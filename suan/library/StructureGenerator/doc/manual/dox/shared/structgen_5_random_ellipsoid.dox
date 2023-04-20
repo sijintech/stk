@@ -1,0 +1,15 @@
+/**
+
+@page page_structure_generator_random_ellipsoid
+@section structure_generator_random_ellipsoid Random Ellipsoid 
+
+
+Random ellipsoid generate a series of random ellipsoid.
+
+- **centerXMin, centerXMax, centerYMin, centerYMax, centerZMin, centerZMax**: define the lower and upper boundary for ellipsoid center point. A series of center point will be randomly generated within this region.
+- **radiusXMin, radiusXMax, radiusYMin, radiusYMax, radiusZMin, radiusZMax**: define the lower and upper boundary for the ellipsoid radius. A series of raidus combination will be randomly picked for each ellipsoid
+- **rotationXMin, rotationXMax, rotationYMin, rotationYMax, rotationZMin, rotationZMax**: define the lower and upper boundary for the ellipsoid rotation along x, y, and z axis in degree by the xyz sequence.
+- **count**: the amount of ellipsoid to be created.
+- **label**: the label to be assigned to these created ellipsoids.
+
+*/

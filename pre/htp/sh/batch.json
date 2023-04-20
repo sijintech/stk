@@ -1,0 +1,29 @@
+{
+  "FreeFile" : [
+    "input.in"
+   ],
+   "FixFile" : [
+     "submit.pbs"
+   ],
+   "CopyFile":[
+    "pot.in"
+   ],
+   "FreeVarName":[
+     "MISFIT",
+     "TEM"
+   ],
+   "FixVarName":["STRESS"],
+  "VarValue":{
+    "MISFIT":["1 1 1","2 2 2","3 3 3" ],
+    "TEM":[100,200,300],
+    "STRESS":[1e5,2e5,3e5]
+  },
+  "VarSequence":[
+    ["MISFIT","TEM"],
+    ["STRESS"]
+  ],
+   "Separator":"+",
+   "Format":"%.1f",
+   "Condition":"1>0",
+   "Command":"echo TEM STRESS"
+}

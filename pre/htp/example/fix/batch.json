@@ -1,0 +1,16 @@
+{
+    "FreeFile": [],
+    "FixFile": ["inputN.in"],
+    "CopyFile": [],
+    "FreeVarName": ["VAR1", "VAR2"],
+    "FixVarName": [],
+    "VarValue": {
+        "VAR1": [100, 200, 300],
+        "VAR2": ["10 20 30", "20 10 30"]
+    },
+    "VarSequence": ["VAR1", "VAR2"],
+    "Separator": "+",
+    "Format": "%s",
+    "Condition": "1>0",
+    "Command": "pwd"
+}

@@ -1,0 +1,11 @@
+/**
+
+@page page_structure_generator_slab
+@section structure_generator_slab Slab
+<b>slab</b> requires definition of a plane (determined by a point and a normal vector), and the thickness.
+
+- **centerX, centerY, centerZ**: Define the location of a point within the simulation grid coordinate, which is used to determine the center plane of current slab.
+- **normalX, normalY, normalZ**: Define the normal vector direction within the simulation grid coordinate. The normal vector is used to define the center plane of current slab.
+- **thickness**: Define the thickness of the slab.
+
+*/

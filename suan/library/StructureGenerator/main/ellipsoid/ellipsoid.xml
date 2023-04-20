@@ -1,0 +1,83 @@
+<input>
+    <geometry>
+        <type>ellipsoid</type>
+        <centerX>0</centerX>
+        <centerY>50</centerY>
+        <centerZ>50</centerZ>
+        <radiusX>10</radiusX>
+        <radiusY>20</radiusY>
+        <radiusZ>30</radiusZ>
+        <rotationX>15</rotationX>
+        <rotationY>30</rotationY>
+        <rotationZ>45</rotationZ>
+        <label>1</label>
+    </geometry>
+    <geometry1>
+        <type>ellipsoid_random_scale</type>
+        <centerXMin>10</centerXMin>
+        <centerYMin>20</centerYMin>
+        <centerZMin>30</centerZMin>
+        <centerXMax>90</centerXMax>
+        <centerYMax>80</centerYMax>
+        <centerZMax>70</centerZMax>        
+        <radiusX>5</radiusX>
+        <radiusY>15</radiusY>
+        <radiusZ>20</radiusZ>
+        <rotationXMin>15</rotationXMin>
+        <rotationYMin>30</rotationYMin>
+        <rotationZMin>45</rotationZMin>
+        <rotationXMax>15</rotationXMax>
+        <rotationYMax>30</rotationYMax>
+        <rotationZMax>45</rotationZMax>
+        <count>3</count>
+        <scaleMin>0.5</scaleMin>
+        <scaleMax>2</scaleMax>
+        <label>1</label>
+    </geometry1>
+    <geometry2>
+        <type>ellipsoid_random</type>
+        <centerXMin>10</centerXMin>
+        <centerYMin>20</centerYMin>
+        <centerZMin>30</centerZMin>
+        <centerXMax>90</centerXMax>
+        <centerYMax>80</centerYMax>
+        <centerZMax>70</centerZMax>        
+        <radiusXMin>5 </radiusXMin>
+        <radiusYMin>5 </radiusYMin>
+        <radiusZMin>5 </radiusZMin>
+        <radiusXMax>20</radiusXMax>
+        <radiusYMax>20</radiusYMax>
+        <radiusZMax>20</radiusZMax>
+        <rotationXMin>15</rotationXMin>
+        <rotationYMin>30</rotationYMin>
+        <rotationZMin>45</rotationZMin>
+        <rotationXMax>15</rotationXMax>
+        <rotationYMax>30</rotationYMax>
+        <rotationZMax>45</rotationZMax>
+        <count>3</count>
+        <label>1</label>
+    </geometry2>
+    <geometry3>
+        <type>ellipsoid_shell</type>
+        <centerXInner>50</centerXInner>
+        <centerYInner>50</centerYInner>
+        <centerZInner>50</centerZInner>
+        <centerXOuter>50</centerXOuter>
+        <centerYOuter>50</centerYOuter>
+        <centerZOuter>50</centerZOuter>        
+        <radiusXInner>5 </radiusXInner>
+        <radiusYInner>5 </radiusYInner>
+        <radiusZInner>5 </radiusZInner>
+        <radiusXOuter>20</radiusXOuter>
+        <radiusYOuter>20</radiusYOuter>
+        <radiusZOuter>20</radiusZOuter>
+        <rotationXInner>0</rotationXInner>
+        <rotationYInner>0</rotationYInner>
+        <rotationZInner>0</rotationZInner>
+        <rotationXOuter>0</rotationXOuter>
+        <rotationYOuter>0</rotationYOuter>
+        <rotationZOuter>0</rotationZOuter>
+        <label>1</label>
+        <labelInner>2</labelInner>
+    </geometry3>
+</input>

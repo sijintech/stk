@@ -1,0 +1,55 @@
+/**
+
+@page material_page
+
+@subsection material_tensor Tensor
+
+<em>Tensor</em> is an element that defines the material property tensor. 
+<em>Tensor</em> is a child element of *phase*, each *phase* can have multiple *tensor*, and each *tensor* can contain multiple *component*. <em>Tensor</em> also must have a *name*, *pointGroup*, and *rank*.
+
+
+@subsubsection Element structure
+- **tensor**
+    - **name** The name of the property tensor.
+    - **pointGroup** The symmetry of current tensor. The symmetry choices are different for different property, please check each @ref systems_page system for available symmetries.
+    - **rank** The tensor rank, 1, 2, 3, or 4.
+    - **component** For setting the values of each non-zero component in the tensor.
+
+<br>
+@code{.XML}
+<phase>
+    <label>0</label>
+    <tensor>
+        <pointGroup>cubic</pointGroup>
+        <name>permittivity</name>
+        <rank>2</rank>
+        <component>
+            <value>3.5</value>
+            <index>11</index>
+        </component>
+    </tensor>
+</phase>
+@endcode
+
+
+@subsection material_component Component
+
+<em>Component</em> set the value for each non-zero values of a material property tensor. <em>Component</em> is a child element of *tensor*. 
+Each unique value component of the *tensor* should have its own *component*.
+Each *component* must have one *value* child, which set the value for this tensor component, and one or multiple *index* children, 
+which specify the indices that have the same component value. 
+The program will automatically assign component value to other equivalent components based on the chosen symmetry.
+
+- **component**
+    - **value** The tensor component value
+    - **index** The tensor index that you want to set *value*
+
+<br>
+@code{.XML}
+<component>
+    <value>3.5</value>
+    <index>11</index>
+</component>
+@endcode
+
+*/

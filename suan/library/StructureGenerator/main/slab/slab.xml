@@ -1,0 +1,13 @@
+<input>
+    <geometry>
+        <type>slab</type>
+        <centerX>3</centerX>
+        <centerY>1</centerY>
+        <centerZ>5</centerZ>
+        <normalX>0</normalX>
+        <normalY>0</normalY>
+        <normalZ>1</normalZ>
+        <thickness>2</thickness>
+        <label>1</label>
+    </geometry>
+</input>

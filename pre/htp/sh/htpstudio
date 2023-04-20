@@ -1,0 +1,1488 @@
+#===============================================================================
+#
+#          FILE:  htpstudio
+#
+#         USAGE:  htpstudio [schedule|create|execute] [batch json file]
+#
+#   DESCRIPTION:  creating high-throughput jobs for high performance calculation
+#
+#       OPTIONS:  schedule, create, execute
+#  REQUIREMENTS:  ---
+#          BUGS:  ---
+#         NOTES:  ---
+#        AUTHOR:  Xiaoxing Cheng, 0001001bill@gmail.com
+#       COMPANY:
+#       VERSION:  1.0
+#       CREATED:  08/21/2019
+#      REVISION:  ---
+#===============================================================================
+
+#===  FUNCTION  ================================================================
+#          NAME: getJsonVar
+#   DESCRIPTION: Use python to parse the json file and obtain the value of chosen
+#                 keyword.
+#    PARAMETERS:
+#       Json file - String file name
+#       Keyword - File, VarName, VarValue, Command, Condition, Separator, Format
+#       RETURNS: Decorated string for the given keyword.
+#===============================================================================
+function getJsonVar() {
+  local fileName=${1}
+  local varName=${2}
+  # local variable=${3:-"not variable"}
+  local value=$(
+    python <<EOF
+import json
+json_data = open('${fileName}')
+data = json.load(json_data)
+json_data.close()
+if "${varName}"=="FreeFile": #NewFile
+  output = " ".join(["&"+name for name in data['${varName}']])
+elif "${varName}"=="FixFile": # OldFile
+  output = " ".join(["@"+name for name in data['${varName}']])
+elif "${varName}"=="CopyFile": # CopyFile
+  output = " ".join(data['${varName}'])
+elif "${varName}"=="FreeVarName": # New varName
+  output = "#".join(["&"+name for name in data['${varName}']])
+elif "${varName}"=="FixVarName": # Old varName
+  output = "#".join(["@"+name for name in data['${varName}']])
+elif "${varName}"=="DependVarName": # Old varName
+  output = "#".join(data['${varName}'])
+elif "${varName}"=="File": # all files
+  outputList=[]
+  outputList.append(" ".join(["&"+name for name in data['FreeFile']]))
+  outputList.append(" ".join(["@"+name for name in data['FixFile']]))
+  outputList.append(" ".join(data['CopyFile']))
+  output = " ".join(outputList)
+elif "${varName}"=="VarName": # all var name
+  outputList=[]
+  freeList=[]
+  fixList=[]
+  for varSeq in data['VarSequence']:
+    temp = []
+    prefix=""
+    if isinstance(varSeq,list):
+      for var in varSeq:
+        if var in data['FreeVarName']:
+          prefix="&"
+        elif var in data['FixVarName']:
+          prefix="@"
+        else:
+          print("The keyword not in Free or Fix VarName")
+        newVar = prefix +var
+        temp.append(newVar)
+      outputList.append("~".join(temp))
+    else:
+      outputList.append(varSeq)
+  output = "#".join(outputList)
+elif "${varName}"=="VarValue": # Var value
+  outputList=[]
+  for varSeq in data['VarSequence']:
+    temp = []
+    tempVal=[]
+    if isinstance(varSeq,list):
+      for var in varSeq:
+        tempVal=[]
+        for val in data['VarValue'][var]:
+          tempVal.append(":".join(str(val).split()))
+        temp.append(" ".join(tempVal))
+      outputList.append("~".join(temp))
+    else:
+      for val in data['VarValue'][varSeq]:
+        tempVal.append(":".join(str(val).split()))
+      outputList.append(" ".join(tempVal))
+  output = "#".join(outputList)
+else:
+  output = data['${varName}']
+print(output)
+EOF
+  )
+  echo $value
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: parseJson
+#   DESCRIPTION: Call getJsonVar to get needed values, and create a script for
+#                 generating folder structures. Input json is batch.json
+#    PARAMETERS: None
+#       RETURNS: batch.sh script for generating htp jobs
+#===============================================================================
+function parseJson() {
+  local file=$(getJsonVar batch.json File)
+  local varName=$(getJsonVar batch.json VarName)
+  local varValue=$(getJsonVar batch.json VarValue)
+  local command=$(getJsonVar batch.json Command)
+  local condition=$(getJsonVar batch.json Condition)
+  local separator=$(getJsonVar batch.json Separator)
+  local format=$(getJsonVar batch.json Format)
+
+  cat <<EOF >>batch.sh
+#!/bin/bash
+# source ht-JobCreation.sh
+
+files="${file}"
+varName="${varName}"
+varValue="${varValue}"
+condition="${condition}"
+command="${command}"
+
+htpstudio schedule -k "\${varName}" -v "\${varValue}" -c "\${condition}" -s "${separator}" -f "${format}"
+htpstudio create -f "\${file}"
+htpstudio execute -c "\${command}"
+EOF
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: getJobNum
+#   DESCRIPTION: Get the amount of jobs currently you're running, including jobs from other sources
+#                 The number is obtained by counting the number lines when using qstat command,
+#                 if in your system, you have a different command please set the 2nd arguement. And we have a 5 lines
+#                 of header for the qstat output, if when you qstat you have different amount of header lines
+#                 please set the 3rd arguement to the number you need.
+#    PARAMETERS:
+#      User name [optional] String name, default value is `whoami`
+#       RETURNS: Total number of all jobs.
+#===============================================================================
+function getJobNum() {
+  local userName=${1:-$(whoami)}
+  local command=${2:-"qstat"}
+  local header=${3:-"5"}
+  local number=$($command -u $userName | wc -l)
+  local out=$(expr $number - $header)
+  echo $out
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: getRunning
+#   DESCRIPTION: Get the amount of jobs currently you're running of only jobs submitted by htpstudio
+#    PARAMETERS: None
+#       RETURNS: Total number of running jobs.
+#===============================================================================
+function getRunning() {
+  qstat -u $(whoami) | awk '{if(NR>5)print $1}' >~/allRunningList.log
+  diff --new-line-format="" --unchanged-line-format="" ~/allRunningList.log ~/originalList.log >~/runningList.log
+  local runningNumber=$(cat ~/runningList.log | wc -l)
+  echo $runningNumber
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: registerToRun
+#   DESCRIPTION: If the amount of jobs is too many, for example 1000, and your account
+#                 can only submit 100 jobs at a time. You can create a job submission
+#                 pool with this command, and automatically keep submiting new jobs once
+#                 old ones are finished.
+#    PARAMETERS:
+#         Starting index - The initial calculation index as in batchList.txt file, default 1
+#         Ending index - The ending calculation index in batchList.txt file, default last line
+#         Registered folder - Identify the folder for auto job submission, default is current folder
+#       RETURNS: Create a autoJobSubmission.sh file in your root directory.
+#===============================================================================
+function registerToRun() {
+  # execute only once to establish the waiting pool
+  local start=${1:-"1"}
+  local end=${2:-$(expr $(cat batchList.txt | wc -l) - 1)}
+  local registerFolder=${3:-"."}
+  if [ -f ~/toRunList.log ]; then
+    rm ~/toRunList.log
+  fi
+  touch ~/toRunList.log
+  touch ~/finishedList.log
+  cd $registerFolder
+  local currentFolder=$(pwd)
+  for i in $(seq $start 1 $end); do
+    local folderName=$(getFolderName $i)
+    echo $currentFolder/$folderName >>~/toRunList.log
+  done
+  qstat -u xuc116 | awk '{if(NR>5)print $1}' >~/originalList.log
+
+  echo 'date;echo auto submitting;prepareNextRun 25 "qsub job.pbs" >> ~/autoJobSubmission.log' >~/autoJobSubmission.sh
+
+}
+
+#function findFinished(){
+## compare the current running and last time running log to get the finished jobs
+#diff --new-line-format="" --unchanged-line-format="" ~/previousRunningList.log ~/runningList.log > ~/newFinishedList.log
+#local finishedNumber = $(cat ~/newFinishedList.log | wc -l)
+#echo $finishedNumber
+#}
+
+#function findNewSubmitted(){
+#diff --new-line-format="" --unchanged-line-format="" ~/runningList.log ~/originalList.log > ~/newSubmittedList.log
+#}
+
+#function getRunning(){
+## get the current running jobs, especially the id
+#if [ -f ~/runningList.log ]; then
+#touch ~/previousRunningList.log ~/trash.log
+#cat ~/previousRunningList.log >> ~/trash.log
+#mv ~/runningList.log ~/previousRunningList.log
+#else
+#touch ~/previousRunningList.log
+#fi
+#qstat -u xuc116 | awk '{if(NR>5)print $1}' > ~/runningList.log
+#}
+
+#===  FUNCTION  ================================================================
+#          NAME: oneRun
+#   DESCRIPTION: Get the next scheduled jobs (1st in toRun list) and perform some command in its folder
+#    PARAMETERS:
+#         Command - The command that you want to execute, default is echo folder name
+#       RETURNS: Update the finishedList.log, toRunList.log
+#===============================================================================
+function oneRun() {
+  local folder=$(head -n 1 ~/toRunList.log)
+  local command=${1:-"echo $folder"}
+  cd $folder
+  (eval $command)
+  cd -
+  head -n 1 ~/toRunList.log >>~/finishedList.log
+  tail -n+2 ~/toRunList.log >~/temp.log
+  mv ~/temp.log ~/toRunList.log
+  if [ $(wc -l <~/toRunList.log) == 0 ]; then
+    rm ~/toRunList.log
+    rm ~/originalList.log
+    rm ~/runningList.log
+    rm ~/allRunningList.log
+    date >>~/finishedList.log
+  fi
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: prepareNextRun
+#   DESCRIPTION: Prepare the designated number jobs for next round of submission
+#    PARAMETERS:
+#         maxRun - Total number of jobs for next round of submission
+#         Command - The command that you want to execute, default is echo folder name
+#       RETURNS: Print in console number of current running jobs, and jobs to be run
+#===============================================================================
+function prepareNextRun() {
+  # check the toRunList.log for available waiting jobs, and if submit one for running remove it from the toRunList.log
+  local maxRun=${1:-"100"}
+  local command=${2:-"qsub cxx.pbs"}
+  local allRunningNumber=$(getJobNum)
+  local runningNumber=$(getRunning)
+  local maxNextSubmit=$(expr 100 - $allRunningNumber)
+  local allowNextSubmit=$(expr $maxRun - $runningNumber)
+  local jobsLeft=$(wc -l <~/toRunList.log)
+  local nextSubmit=$(echo $maxNextSubmit $allowNextSubmit $jobsLeft | awk '{min=$1;for(i=1;i<=NF;i++)if($i<min)min=$i;print min}')
+  local waitPoolNumber=$(cat ~/toRunList.log | wc -l)
+
+  for i in $(seq 1 1 $nextSubmit); do
+    #statements
+    oneRun "$command"
+  done
+  echo current running=$runningNumber \($allRunningNumber\), to be submitted=$nextSubmit, $command
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: checkFinished
+#   DESCRIPTION: Go into one calculation folder and look or a specific file that mark the end of a calculation
+#    PARAMETERS:
+#         fileName [required] The file that marked the end of a calculation
+#         checkList [optional] Text log file for recording the finished calculations, default is finishedJobs.log
+#       RETURNS: The log file
+#===============================================================================
+function checkFinished() {
+  local fileName=$1
+  local checkList=${2:-"finishedJobs.log"}
+  local curDir=$(pwd)
+  rm $checkList
+  rm un$checkList
+  execFoldersSilent "if [ -f $fileName ];then pwd >> ${curDir}/$checkList;else pwd >> ${curDir}/un$checkList;fi"
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: getFirstString
+#   DESCRIPTION: Get the part of string before a specific separator
+#    PARAMETERS:
+#         parse_string [required] The string that you want to split
+#         separator [required] The separator you use
+#       RETURNS: The string before the separator in the string you passed to this function
+#===============================================================================
+function getFirstString() {
+  local separator=$2
+  local parse_string=$1
+  local first=$(echo ${parse_string} | cut -d$separator -f1 | xargs)
+  echo ${first}
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: getRemainString
+#   DESCRIPTION: Get the rest part of string after a specific separator
+#    PARAMETERS:
+#         parse_string [required] The string that you want to split
+#         separator [required] The separator you use
+#       RETURNS: The string after the separator in the string you passed to this function
+#===============================================================================
+function getRemainString() {
+  local separator=$2
+  local parse_string=$1
+
+  local columns=$(echo $parse_string | awk -v sep=$separator 'BEGIN{FS=sep}{print NF;exit}')
+  if [[ $columns > 1 ]]; then
+    echo ${parse_string} | cut -d$separator -f2- | xargs
+    #local first=$(${parse_string} | cut -d $separator -f1 | xargs)
+    #local remain=$(${parse_string} | cut -d $separator -f2- | xargs)
+
+  else
+    echo ""
+  fi
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: stdOutWithTab
+#   DESCRIPTION: redirect the command output through paste command that add certain level of tab before
+#    PARAMETERS:
+#         level [required] tab levels
+#       RETURNS: None
+#===============================================================================
+function stdOutWithTab() {
+  local level=$1
+  local tab_string=""
+  local i=0
+  for ((i = 0; i < ${level}; i++)); do
+    tab_string=${tab_string}$'\t'
+  done
+  exec 3>&1
+  exec 1> >(sed -e $"s/^/${tab_string}/g" >&3)
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: restoreStdOut
+#   DESCRIPTION: restore the normal command output behaviour
+#    PARAMETERS:
+#       RETURNS: None
+#===============================================================================
+function restoreStdOut() {
+  exec 1>&3 3>&-
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: getColumnOfIndex
+#   DESCRIPTION: Get the value of specific row and column in batchList.txt
+#    PARAMETERS:
+#             row [required] the row number, or the index number at column 1
+#             column [required] the column number
+#       RETURNS: the value at row, column in batchList.txt
+#===============================================================================
+function getColumnOfIndex() {
+  local index=$1
+  local index_1=$(($1 + 1))
+  local line=$(sed "${index_1}q;d" batchList.txt)
+  local column=$2
+  local var=$(echo ${line} | awk -v num=$column 'BEGIN{FS="|"}{print $num}' | xargs)
+  echo $var
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: getVariableOfIndex
+#   DESCRIPTION: Get the value of specific row in batchList.txt, the variables are separted by '|'
+#    PARAMETERS:
+#             row [required] the row number, or the index number at column 1
+#       RETURNS: all the variables at row in batchList.txt
+#===============================================================================
+function getVariableOfIndex() {
+  local index=$1
+  local index_1=$(($1 + 1))
+  local var=$(sed "${index_1}q;d" batchList.txt | cut -d "|" -f2- | rev | cut -d "|" -f2- | rev)
+  echo $var
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: getVariableNumber
+#   DESCRIPTION: Get the amount of variables in batchList.txt, which equals to number of columns -2
+#                 since the first column is index, and the last column is condition
+#    PARAMETERS:
+#       RETURNS: Total number of variables listed in batchList.txt, column number - 2
+#===============================================================================
+function getVariableNumber() {
+  local columns=$(awk 'BEGIN{FS="|"}{print NF-2;exit}' batchList.txt)
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: increaseIndex
+#   DESCRIPTION: One of the key function for batch job creation, for incrementing a multidimensional index
+#                 $1 is the current index, $2 is the boundary of the index
+#                 e.g. $1=1 1 1, $2=2 2 2, and the result will be 1 1 2
+#                 e.g. $1=1 1 2, $2=2 2 2, and the result will be 1 2 1
+#                 when the largest value is given, then the output will be -1
+#                 e.g. $1=2 2 2, $2=2 2 2, and the result will be -1
+#    PARAMETERS:
+#         index_bound [required] the upper limits of indices, for example 2 2 2
+#         current_index [required] the current indices, for example 1 1 1
+#         choice [required] set the level of for each index, same number means at the same level
+#                           only adjacent indices can be at the same level, for example 1 1 2 2 3, there are 3 levels
+#       RETURNS: the incremeted indices
+#===============================================================================
+function increaseIndex() {
+  local current_index=($2)
+  local index_bound=($1)
+  local choice=($3)
+  local index_count=${#current_index[@]}
+  local increased=false
+
+  local hold=1
+  for ((i = index_count - 1; i >= 0; i--)); do
+    # echo $i $index_count ${index_bound[$i]} ${current_index[$i]}
+    if [[ $i -gt 0 ]]; then
+      hold=${choice[$i - 1]}
+    fi
+    if [[ ${index_bound[$i]} -gt ${current_index[$i]} ]]; then
+      increased=true
+      current_index[$i]=$((${current_index[$i]} + 1))
+      #local currentChoice=${choice[$i]}
+      if [[ ${choice[$i]} != ${hold} ]]; then
+        break
+      fi
+    else
+      current_index[$i]=1
+    fi
+  done
+  if [[ $increased == false ]]; then
+    echo -1
+  else
+    echo ${current_index[@]}
+  fi
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: replaceKeywordsString
+#   DESCRIPTION: replacing the keywords in a string with the values provided
+#    PARAMETERS:
+#         string [required] the string you want to process
+#         keyword_list [required] the list of keywords separated by 'separator'
+#         variable_list [required] the list of variables separated by 'separator'
+#         sep [optional] the separator char for keyword list an dvariable list, default is #
+#       RETURNS: The processed string
+#===============================================================================
+function replaceKeywordsString() {
+  local string=$1
+  local keyword_list=$2
+  local variable_list=$3
+  local sep=${4:-"#"}
+  local sep2=${5:-"~"}
+  local keyword=$(getFirstString "${keyword_list}" "$sep")
+  local keyword_remain=$(getRemainString "${keyword_list}" "$sep")
+  local variable=$(getFirstString "${variable_list}" "$sep")
+  local variable_remain=$(getRemainString "${variable_list}" "$sep")
+  if [[ ${keyword:0:1} == "@" ]] || [[ ${keyword:0:1} == "&" ]]; then
+    local out=$(echo "$string" | sed "s@${keyword:1}@${variable}@g")
+  else
+    local out=$(echo "$string" | sed "s@${keyword}@${variable}@g")
+  fi
+  if [[ ! -z ${keyword_remain} ]]; then
+    out=$(replaceKeywordsString "$out" "${keyword_remain}" "${variable_remain}" $sep)
+  fi
+
+  echo $out
+}
+#===  FUNCTION  ================================================================
+#          NAME: replaceKeywordsStringIndex
+#   DESCRIPTION: replacing the keywords in a string with the values of specific line in batchList.txt file
+#                 The keywords are obtained from the first line of the batchList.txt file
+#    PARAMETERS:
+#         string [required] the string you want to process
+#         index [required] the line index in batchList.txt
+#       RETURNS: The processed string
+#===============================================================================
+function replaceKeywordsStringIndex() {
+  local string=$1
+  local index=$2
+  local var_name=$(getVariableOfIndex 0)
+  local var_val=$(getVariableOfIndex $index)
+  (replaceKeywordsString "$string" "${var_name}" "${var_val}" "|")
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: replaceKeywordsFile
+#   DESCRIPTION: replacing the keywords in a file with the values provided
+#                 & sign before file name means its a free format file,
+#                 that follows "keyword = value" format, and the value will be substitutes
+#                 @ sign before file name means its a fix format file, they keyword
+#                 $ sign before variable name (keyword) means substituting this variable with the free format style
+#                 @ sign before variable name (keyword) means substituting this variable with the fix format style
+#                 itself will be replaced.
+#                 free format file can have both free format style variable and fix format variable
+#                 fix format file can only have fix format variable
+#    PARAMETERS:
+#         file [required] file name
+#         var_name [required] keyword list
+#         var_val [required] keyword value list for substitution
+#         sep [required] separator between keywords and keywords values
+#       RETURNS: The processed file
+#===============================================================================
+function replaceKeywordsFile() {
+  local file=$1
+  local var_name=$2
+  local var_val=$3
+  local sep=$4
+  local columns=$(echo ${var_name} | awk 'BEGIN{FS="|"}{print NF;exit}')
+
+  for ((i = 0; i < columns; i++)); do
+    local variable_name=$(getFirstString "${var_name}" $sep)
+    var_name=$(getRemainString "${var_name}" $sep)
+    local variable_val=$(getFirstString "${var_val}" $sep)
+    var_val=$(getRemainString "${var_val}" $sep)
+    if [[ ${file:0:1} == "&" || ${file:0:1} == "@" ]]; then
+      if [[ ${file:0:1} == "&" && ${variable_name:0:1} != "@" ]]; then
+        # free format
+        if [[ ${variable_name:0:1} == "&" ]]; then
+          sed -i "/${variable_name:1}/c ${variable_name:1} = ${variable_val}" ${file:1}
+        else
+          sed -i "/${variable_name}/c ${variable_name} = ${variable_val}" ${file:1}
+        fi
+      else
+        # fix format
+        if [[ ${variable_name:0:1} == "@" ]]; then
+          sed -i "s/${variable_name:1}/${variable_val}/g" ${file:1}
+        else
+          sed -i "s/${variable_name}/${variable_val}/g" ${file:1}
+        fi
+      fi
+    fi
+  done
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: replaceKeywordsFileIndex
+#   DESCRIPTION: replace the keywords in file with value from a row in batchList.txt
+#    PARAMETERS:
+#         file [required] file name
+#         index [required] line index of batchList.txt that to be substitute
+#       RETURNS: The processed file
+#===============================================================================
+function replaceKeywordsFileIndex() {
+  local file=$1
+  local index=$2
+  local var_name=$(getVariableOfIndex 0)
+  local var_val=$(getVariableOfIndex $index)
+  (replaceKeywordsFile "$file" "${var_name}" "${var_val}" "|")
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: getFolderName
+#   DESCRIPTION: generate the folder name based on variable name and value pairs
+#                 for the separator between key-value pair, you may use "/" to create subfolders
+#    PARAMETERS:
+#         index [required] line index of batchList.txt that to be substitute
+#       RETURNS: the folder name for one htp calculation which is named by keyword, value pairs
+#===============================================================================
+function getFolderName() {
+  local index=$1
+  local sep=$(getColumnOfIndex 0 1)
+  # local sep=${2:-"+"}
+  local index_1=$(($1 + 1))
+  local first_line=$(getVariableOfIndex 0)
+  local line=$(getVariableOfIndex $index)
+  local columns=$(awk 'BEGIN{FS="|"}{print NF;exit}' batchList.txt)
+  local columns_1=$(($columns - 1))
+  local last_index=$(($(wc -l <batchList.txt) - 1))
+  local digits=${#last_index}
+  local pad_index=$(printf "%0${digits}i" $index)
+  if [[ ${sep} == "/" ]]; then
+    local name=""
+  else
+    local name=${pad_index}${sep}
+  fi
+  local var_name="name"
+  local var_val="value"
+
+  for ((j = 2; j < columns; j++)); do
+    var_name=$(getColumnOfIndex 0 $j | xargs)
+    if [[ ${var_name:0:1} == "@" ]]; then
+      var_name=${var_name:1}
+    fi
+    var_val=($(getColumnOfIndex $index $j | xargs))
+    var_val=$(
+      IFS="_"
+      echo "${var_val[*]}"
+      IFS=" " | xargs
+    )
+    if [[ $j == $columns_1 ]]; then
+      sep=""
+    fi
+    name=${name}${var_name}_${var_val}${sep}
+  done
+  echo $name
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: createFolderConditionOneLine
+#   DESCRIPTION: create the one folder based on information of one row in the batchList.txt
+#                 and then copy the files into the folder
+#    PARAMETERS:
+#         index [required] line index of batchList.txt that to be substitute
+#         fiel_list [required] list of files to be processed and copied into the folder
+#       RETURNS: a folder with htp processed input files copied into it
+#===============================================================================
+function createFolderConditionOneLine() {
+  local index=$1
+  local file_list=($2)
+  # local sep=$(getColumnOfIndex 0 1)
+  name=$(getFolderName ${index})
+  echo "Create folder " ${name}
+  mkdir -p $name
+  for file in "${file_list[@]}"; do
+    if [[ ${file:0:1} == "&" || ${file:0:1} == "@" ]]; then
+      cp ${file:1} $name/${file:1}
+      (replaceKeywordsFileIndex "${file:0:1}$name/${file:1}" $index)
+    else
+      cp $file $name/$file
+      (replaceKeywordsFileIndex "$name/$file" $index)
+    fi
+  done
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: printInfo
+#   DESCRIPTION: print the information when writing the batchList.txt file
+#    PARAMETERS:
+#         name [required] keywords list, separated by 'sep'
+#         val [required] corresponding value list, separated by 'sep'
+#         sep [required] separator char for keywords and values
+#       RETURNS: print one line of keyword=value, for example printInfo "AAA#BBB" "111#222" "#"
+#                will give output of AAA=111 , BBB=222
+#===============================================================================
+function printInfo() {
+  #print the information when writing the batchList.txt file
+  local name=$1
+  local val=$2
+  local sep=$3
+  local first_name=$(getFirstString "$name" "$sep")
+  local remain_name=$(getRemainString "$name" "$sep")
+  local first_val=$(getFirstString "$val" "$sep")
+  local remain_val=$(getRemainString "$val" "$sep")
+  local first_sep=$(echo "$first_val" | sed 's/:/ /g')
+
+  if [ ! -z "${remain_name}" ]; then
+    echo -n ${first_name}=${first_val} ," "
+    printInfo "${remain_name}" "${remain_val}" $sep
+  else
+    echo -n ${first_name}=${first_val}
+    printf "\n"
+  fi
+
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: writeBatchOneline
+#   DESCRIPTION: Write one line of the batchList.txt file
+#    PARAMETERS:
+#         $1 [required] The string lists for the line, could be either the keywords or keyword values
+#       RETURNS: write one line of variables into batchList.txt file, separated by "|"
+#===============================================================================
+function writeBatchOneline() {
+  # Write one line into the batchList.txt file
+  # $1 is all of the column values in the line
+  local first=$(getFirstString "$1" "#" "~")
+  local remain=$(getRemainString "$1" "#" "~")
+
+  local first_sep=$(echo "$first" | sed 's/:/ /g')
+
+  if [ ! -z "${remain}" ]; then
+    printf '%15s' "${first_sep}" >>"batchList.txt"
+    echo -n " | " >>"batchList.txt"
+    writeBatchOneline "$remain"
+  else
+    printf '%15s' "${first}" >>"batchList.txt"
+    printf "\n" >>"batchList.txt"
+  fi
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: makeFolders
+#   DESCRIPTION: create all folders and copy the files into the folders
+#    PARAMETERS:
+#         file_list [required] the file list that need to be copied
+#         start [optional] the initial index, default is 1
+#         end [optional] the last index, default is total number of rows
+#       RETURNS: None
+#===============================================================================
+function makeFolders() {
+  local last_index=$(($(wc -l <batchList.txt) - 1))
+  local start=${2:-"1"}
+  local end=${3:-"${last_index}"}
+  local file_list=$1
+  local i=0
+  # echo $start,"end",$end
+
+  for ((i = start; i <= end; i++)); do
+    # echo $i
+    (createFolderConditionOneLine ${i} "${file_list}")
+  done
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: execFolders
+#   DESCRIPTION: execute commands inside the folders created from batchList.txt file
+#    PARAMETERS:
+#         command_string [required] the command to exec, notice you can use the keywords in the header line of batchList.txt file
+#                                    and it will be substituted by the variable values for each folder
+#         start [optional] the initial index, default is 1
+#         end [optional] the last index, default is total number of rows
+#       RETURNS: Print the command executed to screen
+#===============================================================================
+function execFolders() {
+  local last_index=$(($(wc -l <batchList.txt) - 1))
+  local start=${2:-"1"}
+  local end=${3:-"${last_index}"}
+  local command_string=$1
+  local temp_cmd="temp command"
+  local i=0
+  local pwd=$(pwd)
+  # local sep=$(getColumnOfIndex 0 1)
+
+  for ((i = start; i <= end; i++)); do
+    local name=$(getFolderName ${i})
+    temp_cmd=$(replaceKeywordsStringIndex "${command_string}" ${i})
+    echo "Exec command: "${command_string} "in folder" ${name}
+    stdOutWithTab 1
+    cd $name
+    (eval "${temp_cmd}")
+    cd ${pwd}
+    restoreStdOut
+  done
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: execFoldersSilent
+#   DESCRIPTION: execute commands inside the folders created from batchList.txt file silently
+#    PARAMETERS:
+#         command_string [required] the command to exec, notice you can use the keywords in the header line of batchList.txt file
+#                                    and it will be substituted by the variable values for each folder
+#         start [optional] the initial index, default is 1
+#         end [optional] the last index, default is total number of rows
+#       RETURNS: None
+#===============================================================================
+function execFoldersSilent() {
+  local last_index=$(($(wc -l <batchList.txt) - 1))
+  local start=${2:-"1"}
+  local end=${3:-"${last_index}"}
+  local command_string=$1
+  local temp_cmd="temp command"
+  local i=0
+  local pwd=$(pwd)
+  # local sep=$(getColumnOfIndex 0 1)
+
+  for ((i = start; i <= end; i++)); do
+    local name=$(getFolderName ${i})
+    temp_cmd=$(replaceKeywordsStringIndex "${command_string}" ${i})
+    stdOutWithTab 1
+    cd $name
+    (eval "${temp_cmd}")
+    cd ${pwd}
+    restoreStdOut
+  done
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: execFoldersUnfinished
+#   DESCRIPTION: execute commands inside the folders created from batchList.txt file silently
+#    PARAMETERS:
+#         command_string [required] the command to exec, notice you can use the keywords in the header line of batchList.txt file
+#                                    and it will be substituted by the variable values for each folder
+#         fileName [required] the file that marks the finish of a job
+#         start [optional] the initial index, default is 1
+#         end [optional] the last index, default is total number of rows
+#       RETURNS: Print either "folder already finished" or "exec command" to screen
+#===============================================================================
+function execFoldersUnfinished() {
+  # execute commands inside the folders, created from batchList.txt file
+  # $1 the command to exec, notice you can use the keywords in the header line of batchList.txt file,
+  # and it will be substituted by the variable values for each folder
+  # $2, the starting index, $3 the ending index
+  local last_index=$(($(wc -l <batchList.txt) - 1))
+  local start=${3:-"1"}
+  local end=${4:-"${last_index}"}
+  local command_string=$1
+  local fileName=$2
+  local temp_cmd="temp command"
+  local i=0
+  local pwd=$(pwd)
+  # local sep=$(getColumnOfIndex 0 1)
+
+  for ((i = start; i <= end; i++)); do
+    local name=$(getFolderName ${i})
+    temp_cmd=$(replaceKeywordsStringIndex "${command_string}" ${i})
+    cd $name
+    if grep -Fxq $(pwd) ../$fileName; then
+      echo "Folder ${name}, already finished, see $fileName"
+    else
+      echo "Exec command: "${command_string} "in folder" ${name}
+      stdOutWithTab 1
+      (eval "${temp_cmd}")
+      restoreStdOut
+    fi
+    cd ${pwd}
+  done
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: evaluateEachField
+#   DESCRIPTION: apply the format to each of the variables
+#    PARAMETERS:
+#         expression [required] The variable list separated by "sep"
+#         folder_string [required]  The keyword list
+#         sep [required] The separator
+#         format [optional] The format style, could be either one or several separated by "sep"
+#       RETURNS: The formatted variable list
+#===============================================================================
+function evaluateEachField() {
+  local expression=$1
+  local folder_string=$2
+  local sep=$3
+  local format=${4:-"%s"}
+  local remain=${expression}
+  local remainFolder=${folder_string}
+  local first="anything"
+  local firstFirst="anything"
+  local firstFolder="anyting"
+  local hold=""
+  local temp=""
+  local currFormat="%s"
+  local remainFormat=${format}
+  while [[ "${remain}" ]]; do
+    first=$(getFirstString "${remain}" ${sep})
+    firstFolder=$(getFirstString "${remainFolder}" ${sep})
+    remain=$(getRemainString "${remain}" ${sep})
+    remainFolder=$(getRemainString "${remainFolder}" ${sep})
+    currFormat=$(getFirstString "${remainFormat}" ${sep})
+    format=$(getRemainString "${remainFormat}" ${sep})
+    if [[ ${format} ]]; then
+      remainFormat=${format}
+    fi
+    ####
+    ####
+    #### to refine the following lines
+    # echo "evaluate" ${first} ${currFormat} ${firstFolder}
+    # if [[ ${firstFolder:0:1} == "&" ]]; then
+    temp=""
+    while [[ "${first}" ]]; do
+      firstFirst=$(getFirstString "${first}" :)
+      first=$(getRemainString "${first}" :)
+      temp=${temp}$(awk -v tmp="${firstFirst}" 'BEGIN{printf "'${currFormat}'",tmp}')
+      if [[ "${first}" ]]; then
+        temp=${temp}":"
+      fi
+    done
+    # else
+    # temp=$(awk 'BEGIN{tmp='${first}';printf "'${currFormat}'",tmp}')
+    # fi
+
+    if [[ ${hold} ]]; then
+      hold=${hold}${sep}${temp}
+    else
+      hold=${temp}
+    fi
+  done
+  echo ${hold}
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: writeBatchList
+#   DESCRIPTION: One of the most important function, generate the batchList.txt that
+#                 is needed by all of the following steps, creating folders or executing commands
+#                 the structure of batchList.txt file is like a table, each column is separated by "|"
+#                 the first line of batchList.txt is the header line, first value is the separator for
+#                 different variables when creating folder use the makeFolders command
+#                 the last column is the condition column, and all columns in between are the variable columns
+#    PARAMETERS:
+#         $1 [required] The keyword list separated by "sep", use '~' when two variable change at the same time
+#         $2 [required] The keyword value list separated by "sep", use '~' when two variable change at the same time
+#         $3 [optional] The condition string for further control what will be added as one job
+#         sep [required] The separator
+#         format [optional] The format style, could be either one or several separated by "sep"
+#       RETURNS: batchList.txt file
+#===============================================================================
+function writeBatchList() {
+  local folder_string=$(echo $1 | sed 's/~/#/g')
+  local variable_string=$(echo $2 | sed 's/~/#/g')
+  #local incrementChoice=$(echo $2 | awk 'BEGIN{RS="#";FS="~"}{if(NR>1){a="#"}else{a=""}if(NF>=2){print NR;for(i=2;i<NF;i++){print NR}}else{print a NR}}')
+  local incrementChoice=$(echo $2 | awk 'BEGIN{RS="#";FS="~"}{if(NF>=2){for(i=1;i<=NF;i++){print NR}}else{print NR}}')
+  local condition_string=${3:-"1>0"}
+  local sep=${4:-"+"}
+  local format=${5:-"%s"}
+  local variable_index=$(echo $variable_string | awk 'BEGIN{RS="#"}{print 1}')
+  local variable_list_count=$(echo $variable_string | awk 'BEGIN{RS="#"}{print NF}')
+  local index=0
+
+  local replaced_variable=""
+  local current_condition=${condition_string}
+  local current_variable=""
+  local replaced_previous=""
+  local processed_variable=""
+
+  if [[ -f batchList.txt ]]; then
+    rm batchList.txt
+  fi
+
+  (writeBatchOneline "${sep}#${folder_string}#$condition_string")
+
+  while [[ ${variable_index} != -1 ]]; do
+    current_variable=$(echo $variable_string | awk -v var="${variable_index}" 'BEGIN{RS="#";split(var,list," ")}{if(NR>1){print "#"$list[NR];}else{print $list[NR];}}')
+    # current_variable=$(echo $variable_string | awk -v var="${variable_index}" 'BEGIN{RS="#";FS="~"}{split($NF,list,' ');if(NR>1){print "#"$list[NR];}else{print $list[NR];}}')
+    #  echo "current" ${current_variable}
+    replaced_variable=""
+    replaced_previous=${current_variable}
+    while [[ ${replaced_previous} != ${replaced_variable} ]]; do
+      replaced_previous=${current_variable}
+      replaced_variable=$(replaceKeywordsString "${current_variable}" "${folder_string}" "${current_variable}" "#")
+      current_variable=${replaced_variable}
+      # echo "after replacement"${current_variable}
+    done
+    # echo "replaced" ${replaced_variable}
+    # echo evaluateEachField "${replaced_variable}" "${folder_string}" "#" "${format}"
+    processed_variable=$(evaluateEachField "${replaced_variable}" "${folder_string}" "#" "${format}")
+    # echo "processed" ${processed_variable}
+    current_condition=$(replaceKeywordsString "${condition_string}" "${folder_string}" "${processed_variable}" "#")
+    # if $(eval [[ ${current_condition} ]]);then
+    if $(awk 'BEGIN{if('${current_condition}'){print "true"}else{print "false"}}'); then
+      index=$(($index + 1))
+      echo "Condition fulfilled." ${current_condition}
+      stdOutWithTab 1
+      echo -ne $index "\t"
+      (printInfo "$folder_string" "${processed_variable}" "#")
+      (writeBatchOneline "${index}#${processed_variable}#${current_condition}")
+      restoreStdOut
+    else
+      echo "Condition not fulfiled. " ${current_condition}
+    fi
+
+    # echo count ${variable_list_count[@]}
+    # echo index ${variable_index[@]}
+    # echo choice  ${incrementChoice[@]}
+    variable_index=$(increaseIndex "${variable_list_count[@]}" "${variable_index[@]}" "${incrementChoice[@]}")
+    # echo index ${variable_index[@]}
+  done
+}
+
+#===  FUNCTION  ================================================================
+#          NAME: batchAllCommand
+#   DESCRIPTION: loop through all folders and execute a command
+#    PARAMETERS:
+#         command_string [required] the command you want to execute
+#         $2 [optional]  integer that tune the indentation before output, default is 0
+#       RETURNS: command output
+#===============================================================================
+function batchAllCommand() {
+  # This command will loop through all folders and execute a command
+  # input: 1. the command you want to execute
+  # 2. is optional integer that tune the indentation before output
+
+  local command_string="$1"
+  local batch_depth=0
+  local batch_depth_plus=1
+  local folder_array=($(find . -maxdepth 1 -type d))
+  local current_dir=$(eval pwd)
+  local dir=""
+  if [ ! -z "$2" ]; then
+    let batch_depth=$2
+  fi
+  stdOutWithTab ${batch_depth}
+  if [ ${#folder_array[@]} = 1 ]; then
+    echo "Executing ${command_string}"
+    eval "${command_string}"
+  fi
+  for dir in */; do
+    if [[ -d ${dir} ]]; then
+      echo "Going into ${dir}, from ${current_dir}"
+      cd ${dir}
+      let batch_depth_plus=(${batch_depth} + 1)
+      restoreStdOut
+      batchAllCommand "${command_string}" ${batch_depth_plus}
+      stdOutWithTab ${batch_depth}
+      cd ..
+      echo "Return from ${dir}, to ${current_dir}"
+    fi
+  done
+
+  restoreStdOut
+  #sleep 0.1
+}
+
+usageStudio() {
+  cat << EOF
+\`htpstudio' is a command for generating high-throughput jobs. It has three
+subcommands, "schedule", "create", "execute", corresponding to the three phases
+of high-throughput job generation. It is recommended to use a  json configuration
+file is for controlling the command. But you may also pass variables directly to
+the command as options.
+
+Please refer to the user manual for more detailed documentation, or use 
+"htpstudio schedule --help", "htpstudio create --help", "htpstudio execute --help" 
+for brief introduction to each of the subcommands.
+EOF
+}
+
+usageStudioShort(){
+  cat <<EOF
+Usage 1: Prepare a batch.json configuration file, then
+    htpstudio schedule [json configuration file]
+    htpstudio create [json configuration file]
+    htpstudio execute [json configuration file]
+
+Usage 2: Pass options instead of json configuration file
+    htpstudio schedule -k|--keyword -v|--value [-c|--condition] [-s|--separater] [-f|--format] [-h|--help]
+    htpstudio create [-h|--help] [-s|--start] [-e|--end] -f|--file ... 
+    htpstudio execute [-h|--help] [-s|--start] [-e|--end] -f|--file ... 
+
+EOF
+}
+
+usageSchedule() {
+  cat << EOF
+\`schedule' is one of the sub-command of htpstudio - 
+  schedule the folders and jobs, and create a batchList.txt file which contains 
+  all of the information needed for further 'create' and 'execute'. 'schedule' 
+  is the first phase of high-throughput jobs generation. Please refere to the 
+  user manual for more detailed explanations.
+
+Usage 1 (Recommended): 
+  htpstudio schedule [json configuration file]
+  
+  The recommended usage requires access to python. It will use the json module.
+  The json configuration file contains all of the information needed to schedule
+  jobs and create batchList.txt file. The identifiable keywords in the json file
+  that are related to the 'schedule' command are listed below.
+
+  List of json keywords related to 'schedule' phase:
+    "FreeVarName"   A list of free format style variable names
+    "FixVarName"    A list of fix format style variable names
+    "VarValue"      A list of key value pairs for all fix and free "VarName"
+    "VarSequence"   A list variable names to set the sequence of varying
+                    keywords, and dependence between variables
+    "Separator"     A char to separate keywords in the created folder names
+    "Format"        A c style format for variable values in the batchList.txt
+    "Condition"     A conditional statement for filtering schedule jobs
+
+Example of usage 1:
+  htpstudio schedule batch.json
+
+
+Usage 2 (Not recomended): 
+  htpstudio schedule [OPTION] 
+
+  This type of usage is not recommended because it is not as easy to use as the 
+  previous one. But if you don't have python on your machine, you can use this
+  style as this one is a pure bash shell script.
+
+  -k, --keyword     A string that contains list keywords to loop through
+  -v, --value       A string that contains the values for each keywords
+  -c, --condition   A conditional statement to filter the scheduled jobs
+  -s, --separater   A char used to separate keywords in the created folder names
+  -f, --format      A c style format to set value format in batchList.txt
+  -h, --help        Print helper information
+
+Example of usage 2:
+  htpstudio schedule -k "VAR1#@VAR2" -v "1 2 3#10 20 30" -c "1>0" -f "%s" -s "+"
+EOF
+}
+
+usageScheduleShort() {
+  cat <<EOF
+Usage 1: Prepare a batch.json configuration file, then
+    htpstudio schedule [json configuration file]
+
+Usage 2: Pass options instead of json configuration file
+    htpstudio schedule -k|--keyword -v|--value [-c|--condition] [-s|--separater] [-f|--format] [-h|--help]
+
+Example:
+
+    htpstudio schedule -k "@FREQ#PERIOD" -v "1e12 1e13#1e12/FREQ" -c "FREQ>1e9" -f "%.2e"
+
+EOF
+}
+
+usageCreate() {
+  cat <<EOF
+\`create' is one of the sub-command of htpstudio - 
+  create the folders, copy and modify input files into each folder according to
+  the information listed in batchList.txt file. 'create' is the second phase of 
+  high-throughput jobs generation. Please refere to the user manual for more 
+  detailed explanations.
+
+Usage 1 (Recommended): 
+  htpstudio create [json configuration file]
+  
+  The recommended usage requires access to python. It will use the json module.
+  The command will read necessary input files from the json configuration file
+  and the keywords value pairs from batchList.txt file. The identifiable keywords 
+  in the json file that are related to the 'create' command are listed below.
+
+  List of json keywords related to 'schedule' phase:
+    "FreeFile"   A list of free format style input file
+    "FixFile"    A list of fix format style input file
+    "CopyFile"   A list of file that you only want to copy and change nothing
+
+Example of usage 1:
+  htpstudio create batch.json
+
+
+Usage 2 (Not recomended): 
+  htpstudio create [OPTION] 
+
+  This type of usage is not recommended because it is not as easy to use as the 
+  previous one. But if you don't have python on your machine, you can use this
+  style as this one is a pure bash shell script.
+
+  -f, --file      A list of file names, decorater before the file name set the 
+                  type of the file, @ for fix format, & for free format, and 
+                  nothing for copy file
+  -s, --start     The starting index in batchList.txt for creation
+  -e, --end       The ending index in batchList.txt for creation
+  -h, --help      Print helper information
+
+Example of usage 2:
+  htpstudio create -f "&input.in @jobs.pbs pot.in" 
+EOF
+}
+
+usageCreateShort() {
+  cat <<EOF
+Usage 1: Prepare a batch.json configuration file, then
+    htpstudio create [json configuration file] [-s|--start] [-e|--end]
+
+Usage 2: Pass options instead of json configuration file
+    htpstudio create [-h|--help] [-s|--start] [-e|--end] -f|--file ... 
+
+Example:
+
+    htpstudio create -k "&input.in @jobs.pbs pot.in"
+
+EOF
+
+}
+
+usageExecute() {
+  cat <<EOF
+\`execute' is one of the sub-command of htpstudio - 
+  execute commands in the folders created using batchList.txt file. 'execute' 
+  is the third phase of high-throughput jobs generation. Please refere to the 
+  user manual for more detailed explanations.
+
+Usage 1 (Recommended): 
+  htpstudio execute [json configuration file]
+  
+  The recommended usage requires access to python. It will use the json module.
+  The command will read necessary input files from the json configuration file
+  and the keywords value pairs from batchList.txt file. The identifiable keywords 
+  in the json file that are related to the 'create' command are listed below.
+
+  List of json keywords related to 'schedule' phase:
+    "Command"     A string, which is the command to be executed in each folder
+
+Example of usage 1:
+  htpstudio execute batch.json
+
+
+Usage 2 (Not recomended): 
+  htpstudio execute [OPTION] 
+
+  This type of usage is not recommended because it is not as easy to use as the 
+  previous one. But if you don't have python on your machine, you can use this
+  style as this one is a pure bash shell script.
+
+  -c, --command   A string, which is the command to be executed in each folder
+  -s, --start     The starting index in batchList.txt for creation
+  -e, --end       The ending index in batchList.txt for creation
+  -h, --help      Print helper information
+
+Example of usage 2:
+  htpstudio create -f "&input.in @jobs.pbs pot.in" 
+EOF
+}
+
+usageExecuteShort() {
+  cat <<EOF
+Usage 1: Prepare a batch.json configuration file, then
+    htpstudio execute [json configuration file] [-s|--start] [-e|--end]
+
+Usage 2: Pass options instead of json configuration file
+    htpstudio execute [-h|--help] [-s|--start] [-e|--end] -f|--file ... 
+
+Example:
+
+    htpstudio execute "echo FREQ"
+    htpstudio execute "qsub Ferro.pbs"
+
+EOF
+}
+
+function printArguements() {
+  echo " Command is" ${@:1:1}
+  shift
+  let index=0
+  for arg in "$@"; do
+    let index=index+1
+    echo Argument $index: $arg
+  done
+}
+
+
+# OPT=$(getopt -o h --long help -n 'htpstudio' -- "$@")
+# eval set -- "${OPT}"
+
+[ $# -le 1 ] && {
+  usageStudioShort
+}
+
+case "$1" in
+schedule)
+  echo "Stage 1: Create the batchList.txt file"
+  shift
+
+  condition_string="1>0"
+  format="%s"
+  separater="+"
+  folder_set=false
+  variable_set=false
+  json_set=false
+  
+  OPT=$(getopt -o k:v:c:s:f:h --long keyword:,value:,condition:,separater:,format:,help -n 'htpstudio schedule' -- "$@")
+  eval set -- "${OPT}"
+
+  [ $# -le 1 ] && {
+    usageScheduleShort
+    json_set=true
+
+  }
+
+  while true; do
+    case "$1" in
+    -k | --keyword)
+      folder_string="$2"
+      folder_set=true
+      shift 2
+      ;;
+    -v | --value)
+      variable_string="$2"
+      variable_set=true
+      shift 2
+      ;;
+    -c | --condition)
+      condition_string="$2"
+      shift 2
+      ;;
+    -s | --separater)
+      separater="$2"
+      shift 2
+      ;;
+    -f | --format)
+      format="$2"
+      shift 2
+      ;;
+    -h | --help)
+      usageSchedule
+      json_set=true
+      break
+      ;;
+    --)
+      if [ ! -z "$2" ]; then
+        json_set=true
+        echo "Using the " $2 "configuration file"
+        varName=$(getJsonVar $2 VarName)
+        varValue=$(getJsonVar $2 VarValue)
+        condition=$(getJsonVar $2 Condition)
+        separator=$(getJsonVar $2 Separator)
+        format=$(getJsonVar $2 Format)
+        # echo ${varName} ${varValue} ${condition} ${separator} ${format}
+        writeBatchList "${varName}" "${varValue}" "${condition}" "${separator}" "${format}"
+      fi
+      shift
+      break
+      ;;
+    *)
+      echo "Unknown options!"
+      usageScheduleShort
+      break
+      ;;
+    esac
+  done
+
+  if [[ "${json_set}" == false ]]; then
+    echo "Using options from command line."
+    if [[ "${folder_set}" == false ]]; then
+      echo "The -k or --keyword option is mandatory for mupro batch list command, which sets the keywords for creating the batchList.txt file."
+    fi
+
+    if [[ "${variable_set}" == false ]]; then
+      echo "The -v or --value option is mandatory for mupro batch list command, which sets the sweeping values for each keyword in the input file."
+    fi
+
+    if [[ "${folder_set}" == true && "${variable_set}" == true ]]; then
+      # echo "${folder_string} | ${variable_string} | ${condition_string} | ${separater} | ${format} | "
+      writeBatchList "${folder_string}" "${variable_string}" "${condition_string}" "${separater}" "${format}"
+    fi
+  fi
+  ;;
+
+  create)
+  echo "Stage 2: Create the folder structure"
+  shift
+
+  file_set=false
+  json_set=false
+  OPT=$(getopt -o hf: --long help,file: -n 'htpstudio create' -- "$@")
+  eval set -- "${OPT}"
+
+  [ $# -le 1 ] && {
+    usageCreateShort
+  }
+
+  while true; do
+    case "$1" in
+    -s | --start)
+      start=$2
+      shift 2
+      ;;
+    -e | --end)
+      end=$2
+      shift 2
+      ;;
+    -h | --help)
+      usageCreate
+      break
+      ;;
+    -f | --file)
+      file_list="${file_list} $2"
+      file_set=true
+      shift 2
+      ;;
+    --)
+      if [ ! -z "$2" ]; then
+        echo "Using the " $2 "configuration file"
+        file_list=$(getJsonVar $2 File)
+        file_set=true
+        # echo ${varName} ${varValue} ${condition} ${separator} ${format}
+        # makeFolders "${file_list}" ${start} ${end}
+      fi
+      shift
+      break
+      ;;
+    *)
+      echo "Unknown options!"
+      usageCreateShort
+      break
+      ;;
+    esac
+  done
+
+  if [[ "${json_set}" == false ]]; then
+    if [[ "${file_set}" == true ]]; then
+      makeFolders "${file_list}" ${start} ${end}
+    else
+      echo "The -f or --file option is mandatory."
+    fi
+  fi
+  ;;
+
+execute)
+  echo "Stage 3: Execute command for each folder"
+  shift
+
+  command_set=false
+  json_set=false
+  start=1
+  end=$(($(wc -l <batchList.txt) - 1))
+  exec_command="ls"
+
+  OPT=$(getopt -o s:e:c:h --long start::,end::,command::,help -n 'htpstudio execute' -- "$@")
+  eval set -- "${OPT}"
+
+  [ $# -le 1 ] && {
+    usageExecuteShort
+  }
+
+  while true; do
+    case "$1" in
+    -s | --start)
+      start=$2
+      shift 2
+      ;;
+    -e | --end)
+      end=$2
+      shift 2
+      ;;
+    -c | --command)
+      exec_command=$2
+      command_set=true
+      shift 2
+      ;;
+    -h | --help)
+      usageExecute
+      break
+      ;;
+    --)
+      if [ ! -z "$2" ]; then
+        echo batch execute $2 in folders
+        exec_command=$(getJsonVar $2 Command)
+        command_set=true
+        #  echo ${varName} ${varValue} ${condition} ${separator} ${format}
+        execFolders "${exec_command}"
+      fi
+      shift
+      break
+      ;;
+    *)
+      usageExecuteShort
+      break
+      ;;
+    esac
+  done
+
+  if [[ "${json_set}" == true ]]; then
+    if [[ "${command_set}" == true ]]; then
+      execFolders "${exec_command}" ${start} ${end}
+    else
+      echo "The -c or --command option is mandatory."
+    fi
+  fi
+
+  ;;
+
+utility)
+  echo "Some utitlities functions in htpstudio"
+  shift
+  case "$1" in
+  getFirstString)
+    printArguements "$@"
+    shift
+    getFirstString "$@"
+    ;;
+
+  evaluateEachField)
+    printArguements "$@"
+    shift
+    evaluateEachField "$@"
+    ;;
+
+  increaseIndex)
+    printArguements "$@"
+    shift
+    increaseIndex "$@"
+    ;;
+
+  parseJson)
+    printArguements "$@"
+    shift
+    parseJson "$@"
+    ;;
+
+  esac
+  ;;
+-h | --help)
+  usageStudio
+  shift
+;;
+--)
+  if [ ! -z "$2" ]; then
+    echo "Only schedule, create, execute and utility subcommands are supported" $# $1 $2
+  fi
+  shift
+;;
+*)
+  usageStudioShort
+  shift
+;;
+
+esac

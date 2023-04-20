@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<project>
+<description>
+   This is a test input program
+</description>
+<structure>
+   <file>struct.in</file>
+</structure>
+<property>
+   <file>pot.in</file>
+</property>
+<control>
+   <elastic>
+   <switch>10</switch>
+   <bc>2</bc>
+   </elastic>
+</control>
+<host>
+   <value>1</value>
+   <value>2</value>
+</host>
+</project>

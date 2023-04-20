@@ -1,1 +1,1 @@
-# STK -- Suan Toolkit
+# STK - Suan Toolkit

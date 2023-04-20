@@ -1,0 +1,137 @@
+// lapack.h header file for the lapack declarations
+//
+
+// LAPACK driver routines follow
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+        // routine to solve a general system of linear equations (simple driver)
+// #ifdef _WIN32
+// #       define dgesv_ DGESV
+// #else
+#define DGESV dgesv_
+        // #endif
+        int dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
+
+        // routine to get eigenvalues and (left and right)eigenvectors of a general matrix.
+        // char argument !!! special attention for windows (stilil to be done)
+// #ifdef _WIN32
+// #       define dgeev_ DGEEV
+// #else
+#define DGEEV dgeev_
+        // #endif
+        int dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double *vl,
+                   int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
+
+        // routine to get generalized eigenvalues and eigenvectors for a system of 2 symmetric matrices.
+// #ifdef _WIN32
+// #       define dsygv_ DSYGV
+// #else
+#define DSYGV dsygv_
+        // #endif
+        int dsygv_(int *itype, char *jobz, char *uplo, int *n, double *a, int *lda, double *b, int *ldb, double *w, double *work, int *lwork, int *info);
+
+        // routines for computing minimum norm solution to a possibly singular or degenerate linear system using singular value decomposition. dgelsd is faster than the older dgelss, but needs more workspace
+// #ifdef _WIN32
+// #       define dgelss_ DGELSS
+// #else
+#define DGELSS dgelss_
+        // #endif
+        int dgelss_(int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *s, double *rcond, int *rank, double *work, int *lwork, int *info);
+
+// #ifdef _WIN32
+// #       define dgelsd_ DGELSD
+// #else
+#define DGELSD dgelsd_
+        // #endif
+        int dgelsd_(int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *s, double *rcond, int *rank, double *work, int *lwork, int *iwork, int *info);
+
+        // routine for eigenvectors and eigenvalues of a symmetric matrix
+// #ifdef _WIN32
+// #       define dsyev_ DSYEV
+// #else
+#define DSYEV dsyev_
+        // #endif
+        int dsyev_(char *jobz, char *uplo, int *n, double *fa, int *lda, double *w, double *work, int *lwork, int *info);
+
+        // routine for solving a real symmetric indefinite system of linear equations AX=B (simple driver)
+// #ifdef _WIN32
+// #       define dsysv_ DSYSV
+// #else
+#define DSYSV dsysv_
+        // #endif
+        int dsysv_(char *uplo, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, double *work, int *lwork, int *info);
+
+        // routine for doing LU factorization of general m x n matrix
+// #ifdef _WIN32
+// #       define dgetrf_ DGETRF
+// #else
+#define DGETRF dgetrf_
+        // #endif
+        int dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *info);
+
+        // routine to compute the inverse of a matrix using the LU factorization provided by dgetrf
+// #ifdef _WIN32
+// #       define dgetri_ DGETRI
+// #else
+#define DGETRI dgetri_
+        // #endif
+        int dgetri_(int *n, double *a, int *lda, int *ipiv, double *work, int *lwork, int *info);
+
+        //reduces a real general rectangular matrix to real bidiagonal form by an orthogonal transformation
+// #ifdef _WIN32
+// #define dgebrd_ DGEBRD
+// #else
+#define DGEBRD dgebrd_
+        // #endif
+        void dgebrd_(int *m, int *n, double *a, int *lda, double *d, double *e, double *tauq, double *taup, double *work, int *lwork, int *info);
+
+        //Generates the orthogonal transformation matrices from a reduction to bidiagonal form determined by SGEBRD
+// #ifdef _WIN32
+// #define dorgbr_ DORGBR
+// #else
+#define DORGBR dorgbr_
+        // #endif
+
+        void dorgbr_(char *vect, int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
+
+        //Computes the singular value decomposition (SVD) of a real bidiagonal matrix, using the bidiagonal QR algorithm
+// #ifdef _WIN32
+// #define dbdsqr_ DBDSQR
+// #else
+#define DBDSQR dbdsqr_
+        // #endif
+
+        void dbdsqr_(char *uplo, int *n, int *ncvt, int *nru, int *ncc, double *d, double *e, double *vt, int *ldvt, double *u, int *ldu, double *c, int *ldc, double *work, int *info);
+
+        //Solves a real general system of linear equations AX=B, A**T X=B or A**H X=B, using the LU factorization computed by DGETRF
+// #ifdef _WIN32
+// #define dgetrs_ DGETRS
+// #else
+#define DGETRS dgetrs_
+        // #endif
+
+        void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
+
+        //Computes the Cholesky factorization of a real symmetric positive definite matrix
+// #ifdef _WIN32
+// #define dpotrf_ DPOTRF
+// #else
+#define DPOTRF dpotrf_
+        // #endif
+
+        void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
+
+        //Computes a QR factorization with column pivoting of a general rectangular matrix
+// #ifdef _WIN32
+// #define dgeqpf_ DGEQPF
+// #else
+#define DGEQPF dgeqpf_
+        // #endif
+
+        void dgeqpf_(int *m, int *n, double *a, int *lda, int *jpvt, double *tau, double *work, int *info);
+
+#ifdef __cplusplus
+}
+#endif

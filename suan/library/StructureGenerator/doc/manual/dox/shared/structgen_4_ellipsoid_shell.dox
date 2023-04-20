@@ -1,0 +1,15 @@
+/**
+
+@page page_structure_generator_ellipsoid_shell
+@section structure_generator_ellipsoid_shell Ellipsoid Shell 
+
+Ellipsoid shell require the definition of two ellipsoid, the inner one and the outer one. The formula for each ellipsoid is the same as a @ref structure_generator_ellipsoid "normal ellipsoid"
+
+- **centerInnerX, centerInnerY, centerInnerZ**: the center point coordinate (within the simulation grid) of the defined inner ellipsoid.
+- **radiusInnerX, radiusInnerY, radiusInnerZ**: the inner ellipsoid radius.
+- **rotationInnerX, rotationInnerY, rotationInnerZ**: the inner ellipsoid rotation angle (degree) along x, y, and z axis in sequence.
+- **centerOuterX, centerOuterY, centerOuterZ**: the center point coordinate (within the simulation grid) of the defined outer ellipsoid.
+- **radiusOuterX, radiusOuterY, radiusOuterZ**: the outer ellipsoid radius.
+- **rotationOuterX, rotationOuterY, rotationOuterZ**: the outer ellipsoid rotation angle (degree) along x, y, and z axis in sequence.
+
+*/

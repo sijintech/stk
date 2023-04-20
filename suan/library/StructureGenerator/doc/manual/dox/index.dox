@@ -1,0 +1,6 @@
+/**
+
+@mainpage Introduction
+Structure generator is an important part of the \f$\mu\f$-Pro® module. The generator reads user defined geometric in the *input.xml* and then provide the 3D discretized structured grid of phase label to our simulation program.
+
+*/

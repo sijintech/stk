@@ -1,0 +1,96 @@
+/**
+
+@page material_page
+@section material Material
+
+@subsection material_overview Overview
+
+Setting the material's properties is an necessary part of any \f$\mu\f$-Pro® module. 
+Any input value related to material phases and property tensors are configured through the material's input explained in the next few pages.
+For beginners knowing how to use the GUI interface to guide you create the material properties' input is enough, but for power users, 
+you may want to learn how the material properties part of the *input.xml* file is structured.
+
+There are three levels of elements, 
+- **@subpage material_material "material"** The parent tag of all material phases and properties. The material can have multiple phases.
+    - **@subpage material_phase "phase"** Set the properties of one phase. Each phase can have multiple tensors.
+        - **@subpage material_tensor "tensor"** Set one property tensor. Each tensor may contain several components.
+            - **@subpage material_component "component"** Set the value for one component of a tensor.
+
+
+@subsection material_material Material            
+Material is usually a child element of the system element, which allows you to set the values of various property tensors of each phases. 
+In most cases there can only exist one material element.
+
+Intuitively, the whole system is considered as one material. In most of our calculations, the material is a composite of multiple phases.
+
+# Element structure
+- **material**
+    - **format** Specify the source of material/phase information for calculation. For now, the only available option is *xml*, that is the *input.xml* file. 
+    - **phase** Set values for phases. You can set multiple phase elements under material.
+
+# Example
+<br>
+@code{.XML}
+<material>
+    <format>xml</format>
+    <phase>
+        <label>0</label>
+        <tensor>
+            <pointGroup>cubic</pointGroup>
+            <name>permittivity</name>
+            <rank>2</rank>
+            <component>
+                <value>3.5</value>
+                <index>11</index>
+            </component>
+        </tensor>
+    </phase>
+    <phase>
+        <label>1</label>
+        <tensor>
+            <pointGroup>cubic</pointGroup>
+            <name>permittivity</name>
+            <rank>2</rank>
+            <component>
+                <value>100</value>
+                <index>11</index>
+            </component>
+        </tensor>
+    </phase>
+</material>
+@endcode
+
+
+@subsection material_phase Phase
+
+Phase is the child element of the *material* element. There can exist multiple *phase* elements, and each *phase* element can have multiple *tensor* elements. 
+Each phase element must also has a *label* element as child, which is used to link with the label you specify in the structure generator 
+so that the program knows which material property should assigned to each simulation grid point.
+
+Besides from the normal phase defined in material, there is a special type of phase called "ref" defined in the "solver" element, which is used to set the homogeneous value
+needed by our solver. The syntax is the same as a normal phase element, except it does not have a label child.
+
+# Element structure
+- **phase**
+    - **label** The phase label. This is the same value you used in structure generator.
+    - **tensor** The property tensors of current phase.
+
+# Example
+<br>
+@code{.XML}
+<phase>
+    <label>0</label>
+    <tensor>
+        <pointGroup>cubic</pointGroup>
+        <name>permittivity</name>
+        <rank>2</rank>
+        <component>
+            <value>3.5</value>
+            <index>11</index>
+        </component>
+    </tensor>
+</phase>
+@endcode
+
+
+*/

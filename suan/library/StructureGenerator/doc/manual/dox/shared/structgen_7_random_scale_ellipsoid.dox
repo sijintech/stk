@@ -1,0 +1,15 @@
+/**
+
+@page page_structure_generator_random_scale_ellipsoid
+@section structure_generator_random_scale_ellipsoid Random Scale Ellipsoid
+
+Scaled random ellipsoid generate a series of random ellipsoid, the difference from the previous random ellipsoid is this one has a fixed ratio for radius, and use a scale parameter to resize each ellipsoid
+
+- **centerXMin, centerXMax, centerYMin, centerYMax, centerZMin, centerZMax**: define the lower and upper boundary for ellipsoid center point. A series of center point will be randomly generated within this region.
+- **radiusX, radiusY, radiusZ**: define the ellipsoid radius
+- **scaleMin, scaleMax**: define the lower and upper boundary for the scaling factor.
+- **rotationXMin, rotationXMax, rotationYMin, rotationYMax, rotationZMin, rotationZMax**: define the lower and upper boundary for the ellipsoid rotation along x, y, and z axis in degree by the xyz sequence.
+- **count**: the amount of ellipsoid to be created.
+- **label**: the label to be assigned to these created ellipsoids.
+
+*/

@@ -1,0 +1,16 @@
+site_name: Structure Generator Developer Documentation
+theme:
+  name: "material"
+markdown_extensions:
+  - admonition
+docs_dir: doxybook-out
+dev_addr: 127.0.0.1:3003
+use_directory_urls: true
+nav:
+  - Home: /index
+  - Classes: /Classes/
+  - Namespaces: /Namespaces/
+  - Modules: /Modules/
+  - Files: /Files
+  - Related Pages: /Pages/
+  - Examples: /Examples/

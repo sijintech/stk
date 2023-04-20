@@ -1,0 +1,19 @@
+{
+    "name": "mupro2vtk",
+    "version": "1.0.0",
+    "description": "A gilab page for processing data into vtk compatible format",
+    "main": "index.js",
+    "author": "CXX",
+    "license": "MIT",
+    "private": false,
+    "scripts": {
+      "start": "vuepress dev docs",
+      "build": "vuepress build docs"
+    },
+    "dependencies": {},
+    "devDependencies": {
+      "surge": "^0.21.3",
+      "vuepress": "^0.10.0"
+    }
+  }
+  

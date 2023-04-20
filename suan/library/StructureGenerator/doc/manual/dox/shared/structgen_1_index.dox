@@ -1,0 +1,23 @@
+/**
+
+@page structure_generator_overview_page
+@section structure_generator_overview Structure Generator Overview
+
+Structure generator is an important part of the \f$\mu\f$-Pro® module. The generator reads user defined geometric in the *input.xml* and then provide the 3D discretized structured grid of phase label to our simulation program.
+
+
+Here is a list of current supported geometries in the *input.xml* 
+
+| Geometry Type           	                                                                | Description                           	                                            |
+|-----------------------	                                                                |----------------------------------------	                                            |
+| @subpage page_structure_generator_slab "Slab"                                                  | Infinite 2D plane with thickness                                                    	|
+| @subpage page_structure_generator_ellipsoid "Ellipsoid"                                        | One ellipsoid                           	                                            |
+| @subpage page_structure_generator_ellipsoid_shell "Ellipsoid Shell"                            | One ellipsoid of core shell structure                   	                            |
+| @subpage page_structure_generator_random_ellipsoid "Random Ellipsoid"                          | Multiple ellipsoid, with random location, shape, dimension, rotation                	|
+| @subpage page_structure_generator_random_ellipsoid_shell "Random Ellipsoid Shell"         	    | Multiple ellipsoid shell, with random location, shape, dimension, rotation           	|
+| @subpage page_structure_generator_random_scale_ellipsoid "Random Scale Ellipsoid"            	| Multiple ellipsoid, with random location, rotation, dimension, but fixed shape        |
+| @subpage page_structure_generator_random_scale_ellipsoid_shell "Random Scale Ellipsoid Shell"	| Multiple ellipsoid shell, with random location, rotation, but fixed shape           	|
+
+
+You may also @subpage structure_generator_external "load structure data from external files", such as microstructure.vti or microstructure.in.
+*/

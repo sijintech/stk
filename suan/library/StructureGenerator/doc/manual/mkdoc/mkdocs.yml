@@ -1,0 +1,27 @@
+site_name: Structure Generator User Manual
+site_url: http://127.0.0.1:3003
+theme:
+  name: "material"
+markdown_extensions:
+  - admonition
+  - pymdownx.arithmatex:
+      generic: true
+extra_javascript:
+  - config.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+docs_dir: ../doxybook-out
+dev_addr: 127.0.0.1:3003
+use_directory_urls: true
+nav:
+  - Home: /
+  - Geometry:
+      - Overview: /structure-generator-pages/overview
+      - Slab: /structure-generator-pages/slab
+      - Ellipsoid: /structure-generator-pages/ellipsoid
+      - "Ellipsoid Shell": /structure-generator-pages/ellipsoid_shell
+      - "Random Ellipsoid": /structure-generator-pages/random_ellipsoid
+      - "Random Ellipsoid Shell": /structure-generator-pages/random_ellipsoid_shell
+      - "Random Scale Ellipsoid": /structure-generator-pages/random_scale_ellipsoid
+      - "Random Scale Ellipsoid Shell": /structure-generator-pages/random_scale_ellipsoid_shell
+  # - Examples: /Examples/
