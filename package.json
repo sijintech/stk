@@ -1,0 +1,23 @@
+{
+  "private": true,
+  "name": "stk",
+  "version": "1.0.0",
+  "packageManager": "pnpm@8.0.0",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "scripts": {
+    "dev:docs": "pnpm --filter knowledge dev",
+    "build:docs": "pnpm --filter knowledge build",
+    "deploy:docs": "pnpm --filter knowledge run deploy",
+    "prettier": "prettier --write . docs/**/*.astro",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "husky": "^8.0.0",
+    "prettier": "^2.8.4",
+    "prettier-plugin-astro": "^0.8.0",
+    "prettier-plugin-tailwindcss": "^0.2.3",
+    "pretty-quick": "^3.1.3"
+  }
+}

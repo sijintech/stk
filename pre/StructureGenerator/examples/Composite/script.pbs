@@ -21,4 +21,4 @@
 #PBS -j oe
 
 cd $PBS_O_WORKDIR
-/gpfs/group/lqc3/default/xuc116/MUPRO/MUPRO/Main_Programs/Input-Generator/Structure-Generator/structureGenerator.exe
+structureGenerator.exe

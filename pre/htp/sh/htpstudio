@@ -1302,11 +1302,11 @@ schedule)
   if [[ "${json_set}" == false ]]; then
     echo "Using options from command line."
     if [[ "${folder_set}" == false ]]; then
-      echo "The -k or --keyword option is mandatory for mupro batch list command, which sets the keywords for creating the batchList.txt file."
+      echo "The -k or --keyword option is mandatory for batch list command, which sets the keywords for creating the batchList.txt file."
     fi
 
     if [[ "${variable_set}" == false ]]; then
-      echo "The -v or --value option is mandatory for mupro batch list command, which sets the sweeping values for each keyword in the input file."
+      echo "The -v or --value option is mandatory for batch list command, which sets the sweeping values for each keyword in the input file."
     fi
 
     if [[ "${folder_set}" == true && "${variable_set}" == true ]]; then

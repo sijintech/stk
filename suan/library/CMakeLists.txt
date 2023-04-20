@@ -4,7 +4,7 @@ if (POLICY CMP0025)
 endif ()
 set (CMAKE_CXX_STANDARD 11)
 
-project(mupro-utility-library)
+project(utility-library)
 if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
     set(WINDOWS TRUE)
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
