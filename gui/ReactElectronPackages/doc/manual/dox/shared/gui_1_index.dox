@@ -1,0 +1,15 @@
+/**
+@page gui_overview 
+@section gui GUI Overview
+When you open the program, you will see the interface below. 
+
+@image latex interface_initial_annotated.png 
+
+This is a screenshot on Windows but everything applies to MacOS too, with just slight differences in the styling. The interface contains the following three parts.
+
+
+
+- **@subpage gui_menu "Menu"** Menu items
+- **@subpage gui_input "Input"** For setting the simulation parameters and create *input.xml* file
+- **@subpage gui_output "Output"** For status console output and quick visualization of any 3D/2D data
+*/

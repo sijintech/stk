@@ -1,0 +1,52 @@
+/**
+
+@page gui_input
+@section gui_input_overview GUI Input
+
+@image latex interface_input.png "" width=50%
+
+The **input** part takes two responsibilities:
+1. guide you through the necessary parameter input and create the an input.xml file
+2. start a simulation or kill an existing one
+
+@subsection gui_input_part Create input.xml
+
+@subsubsection gui_input_file input.xml
+
+All simulations must have an input.xml file which the core calculation program will read and process. 
+In fact, you can manually create an input.xml file to feed into the calculation program without the help of the graphical interface.
+
+input.xml, as the file extension indicates, is just a normal xml file, so you will see multiple levels of elements in this file with the root element called **input**. Also to make things simpler, there is no attributes for any of the elements. 
+
+The input.xml file looks like this,
+
+@code{.XML}
+<input>
+  <name>...</name>
+  <dimension>...</dimension>
+  <system>...</system>
+  ...
+</input>
+
+@endcode
+
+The rules and contents of this input.xml file will be introduced in the @ref input_page "following page", so stick around.
+
+
+@subsubsection gui_create_input Enter values and export input.xml file
+
+Please fill the input part of the GUI to set values for the input.xml file.
+Besides from filling every blank manually, you can also import previous input.xml files or load example files within the software.
+
+- Click **File** -> **Import** in the menu, and select the input file that you want to import. Notice, here the file name does not have to be *input.xml*.
+- Click **Examples** in the menu, and select one example from the list.
+
+After loading these files, the blank spaces will be popped for you, and you can click the **Create inputs** button to export all the values in the current GUI. Though, you can export to any file name that you want, but before you can start any simulation, you **must** export a file named *input.xml*.
+
+@subsection gui_start_kill_simulation Start/Kill simulation
+
+To start a simulation, simply click the **Start simulation** button, and the simulation output will be printed to the console panel in the lower part of the output section.
+
+To kill a simulation before it ends, you just need to click the **Stop simulation** button.
+
+*/

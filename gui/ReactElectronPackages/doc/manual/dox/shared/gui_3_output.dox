@@ -1,0 +1,36 @@
+/**
+
+@page gui_output
+@section gui_output_overview Output
+
+@image latex interface_output.png "" width=50%
+
+There are two types of output in the GUI, the 3D visualization in the upper part, and the console output in the lower part.
+
+@subsection gui_output_3D 3D visualization
+
+<b>Disclaimer</b> Visualization in our software is only to have a quick peek into the data rather than for comprehensive visualization or data exploration. For real visualization, we recommend using the software [Paraview](https://www.paraview.org/) developed by Kitware. Or you can choose any software that supports the *.vti* format.
+
+To visualize the 3D data **.vti** output files:
+
+1. **Select a file**: Use this dropdown menu to select available vti files in the folder that you have exported the most recent input.xml file. 
+2. **Load data**: Click to load the data from the selected vti file into the visualization area. The default behavior is to visualize the first data array component in the file.
+3. **Select a component**: If the file you selected has more than one component to visualize, you need to use this dropdown menu to select different component of the vti data file. 
+
+
+@subsection gui_output_console Console output
+
+Logging information will be printed to this area, the information includes:
+1. registration
+2. loading preference
+3. simulation screen output
+
+@cond DOXYGEN_EXCLUDE
+- **Update visualization**: Once you change the selected component, click this button to update the visualization area.
+- **Save current scene**: Click to capture the current scene in the visualization area.
+- **Create GIF**: Click to create a gif image of the selected data file, sorted by simulation steps.
+
+@endcond
+
+
+*/
