@@ -1,0 +1,95 @@
+/**
+@page magnetic
+@section magnetic_permeability Magnetic Permeability
+
+The magnetic permeability calculation can give you 
+1. effective permeability of the system
+2. magnetic field distribution
+3. magnetization distribution
+4. magnetic induction distribution
+
+@subsection magnetic_equation Solved Equation
+\f$\nabla \cdot B = 0\f$, where \f$B = \mu_0 \mu_r H\f$
+- **B** Magnetic induction
+- <b>\f$\mu\f$</b> Permeability, \f$\mu_0\f$ the vacuum permeability, \f$\mu_r\f$ the relative permeability
+- **H** Magnetic field
+
+@subsection magnetic_input Input options
+The following options are needed for the magnetic permeability calculation.
+
+- **input->system** The choice of calculation system must be *magnetic*
+- **input->external->magneticField** External applied magnetic field (A/m), if you want to calculate the magnetic field distribution within the composite
+    - **x** Applied magnetic field along x
+    - **y** Applied magnetic field along y
+    - **z** Applied magnetic field along z
+- **input->solver->ref** A property tensor for the reference phase called *permeability* is needed. Tensor definition is explained @ref material_tensor "here"
+
+
+<br>
+
+@subsection permeability_input_symmetry Allowed symmetry
+
+Below is a list of allowed symmetry choices, with Hermann-Mauguin notation, and the matrices
+- triclinic, 1 and \f$\bar{1}\f$
+    - \f$\begin{bmatrix}
+    \mu_{11} & \mu_{12} & \mu_{13}  \\
+    \mu_{12}& \mu_{22} & \mu_{23}  \\
+    \mu_{13} & \mu_{23} & \mu_{33}     
+    \end{bmatrix}\f$
+- monoclinic, 2, m, 2/m
+    - \f$\begin{bmatrix}
+    \mu_{11} & 0 & \mu_{13}  \\
+    0& \mu_{22} & 0  \\
+    \mu_{13} & 0 & \mu_{33}     
+    \end{bmatrix}\f$
+- orthorhombic, 222, mm2, mmm
+    - \f$\begin{bmatrix}
+    \mu_{11} & 0 & 0  \\
+    0& \mu_{22} & 0  \\
+    0 & 0 & \mu_{33}     
+    \end{bmatrix}\f$
+- uniaxial, 3, \f$\bar{3}\f$, 32, 3m, \f$\bar{3}\f$m, 4, \f$\bar{4}\f$, 4/m, 422, 4mm, \f$\bar{4}\f$2m, 4/mmm, 6, \f$\bar{6}\f$, 6/m, 622, 6mm, \f$\bar{6}\f$m2, 6/mmm, \f$\infty\f$, \f$\infty\f$m, \f$\infty\f$/m, \f$\infty\f$2, \f$\infty\f$/mm
+    - \f$\begin{bmatrix}
+    \mu_{11} & 0 & 0  \\
+    0& \mu_{11} & 0  \\
+    0 & 0 & \mu_{33}     
+    \end{bmatrix}\f$
+- cubic, 23, m\f$\bar{3}\f$, 432, \f$\bar{4}\f$3m, m\f$\bar{3}\f$m, \f$\infty\f$\f$\infty\f$, \f$\infty\f$\f$\infty\f$m
+    - \f$\begin{bmatrix}
+    \mu_{11} & 0 & 0  \\
+    0& \mu_{11} & 0  \\
+    0 & 0 & \mu_{11}     
+    \end{bmatrix}\f$
+
+@code{.XML}
+<system>
+    <type>magnetic</type>
+    <distribution>1</distribution>
+    <external>
+        <magneticField>
+            <x>0</x>
+            <y>0</y>
+            <z>0.1</z>
+        </magneticField>
+    </external>
+    <solver>
+        <ref>
+            <name>permeability</name>
+            <rank>2</rank>
+            <pointGroup>cubic</pointGroup>
+            <component>
+                <value>100</value>
+                <index>11</index>
+            </component>
+        </ref>
+    </solver>
+</system>
+@endcode
+
+@subsection magnetic_output Output files
+There are a total of 4 possible output files for the magnetic calculation
+1. out_effective_permeability.csv
+2. out_magnetic_field.vti
+3. out_magnetization.vti
+4. out_magnetic_induction.vti
+*/

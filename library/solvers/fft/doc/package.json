@@ -1,0 +1,18 @@
+{
+    "private": true,
+    "name": "mupro-dielectric-breakdown-doc",
+    "version": "1.0.0",
+    "scripts": {
+        "prestart": "gatsby clean",
+        "develop": "gatsby develop",
+        "build": "gatsby build",
+        "serve": "gatsby serve"
+    },
+    "dependencies": {
+        "gatsby": "^2.24.40",
+        "gatsby-cli": "^2.12.82",
+        "gatsby-theme-mupro-doc": "4.3.13",
+        "react": "^16.13.1",
+        "react-dom": "^16.13.1"
+    }
+}

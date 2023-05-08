@@ -1,0 +1,180 @@
+/**
+@page elastic
+@section elastic_stiffness Elastic Stiffness
+
+The elastic calculation can give you 
+1. effective elastic stiffness of the system
+2. stress distribution
+3. strain distribution
+
+@subsection elastic_equation Solved Equation
+\f$\nabla \cdot \sigma = 0\f$, where \f$\sigma = C \epsilon T\f$
+- <b>\f$\sigma\f$</b> The stress tensor
+- **C** The elastic stiffness tensor
+- <b>\f$\epsilon\f$</b> The strain tensor
+
+@subsection elastic_input Input options
+The following options are needed for the elastic calculation.
+
+- **input->system** The choice of calculation system must be *elastic*
+- **input->external->elastic/type** Either *stress* or *strain*, this will determine what external constraints are expected.
+- **input->external->elastic/stress** External applied stress constraint, if you want to calculate the stress/strain distribution within the composite
+    - **tensor11** \f$\sigma_{11}\f$
+    - **tensor12** \f$\sigma_{12}\f$
+    - **tensor13** \f$\sigma_{13}\f$
+    - **tensor22** \f$\sigma_{22}\f$
+    - **tensor23** \f$\sigma_{23}\f$
+    - **tensor33** \f$\sigma_{33}\f$
+- **input->external->elastic/strain** External applied strain constraint, if you want to calculate the stress/strain distribution within the composite
+    - **tensor11** \f$\epsilon_{11}\f$
+    - **tensor12** \f$\epsilon_{12}\f$
+    - **tensor13** \f$\epsilon_{13}\f$
+    - **tensor22** \f$\epsilon_{22}\f$
+    - **tensor23** \f$\epsilon_{23}\f$
+    - **tensor33** \f$\epsilon_{33}\f$
+- **input->solver->ref** A property tensor for the reference phase called *stiffness* is needed. Tensor definition is explained @ref material_tensor "here"
+
+<br>
+
+@subsection elastic_input_symmetry Allowed symmetry
+
+Below is a list of allowed symmetry choices, with Hermann-Mauguin notation, and the matrices
+- triclinic, 1 and \f$\bar{1}\f$
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{13} & C_{14} & C_{15} & C_{16}  \\
+    C_{12} & C_{22} & C_{23} & C_{24} & C_{25} & C_{26}  \\
+    C_{13} & C_{23} & C_{33} & C_{34} & C_{35} & C_{36}  \\ 
+    C_{14} & C_{24} & C_{34} & C_{44} & C_{45} & C_{46}  \\
+    C_{15} & C_{25} & C_{35} & C_{45} & C_{55} & C_{56}  \\
+    C_{16} & C_{26} & C_{36} & C_{46} & C_{56} & C_{66}   
+    \end{bmatrix}\f$
+- monoclinic, 2, m, 2/m
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{13} & 0      & C_{15} & 0      \\
+    C_{12} & C_{22} & C_{23} & 0      & C_{25} & 0      \\
+    C_{13} & C_{23} & C_{33} & 0      & C_{35} & 0      \\ 
+    0      & 0      & 0      & C_{44} & 0      & C_{46} \\
+    C_{15} & C_{25} & C_{35} & 0      & C_{55} & 0      \\
+    0      & 0      & 0      & C_{46} & 0      & C_{66}  
+    \end{bmatrix}\f$
+- orthorhombic, 222, mm2, mmm
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{13} & 0      & 0      & 0      \\
+    C_{12} & C_{22} & C_{23} & 0      & 0      & 0      \\
+    C_{13} & C_{23} & C_{33} & 0      & 0      & 0      \\ 
+    0      & 0      & 0      & C_{44} & 0      & 0 \\
+    0      & 0      & 0      & 0      & C_{55} & 0      \\
+    0      & 0      & 0      & 0      & 0      & C_{66}  
+    \end{bmatrix}\f$
+- tetragonal, 4, \f$\bar{4}\f$, 4/m
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{13} & 0      & 0      & C_{16} \\
+    C_{12} & C_{11} & C_{13} & 0      & 0      & -C_{16}\\
+    C_{13} & C_{13} & C_{33} & 0      & 0      & 0      \\ 
+    0      & 0      & 0      & C_{44} & 0      & 0 \\
+    0      & 0      & 0      & 0      & C_{55} & 0      \\
+    C_{16} & -C_{16}& 0      & 0      & 0      & C_{66}  
+    \end{bmatrix}\f$
+- tetragonal, 4mm, \f$\bar{4}\f$2m, 422, 4/mmm
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{13} & 0      & 0      & 0 \\
+    C_{12} & C_{11} & C_{13} & 0      & 0      & 0\\
+    C_{13} & C_{13} & C_{33} & 0      & 0      & 0      \\ 
+    0      & 0      & 0      & C_{44} & 0      & 0 \\
+    0      & 0      & 0      & 0      & C_{44} & 0      \\
+    0      & 0      & 0      & 0      & 0      & C_{66}  
+    \end{bmatrix}\f$
+- trigonal, 3, \f$\bar{3}\f$
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{13} & C_{14} & -C_{25}& 0 \\
+    C_{12} & C_{11} & C_{13} & -C_{14}& C_{25} & 0\\
+    C_{13} & C_{13} & C_{33} & 0      & 0      & 0      \\ 
+    C_{14} & -C_{14}& 0      & C_{44} & 0      & C_{25} \\
+    -C_{25}& C_{25} & 0      & 0      & C_{44} & C_{14}      \\
+    0      & 0      & 0      & C_{25} & C_{14} & \frac{1}{2}(C_{11}-C_{22})  
+    \end{bmatrix}\f$
+- trigonal, 32, 3m, \f$\bar{3}\f$m
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{13} & C_{14} & 0      & 0 \\
+    C_{12} & C_{11} & C_{13} & -C_{14}& 0      & 0\\
+    C_{13} & C_{13} & C_{33} & 0      & 0      & 0      \\ 
+    C_{14} & -C_{14}& 0      & C_{44} & 0      & 0 \\
+    0      & 0      & 0      & 0      & C_{44} & C_{14}      \\
+    0      & 0      & 0      & 0      & C_{14} & \frac{1}{2}(C_{11}-C_{22})  
+    \end{bmatrix}\f$
+- hexagonal, 6, \f$\bar{6}\f$, 6/m, 622, 6mm, \f$\bar{6}\f$m2, 6/mmm, \f$\infty\f$, \f$\infty\f$m, \f$\infty\f$/m, \f$\infty\f$2, \f$\infty\f$/mm
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{13} & 0      & 0      & 0      \\
+    C_{12} & C_{11} & C_{13} & 0      & 0      & 0      \\
+    C_{13} & C_{13} & C_{33} & 0      & 0      & 0      \\ 
+    0      & 0      & 0      & C_{44} & 0      & 0 \\
+    0      & 0      & 0      & 0      & C_{44} & 0      \\
+    0      & 0      & 0      & 0      & 0      & \frac{1}{2}(C_{11}-C_{22})  
+    \end{bmatrix}\f$
+- cubic, 23, m\f$\bar{3}\f$, 432, \f$\bar{4}\f$3m, m\f$\bar{3}\f$m
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{12} & 0      & 0      & 0      \\
+    C_{12} & C_{11} & C_{12} & 0      & 0      & 0      \\
+    C_{12} & C_{12} & C_{11} & 0      & 0      & 0      \\ 
+    0      & 0      & 0      & C_{44} & 0      & 0 \\
+    0      & 0      & 0      & 0      & C_{44} & 0      \\
+    0      & 0      & 0      & 0      & 0      & C_{44}  
+    \end{bmatrix}\f$
+- isotropic, \f$\infty\f$\f$\infty\f$, \f$\infty\f$\f$\infty\f$m
+    - \f$\begin{bmatrix}
+    C_{11} & C_{12} & C_{12} & 0      & 0      & 0      \\
+    C_{12} & C_{11} & C_{12} & 0      & 0      & 0      \\
+    C_{12} & C_{12} & C_{11} & 0      & 0      & 0      \\ 
+    0      & 0      & 0      & \frac{1}{2}(C_{11}-C_{22}) & 0      & 0 \\
+    0      & 0      & 0      & 0      & \frac{1}{2}(C_{11}-C_{22}) & 0      \\
+    0      & 0      & 0      & 0      & 0      & \frac{1}{2}(C_{11}-C_{22})  
+    \end{bmatrix}\f$
+
+@code{.XML}
+<system>
+    <type>elastic</type>
+    <distribution>1</distribution>
+    <external>
+        <elastic>
+            <type>strain</type> 
+            <strain>
+                <tensor11>0.0</tensor11>
+                <tensor22>0.0</tensor22>
+                <tensor33>0.0</tensor33>
+                <tensor23>0.0</tensor23>
+                <tensor13>0.001</tensor13>
+                <tensor12>0.0</tensor12>
+            </strain>
+        </elastic>
+    </external>
+    <solver>
+        <ref>
+            <tensor>
+                <pointGroup>cubic</pointGroup>
+                <name>stiffness</name>
+                <rank>4</rank>
+                <component>
+                    <value>100</value>
+                    <index>11</index>
+                </component>
+                <component>
+                    <value>90</value>
+                    <index>12</index>
+                </component>
+                <component>
+                    <value>80</value>
+                    <index>44</index>
+                </component>
+            </tensor>
+        </ref>
+    </solver>
+</system>
+@endcode
+
+@subsection elastic_output Output files
+There are a total of 3 possible output files for the elastic calculation
+1. out_effective_stiffness.csv
+3. out_stress.vti
+4. out_strain.vti
+
+*/

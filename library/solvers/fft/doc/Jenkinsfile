@@ -1,0 +1,16 @@
+pipeline {
+    agent { label 'master' }
+    stages {
+        stage('build') {
+            steps {
+                sh 'yarn install'
+                sh 'yarn build'
+            }
+        }
+        stage('deploy') {
+            steps {
+                sh 'surge public/'
+            }
+        }
+    }
+}

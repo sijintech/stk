@@ -1,0 +1,18 @@
+{
+  "baseUrl": "/manual",
+  "indexInFolders": false,
+  "linkSuffix": "",
+  "indexRelatedPagesName": "index",
+  "mainPageInRoot": true,
+  "mainPageName": "introduction",
+  "formulaInlineStart": "$",
+  "formulaInlineEnd": "$",
+  "formulaBlockStart": "\\[",
+  "formulaBlockEnd": "\\]",
+  "foldersToGenerate": [
+    "pages"
+  ],
+  "folderRelatedPagesName": "",
+  "copyImages": true,
+  "imagesFolder": ""
+}

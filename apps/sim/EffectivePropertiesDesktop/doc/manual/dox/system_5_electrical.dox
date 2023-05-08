@@ -1,0 +1,96 @@
+/**
+@page electrical
+@section electrical_conductivity Electrical Conductivity
+
+
+The electrical conductivity calculation can give you 
+1. effective conductivity of the system
+2. electric field distribution
+3. electric current distribution given an external electrical current.
+
+@subsection electrical_equation Solved equation
+\f$\nabla \cdot j = 0\f$, where \f$j = \sigma E\f$
+- **j** Electrical displacement
+- <b>\f$\sigma\f$</b> the electrical conductivity tensor 
+- **E** Electric field
+
+@subsection electrical_input Input options
+The following options are needed for the dielectric calculation.
+
+- **input->system** The choice of calculation system must be *electrical*
+- **input->external->electricField** External applied electric field (S/m), if you want to calculate the electric field distribution within the composite
+    - **x** Applied electric field along x
+    - **y** Applied electric field along y
+    - **z** Applied electric field along z
+- **input->solver->ref** A property tensor for the reference phase called *electrical_conductivity* is needed. Tensor definition is explained @ref material_tensor "here"
+
+<br>
+
+
+@subsection electrical_input_symmetry Allowed symmetry
+
+Below is a list of allowed symmetry choices, with Hermann-Mauguin notation, and the matrices
+- triclinic, 1 and \f$\bar{1}\f$
+    - \f$\begin{bmatrix}
+    \sigma_{11} & \sigma_{12} & \sigma_{13}  \\
+    \sigma_{12}& \sigma_{22} & \sigma_{23}  \\
+    \sigma_{13} & \sigma_{23} & \sigma_{33}     
+    \end{bmatrix}\f$
+- monoclinic, 2, m, 2/m
+    - \f$\begin{bmatrix}
+    \sigma_{11} & 0 & \sigma_{13}  \\
+    0& \sigma_{22} & 0  \\
+    \sigma_{13} & 0 & \sigma_{33}     
+    \end{bmatrix}\f$
+- orthorhombic, 222, mm2, mmm
+    - \f$\begin{bmatrix}
+    \sigma_{11} & 0 & 0  \\
+    0& \sigma_{22} & 0  \\
+    0 & 0 & \sigma_{33}     
+    \end{bmatrix}\f$
+- uniaxial, 3, \f$\bar{3}\f$, 32, 3m, \f$\bar{3}\f$m, 4, \f$\bar{4}\f$, 4/m, 422, 4mm, \f$\bar{4}\f$2m, 4/mmm, 6, \f$\bar{6}\f$, 6/m, 622, 6mm, \f$\bar{6}\f$m2, 6/mmm, \f$\infty\f$, \f$\infty\f$m, \f$\infty\f$/m, \f$\infty\f$2, \f$\infty\f$/mm
+    - \f$\begin{bmatrix}
+    \sigma_{11} & 0 & 0  \\
+    0& \sigma_{11} & 0  \\
+    0 & 0 & \sigma_{33}     
+    \end{bmatrix}\f$
+- cubic, 23, m\f$\bar{3}\f$, 432, \f$\bar{4}\f$3m, m\f$\bar{3}\f$m, \f$\infty\f$\f$\infty\f$, \f$\infty\f$\f$\infty\f$m
+    - \f$\begin{bmatrix}
+    \sigma_{11} & 0 & 0  \\
+    0& \sigma_{11} & 0  \\
+    0 & 0 & \sigma_{11}     
+    \end{bmatrix}\f$
+
+
+@code{.XML}
+<system>
+    <type>electrical</type>
+    <distribution>1</distribution>
+    <external>
+        <electricField>
+            <x>0</x>
+            <y>0</y>
+            <z>2e7</z>
+        </electricField>
+    </external>
+    <solver>
+        <ref>
+            <name>electrical_conducitivty</name>
+            <rank>2</rank>
+            <pointGroup>cubic</pointGroup>
+            <component>
+                <value>100</value>
+                <index>11</index>
+            </component>
+        </ref>
+    </solver>
+</system>
+@endcode
+
+@subsection electrical_output Output files
+There are a total of 4 possible output files for the electrical calculation
+1. out_effective_electrical_conductivity.csv
+2. out_electric_field.vti
+3. out_electrical_current.vti
+
+*/
