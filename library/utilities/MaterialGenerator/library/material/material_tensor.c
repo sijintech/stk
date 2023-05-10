@@ -164,12 +164,19 @@ void n_material_generator_one_tensor(double* tensor,
     n_get_xml_element_as_string(tensor_name, filename, temp, "", "tensorname");
 
     sprintf(temp, "%s%s%s", xpathText, "/", tensor_name);
-    if (strcmp(tensor_name, "permittivity") == 0 ||
+    ZF_LOGI("The name is %s %s",temp,tensor_name);
+    if(strcmp(tensor_name,"Ebreak")==0){
+        n_material_generator_tensor_general_rank0(tensor, filename, xpathText);
+        n_material_tensor_print(tensor, rank, temp);
+    }else if (strcmp(tensor_name, "permittivity") == 0 ||
         strcmp(tensor_name, "diffusivity") == 0 ||
         strcmp(tensor_name, "permeability") == 0 ||
         strcmp(tensor_name, "electrical_conductivity") == 0 ||
         strcmp(tensor_name, "thermal_conductivity") == 0) {
-        n_material_generator_tensor_general_rank2(tensor, filename, xpathText);
+                ZF_LOGI("before general tensor rank2");
+                ZF_LOGI("before general tensor rank2 another");
+
+        n_material_generator_tensor_rank2(tensor, filename, xpathText);
         n_material_tensor_print(tensor, rank, temp);
     } else if (strcmp(tensor_name, "stiffness") == 0) {
         n_material_generator_tensor_stiffness(tensor, filename, xpathText);
@@ -180,6 +187,8 @@ void n_material_generator_one_tensor(double* tensor,
     } else if (strcmp(tensor_name, "piezomagnetic") == 0) {
         n_material_generator_tensor_piezomagnetic(tensor, filename, xpathText);
         n_material_tensor_print_piezomagnetic(tensor, temp);
+    }else{
+        ZF_LOGI("******** The tensor is not recongized%s",tensor_name);
     }
 }
 

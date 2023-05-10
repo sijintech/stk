@@ -97,7 +97,12 @@ NMATERIALGENERATORPUBFUN double NMATERIALGENERATORCALL
 _component_value_get(int n, ComponentValue cv[n], const char* index);
 
 NMATERIALGENERATORPUBFUN void NMATERIALGENERATORCALL
-n_material_generator_tensor_general_rank2(double* tensor,
+n_material_generator_tensor_general_rank0(double* tensor,
+                                          const char* filename,
+                                          const char* xpathText);
+
+NMATERIALGENERATORPUBFUN void NMATERIALGENERATORCALL
+n_material_generator_tensor_rank2(double* tensor,
                                           const char* filename,
                                           const char* xpathText);
 

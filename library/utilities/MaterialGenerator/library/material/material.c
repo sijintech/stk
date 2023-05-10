@@ -83,6 +83,7 @@ void n_material_generator(double* tensor,
         size_t i = 0;
         for (i = 0; i < phase_count; i++) {
             sprintf(xpathText, "%s%s%zu%s", xpath, "/phase[", i + 1, "]");
+    // ZF_LOGI("The rank is %i %s",rank,xpathText);
             n_material_generator_one_phase(
                 (double*)&(*tensor_temp)[i], filename, xpathText, tensorname);
         }

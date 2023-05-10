@@ -43,6 +43,7 @@ void n_material_generator_one_phase(double* tensor,
 
     sprintf(xpathText, "%s%s", xpath, "/tensor");
     tensor_count = n_get_xml_element_count(filename, xpathText, "");
+                ZF_LOGI("The tensor count %i",tensor_count);
 
     // rank = n_material_get_tensor_rank(filename, xpathText, tensorname);
 
@@ -52,8 +53,12 @@ void n_material_generator_one_phase(double* tensor,
 
     for (j = 0; j < tensor_count; j++) {
         sprintf(temp, "%s%s%zu%s", xpathText, "[", j + 1, "]/name");
+                        ZF_LOGI("The tensor is %s",temp);
+
         n_get_xml_element_as_string(
             tensor_name, filename, temp, "", "tensorname");
+                ZF_LOGI("The tensor is %s",tensor_name);
+
         if (strcmp(tensor_name, tensorname) == 0) {
 
             sprintf(temp, "%s%s%zu%s", xpathText, "[", j + 1, "]");

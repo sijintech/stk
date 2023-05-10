@@ -73,30 +73,39 @@ PointGroup _general_rank2_get_PointGroup(const char* point_group) {
     return general_rank2_cubic;
 }
 
-void n_material_generator_tensor_general_rank2(double* tensor,
+void n_material_generator_tensor_rank2(double* tensor,
                                                const char* filename,
                                                const char* xpathText) {
     // custom
     // point group
     // isotropic as default
+                printf("in loo1");
+
     char temp[MAX_STRING] = {'\0'};
+                    ZF_LOGI("in loo11");
     int gpindex = 4;
     int k = 0;
     double value = 0;
     char point_group[10] = "cubic\0";
+
     sprintf(temp, "%s%s", xpathText, "/pointGroup");
+                ZF_LOGI("in loo %s 2",temp);
     n_get_xml_element_as_string(point_group, filename, temp, "", "cubic");
+            ZF_LOGI("in loo1");
 
     PointGroup pg = general_rank2_cubic;
     ComponentValue* cv;
     pg = _general_rank2_get_PointGroup(point_group);
     cv = calloc(pg.unique, sizeof(ComponentValue));
     char index_string[5] = {'\0'};
+            ZF_LOGI("in loo2");
 
     // set independent component
     int component_count = 0;
     sprintf(temp, "%s%s", xpathText, "/component");
     component_count = n_get_xml_element_count(filename, temp, "");
+                ZF_LOGI("in loo3");
+
     if (component_count != pg.independent) {
         ZF_LOGE("The number of component is not suitable for the symmetry you "
                 "choose!");
@@ -104,6 +113,7 @@ void n_material_generator_tensor_general_rank2(double* tensor,
         for (k = 0; k < component_count; k++) {
             sprintf(
                 temp, "%s%s%i%s", xpathText, "/component[", k + 1, "]/value");
+            ZF_LOGI("in loop %i %s",k,temp);
             value = n_get_xml_element_as_double(filename, temp, "", 0);
 
             sprintf(temp,
@@ -119,6 +129,7 @@ void n_material_generator_tensor_general_rank2(double* tensor,
         }
     }
     // set dependent component
+    ZF_LOGI("The rank 2 tensor %i %f",pg.unique,cv[0].value);
 
     n_material_generate_tensor(tensor, pg.unique, pg.relation, cv);
     free(cv);
