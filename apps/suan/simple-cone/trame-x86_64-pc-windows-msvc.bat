@@ -26,8 +26,13 @@
 ::ZQ0/vhVqMQ3MEVWAtB9wSA==
 ::Zg8zqx1/OA3MEVWAtB9wSA==
 ::dhA7pRFwIByZRRnk
-::Zh4grVQjdCyDJGyX8VAjFDdRQguUM1eeA6YX/Ofr0/6Vo0AYGfpnLrCNjvmeI60E40vgeoE+m3dJjshCCQNdHg==
+::Zh4grVQjdCyDJGyX8VAjFDdRQguUM1eeA6YX/Ofr0/mOqEQTaPErc7PayqSdHPMG60vYZp8gxnZf1cgDAh5kbQCoIxs1vHxLimaMOfuIoQ7sTwWRvh0PTTE5l2CdmyI1ZNx/iY4OwDa9skjnmsU=
 ::YB416Ek+ZG8=
 ::
 ::
 ::978f952a14a936cc963da21a135fa983
+@echo off
+set "rootdir=%~dp0"
+cd /d "%rootdir%"
+cd ..\lib\cone\server\
+start server %*

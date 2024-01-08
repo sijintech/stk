@@ -8,7 +8,7 @@ REM pip install -U pip
 python.exe -m pip install -U pip
 
 REM Install dependencies
-pip install trame pyinstaller trame_components, trame_vuetify, trame_vtk
+pip install trame pyinstaller trame_components trame_vuetify  trame_vtk
 
 REM Build executable
 python -m PyInstaller ^
