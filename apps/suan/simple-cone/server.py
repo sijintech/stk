@@ -1,6 +1,6 @@
 from trame.app import get_server
-from trame.ui.vuetify import SinglePageLayout
-from trame.widgets import vuetify, vtk
+from trame.ui.vuetify3 import SinglePageLayout
+from trame.widgets import vuetify3 as vuetify, vtk
 
 server = get_server()
 state, ctrl = server.state, server.controller
