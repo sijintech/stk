@@ -26,7 +26,7 @@
 ::ZQ0/vhVqMQ3MEVWAtB9wSA==
 ::Zg8zqx1/OA3MEVWAtB9wSA==
 ::dhA7pRFwIByZRRnk
-::Zh4grVQjdCyDJGyX8VAjFDdRQguUM1eeA6YX/Ofr0/mOqEQTaPErc7PayqSdHPMG60vYZp8gxnZf1cgDAh5kbQCoIxs1vHxLimaMOfuIoQ7sTwWRvh0PTTE5l2CdmyI1ZNx/iY4OwDa9skjnmsU=
+::Zh4grVQjdCyDJGyX8VAjFDdRQguUM1eeA6YX/Ofr0/6CsVkhQOcsbLPPyLWDJa0LshPbI8JgxnkXj8ICCBRPbV+mfRk352taswQ=
 ::YB416Ek+ZG8=
 ::
 ::
@@ -34,5 +34,5 @@
 @echo off
 set "rootdir=%~dp0"
 cd /d "%rootdir%"
-cd ..\lib\cone\server\
+cd server
 start server %*
