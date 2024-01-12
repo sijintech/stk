@@ -13,7 +13,7 @@ pip install trame pyinstaller trame_components trame_vuetify  trame_vtk
 REM Build executable
 python -m PyInstaller ^
     -F --clean --noconfirm ^
-    --distpath src-tauri ^
+    --distpath src-tauri\server ^
     --name server ^
     --hidden-import pkgutil ^
     --collect-data trame_components ^
@@ -29,7 +29,7 @@ REM Set app icon
 cargo tauri icon 
 
 REM Build the app
-REM cargo tauri build --target x86_64-pc-windows-msvc
+REM cargo tauri build --debug
 
 REM Open the generated app on Windows
 start target\release\bundle\windows\server.exe

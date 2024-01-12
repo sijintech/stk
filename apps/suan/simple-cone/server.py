@@ -8,7 +8,8 @@ state, ctrl = server.state, server.controller
 
 @ctrl.add("on_server_ready")
 def notify_tauri(**kwargs):
-    print(f"tauri-server-port={server.port}", flush=True)
+    print("trame server start success")
+    print(f"trame-server-port={server.port}", flush=True)
 
 
 with SinglePageLayout(server) as layout:
