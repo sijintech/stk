@@ -1,0 +1,69 @@
+[common_config]
+  nx = 128
+  ny = 128
+  nz = 60
+  nv = 4
+  nc = 10
+  mst = 2
+
+# In order to generate different files and shapes, we need to configure each function.
+[eta_config]
+  set_eta_case = 1
+
+[comp_config]
+  set_comp_case = 1
+
+[[eta_case_config]]
+  case = 0
+  filename = "eta.in"
+  c0 = 1.5e-2
+
+[[eta_case_config]]
+  case = 1
+  filename = "eta.in"
+  rr = 10
+  vari = 1
+
+[[eta_case_config]]
+  case = 2
+  filename = "eta.in"
+  rr = 10
+  vari = 1
+
+[[eta_case_config]]
+  case = 3
+  filename = "eta.in"
+  rr = 10
+  ptclnum = 10
+  nv_list = [1]
+  iseed = 10
+
+[[comp_case_config]]
+  case = 0
+  filename = "comp.in"
+  nc = 1
+  c0 = 1.5e-2
+
+[[comp_case_config]]
+  case = 1
+  filename = "comp.in"
+  rr = 10
+  vari = 1
+
+[[comp_case_config]]
+  case = 2
+  filename = "comp.in"
+  rr = 10
+  vari = 1
+
+[[comp_case_config]]
+  case = 3
+  filename = "comp.in"
+  rr = 10
+  ptclnum = 10
+  nc_list = [1]
+  iseed = 10
+
+
+
+  
