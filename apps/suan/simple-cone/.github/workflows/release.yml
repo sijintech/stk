@@ -1,76 +1,81 @@
+# 工作流名称
 name: Suan App Release 
 
-# 指定此工作流的触发器
+# 工作流触发器配置
 on:
-  push:
+  push: # 当有代码推送到仓库时触发
     branches:
-      - main
-    # 匹配特定标签 (refs/tags)
+      - main # 仅在 main 分支上触发
     tags:
-      - 'v*' # 推送事件匹配 v*, 例如 v1.0，v20.15.10 等来触发工作流
+      - 'v*' # 仅在 tag 名字匹配 'v*' 模式时触发
 
-# 需要运行的作业组合
+# 定义作业
 jobs:
   # 任务：创建 release 版本
   create-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # 在 Ubuntu 最新版本上运行
     outputs:
-      RELEASE_UPLOAD_ID: ${{ steps.create_release.outputs.id }}
+      RELEASE_UPLOAD_ID: ${{ steps.create_release.outputs.id }} # 将输出值 RELEASE_UPLOAD_ID 设置为 create_release 步骤的输出
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2 # 使用 actions/checkout 动作，将仓库检出到工作目录
+
       # 查询版本号（tag）
       - name: Query version number
         id: get_version
         shell: bash
         run: |
-          echo "using version tag ${GITHUB_REF:10}"
-          echo ::set-output name=version::"${GITHUB_REF:10}"
+          # 打印出 tag 的值（前缀 'v' 后的部分）
+          echo "using version tag ${GITHUB_REF:10}" 
+          # 将版本号设置为输出值,将从第 10 个字符开始的 ${GITHUB_REF} 字符串截取的部分设置为名为 version 的输出变量
+          echo ::set-output name=version::"${GITHUB_REF:10}" # 将版本号设置为输出值
 
       # 根据查询到的版本号创建 release
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 设置 GitHub 令牌
         with:
-          tag_name: '${{ steps.get_version.outputs.version }}'
-          release_name: 'app ${{ steps.get_version.outputs.version }}'
-          body: 'See the assets to download this version and install.'
+          tag_name: '${{ steps.get_version.outputs.version }}' # 使用查询到的版本号作为 tag_name
+          release_name: 'app ${{ steps.get_version.outputs.version }}' # 设置发布名称
+          body: 'See the assets to download this version and install.' # 发布说明
   
-  # 编译 Tauri
+  # 任务：编译 Tauri
   build-tauri:
-    needs: create-release
+    needs: create-release # 在 create-release 任务完成后执行
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-latest, windows-latest]
+        platform: [macos-latest, ubuntu-latest, windows-latest] # 在不同平台上执行
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }} # 在指定的平台上运行
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2 # 使用 actions/checkout 动作，将仓库检出到工作目录
 
-     # 安装 Node.js
+      # 安装 Node.js
       - name: Setup node
         uses: actions/setup-node@v1
         with:
-          node-version: 16
+          node-version: 16 # 安装 Node.js 16 版本
 
       # 安装 Rust
       - name: Install Rust stable
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: stable # 安装 Rust 稳定版
 
       # 使用 Rust 缓存，加快安装速度
       - uses: Swatinem/rust-cache@v1
 
+      # 在 ubuntu 上安装依赖
       - name: install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev webkit2gtk-4.0 libappindicator3-dev librsvg2-dev patchelf
-
 
       # 获取 yarn 缓存路径
       - name: Get yarn cache directory path
@@ -80,7 +85,7 @@ jobs:
       # 使用 yarn 缓存
       - name: Yarn cache
         uses: actions/cache@v2
-        id: yarn-cache # use this to check for `cache-hit` (`steps.yarn-cache.outputs.cache-hit != 'true'`)
+        id: yarn-cache
         with:
           path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
           key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
@@ -94,4 +99,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          releaseId: ${{ needs.create-release.outputs.RELEASE_UPLOAD_ID }}
+          releaseId: ${{ needs.create-release.outputs.RELEASE_UPLOAD_ID }} # 使用 create-release 任务的输出值
