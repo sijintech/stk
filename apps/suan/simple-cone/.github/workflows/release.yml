@@ -1,5 +1,5 @@
 # 可选，将显示在 GitHub 存储库的“操作”选项卡中的工作流名称
-name: Release CI
+name: Suan App Release 
 
 # 指定此工作流的触发器
 on:
