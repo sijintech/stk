@@ -2,6 +2,11 @@ name: Suan App Release
 
 # 指定此工作流的触发器
 on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "v*"
+        required: true
   push:
     # 匹配特定标签 (refs/tags)
     tags:
