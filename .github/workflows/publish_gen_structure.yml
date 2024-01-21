@@ -22,11 +22,11 @@ jobs:
       run: >-
         cd python/structure-generator
         python3 -m build
-    - name: Store the distribution packages
-      uses: action/upload-artifact@v3
-      with: 
-        name: structure_generator
-        path: python/structure-generator/dist/
+    # - name: Store the distribution packages
+    #   uses: action/upload-artifact@v3
+    #   with: 
+    #     name: structure_generator
+    #     path: python/structure-generator/dist/
   
   # publish-to-pypi:
   #   name: >-
