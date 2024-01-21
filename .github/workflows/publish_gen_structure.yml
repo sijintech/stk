@@ -60,7 +60,7 @@ jobs:
       url: https://test.pypi.org/p/structure_generator
   
     permissions:
-      id-token: pypi-AgENdGVzdC5weXBpLm9yZwIkZWEyOThkNzgtZmZjZS00OWY4LWJlMTMtM2FmMDFkNDcxZTE5AAIqWzMsIjExNzQ3NzM5LWY4ZTQtNDliMy1iMjYwLTRhNDhhNGVlYTc2NiJdAAAGIO4SgzMsDmzBeaX2Fb7frBstuxhMEt17IDW3apqk6fFg
+      id-token: write
   
     steps:
     - name: Download all the dists
