@@ -22,11 +22,11 @@ jobs:
       run: |
         cd python/structure-generator
         python3 -m build
-    # - name: Store the distribution packages
-    #   uses: action/upload-artifact@v3
-    #   with: 
-    #     name: structure_generator
-    #     path: python/structure-generator/dist/
+    - name: Store the distribution packages
+      uses: actions/upload-artifact@v3
+      with: 
+        name: structure_generator
+        path: python/structure-generator/dist/
   
   # publish-to-pypi:
   #   name: >-
@@ -66,8 +66,8 @@ jobs:
     - name: Download all the dists
       uses: actions/download-artifact@v3
       with:
-        name: Python-package-distributions
-        path: dist/
+        name: structure_generator
+        path: python/structure-generator/dist/
     - name: Publish distribution 📦 to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
