@@ -19,7 +19,9 @@ jobs:
         build
         --user
     - name: Build a binary wheel and a source tarball
-      run: python3 -m build
+      run: >-
+        cd python/structure-generator
+        python3 -m build
     - name: Store the distribution packages
       uses: action/upload-artifact@v3
       with: 
