@@ -52,6 +52,7 @@ jobs:
         user: __token__
         password: ${{secrets.PYPI_API_TOKEN}}
         packages-dir: python/structure-generator/dist/
+        skip-existing: true
   
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
@@ -79,3 +80,4 @@ jobs:
         password: ${{secrets.TEST_PYPI_API_TOKEN}}
         repository-url: https://test.pypi.org/legacy/
         packages-dir: python/structure-generator/dist/
+        skip-existing: true
