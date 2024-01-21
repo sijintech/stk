@@ -31,21 +31,21 @@ def generate_3d_sphere_data(nx, ny, nz, rr):
   '''
   generated_3d_data = np.zeros((nz+1,ny+1,nx+1))
   for i in range(1, nx+1):
-        for j in range(1, ny+1):
-          for k in range(1, nz+1):
-            if(float((k-nz/2)**2 + (j-ny/2)**2 + (i-nx/2)**2) <= float(rr)**2):
-              generated_3d_data[k, j, i] = 1.0
+    for j in range(1, ny+1):
+      for k in range(1, nz+1):
+        if(float((k-nz/2)**2 + (j-ny/2)**2 + (i-nx/2)**2) <= float(rr)**2):
+          generated_3d_data[k, j, i] = 1.0
 
   return generated_3d_data
 
 # Icase = 2
 def generate_3d_tanh_data(nx ,ny ,nz ,rr):
-  generated_3d_data = np.zeros(nz+1,ny+1,nx+1)
+  generated_3d_data = np.zeros((nz+1,ny+1,nx+1))
   for i in range(1, nx+1):
-        for j in range(1, ny+1):
-          for k in range(1, nz+1):
-            distance = np.sqrt((k-nz/2)**2 + (j-ny/2)**2 + (i-nx/2)**2)
-            generated_3d_data[k, j, i] = (1.0 - np.tanh(1.0 * (distance - rr))) / 2.0
+    for j in range(1, ny+1):
+      for k in range(1, nz+1):
+        distance = np.sqrt((k-nz/2)**2 + (j-ny/2)**2 + (i-nx/2)**2)
+        generated_3d_data[k, j, i] = (1.0 - np.tanh(1.0 * (distance - rr))) / 2.0
 
   return generated_3d_data
 
@@ -55,20 +55,26 @@ def generate_multiple_spheres_data(nx, ny, nz, rr, ptclnum, iseed):
   Generate multiple non-overlapping spheres with radius of rr.
   ptclnum is the number of sphere.
   '''
-  generated_3d_data = np.zeros(nz+1, ny+1, nx+1)
+  generated_3d_data = np.zeros((nz+1, ny+1, nx+1))
   for pp in range(1, ptclnum+1):
-    x_temp = int(float(nx)*r4_uniform_01(iseed))
-    y_temp = int(float(ny)*r4_uniform_01(iseed)) 
-    z_temp = int(float(nz)*r4_uniform_01(iseed))
+    iseed, x_rand = r4_uniform_01(iseed)
+    x_temp = int(float(nx)*x_rand)
+    iseed, y_rand = r4_uniform_01(iseed)
+    y_temp = int(float(ny)*y_rand)
+    iseed, z_rand = r4_uniform_01(iseed)
+    z_temp = int(float(nz)*z_rand)
     while(check_sphere_overlapp(nx, ny, nz, rr, generated_3d_data, x_temp, y_temp, z_temp)):
-      x_temp = int(float(nx)*r4_uniform_01(iseed))
-      y_temp = int(float(ny)*r4_uniform_01(iseed)) 
-      z_temp = int(float(nz)*r4_uniform_01(iseed))
+      iseed, x_rand = r4_uniform_01(iseed)
+      x_temp = int(float(nx)*x_rand)
+      iseed, y_rand = r4_uniform_01(iseed)
+      y_temp = int(float(ny)*y_rand)
+      iseed, z_rand = r4_uniform_01(iseed)
+      z_temp = int(float(nz)*z_rand)
     print(f"{pp}-th nucleus of variant is at: {x_temp} {y_temp} {z_temp}")
     for kk in range(1, nx+1):
       for jj in range(1, ny+1):
         for ii in range(1, nz+1):
-          if(float((ii-z_temp)**2 + (jj-z_temp)**2 + (kk-z_temp)**2) <= float(rr)**2):
+          if(float((ii-z_temp)**2 + (jj-y_temp)**2 + (kk-x_temp)**2) <= float(rr)**2):
             generated_3d_data[ii,jj,kk] = 1.0
     
   return generated_3d_data

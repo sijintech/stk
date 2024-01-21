@@ -1,15 +1,12 @@
-import sys
-sys.path.append("../")
 import argparse
-print(sys.path)
-from ..comp.generate_comp import generate_comp_Icase0
-from ..comp.generate_comp import generate_comp_Icase1
-from ..comp.generate_comp import generate_comp_Icase2
-from ..comp.generate_comp import generate_comp_Icase3
-from ..eta.generate_eta import generate_eta_Icase0
-from ..eta.generate_eta import generate_eta_Icase1
-from ..eta.generate_eta import generate_eta_Icase2
-from ..eta.generate_eta import generate_eta_Icase3
+from .._4D.generate_comp import generate_comp_Icase0
+from .._4D.generate_comp import generate_comp_Icase1
+from .._4D.generate_comp import generate_comp_Icase2
+from .._4D.generate_comp import generate_comp_Icase3
+from .._5D.generate_eta import generate_eta_Icase0
+from .._5D.generate_eta import generate_eta_Icase1
+from .._5D.generate_eta import generate_eta_Icase2
+from .._5D.generate_eta import generate_eta_Icase3
 from ..basic.utils import read_toml
 
 def generate_structure():
@@ -33,7 +30,7 @@ def generate_structure():
     if(comp_case != -1):
       print("Start to generate comp file")
       generateCompFileWithConfig(common_config, comp_case_config,comp_case)
-      print("Finish to generate eta file")
+      print("Finish to generate comp file")
 
 def generateEtaFileWithConfig(common_config, eta_case_config, case):
     eta_selected_config = {}

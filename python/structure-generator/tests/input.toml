@@ -8,15 +8,16 @@
 
 # In order to generate different files and shapes, we need to configure each function.
 [eta_config]
-  set_eta_case = 1
+  set_eta_case = 3
 
 [comp_config]
-  set_comp_case = 1
+  set_comp_case = 0
 
 [[eta_case_config]]
   case = 0
   filename = "eta.in"
   c0 = 1.5e-2
+  vari = 1
 
 [[eta_case_config]]
   case = 1
@@ -35,13 +36,13 @@
   filename = "eta.in"
   rr = 10
   ptclnum = 10
-  nv_list = [1]
+  nv_list = [1,1,1,1]
   iseed = 10
 
 [[comp_case_config]]
   case = 0
   filename = "comp.in"
-  nc = 1
+  vari = 1
   c0 = 1.5e-2
 
 [[comp_case_config]]
@@ -61,7 +62,7 @@
   filename = "comp.in"
   rr = 10
   ptclnum = 10
-  nc_list = [1]
+  vari = 1
   iseed = 10
 
 
