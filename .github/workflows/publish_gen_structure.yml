@@ -25,8 +25,8 @@ jobs:
     - name: Store the distribution packages
       uses: action/upload-artifact@v3
       with: 
-        name: python-package-distributions
-        path: dist/
+        name: structure_generator
+        path: python/structure-generator/dist/
   
   # publish-to-pypi:
   #   name: >-
