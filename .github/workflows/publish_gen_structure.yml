@@ -60,7 +60,7 @@ jobs:
       url: https://test.pypi.org/p/structure_generator
   
     permissions:
-      id-token: write
+      id-token: ${{secrets.TEST_PYPI_API_TOKEN}}
   
     steps:
     - name: Download all the dists
