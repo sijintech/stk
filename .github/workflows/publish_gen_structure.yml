@@ -39,15 +39,18 @@ jobs:
   #     name: pypi
   #     url: https://pypi.org/p/structure_generator
   #   permissions:
-  #     id-token: pypi-AgEIcHlwaS5vcmcCJDNjNDczZjU4LTY3M2EtNDczYS1iYjE4LTUyZDg3MzRjN2NmZAACKlszLCIxNzA3ZDU5YS02NTY1LTQ1NDgtYWE5My00ZGYyNTgwNzI5ZDIiXQAABiCCFw_FOpVd2Z_2okFI3jsbTTcFUBYJjlMI2TWiXqCiNA
+  #     id-token: write
   #   steps:
   #   - name: Download all the dists
   #     uses: actions/download-artifact@v3
   #     with:
   #       name: python-package-distributions
-  #       path: dist/
+  #       path: python/structure-generator/dist/
   #   - name: Publish distribution 📦 to PyPI
   #     uses: pypa/gh-action-pypi-publish@release/v1
+        # with:
+        #   password: ${{secrets.PYPI_API_TOKEN}}
+        #   packages-dir: python/structure-generator/
   
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
@@ -73,3 +76,4 @@ jobs:
       with:
         password: ${{secrets.TEST_PYPI_API_TOKEN}}
         repository-url: https://test.pypi.org/legacy/ 
+        packages-dir: python/structure-generator/
