@@ -18,7 +18,7 @@ jobs:
         strategy:
             # 允许在矩阵中的一个作业失败后继续运行其他作业
           fail-fast: false
-#  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
+          #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
             platform: [macos-latest, ubuntu-latest, windows-latest]
     
@@ -46,7 +46,7 @@ jobs:
               if: matrix.platform == 'ubuntu-latest'
               run: |
                 sudo apt-get update
-                sudo apt-get install -y libgtk-3-dev webkit2gtk-4.0 libappindicator3-dev librsvg2-dev patchelf 
+                # sudo apt-get install -y libgtk-3-dev webkit2gtk-4.0 libappindicator3-dev librsvg2-dev patchelf 
                 sudo apt install cargo
                 cargo install tauri-cli
                 
@@ -60,9 +60,9 @@ jobs:
             - name: build app
               run: |
                /bin/bash
-               ll
                pwd
-               cd apps\suan\simple-cone\src-tauri
+               ls
+               cd ../apps\suan\simple-cone\src-tauri
                pwd
                cargo tauri icon
                cargo tauri build
