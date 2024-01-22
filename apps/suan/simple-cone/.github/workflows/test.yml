@@ -1,0 +1,82 @@
+name: Suan App Release 
+
+# 指定此工作流的触发器
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "v*"
+        required: true
+  push:
+    # 匹配特定标签 (refs/tags)
+    tags:
+      - 'v*' # 推送事件匹配 v*, 例如 v1.0，v20.15.10 等来触发工作流
+# 需要运行的作业组合
+jobs:
+    build-tauri:
+        # 这是指定作业执行策略的部分。在这里，使用了矩阵策略，它允许并行在不同平台上运行相同的作业
+        strategy:
+            # 允许在矩阵中的一个作业失败后继续运行其他作业
+          fail-fast: false
+#  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
+          matrix:
+            platform: [macos-latest, ubuntu-latest, windows-latest]
+    
+        runs-on: ${{ matrix.platform }}
+
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v3
+
+            # 安装 Node.js
+            - name: Setup node
+              uses: actions/setup-node@v1
+              with:
+                node-version: 16
+            # 安装 Rust
+            - name: Install Rust stable
+              uses: actions-rs/toolchain@v1
+              with:
+                toolchain: stable
+
+            # 使用 Rust 缓存，加快安装速度
+            - uses: Swatinem/rust-cache@v1
+
+            - name: install dependencies (ubuntu only)
+              if: matrix.platform == 'ubuntu-latest'
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y libgtk-3-dev webkit2gtk-4.0 libappindicator3-dev librsvg2-dev patchelf 
+                sudo apt install cargo
+                sudo cargo install tauri-cli
+            # - name: install dependencies (windows only)
+            # if: matrix.platform == 'windows-latest'
+            # run: |
+            #     sudo apt-get update
+            #     sudo apt-get install -y libgtk-3-dev webkit2gtk-4.0 libappindicator3-dev librsvg2-dev patchelf
+
+            - name: build app
+              run: |
+               cd apps\suan\simple-cone\src-tauri
+               pwd
+               cargo tauri icon
+               cargo tauri build
+            
+            - name: setup aliyun oss
+              uses: manyuanrong/setup-ossutil@master
+              with:
+                endpoint: oss-cn-hangzhou.aliyuncs.com
+                access-key-id: ${{ secrets.KEY }} # 刚刚配置过的AccessKeyId
+                access-key-secret: ${{ secrets.SECRET }} # 刚刚配置过的AccessKeySecret
+            - name: cp files to aliyun
+              run: |
+                cd target\release\bundle
+                pwd
+                ossutil cp -rf nsis oss://sijin-suan-update/
+                ossutil cp -rf msi oss://sijin-suan-update/
+
+
+
+            
+
+
