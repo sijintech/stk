@@ -48,6 +48,8 @@ jobs:
                 sudo apt-get update
                 sudo apt-get install -y libgtk-3-dev webkit2gtk-4.0 libappindicator3-dev librsvg2-dev patchelf 
                 sudo apt install cargo
+                cargo install tauri-cli
+                /bin/bash
                 
             # - name: install dependencies (windows only)
             # if: matrix.platform == 'windows-latest'
@@ -57,8 +59,6 @@ jobs:
 
             - name: build app
               run: |
-               cargo install tauri-cli
-               /bin/bash
                cd apps\suan\simple-cone\src-tauri
                pwd
                cargo tauri icon
