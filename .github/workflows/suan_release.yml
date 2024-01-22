@@ -59,6 +59,8 @@ jobs:
 
             - name: build app
               run: |
+               ll
+               pwd
                cd apps\suan\simple-cone\src-tauri
                pwd
                cargo tauri icon
