@@ -62,8 +62,10 @@ jobs:
                /bin/bash
                pwd
                ls
-               cd ../apps\suan\simple-cone\src-tauri
+               cd apps\suan\simple-cone
+               ls
                pwd
+               cd src-tauri\
                cargo tauri icon
                cargo tauri build
             
