@@ -169,7 +169,7 @@ jobs:
             - uses: Swatinem/rust-cache@v1
 
             - name: install dependencies and build app (ubuntu)
-              if: matrix.platform == 'ubuntu-latest'
+              if: matrix.platform == 'ubuntu-20.04'
               run: |
                 sudo apt-get update
                 sudo apt install libwebkit2gtk-4.0-dev \
