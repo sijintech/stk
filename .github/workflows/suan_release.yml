@@ -146,7 +146,7 @@ jobs:
           fail-fast: false
           #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
-            platform: [ubuntu-20.04, windows-latest]
+            platform: [windows-latest,ubuntu-20.04]
     
         runs-on: ${{ matrix.platform }}
 
