@@ -186,7 +186,7 @@ jobs:
                 pwd
                 ls
                 cd apps/suan/simple-cone/
-                .linux_build.sh
+                ./linux_build.sh
                 
             - name: install dependencies and build app(windows)
               if: matrix.platform == 'windows-latest'
