@@ -29,7 +29,5 @@ REM Set app icon
 cargo tauri icon 
 
 REM Build the app
-REM cargo tauri build --debug
+cargo tauri build 
 
-REM Open the generated app on Windows
-start target\release\bundle\windows\server.exe

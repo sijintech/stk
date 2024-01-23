@@ -146,7 +146,7 @@ jobs:
           fail-fast: false
           #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
-            platform: [windows-latest,ubuntu-20.04]
+            platform: [ubuntu-20.04]
     
         runs-on: ${{ matrix.platform }}
 
@@ -185,31 +185,37 @@ jobs:
                 /bin/bash
                 pwd
                 ls
-                cd apps/suan/simple-cone/src-tauri
-                cargo tauri icon
-                cargo tauri build
+                cd apps/suan/simple-cone/
+                .linux_build.sh
                 
             - name: install dependencies and build app(windows)
               if: matrix.platform == 'windows-latest'
               run: |
-               cd apps/suan/simple-cone/src-tauri
+               cd apps/suan/simple-cone/
                cargo install tauri-cli
-               cargo tauri icon
-               cargo tauri build
-
-            
+               window_build.bat
+       
             - name: setup aliyun oss
               uses: manyuanrong/setup-ossutil@master
               with:
                 endpoint: oss-cn-hangzhou.aliyuncs.com
                 access-key-id: ${{ secrets.KEY }} # 刚刚配置过的AccessKeyId
                 access-key-secret: ${{ secrets.SECRET }} # 刚刚配置过的AccessKeySecret
-            - name: cp files to aliyun
+            - name: cp files to aliyun(windows)
+              if: matrix.platform == 'windows-latest'
               run: |
-                cd target/release/bundle
+                cd apps/suan/simple-cone/src-tauri/target/release/bundle
                 pwd
                 ossutil cp -rf nsis oss://sijin-suan-update/
                 ossutil cp -rf msi oss://sijin-suan-update/
+                appimage
+            - name: cp files to aliyun(ubuntu)
+              if: matrix.platform == 'ubuntu-20.04'
+              run: |
+                  cd apps/suan/simple-cone/src-tauri/target/release/bundle
+                  pwd
+                  ossutil cp -rf appimage oss://sijin-suan-update/
+
 
 
 

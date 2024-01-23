@@ -22,5 +22,3 @@ sudo cargo install tauri-cli
 cd src-tauri
 cargo tauri icon
 sudo cargo tauri build
-# 打开桌面文件
-open target/release/bundle/macos/Cone.app
