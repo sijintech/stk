@@ -186,14 +186,14 @@ jobs:
                 pwd
                 ls
                 cd apps/suan/simple-cone/
-                ./linux_build.sh
+                sudo ./linux_build.sh
                 
             - name: install dependencies and build app(windows)
               if: matrix.platform == 'windows-latest'
               run: |
                cd apps/suan/simple-cone/
                cargo install tauri-cli
-               window_build.bat
+               ./window_build.bat
        
             - name: setup aliyun oss
               uses: manyuanrong/setup-ossutil@master
