@@ -42,32 +42,35 @@ jobs:
             # 使用 Rust 缓存，加快安装速度
             - uses: Swatinem/rust-cache@v1
 
-            - name: install dependencies (ubuntu only)
+            - name: install dependencies and build app (ubuntu)
               if: matrix.platform == 'ubuntu-latest'
               run: |
                 sudo apt-get update
-                # sudo apt-get install -y libgtk-3-dev webkit2gtk-4.0 libappindicator3-dev librsvg2-dev patchelf 
+                sudo apt install libwebkit2gtk-4.0-dev \
+                build-essential \
+                curl \
+                wget \
+                libssl-dev \
+                libgtk-3-dev \
+                libayatana-appindicator3-dev \
+                librsvg2-dev
                 sudo apt install cargo
                 cargo install tauri-cli
+                /bin/bash
+                pwd
+                ls
+                cd apps/suan/simple-cone/src-tauri
+                cargo tauri icon
+                cargo tauri build
                 
-                
-            # - name: install dependencies (windows only)
-            # if: matrix.platform == 'windows-latest'
-            # run: |
-            #     sudo apt-get update
-            #     sudo apt-get install -y libgtk-3-dev webkit2gtk-4.0 libappindicator3-dev librsvg2-dev patchelf
-
-            - name: build app
+            - name: install dependencies (windows)
+              if: matrix.platform == 'windows-latest'
               run: |
-               /bin/bash
-               pwd
-               ls
-               cd apps/suan/simple-cone
-               ls
-               pwd
-               cd src-tauri/
+               cd apps/suan/simple-cone/src-tauri
+               cargo install tauri-cli
                cargo tauri icon
                cargo tauri build
+
             
             - name: setup aliyun oss
               uses: manyuanrong/setup-ossutil@master
