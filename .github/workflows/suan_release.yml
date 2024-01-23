@@ -62,10 +62,10 @@ jobs:
                /bin/bash
                pwd
                ls
-               cd apps\suan\simple-cone
+               cd apps/suan/simple-cone
                ls
                pwd
-               cd src-tauri\
+               cd src-tauri/
                cargo tauri icon
                cargo tauri build
             
@@ -77,7 +77,7 @@ jobs:
                 access-key-secret: ${{ secrets.SECRET }} # 刚刚配置过的AccessKeySecret
             - name: cp files to aliyun
               run: |
-                cd target\release\bundle
+                cd target/release/bundle
                 pwd
                 ossutil cp -rf nsis oss://sijin-suan-update/
                 ossutil cp -rf msi oss://sijin-suan-update/
