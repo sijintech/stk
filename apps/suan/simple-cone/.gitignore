@@ -3,4 +3,4 @@ build
 *.spec
 .python-version
 src-tauri/target
-
+src-tauri/icons
