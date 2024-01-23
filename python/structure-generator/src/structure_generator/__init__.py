@@ -1,0 +1,1 @@
+from .scripts.generate_structure import generate_structure
