@@ -20,7 +20,7 @@ jobs:
           fail-fast: false
           #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
-            platform: [macos-latest, ubuntu-latest, windows-latest]
+            platform: [ubuntu-latest, windows-latest]
     
         runs-on: ${{ matrix.platform }}
 
@@ -63,7 +63,7 @@ jobs:
                 cargo tauri icon
                 cargo tauri build
                 
-            - name: install dependencies (windows)
+            - name: install dependencies and build app(windows)
               if: matrix.platform == 'windows-latest'
               run: |
                cd apps/suan/simple-cone/src-tauri
