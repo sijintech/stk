@@ -170,6 +170,10 @@ jobs:
 
             - name: install dependencies and build app (ubuntu)
               if: matrix.platform == 'ubuntu-20.04'
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+                TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }} # 密钥的加密文本，与seecrts时输入的密码一致即可。如果未输入密码，则此处留空，如果输入了密码，则也需要添加到 secrets 中，然后使用 ${{ secrets.TAURI_KEY_PASSWORD }} 这种形式
               run: |
                 sudo apt-get update
                 sudo apt install libwebkit2gtk-4.0-dev \
@@ -191,6 +195,10 @@ jobs:
                 
             - name: install dependencies and build app(windows)
               if: matrix.platform == 'windows-latest'
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+                TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }} # 密钥的加密文本，与seecrts时输入的密码一致即可。如果未输入密码，则此处留空，如果输入了密码，则也需要添加到 secrets 中，然后使用 ${{ secrets.TAURI_KEY_PASSWORD }} 这种形式
               run: |
                cd apps/suan/simple-cone/
                cargo install tauri-cli
@@ -259,8 +267,8 @@ jobs:
           import os
 
           # 创建OSS Bucket对象
-          auth = oss2.Auth(OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET)
-          bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET)
+          auth = oss2.Auth(OSS_ACCESS_KEY_ID,OSS_ACCESS_KEY_SECRET)
+          bucket = oss2.Bucket(auth, OSS_ENDPOINT,OSS_BUCKET)
 
           # 上传文件到OSS
           for root, dirs, files in os.walk(SOURCE_DIR):
