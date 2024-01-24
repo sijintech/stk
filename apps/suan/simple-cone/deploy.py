@@ -14,15 +14,16 @@ source_dir = os.environ['SOURCE_DIR']
 # 指定OSS中的目标目录
 target_dir = os.environ['TARGET_DIR']
 print(f"source_dir:{source_dir}")
-# bucket.put_object_from_file(oss_path, file_path)
+this_dir=os.path.dirname()
+file_path = os.path.join(this_dir, 'server.py')
 
 # 必须以二进制的方式打开文件。
 # 填写本地文件的完整路径。如果未指定本地路径，则默认从示例程序所属项目对应本地路径中上传文件。
-with open('server.py', 'rb') as fileobj:
-    # Seek方法用于指定从第1000个字节位置开始读写。上传时会从您指定的第1000个字节位置开始上传，直到文件结束。
-    fileobj.seek(0, os.SEEK_SET)
-    # Tell方法用于返回当前位置。
-    current = fileobj.tell()
+with open(file_path, 'rb') as fileobj:
+    # # Seek方法用于指定从第1000个字节位置开始读写。上传时会从您指定的第1000个字节位置开始上传，直到文件结束。
+    # fileobj.seek(0, os.SEEK_SET)
+    # # Tell方法用于返回当前位置。
+    # current = fileobj.tell()
     # 填写Object完整路径。Object完整路径中不能包含Bucket名称。
     bucket.put_object('msi', fileobj)
 
