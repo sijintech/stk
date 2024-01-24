@@ -14,7 +14,7 @@ source_dir = os.environ['SOURCE_DIR']
 # 指定OSS中的目标目录
 target_dir = os.environ['TARGET_DIR']
 print(f"source_dir:{source_dir}")
-this_dir=os.path.dirname()
+this_dir=os.path.dirname(os.path.abspath(__file__))
 file_path = os.path.join(this_dir, 'server.py')
 
 # 必须以二进制的方式打开文件。
