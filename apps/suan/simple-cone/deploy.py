@@ -14,9 +14,13 @@ source_dir = os.environ['SOURCE_DIR']
 # 指定OSS中的目标目录
 target_dir = os.environ['TARGET_DIR']
 print(f"source_dir:{source_dir}")
+bucket.put_object_from_file(oss_path, file_path)
 
 # 上传文件到OSS
 for root, dirs, files in os.walk(source_dir):
+    print(f"root:{root}")
+    print(f"root:{dirs}")
+    print(f"root:{files}")
 
     for file in files:
         file_path = os.path.join(root, file)
