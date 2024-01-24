@@ -265,13 +265,13 @@ jobs:
           cd apps/suan/simple-cone/src-tauri/target/release/bundle
           import oss2
           import os
-          from oss2.credentials import EnvironmentVariableCredentialsProvider
+          import oss2.credentials  
 
           # 创建OSS Bucket对象
           # auth = oss2.Auth(OSS_ACCESS_KEY_ID,OSS_ACCESS_KEY_SECRET)
 
           # 从环境变量中获取访问凭证。运行本代码示例之前，请确保已设置环境变量OSS_ACCESS_KEY_ID和OSS_ACCESS_KEY_SECRET。
-          auth = oss2.ProviderAuth(EnvironmentVariableCredentialsProvider())
+          auth = oss2.ProviderAuth(oss2.credentials.EnvironmentVariableCredentialsProvider())
           bucket = oss2.Bucket(auth, OSS_ENDPOINT,OSS_BUCKET)
 
           # 上传文件到OSS
