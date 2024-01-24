@@ -218,6 +218,7 @@ jobs:
             #       pwd
             #       ossutil cp -rf appimage oss://sijin-suan-update/
     deploy:
+      needs: build-tauri
       strategy:
         # 允许在矩阵中的一个作业失败后继续运行其他作业
         fail-fast: false
@@ -240,6 +241,7 @@ jobs:
           pip install oss2
 
       - name: Upload files to OSS(window)
+        
         if: matrix.platform == 'windows-latest'
         env:
           OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
