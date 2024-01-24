@@ -64,7 +64,7 @@
       "csp": "default-src 'self'"
     },
     "updater": {
-      "active": true,
+      "active": false,
       "endpoints": [
         "https://github.com/sijintech/stk/releases/download/updater/update.json"
       ],
