@@ -13,9 +13,11 @@ source_dir = os.environ['SOURCE_DIR']
 
 # 指定OSS中的目标目录
 target_dir = os.environ['TARGET_DIR']
+print(f"source_dir:{source_dir}")
 
 # 上传文件到OSS
 for root, dirs, files in os.walk(source_dir):
+
     for file in files:
         file_path = os.path.join(root, file)
         oss_path = os.path.join(target_dir, os.path.relpath(file_path, source_dir))
