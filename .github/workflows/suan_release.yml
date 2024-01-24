@@ -260,7 +260,7 @@ jobs:
           OSS_BUCKET: sijin-suan-update
           # 指定要上传的文件或目录，这里假设您想上传整个repo的内容
           # SOURCE_DIR: 'src-tauri/target/release/bundle/msi'
-          SOURCE_DIR: 'server.py'
+          SOURCE_DIR: 'test'
           # 指定OSS中的目标目录
           TARGET_DIR: 'msi'
         run: |
