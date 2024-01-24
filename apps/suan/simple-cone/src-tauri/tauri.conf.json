@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Cone",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "tauri": {
     "allowlist": {
@@ -64,7 +64,15 @@
       "csp": "default-src 'self'"
     },
     "updater": {
-      "active": false
+      "active": true,
+      "endpoints": [
+        "https://github.com/sijintech/stk/releases/download/updater/update.json"
+      ],
+      "dialog": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFBODFFQUJCRkU5RTFBRTEKUldUaEdwNyt1K3FCR2lIaXdPUGFzdVFRbVMxODVSRXFMdVdreHRFVjlzOUxLWmt6ODdxYVhYczEK",
+      "windows": {
+        "installMode": "passive"
+      }
     },
     "windows": [
       {

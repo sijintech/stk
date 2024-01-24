@@ -196,28 +196,78 @@ jobs:
                cargo install tauri-cli
                ./window_build.bat
        
-            - name: setup aliyun oss
-              uses: manyuanrong/setup-ossutil@master
-              with:
-                endpoint: oss-cn-hangzhou.aliyuncs.com
-                access-key-id: ${{ secrets.KEY }} 
-                access-key-secret: ${{ secrets.SECRET }}
+            # - name: setup aliyun oss
+            #   uses: manyuanrong/setup-ossutil@master
+            #   with:
+            #     endpoint: oss-cn-beijing.aliyuncs.com
+            #     access-key-id: ${{ secrets.KEY }} 
+            #     access-key-secret: ${{ secrets.SECRET }}
 
-            - name: cp files to aliyun(windows)
-              if: matrix.platform == 'windows-latest'
-              run: |
-                cd apps/suan/simple-cone/src-tauri/target/release/bundle
-                pwd
-                ossutil cp -rf nsis oss://sijin-suan-update/
-                ossutil cp -rf msi oss://sijin-suan-update/
+            # - name: cp files to aliyun(windows)
+            #   if: matrix.platform == 'windows-latest'
+            #   run: |
+            #     cd apps/suan/simple-cone/src-tauri/target/release/bundle
+            #     pwd
+            #     ossutil cp -rf nsis oss://sijin-suan-update/
+            #     ossutil cp -rf msi oss://sijin-suan-update/
 
-            - name: cp files to aliyun(ubuntu)
-              if: matrix.platform == 'ubuntu-20.04'
-              run: |
-                  cd apps/suan/simple-cone/src-tauri/target/release/bundle
-                  pwd
-                  ossutil cp -rf appimage oss://sijin-suan-update/
+            # - name: cp files to aliyun(ubuntu)
+            #   if: matrix.platform == 'ubuntu-20.04'
+            #   run: |
+            #       cd apps/suan/simple-cone/src-tauri/target/release/bundle
+            #       pwd
+            #       ossutil cp -rf appimage oss://sijin-suan-update/
+    deploy:
+      strategy:
+        # 允许在矩阵中的一个作业失败后继续运行其他作业
+        fail-fast: false
+      #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
+        matrix:
+          platform: [ubuntu-20.04,windows-latest]
 
+      runs-on: ${{ matrix.platform }}
+      steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install oss2
+
+      - name: Upload files to OSS(window)
+        if: matrix.platform == 'windows-latest'
+        env:
+          OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+          OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
+          OSS_BUCKET: sijin-suan-update
+          # 指定要上传的文件或目录，这里假设您想上传整个repo的内容
+          SOURCE_DIR: 'msi'
+          # 指定OSS中的目标目录
+          TARGET_DIR: 'msi'
+        run: |
+          pwd
+          cd apps/suan/simple-cone/src-tauri/target/release/bundle
+          import oss2
+          import os
+
+          # 创建OSS Bucket对象
+          auth = oss2.Auth(OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET)
+          bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET)
+
+          # 上传文件到OSS
+          for root, dirs, files in os.walk(SOURCE_DIR):
+              for file in files:
+                  file_path = os.path.join(root, file)
+                  oss_path = os.path.join(TARGET_DIR, os.path.relpath(file_path, SOURCE_DIR))
+                  bucket.put_object_from_file(oss_path, file_path)
+                  print(f"Uploaded {file_path} to OSS path {oss_path}")
+          
 
 
 
