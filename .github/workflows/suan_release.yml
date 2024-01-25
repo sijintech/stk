@@ -286,7 +286,7 @@ jobs:
 
       - name: Upload files to OSS(ubuntu)
         
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'ubuntu-20.04'
         env:
             OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
             OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
