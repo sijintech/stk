@@ -175,9 +175,6 @@ jobs:
                 TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
                 TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }} # 密钥的加密文本，与seecrts时输入的密码一致即可。如果未输入密码，则此处留空，如果输入了密码，则也需要添加到 secrets 中，然后使用 ${{ secrets.TAURI_KEY_PASSWORD }} 这种形式
               run: |
-                export TAURI_PRIVATE_KEY=$TAURI_PRIVATE_KEY
-                echo "TAURI_PRIVATE_KEY is $TAURI_PRIVATE_KEY"
-                export TAURI_KEY_PASSWORD="password"
                 sudo apt-get update
                 sudo apt install libwebkit2gtk-4.0-dev \
                 build-essential \
@@ -190,6 +187,9 @@ jobs:
                 sudo apt install cargo
                 cargo install tauri-cli
                 /bin/bash
+                export TAURI_PRIVATE_KEY=$TAURI_PRIVATE_KEY
+                echo "TAURI_PRIVATE_KEY is $TAURI_PRIVATE_KEY"
+                export TAURI_KEY_PASSWORD="password"
                 pwd
                 ls
                 cd apps/suan/simple-cone/
@@ -208,7 +208,7 @@ jobs:
                ./window_build.bat
 
 
-    deploy:
+    deploy-and-update:
       needs: build-tauri
       strategy:
         # 允许在矩阵中的一个作业失败后继续运行其他作业
@@ -220,6 +220,12 @@ jobs:
 
       runs-on: ${{ matrix.platform }}
       steps:
+      - name: get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/||')" >> $GITHUB_ENV
+          echo 
+
       - name: Checkout code
         uses: actions/checkout@v2
 
@@ -247,25 +253,7 @@ jobs:
         run: |
           pwd
           python apps\suan\simple-cone\deploy.py
-          # cd apps/suan/simple-cone/src-tauri/target/release/bundle
-          # import oss2
-          # import os
-          # import oss2.credentials  
 
-          # # 创建OSS Bucket对象
-          # # auth = oss2.Auth(OSS_ACCESS_KEY_ID,OSS_ACCESS_KEY_SECRET)
-
-          # # 从环境变量中获取访问凭证。运行本代码示例之前，请确保已设置环境变量OSS_ACCESS_KEY_ID和OSS_ACCESS_KEY_SECRET。
-          # auth = oss2.ProviderAuth(oss2.credentials.EnvironmentVariableCredentialsProvider())
-          # bucket = oss2.Bucket(auth, OSS_ENDPOINT,OSS_BUCKET)
-
-          # # 上传文件到OSS
-          # for root, dirs, files in os.walk(SOURCE_DIR):
-          #     for file in files:
-          #         file_path = os.path.join(root, file)
-          #         oss_path = os.path.join(TARGET_DIR, os.path.relpath(file_path, SOURCE_DIR))
-          #         bucket.put_object_from_file(oss_path, file_path)
-          #         print(f"Uploaded {file_path} to OSS path {oss_path}")
 
       - name: Upload files to OSS(ubuntu)
         
@@ -281,8 +269,19 @@ jobs:
             TARGET_DIR: 'AppImage/'
         run: |
             pwd
-            python apps\suan\simple-cone\deploy.py          
+            python apps\suan\simple-cone\deploy.py   
 
+
+      - name: modify update.json
+        run: |
+          pwd
+          python apps\suan\simple-cone\update.py
+        env:
+            TAG: ${{ steps.get_tag.outputs.TAG }}
+            OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+            OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
+            OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
+            OSS_BUCKET: sijin-suan-update
 
 
             
