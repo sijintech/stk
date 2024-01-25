@@ -1,24 +1,26 @@
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
 [project]
 name = "structure_generator"
 version = "0.0.1"
 authors = [
   { name="Wen Tan", email="2634918190@qq.com" },
 ]
-description = "This is a tool to generate eta and comp data."
+description = "This is a tool to generate eta and comp structure data."
 readme = "README.md"
 requires-python = ">=3.8"
+dependencies = [
+  "numpy>=1.20.0",
+  "toml>=0.8.2",
+  ]
+
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
 ]
-
-[tool.poetry.dependencies]
-toml = "*"
-numpy = "*"
 
 [project.urls]
 Homepage = "https://github.com/sijintech/stk.git"
