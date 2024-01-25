@@ -29,16 +29,23 @@ print(f"source_dir:{source_dir}")
 
 
 # 上传文件到OSS
-for root, dirs, files in os.walk(source_dir):
-    print(f"root:{root}")
-    print(f"root:{dirs}")
-    print(f"root:{files}")
+# for root, dirs, files in os.walk(source_dir):
+#     print(f"root:{root}")
+#     print(f"root:{dirs}")
+#     print(f"root:{files}")
 
-    for file in files:
-        file_path = os.path.join(root, file)
-        oss_path = os.path.join(target_dir, os.path.relpath(file_path, source_dir))
-        with open(file_path, 'rb') as fileobj:
-             bucket.put_object(oss_path, fileobj)
+    # for file in files:
+    #     file_path = os.path.join(root, file)
+    #     oss_path = os.path.join(target_dir, os.path.relpath(file_path, source_dir))
+    #     with open(file_path, 'rb') as fileobj:
+    #          bucket.put_object(oss_path, fileobj)
 
-        # bucket.put_object_from_file(oss_path, file_path)
-        print(f"Uploaded {file_path} to OSS path {oss_path}")
+    #     # bucket.put_object_from_file(oss_path, file_path)
+    #     print(f"Uploaded {file_path} to OSS path {oss_path}")
+for file in os.listdir(source_dir):
+    file_path = os.path.join(source_dir, file)
+    oss_path = os.path.join(target_dir, file)
+    with open(file_path, 'rb') as fileobj:
+        bucket.put_object(oss_path, fileobj)
+
+    print(f"Uploaded {file_path} to OSS path {oss_path}")
