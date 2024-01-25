@@ -175,6 +175,9 @@ jobs:
                 TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
                 TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }} # 密钥的加密文本，与seecrts时输入的密码一致即可。如果未输入密码，则此处留空，如果输入了密码，则也需要添加到 secrets 中，然后使用 ${{ secrets.TAURI_KEY_PASSWORD }} 这种形式
               run: |
+                export TAURI_PRIVATE_KEY=$TAURI_PRIVATE_KEY
+                echo "TAURI_PRIVATE_KEY is $TAURI_PRIVATE_KEY"
+                export TAURI_KEY_PASSWORD="password"
                 sudo apt-get update
                 sudo apt install libwebkit2gtk-4.0-dev \
                 build-essential \
