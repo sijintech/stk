@@ -262,7 +262,7 @@ jobs:
           # SOURCE_DIR: 'src-tauri/target/release/bundle/msi'
           SOURCE_DIR: 'test'
           # 指定OSS中的目标目录
-          TARGET_DIR: 'msi'
+          TARGET_DIR: 'msi/'
         run: |
           pwd
           python apps\suan\simple-cone\deploy.py
