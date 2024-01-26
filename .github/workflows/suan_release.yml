@@ -257,9 +257,10 @@ jobs:
           TARGET_DIR: 'msi/'
         run: |
           pwd
-          python apps\suan\simple-cone\deploy.py
-          python apps\suan\simple-cone\update.py
-
+          # python apps\suan\simple-cone\deploy.py
+          # python apps\suan\simple-cone\update.py
+          python apps/suan/simple-cone/deploy.py
+          python apps/suan/simple-cone/update.py
 
       # - name: Upload files to OSS(ubuntu)
         
