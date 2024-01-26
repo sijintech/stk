@@ -31,7 +31,7 @@ oss_path=""
 
 # 读取 update.json
 
-with open('update.json', 'r') as f:
+with open(update_json_path, 'r') as f:
 
     data = json.load(f)
 
