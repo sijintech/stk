@@ -50,33 +50,33 @@ data['pub_date'] = '${{ github.event.head_commit.timestamp }}'
 
 if sys.platform.startswith('linux'):
 
-    for file in os.listdir(source_dir):
+#     for file in os.listdir(source_dir):
 
 
-        if file.endswith('.AppImage.tar.gz'):
+#         if file.endswith('.AppImage.tar.gz'):
 
-            download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
+#             download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
 
-            oss_path = os.path.join(target_dir, file)
+#             oss_path = os.path.join(target_dir, file)
 
-            data['platforms']['linux']['url'] = download_path
+#             data['platforms']['linux']['url'] = download_path
 
-            data['platforms']['linux-x86_64']['url'] = download_path
+#             data['platforms']['linux-x86_64']['url'] = download_path
 
-        if file.endswith('.AppImage.tar.gz.sig'):
-            sig_path = os.path.join(source_dir, file)
+#         if file.endswith('.AppImage.tar.gz.sig'):
+#             sig_path = os.path.join(source_dir, file)
 
-            with open(sig_path, 'rb') as sig_file:
+#             with open(sig_path, 'rb') as sig_file:
 
-                signature = sig_file.read()
+#                 signature = sig_file.read()
 
-                data['platforms']['linux']['signature'] = signature
+#                 data['platforms']['linux']['signature'] = signature
 
-                data['platforms']['linux-x86_64']['signature'] = signature
+#                 data['platforms']['linux-x86_64']['signature'] = signature
     
         
 
-elif sys.platform == 'win64':
+# elif sys.platform == 'win64':
 
     for file in os.listdir(source_dir):
 
