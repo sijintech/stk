@@ -240,6 +240,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install oss2
+          pip install sys
 
       - name: Upload files to OSS(window)
         
