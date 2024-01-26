@@ -147,8 +147,8 @@ jobs:
           #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
             # platform: [ubuntu-20.04,windows-latest]
-            # platform: [[windows,self-hosted]]
-            platform: [windows-latest]
+            platform: [self-hosted]
+            # platform: [windows-latest]
     
         runs-on: ${{ matrix.platform }}
 
@@ -171,7 +171,7 @@ jobs:
             - uses: Swatinem/rust-cache@v1
 
             - name: install dependencies and build app (ubuntu)
-              if: matrix.platform == 'ubuntu-20.04'
+              if: matrix.platform == 'self-hosted'
               env:
                 GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                 TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -218,8 +218,8 @@ jobs:
       #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
         matrix:
           # platform: [ubuntu-20.04,windows-latest]
-          # platform: [[windows,self-hosted]]
-          platform: [windows-latest]
+          platform: [self-hosted]
+          # platform: [windows-latest]
 
 
       runs-on: ${{ matrix.platform }}
@@ -261,7 +261,7 @@ jobs:
 
       - name: Upload files to OSS(ubuntu)
         
-        if: matrix.platform == 'ubuntu-20.04'
+        if: matrix.platform == 'self-hosted'
         env:
             OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
             OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
