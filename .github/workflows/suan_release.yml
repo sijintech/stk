@@ -226,7 +226,6 @@ jobs:
         id: get_tag
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/||')" >> $GITHUB_ENV
-          echo 
 
       - name: Checkout code
         uses: actions/checkout@v2
