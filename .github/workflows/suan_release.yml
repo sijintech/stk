@@ -146,8 +146,8 @@ jobs:
           fail-fast: false
           #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
-            # platform: [ubuntu-20.04,windows-latest]
-            platform: [windows-latest]
+            platform: [ubuntu-20.04,windows-latest]
+            # platform: [windows-latest]
     
         runs-on: ${{ matrix.platform }}
 
@@ -188,10 +188,6 @@ jobs:
                 sudo apt install cargo
                 cargo install tauri-cli
                 /bin/bash
-                export TAURI_PRIVATE_KEY=$TAURI_PRIVATE_KEY
-                env
-                echo "TAURI_PRIVATE_KEY is $TAURI_PRIVATE_KEY"
-                export TAURI_KEY_PASSWORD="password"
                 pwd
                 cd apps/suan/simple-cone/
                 chmod +x linux_build.sh
@@ -216,8 +212,8 @@ jobs:
         fail-fast: false
       #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
         matrix:
-          # platform: [ubuntu-20.04,windows-latest]
-          platform: [windows-latest]
+          platform: [ubuntu-20.04,windows-latest]
+          # platform: [windows-latest]
 
 
       runs-on: ${{ matrix.platform }}

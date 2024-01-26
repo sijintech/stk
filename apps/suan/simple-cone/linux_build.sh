@@ -2,6 +2,11 @@
 sudo apt install python3.8-venv
 python3 -m venv .venv
 source .venv/bin/activate
+
+export TAURI_PRIVATE_KEY=$TAURI_PRIVATE_KEY
+env
+echo "TAURI_PRIVATE_KEY is $TAURI_PRIVATE_KEY"
+export TAURI_KEY_PASSWORD="password"
 # 安装需要的包
 pip install -U pip
 pip install trame pyinstaller trame_components trame_vuetify trame_vtk
