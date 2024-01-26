@@ -22,21 +22,21 @@ print(f"source_dir:{source_dir}")
 
 
 for file in os.listdir(source_dir):
-    if sys.platform.startswith('linux'):
+    # if sys.platform.startswith('linux'):
         if file.endswith('.AppImage.tar.gz'):
             file_path = os.path.join(source_dir, file)
             oss_path = os.path.join(target_dir, file)
             with open(file_path, 'rb') as fileobj:
                 bucket.put_object(oss_path, fileobj)
             print(f"Uploaded {file_path} to OSS path {oss_path}")
-    elif sys.platform == 'win64':
+    # elif sys.platform == 'win64':
         if file.endswith('.msi.zip'):
             file_path = os.path.join(source_dir, file)
             oss_path = os.path.join(target_dir, file)
             with open(file_path, 'rb') as fileobj:
                 bucket.put_object(oss_path, fileobj)
             print(f"Uploaded {file_path} to OSS path {oss_path}")  
-    else:
-        print("Unknown operating system")
+    # else:
+    #     print("Unknown operating system")
     
 

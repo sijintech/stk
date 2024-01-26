@@ -72,7 +72,7 @@ for file in os.listdir(source_dir):
 
             data['platforms']['windows-x86_64']['signature'] = signature
 
-## if sys.platform.startswith('linux'):
+# if sys.platform.startswith('linux'):
 
 #     for file in os.listdir(source_dir):
 
