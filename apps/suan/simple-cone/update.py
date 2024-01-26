@@ -65,12 +65,10 @@ for file in os.listdir(source_dir):
     
 
         with open(sig_path, 'rb') as sig_file:
-
-            signature = sig_file.read()
-
+            signature = sig_file.read().decode('utf-8')
             data['platforms']['win64']['signature'] = signature
-
             data['platforms']['windows-x86_64']['signature'] = signature
+
 
 # if sys.platform.startswith('linux'):
 
