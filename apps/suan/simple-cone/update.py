@@ -5,7 +5,7 @@ import oss2
 
 from oss2.credentials import EnvironmentVariableCredentialsProvider
 
-import sys
+# import sys
 
 
 auth = oss2.ProviderAuth(EnvironmentVariableCredentialsProvider())
@@ -47,8 +47,32 @@ data['version'] = tag
 
 data['pub_date'] = '${{ github.event.head_commit.timestamp }}'
 
+for file in os.listdir(source_dir):
 
-if sys.platform.startswith('linux'):
+
+    if file.endswith('.msi.zip'):
+
+        download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
+
+        oss_path = os.path.join(target_dir, file)
+
+        data['platforms']['win64']['url'] = download_path
+
+        data['platforms']['windows-x86_64']['url'] = download_path
+
+    if file.endswith('.msi.zip.sig'):
+        sig_path = os.path.join(source_dir, file)
+    
+
+        with open(sig_path, 'rb') as sig_file:
+
+            signature = sig_file.read()
+
+            data['platforms']['win64']['signature'] = signature
+
+            data['platforms']['windows-x86_64']['signature'] = signature
+
+# if sys.platform.startswith('linux'):
 
 #     for file in os.listdir(source_dir):
 
@@ -78,35 +102,35 @@ if sys.platform.startswith('linux'):
 
 # elif sys.platform == 'win64':
 
-    for file in os.listdir(source_dir):
+#     for file in os.listdir(source_dir):
 
 
-        if file.endswith('.msi.zip'):
+#         if file.endswith('.msi.zip'):
 
-            download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
+#             download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
 
-            oss_path = os.path.join(target_dir, file)
+#             oss_path = os.path.join(target_dir, file)
 
-            data['platforms']['win64']['url'] = download_path
+#             data['platforms']['win64']['url'] = download_path
 
-            data['platforms']['windows-x86_64']['url'] = download_path
+#             data['platforms']['windows-x86_64']['url'] = download_path
 
-        if file.endswith('.msi.zip.sig'):
-            sig_path = os.path.join(source_dir, file)
+#         if file.endswith('.msi.zip.sig'):
+#             sig_path = os.path.join(source_dir, file)
         
 
-            with open(sig_path, 'rb') as sig_file:
+#             with open(sig_path, 'rb') as sig_file:
 
-                signature = sig_file.read()
+#                 signature = sig_file.read()
 
-                data['platforms']['win64']['signature'] = signature
+#                 data['platforms']['win64']['signature'] = signature
 
-                data['platforms']['windows-x86_64']['signature'] = signature
+#                 data['platforms']['windows-x86_64']['signature'] = signature
     
 
-else:
+# else:
 
-    print("Unknown operating system")
+#     print("Unknown operating system")
 
 # 将修改后的数据保存回 update.json
 
