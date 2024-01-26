@@ -203,6 +203,10 @@ jobs:
                cd apps/suan/simple-cone/
                cargo install tauri-cli
                ./window_build.bat
+               cd src-tauri
+               dir /b
+               cd ../../../
+               pwd
 
 
     deploy-and-update:
@@ -213,7 +217,7 @@ jobs:
       #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
         matrix:
           # platform: [ubuntu-20.04,windows-latest]
-          platform: [windows-latest]
+          platform: [[windows-latest,self-hosted]]
 
 
       runs-on: ${{ matrix.platform }}
@@ -237,7 +241,7 @@ jobs:
 
       - name: Upload files to OSS(window)
         
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-latest,self-hosted'
         env:
           OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
           OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
