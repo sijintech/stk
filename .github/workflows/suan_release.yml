@@ -147,7 +147,7 @@ jobs:
           #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
             # platform: [ubuntu-20.04,windows-latest]
-            platform: [[windows-latest,self-hosted]]
+            platform: [[windows,self-hosted]]
     
         runs-on: ${{ matrix.platform }}
 
@@ -217,7 +217,7 @@ jobs:
       #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
         matrix:
           # platform: [ubuntu-20.04,windows-latest]
-          platform: [[windows-latest,self-hosted]]
+          platform: [[windows,self-hosted]]
 
 
       runs-on: ${{ matrix.platform }}
