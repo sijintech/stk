@@ -147,7 +147,8 @@ jobs:
           #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
             # platform: [ubuntu-20.04,windows-latest]
-            platform: [[windows,self-hosted]]
+            # platform: [[windows,self-hosted]]
+            platform: [windows-latest]
     
         runs-on: ${{ matrix.platform }}
 
@@ -194,7 +195,7 @@ jobs:
                 ./linux_build.sh
                 
             - name: install dependencies and build app(windows)
-              if: matrix.platform == 'windows-latest,self-hosted'
+              if: matrix.platform == 'windows-latest'
               env:
                 GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                 TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -217,7 +218,8 @@ jobs:
       #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
         matrix:
           # platform: [ubuntu-20.04,windows-latest]
-          platform: [[windows,self-hosted]]
+          # platform: [[windows,self-hosted]]
+          platform: [windows-latest]
 
 
       runs-on: ${{ matrix.platform }}
@@ -241,7 +243,7 @@ jobs:
 
       - name: Upload files to OSS(window)
         
-        if: matrix.platform == 'windows-latest,self-hosted'
+        if: matrix.platform == 'windows-latest'
         env:
           OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
           OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
