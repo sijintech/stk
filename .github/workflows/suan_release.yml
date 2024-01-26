@@ -241,7 +241,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install oss2
-          pip install sys
+          pip install sys -i http://pypi.doubanio.com/simple/ --trusted-host pypi.doubanio.com
 
       - name: Upload files to OSS(window)
         
