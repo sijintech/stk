@@ -252,7 +252,7 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
           OSS_BUCKET: sijin-suan-update
           # 指定要上传的文件或目录，这里假设您想上传整个repo的内容
-          SOURCE_DIR: 'src-tauri\targets\release\bundle\msi'
+          SOURCE_DIR: 'src-tauri/targets/release/bundle/msi'
           # 指定OSS中的目标目录
           TARGET_DIR: 'msi/'
         run: |
