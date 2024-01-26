@@ -26,7 +26,7 @@ bucket.get_object_to_file('update.json', update_json_path)
 
 source_dir = os.path.join(this_dir, os.environ['SOURCE_DIR'])
 target_dir = os.environ['TARGET_DIR']
-oss_path=""
+oss_path="update.json"
 
 
 # 读取 update.json
@@ -54,7 +54,7 @@ for file in os.listdir(source_dir):
 
         download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
 
-        oss_path = os.path.join(target_dir, file)
+        # oss_path = os.path.join(target_dir, file)
 
         data['platforms']['win64']['url'] = download_path
 
@@ -79,7 +79,7 @@ for file in os.listdir(source_dir):
 
 #             download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
 
-#             oss_path = os.path.join(target_dir, file)
+            # oss_path = os.path.join(target_dir, file)
 
 #             data['platforms']['linux']['url'] = download_path
 
