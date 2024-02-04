@@ -161,17 +161,17 @@ jobs:
               uses: actions/setup-node@v1
               with:
                 node-version: 16
-            # 安装 Rust
-            - name: Install Rust stable
-              uses: actions-rs/toolchain@v1
-              with:
-                toolchain: stable
+            # 安装 Rust(服务器上已安装)
+            # - name: Install Rust stable
+            #   uses: actions-rs/toolchain@v1
+            #   with:
+            #     toolchain: stable
 
             # 使用 Rust 缓存，加快安装速度
-            - uses: Swatinem/rust-cache@v1
+            # - uses: Swatinem/rust-cache@v1
 
             - name: install dependencies and build app (ubuntu)
-              if: matrix.platform == 'self-hosted'
+              if: matrix.platform == 'self-hosted-linux'
               env:
                 GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                 TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -211,15 +211,14 @@ jobs:
 
 
     deploy-and-update:
-      # needs: build-tauri
+      needs: build-tauri
       strategy:
         # 允许在矩阵中的一个作业失败后继续运行其他作业
         fail-fast: false
       #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
         matrix:
           # platform: [ubuntu-20.04,windows-latest]
-          platform: [self-hosted]
-          # platform: [windows-latest]
+          platform: [self-hosted-windows]
 
 
       runs-on: ${{ matrix.platform }}
