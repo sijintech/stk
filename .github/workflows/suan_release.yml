@@ -153,9 +153,12 @@ jobs:
 
         steps:
             - name: get tag(windows)
+              if: matrix.platform == 'self-hosted-windows'
+
               run: |
                 echo "TAG=$(echo $env:GITHUB_REF -replace '^refs/tags/v', '')" >> $env:GITHUB_ENV
             - name: get tag(ubuntu)
+              if: matrix.platform == 'self-hosted-linux'
               run: |
                 echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
 
@@ -179,7 +182,7 @@ jobs:
             - name: fix tauri version
               run : |
                 python apps/suan/simple-cone/fix_version.py
-                
+
             - name: install dependencies and build app (ubuntu)
               if: matrix.platform == 'self-hosted-linux'
               env:
