@@ -139,75 +139,75 @@ on:
       - 'v*' # 推送事件匹配 v*, 例如 v1.0，v20.15.10 等来触发工作流
 # 需要运行的作业组合
 jobs:
-    # build-tauri:
-    #     # 这是指定作业执行策略的部分。在这里，使用了矩阵策略，它允许并行在不同平台上运行相同的作业
-    #     strategy:
-    #         # 允许在矩阵中的一个作业失败后继续运行其他作业
-    #       fail-fast: false
-    #       #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
-    #       matrix:
-    #         # platform: [ubuntu-20.04,windows-latest]
-    #         platform: [self-hosted]
-    #         # platform: [windows-latest]
+    build-tauri:
+        # 这是指定作业执行策略的部分。在这里，使用了矩阵策略，它允许并行在不同平台上运行相同的作业
+        strategy:
+            # 允许在矩阵中的一个作业失败后继续运行其他作业
+          fail-fast: false
+          #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
+          matrix:
+            # platform: [ubuntu-20.04,windows-latest]
+            platform: [self-hosted-windows]
+            # platform: [windows-latest]
     
-    #     runs-on: ${{ matrix.platform }}
+        runs-on: ${{ matrix.platform }}
 
-    #     steps:
-    #         - name: Check out repository
-    #           uses: actions/checkout@v3
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v3
 
-    #         # 安装 Node.js
-    #         - name: Setup node
-    #           uses: actions/setup-node@v1
-    #           with:
-    #             node-version: 16
-    #         # 安装 Rust
-    #         - name: Install Rust stable
-    #           uses: actions-rs/toolchain@v1
-    #           with:
-    #             toolchain: stable
+            # 安装 Node.js
+            - name: Setup node
+              uses: actions/setup-node@v1
+              with:
+                node-version: 16
+            # 安装 Rust
+            - name: Install Rust stable
+              uses: actions-rs/toolchain@v1
+              with:
+                toolchain: stable
 
-    #         # 使用 Rust 缓存，加快安装速度
-    #         - uses: Swatinem/rust-cache@v1
+            # 使用 Rust 缓存，加快安装速度
+            - uses: Swatinem/rust-cache@v1
 
-    #         - name: install dependencies and build app (ubuntu)
-    #           if: matrix.platform == 'self-hosted'
-    #           env:
-    #             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    #             TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-    #             TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }} 
-    #           run: |
-    #             sudo apt-get update
-    #             sudo apt install libwebkit2gtk-4.0-dev \
-    #             build-essential \
-    #             curl \
-    #             wget \
-    #             libssl-dev \
-    #             libgtk-3-dev \
-    #             libayatana-appindicator3-dev \
-    #             librsvg2-dev
-    #             sudo apt install cargo
-    #             cargo install tauri-cli
-    #             /bin/bash
-    #             pwd
-    #             cd apps/suan/simple-cone/
-    #             chmod +x linux_build.sh
-    #             ./linux_build.sh
+            - name: install dependencies and build app (ubuntu)
+              if: matrix.platform == 'self-hosted'
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+                TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }} 
+              run: |
+                sudo apt-get update
+                sudo apt install libwebkit2gtk-4.0-dev \
+                build-essential \
+                curl \
+                wget \
+                libssl-dev \
+                libgtk-3-dev \
+                libayatana-appindicator3-dev \
+                librsvg2-dev
+                sudo apt install cargo
+                cargo install tauri-cli
+                /bin/bash
+                pwd
+                cd apps/suan/simple-cone/
+                chmod +x linux_build.sh
+                ./linux_build.sh
                 
-    #         - name: install dependencies and build app(windows)
-    #           if: matrix.platform == 'windows-latest'
-    #           env:
-    #             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    #             TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-    #             TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }} # 密钥的加密文本，与seecrts时输入的密码一致即可。如果未输入密码，则此处留空，如果输入了密码，则也需要添加到 secrets 中，然后使用 ${{ secrets.TAURI_KEY_PASSWORD }} 这种形式
-    #           run: |
-    #            cd apps/suan/simple-cone/
-    #            cargo install tauri-cli
-    #            ./window_build.bat
-    #            cd src-tauri
-    #            dir /b
-    #            cd ../../../
-    #            pwd
+            - name: install dependencies and build app(windows)
+              if: matrix.platform == 'self-hosted-windows'
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+                TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }} # 密钥的加密文本，与seecrts时输入的密码一致即可。如果未输入密码，则此处留空，如果输入了密码，则也需要添加到 secrets 中，然后使用 ${{ secrets.TAURI_KEY_PASSWORD }} 这种形式
+              run: |
+               cd apps/suan/simple-cone/
+               cargo install tauri-cli
+               ./window_build.bat
+               cd src-tauri
+               dir /b
+               cd ../../../
+               pwd
 
 
     deploy-and-update:
@@ -245,8 +245,8 @@ jobs:
 
       - name: Upload files to OSS(window)
         
-        # if: matrix.platform == 'windows-latest'
-        if: matrix.platform == 'self-hosted'
+        # if: matrix.platform == 'self-hosted-windows'
+        if: matrix.platform == 'self-hosted-windows'
 
         env:
           OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com

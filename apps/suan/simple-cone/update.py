@@ -50,7 +50,7 @@ data['pub_date'] = '${{ github.event.head_commit.timestamp }}'
 for file in os.listdir(source_dir):
 
 
-    if file.endswith('.msi.zip'):
+    if file.endswith('.nsis.zip'):
 
         download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
 
@@ -60,7 +60,7 @@ for file in os.listdir(source_dir):
 
         data['platforms']['windows-x86_64']['url'] = download_path
 
-    if file.endswith('.msi.zip.sig'):
+    if file.endswith('.nsis.zip.sig'):
         sig_path = os.path.join(source_dir, file)
     
 
