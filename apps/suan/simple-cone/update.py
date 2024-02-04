@@ -52,21 +52,20 @@ for file in os.listdir(source_dir):
 
     if file.endswith('.nsis.zip'):
 
-        download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/msi/"+file
+        download_path="https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/nsis/"+file
 
-        # oss_path = os.path.join(target_dir, file)
-
-        data['platforms']['win64']['url'] = download_path
-
+        data['platforms']['windows-aarch64']['url'] = download_path
         data['platforms']['windows-x86_64']['url'] = download_path
+        data['platforms']['windows-i686']['url'] = download_path
+
 
     if file.endswith('.nsis.zip.sig'):
         sig_path = os.path.join(source_dir, file)
-    
 
         with open(sig_path, 'rb') as sig_file:
             signature = sig_file.read().decode('utf-8')
-            data['platforms']['win64']['signature'] = signature
+            data['platforms']['windows-i686']['signature'] = signature
+            data['platforms']['windows-aarch64']['signature'] = signature
             data['platforms']['windows-x86_64']['signature'] = signature
 
 

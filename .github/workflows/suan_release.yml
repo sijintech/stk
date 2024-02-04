@@ -146,13 +146,19 @@ jobs:
           fail-fast: false
           #  这定义了一个矩阵，其中 platform 是一个变量，它在不同的平台上运行作业
           matrix:
-            # platform: [ubuntu-20.04,windows-latest]
             platform: [self-hosted-windows]
             # platform: [windows-latest]
     
         runs-on: ${{ matrix.platform }}
 
         steps:
+            - name: get tag(windows)
+              run: |
+                echo "TAG=$(echo $env:GITHUB_REF -replace '^refs/tags/v', '')" >> $env:GITHUB_ENV
+            - name: get tag(ubuntu)
+              run: |
+                echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
+
             - name: Check out repository
               uses: actions/checkout@v3
 
@@ -170,6 +176,10 @@ jobs:
             # 使用 Rust 缓存，加快安装速度
             # - uses: Swatinem/rust-cache@v1
 
+            - name: fix tauri version
+              run : |
+                python apps/suan/simple-cone/fix_version.py
+                
             - name: install dependencies and build app (ubuntu)
               if: matrix.platform == 'self-hosted-linux'
               env:
@@ -226,7 +236,8 @@ jobs:
       - name: get tag
         id: get_tag
         run: |
-          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/||')" >> $GITHUB_ENV
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
+
 
       - name: Checkout code
         uses: actions/checkout@v2
