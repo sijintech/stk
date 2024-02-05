@@ -154,7 +154,6 @@ jobs:
         steps:
             - name: get tag(windows)
               if: matrix.platform == 'self-hosted-windows'
-
               run: |
                 echo "TAG=$(echo $env:GITHUB_REF -replace '^refs/tags/v', '')" >> $env:GITHUB_ENV
             - name: get tag(ubuntu)
@@ -236,8 +235,13 @@ jobs:
 
       runs-on: ${{ matrix.platform }}
       steps:
-      - name: get tag
-        id: get_tag
+      - name: get tag(windows)
+        if: matrix.platform == 'self-hosted-windows'
+
+        run: |
+          echo "TAG=$(echo $env:GITHUB_REF -replace '^refs/tags/v', '')" >> $env:GITHUB_ENV
+      - name: get tag(ubuntu)
+        if: matrix.platform == 'self-hosted-linux'
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
 
