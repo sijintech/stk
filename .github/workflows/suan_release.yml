@@ -170,10 +170,10 @@ jobs:
               with:
                 node-version: 16
 
-            # - name: Set up Python
-            #   uses: actions/setup-python@v2
-            #   with:
-            #     python-version: 3.9 
+            - name: Set up Python
+              uses: actions/setup-python@v2
+              with:
+                python-version: '3.x'
             # 安装 Rust(服务器上已安装)
             # - name: Install Rust stable
             #   uses: actions-rs/toolchain@v1
