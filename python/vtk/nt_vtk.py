@@ -1,5 +1,8 @@
 # project webpage is at https://nibiru-tech.gitlab.io/python-vtk/
 # Data type macro
+
+
+
 SCALAR=0
 VECTOR=1
 DOMAIN=2
