@@ -76,19 +76,19 @@ class InfoBar(QWidget):
             return
     def analyzeCode(self, curShowCode):
         # 使用正则表达式判断当前显示代码是否涉及到 vtk 或 matplotlib
-        vtk_import = re.search(r'\bimport\s+vtk\b', curShowCode)
-        matplotlib_import = re.search(r'\bimport\s+matplotlib\b', curShowCode)
+        vtk_import = re.search(r'(?<!#)\s+\bimport\s+vtk\b', curShowCode)
+        matplotlib_import = re.search(r'(?<!#)\s+\bimport\s+matplotlib\b', curShowCode)
         need_variable = None  # 用于存储提取的渲染器变量名
         # 如果涉及到 vtk 的代码
         if vtk_import:
             self.curShowCodeType = 'vtk'
             # 使用正则表达式查找赋值为 vtkRenderer() 的语句，并提取变量名
-            need_variables = re.finditer(r'(\w+)\s*=\s*vtk\.vtkRenderer\(\)', curShowCode)
+            need_variables = re.finditer(r'(?<!#)\s+(\w+)\s*=\s*vtk\.vtkRenderer\(\w*\)', curShowCode)
             for match in need_variables:
                 need_variable=match.group(1)
             # 查找涉及到 vtk 渲染窗口和交互器的变量名
             vtk_vars = set()
-            var_assignments = re.finditer(r'(\w+)\s*=\s*(vtk\.vtkRenderWindow|vtk\.vtkRenderWindowInteractor)\(\)', curShowCode)
+            var_assignments = re.finditer(r'(?<!#)\s+(\w+)\s*=\s*(vtk\.vtkRenderWindow|vtk\.vtkRenderWindowInteractor)\(\w*\)', curShowCode)
             for match in var_assignments:
                 vtk_vars.add(match.group(1))
             vtk_vars.add('vtkRenderWindow()')
@@ -105,6 +105,25 @@ class InfoBar(QWidget):
         # 如果涉及到 matplotlib 的代码
         elif matplotlib_import:
             self.curShowCodeType = 'matplotlib'
+             # 使用正则表达式查找赋值为 figure() 的语句，并提取变量名
+            need_variables = re.finditer(r'(?<!#)\s+(\w+)\s*=\s*\w*\.figure\(\)', curShowCode)
+            for match in need_variables:
+                need_variable=match.group(1)
+            # 查找涉及到画布控件的变量名
+            mat_vars = set()
+            var_assignments = re.finditer(r'(?<!#)\s+(\w+)\s*=\s*\w*FigureCanvas\(\w*\)', curShowCode)
+            for match in var_assignments:
+                mat_vars.add(match.group(1))
+            mat_vars.add('FigureCanvas()')
+            print("mat_vars:",mat_vars)
+            # 删除涉及到画布控件的变量赋值语句以及相关的代码行
+            curShowCode_lines = curShowCode.split('\n')  # 将代码按行拆分为列表
+            updated_lines = []  # 用于存储更新后的代码行
+            for line in curShowCode_lines:
+                if any(var in line for var in mat_vars):
+                    continue  # 如果当前行涉及到画布控件的变量，则跳过该行
+                updated_lines.append(line)  # 否则添加到更新后的代码行列表中
+            curShowCode = '\n'.join(updated_lines)  # 将更新后的代码行列表重新组合成字符串
         print(need_variable)
         return curShowCode,need_variable  # 返回处理后的代码字符串
     def runCodeWithAnalysis(self):
