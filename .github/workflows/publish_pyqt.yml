@@ -26,23 +26,24 @@ jobs:
           run : |
                     pip install toml
                     python apps/template/pyqt/fix_version.py
-        - name: Install cibuildwheel
-          run: | 
-            python -m pip install cibuildwheel
-
         - name: build wheels
-          uses: pypa/cibuildwheel@v2.16.5
-          with:
-                package-dir: apps/template/pyqt/
-          env:
-                CIBW_BUILD_VERBOSITY: 1
-                CIBW_BUILD_FRONTEND: build
-                CIBW_SKIP: "*-manylinux_i686 pp*"  # 这个配置告诉 cibuildwheel 只为 64 位 Windows、64 位 Linux 和 macOS 构建 wheels。它跳过了 32 位环境,因为现在大多数系统都是 64 位的。
+          run: | 
+            cd apps/template/pyqt
+            pip wheel -w apps/template/pyqt/dist/
+
+        # - name: build wheels
+        #   uses: pypa/cibuildwheel@v2.16.5
+        #   with:
+        #         package-dir: apps/template/pyqt/
+        #   env:
+        #         CIBW_BUILD_VERBOSITY: 1
+        #         CIBW_BUILD_FRONTEND: build
+        #         CIBW_SKIP: "*-manylinux_i686 pp*"  # 这个配置告诉 cibuildwheel 只为 64 位 Windows、64 位 Linux 和 macOS 构建 wheels。它跳过了 32 位环境,因为现在大多数系统都是 64 位的。
 
         - uses: actions/upload-artifact@v4
           with:
                 name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-                path: ./wheelhouse/*.whl
+                path: apps/template/pyqt/dist/*.whl
 
     build_sdist:  # 源代码打包单平台即可
         name: Build source distribution
