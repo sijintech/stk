@@ -135,8 +135,7 @@
 
 import sys
 import numpy as np
-from qtpy.QtWidgets import QApplication  # qtpy会以PyQt5,PyQt6,PySide2,PySide6的顺序依次尝试import。
-from matplotlib.backends.backend_qtagg import FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 fig = plt.figure()  # 创建figure
 ax = fig.subplots()

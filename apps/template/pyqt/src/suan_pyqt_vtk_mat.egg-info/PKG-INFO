@@ -1,0 +1,39 @@
+Metadata-Version: 2.1
+Name: suan_pyqt_vtk_mat
+Version: 0.0.3
+Summary: This is a tool to vtk and matploblib.
+Author-email: Zhou Hanjie <2625553453@qq.com>
+Project-URL: Homepage, https://github.com/sijintech/stk.git
+Project-URL: Issues, https://github.com/sijintech/stk/issues/
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: POSIX :: Linux
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy>=1.20.0
+Requires-Dist: toml>=0.8.2
+Requires-Dist: matplotlib
+Requires-Dist: PyQt5
+Requires-Dist: vtk
+
+## 如何运行
+    直接运行./src/main.py文件
+## 如何打包
+    如果想要带终端窗口，先设置main.spec文件里面的console=True，然后再运行 `$ pyinstaller .\src\main.spec`,或者运行 `$ pyinstaller .\src\main.py`
+    如果不想要带终端窗口，先设置main.spec文件里面的console=False，然后再运行 `$ pyinstaller .\src\main.spec`,或者运行 `$ pyinstaller -w .\src\main.py`
+
+    
+PyPI recovery codes
+5c1f95163e31da91
+0c2b9e2f8c5bd416
+ab0d7b96835824c7
+2960fbfd49a5f241
+9a0dac3ca8e0d796
+8f0d52ed531b242e
+1b6ba8fcb4e6896b
+8bdb5da3a148d584
+
+
+
+pypi-AgENdGVzdC5weXBpLm9yZwIkMTEzMmQ1YjMtZTc2OC00NDYxLWEyMTctMGNhZmE3MmY2NjQ1AAIqWzMsIjA1ZjIwYmEyLTJiZGMtNDdmYS04NWVjLWRhNDlhMzI5NGIxYiJdAAAGIGThEi8OUpHKca9GM5yCne4qnVY6kY8obUjS9VfxN8Mn

@@ -18,6 +18,7 @@ class CustomFigureCanvas(FigureCanvasQTAgg):
 
     def getFigure(self):
         return self._figure
+
 class CenterWidget(QWidget):
     def __init__(self):
         super().__init__()
@@ -94,7 +95,7 @@ class CenterWidget(QWidget):
         self.vtkWidget.GetRenderWindow().Render()  # 渲染一次
         # 将当前选中的 tab 设置为 "Vtk Visualization"
         vtkVisualizationIndex = self.tabWidget.indexOf(self.vtkVisualizationTab)
-        self.tabWidget.setCurrentIndex(vtkVisualization)
+        self.tabWidget.setCurrentIndex(vtkVisualizationIndex)
     def updateMatplotlibDisplay(self,fig):
         # 更新Matplotlib显示
         self.matplotlibWidget=CustomFigureCanvas(fig)

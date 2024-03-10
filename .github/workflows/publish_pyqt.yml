@@ -1,0 +1,69 @@
+name: Publish pyqt to PyPI and TestPyPI
+on:
+  workflow_dispatch:
+    inputs:
+        tags:
+          description: "v*"
+          required: true
+  push:
+      # 匹配特定标签 (refs/tags)
+      tags:
+        - 'v*' # 推送事件匹配 v*, 例如 v1.0，v20.15.10 等来触发工作流
+jobs:
+    build:
+      name: Build pyqt
+      runs-on: ubuntu-latest
+  
+      steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: get tag
+        run: |
+            echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
+
+      - name: fix tauri version
+        run : |
+                python apps/template/pyqt/fix_version.py
+      - name: Install pypa/build
+        run: >-
+          python3 -m
+          pip install
+          build
+          --user
+      - name: Build a binary wheel and a source tarball
+        run: |
+          cd apps/template/pyqt
+          python3 -m build
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v3
+        with: 
+          name: pyqt
+          path: apps/template/pyqt/dist/
+    
+    publish-to-pypi:
+      name: >-
+        Publish pyqt to PyPI
+      needs:
+      - build
+      runs-on: ubuntu-latest
+      environment:
+        name: pypi
+        url: https://test.pypi.org/p/suan_pyqt_vtk_mat
+      permissions:
+        id-token: write
+      steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v3
+        with:
+          name: pyqt
+          path: apps/template/pyqt/dist/
+      - name: Publish pyqt to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # user: __token__
+          # password: ${{secrets.PYPI_API_TOKEN}}
+          packages-dir: apps/template/pyqt/dist/
+          skip-existing: true

@@ -2,8 +2,6 @@ from PyQt5.QtWidgets import QMessageBox, QAction, QMenu, QFileDialog, QTextEdit,
 from PyQt5.QtCore import Qt
 import re
 
-from center_widget import CenterWidget
-
 
 class InfoBar(QWidget):
 
@@ -76,19 +74,20 @@ class InfoBar(QWidget):
             return
     def analyzeCode(self, curShowCode):
         # 使用正则表达式判断当前显示代码是否涉及到 vtk 或 matplotlib
-        vtk_import = re.search(r'(?<!#)\s+\bimport\s+vtk\b', curShowCode)
-        matplotlib_import = re.search(r'(?<!#)\s+\bimport\s+matplotlib\b', curShowCode)
+        vtk_import = re.search(r'(?<!#)\s*\bimport\s+vtk\b', curShowCode)
+        matplotlib_import = re.search(r'(?<!#)\s*\bimport\s+matplotlib\b', curShowCode)
         need_variable = None  # 用于存储提取的渲染器变量名
         # 如果涉及到 vtk 的代码
         if vtk_import:
+            print("vtk")
             self.curShowCodeType = 'vtk'
             # 使用正则表达式查找赋值为 vtkRenderer() 的语句，并提取变量名
-            need_variables = re.finditer(r'(?<!#)\s+(\w+)\s*=\s*vtk\.vtkRenderer\(\w*\)', curShowCode)
+            need_variables = re.finditer(r'(?<!#)\s*(\w+)\s*=\s*vtk\.vtkRenderer\(\w*\)', curShowCode)
             for match in need_variables:
                 need_variable=match.group(1)
             # 查找涉及到 vtk 渲染窗口和交互器的变量名
             vtk_vars = set()
-            var_assignments = re.finditer(r'(?<!#)\s+(\w+)\s*=\s*(vtk\.vtkRenderWindow|vtk\.vtkRenderWindowInteractor)\(\w*\)', curShowCode)
+            var_assignments = re.finditer(r'(?<!#)\s*(\w+)\s*=\s*(vtk\.vtkRenderWindow|vtk\.vtkRenderWindowInteractor)\(\w*\)', curShowCode)
             for match in var_assignments:
                 vtk_vars.add(match.group(1))
             vtk_vars.add('vtkRenderWindow()')
@@ -104,6 +103,7 @@ class InfoBar(QWidget):
             curShowCode = '\n'.join(updated_lines)  # 将更新后的代码行列表重新组合成字符串
         # 如果涉及到 matplotlib 的代码
         elif matplotlib_import:
+            print("mat")
             self.curShowCodeType = 'matplotlib'
              # 使用正则表达式查找赋值为 figure() 的语句，并提取变量名
             need_variables = re.finditer(r'(?<!#)\s+(\w+)\s*=\s*\w*\.figure\(\)', curShowCode)
