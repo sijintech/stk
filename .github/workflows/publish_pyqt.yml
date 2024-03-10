@@ -26,6 +26,9 @@ jobs:
           run : |
                     pip install toml
                     python apps/template/pyqt/fix_version.py
+                    cd apps/template/pyqt
+                    pwd
+                    ls
         - name: build wheels
           uses: pypa/cibuildwheel@v2.16.5
           env:
