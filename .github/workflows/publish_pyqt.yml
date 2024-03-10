@@ -29,10 +29,12 @@ jobs:
         - name: Install cibuildwheel
           run: | 
             python -m pip install cibuildwheel
-            cd apps/template/pyqt       
-            
+
         - name: build wheels
           uses: pypa/cibuildwheel@v2.16.5
+          with:
+                package-dir: apps/template/pyqt/
+                output-dir: apps/template/pyqt/dist
           env:
                 CIBW_BUILD_FRONTEND: build
                 CIBW_SKIP: "*-manylinux_i686 pp*"  # 这个配置告诉 cibuildwheel 只为 64 位 Windows、64 位 Linux 和 macOS 构建 wheels。它跳过了 32 位环境,因为现在大多数系统都是 64 位的。
