@@ -34,15 +34,15 @@ jobs:
           uses: pypa/cibuildwheel@v2.16.5
           with:
                 package-dir: apps/template/pyqt/
-                output-dir: apps/template/pyqt/dist
           env:
+                CIBW_BUILD_VERBOSITY: 1
                 CIBW_BUILD_FRONTEND: build
                 CIBW_SKIP: "*-manylinux_i686 pp*"  # 这个配置告诉 cibuildwheel 只为 64 位 Windows、64 位 Linux 和 macOS 构建 wheels。它跳过了 32 位环境,因为现在大多数系统都是 64 位的。
 
         - uses: actions/upload-artifact@v4
           with:
                 name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-                path: apps/template/pyqt/dist/*.whl
+                path: ./wheelhouse/*.whl
 
     build_sdist:  # 源代码打包单平台即可
         name: Build source distribution
