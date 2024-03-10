@@ -64,8 +64,8 @@ jobs:
       - name: Publish pyqt to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # user: __token__
-          # password: ${{secrets.PYPI_API_TOKEN}}
-          packages-dir: apps/template/pyqt/dist/
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
+          user: __token__
+          password: ${{secrets.PYPI_API_TOKEN}}
+        #   packages-dir: apps/template/pyqt/dist/
+        #   repository-url: https://test.pypi.org/legacy/
+        #   skip-existing: true
