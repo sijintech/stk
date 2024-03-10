@@ -28,6 +28,7 @@ jobs:
                     python apps/template/pyqt/fix_version.py
         - name: build wheels
           run: | 
+            pip install wheel
             cd apps/template/pyqt
             pip wheel -w apps/template/pyqt/dist/
 
