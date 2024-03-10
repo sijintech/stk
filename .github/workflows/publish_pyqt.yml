@@ -1,95 +1,189 @@
 name: Publish pyqt to PyPI and TestPyPI
-on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测试发布，而release用来正式发布
-  release:
-    types: [published]
+on:
+  workflow_dispatch:
+    inputs:
+        tags:
+          description: "v*"
+          required: true
   push:
-    # Alternative: only build for tags.
-    tags:
-      - 'v*'
+      # 匹配特定标签 (refs/tags)
+      tags:
+        - 'v*' # 推送事件匹配 v*, 例如 v1.0，v20.15.10 等来触发工作流
 jobs:
-    build_wheels:  
-        name: Build wheels on ${{ matrix.os }}
-        runs-on: ${{ matrix.os }}
-        strategy:
-            matrix: 
-                os: [ubuntu-latest, windows-latest]  # 没有macos，因为我的编译没通过。。。
-        steps:
+    build:
+      name: Build pyqt
+      runs-on: ubuntu-latest
+  
+      steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: get tag
+        run: |
+            echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
 
-        - uses: actions/checkout@v4
-          with:
-                submodules: 'recursive'
-        - name: get tag
-          run: |
-                echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
+      - name: fix tauri version
+        run : |
+                pip install toml
+                python apps/template/pyqt/fix_version.py
+      - name: Install pypa/build
+        run: >-
+          python3 -m
+          pip install
+          build
+          --user
+      - name: Build a binary wheel and a source tarball
+        run: |
+          cd apps/template/pyqt
+          python3 -m build
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v3
+        with: 
+          name: pyqt
+          path: apps/template/pyqt/dist/
     
-        - name: fix tauri version
-          run : |
-                    pip install toml
-                    python apps/template/pyqt/fix_version.py
-        - name: build wheels
-          run: | 
-            pip install wheel
-            cd apps/template/pyqt
-            pip wheel -w apps/template/pyqt/dist/
+    publish-to-pypi:
+      name: >-
+        Publish pyqt to PyPI
+      needs:
+      - build
+      runs-on: ubuntu-latest
+      environment:
+        name: pypi
+        url: https://pypi.org/p/suan_pyqt_vtk_mat
+      permissions:
+        id-token: write
+      steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v3
+        with:
+          name: pyqt
+          path: apps/template/pyqt/dist/
+      - name: Publish pyqt to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{secrets.PYPI_API_TOKEN}}
+          packages-dir: apps/template/pyqt/dist/
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+      - name: publish to PYPI
+        if: github.event_name == 'release' && github.event.action == 'published'  
+        uses: pypa/gh-action-pypi-publish@v1.8.12
+        with:
+            packages-dir: apps/template/pyqt/dist/
+            user: __token__
+            skip-existing: true
+            password: ${{secrets.PYPI_API_TOKEN}}
 
-        # - name: build wheels
-        #   uses: pypa/cibuildwheel@v2.16.5
-        #   with:
-        #         package-dir: apps/template/pyqt/
-        #   env:
-        #         CIBW_BUILD_VERBOSITY: 1
-        #         CIBW_BUILD_FRONTEND: build
-        #         CIBW_SKIP: "*-manylinux_i686 pp*"  # 这个配置告诉 cibuildwheel 只为 64 位 Windows、64 位 Linux 和 macOS 构建 wheels。它跳过了 32 位环境,因为现在大多数系统都是 64 位的。
 
-        - uses: actions/upload-artifact@v4
-          with:
-                name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-                path: apps/template/pyqt/dist/*.whl
 
-    build_sdist:  # 源代码打包单平台即可
-        name: Build source distribution
-        runs-on: ubuntu-latest
-        steps:
-        - uses: actions/checkout@v4
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# name: Publish pyqt to PyPI and TestPyPI
+# on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测试发布，而release用来正式发布
+#   release:
+#     types: [published]
+#   push:
+#     # Alternative: only build for tags.
+#     tags:
+#       - 'v*'
+# jobs:
+#     build_wheels:  
+#         name: Build wheels on ${{ matrix.os }}
+#         runs-on: ${{ matrix.os }}
+#         strategy:
+#             matrix: 
+#                 os: [ubuntu-latest, windows-latest]  # 没有macos，因为我的编译没通过。。。
+#         steps:
+
+#         - uses: actions/checkout@v4
+#           with:
+#                 submodules: 'recursive'
+#         - name: get tag
+#           run: |
+#                 echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
+    
+#         - name: fix tauri version
+#           run : |
+#                     pip install toml
+#                     python apps/template/pyqt/fix_version.py
+#         - name: Install cibuildwheel
+#           run: | 
+#             python -m pip install cibuildwheel
+
+#         - name: build wheels
+#           uses: pypa/cibuildwheel@v2.16.5
+#           with:
+#                 package-dir: apps/template/pyqt/
+#           env:
+#                 CIBW_BUILD_VERBOSITY: 1
+#                 CIBW_BUILD_FRONTEND: build
+#                 CIBW_SKIP: "*-manylinux_i686 pp*"  # 这个配置告诉 cibuildwheel 只为 64 位 Windows、64 位 Linux 和 macOS 构建 wheels。它跳过了 32 位环境,因为现在大多数系统都是 64 位的。
+
+#         - uses: actions/upload-artifact@v4
+#           with:
+#                 name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+#                 path: ./wheelhouse/*.whl
+
+#     build_sdist:  # 源代码打包单平台即可
+#         name: Build source distribution
+#         runs-on: ubuntu-latest
+#         steps:
+#         - uses: actions/checkout@v4
             
-        - name: Build sdist
-          run: |
-            cd apps/template/pyqt       
-            pwd
-            pipx run build --sdist
+#         - name: Build sdist
+#           run: |
+#             cd apps/template/pyqt       
+#             pwd
+#             pipx run build --sdist
             
-        - uses: actions/upload-artifact@v4
-          with:
-            name: cibw-sdist
-            path:  apps/template/pyqt/dist/*.tar.gz
+#         - uses: actions/upload-artifact@v4
+#           with:
+#             name: cibw-sdist
+#             path:  apps/template/pyqt/dist/*.tar.gz
 
-    upload:  # 上传到PyPI
-        needs: [build_wheels, build_sdist]
-        runs-on: ubuntu-latest 
-        environment: pypi
-        permissions:
-              id-token: write  
-        steps:
-            - uses: actions/download-artifact@v4  
-              with:
-                # unpacks all CIBW artifacts into dist/
-                pattern: cibw-*
-                path: dist
-                merge-multiple: true
+#     upload:  # 上传到PyPI
+#         needs: [build_wheels, build_sdist]
+#         runs-on: ubuntu-latest 
+#         environment: pypi
+#         permissions:
+#               id-token: write  
+#         steps:
+#             - uses: actions/download-artifact@v4  
+#               with:
+#                 # unpacks all CIBW artifacts into dist/
+#                 pattern: cibw-*
+#                 path: dist
+#                 merge-multiple: true
         
-            - name: publish to Test PyPI
-              uses: pypa/gh-action-pypi-publish@v1.8.12
-              with:
-                repository-url: https://test.pypi.org/legacy/
-                packages-dir: dist/
-                skip-existing: true
-                password: ${{secrets.PYPI_API_TOKEN}}
-                user: __token__
+#             - name: publish to Test PyPI
+#               uses: pypa/gh-action-pypi-publish@v1.8.12
+#               with:
+#                 repository-url: https://test.pypi.org/legacy/
+#                 packages-dir: dist/
+#                 skip-existing: true
+#                 password: ${{secrets.PYPI_API_TOKEN}}
+#                 user: __token__
         
-            - name: publish to PYPI
-              if: github.event_name == 'release' && github.event.action == 'published'  
-              uses: pypa/gh-action-pypi-publish@v1.8.12
-              with:
-                packages-dir: dist/    
+#             - name: publish to PYPI
+#               if: github.event_name == 'release' && github.event.action == 'published'  
+#               uses: pypa/gh-action-pypi-publish@v1.8.12
+#               with:
+#                 packages-dir: dist/    
                 
                 
