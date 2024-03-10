@@ -66,6 +66,6 @@ jobs:
         with:
           user: __token__
           password: ${{secrets.PYPI_API_TOKEN}}
-        #   packages-dir: apps/template/pyqt/dist/
+          packages-dir: apps/template/pyqt/dist/
         #   repository-url: https://test.pypi.org/legacy/
         #   skip-existing: true
