@@ -52,7 +52,7 @@ jobs:
       runs-on: ubuntu-latest
       environment:
         name: pypi
-        url: https://test.pypi.org/p/suan_pyqt_vtk_mat
+        url: https://test.pypi.org/p/pyqt_vtk_mat
       permissions:
         id-token: write
       steps:
