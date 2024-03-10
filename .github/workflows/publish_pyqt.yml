@@ -26,6 +26,7 @@ jobs:
 
       - name: fix tauri version
         run : |
+                pip install toml
                 python apps/template/pyqt/fix_version.py
       - name: Install pypa/build
         run: >-
