@@ -65,10 +65,19 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.x"
+    - name: build exe
+      run:  |
+        cd apps\template\pyqt\src
+        pip install pyinstaller
+        pyinstaller .\main.spec
     - name: Install NSIS
       run: |
-        iwr -useb get.scoop.sh -outfile 'install.ps1'
-        .\install.ps1 -RunAsAdmin
+        iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
+        .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
         scoop update
         scoop bucket add extras
         scoop install nsis
