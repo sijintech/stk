@@ -35,8 +35,9 @@ jobs:
         python-version: "3.x"
     - name: build exe
       run:  |
+        cd apps\template\pyqt\src
         pip install pyinstaller
-        pyinstaller apps\template\pyqt\src\main.spec
+        pyinstaller .\main.spec
       
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v1.0.2

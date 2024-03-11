@@ -1,10 +1,7 @@
 name: Publish pyqt to PyPI and TestPyPI
-on:
-  workflow_dispatch:
-    inputs:
-        tags:
-          description: "v*"
-          required: true
+on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测试发布，而release用来正式发布
+  release:
+    types: [published]
   push:
       # 匹配特定标签 (refs/tags)
       tags:
