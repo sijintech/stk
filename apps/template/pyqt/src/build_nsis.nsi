@@ -1,3 +1,4 @@
+Name "suan"
 ; 定义安装包的名称和版本
 Outfile "../app_dist/suan.exe"
 VIProductVersion "1.0.0"
