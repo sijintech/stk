@@ -85,3 +85,26 @@ jobs:
       run: makensis -VERSION
     - name: build app
       run: makensis apps\template\pyqt\src\build_nsis.nsi
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v1.0.0
+        release_name: Release v1.0.0
+        body: |
+          Release v1.0.0
+        draft: false
+        prerelease: false
+
+    - name: Upload File
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: apps\template\pyqt\app_dist\suan.exe
+        asset_name: suan.exe
+        asset_content_type: application/octet-stream
