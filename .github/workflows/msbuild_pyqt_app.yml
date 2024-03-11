@@ -29,7 +29,14 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.x"
+    - name: build exe
+      run:  |
+        pyinstaller apps\template\pyqt\src\main.spec
+      
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v1.0.2
 
