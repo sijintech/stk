@@ -54,7 +54,7 @@ SetCompressor lzma
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 ;输出安装包文件的位置（需修改）
-OutFile "..\dist\suan_pyqt.exe"
+OutFile "..\app_dist\suan_pyqt.exe"
 InstallDir "$PROGRAMFILES\suan"
 InstallDirRegKey HKLM "${PRODUCT_UNINST_KEY}" "UninstallString"
 ShowInstDetails show
