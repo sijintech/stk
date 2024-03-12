@@ -92,10 +92,10 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v0.0.25
-        release_name: Release v0.0.25
+        tag_name: v0.0.26
+        release_name: Release v0.0.26
         body: |
-          Release v0.0.25
+          Release v0.0.26
         draft: false
         prerelease: false
 
