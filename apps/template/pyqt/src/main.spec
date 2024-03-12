@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['main.py'],
+    ['main.py','left_sidebar.py','center_widget.py','right_sidebar.py','toolbar.py','statusbar.py','info_bar.py'],
     pathex=[],
     binaries=[],
     datas=[],
