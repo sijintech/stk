@@ -97,10 +97,10 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v0.0.29
-        release_name: Release v0.0.29
+        tag_name: v0.0.30
+        release_name: Release v0.0.30
         body: |
-          Release v0.0.29
+          Release v0.0.30
         draft: false
         prerelease: false
 
