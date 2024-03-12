@@ -15,9 +15,6 @@ Section
 SetOutPath $INSTDIR
 
 ; 将生成的 EXE 文件添加到安装包中
-File ".\dist\main\main.exe"
-
-; 添加其他文件到安装包
-File /r ".\dist\main\_internal"
+File ".\dist\main.exe"
 
 SectionEnd
