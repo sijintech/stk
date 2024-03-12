@@ -73,6 +73,11 @@ jobs:
       run:  |
         cd apps\template\pyqt\src
         pip install pyinstaller
+        pip install PyQt5
+        pip install vtk
+        pip install matplotlib
+        pip install pandas
+        pip install numpy
         pyinstaller .\main.spec
     - name: Install NSIS
       run: |
@@ -92,10 +97,10 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v0.0.28
-        release_name: Release v0.0.28
+        tag_name: v0.0.29
+        release_name: Release v0.0.29
         body: |
-          Release v0.0.28
+          Release v0.0.29
         draft: false
         prerelease: false
 
