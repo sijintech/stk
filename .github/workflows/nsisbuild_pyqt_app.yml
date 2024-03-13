@@ -85,7 +85,7 @@ jobs:
         pip install matplotlib
         pip install pandas
         pip install numpy
-        pyinstaller -F .\main.spec
+        pyinstaller .\main.spec
     - name: Install NSIS
       run: |
         iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
@@ -95,7 +95,10 @@ jobs:
         scoop install nsis
 
     - name: build app
-      run: makensis apps\template\pyqt\src\build_nsis1.nsi
+      run: |
+          makensis apps\template\pyqt\src\build_nsis1.nsi
+          cd apps\template\pyqt\src\dist
+          ls
 
     - name: Create Release
       id: create_release
