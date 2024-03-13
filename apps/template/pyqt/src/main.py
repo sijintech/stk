@@ -4,17 +4,15 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHB
 
 from PyQt5.QtCore import Qt 
 
-from left_sidebar import LeftSidebar
+import left_sidebar 
 
-from center_widget import CenterWidget
+import center_widget 
+import right_sidebar 
+import toolbar
 
-from right_sidebar import RightSidebar
+import statusbar 
 
-from toolbar import Toolbar
-
-from statusbar import Statusbar
-
-from info_bar import InfoBar
+import info_bar 
 
 
 class MainWindow(QMainWindow):
@@ -26,32 +24,32 @@ class MainWindow(QMainWindow):
 
         # 创建中部区域
 
-        self.center_widget = CenterWidget()
+        self.center_widget = center_widget.CenterWidget()
 
 
         # 创建右侧栏
 
-        self.right_sidebar = RightSidebar(self)
+        self.right_sidebar = right_sidebar.RightSidebar(self)
 
 
          # 创建底部状态栏
 
-        self.status_bar = Statusbar()
+        self.status_bar = statusbar.Statusbar()
 
 
         # 创建信息栏
 
-        self.info_bar = InfoBar(self)
+        self.info_bar = info_bar.InfoBar(self)
 
 
         # 创建左侧栏
 
-        self.left_sidebar = LeftSidebar(self)
+        self.left_sidebar = left_sidebar.LeftSidebar(self)
 
 
         # 创建顶部工具栏
 
-        self.toolbar = Toolbar(50, self)
+        self.toolbar = toolbar.Toolbar(50, self)
 
 
 
