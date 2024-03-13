@@ -53,12 +53,16 @@
 #       run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
 
 
-name: NSIS
+name: NSISbuild
 
 on:
+  # push:
+  #   branches:
+  #     - main
   push:
-    branches:
-      - main
+    # 匹配特定标签 (refs/tags)
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -69,6 +73,9 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: "3.x"
+    - name: get tag
+      run: |
+        echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
     - name: build exe
       run:  |
         cd apps\template\pyqt\src
@@ -78,7 +85,7 @@ jobs:
         pip install matplotlib
         pip install pandas
         pip install numpy
-        pyinstaller .\main.spec
+        pyinstaller -F .\main.spec
     - name: Install NSIS
       run: |
         iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
@@ -86,8 +93,7 @@ jobs:
         scoop update
         scoop bucket add extras
         scoop install nsis
-    - name: Print NSIS version
-      run: makensis -VERSION
+
     - name: build app
       run: makensis apps\template\pyqt\src\build_nsis1.nsi
 
@@ -97,10 +103,10 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v0.0.30
-        release_name: Release v0.0.30
+        tag_name: ${{ env.TAG }}
+        release_name: Release ${{ env.TAG }}
         body: |
-          Release v0.0.30
+          Release ${{ env.TAG }}
         draft: false
         prerelease: false
 
