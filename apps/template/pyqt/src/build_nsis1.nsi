@@ -63,8 +63,12 @@ ShowUnInstDetails show
 Section "MainSection" SEC01
   SetOutPath "$INSTDIR"
   SetOverwrite ifnewer
+
   ;要打包的exe文件（需修改）
-  File ".\dist\suan_pyqt.exe"
+  SetCompress off
+  File ".\dist\suan_pyqt.exe" /nopatch
+  SetCompress auto
+  
   CreateDirectory "$SMPROGRAMS\suan"
   CreateShortCut "$SMPROGRAMS\suan\suan.lnk" "$INSTDIR\suan_pyqt.exe"
   CreateShortCut "$DESKTOP\suan.lnk" "$INSTDIR\suan_pyqt.exe"
