@@ -11,7 +11,7 @@
 ;用于指定应用程序卸载信息在 Windows 注册表中的根键（即根目录）
 !define PRODUCT_UNINST_ROOT_KEY "HKLM"
 
-SetCompressor lzma
+SetCompress off
 
 ; ------ MUI 现代界面定义 (1.67 版本以上兼容) ------
 !include "MUI.nsh"
@@ -65,10 +65,8 @@ Section "MainSection" SEC01
   SetOverwrite ifnewer
 
   ;要打包的exe文件（需修改）
-  SetCompress off
   File ".\dist\suan_pyqt.exe" /nopatch
-  SetCompress auto
-  
+
   CreateDirectory "$SMPROGRAMS\suan"
   CreateShortCut "$SMPROGRAMS\suan\suan.lnk" "$INSTDIR\suan_pyqt.exe"
   CreateShortCut "$DESKTOP\suan.lnk" "$INSTDIR\suan_pyqt.exe"
