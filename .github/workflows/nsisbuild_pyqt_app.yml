@@ -64,7 +64,7 @@ on:
   #   tags:
   #     - 'v*'
 env:
-    TAG: 0.0.10
+    TAG: 0.0.11
 jobs:
   build:
     runs-on: windows-latest
@@ -87,19 +87,20 @@ jobs:
         pip install pandas
         pip install numpy
         pyinstaller .\main.spec
-    - name: Install NSIS
-      run: |
-        iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
-        .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
-        scoop update
-        scoop bucket add extras
-        scoop install nsis
+        
+    # - name: Install NSIS
+    #   run: |
+    #     iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
+    #     .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
+    #     scoop update
+    #     scoop bucket add extras
+    #     scoop install nsis
 
-    - name: build app
-      run: |
-          makensis apps\template\pyqt\src\build_nsis1.nsi
-          cd apps\template\pyqt\src\dist
-          ls
+    # - name: build app
+    #   run: |
+    #       makensis apps\template\pyqt\src\build_nsis1.nsi
+    #       cd apps\template\pyqt\src\dist
+    #       ls
 
     - name: Create Release
       id: create_release
@@ -120,7 +121,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: apps\template\pyqt\app_dist\suan_nsis.exe
-        # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
-        asset_name: suan_nsis.exe
+        # asset_path: apps\template\pyqt\app_dist\suan_nsis.exe
+        asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
+        asset_name: suan_nsiss.exe
         asset_content_type: application/octet-stream
