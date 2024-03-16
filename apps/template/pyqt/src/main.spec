@@ -12,7 +12,7 @@ a = Analysis(
     # 数据文件列表
     datas=[],
     # 隐藏导入的模块列表，这些模块将不被打包到输出文件中
-    hiddenimports=['PyQt5','vtk','matplotlib','pandas', 'numpy','sys'],
+    hiddenimports=['PyQt5','vtk','matplotlib','pandas', 'numpy','sys','left_sidebar','center_widget','right_sidebar','toolbar','statusbar','info_bar'],
     # 钩子文件路径列表
     hookspath=[],
     # 钩子配置字典

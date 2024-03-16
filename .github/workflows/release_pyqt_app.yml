@@ -64,7 +64,7 @@ on:
   #   tags:
   #     - 'v*'
 env:
-    TAG: 0.0.21
+    TAG: 0.0.24
 jobs:
   build:
     runs-on: windows-latest
@@ -77,11 +77,11 @@ jobs:
     - name: get tag
       run: |
         echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
-    - name: Setup virtual environment
-      run:  |
-        python -m venv .venv
-        . .venv\Scripts\activate 
-        python.exe -m pip install -U pip
+    # - name: Setup virtual environment
+    #   run:  |
+    #     python -m venv .venv
+    #     . .venv\Scripts\activate 
+    #     python.exe -m pip install -U pip
     - name: build exe
       run:  |
         cd apps\template\pyqt\src
@@ -91,7 +91,8 @@ jobs:
         pip install matplotlib
         pip install pandas
         pip install numpy
-        pyinstaller .\main.spec
+        # pyinstaller .\main.spec
+        
         
     # - name: Install NSIS
     #   run: |
@@ -102,11 +103,11 @@ jobs:
     #     scoop install nsis
     
 
-    # - name: build app
-    #   run: |
-    #       makensis apps\template\pyqt\src\build_nsis1.nsi
-    #       cd apps\template\pyqt\src\dist
-    #       ls
+    - name: build app
+      run: |
+          makensis apps\template\pyqt\src\build_nsis1.nsi
+          cd apps\template\pyqt\src\dist
+          ls
 
     - name: Create Release
       id: create_release
