@@ -64,10 +64,10 @@ on:
   #   tags:
   #     - 'v*'
 env:
-    TAG: 0.0.11
+    TAG: 0.0.12
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: self-hosted-windows
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python
