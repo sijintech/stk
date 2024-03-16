@@ -42,8 +42,8 @@ cd ..\
 
 
 REM 执行 git 操作
-git lfs track .\src\dist\suan_pyqt.zip
+REM git lfs track .\src\dist\suan_pyqt.zip
 git add .
 git commit -m "Release %1"
-git tag -a %1 -m "Release %1"
-git push origin %1
+git tag v%1 
+git push --tag
