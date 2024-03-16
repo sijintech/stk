@@ -56,18 +56,18 @@
 name: NSISbuild
 
 on:
-  push:
-    branches:
-      - main
   # push:
-  #   # 匹配特定标签 (refs/tags)
-  #   tags:
-  #     - 'v*'
-env:
-    TAG: 0.0.12
+  #   branches:
+  #     - main
+  push:
+    # 匹配特定标签 (refs/tags)
+    tags:
+      - 'v*'
+# env:
+#     TAG: 0.0.11
 jobs:
   build:
-    runs-on: self-hosted-windows
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python
@@ -77,16 +77,16 @@ jobs:
     - name: get tag
       run: |
         echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
-    - name: build exe
-      run:  |
-        cd apps\template\pyqt\src
-        pip install pyinstaller
-        pip install PyQt5
-        pip install vtk
-        pip install matplotlib
-        pip install pandas
-        pip install numpy
-        pyinstaller .\main.spec
+    # - name: build exe
+    #   run:  |
+    #     cd apps\template\pyqt\src
+    #     pip install pyinstaller
+    #     pip install PyQt5
+    #     pip install vtk
+    #     pip install matplotlib
+    #     pip install pandas
+    #     pip install numpy
+    #     pyinstaller .\main.spec
         
     # - name: Install NSIS
     #   run: |
@@ -96,17 +96,18 @@ jobs:
     #     scoop bucket add extras
     #     scoop install nsis
 
-    # - name: build app
-    #   run: |
-    #       makensis apps\template\pyqt\src\build_nsis1.nsi
-    #       cd apps\template\pyqt\src\dist
-    #       ls
+    - name: build app
+      run: |
+          makensis apps\template\pyqt\src\build_nsis1.nsi
+          cd apps\template\pyqt\src\dist
+          ls
 
     - name: Create Release
       id: create_release
       uses: actions/create-release@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG:  ${{env.TAG }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
       with:
         tag_name: ${{env.TAG }}
         release_name: Release ${{ env.TAG }}
