@@ -80,7 +80,7 @@ jobs:
     - name: Setup virtual environment
       run:  |
         python -m venv .venv
-        call .venv\Scripts\activate 
+        . .venv\Scripts\activate 
         python.exe -m pip install -U pip
     - name: build exe
       run:  |
