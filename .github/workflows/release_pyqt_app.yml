@@ -91,7 +91,7 @@ jobs:
         pip install matplotlib
         pip install pandas
         pip install numpy
-        # pyinstaller .\main.spec
+        pyinstaller .\main.spec
 
         
     # - name: Install NSIS
