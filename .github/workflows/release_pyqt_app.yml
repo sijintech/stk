@@ -1,0 +1,134 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+# name: MSBuild
+
+# on:
+#   push:
+#     branches: [ "main" ]
+#   pull_request:
+#     branches: [ "main" ]
+
+# env:
+#   # Path to the solution file relative to the root of the project.
+#   SOLUTION_FILE_PATH: apps\template\pyqt\src\dist\main\
+
+#   # Configuration type to build.
+#   # You can convert this to a build matrix if you need coverage of multiple configuration types.
+#   # https://docs.github.com/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+#   BUILD_CONFIGURATION: Release
+
+# permissions:
+#   contents: read
+
+# jobs:
+#   build:
+#     runs-on: windows-latest
+
+#     steps:
+#     - uses: actions/checkout@v3
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: "3.x"
+#     - name: build exe
+#       run:  |
+#         cd apps\template\pyqt\src
+#         pip install pyinstaller
+#         pyinstaller .\main.spec
+      
+#     - name: Add MSBuild to PATH
+#       uses: microsoft/setup-msbuild@v1.0.2
+
+#     - name: Restore NuGet packages
+#       working-directory: ${{env.GITHUB_WORKSPACE}}
+#       run: nuget restore ${{env.SOLUTION_FILE_PATH}}
+
+#     - name: Build
+#       working-directory: ${{env.GITHUB_WORKSPACE}}
+#       # Add additional options to the MSBuild command line here (like platform or verbosity level).
+#       # See https://docs.microsoft.com/visualstudio/msbuild/msbuild-command-line-reference
+#       run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
+
+
+name: NSISbuild
+
+on:
+  push:
+    branches:
+      - main
+  # push:
+  #   # 匹配特定标签 (refs/tags)
+  #   tags:
+  #     - 'v*'
+env:
+    TAG: 0.0.20
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.x"
+    - name: get tag
+      run: |
+        echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
+    - name: Setup virtual environment
+      run:  |
+        python -m venv .venv
+        call .venv\Scripts\activate 
+        python.exe -m pip install -U pip
+    - name: build exe
+      run:  |
+        cd apps\template\pyqt\src
+        pip install pyinstaller
+        pip install PyQt5
+        pip install vtk
+        pip install matplotlib
+        pip install pandas
+        pip install numpy
+        pyinstaller .\main.spec
+        
+    # - name: Install NSIS
+    #   run: |
+    #     iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
+    #     .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
+    #     scoop update
+    #     scoop bucket add extras
+    #     scoop install nsis
+    
+
+    # - name: build app
+    #   run: |
+    #       makensis apps\template\pyqt\src\build_nsis1.nsi
+    #       cd apps\template\pyqt\src\dist
+    #       ls
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        TAG:  ${{env.TAG }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
+      with:
+        tag_name: ${{env.TAG }}
+        release_name: Release ${{ env.TAG }}
+        body: |
+          Release ${{ env.TAG }}
+        draft: false
+        prerelease: false
+
+    - name: Upload File
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        # asset_path: apps\template\pyqt\app_dist\suan_nsis.exe
+        asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
+        asset_name: suan_nsiss.exe
+        asset_content_type: application/octet-stream

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "suan_pyqt_vtk_mat"
 version = "0.0.0"
 description = "This is a tool to vtk and matploblib."
-readme = "README.md"
+readme = "pypi_README.md"
 requires-python = ">=3.8"
 dependencies = [ "numpy>=1.20.0", "toml>=0.8.2", "matplotlib", "PyQt5", "vtk",]
 classifiers = [ "Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License", "Operating System :: POSIX :: Linux",]
