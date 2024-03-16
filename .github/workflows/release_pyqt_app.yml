@@ -92,7 +92,7 @@ jobs:
         pip install pandas
         pip install numpy
         # pyinstaller .\main.spec
-        
+
         
     # - name: Install NSIS
     #   run: |
@@ -103,11 +103,11 @@ jobs:
     #     scoop install nsis
     
 
-    - name: build app
-      run: |
-          makensis apps\template\pyqt\src\build_nsis1.nsi
-          cd apps\template\pyqt\src\dist
-          ls
+    # - name: build app
+    #   run: |
+    #       makensis apps\template\pyqt\src\build_nsis1.nsi
+    #       cd apps\template\pyqt\src\dist
+    #       ls
 
     - name: Create Release
       id: create_release
