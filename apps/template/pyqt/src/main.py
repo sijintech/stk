@@ -15,6 +15,31 @@ import statusbar
 import info_bar 
 
 
+import 自动更新模块 
+import version
+全局变量_版本号 = version.version
+全局_项目名称 = "duolabmeng6/QtEasyDesigner"
+全局_应用名称 = "QtEasyDesigner.app"
+全局_当前版本 = version.version
+全局_官方网址 = "https://github.com/duolabmeng6/QtEasyDesigner"
+
+
+def 检查更新回到回调函数(self, 数据):
+    # print("数据", 数据)
+    最新版本号 = 数据['版本号']
+    发布时间 = 数据['发布时间']
+    发布时间 = 到时间(发布时间).取日期()
+    try:
+        最新版本 = f"最新版更新于:{发布时间}({最新版本号})"
+    except:
+        pass
+        最新版本 = "查询失败"
+    self.状态条标签.setText(f"欢迎使用 Qt视窗设计器(QtEasyDesigner) 当前版本:{全局变量_版本号} {最新版本}")
+
+def 更新版本号(self):
+    self.检查更新线程 = 自动更新模块.检查更新线程(全局_项目名称, self.检查更新回到回调函数)
+    self.检查更新线程.start()
+
 class MainWindow(QMainWindow):
 
     def __init__(self):
