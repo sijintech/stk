@@ -1,5 +1,7 @@
-from PyQt5.QtWidgets import QMessageBox, QAction, QMenu, QFileDialog, QTextEdit,QWidget,QVBoxLayout,QTabWidget
-from PyQt5.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox, QMenu, QFileDialog, QTextEdit,QWidget,QVBoxLayout,QTabWidget
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
+
 import re
 
 

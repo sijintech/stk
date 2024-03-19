@@ -1,7 +1,7 @@
-from PyQt5.QtCore import QFileInfo
+from PySide6.QtCore import QFileInfo
 
-from PyQt5.QtWidgets import QToolBar, QAction, QMenu, QFileDialog, QTextEdit
-
+from PySide6.QtWidgets import QToolBar, QMenu, QFileDialog, QTextEdit
+from PySide6.QtGui import QAction
 
 class Toolbar(QToolBar):
 

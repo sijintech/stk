@@ -3,10 +3,10 @@
 
 a = Analysis(
     ['main.py'],
-    pathex=['center_widget.py', 'info_bar.py', 'right_sidebar.py', 'left_sidebar.py', 'statusbar.py', 'toolbar.py'],
+    pathex=['.'],
     binaries=[],
     datas=[],
-    hiddenimports=['center_widget', 'info_bar', 'right_sidebar', 'left_sidebar', 'statusbar', 'toolbar', 'PyQt5', 'vtk', 'matplotlib', 'numpy'],
+    hiddenimports=['center_widget', 'Updater','info_bar', 'right_sidebar', 'left_sidebar', 'statusbar', 'toolbar', 'PySide6', 'vtk', 'matplotlib', 'numpy'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

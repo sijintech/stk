@@ -1,0 +1,10 @@
+{
+    "name": "suan_pyqt.exe",
+    "version": "1.0",
+    "downloadUrl": "https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/nsis/suan_pyqt_0.0.1.exe",
+    "changelog": [
+        {"version": "0.0.1", "changes": ["修复了某些 bug", "改进了性能"]},
+        {"version": "0.0.0", "changes": ["首个发布版本"]}
+    ],
+    "minimumVersion": "0.0.1"
+}

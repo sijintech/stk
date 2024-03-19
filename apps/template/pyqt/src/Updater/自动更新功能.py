@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import json
 import os
 import platform
@@ -130,11 +131,11 @@ def 更新自己Window应用(exe资源文件路径):
     return True, ""
 
 
-class 下载文件线程类(QThread):
+class download_file_thread(QThread):
     刷新进度条 = QtCore.Signal(int, str)  # 进度 提示文本
 
     def __init__(self, *args, **kwargs):
-        super(下载文件线程类, self).__init__()
+        super(download_file_thread, self).__init__()
         self.窗口 = kwargs.get('窗口')
         self.下载地址 = kwargs.get('下载地址')
         self.保存地址 = kwargs.get('保存地址')
@@ -181,25 +182,30 @@ class 下载文件线程类(QThread):
             self.进度条.setValue(int(进度))
 
 
-class 检查更新线程(QThread):
-    def __init__(self, Github项目名称="duolabmeng6/qtAutoUpdateApp", 回调函数=None):
-        super(检查更新线程, self).__init__()
+class check_update_thread(QThread):
+    def __init__(self, updatejson_url, callback=None):
+        super(check_update_thread, self).__init__()
         # 绑定线程开始事件
-        self.started.connect(self.ui_开始)
+        self.started.connect(self.ui_start)
         # 绑定线程结束事件
-        self.finished.connect(self.ui_结束)
-        self.Github项目名称 = Github项目名称
-        self.回调函数 = 回调函数
+        self.finished.connect(self.ui_end)
+        self.updatejson_url = updatejson_url
+        self.callback = callback
 
     def run(self):
-        data = 获取最新版本号和下载地址(self.Github项目名称)
-        self.数据 = data
-
-    def ui_开始(self):
-        pass
-        # print("开始检查更新")
-
-    def ui_结束(self):
-        # data = json.dumps(self.数据, indent=4, ensure_ascii=False)
+        print('检查更新中')
+        data = 获取最新版本号和下载地址(self.updatejson_url)
+        self.data = data
+        # self.callback(self.data)
         # print("检查更新结果", data)
-        self.回调函数(self.数据)
+
+
+    def ui_start(self):
+        # pass
+        print("开始检查更新")
+        # self.run()
+
+    def ui_end(self):
+        # data = json.dumps(self.数据, indent=4, ensure_ascii=False)
+        print("检查更新结果", self.data)
+        self.callback(self.data)

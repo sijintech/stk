@@ -6,8 +6,8 @@
 ## 如何打包并发布到github
     window下 运行批处理文件：
        `$ .\nsisbuid_and_release.bat tag_num` 
-    
-
-
+    pip install matplotlib==3.6.2
+    pip install PySide6==6.4.0
+    'center_widget.py', 'info_bar.py', 'right_sidebar.py', 'left_sidebar.py', 'statusbar.py', 'toolbar.py','Updater\\'
 
 

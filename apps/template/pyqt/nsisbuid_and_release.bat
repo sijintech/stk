@@ -14,7 +14,7 @@ REM pip install -U pip
 python.exe -m pip install -U pip
 
 REM 设置需要检查的python软件包列表
-set "PACKAGES=pyinstaller PyQt5 vtk matplotlib pandas numpy"
+set "PACKAGES=pyinstaller PySide6 vtk matplotlib pandas numpy"
 
 REM 创建临时文件来存储 `pip show` 命令的输出
 set "TEMP_FILE=%TEMP%\pip_show_output.txt"

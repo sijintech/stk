@@ -1,7 +1,7 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QTabWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTabWidget
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg 
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg 
 import matplotlib.pyplot as plt
 class CustomFigureCanvas(FigureCanvasQTAgg):
     def __init__(self, figure=None):

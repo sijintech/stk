@@ -1,9 +1,9 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QFileSystemModel, QTreeView
-from PyQt5.QtCore import QModelIndex, Qt,pyqtSignal
-from PyQt5.QtCore import QFileInfo
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QFileSystemModel, QTreeView
+from PySide6.QtCore import QModelIndex, Qt,Signal
+from PySide6.QtCore import QFileInfo
 
 class LeftSidebar(QWidget):
-    openFilePath = pyqtSignal(str)  # 定义一个信号，用于发送打开文件请求
+    openFilePath = Signal(str)  # 定义一个信号，用于发送打开文件请求
     def __init__(self, parent):
         super().__init__()
         self.parent = parent

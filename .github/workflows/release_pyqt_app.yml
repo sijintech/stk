@@ -56,15 +56,15 @@
 name: NSISbuild
 
 on:
-  # push:
-  #   branches:
-  #     - main
   push:
-    # 匹配特定标签 (refs/tags)
-    tags:
-      - 'v*'
-# env:
-#     TAG: 0.0.27
+    branches:
+      - main
+  # push:
+  #   # 匹配特定标签 (refs/tags)
+  #   tags:
+  #     - 'v*'
+env:
+    TAG: 0.0.28
 jobs:
   build:
     runs-on: windows-latest
@@ -87,13 +87,13 @@ jobs:
         python.exe -m pip install -U pip
         cd apps\template\pyqt\src
         pip install pyinstaller
-        pip install PyQt5
+        pip install PySide6
         pip install vtk
         pip install matplotlib
         pip install pandas
         pip install numpy
-        # pyinstaller .\main.spec
-        python -m PyInstaller -F --clean --noconfirm -w --name suan_pyqt --hidden-import center_widget --hidden-import info_bar --hidden-import right_sidebar --hidden-import left_sidebar --hidden-import statusbar --hidden-import toolbar --hidden-import PyQt5 --hidden-import vtk --hidden-import matplotlib --hidden-import numpy -p center_widget.py -p info_bar.py -p right_sidebar.py -p left_sidebar.py -p statusbar.py -p toolbar.py main.py
+        pyinstaller .\main.spec
+        # python -m PyInstaller -F --clean --noconfirm -w --name suan_pyqt --hidden-import center_widget --hidden-import info_bar --hidden-import right_sidebar --hidden-import left_sidebar --hidden-import statusbar --hidden-import toolbar --hidden-import PySide6 --hidden-import vtk --hidden-import matplotlib --hidden-import numpy -p center_widget.py -p info_bar.py -p right_sidebar.py -p left_sidebar.py -p statusbar.py -p toolbar.py main.py
 
         
     - name: Install NSIS

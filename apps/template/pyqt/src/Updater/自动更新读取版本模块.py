@@ -1,70 +1,64 @@
 # https://github.com/duolabmeng6/qtAutoUpdateApp/releases
 import re
+import urllib.request
+import json
 
 
-def 获取最新版本号和下载地址_需要token(project_name):
-    # 读取github项目中的最新的版本号
-    # pip install PyGithub
-    from github import Github
-    # 这个代码..尴尬了..在客户端无法跑 应部署在服务器上
-    g = Github("...token...")
-    repo = g.get_repo(project_name)
-    latest_release = repo.get_latest_release()
-    版本号 = latest_release.tag_name
-    body = latest_release.body
-    created_at = latest_release.created_at
-
-    mac下载地址 = ""
-    win下载地址 = ""
-    下载地址列表 = []
-    for item in latest_release.get_assets():
-        下载地址 = item.browser_download_url
-        文件名 = item.name
-        下载地址列表.append([
-            文件名, 下载地址
-        ])
-        if 文件名.find('MacOS.zip') != -1:
-            mac下载地址 = 下载地址
-        if 文件名.find('.exe') != -1:
-            win下载地址 = 下载地址
-    return {
-        "版本号": 版本号,
-        "下载地址列表": 下载地址列表,
-        "mac下载地址": mac下载地址,
-        "win下载地址": win下载地址,
-        "更新内容": body,
-        "发布时间": str(created_at)
-    }
 
 
 import requests
 
 
-def 获取最新版本号和下载地址(project_name):
-    # 通过访问最新的页面 获取版本号和下载地址和更新内容
-    # https://github.com/duolabmeng6/qtAutoUpdateApp/releases/latest
-    # 镜像地址也可以自己造一个 https://quiet-boat-a038.duolabmeng.workers.dev/
-    #https://github.com/duolabmeng6/qoq/releases/expanded_assets/v0.1.5
-    url = f"https://ghproxy.com/https://github.com/{project_name}/releases/latest"
-    # print(url)
-    jsondata = requests.get(url)
+# def 获取最新版本号和下载地址(project_name):
+#     # 通过访问最新的页面 获取版本号和下载地址和更新内容
+#     # https://github.com/duolabmeng6/qtAutoUpdateApp/releases/latest
+#     # 镜像地址也可以自己造一个 https://quiet-boat-a038.duolabmeng.workers.dev/
+#     #https://github.com/duolabmeng6/qoq/releases/expanded_assets/v0.1.5
+#     # https://github.com/duolabmeng6/qtAutoUpdateApp/releases/tag/v0.0.68
+#     # https://ghproxy.com/https://github.com/{project_name}/releases/latest
+#     print('开始解析网页')
+#     url = f"https://github.com/{project_name}/releases/latest"
+#     print(url)
+#     # jsondata = requests.get(url,proxies={})
+#     response = urllib.request.urlopen(url)
+#     # jsondata = json.loads(response.read().decode('utf-8'))
+#     jsondata = response.read().decode('utf-8')
+#     # print(response.read())
 
 
-    # 写出文件
-    # with open('test.html', "w", encoding="utf-8") as f:
-    #     f.write(jsondata.text)
-    # 获取版本号
+#     # 写出文件
+#     # with open('test.html', "w", encoding="utf-8") as f:
+#     #     f.write(jsondata.text)
+#     # 获取版本号
 
 
 
-    return 解析网页信息(jsondata.text,project_name)
-
+#     return 解析网页信息(jsondata,project_name)
+def 获取最新版本号和下载地址(url):
+    try:
+        response = urllib.request.urlopen(url)
+        if response.getcode() == 200:
+            data = json.loads(response.read().decode('utf-8'))
+            return {
+                "版本号": data["version"],
+                "下载地址列表":data["download_list"],
+                "更新内容": data["changelog"],
+                "发布时间": data["releasetime"],
+                "mac下载地址": data["mac_download"],
+                "win下载地址": data["win_download"]
+            }
+        else:
+            print("HTTP 请求失败:", response.getcode())
+            return None
+    except Exception as e:
+        print("请求失败:", e)
+        return None
 
 def 解析网页信息(网页,project_name):
     版本号 = 网页.find('<span class="ml-1">')
     版本号 = 网页[版本号 + len('<span class="ml-1">'):]
     版本号 = 版本号[:版本号.find('</span>')].strip()
-    # print(版本号)
+    print(版本号)
     # 获取更新内容
     # <div data-pjax="true" data-test-selector="body-content" data-view-component="true" class="markdown-body my-3"><h1>自动更新程序</h1>
     # <ul>
@@ -92,8 +86,9 @@ def 解析网页信息(网页,project_name):
     win下载地址 = ""
     # 重新重新访问页面
     # https://github.com/duolabmeng6/qoq/releases/expanded_assets/v0.1.5
-    url = f"https://ghproxy.com/https://github.com/{project_name}/releases/expanded_assets/{版本号}"
-    网页2 = requests.get(url).text
+    url = f"https://github.com/{project_name}/releases/expanded_assets/{版本号}"
+    # 网页2 = requests.get(url).text
+    网页2 = urllib.request.urlopen(url).read().decode('utf-8')
 
     pattern = re.compile( r'class="Truncate-text text-bold">(.*?)</span>' )
     result = pattern.findall(网页2)
@@ -101,7 +96,7 @@ def 解析网页信息(网页,project_name):
     for item in result:
         # print(item)
         下载地址 = item
-        下载地址 = f"https://ghproxy.com/https://github.com/{project_name}/releases/download/{版本号}/{下载地址}"
+        下载地址 = f"https://github.com/{project_name}/releases/download/{版本号}/{下载地址}"
         文件名 = item
         if 文件名.find('Source code') != -1:
             continue
@@ -114,7 +109,7 @@ def 解析网页信息(网页,project_name):
             win下载地址 = 下载地址
 
 
-    # print(下载地址列表)
+    print(下载地址列表)
 
     # 获取发布时间
     # <relative-time datetime="2022-07-22T17:32:41Z" class="no-wrap"></relative-time>
@@ -142,9 +137,9 @@ def 解析网页信息(网页,project_name):
 
 # 测试
 if __name__ == '__main__':
-    data = 获取最新版本号和下载地址("duolabmeng6/qoq2")
-    print(data)
+    # data = 获取最新版本号和下载地址("duolabmeng6/qoq2")
+    # print(data)
     # data = 解析网页信息("")
     # print(data)
-    # data = 获取最新版本号和下载地址("duolabmeng6/qtAutoUpdateApp")
-    # print(data)
+    data = 获取最新版本号和下载地址("https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json")
+    print(data)
