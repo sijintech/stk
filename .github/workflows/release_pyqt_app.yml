@@ -64,7 +64,7 @@ on:
   #   tags:
   #     - 'v*'
 env:
-    TAG: 0.0.28
+    TAG: 0.0.29
 jobs:
   build:
     runs-on: windows-latest
