@@ -79,8 +79,9 @@ jobs:
       - name: get tag
         id: get_tag
         run: |
-          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
-          echo "::set-output name=tag::$TAG"
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
+
 
 
       # - name: Setup virtual environment
@@ -143,10 +144,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
 
         with:
-          tag_name: ${{ steps.get_tag.outputs.tag }}
-          release_name: Release ${{ steps.get_tag.outputs.tag }}
+          # tag_name: ${{ steps.get_tag.outputs.tag }}
+          tag_name: ${{ steps.get_tag.outputs.TAG }}
+          release_name: Release ${{ steps.get_tag.outputs.TAG }}
           body: |
-            Release ${{ steps.get_tag.outputs.tag }}
+            Release ${{ steps.get_tag.outputs.TAG}}
           draft: false
           prerelease: false
 
