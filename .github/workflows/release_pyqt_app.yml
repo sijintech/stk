@@ -145,10 +145,10 @@ jobs:
 
         with:
           # tag_name: ${{ steps.get_tag.outputs.tag }}
-          tag_name: ${{ steps.get_tag.outputs.TAG }}
-          release_name: Release ${{ steps.get_tag.outputs.TAG }}
+          tag_name:  ${{ github.ref }}
+          release_name:  ${{ github.ref }}
           body: |
-            Release ${{ steps.get_tag.outputs.TAG}}
+            Release  ${{ github.ref }}
           draft: false
           prerelease: false
 
