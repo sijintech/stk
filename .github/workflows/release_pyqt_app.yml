@@ -56,15 +56,16 @@
 name: NSISbuild
 
 on:
-  push:
-    branches:
-      - main
   # push:
-  #   # 匹配特定标签 (refs/tags)
-  #   tags:
-  #     - 'v*'
-env:
-    TAG: 0.0.29
+  #   branches:
+  #     - main
+  # env:
+  #   TAG: 0.0.29
+  push:
+    # 匹配特定标签 (refs/tags)
+    tags:
+      - 'v*'
+
 jobs:
   build:
     runs-on: windows-latest

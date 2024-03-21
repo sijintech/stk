@@ -1,2 +1,0 @@
-src/dist/suan_pyqt.exe filter=lfs diff=lfs merge=lfs -text
-
