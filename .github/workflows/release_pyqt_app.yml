@@ -127,6 +127,7 @@ jobs:
             TARGET_DIR: 'nsis/'
         run: |
             pwd
+            pip install oss2
             python apps\template\pyqt\deploy.py
             python apps\template\pyqt\update.py
 
