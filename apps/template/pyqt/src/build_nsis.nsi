@@ -1,20 +1,132 @@
-Name "suan"
-; å®šä¹‰å®‰è£…åŒ…çš„åç§°å’Œç‰ˆæœ¬
-Outfile "../app_dist/suan.exe"
-VIProductVersion "1.0.0"
 
-; å®šä¹‰å®‰è£…ç¨‹åºçš„æ ‡é¢˜å’Œå›¾æ ‡
-Caption "Your Installer"
-Icon ".\icons\icon.ico"
+; °²×°³ÌĞò³õÊ¼¶¨Òå³£Á¿
+!define PRODUCT_NAME "suan_nsis"
+!define PRODUCT_VERSION "1.0"
+!define PRODUCT_PUBLISHER "ZhouHanjie"
+!define PRODUCT_WEB_SITE "http://www.mycompany.com"
+;ÓÃÓÚÖ¸¶¨ÔÚ Windows ×¢²á±íÖĞ´æ´¢Ó¦ÓÃ³ÌĞòÂ·¾¶µÄ¼üÃû
+!define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\suan_pyqt.exe"
+;Í¨³£ÓÃÓÚÖ¸¶¨ÔÚ Windows ×¢²á±íÖĞ´æ´¢Ó¦ÓÃ³ÌĞòĞ¶ÔØĞÅÏ¢µÄ¼üÃû
+!define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
+;ÓÃÓÚÖ¸¶¨Ó¦ÓÃ³ÌĞòĞ¶ÔØĞÅÏ¢ÔÚ Windows ×¢²á±íÖĞµÄ¸ù¼ü£¨¼´¸ùÄ¿Â¼£©
+!define PRODUCT_UNINST_ROOT_KEY "HKLM"
 
-; å®šä¹‰å®‰è£…è¿‡ç¨‹ä¸­çš„é¡µé¢å’Œæ“ä½œ
-Page Directory
-Page InstFiles
+SetCompress off
 
-Section
-SetOutPath $INSTDIR
+; ------ MUI ÏÖ´ú½çÃæ¶¨Òå (1.67 °æ±¾ÒÔÉÏ¼æÈİ) ------
+!include "MUI.nsh"
 
-; å°†ç”Ÿæˆçš„ EXE æ–‡ä»¶æ·»åŠ åˆ°å®‰è£…åŒ…ä¸­
-File ".\dist\main.exe"
+; MUI Ô¤¶¨Òå³£Á¿
+!define MUI_ABORTWARNING
+;Í¼±êÎ»ÖÃ£¨ĞŞ¸Ä£©
+!define MUI_ICON ".\icons\modern-install.ico"
+!define MUI_UNICON ".\icons\modern-uninstall.ico"
 
+; ÓïÑÔÑ¡Ôñ´°¿Ú³£Á¿ÉèÖÃ
+!define MUI_LANGDLL_REGISTRY_ROOT "${PRODUCT_UNINST_ROOT_KEY}"
+!define MUI_LANGDLL_REGISTRY_KEY "${PRODUCT_UNINST_KEY}"
+!define MUI_LANGDLL_REGISTRY_VALUENAME "NSIS:lANGUAGE"
+
+; »¶Ó­Ò³Ãæ
+!insertmacro MUI_PAGE_WELCOME
+; Ğí¿ÉĞ­ÒéÒ³Ãæ(ĞèĞŞ¸Ä)
+!define MUI_LICENSEPAGE_CHECKBOX
+!insertmacro MUI_PAGE_LICENSE ".\licence.txt"
+; °²×°Ä¿Â¼Ñ¡ÔñÒ³Ãæ
+!insertmacro MUI_PAGE_DIRECTORY
+; °²×°¹ı³ÌÒ³Ãæ
+!insertmacro MUI_PAGE_INSTFILES
+; °²×°Íê³ÉÒ³Ãæ
+!define MUI_FINISHPAGE_RUN "$INSTDIR\suan_pyqt.exe"
+!insertmacro MUI_PAGE_FINISH
+
+; °²×°Ğ¶ÔØ¹ı³ÌÒ³Ãæ
+!insertmacro MUI_UNPAGE_INSTFILES
+
+; °²×°½çÃæ°üº¬µÄÓïÑÔÉèÖÃ
+!insertmacro MUI_LANGUAGE "English"
+!insertmacro MUI_LANGUAGE "SimpChinese"
+
+; °²×°Ô¤ÊÍ·ÅÎÄ¼ş
+!insertmacro MUI_RESERVEFILE_LANGDLL
+!insertmacro MUI_RESERVEFILE_INSTALLOPTIONS
+; ------ MUI ÏÖ´ú½çÃæ¶¨Òå½áÊø ------
+
+Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
+;Êä³ö°²×°°üÎÄ¼şµÄÎ»ÖÃ£¨ĞèĞŞ¸Ä£©
+OutFile "..\app_dist\suan_nsis.exe"
+InstallDir "$PROGRAMFILES\suan"
+InstallDirRegKey HKLM "${PRODUCT_UNINST_KEY}" "UninstallString"
+ShowInstDetails show
+ShowUnInstDetails show
+
+Section "MainSection" SEC01
+  SetOutPath "$INSTDIR"
+  SetOverwrite ifnewer
+
+  ;Òª´ò°üµÄexeÎÄ¼ş£¨ĞèĞŞ¸Ä£©
+  File ".\dist\suan_pyqt.exe"
+
+  CreateDirectory "$SMPROGRAMS\suan"
+  CreateShortCut "$SMPROGRAMS\suan\suan.lnk" "$INSTDIR\suan_pyqt.exe"
+  CreateShortCut "$DESKTOP\suan.lnk" "$INSTDIR\suan_pyqt.exe"
 SectionEnd
+
+Section -AdditionalIcons
+  WriteIniStr "$INSTDIR\${PRODUCT_NAME}.url" "InternetShortcut" "URL" "${PRODUCT_WEB_SITE}"
+  CreateShortCut "$SMPROGRAMS\suan\Website.lnk" "$INSTDIR\${PRODUCT_NAME}.url"
+  CreateShortCut "$SMPROGRAMS\suan\Uninstall.lnk" "$INSTDIR\uninst.exe"
+SectionEnd
+
+Section -Post
+  WriteUninstaller "$INSTDIR\uninst.exe"
+  WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\suan_pyqt.exe"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayName" "$(^Name)"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString" "$INSTDIR\uninst.exe"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\suan_pyqt.exe"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "URLInfoAbout" "${PRODUCT_WEB_SITE}"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
+SectionEnd
+
+#-- ¸ù¾İ NSIS ½Å±¾±à¼­¹æÔò£¬ËùÓĞ Function Çø¶Î±ØĞë·ÅÖÃÔÚ Section Çø¶ÎÖ®ºó±àĞ´£¬ÒÔ±ÜÃâ°²×°³ÌĞò³öÏÖÎ´¿ÉÔ¤ÖªµÄÎÊÌâ¡£--#
+
+Function .onInit
+  !insertmacro MUI_LANGDLL_DISPLAY
+FunctionEnd
+
+/******************************
+ *  ÒÔÏÂÊÇ°²×°³ÌĞòµÄĞ¶ÔØ²¿·Ö  *
+ ******************************/
+
+Section Uninstall
+  Delete "$INSTDIR\${PRODUCT_NAME}.url"
+  Delete "$INSTDIR\uninst.exe"
+  Delete "$INSTDIR\suan_pyqt.exe"
+
+  Delete "$SMPROGRAMS\suan\Uninstall.lnk"
+  Delete "$SMPROGRAMS\suan\Website.lnk"
+  Delete "$DESKTOP\suan.lnk"
+  Delete "$SMPROGRAMS\suan\suan.lnk"
+
+  RMDir "$SMPROGRAMS\suan"
+
+  RMDir "$INSTDIR"
+
+  DeleteRegKey ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}"
+  DeleteRegKey HKLM "${PRODUCT_DIR_REGKEY}"
+  SetAutoClose true
+SectionEnd
+
+#-- ¸ù¾İ NSIS ½Å±¾±à¼­¹æÔò£¬ËùÓĞ Function Çø¶Î±ØĞë·ÅÖÃÔÚ Section Çø¶ÎÖ®ºó±àĞ´£¬ÒÔ±ÜÃâ°²×°³ÌĞò³öÏÖÎ´¿ÉÔ¤ÖªµÄÎÊÌâ¡£--#
+
+Function un.onInit
+!insertmacro MUI_UNGETLANGUAGE
+  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "ÄúÈ·ÊµÒªÍêÈ«ÒÆ³ı $(^Name) £¬¼°ÆäËùÓĞµÄ×é¼ş£¿" IDYES +2
+  Abort
+FunctionEnd
+
+Function un.onUninstSuccess
+  HideWindow
+  MessageBox MB_ICONINFORMATION|MB_OK "$(^Name) ÒÑ³É¹¦µØ´ÓÄúµÄ¼ÆËã»úÒÆ³ı¡£"
+FunctionEnd

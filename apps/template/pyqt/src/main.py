@@ -8,12 +8,12 @@ import toolbar
 import statusbar
 import info_bar
 import Updater
-
+import version
 updatejson_url = "https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json"
 
 app_name = "suan_pyqt"
 
-cur_version = "0.0.0"
+cur_version = version.version
 
 index_url = "https://github.com/sijintech/stk"
 
@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(self.toolbar)
         self.setStatusBar(self.status_bar)
         # 设置主窗口大小和显示
-        self.setGeometry(100, 100, 1500, 1000)
+        self.setGeometry(50, 50, 1000, 600)
         self.left_sidebar.openFilePath.connect(self.fixCurFilePath)
     def fixCurFilePath(self, path):
         self.toolbar.current_open_file = path
