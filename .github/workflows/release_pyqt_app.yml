@@ -79,7 +79,6 @@ jobs:
       - name: get tag
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
-          TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')
           echo "::set-output name=tag::$TAG"
 
 
