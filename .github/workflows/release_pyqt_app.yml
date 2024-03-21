@@ -75,9 +75,13 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
+
       - name: get tag
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
+          TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')
+          echo "::set-output name=tag::$TAG"
+
 
       # - name: Setup virtual environment
       #   run:  |
@@ -139,10 +143,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
 
         with:
-          tag_name: ${{env.TAG }}
-          release_name: Release ${{ env.TAG }}
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          release_name: Release ${{ steps.get_tag.outputs.tag }}
           body: |
-            Release ${{ env.TAG }}
+            Release ${{ steps.get_tag.outputs.tag }}
           draft: false
           prerelease: false
 
