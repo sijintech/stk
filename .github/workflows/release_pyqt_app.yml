@@ -135,8 +135,9 @@ jobs:
             python apps\template\pyqt\update.py
       - name: get tag2
         run: |
-          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
           echo "Extracted Tag Name: $GITHUB_ENV"
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+          echo "Extracted Tag Name: $GITHUB_ENV.TAG"
           # echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
       - name: Create Release
         id: create_release
@@ -147,8 +148,8 @@ jobs:
         with:
           tag_name:  ${{ github.env.TAG }}
           # tag_name:  ${{ github.ref.endsWith('refs/tags/') ? github.ref.substring(10) : github.ref }}
-          # release_name:  ${{ github.ref }}
-          release_name:  ${{ github.env.TAG }}
+          release_name:  ${{ github.ref }}
+          # release_name:  ${{ github.env.TAG }}
 
           body: |
             Release  ${{ github.env.TAG }}
