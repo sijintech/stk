@@ -56,15 +56,15 @@
 name: NSISbuild
 
 on:
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
   # env:
   #   TAG: 0.0.29
-  push:
-    # 匹配特定标签 (refs/tags)
-    tags:
-      - 'v*'
+  # push:
+  #   # 匹配特定标签 (refs/tags)
+  #   tags:
+  #     - 'v*'
 
 jobs:
   build:
@@ -83,7 +83,7 @@ jobs:
           # echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
       - name: Set color
         id: color-selector
-        run: echo "SELECTED_COLOR=green" >> $GITHUB_OUTPUT
+        run: echo "SELECTED_COLOR=green" >> $env:GITHUB_OUTPUT
       - name: Get color
         env:
             SELECTED_COLOR: ${{ steps.color-selector.outputs.SELECTED_COLOR }}
