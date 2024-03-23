@@ -137,6 +137,7 @@ jobs:
             python apps\template\pyqt\deploy.py
             python apps\template\pyqt\update.py
   release:
+    needs: build
     runs-on: ubuntu-latest
 
     steps:
