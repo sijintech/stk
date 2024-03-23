@@ -136,7 +136,7 @@ jobs:
       - name: get tag2
         run: |
           echo "Extracted Tag Name: $GITHUB_ENV"
-          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
           echo "Extracted Tag Name: $GITHUB_ENV.TAG"
           # echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
       - name: Create Release
