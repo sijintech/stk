@@ -68,14 +68,23 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # runs-on: windows-latest
+    runs-on: ubuntu--latest
+
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
-
+      - name: Set the value
+        id: step_one
+        run: |
+            echo "action_state=yellow" >> "$GITHUB_ENV"
+      - name: Use the value
+        id: step_two
+        run: |
+            printf '%s\n' "$action_state" # This will output 'yellow'
       - name: get tag
         id: get_tag
         run: |
