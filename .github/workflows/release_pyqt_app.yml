@@ -56,20 +56,20 @@
 name: NSISbuild
 
 on:
-  push:
-    branches:
-      - main
+  # push:
+  #   branches:
+  #     - main
   # env:
   #   TAG: 0.0.29
-  # push:
-  #   # 匹配特定标签 (refs/tags)
-  #   tags:
-  #     - 'v*'
+  push:
+    # 匹配特定标签 (refs/tags)
+    tags:
+      - 'v*'
 
 jobs:
   build:
-    # runs-on: windows-latest
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    # runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
@@ -77,110 +77,98 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
-      - name: Set the value
-        id: step_one
-        run: |
-            echo "action_state=yellow" >> "$GITHUB_ENV"
-      - name: Use the value
-        id: step_two
-        run: |
-            printf '%s\n' "$action_state" # This will output 'yellow'
       - name: get tag
         id: get_tag
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
           # echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
-      - name: Set color
-        id: color-selector
-        run: echo "SELECTED_COLOR=green" >> $GITHUB_OUTPUT
-      - name: Get color
-        env:
-            SELECTED_COLOR: ${{ steps.color-selector.outputs.SELECTED_COLOR }}
-        run: echo "The selected color is $SELECTED_COLOR"
 
 
-      # - name: Setup virtual environment
-      #   run:  |
-      #     python -m venv .venv
-      #     . .venv\Scripts\activate 
-      #     python.exe -m pip install -U pip
+
+      - name: Setup virtual environment
+        run:  |
+          python -m venv .venv
+          . .venv\Scripts\activate 
+          python.exe -m pip install -U pip
 
 
-      # - name: build exe
-      #   run:  |
+      - name: build exe
+        run:  |
           
-      #     python.exe -m pip install -U pip
-      #     python apps\template\pyqt\run_write_version.py
-      #     cd apps\template\pyqt\src
-      #     pip install pyinstaller
-      #     pip install PySide6
-      #     pip install vtk
-      #     pip install matplotlib
-      #     pip install pandas
-      #     pip install numpy
-      #     pip install requests
-      #     pyinstaller .\main.spec
+          python.exe -m pip install -U pip
+          python apps\template\pyqt\run_write_version.py
+          cd apps\template\pyqt\src
+          pip install pyinstaller
+          pip install PySide6
+          pip install vtk
+          pip install matplotlib
+          pip install pandas
+          pip install numpy
+          pip install requests
+          pyinstaller .\main.spec
  
           
-      # # - name: Install NSIS
-      # #   run: |
-      # #     iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
-      # #     .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
-      # #     scoop update
-      # #     scoop bucket add extras
-      # #     scoop install nsis
+      # - name: Install NSIS
+      #   run: |
+      #     iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
+      #     .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
+      #     scoop update
+      #     scoop bucket add extras
+      #     scoop install nsis
       
 
-      # - name: build app
-      #   run: |
-      #       makensis apps\template\pyqt\src\build_nsis.nsi
+      - name: build app
+        run: |
+            makensis apps\template\pyqt\src\build_nsis.nsi
 
-      # - name: Upload files to OSS(window)
-      #   env:
-      #       OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
-      #       OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
-      #       OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
-      #       OSS_BUCKET: sijin-suan-update
-      #       # 指定要上传的文件或目录，这里假设您想上传整个repo的内容
-      #       SOURCE_DIR: 'src/dist'
-      #       # 指定OSS中的目标目录
-      #       TARGET_DIR: 'nsis/'
-      #   run: |
-      #       pwd
-      #       pip install oss2
-      #       python apps\template\pyqt\deploy.py
-      #       python apps\template\pyqt\update.py
-      # - name: get tag2
-      #   run: |
-      #     echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
-      #     echo "action_state=yellow" >> "$GITHUB_ENV"
-      #     printf '%s\n' "$action_state"
-      #     printf '%s\n' "&TAG"
-      #     # echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
-      # - name: Create Release
-      #   id: create_release
-      #   uses: actions/create-release@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
+      - name: Upload files to OSS(window)
+        env:
+            OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+            OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
+            OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
+            OSS_BUCKET: sijin-suan-update
+            # 指定要上传的文件或目录，这里假设您想上传整个repo的内容
+            SOURCE_DIR: 'src/dist'
+            # 指定OSS中的目标目录
+            TARGET_DIR: 'nsis/'
+        run: |
+            pwd
+            pip install oss2
+            python apps\template\pyqt\deploy.py
+            python apps\template\pyqt\update.py
+  release:
+    runs-on: ubuntu-latest
 
-      #   with:
-      #     tag_name:  ${{ env.TAG }}
-      #     # tag_name:  ${{ github.ref.endsWith('refs/tags/') ? github.ref.substring(10) : github.ref }}
-      #     release_name:  ${{ github.ref }}
-      #     # release_name:  ${{ github.env.TAG }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
+          echo "The TAG is $steps.get_tag.outputs.TAG"
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
 
-      #     body: |
-      #       Release  ${{ github.env.TAG }}
-      #     draft: false
-      #     prerelease: false
+        with:
+          tag_name:  ${{ steps.get_tag.outputs.TAG }}
+          release_name:  ${{ steps.get_tag.outputs.TAG}}
+          # release_name:  ${{ github.env.TAG }}
 
-      # - name: Upload File
-      #   uses: actions/upload-release-asset@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   with:
-      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
-      #     asset_path: apps\template\pyqt\app_dist\suan_nsis.exe
-      #     # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
-      #     asset_name: suan_nsiss.exe
-      #     asset_content_type: application/octet-stream
+          body: |
+            Release  ${{ steps.get_tag.outputs.TAG }}
+          draft: false
+          prerelease: false
+
+      - name: Upload File
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: apps\template\pyqt\app_dist\suan_nsis.exe
+          # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
+          asset_name: suan_nsiss.exe
+          asset_content_type: application/octet-stream
