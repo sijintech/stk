@@ -140,15 +140,16 @@ jobs:
         id: create_release
         uses: actions/create-release@v1
         env:
-          # TAG:  ${{env.TAG }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
 
         with:
-          # tag_name: ${{ steps.get_tag.outputs.tag }}
-          tag_name:  ${{ github.ref }}
-          release_name:  ${{ github.ref }}
+          tag_name:  ${{ github.env.TAG }}
+          # tag_name:  ${{ github.ref.endsWith('refs/tags/') ? github.ref.substring(10) : github.ref }}
+          # release_name:  ${{ github.ref }}
+          release_name:  ${{ github.env.TAG }}
+
           body: |
-            Release  ${{ github.ref }}
+            Release  ${{ github.env.TAG }}
           draft: false
           prerelease: false
 
