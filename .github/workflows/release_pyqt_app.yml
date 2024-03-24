@@ -56,15 +56,15 @@
 name: NSISbuild
 
 on:
-  # push:
-  #   branches:
-  #     - main
-  # env:
-  #   TAG: 0.0.29
   push:
-    # 匹配特定标签 (refs/tags)
-    tags:
-      - 'v*'
+    branches:
+      - main
+env:
+    TAG: 0.0.29
+  # push:
+  #   # 匹配特定标签 (refs/tags)
+  #   tags:
+  #     - 'v*'
 
 jobs:
   build:
@@ -81,8 +81,6 @@ jobs:
         id: get_tag
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
-          # echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
-
 
 
       - name: Setup virtual environment
@@ -155,12 +153,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
 
         with:
-          tag_name:  ${{ steps.get_tag.outputs.TAG }}
-          release_name:  ${{ steps.get_tag.outputs.TAG}}
-          # release_name:  ${{ github.env.TAG }}
+          # tag_name:  ${{ steps.get_tag.outputs.TAG }}
+          # release_name:  ${{ steps.get_tag.outputs.TAG}}
+          tag_name:  ${{ env.TAG }}
+          release_name:  ${{ env.TAG }}
 
           body: |
-            Release  ${{ steps.get_tag.outputs.TAG }}
+            Release  ${{ env.TAG }}
           draft: false
           prerelease: false
 
