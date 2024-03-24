@@ -60,7 +60,7 @@ on:
     branches:
       - main
 env:
-    TAG: 0.0.29
+    TAG: 0.0.30
   # push:
   #   # 匹配特定标签 (refs/tags)
   #   tags:
@@ -134,17 +134,17 @@ jobs:
             pip install oss2
             python apps\template\pyqt\deploy.py
             python apps\template\pyqt\update.py
-  release:
-    needs: build
-    runs-on: ubuntu-latest
+  # release:
+  #   needs: build
+  #   runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v3
-      - name: get tag
-        id: get_tag
-        run: |
-          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
-          echo "The TAG is $steps.get_tag.outputs.TAG"
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - name: get tag
+  #       id: get_tag
+  #       run: |
+  #         echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
+  #         echo "The TAG is $steps.get_tag.outputs.TAG"
           
       - name: Create Release
         id: create_release
