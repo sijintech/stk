@@ -147,6 +147,7 @@ jobs:
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
           echo "The TAG is $steps.get_tag.outputs.TAG"
+          
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
