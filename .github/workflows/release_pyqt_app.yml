@@ -56,15 +56,15 @@
 name: NSISbuild
 
 on:
-  push:
-    branches:
-      - main
-env:
-    TAG: 0.0.30
   # push:
-  #   # 匹配特定标签 (refs/tags)
-  #   tags:
-  #     - 'v*'
+  #   branches:
+  #     - main
+# env:
+#     TAG: 0.0.30
+  push:
+    # 匹配特定标签 (refs/tags)
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -134,17 +134,24 @@ jobs:
             pip install oss2
             python apps\template\pyqt\deploy.py
             python apps\template\pyqt\update.py
-  # release:
-  #   needs: build
-  #   runs-on: ubuntu-latest
 
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #     - name: get tag
-  #       id: get_tag
-  #       run: |
-  #         echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
-  #         echo "The TAG is $steps.get_tag.outputs.TAG"
+      - name: Store dist
+        uses: actions/upload-artifact@v3
+        with: 
+              name: suan_nsis.exe
+              path: apps\template\pyqt\app_dist\suan_nsis.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
+          echo "The TAG is $steps.get_tag.outputs.TAG"
           
       - name: Create Release
         id: create_release
@@ -153,16 +160,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
 
         with:
-          # tag_name:  ${{ steps.get_tag.outputs.TAG }}
-          # release_name:  ${{ steps.get_tag.outputs.TAG}}
-          tag_name:  ${{ env.TAG }}
-          release_name:  ${{ env.TAG }}
+          tag_name:  ${{ steps.get_tag.outputs.TAG }}
+          release_name:  ${{ steps.get_tag.outputs.TAG}}
+          # tag_name:  ${{ env.TAG }}
+          # release_name:  ${{ env.TAG }}
 
           body: |
-            Release  ${{ env.TAG }}
-          draft: false
+            Release  ${{ steps.get_tag.outputs.TAG }}
+          draft: true
           prerelease: false
-
+      - name: Download dist
+        uses: actions/download-artifact@v3
+        with:
+          name: suan_nsis.exe
+          path: apps\template\pyqt\app_dist\suan_nsis.exe
       - name: Upload File
         uses: actions/upload-release-asset@v1
         env:
@@ -171,5 +182,5 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: apps\template\pyqt\app_dist\suan_nsis.exe
           # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
-          asset_name: suan_nsiss.exe
+          asset_name: suan_nsis.exe
           asset_content_type: application/octet-stream
