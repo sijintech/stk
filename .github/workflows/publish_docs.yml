@@ -1,0 +1,39 @@
+name: Deploy to Cloudflare Pages
+defaults:
+  run:
+    shell: bash -ieo pipefail {0}
+on:
+  # Trigger the workflow every time you push to the `main` branch
+  # Using a different branch name? Replace `main` with your branch’s name
+  push:
+    paths:
+      - "docs/**"
+      - .github/workflows/publish_docs.yml
+    branches: [main]
+  # Allows you to run this workflow manually from the Actions tab on GitHub.
+  workflow_dispatch:
+
+# Allow this job to clone the repo and create a page deployment
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  build:
+    runs-on: [self-hosted, Linux]
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v3
+      - name: Build
+        run: |
+          cd docs
+          nvm use 18
+          pnpm install
+          pnpm run build
+      - name: Publish
+        run: |
+          export CLOUDFLARE_API_TOKEN=${{ secrets.CF_API_TOKEN }}
+          export CLOUDFLARE_ACCOUNT_ID=${{secrets.CLOUDFLARE_ACCOUNT_ID}}
+          cd docs
+          nvm use 18
+          pnpm run deploy
