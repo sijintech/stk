@@ -174,7 +174,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: suan_nsis.exe
-          path: apps\template\pyqt\app_dist\suan_nsis.exe
+          path: apps\template\pyqt\app_dist\
       - name: Upload File
         uses: actions/upload-release-asset@v1
         env:
