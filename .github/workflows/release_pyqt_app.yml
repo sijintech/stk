@@ -165,9 +165,9 @@ jobs:
           # tag_name:  ${{ env.TAG }}
           # release_name:  ${{ env.TAG }}
 
-          body: |
-            Release  ${{ steps.get_tag.outputs.TAG }}
-          draft: true
+          # body: |
+          #   Release  ${{ steps.get_tag.outputs.TAG }}
+          # draft: true
           # prerelease: false
       - name: Download dist
         uses: actions/download-artifact@v3

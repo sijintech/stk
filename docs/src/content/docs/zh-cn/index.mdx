@@ -1,0 +1,32 @@
+---
+title: stk
+template: splash
+hero:
+  name: stk
+  text: 一个简单的软件许可证解决方案
+  tagline: 同时支持永久许可证模式和订阅模式
+  actions:
+    - variant: primary
+      text: 开发者指南
+      link: /zh-cn/dev_guide/
+    - variant: secondary
+      text: 用户指南
+      link: /zh-cn/user_guide/
+---
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+
+
+## 特点
+<CardGrid stagger>
+	<Card title="灵活方案" icon="star">
+		您可以在离线模式、按需在线模式和订阅模式之间进行选择。
+	</Card>
+	<Card title="费用合理" icon="star">
+		根据您的使用模式，您可以选择订阅付费、或者按许可证计数付费，甚至只需一次性付费。
+	</Card>
+	<Card title="便捷使用" icon="star">
+		我们提供了C接口，这样您就可以将我们的库链接到您使用的几乎任何语言。
+	</Card>
+</CardGrid>
+
