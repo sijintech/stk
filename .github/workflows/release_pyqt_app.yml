@@ -154,6 +154,7 @@ jobs:
           echo "The TAG is $steps.get_tag.outputs.TAG"
           
       - name: Create Release
+        if: github.event_name == 'push'
         id: create_release
         uses: actions/create-release@v1
         env:
