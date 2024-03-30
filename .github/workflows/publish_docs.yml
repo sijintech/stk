@@ -22,8 +22,22 @@ jobs:
   build:
     runs-on: [self-hosted, Linux]
     steps:
+
       - name: Checkout your repository using git
         uses: actions/checkout@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: 14
+          registry-url: 'https://registry.npm.taobao.org'
+          cache: 'npm'
+  
+      - name: Install dependencies
+        run: |
+          npm install -g nvm
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+          nvm install 18
       - name: Build
         run: |
           cd docs
