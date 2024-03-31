@@ -47,11 +47,18 @@ jobs:
           nvm use 18
           npm install
           npm run build
+      # - name: Publish
+      #   uses: cloudflare/pages-action@1
+      #   with: 
+      #     apiToken: ${{ secrets.CF_API_TOKEN }}
+      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #     projectName: 'stk'
+      #     directory: './docs/dist'
+      #     gitHubToken: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish
-        uses: cloudflare/pages-action@1
-        with: 
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: 'stk'
-          directory: './docs/dist'
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          export CLOUDFLARE_API_TOKEN=${{ secrets.CF_API_TOKEN }}
+          export CLOUDFLARE_ACCOUNT_ID=${{secrets.CLOUDFLARE_ACCOUNT_ID}}
+          cd docs
+          nvm use 18
+          npm run deploy
