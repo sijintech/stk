@@ -47,7 +47,7 @@ jobs:
           npm install
           npm run build
       - name: Publish
-        uses: cloudflare/pages-action@3
+        uses: cloudflare/pages-action@1
         with: 
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{secrets.CLOUDFLARE_ACCOUNT_ID}}
