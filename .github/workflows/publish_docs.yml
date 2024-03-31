@@ -51,6 +51,6 @@ jobs:
         with: 
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{secrets.CLOUDFLARE_ACCOUNT_ID}}
-          projectName: stk
-          directory: dist
+          projectName: 'stk'
+          directory: './docs/dist'
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
