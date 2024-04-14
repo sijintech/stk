@@ -51,7 +51,7 @@ scoop install nsis
 #### 运行程序
     直接运行./src/main.py文件
 #### 打包成可执行文件
-如果想要带终端窗口，先设置main.spec文件里面的console=True，然后再运行 `$ pyinstaller .\src\main.spec`,或者运行 `$ python -m PyInstaller -F --clean --noconfirm --name suan_pyqt --hidden-import center_widget --hidden-import info_bar --hidden-import right_sidebar --hidden-import left_sidebar --hidden-import statusbar --hidden-import toolbar --hidden-import PySide6 --hidden-import vtk --hidden-import matplotlib --hidden-import numpy -p .\src\ main.py`
+如果想要带终端窗口，先设置main.spec文件里面的console=True，然后再运行 `$ pyinstaller .\src\main.spec`,或者运行 `$ python -m PyInstaller -F --clean --noconfirm --name suan_pyqt --hidden-import center_widget --hidden-import info_bar --hidden-import right_sidebar --hidden-import left_sidebar --hidden-import statusbar --hidden-import toolbar --hidden-import PySide6 --hidden-import vtk --hidden-import matplotlib --hidden-import numpy -p .\src\ main.py`  
 
 如果不想要带终端窗口，先设置main.spec文件里面的console=False，然后再运行 `$ pyinstaller .\src\main.spec`,或者运行 `$ python -m PyInstaller -F --clean --noconfirm -w --name suan_pyqt --hidden-import center_widget --hidden-import info_bar --hidden-import right_sidebar --hidden-import left_sidebar --hidden-import statusbar --hidden-import toolbar --hidden-import PySide6 --hidden-import vtk --hidden-import matplotlib --hidden-import numpy -p .\src\ main.py`
 
@@ -110,7 +110,7 @@ sudo apt install nsis # 安装 NSIS
 
 ### 配置 git
 
-可以按照这篇配置博客进行：[Python 集成开发环境 pycharm 配置 git 详细教程](https://blog.csdn.net/yangcangong/article/details/134397131)
+可以按照这篇配置博客进行：[Python 集成开发环境 pycharm 配置 git 详细教程](https://blog.csdn.net/yangcangong/article/details/134397131)  
 远程仓库地址为：https://github.com/sijintech/stk.git
 
 ## Vscode 配置
@@ -121,6 +121,6 @@ sudo apt install nsis # 安装 NSIS
 
 ### 配置 git
 
-可以按照这篇配置博客进行：[VSCode 配置 git](https://www.cnblogs.com/ostrich-sunshine/p/11329444.html)
+可以按照这篇配置博客进行：[VSCode 配置 git](https://www.cnblogs.com/ostrich-sunshine/p/11329444.html)  
 远程仓库地址为：https://github.com/sijintech/stk.git
 
