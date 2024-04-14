@@ -108,11 +108,11 @@ jobs:
           
       # - name: Install NSIS
       #   run: |
-      #     iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
-      #     .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
-      #     scoop update
-      #     scoop bucket add extras
-      #     scoop install nsis
+          # iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
+          # .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
+          # scoop update
+          # scoop bucket add extras
+          # scoop install nsis
       
 
       - name: build app
@@ -138,7 +138,9 @@ jobs:
       - name: Store dist
         uses: actions/upload-artifact@v3
         with: 
+          # 上传后的标记名，下载依靠它找到对应文件
               name: suan_nsis.exe
+          # 上传的文件位置
               path: apps/template/pyqt/app_dist/suan_nsis.exe
 
   release:
@@ -173,7 +175,9 @@ jobs:
       - name: Download dist
         uses: actions/download-artifact@v3
         with:
+          # 要下载的文件的标记
           name: suan_nsis.exe
+          # 下载到哪个目录（注意是/而不是\,否则报错）
           path: apps/template/pyqt/app_dist/
       # - run: |
       #     cd apps/template/pyqt/app_dist/

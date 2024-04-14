@@ -288,10 +288,10 @@ class MainWin(主窗口):
         # self.更新版本号()
         # 检查窗口是否已经创建
         if self.winUpdate is None:
-            self.winUpdate = 自动更新模块.窗口_更新软件(Github项目名称=全局_项目名称,
-                                                        应用名称=全局_应用名称,
-                                                        当前版本号=全局_当前版本,
-                                                        官方网址=全局_官方网址)
+            self.winUpdate = 自动更新模块.UpdateWindow(Github项目名称=全局_项目名称,
+                                                 应用名称=全局_应用名称,
+                                                 当前版本号=全局_当前版本,
+                                                 官方网址=全局_官方网址)
         self.winUpdate.show()
 
     def 撤消(self):
@@ -438,7 +438,7 @@ class MainWin(主窗口):
 
 if __name__ == '__main__':
     print("test -2")
-    自动更新模块.初始化()
+    自动更新模块.init()
     print("test -1")
 
     app = QApplication(sys.argv)

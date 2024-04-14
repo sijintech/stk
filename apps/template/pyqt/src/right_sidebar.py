@@ -1,8 +1,10 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QSizePolicy, QHeaderView
+
 
 class RightSidebar(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
+        self.table_widget = None
         self.status=None
         self.initUI()
 
@@ -20,9 +22,12 @@ class RightSidebar(QWidget):
 
         # 将表格的单元格内容更改信号连接到自定义的槽函数
         self.table_widget.cellChanged.connect(self.handleCellChanged)
-
+        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table_widget)
+        layout.setContentsMargins(0,0,0,0)
+
         self.setLayout(layout)
+
 
     def addTableRow(self, statu, value):
         row_count = self.table_widget.rowCount()  # 获取当前行数

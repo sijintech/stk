@@ -8,9 +8,9 @@ import sys
 from PySide6 import QtCore
 from PySide6.QtCore import QThread
 
-from .压缩包文件处理 import zip解压2
-from .文件下载模块 import 下载文件
-from .自动更新读取版本模块 import 获取最新版本号和下载地址
+from .handleZip import zip解压2
+from .downloadFile import 下载文件
+from .updateVersion import 获取最新版本号和下载地址
 
 
 def 系统_是否为window系统():
@@ -81,7 +81,7 @@ def _取运行目录():
         return sys.path[0]
 
 
-def 初始化():
+def init():
     # 构建时测试运行是否正常的
     传入参数 = sys.argv
     if len(传入参数) == 2:

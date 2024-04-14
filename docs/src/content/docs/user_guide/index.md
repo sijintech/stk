@@ -1,5 +1,5 @@
 ---
-title: User Guide
-description: Some introduction of User Guide.
+title: 用户指南
+description: Some introduction of Sijin License.
 ---
 

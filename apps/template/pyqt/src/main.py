@@ -54,14 +54,15 @@ class MainWindow(QMainWindow):
         self.center_splitter.setOrientation(Qt.Vertical)
         self.center_splitter.addWidget(self.center_widget)
         self.center_splitter.addWidget(self.info_bar)
-        self.center_splitter.setHandleWidth(5) # 设置分割线的宽度
+        self.center_splitter.setHandleWidth(2) # 设置分割线的宽度
         # 使用另一个QSplitter将左，右侧栏和中心部件包裹起来
         self.main_splitter.addWidget(self.left_sidebar)
         self.main_splitter.addWidget(self.center_splitter)
         self.main_splitter.addWidget(self.right_sidebar)
-        self.main_splitter.setHandleWidth(5)  # 设置分割线的宽度
+        self.main_splitter.setHandleWidth(2)  # 设置分割线的宽度
         # 创建主窗口布局
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0,0,0,0)
         main_layout.addWidget(self.main_splitter)
         # 创建主窗口中心部件
         central_widget = QWidget()
@@ -77,6 +78,10 @@ class MainWindow(QMainWindow):
         self.toolbar.current_open_file = path
 
     def compare_versions(self,version1, version2):
+        if version1=='':
+            return -1
+        if version2=='':
+            return 1
         v1_parts = list(map(int, version1.split('.')))
         v2_parts = list(map(int, version2.split('.')))
 
@@ -95,7 +100,6 @@ class MainWindow(QMainWindow):
 
         return 0
     def check_update_callback(self, data):
-        # print("数据", 数据)
         new_version = data['版本号']
         release_time = data['发布时间']
         # try:
@@ -113,15 +117,15 @@ class MainWindow(QMainWindow):
         self.check_update_thread.start()
     def show_update_window(self):
         if self.winUpdate is None:
-            self.winUpdate = Updater.窗口_更新软件(updatejson_url,
-                                             app_name,
-                                             cur_version,
-                                             index_url)
+            self.winUpdate = Updater.UpdateWindow(updatejson_url,
+                                                  app_name,
+                                                  cur_version,
+                                                  index_url)
         self.winUpdate.show()
 
 
 if __name__ == '__main__':
-    Updater.初始化()
+    Updater.init()
     app = QApplication(sys.argv)
     mainWindow = MainWindow()
     mainWindow.show()

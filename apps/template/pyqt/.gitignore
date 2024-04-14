@@ -1,3 +1,6 @@
 src/build/
 src/dist/
-.venv
+.venv/
+dist/
+app_dist/
+update.json

@@ -30,6 +30,7 @@ class CenterWidget(QWidget):
         layout = QVBoxLayout()
         self.tabWidget = QTabWidget()
         layout.addWidget(self.tabWidget)
+        layout.setContentsMargins(0,0,0,0)
         self.setLayout(layout)
 
         self.addMainOperationTabs()

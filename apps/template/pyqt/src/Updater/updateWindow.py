@@ -3,18 +3,18 @@ import webbrowser
 
 from PySide6.QtWidgets import QDialog
 
-from .自动更新功能 import download_file_thread, 系统_是否为window系统, 系统_是否为mac系统, 更新自己Window应用, check_update_thread, 更新自己MacOS应用
+from .autoUpdate import download_file_thread, 系统_是否为window系统, 系统_是否为mac系统, 更新自己Window应用, check_update_thread, 更新自己MacOS应用
 
 from . import update_image_rc
 from . import ui_winUpdate
 
 
-class 窗口_更新软件(QDialog):
+class UpdateWindow(QDialog):
     允许关闭 = False
 
-    def __init__(self, updatejson_url="duolabmeng6/qtAutoUpdateApp", 应用名称="my_app.app", 当前版本号="1.0",
-                 官方网址="https://github.com/duolabmeng6/qtAutoUpdateApp"):
-        super(窗口_更新软件, self).__init__()
+    def __init__(self, updatejson_url="", 应用名称="my_app.app", 当前版本号="1.0",
+                 官方网址=""):
+        super(UpdateWindow, self).__init__()
         self.ui = ui_winUpdate.Ui_Form()
         self.ui.setupUi(self)
         self.setWindowTitle('软件更新')

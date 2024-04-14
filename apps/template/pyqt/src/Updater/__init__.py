@@ -6,5 +6,5 @@
 #     sys.path.append(编译后路径)
 # except Exception:
 #     pass
-from .自动更新功能 import *
-from .窗口_更新软件 import *
+from .autoUpdate import *
+from .updateWindow import *
