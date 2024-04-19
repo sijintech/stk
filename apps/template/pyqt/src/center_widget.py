@@ -20,20 +20,42 @@ class CustomFigureCanvas(FigureCanvasQTAgg):
         return self._figure
 
 class CenterWidget(QWidget):
-    def __init__(self):
+    def __init__(self,parent):
         super().__init__()
         self.runCodeType=None
         self.runCode=None
+        self.parent=parent
+        self.parent.registerComponent('Visualization window',self,True)
         self.initUI()
 
     def initUI(self):
         layout = QVBoxLayout()
         self.tabWidget = QTabWidget()
+        # self.tabWidget.setTabsClosable(True)
+        self.tabWidget.setMovable(True)
+        self.tabWidget.setTabBarAutoHide(False)
         layout.addWidget(self.tabWidget)
         layout.setContentsMargins(0,0,0,0)
         self.setLayout(layout)
 
         self.addMainOperationTabs()
+
+    def registerComponent(self, path, component):
+        truePath='Visualization window/'+path
+        self.parent.registerComponent(truePath,component,True)
+
+    def toggleComponentVisibility(self, tabName):
+        tab=self.parent.components['main']['children']['Visualization window']['children'][tabName]
+        tab['isVisible']=not tab['isVisible']
+        for i in range(self.tabWidget.count()):
+            if self.tabWidget.tabText(i) == tabName[:-len(" Tab")]:
+                # 如果选项卡已存在，则删除它
+                self.tabWidget.removeTab(i)
+                print("删除"+tabName)
+                return
+        # 如果选项卡不存在，则添加它
+        component = tab['component']
+        self.tabWidget.addTab(component, tabName[:-len(" Tab")])
 
     def addMainOperationTabs(self):
         # vtkVisualizationTab
@@ -46,6 +68,7 @@ class CenterWidget(QWidget):
         vtkLayout.addWidget(self.vtkWidget)
         self.vtkVisualizationTab.setLayout(vtkLayout)
         self.tabWidget.addTab(self.vtkVisualizationTab, "VTK Visualization")
+        self.registerComponent("VTK Visualization Tab",self.vtkVisualizationTab)
 
         #  matplotlibDisplayTab
         self.matplotlibWidget = CustomFigureCanvas()  # 创建画布控件
@@ -54,6 +77,7 @@ class CenterWidget(QWidget):
         self.matplotlibLayout.addWidget(self.matplotlibWidget)
         self.matplotlibDisplayTab.setLayout(self.matplotlibLayout)
         self.tabWidget.addTab(self.matplotlibDisplayTab, "Matplotlib Display")
+        self.registerComponent("Matplotlib Display Tab",self.matplotlibDisplayTab)
 
         # dataTableTab
         dataTableTab = QWidget()

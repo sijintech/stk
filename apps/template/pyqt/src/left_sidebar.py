@@ -7,12 +7,12 @@ class LeftSidebar(QWidget):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
+        self.parent.registerComponent('File structure',self,True)
         self.initUI()
 
     def initUI(self):
         layout = QVBoxLayout()
         self.treeView = QTreeView()
-
 
         layout.addWidget(self.treeView)
         self.setLayout(layout)
@@ -26,9 +26,9 @@ class LeftSidebar(QWidget):
         self.treeView.setModel(self.model)
         self.treeView.setRootIndex(self.model.index(""))  # 设置根索引为当前路径
         # 只想显示name这一列，不想显示size,type,modified的信息
-        self.treeView.setColumnHidden(1, True);
-        self.treeView.setColumnHidden(2, True);
-        self.treeView.setColumnHidden(3, True);
+        self.treeView.setColumnHidden(1, True)
+        self.treeView.setColumnHidden(2, True)
+        self.treeView.setColumnHidden(3, True)
         # 连接双击信号到槽函数
         self.treeView.doubleClicked.connect(self.onDoubleClick)
 
