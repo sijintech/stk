@@ -1,14 +1,1 @@
-[server]
-host = "localhost"
-port = "8080"
-ssl = "False"
-
-[database]
-url = "mongodb://localhost:27017"
-name = "mydb"
-username = "myuser"
-password = "mypassword"
-level = "info"
-
-[op]
-2342 = "afwc"
+Default_Location="$HOME"

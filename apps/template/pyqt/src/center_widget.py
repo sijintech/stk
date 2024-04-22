@@ -1,10 +1,20 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTabWidget,QTableWidgetItem, QPushButton,QTableWidget,QMenu
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QTabWidget,
+    QTableWidgetItem,
+    QPushButton,
+    QTableWidget,
+    QMenu,
+)
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg 
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 import matplotlib.pyplot as plt
 import toml
 from PySide6.QtCore import Qt
+
 
 class CustomFigureCanvas(FigureCanvasQTAgg):
     def __init__(self, figure=None):
@@ -21,7 +31,11 @@ class CustomFigureCanvas(FigureCanvasQTAgg):
 
     def getFigure(self):
         return self._figure
-ColumnCount=7
+
+
+ColumnCount = 7
+
+
 class PreferenceTab(QWidget):
     def __init__(self, data):
         super().__init__()
@@ -37,7 +51,7 @@ class PreferenceTab(QWidget):
         self.table.horizontalHeader().setVisible(False)
         self.table.setShowGrid(False)
         layout.addWidget(self.table)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         # 添加保存按钮
         self.saveButton = QPushButton("保存")
@@ -100,7 +114,7 @@ class PreferenceTab(QWidget):
             self.addNewRow(above=True)
         elif action == addRowBelow:
             self.addNewRow(above=False)
-        elif action == deleteRow:  
+        elif action == deleteRow:
             self.deleteRow()
 
     def addNewRow(self, above=True):
@@ -112,13 +126,18 @@ class PreferenceTab(QWidget):
         self.table.insertRow(current_row)
         for i in range(self.table.columnCount()):
             self.table.setItem(current_row, i, QTableWidgetItem(""))
+
     def deleteRow(self):
-            current_row = self.table.currentRow()
-            if current_row != -1:
-                self.table.removeRow(current_row)
+        current_row = self.table.currentRow()
+        if current_row != -1:
+            self.table.removeRow(current_row)
+
     def save_preferences_to_file(self, preferences):
-        with open("C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/preference.toml", "w") as file:
-            toml.dump(preferences, file)           
+        with open(
+            "C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/preference.toml", "w"
+        ) as file:
+            toml.dump(preferences, file)
+
     def saveData(self):
         rows = self.table.rowCount()  # 获取表格的行数
         cols = self.table.columnCount()  # 获取表格的列数
@@ -155,7 +174,6 @@ class PreferenceTab(QWidget):
                         value_item.text() if value_item else None
                     )  # 获取值项的文本内容，如果值项为空则设置为None
                     data_dict[key] = value
-                    print(key + ":" + value)
                     nextrow += 1
             return nextrow, data_dict
 
@@ -168,9 +186,18 @@ class PreferenceTab(QWidget):
             key = (
                 key_item.text() if key_item else None
             )  # 获取键项的文本内容，如果键项为空则设置为None
-            print("'" + key + "':")
-            row, subdict = get_subdict(row + 1, col + 1)
-            data[key] = subdict
+            if self.check_single_cell(row) != -1:
+                row, subdict = get_subdict(row + 1, col + 1)
+                data[key] = subdict
+            elif self.check_double_cell(row) != -1:
+                value_item = (
+                    self.table.item(row, col + 1) if col + 1 < cols else None
+                )  # 获取当前单元格的值项
+                value = (
+                    value_item.text() if value_item else None
+                )  # 获取值项的文本内容，如果值项为空则设置为None
+                data[key] = value
+                row += 1
 
         print(data)
         self.save_preferences_to_file(data)
@@ -217,14 +244,14 @@ class PreferenceTab(QWidget):
         # 如果只有一个非空单元格，则返回该列索引，否则返回 -1
         return non_empty_column if count_non_empty == 2 else -1
 
-            
+
 class CenterWidget(QWidget):
-    def __init__(self,parent):
+    def __init__(self, parent):
         super().__init__()
-        self.runCodeType=None
-        self.runCode=None
-        self.parent=parent
-        self.parent.registerComponent('Visualization window',self,True)
+        self.runCodeType = None
+        self.runCode = None
+        self.parent = parent
+        self.parent.registerComponent("Visualization window", self, True)
         self.initUI()
 
     def initUI(self):
@@ -234,31 +261,33 @@ class CenterWidget(QWidget):
         self.tabWidget.setMovable(True)
         self.tabWidget.setTabBarAutoHide(False)
         layout.addWidget(self.tabWidget)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         self.addMainOperationTabs()
 
-    def registerComponent(self, path, component,isVisible):
-        truePath='Visualization window/'+path
-        self.parent.registerComponent(truePath,component,isVisible)
-        
-    def unregisterComponent(self,path):
-        truePath='Visualization window/'+path
+    def registerComponent(self, path, component, isVisible):
+        truePath = "Visualization window/" + path
+        self.parent.registerComponent(truePath, component, isVisible)
+
+    def unregisterComponent(self, path):
+        truePath = "Visualization window/" + path
         self.parent.unregisterComponent(truePath)
 
     def toggleComponentVisibility(self, tabName):
-        tab=self.parent.components['main']['children']['Visualization window']['children'][tabName]
-        tab['isVisible']=not tab['isVisible']
+        tab = self.parent.components["main"]["children"]["Visualization window"][
+            "children"
+        ][tabName]
+        tab["isVisible"] = not tab["isVisible"]
         for i in range(self.tabWidget.count()):
-            if self.tabWidget.tabText(i) == tabName[:-len(" Tab")]:
+            if self.tabWidget.tabText(i) == tabName[: -len(" Tab")]:
                 # 如果选项卡已存在，则删除它
                 self.tabWidget.removeTab(i)
-                print("删除"+tabName)
+                print("删除" + tabName)
                 return
         # 如果选项卡不存在，则添加它
-        component = tab['component']
-        self.tabWidget.addTab(component, tabName[:-len(" Tab")])
+        component = tab["component"]
+        self.tabWidget.addTab(component, tabName[: -len(" Tab")])
 
     def addMainOperationTabs(self):
         # vtkVisualizationTab
@@ -271,7 +300,7 @@ class CenterWidget(QWidget):
         vtkLayout.addWidget(self.vtkWidget)
         self.vtkVisualizationTab.setLayout(vtkLayout)
         self.tabWidget.addTab(self.vtkVisualizationTab, "VTK Visualization")
-        self.registerComponent("VTK Visualization Tab",self.vtkVisualizationTab,True)
+        self.registerComponent("VTK Visualization Tab", self.vtkVisualizationTab, True)
 
         #  matplotlibDisplayTab
         self.matplotlibWidget = CustomFigureCanvas()  # 创建画布控件
@@ -280,7 +309,9 @@ class CenterWidget(QWidget):
         self.matplotlibLayout.addWidget(self.matplotlibWidget)
         self.matplotlibDisplayTab.setLayout(self.matplotlibLayout)
         self.tabWidget.addTab(self.matplotlibDisplayTab, "Matplotlib Display")
-        self.registerComponent("Matplotlib Display Tab",self.matplotlibDisplayTab,True)
+        self.registerComponent(
+            "Matplotlib Display Tab", self.matplotlibDisplayTab, True
+        )
 
         # dataTableTab
         dataTableTab = QWidget()
@@ -289,63 +320,65 @@ class CenterWidget(QWidget):
         dataLayout.addWidget(dataTableLabel)
         dataTableTab.setLayout(dataLayout)
         self.tabWidget.addTab(dataTableTab, "Data Table")
-        
+
         # preferenceTab
         # self.preferenceTab = PreferenceTab()
         # # self.tabWidget.addTab(self.preferenceTab, "Preference")
         # self.registerComponent("Preference Tab", self.preferenceTab,False)
-    def addPreferenceTab(self,data):
+
+    def addPreferenceTab(self, data):
         print("addPreferenceTab")
         self.unregisterComponent("Preference Tab")
         self.preferenceTab = PreferenceTab(data)
         self.tabWidget.addTab(self.preferenceTab, "Preference")
-        self.registerComponent("Preference Tab", self.preferenceTab,True)
+        self.registerComponent("Preference Tab", self.preferenceTab, True)
         preferenceTabIndex = self.tabWidget.indexOf(self.preferenceTab)
         self.tabWidget.setCurrentIndex(preferenceTabIndex)
-        
-        
-    
-    def runCodeWithAnalysis(self,runCode,runCodeType,need_variable):
-        self.runCode=runCode
-        self.runCodeType=runCodeType
-        if self.runCodeType=='vtk':
+
+    def runCodeWithAnalysis(self, runCode, runCodeType, need_variable):
+        self.runCode = runCode
+        self.runCodeType = runCodeType
+        if self.runCodeType == "vtk":
             local_vars = {}
-            global_vars = {'vtk': vtk}
+            global_vars = {"vtk": vtk}
             exec(self.runCode, global_vars, local_vars)
             renderer = local_vars.get(need_variable)
             if renderer:
                 self.updateVTKVisualization(renderer)
-        if self.runCodeType=='matplotlib':
+        if self.runCodeType == "matplotlib":
             local_vars = {}
-            global_vars = {'plt': plt}
+            global_vars = {"plt": plt}
             exec(self.runCode, global_vars, local_vars)
             fig = local_vars.get(need_variable)
             if fig:
-                self.updateMatplotlibDisplay(fig) 
+                self.updateMatplotlibDisplay(fig)
+
     # 清空 QVBoxLayout 中所有子控件
-    def clearLayout(self,layout):
+    def clearLayout(self, layout):
         while layout.count():
             item = layout.takeAt(0)
             widget = item.widget()
             layout.removeWidget(widget)
             if widget is not None:
-                widget.deleteLater()      
+                widget.deleteLater()
+
     def updateVTKVisualization(self, vtkObject):
         # 更新VTK可视化图
         # renderer = self.vtkWidget.GetRenderWindow().GetRenderers().GetFirstRenderer()
         # renderer.RemoveAllViewProps()  # 移除当前渲染器中的所有对象
-        self.vtkWidget.GetRenderWindow().AddRenderer(vtkObject)  # 将渲染器添加到渲染窗口
+        self.vtkWidget.GetRenderWindow().AddRenderer(
+            vtkObject
+        )  # 将渲染器添加到渲染窗口
         self.vtkWidget.GetRenderWindow().Render()  # 渲染一次
         # 将当前选中的 tab 设置为 "Vtk Visualization"
         vtkVisualizationIndex = self.tabWidget.indexOf(self.vtkVisualizationTab)
         self.tabWidget.setCurrentIndex(vtkVisualizationIndex)
-    def updateMatplotlibDisplay(self,fig):
+
+    def updateMatplotlibDisplay(self, fig):
         # 更新Matplotlib显示
-        self.matplotlibWidget=CustomFigureCanvas(fig)
+        self.matplotlibWidget = CustomFigureCanvas(fig)
         self.clearLayout(self.matplotlibLayout)
         self.matplotlibLayout.addWidget(self.matplotlibWidget)
         # 将当前选中的 tab 设置为 "Matplotlib Display"
         matplotlibDisplayIndex = self.tabWidget.indexOf(self.matplotlibDisplayTab)
         self.tabWidget.setCurrentIndex(matplotlibDisplayIndex)
-       
-
