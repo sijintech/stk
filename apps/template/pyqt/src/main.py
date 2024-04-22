@@ -141,6 +141,19 @@ class MainWindow(QMainWindow):
             "isVisible":isVisible
         }  # 在路径的最后一个部分中添加组件
 
+    def unregisterComponent(self,path):
+        """按路径取消注册组件,根组件为main"""
+        parts = path.split("/")
+        current_level = self.components["main"]["children"]  # 从根组件的子组件开始搜索
+
+        for part in parts[:-1]:
+            current_level = current_level.setdefault(part, {}).setdefault(
+                "children", {}
+            ) 
+        if  parts[-1] in current_level:
+            current_level.pop(parts[-1])
+
+
     def toggleComponentVisibility(self, path):
         """切换组件的可见性."""
         parts = path.split("/")
@@ -163,6 +176,23 @@ class MainWindow(QMainWindow):
         component = current_level[component_name]["component"]  # 获取要切换可见性的组件
         component.setVisible(not component.isVisible())  # 切换组件的可见性
         current_level[component_name]['isVisible']=not current_level[component_name]['isVisible']
+        
+    def componentIsVisible(self, path):
+        """判断组件是否可见."""
+        parts = path.split("/")
+        current_level = self.components["main"]["children"]  # 从根组件的子组件开始搜索
+        component_name = parts[-1]
+        for part in parts[:-1]:
+            current_level = current_level[part]["children"]  # 移动到下一个层级的子组件
+        return current_level[component_name]["isVisible"] 
+    def getComponent(self, path):
+        """得到已注册的组件，以引用."""
+        parts = path.split("/")
+        current_level = self.components["main"]["children"]  # 从根组件的子组件开始搜索
+        component_name = parts[-1]
+        for part in parts[:-1]:
+            current_level = current_level[part]["children"]  # 移动到下一个层级的子组件
+        return current_level[component_name]["component"] 
 
     def check_update_callback(self, data):
         new_version = data["版本号"]

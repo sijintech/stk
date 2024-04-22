@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 from PySide6.QtGui import QAction, QIcon
-
+import toml
 
 class Toolbar(QToolBar):
 
@@ -24,22 +24,21 @@ class Toolbar(QToolBar):
         # self.info_bar = info_bar
 
         self.current_open_file = None
-        self.parent.registerComponent('Tool',self,True)
+        self.parent.registerComponent("Tool", self, True)
         self.initUI(height)
 
     def initUI(self, height):
 
         self.setFixedHeight(height)  # 设置工具栏高度
-        
 
         openAction = QAction("Open", self)
         openAction.triggered.connect(self.showOpenMenu)
-        self.registerComponent("Open",openAction)
+        self.registerComponent("Open", openAction)
         self.addAction(openAction)
 
         saveAction = QAction("Save", self)
         saveAction.triggered.connect(self.saveFile)
-        self.registerComponent("Save",saveAction)
+        self.registerComponent("Save", saveAction)
         self.addAction(saveAction)
 
         viewAction = QAction("View", self)
@@ -48,7 +47,7 @@ class Toolbar(QToolBar):
 
         helpAction = QAction("Help", self)
         helpAction.triggered.connect(self.showHelpMenu)
-        self.registerComponent("Help",helpAction)
+        self.registerComponent("Help", helpAction)
         self.addAction(helpAction)
 
     def showOpenMenu(self):
@@ -138,11 +137,12 @@ class Toolbar(QToolBar):
         except Exception as e:
 
             print("Error saving file:", e)
+
     def registerComponent(self, path, component):
-        truePath='Tool/'+path
-        self.parent.registerComponent(truePath,component,True)
-        
-    def toggleComponentVisibility(self,  path):
+        truePath = "Tool/" + path
+        self.parent.registerComponent(truePath, component, True)
+
+    def toggleComponentVisibility(self, path):
         print("改变勾选")
         self.parent.toggleComponentVisibility(path)
 
@@ -169,7 +169,9 @@ class Toolbar(QToolBar):
                 menu.addAction(action)
                 # checkbox.clicked.connect(self.toggleComponentVisibility(current_path))
                 checkbox.clicked.connect(
-                    lambda c=info["component"], p=current_path: self.toggleComponentVisibility(p)
+                    lambda c=info[
+                        "component"
+                    ], p=current_path: self.toggleComponentVisibility(p)
                 )
 
     def showHelpMenu(self):
@@ -204,6 +206,26 @@ class Toolbar(QToolBar):
         self.parent.check_update()
 
     def preference(self):
-        # Your existing method for preferences
-        pass
-        # self.toggleComponentVisibility("Visualization window/VTK Visualization Tab")
+
+        preferences = self.load_preferences_from_file()
+        Visualization_window= self.parent.getComponent(
+                "Visualization window"
+            )
+        Visualization_window.addPreferenceTab(preferences)
+        
+
+    def load_preferences_from_file(self):
+        try:
+            with open(
+                "C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/preference.toml",
+                "r",
+            ) as file:
+                preferences = toml.load(file)
+                print(preferences)
+        except FileNotFoundError:
+            preferences = {}
+        return preferences
+
+
+
+

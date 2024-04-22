@@ -9,3 +9,5 @@
     "win_download":"https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/nsis/suan_pyqt.exe",
     "mac_download":""
 }
+{'server': {'host': 'localhost', 'port': 8080, 'ssl': False}, 'database': {'url': 
+'mongodb://localhost:27017', 'name': 'mydb', 'username': 'myuser', 'password': 'mypassword', 'level': 'info'}}
