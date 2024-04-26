@@ -338,17 +338,39 @@ class CenterWidget(QWidget):
     def runCodeWithAnalysis(self, runCode, runCodeType, need_variable):
         self.runCode = runCode
         self.runCodeType = runCodeType
+        script_path = "C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/test/strain/volumn-minimum.py"  # 需要根据实际情况修改此路径
         if self.runCodeType == "vtk":
             local_vars = {}
             global_vars = {"vtk": vtk}
-            exec(self.runCode, global_vars, local_vars)
+            self.parent.info_bar.execute_code_with_file_path(self.runCode,script_path,global_vars, local_vars)
+            # exec(self.runCode, global_vars, local_vars)
+            # script_directory=os.path.dirname(os.path.abspath(script_path))
+            # # 保存当前工作目录
+            # original_directory = os.getcwd()
+            # print("执行代码")
+            # print(script_directory)
+            
+            # # 改变当前工作目录
+            # os.chdir(script_directory)
+            # # 将 __file__ 替换为指定的文件路径
+            # modified_code = code_string.replace("__file__", f'"{script_path}"')
+            # # 执行替换后的代码字符串
+            # try:
+            #     exec(modified_code, global_vals, local_vals)  
+            # except Exception as e:
+            #     QMessageBox.critical(self, "Error", f"Failed to execute script: {str(e)}")
+            #     return
+            # finally:
+            # # 恢复原来的工作目录
+            #     os.chdir(original_directory)  
             renderer = local_vars.get(need_variable)
             if renderer:
                 self.updateVTKVisualization(renderer)
         if self.runCodeType == "matplotlib":
             local_vars = {}
             global_vars = {"plt": plt}
-            exec(self.runCode, global_vars, local_vars)
+            self.parent.info_bar.execute_code_with_file_path(self.runCode,script_path,global_vars, local_vars)
+            # exec(self.runCode, global_vars, local_vars)
             fig = local_vars.get(need_variable)
             if fig:
                 self.updateMatplotlibDisplay(fig)

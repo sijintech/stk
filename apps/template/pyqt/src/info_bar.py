@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QMessageBox, QMenu, QFileDialog, QTextEdit,QWidget,QVBoxLayout,QTabWidget
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
-
+import os
 import re
 
 
@@ -85,17 +85,40 @@ class InfoBar(QWidget):
         menu.addAction(runAction)
 
         menu.exec_(self.codeTab.mapToGlobal(pos))
+    
+    def execute_code_with_file_path(self,code_string, file_path, global_vals, local_vals):
+        script_directory=os.path.dirname(os.path.abspath(file_path))
+         # 保存当前工作目录
+        original_directory = os.getcwd()
+        print("执行代码")
+        print(script_directory)
         
-    def runCodeWithoutAnalysis(self):
-        # 执行当前显示的原代码（独立运行，一般会打开新窗口显示）
+        # 改变当前工作目录
+        os.chdir(script_directory)
+        # 将 __file__ 替换为指定的文件路径
+        modified_code = code_string.replace("__file__", f'"{file_path}"')
+        # 执行替换后的代码字符串
         try:
-            exec(self.curShowCode, globals(), locals())
+            exec(modified_code, global_vals, local_vals)  
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to execute script: {str(e)}")
             return
+        finally:
+        # 恢复原来的工作目录
+            os.chdir(original_directory)  
+    def runCodeWithoutAnalysis(self):
+        # 将工作目录设置为与源代码文件所在的目录相同
+        script_path = "C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/test/strain/volumn-minimum.py"  # 需要根据实际情况修改此路径
+
+        self.execute_code_with_file_path(self.curShowCode,script_path,globals(),locals())
+
+    
     def analyzeCode(self, curShowCode):
         # 使用正则表达式判断当前显示代码是否涉及到 vtk 或 matplotlib
         vtk_import = re.search(r'(?<!#)\s*\bimport\s+vtk\b', curShowCode)
+        if vtk_import is None:
+            vtk_import = re.search(r'(?<!#)\s*\bfrom\s+vtk\b', curShowCode)
+            
         matplotlib_import = re.search(r'(?<!#)\s*\bimport\s+matplotlib\b', curShowCode)
         need_variable = None  # 用于存储提取的渲染器变量名
         # 如果涉及到 vtk 的代码
@@ -104,6 +127,9 @@ class InfoBar(QWidget):
             self.curShowCodeType = 'vtk'
             # 使用正则表达式查找赋值为 vtkRenderer() 的语句，并提取变量名
             need_variables = re.finditer(r'(?<!#)\s*(\w+)\s*=\s*vtk\.vtkRenderer\(\w*\)', curShowCode)
+            if need_variable is None:
+                need_variables = re.finditer(r'(?<!#)\s*(\w+)\s*=\s*vtkRenderer\(\w*\)', curShowCode)
+                
             for match in need_variables:
                 need_variable=match.group(1)
             # 查找涉及到 vtk 渲染窗口和交互器的变量名
@@ -116,11 +142,17 @@ class InfoBar(QWidget):
             # print("vtk_vars:",vtk_vars)
             # 删除涉及到 vtk 渲染窗口和交互器的变量赋值语句以及相关的代码行
             curShowCode_lines = curShowCode.split('\n')  # 将代码按行拆分为列表
+            # line_nums=len(curShowCode_lines)
             updated_lines = []  # 用于存储更新后的代码行
-            for line in curShowCode_lines:
+            for line in curShowCode_lines:         
                 if any(var in line for var in vtk_vars):
+                    local_assignments = re.finditer(r'(?<!#)\s*(\w+)\s*=\s*\w*', line)
+                    # if len(local_assignments)!=0:
+                    for match in local_assignments:
+                        vtk_vars.add(match.group(1))
                     continue  # 如果当前行涉及到 vtk 渲染窗口和交互器的变量，则跳过该行
                 updated_lines.append(line)  # 否则添加到更新后的代码行列表中
+            print("vtk_vars:",vtk_vars)
             curShowCode = '\n'.join(updated_lines)  # 将更新后的代码行列表重新组合成字符串
         # 如果涉及到 matplotlib 的代码
         elif matplotlib_import:
@@ -150,6 +182,6 @@ class InfoBar(QWidget):
     def runCodeWithAnalysis(self):
         # 分析当前显示的原代码提取出渲染器后再运行
         runCode,need_variable=self.analyzeCode(self.curShowCode)
-        # self.parent.CenterWidget.runCode(runCode,self.curShowCodeType)
+        print("runCode:"+runCode)
         self.parent.center_widget.runCodeWithAnalysis(runCode,self.curShowCodeType,need_variable)
 
