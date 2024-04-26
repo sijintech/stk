@@ -9,7 +9,7 @@ export default defineConfig({
   output: "static",
   integrations: [
     starlight({
-      title: "suan",
+      title: "Suan Toolkit",
       // 为此网站设置中文为默认语言。
       defaultLocale: "root",
       locales: {

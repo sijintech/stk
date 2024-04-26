@@ -1,41 +1,54 @@
 from PySide6.QtCore import QFileInfo
-
-from PySide6.QtWidgets import QToolBar, QMenu, QFileDialog, QTextEdit
-from PySide6.QtGui import QAction
+import webbrowser
+from PySide6.QtWidgets import (
+    QToolBar,
+    QMenu,
+    QFileDialog,
+    QTextEdit,
+    QToolButton,
+    QCheckBox,
+    QWidgetAction,
+)
+from PySide6.QtGui import QAction, QIcon
+import toml
 
 class Toolbar(QToolBar):
 
-    def __init__(self, height,parent):
+    def __init__(self, height, parent):
 
         super().__init__()
 
-        self.parent=parent
+        self.parent = parent
         # self.left_sidebar = left_sidebar
 
         # self.info_bar = info_bar
 
         self.current_open_file = None
-
+        self.parent.registerComponent("Tool", self, True)
         self.initUI(height)
-
 
     def initUI(self, height):
 
         self.setFixedHeight(height)  # 设置工具栏高度
 
         openAction = QAction("Open", self)
-
         openAction.triggered.connect(self.showOpenMenu)
-
+        self.registerComponent("Open", openAction)
         self.addAction(openAction)
 
-
         saveAction = QAction("Save", self)
-
         saveAction.triggered.connect(self.saveFile)
-
+        self.registerComponent("Save", saveAction)
         self.addAction(saveAction)
 
+        viewAction = QAction("View", self)
+        viewAction.triggered.connect(self.showViewMenu)
+        self.addAction(viewAction)
+
+        helpAction = QAction("Help", self)
+        helpAction.triggered.connect(self.showHelpMenu)
+        self.registerComponent("Help", helpAction)
+        self.addAction(helpAction)
 
     def showOpenMenu(self):
 
@@ -47,16 +60,13 @@ class Toolbar(QToolBar):
 
         menu.addAction(openFileAction)
 
-
         openDirectoryAction = QAction("Open Directory", self)
 
         openDirectoryAction.triggered.connect(self.openDirectory)
 
         menu.addAction(openDirectoryAction)
 
-
         menu.popup(self.mapToGlobal(self.actionGeometry(self.sender()).bottomLeft()))
-
 
     def openFile(self):
 
@@ -70,15 +80,17 @@ class Toolbar(QToolBar):
 
                 # 以二进制模式读取文件，并使用UTF-8解码
 
-                with open(path, 'rb') as file:
+                with open(path, "rb") as file:
 
-                    content = file.read().decode('utf-8')
+                    content = file.read().decode("utf-8")
 
                     # 设置文件目录树的根路径为文件所在目录
 
                     root_path = QFileInfo(path).absolutePath()
 
-                    self.parent.left_sidebar.treeView.setRootIndex(self.parent.left_sidebar.model.index(root_path))
+                    self.parent.left_sidebar.treeView.setRootIndex(
+                        self.parent.left_sidebar.model.index(root_path)
+                    )
 
                     # 显示文件内容
 
@@ -90,7 +102,6 @@ class Toolbar(QToolBar):
 
                 print("Error reading file:", e)
 
-
     def openDirectory(self):
 
         # 打开目录对话框
@@ -101,12 +112,13 @@ class Toolbar(QToolBar):
 
             # 设置文件目录树的根路径为用户选择的目录路径
 
-            self.parent.left_sidebar.treeView.setRootIndex(self.parent.left_sidebar.model.index(path))
-
+            self.parent.left_sidebar.treeView.setRootIndex(
+                self.parent.left_sidebar.model.index(path)
+            )
 
     def saveFile(self):
 
-        if not self.current_open_file:           
+        if not self.current_open_file:
 
             return
 
@@ -118,11 +130,102 @@ class Toolbar(QToolBar):
 
             # 将内容写入文件
 
-            with open(self.current_open_file, 'w', encoding='utf-8') as file:
+            with open(self.current_open_file, "w", encoding="utf-8") as file:
 
                 file.write(content)
 
         except Exception as e:
 
             print("Error saving file:", e)
+
+    def registerComponent(self, path, component):
+        truePath = "Tool/" + path
+        self.parent.registerComponent(truePath, component, True)
+
+    def toggleComponentVisibility(self, path):
+        print("改变勾选")
+        self.parent.toggleComponentVisibility(path)
+
+    def showViewMenu(self):
+        menu = QMenu(self)
+        self.addComponentsToMenu(self.parent.components["main"]["children"], menu, "")
+        menu.exec(self.mapToGlobal(self.actionGeometry(self.sender()).bottomLeft()))
+
+    def addComponentsToMenu(self, components, menu, path):
+        for name, info in components.items():
+            current_path = path + name  # 使用局部变量存储当前节点的路径
+            if len(info["children"]) != 0:  # 该节点有子组件
+                sub_menu = menu.addMenu(name)
+                self.addComponentsToMenu(
+                    info["children"], sub_menu, current_path + "/"
+                )  # 传递更新后的当前路径
+            else:  # 该节点为叶子节点
+
+                checkbox = QCheckBox(self)
+                checkbox.setText(name)
+                checkbox.setChecked(info["isVisible"])
+                action = QWidgetAction(self)
+                action.setDefaultWidget(checkbox)
+                menu.addAction(action)
+                # checkbox.clicked.connect(self.toggleComponentVisibility(current_path))
+                checkbox.clicked.connect(
+                    lambda c=info[
+                        "component"
+                    ], p=current_path: self.toggleComponentVisibility(p)
+                )
+
+    def showHelpMenu(self):
+
+        menu = QMenu(self)
+
+        openWebsiteAction = QAction("Support Website", self)
+
+        openWebsiteAction.triggered.connect(self.openWebsite)
+
+        menu.addAction(openWebsiteAction)
+
+        checkUpdateAction = QAction("Check Update", self)
+
+        checkUpdateAction.triggered.connect(self.checkUpdate)
+
+        menu.addAction(checkUpdateAction)
+
+        preferenceAction = QAction("Preference", self)
+
+        preferenceAction.triggered.connect(self.preference)
+
+        menu.addAction(preferenceAction)
+
+        menu.popup(self.mapToGlobal(self.actionGeometry(self.sender()).bottomLeft()))
+
+    def openWebsite(self):
+        url = "https://3dfd8b42.stk.pages.dev"
+        webbrowser.open(url)
+
+    def checkUpdate(self):
+        self.parent.check_update()
+
+    def preference(self):
+
+        preferences = self.load_preferences_from_file()
+        Visualization_window= self.parent.getComponent(
+                "Visualization window"
+            )
+        Visualization_window.addPreferenceTab(preferences)
+        
+
+    def load_preferences_from_file(self):
+        try:
+            with open(
+                "C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/preference.toml",
+                "r",
+            ) as file:
+                preferences = toml.load(file)
+                print(preferences)
+        except FileNotFoundError:
+            preferences = {}
+        return preferences
+
+
+
 

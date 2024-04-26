@@ -3,7 +3,8 @@ title: Suan Toolkit
 template: splash
 hero:
   name: Suan Toolkit
-  text: 提供一些为开发服务的软件
+  text: 提供一些为程序员服务的软件
+  
   actions:
     - variant: primary
       text: 开发者指南

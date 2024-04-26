@@ -6,6 +6,8 @@ class RightSidebar(QWidget):
         super().__init__(parent)
         self.table_widget = None
         self.status=None
+        self.parent=parent
+        self.parent.registerComponent('Status',self,True)
         self.initUI()
 
     def initUI(self):
