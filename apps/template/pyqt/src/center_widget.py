@@ -37,9 +37,10 @@ ColumnCount = 7
 
 
 class PreferenceTab(QWidget):
-    def __init__(self, data):
+    def __init__(self, data, preference_toml_path):
         super().__init__()
         self.data = data
+        self.preference_toml_path = preference_toml_path
         self.initUI()
 
     def initUI(self):
@@ -61,6 +62,7 @@ class PreferenceTab(QWidget):
         self.setLayout(layout)
         self.populateTable(self.data, 0, 0)
         self.beautify()
+        
 
     def beautify(self):
         for row in range(0, self.table.rowCount()):
@@ -133,9 +135,7 @@ class PreferenceTab(QWidget):
             self.table.removeRow(current_row)
 
     def save_preferences_to_file(self, preferences):
-        with open(
-            "C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/preference.toml", "w"
-        ) as file:
+        with open(self.preference_toml_path, "w") as file:
             toml.dump(preferences, file)
 
     def saveData(self):
@@ -153,7 +153,6 @@ class PreferenceTab(QWidget):
                     key_item.text() if key_item else None
                 )  # 获取键项的文本内容，如果键项为空则设置为None
                 if father_index != -1:  # 是一个父子典
-                    print(key + ":{")
 
                     if father_index < col:  # 不是上一个父子典的子字典
                         return nextrow, data_dict
@@ -163,8 +162,7 @@ class PreferenceTab(QWidget):
                             data_dict[key] = sub_dict
                         else:
                             data_dict[key] = {}
-                        nextrow += 1
-                    print("}")
+                        # nextrow += 1
 
                 else:  # 是叶字典
                     value_item = (
@@ -173,6 +171,10 @@ class PreferenceTab(QWidget):
                     value = (
                         value_item.text() if value_item else None
                     )  # 获取值项的文本内容，如果值项为空则设置为None
+                    if value == "True":
+                        value = True
+                    elif value == "False":
+                        value = False
                     data_dict[key] = value
                     nextrow += 1
             return nextrow, data_dict
@@ -196,10 +198,14 @@ class PreferenceTab(QWidget):
                 value = (
                     value_item.text() if value_item else None
                 )  # 获取值项的文本内容，如果值项为空则设置为None
+                if value == "True":
+                    value = True
+                elif value == "False":
+                    value = False
                 data[key] = value
                 row += 1
 
-        print(data)
+        # print(data)
         self.save_preferences_to_file(data)
 
     def check_single_cell(self, row):
@@ -257,7 +263,8 @@ class CenterWidget(QWidget):
     def initUI(self):
         layout = QVBoxLayout()
         self.tabWidget = QTabWidget()
-        # self.tabWidget.setTabsClosable(True)
+        self.tabWidget.setTabsClosable(True)
+        self.tabWidget.tabCloseRequested.connect(self.close_tab)
         self.tabWidget.setMovable(True)
         self.tabWidget.setTabBarAutoHide(False)
         layout.addWidget(self.tabWidget)
@@ -265,6 +272,26 @@ class CenterWidget(QWidget):
         self.setLayout(layout)
 
         self.addMainOperationTabs()
+
+    def initWorkspace(self):
+        active_tab_index=self.parent.get_workspaceData('center_widget/active_tab_index')
+        self.tabWidget.setCurrentIndex(active_tab_index)
+        # self.vtkObject=self.parent.get_workspaceData('center_widget/vtk/view_port')
+        # self.vtkWidget.GetRenderWindow().AddRenderer(
+        #     self.vtkObject
+        # )
+
+    def close_tab(self, index):
+        tabName = self.tabWidget.tabText(index) + " Tab"
+        tab = self.parent.components["main"]["children"]["Visualization window"][
+            "children"
+        ][tabName]
+        tab["isVisible"] = not tab["isVisible"]
+        self.tabWidget.removeTab(index)
+        
+    def closeEvent(self, QCloseEvent):
+        super().closeEvent(QCloseEvent)
+        self.vtkWidget.Finalize()
 
     def registerComponent(self, path, component, isVisible):
         truePath = "Visualization window/" + path
@@ -314,62 +341,45 @@ class CenterWidget(QWidget):
         )
 
         # dataTableTab
-        dataTableTab = QWidget()
+        self.dataTableTab = QWidget()
         dataTableLabel = QLabel("Data Table Tab")
         dataLayout = QVBoxLayout()
         dataLayout.addWidget(dataTableLabel)
-        dataTableTab.setLayout(dataLayout)
-        self.tabWidget.addTab(dataTableTab, "Data Table")
-
+        self.dataTableTab.setLayout(dataLayout)
+        self.tabWidget.addTab(self.dataTableTab, "Data Table")
+        self.registerComponent("Data Table Tab", self.dataTableTab, True)
         # preferenceTab
         # self.preferenceTab = PreferenceTab()
         # # self.tabWidget.addTab(self.preferenceTab, "Preference")
         # self.registerComponent("Preference Tab", self.preferenceTab,False)
 
     def addPreferenceTab(self, data):
-        print("addPreferenceTab")
+        # print("addPreferenceTab")
         self.unregisterComponent("Preference Tab")
-        self.preferenceTab = PreferenceTab(data)
+        self.preferenceTab = PreferenceTab(data, self.parent.preference_toml_path)
         self.tabWidget.addTab(self.preferenceTab, "Preference")
         self.registerComponent("Preference Tab", self.preferenceTab, True)
         preferenceTabIndex = self.tabWidget.indexOf(self.preferenceTab)
         self.tabWidget.setCurrentIndex(preferenceTabIndex)
-
     def runCodeWithAnalysis(self, runCode, runCodeType, need_variable):
         self.runCode = runCode
         self.runCodeType = runCodeType
-        script_path = "C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/test/strain/volumn-minimum.py"  # 需要根据实际情况修改此路径
+        script_path = self.parent.info_bar.curShowCodePath  # 需要根据实际情况修改此路径
         if self.runCodeType == "vtk":
             local_vars = {}
             global_vars = {"vtk": vtk}
-            self.parent.info_bar.execute_code_with_file_path(self.runCode,script_path,global_vars, local_vars)
-            # exec(self.runCode, global_vars, local_vars)
-            # script_directory=os.path.dirname(os.path.abspath(script_path))
-            # # 保存当前工作目录
-            # original_directory = os.getcwd()
-            # print("执行代码")
-            # print(script_directory)
-            
-            # # 改变当前工作目录
-            # os.chdir(script_directory)
-            # # 将 __file__ 替换为指定的文件路径
-            # modified_code = code_string.replace("__file__", f'"{script_path}"')
-            # # 执行替换后的代码字符串
-            # try:
-            #     exec(modified_code, global_vals, local_vals)  
-            # except Exception as e:
-            #     QMessageBox.critical(self, "Error", f"Failed to execute script: {str(e)}")
-            #     return
-            # finally:
-            # # 恢复原来的工作目录
-            #     os.chdir(original_directory)  
+            self.parent.info_bar.execute_code_with_file_path(
+                self.runCode, script_path, global_vars, local_vars
+            )
             renderer = local_vars.get(need_variable)
             if renderer:
                 self.updateVTKVisualization(renderer)
         if self.runCodeType == "matplotlib":
             local_vars = {}
             global_vars = {"plt": plt}
-            self.parent.info_bar.execute_code_with_file_path(self.runCode,script_path,global_vars, local_vars)
+            self.parent.info_bar.execute_code_with_file_path(
+                self.runCode, script_path, global_vars, local_vars
+            )
             # exec(self.runCode, global_vars, local_vars)
             fig = local_vars.get(need_variable)
             if fig:
@@ -388,6 +398,7 @@ class CenterWidget(QWidget):
         # 更新VTK可视化图
         # renderer = self.vtkWidget.GetRenderWindow().GetRenderers().GetFirstRenderer()
         # renderer.RemoveAllViewProps()  # 移除当前渲染器中的所有对象
+        self.vtkObject=vtkObject
         self.vtkWidget.GetRenderWindow().AddRenderer(
             vtkObject
         )  # 将渲染器添加到渲染窗口

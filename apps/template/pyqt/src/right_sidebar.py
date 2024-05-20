@@ -1,13 +1,22 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QSizePolicy, QHeaderView
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QTableWidget,
+    QTableWidgetItem,
+    QSizePolicy,
+    QHeaderView,
+    QPushButton,
+    QMenu,
+)
 
 
 class RightSidebar(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.table_widget = None
-        self.status=None
-        self.parent=parent
-        self.parent.registerComponent('Status',self,True)
+        self.variable_info = None
+        self.parent = parent
+        self.parent.registerComponent("Status", self, True)
         self.initUI()
 
     def initUI(self):
@@ -16,35 +25,65 @@ class RightSidebar(QWidget):
         # 创建表格部件
         self.table_widget = QTableWidget()
         self.table_widget.setColumnCount(2)  # 设置表格列数为2
-        self.table_widget.setHorizontalHeaderLabels(["Statu", "Value"])  # 设置表头标签
-
-        # 添加示例数据
-        self.addTableRow("Statu 1", "Value 1")
-        self.addTableRow("Statu 2", "Value 2")
-
-        # 将表格的单元格内容更改信号连接到自定义的槽函数
-        self.table_widget.cellChanged.connect(self.handleCellChanged)
-        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table_widget.setHorizontalHeaderLabels(
+            ["变量名", "变量值"]
+        )  # 设置表头标签
         layout.addWidget(self.table_widget)
-        layout.setContentsMargins(0,0,0,0)
+
+        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         self.setLayout(layout)
 
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        saveData = menu.addAction("保存修改")
+        saveDataAndrun = menu.addAction("保存修改并运行")
 
-    def addTableRow(self, statu, value):
-        row_count = self.table_widget.rowCount()  # 获取当前行数
-        self.table_widget.insertRow(row_count)  # 在最后插入新行
-        self.table_widget.setItem(row_count, 0, QTableWidgetItem(statu))  # 在第一列设置选项
-        self.table_widget.setItem(row_count, 1, QTableWidgetItem(value))  # 在第二列设置值
+        action = menu.exec_(event.globalPos())
 
-    def handleCellChanged(self, row, column):
-        # 获取编辑后的单元格内容
-        statu_item = self.table_widget.item(row, 0)
-        statu = statu_item.text()
+        if action == saveData:
+            self.saveData()
+        elif action == saveDataAndrun:
+            self.saveData()
+            self.parent.info_bar.runCodeWithAnalysis()
 
-        value_item = self.table_widget.item(row, 1)
-        value = value_item.text()
+    def saveData(self):
+        # 获取表格行数
+        rows = self.table_widget.rowCount()
 
-        # 构建字典并发送给应用程序
-        modified_info = {statu: value}
-        print("Modified information:", modified_info)
+        # 遍历表格行，更新变量信息的初始值
+        for row in range(rows):
+            variable_name_item = self.table_widget.item(row, 0)  # 获取变量名单元格
+            variable_value_item = self.table_widget.item(row, 1)  # 获取变量值单元格
+
+            # 获取变量名和变量值
+            variable_name = variable_name_item.text() if variable_name_item else ""
+            variable_value = variable_value_item.text() if variable_value_item else ""
+
+            # 更新变量信息中的初始值
+            if variable_name in self.variable_info:
+                self.variable_info[variable_name]["initial_value"] = variable_value
+        self.parent.info_bar.updateInitialValue(self.variable_info)
+        self.parent.toolbar.saveFile()
+
+    def updateData(self, variable_info):
+        self.variable_info = variable_info
+        # 清空表格
+        print("清空表格")
+        self.table_widget.clearContents()
+
+        # 设置表格行数
+        self.table_widget.setRowCount(len(variable_info))
+
+        # 遍历 variable_info 字典，将变量名和初始值填充到表格中
+        for row, (variable_name, info) in enumerate(variable_info.items()):
+            # 设置变量名
+            variable_name_item = QTableWidgetItem(variable_name)
+            self.table_widget.setItem(row, 0, variable_name_item)
+
+            # 设置初始值
+            initial_value_item = QTableWidgetItem(info["initial_value"])
+            self.table_widget.setItem(row, 1, initial_value_item)
+        # 强制刷新表格视图
+        self.table_widget.viewport().update()

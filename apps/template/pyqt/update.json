@@ -9,5 +9,4 @@
     "win_download":"https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/nsis/suan_pyqt.exe",
     "mac_download":""
 }
-{'server': {'host': 'localhost', 'port': 8080, 'ssl': False}, 'database': {'url': 
-'mongodb://localhost:27017', 'name': 'mydb', 'username': 'myuser', 'password': 'mypassword', 'level': 'info'}}
+{'Default_Location': '$Home', 'UI_Init': {'window_width': '500', 'window_height': '500', 'left_sidebar_width': '100', 'right_sidebar_width': '100', 'center_widget_height': '300'}, 'UI_Component_Visibility_Init': {'Info': {'Code_Tab': 'True', 'Log_Tab': 'True', 'Console_Tab': 'True', 'Status_Information': 'True'}, 'Visualization_window': {'VTK_Visualization_Tab': 'True', 'Matplotlib_Display_Tab': 'True', 'Data_Table_Tab': 'True', 'Preference_Tab': 'False'}, 'Tool': {'Open': 'True', 'Save': 'True', 'View': 'True', 'Help': 'True'}, 'Other': {'File_structure': 'True', 'Status': 'True', 'Statusbar': 'True'}}}

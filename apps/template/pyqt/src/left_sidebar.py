@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QFileSystemModel, QTreeView
 from PySide6.QtCore import QModelIndex, Qt,Signal
 from PySide6.QtCore import QFileInfo
-
+import os
 class LeftSidebar(QWidget):
     openFilePath = Signal(str)  # 定义一个信号，用于发送打开文件请求
     def __init__(self, parent):
@@ -32,17 +32,27 @@ class LeftSidebar(QWidget):
         # 连接双击信号到槽函数
         self.treeView.doubleClicked.connect(self.onDoubleClick)
 
+    def initWorkspace(self):
+        working_directory=self.parent.get_workspaceData('left_sidebar/working_directory')
+        self.treeView.setRootIndex(self.model.index(working_directory))
+
+        
     def onDoubleClick(self, index: QModelIndex):
         # 获取所选项的路径
         path = self.model.filePath(index)
-
+        self.openFlie(path)
+        
+    def openFlie(self,path):  
+        working_directory = os.path.dirname(os.path.abspath(path))
+        self.parent.modify_workspaceData('left_sidebar/working_directory', working_directory)
+        self.parent.modify_workspaceData('info_bar/code/file_path',path)
         # 如果是文件，则读取文件内容
         if QFileInfo(path).isFile():
             try:
                 with open(path, 'r', encoding='utf-8') as file:
                     content = file.read()
-                    self.openFilePath.emit(path)
+                    # self.openFilePath.emit(path)
                     # 发送文件内容给InfoBar
-                    self.parent.info_bar.showContent(content)
+                    self.parent.info_bar.showContent(content,path)
             except Exception as e:
                 print("Error reading file:", e)

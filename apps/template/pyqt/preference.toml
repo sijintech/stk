@@ -1,1 +1,30 @@
-Default_Location="$HOME"
+Default_Location = "$Home"
+Open_Last_Workspace=true
+[UI_Init]
+window_width = "800"
+window_height = "500"
+left_sidebar_width = "100"
+right_sidebar_width = "100"
+center_widget_height = "300"
+
+[UI_Component_Visibility_Init.Info]
+Code_Tab = true
+Log_Tab = true
+Console_Tab = true
+Status_Information = true
+
+[UI_Component_Visibility_Init.Visualization_window]
+VTK_Visualization_Tab = true
+Matplotlib_Display_Tab = true
+Data_Table_Tab = false
+
+[UI_Component_Visibility_Init.Tool]
+Open = true
+Save = true
+View = true
+Help = true
+
+[UI_Component_Visibility_Init.Other]
+File_structure = true
+Status = true
+Statusbar = true
