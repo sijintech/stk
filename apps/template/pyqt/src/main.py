@@ -82,17 +82,6 @@ class MainWindow(QMainWindow):
         #  根据preference_toml设置组件UI setSizes
         preferences = self.load_preferences_from_file()
 
-        if self.has_initWorkspace and preferences["Open_Last_Workspace"]:
-            self.initWorkspace()
-        else:
-            # 设置主窗口大小和显示
-            self.setGeometry(
-                50,
-                50,
-                int(preferences["UI_Init"]["window_width"]),
-                int(preferences["UI_Init"]["window_height"]),
-            )
-
         self.main_splitter.setSizes(
             [
                 int(preferences["UI_Init"]["left_sidebar_width"]),
@@ -126,6 +115,18 @@ class MainWindow(QMainWindow):
                     + component.replace("_", " ")
                 )
                 self.toggleComponentVisibility(path)
+                
+        if self.has_initWorkspace and preferences["Open_Last_Workspace"]:
+            self.initWorkspace()
+        else:
+            # 设置主窗口大小和显示
+            self.setGeometry(
+                50,
+                50,
+                int(preferences["UI_Init"]["window_width"]),
+                int(preferences["UI_Init"]["window_height"]),
+            )
+
 
     def curWorkspaceIsSave(self):
         if (not self.info_bar.curFileIsSave()) or (
@@ -136,6 +137,14 @@ class MainWindow(QMainWindow):
             return True
 
     def closeEvent(self, event):
+        width = self.width()
+        height = self.height()
+        self.modify_workspaceData("window/width", width)
+        self.modify_workspaceData("window/height", height)
+        self.modify_workspaceData(
+            "center_widget/active_tab_index",
+            self.center_widget.tabWidget.currentIndex(),
+        )
         if not self.curWorkspaceIsSave():
             print("curWorkspaceIsSave")
             self.center_widget.close()

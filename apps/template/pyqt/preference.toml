@@ -1,5 +1,6 @@
 Default_Location = "$Home"
 Open_Last_Workspace=true
+Open_Last_Workspace_Directory=""
 [UI_Init]
 window_width = "800"
 window_height = "500"
@@ -16,7 +17,7 @@ Status_Information = true
 [UI_Component_Visibility_Init.Visualization_window]
 VTK_Visualization_Tab = true
 Matplotlib_Display_Tab = true
-Data_Table_Tab = false
+Data_Table_Tab = true
 
 [UI_Component_Visibility_Init.Tool]
 Open = true
