@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QFileSystemModel, QTreeView
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QFileSystemModel, QTreeView, QMessageBox
 from PySide6.QtCore import QModelIndex, Qt,Signal
 from PySide6.QtCore import QFileInfo
 import os
@@ -8,6 +8,8 @@ class LeftSidebar(QWidget):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
+        self.curDir=None
+        self.curFile=None
         self.parent.registerComponent('File structure',self,True)
         self.initUI()
 
@@ -41,12 +43,66 @@ class LeftSidebar(QWidget):
     def onDoubleClick(self, index: QModelIndex):
         # 获取所选项的路径
         path = self.model.filePath(index)
-        self.openFlie(path)
-        
-    def openFlie(self,path):  
-        working_directory = os.path.dirname(os.path.abspath(path))
-        self.parent.modify_workspaceData('left_sidebar/working_directory', working_directory)
-        self.parent.modify_workspaceData('info_bar/code/file_path',path)
+        if os.path.isdir(path):
+            self.openDirectory(path)
+        else:
+            self.openFile(path)
+
+    def openDirectory(self, directory):
+        # 原来目录处理
+        if self.curDir!=None and self.curDir!=directory:
+            if self.parent.openWorkspace:
+                self.parent.checkAndSaveCurWorkspace()
+
+        # 新的目录处理
+        self.curDir=directory
+        self.parent.modify_preferences('Open_Last_Working_Directory', directory)
+        # self.parent.checkWorkspaceFile(directory)
+        self.treeView.setRootIndex(self.model.index(directory))
+        file_name=self.parent.checkWorkspaceFile(directory)
+        if self.parent.openWorkspace:
+            self.parent.workspace_suan_path = os.path.join(directory, file_name)
+            self.parent.workspaceData=self.parent.load_workspaceData_from_file()
+            self.parent.modify_workspaceData('left_sidebar/working_directory', directory)
+
+        else:
+            self.parent.questionAndCreateWorkspace(directory)
+
+    def openFile(self, path, working_directory=""):
+        # if working_directory=="":
+        #     working_directory = os.path.dirname(os.path.abspath(path))
+        # self.parent.modify_preferences('Open_Last_Working_Directory', working_directory)
+        # self.parent.checkWorkspaceFile(working_directory)
+        # self.treeView.setRootIndex(self.model.index(working_directory))
+        # if self.parent.openWorkspace==True:
+        #     # self.parent.modify_workspaceData('left_sidebar/working_directory', working_directory)
+        #     self.parent.modify_workspaceData('info_bar/code/file_path',path)
+        # else :
+        #     reply = QMessageBox.question(
+        #         self,
+        #         "Warning",
+        #         "是否为该目录创建工作区",
+        #         QMessageBox.Yes,
+        #         QMessageBox.No,
+        #     )
+        #     if reply == QMessageBox.Yes:
+        #         this_dir = os.path.dirname(os.path.abspath(__file__))
+        #         self.parent.createWorkspaceFile(working_directory, os.path.join(this_dir, "../workspace.suan"))
+        # 原来文件处理
+        if working_directory == "":
+            working_directory = os.path.dirname(os.path.abspath(path))
+        if self.curFile != None:
+            # self.parent.checkAndSaveCurFile()
+            if self.parent.openWorkspace and self.curDir!=working_directory:
+                self.parent.checkAndSaveCurWorkspace()
+            else:
+                self.parent.checkAndSaveCurFile()
+        # 新的文件处理
+        self.curFile=path
+        self.openDirectory(working_directory)
+        if self.parent.openWorkspace:
+            self.parent.modify_workspaceData('info_bar/code/file_path',path)
+
         # 如果是文件，则读取文件内容
         if QFileInfo(path).isFile():
             extension = QFileInfo(path).suffix().lower()

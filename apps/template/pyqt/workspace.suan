@@ -3,13 +3,13 @@ width = 766
 height = 464
 
 [left_sidebar]
-working_directory = "C:\\Users\\Lenovo\\Desktop\\sijin\\stk\\apps\\template\\pyqt\\test\\strain"
+working_directory = "C:/"
 
 [center_widget]
-active_tab_index = 2
+active_tab_index = 0
 
 [center_widget.vtk]
 view_port = "the_view_port_of_vtk_window"
 
 [info_bar.code]
-file_path = "C:/Users/Lenovo/Desktop/sijin/stk/apps/template/pyqt/test/strain/strain.vtk"
+file_path = "C:/"

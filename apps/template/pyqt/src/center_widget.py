@@ -210,7 +210,8 @@ class PreferenceTab(QWidget):
                 row += 1
 
         # print(data)
-        self.save_preferences_to_file(data)
+        self.data=data
+        self.save_preferences_to_file(self.data)
 
     def check_single_cell(self, row):
         """
@@ -472,7 +473,7 @@ class CenterWidget(QWidget):
     def runCodeWithAnalysis(self, runCode, runCodeType, need_variable):
         self.runCode = runCode
         self.runCodeType = runCodeType
-        script_path = self.parent.info_bar.curShowCodePath  # 需要根据实际情况修改此路径
+        script_path = self.parent.left_sidebar.curFile  # 需要根据实际情况修改此路径
         if self.runCodeType == "vtk":
             local_vars = {}
             global_vars = {"vtk": vtk}

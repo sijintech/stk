@@ -21,7 +21,7 @@ import Updater
 import version
 import os
 import toml
-
+import shutil
 updatejson_url = "https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json"
 app_name = "suan_pyqt"
 cur_version = version.version
@@ -54,56 +54,106 @@ class MainWindow(QMainWindow):
 
         self.winUpdate = None
         self.has_initWorkspace=has_initWorkspace
+        self.openWorkspace=False
+        self.workspaceData={}
         # 对于已发布版本，首选项文件的位置应位于用户目录中，对于开发版本，应位于当前目录中
         this_dir = os.path.dirname(os.path.abspath(__file__))
         if getattr(sys, "frozen", True):
             print("执行脚本")
             self.preference_toml_path = os.path.join(this_dir, "../preference.toml")
-            self.workspace_suan_path = os.path.join(this_dir, "../workspace.suan")
             # self.preference_toml_path = os.path.join(this_dir, "../workspace.suan")
-
+            
         else:
             self.preference_toml_path = os.path.join(
                 this_dir, "../test/preference.toml"
             )
-            self.workspace_suan_path = os.path.join(this_dir, "../test/workspace.suan")
-
-        self.workspaceData = self.load_workspaceData_from_file()
+            # self.workspace_suan_path = os.path.join(this_dir, "../test/workspace.suan")
 
         self.initUI()
         self.check_update()
         # print(self.components)
 
+    def checkWorkspaceFile(self, directory):
+        # 判断目录是否存在
+        if not os.path.isdir(directory):
+            print("目录不存在")
+            return
+
+        # 检查目录下是否有.suan后缀的文件
+        self.openWorkspace = False
+        file_name = ""
+
+        for file in os.listdir(directory):
+            if file.endswith(".suan"):
+                self.openWorkspace = True
+                file_name = file
+                break
+        return file_name
+
+
+    def createWorkspaceFile(self, directory, file_to_copy):
+        file_name=self.checkWorkspaceFile(directory)
+        # 获取目录名
+        dir_name = os.path.basename(directory)
+        if self.openWorkspace:
+            print("目录下已存在.suan后缀的文件")
+            return file_name
+        else:
+            # 复制文件到目录下，并重命名为目录名+".suan"
+            new_file_name = dir_name + ".suan"
+            destination = os.path.join(directory, new_file_name)
+            shutil.copy(file_to_copy, destination)
+            self.openWorkspace = True
+            print("已成功复制文件到目录下并改名为", new_file_name)
+            return new_file_name
+    def questionAndCreateWorkspace(self,directory):
+        reply = QMessageBox.question(
+            self,
+            "Warning",
+            "该目录下还未创建工作区，是否创建",
+            QMessageBox.Yes,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            this_dir = os.path.dirname(os.path.abspath(__file__))
+            self.createWorkspaceFile(directory, os.path.join(this_dir, "../workspace.suan"))
+
+    def loadWorkspaceData(self,file_name):
+        workingDirectory=self.preferences['Open_Last_Working_Directory']
+        self.workspace_suan_path = os.path.join(workingDirectory,file_name)
+        self.workspaceData = self.load_workspaceData_from_file()
+        self.modify_workspaceData('left_sidebar/working_directory',workingDirectory)
+        
     def openNewWindow(self):
         newWindow = MainWindow(False)
         newWindow.show()
     def showEvent(self, event):
         super().showEvent(event)
         #  根据preference_toml设置组件UI setSizes
-        preferences = self.load_preferences_from_file()
+        self.preferences = self.load_preferences_from_file()
 
         self.main_splitter.setSizes(
             [
-                int(preferences["UI_Init"]["left_sidebar_width"]),
+                int(self.preferences["UI_Init"]["left_sidebar_width"]),
                 self.main_splitter.width()
-                - int(preferences["UI_Init"]["right_sidebar_width"])
-                - int(preferences["UI_Init"]["left_sidebar_width"]),
-                int(preferences["UI_Init"]["right_sidebar_width"]),
+                - int(self.preferences["UI_Init"]["right_sidebar_width"])
+                - int(self.preferences["UI_Init"]["left_sidebar_width"]),
+                int(self.preferences["UI_Init"]["right_sidebar_width"]),
             ]
         )
 
         self.center_splitter.setSizes(
             [
-                int(preferences["UI_Init"]["center_widget_height"]),
+                int(self.preferences["UI_Init"]["center_widget_height"]),
                 self.center_splitter.height()
-                - int(preferences["UI_Init"]["center_widget_height"]),
+                - int(self.preferences["UI_Init"]["center_widget_height"]),
             ]
         )
 
         for father_component in ["Info", "Visualization_window", "Tool", "Other"]:
             UI_Components_not_Visibile = [
                 key
-                for key, value in preferences["UI_Component_Visibility_Init"][
+                for key, value in self.preferences["UI_Component_Visibility_Init"][
                     father_component
                 ].items()
                 if value is False
@@ -115,16 +165,17 @@ class MainWindow(QMainWindow):
                     + component.replace("_", " ")
                 )
                 self.toggleComponentVisibility(path)
-                
-        if self.has_initWorkspace and preferences["Open_Last_Workspace"]:
-            self.initWorkspace()
+
+        file_name=self.checkWorkspaceFile(self.preferences["Open_Last_Working_Directory"])
+        if self.has_initWorkspace and self.preferences["Open_Last_Workspace"] and self.openWorkspace:
+            self.initWorkspace(file_name)
         else:
             # 设置主窗口大小和显示
             self.setGeometry(
                 50,
                 50,
-                int(preferences["UI_Init"]["window_width"]),
-                int(preferences["UI_Init"]["window_height"]),
+                int(self.preferences["UI_Init"]["window_width"]),
+                int(self.preferences["UI_Init"]["window_height"]),
             )
 
 
@@ -136,7 +187,20 @@ class MainWindow(QMainWindow):
         else:
             return True
 
-    def closeEvent(self, event):
+    def checkAndSaveCurFile(self):
+        if not self.info_bar.curFileIsSave():
+            reply = QMessageBox.question(
+                self,
+                "Warning",
+                "你还未保存该文件内容，是否保存",
+                QMessageBox.Yes,
+                QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                self.toolbar.saveFile()
+
+
+    def checkAndSaveCurWorkspace(self):
         width = self.width()
         height = self.height()
         self.modify_workspaceData("window/width", width)
@@ -146,7 +210,7 @@ class MainWindow(QMainWindow):
             self.center_widget.tabWidget.currentIndex(),
         )
         if not self.curWorkspaceIsSave():
-            print("curWorkspaceIsSave")
+            # print("curWorkspaceIsSave")
             self.center_widget.close()
             reply = QMessageBox.question(
                 self,
@@ -157,9 +221,16 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.Yes:
                 self.saveWorkspace()
-                event.accept()
-            else:
-                event.accept()
+                # event.accept()
+            # else:
+                # event.accept()
+    def closeEvent(self, event):
+        if self.openWorkspace==True:
+            self.checkAndSaveCurWorkspace()
+        else:
+            if self.left_sidebar.curFile!=None:
+                self.checkAndSaveCurFile()
+        event.accept()
 
     def saveWorkspace(self):
         width = self.width()
@@ -171,9 +242,10 @@ class MainWindow(QMainWindow):
             self.center_widget.tabWidget.currentIndex(),
         )
         # print(self.center_widget.tabWidget.currentIndex())
-
+        # print(self.workspaceData)
         self.save_workspaceData_to_file(self.workspaceData)
         self.toolbar.saveFile()
+
     def load_preferences_from_file(self):
         try:
             with open(
@@ -185,7 +257,20 @@ class MainWindow(QMainWindow):
         except FileNotFoundError:
             preferences = {}
         return preferences
-
+    def modify_preferences(self,path, value):
+        parts = path.split("/")
+        data = self.preferences
+        for part in parts[:-1]:
+            if part not in data:
+                data[part] = {}
+            data = data[part]
+        data[parts[-1]] = value
+        self.save_preferences_to_file(self.preferences)
+        
+    def save_preferences_to_file(self, preferences):
+        with open(self.preference_toml_path, "w") as file:
+            toml.dump(preferences, file)   
+    
     def load_workspaceData_from_file(self):
         try:
             with open(
@@ -196,11 +281,9 @@ class MainWindow(QMainWindow):
         except FileNotFoundError:
             workspaceData = {}
         return workspaceData
-
     def save_workspaceData_to_file(self, workspaceData):
         with open(self.workspace_suan_path, "w") as file:
             toml.dump(workspaceData, file)
-
     def modify_workspaceData(self, path, value):
         parts = path.split("/")
         data = self.workspaceData
@@ -210,7 +293,6 @@ class MainWindow(QMainWindow):
             data = data[part]
         data[parts[-1]] = value
         # print(self.workspaceData)
-
     def get_workspaceData(self, path):
         parts = path.split("/")
         data = self.workspaceData
@@ -248,7 +330,8 @@ class MainWindow(QMainWindow):
 
         self.left_sidebar.openFilePath.connect(self.fixCurFilePath)
 
-    def initWorkspace(self):
+    def initWorkspace(self,file_name):
+        self.loadWorkspaceData(file_name)
         height = self.get_workspaceData("window/height")
         width = self.get_workspaceData("window/width")
         self.setGeometry(
@@ -260,7 +343,7 @@ class MainWindow(QMainWindow):
         self.left_sidebar.initWorkspace()
         self.center_widget.initWorkspace()
         self.info_bar.initWorkspace()
-        self.toolbar.initWorkspace()
+        # self.toolbar.initWorkspace()
 
     def fixCurFilePath(self, path):
         self.toolbar.current_open_file = path
@@ -358,7 +441,6 @@ class MainWindow(QMainWindow):
         return current_level[component_name]["isVisible"]
 
     def getComponent(self, path):
-        """得到已注册的组件，以引用."""
         parts = path.split("/")
         current_level = self.components["main"]["children"]  # 从根组件的子组件开始搜索
         component_name = parts[-1]

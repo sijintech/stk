@@ -20,7 +20,7 @@ class InfoBar(QWidget):
         super().__init__()
         self.parent = parent
         self.curShowCode = None
-        self.curShowCodePath = None
+        # self.curShowCodePath = None
         self.curShowCodeType = None
         self.parent.registerComponent("Info", self, True)
         self.initUI()
@@ -34,7 +34,8 @@ class InfoBar(QWidget):
         
     def initWorkspace(self):
         file_path=self.parent.get_workspaceData('info_bar/code/file_path')
-        self.parent.left_sidebar.openFlie(file_path)
+        working_directory = self.parent.get_workspaceData('left_sidebar/working_directory')
+        self.parent.left_sidebar.openFile(file_path, working_directory)
         
     def getContentfromPath(self,path):
         try:
@@ -45,7 +46,7 @@ class InfoBar(QWidget):
                 print("Error reading file:", e)   
                 
     def curFileIsSave(self):
-        if self.getContentfromPath(self.curShowCodePath)==self.codeTab.toPlainText():
+        if self.getContentfromPath(self.parent.left_sidebar.curFile)==self.codeTab.toPlainText():
             return True
         else:
             return False
@@ -86,7 +87,7 @@ class InfoBar(QWidget):
         self.tabWidget.addTab(component, tabName[: -len(" Tab")])
 
     def showContent(self, content, path):
-        self.curShowCodePath = path
+        # self.curShowCodePath = path
         # 将文件内容显示在Code标签页中
         self.codeTab.setText(content)
         self.curShowCode = content
@@ -144,7 +145,7 @@ class InfoBar(QWidget):
 
     def runCodeWithoutAnalysis(self):
         self.execute_code_with_file_path(
-            self.curShowCode, self.curShowCodePath, globals(), locals()
+            self.curShowCode, self.parent.left_sidebar.curFile, globals(), locals()
         )
 
     def extract_variable_info(self, curShowCode):

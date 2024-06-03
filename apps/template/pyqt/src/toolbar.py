@@ -15,7 +15,7 @@ class Toolbar(QToolBar):
     def __init__(self, height, parent):
         super().__init__()
         self.parent = parent
-        self.current_open_file = None
+        # self.current_open_file = None
         self.parent.registerComponent("Tool", self, True)
         self.initUI(height)
 
@@ -27,6 +27,7 @@ class Toolbar(QToolBar):
         openAction.triggered.connect(self.showOpenMenu)
         self.registerComponent("Open", openAction)
         self.addAction(openAction)
+
 
         saveAction = QAction("Save", self)
         saveAction.triggered.connect(self.showSaveMenu)
@@ -41,9 +42,9 @@ class Toolbar(QToolBar):
         helpAction.triggered.connect(self.showHelpMenu)
         self.registerComponent("Help", helpAction)
         self.addAction(helpAction)
-    def initWorkspace(self):
-        file_path=self.parent.get_workspaceData('info_bar/code/file_path')
-        self.current_open_file=file_path
+    # def initWorkspace(self):
+    #     file_path=self.parent.get_workspaceData('info_bar/code/file_path')
+    #     self.current_open_file=file_path
     def showOpenMenu(self):
 
         menu = QMenu(self)
@@ -60,44 +61,48 @@ class Toolbar(QToolBar):
         openNewWindowAction.triggered.connect(self.parent.openNewWindow)
         menu.addAction(openNewWindowAction)
 
-        menu.popup(self.mapToGlobal(self.actionGeometry(self.sender()).bottomLeft()))
+        createNewWorkspaceAction = QAction("Create New Workspace", self)
+        createNewWorkspaceAction.triggered.connect(self.createNewWorkspace)
+        menu.addAction(createNewWorkspaceAction)
 
+        menu.popup(self.mapToGlobal(self.actionGeometry(self.sender()).bottomLeft()))
+    def createNewWorkspace(self):
+        self.parent.questionAndCreateWorkspace(self.parent.left_sidebar.curDir)
     def openFile(self):
 
         # 打开文件对话框
-
         path, _ = QFileDialog.getOpenFileName(self, "Open File", filter="All Files (*)")
+        self.parent.left_sidebar.openFile(path)
 
-        if path:
-            try:
-                # 以二进制模式读取文件，并使用UTF-8解码
-                with open(path, "rb") as file:
-                    content = file.read().decode("utf-8")
-                    # 设置文件目录树的根路径为文件所在目录
-                    root_path = QFileInfo(path).absolutePath()
-                    self.parent.left_sidebar.treeView.setRootIndex(
-                        self.parent.left_sidebar.model.index(root_path)
-                    )
-                    # 显示文件内容
-                    self.parent.info_bar.showContent(content)
-                    self.current_open_file = path
-
-            except Exception as e:
-                print("Error reading file:", e)
+        # if path:
+        #     try:
+        #         # 以二进制模式读取文件，并使用UTF-8解码
+        #         with open(path, "rb") as file:
+        #             content = file.read().decode("utf-8")
+        #             # 设置文件目录树的根路径为文件所在目录
+        #             root_path = QFileInfo(path).absolutePath()
+        #             self.parent.left_sidebar.treeView.setRootIndex(
+        #                 self.parent.left_sidebar.model.index(root_path)
+        #             )
+        #             # 显示文件内容
+        #             self.parent.info_bar.showContent(content)
+        #             self.current_open_file = path
+        #
+        #     except Exception as e:
+        #         print("Error reading file:", e)
 
     def openDirectory(self):
 
         # 打开目录对话框
-
         path = QFileDialog.getExistingDirectory(self, "Open Directory")
-
         if path:
-
-            # 设置文件目录树的根路径为用户选择的目录路径
-
-            self.parent.left_sidebar.treeView.setRootIndex(
-                self.parent.left_sidebar.model.index(path)
-            )
+            self.parent.left_sidebar.openDirectory(path)
+            #
+            # # 设置文件目录树的根路径为用户选择的目录路径
+            #
+            # self.parent.left_sidebar.treeView.setRootIndex(
+            #     self.parent.left_sidebar.model.index(path)
+            # )
 
     def showSaveMenu(self):
 
@@ -114,13 +119,13 @@ class Toolbar(QToolBar):
 
         menu.popup(self.mapToGlobal(self.actionGeometry(self.sender()).bottomLeft()))
     def saveFile(self):
-        if not self.current_open_file:
-            return
+        # if not self.current_open_file:
+        #     return
         try:
             # 获取Code标签页中的文本内容
             content = self.parent.info_bar.codeTab.toPlainText()
             # 将内容写入文件
-            with open(self.current_open_file, "w", encoding="utf-8") as file:
+            with open(self.parent.left_sidebar.curFile, "w", encoding="utf-8") as file:
                 file.write(content)
         except Exception as e:
             print("Error saving file:", e)
