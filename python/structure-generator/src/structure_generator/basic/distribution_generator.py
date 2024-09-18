@@ -79,6 +79,17 @@ def generate_multiple_spheres_data(nx, ny, nz, rr, ptclnum, iseed):
     
   return generated_3d_data
 
+def check_sphere_overlapp(nx, ny, nz, rr, generated_3d_data, x_temp, y_temp, z_temp):
+  '''
+  Check whether two spheres overlap.
+  '''
+  for kk in range(1, nx+1):
+    for jj in range(1,ny+1):
+      for ii in range(1, nz+1):
+        if(float((ii-z_temp)**2 + (jj-y_temp)**2 + (kk-x_temp)**2) <= float(rr)**2):
+          if(generated_3d_data[ii,jj,kk] >= 0.8):
+            return True # sphere overlapp
+
 # Icase = 4
 def generate_first_circle(nx, ny, nz, rr, shell_thickness):
   """
@@ -107,6 +118,7 @@ def generate_random_circle(nx, ny, nz, rr, shell_thickness, ic, iseed):
   R2 = R1 + shell_thickness
 
   return x_temp, y_temp, z_temp, R1, R2, iseed + ic
+
 
 
 def check_overlap(coordinates, x_temp, y_temp, z_temp, rr, shell_thickness):
