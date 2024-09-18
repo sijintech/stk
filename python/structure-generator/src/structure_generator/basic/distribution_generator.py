@@ -79,15 +79,42 @@ def generate_multiple_spheres_data(nx, ny, nz, rr, ptclnum, iseed):
     
   return generated_3d_data
 
-def check_sphere_overlapp(nx, ny, nz, rr, generated_3d_data, x_temp, y_temp, z_temp):
-  '''
-  Check whether two spheres overlap.
-  '''
-  for kk in range(1, nx+1):
-    for jj in range(1,ny+1):
-      for ii in range(1, nz+1):
-        if(float((ii-z_temp)**2 + (jj-y_temp)**2 + (kk-x_temp)**2) <= float(rr)**2):
-          if(generated_3d_data[ii,jj,kk] >= 0.8):
-            return True # sphere overlapp
-  
+# Icase = 4
+def generate_first_circle(nx, ny, nz, rr, shell_thickness):
+  """
+  Generate the first circle at the center of the grid.
+  """
+  x_temp = int(nx / 2)
+  y_temp = int(ny / 2)
+  z_temp = int(nz / 2)
+  R1 = rr
+  R2 = R1 + shell_thickness
+  return x_temp, y_temp, z_temp, R1, R2
+def generate_random_circle(nx, ny, nz, rr, shell_thickness, ic, iseed):
+  """
+  Generate a random circle's coordinates and radius.
+  Returns the x, y, z coordinates, radius, and updated seed.
+  """
+  seed, x_rand = r4_uniform_01(seed + ic)
+  x_temp = int(x_rand * (nx - 20) + 10)  # Random x coordinate
+
+  seed, y_rand = r4_uniform_01(seed + ic)
+  y_temp = int(y_rand * (ny - 20) + 10)  # Random y coordinate
+
+  seed, z_rand = r4_uniform_01(seed + ic)
+  z_temp = int(z_rand * (nz - 20) + 10)  # Random z coordinate for 3D
+  R1 = rr
+  R2 = R1 + shell_thickness
+
+  return x_temp, y_temp, z_temp, R1, R2, iseed + ic
+
+
+def check_overlap(coordinates, x_temp, y_temp, z_temp, rr, shell_thickness):
+  """
+  Check if a newly generated circle overlaps with any existing circles.
+  """
+  for (x, y, z, R1, R2) in coordinates:
+    distance_squared = (x - x_temp) ** 2 + (y - y_temp) ** 2 + (z - z_temp) ** 2
+    if distance_squared <= (R2 + rr + shell_thickness + 14) ** 2:
+      return True  # Overlap detected
   return False
