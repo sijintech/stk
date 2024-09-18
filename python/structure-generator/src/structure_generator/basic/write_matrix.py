@@ -73,12 +73,20 @@ def write_structure_to_file(filename, nx, ny, nz, phip, phis, phim, phiv, struct
       for ii in range(nx):
         for jj in range(ny):
           for kk in range(nz):
-            data_index = [ii, jj, kk]
-            data_array = [phip[ii, jj, kk], phis[ii, jj, kk], phim[ii, jj, kk], phiv[ii, jj, kk]]
-            data_format = "{:1}" + "{:" + f"{entry_length - 1}.{per}" + "E}"
-            data_string = "".join(str(" ") + str(num).rjust(int_len - 1) for num in data_index)
-            for data_val in data_array:
-              data_string += data_format.format(" ", data_val) + " \n"
+
+            # 将索引值和相场值格式化为一行
+            data_string = f"{ii:<{int_len}} {jj:<{int_len}} {kk:<{int_len}} "  # 格式化 x, y, z
+            data_string += f"{phip[ii, jj, kk]:<{entry_length}.{per}E} "  # 格式化 phip
+            data_string += f"{phis[ii, jj, kk]:<{entry_length}.{per}E} "  # 格式化 phis
+            data_string += f"{phim[ii, jj, kk]:<{entry_length}.{per}E} "  # 格式化 phim
+            data_string += f"{phiv[ii, jj, kk]:<{entry_length}.{per}E}\n"  # 格式化 phiv
+
+            #data_index = [ii, jj, kk]
+            #data_array = [phip[ii, jj, kk], phis[ii, jj, kk], phim[ii, jj, kk], phiv[ii, jj, kk]]
+            #data_format = "{:1}" + "{:" + f"{entry_length - 1}.{per}" + "E}"
+            #data_string = "".join(str(" ") + str(num).rjust(int_len - 1) for num in data_index)
+            #for data_val in data_array:
+              #data_string += data_format.format(" ", data_val) + " \n"
             f.write(data_string)
 
     elif structure_type == 2:

@@ -14,7 +14,7 @@ from ..basic.utils import read_toml
 
 def generate_structure():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-f','--filename',default="input_muBreakdown.toml",help='Path of configuration file for generating eta/comp/phi structure data.')
+    parser.add_argument('-f','--filename',default="tests/input_muBreakdown.toml",help='Path of configuration file for generating eta/comp/phi structure data.')
     args = parser.parse_args()
 
 
@@ -38,14 +38,15 @@ def generate_structure():
         rr = params["rr"]
         shell_thickness = params["shell_thickness"]
         iseed = params["iseed"]
+        structure_type = params["structure_type"]
 
         print("Generating structure for 'muBreakdown'...")
         phim, phip, phis, phiv = generate_phi(nx, ny, nz, rr, shell_thickness, ptclnum, iseed)
 
         # 输出结构到文件
-        output_file = output["structure.in"]
+        output_file = output["output_file"]
         print(f"Writing muBreakdown structure to {output_file}")
-        write_structure_to_file(output_file, nx, ny, nz, phip, phis, phim, phiv, 2)  # 输出类型为2
+        write_structure_to_file(output_file, nx, ny, nz, phip, phis, phim, phiv, structure_type)  # 输出类型为1
 
     elif target_program == 'muPRODICT':
 
@@ -88,3 +89,6 @@ def generateCompFileWithConfig(common_config, comp_case_config,case):
     
     generated_function = globals()["generate_comp_Icase{}".format(case)]
     generated_function(common_config, comp_selected_config)
+
+if __name__ == '__main__':
+    generate_structure()

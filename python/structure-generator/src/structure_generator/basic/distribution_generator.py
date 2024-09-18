@@ -95,13 +95,13 @@ def generate_random_circle(nx, ny, nz, rr, shell_thickness, ic, iseed):
   Generate a random circle's coordinates and radius.
   Returns the x, y, z coordinates, radius, and updated seed.
   """
-  seed, x_rand = r4_uniform_01(seed + ic)
+  iseed, x_rand = r4_uniform_01(iseed + ic)
   x_temp = int(x_rand * (nx - 20) + 10)  # Random x coordinate
 
-  seed, y_rand = r4_uniform_01(seed + ic)
+  iseed, y_rand = r4_uniform_01(iseed + ic)
   y_temp = int(y_rand * (ny - 20) + 10)  # Random y coordinate
 
-  seed, z_rand = r4_uniform_01(seed + ic)
+  iseed, z_rand = r4_uniform_01(iseed + ic)
   z_temp = int(z_rand * (nz - 20) + 10)  # Random z coordinate for 3D
   R1 = rr
   R2 = R1 + shell_thickness

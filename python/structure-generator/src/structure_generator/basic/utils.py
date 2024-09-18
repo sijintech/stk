@@ -14,7 +14,7 @@ def r4_uniform_01(seed):
     return seed, float(seed) * 4.656612875E-10
 
 def read_toml(file_name):
-    with open(file_name) as f:
+    with open(file_name, 'r', encoding='utf-8') as f:
         data = toml.load(f)
         return data
 
