@@ -108,7 +108,7 @@ def export_images(elem, filename_fmt='image%03d', start_idx=1):
     ns = '{http://www.w3.org/2000/svg}'
     href = '{http://www.w3.org/1999/xlink}href'
     count = 0
-    if isinstance(elem.tag, basestring) and elem.tag.startswith(ns):
+    if isinstance(elem.tag, str) and elem.tag.startswith(ns):
         tag = elem.tag[len(ns):]
         if tag == 'image':
             buf = etree.tostring(elem, pretty_print=True)
