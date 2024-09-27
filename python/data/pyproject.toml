@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stk_data"
+version = "0.0.1"
+authors = [
+    {name="Wen Tan", email="2634918190@qq.com"},
+]
+description = "This is a library of functions for manipulating data."
+readme = "README.md"
+requires-python = ">=3.6"
+dependencies = [
+    "numpy>=1.20.0",
+    "toml>=0.8.2",
+    "pandas",
+    "lxml",
+    "svgwrite",
+    "svgutils",
+    "pillow",
+    "cairosvg",
+    "matplotlib",
+    "h5py",
+    "argparse"
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.urls]
+Homepage = "https://github.com/sijintech/stk.git"
+Issues = "https://github.com/sijintech/stk/issues/"
+
+[project.scripts]
+get_skyrmion_shape = "data:get_skyrmion_shape"
