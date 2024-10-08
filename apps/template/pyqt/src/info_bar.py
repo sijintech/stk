@@ -213,7 +213,7 @@ class InfoBar(QWidget):
         need_variable = None  # 用于存储提取的渲染器变量名
         # 如果涉及到 vtk 的代码
         if vtk_import:
-            print("vtk")
+            # print("vtk")
             self.curShowCodeType = "vtk"
             # 使用正则表达式查找赋值为 vtkRenderer() 的语句，并提取变量名
             need_variables = re.finditer(
@@ -255,7 +255,7 @@ class InfoBar(QWidget):
             )  # 将更新后的代码行列表重新组合成字符串
         # 如果涉及到 matplotlib 的代码
         elif matplotlib_import:
-            print("mat")
+            # print("mat")
             self.curShowCodeType = "matplotlib"
             # 使用正则表达式查找赋值为 figure() 的语句，并提取变量名
             need_variables = re.finditer(
@@ -282,7 +282,7 @@ class InfoBar(QWidget):
             curShowCode = "\n".join(
                 updated_lines
             )  # 将更新后的代码行列表重新组合成字符串
-        print(need_variable)
+        # print(need_variable)
         return curShowCode, need_variable  # 返回处理后的代码字符串
 
     def runCodeWithAnalysis(self):

@@ -5,7 +5,7 @@ on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测�
   push:
       # 匹配特定标签 (refs/tags)
       tags:
-        - 'v*' # 推送事件匹配 v*, 例如 v1.0，v20.15.10 等来触发工作流
+        - 'v*'
 jobs:
     build:
       name: Build pyqt
@@ -24,7 +24,7 @@ jobs:
       - name: fix tauri version
         run : |
                 pip install toml
-                python apps/template/pyqt/fix_toml_version.py
+          python apps/template/pyqt/scripts/fix_toml_version.py
       - name: Install pypa/build
         run: >-
           python3 -m

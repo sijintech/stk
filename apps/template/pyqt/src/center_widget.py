@@ -340,26 +340,27 @@ class DataTableTab(QWidget):
 
 
     def populateTable(self, data, ColumnCount):
-        self.table.clearContents()  
-        self.data = data
-        row = 0
-        self.table.setRowCount(len(self.data))
-        self.table.setColumnCount(ColumnCount)
-        for key, value in self.data.items():
-            x, y, z = key
-            x_item = QTableWidgetItem(str(x))
-            y_item = QTableWidgetItem(str(y))
-            z_item = QTableWidgetItem(str(z))
-            value_item = QTableWidgetItem(str(value))
+        if data != None:
+            self.table.clearContents()
+            self.data = data
+            row = 0
+            self.table.setRowCount(len(self.data))
+            self.table.setColumnCount(ColumnCount)
+            for key, value in self.data.items():
+                x, y, z = key
+                x_item = QTableWidgetItem(str(x))
+                y_item = QTableWidgetItem(str(y))
+                z_item = QTableWidgetItem(str(z))
+                value_item = QTableWidgetItem(str(value))
 
-            self.table.setItem(row, 0, x_item)
-            self.table.setItem(row, 1, y_item)
-            self.table.setItem(row, 2, z_item)
-            self.table.setItem(row, 3, value_item)
+                self.table.setItem(row, 0, x_item)
+                self.table.setItem(row, 1, y_item)
+                self.table.setItem(row, 2, z_item)
+                self.table.setItem(row, 3, value_item)
 
-            row += 1
+                row += 1
 
-        self.beautify()
+            self.beautify()
         
 
 class CenterWidget(QWidget):
@@ -524,13 +525,13 @@ class CenterWidget(QWidget):
         # 将当前选中的 tab 设置为 "Matplotlib Display"
         matplotlibDisplayIndex = self.tabWidget.indexOf(self.matplotlibDisplayTab)
         self.tabWidget.setCurrentIndex(matplotlibDisplayIndex)
-        
-    def updateMatplotlibDisplay(self,data):
+
+    def updateDataTable(self, data):
         # print(data)
         # self.unregisterComponent("Data Table Tab")
         # self.dataTableTab = DataTableTab(data,4)
         # self.tabWidget.addTab(self.dataTableTab, "Data Table")
         # self.registerComponent("Data Table Tab", self.dataTableTab, True)
-        self.dataTableTab.populateTable(data,4)
+        self.dataTableTab.populateTable(data, 4)
         dataTableIndex = self.tabWidget.indexOf(self.dataTableTab)
         self.tabWidget.setCurrentIndex(dataTableIndex)

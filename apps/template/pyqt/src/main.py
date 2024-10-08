@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         this_dir = os.path.dirname(os.path.abspath(__file__))
         if getattr(sys, "frozen", True):
             print("执行脚本")
-            self.preference_toml_path = os.path.join(this_dir, "../preference.toml")
+            self.preference_toml_path = os.path.join(this_dir, "../confs/preference.toml")
             # self.preference_toml_path = os.path.join(this_dir, "../workspace.suan")
             
         else:
@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.Yes:
             this_dir = os.path.dirname(os.path.abspath(__file__))
-            self.createWorkspaceFile(directory, os.path.join(this_dir, "../workspace.suan"))
+            self.createWorkspaceFile(directory, os.path.join(this_dir, "../confs/workspace.suan"))
 
     def loadWorkspaceData(self,file_name):
         workingDirectory=self.preferences['Open_Last_Working_Directory']

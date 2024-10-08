@@ -56,11 +56,6 @@
 name: NSISbuild
 
 on:
-  # push:
-  #   branches:
-  #     - main
-# env:
-#     TAG: 0.0.30
   push:
     # 匹配特定标签 (refs/tags)
     tags:
@@ -82,7 +77,6 @@ jobs:
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
 
-
       - name: Setup virtual environment
         run:  |
           python -m venv .venv
@@ -94,7 +88,7 @@ jobs:
         run:  |
           
           python.exe -m pip install -U pip
-          python apps\template\pyqt\run_write_version.py
+          python apps\template\pyqt\scripts\run_write_version.py
           cd apps\template\pyqt\src
           pip install pyinstaller
           pip install PySide6
@@ -103,7 +97,7 @@ jobs:
           pip install pandas
           pip install numpy
           pip install requests
-          pyinstaller .\main.spec
+          pyinstaller .\confs\main.spec
  
           
       # - name: Install NSIS
@@ -130,10 +124,10 @@ jobs:
             # 指定OSS中的目标目录
             TARGET_DIR: 'nsis/'
         run: |
-            pwd
-            pip install oss2
-            python apps\template\pyqt\deploy.py
-            python apps\template\pyqt\update.py
+          pwd
+          pip install oss2
+          python apps\template\pyqt\scripts\deploy.py
+          python apps\template\pyqt\scripts\update.py
 
       - name: Store dist
         uses: actions/upload-artifact@v3

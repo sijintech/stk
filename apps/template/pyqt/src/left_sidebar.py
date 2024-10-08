@@ -137,7 +137,7 @@ class LeftSidebar(QWidget):
                             
                             # 使用(x, y, z)作为键，数据值作为值存储到字典中
                             vertex_data[(x, y, z)] = scalar_value
-                self.parent.center_widget.updateMatplotlibDisplay(vertex_data)
+                self.parent.center_widget.updateDataTable(vertex_data)
                 try:
                     with open(path, 'r', encoding='utf-8') as file:
                         content = file.read()

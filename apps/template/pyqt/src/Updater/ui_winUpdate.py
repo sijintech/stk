@@ -36,8 +36,8 @@ class Ui_Form(object):
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.label.sizePolicy().hasHeightForWidth())
         self.label.setSizePolicy(sizePolicy)
-        self.label.setMaximumSize(65,64)
-        self.label.setPixmap(QPixmap(u":/images/icon_128x128.png"))
+        self.label.setMaximumSize(65, 64)
+        self.label.setPixmap(QPixmap(u":/images/refrech.png"))
         self.label.setScaledContents(True)
 
         self.verticalLayout_2.addWidget(self.label)
