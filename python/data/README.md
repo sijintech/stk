@@ -26,9 +26,15 @@ After, you can install the package under `dist` folder by running command
 ```bash
 pip install ./data-0.0.1-py3-none-any.whl
 ```
+We publish the package on PyPI website, you can install the package by running command
+```bash
+pip install stk-date
+```
 ### import package in python
 ```python
+# import package
 import stk_data
+from stk_data import get_skyrmion_shape
 ```
 ### scripts
 1. Calculate the topological number, parameters can be read and calculated via commands, terminal command as follows:
