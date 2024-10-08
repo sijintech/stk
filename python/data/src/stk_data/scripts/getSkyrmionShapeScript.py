@@ -2,7 +2,7 @@ from ..statistics.getSkyrmionShape import SkyrmionShape
 import argparse
 
 
-def get_skyrmion_shape():
+def get_skyrmion_shape_cmd():
     parser = argparse.ArgumentParser()
     parser.add_argument("--nx", type=int, default=250)
     parser.add_argument("--ny", type=int, default=250)

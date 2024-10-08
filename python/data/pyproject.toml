@@ -36,4 +36,4 @@ Homepage = "https://github.com/sijintech/stk.git"
 Issues = "https://github.com/sijintech/stk/issues/"
 
 [project.scripts]
-get_skyrmion_shape = "stk_data:get_skyrmion_shape"
+get_skyrmion_shape = "stk_data:get_skyrmion_shape_cmd"

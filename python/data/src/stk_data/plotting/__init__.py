@@ -1,3 +1,6 @@
+from .plot1D import *
+from .plot2D import *
+
 __all__ = [
     "plot_color_gradients",
     "concatImageCol",
