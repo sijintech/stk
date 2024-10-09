@@ -23,4 +23,3 @@ versionFilePath = os.path.join(dir, "../src/version.py")
 with open(versionFilePath, 'w') as f:
     f.write(f'version = "{version}"')
 
-# exit()

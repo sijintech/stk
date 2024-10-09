@@ -8,8 +8,7 @@ class LeftSidebar(QWidget):
     def __init__(self, parent):
         super().__init__()
         self.parent = parent
-        self.curDir=None
-        self.curFile=None
+        # self.curFile=None
         self.parent.registerComponent('File structure',self,True)
         self.initUI()
 
@@ -36,7 +35,7 @@ class LeftSidebar(QWidget):
         self.treeView.doubleClicked.connect(self.onDoubleClick)
 
     def initWorkspace(self):
-        working_directory=self.parent.get_workspaceData('left_sidebar/working_directory')
+        working_directory = self.parent.get_workspace_data('left_sidebar/working_directory')
         self.treeView.setRootIndex(self.model.index(working_directory))
 
         
@@ -44,31 +43,31 @@ class LeftSidebar(QWidget):
         # 获取所选项的路径
         path = self.model.filePath(index)
         if os.path.isdir(path):
-            self.openDirectory(path)
+            self.open_directory(path)
         else:
-            self.openFile(path)
+            self.open_file(path)
 
-    def openDirectory(self, directory):
+    def open_directory(self, directory, init_workspace=True):
         # 原来目录处理
-        if self.curDir!=None and self.curDir!=directory:
-            if self.parent.openWorkspace:
-                self.parent.checkAndSaveCurWorkspace()
+        if self.parent.curWorkDir is not None and not os.path.samefile(self.parent.curWorkDir, directory):
+            if self.parent.isWorkspace:
+                self.parent.check_and_save_curworkspace()
+            else:
+                self.parent.check_and_save_curfile()
 
         # 新的目录处理
-        self.curDir=directory
-        self.parent.modify_preferences('Open_Last_Working_Directory', directory)
+        self.parent.curWorkDir = directory
         # self.parent.checkWorkspaceFile(directory)
         self.treeView.setRootIndex(self.model.index(directory))
-        file_name=self.parent.checkWorkspaceFile(directory)
-        if self.parent.openWorkspace:
-            self.parent.workspace_suan_path = os.path.join(directory, file_name)
-            self.parent.workspaceData=self.parent.load_workspaceData_from_file()
-            self.parent.modify_workspaceData('left_sidebar/working_directory', directory)
 
+        if not init_workspace:
+            return
+        elif self.parent.curworkdir_is_workspace():
+            self.parent.init_workspace()
         else:
-            self.parent.questionAndCreateWorkspace(directory)
+            self.parent.question_and_create_workspace(directory)
 
-    def openFile(self, path, working_directory=""):
+    def open_file(self, path, working_directory="", is_init=False):
         # if working_directory=="":
         #     working_directory = os.path.dirname(os.path.abspath(path))
         # self.parent.modify_preferences('Open_Last_Working_Directory', working_directory)
@@ -91,17 +90,19 @@ class LeftSidebar(QWidget):
         # 原来文件处理
         if working_directory == "":
             working_directory = os.path.dirname(os.path.abspath(path))
-        if self.curFile != None:
+
+        if self.parent.curWorkFile is not None and not is_init:
             # self.parent.checkAndSaveCurFile()
-            if self.parent.openWorkspace and self.curDir!=working_directory:
-                self.parent.checkAndSaveCurWorkspace()
+            if self.parent.isWorkspace and not os.path.samefile(self.parent.curWorkDir, working_directory):
+                self.parent.check_and_save_curworkspace()
             else:
-                self.parent.checkAndSaveCurFile()
+                self.parent.check_and_save_curfile()
         # 新的文件处理
-        self.curFile=path
-        self.openDirectory(working_directory)
-        if self.parent.openWorkspace:
-            self.parent.modify_workspaceData('info_bar/code/file_path',path)
+        self.parent.curWorkFile = path
+        if not os.path.samefile(self.parent.curWorkDir, working_directory):
+            self.open_directory(working_directory, not is_init)
+        if self.parent.isWorkspace:
+            self.parent.modify_workspaceData('info_bar/code/file_path', path)
 
         # 如果是文件，则读取文件内容
         if QFileInfo(path).isFile():

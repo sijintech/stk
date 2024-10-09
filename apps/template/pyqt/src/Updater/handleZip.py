@@ -3,10 +3,10 @@ import stat
 import zipfile
 
 
-def zip压缩2(压缩包的路径, 待压缩的文件或目录):
+def compression(des_path, src_path):
     # 使用递归实现的压缩
-    with zipfile.ZipFile(压缩包的路径, 'w', compression=zipfile.ZIP_DEFLATED) as 压缩包文件:
-        父目录文本长度 = len(os.path.dirname(待压缩的文件或目录))
+    with zipfile.ZipFile(des_path, 'w', compression=zipfile.ZIP_DEFLATED) as 压缩包文件:
+        父目录文本长度 = len(os.path.dirname(src_path))
 
         def 递归压缩(父目录):
             文件路径列表 = os.listdir(父目录)
@@ -32,20 +32,20 @@ def zip压缩2(压缩包的路径, 待压缩的文件或目录):
                     else:
                         压缩包文件.write(文件绝对路径, 根目录, zipfile.ZIP_DEFLATED)
 
-        递归压缩(待压缩的文件或目录)
+        递归压缩(src_path)
     return True
 
 
-def zip解压2(压缩包的路径, 解压目录, 允许解压路径前缀=[]):
+def unpack(src_path, des_path, allow_prefixes=[]):
     # 保持权限和软连接解压
     # 允许解压路径前缀 例如 ["my_app.app/Contents/"] 不填则全部解压
 
-    file = zipfile.ZipFile(压缩包的路径)
+    file = zipfile.ZipFile(src_path)
     for info in file.infolist():
         # 检查 目标文件路径 是否在 允许解压路径前缀 中
-        if len(允许解压路径前缀) > 0:
+        if len(allow_prefixes) > 0:
             允许解压 = False
-            for 路径 in 允许解压路径前缀:
+            for 路径 in allow_prefixes:
                 if info.filename.startswith(路径):
                     允许解压 = True
             if not 允许解压:
@@ -59,7 +59,7 @@ def zip解压2(压缩包的路径, 解压目录, 允许解压路径前缀=[]):
             pass
         # print("解压", 文件名)
         # continue
-        目标文件路径 = os.path.join(解压目录, info.filename)
+        目标文件路径 = os.path.join(des_path, info.filename)
         # 解压
         权限 = info.external_attr >> 16
         if stat.S_ISLNK(权限):  # 权限 == 'lrwxr-xr-x' 权限 = stat.filemode(权限)
@@ -77,7 +77,7 @@ def zip解压2(压缩包的路径, 解压目录, 允许解压路径前缀=[]):
                 if os.path.isfile(目标文件路径):
                     os.remove(目标文件路径)
 
-            file.extract(info, path=解压目录)
+            file.extract(info, path=des_path)
             # print("权限", stat.filemode(权限))
             # 文件是否存在
             if os.path.exists(目标文件路径):
@@ -114,6 +114,6 @@ if __name__ == '__main__':
 
     压缩包的路径 = "/Users/chensuilong/Downloads/my_app.app.zip"
     解压目录 = r"/Users/chensuilong/Desktop/pythonproject/autotest/dist/"
-    zip解压2(压缩包的路径, 解压目录, 允许解压路径前缀=[
+    unpack(压缩包的路径, 解压目录, allow_prefixes=[
         "my_app.app/Contents/",
     ])

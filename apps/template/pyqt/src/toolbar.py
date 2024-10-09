@@ -58,7 +58,7 @@ class Toolbar(QToolBar):
         menu.addAction(openDirectoryAction)
         
         openNewWindowAction = QAction("Open New Window", self)
-        openNewWindowAction.triggered.connect(self.parent.openNewWindow)
+        openNewWindowAction.triggered.connect(self.parent.open_new_window)
         menu.addAction(openNewWindowAction)
 
         createNewWorkspaceAction = QAction("Create New Workspace", self)
@@ -67,12 +67,12 @@ class Toolbar(QToolBar):
 
         menu.popup(self.mapToGlobal(self.actionGeometry(self.sender()).bottomLeft()))
     def createNewWorkspace(self):
-        self.parent.questionAndCreateWorkspace(self.parent.left_sidebar.curDir)
+        self.parent.question_and_create_workspace(self.parent.left_sidebar.curDir)
     def openFile(self):
 
         # 打开文件对话框
         path, _ = QFileDialog.getOpenFileName(self, "Open File", filter="All Files (*)")
-        self.parent.left_sidebar.openFile(path)
+        self.parent.left_sidebar.open_file(path)
 
         # if path:
         #     try:
@@ -96,7 +96,7 @@ class Toolbar(QToolBar):
         # 打开目录对话框
         path = QFileDialog.getExistingDirectory(self, "Open Directory")
         if path:
-            self.parent.left_sidebar.openDirectory(path)
+            self.parent.left_sidebar.open_directory(path)
             #
             # # 设置文件目录树的根路径为用户选择的目录路径
             #
@@ -108,44 +108,44 @@ class Toolbar(QToolBar):
 
         menu = QMenu(self)
         saveFileAction = QAction("Save", self)
-        saveFileAction.triggered.connect(self.saveFile)
+        saveFileAction.triggered.connect(self.save_file)
         menu.addAction(saveFileAction)
         saveAndRunAction = QAction("Save and Run", self)
         saveAndRunAction.triggered.connect(self.saveAndRun)
         menu.addAction(saveAndRunAction)
         saveWorkspaceAction = QAction("Save Workspace", self)
         saveWorkspaceAction.triggered.connect(self.saveWorkspace)
-        menu.addAction(saveWorkspaceAction)     
+        menu.addAction(saveWorkspaceAction)
 
         menu.popup(self.mapToGlobal(self.actionGeometry(self.sender()).bottomLeft()))
-    def saveFile(self):
+
+    def save_file(self):
         # if not self.current_open_file:
         #     return
         try:
             # 获取Code标签页中的文本内容
             content = self.parent.info_bar.codeTab.toPlainText()
             # 将内容写入文件
-            with open(self.parent.left_sidebar.curFile, "w", encoding="utf-8") as file:
+            with open(self.parent.curWorkFile, "w", encoding="utf-8") as file:
                 file.write(content)
         except Exception as e:
             print("Error saving file:", e)
 
     def saveAndRun(self):
-        self.saveFile()
+        self.save_file()
         content = self.parent.info_bar.codeTab.toPlainText()
         self.parent.info_bar.curShowCode=content
         self.parent.info_bar.runCodeWithAnalysis()
-        
+
     def saveWorkspace(self):
-        self.saveFile()
-        self.parent.saveWorkspace()
+        self.save_file()
+        self.parent.save_last_workspace_data()
         
     def registerComponent(self, path, component):
         truePath = "Tool/" + path
         self.parent.registerComponent(truePath, component, True)
 
     def toggleComponentVisibility(self, path):
-        print("改变勾选")
         self.parent.toggleComponentVisibility(path)
 
     def showViewMenu(self):
@@ -209,10 +209,10 @@ class Toolbar(QToolBar):
 
     def preference(self):
 
-        preferences = self.parent.load_preferences_from_file()
-        Visualization_window= self.parent.getComponent(
-                "Visualization window"
-            )
+        preferences = self.parent.load_preferences()
+        Visualization_window = self.parent.getComponent(
+            "Visualization window"
+        )
         Visualization_window.addPreferenceTab(preferences)
         
 

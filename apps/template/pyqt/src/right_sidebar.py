@@ -65,7 +65,7 @@ class RightSidebar(QWidget):
             if variable_name in self.variable_info:
                 self.variable_info[variable_name]["initial_value"] = variable_value
         self.parent.info_bar.updateInitialValue(self.variable_info)
-        self.parent.toolbar.saveFile()
+        self.parent.toolbar.save_file()
 
     def updateData(self, variable_info):
         self.variable_info = variable_info

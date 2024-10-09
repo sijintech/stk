@@ -34,14 +34,14 @@ import requests
 
 
 #     return 解析网页信息(jsondata,project_name)
-def 获取最新版本号和下载地址(url):
+def get_version_and_download_addr(url):
     try:
         response = urllib.request.urlopen(url)
         if response.getcode() == 200:
             data = json.loads(response.read().decode('utf-8'))
             return {
                 "版本号": data["version"],
-                "下载地址列表":data["download_list"],
+                "下载地址列表": data["download_list"],
                 "更新内容": data["changelog"],
                 "发布时间": data["releasetime"],
                 "mac下载地址": data["mac_download"],
@@ -54,9 +54,10 @@ def 获取最新版本号和下载地址(url):
         print("请求失败:", e)
         return None
 
-def 解析网页信息(网页,project_name):
-    版本号 = 网页.find('<span class="ml-1">')
-    版本号 = 网页[版本号 + len('<span class="ml-1">'):]
+
+def refresh_web(web, project_name):
+    版本号 = web.find('<span class="ml-1">')
+    版本号 = web[版本号 + len('<span class="ml-1">'):]
     版本号 = 版本号[:版本号.find('</span>')].strip()
     print(版本号)
     # 获取更新内容
@@ -69,9 +70,9 @@ def 解析网页信息(网页,project_name):
     # </ul></div>
     # </div>
 
-    更新内容 = 网页.find(
+    更新内容 = web.find(
         '<div data-pjax="true" data-test-selector="body-content" data-view-component="true" class="markdown-body my-3">')
-    更新内容 = 网页[更新内容 + len(
+    更新内容 = web[更新内容 + len(
         '<div data-pjax="true" data-test-selector="body-content" data-view-component="true" class="markdown-body my-3">'):]
     更新内容 = 更新内容[:更新内容.find('</div>')]
     # print(更新内容)
@@ -141,5 +142,5 @@ if __name__ == '__main__':
     # print(data)
     # data = 解析网页信息("")
     # print(data)
-    data = 获取最新版本号和下载地址("https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json")
+    data = get_version_and_download_addr("https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json")
     print(data)

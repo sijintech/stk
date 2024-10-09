@@ -3,7 +3,8 @@ import webbrowser
 
 from PySide6.QtWidgets import QDialog
 
-from .autoUpdate import download_file_thread, 系统_是否为window系统, 系统_是否为mac系统, 更新自己Window应用, check_update_thread, 更新自己MacOS应用
+from .autoUpdate import download_file_thread, is_windows, is_mac, update_windows_app, check_update_thread, \
+    update_mac_app
 
 from . import update_image_rc
 from . import ui_winUpdate
@@ -21,8 +22,8 @@ class UpdateWindow(QDialog):
         self.resize(620, 380)
 
         # 绑定按钮事件
-        self.ui.pushButton_azgx.clicked.connect(self.安装更新)
-        self.ui.pushButton_gfwz.clicked.connect(self.打开官方网址)
+        self.ui.pushButton_azgx.clicked.connect(self.install_update)
+        self.ui.pushButton_gfwz.clicked.connect(self.open_web)
         self.ui.pushButton_tgbb.clicked.connect(self.close)
         self.ui.pushButton_ok.clicked.connect(self.close)
 
@@ -45,14 +46,14 @@ class UpdateWindow(QDialog):
         self.ui.label_2.setText(最新版本)
         self.ui.label_bbh.setText(f'最新版本:{最新版本} 当前版本: {self.cur_version}')
         self.下载文件夹路径 = os.path.expanduser('~/Downloads')
-        if 系统_是否为mac系统():
+        if is_mac():
             self.压缩包路径 = os.path.abspath(self.下载文件夹路径 + f"/{self.应用名称}.zip")
-        if 系统_是否为window系统():
+        if is_windows():
             print('window')
             self.压缩包路径 = os.path.abspath(self.下载文件夹路径 + f"/{self.应用名称}.exe")
 
         print('查询最新版本')
-        self.检查更新线程 = check_update_thread(updatejson_url, self.检查更新回到回调函数)
+        self.检查更新线程 = check_update_thread(updatejson_url, self.check_update_and_callback)
         self.检查更新线程.start()
 
     def closeEvent(self, event):
@@ -78,7 +79,8 @@ class UpdateWindow(QDialog):
                 return 1
 
         return 0
-    def 检查更新回到回调函数(self, data):
+
+    def check_update_and_callback(self, data):
         print("数据", data)
         new_version = data['版本号']
         self.ui.label_bbh.setText(f'最新版本:{new_version} 当前版本: {self.cur_version}')
@@ -86,7 +88,7 @@ class UpdateWindow(QDialog):
         self.mac下载地址 = data['mac下载地址']
         self.win下载地址 = data['win下载地址']
 
-        if self.compare_versions(new_version,self.cur_version)!=1 or new_version == "":
+        if self.compare_versions(new_version, self.cur_version) != 1 or new_version == "":
             self.ui.label_2.setText("你使用的是最新版本")
             self.ui.pushButton_azgx.hide()
             self.ui.pushButton_tgbb.hide()
@@ -97,7 +99,7 @@ class UpdateWindow(QDialog):
         self.ui.pushButton_tgbb.setEnabled(True)
         self.ui.label_2.setText("发现新版本")
 
-    def 安装更新(self):
+    def install_update(self):
         print('安装更新')
         self.ui.progressBar.show()
         self.ui.label_zt.show()
@@ -107,7 +109,7 @@ class UpdateWindow(QDialog):
         print('mac下载地址', self.mac下载地址)
         print('win下载地址', self.win下载地址)
 
-        if 系统_是否为mac系统():
+        if is_mac():
             if self.mac下载地址 == "":
                 self.ui.label_zt.setText("没有找到 ManOS 系统软件下载地址")
                 return
@@ -119,11 +121,11 @@ class UpdateWindow(QDialog):
                 编辑框=self.ui.label_zt,
                 进度条=self.ui.progressBar,
                 应用名称=self.应用名称,
-                回调函数=self.下载完成,
+                回调函数=self.finish_download,
             )
             self.下载文件线程.start()
 
-        if 系统_是否为window系统():
+        if is_windows():
             if self.win下载地址 == "":
                 self.ui.label_zt.setText("没有找到 windows 系统软件下载地址")
                 return
@@ -136,24 +138,24 @@ class UpdateWindow(QDialog):
                 编辑框=self.ui.label_zt,
                 进度条=self.ui.progressBar,
                 应用名称=self.应用名称,
-                回调函数=self.下载完成
+                回调函数=self.finish_download
             )
             self.下载文件线程.start()
 
-    def 下载完成(self, 下载结果, 保存地址):
-        if not 下载结果:
+    def finish_download(self, result, save_addr):
+        if not result:
             self.ui.label_zt.setText("下载更新失败")
             return
-        if 系统_是否为mac系统():
-            更新自己MacOS应用(
-                资源压缩包=保存地址,
-                应用名称=self.应用名称
+        if is_mac():
+            update_mac_app(
+                zip_path=save_addr,
+                app_name=self.应用名称
             )
-        if 系统_是否为window系统():
-            exe资源文件路径 = 保存地址
-            更新自己Window应用(exe资源文件路径)
+        if is_windows():
+            exe资源文件路径 = save_addr
+            update_windows_app(exe资源文件路径)
 
-    def 打开官方网址(self):
+    def open_web(self):
         # 浏览器打开网址
         print('官方网址', self.官方网址)
         webbrowser.open(self.官方网址)

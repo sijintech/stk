@@ -33,9 +33,9 @@ class InfoBar(QWidget):
         self.addInfoTabs()
         
     def initWorkspace(self):
-        file_path=self.parent.get_workspaceData('info_bar/code/file_path')
-        working_directory = self.parent.get_workspaceData('left_sidebar/working_directory')
-        self.parent.left_sidebar.openFile(file_path, working_directory)
+        file_path = self.parent.get_workspace_data('info_bar/code/file_path')
+        working_directory = self.parent.get_workspace_data('left_sidebar/working_directory')
+        self.parent.left_sidebar.open_file(file_path, working_directory, False)
         
     def getContentfromPath(self,path):
         try:
@@ -43,10 +43,12 @@ class InfoBar(QWidget):
                     content = file.read()
                     return content
         except Exception as e:
-                print("Error reading file:", e)   
+            print("Error reading file:", e)
+            return None
                 
     def curFileIsSave(self):
-        if self.getContentfromPath(self.parent.left_sidebar.curFile)==self.codeTab.toPlainText():
+        if self.getContentfromPath(self.parent.curWorkFile) is None or self.getContentfromPath(
+                self.parent.curWorkFile) == self.codeTab.toPlainText():
             return True
         else:
             return False
@@ -145,7 +147,7 @@ class InfoBar(QWidget):
 
     def runCodeWithoutAnalysis(self):
         self.execute_code_with_file_path(
-            self.curShowCode, self.parent.left_sidebar.curFile, globals(), locals()
+            self.curShowCode, self.parent.curWorkFile, globals(), locals()
         )
 
     def extract_variable_info(self, curShowCode):

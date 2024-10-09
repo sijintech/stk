@@ -59,7 +59,7 @@ class PreferenceTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # 添加保存按钮
-        self.saveButton = QPushButton("保存")
+        self.saveButton = QPushButton("Save")
         self.saveButton.clicked.connect(self.saveData)
         layout.addWidget(self.saveButton)
 
@@ -111,9 +111,9 @@ class PreferenceTab(QWidget):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-        addRowAbove = menu.addAction("在上方添加行")
-        addRowBelow = menu.addAction("在下方添加行")
-        deleteRow = menu.addAction("删除行")
+        addRowAbove = menu.addAction("Add Row Above")
+        addRowBelow = menu.addAction("Add Row Below")
+        deleteRow = menu.addAction("Delete Row")
         action = menu.exec_(event.globalPos())
 
         if action == addRowAbove:
@@ -386,7 +386,7 @@ class CenterWidget(QWidget):
         self.addMainOperationTabs()
 
     def initWorkspace(self):
-        active_tab_index=self.parent.get_workspaceData('center_widget/active_tab_index')
+        active_tab_index = self.parent.get_workspace_data('center_widget/active_tab_index')
         self.tabWidget.setCurrentIndex(active_tab_index)
         # self.vtkObject=self.parent.get_workspaceData('center_widget/vtk/view_port')
         # self.vtkWidget.GetRenderWindow().AddRenderer(
@@ -408,6 +408,7 @@ class CenterWidget(QWidget):
     def registerComponent(self, path, component, isVisible):
         truePath = "Visualization window/" + path
         self.parent.registerComponent(truePath, component, isVisible)
+
 
     def unregisterComponent(self, path):
         truePath = "Visualization window/" + path
@@ -474,7 +475,7 @@ class CenterWidget(QWidget):
     def runCodeWithAnalysis(self, runCode, runCodeType, need_variable):
         self.runCode = runCode
         self.runCodeType = runCodeType
-        script_path = self.parent.left_sidebar.curFile  # 需要根据实际情况修改此路径
+        script_path = self.parent.curWorkFile
         if self.runCodeType == "vtk":
             local_vars = {}
             global_vars = {"vtk": vtk}

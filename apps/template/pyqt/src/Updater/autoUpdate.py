@@ -8,33 +8,33 @@ import sys
 from PySide6 import QtCore
 from PySide6.QtCore import QThread
 
-from .handleZip import zip解压2
-from .downloadFile import 下载文件
-from .updateVersion import 获取最新版本号和下载地址
+from .handleZip import unpack
+from .downloadFile import download_file
+from .updateVersion import get_version_and_download_addr
 
 
-def 系统_是否为window系统():
+def is_windows():
     return platform.system().lower() == 'windows'
 
 
-def 系统_是否为linux系统():
+def is_linux():
     return platform.system().lower() == 'linux'
 
 
-def 系统_是否为mac系统():
+def is_mac():
     return platform.system().lower() == 'darwin'
 
 
-def 取自身路径Window():
+def get_windows_path():
     # 如果不处于编译状态反馈空
     try:
-        编译后路径 = sys._MEIPASS
+        path = sys._MEIPASS
         return sys.argv[0]
     except Exception:
         return ""
 
 
-def 取自身MacOs应用路径():
+def get_mac_path():
     # 如果不处于编译状态反馈空
     try:
         编译后路径 = sys._MEIPASS
@@ -51,21 +51,21 @@ def 取自身MacOs应用路径():
         return ""
 
 
-def 更新自己MacOS应用(资源压缩包, 应用名称="my_app.app"):
+def update_mac_app(zip_path, app_name="my_app.app"):
     # 资源压缩包 = "/Users/chensuilong/Desktop/pythonproject/autotest/dist/my_app.2.0.zip"
     # 应用名称 例如 my_app.app 这你的压缩包里面压缩的应用文件夹名称
-    MacOs应用路径 = 取自身MacOs应用路径()
+    MacOs应用路径 = get_mac_path()
     if MacOs应用路径 != "":
         app目录父目录 = MacOs应用路径[:MacOs应用路径.rfind('/')]
-        print(f"资源压缩包 {资源压缩包} app目录父目录{app目录父目录} MacOs应用路径{MacOs应用路径}")
+        print(f"资源压缩包 {zip_path} app目录父目录{app目录父目录} MacOs应用路径{MacOs应用路径}")
         if MacOs应用路径 != "":
-            zip解压2(资源压缩包, app目录父目录, [应用名称 + '/Contents/'])
+            unpack(zip_path, app目录父目录, [app_name + '/Contents/'])
             # 解压完成就压缩包
-            os.remove(资源压缩包)
-            MacOs应用路径 = os.path.join(app目录父目录, 应用名称)
+            os.remove(zip_path)
+            MacOs应用路径 = os.path.join(app目录父目录, app_name)
             # QApplication.quit()
-            应用名称 = 应用名称[:应用名称.rfind('.')]
-            运行命令 = f"killall {应用名称} && open -n -a {MacOs应用路径}"
+            app_name = app_name[:app_name.rfind('.')]
+            运行命令 = f"killall {app_name} && open -n -a {MacOs应用路径}"
             os.system(运行命令)
             return True, MacOs应用路径
     else:
@@ -73,7 +73,7 @@ def 更新自己MacOS应用(资源压缩包, 应用名称="my_app.app"):
         return False, ""
 
 
-def _取运行目录():
+def _get_run_path():
     """ PyInstaller 单文件的运行目录  """
     if getattr(sys, 'frozen', False):
         return os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -89,12 +89,12 @@ def init():
         if 参数1 == "test":
             print("app run success")
             # 写出文件
-            with open(_取运行目录() + "/test.txt", "w") as f:
+            with open(_get_run_path() + "/test.txt", "w") as f:
                 f.write("app run success")
             sys.exit(0)
 
     # 如果在window系统中存在旧的文件则自动删除
-    自身路径Window = 取自身路径Window()
+    自身路径Window = get_windows_path()
     if 自身路径Window == "":
         # print("非Window编译环境")
         return False, ""
@@ -105,10 +105,10 @@ def init():
         os.remove(旧的文件名)
 
 
-def 更新自己Window应用(exe资源文件路径):
+def update_windows_app(exe资源文件路径):
     # window更新方法
     # exe资源文件路径 = r"C:\Users\csuil\.virtualenvs\QtEsayDesigner\Scripts\dist\my_app1.0.exe"
-    自身路径Window = 取自身路径Window()
+    自身路径Window = get_windows_path()
     if 自身路径Window == "":
         print("非Window编译环境")
         return False, ""
@@ -144,12 +144,12 @@ class download_file_thread(QThread):
         self.应用名称 = kwargs.get('应用名称')
         self.回调函数 = kwargs.get('回调函数')
 
-        self.刷新进度条.connect(self.刷新界面)
+        self.刷新进度条.connect(self.ui_refresh)
 
         # 绑定线程开始事件
-        self.started.connect(self.ui_开始)
+        self.started.connect(self.ui_start)
         # 绑定线程结束事件
-        self.finished.connect(self.ui_结束)
+        self.finished.connect(self.ui_end)
 
     def run(self):
         if self.下载地址 == None:
@@ -161,25 +161,25 @@ class download_file_thread(QThread):
             self.刷新进度条.emit(进度百分比, 信息)
 
         try:
-            下载结果 = 下载文件(self.下载地址, self.保存地址, 进度)
+            下载结果 = download_file(self.下载地址, self.保存地址, 进度)
             self.下载结果 = True
         except:
             self.下载结果 = False
 
-    def ui_开始(self):
+    def ui_start(self):
         self.编辑框.setText(f'开始下载')
 
-    def ui_结束(self):
+    def ui_end(self):
         print("下载结果", self.下载结果)
         print("保存地址", self.保存地址)
         self.回调函数(self.下载结果, self.保存地址)
         self.编辑框.setText(f"下载完成 {self.保存地址}")
 
-    def 刷新界面(self, 进度, 信息):
+    def ui_refresh(self, progress, meg):
         if self.编辑框:
-            self.编辑框.setText(str(信息))
+            self.编辑框.setText(str(meg))
         if self.进度条:
-            self.进度条.setValue(int(进度))
+            self.进度条.setValue(int(progress))
 
 
 class check_update_thread(QThread):
@@ -194,7 +194,7 @@ class check_update_thread(QThread):
 
     def run(self):
         print('检查更新中')
-        data = 获取最新版本号和下载地址(self.updatejson_url)
+        data = get_version_and_download_addr(self.updatejson_url)
         self.data = data
         # self.callback(self.data)
         # print("检查更新结果", data)
