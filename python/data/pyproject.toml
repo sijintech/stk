@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stk_data"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
     {name="Wen Tan", email="2634918190@qq.com"},
 ]
@@ -36,4 +36,4 @@ Homepage = "https://github.com/sijintech/stk.git"
 Issues = "https://github.com/sijintech/stk/issues/"
 
 [project.scripts]
-get_skyrmion_shape = "data:get_skyrmion_shape"
+get_skyrmion_shape = "stk_data:get_skyrmion_shape_cmd"

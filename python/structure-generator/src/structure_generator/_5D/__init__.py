@@ -1,4 +1,8 @@
-__all__=["generate_eta_Icase0",
-         "generate_eta_Icase1",
-         "generate_eta_Icase2",
-         "generate_eta_Icase3",]
+from .generate_eta import *
+
+__all__ = [
+    "generate_eta_Icase0",
+    "generate_eta_Icase1",
+    "generate_eta_Icase2",
+    "generate_eta_Icase3",
+]
