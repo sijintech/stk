@@ -18,8 +18,7 @@ jobs:
         with:
           python-version: "3.x"
       - name: get tag
-        run: |
-            echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
+        run: echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
       - name: fix tauri version
         run : |
                 pip install toml
