@@ -12,24 +12,24 @@ jobs:
       runs-on: ubuntu-latest
   
       steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.x"
-      - name: get tag
-        run: echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> $GITHUB_ENV
-      - name: fix tauri version
-        run : |
-                pip install toml
-          python apps/template/pyqt/scripts/fix_toml_version.py
-      - name: Install pypa/build
-        run: >-
-          python3 -m
-          pip install
-          build
-          --user
-      - name: Build a binary wheel and a source tarball
+        - uses: actions/checkout@v4
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: "3.x"
+        - name: get tag
+            run: echo "TAG=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_ENV
+        - name: fix toml version
+          run: |
+            pip install toml
+            python apps/template/pyqt/scripts/fix_toml_version.py
+        - name: Install pypa/build
+          run: >-
+            python3 -m
+            pip install
+            build
+            --user
+        - name: Build a binary wheel and a source tarball
         run: |
           cd apps/template/pyqt
           python3 -m build

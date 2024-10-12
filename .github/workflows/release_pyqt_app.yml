@@ -62,80 +62,6 @@ on:
       - 'v*'
 
 jobs:
-  windows_build:
-    runs-on: windows-latest
-    # runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.x"
-      - name: get tag
-        id: get_tag
-        run: |
-          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
-
-      - name: Setup virtual environment
-        run:  |
-          python -m venv .venv
-          . .venv\Scripts\activate 
-          python.exe -m pip install -U pip
-
-
-      - name: build exe
-        run:  |
-          
-          python.exe -m pip install -U pip
-          python apps\template\pyqt\scripts\run_write_version.py
-          cd apps\template\pyqt\src
-          pip install pyinstaller
-          pip install PySide6
-          pip install vtk
-          pip install matplotlib
-          pip install pandas
-          pip install numpy
-          pip install requests
-          pyinstaller .\confs\main.spec
- 
-          
-      # - name: Install NSIS
-      #   run: |
-          # iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
-          # .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
-          # scoop update
-          # scoop bucket add extras
-          # scoop install nsis
-      
-
-      - name: build app
-        run: |
-            makensis apps\template\pyqt\src\build_nsis.nsi
-
-      - name: Upload files to OSS(window)
-        env:
-            OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
-            OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
-            OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
-            OSS_BUCKET: sijin-suan-update
-            # 指定要上传的文件或目录，这里假设您想上传整个repo的内容
-            SOURCE_DIR: 'src/dist'
-            # 指定OSS中的目标目录
-            TARGET_DIR: 'nsis/'
-        run: |
-          pwd
-          pip install oss2
-          python apps\template\pyqt\scripts\deploy.py
-          python apps\template\pyqt\scripts\update.py
-
-      - name: Store dist
-        uses: actions/upload-artifact@v3
-        with:
-          # 上传后的标记名，下载依靠它找到对应文件
-          name: suan_nsis.exe
-          # 上传的文件位置
-          path: apps/template/pyqt/app_dist/suan_nsis.exe
   macOS_build:
     runs-on: macos-latest
 
@@ -170,6 +96,80 @@ jobs:
           pip install numpy
           pip install requests
           pyinstaller ./confs/main.spec
+  windows_build:
+    runs-on: windows-latest
+    # runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+
+      - name: Setup virtual environment
+        run: |
+          python -m venv .venv
+          . .venv\Scripts\activate 
+          python.exe -m pip install -U pip
+
+
+      - name: build exe
+        run: |
+          
+          python.exe -m pip install -U pip
+          python apps\template\pyqt\scripts\run_write_version.py
+          cd apps\template\pyqt\src
+          pip install pyinstaller
+          pip install PySide6
+          pip install vtk
+          pip install matplotlib
+          pip install pandas
+          pip install numpy
+          pip install requests
+          pyinstaller .\confs\main.spec
+          
+          
+          # - name: Install NSIS
+          #   run: |
+          # iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
+          # .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
+          # scoop update
+          # scoop bucket add extras
+        # scoop install nsis
+
+
+      - name: build app
+        run: |
+          makensis apps\template\pyqt\src\build_nsis.nsi
+
+      - name: Upload files to OSS(window)
+        env:
+          OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+          OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
+          OSS_BUCKET: sijin-suan-update
+          # 指定要上传的文件或目录，这里假设您想上传整个repo的内容
+          SOURCE_DIR: 'src/dist'
+          # 指定OSS中的目标目录
+          TARGET_DIR: 'nsis/'
+        run: |
+          pwd
+          pip install oss2
+          python apps\template\pyqt\scripts\deploy.py
+          python apps\template\pyqt\scripts\update.py
+
+      - name: Store dist
+        uses: actions/upload-artifact@v3
+        with:
+          # 上传后的标记名，下载依靠它找到对应文件
+          name: suan_nsis.exe
+          # 上传的文件位置
+          path: apps/template/pyqt/app_dist/suan_nsis.exe
   release:
     needs: windows_build
     runs-on: ubuntu-latest
