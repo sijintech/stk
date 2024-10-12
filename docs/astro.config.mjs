@@ -76,14 +76,75 @@ export default defineConfig({
             en: "User Guide",
           },
           items: [
-            // Each item here is one entry in the navigation menu.
-            {
-              label: "概述",
-              translations: {
-                en: "index",
-              },
-              link: "/user_guide/",
-            },
+              // Each item here is one entry in the navigation menu.
+              // {
+              //   label: "概述",
+              //   translations: {
+              //     en: "index",
+              //   },
+              //   link: "/user_guide/",
+              // },
+              {
+                  label: "Apps",
+                  translations: {
+                      en: "Apps",
+                  },
+                  items: [
+                      {
+                          label: "pyqt",
+                          translations: {
+                              en: "pyqt",
+                          },
+                          // link: "/user_guide/pyqt/",
+                          items: [
+                              {
+                                  label: "功能模块",
+                                  translations: {
+                                      en: "function module",
+                                  },
+                                  // link: "/user_guide/pyqt/function",
+                                  items: [
+                                      {
+                                          label: "文件系统模块",
+                                          translations: {
+                                              en: "file system",
+                                          },
+                                          link: "/user_guide/pyqt/function/file_system",
+                                      },
+                                      {
+                                          label: "信息栏模块",
+                                          translations: {
+                                              en: "infobar module",
+                                          },
+                                          link: "/user_guide/pyqt/function/infobar",
+                                      },
+                                      {
+                                          label: "状态栏模块",
+                                          translations: {
+                                              en: "statebar module",
+                                          },
+                                          link: "/user_guide/pyqt/function/statebar",
+                                      },
+                                      {
+                                          label: "工具栏模块",
+                                          translations: {
+                                              en: "toolbar module",
+                                          },
+                                          link: "/user_guide/pyqt/function/toolbar",
+                                      },
+                                      {
+                                          label: "可视化界面模块",
+                                          translations: {
+                                              en: "visualization module",
+                                          },
+                                          link: "/user_guide/pyqt/function/visualization",
+                                      },
+                                  ]
+                              },
+
+                          ],
+                      },]
+              }
           ],
         },
       ],

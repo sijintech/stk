@@ -62,7 +62,7 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  windows_build:
     runs-on: windows-latest
     # runs-on: ubuntu-latest
 
@@ -131,14 +131,47 @@ jobs:
 
       - name: Store dist
         uses: actions/upload-artifact@v3
-        with: 
+        with:
           # 上传后的标记名，下载依靠它找到对应文件
-              name: suan_nsis.exe
+          name: suan_nsis.exe
           # 上传的文件位置
-              path: apps/template/pyqt/app_dist/suan_nsis.exe
+          path: apps/template/pyqt/app_dist/suan_nsis.exe
+  macOS_build:
+    runs-on: macos-latest
 
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+
+      - name: Setup virtual environment
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate 
+          python -m pip install -U pip
+
+      - name: build exe
+        run: |
+          source .venv/bin/activate
+          python -m pip install -U pip
+          python apps/template/pyqt/scripts/run_write_version.py
+          cd apps/template/pyqt/src
+          pip install pyinstaller
+          pip install PySide6
+          pip install vtk
+          pip install matplotlib
+          pip install pandas
+          pip install numpy
+          pip install requests
+          pyinstaller ./confs/main.spec
   release:
-    needs: build
+    needs: windows_build
     runs-on: ubuntu-latest
 
     steps:
