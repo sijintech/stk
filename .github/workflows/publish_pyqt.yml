@@ -10,7 +10,6 @@ jobs:
     build:
       name: Build pyqt
       runs-on: ubuntu-latest
-  
       steps:
         - uses: actions/checkout@v4
         - name: Set up Python
@@ -30,14 +29,14 @@ jobs:
             build
             --user
         - name: Build a binary wheel and a source tarball
-        run: |
-          cd apps/template/pyqt
-          python3 -m build
-      - name: Store the distribution packages
-        uses: actions/upload-artifact@v3
-        with: 
-          name: pyqt
-          path: apps/template/pyqt/dist/
+          run: |
+            cd apps/template/pyqt
+            python3 -m build
+        - name: Store the distribution packages
+          uses: actions/upload-artifact@v3
+          with:
+            name: pyqt
+            path: apps/template/pyqt/dist/
     
     publish-to-pypi:
       name: >-

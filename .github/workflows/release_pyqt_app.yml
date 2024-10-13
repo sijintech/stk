@@ -182,7 +182,9 @@ jobs:
           # 上传的文件位置
           path: apps/template/pyqt/app_dist/suan_nsis.exe
   release:
-    needs: windows_build,macOS_build
+    needs:
+      - windows_build
+      - macOS_build
     runs-on: ubuntu-latest
 
     steps:
@@ -192,7 +194,7 @@ jobs:
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
           echo "The TAG is $steps.get_tag.outputs.TAG"
-          
+
       - name: Create Release
         if: github.event_name == 'push'
         id: create_release
