@@ -95,8 +95,7 @@ jobs:
           pip install pandas
           pip install numpy
           pip install requests
-          cd ../confs/
-          pyinstaller main.spec
+          pyinstaller ../confs/main.spec
   windows_build:
     runs-on: windows-latest
     # runs-on: ubuntu-latest
