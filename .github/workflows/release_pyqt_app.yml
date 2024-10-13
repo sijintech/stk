@@ -96,6 +96,18 @@ jobs:
           pip install numpy
           pip install requests
           pyinstaller ../confs/main.spec
+      - run: |
+          cd apps/template/pyqt/src/dist
+          ls
+
+      - name: Store dist
+        uses: actions/upload-artifact@v3
+        with:
+          # 上传后的标记名，下载依靠它找到对应文件
+          name: suan_pyqt.app
+          # 上传的文件位置
+          path: apps/template/pyqt/src/dist/suan_pyqt.app
+
   windows_build:
     runs-on: windows-latest
     # runs-on: ubuntu-latest
@@ -131,7 +143,7 @@ jobs:
           pip install pandas
           pip install numpy
           pip install requests
-          pyinstaller .\confs\main.spec
+          pyinstaller ..\confs\main.spec
           
           
           # - name: Install NSIS
@@ -140,9 +152,8 @@ jobs:
           # .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
           # scoop update
           # scoop bucket add extras
+
         # scoop install nsis
-
-
       - name: build app
         run: |
           makensis apps\template\pyqt\src\build_nsis.nsi
@@ -153,7 +164,7 @@ jobs:
           OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
           OSS_BUCKET: sijin-suan-update
-          # 指定要上传的文件或目录，这里假设您想上传整个repo的内容
+          # 指定要上传的文件或目录
           SOURCE_DIR: 'src/dist'
           # 指定OSS中的目标目录
           TARGET_DIR: 'nsis/'
@@ -171,7 +182,7 @@ jobs:
           # 上传的文件位置
           path: apps/template/pyqt/app_dist/suan_nsis.exe
   release:
-    needs: windows_build
+    needs: windows_build,macOS_build
     runs-on: ubuntu-latest
 
     steps:
@@ -199,17 +210,23 @@ jobs:
           #   Release  ${{ steps.get_tag.outputs.TAG }}
           # draft: true
           # prerelease: false
-      - name: Download dist
+      - name: Download windows app
         uses: actions/download-artifact@v3
         with:
           # 要下载的文件的标记
           name: suan_nsis.exe
           # 下载到哪个目录（注意是/而不是\,否则报错）
           path: apps/template/pyqt/app_dist/
-      # - run: |
-      #     cd apps/template/pyqt/app_dist/
-      #     ls
-      - name: Upload File
+
+      - name: Download macOS app
+          uses: actions/download-artifact@v3
+          with:
+            # 要下载的文件的标记
+            name: suan_pyqt.app
+            # 下载到哪个目录（注意是/而不是\,否则报错）
+            path: apps/template/pyqt/src/dist/suan_pyqt.app
+
+      - name: release windows app
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
@@ -218,4 +235,14 @@ jobs:
           asset_path: apps/template/pyqt/app_dist/suan_nsis.exe
           # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
           asset_name: suan_nsis.exe
+          asset_content_type: application/octet-stream
+      - name: release macOS app
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: apps/template/pyqt/src/dist/suan_pyqt.app
+          # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
+          asset_name: suan_pyqt.app
           asset_content_type: application/octet-stream
