@@ -165,7 +165,7 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
           OSS_BUCKET: sijin-suan-update
           # 指定要上传的文件或目录
-          SOURCE_DIR: 'src/dist'
+          SOURCE_DIR: '../src/dist'
           # 指定OSS中的目标目录
           TARGET_DIR: 'nsis/'
         run: |
