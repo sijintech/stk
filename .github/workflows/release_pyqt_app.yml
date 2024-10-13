@@ -224,9 +224,9 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           # 要下载的文件的标记
-          name: suan_pyqt.app
+          name: suan_pyqt.
           # 下载到哪个目录（注意是/而不是\,否则报错）
-          path: apps/template/pyqt/src/dist/suan_pyqt.app
+          path: apps/template/pyqt/src/dist/suan_pyqt
 
       - name: release windows app
         uses: actions/upload-release-asset@v1
