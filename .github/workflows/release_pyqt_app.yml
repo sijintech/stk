@@ -219,12 +219,12 @@ jobs:
           path: apps/template/pyqt/app_dist/
 
       - name: Download macOS app
-          uses: actions/download-artifact@v3
-          with:
-            # 要下载的文件的标记
-            name: suan_pyqt.app
-            # 下载到哪个目录（注意是/而不是\,否则报错）
-            path: apps/template/pyqt/src/dist/suan_pyqt.app
+        uses: actions/download-artifact@v3
+        with:
+          # 要下载的文件的标记
+          name: suan_pyqt.app
+          # 下载到哪个目录（注意是/而不是\,否则报错）
+          path: apps/template/pyqt/src/dist/suan_pyqt.app
 
       - name: release windows app
         uses: actions/upload-release-asset@v1
@@ -236,6 +236,7 @@ jobs:
           # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
           asset_name: suan_nsis.exe
           asset_content_type: application/octet-stream
+
       - name: release macOS app
         uses: actions/upload-release-asset@v1
         env:
