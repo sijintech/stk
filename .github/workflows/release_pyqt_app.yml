@@ -158,21 +158,21 @@ jobs:
         run: |
           makensis apps\template\pyqt\src\build_nsis.nsi
 
-      - name: Upload files to OSS(window)
-        env:
-          OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
-          OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
-          OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
-          OSS_BUCKET: sijin-suan-update
-          # 指定要上传的文件或目录
-          SOURCE_DIR: '../src/dist'
-          # 指定OSS中的目标目录
-          TARGET_DIR: 'nsis/'
-        run: |
-          pwd
-          pip install oss2
-          python apps\template\pyqt\scripts\deploy.py
-          python apps\template\pyqt\scripts\update.py
+      # - name: Upload files to OSS(window)
+      #   env:
+      #     OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+      #     OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
+      #     OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
+      #     OSS_BUCKET: sijin-suan-update
+      #     # 指定要上传的文件或目录
+      #     SOURCE_DIR: '../src/dist'
+      #     # 指定OSS中的目标目录
+      #     TARGET_DIR: 'nsis/'
+      #   run: |
+      #     pwd
+      #     pip install oss2
+      #     python apps\template\pyqt\scripts\deploy.py
+      #     python apps\template\pyqt\scripts\update.py
 
       - name: Store dist
         uses: actions/upload-artifact@v3
