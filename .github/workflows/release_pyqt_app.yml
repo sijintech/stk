@@ -198,11 +198,11 @@ jobs:
         id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}  
+          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
 
         with:
-          tag_name:  ${{ steps.get_tag.outputs.TAG }}
-          release_name:  ${{ steps.get_tag.outputs.TAG}}
+          tag_name: ${{ steps.get_tag.outputs.TAG }}
+          release_name: ${{ steps.get_tag.outputs.TAG}}
           # tag_name:  ${{ env.TAG }}
           # release_name:  ${{ env.TAG }}
 
@@ -210,13 +210,15 @@ jobs:
           #   Release  ${{ steps.get_tag.outputs.TAG }}
           # draft: true
           # prerelease: false
-      - name: Download windows app
-        uses: actions/download-artifact@v3
-        with:
-          # 要下载的文件的标记
-          name: suan_nsis.exe
-          # 下载到哪个目录（注意是/而不是\,否则报错）
-          path: apps/template/pyqt/app_dist/
+
+
+      #      - name: Download windows app
+      #        uses: actions/download-artifact@v3
+      #        with:
+      #          # 要下载的文件的标记
+      #          name: suan_nsis.exe
+      #          # 下载到哪个目录（注意是/而不是\,否则报错）
+      #          path: apps/template/pyqt/app_dist/
 
       - name: Download macOS app
         uses: actions/download-artifact@v3
@@ -228,16 +230,17 @@ jobs:
       - run: |
           cd apps/template/pyqt/src/dist/suan_pyqt
           ls
-      - name: release windows app
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: apps/template/pyqt/app_dist/suan_nsis.exe
-          # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
-          asset_name: suan_nsis.exe
-          asset_content_type: application/octet-stream
+
+      #      - name: release windows app
+      #        uses: actions/upload-release-asset@v1
+      #        env:
+      #          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
+      #        with:
+      #          upload_url: ${{ steps.create_release.outputs.upload_url }}
+      #          asset_path: apps/template/pyqt/app_dist/suan_nsis.exe
+      #          # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
+      #          asset_name: suan_nsis.exe
+      #          asset_content_type: application/octet-stream
 
       - name: release macOS app
         uses: actions/upload-release-asset@v1
