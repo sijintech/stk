@@ -181,7 +181,7 @@ jobs:
   #          path: apps/template/pyqt/app_dist/suan_nsis.exe
   release:
     needs:
-      - windows_build
+#      - windows_build
       - macOS_build
     runs-on: ubuntu-latest
 
