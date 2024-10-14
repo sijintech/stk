@@ -3,7 +3,7 @@ import toml
 
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
-toml_path = os.path.join(this_dir, "../confs/pyproject.toml")
+toml_path = os.path.join(this_dir, "../pyproject.toml")
 
 
 # Read the pyproject.toml file

@@ -7,17 +7,17 @@ on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测�
       tags:
         - '1v*'
 jobs:
-    build:
-      name: Build pyqt
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v4
-        - name: Set up Python
-          uses: actions/setup-python@v4
-          with:
-            python-version: "3.x"
-        - name: get tag
-          run: echo "TAG=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_ENV
+  build_pyqt:
+    name: Build pyqt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: get tag
+        run: echo "TAG=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_ENV
         - name: fix toml version
           run: |
             pip install toml
@@ -42,7 +42,7 @@ jobs:
       name: >-
         Publish pyqt to PyPI
       needs:
-      - build
+        - build_pyqt
       runs-on: ubuntu-latest
       environment:
         name: pypi
