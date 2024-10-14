@@ -97,7 +97,7 @@ jobs:
           pip install requests
           pyinstaller ../confs/main.spec
       - run: |
-          cd apps/template/pyqt/src/dist
+          cd apps/template/pyqt/src/dist/suan_pyqt
           ls
 
       - name: Store dist
