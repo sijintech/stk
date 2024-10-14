@@ -248,7 +248,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: apps/template/pyqt/src/dist/suan_pyqt
+          asset_path: apps/template/pyqt/src/dist/suan_pyqt/suan_pyqt
           # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
           asset_name: suan_pyqt
           asset_content_type: application/octet-stream
