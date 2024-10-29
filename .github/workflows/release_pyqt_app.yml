@@ -35,7 +35,7 @@ jobs:
                cd apps/template/pyqt/src
                pip install pyinstaller
                pip install PySide6
-               pip install vtk
+#               pip install vtk
                pip install matplotlib
                pip install pandas
                pip install numpy
