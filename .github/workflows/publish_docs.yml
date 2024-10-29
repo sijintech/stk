@@ -3,17 +3,13 @@ defaults:
   run:
     shell: bash -ieo pipefail {0}
 on:
-  # Trigger the workflow every time you push to the `main` branch
-  # Using a different branch name? Replace `main` with your branch’s name
   push:
     paths:
       - "docs/**"
       - .github/workflows/publish_docs.yml
     branches: [main]
-  # Allows you to run this workflow manually from the Actions tab on GitHub.
   workflow_dispatch:
 
-# Allow this job to clone the repo and create a page deployment
 permissions:
   contents: read
   pages: write
@@ -26,35 +22,14 @@ jobs:
 
       - name: Checkout your repository using git
         uses: actions/checkout@v4
-      # - name: Setup Node.js
-      #   uses: actions/setup-node@v2
-      #   with:
-      #     node-version: 14
-          # registry-url: 'https://registry.npm.taobao.org'
-          # cache: 'npm'
-  
-      # - name: Install dependencies
-      #   run: |
-      #     # npm install -g nvm
-      #     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | bash
-      #     export NVM_DIR="$HOME/.nvm"
-      #     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-      #     nvm install 18
-          
+
       - name: Build
         run: |
           cd docs
           nvm use 18
           npm install
           npm run build
-      # - name: Publish
-      #   uses: cloudflare/pages-action@1
-      #   with: 
-      #     apiToken: ${{ secrets.CF_API_TOKEN }}
-      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      #     projectName: 'stk'
-      #     directory: './docs/dist'
-      #     gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish
         run: |
           export CLOUDFLARE_API_TOKEN=${{ secrets.CF_API_TOKEN }}
