@@ -1,63 +1,8 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
 
-# name: MSBuild
-
-# on:
-#   push:
-#     branches: [ "main" ]
-#   pull_request:
-#     branches: [ "main" ]
-
-# env:
-#   # Path to the solution file relative to the root of the project.
-#   SOLUTION_FILE_PATH: apps\template\pyqt\src\dist\main\
-
-#   # Configuration type to build.
-#   # You can convert this to a build matrix if you need coverage of multiple configuration types.
-#   # https://docs.github.com/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
-#   BUILD_CONFIGURATION: Release
-
-# permissions:
-#   contents: read
-
-# jobs:
-#   build:
-#     runs-on: windows-latest
-
-#     steps:
-#     - uses: actions/checkout@v3
-#     - name: Set up Python
-#       uses: actions/setup-python@v4
-#       with:
-#         python-version: "3.x"
-#     - name: build exe
-#       run:  |
-#         cd apps\template\pyqt\src
-#         pip install pyinstaller
-#         pyinstaller .\main.spec
-      
-#     - name: Add MSBuild to PATH
-#       uses: microsoft/setup-msbuild@v1.0.2
-
-#     - name: Restore NuGet packages
-#       working-directory: ${{env.GITHUB_WORKSPACE}}
-#       run: nuget restore ${{env.SOLUTION_FILE_PATH}}
-
-#     - name: Build
-#       working-directory: ${{env.GITHUB_WORKSPACE}}
-#       # Add additional options to the MSBuild command line here (like platform or verbosity level).
-#       # See https://docs.microsoft.com/visualstudio/msbuild/msbuild-command-line-reference
-#       run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}} ${{env.SOLUTION_FILE_PATH}}
-
-
-name: NSISbuild
+name: Build and Release App
 
 on:
   push:
-    # 匹配特定标签 (refs/tags)
     tags:
       - 'v*'
 
@@ -97,7 +42,6 @@ jobs:
           pip install requests
           pyinstaller ../confs/main.spec
 
-
       - name: Store dist
         uses: actions/upload-artifact@v3
         with:
@@ -106,82 +50,82 @@ jobs:
           # 上传的文件位置
           path: apps/template/pyqt/src/dist/suan_pyqt
 
-  #  windows_build:
-  #    runs-on: windows-latest
-  #    # runs-on: ubuntu-latest
-  #
-  #    steps:
-  #      - uses: actions/checkout@v3
-  #      - name: Set up Python
-  #        uses: actions/setup-python@v4
-  #        with:
-  #          python-version: "3.x"
-  #      - name: get tag
-  #        id: get_tag
-  #        run: |
-  #          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
-  #
-  #      - name: Setup virtual environment
-  #        run: |
-  #          python -m venv .venv
-  #          . .venv\Scripts\activate
-  #          python.exe -m pip install -U pip
-  #
-  #
-  #      - name: build exe
-  #        run: |
-  #
-  #          python.exe -m pip install -U pip
-  #          python apps\template\pyqt\scripts\run_write_version.py
-  #          cd apps\template\pyqt\src
-  #          pip install pyinstaller
-  #          pip install PySide6
-  #          pip install vtk
-  #          pip install matplotlib
-  #          pip install pandas
-  #          pip install numpy
-  #          pip install requests
-  #          pyinstaller ..\confs\main.spec
-  #
-  #
-  #          # - name: Install NSIS
-  #          #   run: |
-  #          # iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
-  #          # .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
-  #          # scoop update
-  #          # scoop bucket add extras
-  #
-  #        # scoop install nsis
-  #      - name: build app
-  #        run: |
-  #          makensis apps\template\pyqt\src\build_nsis.nsi
-  #
-  #      # - name: Upload files to OSS(window)
-  #      #   env:
-  #      #     OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
-  #      #     OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
-  #      #     OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
-  #      #     OSS_BUCKET: sijin-suan-update
-  #      #     # 指定要上传的文件或目录
-  #      #     SOURCE_DIR: '../src/dist'
-  #      #     # 指定OSS中的目标目录
-  #      #     TARGET_DIR: 'nsis/'
-  #      #   run: |
-  #      #     pwd
-  #      #     pip install oss2
-  #      #     python apps\template\pyqt\scripts\deploy.py
-  #      #     python apps\template\pyqt\scripts\update.py
-  #
-  #      - name: Store dist
-  #        uses: actions/upload-artifact@v3
-  #        with:
-  #          # 上传后的标记名，下载依靠它找到对应文件
-  #          name: suan_nsis.exe
-  #          # 上传的文件位置
-  #          path: apps/template/pyqt/app_dist/suan_nsis.exe
+  windows_build:
+    runs-on: windows-latest
+    # runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+
+      - name: Setup virtual environment
+        run: |
+          python -m venv .venv
+          . .venv\Scripts\activate
+          python.exe -m pip install -U pip
+
+
+      - name: build exe
+        run: |
+
+          python.exe -m pip install -U pip
+          python apps\template\pyqt\scripts\run_write_version.py
+          cd apps\template\pyqt\src
+          pip install pyinstaller
+          pip install PySide6
+          pip install vtk
+          pip install matplotlib
+          pip install pandas
+          pip install numpy
+          pip install requests
+          pyinstaller ..\confs\main.spec
+
+
+          # - name: Install NSIS
+          #   run: |
+          # iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
+          # .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
+          # scoop update
+          # scoop bucket add extras
+
+        # scoop install nsis
+      - name: build app
+        run: |
+          makensis apps\template\pyqt\src\build_nsis.nsi
+
+      # - name: Upload files to OSS(window)
+      #   env:
+      #     OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+      #     OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
+      #     OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
+      #     OSS_BUCKET: sijin-suan-update
+      #     # 指定要上传的文件或目录
+      #     SOURCE_DIR: '../src/dist'
+      #     # 指定OSS中的目标目录
+      #     TARGET_DIR: 'nsis/'
+      #   run: |
+      #     pwd
+      #     pip install oss2
+      #     python apps\template\pyqt\scripts\deploy.py
+      #     python apps\template\pyqt\scripts\update.py
+
+      - name: Store dist
+        uses: actions/upload-artifact@v3
+        with:
+          # 上传后的标记名，下载依靠它找到对应文件
+          name: suan_nsis.exe
+          # 上传的文件位置
+          path: apps/template/pyqt/app_dist/suan_nsis.exe
   release:
     needs:
-#      - windows_build
+      - windows_build
       - macOS_build
     runs-on: ubuntu-latest
 
@@ -203,22 +147,19 @@ jobs:
         with:
           tag_name: ${{ steps.get_tag.outputs.TAG }}
           release_name: ${{ steps.get_tag.outputs.TAG}}
-          # tag_name:  ${{ env.TAG }}
-          # release_name:  ${{ env.TAG }}
-
           # body: |
           #   Release  ${{ steps.get_tag.outputs.TAG }}
           # draft: true
           # prerelease: false
 
 
-      #      - name: Download windows app
-      #        uses: actions/download-artifact@v3
-      #        with:
-      #          # 要下载的文件的标记
-      #          name: suan_nsis.exe
-      #          # 下载到哪个目录（注意是/而不是\,否则报错）
-      #          path: apps/template/pyqt/app_dist/
+      - name: Download windows app
+        uses: actions/download-artifact@v3
+        with:
+          # 要下载的文件的标记
+          name: suan_nsis.exe
+          # 下载到哪个目录（注意是/而不是\,否则报错）
+          path: apps/template/pyqt/app_dist/
 
       - name: Download macOS app
         uses: actions/download-artifact@v3
@@ -231,16 +172,15 @@ jobs:
           cd apps/template/pyqt/src/dist/suan_pyqt
           ls
 
-      #      - name: release windows app
-      #        uses: actions/upload-release-asset@v1
-      #        env:
-      #          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
-      #        with:
-      #          upload_url: ${{ steps.create_release.outputs.upload_url }}
-      #          asset_path: apps/template/pyqt/app_dist/suan_nsis.exe
-      #          # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
-      #          asset_name: suan_nsis.exe
-      #          asset_content_type: application/octet-stream
+      - name: release windows app
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: apps/template/pyqt/app_dist/suan_nsis.exe
+          asset_name: suan_nsis.exe
+          asset_content_type: application/octet-stream
 
       - name: release macOS app
         uses: actions/upload-release-asset@v1
@@ -249,6 +189,5 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: apps/template/pyqt/src/dist/suan_pyqt/suan_pyqt
-          # asset_path: apps\template\pyqt\src\dist\suan_pyqt.exe
           asset_name: suan_pyqt
           asset_content_type: application/octet-stream
