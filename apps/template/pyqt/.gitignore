@@ -330,3 +330,5 @@ cython_debug/
 #.idea/!/src/testpython.py
 !/confs/mac.txt
 
+!/app_dist/
+!/dist/

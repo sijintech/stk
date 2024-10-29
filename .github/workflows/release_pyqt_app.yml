@@ -29,18 +29,18 @@ jobs:
 
       - name: build exe
         run: |
-          source .venv/bin/activate
-          python -m pip install -U pip
-          python apps/template/pyqt/scripts/run_write_version.py
-          cd apps/template/pyqt/src
-          pip install pyinstaller
-          pip install PySide6
-          pip install vtk
-          pip install matplotlib
-          pip install pandas
-          pip install numpy
-          pip install requests
-          pyinstaller ../confs/main.spec
+          #          source .venv/bin/activate
+          #          python -m pip install -U pip
+               python apps/template/pyqt/scripts/run_write_version.py
+               cd apps/template/pyqt/src
+               pip install pyinstaller
+               pip install PySide6
+               pip install vtk
+               pip install matplotlib
+               pip install pandas
+               pip install numpy
+               pip install requests
+               pyinstaller ../confs/main.spec
 
       - name: Store dist
         uses: actions/upload-artifact@v3
@@ -69,7 +69,7 @@ jobs:
         run: |
           python -m venv .venv
           . .venv\Scripts\activate
-          python.exe -m pip install -U pip
+      #          python.exe -m pip install -U pip
 
 
       - name: build exe
