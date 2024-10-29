@@ -24,9 +24,7 @@ jobs:
       - name: Setup virtual environment
         run: |
           python -m venv .venv
-          source .venv/bin/activate 
-
-
+          source .venv/bin/activate
       - name: build exe
         run: |
           python -m pip install -U pip
@@ -34,7 +32,6 @@ jobs:
           cd apps/template/pyqt/src
           pip install pyinstaller
           pip install PySide6
-#               pip install vtk
           pip install matplotlib
           pip install pandas
           pip install numpy
