@@ -7,6 +7,48 @@ on:
       - 'v*'
 
 jobs:
+  ubuntu_build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+
+      - name: Setup virtual environment
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+
+      - name: Build executable
+        run: |
+          python -m pip install -U pip
+          python apps/template/pyqt/scripts/run_write_version.py
+          cd apps/template/pyqt/src
+          pip install pyinstaller
+          pip install PySide6
+          pip install matplotlib
+          pip install pandas
+          pip install numpy
+          pip install requests
+          pyinstaller ../confs/main.spec
+          cd dist
+          ll
+
+      - name: Store dist
+        uses: actions/upload-artifact@v3
+        with:
+          name: suan_pyqt
+          path: apps/template/pyqt/src/dist/suan_pyqt
+
   macOS_build:
     runs-on: macos-latest
 
@@ -48,7 +90,6 @@ jobs:
 
   windows_build:
     runs-on: windows-latest
-    # runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
@@ -121,6 +162,7 @@ jobs:
     needs:
       - windows_build
       - macOS_build
+      - ubuntu_build
     runs-on: ubuntu-latest
 
     steps:

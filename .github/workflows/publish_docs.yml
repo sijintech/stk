@@ -19,7 +19,6 @@ jobs:
   build:
     runs-on: [self-hosted, Linux]
     steps:
-
       - name: Checkout your repository using git
         uses: actions/checkout@v4
 
