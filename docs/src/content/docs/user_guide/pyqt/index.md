@@ -1,10 +1,6 @@
 ---
 title: Suan Toolkit
 description: Some introduction of Sijin License.
-hero:
-name: Suan Toolkit
-text: 一款提供了多种与VTK和Matplotlib相关的实用功能的桌面应用软件
-tagline: 满足用户在涉及VTK和Matplotlib相关编程和数据处理方面的多样化需求，用户可以在这个统一的平台上轻松进行代码编写、运行和调试，无需切换多个不同的工具或环境。
 ---
 Suan
 Toolkit是一款功能强大的桌面应用软件，采用Pyside6框架开发。该软件不仅提供了多种与VTK和Matplotlib相关的实用功能，而且通过其灵活的扩展性，为用户创造了更便捷和高效的编程环境。设计初衷是为了满足用户在涉及VTK和Matplotlib相关编程和数据处理方面的多样化需求，用户可以在这个统一的平台上轻松进行代码编写、运行和调试，无需切换多个不同的工具或环境。并且通过友好的界面设计和丰富的功能组合为用户提供了一个全面而易于上手的工作平台，使得无论是初学者还是专业人士，都能够从中受益，提高工作效率并更准确地完成任务。
