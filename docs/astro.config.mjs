@@ -9,19 +9,23 @@ export default defineConfig({
   output: "static",
   integrations: [
     starlight({
-      title: "Suan Toolkit",
-      // 为此网站设置中文为默认语言。
-      defaultLocale: "root",
-      locales: {
-        // 简体中文文档在 `src/content/docs/zh-cn/` 中。
-        root: {
-          label: "简体中文",
-          lang: "zh-CN",
-        },
-        en: {
-          // 英文文档在 `src/content/docs/en/` 中。
-          label: "English",
-          lang: "en", // lang 是 root 语言必须的
+        title: "Suan Toolkit",
+        // 为此网站设置中文为默认语言。
+        defaultLocale: "root",
+        customCss: [
+            // 你的自定义 CSS 文件的相对路径
+            './src/styles/global.css'
+        ],
+        locales: {
+            // 简体中文文档在 `src/content/docs/zh-cn/` 中。
+            root: {
+                label: "简体中文",
+                lang: "zh-CN",
+            },
+            en: {
+                // 英文文档在 `src/content/docs/en/` 中。
+                label: "English",
+                lang: "en", // lang 是 root 语言必须的
         },
       },
       social: {
@@ -44,18 +48,18 @@ export default defineConfig({
                 en: "Apps",
               },
               items: [
-                {
-                  label: "pyqt",
-                  translations: {
-                    en: "pyqt",
-                  },
-                  items: [
-                    {
-                      label: "环境配置",
+                  {
+                      label: "Suan Tookit",
                       translations: {
-                        en: "Configuration",
+                          en: "Suan Tookit",
                       },
-                      link: "/dev_guide/pyqt/configuration",
+                      items: [
+                          {
+                              label: "环境配置",
+                              translations: {
+                                  en: "Configuration",
+                              },
+                              link: "/dev_guide/pyqt/configuration",
                     },
                     {
                       label: "项目结构",
@@ -91,9 +95,9 @@ export default defineConfig({
                   },
                   items: [
                       {
-                          label: "pyqt",
+                          label: "Suan Tookit",
                           translations: {
-                              en: "pyqt",
+                              en: "Suan Tookit",
                           },
                           // link: "/user_guide/pyqt/",
                           items: [

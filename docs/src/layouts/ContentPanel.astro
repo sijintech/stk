@@ -1,0 +1,20 @@
+---
+import type { Props } from '@astrojs/starlight/props'
+import Default from '@astrojs/starlight/components/ContentPanel.astro'
+
+const isHomepage =
+  Astro.props.slug === '' ||
+  Astro.props.slug === 'buy' ||
+  Astro.props.slug === 'zh-cn/buy' ||
+  Astro.props.slug === 'zh-cn'
+---
+
+{
+  isHomepage ? (
+    <slot />
+  ) : (
+    <Default {...Astro.props}>
+      <slot />
+    </Default>
+  )
+}

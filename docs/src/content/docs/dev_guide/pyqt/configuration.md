@@ -35,7 +35,7 @@ pip install requests
 pip install oss2
 ```
 
-### 配置 NSIS 打包环境
+### 配置 NSIS 打包环境（用于打包成 Windows程序安装包）
 
 在命令行中运行下面代码：
 
@@ -93,7 +93,7 @@ pip install requests
 pip install oss2
 ```
 
-### 配置 NSIS 打包环境
+### 配置 NSIS 打包环境（用于打包成 Windows程序安装包）
 
 在终端中运行下面代码：
 
