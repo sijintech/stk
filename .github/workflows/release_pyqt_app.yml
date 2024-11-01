@@ -48,7 +48,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: stk_ubuntu
-          path: apps/template/pyqt/src/dist/suan_pyqt
+          path: apps/template/pyqt/src/dist/stk
 
   macOS_build:
     runs-on: macos-latest
@@ -86,9 +86,9 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           # 上传后的标记名，下载依靠它找到对应文件
-          name: suan_pyqt
+          name: stk_macos
           # 上传的文件位置
-          path: apps/template/pyqt/src/dist/suan_pyqt
+          path: apps/template/pyqt/src/dist/stk
 
   windows_build:
     runs-on: windows-latest
@@ -158,9 +158,9 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           # 上传后的标记名，下载依靠它找到对应文件
-          name: suan_nsis.exe
+          name: stk_windows.exe
           # 上传的文件位置
-          path: apps/template/pyqt/dist/suan_nsis.exe
+          path: apps/template/pyqt/dist/stk_nsis.exe
   release:
     needs:
       - windows_build
@@ -191,25 +191,41 @@ jobs:
           # draft: true
           # prerelease: false
 
-
+      - name: Download ubuntu app
+        uses: actions/download-artifact@v3
+        with:
+          # 要下载的文件的标记
+          name: stk_ubuntu
+          # 下载到哪个目录（注意是/而不是\,否则报错）
+          path: apps/template/pyqt/src/dist/
       - name: Download windows app
         uses: actions/download-artifact@v3
         with:
           # 要下载的文件的标记
-          name: suan_nsis.exe
+          name: stk_windows.exe
           # 下载到哪个目录（注意是/而不是\,否则报错）
-          path: apps/template/pyqt/app_dist/
+          path: apps/template/pyqt/src/dist/
 
       - name: Download macOS app
         uses: actions/download-artifact@v3
         with:
           # 要下载的文件的标记
-          name: suan_pyqt
+          name: stk_macos
           # 下载到哪个目录（注意是/而不是\,否则报错）
-          path: apps/template/pyqt/src/dist/suan_pyqt
+          path: apps/template/pyqt/src/dist/
       - run: |
-          cd apps/template/pyqt/src/dist/suan_pyqt
+          cd apps/template/pyqt/src/dist/
           ls
+
+      - name: release ubuntu app
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: apps/template/pyqt/src/dist/stk_ubuntu
+          asset_name: stk_ubuntu
+          asset_content_type: application/octet-stream
 
       - name: release windows app
         uses: actions/upload-release-asset@v1
@@ -217,8 +233,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: apps/template/pyqt/app_dist/suan_nsis.exe
-          asset_name: suan_nsis.exe
+          asset_path: apps/template/pyqt/src/dist/stk_nsis.exe
+          asset_name: stk_windows.exe
           asset_content_type: application/octet-stream
 
       - name: release macOS app
@@ -227,6 +243,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: apps/template/pyqt/src/dist/suan_pyqt/suan_pyqt
-          asset_name: suan_pyqt
+          asset_path: apps/template/pyqt/src/dist/stk_macos
+          asset_name: stk_macos
           asset_content_type: application/octet-stream
+
