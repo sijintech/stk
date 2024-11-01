@@ -38,7 +38,8 @@ jobs:
           pip install matplotlib
           pip install pandas
           pip install numpy
-          pip install requests
+          pip install requests          
+          pip install toml
           pyinstaller ../confs/main.spec
           cd dist
           ll
@@ -46,7 +47,7 @@ jobs:
       - name: Store dist
         uses: actions/upload-artifact@v3
         with:
-          name: suan_pyqt
+          name: stk_ubuntu
           path: apps/template/pyqt/src/dist/suan_pyqt
 
   macOS_build:
@@ -78,6 +79,7 @@ jobs:
           pip install pandas
           pip install numpy
           pip install requests
+          pip install toml
           pyinstaller ../confs/main.spec
 
       - name: Store dist
@@ -120,6 +122,7 @@ jobs:
           pip install pandas
           pip install numpy
           pip install requests
+          pip install toml
           pyinstaller ..\confs\main.spec
 
 
