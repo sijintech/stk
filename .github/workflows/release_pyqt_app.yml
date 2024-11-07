@@ -161,7 +161,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           # 上传后的标记名，下载依靠它找到对应文件
-          name: stk_windows.exe
+          name: stk_windows
           # 上传的文件位置
           path: apps/template/pyqt/dist/stk_nsis.exe
   release:
@@ -201,11 +201,12 @@ jobs:
           name: stk_ubuntu
           # 下载到哪个目录（注意是/而不是\,否则报错）
           path: apps/template/pyqt/src/dist/
+
       - name: Download windows app
         uses: actions/download-artifact@v3
         with:
           # 要下载的文件的标记
-          name: stk_windows.exe
+          name: stk_windows
           # 下载到哪个目录（注意是/而不是\,否则报错）
           path: apps/template/pyqt/src/dist/
 
