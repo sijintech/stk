@@ -48,7 +48,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: stk_ubuntu
-          path: apps/template/pyqt/src/dist/
+          path: apps/template/pyqt/src/dist/stk_ubuntu
 
   macOS_build:
     runs-on: macos-latest
@@ -90,7 +90,7 @@ jobs:
           # 上传后的标记名，下载依靠它找到对应文件
           name: stk_macos
           # 上传的文件位置
-          path: apps/template/pyqt/src/dist/stk
+          path: apps/template/pyqt/src/dist/stk_macos
 
   windows_build:
     runs-on: windows-latest
@@ -163,7 +163,7 @@ jobs:
           # 上传后的标记名，下载依靠它找到对应文件
           name: stk_windows
           # 上传的文件位置
-          path: apps/template/pyqt/dist/
+          path: apps/template/pyqt/dist/stk_nsis.exe
   release:
     needs:
       - windows_build

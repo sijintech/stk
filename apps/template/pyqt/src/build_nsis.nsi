@@ -65,7 +65,7 @@ Section "MainSection" SEC01
   SetOverwrite ifnewer
 
   ;要打包的exe文件（需修改）
-  File ".\dist\stk.exe"
+  File ".\dist\stk_windows.exe"
 
   CreateDirectory "$SMPROGRAMS\suan"
   CreateShortCut "$SMPROGRAMS\suan\suan.lnk" "$INSTDIR\stk.exe"

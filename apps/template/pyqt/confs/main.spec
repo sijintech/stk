@@ -1,5 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
+import platform
 
+# 根据当前系统设置应用程序名称
+system = platform.system()
+if system == "Windows":
+    app_name = "stk_windows"
+elif system == "Darwin":
+    app_name = "stk_macos"
+else:
+    app_name = "stk_ubuntu"
 
 a = Analysis(
     ['../src/main.py'],
@@ -21,7 +30,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='stk',
+    name=app_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
