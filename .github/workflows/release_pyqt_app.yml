@@ -42,7 +42,7 @@ jobs:
           pip install toml
           pyinstaller ../confs/main.spec
           cd dist
-          ll
+          ls
 
       - name: Store dist
         uses: actions/upload-artifact@v3
@@ -81,6 +81,8 @@ jobs:
           pip install requests
           pip install toml
           pyinstaller ../confs/main.spec
+          cd dist
+          ls
 
       - name: Store dist
         uses: actions/upload-artifact@v3
@@ -124,8 +126,8 @@ jobs:
           pip install requests
           pip install toml
           pyinstaller ..\confs\main.spec
-
-
+          
+          
           # - name: Install NSIS
           #   run: |
           # iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
@@ -137,7 +139,8 @@ jobs:
       - name: build app
         run: |
           makensis apps\template\pyqt\src\build_nsis.nsi
-
+          cd apps\template\pyqt\src\dist
+          ls
       # - name: Upload files to OSS(window)
       #   env:
       #     OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
