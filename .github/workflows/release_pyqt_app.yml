@@ -40,7 +40,7 @@ jobs:
           pip install numpy
           pip install requests          
           pip install toml
-          pyinstaller ../confs/main.spec
+          pyinstaller ./confs/main.spec
           cd dist
           ls
 
@@ -80,7 +80,7 @@ jobs:
           pip install numpy
           pip install requests
           pip install toml
-          pyinstaller ../confs/main.spec
+          pyinstaller ./confs/main.spec
           cd dist
           ls
 
@@ -125,7 +125,7 @@ jobs:
           pip install numpy
           pip install requests
           pip install toml
-          pyinstaller ..\confs\main.spec
+          pyinstaller .\confs\main.spec
           
           
           # - name: Install NSIS

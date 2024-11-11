@@ -3,7 +3,7 @@ src/dist/
 .venv/
 dist/
 app_dist/
-confs/update.json
+
 test/
 
 # Byte-compiled / optimized / DLL files

@@ -37,19 +37,19 @@ jobs:
         with:
           name: pyqt
           path: apps/template/pyqt/dist/
-    
-    publish-to-pypi:
-      name: >-
-        Publish pyqt to PyPI
-      needs:
-        - build_pyqt
-      runs-on: ubuntu-latest
-      environment:
-        name: pypi
-        url: https://pypi.org/p/suan_pyqt_vtk_mat
-      permissions:
-        id-token: write
-      steps:
+
+  publish-to-pypi:
+    name: >-
+      Publish pyqt to PyPI
+    needs:
+      - build_pyqt
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/suan_pyqt_vtk_mat
+    permissions:
+      id-token: write
+    steps:
       - name: Download all the dists
         uses: actions/download-artifact@v3
         with:
@@ -64,13 +64,13 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
       - name: publish to PYPI
-        if: github.event_name == 'release' && github.event.action == 'published'  
+        if: github.event_name == 'release' && github.event.action == 'published'
         uses: pypa/gh-action-pypi-publish@v1.8.12
         with:
-            packages-dir: apps/template/pyqt/dist/
-            user: __token__
-            skip-existing: true
-            password: ${{secrets.PYPI_API_TOKEN}}
+          packages-dir: apps/template/pyqt/dist/
+          user: __token__
+          skip-existing: true
+          password: ${{secrets.PYPI_API_TOKEN}}
 
 
 
@@ -88,7 +88,7 @@ jobs:
 
 
 
-# name: Publish pyqt to PyPI and TestPyPI
+            # name: Publish pyqt to PyPI and TestPyPI
 # on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测试发布，而release用来正式发布
 #   release:
 #     types: [published]

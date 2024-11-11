@@ -22,9 +22,10 @@ import version
 import os
 import toml
 import shutil
+from custom_logger import CustomLogger
 
 updatejson_url = "https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json"
-app_name = "suan_pyqt"
+app_name = "stk"
 cur_version = version.version
 code_url = "https://github.com/sijintech/stk"
 
@@ -32,7 +33,7 @@ code_url = "https://github.com/sijintech/stk"
 class MainWindow(QMainWindow):
     def __init__(self, create_workspace_if_no):
         super().__init__()
-
+        self.logger = CustomLogger()
         # 用于存储具有层级关系的组件
         self.components = {
             "main": {"name": "main", "component": self, "children": {}}
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self.check_update()
         # print(self.components)
+
 
     def init_ui(self):
         # 设置主窗口标题
@@ -137,12 +139,12 @@ class MainWindow(QMainWindow):
                 self.toggleComponentVisibility(path)
 
     def showEvent(self, event):
+        self.logger.debug("showEvent")
         super().showEvent(event)
         if self.preferences["Open_Last_Workspace"] and self.curworkdir_is_workspace():
             self.init_workspace()
         elif self.create_workspace_if_no:
-            self.question_and_create_workspace(self.curWorkDir)
-            self.init_workspace()
+            self.question_and_create_workspace(self.curWorkDir, True)
         else:
             # 设置主窗口大小和显示
             self.setGeometry(
@@ -154,6 +156,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.modify_preferences('Open_Last_Working_Directory', self.curWorkDir)
+        self.save_preferences()
         if self.isWorkspace:
             self.check_and_save_curworkspace()
         elif self.left_sidebar.curFile is not None:
@@ -163,7 +166,7 @@ class MainWindow(QMainWindow):
     def get_workspace_file(self, directory):
         # 判断目录是否存在
         if not os.path.isdir(directory):
-            print("目录不存在")
+            self.logger.error("目录不存在")
             return None
 
         # 检查目录下是否有.suan后缀的文件
@@ -208,27 +211,29 @@ class MainWindow(QMainWindow):
         # 获取目录名
         dir_name = os.path.basename(directory)
         if self.isWorkspace:
-            print("目录下已存在.suan后缀的文件")
+            self.logger.info("目录下已存在.suan后缀的文件")
             return file_name
         else:
             # 复制文件到目录下，并重命名为目录名+".suan"
             new_file_name = dir_name + ".suan"
             destination = os.path.join(directory, new_file_name)
             shutil.copy(file_to_copy, destination)
-            print("已成功复制文件到目录下并改名为", new_file_name)
+            self.logger.debug("已成功复制文件到目录下并改名为:%s", new_file_name)
             return new_file_name
 
-    def question_and_create_workspace(self, directory):
+    def question_and_create_workspace(self, directory, is_init):
         reply = QMessageBox.question(
             self,
             "Warning",
-            "该目录下还未创建工作区，是否创建",
+            directory + " 目录下还未创建工作区，是否创建",
             QMessageBox.Yes,
             QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
             this_dir = os.path.dirname(os.path.abspath(__file__))
-            self.create_workspace_file(directory, os.path.join(this_dir, "../confs/workspace.suan"))
+            self.create_workspace_file(directory, os.path.join(this_dir, "confs/workspace.suan"))
+            if is_init:
+                self.init_workspace()
 
     def open_new_window(self):
         newWindow = MainWindow(False)
@@ -319,13 +324,13 @@ class MainWindow(QMainWindow):
             data = data[part]
         return data[parts[-1]]
 
-    #
+
     def init_preferences(self):
         # 对于已发布版本，首选项文件的位置应位于用户目录中，对于开发版本，应位于当前目录中
         this_dir = os.path.dirname(os.path.abspath(__file__))
         if getattr(sys, "frozen", True):
-            print("执行脚本")
-            self.preference_toml_path = os.path.join(this_dir, "../confs/preference.toml")
+            self.logger.info("执行脚本")
+            self.preference_toml_path = os.path.join(this_dir, "./confs/preference.toml")
 
         else:
             self.preference_toml_path = os.path.join(
@@ -333,6 +338,7 @@ class MainWindow(QMainWindow):
             )
         self.preferences = self.load_preferences()
         self.curWorkDir = self.preferences["Open_Last_Working_Directory"]
+        self.logger.debug("curWorkDir:%s", self.curWorkDir)
 
     def load_preferences(self):
         try:
@@ -400,7 +406,7 @@ class MainWindow(QMainWindow):
             "children": {},
             "isVisible": isVisible,
         }  # 在路径的最后一个部分中添加组件
-        print("registerComponent " + path)
+        self.logger.debug("registerComponent %s " + path)
 
     def unregisterComponent(self, path):
         """按路径取消注册组件,根组件为main"""
@@ -419,10 +425,10 @@ class MainWindow(QMainWindow):
             if "Tab" in component_name:
                 father_level["component"].toggleComponentVisibility(component_name)
             current_level.pop(parts[-1])
-            print("unregisterComponent " + path)
+            self.logger.debug("unregisterComponent %s" + path)
 
     def toggleComponentVisibility(self, path):
-        print(path)
+        self.logger.debug(path)
         """切换组件的可见性."""
         parts = path.split("/")
         current_level = self.components["main"]["children"]  # 从根组件的子组件开始搜索
@@ -437,7 +443,7 @@ class MainWindow(QMainWindow):
             # oldVisible=component.isVisible()
             current_level["component"].toggleComponentVisibility(component_name)
             # component.setVisible(not oldVisible)  # 切换组件的可见性
-            print("toggleComponentVisibility " + path)
+            self.logger.debug("toggleComponentVisibility %s" + path)
             return
         # 如果修改的是其他的话
         for part in parts[:-1]:
@@ -447,7 +453,7 @@ class MainWindow(QMainWindow):
         current_level[component_name]["isVisible"] = not current_level[component_name][
             "isVisible"
         ]
-        print("toggleComponentVisibility " + path)
+        self.logger.debug("toggleComponentVisibility %s" + path)
 
     def componentIsVisible(self, path):
         """判断组件是否可见."""
@@ -470,7 +476,7 @@ class MainWindow(QMainWindow):
         new_version = data["版本号"]
         release_time = data["发布时间"]
         if self.compare_versions(new_version, cur_version) == 1:
-            print("SHOW update")
+            self.logger.debug("SHOW update")
             self.show_update_window()
 
     def check_update(self):
@@ -492,4 +498,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     mainWindow = MainWindow(True)
     mainWindow.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

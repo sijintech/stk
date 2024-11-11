@@ -22,8 +22,10 @@ class LeftSidebar(QWidget):
         self.setupFileSystemModel()
 
     def setupFileSystemModel(self):
+        # TODO:设置一个上级目录，以供返回
+
         # 创建文件系统模型
-        self.model = QFileSystemModel(self) 
+        self.model = QFileSystemModel(self)
         self.model.setRootPath("")
         self.treeView.setModel(self.model)
         self.treeView.setRootIndex(self.model.index(""))  # 设置根索引为当前路径
@@ -56,6 +58,7 @@ class LeftSidebar(QWidget):
                 self.parent.check_and_save_curfile()
 
         # 新的目录处理
+        print("打开：", directory)
         self.parent.curWorkDir = directory
         # self.parent.checkWorkspaceFile(directory)
         self.treeView.setRootIndex(self.model.index(directory))
@@ -65,28 +68,10 @@ class LeftSidebar(QWidget):
         elif self.parent.curworkdir_is_workspace():
             self.parent.init_workspace()
         else:
-            self.parent.question_and_create_workspace(directory)
+            self.parent.question_and_create_workspace(directory, False)
 
     def open_file(self, path, working_directory="", is_init=False):
-        # if working_directory=="":
-        #     working_directory = os.path.dirname(os.path.abspath(path))
-        # self.parent.modify_preferences('Open_Last_Working_Directory', working_directory)
-        # self.parent.checkWorkspaceFile(working_directory)
-        # self.treeView.setRootIndex(self.model.index(working_directory))
-        # if self.parent.openWorkspace==True:
-        #     # self.parent.modify_workspaceData('left_sidebar/working_directory', working_directory)
-        #     self.parent.modify_workspaceData('info_bar/code/file_path',path)
-        # else :
-        #     reply = QMessageBox.question(
-        #         self,
-        #         "Warning",
-        #         "是否为该目录创建工作区",
-        #         QMessageBox.Yes,
-        #         QMessageBox.No,
-        #     )
-        #     if reply == QMessageBox.Yes:
-        #         this_dir = os.path.dirname(os.path.abspath(__file__))
-        #         self.parent.createWorkspaceFile(working_directory, os.path.join(this_dir, "../workspace.suan"))
+        # TODO:打开一个数据大文件时，需要等待，应设置等待页面
         # 原来文件处理
         if working_directory == "":
             working_directory = os.path.dirname(os.path.abspath(path))
