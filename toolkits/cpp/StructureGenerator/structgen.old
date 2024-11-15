@@ -1,0 +1,33 @@
+SIMDIM = 100 100 40
+FILMTHICK = 15
+SUBTHICK = 15
+BASE = -1 -1 -1  # the default polarization
+FILENAME = Polar.in
+
+PLANE = STRIP1
+STRIP1.position = 50 50 20
+STRIP1.normal = 1 1 1
+STRIP1.distance = 10
+STRIP1.domain = 0.5 0.5 1
+STRIP1.REPEAT = 50 0 0
+
+COLUMN = SQUARE
+SQUARE.POSITION = 25 50 20  # The center point of the column domain
+SQUARE.DIRECTION = 1 0 1    # The direction of the center line of column domain
+SQUARE.SHAPE = 1            # 1: round, 2: parallelpiped
+SQUARE.SURFACE = 3          # The ending surface 
+SQUARE.POINTA = 20 55 20
+SQUARE.POINTB = 40 55 20
+SQUARE.REPEAT = 0 20 0       # The repeat direction
+SQUARE.DOMAIN = 0 0 1       # The columnar domain
+
+COLUMN = ROUND
+ROUND.POSITION = 75 50 20
+ROUND.DIRECTION = 0 1 1
+ROUND.SHAPE = 2
+ROUND.SURFACE = 3
+ROUND.RADIUS = 10
+ROUND.DOMAIN = 0 1 0
+ROUND.REPEAT = 0 30 0
+
+SYSTYPE = FERRO

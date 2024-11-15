@@ -1,0 +1,88 @@
+/**
+@page input_structure_page
+@section input_structure Structure File
+
+The structure file is not a required input file. It is only necessary when you choose to use dat, vti, or dream3d for the sourceType in the input.xml file.
+
+@subsection dat file
+
+Continuous data file looks like this 
+@code
+    64    64    64                 
+     1     1     1  8.8943915E-001 
+     1     1     2  8.3390561E-001 
+     1     1     3  6.4306105E-001 
+     1     1     4  3.8508420E-001 
+     1     1     5  2.7954857E-001 
+     1     1     6  2.5842446E-001 
+     1     1     7  2.5434823E-001 
+     1     1     8  2.5419246E-001 
+     .......
+@endcode
+
+Discrete data file looks like this 
+@code
+    64    64    64                 
+     1     1     1  0 
+     1     1     2  0 
+     1     1     3  0 
+     1     1     4  0 
+     1     1     5  0 
+     1     1     6  0 
+     1     1     7  1 
+     1     1     8  1 
+     .......
+@endcode
+
+@subsection vti file
+
+Continuous data file looks like this 
+@code
+<?xml version="1.0" encoding="UTF-8"?>
+<VTKFile type="ImageData">
+    <ImageData WholeExtent="0 63 0 63 0 63" Origin="0 0 0" Spacing="1 1 1">
+        <Piece Extent="0 63 0 63 0 63">
+            <PointData Scalars="scalar_data_0">
+                <DataArray type="UInt16" Name="scalar_data_0" format="ascii">
+                    8.8943915E-001 8.3390561E-001 6.4306105E-001 3.8508420E-001 .....
+                </DataArray>
+            </PointData>
+        </Piece>
+    </ImageData>
+</VTKFile>
+@endcode
+
+Discrete data file looks like this 
+@code
+<?xml version="1.0" encoding="UTF-8"?>
+<VTKFile type="ImageData">
+    <ImageData WholeExtent="0 63 0 63 0 63" Origin="0 0 0" Spacing="1 1 1">
+        <Piece Extent="0 63 0 63 0 63">
+            <PointData Scalars="scalar_data_0">
+                <DataArray type="UInt16" Name="scalar_data_0" format="ascii">
+                    +1 +1 +1 +1 +1 +0 .....
+                </DataArray>
+            </PointData>
+        </Piece>
+    </ImageData>
+</VTKFile>
+@endcode
+
+
+@subsection dream3d file
+Dream3D ASCII export  data file looks like this 
+@code         
+0 
+0 
+0 
+0 
+0 
+0 
+1 
+1 
+.
+.
+.
+@endcode
+
+*/

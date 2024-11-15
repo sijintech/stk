@@ -1,0 +1,62 @@
+pipeline {
+  agent any
+  stages {
+    stage('检出') {
+      steps {
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: GIT_BUILD_REF]],
+          userRemoteConfigs: [[
+            url: GIT_REPO_URL,
+            credentialsId: CREDENTIALS_ID
+          ]]])
+        }
+      }
+      stage('Mac Build') {
+        when{
+          environment name: 'OS', value: 'macosx'
+        }
+        steps {
+          echo 'Mac compiling'
+          sh 'pwd;ls'
+          sh '''mkdir -p build
+cd build
+cmake -DCMAKE_C_COMPILER=icc -DCMAKE_CXX_COMPILER=icpc -DCMAKE_Fortran_COMPILER=ifort -DCMAKE_BUILD_TYPE=Release ..
+make'''
+          echo 'Mac compiling finished'
+        }
+      }
+      stage('Win Build') {
+        when{
+          environment name: 'OS', value: 'windows'
+        }
+        steps {
+          echo 'Win compiling'
+          powershell 'pwd;ls'
+          bat '''"C:\\Program Files (x86)\\Intel\\oneAPI\\setvars.bat"
+rd build
+md build
+cd build
+cmake -DCMAKE_C_COMPILER=icl -DCMAKE_CXX_COMPILER=icl -DCMAKE_Fortran_COMPILER=ifort -DCMAKE_BUILD_TYPE=Release -G Ninja ..
+ninja'''
+          echo 'Win compiling finished'
+        }
+      }
+      stage('Linux Build') {
+        when{
+          environment name: 'OS', value: 'linux'
+        }
+        steps {
+          echo 'Linux compiling'
+          sh 'pwd;ls'
+          sh '''module load compiler
+rm -rf build
+mkdir build
+cd build
+cmake -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx -DCMAKE_Fortran_COMPILER=ifx -DCMAKE_BUILD_TYPE=Release -G Ninja ..
+ninja'''
+          echo 'Linux compiling finished'
+        }
+      }
+    }
+  }

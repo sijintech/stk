@@ -1,0 +1,98 @@
+/**
+@page examples Usage Examples
+
+Quick tutorial
+
+
+In this section, we will go through step by step instructions on how to use the MUPRO dielectric breakdown simulation module.
+
+## Prepare input
+There are two ways to define the input parameters you want to use. First, load from a previous input file. Second, manually insert value for each parameter into the software interface.
+
+#### Load from a file
+1. Click **File->Import** in the menu bar on the top left of the software interface.
+2. Choose the folder where the **input.xml** file exists. The program will read information from the input.xml in the selected folder.
+3. Once the information is loaded, you can make any changes to the input parameter as you need.
+
+Here is an example input.xml file that you can use to load into the program
+<br>
+@code{.xml}
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<input>
+    <dimension>
+        <nx> 110 </nx>
+        <ny> 1 </ny>
+        <nz> 110 </nz>
+        <dx> 1.5e-7 </dx>
+        <dy> 1.5e-7 </dy>
+        <dz> 1.5e-7 </dz>
+    </dimension>
+    <external>
+        <ezInitial> 2e9 </ezInitial>
+        <ezSlope> 1.75e4 </ezSlope>
+    </external>
+    <output>
+        <frequency> 1000 </frequency>
+        <format> vti </format>
+    </output>
+    <material>
+        <phase>
+            <label> 0 </label>
+            <epsilon11> 3.1 </epsilon11>
+            <epsilon22> 3.1 </epsilon22>
+            <epsilon33> 3.1 </epsilon33>
+            <breakdownStrength> 4.54e8 </breakdownStrength>
+        </phase>
+        <phase>
+            <label> 1 </label>
+            <epsilon11> 100 </epsilon11>
+            <epsilon22> 100 </epsilon22>
+            <epsilon33> 100 </epsilon33>
+            <breakdownStrength> 8e7 </breakdownStrength>
+        </phase>
+    </material>
+    <structure>
+        <sourceType> 0 </sourceType>
+        <matrixLabel> 0 </matrixLabel>
+        <geometry>
+            <type> 0 </type>
+            <centerX> 55 </centerX>
+            <centerY> 1 </centerY>
+            <centerZ> 55 </centerZ>
+            <normalX> 0 </normalX>
+            <normalY> 0 </normalY>
+            <normalZ> 1 </normalZ>
+            <thickness> 5 </thickness>
+            <label> 1 </label>
+            <matrixLabel>0</matrixLabel>
+        </geometry>
+    </structure>
+</input>
+@endcode
+
+Once you are sure all values in the input forms are as expected, you now need to export the input.xml file to the computer hard drive so that the simulation program can read and you can also keep a record of the conditions you used for this simulation.
+1. Click **Setup output folder** button. Choose the folder where you want to store the input.xml file and all other output files from the simulation.
+2. Click **Create input** button. The program will output all information in the input area to an **input.xml** file in the selected output folder.
+
+@warning <b>Setup output folder</b> It is extremely important to setup the output folder properly. Because the chosen folder will be used throughout the whole simulation. It is used for exporting the input.xml file, outputing .vti and .csv data file. Also, the visualization script will search in this directory to look for available data.    
+
+
+## Start the simulation
+Click the **Start simulation** button and you will see texts print to the console output area. If you want to stop the simulation before it ends, you can click the **Kill simulation** button to stop the calculation process (the GUI interface will keep alive).
+
+## Visualize the 3D data
+Let us take a look at breakdown path.
+1. Use the dropdown menu in 3D visualization part to select the a 3D data snapshot you want to visualize, for example, we choose treeFlag of the last time step.
+2. Save the visualized image using the **Save current scene** button.
+
+## Create a GIF
+Once you have visualized a 3D data, you can click the **Create GIF** button to automatically generate an image for each output timestep of your current data and combine them into one GIF animation.
+
+## Visualize the time series data
+We may also plot the line profile of the breakdown path front data.
+1. Toggle the switch for Time Series visualization. You will see a hidden area appear in the visualization area.
+2. Use the dropdown menu to select a time series data you want to plot, for example, Tree-Front.csv data. Then click **Load data** button.
+3. The first column of simulation timestep is used as the horizontal axis, and the rest of the columns are plotted as a line profile. Click the cross mark on right of the "E_ext" tag, so that only "kfront" column is selected and shown on the plot.
+
+
+*/

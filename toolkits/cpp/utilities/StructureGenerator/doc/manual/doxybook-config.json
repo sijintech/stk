@@ -1,0 +1,18 @@
+{
+  "baseUrl": "/",
+  "indexInFolders": false,
+  "linkSuffix": "/",
+  "indexClassesName": "index-classes",
+  "indexFilesName": "index-files",
+  "indexGroupsName": "index-groups",
+  "indexNamespacesName": "index-namespaces",
+  "indexRelatedPagesName": "index-pages",
+  "indexExamplesName": "index-examples",
+  "mainPageInRoot": true,
+  "mainPageName": "index",
+  "formulaInlineStart": "\\(",
+  "formulaInlineEnd": "\\)",
+  "foldersToGenerate": ["pages", "examples"],
+  "folderRelatedPagesName": "structure-generator-pages",
+  "folderExamplesName": "structure-generator-examples"
+}

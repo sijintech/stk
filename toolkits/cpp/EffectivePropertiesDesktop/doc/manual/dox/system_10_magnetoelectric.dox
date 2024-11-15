@@ -1,0 +1,168 @@
+/**
+@page magnetoelectric
+@section magnetoelectric_coefficient Magnetoelectric Coefficient
+
+The magnetoelectric calculation can give you 
+1. effective stiffness of the system
+2. effective permittivity of the system
+2. effective permeability of the system
+3. effective piezoelectric of the system
+3. effective piezomagnetic of the system
+3. effective megnetoelectric of the system
+4. strain distribution
+5. stress distribution
+6. electric field distribution
+7. electric polarization distribution
+8. electric displacement
+6. magnetic field distribution
+7. magnetization distribution
+8. magnetic induction distribution
+
+@subsection magnetoelectric_equation Equation solved
+The coupled equation of
+\f$\nabla \cdot D = 0\f$, where \f$D = \epsilon_0 \epsilon_r E + d \sigma + \alpha H\f$
+
+\f$\nabla \cdot B = 0\f$, where \f$B = \mu_0 \mu_r H + q \sigma + \alpha^T E\f$
+
+\f$\nabla \cdot \sigma = 0\f$, where \f$\sigma = C(\epsilon - d^T E - q^T H)\f$
+
+- **D** Electric displacement
+- **E** Electric field
+- **B** Magnetic induction
+- **H** Magnetic field
+- <b>\f$\epsilon_0\f$</b> vaccum permittivity
+- <b>\f$\epsilon_r\f$</b> relative permittivity
+- <b>\f$\mu_0\f$</b> vaccum permeability
+- <b>\f$\mu_r\f$</b> relative permeability
+- <b>\f$\sigma\f$</b> The stress
+- <b>\f$\epsilon\f$</b> The strain
+- <b>q</b> Piezomagnetic coefficient
+- <b>\f$q^T\f$</b> The transpose of piezomagnetic coefficient, or converse piezomagnetic coefficient
+- <b>d</b> Piezoelectric coefficient
+- <b>\f$d^T\f$</b> The transpose of piezoelectric coefficient, or converse piezoelectric coefficient
+- <b>\f$\alpha\f$</b> The magnetoelectric coefficient
+- <b>\f$\alpha^T\f$</b> The transpose of magnetoelectric coefficient
+
+@subsection magnetoelectric_input Input options
+The following options are needed for the dielectric calculation.
+
+- **input->system** The choice of calculation system must be *piezoelectric*
+- **input->external->electricField** External applied electric field (V/m), if you want to calculate the electric field distribution within the composite
+  - **x** Applied electric field along x
+  - **y** Applied electric field along y
+  - **z** Applied electric field along z
+- **input->external->magneticField** External applied electric field (V/m), if you want to calculate the electric field distribution within the composite
+  - **x** Applied magnetic field along x
+  - **y** Applied magnetic field along y
+  - **z** Applied magnetic field along z
+- **input->external->elastic/type** Either _stress_ or _strain_, this will determine what external constraints are expected.
+- **input->external->elastic/stress** External applied stress constraint, if you want to calculate the stress/strain distribution within the composite
+  - **tensor11** \f$\sigma_{11}\f$
+  - **tensor12** \f$\sigma_{12}\f$
+  - **tensor13** \f$\sigma_{13}\f$
+  - **tensor22** \f$\sigma_{22}\f$
+  - **tensor23** \f$\sigma_{23}\f$
+  - **tensor33** \f$\sigma_{33}\f$
+- **input->external->elastic/strain** External applied strain constraint, if you want to calculate the stress/strain distribution within the composite
+  - **tensor11** \f$\epsilon_{11}\f$
+  - **tensor12** \f$\epsilon_{12}\f$
+  - **tensor13** \f$\epsilon_{13}\f$
+  - **tensor22** \f$\epsilon_{22}\f$
+  - **tensor23** \f$\epsilon_{23}\f$
+  - **tensor33** \f$\epsilon_{33}\f$
+- **input->solver->ref** A property tensor for the reference phase called _permittivity_ and a tensor of _stiffness_ are needed. Tensor definition is explained @ref material_tensor "here"
+
+<br>
+@code{.XML}
+<system>
+    <type>piezomagnetic</type>
+    <external>
+        <magneticField>
+            <x>0</x>
+            <y>0</y>
+            <z>2e7</z>
+        </magneticField>
+        <elastic>
+            <type>strain</type>
+            <strain>
+                <tensor11>0.0</tensor11>
+                <tensor22>0.0</tensor22>
+                <tensor33>0.0</tensor33>
+                <tensor23>0.0</tensor23>
+                <tensor13>0.001</tensor13>
+                <tensor12>0.0</tensor12>
+            </strain>
+        </elastic>
+    </external>
+    <solver>
+        <ref>
+            <tensor>
+                <name>permeability</name>
+                <rank>2</rank>
+                <pointGroup>custom</pointGroup>
+                <component>
+                    <value>100</value>
+                    <index>11</index>
+                    <index>22</index>
+                    <index>33</index>
+                </component>
+            </tensor>
+            <tensor>
+                <name>permittivity</name>
+                <rank>2</rank>
+                <pointGroup>custom</pointGroup>
+                <component>
+                    <value>100</value>
+                    <index>11</index>
+                    <index>22</index>
+                    <index>33</index>
+                </component>
+            </tensor>
+            <tensor>
+                <pointGroup>Oh</pointGroup>
+                <name>stiffness</name>
+                <rank>4</rank>
+                <component>
+                    <value>1000</value>
+                    <index>1111</index>
+                </component>
+                <component>
+                    <value>1200</value>
+                    <index>1122</index>
+                </component>
+                <component>
+                    <value>1100</value>
+                    <index>1212</index>
+                </component>
+                <component>
+                    <value>1100</value>
+                    <index>1221</index>
+                </component>
+            </tensor>
+        </ref>
+    </solver>
+</system>
+@endcode
+
+@subsection magnetoelectric_output Output files
+There are a total of 17 possible output files for the dielectric calculation
+
+1. effDielectricPermittivity.dat
+2. effMagneticPermeability.dat
+3. effElasticStiffness.dat
+4. effPiezoelectric.dat
+5. effPiezomagnetic.dat
+6. effMagnetoelectric.dat
+7. avMagneticVariables.dat
+8. avElectricVariables.dat
+9. avElasticVariables.dat
+10. elePtntl.00000000.dat
+11. eleField.00000000.dat
+12. eleDspl.00000000.dat
+13. stress.00000000.dat
+14. strain.00000000.dat
+15. magnField.00000000.dat
+16. magnetiz.00000000.dat
+17. magIndc.00000000.dat
+
+*/

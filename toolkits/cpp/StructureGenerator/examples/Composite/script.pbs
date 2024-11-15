@@ -1,0 +1,24 @@
+#!/bin/bash
+
+########################
+# Applying for 1 node 2 cores
+# 4 hours of running time
+# 2Gb of RAM per process (cores)
+# Name of the submitted job is JOBNAME
+# The job is submitted to open queque for running
+# An email will be sent to you when the job is finished or aborted
+# The email will be sent to EMAIL
+# The normal output .o file and error output .e file will be joint together
+########################
+
+#PBS -l nodes=1:ppn=1
+#PBS -l walltime=4:00:00
+#PBS -l pmem=2gb
+#PBS -N JOBNAME
+#PBS -A open
+#PBS -m ae
+#PBS -M EMAIL
+#PBS -j oe
+
+cd $PBS_O_WORKDIR
+structureGenerator.exe

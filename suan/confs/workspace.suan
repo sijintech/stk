@@ -1,0 +1,15 @@
+[window]
+width = 766
+height = 464
+
+[left_sidebar]
+working_directory = "C:/"
+
+[center_widget]
+active_tab_index = 0
+
+[center_widget.vtk]
+view_port = "the_view_port_of_vtk_window"
+
+[info_bar.code]
+file_path = "C:/"

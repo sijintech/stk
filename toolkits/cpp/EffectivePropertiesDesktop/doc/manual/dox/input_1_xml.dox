@@ -1,0 +1,213 @@
+/**
+@page input_page
+@section input_file_xml Input File
+
+This is a required input file used for passing materials properties and controlling parameters into the simulation program. 
+
+@subsection input_file_elements Five elements of input.xml
+
+There are five child elements under the root **input** element. They are:
+- **name**, name for the current simulation
+- **dimension**, simulation dimensions
+- **output**, output configurations
+- **system**, simulation system configurations
+- **structure**, simulation structure configurations
+
+<br/>
+An input.xml file look will look like this:
+
+@code{.xml}
+<input>
+  <name>...</name>
+  <dimension>...</dimension>
+  <output>...</output>
+  <system>...</system>
+  <structure>...</structure>
+</input>
+@endcode
+
+@subsection input_file_output Output
+
+The **output** element contains only one child element:
+
+- **format** two options available, vti or dat, both file format will be explained in the @ref output_files "Output Files" part. 
+
+An example output element looks like this:
+
+@code{.xml}
+<output>
+  <format>vti</format>
+</output>
+@endcode
+
+@subsection input_file_system System
+
+The **system** element contains 5 child elements:
+
+- **type**, the calculation type, @ref systems_page "here" is a list of available system types
+- **distribution**, whether you want to calculate the field distribution under external field. Boolean value of either 0 or 1.
+- **external**, if distribution set to 1, then you must specify the value of the applied external field. Please check the @ref systems_page "page of each system" for how to set the **external** element.
+- **solver**, for solver related settings. Contain a **ref** element which set the reference tensor value for our solver. The reference value is a parameter used in our iterative solver as explained <a href="https://doi.org/10.1016/j.actamat.2013.08.055">in this paper</a>. Usually you may set it to the largest value across different phases. Please check the @ref systems "page of each system" for how to set the **solver** -> **ref** element.
+- **material**, contain multiple **phase** elements which set the property tensors for each phase. Please check the @ref material "material" section for details.
+
+An example system element looks like this
+
+@code{.xml}
+<system>
+  <type>dielectric</type>
+  <distribution>1</distribution>
+  <external>
+    <electricField>
+      <x>0</x>
+      <y>0</y>
+      <z>1e6</z>
+    </electricField>
+  </external>
+  <solver>
+    <ref>
+      <tensor>
+        <name>permittivity</name>
+        <rank>2</rank>
+        <pointGroup>cubic</pointGroup>
+        <component>
+          <value>100</value>
+          <index>11</index>
+        </component>
+      </tensor>
+    </ref>
+  </solver>
+  <material>
+    <phase>
+      <label>0</label>
+      <tensor>
+        <name>permittivity</name>
+        <rank>2</rank>
+        <pointGroup>cubic</pointGroup>
+        <component>
+          <value>10.1</value>
+          <index>11</index>
+        </component>
+      </tensor>
+    </phase>
+    <phase>
+      <label>1</label>
+      <tensor>
+        <name>permittivity</name>
+        <rank>2</rank>
+        <pointGroup>cubic</pointGroup>
+        <component>
+          <value>100</value>
+          <index>11</index>
+        </component>
+      </tensor>
+    </phase>
+  </material>
+</system>
+@endcode
+
+
+@subsection input_example_input Example input.xml file
+Here is an example input.xml file:
+<br>
+
+@code{.xml}
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<input>
+  <output>
+    <format>vti</format>
+  </output>
+  <dimension>
+    <nx>64</nx>
+    <ny>64</ny>
+    <nz>64</nz>
+    <dx>5e-7</dx>
+    <dy>5e-7</dy>
+    <dz>5e-7</dz>
+  </dimension>
+  <system>
+    <type>elastic</type>
+    <distribution>0</distribution>
+    <external>
+      <elastic>
+        <type>strain</type>
+        <strain>
+          <tensor11>0.01</tensor11>
+          <tensor22>0.00</tensor22>
+          <tensor33>0.00</tensor33>
+          <tensor23>0.00</tensor23>
+          <tensor13>0.00</tensor13>
+          <tensor12>0.00</tensor12>
+        </strain>
+      </elastic>
+    </external>
+    <solver>
+      <ref>
+        <tensor>
+          <name>stiffness</name>
+          <rank>4</rank>
+          <pointGroup>isotropic</pointGroup>
+          <component>
+            <value>1e6</value>
+            <index>young</index>
+          </component>
+          <component>
+            <value>0.3</value>
+            <index>poisson</index>
+          </component>
+        </tensor>
+      </ref>
+    </solver>
+    <material>
+      <phase>
+        <label>0</label>
+        <tensor>
+          <name>stiffness</name>
+          <rank>4</rank>
+          <pointGroup>isotropic</pointGroup>
+          <component>
+            <value>1e6</value>
+            <index>young</index>
+          </component>
+          <component>
+            <value>0.3</value>
+            <index>poisson</index>
+          </component>
+        </tensor>
+      </phase>
+      <phase>
+        <label>1</label>
+        <tensor>
+          <name>stiffness</name>
+          <rank>4</rank>
+          <pointGroup>isotropic</pointGroup>
+          <component>
+            <value>1e3</value>
+            <index>young</index>
+          </component>
+          <component>
+            <value>0.3</value>
+            <index>poisson</index>
+          </component>
+        </tensor>
+      </phase>
+    </material>
+  </system>
+  <structure>
+        <sourceType>xml</sourceType>
+        <matrixLabel>0</matrixLabel>
+        <geometry>
+            <type>slab</type>
+            <centerX>128</centerX>
+            <centerY>1</centerY>
+            <centerZ>128</centerZ>
+            <normalX>0</normalX>
+            <normalY>0</normalY>
+            <normalZ>1</normalZ>
+            <thickness>85</thickness>
+            <label>2</label>
+            <matrixLabel>0</matrixLabel>
+        </geometry>
+  </structure>
+</input>
+@endcode
+*/

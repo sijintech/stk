@@ -1,0 +1,18 @@
+/**
+@page systems_page
+
+@section systems Effective Properties Calculations
+We use a fourier spectral perturbation method @cite wang-PhaseTransitionsDomain-2013 to solve the following list of properties.
+
+| System Type           	             | Calculated Property                    	| Calculated Field                                   	|
+|-----------------------	             |----------------------------------------	|----------------------------------------------------	|
+| @subpage dielectric "dielectric"       | Permittivity                           	| Electric field, Electric potential                 	|
+| @subpage magnetic "magnetic"           | Permeability                           	| Magnetic field, Magnetic induction                 	|
+| @subpage thermal "thermal"             | Thermal conductivity                   	| Temperature, Temperature gradient                  	|
+| @subpage electrical "electrical"       | Electrical conductivity                	| Electrical current, Electric field                 	|
+| @subpage diffusion "diffusion"         | Diffusivity                            	| Concentration, Concentration gradient              	|
+| @subpage elastic "elastic"             | Elastic Stiffness                       	| Stress, Strain                                     	|
+| @subpage piezoelectric "piezoelectric" | Piezoelectric coefficient              	| Electric field, Electric potential, Stress, Strain 	|
+| @subpage piezomagnetic "piezomagnetic" | Piezomagnetic coefficient              	| Magnetic field, Magnetic induction, Stress, Strain 	|
+
+*/

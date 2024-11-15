@@ -1,0 +1,13 @@
+/**
+@page faq
+
+@section faqs Frequently Asked Questions
+
+// @tableofcontents{LaTex:3}
+
+@subsection faq_interface Interface related
+
+@subsubsection faq_interface_q1 The interface becomes slow after a while of usage, especially the center visualization canvas.
+This is due to an incompatibility between the chromium engine and webgl, which is out of our control. For now the work around is to toggle the "3D visualization" switch at the top of the right-hand side visualization control area. By doing so, the webgl canvas will be refreshed and you should be to use it smoothly for a while. But always remember, the purpose of the that built-in visualization functionality is only for convenience. Whenever condition allows, you should always download Paraview and use it to visualize the output data.
+
+*/

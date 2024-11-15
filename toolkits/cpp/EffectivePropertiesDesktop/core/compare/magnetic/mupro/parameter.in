@@ -1,0 +1,22 @@
+# Example with Elasticity
+
+# size
+SYSDIM = 	11	1  11  
+REALDIM = 	1650	150.	1650.
+
+# system
+CHOICESYS =	4
+NPHASES = 	2
+CHOICESTRUCT =	2
+
+# distribution
+OUTDIST = 	t
+MAGFIELD = 0 0 1d6
+
+# coefficients of phase 1
+PHASEID = 	2
+PERMEABILITY = 3.5 3.5 3.5 0 0 0
+
+# coefficients of phase 2
+PHASEID = 	1
+PERMEABILITY = 100 100 100 0 0 0

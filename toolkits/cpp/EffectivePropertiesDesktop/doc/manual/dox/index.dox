@@ -1,0 +1,24 @@
+/**
+@mainpage introduction
+@section intro Introduction
+Mu-PRO® Effective Properties Desktop version is a simulation program for calculating the various effective properties and field distribution within an arbitrary inhomogeneous microstructure under an applied external stimuli. 
+
+This program calculates the effective properties of a multi-phase/domain composite by solving equilibrium equations using the Fourier spectral iterative perturbation method.
+
+Due to its outstanding efficiency, the program can be used to generate large microstructure-property databases for machine learning.
+
+From the input and output point of view, Effective Properties Desktop has the following features.
+
+@subsection input Input 
+1. digitized microstructure from a computer simulation or experiment, we can read ASCII export from [Dream3D](http://dream3d.bluequartz.net/).
+2. properties for each of the phases/crystals/domains that constitute the microstructure
+
+@subsection output Output 
+1. effective scaler or tensorial properties
+2. spatial distributions of property fields such as electric potential/field, mechanical displacement/strain/stress fields, magnetic field, concentration, temperature.
+
+@subsection extension The code also provides
+1. graphical input for entering input parameters
+2. a microstructure generator for some representative two-phase microstructures
+3. graphical visualization of output field distributions
+*/

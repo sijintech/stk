@@ -1,0 +1,65 @@
+/**
+@page input_page
+
+@subsection input_file_structure Structure
+
+The **structure** element has one required child element:
+
+- **sourceType**, choose how the structure is defined, 4 possible choices, xml, dat, vti, dream3d
+
+And depending on the **sourceType** you choose, the **structure** element will need to have more child elements:
+
+@subsubsection input_file_structure_xml xml
+
+If you choose **xml** for **sourceType**, then you need to set
+
+- **matrixLabel** The default(matrix) phase label
+- **geometry** List of @ref structure_generator_overview_page "geometries"
+
+An example structure element looks like this:
+
+@code{.xml}
+<structure>
+    <sourceType>xml</sourceType>
+    <matrixLabel>0</matrixLabel>
+    <geometry>
+        <type>slab</type>
+        <centerX>128</centerX>
+        <centerY>1</centerY>
+        <centerZ>128</centerZ>
+        <normalX>0</normalX>
+        <normalY>0</normalY>
+        <normalZ>1</normalZ>
+        <thickness>85</thickness>
+        <label>2</label>
+        <matrixLabel>0</matrixLabel>
+    </geometry>
+</structure>
+@endcode
+
+@subsubsection input_file_structure_dat dat or vti
+
+If you choose **dat** or **vti** for **sourceType**, then you need to set:
+
+- **file** Path to the dat or vti file
+- **dataType** Either <em>continuous</em> or <em>discrete</em> type
+- **keypoints** When choosing the <em>continuous</em> data type, you need to set a series of threshold values, so that the program can assign the phase label to each value range.
+
+An example structure element looks like this, the program will automatically assign anything smaller than 0.5 as phase label 0, and anything larger than 0.5 as phase label 1.
+
+@code{.xml}
+<structure>
+    <sourceType>dat</sourceType>
+    <dataType>continuous</dataType>
+    <keypoints>
+      <value>0.5</value>
+    </keypoints>
+</structure>
+@endcode
+
+@subsubsection input_file_structure_dream3d dream3d
+
+If you choose **dream3d** for **sourceType**, then you need to set:
+
+- **file** Path to the ASCII export from Dream3D.
+*/

@@ -1,0 +1,13 @@
+/**
+@page ref
+@section references Important References
+
+Here are some references for our models, 
+piezoelectric \cite cao-PiezoelectricResponseSinglecrystal-2010, 
+elastic \cite hu-PhasefieldModelEvolving-2001 \cite wang-PhaseTransitionsDomain-2013, dielectric \cite wang-PhaseTransitionsDomain-2013, 
+magnetic \cite wang-StaticMagneticSolution-2015, 
+magnetoelectric \cite yang-PredictingEffectiveMagnetoelectric-2014, 
+diffusion \cite zhu-ComputingEffectiveDiffusivity-2001
+
+
+*/

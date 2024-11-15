@@ -1,0 +1,17 @@
+/**
+
+@page page_structure_generator_random_scale_ellipsoid_shell
+@section structure_generator_random_scale_ellipsoid_shell Random Scale Ellipsoid Shell 
+
+Random scale ellipsoid shell require the definition of the parameters range for one @ref structure_generator_random_ellipsoid "Random Ellipsoid", and the thickness range for the shell, but all the ellipsoid shell have the same shape.
+
+- **centerXMin, centerXMax, centerYMin, centerYMax, centerZMin, centerZMax**: define the lower and upper boundary for ellipsoid center point. A series of center point will be randomly generated within this region.
+- **radiusX, radiusY, radiusZ**: the ellipsoid radius.
+- **rotationXMin, rotationXMax, rotationYMin, rotationYMax, rotationZMin, rotationZMax**: define the lower and upper boundary for the ellipsoid rotation along x, y, and z axis in degree by the xyz sequence.
+- **count**: the amount of ellipsoid to be created.
+- **label**: the label to be assigned to the shell.
+- **innerLabel**: the label to be assigned to region within the inner ellipsoid.
+- **thicknessMin, thicknessMax**: the thickness range for the shell.
+- **scaleMin, scaleMax**: the range of scale multiplier to be applied to the radius of each ellipsoid shell.
+
+*/

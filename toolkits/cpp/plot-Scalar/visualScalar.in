@@ -1,0 +1,13 @@
+camera = view1
+view1.focal = 0 0 0
+view1.position = 100 100 100
+view1.up = 0 0 1
+
+lookuptable = color
+color.min = 0
+color.max = 1
+color.pointAdd = 0   1 0 0 1
+color.pointAdd = 0.5 0 1 0 0.5
+color.pointAdd = 1   0 0 1 1
+
+showLegend = true

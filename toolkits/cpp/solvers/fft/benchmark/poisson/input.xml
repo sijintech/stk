@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<input>
+    <dimension>
+        <nx>            256        </nx>
+        <ny>            1        </ny>
+        <nz>            256        </nz>
+        <dx>            1.5e-7        </dx>
+        <dy>            1.5e-7        </dy>
+        <dz>            1.5e-7        </dz>
+    </dimension>
+    <origin>
+        <x>            64        </x>
+        <y>            1        </y>
+        <z>            128        </z>
+    </origin>
+    <totalSteps>        100000    </totalSteps>
+    <neighbour>        1    </neighbour>
+    <external>
+        <ezInitial>            2e9        </ezInitial>
+        <ezSlope>            1.75e4        </ezSlope>
+    </external>
+    <output>
+        <frequency>            100        </frequency>
+        <format>            vti        </format>
+    </output>
+    <material>
+        <breakdown>
+            <epsilon11>                10000            </epsilon11>
+            <epsilon22>                10000            </epsilon22>
+            <epsilon33>                10000            </epsilon33>
+        </breakdown>
+        <phase>
+            <label>                0            </label>
+            <epsilon11>                10            </epsilon11>
+            <epsilon22>                10            </epsilon22>
+            <epsilon33>                10            </epsilon33>
+            <breakdownStrength>                3.7e8            </breakdownStrength>
+        </phase>
+        <phase>
+            <label>                1            </label>
+            <epsilon11>                900            </epsilon11>
+            <epsilon22>                900            </epsilon22>
+            <epsilon33>                900            </epsilon33>
+            <breakdownStrength>                5e7            </breakdownStrength>
+        </phase>
+    </material>
+    <structure>
+        <sourceType>            xml        </sourceType>
+        <matrixLabel>            0        </matrixLabel>
+        <geometry>
+            <type>                ellipsoid_random            </type>
+            <count>                20            </count>
+            <centerXMin>                20            </centerXMin>
+            <centerYMin>                1            </centerYMin>
+            <centerZMin>                20            </centerZMin>
+            <radiusXMin>                2            </radiusXMin>
+            <radiusYMin>                2            </radiusYMin>
+            <radiusZMin>                2            </radiusZMin>
+            <rotationXMin>                1            </rotationXMin>
+            <rotationYMin>                1            </rotationYMin>
+            <rotationZMin>                1            </rotationZMin>
+            <centerXMax>                108            </centerXMax>
+            <centerYMax>                1            </centerYMax>
+            <centerZMax>                108            </centerZMax>
+            <radiusXMax>                2            </radiusXMax>
+            <radiusYMax>                2            </radiusYMax>
+            <radiusZMax>                2            </radiusZMax>
+            <rotationXMax>                1            </rotationXMax>
+            <rotationYMax>                1            </rotationYMax>
+            <rotationZMax>                1            </rotationZMax>
+            <label>                1            </label>
+        </geometry>
+    </structure>
+</input>

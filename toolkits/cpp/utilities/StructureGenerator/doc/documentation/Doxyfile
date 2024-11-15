@@ -1,0 +1,30 @@
+DOXYFILE_ENCODING = UTF-8
+PROJECT_NAME = "License Developer Documentation"
+OUTPUT_DIRECTORY = doxygen-out
+GENERATE_LATEX = YES
+LATEX_OUTPUT = latex
+
+# The necessary stuff!
+GENERATE_XML = YES
+XML_OUTPUT = xml
+INPUT = ../../include
+RECURSIVE = YES
+FILE_PATTERNS = *.h *.hpp
+
+# Html related stuff, optional
+SHOW_NAMESPACES = YES
+EXTRACT_ALL = YES
+GENERATE_HTML = YES
+
+# This is here just so we don't have to mess
+# with dot executable on continous integration.
+CALL_GRAPH = NO
+HAVE_DOT = NO
+
+IMAGE_PATH = images
+
+REFERENCES_LINK_SOURCE = NO
+SOURCE_BROWSER = NO
+VERBATIM_HEADERS = NO
+OPTIMIZE_OUTPUT_FOR_C = YES
+INLINE_SOURCES = NO

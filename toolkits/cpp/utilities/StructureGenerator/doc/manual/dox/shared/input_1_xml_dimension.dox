@@ -1,0 +1,24 @@
+/**
+@page input_page
+@subsection input_file_dimension Dimension
+
+The **dimension** element contains six child elements:
+- **nx**, **ny**, and **nz** are integer values of the unitless simulation grid counts in three dimension, for example nx=100 means there are 100 uniform grids along x direction in the simulation space.
+- **dx**, **dy**, and **dz** are floating point values for each simulation grid size in meter, for example dx=1e-6 means 1 simulation grid along x direction in simulation space represent 1 micron in real space. Thus, \f$nx \cdot dx\f$ will give you the real space simulation dimension along x in meter. 
+
+Notice, you must set a numeric value for all six child elements.
+
+An example dimension element of 64 micron cubic with 64 simulation grids along each dimension looks like this:
+
+@code{.xml}
+<dimension>
+  <nx>64</nx>
+  <ny>64</ny>
+  <nz>64</nz>
+  <dx>1e-6</dx>
+  <dy>1e-6</dy>
+  <dz>1e-6</dz>
+</dimension>
+@endcode
+
+*/

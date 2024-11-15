@@ -1,0 +1,11 @@
+/**
+
+@page page_structure_generator_ellipsoid
+@section structure_generator_ellipsoid Ellipsoid 
+
+Ellipsoid requires definition of a center point, the radius, and the oritentation. \f$\frac{(x-centerX)^2}{radiusX^2}+\frac{(y-centerY)^2}{radiusY^2}+\frac{(z-centerZ)^2}{radiusZ^2}=1\f$
+- **centerX, centerY, centerZ**: the center point coordinate (within the simulation grid) of the defined ellipsoid.
+- **radiusX, radiusY, radiusZ**: the ellipsoid radius.
+- **rotationX, rotationY, rotationZ**: the rotation angle (degree) along x, y, and z axis in sequence.
+
+*/
