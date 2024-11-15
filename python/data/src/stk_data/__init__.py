@@ -1,2 +1,0 @@
-from .scripts.getSkyrmionShapeScript import get_skyrmion_shape_cmd
-from .statistics.getSkyrmionShape import get_skyrmion_shape

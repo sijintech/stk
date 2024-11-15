@@ -1,9 +1,0 @@
-{
-    "name": "suan_pyqt.exe",
-    "version": "0.0.2",
-    "download_list": {"suan_pyqt_0.0.1.exe":"https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/nsis/suan_pyqt_0.0.1.exe"},
-    "changelog": "更新内容",
-    "releasetime":"2024.03.18",
-    "win_download":"https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/nsis/suan_pyqt_0.0.1.exe",
-    "mac_download":""
-}
