@@ -17,7 +17,7 @@ version = os.environ.get('TAG', '')
 # 获取文件目录
 dir = os.path.dirname(__file__)
 # print("file dir:", os.path.dirname(__file__))
-versionFilePath = os.path.join(dir, "../src/version.py")
+versionFilePath = os.path.join(dir, "../gui/version.py")
 # print("edit file {versionFilePath} output: version = {version}")
 # 覆盖写出文件 version.py 中
 with open(versionFilePath, 'w') as f:
