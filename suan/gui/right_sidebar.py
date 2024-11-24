@@ -8,16 +8,17 @@ from PySide6.QtWidgets import (
     QPushButton,
     QMenu,
 )
-
+from custom_logger import CustomLogger
 
 class RightSidebar(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
+        self.logger = CustomLogger()
         self.table_widget = None
         self.variable_info = None
         self.parent = parent
-        self.parent.registerComponent("Status", self, True)
         self.initUI()
+        self.parent.registerComponent("Status", self, True)
 
     def initUI(self):
         layout = QVBoxLayout()
@@ -70,7 +71,7 @@ class RightSidebar(QWidget):
     def updateData(self, variable_info):
         self.variable_info = variable_info
         # 清空表格
-        print("清空表格")
+        self.logger.debug("清空表格")
         self.table_widget.clearContents()
 
         # 设置表格行数

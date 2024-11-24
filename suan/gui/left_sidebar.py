@@ -1,15 +1,30 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QFileSystemModel, QTreeView, QMessageBox
-from PySide6.QtCore import QModelIndex, Qt,Signal
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QFileSystemModel, QTreeView, QMessageBox, QFileIconProvider
+from PySide6.QtCore import QModelIndex, Qt, Signal
 from PySide6.QtCore import QFileInfo
+from PySide6.QtGui import QIcon
 import os
 import vtk
+from custom_logger import CustomLogger
+
+
+class FileIconProvider(QFileIconProvider):
+    def icon(self, file_info):
+        if file_info.isDir():
+            return QIcon("./icons/dir.png")
+        else:
+            return QIcon("./icons/file.png")
+        # return super().icon(file_info)
+
+
 class LeftSidebar(QWidget):
     openFilePath = Signal(str)  # 定义一个信号，用于发送打开文件请求
+
     def __init__(self, parent):
         super().__init__()
+        self.logger = CustomLogger()
         self.parent = parent
         # self.curFile=None
-        self.parent.registerComponent('File structure',self,True)
+        self.parent.registerComponent('File structure', self, True)
         self.initUI()
 
     def initUI(self):
@@ -23,39 +38,59 @@ class LeftSidebar(QWidget):
 
     def setupFileSystemModel(self):
         # 创建文件系统模型
-        self.model = QFileSystemModel(self) 
-        self.model.setRootPath("")
+        self.model = QFileSystemModel(self)
+        root_path = os.getcwd()  # 获取当前工作目录
+        self.model.setRootPath(root_path)
+        self.treeView.setRootIndex(self.model.index(root_path))  # 设置根索引为当前路径
         self.treeView.setModel(self.model)
-        self.treeView.setRootIndex(self.model.index(""))  # 设置根索引为当前路径
-        # 只想显示name这一列，不想显示size,type,modified的信息
+        # 自定义文件和目录图标
+        self.model.setIconProvider(FileIconProvider())
+
+        # 隐藏标题栏
+        self.treeView.header().hide()
+
+        # 隐藏其他列
         self.treeView.setColumnHidden(1, True)
         self.treeView.setColumnHidden(2, True)
         self.treeView.setColumnHidden(3, True)
+
         # 连接双击信号到槽函数
         self.treeView.doubleClicked.connect(self.onDoubleClick)
-
     def initWorkspace(self):
         working_directory = self.parent.get_workspace_data('left_sidebar/working_directory')
+        self.logger.debug(working_directory)
         self.treeView.setRootIndex(self.model.index(working_directory))
 
-        
     def onDoubleClick(self, index: QModelIndex):
         # 获取所选项的路径
         path = self.model.filePath(index)
         if os.path.isdir(path):
-            self.open_directory(path)
+            self.open_dir(path)
         else:
             self.open_file(path)
 
-    def open_directory(self, directory, init_workspace=True):
+    def open_dir(self, directory):
+        # 展开指定目录的内容
+        index = self.model.index(directory)
+        if os.path.exists(directory):
+            index = self.model.index(directory)
+            if index.isValid():
+                self.treeView.expand(index)  # 展开目录
+        else:
+            QMessageBox.warning(self, "警告", f"目录不存在: {directory}")
+
+    def open_directory(self, directory, workspace_data=None, init_workspace=True):
         # 原来目录处理
-        if self.parent.curWorkDir is not None and not os.path.samefile(self.parent.curWorkDir, directory):
+        self.logger.debug(self.parent.curWorkDir)
+
+        if self.parent.curWorkDir is not None and not self.parent.curWorkDir == directory:
             if self.parent.isWorkspace:
                 self.parent.check_and_save_curworkspace()
             else:
                 self.parent.check_and_save_curfile()
 
         # 新的目录处理
+        self.logger.debug("打开：%s", directory)
         self.parent.curWorkDir = directory
         # self.parent.checkWorkspaceFile(directory)
         self.treeView.setRootIndex(self.model.index(directory))
@@ -64,43 +99,64 @@ class LeftSidebar(QWidget):
             return
         elif self.parent.curworkdir_is_workspace():
             self.parent.init_workspace()
+            if workspace_data and isinstance(workspace_data, dict):
+                for path, value in workspace_data.items():
+                    self.parent.modify_workspaceData(path, value)
+                self.parent.init_ui_from_workspace()
         else:
-            self.parent.question_and_create_workspace(directory)
+            self.parent.question_and_create_workspace(directory, False)
+
+    def create_new_file(self):
+        # 在文件系统视图选中的位置创建一个新文件
+        index = self.treeView.currentIndex()
+        if not index.isValid():
+            QMessageBox.warning(self, "警告", "请先选择一个位置")
+            return
+        path = self.model.filePath(index)
+        if not os.path.isdir(path):
+            path = os.path.dirname(path)
+        new_file_path = os.path.join(path, "新建文件.txt")
+        try:
+            with open(new_file_path, "w", encoding="utf-8") as file:
+                file.write("")
+            self.logger.info(f"新建文件: {new_file_path}")
+            self.model.refresh()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"无法创建新文件: {e}")
+
+    def create_new_dir(self):
+        # 在文件系统视图选中的位置创建一个新目录
+        index = self.treeView.currentIndex()
+        if not index.isValid():
+            QMessageBox.warning(self, "警告", "请先选择一个位置")
+            return
+        path = self.model.filePath(index)
+        if not os.path.isdir(path):
+            path = os.path.dirname(path)
+        new_dir_path = os.path.join(path, "新建文件夹")
+        try:
+            os.makedirs(new_dir_path, exist_ok=True)
+            self.logger.info(f"新建文件夹: {new_dir_path}")
+            self.model.refresh()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"无法创建新文件夹: {e}")
 
     def open_file(self, path, working_directory="", is_init=False):
-        # if working_directory=="":
-        #     working_directory = os.path.dirname(os.path.abspath(path))
-        # self.parent.modify_preferences('Open_Last_Working_Directory', working_directory)
-        # self.parent.checkWorkspaceFile(working_directory)
-        # self.treeView.setRootIndex(self.model.index(working_directory))
-        # if self.parent.openWorkspace==True:
-        #     # self.parent.modify_workspaceData('left_sidebar/working_directory', working_directory)
-        #     self.parent.modify_workspaceData('info_bar/code/file_path',path)
-        # else :
-        #     reply = QMessageBox.question(
-        #         self,
-        #         "Warning",
-        #         "是否为该目录创建工作区",
-        #         QMessageBox.Yes,
-        #         QMessageBox.No,
-        #     )
-        #     if reply == QMessageBox.Yes:
-        #         this_dir = os.path.dirname(os.path.abspath(__file__))
-        #         self.parent.createWorkspaceFile(working_directory, os.path.join(this_dir, "../workspace.suan"))
+        # TODO:打开一个数据大文件时，需要等待，应设置等待页面
         # 原来文件处理
         if working_directory == "":
             working_directory = os.path.dirname(os.path.abspath(path))
 
         if self.parent.curWorkFile is not None and not is_init:
             # self.parent.checkAndSaveCurFile()
-            if self.parent.isWorkspace and not os.path.samefile(self.parent.curWorkDir, working_directory):
-                self.parent.check_and_save_curworkspace()
-            else:
-                self.parent.check_and_save_curfile()
+            # if self.parent.isWorkspace and not os.path.samefile(self.parent.curWorkDir, working_directory):
+            #     self.parent.check_and_save_curworkspace()
+            # else:
+            self.parent.check_and_save_curfile()
         # 新的文件处理
         self.parent.curWorkFile = path
-        if not os.path.samefile(self.parent.curWorkDir, working_directory):
-            self.open_directory(working_directory, not is_init)
+        # if not os.path.samefile(self.parent.curWorkDir, working_directory):
+        #     self.open_directory(working_directory, not is_init)
         if self.parent.isWorkspace:
             self.parent.modify_workspaceData('info_bar/code/file_path', path)
 
@@ -146,7 +202,7 @@ class LeftSidebar(QWidget):
                         # 发送文件内容给InfoBar
                         self.parent.info_bar.showContent(content, path)
                 except Exception as e:
-                    print("Error reading file:", e)
+                    print("Error reading file:%s", e)
             else:
                 try:
                     with open(path, 'r', encoding='utf-8') as file:
@@ -155,4 +211,4 @@ class LeftSidebar(QWidget):
                         # 发送文件内容给InfoBar
                         self.parent.info_bar.showContent(content,path)
                 except Exception as e:
-                    print("Error reading file:", e)
+                    print("Error reading file:%s", e)

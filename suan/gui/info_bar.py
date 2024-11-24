@@ -12,12 +12,16 @@ from PySide6.QtGui import QAction
 import os
 import re
 
+from custom_logger import CustomLogger
+from suan.gui.custom_tab_bar import CustomTabBar
+
 
 class InfoBar(QWidget):
 
     def __init__(self, parent):
 
         super().__init__()
+        self.logger = CustomLogger()
         self.parent = parent
         self.curShowCode = None
         # self.curShowCodePath = None
@@ -28,24 +32,28 @@ class InfoBar(QWidget):
     def initUI(self):
         layout = QVBoxLayout()
         self.tabWidget = QTabWidget()
+        self.tabWidget.setTabBar(CustomTabBar())
         layout.addWidget(self.tabWidget)
         self.setLayout(layout)
         self.addInfoTabs()
-        
+
     def initWorkspace(self):
         file_path = self.parent.get_workspace_data('info_bar/code/file_path')
         working_directory = self.parent.get_workspace_data('left_sidebar/working_directory')
         self.parent.left_sidebar.open_file(file_path, working_directory, False)
-        
-    def getContentfromPath(self,path):
-        try:
-                with open(path, 'r', encoding='utf-8') as file:
-                    content = file.read()
-                    return content
-        except Exception as e:
-            print("Error reading file:", e)
+
+    def getContentfromPath(self, path):
+        self.logger.debug(path)
+        if path == '':
             return None
-                
+        try:
+            with open(path, 'r', encoding='utf-8') as file:
+                content = file.read()
+                return content
+        except Exception as e:
+            self.logger.error("Error reading file: %s", e)
+            return None
+
     def curFileIsSave(self):
         if self.getContentfromPath(self.parent.curWorkFile) is None or self.getContentfromPath(
                 self.parent.curWorkFile) == self.codeTab.toPlainText():
@@ -82,7 +90,7 @@ class InfoBar(QWidget):
             if self.tabWidget.tabText(i) == tabName[: -len(" Tab")]:
                 # 如果选项卡已存在，则删除它
                 self.tabWidget.removeTab(i)
-                print("删除" + tabName)
+                self.logger.debug("删除" + tabName)
                 return
         # 如果选项卡不存在，则添加它
         component = tab["component"]
@@ -251,7 +259,7 @@ class InfoBar(QWidget):
                         vtk_vars.add(match.group(1))
                     continue  # 如果当前行涉及到 vtk 渲染窗口和交互器的变量，则跳过该行
                 updated_lines.append(line)  # 否则添加到更新后的代码行列表中
-            print("vtk_vars:", vtk_vars)
+            self.logger.debug("vtk_vars: %s", vtk_vars)
             curShowCode = "\n".join(
                 updated_lines
             )  # 将更新后的代码行列表重新组合成字符串
@@ -273,7 +281,7 @@ class InfoBar(QWidget):
             for match in var_assignments:
                 mat_vars.add(match.group(1))
             mat_vars.add("FigureCanvas()")
-            print("mat_vars:", mat_vars)
+            self.logger.debug("mat_vars:", mat_vars)
             # 删除涉及到画布控件的变量赋值语句以及相关的代码行
             curShowCode_lines = curShowCode.split("\n")  # 将代码按行拆分为列表
             updated_lines = []  # 用于存储更新后的代码行

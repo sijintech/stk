@@ -9,20 +9,23 @@ from PySide6.QtWidgets import (
     QMenu,
     QHBoxLayout,
     QLineEdit,
+    QTabBar,
 )
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 import matplotlib.pyplot as plt
 import toml
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 import math
-
+from custom_logger import CustomLogger
+from custom_tab_bar import CustomTabBar
 
 
 class CustomFigureCanvas(FigureCanvasQTAgg):
     def __init__(self, figure=None):
         super().__init__(figure)
+        self.logger = CustomLogger()
         self._figure = None  # 用于保存 Figure 对象的成员变量
 
     def setFigure(self, fig):
@@ -41,10 +44,11 @@ PreferenceColumnCount = 7
 
 
 class PreferenceTab(QWidget):
-    def __init__(self, data, preference_toml_path):
+    def __init__(self, data, parent):
         super().__init__()
+        self.logger = CustomLogger()
         self.data = data
-        self.preference_toml_path = preference_toml_path
+        self.parent = parent
         self.initUI()
 
     def initUI(self):
@@ -139,8 +143,8 @@ class PreferenceTab(QWidget):
             self.table.removeRow(current_row)
 
     def save_preferences_to_file(self, preferences):
-        with open(self.preference_toml_path, "w") as file:
-            toml.dump(preferences, file)
+        self.parent.preferences = preferences
+        self.parent.save_preferences
 
     def saveData(self):
         rows = self.table.rowCount()  # 获取表格的行数
@@ -209,7 +213,7 @@ class PreferenceTab(QWidget):
                 data[key] = value
                 row += 1
 
-        # print(data)
+        self.logger.debug(data)
         self.data=data
         self.save_preferences_to_file(self.data)
 
@@ -361,11 +365,11 @@ class DataTableTab(QWidget):
                 row += 1
 
             self.beautify()
-        
 
 class CenterWidget(QWidget):
     def __init__(self, parent):
         super().__init__()
+        self.logger = CustomLogger()
         self.runCodeType = None
         self.runCode = None
         self.parent = parent
@@ -375,6 +379,10 @@ class CenterWidget(QWidget):
     def initUI(self):
         layout = QVBoxLayout()
         self.tabWidget = QTabWidget()
+
+        # 设置自定义 TabBar
+        self.tabWidget.setTabBar(CustomTabBar())
+
         self.tabWidget.setTabsClosable(True)
         self.tabWidget.tabCloseRequested.connect(self.close_tab)
         self.tabWidget.setMovable(True)
@@ -423,7 +431,7 @@ class CenterWidget(QWidget):
             if self.tabWidget.tabText(i) == tabName[: -len(" Tab")]:
                 # 如果选项卡已存在，则删除它
                 self.tabWidget.removeTab(i)
-                print("删除" + tabName)
+                self.logger.debug("删除" + tabName)
                 return
         # 如果选项卡不存在，则添加它
         component = tab["component"]
@@ -455,7 +463,7 @@ class CenterWidget(QWidget):
 
         # dataTableTab
         self.dataTableTab = DataTableTab({},4)
-        self.tabWidget.addTab(self.dataTableTab, "Data Table")
+        self.tabWidget.addTab(self.dataTableTab, "Data Table ")
         self.registerComponent("Data Table Tab", self.dataTableTab, True)
 
         # preferenceTab
@@ -466,7 +474,7 @@ class CenterWidget(QWidget):
     def addPreferenceTab(self, data):
         # print("addPreferenceTab")
         self.unregisterComponent("Preference Tab")
-        self.preferenceTab = PreferenceTab(data, self.parent.preference_toml_path)
+        self.preferenceTab = PreferenceTab(data, self.parent)
         self.tabWidget.addTab(self.preferenceTab, "Preference")
         self.registerComponent("Preference Tab", self.preferenceTab, True)
         preferenceTabIndex = self.tabWidget.indexOf(self.preferenceTab)

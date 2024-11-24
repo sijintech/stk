@@ -1,0 +1,492 @@
+﻿/* 浅蓝色主题的QSS文件 */
+
+/* 窗口背景色 */
+QMainWindow {
+     background-color: #F0F0F0; /* 背景色 */
+     color: #333333; /* 文字颜色 */
+     font-family: Microsoft YaHei; /* 设置所有控件的字体为微软雅黑 */
+     font-size: 14pt; /* 字体大小 */	
+     border: none;  /*无边框 */
+}
+
+/* 显示窗口背景色 */
+QWidget#widget{
+	background-color: #F0F0F0; /* 背景色 */
+	border: 1px solid #AAAAAA; /* 边框颜色 */
+}
+
+QWidget{
+	padding: 0; /* 控件内边距设置为0 */
+	font-family: Microsoft YaHei; /* 设置所有控件的字体为微软雅黑 */
+	font-size: 14pt; /* 字体大小 */	
+	 /*border: none; 无边框 */
+	/*border: 1px solid #AAAAAA;  边框颜色 */
+	margin: 0px;
+}
+QHBoxLayout, QVBoxLayout, QGridLayout {
+    spacing: 0px;
+}
+
+QSplitter{
+    handle-width:200px;
+}
+QDialog#LoginDialog{
+	border-image: url(":/MvtSuites/bin/Image/Login.png");
+}
+QDialog#LoginDialog{
+	border-image: url(":/MvtSuites/bin/Image/Login.png");
+}
+
+/* QDockWidget */
+QDockWidget
+{
+        min-width: 300px;
+	padding: 0; /* 控件内边距设置为0 */
+	border: 1px solid #AAAAAA; /* 边框颜色 */
+}
+
+QDockWidget::title {
+    display: none;
+}
+
+QDockWidget#dockWidget_GeneralCAE,QDockWidget#dockWidget_StructuralIntegrity{
+    margin: 0px;
+    padding: 0px;
+    border: 1px solid #AAAAAA; /* 边框颜色 */
+}
+
+QDockWidget#dockWidget_console{
+    min-height: 100px;
+    max-height: 150px;
+    border: 1px solid #AAAAAA; /* 边框颜色 */
+}
+
+/* 标签样式 */
+QLabel{
+	border: 0px; /* 无边框 */
+	border: none; /* 无边框 */
+}
+QLabel {
+    margin: 0px;
+    padding: 0px;
+}
+
+.StandardCrack QLabel, CrackPropagation QLabel, .FatigueAnalysis QLabel, .FatigueDatabase QLabel, .MicroFatigue QLabel{
+    /* 在这里设置样式属性，例如字体、颜色、边框等 */
+    font-weight: bold; /* 加粗字体 */
+    color: #333333; /* 文字颜色 */ 
+    border-top: 1px solid #AAAAAA; /* 边框颜色 */
+}
+.CommonFileSystemWidget QLabel#label_Location,.CommonFileSystemWidget QLabel#label_Directory{
+    /* 在这里设置样式属性，例如字体、颜色、边框等 */
+    font-weight: bold; /* 加粗字体 */
+    color: #333333; /* 文字颜色 */
+    border: 1px solid #AAAAAA; /* 边框颜色 */
+    padding: 0px; /* 文字与边框之间的间距 */
+}
+
+/* 菜单栏样式 F0F8FF*/
+QMenu::indicator {
+    width: 0px;
+    height: 0px;
+}
+
+QMenuBar {
+    background-color: #F0F0F0;
+}
+QMenu::icon { 
+	width: 32px; 
+	height: 32px; 
+}
+QMenuBar::item {
+    background-color: transparent;
+    padding: 5px 15px;
+}
+
+QMenuBar::item:selected {
+    background-color: #87CEFA;
+}
+
+QMenu {
+    background-color: #F0F8FF;
+}
+
+QMenu::item:selected {
+    background-color: #87CEFA;
+}
+
+
+/* 按钮样式 */
+QPushButton {
+    padding: 5px 10px; /* 内边距 */
+    border-radius: 4px; /* 圆角 */
+    font: 14pt "宋体";
+    color: black; /* 设置字体颜色为黑色 */
+    border: 1px solid #AAAAAA; /* 边框颜色 */
+    background-color: #FDFDFD;
+}
+
+QPushButton:hover {
+    background-color: #357ABD; /* 鼠标悬停时的背景色 */
+    border-color: #357ABD; /* 鼠标悬停时的边框色 */
+}
+
+QPushButton:pressed {
+    background-color: #2A6496; /* 按下时的背景色 */
+    border-color: #2A6496; /* 按下时的边框色 */
+}
+
+.ReadFiniteElementDialog QDockWidget
+{
+	weight: 842px;
+	height: 536px;
+}
+.ReadModelandResultDialog QDockWidget
+{
+	weight: 419px;
+	height: 663px;
+}
+.EquivalentGravityDialog QDockWidget
+{
+	weight: 518px;
+	height: 637px;
+}
+.CrackModel QDockWidget,SetsizeDialog QDockWidget,DefineLoadDialog QDockWidget
+{
+	min-height: 400px; 
+	max-height: 400px;
+	min-width: 600px; 
+	max-width: 600px; 
+}
+.LoadSpectrumFileDialog QDockWidget,.LoadSpectrumDialog QDockWidget
+{
+
+}
+
+.ReadFiniteElementDialog QPushButton
+{
+	color: black; /* 设置字体颜色为黑色 */
+	border: 1px solid #AAAAAA; /* 边框颜色 */
+    background: transparent;
+	font: 14pt "宋体";
+	weight: 24px;
+	height: 24px;
+}
+.ReadFiniteElementDialog QPushButton:pressed {
+    background-color: #2A6496; /* 按下时的背景色 */
+    border-color: #2A6496; /* 按下时的边框色 */
+}
+.ReadFiniteElementDialog QPushButton:hover {
+    background-color: #357ABD; /* 鼠标悬停时的背景色 */
+    border-color: #357ABD; /* 鼠标悬停时的边框色 */
+}
+
+QPushButton#pushButton_arrows_left
+{
+  border-image: url(":/MvtSuites/bin/Image/FatigueAnalysis/arrows_left.ico");
+}
+QPushButton#pushButton_arrows_right
+{  
+	border-image: url(":/MvtSuites/bin/Image/FatigueAnalysis/arrows_right.ico");
+}
+QPushButton#pushButton_conten
+{
+	border-image: url(":/MvtSuites/bin/Image/FatigueAnalysis/conten.ico");
+}
+QPushButton#pushButton_ZoomIn
+{
+	border-image: url(":/StandardCrackFunction/bin/Image/StandardCrackFunction/zoom_in.png");
+}
+QPushButton#pushButton_ZoomOut
+{
+	border-image: url(":/StandardCrackFunction/bin/Image/StandardCrackFunction/zoom_out.png");
+}
+
+/* 文本框样式 */
+/* 输入框样式 */
+QLineEdit {
+    background-color: #FFFFFF; /* 输入框背景色 */
+    border: 1px solid #CCCCCC; /* 边框色 */
+    padding: 4px; /* 内边距 */
+    border-radius: 4px; /* 圆角 */
+	font-size: 14pt;
+}
+
+QLineEdit:focus {
+    border: 1px solid #4A90E2; /* 获得焦点时的边框色 */
+}
+
+/* 列表视图样式 */
+QListView {
+    background-color: #FFFFFF; /* 背景色 */
+    border: 1px solid #CCCCCC; /* 边框色 */
+    show-decoration-selected: 1; /* 选中时显示装饰 */
+}
+
+QListView::item {
+    padding: 4px; /* 列表项内边距 */
+}
+
+QListView::item:selected {
+    background-color: #E0E0E0; /* 选中时的背景色 */
+    color: #333333; /* 选中时的文字颜色 */
+}
+
+/* 滚动条样式 */
+QScrollBar:vertical {
+    width: 15px; /* 滚动条宽度 */
+    background-color: #F5F5F5; /* 滚动条背景色 */
+}
+
+QScrollBar::handle:vertical {
+    background-color: #AAAAAA; /* 滚动条手柄颜色 */
+    min-height: 20px; /* 手柄最小高度 */
+}
+
+QScrollBar::add-line:vertical {
+    height: 0px; /* 增加按钮高度 */
+    subcontrol-position: bottom; /* 按钮位置 */
+    subcontrol-origin: margin; /* 按钮原点 */
+}
+
+QScrollBar::sub-line:vertical {
+    height: 0px; /* 滚动条减少按钮高度 */
+    subcontrol-position: top; /* 按钮位置 */
+    subcontrol-origin: margin; /* 按钮原点 */
+}
+
+/* 树视图样式 */
+QTreeView {
+    background-color: #FFFFFF; /* 背景色 */
+    border: 1px solid #CCCCCC; /* 边框色 */
+    show-decoration-selected: 1; /* 选中时显示装饰 */
+    font-size: 14pt; /* 字体大小 */	
+}
+
+QTreeView::item {
+    padding: 2px; /* 树视图项内边距 */
+}
+
+QTreeView::item:selected {
+    background-color: #E0E0E0; /* 选中时的背景色 */
+    color: #333333; /* 选中时的文字颜色 */
+}
+/* QTreeWidget 样式 */
+QTreeWidget {
+     /* border: 1px solid #AAAAAA; /* 边框颜色 */
+    show-decoration-selected: 1; /* 选中时显示装饰 */
+}
+
+QTreeWidget::item {
+    border: 0px; /* 项目边框 */
+    padding: 0px; /* 项目内边距 */
+    margin: 0px;
+}
+
+QTreeWidget::item:selected {
+    background-color: #D8E7F3; /* 选中项目背景色 */
+    color: #000000; /* 选中项目文字颜色 */
+}
+
+/* QToolBar 样式 */
+QToolBar {
+    border: 0px; /* 工具栏边框 */
+    background-color: #F0F0F0; /* 工具栏背景色 */
+    font-weight: bold; /* 工具栏字体加粗 */
+}
+
+QToolBar QToolButton {
+    border: 0px; /* 工具栏按钮边框 */
+    padding: 5px; /* 工具栏按钮内边距 */
+}
+
+QToolBar QToolButton:checked {
+    background-color: #87CEFA; /* 选中按钮背景色 */
+}
+
+/* 工具栏按钮图标样式 */
+QToolBar QToolButton:hover {
+    background-color: #87CEFA; /* 鼠标悬停背景色 */
+}
+
+QToolBar QToolButton{
+    icon-size: 24; /* 设置图标大小 */
+}
+QToolButton::menu-indicator {
+    image: none;
+}
+
+/* QComboBox 样式 */
+QComboBox {
+    border: 1px solid #CCCCCC; /* 边框颜色，与提供的图片风格相似 */
+    border-radius: 4px; /* 轻微的圆角边框 */
+    padding: 2px 5px; /* 轻微的内边距 */
+    background-color: #FFFFFF; /* 背景色 */
+    min-height: 20px; /* 确保有足够的高度 */
+    max-height: 20px;
+    min-width: 150px; 
+    max-width: 150px; 
+    font-size: 14pt; /* 调整字体大小 */
+}
+
+.MvtSuites QDockWidget QComboBox
+{
+    min-height: 20px; /* 确保有足够的高度 */
+    max-height: 20px;
+    min-width: 300px;
+}
+
+.CommonFileSystemWidget QComboBox#fileTypeComboBox{
+    min-height: 20px; /* 确保有足够的高度 */
+    max-height: 20px;
+    min-width: 150px; 
+    max-width: 250px; 
+}
+QComboBox:focus {
+    border: 1px solid #4A90D9; /* 获得焦点时的边框颜色 */
+}
+
+QComboBox::item {
+    padding: 4px; /* 下拉菜单中每个项的内边距 */
+	min-height: 20px; /* 确保有足够的高度 */
+	max-height: 20px;
+	min-width: 100px; 
+}
+
+QComboBox::item:selected {
+    background-color: #E0E0E0; /* 选中项的背景色 */
+    color: #333333; /* 选中项的文本颜色 */
+}
+
+QComboBox QPopupProxyStandard {
+    border: 1px solid #CCCCCC; /* 下拉菜单边框颜色 */
+    padding: 0; /* 移除内边距 */
+    border-radius: 4px; /* 下拉菜单边框圆角 */
+}
+
+QComboBox QPopupProxyStandard > QFrame {
+    background-color: #FFFFFF; /* 下拉菜单背景色 */
+}
+/* CommomTable 样式 */
+/* TableWidget 样式 */
+.CommomTable QTableWidget {
+    border: 1px solid black; /* 表格边框 */
+    background-color: white; /* 表格背景色 */
+    show-grid: true; /* 显示网格线 */
+    gridline-color: lightgray; /* 网格线颜色 */
+    selection-background-color: lightblue; /* 选中行的背景色 */
+    selection-color: black; /* 选中行的文字颜色 */
+	min-width: 300px;
+}
+
+.CommomTable QTableWidget::item {
+    border: 0px; /* 单元格无边框 */
+    padding: 4px; /* 单元格内边距 */
+	min-width: 100px;
+}
+
+.CommomTable QTableWidget::item:selected {
+    background-color: lightblue; /* 选中单元格的背景色 */
+    color: black; /* 选中单元格的文字颜色 */
+}
+
+/* 三维裂纹建模  DefineCracksDialogClass */
+.DefineCracksDialog QWidget
+{
+	padding: 0; /* 控件内边距设置为0 */
+}
+
+.DefineCracksDialog QPushButton
+{
+    border: 1px solid #4A90E2; /* 边框色 */
+    padding: 5px 10px; /* 内边距 */
+    border-radius: 4px; /* 圆角 */
+	font: 14pt "宋体";
+	width: 153px;
+	height: 153px
+}
+QTabBar::tab {
+    font: 14px "Times New Roman"; /* 字体样式 */
+    padding: 0px;                 /* 内边距 */
+    border-width: 0px;
+    margin-left: 0px;
+    margin-right: 10px;
+}
+QTabBar::tab:selected {
+    color: blue;       /* 文字颜色 */
+}
+
+/* 标签未选中状态 */
+QTabBar::tab:!selected {
+    color: gray;
+}
+
+/* 标签 hover 样式 */
+QTabBar::tab:hover:!selected {
+    color: black;
+}
+
+
+
+
+
+
+/* 设置 QTabWidget 的背景和边框
+QTabWidget::pane {
+    background-color: rgb(132, 171, 230); /* 背景色 */
+    background: transparent;        /* 背景透明 */
+
+}
+
+/* 隐藏 QTabWidget 的标签栏边框 */
+QTabWidget::tab-bar {
+    border-width: 0px;
+}
+
+/* 设置 QTabBar 标签样式 */
+QTabBar::tab {
+    font: 14px "Times New Roman"; /* 字体样式 */
+    padding: 0px;                 /* 内边距 */
+
+}
+
+/* 标签选中状态 */
+QTabBar::tab:selected {
+    border-width: 0px;
+    margin-left: 0px;  /* 左边距 */
+    margin-right: 10px;  /* 右边距 */
+    color: blue;       /* 文字颜色 */
+}
+
+/* 标签未选中状态 */
+QTabBar::tab:!selected {
+    border-width: 0px;
+    margin-left: 0px;
+    margin-right: 10px;
+    color: gray;
+}
+
+/* 标签 hover 样式 */
+QTabBar::tab:hover:!selected {
+    margin-left: 0px;
+    margin-right: 10px;
+    color: black;
+}
+
+/* 删除按钮未悬停时样式 */
+QTabBar::close-button {
+    background-color: rgb(240, 240, 240); /* 与标签背景色一致 */
+    border-radius: 8px; /* 圆形效果 */
+    margin-left: 5px; /* 与左边文本距离一致 */
+    margin-right: 0px;
+    border-image: url(../icons/close.png)
+}
+
+/* 删除按钮悬停时样式 */
+QTabBar::close-button:hover {
+    background-color: black; /* 颜色变深 */
+    border-image: url(../icons/close.png)
+}
+*/
+
+

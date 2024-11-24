@@ -22,9 +22,10 @@ import version
 import os
 import toml
 import shutil
+from custom_logger import CustomLogger
 
 updatejson_url = "https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json"
-app_name = "suan_pyqt"
+app_name = "stk"
 cur_version = version.version
 code_url = "https://github.com/sijintech/stk"
 
@@ -32,7 +33,7 @@ code_url = "https://github.com/sijintech/stk"
 class MainWindow(QMainWindow):
     def __init__(self, create_workspace_if_no):
         super().__init__()
-
+        self.logger = CustomLogger()
         # 用于存储具有层级关系的组件
         self.components = {
             "main": {"name": "main", "component": self, "children": {}}
@@ -48,7 +49,7 @@ class MainWindow(QMainWindow):
         # 创建左侧栏
         self.left_sidebar = left_sidebar.LeftSidebar(self)
         # 创建顶部工具栏
-        self.toolbar = toolbar.Toolbar(50, self)
+        self.toolbar = toolbar.ToolBar(self)
 
         self.center_splitter = QSplitter()
         self.main_splitter = QSplitter()
@@ -73,6 +74,7 @@ class MainWindow(QMainWindow):
         self.check_update()
         # print(self.components)
 
+
     def init_ui(self):
         # 设置主窗口标题
         self.setWindowTitle("STK")
@@ -80,15 +82,14 @@ class MainWindow(QMainWindow):
         self.center_splitter.setOrientation(Qt.Vertical)
         self.center_splitter.addWidget(self.center_widget)
         self.center_splitter.addWidget(self.info_bar)
-        self.center_splitter.setHandleWidth(2)  # 设置分割线的宽度
+        # self.center_splitter.setHandleWidth(2)  # 设置分割线的宽度
         # 使用另一个QSplitter将左，右侧栏和中心部件包裹起来
         self.main_splitter.addWidget(self.left_sidebar)
         self.main_splitter.addWidget(self.center_splitter)
         self.main_splitter.addWidget(self.right_sidebar)
-        self.main_splitter.setHandleWidth(2)  # 设置分割线的宽度
         # 创建主窗口布局
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        # main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.main_splitter)
 
         # 创建主窗口中心部件
@@ -96,7 +97,7 @@ class MainWindow(QMainWindow):
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
         # 将顶部工具栏和底部状态栏添加到主窗口
-        self.addToolBar(self.toolbar)
+        # self.addToolBar(self.toolbar)
         self.setStatusBar(self.status_bar)
 
         self.left_sidebar.openFilePath.connect(self.fixCurFilePath)
@@ -129,20 +130,26 @@ class MainWindow(QMainWindow):
                 if value is False
             ]
             for component in UI_Components_not_Visibile:
-                path = (
-                        father_component.replace("_", " ")
-                        + "/"
-                        + component.replace("_", " ")
-                )
-                self.toggleComponentVisibility(path)
+                if father_component != "Other":
+                    path = (
+                            father_component.replace("_", " ")
+                            + "/"
+                            + component.replace("_", " ")
+                    )
+                    self.toggleComponentVisibility(path)
+                else:
+                    path = (
+                        component.replace("_", " ")
+                    )
+                    self.toggleComponentVisibility(path)
 
     def showEvent(self, event):
+        self.logger.debug("showEvent")
         super().showEvent(event)
         if self.preferences["Open_Last_Workspace"] and self.curworkdir_is_workspace():
             self.init_workspace()
         elif self.create_workspace_if_no:
-            self.question_and_create_workspace(self.curWorkDir)
-            self.init_workspace()
+            self.question_and_create_workspace(self.curWorkDir, True)
         else:
             # 设置主窗口大小和显示
             self.setGeometry(
@@ -154,16 +161,17 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.modify_preferences('Open_Last_Working_Directory', self.curWorkDir)
+        self.save_preferences()
         if self.isWorkspace:
             self.check_and_save_curworkspace()
-        elif self.left_sidebar.curFile is not None:
+        elif self.curFile is not None:
             self.check_and_save_curfile()
         event.accept()
 
     def get_workspace_file(self, directory):
         # 判断目录是否存在
         if not os.path.isdir(directory):
-            print("目录不存在")
+            self.logger.error(f"目录不存在 {directory}")
             return None
 
         # 检查目录下是否有.suan后缀的文件
@@ -208,27 +216,29 @@ class MainWindow(QMainWindow):
         # 获取目录名
         dir_name = os.path.basename(directory)
         if self.isWorkspace:
-            print("目录下已存在.suan后缀的文件")
+            self.logger.info("目录下已存在.suan后缀的文件")
             return file_name
         else:
             # 复制文件到目录下，并重命名为目录名+".suan"
             new_file_name = dir_name + ".suan"
             destination = os.path.join(directory, new_file_name)
             shutil.copy(file_to_copy, destination)
-            print("已成功复制文件到目录下并改名为", new_file_name)
+            self.logger.debug("已成功复制文件到目录下并改名为:%s", new_file_name)
             return new_file_name
 
-    def question_and_create_workspace(self, directory):
+    def question_and_create_workspace(self, directory, is_init):
         reply = QMessageBox.question(
             self,
             "Warning",
-            "该目录下还未创建工作区，是否创建",
+            directory + " 目录下还未创建工作区，是否创建",
             QMessageBox.Yes,
             QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
             this_dir = os.path.dirname(os.path.abspath(__file__))
-            self.create_workspace_file(directory, os.path.join(this_dir, "../confs/workspace.suan"))
+            self.create_workspace_file(directory, os.path.join(this_dir, "confs/workspace.suan"))
+            if is_init:
+                self.init_workspace()
 
     def open_new_window(self):
         newWindow = MainWindow(False)
@@ -245,12 +255,12 @@ class MainWindow(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "Warning",
-                "你还未保存该文件内容，是否保存",
+                f"你还未保存文件:{self.curWorkFile}，是否保存",
                 QMessageBox.Yes,
                 QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
-                self.toolbar.saveFile()
+                self.toolbar.save_file()
 
     def check_and_save_curworkspace(self):
         self.check_and_save_curfile()
@@ -260,7 +270,7 @@ class MainWindow(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "Warning",
-                "你还未保存工作区设置，是否保存",
+                f"你还未保存工作区:{self.curWorkDir}，是否保存",
                 QMessageBox.Yes,
                 QMessageBox.No,
             )
@@ -308,7 +318,7 @@ class MainWindow(QMainWindow):
                 data[part] = {}
             data = data[part]
         data[parts[-1]] = value
-        # print(self.workspaceData)
+        self.logger.debug(self.workspaceData)
 
     def get_workspace_data(self, path):
         parts = path.split("/")
@@ -319,12 +329,12 @@ class MainWindow(QMainWindow):
             data = data[part]
         return data[parts[-1]]
 
-    #
+
     def init_preferences(self):
         # 对于已发布版本，首选项文件的位置应位于用户目录中，对于开发版本，应位于当前目录中
         this_dir = os.path.dirname(os.path.abspath(__file__))
         if getattr(sys, "frozen", True):
-            print("执行脚本")
+            self.logger.info("执行脚本")
             self.preference_toml_path = os.path.join(this_dir, "../confs/preference.toml")
 
         else:
@@ -333,6 +343,7 @@ class MainWindow(QMainWindow):
             )
         self.preferences = self.load_preferences()
         self.curWorkDir = self.preferences["Open_Last_Working_Directory"]
+        self.logger.debug("curWorkDir:%s", self.curWorkDir)
 
     def load_preferences(self):
         try:
@@ -356,8 +367,12 @@ class MainWindow(QMainWindow):
         data[parts[-1]] = value
 
     def save_preferences(self):
-        with open(self.preference_toml_path, "w") as file:
-            toml.dump(self.preferences, file)
+        try:
+            with open(self.preference_toml_path, "w") as file:
+                toml.dump(self.preferences, file)
+        except Exception as e:
+            self.logger.error("Error reading file:", e)
+            return None
 
     def fixCurFilePath(self, path):
         self.toolbar.current_open_file = path
@@ -400,7 +415,7 @@ class MainWindow(QMainWindow):
             "children": {},
             "isVisible": isVisible,
         }  # 在路径的最后一个部分中添加组件
-        print("registerComponent " + path)
+        self.logger.debug("registerComponent %s ", path)
 
     def unregisterComponent(self, path):
         """按路径取消注册组件,根组件为main"""
@@ -419,10 +434,10 @@ class MainWindow(QMainWindow):
             if "Tab" in component_name:
                 father_level["component"].toggleComponentVisibility(component_name)
             current_level.pop(parts[-1])
-            print("unregisterComponent " + path)
+            self.logger.debug("unregisterComponent %s", path)
 
     def toggleComponentVisibility(self, path):
-        print(path)
+        self.logger.debug(path)
         """切换组件的可见性."""
         parts = path.split("/")
         current_level = self.components["main"]["children"]  # 从根组件的子组件开始搜索
@@ -437,7 +452,7 @@ class MainWindow(QMainWindow):
             # oldVisible=component.isVisible()
             current_level["component"].toggleComponentVisibility(component_name)
             # component.setVisible(not oldVisible)  # 切换组件的可见性
-            print("toggleComponentVisibility " + path)
+            self.logger.debug("toggleComponentVisibility %s", path)
             return
         # 如果修改的是其他的话
         for part in parts[:-1]:
@@ -447,7 +462,7 @@ class MainWindow(QMainWindow):
         current_level[component_name]["isVisible"] = not current_level[component_name][
             "isVisible"
         ]
-        print("toggleComponentVisibility " + path)
+        self.logger.debug("toggleComponentVisibility %s:%s", path, component.isVisible())
 
     def componentIsVisible(self, path):
         """判断组件是否可见."""
@@ -470,7 +485,7 @@ class MainWindow(QMainWindow):
         new_version = data["版本号"]
         release_time = data["发布时间"]
         if self.compare_versions(new_version, cur_version) == 1:
-            print("SHOW update")
+            self.logger.debug("SHOW update")
             self.show_update_window()
 
     def check_update(self):
@@ -487,9 +502,24 @@ class MainWindow(QMainWindow):
         self.updateWindow.show()
 
 
+def load_qss(qss_file_path):
+    with open(qss_file_path, 'r', encoding='gbk', errors='ignore') as file:
+        return file.read()
+
+
+def apply_qss(app, qss):
+    app.setStyleSheet(qss)
+
+
 if __name__ == "__main__":
     Updater.init()
     app = QApplication(sys.argv)
+    # 加载QSS文件
+    qss_file_path = './resources/styles.qss'
+    qss = load_qss(qss_file_path)
+
+    # 应用QSS样式
+    apply_qss(app, qss)
     mainWindow = MainWindow(True)
     mainWindow.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

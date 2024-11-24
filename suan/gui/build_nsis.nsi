@@ -1,11 +1,11 @@
 
 ; 安装程序初始定义常量
-!define PRODUCT_NAME "suan_nsis"
+!define PRODUCT_NAME "stk_nsis"
 !define PRODUCT_VERSION "1.0"
 !define PRODUCT_PUBLISHER "ZhouHanjie"
 !define PRODUCT_WEB_SITE "http://www.mycompany.com"
 ;用于指定在 Windows 注册表中存储应用程序路径的键名
-!define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\suan_pyqt.exe"
+!define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\stk.exe"
 ;通常用于指定在 Windows 注册表中存储应用程序卸载信息的键名
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 ;用于指定应用程序卸载信息在 Windows 注册表中的根键（即根目录）
@@ -37,7 +37,7 @@ SetCompress off
 ; 安装过程页面
 !insertmacro MUI_PAGE_INSTFILES
 ; 安装完成页面
-!define MUI_FINISHPAGE_RUN "$INSTDIR\suan_pyqt.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\stk.exe"
 !insertmacro MUI_PAGE_FINISH
 
 ; 安装卸载过程页面
@@ -54,7 +54,7 @@ SetCompress off
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 ;输出安装包文件的位置（需修改）
-OutFile "..\app_dist\suan_nsis.exe"
+OutFile ".\dist\stk_nsis.exe"
 InstallDir "$PROGRAMFILES\suan"
 InstallDirRegKey HKLM "${PRODUCT_UNINST_KEY}" "UninstallString"
 ShowInstDetails show
@@ -65,11 +65,11 @@ Section "MainSection" SEC01
   SetOverwrite ifnewer
 
   ;要打包的exe文件（需修改）
-  File ".\dist\suan_pyqt.exe"
+  File ".\dist\stk_windows.exe"
 
   CreateDirectory "$SMPROGRAMS\suan"
-  CreateShortCut "$SMPROGRAMS\suan\suan.lnk" "$INSTDIR\suan_pyqt.exe"
-  CreateShortCut "$DESKTOP\suan.lnk" "$INSTDIR\suan_pyqt.exe"
+  CreateShortCut "$SMPROGRAMS\suan\suan.lnk" "$INSTDIR\stk.exe"
+  CreateShortCut "$DESKTOP\suan.lnk" "$INSTDIR\stk.exe"
 SectionEnd
 
 Section -AdditionalIcons
@@ -80,10 +80,10 @@ SectionEnd
 
 Section -Post
   WriteUninstaller "$INSTDIR\uninst.exe"
-  WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\suan_pyqt.exe"
+  WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\stk.exe"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayName" "$(^Name)"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString" "$INSTDIR\uninst.exe"
-  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\suan_pyqt.exe"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\stk.exe"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "URLInfoAbout" "${PRODUCT_WEB_SITE}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
@@ -102,7 +102,7 @@ FunctionEnd
 Section Uninstall
   Delete "$INSTDIR\${PRODUCT_NAME}.url"
   Delete "$INSTDIR\uninst.exe"
-  Delete "$INSTDIR\suan_pyqt.exe"
+  Delete "$INSTDIR\stk.exe"
 
   Delete "$SMPROGRAMS\suan\Uninstall.lnk"
   Delete "$SMPROGRAMS\suan\Website.lnk"
