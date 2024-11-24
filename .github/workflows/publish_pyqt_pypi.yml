@@ -21,7 +21,7 @@ jobs:
       - name: fix toml version
         run: |
           pip install toml
-          python apps/template/pyqt/scripts/fix_toml_version.py
+          python suan/scripts/fix_toml_version.py
       - name: Install pypa/build
         run: >-
           python3 -m
@@ -30,13 +30,13 @@ jobs:
           --user
       - name: Build a binary wheel and a source tarball
         run: |
-          cd apps/template/pyqt
+          cd suan/gui/pyqt
           python3 -m build
       - name: Store the distribution packages
         uses: actions/upload-artifact@v3
         with:
           name: pyqt
-          path: apps/template/pyqt/dist/
+          path: suan/gui/dist/
 
   publish-to-pypi:
     name: >-
@@ -54,20 +54,20 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: pyqt
-          path: apps/template/pyqt/dist/
+          path: suan/gui/dist/
       - name: Publish pyqt to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__
           password: ${{secrets.TEST_PYPI_API_TOKEN}}
-          packages-dir: apps/template/pyqt/dist/
+          packages-dir: suan/gui/dist/
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
       - name: publish to PYPI
         if: github.event_name == 'release' && github.event.action == 'published'
         uses: pypa/gh-action-pypi-publish@v1.8.12
         with:
-          packages-dir: apps/template/pyqt/dist/
+          packages-dir: suan/gui/dist/
           user: __token__
           skip-existing: true
           password: ${{secrets.PYPI_API_TOKEN}}

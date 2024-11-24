@@ -31,8 +31,8 @@ jobs:
       - name: Build executable
         run: |
           python -m pip install -U pip
-          python apps/template/pyqt/scripts/run_write_version.py
-          cd apps/template/pyqt/src
+          python suan/scripts/run_write_version.py
+          cd suan/gui/
           pip install pyinstaller
           pip install PySide6
           pip install matplotlib
@@ -40,7 +40,7 @@ jobs:
           pip install numpy
           pip install requests          
           pip install toml
-          pyinstaller ./confs/main.spec
+          pyinstaller ../confs/main.spec
           cd dist
           ls
 
@@ -48,7 +48,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: stk_ubuntu
-          path: apps/template/pyqt/src/dist/stk_ubuntu
+          path: suan/gui/dist/stk_ubuntu
 
   macOS_build:
     runs-on: macos-latest
@@ -71,8 +71,8 @@ jobs:
       - name: build exe
         run: |
           python -m pip install -U pip
-          python apps/template/pyqt/scripts/run_write_version.py
-          cd apps/template/pyqt/src
+          python suan/scripts/run_write_version.py
+          cd suan/gui/
           pip install pyinstaller
           pip install PySide6
           pip install matplotlib
@@ -80,7 +80,7 @@ jobs:
           pip install numpy
           pip install requests
           pip install toml
-          pyinstaller ./confs/main.spec
+          pyinstaller ../confs/main.spec
           cd dist
           ls
 
@@ -90,7 +90,7 @@ jobs:
           # 上传后的标记名，下载依靠它找到对应文件
           name: stk_macos
           # 上传的文件位置
-          path: apps/template/pyqt/src/dist/stk_macos
+          path: suan/gui/dist/stk_macos
 
   windows_build:
     runs-on: windows-latest
@@ -115,8 +115,8 @@ jobs:
       - name: build exe
         run: |
           python.exe -m pip install -U pip
-          python apps\template\pyqt\scripts\run_write_version.py
-          cd apps\template\pyqt\src
+          python suan\scripts\run_write_version.py
+          cd suan\gui
           pip install pyinstaller
           pip install PySide6
           pip install vtk
@@ -125,7 +125,7 @@ jobs:
           pip install numpy
           pip install requests
           pip install toml
-          pyinstaller .\confs\main.spec
+          pyinstaller ..\confs\main.spec
           
           
           # - name: Install NSIS
@@ -138,8 +138,8 @@ jobs:
         # scoop install nsis
       - name: build app
         run: |
-          makensis apps\template\pyqt\src\build_nsis.nsi
-          cd apps\template\pyqt\src\dist
+          makensis suan\gui\build_nsis.nsi
+          cd suan\gui\dist
           ls
       # - name: Upload files to OSS(window)
       #   env:
@@ -154,8 +154,8 @@ jobs:
       #   run: |
       #     pwd
       #     pip install oss2
-      #     python apps\template\pyqt\scripts\deploy.py
-      #     python apps\template\pyqt\scripts\update.py
+      #     python suan\scripts\deploy.py
+      #     python suan\scripts\update.py
 
       - name: Store dist
         uses: actions/upload-artifact@v3
@@ -163,7 +163,7 @@ jobs:
           # 上传后的标记名，下载依靠它找到对应文件
           name: stk_windows
           # 上传的文件位置
-          path: apps/template/pyqt/src/dist/stk_nsis.exe
+          path: suan/gui/dist/stk_nsis.exe
   release:
     needs:
       - windows_build
@@ -200,7 +200,7 @@ jobs:
           # 要下载的文件的标记
           name: stk_ubuntu
           # 下载到哪个目录（注意是/而不是\,否则报错）
-          path: apps/template/pyqt/src/dist/
+          path: suan/gui/dist/
 
       - name: Download windows app
         uses: actions/download-artifact@v3
@@ -208,7 +208,7 @@ jobs:
           # 要下载的文件的标记
           name: stk_windows
           # 下载到哪个目录（注意是/而不是\,否则报错）
-          path: apps/template/pyqt/src/dist/
+          path: suan/gui/dist/
 
       - name: Download macOS app
         uses: actions/download-artifact@v3
@@ -216,9 +216,9 @@ jobs:
           # 要下载的文件的标记
           name: stk_macos
           # 下载到哪个目录（注意是/而不是\,否则报错）
-          path: apps/template/pyqt/src/dist/
+          path: suan/gui/dist/
       - run: |
-          cd apps/template/pyqt/src/dist/
+          cd suan/gui/dist/
           ls
 
       - name: release ubuntu app
@@ -227,7 +227,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: apps/template/pyqt/src/dist/stk_ubuntu
+          asset_path: suan/gui/dist/stk_ubuntu
           asset_name: stk_ubuntu
           asset_content_type: application/octet-stream
 
@@ -237,7 +237,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: apps/template/pyqt/src/dist/stk_nsis.exe
+          asset_path: suan/gui/dist/stk_nsis.exe
           asset_name: stk_windows.exe
           asset_content_type: application/octet-stream
 
@@ -247,7 +247,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: apps/template/pyqt/src/dist/stk_macos
+          asset_path: suan/gui/dist/stk_macos
           asset_name: stk_macos
           asset_content_type: application/octet-stream
 
