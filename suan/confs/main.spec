@@ -13,7 +13,7 @@ else:
 added_files = [('../confs', 'confs' ),('../examples', 'examples')]
 
 a = Analysis(
-    ['../main.py'],
+    ['../gui/main.py'],
     pathex=['.'],
     binaries=[],
     datas=added_files,
