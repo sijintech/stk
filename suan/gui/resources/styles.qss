@@ -28,38 +28,10 @@ QHBoxLayout, QVBoxLayout, QGridLayout {
 }
 
 QSplitter{
-    handle-width:200px;
-}
-QDialog#LoginDialog{
-	border-image: url(":/MvtSuites/bin/Image/Login.png");
-}
-QDialog#LoginDialog{
-	border-image: url(":/MvtSuites/bin/Image/Login.png");
+    handle-width:5px;
 }
 
-/* QDockWidget */
-QDockWidget
-{
-        min-width: 300px;
-	padding: 0; /* 控件内边距设置为0 */
-	border: 1px solid #AAAAAA; /* 边框颜色 */
-}
 
-QDockWidget::title {
-    display: none;
-}
-
-QDockWidget#dockWidget_GeneralCAE,QDockWidget#dockWidget_StructuralIntegrity{
-    margin: 0px;
-    padding: 0px;
-    border: 1px solid #AAAAAA; /* 边框颜色 */
-}
-
-QDockWidget#dockWidget_console{
-    min-height: 100px;
-    max-height: 150px;
-    border: 1px solid #AAAAAA; /* 边框颜色 */
-}
 
 /* 标签样式 */
 QLabel{
@@ -71,19 +43,6 @@ QLabel {
     padding: 0px;
 }
 
-.StandardCrack QLabel, CrackPropagation QLabel, .FatigueAnalysis QLabel, .FatigueDatabase QLabel, .MicroFatigue QLabel{
-    /* 在这里设置样式属性，例如字体、颜色、边框等 */
-    font-weight: bold; /* 加粗字体 */
-    color: #333333; /* 文字颜色 */ 
-    border-top: 1px solid #AAAAAA; /* 边框颜色 */
-}
-.CommonFileSystemWidget QLabel#label_Location,.CommonFileSystemWidget QLabel#label_Directory{
-    /* 在这里设置样式属性，例如字体、颜色、边框等 */
-    font-weight: bold; /* 加粗字体 */
-    color: #333333; /* 文字颜色 */
-    border: 1px solid #AAAAAA; /* 边框颜色 */
-    padding: 0px; /* 文字与边框之间的间距 */
-}
 
 /* 菜单栏样式 F0F8FF*/
 QMenu::indicator {
@@ -136,71 +95,6 @@ QPushButton:pressed {
     border-color: #2A6496; /* 按下时的边框色 */
 }
 
-.ReadFiniteElementDialog QDockWidget
-{
-	weight: 842px;
-	height: 536px;
-}
-.ReadModelandResultDialog QDockWidget
-{
-	weight: 419px;
-	height: 663px;
-}
-.EquivalentGravityDialog QDockWidget
-{
-	weight: 518px;
-	height: 637px;
-}
-.CrackModel QDockWidget,SetsizeDialog QDockWidget,DefineLoadDialog QDockWidget
-{
-	min-height: 400px; 
-	max-height: 400px;
-	min-width: 600px; 
-	max-width: 600px; 
-}
-.LoadSpectrumFileDialog QDockWidget,.LoadSpectrumDialog QDockWidget
-{
-
-}
-
-.ReadFiniteElementDialog QPushButton
-{
-	color: black; /* 设置字体颜色为黑色 */
-	border: 1px solid #AAAAAA; /* 边框颜色 */
-    background: transparent;
-	font: 14pt "宋体";
-	weight: 24px;
-	height: 24px;
-}
-.ReadFiniteElementDialog QPushButton:pressed {
-    background-color: #2A6496; /* 按下时的背景色 */
-    border-color: #2A6496; /* 按下时的边框色 */
-}
-.ReadFiniteElementDialog QPushButton:hover {
-    background-color: #357ABD; /* 鼠标悬停时的背景色 */
-    border-color: #357ABD; /* 鼠标悬停时的边框色 */
-}
-
-QPushButton#pushButton_arrows_left
-{
-  border-image: url(":/MvtSuites/bin/Image/FatigueAnalysis/arrows_left.ico");
-}
-QPushButton#pushButton_arrows_right
-{  
-	border-image: url(":/MvtSuites/bin/Image/FatigueAnalysis/arrows_right.ico");
-}
-QPushButton#pushButton_conten
-{
-	border-image: url(":/MvtSuites/bin/Image/FatigueAnalysis/conten.ico");
-}
-QPushButton#pushButton_ZoomIn
-{
-	border-image: url(":/StandardCrackFunction/bin/Image/StandardCrackFunction/zoom_in.png");
-}
-QPushButton#pushButton_ZoomOut
-{
-	border-image: url(":/StandardCrackFunction/bin/Image/StandardCrackFunction/zoom_out.png");
-}
 
 /* 文本框样式 */
 /* 输入框样式 */
@@ -329,19 +223,7 @@ QComboBox {
     font-size: 14pt; /* 调整字体大小 */
 }
 
-.MvtSuites QDockWidget QComboBox
-{
-    min-height: 20px; /* 确保有足够的高度 */
-    max-height: 20px;
-    min-width: 300px;
-}
 
-.CommonFileSystemWidget QComboBox#fileTypeComboBox{
-    min-height: 20px; /* 确保有足够的高度 */
-    max-height: 20px;
-    min-width: 150px; 
-    max-width: 250px; 
-}
 QComboBox:focus {
     border: 1px solid #4A90D9; /* 获得焦点时的边框颜色 */
 }
@@ -369,8 +251,8 @@ QComboBox QPopupProxyStandard > QFrame {
 }
 /* CommomTable 样式 */
 /* TableWidget 样式 */
-.CommomTable QTableWidget {
-    border: 1px solid black; /* 表格边框 */
+QTableWidget {
+    border: none; /* 表格边框 */
     background-color: white; /* 表格背景色 */
     show-grid: true; /* 显示网格线 */
     gridline-color: lightgray; /* 网格线颜色 */
@@ -379,32 +261,7 @@ QComboBox QPopupProxyStandard > QFrame {
 	min-width: 300px;
 }
 
-.CommomTable QTableWidget::item {
-    border: 0px; /* 单元格无边框 */
-    padding: 4px; /* 单元格内边距 */
-	min-width: 100px;
-}
 
-.CommomTable QTableWidget::item:selected {
-    background-color: lightblue; /* 选中单元格的背景色 */
-    color: black; /* 选中单元格的文字颜色 */
-}
-
-/* 三维裂纹建模  DefineCracksDialogClass */
-.DefineCracksDialog QWidget
-{
-	padding: 0; /* 控件内边距设置为0 */
-}
-
-.DefineCracksDialog QPushButton
-{
-    border: 1px solid #4A90E2; /* 边框色 */
-    padding: 5px 10px; /* 内边距 */
-    border-radius: 4px; /* 圆角 */
-	font: 14pt "宋体";
-	width: 153px;
-	height: 153px
-}
 QTabBar::tab {
     font: 14px "Times New Roman"; /* 字体样式 */
     padding: 0px;                 /* 内边距 */
@@ -426,7 +283,10 @@ QTabBar::tab:hover:!selected {
     color: black;
 }
 
-
+QTextEdit {
+    border: none;
+    background-color: transparent;
+}
 
 
 
@@ -435,6 +295,7 @@ QTabBar::tab:hover:!selected {
 QTabWidget::pane {
     background-color: rgb(132, 171, 230); /* 背景色 */
     background: transparent;        /* 背景透明 */
+    border: none;
 
 }
 

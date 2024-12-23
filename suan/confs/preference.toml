@@ -10,7 +10,6 @@ right_sidebar_width = "100"
 center_widget_height = "300"
 
 [UI_Component_Visibility_Init.Info]
-Code_Tab = true
 Log_Tab = true
 Console_Tab = true
 Status_Information = true
@@ -19,6 +18,7 @@ Status_Information = true
 VTK_Visualization_Tab = true
 Matplotlib_Display_Tab = true
 Data_Table_Tab = true
+Code_Tab = true
 
 [UI_Component_Visibility_Init.Tool]
 Open = true

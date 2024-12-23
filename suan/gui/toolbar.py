@@ -268,7 +268,7 @@ class ToolBar(QWidget):
     def preference(self):
         self.logger.info("打开布局设置...")
         preferences = self.parent.load_preferences()
-        Visualization_window = self.parent.getComponent(
+        Visualization_window = self.parent.get_component_by_path(
             "Visualization window"
         )
         Visualization_window.addPreferenceTab(preferences)

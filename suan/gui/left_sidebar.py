@@ -155,6 +155,7 @@ class LeftSidebar(QWidget):
             self.parent.check_and_save_curfile()
         # 新的文件处理
         self.parent.curWorkFile = path
+        # self.parent.center_widget.update_code();
         # if not os.path.samefile(self.parent.curWorkDir, working_directory):
         #     self.open_directory(working_directory, not is_init)
         if self.parent.isWorkspace:
@@ -200,7 +201,7 @@ class LeftSidebar(QWidget):
                         content = file.read()
                         # self.openFilePath.emit(path)
                         # 发送文件内容给InfoBar
-                        self.parent.info_bar.showContent(content, path)
+                        self.parent.get_component_by_name('Code Tab').showContent(content)
                 except Exception as e:
                     print("Error reading file:%s", e)
             else:
@@ -209,6 +210,6 @@ class LeftSidebar(QWidget):
                         content = file.read()
                         # self.openFilePath.emit(path)
                         # 发送文件内容给InfoBar
-                        self.parent.info_bar.showContent(content,path)
+                        self.parent.get_component_by_name('Code Tab').showContent(content)
                 except Exception as e:
                     print("Error reading file:%s", e)

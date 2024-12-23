@@ -89,7 +89,8 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.right_sidebar)
         # 创建主窗口布局
         main_layout = QVBoxLayout()
-        # main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         main_layout.addWidget(self.main_splitter)
 
         # 创建主窗口中心部件
@@ -194,8 +195,8 @@ class MainWindow(QMainWindow):
         height = self.get_workspace_data("window/height")
         width = self.get_workspace_data("window/width")
         self.setGeometry(
-            50,
-            50,
+            10,
+            10,
             int(width),
             int(height),
         )
@@ -251,7 +252,7 @@ class MainWindow(QMainWindow):
             return True
 
     def check_and_save_curfile(self):
-        if not self.info_bar.curFileIsSave():
+        if not self.get_component_by_name('Code Tab').curFileIsSave():
             reply = QMessageBox.question(
                 self,
                 "Warning",
@@ -473,13 +474,30 @@ class MainWindow(QMainWindow):
             current_level = current_level[part]["children"]  # 移动到下一个层级的子组件
         return current_level[component_name]["isVisible"]
 
-    def getComponent(self, path):
+    def get_component_by_path(self, path):
         parts = path.split("/")
         current_level = self.components["main"]["children"]  # 从根组件的子组件开始搜索
         component_name = parts[-1]
         for part in parts[:-1]:
             current_level = current_level[part]["children"]  # 移动到下一个层级的子组件
         return current_level[component_name]["component"]
+
+    def get_component_by_name(self, name):
+        # 从根组件的子组件开始搜索
+        def search_component(current_level):
+            for key, value in current_level.items():
+                # 如果当前组件的名称匹配，则返回该组件
+                if key == name:
+                    return value["component"]
+                # 如果有子组件，递归搜索
+                if "children" in value:
+                    result = search_component(value["children"])
+                    if result:  # 如果子组件中找到了匹配项，返回该组件
+                        return result
+            return None
+
+        # 从根组件的子组件开始搜索
+        return search_component(self.components["main"]["children"])
 
     def check_update_callback(self, data):
         new_version = data["版本号"]

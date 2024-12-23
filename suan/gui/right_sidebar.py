@@ -47,7 +47,7 @@ class RightSidebar(QWidget):
             self.saveData()
         elif action == saveDataAndrun:
             self.saveData()
-            self.parent.info_bar.runCodeWithAnalysis()
+            self.parent.get_component_by_name('Code Tab').runCodeWithAnalysis()
 
     def saveData(self):
         # 获取表格行数
@@ -65,7 +65,7 @@ class RightSidebar(QWidget):
             # 更新变量信息中的初始值
             if variable_name in self.variable_info:
                 self.variable_info[variable_name]["initial_value"] = variable_value
-        self.parent.info_bar.updateInitialValue(self.variable_info)
+        self.parent.get_component_by_name('Code Tab').update_initial_value(self.variable_info)
         self.parent.toolbar.save_file()
 
     def updateData(self, variable_info):
