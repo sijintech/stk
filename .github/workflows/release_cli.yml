@@ -33,7 +33,7 @@ jobs:
           cd suan/cli/
           pip install pyinstaller
           pip install click
-          pyinstaller ./main.spec
+          pyinstaller main.spec
           cd dist
           ls
 
