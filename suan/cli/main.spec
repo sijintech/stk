@@ -11,14 +11,15 @@ block_cipher = None
 # 遍历 toolkits 目录，查找包含 cli.py 的子目录
 for plugin_name in os.listdir(toolkits_dir):
     plugin_path = os.path.join(toolkits_dir, plugin_name)
-
     # 确保是目录，并且该目录下有 cli.py 文件
     if os.path.isdir(plugin_path) and os.path.exists(os.path.join(plugin_path, 'cli.py')):
+        print(f"Adding plugin: {plugin_path}")
         # 将整个插件目录添加到打包列表
         plugin_data.append((plugin_path, os.path.join('toolkits', plugin_name)))
 
         # 如果插件目录下还有其他需要包含的文件，使用 collect_data_files 自动收集
         plugin_data.extend(collect_data_files(plugin_name))
+print("Collected plugin data:", plugin_data)
 
 # 以下是 PyInstaller spec 文件的其他部分
 a = Analysis(
