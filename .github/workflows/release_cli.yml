@@ -1,0 +1,226 @@
+
+name: Build and Release Cli
+
+on:
+  push:
+    paths:
+      - "suan/cli/**"
+      - "toolkits/**"
+      - .github/workflows/release_cli.yml
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  ubuntu_build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Setup virtual environment
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+
+      - name: Build executable
+        run: |
+          python -m pip install -U pip
+          cd suan/cli/
+          pip install pyinstaller
+          pip install click
+          pyinstaller ./main.spec
+          cd dist
+          ls
+
+      - name: Store dist
+        uses: actions/upload-artifact@v3
+        with:
+          name: cli_ubuntu
+          path: suan/cli/dist/suan
+
+#  macOS_build:
+#    runs-on: macos-latest
+#
+#    steps:
+#      - uses: actions/checkout@v3
+#      - name: Set up Python
+#        uses: actions/setup-python@v4
+#        with:
+#          python-version: "3.10"
+##      - name: get tag
+##        id: get_tag
+##        run: |
+##          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+#
+#      - name: Setup virtual environment
+#        run: |
+#          python -m venv .venv
+#          source .venv/bin/activate
+#      - name: build exe
+#        run: |
+#          python -m pip install -U pip
+#          cd suan/cli/
+#          pip install pyinstaller
+#          pip install click
+#          pyinstaller ./main.spec
+#          cd dist
+#          ls
+#
+#      - name: Store dist
+#        uses: actions/upload-artifact@v3
+#        with:
+#          # 上传后的标记名，下载依靠它找到对应文件
+#          name: cli_macos
+#          # 上传的文件位置
+#          path: suan/cli/dist/suan
+
+  windows_build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+#      - name: get tag
+#        id: get_tag
+#        run: |
+#          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+
+      - name: Setup virtual environment
+        run: |
+          python -m venv .venv
+          . .venv\Scripts\activate
+
+
+      - name: build exe
+        run: |
+          python.exe -m pip install -U pip
+          cd suan\cli
+          pip install pyinstaller
+          pip install click
+
+          pyinstaller .\main.spec
+          
+          
+
+
+
+      # - name: Upload files to OSS(window)
+      #   env:
+      #     OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+      #     OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
+      #     OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
+      #     OSS_BUCKET: sijin-suan-update
+      #     # 指定要上传的文件或目录
+      #     SOURCE_DIR: '../src/dist'
+      #     # 指定OSS中的目标目录
+      #     TARGET_DIR: 'nsis/'
+      #   run: |
+      #     pwd
+      #     pip install oss2
+      #     python suan\scripts\deploy.py
+      #     python suan\scripts\update.py
+
+      - name: Store dist
+        uses: actions/upload-artifact@v3
+        with:
+          # 上传后的标记名，下载依靠它找到对应文件
+          name: cli_windows
+          # 上传的文件位置
+          path: suan/cli/dist/suan.exe
+  release:
+    needs:
+      - windows_build
+#      - macOS_build
+      - ubuntu_build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+#      - name: get tag
+#        id: get_tag
+#        run: |
+#          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
+#          echo "The TAG is $steps.get_tag.outputs.TAG"
+
+      - name: Create Release
+        if: github.event_name == 'push'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
+
+        with:
+          tag_name: cli_1.0.0
+          release_name: cli_1.0.0
+#          tag_name: ${{ steps.get_tag.outputs.TAG }}
+#          release_name: ${{ steps.get_tag.outputs.TAG}}
+          # body: |
+          #   Release  ${{ steps.get_tag.outputs.TAG }}
+          # draft: true
+          # prerelease: false
+
+      - name: Download ubuntu app
+        uses: actions/download-artifact@v3
+        with:
+          # 要下载的文件的标记
+          name: cli_ubuntu
+          # 下载到哪个目录（注意是/而不是\,否则报错）
+          path: suan/cli/dist/
+
+      - name: Download windows app
+        uses: actions/download-artifact@v3
+        with:
+          # 要下载的文件的标记
+          name: cli_windows
+          # 下载到哪个目录（注意是/而不是\,否则报错）
+          path: suan/cli/dist/
+
+#      - name: Download macOS app
+#        uses: actions/download-artifact@v3
+#        with:
+#          # 要下载的文件的标记
+#          name: stk_macos
+#          # 下载到哪个目录（注意是/而不是\,否则报错）
+#          path: suan/gui/dist/
+#      - run: |
+#          cd suan/gui/dist/
+#          ls
+
+      - name: release ubuntu app
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: suan/cli/dist/suan
+          asset_name: cli_ubuntu
+          asset_content_type: application/octet-stream
+
+      - name: release windows app
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: suan/cli/dist/suan.exe
+          asset_name: cli_windows
+          asset_content_type: application/octet-stream
+
+#      - name: release macOS app
+#        uses: actions/upload-release-asset@v1
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
+#        with:
+#          upload_url: ${{ steps.create_release.outputs.upload_url }}
+#          asset_path: suan/gui/dist/stk_macos
+#          asset_name: stk_macos
+#          asset_content_type: application/octet-stream
+
