@@ -11,10 +11,10 @@ def cli():
     pass
 
 
-toolkits_path = '../../toolkits'  # 未打包时测试用
+# toolkits_path = '../../toolkits'  # 未打包时测试用
 
 
-# toolkits_path= 'toolkits' #打包时用
+toolkits_path= 'toolkits' #打包时用
 def load_plugins():
     """加载插件并返回每个插件的click.Group对象"""
     # 获取toolkits目录的绝对路径

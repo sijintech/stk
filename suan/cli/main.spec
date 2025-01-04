@@ -2,7 +2,7 @@ import os
 from PyInstaller.utils.hooks import collect_data_files
 
 # 获取当前工作目录，并根据该目录确定 toolkits 的路径
-toolkits_dir = os.path.join(os.getcwd(), '..\\..\\toolkits')  # toolkits 作为一个包
+toolkits_dir = os.path.join(os.getcwd(), '../../toolkits')  # toolkits 作为一个包
 
 # 自动收集所有插件目录下的 cli.py 和相关文件
 plugin_data = []
@@ -47,21 +47,12 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='suan',  # 可执行文件名称
+    name='Suan',  # 可执行文件名称
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=True,  # 在控制台运行
 )
 
-# 收集所有数据文件
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    name='suan',
-)
+
