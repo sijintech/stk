@@ -202,7 +202,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: suan/cli/dist/suan
-          asset_name: cli_ubuntu
+          asset_name: suan
           asset_content_type: application/octet-stream
 
       - name: release windows app
@@ -212,7 +212,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: suan/cli/dist/suan.exe
-          asset_name: cli_windows
+          asset_name: suan.exe
           asset_content_type: application/octet-stream
 
 #      - name: release macOS app

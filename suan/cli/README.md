@@ -57,5 +57,5 @@ pyinstaller main.spec
 如果不知道有什么命令可以使用--help"查询命令，如：
 ./suan.exe sjob --help
 命令参数赋值可以用等号连接(如果值使用了通配符，请务必用等号连接)，也可以把值直接放在参数名后面，如：
-./suan.exe sjob batch-all-command -f='./*' -c 'dir'
+./suan.exe sjob batchCommand -f='./*' -c 'dir'
     

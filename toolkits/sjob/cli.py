@@ -27,8 +27,11 @@ def batch_all_command(command, folder_pattern):
     if (folder_pattern.startswith('"') and folder_pattern.endswith('"')) or \
             (folder_pattern.startswith("'") and folder_pattern.endswith("'")):
         folder_pattern = folder_pattern[1:-1]
+    if (command.startswith('"') and command.endswith('"')) or \
+            (command.startswith("'") and command.endswith("'")):
+        command = command[1:-1]
 
-        # 获取当前工作目录的绝对路径
+    # 获取当前工作目录的绝对路径
     current_dir = os.getcwd()
     # 获取系统默认编码
     system_encoding = locale.getpreferredencoding()
