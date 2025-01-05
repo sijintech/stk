@@ -47,7 +47,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='Suan',  # 可执行文件名称
+    name='suan',  # 可执行文件名称
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
