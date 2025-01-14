@@ -3,6 +3,8 @@ name: Build and Release Cli
 
 on:
   push:
+    tags:
+      - 'v*'
     paths:
       - "suan/cli/**"
       - "toolkits/**"
@@ -44,41 +46,6 @@ jobs:
           name: cli_ubuntu
           path: suan/cli/dist/suan
 
-#  macOS_build:
-#    runs-on: macos-latest
-#
-#    steps:
-#      - uses: actions/checkout@v3
-#      - name: Set up Python
-#        uses: actions/setup-python@v4
-#        with:
-#          python-version: "3.10"
-##      - name: get tag
-##        id: get_tag
-##        run: |
-##          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
-#
-#      - name: Setup virtual environment
-#        run: |
-#          python -m venv .venv
-#          source .venv/bin/activate
-#      - name: build exe
-#        run: |
-#          python -m pip install -U pip
-#          cd suan/cli/
-#          pip install pyinstaller
-#          pip install click
-#          pyinstaller ./main.spec
-#          cd dist
-#          ls
-#
-#      - name: Store dist
-#        uses: actions/upload-artifact@v3
-#        with:
-#          # 上传后的标记名，下载依靠它找到对应文件
-#          name: cli_macos
-#          # 上传的文件位置
-#          path: suan/cli/dist/suan
 
   windows_build:
     runs-on: windows-latest
@@ -89,10 +56,10 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
-#      - name: get tag
-#        id: get_tag
-#        run: |
-#          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+      - name: get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
 
       - name: Setup virtual environment
         run: |
@@ -145,11 +112,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-#      - name: get tag
-#        id: get_tag
-#        run: |
-#          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
-#          echo "The TAG is $steps.get_tag.outputs.TAG"
+      - name: get tag
+        id: get_tag
+        run: |
+          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_OUTPUT"
+          echo "The TAG is $steps.get_tag.outputs.TAG"
 
       - name: Create Release
         if: github.event_name == 'push'
@@ -159,10 +126,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
 
         with:
-          tag_name: cli_1.0.0
-          release_name: cli_1.0.0
-#          tag_name: ${{ steps.get_tag.outputs.TAG }}
-#          release_name: ${{ steps.get_tag.outputs.TAG}}
+
+          tag_name: cli_${{ steps.get_tag.outputs.TAG }}
+          release_name: cli_${{ steps.get_tag.outputs.TAG}}
           # body: |
           #   Release  ${{ steps.get_tag.outputs.TAG }}
           # draft: true
