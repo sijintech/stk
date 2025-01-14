@@ -7,16 +7,12 @@ Created on Mon Feb 18 11:40:52 2019
 This is the general header file for all research data processing and plotting
 """
 import numpy as np
-import pandas as pd
 import re
-import glob
 import os
-import sys
 import matplotlib.pyplot as plt
 # import svgutils.transform as sg
 #import muproData.svg_stack as ss
 #import muproData.svg_stack as ss
-from ..drawing import svg_stack as ss
 from ..data_handling.readDat import readDatScalar
 import datetime
 

@@ -9,10 +9,10 @@ from math import ceil
 import cairosvg
 import os
 from . import svg_stack as ss
-from ..research.research_header import *
+from stk.toolkits.smesh.src.stk_data.research.research_header import *
 
 
-def svg_grid(outFileName, imgNames=get_file_list('.'), vals_in={}):
+def svg_grid(outFileName, imgNames=get_file_list(''), vals_in={}):
 
     keys, vals = get_val_list(imgNames)
     if len(vals_in) != 0:
