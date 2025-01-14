@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
         self.save_preferences()
         if self.isWorkspace:
             self.check_and_save_curworkspace()
-        elif self.curFile is not None:
+        elif self.curWorkFile is not None:
             self.check_and_save_curfile()
         event.accept()
 

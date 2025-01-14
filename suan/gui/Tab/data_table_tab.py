@@ -1,7 +1,4 @@
 import math
-
-import matplotlib.pyplot as plt
-import vtk
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
@@ -14,8 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
 )
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
+
 
 from custom_logger import CustomLogger
 

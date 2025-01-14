@@ -1,17 +1,25 @@
-本免责及隐私保护声明(以下简称“隐私声明”或“本声明”)适用于软件工作室(以下简称“”)研发的系列软件(以下简称"软件") 在您阅读本声明后若不同意此声明中的任何条款，或对本声明存在质疑，请立刻停止使用我们的软件。若您已经开始或正在使用软件，则表示您已阅读并同意本声明的所有条款之约定。
+This Privacy Statement applies to the series of software developed by the Software Studio (hereinafter referred to as "Software"). If you do not agree to any terms of this Statement or have questions about it, please immediately stop using our Software. By installing or using the Software, you acknowledge that you have read and agreed to all the terms of this Statement.
 
-　　1、 总则：您通过安装软件并使用软件提供的服务与功能即表示您已经同意与立本协议。可随时执行全权决定更改“条款”。如“条款”有任何变更，官方网站上刊载公告作为通知。经修订的“条款”一经在官方网站上公布后，立即自动生效。
+General Provisions:
+By installing and using the Software and its provided services and features, you agree to the terms of this agreement. The Software Studio reserves the right to amend the "Terms" at its sole discretion at any time. Any changes to the "Terms" will be announced on the official website. The revised "Terms" take effect immediately upon publication on the official website.
 
-　　2、 本产品是新一代软件。我们的软件永久免费，无病毒。
+Product Description:
+This product represents a new generation of software. Our Software is free of charge and free from viruses.
 
-　　3、一切因使用软件而引致之任何意外、疏忽、合约毁坏、诽谤、版权或知识产权侵犯及其所造成的损失(包括在非官方站点下载软件而感染电脑病毒)，软件软件概不负责，亦不承担任何法律责任。
+Liability Disclaimer:
+The Software Studio is not responsible for any accidents, negligence, contract breaches, defamation, copyright or intellectual property infringements, or any resulting losses (including computer viruses contracted from downloading the Software from non-official sites). The Software Studio does not assume any legal liability.
 
-　　4、用户对使用软件自行承担风险，我们不做任何形式的保证, 因网络状况、通讯线路等任何技术原因而导致用户不能正常升级更新，我们也不承担任何法律责任。
+User Responsibility:
+Users bear the risks associated with using the Software. The Software Studio provides no guarantees of any kind. We do not assume legal responsibility for users' inability to update or upgrade due to network conditions, communication line issues, or other technical reasons.
 
-　　5、软件尊重并保护所有用户的个人隐私权，不会窃取任何用户计算机中的信息。
+Privacy Protection:
+The Software respects and protects all users' personal privacy. It does not collect or steal any information from users' computers.
 
-　　6、任何单位或个人不得在没有软件工作室授权的情况下对旗下软件进行二次开发、功能修改和反编译。软件保留版权与著作权。
+Restrictions:
+No entity or individual is allowed to perform secondary development, functionality modifications, or reverse engineering on the Software without authorization from the Software Studio. All copyright and intellectual property rights are reserved.
 
-　　7、系统的版权：软件工作室对所有开发的或合作开发的产品拥有知识产权，著作权，版权和使用权，这些产品受到适用的知识产权、版权、商标、服务商标、专利或其他法律的保护。
+System Copyright:
+The Software Studio owns the intellectual property, copyright, and usage rights for all products it develops or co-develops. These products are protected under applicable intellectual property, copyright, trademark, service mark, patent, or other laws.
 
-　　8、传播:任何公司或个人在网络上发布，传播我们软件的行为都是允许的，但因公司或个人传播软件可能造成的任何法律和刑事事件不负任何责任。
+Distribution:
+Any company or individual is permitted to publish or distribute the Software online. However, the Software Studio assumes no responsibility for any legal or criminal issues caused by such distribution.

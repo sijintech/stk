@@ -3,7 +3,7 @@ from PySide6.QtCore import QModelIndex, Qt, Signal
 from PySide6.QtCore import QFileInfo
 from PySide6.QtGui import QIcon
 import os
-import vtk
+import vtkmodules.all as vtk
 from custom_logger import CustomLogger
 
 
