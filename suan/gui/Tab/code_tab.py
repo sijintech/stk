@@ -11,7 +11,7 @@ from PySide6.QtGui import QAction
 import os
 import re
 
-from suan.gui.custom_logger import CustomLogger
+from custom_logger import CustomLogger
 
 
 class CodeTab(QTextEdit):

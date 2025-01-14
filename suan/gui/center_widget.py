@@ -9,9 +9,9 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
 from custom_logger import CustomLogger
-from suan.gui.Tab.code_tab import CodeTab
-from suan.gui.Tab.data_table_tab import DataTableTab
-from suan.gui.Tab.preference_tab import PreferenceTab
+from Tab.code_tab import CodeTab
+from Tab.data_table_tab import DataTableTab
+from Tab.preference_tab import PreferenceTab
 
 
 class CustomFigureCanvas(FigureCanvasQTAgg):

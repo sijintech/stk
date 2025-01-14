@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
-from suan.gui.custom_logger import CustomLogger
+from custom_logger import CustomLogger
 
 
 class DataTableTab(QWidget):

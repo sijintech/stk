@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 
 
 from custom_logger import CustomLogger
-from suan.gui.Tab.code_tab import CodeTab
+from Tab.code_tab import CodeTab
 
 
 class InfoBar(QWidget):
