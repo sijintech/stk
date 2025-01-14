@@ -1,6 +1,6 @@
-Default_Location = "$Home"
+Default_Location = "Home"
 Open_Last_Workspace = true
-Open_Last_Working_Directory = "D:/work/sijin/stk/suan/test/1"
+Open_Last_Working_Directory = "C:\Windows"
 
 [UI_Init]
 window_width = "800"

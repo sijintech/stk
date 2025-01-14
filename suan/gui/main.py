@@ -1,3 +1,4 @@
+import re
 import sys
 from PySide6.QtWidgets import (
     QApplication,
@@ -520,24 +521,59 @@ class MainWindow(QMainWindow):
         self.updateWindow.show()
 
 
+
 def load_qss(qss_file_path):
+    """
+    加载 QSS 文件内容
+    """
     with open(qss_file_path, 'r', encoding='gbk', errors='ignore') as file:
         return file.read()
 
 
+def scale_qss_font_size(qss, scale_factor):
+    """
+    根据缩放因子动态调整 QSS 字体大小
+    :param qss: 原始 QSS 字符串
+    :param scale_factor: 缩放因子
+    :return: 调整后的 QSS
+    """
+
+    def adjust_font_size(match):
+        size = int(match.group(1))  # 提取 font-size 的数值部分
+        scaled_size = int(size * scale_factor)  # 乘以缩放因子
+        return f"font-size: {scaled_size}px;"
+
+    # 用正则表达式匹配 font-size 并替换
+    scaled_qss = re.sub(r"font-size:\s*(\d+)px;", adjust_font_size, qss)
+    return scaled_qss
+
+
 def apply_qss(app, qss):
+    """
+    应用 QSS 样式
+    """
     app.setStyleSheet(qss)
 
 
 if __name__ == "__main__":
-    Updater.init()
+    # 初始化应用程序
     app = QApplication(sys.argv)
-    # 加载QSS文件
+
+    # 获取屏幕的逻辑 DPI 和缩放因子
+    screen = app.primaryScreen()
+    dpi = screen.logicalDotsPerInch()
+    scale_factor = dpi / 96.0  # 96 为标准 DPI
+
+    # 加载原始 QSS 文件
     qss_file_path = './resources/styles.qss'
     qss = load_qss(qss_file_path)
 
-    # 应用QSS样式
-    apply_qss(app, qss)
+    # 动态调整字体大小
+    scaled_qss = scale_qss_font_size(qss, scale_factor)
+
+    # 应用调整后的 QSS 样式
+    apply_qss(app, scaled_qss)
     mainWindow = MainWindow(True)
     mainWindow.show()
+
     sys.exit(app.exec())
