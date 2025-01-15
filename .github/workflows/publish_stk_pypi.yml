@@ -1,4 +1,4 @@
-name: Publish pyqt to PyPI and TestPyPI
+name: Publish STK to PyPI and TestPyPI
 on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测试发布，而release用来正式发布
   release:
     types: [published]
@@ -8,7 +8,7 @@ on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测�
         - '1v*'
 jobs:
   build_pyqt:
-    name: Build pyqt
+    name: Build STK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,17 +30,17 @@ jobs:
           --user
       - name: Build a binary wheel and a source tarball
         run: |
-          cd suan/gui/pyqt
+          cd suan/gui/
           python3 -m build
       - name: Store the distribution packages
         uses: actions/upload-artifact@v3
         with:
-          name: pyqt
+          name: STK
           path: suan/gui/dist/
 
   publish-to-pypi:
     name: >-
-      Publish pyqt to PyPI
+      Publish STK to PyPI
     needs:
       - build_pyqt
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
         with:
           name: pyqt
           path: suan/gui/dist/
-      - name: Publish pyqt to TestPyPI
+      - name: Publish STK to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__

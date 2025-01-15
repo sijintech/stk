@@ -40,6 +40,7 @@ jobs:
           pip install numpy
           pip install requests          
           pip install toml
+          pip install vtk
           pyinstaller ../confs/main.spec
           cd dist
           ls
