@@ -15,7 +15,7 @@ added_files = [('confs/*', 'confs/' ),('examples/*', 'examples/'),('resources', 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[('Updater','Updater'),('Tab','Tab'),('version.py','.'),('custom_logger.py','.'),('vtkmodules.util.data_model','.')],
+    binaries=[('Updater','Updater'),('Tab','Tab'),('version.py','.'),('custom_logger.py','.')],
     datas=added_files,
     hiddenimports=['version','vtkmodules.util.data_model','custom_logger','center_widget', 'Updater','info_bar', 'right_sidebar',
     'left_sidebar','statusbar', 'toolbar', 'Tab','PySide6', 'vtk', 'matplotlib',
