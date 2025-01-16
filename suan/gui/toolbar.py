@@ -15,8 +15,13 @@ import zipfile
 from PySide6.QtGui import QAction, QIcon
 from custom_logger import CustomLogger
 import os
-import shutil
+import sys
 
+
+def get_resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 class ToolBar(QWidget):
     """自定义工具栏，继承自 QWidget，并作为窗口的一个部件"""
@@ -47,15 +52,15 @@ class ToolBar(QWidget):
 
         # 文件菜单
         file_menu = QMenu("文件", self)
-        open_file_action = QAction(QIcon("./icons/file_icon.ico"), "打开文件", self)
+        open_file_action = QAction(QIcon(get_resource_path("./icons/file_icon.ico")), "打开文件", self)
         open_file_action.triggered.connect(self.openFile)
         file_menu.addAction(open_file_action)
 
-        open_directory_action = QAction(QIcon("./icons/folder_icon.ico"), "打开项目", self)
+        open_directory_action = QAction(QIcon(get_resource_path("./icons/folder_icon.ico")), "打开项目", self)
         open_directory_action.triggered.connect(self.openDirectory)
         file_menu.addAction(open_directory_action)
 
-        open_new_action = QAction(QIcon("./icons/new.ico"), "新建", self)
+        open_new_action = QAction(QIcon(get_resource_path("./icons/new.ico")), "新建", self)
         open_new_action.triggered.connect(self.showNewMenu)
         file_menu.addAction(open_new_action)
 
@@ -114,7 +119,7 @@ class ToolBar(QWidget):
 
         # 新建按钮
         new_button = QToolButton(self)
-        new_button.setIcon(QIcon("./icons/new.ico"))
+        new_button.setIcon(QIcon(get_resource_path("./icons/new.ico")))
         new_button.setPopupMode(QToolButton.InstantPopup)
         new_menu = QMenu(self)
 
@@ -138,29 +143,29 @@ class ToolBar(QWidget):
         self.toolbar2.addWidget(new_button)
 
         # 保存工作区按钮
-        save_workspace_action = QAction(QIcon("./icons/save.ico"), "保存工作区", self)
+        save_workspace_action = QAction(QIcon(get_resource_path("./icons/save.ico")), "保存工作区", self)
         save_workspace_action.triggered.connect(self.saveWorkspace)
         self.toolbar2.addAction(save_workspace_action)
 
         # 打开文件按钮
-        open_file_action = QAction(QIcon("./icons/file_action.ico"), "打开文件", self)
+        open_file_action = QAction(QIcon(get_resource_path("./icons/file_action.ico")), "打开文件", self)
         open_file_action.triggered.connect(self.openFile)
         self.toolbar2.addAction(open_file_action)
 
         # 打开目录按钮
-        open_directory_action = QAction(QIcon("./icons/folder_icon.ico"), "打开项目", self)
+        open_directory_action = QAction(QIcon(get_resource_path("./icons/folder_icon.ico")), "打开项目", self)
         open_directory_action.triggered.connect(self.openDirectory)
         self.toolbar2.addAction(open_directory_action)
         # 分隔符
         self.toolbar2.addSeparator()
 
         # 保存并运行按钮
-        save_and_run_action = QAction(QIcon("./icons/run.png"), "保存并运行", self)
+        save_and_run_action = QAction(QIcon(get_resource_path("./icons/run.png")), "保存并运行", self)
         save_and_run_action.triggered.connect(self.saveAndRun)
         self.toolbar2.addAction(save_and_run_action)
 
         # 停止按钮
-        stop_action = QAction(QIcon("./icons/stop.png"), "停止", self)
+        stop_action = QAction(QIcon(get_resource_path("./icons/stop.png")), "停止", self)
         stop_action.triggered.connect(self.stop_execution)
         self.toolbar2.addAction(stop_action)
 
@@ -170,13 +175,14 @@ class ToolBar(QWidget):
         # 项目下拉菜单
         self.project_dropdown = QComboBox(self)
         self.project_dropdown.addItem("选择项目")  # 默认提示选项
-        self.loadProjects("../examples")
+        # self.loadProjects("examples")
+        self.loadProjects(get_resource_path("examples"))
         self.project_dropdown.currentIndexChanged.connect(self.handleProjectSelection)
         self.toolbar2.addWidget(self.project_dropdown)
         # 分隔符
         self.toolbar2.addSeparator()
         # 检查更新按钮
-        check_update_action = QAction(QIcon("./icons/update.png"), "检查更新", self)
+        check_update_action = QAction(QIcon(get_resource_path("./icons/update.png")), "检查更新", self)
         check_update_action.triggered.connect(self.checkUpdate)
         self.toolbar2.addAction(check_update_action)
 

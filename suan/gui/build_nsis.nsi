@@ -37,7 +37,7 @@ SetCompress off
 ; 安装过程页面
 !insertmacro MUI_PAGE_INSTFILES
 ; 安装完成页面
-!define MUI_FINISHPAGE_RUN "$INSTDIR\stk.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\stk_windows.exe"
 !insertmacro MUI_PAGE_FINISH
 
 ; 安装卸载过程页面
@@ -68,8 +68,8 @@ Section "MainSection" SEC01
   File ".\dist\stk_windows.exe"
 
   CreateDirectory "$SMPROGRAMS\suan"
-  CreateShortCut "$SMPROGRAMS\suan\suan.lnk" "$INSTDIR\stk.exe"
-  CreateShortCut "$DESKTOP\suan.lnk" "$INSTDIR\stk.exe"
+  CreateShortCut "$SMPROGRAMS\suan\suan.lnk" "$INSTDIR\stk_windows.exe"
+  CreateShortCut "$DESKTOP\suan.lnk" "$INSTDIR\stk_windows.exe"
 SectionEnd
 
 Section -AdditionalIcons
@@ -80,10 +80,10 @@ SectionEnd
 
 Section -Post
   WriteUninstaller "$INSTDIR\uninst.exe"
-  WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\stk.exe"
+  WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\stk_windows.exe"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayName" "$(^Name)"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString" "$INSTDIR\uninst.exe"
-  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\stk.exe"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\stk_windows.exe"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "URLInfoAbout" "${PRODUCT_WEB_SITE}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "Publisher" "${PRODUCT_PUBLISHER}"
@@ -102,7 +102,7 @@ FunctionEnd
 Section Uninstall
   Delete "$INSTDIR\${PRODUCT_NAME}.url"
   Delete "$INSTDIR\uninst.exe"
-  Delete "$INSTDIR\stk.exe"
+  Delete "$INSTDIR\stk_windows.exe"
 
   Delete "$SMPROGRAMS\suan\Uninstall.lnk"
   Delete "$SMPROGRAMS\suan\Website.lnk"

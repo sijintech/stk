@@ -12,3 +12,4 @@ _deps
 .idea
 
 .DS_Store!/suan/confs/main.spec
+!/.venv/

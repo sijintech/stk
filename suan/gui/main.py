@@ -337,7 +337,7 @@ class MainWindow(QMainWindow):
         this_dir = os.path.dirname(os.path.abspath(__file__))
         if getattr(sys, "frozen", True):
             self.logger.info("执行脚本")
-            self.preference_toml_path = os.path.join(this_dir, "../confs/preference.toml")
+            self.preference_toml_path = os.path.join(this_dir, "confs/preference.toml")
 
         else:
             self.preference_toml_path = os.path.join(
@@ -555,6 +555,12 @@ def apply_qss(app, qss):
     app.setStyleSheet(qss)
 
 
+def get_resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+
 if __name__ == "__main__":
     # 初始化应用程序
     app = QApplication(sys.argv)
@@ -565,7 +571,7 @@ if __name__ == "__main__":
     scale_factor = dpi / 96.0  # 96 为标准 DPI
 
     # 加载原始 QSS 文件
-    qss_file_path = './resources/styles.qss'
+    qss_file_path = get_resource_path('resources/styles.qss')
     qss = load_qss(qss_file_path)
 
     # 动态调整字体大小

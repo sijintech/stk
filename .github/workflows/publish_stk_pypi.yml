@@ -30,13 +30,13 @@ jobs:
           --user
       - name: Build a binary wheel and a source tarball
         run: |
-          cd suan/gui/
+          cd suan/
           python3 -m build
       - name: Store the distribution packages
         uses: actions/upload-artifact@v3
         with:
           name: STK
-          path: suan/gui/dist/
+          path: suan/dist/
 
   publish-to-pypi:
     name: >-

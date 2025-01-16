@@ -19,14 +19,14 @@ bucket = oss2.Bucket(auth, os.environ['OSS_ENDPOINT'], os.environ['OSS_BUCKET'])
 # 下载Object到本地文件，并保存到指定的本地路径D:\\localpath\\examplefile.txt。如果指定的本地文件存在会覆盖，不存在则新建。
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
-update_json_path = os.path.join(this_dir, "../confs/update.json")
+update_json_path = os.path.join(this_dir, "../gui/confs/update.json")
 
 bucket.get_object_to_file('update.json', update_json_path)
 
 
 source_dir = os.path.join(this_dir, os.environ['SOURCE_DIR'])
 target_dir = os.environ['TARGET_DIR']
-oss_path = "../confs/update.json"
+oss_path = "../gui/confs/update.json"
 
 
 # 读取 update.json

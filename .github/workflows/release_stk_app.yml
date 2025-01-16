@@ -41,7 +41,7 @@ jobs:
           pip install requests          
           pip install toml
           pip install vtk
-          pyinstaller ../confs/main.spec
+          pyinstaller ./main.spec
           cd dist
           ls
 
@@ -81,7 +81,7 @@ jobs:
           pip install numpy
           pip install requests
           pip install toml
-          pyinstaller ../confs/main.spec
+          pyinstaller ./main.spec
           cd dist
           ls
 
@@ -120,13 +120,13 @@ jobs:
           cd suan\gui
           pip install pyinstaller
           pip install PySide6
-          pip install vtk
+          pip install vtk --upgrade
           pip install matplotlib
           pip install pandas
           pip install numpy
           pip install requests
           pip install toml
-          pyinstaller ..\confs\main.spec
+          pyinstaller .\main.spec
           
           
           # - name: Install NSIS
