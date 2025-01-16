@@ -200,7 +200,7 @@ jobs:
           # prerelease: false
 
       - name: Download ubuntu app
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           # 要下载的文件的标记
           name: stk_ubuntu
@@ -208,7 +208,7 @@ jobs:
           path: suan/gui/dist/
 
       - name: Download windows app
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           # 要下载的文件的标记
           name: stk_windows
@@ -216,7 +216,7 @@ jobs:
           path: suan/gui/dist/
 
       - name: Download macOS app
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           # 要下载的文件的标记
           name: stk_macos
