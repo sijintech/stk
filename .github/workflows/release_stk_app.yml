@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.9.7"
+          python-version: "3.9"
 
       - name: Get tag
         id: get_tag
@@ -59,7 +59,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.9.7"
+          python-version: "3.9"
       - name: get tag
         id: get_tag
         run: |
@@ -101,7 +101,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.9.7"
+          python-version: "3.9"
       - name: get tag
         id: get_tag
         run: |
