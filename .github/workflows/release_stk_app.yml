@@ -167,7 +167,7 @@ jobs:
           name: stk_windows
           # 上传的文件位置
 #          path: suan/gui/dist/stk_nsis.exe
-          path: suan/gui/dist/stk_window.exe
+          path: suan/gui/dist/stk_windows.exe
 
   release:
     needs:
