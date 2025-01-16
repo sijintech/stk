@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.9.7"
 
       - name: Get tag
         id: get_tag
@@ -33,7 +33,7 @@ jobs:
           python -m pip install -U pip
           python suan/scripts/run_write_version.py
           cd suan/gui/
-          pip install pyinstaller
+          pip install pyinstaller==6.3.0
           pip install PySide6
           pip install matplotlib
           pip install pandas
@@ -59,7 +59,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.9.7"
       - name: get tag
         id: get_tag
         run: |
@@ -74,13 +74,14 @@ jobs:
           python -m pip install -U pip
           python suan/scripts/run_write_version.py
           cd suan/gui/
-          pip install pyinstaller
+          pip install pyinstaller==6.3.0
           pip install PySide6
           pip install matplotlib
           pip install pandas
           pip install numpy
           pip install requests
           pip install toml
+#          pip install vtk
           pyinstaller ./main.spec
           cd dist
           ls
@@ -101,7 +102,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.9.7"
       - name: get tag
         id: get_tag
         run: |
@@ -118,9 +119,10 @@ jobs:
           python.exe -m pip install -U pip
           python suan\scripts\run_write_version.py
           cd suan\gui
-          pip install pyinstaller
+          pip install pyinstaller==6.3.0
           pip install PySide6
           pip install vtk --upgrade
+          python -c "import vtk"
           pip install matplotlib
           pip install pandas
           pip install numpy
