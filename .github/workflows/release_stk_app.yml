@@ -242,7 +242,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: suan/gui/dist/stk_nsis.exe
+#          asset_path: suan/gui/dist/stk_nsis.exe
+          asset_path: suan/gui/dist/stk_windows.exe
           asset_name: stk_windows.exe
           asset_content_type: application/octet-stream
 
