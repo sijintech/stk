@@ -74,6 +74,7 @@ jobs:
           python -m pip install -U pip
           python suan/scripts/run_write_version.py
           cd suan/gui/
+          pip install vtk==9.3.0
           pip install pyinstaller==6.3.0
           pip install PySide6
           pip install matplotlib
@@ -120,7 +121,7 @@ jobs:
           cd suan\gui
           pip install pyinstaller==6.3.0
           pip install PySide6
-          pip install vtk --upgrade
+          pip install vtk==9.3.0
           python -c "import vtk"
           pip install matplotlib
           pip install pandas
