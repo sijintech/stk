@@ -1,6 +1,6 @@
 Default_Location = "Home"
 Open_Last_Workspace = true
-Open_Last_Working_Directory = "C:\\Windows"
+Open_Last_Working_Directory = "C:/"
 
 [UI_Init]
 window_width = "800"
