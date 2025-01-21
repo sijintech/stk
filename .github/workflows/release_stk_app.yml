@@ -139,11 +139,11 @@ jobs:
           # scoop bucket add extras
 
         # scoop install nsis
-#      - name: build app
-#        run: |
-#          makensis suan\gui\build_nsis.nsi
-#          cd suan\gui\dist
-#          ls
+      - name: build app
+        run: |
+          makensis suan\gui\build_nsis.nsi
+          cd suan\gui\dist
+          ls
 
       # - name: Upload files to OSS(window)
       #   env:
@@ -167,8 +167,8 @@ jobs:
           # 上传后的标记名，下载依靠它找到对应文件
           name: stk_windows
           # 上传的文件位置
-#          path: suan/gui/dist/stk_nsis.exe
-          path: suan/gui/dist/stk_windows.exe
+          path: suan/gui/dist/stk_nsis.exe
+  #          path: suan/gui/dist/stk_windows.exe
 
   release:
     needs:
@@ -243,8 +243,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-#          asset_path: suan/gui/dist/stk_nsis.exe
-          asset_path: suan/gui/dist/stk_windows.exe
+          asset_path: suan/gui/dist/stk_nsis.exe
+          #          asset_path: suan/gui/dist/stk_windows.exe
           asset_name: stk_windows.exe
           asset_content_type: application/octet-stream
 
