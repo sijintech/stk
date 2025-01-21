@@ -5,7 +5,7 @@
 !define PRODUCT_PUBLISHER "ZhouHanjie"
 !define PRODUCT_WEB_SITE "http://www.mycompany.com"
 ;用于指定在 Windows 注册表中存储应用程序路径的键名
-!define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\stk.exe"
+!define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\stk_windows.exe"
 ;通常用于指定在 Windows 注册表中存储应用程序卸载信息的键名
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 ;用于指定应用程序卸载信息在 Windows 注册表中的根键（即根目录）
