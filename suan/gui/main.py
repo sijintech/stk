@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.Yes:
             this_dir = os.path.dirname(os.path.abspath(__file__))
-            self.create_workspace_file(directory, os.path.join(this_dir, "confs/workspace.suan"))
+            self.create_workspace_file(directory, os.path.join(this_dir, get_resource_path("confs/workspace.suan")))
             if is_init:
                 self.init_workspace()
 
@@ -337,11 +337,11 @@ class MainWindow(QMainWindow):
         this_dir = os.path.dirname(os.path.abspath(__file__))
         if getattr(sys, "frozen", True):
             self.logger.info("执行脚本")
-            self.preference_toml_path = os.path.join(this_dir, "confs/preference.toml")
+            self.preference_toml_path = os.path.join(this_dir, get_resource_path("confs/preference.toml"))
 
         else:
             self.preference_toml_path = os.path.join(
-                this_dir, "confs/preference.toml"
+                this_dir, get_resource_path("confs/preference.toml")
             )
         self.preferences = self.load_preferences()
         self.curWorkDir = self.preferences["Open_Last_Working_Directory"]
@@ -560,11 +560,36 @@ def get_resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
+def check_resource():
+
+    # 获取当前文件路径
+    current_path = os.path.dirname(os.path.abspath(__file__))
+
+    # 需要检查的子目录列表
+    subdirs = ['confs', 'examples', 'resources', 'icons']
+
+    for subdir in subdirs:
+        dir_path = os.path.join(current_path, get_resource_path(subdir))
+        print(f"\n目录: {dir_path}")
+
+        # 判断目录是否存在
+        if os.path.exists(dir_path) and os.path.isdir(dir_path):
+            # 列出目录中的所有文件和子目录
+            items = os.listdir(dir_path)
+            if items:
+                print("包含以下内容:")
+                for item in items:
+                    print(f"  - {item}")
+            else:
+                print("目录为空。")
+        else:
+            print("目录不存在。")
+
 
 if __name__ == "__main__":
     # 初始化应用程序
     app = QApplication(sys.argv)
-
+    check_resource()
     # 获取屏幕的逻辑 DPI 和缩放因子
     screen = app.primaryScreen()
     dpi = screen.logicalDotsPerInch()
