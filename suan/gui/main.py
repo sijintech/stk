@@ -341,7 +341,7 @@ class MainWindow(QMainWindow):
 
         else:
             self.preference_toml_path = os.path.join(
-                this_dir, "confs//preference.toml"
+                this_dir, "confs/preference.toml"
             )
         self.preferences = self.load_preferences()
         self.curWorkDir = self.preferences["Open_Last_Working_Directory"]
