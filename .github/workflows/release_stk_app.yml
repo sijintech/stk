@@ -1,6 +1,4 @@
-
 name: Build and Release App
-
 on:
   push:
     tags:
