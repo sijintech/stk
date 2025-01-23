@@ -11,5 +11,6 @@ CTestTestfile.cmake
 _deps
 .idea
 
-.DS_Store!/suan/confs/main.spec
+
 !/.venv/
+!/suan/gui/main.spec

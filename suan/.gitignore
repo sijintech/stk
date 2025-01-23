@@ -332,3 +332,4 @@ cython_debug/
 !/dist/
 !/gui/confs/main.spec
 !/dist/
+!/gui/main.spec
