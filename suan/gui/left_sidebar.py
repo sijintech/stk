@@ -36,13 +36,24 @@ class LeftSidebar(QWidget):
         layout.setContentsMargins(0,0,0,0)
         self.setupFileSystemModel()
 
-    def setupFileSystemModel(self):
+    def setupFileSystemModel(self): 
         # 创建文件系统模型
         self.model = QFileSystemModel(self)
         root_path = os.getcwd()  # 获取当前工作目录
+        self.logger.debug(f"设置根路径: {root_path}")
         self.model.setRootPath(root_path)
-        self.treeView.setRootIndex(self.model.index(root_path))  # 设置根索引为当前路径
+
+        # 检查索引有效性
+        root_index = self.model.index(root_path)
+        self.logger.debug(f"根索引有效性: {root_index.isValid()}")
+
+        # 设置模型后再设置根索引
         self.treeView.setModel(self.model)
+        if root_index.isValid():
+            self.treeView.setRootIndex(root_index)
+        else:
+            self.logger.error("根索引无效，无法设置为根索引")
+        
         # 自定义文件和目录图标
         self.model.setIconProvider(FileIconProvider())
 
@@ -58,8 +69,21 @@ class LeftSidebar(QWidget):
         self.treeView.doubleClicked.connect(self.onDoubleClick)
     def initWorkspace(self):
         working_directory = self.parent.get_workspace_data('left_sidebar/working_directory')
-        self.logger.debug(working_directory)
-        self.treeView.setRootIndex(self.model.index(working_directory))
+        self.logger.debug(f"工作目录: {working_directory}")
+
+        # 确保模型已设置
+        if not hasattr(self, 'model') or self.model is None:
+            self.logger.error("模型未初始化，请先调用 setupFileSystemModel")
+            return
+
+        # 检查索引有效性
+        index = self.model.index(working_directory)
+        self.logger.debug(f"工作目录索引有效性: {index.isValid()}")
+
+        if index.isValid():
+            self.treeView.setRootIndex(index)
+        else:
+            self.logger.error(f"无效索引: {working_directory}，无法设置为根索引")
 
     def onDoubleClick(self, index: QModelIndex):
         # 获取所选项的路径
@@ -81,7 +105,7 @@ class LeftSidebar(QWidget):
 
     def open_directory(self, directory, workspace_data=None, init_workspace=True):
         # 原来目录处理
-        self.logger.debug(self.parent.curWorkDir)
+        self.logger.debug(f"当前工作目录: {self.parent.curWorkDir}")
 
         if self.parent.curWorkDir is not None and not self.parent.curWorkDir == directory:
             if self.parent.isWorkspace:
@@ -90,10 +114,23 @@ class LeftSidebar(QWidget):
                 self.parent.check_and_save_curfile()
 
         # 新的目录处理
-        self.logger.debug("打开：%s", directory)
+        self.logger.debug(f"打开新目录: {directory}")
         self.parent.curWorkDir = directory
-        # self.parent.checkWorkspaceFile(directory)
-        self.treeView.setRootIndex(self.model.index(directory))
+
+        # 确保模型已设置
+        if not hasattr(self, 'model') or self.model is None:
+            self.logger.error("模型未初始化，请先调用 setupFileSystemModel")
+            return
+
+        # 检查索引有效性
+        index = self.model.index(directory)
+        self.logger.debug(f"新目录索引有效性: {index.isValid()}")
+
+        if index.isValid():
+            self.treeView.setRootIndex(index)
+        else:
+            self.logger.error(f"无效索引: {directory}，无法设置为根索引")
+
 
         if not init_workspace:
             return
