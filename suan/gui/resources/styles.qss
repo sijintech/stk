@@ -27,10 +27,16 @@ QHBoxLayout, QVBoxLayout, QGridLayout {
     spacing: 0px;
 }
 
+/*
 QSplitter{
     handle-width:5px;
 }
-
+*/
+QSlider::handle {
+    width: 5px;
+    background: #0078d7;
+    border-radius: 5px;
+}
 
 
 /* 标签样式 */
@@ -254,13 +260,13 @@ QComboBox QPopupProxyStandard > QFrame {
 QTableWidget {
     border: none; /* 表格边框 */
     background-color: white; /* 表格背景色 */
-    show-grid: true; /* 显示网格线 */
+   /*  show-grid: true; 显示网格线 */
     gridline-color: lightgray; /* 网格线颜色 */
     selection-background-color: lightblue; /* 选中行的背景色 */
     selection-color: black; /* 选中行的文字颜色 */
 	min-width: 300px;
 }
-
+QTableView::item { border: 1px solid #ccc; }
 
 QTabBar::tab {
     font: 14px "Times New Roman"; /* 字体样式 */
