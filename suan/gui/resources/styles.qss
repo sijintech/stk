@@ -255,17 +255,7 @@ QComboBox QPopupProxyStandard {
 QComboBox QPopupProxyStandard > QFrame {
     background-color: #FFFFFF; /* 下拉菜单背景色 */
 }
-/* CommomTable 样式 */
-/* TableWidget 样式 */
-QTableWidget {
-    border: none; /* 表格边框 */
-    background-color: white; /* 表格背景色 */
-   /*  show-grid: true; 显示网格线 */
-    gridline-color: lightgray; /* 网格线颜色 */
-    selection-background-color: lightblue; /* 选中行的背景色 */
-    selection-color: black; /* 选中行的文字颜色 */
-	min-width: 300px;
-}
+
 QTableView::item { border: 1px solid #ccc; }
 
 QTabBar::tab {
@@ -294,66 +284,5 @@ QTextEdit {
     background-color: transparent;
 }
 
-
-
-
-/* 设置 QTabWidget 的背景和边框
-QTabWidget::pane {
-    background-color: rgb(132, 171, 230); /* 背景色 */
-    background: transparent;        /* 背景透明 */
-    border: none;
-
-}
-
-/* 隐藏 QTabWidget 的标签栏边框 */
-QTabWidget::tab-bar {
-    border-width: 0px;
-}
-
-/* 设置 QTabBar 标签样式 */
-QTabBar::tab {
-    font: 14px "Times New Roman"; /* 字体样式 */
-    padding: 0px;                 /* 内边距 */
-
-}
-
-/* 标签选中状态 */
-QTabBar::tab:selected {
-    border-width: 0px;
-    margin-left: 0px;  /* 左边距 */
-    margin-right: 10px;  /* 右边距 */
-    color: blue;       /* 文字颜色 */
-}
-
-/* 标签未选中状态 */
-QTabBar::tab:!selected {
-    border-width: 0px;
-    margin-left: 0px;
-    margin-right: 10px;
-    color: gray;
-}
-
-/* 标签 hover 样式 */
-QTabBar::tab:hover:!selected {
-    margin-left: 0px;
-    margin-right: 10px;
-    color: black;
-}
-
-/* 删除按钮未悬停时样式 */
-QTabBar::close-button {
-    background-color: rgb(240, 240, 240); /* 与标签背景色一致 */
-    border-radius: 8px; /* 圆形效果 */
-    margin-left: 5px; /* 与左边文本距离一致 */
-    margin-right: 0px;
-    border-image: url(../icons/close.png)
-}
-
-/* 删除按钮悬停时样式 */
-QTabBar::close-button:hover {
-    background-color: black; /* 颜色变深 */
-    border-image: url(../icons/close.png)
-}
-*/
 
 
