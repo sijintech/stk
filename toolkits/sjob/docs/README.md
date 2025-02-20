@@ -1,35 +1,40 @@
-# htpstudio manual
+# **sjob** manual
 ## Overview
-The "htpstudio" is a tool for high-throughput computer simulation's jobs creation and execution. This command provides a convenient interface to several useful command line tools related to high-throughput computer simulations starting from scheduling job parameters, creating folder structure to final submission.
+The "sjob" is a tool for high-throughput computer simulation's jobs creation and execution. This command provides a convenient interface to several useful command line tools related to high-throughput computer simulations starting from scheduling job parameters, creating folder structure to final submission.
 
 Features including 
 1. User friendly json config file (available when python is installed)
-2. Also capable of working with minimal dependency, only bash and awk is enough (though a little bit less user friendly than using the json config file)
+2. Also capable of working with minimal dependency, run using command-line parameters in the terminal of both Windows and Linux systems (though a little bit less user friendly than using the json config file)
 3. Separate the whole jobs creation into three phases, force you to double check the correctness of your calculations after each stage to avoid errors during rush submission
 4. Capable of dealing with dependency between degree of freedom
 5. Support [free and fix format of keyword replacement](#free-fix-format). 
 ,etc.
 
-`htpstudio` targets the most basic workflow of high-throughput computation, namely automatically create hundreds of calculation jobs to sweep through several dimension of the parameter space. 
+`sjob` targets the most basic workflow of high-throughput computation, namely automatically create hundreds of calculation jobs to sweep through several dimension of the parameter space. 
 First, an intermediate *batchList.txt* file is generated. And all of the following steps, such as folder creation, file copying, keywords replacement, folder-wise command execution is based on information in this batchList.txt file. 
 
+## Install
+You can use the sjob command in the terminal after installing the `suan` package:
+```sh
+pip install suan
+```
 
 ## Quick start
 **step 1:** Prepare the [batch.json file](#batch.json)
 
 **step 2:** Schedule jobs and create the *batchList.txt* file
 ``` sh
-htpstudio schedule batch.json
+sjob schedule batch.json
 ```
 
 **step 3:** Double check the listed jobs in *batchList.txt* and create folders
 ``` sh
-htpstudio create batch.json
+sjob create batch.json
 ```
 
-**step 4** Go into the created folders and check if generated files are as expected, then execute the specified command
+**step 4:** Go into the created folders and check if generated files are as expected, then execute the specified command
 ``` sh
-htpstudio execute batch.json
+sjob execute batch.json
 ```
 
 ## Minimal example
@@ -63,11 +68,11 @@ Prepare a batch.json file, such as
 High-throughput jobs creation
 ``` sh
 # Generate batchList.txt
-htpstudio schedule batch.json
+sjob schedule batch.json
 # Create folder structure
-htpstudio create batch.json
+sjob create batch.json
 # Execute the command "pwd" in each folder
-htpstudio execute batch.json
+sjob execute batch.json
 ```
 What you will get is three things:
 1. a batchList.txt file
@@ -106,23 +111,23 @@ Exec command: pwd in folder 6+VAR1_300+VAR2_20_10_30
 ```
 
 ## Sub-commands
-As you have seen in the previous examples, the `htpstudio` command has several sub-commands, three of them are more important and each corresponding to one stage of the high-throughput jobs creation processes. 
-- **Stage 1**: `schedule`   -- create a batchList.txt file in which each row correspond to one calculation and the varying parameters are specified in each column. [Details of *htpstudio schedule* is here](##Schedule)
-- **Stage 2**: `create`     -- create a properly named folder structure, copy input files into each folder and replace the specified keywords according to each row in batchList.txt file. [Details of *htpstudio create* is here](##Create)
-- **Stage 3**: `execute`    -- execute a command for a set of folders in the above generated jobs pool. [Details of *htpstudio execute* is here](##Execute)
+As you have seen in the previous examples, the `sjob` command has several sub-commands, three of them are more important and each corresponding to one stage of the high-throughput jobs creation processes. 
+- **Stage 1**: `schedule`   -- create a batchList.txt file in which each row correspond to one calculation and the varying parameters are specified in each column. [Details of *sjob schedule* is here](##Schedule)
+- **Stage 2**: `create`     -- create a properly named folder structure, copy input files into each folder and replace the specified keywords according to each row in batchList.txt file. [Details of *sjob create* is here](##Create)
+- **Stage 3**: `execute`    -- execute a command for a set of folders in the above generated jobs pool. [Details of *sjob execute* is here](##Execute)
 
 The reason I explicitly separate the whole process into three stages, rather than mix them together, because it force you to slow down and potentially save a lot of your time redoing wrong calculations. It is always a good idea to double check everything before submission, 
 1. checking the batchList.txt file after the scheduling phase, 
 2. checking the input files in the created folders after the creation phase. 
 
 <!-- Other sub-commands are 
-- **utility** -- access to the functions defined in htpstudio file, for either debugging or convenient usage, available functions are listed below
+- **utility** -- access to the functions defined in sjob file, for either debugging or convenient usage, available functions are listed below
     * getFirstString 
     * getRemainString -->
 
 
 ## Examples
-There are two ways to use htpstudio, 1. if python is installed in the system, use a json file for configuring the parameter space, keyword names, etc. 2. if no python is available, pass those necessary arguements through command line options.
+There are two ways to use sjob, 1. use a json file for configuring the parameter space, keyword names, etc. 2. pass those necessary arguements through command line options.
 Generally the first style is recommended, because it keeps a record of your high-throughput setup, gurantee future reproducibility and easiness of improvement.  
 ### Style 1
 Suppose you have a batch.json file that looks like this. Explanation for all of the keywords could be find [later in this manual](##batch.json). 
@@ -158,8 +163,6 @@ Suppose you have a batch.json file that looks like this. Explanation for all of 
    "Command":"echo TEM STRESS"
 }
 ```
-You need to put the htpstudio file into a folder that is in *PATH* so that you can easily access the htpstudio command. As high-throughput calculations are usually performed on high performance supercomputers, in most cases you won't have administrator previlage, so creating a `bin` folder in your home directory, add it to *PATH* with `export PATH=$PATH:~/bin`, and then copy *htpstudio* to *~/bin* is probably the easiest way to use *htpstudio*. 
-
 You need to put the necessary files into the same directory, which shall look like this
 ```
 dir
@@ -177,7 +180,7 @@ dir
 #### Stage 1: Job Scheduling
 ``` sh
 # Input
-htpstudio schedule batch.json
+sjob schedule batch.json
 # Output
 Stage 1: Create the batchList.txt file
 Condition fulfilled. 1>0
@@ -199,7 +202,7 @@ Condition fulfilled. 1>0
 Condition fulfilled. 1>0
         9       &MISFIT=3.0:3.0:3.0 , &TEM=300.0 , @STRESS=300000.0
 ```
-Using the `htpstudio schedule` command, 9 jobs are generated, the varying parameter's value is printed to screen, as well as into the *batchList.txt* file. Notice here, the MISFIT and TEM values are dependent of each other.
+Using the `sjob schedule` command, 9 jobs are generated, the varying parameter's value is printed to screen, as well as into the *batchList.txt* file. Notice here, the MISFIT and TEM values are dependent of each other.
 ```
               + |         &MISFIT |            &TEM |         @STRESS |             1>0
               1 |     1.0 1.0 1.0 |           100.0 |        100000.0 |             1>0
@@ -215,7 +218,7 @@ Using the `htpstudio schedule` command, 9 jobs are generated, the varying parame
 #### Stage 2: Folder creation
 ``` sh
 # Input
-htpstudio create batch.json
+sjob create batch.json
 # Created folders
 '9+&MISFIT_3.0_3.0_3.0+&TEM_300.0+STRESS_300000.0'/
 '8+&MISFIT_3.0_3.0_3.0+&TEM_300.0+STRESS_200000.0'/
@@ -230,7 +233,7 @@ htpstudio create batch.json
 #### Stage 3: Execution (Job submission)
 ```sh
 # Input 
-htpstudio execute batch.json
+sjob execute batch.json
 # Output
 Exec command: echo TEM STRESS in folder 1+&MISFIT_1.0_1.0_1.0+&TEM_100.0+STRESS_100000.0
         100.0 100000.0
@@ -262,16 +265,16 @@ eyy="0.1 0.2 0.3"
 realdim="123:234:234 456:567:678"
 sysdim="123:234:234 456:567:678"
 variables="${TEM}#${exx}#${eyy}#${realdim}#${sysdim}" # different variables are separated by #"
-htpstudio schedule -k "${folders}" -v "${variables}" -c 'exx>=eyy&&"REALDIM"=="SYSDIM"'     # No 4th argument, default of + is used
-htpstudio create -f "${files}"
-htpstudio execute -c "echo TEM,exx,eyy,REALDIM"
+sjob schedule -k "${folders}" -v "${variables}" -c 'exx>=eyy&&"REALDIM"=="SYSDIM"'     # No 4th argument, default of + is used
+sjob create -f "${files}"
+sjob execute -c "echo TEM,exx,eyy,REALDIM"
 ```
 
 ---
 ## batch.json
 [Jump back to Example, style 1](#style-1)
 
-This is the a json file that contains necessary arguements that htpstudio needs at all three stages of high-throughput jobs creation.
+This is a json file that contains necessary arguements that sjob needs at all three stages of high-throughput jobs creation.
 Keywords include:
 - **FreeFile** A list of free format style file, used in the *create* phase
 - **FixFile** A list of fix format style file, used in the *create* phase
@@ -306,7 +309,7 @@ Everything in middle are the value for keywords, set with -v option.
 ---
 ## Schedule
 ### Description
-The `htpstudio schedule` command takes care of the scheduling phase. It will generate a *batchList.txt* file that lists all of the scheduled calculations, which will be used in the creation and execution phase.
+The `sjob schedule` command takes care of the scheduling phase. It will generate a *batchList.txt* file that lists all of the scheduled calculations, which will be used in the creation and execution phase.
 
 You may use a json file for configuration, or you can pass options explicitly to the commands. There are two mandatory options, 1. -k,--keyword option which tells the program what are the words to search for and replace in the second folder creation phase, 2. -v,--value option which tells the program what are the values to be used for substituting the keywords. 
 
@@ -319,15 +322,15 @@ You may use a json file for configuration, or you can pass options explicitly to
 - **-h**,**--help** *Optional* Display helping doc (this file).
 
 ### Example
-1. `htpstudio schedule -k "FREQ" -v "1e12 1e13" -f "%.2e"` 
-2. `htpstudio schedule -k "@FREQ#PERIOD" -v "1e12 1e13#1e12/FREQ" -c "FREQ>1e9" -f "%.2e"` 
+1. `sjob schedule -k "FREQ" -v "1e12 1e13" -f "%.2e"` 
+2. `sjob schedule -k "@FREQ#PERIOD" -v "1e12 1e13#1e12/FREQ" -c "FREQ>1e9" -f "%.2e"` 
 
 
 
 ---
 ## Create
 ### Description
-The `htpstudio create` command takes care of the folder creating phase. It will generate a list of folders/folder structures according (and only according) to the information in *batchList.txt* file. 
+The `sjob create` command takes care of the folder creating phase. It will generate a list of folders/folder structures according (and only according) to the information in *batchList.txt* file. 
 
 You may use a json file for configuration, or you can pass options explicitly to the commands. This command will take a list of files as argument, and copy them into each folder according to the batchList.txt file created with the schedule command. And of course, the keywords in these files are replaced with the values in the batchList.txt file. There are actually three types of copying that we can make, 1. pure copy, without any keyword replacement, 2. fix format type copy, during which only the keyword itself is replaced, 3. free format type copy, for which the whole line containing the keyword is replaced with a new line using the specific value.
 
@@ -342,13 +345,13 @@ It is true that there are some overlap between the style set here and the style 
 - **-h**, **--help**
 
 ### Example
-1. `htpstudio create &input.in @Ferro.pbs pot.in`
+1. `sjob create &input.in @Ferro.pbs pot.in`
 
 
 ---
 ## Execute
 ### Description
-The `htpstudio execute` command takes care of the command executing phase. This command will go to each folder that is created according to the batchList.txt file, and execute the command you passed to it. Similar to the condition option and value option in the schedule command, you can use the keyword name to represent such variables current value and achieve different outcome for different folders.
+The `sjob execute` command takes care of the command executing phase. This command will go to each folder that is created according to the batchList.txt file, and execute the command you passed to it. Similar to the condition option and value option in the schedule command, you can use the keyword name to represent such variables current value and achieve different outcome for different folders.
 
 You may use a json file for configuration, or you can pass options explicitly to the commands. 
 
@@ -358,8 +361,8 @@ You may use a json file for configuration, or you can pass options explicitly to
 - **-h**, **--help**
 
 ### Example
-1. htpstudio execute "echo FREQ"
-2. htpstudio execute "qsub Ferro.pbs"
+1. sjob execute "echo FREQ"
+2. sjob execute "qsub Ferro.pbs"
 
 
 ---

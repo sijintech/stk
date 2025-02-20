@@ -2,9 +2,9 @@
 from setuptools import setup
 
 setup(
-    name="htpstudio",
+    name="sjob",
     version="0.1",
-    py_modules=["htpstudio"],  # 模块的名称
+    py_modules=["sjob"],  # 模块的名称
     install_requires=[
         # "subprocess",
         # "os",
@@ -16,7 +16,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'htpstudio = htpstudio:runCommand',
+            'sjob = cli:sjob',
         ],
     },
 )
