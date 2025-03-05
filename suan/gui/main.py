@@ -25,11 +25,12 @@ import toml
 import shutil
 from custom_logger import CustomLogger
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), './Tab')))
 updatejson_url = "https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json"
 app_name = "stk"
 cur_version = version.version
 code_url = "https://github.com/sijintech/stk"
-
+os.environ['QT_API'] = 'pyside'
 
 class MainWindow(QMainWindow):
     def __init__(self, create_workspace_if_no):

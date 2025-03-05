@@ -3,7 +3,7 @@ width = 766
 height = 464
 
 [left_sidebar]
-working_directory = "C:/"
+working_directory = "D:/work/sijin/stk/suan/test"
 
 [center_widget]
 active_tab_index = 0
@@ -12,4 +12,4 @@ active_tab_index = 0
 view_port = "the_view_port_of_vtk_window"
 
 [info_bar.code]
-file_path = "C:/"
+file_path = ""

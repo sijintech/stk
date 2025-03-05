@@ -1,3 +1,5 @@
+
+
 from PySide6.QtWidgets import (
     QMessageBox,
     QMenu,
@@ -11,40 +13,77 @@ from PySide6.QtGui import QAction
 import os
 import re
 
+os.environ['QT_API'] = 'pyside6'
+os.environ['FORCE_QT_API'] = 'PySide6'
+from pyqode.core.api import CodeEdit
+from pyqode.core.panels import LineNumberPanel
+from pyqode.core import modes, api, panels
 from custom_logger import CustomLogger
+from pyqode.qt import QtWidgets
 
 
-class CodeTab(QTextEdit):
+class CodeTab(QWidget):
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__()
         self.parent = parent
         self.logger = CustomLogger()
         self.curShowCode = None
-        self.curShowCodeType = None
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.show_context_menu)
-        self.curShowCode = None
+        self.curShowCodeType = "python"
+        self.encoding = 'utf-8'
+
+        self.editor = CodeEdit()
+        self.editor.backend.start('code_server.py')
+        # 语法高亮设置：使用 pygments 风格高亮
+        self.editor.modes.append(modes.PygmentsSyntaxHighlighter(self.editor.document()))
+        self.editor.modes.append(modes.CodeCompletionMode())
+        self.editor.modes.append(modes.CaretLineHighlighterMode())
+        # 行号区域设置
+        self.editor.panels.append(LineNumberPanel())
+        self.editor.panels.append(panels.SearchAndReplacePanel(),
+                                  api.Panel.Position.BOTTOM)
+
+        # 其他设置
+        # self.editor.setAutoIndent(True)
+        self.editor.setTabStopWidth(4)
+        self.editor.setLineWrapMode(CodeEdit.NoWrap)
+        self.show_context_menu()
+        # self.editor.setFont("Courier New", 10)
+        # 创建布局并添加 editor
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.editor)
+        # layout.setContentsMargins(0, 0, 0, 0)  # 去除布局的边距
+        # layout.setSpacing(0)  # 去除布局的间距
+        self.setLayout(layout)
 
     def showContent(self, content):
         """显示代码内容"""
         self.curShowCode = content
-        self.setText(content)
+        self.editor.setPlainText(content, "text/plain", self.encoding)
         codeIndex = self.parent.tabWidget.indexOf(self.parent.codeTab)
         self.parent.tabWidget.setCurrentIndex(codeIndex)
 
-    def show_context_menu(self, pos):
+    def toPlainText(self):
+        return self.editor.toPlainText()
+
+    def setTest(self, content):
+        self.editor.setPlainText(content, "text/plain", self.encoding)
+
+    def show_context_menu(self):
         """显示右键菜单"""
-        menu = QMenu(self)
+        # menu = QMenu(self,'RUN')
+        # self.editor.add_menu(menu)
 
         analyzeRunAction = QAction("Analyze and Run the current code", self)
         analyzeRunAction.triggered.connect(self.runCodeWithAnalysis)
-        menu.addAction(analyzeRunAction)
+        # menu.addAction(analyzeRunAction)
+        self.editor.add_action(analyzeRunAction, 'RUN')
 
         directRunAction = QAction("Run the current code directly (without analysis)", self)
         directRunAction.triggered.connect(self.runCodeWithoutAnalysis)
-        menu.addAction(directRunAction)
+        # menu.addAction(directRunAction)
+        self.editor.add_action(directRunAction, 'RUN')
 
-        menu.exec_(self.mapToGlobal(pos))
+        # menu.exec_(self.editor.mapToGlobal(pos))
 
     def runCodeWithoutAnalysis(self):
         """直接运行当前代码"""
@@ -74,8 +113,10 @@ class CodeTab(QTextEdit):
             return None
 
     def curFileIsSave(self):
+        self.logger.debug(f"当前文件：{self.parent.parent.curWorkFile}")
+        comment = self.editor.toPlainText()
         if self.getContentfromPath(self.parent.parent.curWorkFile) is None or self.getContentfromPath(
-                self.parent.parent.curWorkFile) == self.toPlainText():
+                self.parent.parent.curWorkFile) == comment:
             return True
         else:
             return False

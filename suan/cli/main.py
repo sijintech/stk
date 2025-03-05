@@ -11,10 +11,10 @@ def cli():
     pass
 
 
-# toolkits_path = '../../toolkits'  # 未打包时测试用
+toolkits_path = '../../toolkits'  # 未打包时测试用
 
 
-toolkits_path= 'toolkits' #打包时用
+# toolkits_path= 'toolkits' #打包时用
 def load_plugins():
     """加载插件并返回每个插件的click.Group对象"""
     # 获取toolkits目录的绝对路径
@@ -35,6 +35,12 @@ def load_plugins():
                 cli.add_command(plugin_group)
 
 
+def show_commands():
+    """打印所有的子命令"""
+    print("Available commands:")
+    for command in cli.commands:
+        print(f"- {command}")
 if __name__ == '__main__':
     load_plugins()
+    show_commands()
     cli()

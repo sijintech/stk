@@ -5,7 +5,7 @@ from PySide6.QtGui import QIcon
 import os
 import vtkmodules.all as vtk
 from custom_logger import CustomLogger
-
+import chardet
 
 class FileIconProvider(QFileIconProvider):
     def icon(self, file_info):
@@ -17,7 +17,7 @@ class FileIconProvider(QFileIconProvider):
 
 
 class LeftSidebar(QWidget):
-    openFilePath = Signal(str)  # 定义一个信号，用于发送打开文件请求
+    openFilePath = Signal(str)  # 
 
     def __init__(self, parent):
         super().__init__()
@@ -33,60 +33,60 @@ class LeftSidebar(QWidget):
 
         layout.addWidget(self.treeView)
         self.setLayout(layout)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setupFileSystemModel()
 
-    def setupFileSystemModel(self): 
-        # 创建文件系统模型
+    def setupFileSystemModel(self):
+        # 
         self.model = QFileSystemModel(self)
-        root_path = os.getcwd()  # 获取当前工作目录
-        self.logger.debug(f"设置根路径: {root_path}")
+        root_path = os.getcwd()  # 
+        self.logger.debug(f": {root_path}")
         self.model.setRootPath(root_path)
 
-        # 检查索引有效性
+        # 
         root_index = self.model.index(root_path)
-        self.logger.debug(f"根索引有效性: {root_index.isValid()}")
+        self.logger.debug(f": {root_index.isValid()}")
 
-        # 设置模型后再设置根索引
+        # 
         self.treeView.setModel(self.model)
         if root_index.isValid():
             self.treeView.setRootIndex(root_index)
         else:
-            self.logger.error("根索引无效，无法设置为根索引")
-        
-        # 自定义文件和目录图标
+            self.logger.error("")
+
+        # 
         self.model.setIconProvider(FileIconProvider())
 
-        # 隐藏标题栏
+        # 
         self.treeView.header().hide()
 
-        # 隐藏其他列
+        # 
         self.treeView.setColumnHidden(1, True)
         self.treeView.setColumnHidden(2, True)
         self.treeView.setColumnHidden(3, True)
 
-        # 连接双击信号到槽函数
+        # 
         self.treeView.doubleClicked.connect(self.onDoubleClick)
     def initWorkspace(self):
         working_directory = self.parent.get_workspace_data('left_sidebar/working_directory')
-        self.logger.debug(f"工作目录: {working_directory}")
+        self.logger.debug(f": {working_directory}")
 
-        # 确保模型已设置
+        # 
         if not hasattr(self, 'model') or self.model is None:
-            self.logger.error("模型未初始化，请先调用 setupFileSystemModel")
+            self.logger.error(" setupFileSystemModel")
             return
 
-        # 检查索引有效性
+        # 
         index = self.model.index(working_directory)
-        self.logger.debug(f"工作目录索引有效性: {index.isValid()}")
+        self.logger.debug(f": {index.isValid()}")
 
         if index.isValid():
             self.treeView.setRootIndex(index)
         else:
-            self.logger.error(f"无效索引: {working_directory}，无法设置为根索引")
+            self.logger.error(f": {working_directory}")
 
     def onDoubleClick(self, index: QModelIndex):
-        # 获取所选项的路径
+        # 
         path = self.model.filePath(index)
         if os.path.isdir(path):
             self.open_dir(path)
@@ -94,18 +94,18 @@ class LeftSidebar(QWidget):
             self.open_file(path)
 
     def open_dir(self, directory):
-        # 展开指定目录的内容
+        # 
         index = self.model.index(directory)
         if os.path.exists(directory):
             index = self.model.index(directory)
             if index.isValid():
-                self.treeView.expand(index)  # 展开目录
+                self.treeView.expand(index)  # 
         else:
-            QMessageBox.warning(self, "警告", f"目录不存在: {directory}")
+            QMessageBox.warning(self, "", f": {directory}")
 
     def open_directory(self, directory, workspace_data=None, init_workspace=True):
-        # 原来目录处理
-        self.logger.debug(f"当前工作目录: {self.parent.curWorkDir}")
+        # 
+        self.logger.debug(f": {self.parent.curWorkDir}")
 
         if self.parent.curWorkDir is not None and not self.parent.curWorkDir == directory:
             if self.parent.isWorkspace:
@@ -113,23 +113,23 @@ class LeftSidebar(QWidget):
             else:
                 self.parent.check_and_save_curfile()
 
-        # 新的目录处理
-        self.logger.debug(f"打开新目录: {directory}")
+        # 
+        self.logger.debug(f": {directory}")
         self.parent.curWorkDir = directory
 
-        # 确保模型已设置
+        # 
         if not hasattr(self, 'model') or self.model is None:
-            self.logger.error("模型未初始化，请先调用 setupFileSystemModel")
+            self.logger.error(" setupFileSystemModel")
             return
 
-        # 检查索引有效性
+        # 
         index = self.model.index(directory)
-        self.logger.debug(f"新目录索引有效性: {index.isValid()}")
+        self.logger.debug(f": {index.isValid()}")
 
         if index.isValid():
             self.treeView.setRootIndex(index)
         else:
-            self.logger.error(f"无效索引: {directory}，无法设置为根索引")
+            self.logger.error(f": {directory}")
 
 
         if not init_workspace:
@@ -144,43 +144,51 @@ class LeftSidebar(QWidget):
             self.parent.question_and_create_workspace(directory, False)
 
     def create_new_file(self):
-        # 在文件系统视图选中的位置创建一个新文件
+        # 
         index = self.treeView.currentIndex()
         if not index.isValid():
-            QMessageBox.warning(self, "警告", "请先选择一个位置")
+            QMessageBox.warning(self, "", "")
             return
         path = self.model.filePath(index)
         if not os.path.isdir(path):
             path = os.path.dirname(path)
-        new_file_path = os.path.join(path, "新建文件.txt")
+        new_file_path = os.path.join(path, ".txt")
         try:
             with open(new_file_path, "w", encoding="utf-8") as file:
                 file.write("")
-            self.logger.info(f"新建文件: {new_file_path}")
+            self.logger.info(f": {new_file_path}")
             self.model.refresh()
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"无法创建新文件: {e}")
+            QMessageBox.critical(self, "", f": {e}")
 
     def create_new_dir(self):
-        # 在文件系统视图选中的位置创建一个新目录
+        # 
         index = self.treeView.currentIndex()
         if not index.isValid():
-            QMessageBox.warning(self, "警告", "请先选择一个位置")
+            QMessageBox.warning(self, "", "")
             return
         path = self.model.filePath(index)
         if not os.path.isdir(path):
             path = os.path.dirname(path)
-        new_dir_path = os.path.join(path, "新建文件夹")
+        new_dir_path = os.path.join(path, "")
         try:
             os.makedirs(new_dir_path, exist_ok=True)
-            self.logger.info(f"新建文件夹: {new_dir_path}")
+            self.logger.info(f": {new_dir_path}")
             self.model.refresh()
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"无法创建新文件夹: {e}")
+            QMessageBox.critical(self, "", f": {e}")
+
+    def detect_file_encoding(self, file_path):
+        with open(file_path, 'rb') as file:
+            raw_data = file.read(100)  # 100
+            result = chardet.detect(raw_data)
+            encoding = result['encoding']
+            return encoding
 
     def open_file(self, path, working_directory="", is_init=False):
-        # TODO:打开一个数据大文件时，需要等待，应设置等待页面
-        # 原来文件处理
+        # TODO:
+
+        # 
         if working_directory == "":
             working_directory = os.path.dirname(os.path.abspath(path))
 
@@ -190,7 +198,11 @@ class LeftSidebar(QWidget):
             #     self.parent.check_and_save_curworkspace()
             # else:
             self.parent.check_and_save_curfile()
-        # 新的文件处理
+        if os.path.isdir(path):
+            # self.open_dir(path)
+            self.logger.debug("")
+            return
+        # 
         self.parent.curWorkFile = path
         # self.parent.center_widget.update_code();
         # if not os.path.samefile(self.parent.curWorkDir, working_directory):
@@ -198,29 +210,29 @@ class LeftSidebar(QWidget):
         if self.parent.isWorkspace:
             self.parent.modify_workspaceData('info_bar/code/file_path', path)
 
-        # 如果是文件，则读取文件内容
+        # 
         if QFileInfo(path).isFile():
             extension = QFileInfo(path).suffix().lower()
             if extension == 'vtk':
                 reader = vtk.vtkStructuredPointsReader()
                 reader.SetFileName(path)
                 reader.Update()
-                # 获取结构化点数据对象
+                # 
                 structured_points = reader.GetOutput()
-                # 获取结构化点数据的属性信息
+                # 
                 dimensions = structured_points.GetDimensions()
                 origin = structured_points.GetOrigin()
                 spacing = structured_points.GetSpacing()
 
-                # 创建一个字典来存储顶点坐标和数据值
+                # 
                 vertex_data = {}
 
-                # 计算每个维度上的顶点数量
+                # 
                 num_x = dimensions[0]
                 num_y = dimensions[1]
                 num_z = dimensions[2]
 
-                # 将顶点的坐标和数据值存储到字典中
+                # 
                 for i in range(num_x):
                     for j in range(num_y):
                         for k in range(num_z):
@@ -229,24 +241,26 @@ class LeftSidebar(QWidget):
                             z = origin[2] + k * spacing[2]
 
                             scalar_value = structured_points.GetScalarComponentAsFloat(i, j, k, 0)
-                            
-                            # 使用(x, y, z)作为键，数据值作为值存储到字典中
+
+                            # (x, y, z)
                             vertex_data[(x, y, z)] = scalar_value
                 self.parent.center_widget.updateDataTable(vertex_data)
                 try:
                     with open(path, 'r', encoding='utf-8') as file:
                         content = file.read()
                         # self.openFilePath.emit(path)
-                        # 发送文件内容给InfoBar
+                        # InfoBar
                         self.parent.get_component_by_name('Code Tab').showContent(content)
                 except Exception as e:
-                    print("Error reading file:%s", e)
+                    self.logger.error(f"Error reading file:{e}")
             else:
                 try:
-                    with open(path, 'r', encoding='utf-8') as file:
+                    file_encoding = self.detect_file_encoding(path)
+                    with open(path, 'r', encoding=file_encoding, errors='ignore') as file:
                         content = file.read()
                         # self.openFilePath.emit(path)
-                        # 发送文件内容给InfoBar
+                        # InfoBar
+                        self.parent.get_component_by_name('Code Tab').encoding = file_encoding
                         self.parent.get_component_by_name('Code Tab').showContent(content)
                 except Exception as e:
-                    print("Error reading file:%s", e)
+                    self.logger.error(f"Error reading file:{e}")

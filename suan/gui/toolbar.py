@@ -282,7 +282,7 @@ class ToolBar(QWidget):
     def save_file(self):
         try:
             # 获取Code标签页中的文本内容
-            content = self.parent.info_bar.codeTab.toPlainText()
+            content = self.parent.get_component_by_name('Code Tab').toPlainText()
             # 将内容写入文件
             with open(self.parent.curWorkFile, "w", encoding="utf-8") as file:
                 file.write(content)

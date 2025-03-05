@@ -6,7 +6,7 @@ on:
 
 jobs:
   ubuntu_build:
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, Linux ]
 
     steps:
       - uses: actions/checkout@v3
@@ -93,7 +93,7 @@ jobs:
           path: suan/gui/dist/stk_macos
 
   windows_build:
-    runs-on: windows-latest
+    runs-on: [ self-hosted, Windows ]
 
     steps:
       - uses: actions/checkout@v3
@@ -173,7 +173,7 @@ jobs:
       - windows_build
       - macOS_build
       - ubuntu_build
-    runs-on: ubuntu-latest
+    runs-on: [ self-hosted, Linux ]
 
     steps:
       - uses: actions/checkout@v3
