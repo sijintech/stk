@@ -1,11 +1,13 @@
 name: Publish STK to PyPI and TestPyPI
 on:  # 这里我设置了两个事件，一般的push tag以v开头，用来测试发布，而release用来正式发布
-  release:
-    types: [published]
-  push:
-      # 匹配特定标签 (refs/tags)
-      tags:
-        - '1v*'
+#  release:
+  #    types: [published]
+  #  push:
+  #      # 匹配特定标签 (refs/tags)
+  #      tags:
+  #        - '1v*'
+
+  workflow_dispatch:
 jobs:
   build_pyqt:
     name: Build STK

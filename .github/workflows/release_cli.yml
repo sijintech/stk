@@ -97,7 +97,7 @@ jobs:
       #     python suan\scripts\update.py
 
       - name: Store dist
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           # 上传后的标记名，下载依靠它找到对应文件
           name: cli_windows
@@ -143,7 +143,7 @@ jobs:
           path: suan/cli/dist/
 
       - name: Download windows app
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           # 要下载的文件的标记
           name: cli_windows
