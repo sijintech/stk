@@ -6,7 +6,8 @@ on:
 
 jobs:
   ubuntu_build:
-    runs-on: [ self-hosted, Linux ]
+#    runs-on: [ self-hosted, Linux ]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
@@ -97,10 +98,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.9"
+      #      - name: Set up Python
+      #        uses: actions/setup-python@v4
+      #        with:
+      #          python-version: "3.9"
       - name: get tag
         id: get_tag
         run: |
@@ -114,7 +115,7 @@ jobs:
 
       - name: build exe
         run: |
-          python.exe -m pip install -U pip
+          #          python.exe -m pip install -U pip
           python suan\scripts\run_write_version.py
           cd suan\gui
           pip install pyinstaller==6.3.0
@@ -173,7 +174,8 @@ jobs:
       - windows_build
       - macOS_build
       - ubuntu_build
-    runs-on: [ self-hosted, Linux ]
+    #    runs-on: [ self-hosted, Linux ]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
