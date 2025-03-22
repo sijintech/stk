@@ -19,9 +19,10 @@ from pygments.lexers.special import TextLexer
 from pygments.styles import get_style_by_name, get_all_styles
 from pygments.token import Whitespace, Comment, Token
 from pygments.util import ClassNotFound
-from qtpy import QtGui
+from qtpy import QtGui, QtCore
 from qtpy.QtCore import QRegularExpression, QTimer
 
+from pyqode.core.api.mode import Mode
 from pyqode.core.api.syntax_highlighter import (
     SyntaxHighlighter, ColorScheme, TextBlockUserData)
 
@@ -129,7 +130,7 @@ CppLexer.tokens['comment'] = COMMENT_STATE
 CSharpLexer.tokens['comment'] = COMMENT_STATE
 
 
-class PygmentsSH(SyntaxHighlighter):
+class PygmentsSyntaxHighlighter(SyntaxHighlighter):
     """ Highlights code using the pygments parser.
 
     This mode enable syntax highlighting using the pygments library. This is a
@@ -187,7 +188,7 @@ class PygmentsSH(SyntaxHighlighter):
         """
         self._clear_caches()
         self._update_style()
-        super(PygmentsSH, self).on_install(editor)
+        super(PygmentsSyntaxHighlighter, self).on_install(editor)
 
     def set_mime_type(self, mime_type):
         """
@@ -394,3 +395,7 @@ class PygmentsSH(SyntaxHighlighter):
                       int(color[2:4], base=16),
                       int(color[4:6], base=16))
         return qcolor
+
+
+# 添加 PygmentsSH 别名，解决导入错误
+PygmentsSH = PygmentsSyntaxHighlighter
