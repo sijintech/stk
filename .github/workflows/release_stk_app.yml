@@ -100,11 +100,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      # 移除Python安装步骤，改用系统Python
+      # 修复中文编码问题
       - name: Check Python Version
         run: |
           python --version
-          echo "使用系统已安装的Python，避免权限问题"
+          echo "Using system Python to avoid permission issues"
 
       - name: get tag
         id: get_tag
@@ -169,11 +169,11 @@ jobs:
 
       - name: Check build output
         run: |
-          # 检查构建产物是否存在
+          # 检查构建产物是否存在，避免使用中文
           if (Test-Path suan\gui\dist\stk_windows.exe) {
-            echo "构建产物已生成，大小为 $((Get-Item suan\gui\dist\stk_windows.exe).length / 1MB) MB"
+            echo "Build artifact generated, size: $((Get-Item suan\gui\dist\stk_windows.exe).length / 1MB) MB"
           } else {
-            echo "构建产物不存在，请检查构建过程"
+            echo "Build artifact not found, please check the build process"
             exit 1
           }
 
