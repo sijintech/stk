@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "suan_toolkits"
+version = "0.0.0"
+description = "This is a tool to vtk and matploblib."
+readme = "README.md"
+requires-python = ">=3.9,<3.12"
+
+dependencies = [
+    "numpy==1.24.3",
+    "toml>=0.8.2",
+    "matplotlib==3.6.2",
+    "PySide6==6.4.1",
+    "vtk==9.3.0",
+    "requests",
+    "pandas",
+    "ollama",
+    "torch==1.13.1",
+    "transformers==4.30.2",
+    "sentence_transformers==2.2.2",
+    "PyPDF2",
+    "chardet",
+    "qtpy",
+    "pygments",
+    "pyinstaller==6.3.0",
+    "frontend"
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux"
+]
+
+[[project.authors]]
+name = "Zhou Hanjie"
+email = "2625553453@qq.com"
+
+[project.urls]
+Homepage = "https://github.com/sijintech/stk.git"
+Issues = "https://github.com/sijintech/stk/issues/"
+
+[tool.poetry]
+package-mode = false
+
+[[tool.poetry.source]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+
