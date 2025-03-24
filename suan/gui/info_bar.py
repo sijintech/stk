@@ -5,10 +5,8 @@ from PySide6.QtWidgets import (
     QTabWidget,
 )
 
-
 from custom_logger import CustomLogger
-from Tab.code_tab import CodeTab
-
+from Tab.custom_terminal import CustomTerminalWidget
 
 class InfoBar(QWidget):
     def __init__(self, parent):
@@ -37,8 +35,8 @@ class InfoBar(QWidget):
         self.tabWidget.addTab(self.logTab, "Log")
         self.registerComponent("Log Tab", self.logTab)
 
-        self.consoleTab = QTextEdit()
-        self.tabWidget.addTab(self.consoleTab, "Console")
+        self.consoleTab = CustomTerminalWidget(self)
+        self.tabWidget.addTab(self.consoleTab, "控制台")
         self.registerComponent("Console Tab", self.consoleTab)
 
         self.statusTab = QTextEdit()
@@ -59,4 +57,22 @@ class InfoBar(QWidget):
                 return
         component = tab["component"]
         self.tabWidget.addTab(component, tabName[: -len(" Tab")])
+
+    def execute_command(self, command):
+        """
+        在终端中执行命令
+        """
+        self.consoleTab.terminal.execute_command(command)
+    
+    def clear_console(self):
+        """
+        清空终端内容
+        """
+        self.consoleTab.terminal.clear_terminal()
+    
+    def change_console_directory(self, directory):
+        """
+        更改终端的工作目录
+        """
+        self.consoleTab.terminal.change_directory(directory)
 
