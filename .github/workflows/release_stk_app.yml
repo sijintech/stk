@@ -99,22 +99,26 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.9"
+      
+      # 移除Python安装步骤，改用系统Python
+      - name: Check Python Version
+        run: |
+          python --version
+          echo "使用系统已安装的Python，避免权限问题"
+
       - name: get tag
         id: get_tag
         run: |
-          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+          # 修正Windows环境下的环境变量设置方式
+          echo "TAG=$($env:GITHUB_REF -replace 'refs/tags/v','')" >> $env:GITHUB_ENV
 
       - name: Setup virtual environment
         run: |
           python -m venv .venv
-          . .venv\Scripts\activate
+          # 修正Windows环境下的激活命令
+          .\.venv\Scripts\activate.ps1
           pip install poetry
           poetry install
-
 
       - name: build exe
         run: |
@@ -163,6 +167,16 @@ jobs:
       #     python suan\scripts\deploy.py
       #     python suan\scripts\update.py
 
+      - name: Check build output
+        run: |
+          # 检查构建产物是否存在
+          if (Test-Path suan\gui\dist\stk_windows.exe) {
+            echo "构建产物已生成，大小为 $((Get-Item suan\gui\dist\stk_windows.exe).length / 1MB) MB"
+          } else {
+            echo "构建产物不存在，请检查构建过程"
+            exit 1
+          }
+
       - name: Store dist
         uses: actions/upload-artifact@v4
         with:
@@ -203,6 +217,7 @@ jobs:
           # prerelease: false
 
       - name: Download ubuntu app
+        if: ${{ false }}  # 当前禁用了Ubuntu构建，暂时跳过下载
         uses: actions/download-artifact@v4
         with:
           # 要下载的文件的标记
@@ -219,6 +234,7 @@ jobs:
           path: suan/gui/dist/
 
       - name: Download macOS app
+        if: ${{ false }}  # 当前禁用了macOS构建，暂时跳过下载
         uses: actions/download-artifact@v4
         with:
           # 要下载的文件的标记
@@ -230,6 +246,7 @@ jobs:
           ls
 
       - name: release ubuntu app
+        if: ${{ false }}  # 当前禁用了Ubuntu构建，暂时跳过发布
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
@@ -251,6 +268,7 @@ jobs:
           asset_content_type: application/octet-stream
 
       - name: release macOS app
+        if: ${{ false }}  # 当前禁用了macOS构建，暂时跳过发布
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
