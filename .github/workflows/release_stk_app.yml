@@ -135,20 +135,39 @@ jobs:
           # 激活虚拟环境
           .\.venv\Scripts\activate.ps1
           
-          # 只有在没有安装poetry或poetry.lock变更时才重新安装
-          if (-not (Get-Command poetry -ErrorAction SilentlyContinue)) {
-            pip install poetry
-          }
+          # 更新pip并设置超时时间
+          python -m pip install --upgrade pip --timeout 1800
           
-          # 使用--no-root选项避免重新安装主项目
-          poetry install --no-interaction --no-root
+          # 使用全路径安装poetry并添加到PATH
+          python -m pip install poetry==1.7.1 --timeout 1800
+          
+          # 显示安装位置并确认poetry安装成功
+          $poetryPath = (Get-Command -ErrorAction SilentlyContinue python).Path | Split-Path -Parent
+          echo "Poetry should be installed at: $poetryPath\Scripts\poetry.exe"
+          
+          # 检查poetry是否在PATH中
+          if (Test-Path "$poetryPath\Scripts\poetry.exe") {
+            echo "Poetry executable found"
+            # 直接使用完整路径执行poetry
+            & "$poetryPath\Scripts\poetry.exe" --version
+            & "$poetryPath\Scripts\poetry.exe" config virtualenvs.create false
+            & "$poetryPath\Scripts\poetry.exe" install --no-interaction --no-root
+          } else {
+            echo "Poetry not found, using direct pip installation for required packages"
+            # 如果poetry未找到，使用pip直接安装必要的依赖
+            pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 180
+          }
 
       - name: build exe
         run: |
+          # 重新激活虚拟环境，确保路径正确
+          .\.venv\Scripts\activate.ps1
+          
+          # 如果上一步成功安装了poetry，它的可执行文件应该已经在PATH中
           python.exe -m pip install -U pip
           python suan\scripts\run_write_version.py
           cd suan\gui
-          # pip install pyinstaller==6.3.0
+
           # pip install PySide6
           # pip install vtk==9.3.0
           # python -c "import vtk"
@@ -157,8 +176,9 @@ jobs:
           # pip install numpy
           # pip install requests
           # pip install toml
+
           pyinstaller .\main.spec
-          
+
           
           # - name: Install NSIS
           #   run: |
