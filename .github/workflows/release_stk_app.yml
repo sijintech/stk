@@ -138,24 +138,23 @@ jobs:
           # 更新pip并设置超时时间
           python -m pip install --upgrade pip --timeout 1800
           
-          # 使用全路径安装poetry并添加到PATH
+          # 使用python -m方式安装和运行poetry，避免路径问题
+          echo "Installing Poetry using python -m"
           python -m pip install poetry==1.7.1 --timeout 1800
           
-          # 显示安装位置并确认poetry安装成功
-          $poetryPath = (Get-Command -ErrorAction SilentlyContinue python).Path | Split-Path -Parent
-          echo "Poetry should be installed at: $poetryPath\Scripts\poetry.exe"
+          # 设置Poetry超时环境变量
+          $env:POETRY_HTTP_TIMEOUT = 1800
           
-          # 检查poetry是否在PATH中
-          if (Test-Path "$poetryPath\Scripts\poetry.exe") {
-            echo "Poetry executable found"
-            # 直接使用完整路径执行poetry
-            & "$poetryPath\Scripts\poetry.exe" --version
-            & "$poetryPath\Scripts\poetry.exe" config virtualenvs.create false
-            & "$poetryPath\Scripts\poetry.exe" install --no-interaction --no-root
-          } else {
-            echo "Poetry not found, using direct pip installation for required packages"
-            # 如果poetry未找到，使用pip直接安装必要的依赖
-            pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 180
+          # 使用python -m方式运行poetry，这样会使用当前Python环境中的poetry模块
+          echo "Configuring and using Poetry"
+          python -m poetry --version
+          python -m poetry config virtualenvs.create false
+          python -m poetry install --no-interaction --no-root
+          
+          # 检查是否安装成功
+          if ($LASTEXITCODE -ne 0) {
+            echo "Poetry install failed, falling back to pip"
+            pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 1800
           }
 
       - name: build exe
