@@ -6,6 +6,7 @@ on:
 
 jobs:
   ubuntu_build:
+    if: false  # Temporarily disabled
     runs-on: [ self-hosted, Linux ]
 
     steps:
@@ -50,6 +51,7 @@ jobs:
           path: suan/gui/dist/stk_ubuntu
 
   macOS_build:
+    if: false  # Temporarily disabled
     runs-on: macos-latest
 
     steps:
@@ -110,6 +112,8 @@ jobs:
         run: |
           python -m venv .venv
           . .venv\Scripts\activate
+          pip install poetry
+          poetry install
 
 
       - name: build exe
@@ -117,15 +121,15 @@ jobs:
           python.exe -m pip install -U pip
           python suan\scripts\run_write_version.py
           cd suan\gui
-          pip install pyinstaller==6.3.0
-          pip install PySide6
-          pip install vtk==9.3.0
-          python -c "import vtk"
-          pip install matplotlib
-          pip install pandas
-          pip install numpy
-          pip install requests
-          pip install toml
+          # pip install pyinstaller==6.3.0
+          # pip install PySide6
+          # pip install vtk==9.3.0
+          # python -c "import vtk"
+          # pip install matplotlib
+          # pip install pandas
+          # pip install numpy
+          # pip install requests
+          # pip install toml
           pyinstaller .\main.spec
           
           
@@ -171,8 +175,8 @@ jobs:
   release:
     needs:
       - windows_build
-      - macOS_build
-      - ubuntu_build
+      # - macOS_build    # Temporarily commented out
+      # - ubuntu_build   # Temporarily commented out
     runs-on: [ self-hosted, Linux ]
 
     steps:
