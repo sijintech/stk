@@ -100,11 +100,21 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      # 修复中文编码问题
       - name: Check Python Version
         run: |
           python --version
           echo "Using system Python to avoid permission issues"
+
+      # 添加缓存机制
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\.cache\pypoetry
+            .venv
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
 
       - name: get tag
         id: get_tag
@@ -114,11 +124,24 @@ jobs:
 
       - name: Setup virtual environment
         run: |
-          python -m venv .venv
-          # 修正Windows环境下的激活命令
+          # 检查缓存的虚拟环境是否存在
+          if (Test-Path .venv\Scripts\activate.ps1) {
+            echo "Using cached virtual environment"
+          } else {
+            echo "Creating new virtual environment"
+            python -m venv .venv
+          }
+          
+          # 激活虚拟环境
           .\.venv\Scripts\activate.ps1
-          pip install poetry
-          poetry install
+          
+          # 只有在没有安装poetry或poetry.lock变更时才重新安装
+          if (-not (Get-Command poetry -ErrorAction SilentlyContinue)) {
+            pip install poetry
+          }
+          
+          # 使用--no-root选项避免重新安装主项目
+          poetry install --no-interaction --no-root
 
       - name: build exe
         run: |
