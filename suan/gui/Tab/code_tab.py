@@ -32,7 +32,10 @@ class CodeTab(QWidget):
         self.encoding = 'utf-8'
 
         self.editor = CodeEdit()
-        self.editor.backend.start('code_server.py')
+        # 获取当前文件路径
+        current_path = os.path.dirname(__file__)
+        server_path = os.path.join(current_path, 'code_server.py')
+        # self.editor.backend.start(server_path)
         # 语法高亮设置：使用 pygments 风格高亮
         self.editor.modes.append(modes.PygmentsSyntaxHighlighter(self.editor.document()))
         self.editor.modes.append(modes.CodeCompletionMode())
