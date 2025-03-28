@@ -12,6 +12,7 @@ from custom_logger import CustomLogger
 from Tab.code_tab import CodeTab
 from Tab.data_table_tab import DataTableTab
 from Tab.preference_tab import PreferenceTab
+from Tab.ai_chat_tab import AIChatTab
 
 
 class CustomFigureCanvas(FigureCanvasQTAgg):
@@ -30,6 +31,7 @@ class CustomFigureCanvas(FigureCanvasQTAgg):
 
     def getFigure(self):
         return self._figure
+
 
 class CenterWidget(QWidget):
     def __init__(self, parent):
@@ -58,8 +60,13 @@ class CenterWidget(QWidget):
 
         self.addMainOperationTabs()
 
+        # 设置信号连接
+        self.tabWidget.currentChanged.connect(self.onTabChanged)
+
     def initWorkspace(self):
-        active_tab_index = self.parent.get_workspace_data('center_widget/active_tab_index')
+        active_tab_index = self.parent.get_workspace_data(
+            "center_widget/active_tab_index"
+        )
         self.tabWidget.setCurrentIndex(active_tab_index)
         # self.vtkObject=self.parent.get_workspaceData('center_widget/vtk/view_port')
         # self.vtkWidget.GetRenderWindow().AddRenderer(
@@ -73,7 +80,7 @@ class CenterWidget(QWidget):
         ][tabName]
         tab["isVisible"] = not tab["isVisible"]
         self.tabWidget.removeTab(index)
-        
+
     def closeEvent(self, QCloseEvent):
         super().closeEvent(QCloseEvent)
         self.vtkWidget.Finalize()
@@ -81,7 +88,6 @@ class CenterWidget(QWidget):
     def registerComponent(self, path, component, isVisible):
         truePath = "Visualization window/" + path
         self.parent.registerComponent(truePath, component, isVisible)
-
 
     def unregisterComponent(self, path):
         truePath = "Visualization window/" + path
@@ -108,6 +114,13 @@ class CenterWidget(QWidget):
         self.tabWidget.addTab(self.codeTab, "Code")
         self.registerComponent("Code Tab", self.codeTab, True)
 
+        # AI Chat Tab
+        self.aiChatTab = AIChatTab(self)
+        self.tabWidget.addTab(self.aiChatTab, "AI对话")
+        self.registerComponent("AI对话 Tab", self.aiChatTab, True)
+        # 连接AI模型配置变更信号
+        self.aiChatTab.modelConfigChanged.connect(self.onAIModelConfigChanged)
+
         # vtkVisualizationTab
         self.vtkWidget = QVTKRenderWindowInteractor()  # 创建VTK渲染窗口交互器
         self.vtkWidget.Initialize()
@@ -132,7 +145,7 @@ class CenterWidget(QWidget):
         )
 
         # dataTableTab
-        self.dataTableTab = DataTableTab({},4)
+        self.dataTableTab = DataTableTab({}, 4)
         self.tabWidget.addTab(self.dataTableTab, "Data Table")
         self.registerComponent("Data Table Tab", self.dataTableTab, True)
 
@@ -140,6 +153,11 @@ class CenterWidget(QWidget):
         # self.preferenceTab = PreferenceTab()
         # # self.tabWidget.addTab(self.preferenceTab, "Preference")
         # self.registerComponent("Preference Tab", self.preferenceTab,False)
+
+    def onAIModelConfigChanged(self):
+        """处理AI模型配置变更"""
+        self.logger.debug("AI模型配置已更改")
+        # 可以在这里更新其他组件或设置
 
     def addPreferenceTab(self, data):
         # print("addPreferenceTab")
@@ -149,7 +167,7 @@ class CenterWidget(QWidget):
         self.registerComponent("Preference Tab", self.preferenceTab, True)
         preferenceTabIndex = self.tabWidget.indexOf(self.preferenceTab)
         self.tabWidget.setCurrentIndex(preferenceTabIndex)
-        
+
     def runCodeWithAnalysis(self, runCode, runCodeType, need_variable):
         self.runCode = runCode
         self.runCodeType = runCodeType
@@ -157,7 +175,7 @@ class CenterWidget(QWidget):
         if self.runCodeType == "vtk":
             local_vars = {}
             global_vars = {"vtk": vtk}
-            self.parent.get_component_by_name('Code Tab').execute_code_with_file_path(
+            self.parent.get_component_by_name("Code Tab").execute_code_with_file_path(
                 self.runCode, script_path, global_vars, local_vars
             )
             renderer = local_vars.get(need_variable)
@@ -166,7 +184,7 @@ class CenterWidget(QWidget):
         if self.runCodeType == "matplotlib":
             local_vars = {}
             global_vars = {"plt": plt}
-            self.parent.get_component_by_name('Code Tab').execute_code_with_file_path(
+            self.parent.get_component_by_name("Code Tab").execute_code_with_file_path(
                 self.runCode, script_path, global_vars, local_vars
             )
             # exec(self.runCode, global_vars, local_vars)
@@ -187,7 +205,7 @@ class CenterWidget(QWidget):
         # 更新VTK可视化图
         # renderer = self.vtkWidget.GetRenderWindow().GetRenderers().GetFirstRenderer()
         # renderer.RemoveAllViewProps()  # 移除当前渲染器中的所有对象
-        self.vtkObject=vtkObject
+        self.vtkObject = vtkObject
         self.vtkWidget.GetRenderWindow().AddRenderer(
             vtkObject
         )  # 将渲染器添加到渲染窗口
@@ -215,6 +233,49 @@ class CenterWidget(QWidget):
         dataTableIndex = self.tabWidget.indexOf(self.dataTableTab)
         self.tabWidget.setCurrentIndex(dataTableIndex)
 
-    # def update_code(self):
-    #     codeIndex = self.tabWidget.indexOf(self.codeTab)
-    #     self.tabWidget.setCurrentIndex(codeIndex)
+    def onTabChanged(self, index):
+        """选项卡切换事件处理"""
+        if index < 0 or index >= self.tabWidget.count():
+            return
+
+        tab_name = self.tabWidget.tabText(index)
+        self.logger.debug(f"切换到选项卡: {tab_name}")
+
+        # 特殊处理AI对话选项卡
+        if tab_name == "AI对话" and hasattr(self, "aiChatTab"):
+            # 如果AI对话选项卡未连接，尝试连接
+            if not self.aiChatTab.client:
+                self.logger.debug("AI对话选项卡需要连接到模型")
+                # 异步连接，避免阻塞UI
+                from PySide6.QtCore import QTimer
+
+                QTimer.singleShot(100, self.aiChatTab.connectToModel)
+
+    def switchToAIChat(self):
+        """切换到AI对话选项卡"""
+        for i in range(self.tabWidget.count()):
+            if self.tabWidget.tabText(i) == "AI对话":
+                self.tabWidget.setCurrentIndex(i)
+                return True
+
+        # 如果没有找到AI对话选项卡，尝试添加它
+        if (
+            "AI对话 Tab"
+            in self.parent.components["main"]["children"]["Visualization window"][
+                "children"
+            ]
+        ):
+            self.toggleComponentVisibility("AI对话 Tab")
+            return self.switchToAIChat()  # 递归调用一次
+
+        return False
+
+    def activateAIChatTab(self):
+        """激活AI对话选项卡并确保它可见"""
+        result = self.switchToAIChat()
+        if result:
+            self.logger.debug("已切换到AI对话选项卡")
+            # 确保聊天输入框获得焦点
+            if hasattr(self.aiChatTab, "inputField"):
+                self.aiChatTab.inputField.setFocus()
+        return result
