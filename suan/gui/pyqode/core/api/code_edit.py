@@ -756,7 +756,7 @@ class CodeEdit(QtWidgets.QPlainTextEdit):
         Menu are put at the bottom of the context menu.
 
         .. note:: to add a menu in the middle of the context menu, you can
-            always add its menuAction().
+            always add its menuAction(). 
 
         :param menu: menu to add
         """

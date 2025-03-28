@@ -1,71 +1,43 @@
 """
-**pyqode.qt** is a shim over the various qt bindings. It is used to write
-qt bindings indenpendent library or application.
+**pyqode.qt** 是一个针对不同Qt绑定的兼容层。主要用于写跨Qt绑定的库或应用程序。
 
-The shim will automatically select the first available API (PyQt5, PyQt4 and
-finally PySide).
+该兼容层会自动选择第一个可用的API (PyQt5, PyQt4 或最后是PySide)。
 
-You can force the use of one specific bindings (e.g. if your application is
-using one specific bindings and you need to use library that use pyqode.qt) by
-setting up the ``QT_API`` environment variable.
+你可以通过设置 ``QT_API`` 环境变量来强制使用特定的绑定。
 
-PyQt5
-+++++
-
-For pyqt5, you don't have to set anything as it will be used automatically::
-
-    >>> from pyqode.qt import QtGui, QtWidgets, QtCore
-    >>> print(QtWidgets.QWidget)
-
-
-PyQt4
-+++++
-
-Set the ``QT_API`` environment variable to 'PyQt4' (case insensitive) before
-importing any python package::
-
-    >>> import os
-    >>> os.environ['QT_API'] = 'PyQt4'
-    >>> from pyqode.qt import QtGui, QtWidgets, QtCore
-    >>> print(QtWidgets.QWidget)
-
-
-.. warning:: This requires to set the SIP api to version 2 (for strings and
-    covariants). If you're using python2 you have to make sure the correct sip
-    api is set before importing any PyQt4 module (pyqode.qt can take care of
-    that for you but it must be imported before any PyQt4 module).
-
-
-PySide
-++++++
-
-Set the QT_API environment variable to 'PySide' (case insensitive) before
-importing pyqode::
-
-    >>> import os
-    >>> os.environ['QT_API'] = 'PySide'
-    >>> from pyqode.qt import QtGui, QtWidgets, QtCore
-    >>> print(QtWidgets.QWidget)
-
+现在我们默认使用PySide6进行所有操作。
 """
 import os
 import sys
 import logging
 
-__version__ = '2.10.0'
+# Qt绑定的优先级
+PYSIDE6 = 'pyside6'
+PYSIDE2 = 'pyside2'  
+PYSIDE = 'pyside'
+PYQT5 = 'pyqt5'
+PYQT4 = 'pyqt4'
 
-#: Qt API environment variable name
+# 环境变量的名称
 QT_API = 'QT_API'
-#: names of the expected PyQt5 api
-PYQT5_API = ['pyqt5']
-#: names of the expected PyQt4 api
-PYQT4_API = [
-    'pyqt',  # name used in IPython.qt
-    'pyqt4'  # pyqode.qt original name
-]
-#: names of the expected PySide api
-PYSIDE_API = ['pyside', 'pyside6']
 
+# 绑定API的映射
+PYQT4_API = [PYQT4, 'pyqt']
+PYQT5_API = [PYQT5]
+PYSIDE_API = [PYSIDE, PYSIDE2, PYSIDE6]
+
+# 首选的Qt绑定顺序
+API_NAMES = [PYSIDE6, PYQT5, PYSIDE2, PYQT4, PYSIDE]
+
+# 设置默认值
+os.environ.setdefault(QT_API, PYSIDE6)
+
+# 确保QT_API为小写
+os.environ[QT_API] = os.environ[QT_API].lower()
+
+logging.getLogger(__name__).debug('使用的Qt绑定: %s', os.environ[QT_API])
+
+__version__ = '2.10.0'
 
 class PythonQtError(Exception):
     """
@@ -97,56 +69,54 @@ def autodetect():
     Auto-detects and use the first available QT_API by importing them in the
     following order:
 
-    1) PyQt5
-    2) PyQt4
-    3) PySide
+    1) PySide6
+    2) PyQt5
+    3) PySide2
+    4) PyQt4
+    5) PySide
     """
     logging.getLogger(__name__).debug('auto-detecting QT_API')
-    try:
-        logging.getLogger(__name__).debug('trying PySide6')
-        import PySide6
-        os.environ[QT_API] = PYSIDE_API[0]
-        logging.getLogger(__name__).debug('imported PySide6')
-
-    except ImportError:
+    for api in API_NAMES:
         try:
-            logging.getLogger(__name__).debug('trying PyQt4')
-            setup_apiv2()
-            import PyQt4
-            os.environ[QT_API] = PYQT4_API[0]
-            logging.getLogger(__name__).debug('imported PyQt4')
-        except ImportError:
-            try:
-                logging.getLogger(__name__).debug('trying PyQt5')
+            logging.getLogger(__name__).debug('trying %s', api)
+            if api == PYSIDE6:
+                import PySide6
+            elif api == PYSIDE2:
+                import PySide2
+            elif api == PYSIDE:
+                import PySide
+            elif api == PYQT5:
                 import PyQt5
-                os.environ[QT_API] = PYQT5_API[0]
-                logging.getLogger(__name__).debug('imported PyQt5')
-            except ImportError:
-                raise PythonQtError('No Qt bindings could be found')
+            elif api == PYQT4:
+                setup_apiv2()
+                import PyQt4
+            os.environ[QT_API] = api
+            logging.getLogger(__name__).debug('imported %s', api)
+            return
+        except ImportError:
+            continue
+    raise PythonQtError('No Qt bindings could be found')
 
 
 if QT_API in os.environ:
     # check if the selected QT_API is available
     try:
-        if os.environ[QT_API].lower() in PYQT5_API:
-            logging.getLogger(__name__).debug('importing PyQt5')
-            import PyQt5
-
-            os.environ[QT_API] = PYQT5_API[0]
-            logging.getLogger(__name__).debug('imported PyQt5')
-        elif os.environ[QT_API].lower() in PYQT4_API:
-            logging.getLogger(__name__).debug('importing PyQt4')
-            setup_apiv2()
-            import PyQt4
-
-            os.environ[QT_API] = PYQT4_API[0]
-            logging.getLogger(__name__).debug('imported PyQt4')
-        elif os.environ[QT_API].lower() in PYSIDE_API:
-            logging.getLogger(__name__).debug('importing PySide6')
-            import PySide6
-
-            os.environ[QT_API] = PYSIDE_API[0]
-            logging.getLogger(__name__).debug('imported PySide6')
+        if os.environ[QT_API] in API_NAMES:
+            logging.getLogger(__name__).debug('importing %s', os.environ[QT_API])
+            if os.environ[QT_API] == PYSIDE6:
+                import PySide6
+            elif os.environ[QT_API] == PYSIDE2:
+                import PySide2
+            elif os.environ[QT_API] == PYSIDE:
+                import PySide
+            elif os.environ[QT_API] == PYQT5:
+                import PyQt5
+            elif os.environ[QT_API] == PYQT4:
+                setup_apiv2()
+                import PyQt4
+            logging.getLogger(__name__).debug('imported %s', os.environ[QT_API])
+        else:
+            raise ImportError
     except ImportError:
         logging.getLogger(__name__).warning(
             'failed to import the selected QT_API: %s',

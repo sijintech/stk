@@ -431,6 +431,19 @@ class OutputWindow(CodeEdit):
         else:
             self.insertPlainText(output)
 
+    def _set_whitespaces_flags(self, show):
+        """ Sets show white spaces flag """
+        doc = self.document()
+        options = doc.defaultTextOption()
+        # Updated to be compatible with PySide6
+        if show:
+            current_flags = options.flags()
+            options.setFlags(current_flags | QtGui.QTextOption.Flag.ShowTabsAndSpaces)
+        else:
+            current_flags = options.flags()
+            options.setFlags(current_flags & ~QtGui.QTextOption.Flag.ShowTabsAndSpaces)
+        doc.setDefaultTextOption(options)
+
 
 class _LinkHighlighter(SyntaxHighlighter):
     """

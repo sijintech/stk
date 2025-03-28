@@ -2,6 +2,8 @@
 """
 This module contains the TabWidget designer plugin.
 """
+# Designer plugins are not needed for runtime - commenting out
+'''
 from pyqode.core import widgets
 from pyqode.core._designer_plugins import WidgetPlugin
 
@@ -16,3 +18,4 @@ class TabWidgetPlugin(WidgetPlugin):
 
     def objectName(self):
         return 'tabWidget'
+'''

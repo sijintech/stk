@@ -184,70 +184,90 @@ class TextHelper(object):
         """
         return self._editor.textCursor().selectedText()
 
-    def word_under_cursor(
-            self,
-            select_whole_word=False,
-            text_cursor=None,
-            from_start=True
-    ):
+    def word_under_cursor(self, select_whole_word=True, text_cursor=None,
+                          include_whitespaces=False, select_first_line=False,
+                          as_tuple=False, from_start=True):
         """
-        Gets the word under cursor using the separators defined by
-        :attr:`pyqode.core.api.CodeEdit.word_separators`.
-
-        .. note: Instead of returning the word string, this function returns
-            a QTextCursor, that way you may get more information than just the
-            string. To get the word, just call ``selectedText`` on the returned
-            value.
+        Gets the word under cursor.
 
         :param select_whole_word: If set to true the whole word is selected,
-         else the selection stops at the cursor position.
-        :param text_cursor: Optional custom text cursor (e.g. from a
-            QTextDocument clone)
-        :param from_start: If set to true the word is selected from the start,
-        else from the cursor position.
-        :returns: The QTextCursor that contains the selected word.
+                                else the selection stops at the cursor position.
+        :param text_cursor: Optional custom text cursor (QTextCursor).
+        :param include_whitespaces: True to include whitespaces.
+        :param select_first_line: True to select the first line if the cursor touch
+            \\n.
+        :param as_tuple: True to return a tuple (start, end) instead of a QTextCursor
+        :param from_start: True to select from the start of the word.
+            Used only if select_whole_word is False.
+        :returns: The cursor that contains the selected word.
+        :rtype: QTextCursor
         """
-        editor = self._editor
-        if not text_cursor:
-            text_cursor = editor.textCursor()
-        word_separators = editor.word_separators
-        end_pos = start_pos = text_cursor.position()
-        # select char by char until we are at the original cursor position.
-        while from_start and not text_cursor.atStart():
-            text_cursor.movePosition(
-                text_cursor.MoveOperation.Left, text_cursor.MoveMode.KeepAnchor, 1)
+        if text_cursor is None:
+            text_cursor = QtGui.QTextCursor(self._editor.textCursor())
+        if select_first_line and text_cursor.positionInBlock() == 0:
+            if as_tuple:
+                return text_cursor.position(), text_cursor.position()
+            return text_cursor.clearSelection() and text_cursor
+        move_operation = QtGui.QTextCursor.MoveOperation.Right if \
+            hasattr(QtGui.QTextCursor, 'MoveOperation') else QtGui.QTextCursor.Right
+        word_separators = self._editor.word_separators
+        if text_cursor and not include_whitespaces:
             try:
-                char = text_cursor.selectedText()[0]
-            except IndexError:
-                break  # nothing selectable
-            word_separators = editor.word_separators
-            selected_txt = text_cursor.selectedText()
-            if (selected_txt in word_separators and
-                    (selected_txt != "\n" and selected_txt != "\t") or
-                    char.isspace()):
-                break  # start boundary found
-            start_pos = text_cursor.position()
-            text_cursor.setPosition(start_pos)
-        if select_whole_word:
-            # select the rest of the word
-            text_cursor.setPosition(end_pos)
-            while not text_cursor.atEnd():
-                text_cursor.movePosition(text_cursor.Right,
-                                         text_cursor.KeepAnchor, 1)
-                try:
-                    char = text_cursor.selectedText()[0]
-                except IndexError:
-                    break  # nothing selectable
-                selected_txt = text_cursor.selectedText()
-                if (selected_txt in word_separators and
-                        (selected_txt != "\n" and selected_txt != "\t") or
-                        char.isspace()):
-                    break  # end boundary found
                 end_pos = text_cursor.position()
-                text_cursor.setPosition(end_pos)
-        # now that we habe the boundaries, we can select the text
-        text_cursor.setPosition(start_pos)
-        text_cursor.setPosition(end_pos, text_cursor.KeepAnchor)
+                if not from_start:
+                    text_cursor.setPosition(end_pos, text_cursor.MoveMode.MoveAnchor)
+                    while not text_cursor.atStart():
+                        text_cursor.movePosition(QtGui.QTextCursor.MoveOperation.Left if \
+                            hasattr(QtGui.QTextCursor, 'MoveOperation') else QtGui.QTextCursor.Left,
+                                               text_cursor.MoveMode.KeepAnchor, 1)
+                        char = text_cursor.selectedText()
+                        if not char or char in word_separators:
+                            break
+                        text_cursor.setPosition(text_cursor.position() - 1,
+                                               text_cursor.MoveMode.MoveAnchor)
+                    pos = text_cursor.position()
+                    text_cursor.setPosition(pos, text_cursor.MoveMode.MoveAnchor)
+                    if select_whole_word:
+                        # select from cursor pos to end of word
+                        while not text_cursor.atEnd():
+                            text_cursor.movePosition(move_operation,
+                                                   text_cursor.MoveMode.KeepAnchor, 1)
+                            char = text_cursor.selectedText()[-1]
+                            if char in word_separators:
+                                text_cursor.movePosition(
+                                    QtGui.QTextCursor.MoveOperation.Left if \
+                                    hasattr(QtGui.QTextCursor, 'MoveOperation') else \
+                                    QtGui.QTextCursor.Left,
+                                    text_cursor.MoveMode.KeepAnchor, 1)
+                                break
+                        text = text_cursor.selectedText()
+                        if text and text[-1] in word_separators:
+                            text_cursor.movePosition(
+                                QtGui.QTextCursor.MoveOperation.Left if \
+                                hasattr(QtGui.QTextCursor, 'MoveOperation') else \
+                                QtGui.QTextCursor.Left,
+                                text_cursor.MoveMode.KeepAnchor, 1)
+                else:
+                    text_cursor.movePosition(
+                        QtGui.QTextCursor.MoveOperation.StartOfWord if \
+                        hasattr(QtGui.QTextCursor, 'MoveOperation') else \
+                        QtGui.QTextCursor.StartOfWord,
+                        text_cursor.MoveMode.MoveAnchor)
+                    text_cursor.movePosition(
+                        QtGui.QTextCursor.MoveOperation.EndOfWord if \
+                        hasattr(QtGui.QTextCursor, 'MoveOperation') else \
+                        QtGui.QTextCursor.EndOfWord,
+                        text_cursor.MoveMode.KeepAnchor)
+            except (IndexError, RuntimeError):
+                pass
+        elif text_cursor:
+            # Use the regexp to select the word
+            text_cursor = self.select_extended_word(
+                text_cursor, direction='b', as_tuple=as_tuple)
+            if as_tuple and isinstance(text_cursor, tuple):
+                return text_cursor
+        if as_tuple:
+            return text_cursor.selectionStart(), text_cursor.selectionEnd()
         return text_cursor
 
     def word_under_mouse_cursor(self):
@@ -764,52 +784,58 @@ class TextHelper(object):
                                 return True
         return False
 
-    def select_extended_word(self, continuation_chars=('.',)):
+    def select_extended_word(self, text_cursor=None, direction='b', as_tuple=False):
         """
-        Performs extended word selection. Extended selection consists in
-        selecting the word under cursor and any other words that are linked
+        Selects the word under cursor and any other words that are linked
         by a ``continuation_chars``.
 
-        :param continuation_chars: the list of characters that may extend a
-            word.
+        :param text_cursor: Optional QTextCursor to use as starting point. Default is 
+                           to use the current text cursor.
+        :param direction: Selection direction, both directions by default.
+        :param as_tuple: True to return a tuple (start, end) instead of a QTextCursor
         """
-        cursor = self._editor.textCursor()
-        original_pos = cursor.position()
+        # Fix the implementation to work with text_cursor parameter
+        if text_cursor is None:
+            text_cursor = self._editor.textCursor()
+        original_pos = text_cursor.position()
         start_pos = None
         end_pos = None
         # go left
         stop = False
         seps = self._editor.word_separators + [' ']
         while not stop:
-            cursor.clearSelection()
-            cursor.movePosition(cursor.Left, cursor.KeepAnchor)
-            char = cursor.selectedText()
-            if cursor.atBlockStart():
+            text_cursor.clearSelection()
+            text_cursor.movePosition(text_cursor.Left, text_cursor.KeepAnchor)
+            char = text_cursor.selectedText()
+            if text_cursor.atBlockStart():
                 stop = True
-                start_pos = cursor.position()
-            elif char in seps and char not in continuation_chars:
+                start_pos = text_cursor.position()
+            elif char in seps and char not in ('.', ):  # Using '.' as continuation char
                 stop = True
-                start_pos = cursor.position() + 1
+                start_pos = text_cursor.position() + 1
         # go right
-        cursor.setPosition(original_pos)
+        text_cursor.setPosition(original_pos)
         stop = False
         while not stop:
-            cursor.clearSelection()
-            cursor.movePosition(cursor.Right, cursor.KeepAnchor)
-            char = cursor.selectedText()
-            if cursor.atBlockEnd():
+            text_cursor.clearSelection()
+            text_cursor.movePosition(text_cursor.Right, text_cursor.KeepAnchor)
+            char = text_cursor.selectedText()
+            if text_cursor.atBlockEnd():
                 stop = True
-                end_pos = cursor.position()
+                end_pos = text_cursor.position()
                 if char in seps:
                     end_pos -= 1
-            elif char in seps and char not in continuation_chars:
+            elif char in seps and char not in ('.', ):  # Using '.' as continuation char
                 stop = True
-                end_pos = cursor.position() - 1
+                end_pos = text_cursor.position() - 1
         if start_pos and end_pos:
-            cursor.setPosition(start_pos)
-            cursor.movePosition(cursor.Right, cursor.KeepAnchor,
+            text_cursor.setPosition(start_pos)
+            text_cursor.movePosition(text_cursor.Right, text_cursor.KeepAnchor,
                                 end_pos - start_pos)
-            self._editor.setTextCursor(cursor)
+            if as_tuple:
+                return text_cursor.selectionStart(), text_cursor.selectionEnd()
+            return text_cursor
+        return text_cursor
 
     def match_select(self, ignored_symbols=None):
         """

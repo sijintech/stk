@@ -7,7 +7,9 @@ from pyqode.qt import PYQT5_API
 from pyqode.qt import PYQT4_API
 from pyqode.qt import PYSIDE_API
 
+# 确保使用PySide6
 os.environ[QT_API] = 'pyside6'
+
 if os.environ[QT_API] in PYQT5_API:
     from PyQt5.QtCore import *
     # compatibility with pyside
@@ -27,10 +29,8 @@ elif os.environ[QT_API] in PYQT4_API:
     from PyQt4.QtCore import QT_VERSION_STR as __version__
 elif os.environ[QT_API] in PYSIDE_API:
     from PySide6.QtCore import *
-    # from PySide6.QtGui import QSortFilterProxyModel
     from PySide6.QtCore import QSortFilterProxyModel
 
-    # use a common __version__
+    # 使用通用的版本变量
     import PySide6.QtCore
-
     __version__ = PySide6.QtCore.__version__

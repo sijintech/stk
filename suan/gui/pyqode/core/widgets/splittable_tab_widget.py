@@ -1961,3 +1961,18 @@ class SplittableCodeEditTabWidget(SplittableTabWidget):
         if self.root:
             return DEFAULT_EXTENSION
         return self.get_root_splitter().default_extension()
+
+    def _set_whitespaces_flags(self, show):
+        """ 设置显示空格标志 """
+        doc = self.document()
+        options = doc.defaultTextOption()
+        if show:
+            # 使用PySide6兼容的方式设置标志
+            current_flags = options.flags()
+            if QtGui.QTextOption.Flag.ShowTabsAndSpaces not in current_flags:
+                options.setFlags(current_flags | QtGui.QTextOption.Flag.ShowTabsAndSpaces)
+        else:
+            current_flags = options.flags()
+            if QtGui.QTextOption.Flag.ShowTabsAndSpaces in current_flags:
+                options.setFlags(current_flags & ~QtGui.QTextOption.Flag.ShowTabsAndSpaces)
+        doc.setDefaultTextOption(options)
