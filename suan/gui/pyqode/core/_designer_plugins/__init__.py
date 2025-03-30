@@ -1,10 +1,12 @@
 """
 This packages contains the various qt designer plugins
 """
-from qtpy import QtDesigner
+# Commented out Qt Designer plugins as they're not needed for runtime and may cause issues
+# with PySide6 if QtDesigner is not available
 
+# from qtpy import QtDesigner  # Comment this out as it's not needed for normal operation
 
-class WidgetPlugin(QtDesigner.QPyDesignerCustomWidgetPlugin):
+class WidgetPlugin:  # Removed QtDesigner dependency
     """
     Base class for writing a designer plugins.
 
@@ -15,9 +17,9 @@ class WidgetPlugin(QtDesigner.QPyDesignerCustomWidgetPlugin):
     """
 
     def __init__(self, parent=None):
-        super(WidgetPlugin, self).__init__(parent=parent)
+        # super(WidgetPlugin, self).__init__(parent=parent)  # Removed QtDesigner dependency
         self.initialized = False
-        print(self.name(), self.includeFile(), self.objectName())
+        # print(self.name(), self.includeFile(), self.objectName())  # Remove debug print
 
     def klass(self):
         """

@@ -1,5 +1,5 @@
 """
-This shiw provides a QWebView either from QtWebKit or from QtWebEngine.
+This module provides a QWebView either from QtWebKit or from QtWebEngine.
 """
 import os
 from pyqode.qt import QT_API
@@ -22,7 +22,14 @@ if os.environ[QT_API] in PYQT5_API:
 elif os.environ[QT_API] in PYQT4_API:
     from PyQt4.QtWebKit import QWebView, QWebPage
 elif os.environ[QT_API] in PYSIDE_API:
-    from PySide.QtWebKit import QWebView, QWebPage
+    try:
+        # PySide6中使用WebEngineWidgets
+        from PySide6.QtWebEngineWidgets import QWebEngineView as QWebView
+        from PySide6.QtWebEngineWidgets import QWebEnginePage as QWebPage
+    except ImportError:
+        # 如果无法导入，设置为None
+        QWebPage = None
+        QWebView = None
 else:
     QWebPage = None
     QWebView = None

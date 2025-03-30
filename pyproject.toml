@@ -1,0 +1,47 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "suan_toolkits"
+version = "0.0.0"
+description = "This is a tool to vtk and matploblib."
+readme = "README.md"
+authors = ["Zhou Hanjie <2625553453@qq.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.12"
+numpy = "1.24.3"
+toml = ">=0.8.2"
+matplotlib = "3.6.2"
+PySide6 = "6.4.1"
+vtk = "9.3.0"
+requests = "*"
+pandas = "*"
+ollama = "*"
+# 更改 torch 依赖为使用特定的 URL
+#torch = { url = "https://download.pytorch.org/whl/cu117/torch-1.13.1%2Bcu117-cp39-cp39-win_amd64.whl" }
+#transformers = "4.30.2"
+sentence-transformers = "2.2.2"
+PyPDF2 = "*"
+chardet = "*"
+qtpy = "*"
+pygments = "*"
+pyinstaller = "6.3.0"
+frontend = "*"
+pathspec= "*"
+psutil = "*"  
+
+# 添加 PyTorch 官方源
+[[tool.poetry.source]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/"
+priority = "supplemental"
+
+[tool.poetry.urls]
+Homepage = "https://github.com/sijintech/stk.git"
+Issues = "https://github.com/sijintech/stk/issues/"

@@ -1,3 +1,18 @@
+import os
+import sys
+
+# 在导入其他模块前设置 DPI 感知
+# 解决 "qt.qpa.window: SetProcessDpiAwarenessContext..." 警告
+if sys.platform == "win32":
+    try:
+        from ctypes import windll
+
+        # 使用 SetProcessDpiAwareness 替代 SetProcessDpiAwarenessContext
+        # 0 = 不感知, 1 = 系统感知, 2 = 每显示器感知
+        windll.shcore.SetProcessDpiAwareness(2)
+    except (ImportError, AttributeError, OSError):
+        pass
+
 import re
 import sys
 from PySide6.QtWidgets import (
@@ -25,21 +40,20 @@ import toml
 import shutil
 from custom_logger import CustomLogger
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), './Tab')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "./Tab")))
 updatejson_url = "https://sijin-suan-update.oss-cn-beijing.aliyuncs.com/update.json"
 app_name = "stk"
 cur_version = version.version
 code_url = "https://github.com/sijintech/stk"
-os.environ['QT_API'] = 'pyside'
+os.environ["QT_API"] = "pyside"
+
 
 class MainWindow(QMainWindow):
     def __init__(self, create_workspace_if_no):
         super().__init__()
         self.logger = CustomLogger()
         # 用于存储具有层级关系的组件
-        self.components = {
-            "main": {"name": "main", "component": self, "children": {}}
-        }
+        self.components = {"main": {"name": "main", "component": self, "children": {}}}
         # 创建中部区域
         self.center_widget = center_widget.CenterWidget(self)
         # 创建右侧栏
@@ -75,7 +89,6 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self.check_update()
         # print(self.components)
-
 
     def init_ui(self):
         # 设置主窗口标题
@@ -135,15 +148,13 @@ class MainWindow(QMainWindow):
             for component in UI_Components_not_Visibile:
                 if father_component != "Other":
                     path = (
-                            father_component.replace("_", " ")
-                            + "/"
-                            + component.replace("_", " ")
+                        father_component.replace("_", " ")
+                        + "/"
+                        + component.replace("_", " ")
                     )
                     self.toggleComponentVisibility(path)
                 else:
-                    path = (
-                        component.replace("_", " ")
-                    )
+                    path = component.replace("_", " ")
                     self.toggleComponentVisibility(path)
 
     def showEvent(self, event):
@@ -163,7 +174,7 @@ class MainWindow(QMainWindow):
             )
 
     def closeEvent(self, event):
-        self.modify_preferences('Open_Last_Working_Directory', self.curWorkDir)
+        self.modify_preferences("Open_Last_Working_Directory", self.curWorkDir)
         self.save_preferences()
         if self.isWorkspace:
             self.check_and_save_curworkspace()
@@ -239,7 +250,10 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.Yes:
             this_dir = os.path.dirname(os.path.abspath(__file__))
-            self.create_workspace_file(directory, os.path.join(this_dir, get_resource_path("confs/workspace.suan")))
+            self.create_workspace_file(
+                directory,
+                os.path.join(this_dir, get_resource_path("confs/workspace.suan")),
+            )
             if is_init:
                 self.init_workspace()
 
@@ -254,7 +268,7 @@ class MainWindow(QMainWindow):
             return True
 
     def check_and_save_curfile(self):
-        if not self.get_component_by_name('Code Tab').curFileIsSave():
+        if not self.get_component_by_name("Code Tab").curFileIsSave():
             reply = QMessageBox.question(
                 self,
                 "Warning",
@@ -301,8 +315,8 @@ class MainWindow(QMainWindow):
     def load_workspace_data(self):
         try:
             with open(
-                    self.workspace_conf_path,
-                    "r",
+                self.workspace_conf_path,
+                "r",
             ) as file:
                 workspaceData = toml.load(file)
         except FileNotFoundError:
@@ -332,13 +346,14 @@ class MainWindow(QMainWindow):
             data = data[part]
         return data[parts[-1]]
 
-
     def init_preferences(self):
         # 对于已发布版本，首选项文件的位置应位于用户目录中，对于开发版本，应位于当前目录中
         this_dir = os.path.dirname(os.path.abspath(__file__))
         if getattr(sys, "frozen", True):
             self.logger.info("执行脚本")
-            self.preference_toml_path = os.path.join(this_dir, get_resource_path("confs/preference.toml"))
+            self.preference_toml_path = os.path.join(
+                this_dir, get_resource_path("confs/preference.toml")
+            )
 
         else:
             self.preference_toml_path = os.path.join(
@@ -348,11 +363,15 @@ class MainWindow(QMainWindow):
         self.curWorkDir = self.preferences["Open_Last_Working_Directory"]
         self.logger.debug("curWorkDir:%s", self.curWorkDir)
 
+        # 确保AI模型配置目录存在
+        ai_config_dir = os.path.join(os.path.expanduser("~"), ".stk")
+        os.makedirs(ai_config_dir, exist_ok=True)
+
     def load_preferences(self):
         try:
             with open(
-                    self.preference_toml_path,
-                    "r",
+                self.preference_toml_path,
+                "r",
             ) as file:
                 preferences = toml.load(file)
                 # print(preferences)
@@ -465,7 +484,9 @@ class MainWindow(QMainWindow):
         current_level[component_name]["isVisible"] = not current_level[component_name][
             "isVisible"
         ]
-        self.logger.debug("toggleComponentVisibility %s:%s", path, component.isVisible())
+        self.logger.debug(
+            "toggleComponentVisibility %s:%s", path, component.isVisible()
+        )
 
     def componentIsVisible(self, path):
         """判断组件是否可见."""
@@ -522,12 +543,11 @@ class MainWindow(QMainWindow):
         self.updateWindow.show()
 
 
-
 def load_qss(qss_file_path):
     """
     加载 QSS 文件内容
     """
-    with open(qss_file_path, 'r', encoding='gbk', errors='ignore') as file:
+    with open(qss_file_path, "r", encoding="gbk", errors="ignore") as file:
         return file.read()
 
 
@@ -557,9 +577,10 @@ def apply_qss(app, qss):
 
 
 def get_resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):
+    if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
+
 
 def check_resource():
 
@@ -567,7 +588,7 @@ def check_resource():
     current_path = os.path.dirname(os.path.abspath(__file__))
 
     # 需要检查的子目录列表
-    subdirs = ['confs', 'examples', 'resources', 'icons']
+    subdirs = ["confs", "examples", "resources", "icons"]
 
     for subdir in subdirs:
         dir_path = os.path.join(current_path, get_resource_path(subdir))
@@ -597,7 +618,7 @@ if __name__ == "__main__":
     scale_factor = dpi / 96.0  # 96 为标准 DPI
 
     # 加载原始 QSS 文件
-    qss_file_path = get_resource_path('resources/styles.qss')
+    qss_file_path = get_resource_path("resources/styles.qss")
     qss = load_qss(qss_file_path)
 
     # 动态调整字体大小

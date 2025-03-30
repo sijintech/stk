@@ -6,8 +6,8 @@ on:
 
 jobs:
   ubuntu_build:
-#    runs-on: [ self-hosted, Linux ]
-    runs-on: ubuntu-latest
+    if: false  # Temporarily disabled
+    runs-on: [ self-hosted, Linux ]
 
     steps:
       - uses: actions/checkout@v3
@@ -51,6 +51,7 @@ jobs:
           path: suan/gui/dist/stk_ubuntu
 
   macOS_build:
+    if: false  # Temporarily disabled
     runs-on: macos-latest
 
     steps:
@@ -98,37 +99,85 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      #      - name: Set up Python
-      #        uses: actions/setup-python@v4
-      #        with:
-      #          python-version: "3.9"
+      
+      - name: Check Python Version
+        run: |
+          python --version
+          echo "Using system Python to avoid permission issues"
+
+      # 添加缓存机制
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\.cache\pypoetry
+            .venv
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
       - name: get tag
         id: get_tag
         run: |
-          echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
+          # 修正Windows环境下的环境变量设置方式
+          echo "TAG=$($env:GITHUB_REF -replace 'refs/tags/v','')" >> $env:GITHUB_ENV
 
       - name: Setup virtual environment
         run: |
-          python -m venv .venv
-          . .venv\Scripts\activate
-
+          # 检查缓存的虚拟环境是否存在
+          if (Test-Path .venv\Scripts\activate.ps1) {
+            echo "Using cached virtual environment"
+          } else {
+            echo "Creating new virtual environment"
+            python -m venv .venv
+          }
+          
+          # 激活虚拟环境
+          .\.venv\Scripts\activate.ps1
+          
+          # 更新pip并设置超时时间
+          python -m pip install --upgrade pip --timeout 1800
+          
+          # 使用python -m方式安装和运行poetry，避免路径问题
+          echo "Installing Poetry using python -m"
+          python -m pip install poetry==1.7.1 --timeout 1800
+          
+          # 设置Poetry超时环境变量
+          $env:POETRY_HTTP_TIMEOUT = 1800
+          
+          # 使用python -m方式运行poetry，这样会使用当前Python环境中的poetry模块
+          echo "Configuring and using Poetry"
+          python -m poetry --version
+          python -m poetry config virtualenvs.create false
+          python -m poetry install --no-interaction --no-root
+          
+          # 检查是否安装成功
+          if ($LASTEXITCODE -ne 0) {
+            echo "Poetry install failed, falling back to pip"
+            pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 1800
+          }
 
       - name: build exe
         run: |
-          #          python.exe -m pip install -U pip
+          # 重新激活虚拟环境，确保路径正确
+          .\.venv\Scripts\activate.ps1
+          
+          # 如果上一步成功安装了poetry，它的可执行文件应该已经在PATH中
+          python.exe -m pip install -U pip
           python suan\scripts\run_write_version.py
           cd suan\gui
-          pip install pyinstaller==6.3.0
-          pip install PySide6
-          pip install vtk==9.3.0
-          python -c "import vtk"
-          pip install matplotlib
-          pip install pandas
-          pip install numpy
-          pip install requests
-          pip install toml
+
+          # pip install PySide6
+          # pip install vtk==9.3.0
+          # python -c "import vtk"
+          # pip install matplotlib
+          # pip install pandas
+          # pip install numpy
+          # pip install requests
+          # pip install toml
+
           pyinstaller .\main.spec
-          
+
           
           # - name: Install NSIS
           #   run: |
@@ -160,6 +209,16 @@ jobs:
       #     python suan\scripts\deploy.py
       #     python suan\scripts\update.py
 
+      - name: Check build output
+        run: |
+          # 检查构建产物是否存在，避免使用中文
+          if (Test-Path suan\gui\dist\stk_windows.exe) {
+            echo "Build artifact generated, size: $((Get-Item suan\gui\dist\stk_windows.exe).length / 1MB) MB"
+          } else {
+            echo "Build artifact not found, please check the build process"
+            exit 1
+          }
+
       - name: Store dist
         uses: actions/upload-artifact@v4
         with:
@@ -172,10 +231,9 @@ jobs:
   release:
     needs:
       - windows_build
-      - macOS_build
-      - ubuntu_build
-    #    runs-on: [ self-hosted, Linux ]
-    runs-on: ubuntu-latest
+      # - macOS_build    # Temporarily commented out
+      # - ubuntu_build   # Temporarily commented out
+    runs-on: [ self-hosted, Linux ]
 
     steps:
       - uses: actions/checkout@v3
@@ -201,6 +259,7 @@ jobs:
           # prerelease: false
 
       - name: Download ubuntu app
+        if: ${{ false }}  # 当前禁用了Ubuntu构建，暂时跳过下载
         uses: actions/download-artifact@v4
         with:
           # 要下载的文件的标记
@@ -217,6 +276,7 @@ jobs:
           path: suan/gui/dist/
 
       - name: Download macOS app
+        if: ${{ false }}  # 当前禁用了macOS构建，暂时跳过下载
         uses: actions/download-artifact@v4
         with:
           # 要下载的文件的标记
@@ -228,6 +288,7 @@ jobs:
           ls
 
       - name: release ubuntu app
+        if: ${{ false }}  # 当前禁用了Ubuntu构建，暂时跳过发布
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
@@ -249,6 +310,7 @@ jobs:
           asset_content_type: application/octet-stream
 
       - name: release macOS app
+        if: ${{ false }}  # 当前禁用了macOS构建，暂时跳过发布
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}

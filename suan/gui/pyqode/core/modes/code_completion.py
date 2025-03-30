@@ -626,8 +626,13 @@ class CodeCompletionMode(Mode, QtCore.QObject):
             return
         # Get the word that was typed so far
         text_cursor = self.editor.textCursor()
-        text_cursor.movePosition(text_cursor.Left, text_cursor.MoveAnchor, 1)
-        text_cursor.select(text_cursor.WordUnderCursor)
+        moveLeft = QtGui.QTextCursor.MoveOperation.Left if \
+            hasattr(QtGui.QTextCursor, 'MoveOperation') else QtGui.QTextCursor.Left
+        wordUnderCursor = QtGui.QTextCursor.MoveOperation.WordUnderCursor if \
+            hasattr(QtGui.QTextCursor, 'MoveOperation') else QtGui.QTextCursor.WordUnderCursor
+            
+        text_cursor.movePosition(moveLeft, text_cursor.MoveAnchor, 1)
+        text_cursor.select(wordUnderCursor)
         self._update_popup_rect(text_cursor.anchor())
         word_so_far = text_cursor.selectedText()
         self._completer.setCaseSensitivity(
@@ -655,20 +660,24 @@ class CodeCompletionMode(Mode, QtCore.QObject):
         # reconstruct a basic stylesheet and directly apply it. There may be
         # more elegant solutions, but this works.
         if not self._stylesheet_initialized:
-            self._completer.popup().setStyleSheet(
-                '''
-                background: {};
-                color: {};
-                font-family: {};
-                font-size: {};
-                '''.format(
-                    self.editor.palette().base().color().name(),
-                    self.editor.palette().text().color().name(),
-                    self.editor.font_name,
-                    self.editor.font_size,
+            try:
+                self._completer.popup().setStyleSheet(
+                    '''
+                    background: {};
+                    color: {};
+                    font-family: {};
+                    font-size: {};
+                    '''.format(
+                        self.editor.palette().base().color().name(),
+                        self.editor.palette().text().color().name(),
+                        self.editor.font_name,
+                        self.editor.font_size,
+                    )
                 )
-            )
-            self._stylesheet_initialized = True
+                self._stylesheet_initialized = True
+            except Exception:
+                # In case of any stylesheet issues, just continue without styling
+                pass
         self._completer.popup().setCurrentIndex(
             self._completer.completionModel().index(row, 0)
         )

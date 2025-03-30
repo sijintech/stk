@@ -9,19 +9,22 @@ from PySide6.QtWidgets import (
     QToolButton,
     QCheckBox,
     QComboBox,
-    QWidgetAction
+    QWidgetAction,
+    QInputDialog,
 )
 import zipfile
 from PySide6.QtGui import QAction, QIcon
 from custom_logger import CustomLogger
 import os
 import sys
+from ai_dialog import AIConnectionDialog
 
 
 def get_resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):
+    if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
+
 
 class ToolBar(QWidget):
     """自定义工具栏，继承自 QWidget，并作为窗口的一个部件"""
@@ -30,6 +33,7 @@ class ToolBar(QWidget):
         super().__init__(parent)
         self.logger = CustomLogger()
         self.parent = parent
+        self.current_open_file = None
         self.initUI()
 
     def initUI(self):
@@ -52,29 +56,52 @@ class ToolBar(QWidget):
 
         # 文件菜单
         file_menu = QMenu("文件", self)
-        open_file_action = QAction(QIcon(get_resource_path("./icons/file_icon.ico")), "打开文件", self)
+        open_file_action = QAction(
+            QIcon(get_resource_path("./icons/file_icon.ico")), "打开文件", self
+        )
         open_file_action.triggered.connect(self.openFile)
         file_menu.addAction(open_file_action)
 
-        open_directory_action = QAction(QIcon(get_resource_path("./icons/folder_icon.ico")), "打开项目", self)
+        open_directory_action = QAction(
+            QIcon(get_resource_path("./icons/folder_icon.ico")), "打开项目", self
+        )
         open_directory_action.triggered.connect(self.openDirectory)
         file_menu.addAction(open_directory_action)
 
-        open_new_action = QAction(QIcon(get_resource_path("./icons/new.ico")), "新建", self)
+        open_new_action = QAction(
+            QIcon(get_resource_path("./icons/new.ico")), "新建", self
+        )
         open_new_action.triggered.connect(self.showNewMenu)
         file_menu.addAction(open_new_action)
 
         file_action = QAction("文件", self)
         file_action.triggered.connect(
-            lambda: file_menu.exec(self.toolbar1.mapToGlobal(self.toolbar1.actionGeometry(file_action).bottomLeft())))
+            lambda: file_menu.exec(
+                self.toolbar1.mapToGlobal(
+                    self.toolbar1.actionGeometry(file_action).bottomLeft()
+                )
+            )
+        )
         self.toolbar1.addAction(file_action)
+
+        # AI对话按钮
+        ai_chat_action = QAction("AI对话", self)
+        ai_chat_action.triggered.connect(self.showAIChat)
+        self.toolbar1.addAction(ai_chat_action)
 
         # 视图菜单
         viewAction = QAction("视图", self)
         view_menu = QMenu("视图", self)
-        self.addComponentsToMenu(self.parent.components["main"]["children"], view_menu, "")
+        self.addComponentsToMenu(
+            self.parent.components["main"]["children"], view_menu, ""
+        )
         viewAction.triggered.connect(
-            lambda: view_menu.exec(self.toolbar1.mapToGlobal(self.toolbar1.actionGeometry(viewAction).bottomLeft())))
+            lambda: view_menu.exec(
+                self.toolbar1.mapToGlobal(
+                    self.toolbar1.actionGeometry(viewAction).bottomLeft()
+                )
+            )
+        )
         self.toolbar1.addAction(viewAction)
 
         # 窗口菜单
@@ -84,8 +111,13 @@ class ToolBar(QWidget):
         window_menu.addAction(preference_action)
 
         window_action = QAction("窗口", self)
-        window_action.triggered.connect(lambda: window_menu.exec(
-            self.toolbar1.mapToGlobal(self.toolbar1.actionGeometry(window_action).bottomLeft())))
+        window_action.triggered.connect(
+            lambda: window_menu.exec(
+                self.toolbar1.mapToGlobal(
+                    self.toolbar1.actionGeometry(window_action).bottomLeft()
+                )
+            )
+        )
         self.toolbar1.addAction(window_action)
 
         # 帮助菜单
@@ -96,14 +128,23 @@ class ToolBar(QWidget):
 
         help_action = QAction("帮助", self)
         help_action.triggered.connect(
-            lambda: help_menu.exec(self.toolbar1.mapToGlobal(self.toolbar1.actionGeometry(help_action).bottomLeft())))
+            lambda: help_menu.exec(
+                self.toolbar1.mapToGlobal(
+                    self.toolbar1.actionGeometry(help_action).bottomLeft()
+                )
+            )
+        )
         self.toolbar1.addAction(help_action)
 
     def showNewMenu(self):
         new_menu = QMenu(self)
-        new_menu.addAction(QAction("新文件", self))
+        new_file_action = QAction("新文件", self)
+        new_file_action.triggered.connect(self.create_new_file)
+        new_menu.addAction(new_file_action)
 
-        new_menu.addAction(QAction("新目录", self))
+        new_dir_action = QAction("新目录", self)
+        new_dir_action.triggered.connect(self.create_new_dir)
+        new_menu.addAction(new_dir_action)
 
         new_window_action = QAction("新窗口", self)
         new_window_action.triggered.connect(self.parent.open_new_window)
@@ -112,7 +153,11 @@ class ToolBar(QWidget):
         create_workspace_action = QAction("创建工作区", self)
         create_workspace_action.triggered.connect(self.createNewWorkspace)
         new_menu.addAction(create_workspace_action)
-        new_menu.popup(self.toolbar1.mapToGlobal(self.toolbar1.actionGeometry(self.toolbar1.sender()).bottomLeft()))
+        new_menu.popup(
+            self.toolbar1.mapToGlobal(
+                self.toolbar1.actionGeometry(self.toolbar1.sender()).bottomLeft()
+            )
+        )
 
     def createSecondRowButtons(self):
         self.logger.info("创建第二行工具栏按钮...")
@@ -143,29 +188,39 @@ class ToolBar(QWidget):
         self.toolbar2.addWidget(new_button)
 
         # 保存工作区按钮
-        save_workspace_action = QAction(QIcon(get_resource_path("./icons/save.ico")), "保存工作区", self)
+        save_workspace_action = QAction(
+            QIcon(get_resource_path("./icons/save.ico")), "保存工作区", self
+        )
         save_workspace_action.triggered.connect(self.saveWorkspace)
         self.toolbar2.addAction(save_workspace_action)
 
         # 打开文件按钮
-        open_file_action = QAction(QIcon(get_resource_path("./icons/file_action.ico")), "打开文件", self)
+        open_file_action = QAction(
+            QIcon(get_resource_path("./icons/file_action.ico")), "打开文件", self
+        )
         open_file_action.triggered.connect(self.openFile)
         self.toolbar2.addAction(open_file_action)
 
         # 打开目录按钮
-        open_directory_action = QAction(QIcon(get_resource_path("./icons/folder_icon.ico")), "打开项目", self)
+        open_directory_action = QAction(
+            QIcon(get_resource_path("./icons/folder_icon.ico")), "打开项目", self
+        )
         open_directory_action.triggered.connect(self.openDirectory)
         self.toolbar2.addAction(open_directory_action)
         # 分隔符
         self.toolbar2.addSeparator()
 
         # 保存并运行按钮
-        save_and_run_action = QAction(QIcon(get_resource_path("./icons/run.png")), "保存并运行", self)
+        save_and_run_action = QAction(
+            QIcon(get_resource_path("./icons/run.png")), "保存并运行", self
+        )
         save_and_run_action.triggered.connect(self.saveAndRun)
         self.toolbar2.addAction(save_and_run_action)
 
         # 停止按钮
-        stop_action = QAction(QIcon(get_resource_path("./icons/stop.png")), "停止", self)
+        stop_action = QAction(
+            QIcon(get_resource_path("./icons/stop.png")), "停止", self
+        )
         stop_action.triggered.connect(self.stop_execution)
         self.toolbar2.addAction(stop_action)
 
@@ -175,14 +230,15 @@ class ToolBar(QWidget):
         # 项目下拉菜单
         self.project_dropdown = QComboBox(self)
         self.project_dropdown.addItem("选择项目")  # 默认提示选项
-        # self.loadProjects("examples")
         self.loadProjects(get_resource_path("examples"))
         self.project_dropdown.currentIndexChanged.connect(self.handleProjectSelection)
         self.toolbar2.addWidget(self.project_dropdown)
         # 分隔符
         self.toolbar2.addSeparator()
         # 检查更新按钮
-        check_update_action = QAction(QIcon(get_resource_path("./icons/update.png")), "检查更新", self)
+        check_update_action = QAction(
+            QIcon(get_resource_path("./icons/update.png")), "检查更新", self
+        )
         check_update_action.triggered.connect(self.checkUpdate)
         self.toolbar2.addAction(check_update_action)
 
@@ -190,7 +246,7 @@ class ToolBar(QWidget):
 
     def loadProjects(self, examples_dir):
         """
-        读取 ../examples 下的 .zip 文件，并加载到下拉菜单中。
+        读取 examples 下的 .zip 文件，并加载到下拉菜单中。
         """
         if not os.path.exists(examples_dir):
             self.logger.error(f"目录 {examples_dir} 不存在")
@@ -214,9 +270,7 @@ class ToolBar(QWidget):
         self.logger.info(f"用户选择了项目：{selected_project}")
 
         # 打开文件对话框，选择目标路径
-        target_dir = QFileDialog.getExistingDirectory(
-            self, "选择目标路径"
-        )
+        target_dir = QFileDialog.getExistingDirectory(self, "选择目标路径")
         if not target_dir:
             self.logger.info("用户取消了路径选择")
             return
@@ -229,7 +283,7 @@ class ToolBar(QWidget):
 
         # 解压缩项目到新目录
         try:
-            with zipfile.ZipFile(selected_project, 'r') as zip_ref:
+            with zipfile.ZipFile(selected_project, "r") as zip_ref:
                 zip_ref.extractall(new_dir)
             self.logger.info(f"项目成功解压到：{new_dir}")
         except Exception as e:
@@ -239,8 +293,8 @@ class ToolBar(QWidget):
         # 打开解压后的项目
         try:
             workspace_updates = {
-                'left_sidebar/working_directory': new_dir,
-                'info_bar/code/file_path': '',
+                "left_sidebar/working_directory": new_dir,
+                "info_bar/code/file_path": "",
             }
             # 打开复制后的项目
             self.parent.left_sidebar.open_directory(new_dir, workspace_updates)
@@ -249,18 +303,20 @@ class ToolBar(QWidget):
 
     def openFile(self):
         # 打开文件对话框
-        path, _ = QFileDialog.getOpenFileName(self, "Open File", filter="All Files (*)")
-        self.parent.left_sidebar.open_file(path)
+        path, _ = QFileDialog.getOpenFileName(self, "打开文件", filter="所有文件 (*)")
+        if path:
+            self.parent.left_sidebar.open_file(path)
+            self.current_open_file = path
 
     def openDirectory(self):
         # 打开目录对话框
-        path = QFileDialog.getExistingDirectory(self, "Open Directory")
+        path = QFileDialog.getExistingDirectory(self, "打开项目")
         if path:
             self.parent.left_sidebar.open_directory(path)
 
     def createNewWorkspace(self):
         self.logger.info("创建新工作区...")
-        self.parent.question_and_create_workspace(self.parent.curDir)
+        self.parent.question_and_create_workspace(self.parent.curWorkDir)
 
     def saveWorkspace(self):
         self.logger.info("保存工作区...")
@@ -274,20 +330,22 @@ class ToolBar(QWidget):
     def preference(self):
         self.logger.info("打开布局设置...")
         preferences = self.parent.load_preferences()
-        Visualization_window = self.parent.get_component_by_path(
-            "Visualization window"
-        )
+        Visualization_window = self.parent.get_component_by_path("Visualization window")
         Visualization_window.addPreferenceTab(preferences)
 
     def save_file(self):
         try:
             # 获取Code标签页中的文本内容
-            content = self.parent.get_component_by_name('Code Tab').toPlainText()
+            content = self.parent.get_component_by_name("Code Tab").toPlainText()
             # 将内容写入文件
-            with open(self.parent.curWorkFile, "w", encoding="utf-8") as file:
-                file.write(content)
+            if self.parent.curWorkFile:
+                with open(self.parent.curWorkFile, "w", encoding="utf-8") as file:
+                    file.write(content)
+                self.logger.info(f"保存文件成功: {self.parent.curWorkFile}")
+            else:
+                self.logger.warning("没有当前工作文件可保存")
         except Exception as e:
-            self.logger.debug("Error saving file:", e)
+            self.logger.error(f"保存文件失败: {e}")
 
     def saveAndRun(self):
         self.save_file()
@@ -299,16 +357,44 @@ class ToolBar(QWidget):
         self.parent.check_update()
 
     def stop_execution(self):
-        # todo
-        pass
+        self.logger.info("停止执行...")
+        # 实现停止执行逻辑
+        # 目前只是占位，实际实现需要结合具体的执行上下文
 
     def create_new_file(self):
-        # todo
-        pass
+        # 实现创建新文件的功能
+        text, ok = QInputDialog.getText(self, "新建文件", "请输入文件名:")
+        if ok and text:
+            if self.parent.curWorkDir:
+                file_path = os.path.join(self.parent.curWorkDir, text)
+                if not os.path.splitext(file_path)[1]:  # 如果没有扩展名，添加.txt
+                    file_path += ".txt"
+                try:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write("")
+                    self.logger.info(f"创建新文件成功: {file_path}")
+                    # 打开新创建的文件
+                    self.parent.left_sidebar.open_file(file_path)
+                except Exception as e:
+                    self.logger.error(f"创建新文件失败: {e}")
+            else:
+                self.logger.warning("当前没有工作目录，无法创建文件")
 
     def create_new_dir(self):
-        # todo
-        pass
+        # 实现创建新目录的功能
+        text, ok = QInputDialog.getText(self, "新建目录", "请输入目录名:")
+        if ok and text:
+            if self.parent.curWorkDir:
+                dir_path = os.path.join(self.parent.curWorkDir, text)
+                try:
+                    os.makedirs(dir_path, exist_ok=True)
+                    self.logger.info(f"创建新目录成功: {dir_path}")
+                    # 刷新文件树
+                    self.parent.left_sidebar.model.refresh()
+                except Exception as e:
+                    self.logger.error(f"创建新目录失败: {e}")
+            else:
+                self.logger.warning("当前没有工作目录，无法创建目录")
 
     def registerComponent(self, path, component):
         truePath = "Tool/" + path
@@ -320,7 +406,11 @@ class ToolBar(QWidget):
     def showViewMenu(self):
         menu = QMenu(self)
         self.addComponentsToMenu(self.parent.components["main"]["children"], menu, "")
-        menu.exec(self.toolbar1.mapToGlobal(self.toolbar1.actionGeometry(self.toolbar1.sender()).bottomLeft()))
+        menu.exec(
+            self.toolbar1.mapToGlobal(
+                self.toolbar1.actionGeometry(self.toolbar1.sender()).bottomLeft()
+            )
+        )
 
     def addComponentsToMenu(self, components, menu, path):
         for name, info in components.items():
@@ -331,17 +421,36 @@ class ToolBar(QWidget):
                     info["children"], sub_menu, current_path + "/"
                 )  # 传递更新后的当前路径
             else:  # 该节点为叶子节点
-
                 checkbox = QCheckBox(self)
                 checkbox.setText(name)
-                self.logger.debug(info)
                 checkbox.setChecked(info["isVisible"])
                 action = QWidgetAction(self)
                 action.setDefaultWidget(checkbox)
                 menu.addAction(action)
-                # checkbox.clicked.connect(self.toggleComponentVisibility(current_path))
                 checkbox.clicked.connect(
                     lambda c=info[
                         "component"
                     ], p=current_path: self.toggleComponentVisibility(p)
                 )
+
+
+
+    def showAIChat(self):
+        """显示AI对话界面"""
+        # 获取center_widget对象
+        center_widget = self.parent.center_widget
+        # 获取AI对话选项卡的索引
+        for i in range(center_widget.tabWidget.count()):
+            if center_widget.tabWidget.tabText(i) == "AI对话":
+                # 切换到AI对话选项卡
+                center_widget.tabWidget.setCurrentIndex(i)
+                # 如果AI对话选项卡不存在，则添加它
+                if not center_widget.aiChatTab.isVisible():
+                    center_widget.toggleComponentVisibility("AI对话 Tab")
+                # 确保AI对话模块已连接到服务器
+                if not center_widget.aiChatTab.client:
+                    center_widget.aiChatTab.connectToModel()
+                return
+
+        # 如果没有找到AI对话选项卡，尝试添加它
+        center_widget.toggleComponentVisibility("AI对话 Tab")

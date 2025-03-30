@@ -684,11 +684,12 @@ class SearchAndReplacePanel(Panel, Ui_SearchPanel):
         if offset:
             updated_occurences = []
             for j, occ in enumerate(self._occurrences):
-                if j >= i:
-                    updated_occurences.append(
-                        (occ[0] + offset, occ[1] + offset))
+                # Fix the missing implementation
+                if j > i:
+                    # Adjust occurrence positions based on offset
+                    updated_occurences.append((occ[0] + offset, occ[1] + offset))
                 else:
-                    updated_occurences.append((occ[0], occ[1]))
+                    updated_occurences.append(occ)
             self._occurrences = updated_occurences
 
     def _update_buttons(self, txt=""):
