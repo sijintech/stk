@@ -26,6 +26,7 @@ def get_resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 
+
 class ToolBar(QWidget):
     """自定义工具栏，继承自 QWidget，并作为窗口的一个部件"""
 
