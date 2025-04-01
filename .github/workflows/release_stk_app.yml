@@ -169,14 +169,15 @@ jobs:
       - name: Install dependencies
         run: |
           .\.venv\Scripts\activate.ps1
+          poetry lock
           poetry install --no-interaction --no-root
           
-          # 尝试手动安装关键依赖，以防Poetry安装失败
-          if ($LASTEXITCODE -ne 0) {
-            echo "Poetry install failed, falling back to pip"
-            python -m pip install -r requirements.txt --timeout 1800
-            python -m pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 1800
-          }
+          # # 尝试手动安装关键依赖，以防Poetry安装失败
+          # if ($LASTEXITCODE -ne 0) {
+          #   echo "Poetry install failed, falling back to pip"
+          #   python -m pip install -r requirements.txt --timeout 1800
+          #   python -m pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 1800
+          # }
 
       - name: Generate version
         run: |
