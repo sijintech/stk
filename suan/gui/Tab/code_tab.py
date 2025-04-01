@@ -1,5 +1,3 @@
-
-
 from PySide6.QtWidgets import (
     QMessageBox,
     QMenu,
@@ -30,6 +28,7 @@ class CodeTab(QWidget):
         self.curShowCode = None
         self.curShowCodeType = "python"
         self.encoding = 'utf-8'
+        self.current_file = None
 
         self.editor = CodeEdit()
         # self.editor.backend.start('code_server.py')
@@ -288,3 +287,59 @@ class CodeTab(QWidget):
                     )
 
         return variable_info
+
+    def save_if_auto(self):
+        """如果开启了自动保存且当前文件已被修改，则保存文件"""
+        if not self.parent or not hasattr(self.parent, 'parent'):
+            return False
+            
+        parent_window = self.parent.parent
+        
+        # 检查parent_window及其preferences是否已正确初始化
+        if not hasattr(parent_window, 'preferences') or parent_window.preferences is None:
+            return False
+            
+        # 获取自动保存设置
+        auto_save = parent_window.preferences.get("Auto_Save", True)
+        
+        # 确保当前文件和current_file属性存在
+        if not hasattr(self, 'current_file'):
+            # 使用curWorkFile作为替代
+            if hasattr(parent_window, 'curWorkFile'):
+                current_file = parent_window.curWorkFile
+            else:
+                return False
+        else:
+            current_file = self.current_file
+        
+        # 如果开启了自动保存且当前文件已被修改，则自动保存
+        if auto_save and not self.curFileIsSave() and current_file:
+            parent_window.logger.debug(f"自动保存文件: {current_file}")
+            self.save_file()
+            return True
+        return False
+
+    def save_file(self):
+        """保存当前文件"""
+        try:
+            # 获取当前文件路径
+            if hasattr(self, 'current_file') and self.current_file:
+                file_path = self.current_file
+            elif hasattr(self.parent, 'parent') and hasattr(self.parent.parent, 'curWorkFile'):
+                file_path = self.parent.parent.curWorkFile
+            else:
+                self.logger.error("没有可保存的文件路径")
+                return False
+                
+            # 获取编辑器内容
+            content = self.editor.toPlainText()
+            
+            # 保存文件
+            with open(file_path, "w", encoding=self.encoding) as file:
+                file.write(content)
+                
+            self.logger.debug(f"文件已保存: {file_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"保存文件失败: {e}")
+            return False

@@ -38,8 +38,8 @@ SENTENCE_TRANSFORMER_ERROR = None
 try:
     # 首先验证 PyTorch 版本
     import torch
-    if not torch.__version__.startswith(('1.13', '2.0')):
-        raise ImportError(f"不兼容的 PyTorch 版本 {torch.__version__}，需要 1.13.x 或 2.0.x")
+    # if not torch.__version__.startswith(('1.13', '2.0')):
+    #     raise ImportError(f"不兼容的 PyTorch 版本 {torch.__version__}，需要 1.13.x 或 2.0.x")
         
     from sentence_transformers import SentenceTransformer, util
     SENTENCE_TRANSFORMER_AVAILABLE = True

@@ -264,3 +264,22 @@ class LeftSidebar(QWidget):
                         self.parent.get_component_by_name('Code Tab').showContent(content)
                 except Exception as e:
                     self.logger.error(f"Error reading file:{e}")
+
+    def tree_double_clicked(self, item, column):
+        # 获得点击的文件路径
+        self.check_auto_save()
+        
+        if item.childCount() == 0:  # 判断是否是叶子节点
+            file_path = self.get_file_path(item)
+            self.logger.debug(f"双击了文件: {file_path}")
+            # 发送打开文件的信号
+            self.openFilePath.emit(file_path)
+            code_tab = self.parent.get_component_by_name("Code Tab")
+            if code_tab:
+                code_tab.open_file(file_path)
+                
+    def check_auto_save(self):
+        """检查并自动保存当前文件（如果启用了自动保存）"""
+        code_tab = self.parent.get_component_by_name("Code Tab")
+        if code_tab:
+            code_tab.save_if_auto()

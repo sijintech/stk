@@ -1,6 +1,7 @@
 Default_Location = "Home"
 Open_Last_Workspace = true
-Open_Last_Working_Directory = "D:/work/sijin/stk/suan/test/strain"
+Open_Last_Working_Directory = ""
+Auto_Save = true
 
 [UI_Init]
 window_width = "800"
@@ -19,6 +20,7 @@ VTK_Visualization_Tab = true
 Matplotlib_Display_Tab = true
 Data_Table_Tab = true
 Code_Tab = true
+AI_Tab = true
 
 [UI_Component_Visibility_Init.Tool]
 Open = true

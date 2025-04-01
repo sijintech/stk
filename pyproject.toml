@@ -30,7 +30,7 @@ pygments = "*"
 pyinstaller = "6.3.0"
 frontend = "*"
 pathspec= "*"
-
+psutil = "*"  
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]
 name = "aliyun"
@@ -44,3 +44,39 @@ priority = "supplemental"
 [tool.poetry.urls]
 Homepage = "https://github.com/sijintech/stk.git"
 Issues = "https://github.com/sijintech/stk/issues/"
+
+# 打包和开发工具，放在可选依赖中
+[tool.poetry.group.dev.dependencies]
+pyinstaller = "6.3.0"
+black = "^23.3.0"
+isort = "^5.12.0"
+flake8 = "^6.0.0"
+
+# PyInstaller配置
+[tool.pyinstaller]
+# 打包相关的配置
+hooks_dir = "suan/gui/hooks"
+hidden_imports = [
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+    "PySide6.QtSvg",
+    "PySide6.QtNetwork",
+    "matplotlib.backends.backend_qt5agg",
+    "numpy.core._methods",
+    "numpy.lib.format",
+    "pandas._libs.tslibs.timedeltas",
+    "pandas._libs.tslibs.nattype",
+    "pandas._libs.tslibs.np_datetime",
+    "vtk.vtkIOXMLPython",
+    "vtk.vtkRenderingCorePython",
+    "vtk.vtkCommonCorePython",
+    "vtk.vtkFiltersCoreModule",
+    "vtkmodules.util.execution_model", 
+    "vtkmodules.util.data_model"
+]
+
+# 添加自动命令
+[tool.poetry.scripts]
+generate-deps = "suan.gui.update_dependencies:main"
+build-app = "suan.gui.build_with_poetry:main"

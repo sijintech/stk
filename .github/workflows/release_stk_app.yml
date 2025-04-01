@@ -22,27 +22,34 @@ jobs:
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
 
-      - name: Setup virtual environment
+      # 添加Poetry缓存
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      # 使用Poetry安装依赖
+      - name: Install Poetry
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          cd $GITHUB_WORKSPACE
+          poetry config virtualenvs.create false
+          poetry install --no-interaction --no-root
+          python suan/scripts/run_write_version.py
 
       - name: Build executable
         run: |
-          python -m pip install -U pip
-          python suan/scripts/run_write_version.py
-          cd suan/gui/
-          pip install pyinstaller==6.3.0
-          pip install PySide6
-          pip install matplotlib
-          pip install pandas
-          pip install numpy
-          pip install requests          
-          pip install toml
-          pip install vtk
-          pyinstaller ./main.spec
+          cd suan/gui
+          python build_with_poetry.py
           cd dist
-          ls
+          ls -la
 
       - name: Store dist
         uses: actions/upload-artifact@v4
@@ -56,42 +63,50 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.9"
-      - name: get tag
+      
+      - name: Get tag
         id: get_tag
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
 
-      - name: Setup virtual environment
+      # 添加Poetry缓存
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/Library/Caches/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      # 使用Poetry安装依赖
+      - name: Install Poetry
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
-      - name: build exe
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
         run: |
-          python -m pip install -U pip
+          cd $GITHUB_WORKSPACE
+          poetry config virtualenvs.create false
+          poetry install --no-interaction --no-root
           python suan/scripts/run_write_version.py
-          cd suan/gui/
-          pip install vtk==9.3.0
-          pip install pyinstaller==6.3.0
-          pip install PySide6
-          pip install matplotlib
-          pip install pandas
-          pip install numpy
-          pip install requests
-          pip install toml
-          pyinstaller ./main.spec
+
+      - name: Build executable
+        run: |
+          cd suan/gui
+          python build_with_poetry.py
           cd dist
-          ls
+          ls -la
 
       - name: Store dist
         uses: actions/upload-artifact@v4
         with:
-          # 上传后的标记名，下载依靠它找到对应文件
           name: stk_macos
-          # 上传的文件位置
           path: suan/gui/dist/stk_macos
 
   windows_build:
@@ -112,17 +127,17 @@ jobs:
           path: |
             ~\.cache\pypoetry
             .venv
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-poetry-
 
-      - name: get tag
+      - name: Get tag
         id: get_tag
         run: |
           # 修正Windows环境下的环境变量设置方式
           echo "TAG=$($env:GITHUB_REF -replace 'refs/tags/v','')" >> $env:GITHUB_ENV
 
-      - name: Setup virtual environment
+      - name: Setup environment
         run: |
           # 检查缓存的虚拟环境是否存在
           if (Test-Path .venv\Scripts\activate.ps1) {
@@ -137,81 +152,50 @@ jobs:
           
           # 更新pip并设置超时时间
           python -m pip install --upgrade pip --timeout 1800
-          
-          # 使用python -m方式安装和运行poetry，避免路径问题
-          echo "Installing Poetry using python -m"
+
+      - name: Install Poetry
+        run: |
+          # 安装Poetry
+          .\.venv\Scripts\activate.ps1
           python -m pip install poetry==1.7.1 --timeout 1800
           
-          # 设置Poetry超时环境变量
+          # 设置Poetry配置
           $env:POETRY_HTTP_TIMEOUT = 1800
+          poetry --version
+          poetry config virtualenvs.create false
+
+      - name: Install dependencies
+        run: |
+          .\.venv\Scripts\activate.ps1
+          poetry install --no-interaction --no-root
           
-          # 使用python -m方式运行poetry，这样会使用当前Python环境中的poetry模块
-          echo "Configuring and using Poetry"
-          python -m poetry --version
-          python -m poetry config virtualenvs.create false
-          python -m poetry install --no-interaction --no-root
-          
-          # 检查是否安装成功
+          # 尝试手动安装关键依赖，以防Poetry安装失败
           if ($LASTEXITCODE -ne 0) {
             echo "Poetry install failed, falling back to pip"
-            pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 1800
+            python -m pip install -r requirements.txt --timeout 1800
+            python -m pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 1800
           }
 
-      - name: build exe
+      - name: Generate version
         run: |
-          # 重新激活虚拟环境，确保路径正确
           .\.venv\Scripts\activate.ps1
-          
-          # 如果上一步成功安装了poetry，它的可执行文件应该已经在PATH中
-          python.exe -m pip install -U pip
           python suan\scripts\run_write_version.py
+
+      - name: Build with Poetry
+        run: |
+          .\.venv\Scripts\activate.ps1
           cd suan\gui
-
-          # pip install PySide6
-          # pip install vtk==9.3.0
-          # python -c "import vtk"
-          # pip install matplotlib
-          # pip install pandas
-          # pip install numpy
-          # pip install requests
-          # pip install toml
-
-          pyinstaller .\main.spec
-
           
-          # - name: Install NSIS
-          #   run: |
-          # iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
-          # .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
-          # scoop update
-          # scoop bucket add extras
-
-        # scoop install nsis
-      #      - name: build app
-      #        run: |
-      #          makensis suan\gui\build_nsis.nsi
-      #          cd suan\gui\dist
-      #          ls
-
-      # - name: Upload files to OSS(window)
-      #   env:
-      #     OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
-      #     OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
-      #     OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
-      #     OSS_BUCKET: sijin-suan-update
-      #     # 指定要上传的文件或目录
-      #     SOURCE_DIR: '../src/dist'
-      #     # 指定OSS中的目标目录
-      #     TARGET_DIR: 'nsis/'
-      #   run: |
-      #     pwd
-      #     pip install oss2
-      #     python suan\scripts\deploy.py
-      #     python suan\scripts\update.py
+          # 使用基于Poetry的构建脚本
+          python build_with_poetry.py
+          
+          # 检查dist目录
+          cd dist
+          dir
 
       - name: Check build output
         run: |
-          # 检查构建产物是否存在，避免使用中文
+          # 检查构建产物是否存在
           if (Test-Path suan\gui\dist\stk_windows.exe) {
             echo "Build artifact generated, size: $((Get-Item suan\gui\dist\stk_windows.exe).length / 1MB) MB"
           } else {
@@ -222,10 +206,7 @@ jobs:
       - name: Store dist
         uses: actions/upload-artifact@v4
         with:
-          # 上传后的标记名，下载依靠它找到对应文件
           name: stk_windows
-          # 上传的文件位置
-          #          path: suan/gui/dist/stk_nsis.exe
           path: suan/gui/dist/stk_windows.exe
 
   release:
@@ -304,7 +285,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          #          asset_path: suan/gui/dist/stk_nsis.exe
           asset_path: suan/gui/dist/stk_windows.exe
           asset_name: stk_windows.exe
           asset_content_type: application/octet-stream

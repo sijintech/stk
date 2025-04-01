@@ -14,4 +14,3 @@ _deps
 
 .venv/
 !/suan/gui/main.spec
-poetry.lock
