@@ -168,6 +168,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          $env:PYTHONIOENCODING = "utf-8"
           .\.venv\Scripts\activate.ps1
           poetry lock
           poetry install --no-interaction --no-root
