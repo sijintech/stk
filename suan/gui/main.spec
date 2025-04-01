@@ -27,6 +27,16 @@ added_files = [
     ('icons', 'icons')
 ]
 
+# 确保目录存在，如果不存在则创建空目录
+for file_pattern, target_dir in added_files:
+    source_dir = file_pattern.split('/*')[0] if '/*' in file_pattern else file_pattern
+    if not os.path.exists(source_dir):
+        try:
+            os.makedirs(source_dir)
+            print(f"Created directory {source_dir}")
+        except Exception as e:
+            print(f"Warning: Could not create directory {source_dir}: {e}")
+
 # 自动收集常用模块的依赖
 def collect_dependencies(module_names):
     all_imports = []
@@ -40,7 +50,7 @@ def collect_dependencies(module_names):
             all_datas.extend(datas)
             all_binaries.extend(binaries)
         except Exception as e:
-            print(f"警告: 收集模块 {module_name} 依赖时出错: {e}")
+            print(f"Warning: Error collecting dependencies for {module_name}: {e}")
     
     return all_imports, all_datas, all_binaries
 
@@ -67,22 +77,30 @@ def scan_project_imports():
                                 if not base_module.startswith('.'):
                                     imports.add(base_module)
                 except Exception as e:
-                    print(f"无法解析文件 {os.path.join(root, file)}: {e}")
+                    print(f"Warning: Could not parse file {os.path.join(root, file)}: {e}")
     
     return list(imports)
 
-# 扫描项目导入
-project_imports = scan_project_imports()
-print(f"检测到项目中使用的模块: {project_imports}")
+try:
+    # 扫描项目导入
+    project_imports = scan_project_imports()
+    print(f"Detected modules used in project: {project_imports}")
 
-# 合并导入列表
-all_packages = list(set(key_packages + project_imports))
+    # 合并导入列表
+    all_packages = list(set(key_packages + project_imports))
 
-# 收集所有依赖
-pkg_imports, pkg_datas, pkg_binaries = collect_dependencies(all_packages)
+    # 收集所有依赖
+    pkg_imports, pkg_datas, pkg_binaries = collect_dependencies(all_packages)
 
-# 确保VTK相关模块被正确包含
-vtk_modules = collect_submodules('vtkmodules')
+    # 确保VTK相关模块被正确包含
+    vtk_modules = collect_submodules('vtkmodules')
+except Exception as e:
+    print(f"Warning: Error during dependency analysis: {e}")
+    # 提供默认值以防止构建失败
+    pkg_imports = []
+    pkg_datas = []
+    pkg_binaries = []
+    vtk_modules = []
 
 # 项目自定义模块
 custom_modules = [
@@ -106,9 +124,30 @@ a = Analysis(
         *vtk_modules,
         *pkg_imports,
         'vtkmodules.util.execution_model', 
-        'vtkmodules.util.data_model'
+        'vtkmodules.util.data_model',
+        # 添加其他常见的隐藏导入
+        'PySide6.QtCore',
+        'PySide6.QtGui',
+        'PySide6.QtWidgets',
+        'PySide6.QtSvg',
+        'PySide6.QtNetwork',
+        'matplotlib.backends.backend_qt5agg',
+        'numpy.core._methods',
+        'numpy.lib.format',
+        'pandas._libs.tslibs.timedeltas',
+        'pandas._libs.tslibs.nattype',
+        'pandas._libs.tslibs.np_datetime',
+        'ollama',
+        'sentence_transformers',
+        'PyPDF2',
+        'qtpy',
+        'pygments',
+        'frontend',
+        'pathspec',
+        'psutil',
+        'chardet',
     ],
-    hookspath=[],
+    hookspath=['hooks'],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],

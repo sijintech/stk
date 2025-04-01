@@ -4,6 +4,10 @@ on:
     tags:
       - 'v*'
 
+env:
+  CI: true
+  GITHUB_ACTIONS: true
+
 jobs:
   ubuntu_build:
     if: false  # Temporarily disabled
@@ -47,9 +51,8 @@ jobs:
       - name: Build executable
         run: |
           cd suan/gui
+          # 直接运行构建脚本，CI环境变量已设置为自动构建
           python build_with_poetry.py
-          cd dist
-          ls -la
 
       - name: Store dist
         uses: actions/upload-artifact@v4
@@ -99,9 +102,8 @@ jobs:
       - name: Build executable
         run: |
           cd suan/gui
+          # 直接运行构建脚本，CI环境变量已设置为自动构建
           python build_with_poetry.py
-          cd dist
-          ls -la
 
       - name: Store dist
         uses: actions/upload-artifact@v4
@@ -186,12 +188,18 @@ jobs:
           .\.venv\Scripts\activate.ps1
           cd suan\gui
           
-          # 使用基于Poetry的构建脚本
+          # 使用基于Poetry的构建脚本，设置环境变量确保自动构建
+          $env:CI = "true"
+          $env:GITHUB_ACTIONS = "true"
           python build_with_poetry.py
           
+          # 创建dist目录（如果不存在）
+          if (-not (Test-Path dist)) {
+            mkdir dist
+          }
+          
           # 检查dist目录
-          cd dist
-          dir
+          dir dist
 
       - name: Check build output
         run: |
@@ -200,6 +208,15 @@ jobs:
             echo "Build artifact generated, size: $((Get-Item suan\gui\dist\stk_windows.exe).length / 1MB) MB"
           } else {
             echo "Build artifact not found, please check the build process"
+            # 不要立即退出，尝试搜索构建产物
+            Get-ChildItem -Path suan\gui\dist -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*.exe" } | ForEach-Object {
+              echo "Found possible artifact: $($_.FullName), size: $($_.Length / 1MB) MB"
+            }
+            # 检查build_debug.log
+            if (Test-Path suan\gui\build_debug.log) {
+              echo "Contents of build_debug.log:"
+              Get-Content suan\gui\build_debug.log -Tail 50
+            }
             exit 1
           }
 
@@ -243,30 +260,27 @@ jobs:
         if: ${{ false }}  # 当前禁用了Ubuntu构建，暂时跳过下载
         uses: actions/download-artifact@v4
         with:
-          # 要下载的文件的标记
           name: stk_ubuntu
-          # 下载到哪个目录（注意是/而不是\,否则报错）
           path: suan/gui/dist/
 
       - name: Download windows app
         uses: actions/download-artifact@v4
         with:
-          # 要下载的文件的标记
           name: stk_windows
-          # 下载到哪个目录（注意是/而不是\,否则报错）
           path: suan/gui/dist/
 
       - name: Download macOS app
         if: ${{ false }}  # 当前禁用了macOS构建，暂时跳过下载
         uses: actions/download-artifact@v4
         with:
-          # 要下载的文件的标记
           name: stk_macos
-          # 下载到哪个目录（注意是/而不是\,否则报错）
           path: suan/gui/dist/
-      - run: |
+
+      - name: List downloaded artifacts
+        run: |
+          mkdir -p suan/gui/dist/
           cd suan/gui/dist/
-          ls
+          ls -la
 
       - name: release ubuntu app
         if: ${{ false }}  # 当前禁用了Ubuntu构建，暂时跳过发布

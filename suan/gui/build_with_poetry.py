@@ -11,7 +11,25 @@ import platform
 import subprocess
 import shutil
 import toml
+import locale
 from pathlib import Path
+
+# 设置控制台编码
+def setup_console_encoding():
+    """设置控制台编码，确保中文显示正常"""
+    if platform.system() == "Windows":
+        try:
+            # 尝试设置控制台代码页为UTF-8
+            subprocess.run(["chcp", "65001"], shell=True, check=False)
+        except Exception:
+            pass
+        
+        # 设置Python标准输出编码
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# 调用编码设置函数
+setup_console_encoding()
 
 def get_project_root():
     """获取项目根目录"""
@@ -28,14 +46,14 @@ def load_pyproject():
     pyproject_path = project_root / "pyproject.toml"
     
     if not pyproject_path.exists():
-        print(f"错误: 找不到 pyproject.toml 文件: {pyproject_path}")
+        print(f"Error: pyproject.toml not found: {pyproject_path}")
         sys.exit(1)
     
     try:
         with open(pyproject_path, 'r', encoding='utf-8') as f:
             return toml.load(f)
     except Exception as e:
-        print(f"错误: 无法解析 pyproject.toml 文件: {e}")
+        print(f"Error: Cannot parse pyproject.toml: {e}")
         sys.exit(1)
 
 def extract_dependencies(pyproject):
@@ -62,7 +80,7 @@ def ensure_pyinstaller_spec(dependencies):
     
     # 如果不存在spec文件，创建一个基本模板
     if not spec_path.exists():
-        print("警告: 未找到 main.spec 文件，将创建一个基本模板")
+        print("Warning: main.spec not found, creating a basic template")
         create_basic_spec_template(spec_path, dependencies)
         return
     
@@ -77,8 +95,8 @@ def ensure_pyinstaller_spec(dependencies):
             missing_imports.append(dep)
     
     if missing_imports:
-        print(f"警告: main.spec 文件中可能缺少以下依赖: {', '.join(missing_imports)}")
-        print("请考虑在 hiddenimports 列表中添加这些依赖")
+        print(f"Warning: main.spec file may be missing dependencies: {', '.join(missing_imports)}")
+        print("Consider adding these dependencies to the hiddenimports list")
 
 def create_basic_spec_template(spec_path, dependencies):
     """创建基本的 PyInstaller spec 模板"""
@@ -196,7 +214,7 @@ exe = EXE(
     with open(spec_path, 'w', encoding='utf-8') as f:
         f.write(template)
     
-    print(f"已创建基本 spec 模板文件: {spec_path}")
+    print(f"Created basic spec template file: {spec_path}")
 
 def ensure_hooks_directory():
     """确保hooks目录存在"""
@@ -205,23 +223,23 @@ def ensure_hooks_directory():
     
     if not hooks_dir.exists():
         os.makedirs(hooks_dir)
-        print(f"已创建hooks目录: {hooks_dir}")
+        print(f"Created hooks directory: {hooks_dir}")
     
     # 创建基本的钩子文件
     hook_app_path = hooks_dir / "hook-app.py"
     if not hook_app_path.exists():
         with open(hook_app_path, 'w', encoding='utf-8') as f:
             f.write("""\"\"\"
-这是一个自定义的PyInstaller钩子文件，用于确保STK GUI应用程序的所有依赖项都被正确打包。
-将此文件放在项目的hooks目录中，并在main.spec中引用它。
+This is a custom PyInstaller hook file to ensure all dependencies for the STK GUI application are correctly packaged.
+Place this file in the project's hooks directory and reference it in main.spec.
 \"\"\"
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
-# 收集所有VTK相关模块
+# Collect all VTK related modules
 hiddenimports = collect_submodules('vtkmodules')
 
-# 确保这些关键模块被包含
+# Ensure these key modules are included
 hiddenimports.extend([
     'PySide6.QtCore',
     'PySide6.QtGui',
@@ -240,19 +258,19 @@ hiddenimports.extend([
     'vtk.vtkFiltersCoreModule',
 ])
 
-# 收集所有PySide6资源
+# Collect all PySide6 resources
 datas, binaries, hiddenimports_pyside = collect_all('PySide6')
 
-# 合并隐藏导入
+# Merge hidden imports
 hiddenimports.extend(hiddenimports_pyside)
 
-# 这些文件会被PyInstaller打包
+# These files will be packaged by PyInstaller
 datas.extend([])
 
-# 这些二进制文件会被PyInstaller打包
+# These binaries will be packaged by PyInstaller
 binaries.extend([])
 """)
-        print(f"已创建钩子文件: {hook_app_path}")
+        print(f"Created hook file: {hook_app_path}")
 
 def run_build():
     """运行构建过程"""
@@ -270,12 +288,12 @@ def run_build():
     else:
         build_command = "python3 -m PyInstaller main.spec"
     
-    print(f"开始构建: {build_command}")
+    print(f"Starting build: {build_command}")
     try:
         subprocess.run(build_command, shell=True, check=True)
-        print("构建成功!")
+        print("Build successful!")
     except subprocess.CalledProcessError as e:
-        print(f"构建失败: {e}")
+        print(f"Build failed: {e}")
         sys.exit(1)
 
 def create_debug_log(dependencies):
@@ -284,17 +302,17 @@ def create_debug_log(dependencies):
     log_path = gui_dir / "build_debug.log"
     
     with open(log_path, 'w', encoding='utf-8') as f:
-        f.write("=== STK构建调试日志 ===\n\n")
+        f.write("=== STK Build Debug Log ===\n\n")
         
-        f.write(f"Python版本: {sys.version}\n")
-        f.write(f"操作系统: {platform.system()} {platform.release()}\n")
-        f.write(f"平台: {platform.platform()}\n\n")
+        f.write(f"Python version: {sys.version}\n")
+        f.write(f"Operating system: {platform.system()} {platform.release()}\n")
+        f.write(f"Platform: {platform.platform()}\n\n")
         
-        f.write("=== 提取的依赖列表 ===\n")
+        f.write("=== Extracted Dependencies ===\n")
         for dep in dependencies:
             f.write(f"- {dep}\n")
         
-        f.write("\n=== 已安装的包版本 ===\n")
+        f.write("\n=== Installed Package Versions ===\n")
         try:
             process = subprocess.run(
                 [sys.executable, "-m", "pip", "freeze"],
@@ -302,23 +320,58 @@ def create_debug_log(dependencies):
             )
             f.write(process.stdout)
         except Exception as e:
-            f.write(f"无法获取已安装的包信息: {e}\n")
+            f.write(f"Could not get installed package information: {e}\n")
+        
+        # 添加系统环境变量信息
+        f.write("\n=== Environment Variables ===\n")
+        for key, value in os.environ.items():
+            # 过滤敏感信息
+            if not any(sensitive in key.lower() for sensitive in ['token', 'key', 'secret', 'password', 'auth']):
+                f.write(f"{key}={value}\n")
     
-    print(f"已创建调试日志: {log_path}")
+    print(f"Created debug log: {log_path}")
+
+def is_ci_environment():
+    """检测是否在CI/CD环境中运行"""
+    # 检查常见的CI环境变量
+    ci_env_vars = [
+        'CI',
+        'GITHUB_ACTIONS',
+        'GITLAB_CI',
+        'TRAVIS',
+        'CIRCLECI',
+        'JENKINS_URL',
+        'TEAMCITY_VERSION'
+    ]
+    
+    return any(os.environ.get(var) for var in ci_env_vars)
+
+def prepare_build_environment():
+    """准备构建环境"""
+    # 确保目标目录存在
+    gui_dir = get_gui_dir()
+    dist_dir = gui_dir / "dist"
+    
+    if not dist_dir.exists():
+        os.makedirs(dist_dir)
+        print(f"Created dist directory: {dist_dir}")
 
 def main():
     """主函数"""
-    print("==== 基于Poetry的STK项目打包工具 ====")
-    print(f"当前Python版本: {sys.version}")
-    print(f"当前操作系统: {platform.system()} {platform.release()}")
+    print("==== Poetry-based STK Project Packaging Tool ====")
+    print(f"Current Python version: {sys.version}")
+    print(f"Current operating system: {platform.system()} {platform.release()}")
+    
+    # 准备构建环境
+    prepare_build_environment()
     
     # 加载 pyproject.toml
     pyproject = load_pyproject()
-    print("已加载 pyproject.toml")
+    print("Loaded pyproject.toml")
     
     # 提取依赖
     dependencies = extract_dependencies(pyproject)
-    print(f"已从pyproject.toml提取{len(dependencies)}个依赖")
+    print(f"Extracted {len(dependencies)} dependencies from pyproject.toml")
     
     # 确保hooks目录存在
     ensure_hooks_directory()
@@ -329,12 +382,24 @@ def main():
     # 创建调试日志
     create_debug_log(dependencies)
     
-    # 询问是否继续构建
-    response = input("是否立即进行构建? (y/n): ")
-    if response.lower() in ['y', 'yes']:
+    # 检查是否在CI环境中运行
+    in_ci = is_ci_environment()
+    
+    # 在CI环境中自动构建，在本地环境中询问用户
+    if in_ci:
+        print("CI environment detected, automatically starting build process...")
         run_build()
     else:
-        print("已取消构建，您可以稍后手动运行 'pyinstaller main.spec'")
+        try:
+            response = input("Start build now? (y/n): ")
+            if response.lower() in ['y', 'yes']:
+                run_build()
+            else:
+                print("Build canceled, you can run 'pyinstaller main.spec' manually later")
+        except EOFError:
+            # 即使在非交互式环境中也自动构建
+            print("Non-interactive environment detected, automatically starting build process...")
+            run_build()
 
 if __name__ == "__main__":
     main() 
