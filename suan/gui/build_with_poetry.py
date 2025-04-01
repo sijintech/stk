@@ -12,6 +12,7 @@ import subprocess
 import shutil
 import toml
 import locale
+import traceback
 from pathlib import Path
 
 # 设置控制台编码
@@ -139,6 +140,16 @@ added_files = [
     ('icons', 'icons')
 ]
 
+# 确保目录存在
+for file_pattern, target_dir in added_files:
+    source_dir = file_pattern.split('/*')[0] if '/*' in file_pattern else file_pattern
+    if not os.path.exists(source_dir):
+        try:
+            os.makedirs(source_dir)
+            print(f"Created directory {{source_dir}}")
+        except Exception as e:
+            print(f"Warning: Could not create directory {{source_dir}}: {{e}}")
+
 # 收集VTK模块
 vtk_modules = collect_submodules('vtkmodules')
 
@@ -150,20 +161,42 @@ for package in [{dependencies_str}]:
     try:
         pkg_imports, pkg_datas, pkg_binaries = collect_all(package)
         all_datas.extend(pkg_datas)
-        all_binaries.extend(pkg_binaries)
+        
+        # 确保二进制文件格式正确
+        valid_binaries = []
+        for item in pkg_binaries:
+            if isinstance(item, tuple):
+                if len(item) == 2:
+                    valid_binaries.append(item)
+                elif len(item) > 2:
+                    valid_binaries.append((item[0], item[1]))
+                else:
+                    print(f"Warning: Invalid binary format: {{item}}")
+            else:
+                print(f"Warning: Binary item is not a tuple: {{item}}")
+        
+        all_binaries.extend(valid_binaries)
     except Exception as e:
-        print(f"警告: 收集 {{package}} 资源时出错: {{e}}")
+        print(f"Warning: Error collecting {{package}} resources: {{e}}")
+
+# 检查并创建自定义二进制文件列表
+standard_binaries = []
+for item in [
+    ('Updater', 'Updater'),
+    ('Tab', 'Tab'),
+    ('version.py', '.'),
+    ('custom_logger.py', '.')
+]:
+    if isinstance(item, tuple) and len(item) == 2:
+        standard_binaries.append(item)
+    else:
+        print(f"Warning: Skipping invalid binary format: {{item}}")
 
 # 分析规范
 a = Analysis(
     ['main.py'],
     pathex=[script_dir],
-    binaries=[
-        ('Updater', 'Updater'),
-        ('Tab', 'Tab'),
-        ('version.py', '.'),
-        ('custom_logger.py', '.')
-    ] + all_binaries,
+    binaries=standard_binaries + all_binaries,
     datas=added_files + all_datas,
     hiddenimports=[
         # 项目自定义模块
@@ -174,12 +207,21 @@ a = Analysis(
         # VTK相关模块
         *vtk_modules,
         'vtkmodules.util.execution_model', 
-        'vtkmodules.util.data_model'
+        'vtkmodules.util.data_model',
+        # 其他常见的隐藏导入
+        'PySide6.QtCore',
+        'PySide6.QtGui',
+        'PySide6.QtWidgets',
+        'PySide6.QtSvg',
+        'PySide6.QtNetwork',
+        'matplotlib.backends.backend_qt5agg',
+        'numpy.core._methods',
+        'numpy.lib.format'
     ],
     hookspath=['hooks'],
     hooksconfig={{}},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['rapidfuzz.__pyinstaller'],
     noarchive=False,
 )
 
@@ -272,6 +314,46 @@ binaries.extend([])
 """)
         print(f"Created hook file: {hook_app_path}")
 
+    # 创建处理rapifuzz的钩子文件
+    hook_rapidfuzz_path = hooks_dir / "hook-rapidfuzz.py"
+    if not hook_rapidfuzz_path.exists():
+        with open(hook_rapidfuzz_path, 'w', encoding='utf-8') as f:
+            f.write("""\"\"\"
+Hook for rapidfuzz package to avoid errors related to __pyinstaller attribute
+\"\"\"
+
+# Define an empty hiddenimports list to prevent PyInstaller from looking for rapidfuzz.__pyinstaller
+hiddenimports = []
+datas = []
+binaries = []
+""")
+        print(f"Created rapidfuzz hook file: {hook_rapidfuzz_path}")
+
+def ensure_required_directories():
+    """确保所有必需的目录存在"""
+    gui_dir = get_gui_dir()
+    
+    # 检查并创建必要的目录
+    required_dirs = [
+        'dist',
+        'hooks',
+        'Updater',
+        'Tab',
+        'confs',
+        'examples',
+        'resources',
+        'icons'
+    ]
+    
+    for dir_name in required_dirs:
+        dir_path = gui_dir / dir_name
+        if not dir_path.exists():
+            try:
+                os.makedirs(dir_path)
+                print(f"Created required directory: {dir_path}")
+            except Exception as e:
+                print(f"Warning: Could not create directory {dir_path}: {e}")
+
 def run_build():
     """运行构建过程"""
     gui_dir = get_gui_dir()
@@ -279,22 +361,92 @@ def run_build():
     # 确保当前目录是GUI目录
     os.chdir(gui_dir)
     
-    # 运行PyInstaller
-    system = platform.system()
-    if system == "Windows":
-        build_command = "pyinstaller main.spec"
-    elif system == "Darwin":
-        build_command = "python -m PyInstaller main.spec"
-    else:
-        build_command = "python3 -m PyInstaller main.spec"
+    # 在运行PyInstaller之前确保所有必需的文件和目录都存在
+    ensure_required_files()
     
-    print(f"Starting build: {build_command}")
+    # 构建命令行参数
+    pyinstaller_args = [
+        "--clean",  # 清理旧的构建文件
+        "--noconfirm",  # 不确认覆盖
+        "--log-level=INFO",  # 设置日志级别
+    ]
+    
+    if platform.system() == "Windows":
+        pyinstaller_cmd = ["pyinstaller"] + pyinstaller_args + ["main.spec"]
+    elif platform.system() == "Darwin":
+        pyinstaller_cmd = ["python", "-m", "PyInstaller"] + pyinstaller_args + ["main.spec"]
+    else:
+        pyinstaller_cmd = ["python3", "-m", "PyInstaller"] + pyinstaller_args + ["main.spec"]
+    
+    print(f"Starting build: {' '.join(pyinstaller_cmd)}")
     try:
-        subprocess.run(build_command, shell=True, check=True)
-        print("Build successful!")
-    except subprocess.CalledProcessError as e:
-        print(f"Build failed: {e}")
+        # 运行构建命令并捕获输出
+        process = subprocess.run(
+            pyinstaller_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False  # 不要立即引发异常，让我们自己处理错误
+        )
+        
+        # 打印输出
+        if process.stdout:
+            print("=== Build Output ===")
+            print(process.stdout)
+        
+        # 打印错误
+        if process.stderr:
+            print("=== Build Errors ===")
+            print(process.stderr)
+        
+        # 检查是否构建成功
+        if process.returncode != 0:
+            print(f"Build failed with exit code {process.returncode}")
+            
+            # 检查错误中是否包含已知问题
+            if "too many values to unpack" in process.stderr:
+                print("\nERROR DETECTED: 'too many values to unpack'")
+                print("This is usually caused by an invalid binary format in the spec file.")
+                print("Please check the format of the 'binaries' list in main.spec")
+            
+            # 创建错误日志文件
+            with open(gui_dir / "build_error.log", 'w', encoding='utf-8') as f:
+                f.write("=== BUILD ERROR LOG ===\n\n")
+                f.write(f"Command: {' '.join(pyinstaller_cmd)}\n")
+                f.write(f"Exit Code: {process.returncode}\n\n")
+                f.write("=== STDOUT ===\n")
+                f.write(process.stdout)
+                f.write("\n\n=== STDERR ===\n")
+                f.write(process.stderr)
+            
+            print(f"Error details have been saved to {gui_dir / 'build_error.log'}")
+            sys.exit(1)
+        else:
+            print("Build successful!")
+    except Exception as e:
+        print(f"Exception during build: {e}")
+        traceback.print_exc()
         sys.exit(1)
+
+def ensure_required_files():
+    """确保所有必需的文件存在"""
+    gui_dir = get_gui_dir()
+    
+    # 检查必需的文件
+    required_files = [
+        ('version.py', '# Generated version\nversion = "0.0.0"\n'),
+        ('custom_logger.py', '# Placeholder for custom logger\ndef setup_logger():\n    pass\n')
+    ]
+    
+    for file_name, default_content in required_files:
+        file_path = gui_dir / file_name
+        if not file_path.exists():
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(default_content)
+                print(f"Created placeholder file: {file_path}")
+            except Exception as e:
+                print(f"Warning: Could not create file {file_path}: {e}")
 
 def create_debug_log(dependencies):
     """创建调试日志，记录环境和依赖情况"""
@@ -308,7 +460,21 @@ def create_debug_log(dependencies):
         f.write(f"Operating system: {platform.system()} {platform.release()}\n")
         f.write(f"Platform: {platform.platform()}\n\n")
         
-        f.write("=== Extracted Dependencies ===\n")
+        f.write("=== Directory Structure ===\n")
+        f.write(f"Current working directory: {os.getcwd()}\n")
+        f.write(f"GUI directory: {gui_dir}\n")
+        f.write(f"Project root: {get_project_root()}\n\n")
+        
+        # 记录目录内容
+        f.write("=== Directory Contents ===\n")
+        for path, dirs, files in os.walk(gui_dir):
+            rel_path = os.path.relpath(path, gui_dir)
+            if rel_path == ".":
+                f.write(f"Root directory: {len(files)} files, {len(dirs)} subdirectories\n")
+            else:
+                f.write(f"Directory {rel_path}: {len(files)} files, {len(dirs)} subdirectories\n")
+        
+        f.write("\n=== Extracted Dependencies ===\n")
         for dep in dependencies:
             f.write(f"- {dep}\n")
         
@@ -348,13 +514,11 @@ def is_ci_environment():
 
 def prepare_build_environment():
     """准备构建环境"""
-    # 确保目标目录存在
-    gui_dir = get_gui_dir()
-    dist_dir = gui_dir / "dist"
+    # 确保所有必需的目录存在
+    ensure_required_directories()
     
-    if not dist_dir.exists():
-        os.makedirs(dist_dir)
-        print(f"Created dist directory: {dist_dir}")
+    # 确保所有必需的文件存在
+    ensure_required_files()
 
 def main():
     """主函数"""

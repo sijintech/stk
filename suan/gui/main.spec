@@ -48,7 +48,23 @@ def collect_dependencies(module_names):
             imports, datas, binaries = collect_all(module_name)
             all_imports.extend(imports)
             all_datas.extend(datas)
-            all_binaries.extend(binaries)
+            
+            # 确保二进制文件格式正确 (src, dest)
+            valid_binaries = []
+            for item in binaries:
+                if isinstance(item, tuple):
+                    if len(item) == 2:
+                        valid_binaries.append(item)
+                    elif len(item) > 2:
+                        # 如果元组包含超过2个元素，只取前两个
+                        valid_binaries.append((item[0], item[1]))
+                    else:
+                        # 忽略格式不正确的元素
+                        print(f"Warning: Invalid binary format: {item}, skipping")
+                else:
+                    print(f"Warning: Binary item is not a tuple: {item}, skipping")
+            
+            all_binaries.extend(valid_binaries)
         except Exception as e:
             print(f"Warning: Error collecting dependencies for {module_name}: {e}")
     
@@ -108,16 +124,25 @@ custom_modules = [
     'left_sidebar', 'statusbar', 'toolbar', 'Tab'
 ]
 
+# 检查并修复自定义二进制文件的格式
+standard_binaries = []
+for item in [
+    ('Updater', 'Updater'),
+    ('Tab', 'Tab'),
+    ('version.py', '.'),
+    ('custom_logger.py', '.')
+]:
+    # 确保每个元素都是二元组
+    if isinstance(item, tuple) and len(item) == 2:
+        standard_binaries.append(item)
+    else:
+        print(f"Warning: Skipping invalid binary format: {item}")
+
 # 分析规范
 a = Analysis(
     ['main.py'],
     pathex=[script_dir],
-    binaries=[
-        ('Updater', 'Updater'),
-        ('Tab', 'Tab'),
-        ('version.py', '.'),
-        ('custom_logger.py', '.')
-    ] + pkg_binaries,
+    binaries=standard_binaries + pkg_binaries,
     datas=added_files + pkg_datas,
     hiddenimports=[
         *custom_modules, 
@@ -150,7 +175,7 @@ a = Analysis(
     hookspath=['hooks'],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['rapidfuzz.__pyinstaller'],
     noarchive=False,
 )
 
