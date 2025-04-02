@@ -22,7 +22,7 @@ ollama = "*"
 # 更改 torch 依赖为使用特定的 URL
 #torch = { url = "https://download.pytorch.org/whl/cu117/torch-1.13.1%2Bcu117-cp39-cp39-win_amd64.whl" }
 #transformers = "4.30.2"
-sentence-transformers = "2.2.2"
+sentence-transformers = "4.0.1"
 PyPDF2 = "*"
 chardet = "*"
 qtpy = "*"
