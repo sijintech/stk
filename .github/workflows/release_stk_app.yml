@@ -4,10 +4,6 @@ on:
     tags:
       - 'v*'
 
-env:
-  CI: true
-  GITHUB_ACTIONS: true
-
 jobs:
   ubuntu_build:
     if: false  # Temporarily disabled
@@ -66,49 +62,42 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.9"
-      
-      - name: Get tag
+      - name: get tag
         id: get_tag
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
 
-      # 添加Poetry缓存
-      - name: Cache Poetry dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/Library/Caches/pypoetry
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-poetry-
-
-      # 使用Poetry安装依赖
-      - name: Install Poetry
+      - name: Setup virtual environment
         run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install dependencies
+          python -m venv .venv
+          source .venv/bin/activate
+      - name: build exe
         run: |
-          cd $GITHUB_WORKSPACE
-          poetry config virtualenvs.create false
-          poetry install --no-interaction --no-root
+          python -m pip install -U pip
           python suan/scripts/run_write_version.py
-
-      - name: Build executable
-        run: |
-          cd suan/gui
-          # 直接运行构建脚本，CI环境变量已设置为自动构建
-          python build_with_poetry.py
+          cd suan/gui/
+          pip install vtk==9.3.0
+          pip install pyinstaller==6.3.0
+          pip install PySide6
+          pip install matplotlib
+          pip install pandas
+          pip install numpy
+          pip install requests
+          pip install toml
+          pyinstaller ./main.spec
+          cd dist
+          ls
 
       - name: Store dist
         uses: actions/upload-artifact@v4
         with:
+          # 上传后的标记名，下载依靠它找到对应文件
           name: stk_macos
+          # 上传的文件位置
           path: suan/gui/dist/stk_macos
 
   windows_build:
@@ -129,103 +118,85 @@ jobs:
           path: |
             ~\.cache\pypoetry
             .venv
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
           restore-keys: |
             ${{ runner.os }}-poetry-
 
-      - name: Get tag
+      - name: get tag
         id: get_tag
         run: |
           # 修正Windows环境下的环境变量设置方式
           echo "TAG=$($env:GITHUB_REF -replace 'refs/tags/v','')" >> $env:GITHUB_ENV
 
-      - name: Setup environment
-        run: |
-          # 检查缓存的虚拟环境是否存在
-          if (Test-Path .venv\Scripts\activate.ps1) {
-            echo "Using cached virtual environment"
-          } else {
-            echo "Creating new virtual environment"
-            python -m venv .venv
-          }
-          
-          # 激活虚拟环境
-          .\.venv\Scripts\activate.ps1
-          
-          # 更新pip并设置超时时间
-          python -m pip install --upgrade pip --timeout 1800
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
 
       - name: Install Poetry
         run: |
-          # 安装Poetry
-          .\.venv\Scripts\activate.ps1
-          python -m pip install poetry==1.7.1 --timeout 1800
-          
-          # 设置Poetry配置
-          $env:POETRY_HTTP_TIMEOUT = 1800
-          poetry --version
-          poetry config virtualenvs.create false
-
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Install dependencies
         run: |
-          $env:PYTHONIOENCODING = "utf-8"
-          .\.venv\Scripts\activate.ps1
-          poetry lock
+          cd $GITHUB_WORKSPACE
+          poetry config virtualenvs.create false
           poetry install --no-interaction --no-root
-          
-          # # 尝试手动安装关键依赖，以防Poetry安装失败
-          # if ($LASTEXITCODE -ne 0) {
-          #   echo "Poetry install failed, falling back to pip"
-          #   python -m pip install -r requirements.txt --timeout 1800
-          #   python -m pip install pyinstaller==6.3.0 PySide6 vtk matplotlib pandas numpy requests toml --timeout 1800
-          # }
+          python suan/scripts/run_write_version.py
 
-      - name: Generate version
+      - name: build exe
         run: |
+          # 重新激活虚拟环境，确保路径正确
           .\.venv\Scripts\activate.ps1
-          python suan\scripts\run_write_version.py
+          
+          cd suan/gui
+          pyinstaller .\main.spec
 
-      - name: Build with Poetry
+          
+      - name: Install NSIS
+        if: ${{ false }}
         run: |
-          .\.venv\Scripts\activate.ps1
-          cd suan\gui
-          
-          # 使用基于Poetry的构建脚本，设置环境变量确保自动构建
-          $env:CI = "true"
-          $env:GITHUB_ACTIONS = "true"
-          python build_with_poetry.py
-          
-          # 创建dist目录（如果不存在）
-          if (-not (Test-Path dist)) {
-            mkdir dist
-          }
-          
-          # 检查dist目录
-          dir dist
+          iwr -useb get.scoop.sh -outfile 'install.ps1' # 从 get.scoop.sh 下载 install.ps1 脚本
+          .\install.ps1 -RunAsAdmin # 以管理员权限运行 install.ps1 脚本
+          scoop update
+          scoop bucket add extras
 
-      - name: Check build output
+        # scoop install nsis
+      - name: build app
+        if: ${{ false }}
         run: |
-          # 检查构建产物是否存在
-          if (Test-Path suan\gui\dist\stk_windows.exe) {
-            echo "Build artifact generated, size: $((Get-Item suan\gui\dist\stk_windows.exe).length / 1MB) MB"
-          } else {
-            echo "Build artifact not found, please check the build process"
-            # 不要立即退出，尝试搜索构建产物
-            Get-ChildItem -Path suan\gui\dist -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*.exe" } | ForEach-Object {
-              echo "Found possible artifact: $($_.FullName), size: $($_.Length / 1MB) MB"
-            }
-            # 检查build_debug.log
-            if (Test-Path suan\gui\build_debug.log) {
-              echo "Contents of build_debug.log:"
-              Get-Content suan\gui\build_debug.log -Tail 50
-            }
-            exit 1
-          }
+          makensis suan\gui\build_nsis.nsi
+          cd suan\gui\dist
+          ls
+
+      - name: Upload files to OSS(window)
+        if: ${{ false }}
+        env:
+          OSS_ENDPOINT: oss-cn-beijing.aliyuncs.com
+          OSS_ACCESS_KEY_ID: ${{ secrets.KEY }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.SECRET }}
+          OSS_BUCKET: sijin-suan-update
+          # 指定要上传的文件或目录
+          SOURCE_DIR: '../src/dist'
+          # 指定OSS中的目标目录
+          TARGET_DIR: 'nsis/'
+        run: |
+          pwd
+          pip install oss2
+          python suan\scripts\deploy.py
+          python suan\scripts\update.py
+
 
       - name: Store dist
         uses: actions/upload-artifact@v4
         with:
+          # 上传后的标记名，下载依靠它找到对应文件
           name: stk_windows
+          # 上传的文件位置
+          #          path: suan/gui/dist/stk_nsis.exe
           path: suan/gui/dist/stk_windows.exe
 
   release:
@@ -262,27 +233,30 @@ jobs:
         if: ${{ false }}  # 当前禁用了Ubuntu构建，暂时跳过下载
         uses: actions/download-artifact@v4
         with:
+          # 要下载的文件的标记
           name: stk_ubuntu
+          # 下载到哪个目录（注意是/而不是\,否则报错）
           path: suan/gui/dist/
 
       - name: Download windows app
         uses: actions/download-artifact@v4
         with:
+          # 要下载的文件的标记
           name: stk_windows
+          # 下载到哪个目录（注意是/而不是\,否则报错）
           path: suan/gui/dist/
 
       - name: Download macOS app
         if: ${{ false }}  # 当前禁用了macOS构建，暂时跳过下载
         uses: actions/download-artifact@v4
         with:
+          # 要下载的文件的标记
           name: stk_macos
+          # 下载到哪个目录（注意是/而不是\,否则报错）
           path: suan/gui/dist/
-
-      - name: List downloaded artifacts
-        run: |
-          mkdir -p suan/gui/dist/
+      - run: |
           cd suan/gui/dist/
-          ls -la
+          ls
 
       - name: release ubuntu app
         if: ${{ false }}  # 当前禁用了Ubuntu构建，暂时跳过发布
@@ -301,6 +275,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUBTOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
+          #          asset_path: suan/gui/dist/stk_nsis.exe
           asset_path: suan/gui/dist/stk_windows.exe
           asset_name: stk_windows.exe
           asset_content_type: application/octet-stream
@@ -315,4 +290,3 @@ jobs:
           asset_path: suan/gui/dist/stk_macos
           asset_name: stk_macos
           asset_content_type: application/octet-stream
-
