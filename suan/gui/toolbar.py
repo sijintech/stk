@@ -17,7 +17,7 @@ from PySide6.QtGui import QAction, QIcon
 from custom_logger import CustomLogger
 import os
 import sys
-from ai_dialog import AIConnectionDialog
+
 
 
 def get_resource_path(relative_path):

@@ -46,9 +46,9 @@ jobs:
 
       - name: Build executable
         run: |
+          # 使用优化后的打包脚本
           cd suan/gui
-          # 直接运行构建脚本，CI环境变量已设置为自动构建
-          python build_with_poetry.py
+          python build.py --clean
 
       - name: Store dist
         uses: actions/upload-artifact@v4
@@ -82,13 +82,14 @@ jobs:
           cd suan/gui/
           pip install vtk==9.3.0
           pip install pyinstaller==6.3.0
+          pip install pyinstaller-hooks-contrib  # 添加hooks贡献库
           pip install PySide6
           pip install matplotlib
           pip install pandas
           pip install numpy
           pip install requests
           pip install toml
-          pyinstaller ./main.spec
+          python build.py --clean  # 使用优化后的打包脚本
           cd dist
           ls
 
@@ -153,9 +154,8 @@ jobs:
           .\.venv\Scripts\activate.ps1
           
           cd suan/gui
-          pyinstaller .\main.spec
+          python build.py --clean  # 使用优化后的打包脚本
 
-          
       - name: Install NSIS
         if: ${{ false }}
         run: |
