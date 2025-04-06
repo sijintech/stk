@@ -17,14 +17,13 @@ from PySide6.QtGui import QAction, QIcon
 from custom_logger import CustomLogger
 import os
 import sys
-from ai_dialog import AIConnectionDialog
+
 
 
 def get_resource_path(relative_path):
     if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
-
 
 
 class ToolBar(QWidget):
@@ -350,9 +349,15 @@ class ToolBar(QWidget):
 
     def saveAndRun(self):
         self.save_file()
-        content = self.parent.info_bar.codeTab.toPlainText()
-        self.parent.info_bar.curShowCode = content
-        self.parent.info_bar.runCodeWithAnalysis()
+        # 由于 info_bar 的 codeTab 已被移除，这里修改运行代码的逻辑
+        # 直接从 center_widget 的 codeTab 获取内容
+        code_tab = self.parent.get_component_by_name("Code Tab")
+        if code_tab:
+            content = code_tab.toPlainText()
+            # 在 center_widget 中运行代码
+            code_tab.runCodeWithAnalysis()
+        else:
+            self.logger.warning("无法找到代码标签页")
 
     def checkUpdate(self):
         self.parent.check_update()
@@ -442,16 +447,16 @@ class ToolBar(QWidget):
         center_widget = self.parent.center_widget
         # 获取AI对话选项卡的索引
         for i in range(center_widget.tabWidget.count()):
-            if center_widget.tabWidget.tabText(i) == "AI对话":
+            if center_widget.tabWidget.tabText(i) == "AI":
                 # 切换到AI对话选项卡
                 center_widget.tabWidget.setCurrentIndex(i)
                 # 如果AI对话选项卡不存在，则添加它
                 if not center_widget.aiChatTab.isVisible():
-                    center_widget.toggleComponentVisibility("AI对话 Tab")
+                    center_widget.toggleComponentVisibility("AI Tab")
                 # 确保AI对话模块已连接到服务器
                 if not center_widget.aiChatTab.client:
                     center_widget.aiChatTab.connectToModel()
                 return
 
         # 如果没有找到AI对话选项卡，尝试添加它
-        center_widget.toggleComponentVisibility("AI对话 Tab")
+        center_widget.toggleComponentVisibility("AI Tab")

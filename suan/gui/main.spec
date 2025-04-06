@@ -2,6 +2,22 @@
 import platform
 import sys
 import os
+from pathlib import Path
+
+# 将当前目录添加到路径中，以便导入依赖模块
+gui_dir = os.path.dirname(os.path.abspath('__file__'))
+if gui_dir not in sys.path:
+    sys.path.insert(0, gui_dir)
+
+# 尝试导入依赖提取函数
+try:
+    from pkg_tools.dependencies import extract_dependencies
+    # 提取依赖
+    extracted_imports = extract_dependencies()
+    print(f"成功提取 {len(extracted_imports)} 个依赖项")
+except ImportError:
+    print("警告: 无法导入dependencies模块，将使用默认依赖列表")
+    extracted_imports = []
 
 # 根据当前系统设置应用程序名称
 system = platform.system()
@@ -23,6 +39,15 @@ added_files = [
     ('icons', 'icons')
 ]
 
+# 合并所有隐藏导入（依赖完全由dependencies模块提供）
+all_hidden_imports = extracted_imports
+
+# 创建钩子目录(如果不存在)
+hooks_dir = os.path.join(gui_dir, 'pkg_tools', 'hooks')
+if not os.path.exists(hooks_dir):
+    os.makedirs(hooks_dir)
+    print(f"创建钩子目录: {hooks_dir}")
+
 # 分析规范
 a = Analysis(
     ['main.py'],
@@ -31,17 +56,17 @@ a = Analysis(
         ('Updater', 'Updater'),
         ('Tab', 'Tab'),
         ('version.py', '.'),
-        ('custom_logger.py', '.')
+        ('custom_logger.py', '.'),
+        ('left_sidebar.py', '.'),
+        ('right_sidebar.py', '.'),
+        ('toolbar.py', '.'),
+        ('statusbar.py', '.'),
+        ('info_bar.py', '.'),
+        ('center_widget.py', '.'),
     ],
     datas=added_files,
-    hiddenimports=[
-        'version', 'vtkmodules.util', 'vtkmodules.all',
-        'vtkmodules.util.execution_model', 'vtkmodules.util.data_model',
-        'custom_logger', 'center_widget', 'Updater', 'info_bar', 'right_sidebar',
-        'left_sidebar', 'statusbar', 'toolbar', 'Tab', 'PySide6', 'vtk', 'matplotlib',
-        'numpy', 'requests', 'toml', 'chardet'
-    ],
-    hookspath=[],
+    hiddenimports=all_hidden_imports,
+    hookspath=['pkg_tools/hooks'],  # 更新钩子目录路径
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
@@ -71,5 +96,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icons/app_icon.ico',
 )

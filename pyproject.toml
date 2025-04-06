@@ -22,7 +22,7 @@ ollama = "*"
 # 更改 torch 依赖为使用特定的 URL
 #torch = { url = "https://download.pytorch.org/whl/cu117/torch-1.13.1%2Bcu117-cp39-cp39-win_amd64.whl" }
 #transformers = "4.30.2"
-sentence-transformers = "2.2.2"
+sentence-transformers = "4.0.1"
 PyPDF2 = "*"
 chardet = "*"
 qtpy = "*"
@@ -31,6 +31,7 @@ pyinstaller = "6.3.0"
 frontend = "*"
 pathspec= "*"
 psutil = "*"  
+pyinstaller-hooks-contrib = "*"  # 添加PyInstaller钩子库
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]
@@ -45,3 +46,85 @@ priority = "supplemental"
 [tool.poetry.urls]
 Homepage = "https://github.com/sijintech/stk.git"
 Issues = "https://github.com/sijintech/stk/issues/"
+
+# 打包和开发工具，放在可选依赖中
+[tool.poetry.group.dev.dependencies]
+pyinstaller = "6.3.0"
+black = "^23.3.0"
+isort = "^5.12.0"
+flake8 = "^6.0.0"
+
+# 添加脚本命令
+[tool.poetry.scripts]
+build-app = "suan.gui.packaging.builder:main"
+extract-deps = "suan.gui.packaging.dependencies:extract_dependencies"
+generate-hooks = "suan.gui.packaging.hooks_generator:main"
+
+# PyInstaller配置
+[tool.pyinstaller]
+# 钩子目录
+hooks_dir = "suan/gui/packaging/hooks"
+# 集中管理的所有隐藏导入
+hidden_imports = [
+    # GUI组件
+    "left_sidebar", "right_sidebar", "toolbar", "statusbar", "info_bar",
+    "center_widget", "custom_logger", "version", "Tab",
+    # 核心Python库
+    "numpy.core._methods", "numpy.lib.format", "chardet",
+    # 通用依赖
+    "requests", "toml"
+]
+
+# 按库分类的特定依赖配置
+[tool.pyinstaller.PySide6]
+modules = [
+    "QtCore", "QtGui", "QtWidgets", "QtSvg", "QtXml", 
+    "QtNetwork", "QtPrintSupport"
+]
+
+[tool.pyinstaller.matplotlib]
+modules = [
+    # Qt后端
+    "backends.backend_qt5agg", "backends.backend_qtagg", 
+    "backends.backend_qt5", "backends.backend_qt",
+    "backends.qt_compat", "backends.qt_editor",
+    # 其他后端
+    "backends.backend_svg", "backends.backend_pdf", 
+    "backends.backend_ps", "backends.backend_agg",
+    "backends.backend_cairo", "backends.backend_tkagg", 
+    "backends._backend_tk",
+    # 核心模块
+    "pyplot", "figure", "colors", "artist", "text", "image"
+]
+
+[tool.pyinstaller.vtk]
+modules = [
+    # vtk顶级模块
+    "vtk", "vtk.vtkCommonCore", "vtk.vtkCommonCorePython",
+    "vtk.vtkRenderingCorePython", "vtk.vtkFiltersCoreModule",
+    "vtk.vtkIOXMLPython", "vtk.vtkInteractionStyle", 
+    "vtk.vtkRenderingOpenGL2",
+    
+    # vtkmodules包及其重要子模块
+    "vtkmodules", "vtkmodules.all", 
+    "vtkmodules.qt.QVTKRenderWindowInteractor",
+    "vtkmodules.util.numpy_support", "vtkmodules.util.execution_model", 
+    "vtkmodules.util.data_model", "vtkmodules.util.colors",
+    "vtkmodules.util.vtkAlgorithm", "vtkmodules.util.vtkConstants",
+    "vtkmodules.util.misc", "vtkmodules.vtkCommonCore",
+    "vtkmodules.vtkRenderingCore", "vtkmodules.vtkIOXML",
+    "vtkmodules.vtkFiltersCore", "vtkmodules.vtkImagingCore",
+    "vtkmodules.vtkRenderingOpenGL2", "vtkmodules.web"
+]
+
+[tool.pyinstaller.pandas]
+modules = [
+    "_libs.tslibs.timedeltas", "_libs.tslibs.nattype",
+    "_libs.tslibs.np_datetime", "_libs.tslibs.base",
+    "_libs.tslibs.conversion", "_libs.tslibs.fields",
+    "_libs.tslibs.offsets", "_libs.tslibs.parsing",
+    "_libs.tslibs.period", "_libs.tslibs.strptime",
+    "_libs.tslibs.vectorized"
+]
+
+

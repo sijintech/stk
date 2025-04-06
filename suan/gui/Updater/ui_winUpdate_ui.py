@@ -3,23 +3,22 @@
 ################################################################################
 ## Form generated from reading UI file 'ui_winUpdate.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.4.0
+## Created by: Qt User Interface Compiler version 6.4.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
-                            QMetaObject, QObject, QPoint, QRect,
-                            QSize, QTime, QUrl, Qt)
+    QMetaObject, QObject, QPoint, QRect,
+    QSize, QTime, QUrl, Qt)
 from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-                           QFont, QFontDatabase, QGradient, QIcon,
-                           QImage, QKeySequence, QLinearGradient, QPainter,
-                           QPalette, QPixmap, QRadialGradient, QTransform)
+    QFont, QFontDatabase, QGradient, QIcon,
+    QImage, QKeySequence, QLinearGradient, QPainter,
+    QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QProgressBar,
-                               QPushButton, QSizePolicy, QSpacerItem, QTextEdit,
-                               QVBoxLayout, QWidget)
+    QPushButton, QSizePolicy, QSpacerItem, QTextEdit,
+    QVBoxLayout, QWidget)
 import update_image_rc
-
 
 class Ui_Form(object):
     def setupUi(self, Form):
@@ -46,6 +45,7 @@ class Ui_Form(object):
         self.verticalSpacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
 
         self.verticalLayout_2.addItem(self.verticalSpacer)
+
 
         self.horizontalLayout_2.addLayout(self.verticalLayout_2)
 
@@ -124,31 +124,32 @@ class Ui_Form(object):
 
         self.horizontalLayout.addWidget(self.pushButton_ok)
 
+
         self.verticalLayout.addLayout(self.horizontalLayout)
 
+
         self.horizontalLayout_2.addLayout(self.verticalLayout)
+
 
         self.retranslateUi(Form)
 
         self.pushButton_azgx.setDefault(True)
         self.pushButton_ok.setDefault(False)
 
-        QMetaObject.connectSlotsByName(Form)
 
+        QMetaObject.connectSlotsByName(Form)
     # setupUi
 
     def retranslateUi(self, Form):
         Form.setWindowTitle(QCoreApplication.translate("Form", u"\u8f6f\u4ef6\u66f4\u65b0", None))
         self.label.setText("")
         self.label_2.setText(QCoreApplication.translate("Form", u"\u53d1\u73b0\u65b0\u7248\u672c", None))
-        self.label_bbh.setText(
-            QCoreApplication.translate("Form", u"\u6700\u65b0\u7248\u672c:2.0 \u5f53\u524d\u7248\u672c:1.0", None))
+        self.label_bbh.setText(QCoreApplication.translate("Form", u"\u6700\u65b0\u7248\u672c:2.0 \u5f53\u524d\u7248\u672c:1.0", None))
         self.label_3.setText(QCoreApplication.translate("Form", u"\u7248\u672c\u63cf\u8ff0", None))
-        self.label_zt.setText(QCoreApplication.translate("Form",
-                                                         u"\u6587\u4ef6\u5927\u5c0f \u4e0b\u8f7d\u901f\u5ea6 \u5269\u4f59\u65f6\u95f4",
-                                                         None))
+        self.label_zt.setText(QCoreApplication.translate("Form", u"\u6587\u4ef6\u5927\u5c0f \u4e0b\u8f7d\u901f\u5ea6 \u5269\u4f59\u65f6\u95f4", None))
         self.pushButton_tgbb.setText(QCoreApplication.translate("Form", u"\u8df3\u8fc7\u7248\u672c", None))
         self.pushButton_gfwz.setText(QCoreApplication.translate("Form", u"\u5b98\u65b9\u7f51\u5740", None))
         self.pushButton_azgx.setText(QCoreApplication.translate("Form", u"\u5b89\u88c5\u66f4\u65b0", None))
         self.pushButton_ok.setText(QCoreApplication.translate("Form", u"\u786e\u5b9a", None))
     # retranslateUi
+

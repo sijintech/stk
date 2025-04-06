@@ -17,8 +17,9 @@ from PySide6.QtWidgets import (
     QSlider,
     QSpinBox,
     QFileDialog,
+    QProgressDialog,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread, QObject, Slot
 from PySide6.QtGui import QIcon, QPixmap, QTextOption, QTextCursor
 import ollama
 import json
@@ -26,6 +27,8 @@ import os
 import requests
 import psutil
 import time
+import threading
+import traceback
 from custom_logger import CustomLogger
 
 # 导入RAG相关依赖 - 更健壮的错误处理
@@ -38,40 +41,243 @@ SENTENCE_TRANSFORMER_ERROR = None
 try:
     # 首先验证 PyTorch 版本
     import torch
-
-    torch_version = torch.__version__
-    if not (torch_version.startswith("1.13") or torch_version.startswith("2.0")):
-        raise ImportError(
-            f"不兼容的 PyTorch 版本 {torch_version}，需要 1.13.x 或 2.0.x"
-        )
-
+    # if not torch.__version__.startswith(('1.13', '2.0')):
+    #     raise ImportError(f"不兼容的 PyTorch 版本 {torch.__version__}，需要 1.13.x 或 2.0.x")
+        
     from sentence_transformers import SentenceTransformer, util
-
     SENTENCE_TRANSFORMER_AVAILABLE = True
-
+    
 except Exception as e:
     import traceback
-
     error_message = str(e)
     error_traceback = traceback.format_exc()
     SENTENCE_TRANSFORMER_ERROR = error_message
-
+    
     # 记录详细错误信息到日志
     logger = CustomLogger()
     logger.error(f"无法导入sentence_transformers库: {error_message}")
     logger.debug(f"详细错误: {error_traceback}")
-
+    
     # 如果是特定的版本不兼容错误，提供更具体的错误信息
     if "LRScheduler" in error_message:
-        logger.error(
-            "检测到版本不兼容问题。请按照以下步骤解决：\n"
-            "1. 卸载现有包：\n"
-            "   pip uninstall torch transformers sentence-transformers\n"
-            "2. 安装兼容版本：\n"
-            "   pip install torch==1.13.1\n"
-            "   pip install transformers==4.30.2\n"
-            "   pip install sentence-transformers==2.2.2"
-        )
+        logger.error("检测到版本不兼容问题。请按照以下步骤解决：\n"
+                    "1. 卸载现有包：\n"
+                    "   pip uninstall torch transformers sentence-transformers\n"
+                    "2. 安装兼容版本：\n"
+                    "   pip install torch==1.13.1\n"
+                    "   pip install transformers==4.30.2\n"
+                    "   pip install sentence-transformers==2.2.2")
+
+# 添加RAG处理线程类
+class RagWorker(QThread):
+    """RAG处理工作线程，用于在后台处理PDF和模型加载"""
+    progress_signal = Signal(int, str)  # 进度信号(百分比, 消息)
+    finished_signal = Signal(object)    # 完成信号(处理后的消息列表)
+    error_signal = Signal(str)          # 错误信号
+
+    def __init__(self, pdf_path, question, system_prompt=""):
+        super().__init__()
+        self.pdf_path = pdf_path
+        self.question = question
+        self.system_prompt = system_prompt
+        self.logger = CustomLogger()
+        self.sentence_model = None
+
+    def extract_text_from_pdf(self, pdf_path):
+        """从PDF中提取文本，支持进度报告"""
+        if not os.path.exists(pdf_path):
+            self.logger.error(f"PDF文件不存在: {pdf_path}")
+            self.error_signal.emit(f"PDF文件不存在: {pdf_path}")
+            return ""
+
+        try:
+            text = ""
+            with open(pdf_path, "rb") as file:
+                reader = PyPDF2.PdfReader(file)
+                total_pages = len(reader.pages)
+                
+                # 发送开始处理的进度信号
+                self.progress_signal.emit(0, f"开始处理PDF文件 ({total_pages}页)...")
+                
+                # 处理每一页并报告进度
+                for i, page in enumerate(reader.pages):
+                    if self.isInterruptionRequested():
+                        self.progress_signal.emit(100, "处理被用户取消")
+                        return ""
+                    
+                    page_text = page.extract_text()
+                    text += page_text + "\n\n"
+                    
+                    # 发送进度更新
+                    progress = int((i + 1) / total_pages * 100)
+                    self.progress_signal.emit(progress, f"正在处理PDF: {progress}% ({i+1}/{total_pages}页)")
+                
+                # 防止文本过长，可能导致模型输入超长
+                if len(text) > 100000:  # 约10万字符
+                    text = text[:100000] + "...(文本已截断)"
+                    self.progress_signal.emit(100, "文本过长已截断")
+                
+                self.progress_signal.emit(100, "PDF处理完成")
+                return text
+        except Exception as e:
+            self.logger.error(f"提取PDF文本失败: {str(e)}")
+            self.error_signal.emit(f"提取PDF文本失败: {str(e)}")
+            return ""
+
+    def load_sentence_model(self):
+        """加载句子变换器模型"""
+        if not SENTENCE_TRANSFORMER_AVAILABLE:
+            self.error_signal.emit("sentence-transformers库不可用，无法进行语义搜索")
+            return False
+
+        try:
+            self.progress_signal.emit(0, "开始加载语义模型...")
+            self.sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+            self.progress_signal.emit(100, "语义模型加载完成")
+            return True
+        except Exception as e:
+            self.logger.error(f"加载sentence-transformer模型失败: {str(e)}")
+            self.error_signal.emit(f"加载语义模型失败: {str(e)}")
+            return False
+
+    def run(self):
+        """线程主函数：处理PDF并准备RAG消息"""
+        try:
+            # 第一步：提取PDF文本
+            self.progress_signal.emit(0, "准备处理PDF...")
+            manual_text = self.extract_text_from_pdf(self.pdf_path)
+            
+            if not manual_text:
+                self.error_signal.emit("未能从PDF中提取文本，RAG处理终止")
+                return
+            
+            # 第二步：准备消息
+            messages = []
+            
+            # 添加系统提示(如果有)
+            if self.system_prompt:
+                messages.append({"role": "system", "content": self.system_prompt})
+            
+            # 将文本分块，避免超长提示
+            max_chunk_size = 8000  # 每块最大字符数
+            if len(manual_text) > max_chunk_size:
+                self.progress_signal.emit(50, "文本过长，进行分块处理...")
+                # 简单分块，更复杂的实现可以考虑基于段落或语义分块
+                manual_chunks = [manual_text[i:i+max_chunk_size] 
+                                for i in range(0, len(manual_text), max_chunk_size)]
+                
+                # 只使用前3块进行处理
+                if len(manual_chunks) > 3:
+                    manual_chunks = manual_chunks[:3]
+                    self.progress_signal.emit(60, f"文本已分为{len(manual_chunks)}块，只使用前3块")
+                
+                # 构建带有分块上下文的提示
+                rag_prompt = (
+                    f"请基于以下软件使用手册内容回答问题。如果手册中没有相关信息，请明确说明。\n\n"
+                    f"使用手册内容(节选):\n{manual_chunks[0]}\n\n"
+                    f"用户问题: {self.question}"
+                )
+            else:
+                # 构建带有上下文的提示
+                rag_prompt = (
+                    f"请基于以下软件使用手册内容回答问题。如果手册中没有相关信息，请明确说明。\n\n"
+                    f"使用手册内容:\n{manual_text}\n\n"
+                    f"用户问题: {self.question}"
+                )
+            
+            self.progress_signal.emit(90, "RAG处理完成，准备发送到AI模型")
+            messages.append({"role": "user", "content": rag_prompt})
+            
+            # 完成处理，发出信号
+            self.finished_signal.emit(messages)
+            
+        except Exception as e:
+            self.logger.error(f"RAG处理线程异常: {str(e)}")
+            self.error_signal.emit(f"RAG处理失败: {str(e)}\n{traceback.format_exc()}")
+            
+# 添加响应生成线程
+class ResponseGenerationWorker(QThread):
+    """响应生成工作线程，用于在后台生成AI回复"""
+    chunk_signal = Signal(str)     # 文本块信号
+    finished_signal = Signal(str)  # 完成信号(完整文本)
+    error_signal = Signal(str)     # 错误信号
+
+    def __init__(self, client, model_config, messages):
+        super().__init__()
+        self.client = client
+        self.config = model_config
+        self.messages = messages
+        self.logger = CustomLogger()
+        
+    def run(self):
+        """线程主函数：生成AI响应"""
+        try:
+            model_type = self.config["type"]  # public/private
+            model_name = self.config["model_name"]
+            temperature = self.config.get("temperature", 0.7)
+            max_tokens = self.config.get("max_tokens", 1000)
+            response_timeout = self.config.get("response_timeout", 120)  # 增大超时时间
+            
+            response_text = ""
+            
+            # 公有模型 - 使用Ollama API
+            if model_type == "public":
+                # 使用stream模式接收响应
+                stream = self.client.chat(
+                    model=model_name,
+                    messages=self.messages,
+                    stream=True,
+                    options={"num_predict": max_tokens, "temperature": temperature},
+                )
+
+                for chunk in stream:
+                    if self.isInterruptionRequested():
+                        self.chunk_signal.emit("\n\n[用户取消了响应生成]")
+                        self.finished_signal.emit(response_text)
+                        return
+                        
+                    content = chunk["message"]["content"]
+                    self.chunk_signal.emit(content)
+                    response_text += content
+            
+            # 私有模型 - 使用自定义API
+            else:
+                headers = self.client["headers"]
+                url = self.client["base_url"]
+                if not url.startswith("http"):
+                    url = f"http://{url}"
+
+                response = requests.post(
+                    f"{url}/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": self.client["model"],
+                        "messages": self.messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                    timeout=response_timeout,
+                )
+
+                if response.status_code == 200:
+                    content = (
+                        response.json()
+                        .get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                    )
+                    self.chunk_signal.emit(content)
+                    response_text = content
+                else:
+                    raise Exception(f"API返回错误: {response.status_code}")
+            
+            # 发送完成信号
+            self.finished_signal.emit(response_text)
+            
+        except Exception as e:
+            error_message = str(e)
+            self.logger.error(f"生成响应失败: {error_message}")
+            self.error_signal.emit(error_message)
 
 
 class ModelConfigDialog(QDialog):
@@ -323,28 +529,15 @@ class ModelConfigDialog(QDialog):
 
         # 如果启用RAG但软件包不可用，显示警告
         if enabled and not SENTENCE_TRANSFORMER_AVAILABLE:
-            error_hint = ""
-            if (
-                SENTENCE_TRANSFORMER_ERROR
-                and "LRScheduler" in SENTENCE_TRANSFORMER_ERROR
-            ):
-                error_hint = (
-                    "\n\n请运行以下命令安装兼容版本：\n"
-                    "pip uninstall torch transformers sentence-transformers\n"
-                    "pip install torch==1.13.1\n"
-                    "pip install transformers==4.30.2\n"
-                    "pip install sentence-transformers==2.2.2"
-                )
-
             QMessageBox.warning(
                 self,
                 "RAG功能不可用",
-                f"无法启用RAG功能，因为sentence_transformers库加载失败。\n\n"
-                f"错误信息: {SENTENCE_TRANSFORMER_ERROR}\n\n"
-                f"可能原因:\n"
-                f"1. 未安装sentence_transformers库\n"
-                f"2. PyTorch和transformers版本不兼容\n\n"
-                f"建议:{error_hint}",
+                "无法启用RAG功能，因为sentence_transformers库加载失败。\n\n"
+                "可能原因:\n"
+                "1. 未安装sentence_transformers库\n"
+                "2. PyTorch和transformers版本不兼容\n\n"
+                "建议:\n"
+                "尝试运行: pip install sentence-transformers torch==1.13.1",
             )
 
     def browseManualFile(self):
@@ -387,9 +580,6 @@ class ModelConfigDialog(QDialog):
 
 class AIChatTab(QWidget):
     modelConfigChanged = Signal()  # 信号：模型配置变更
-    CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".stk")
-    CONFIG_FILE = "ai_models.json"
-    LOG_DIR = os.path.join(CONFIG_DIR, "logs")
 
     def __init__(self, parent=None):
         super().__init__()
@@ -398,7 +588,15 @@ class AIChatTab(QWidget):
         self.client = None
         self.currentModelConfig = None
         self.modelConfigs = []
-        self.configPath = os.path.join(self.CONFIG_DIR, self.CONFIG_FILE)
+        
+        # 添加新的工作线程属性
+        self.rag_worker = None
+        self.response_worker = None
+        self.progress_dialog = None
+        
+        self.configPath = os.path.join(
+            os.path.expanduser("~"), ".stk", "ai_models.json"
+        )
 
         # RAG相关属性
         self.manual_text = None
@@ -406,32 +604,27 @@ class AIChatTab(QWidget):
 
         # 确保配置目录存在
         os.makedirs(os.path.dirname(self.configPath), exist_ok=True)
-        os.makedirs(self.LOG_DIR, exist_ok=True)
 
         # 加载已保存的模型配置
         self.loadModelConfigs()
 
         # 如果没有配置，添加默认配置
         if not self.modelConfigs:
-            self.addDefaultConfig()
+            self.modelConfigs.append(
+                {
+                    "name": "默认公有模型",
+                    "type": "public",
+                    "host": "127.0.0.1",
+                    "port": "11434",
+                    "api_key": "",
+                    "model_name": "deepseek-coder",
+                    "temperature": 0.7,
+                    "max_tokens": 1000,
+                }
+            )
+            self.saveModelConfigs()
 
         self.initUI()
-
-    def addDefaultConfig(self):
-        """添加默认配置"""
-        self.modelConfigs.append(
-            {
-                "name": "默认公有模型",
-                "type": "public",
-                "host": "127.0.0.1",
-                "port": "11434",
-                "api_key": "",
-                "model_name": "deepseek-coder",
-                "temperature": 0.7,
-                "max_tokens": 1000,
-            }
-        )
-        self.saveModelConfigs()
 
     def initUI(self):
         layout = QVBoxLayout()
@@ -720,262 +913,6 @@ class AIChatTab(QWidget):
             self.logger.error(f"连接私有API失败: {str(e)}")
             return False
 
-    def extract_text_from_pdf(self, pdf_path):
-        """从PDF中提取文本"""
-        if not os.path.exists(pdf_path):
-            self.logger.error(f"PDF文件不存在: {pdf_path}")
-            return ""
-
-        try:
-            text = ""
-            with open(pdf_path, "rb") as file:
-                reader = PyPDF2.PdfReader(file)
-                for page in reader.pages:
-                    text += page.extract_text()
-            return text
-        except Exception as e:
-            self.logger.error(f"提取PDF文本失败: {str(e)}")
-            return ""
-
-    def load_sentence_model(self):
-        """加载句子变换器模型"""
-        if not SENTENCE_TRANSFORMER_AVAILABLE:
-            self._show_sentence_transformer_error()
-            return False
-
-        try:
-            self.chatHistory.append("<b>系统:</b> 正在加载语义搜索模型...<br>")
-            self.sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
-            return True
-        except Exception as e:
-            self.logger.error(f"加载sentence-transformer模型失败: {str(e)}")
-            self.chatHistory.append(
-                f"<b>系统:</b> ❌ 加载语义搜索模型失败: {str(e)}<br>"
-            )
-            return False
-
-    def _show_sentence_transformer_error(self):
-        """显示Sentence Transformer错误信息"""
-        error_hint = ""
-        if SENTENCE_TRANSFORMER_ERROR and "LRScheduler" in SENTENCE_TRANSFORMER_ERROR:
-            error_hint = (
-                "<br>请运行以下命令安装兼容版本：<br>"
-                "<code>pip uninstall torch transformers sentence-transformers</code><br>"
-                "<code>pip install torch==1.13.1</code><br>"
-                "<code>pip install transformers==4.30.2</code><br>"
-                "<code>pip install sentence-transformers==2.2.2</code>"
-            )
-
-        self.logger.warning(
-            f"sentence-transformers库不可用，RAG功能将被禁用\n{error_hint}"
-        )
-        self.chatHistory.append(
-            "<b>系统:</b> ⚠️ sentence-transformers库不可用，RAG功能被禁用。<br>"
-            f"错误信息: {SENTENCE_TRANSFORMER_ERROR}<br>{error_hint}"
-        )
-
-    def sendMessage(self):
-        """发送消息并获取AI回复"""
-        if not self.client and not self.connectToModel():
-            return
-
-        question = self.inputField.text().strip()
-        if not question:
-            return
-
-        self.chatHistory.append(f"<b>用户:</b> {question}<br>")
-        self.inputField.clear()
-
-        try:
-            # 添加性能分析
-            start_time = time.time()
-            self.checkMemoryUsage()
-
-            # 获取配置
-            config = self.currentModelConfig
-            model_type = config["type"]
-            model_name = config["model_name"]
-            temperature = config.get("temperature", 0.7)
-            max_tokens = config.get("max_tokens", 1000)
-            system_prompt = config.get("system_prompt", "")
-            response_timeout = config.get("response_timeout", 60)
-
-            # 准备RAG相关内容
-            use_rag, context = self._prepare_rag(config, question)
-
-            # 构建消息
-            messages = self._build_messages(system_prompt, question, use_rag, context)
-
-            # 开始生成回答
-            self.chatHistory.append("<b>AI:</b> ")
-            self._prepare_cursor()
-
-            # 获取AI回复
-            response_text = self._get_ai_response(
-                model_type,
-                model_name,
-                messages,
-                temperature,
-                max_tokens,
-                response_timeout,
-            )
-
-            # 记录分析数据
-            self._log_analytics(config, question, response_text, start_time)
-
-        except Exception as e:
-            self._handle_error(e)
-
-    def _prepare_rag(self, config, question):
-        """准备RAG相关内容"""
-        use_rag = config.get("use_rag", False)
-        manual_path = config.get("manual_path", "")
-        context = None
-
-        # 如果启用RAG但sentence_transformers不可用，使用普通模式
-        if use_rag and not SENTENCE_TRANSFORMER_AVAILABLE:
-            self.chatHistory.append(
-                "<b>系统:</b> ⚠️ RAG功能不可用，将使用普通模式回答。<br>"
-            )
-            return False, None
-
-        # 如果启用RAG且指定了手册路径
-        if use_rag and manual_path and os.path.exists(manual_path):
-            # 如果尚未加载手册文本，加载它
-            if self.manual_text is None:
-                self.chatHistory.append("<b>系统:</b> 正在加载使用手册...<br>")
-                self.manual_text = self.extract_text_from_pdf(manual_path)
-                if not self.manual_text:
-                    self.chatHistory.append(
-                        "<b>系统:</b> ⚠️ 无法提取手册内容，将使用普通模式<br>"
-                    )
-                    return False, None
-
-            # 如果启用RAG但没有加载sentence模型，尝试加载
-            if use_rag and self.sentence_model is None:
-                if not self.load_sentence_model():
-                    return False, None
-
-            context = self.manual_text
-            return True, context
-
-        return False, None
-
-    def _build_messages(self, system_prompt, question, use_rag, context):
-        """构建消息列表"""
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-
-        # 如果使用RAG，提取相关上下文并添加到提示中
-        if use_rag and context:
-            # 构造带有上下文的提示
-            rag_prompt = (
-                f"请基于以下软件使用手册内容回答问题。如果手册中没有相关信息，请明确说明。\n\n"
-                f"使用手册内容:\n{context}\n\n"
-                f"用户问题: {question}"
-            )
-            messages.append({"role": "user", "content": rag_prompt})
-        else:
-            # 普通模式，直接添加用户问题
-            messages.append({"role": "user", "content": question})
-
-        return messages
-
-    def _prepare_cursor(self):
-        """准备文本光标位置"""
-        cursor = self.chatHistory.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        self.chatHistory.setTextCursor(cursor)
-
-    def _get_ai_response(
-        self,
-        model_type,
-        model_name,
-        messages,
-        temperature,
-        max_tokens,
-        response_timeout,
-    ):
-        """获取AI回复"""
-        response_text = ""
-
-        # 公有模型 - 使用Ollama API
-        if model_type == "public":
-            stream = self.client.chat(
-                model=model_name,
-                messages=messages,
-                stream=True,
-                options={"num_predict": max_tokens, "temperature": temperature},
-            )
-
-            for chunk in stream:
-                content = chunk["message"]["content"]
-                self.chatHistory.insertPlainText(content)
-                response_text += content
-                self.chatHistory.ensureCursorVisible()
-                QApplication.processEvents()  # 确保UI更新
-
-        # 私有模型 - 使用自定义API
-        else:
-            headers = self.client["headers"]
-            url = self._format_url(self.client["base_url"])
-
-            response = requests.post(
-                f"{url}/chat/completions",
-                headers=headers,
-                json={
-                    "model": self.client["model"],
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-                timeout=response_timeout,
-            )
-
-            if response.status_code == 200:
-                content = (
-                    response.json()
-                    .get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                )
-                self.chatHistory.insertPlainText(content)
-                response_text += content
-            else:
-                raise Exception(f"API返回错误: {response.status_code}")
-
-        # 添加换行，确保下一个消息从新行开始
-        self.chatHistory.insertPlainText("\n\n")
-        return response_text
-
-    def _format_url(self, url):
-        """格式化URL，确保有http前缀"""
-        if not url.startswith("http"):
-            return f"http://{url}"
-        return url
-
-    def _log_analytics(self, config, question, response_text, start_time):
-        """记录分析数据"""
-        if config.get("enable_analytics", False):
-            end_time = time.time()
-            response_time = round((end_time - start_time) * 1000)
-            self.chatHistory.append(
-                f"<span style='color: gray; font-size: 9px;'>响应时间: {response_time}ms, "
-                f"输出长度: {len(response_text)} 字符</span><br>"
-            )
-
-            # 记录查询日志
-            if config.get("log_queries", False):
-                self.logQuery(question, response_text, response_time)
-
-    def _handle_error(self, error):
-        """处理错误"""
-        error_msg = str(error)
-        self.chatHistory.append(f"<b>系统:</b> 获取回答时出错: {error_msg}<br>")
-        self.logger.error(f"获取AI回答失败: {error_msg}")
-        self.handleSpecificErrors(error_msg)
-
     def validateConnection(self):
         """验证当前选择的模型连接"""
         if not self.currentModelConfig:
@@ -988,7 +925,7 @@ class AIChatTab(QWidget):
             model_type = config["type"]
 
             # 公有模型验证
-            if model_type == "public":
+            if (model_type == "public"):
                 self.validatePublicModel()
             # 私有模型验证
             else:
@@ -1181,3 +1118,188 @@ class AIChatTab(QWidget):
                 f"2. 是否需要代理<br>"
                 f"3. 网络连接是否稳定<br>"
             )
+
+    def sendMessage(self):
+        # 检查是否连接到模型
+        if not self.client:
+            if not self.connectToModel():
+                return
+
+        # 获取输入问题
+        question = self.inputField.text().strip()
+        if not question:
+            return
+
+        # 显示用户输入
+        self.chatHistory.append(f"<b>用户:</b> {question}<br>")
+        self.inputField.clear()
+
+        # 禁用发送按钮，防止重复发送
+        self.sendButton.setEnabled(False)
+        
+        try:
+            # 添加性能分析
+            start_time = time.time()
+
+            # 检查内存使用情况
+            self.checkMemoryUsage()
+
+            config = self.currentModelConfig
+            model_type = config["type"]
+            model_name = config["model_name"]
+
+            # 获取高级参数
+            temperature = config.get("temperature", 0.7)
+            max_tokens = config.get("max_tokens", 1000)
+            system_prompt = config.get("system_prompt", "")
+            response_timeout = config.get("response_timeout", 60)
+
+            # 检查是否启用RAG
+            use_rag = config.get("use_rag", False)
+            manual_path = config.get("manual_path", "")
+
+            # 如果启用RAG但sentence_transformers不可用，使用普通模式
+            if use_rag and not SENTENCE_TRANSFORMER_AVAILABLE:
+                self.chatHistory.append(
+                    "<b>系统:</b> ⚠️ RAG功能不可用，将使用普通模式回答。<br>"
+                )
+                use_rag = False
+
+            # 如果启用RAG且指定了手册路径
+            if use_rag and manual_path and os.path.exists(manual_path):
+                # 使用RAG工作线程处理
+                self.statusLabel.setText("RAG处理中...")
+                self.chatHistory.append("<b>系统:</b> 正在处理文档并准备RAG上下文，请稍候...<br>")
+                
+                # 创建并配置进度对话框
+                self.progress_dialog = QProgressDialog("处理中...", "取消", 0, 100, self)
+                self.progress_dialog.setWindowTitle("RAG处理进度")
+                self.progress_dialog.setAutoClose(True)
+                self.progress_dialog.setMinimumDuration(500)  # 500ms后才显示
+                
+                # 创建RAG处理线程
+                self.rag_worker = RagWorker(manual_path, question, system_prompt)
+                
+                # 连接信号
+                self.rag_worker.progress_signal.connect(self.updateRagProgress)
+                self.rag_worker.finished_signal.connect(self.onRagFinished)
+                self.rag_worker.error_signal.connect(self.onRagError)
+                
+                # 连接取消按钮
+                self.progress_dialog.canceled.connect(self.cancelRagProcessing)
+                
+                # 启动线程
+                self.rag_worker.start()
+                
+            else:
+                # 普通模式，直接生成响应
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                    
+                messages.append({"role": "user", "content": question})
+                
+                # 开始生成回答
+                self.startResponseGeneration(messages)
+                
+        except Exception as e:
+            error_msg = str(e)
+            self.chatHistory.append(f"<b>系统:</b> 处理请求时出错: {error_msg}<br>")
+            self.logger.error(f"处理请求失败: {error_msg}")
+            self.sendButton.setEnabled(True)
+            self.statusLabel.setText("处理出错")
+
+    def updateRagProgress(self, progress, message):
+        """更新RAG处理进度"""
+        if self.progress_dialog:
+            self.progress_dialog.setValue(progress)
+            self.progress_dialog.setLabelText(message)
+    
+    def cancelRagProcessing(self):
+        """取消RAG处理"""
+        if self.rag_worker and self.rag_worker.isRunning():
+            self.rag_worker.requestInterruption()
+            self.rag_worker.wait(1000)  # 等待最多1秒
+            self.chatHistory.append("<b>系统:</b> RAG处理已取消<br>")
+            self.statusLabel.setText("已取消")
+            self.sendButton.setEnabled(True)
+    
+    def onRagError(self, error_message):
+        """处理RAG错误"""
+        self.chatHistory.append(f"<b>系统:</b> RAG处理出错: {error_message}<br>")
+        # 重新启用发送按钮
+        self.sendButton.setEnabled(True)
+        self.statusLabel.setText("就绪")
+    
+    def onRagFinished(self, messages):
+        """RAG处理完成，开始生成响应"""
+        self.chatHistory.append("<b>系统:</b> RAG处理完成，正在生成回答...<br>")
+        
+        # 开始生成响应
+        self.startResponseGeneration(messages)
+    
+    def startResponseGeneration(self, messages):
+        """开始生成AI响应"""
+        # 在界面中显示标识
+        self.chatHistory.append("<b>AI:</b> ")
+        
+        # 获取光标并移动到末尾，为使用insertPlainText做准备
+        cursor = self.chatHistory.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.chatHistory.setTextCursor(cursor)
+        
+        # 创建响应生成线程
+        self.response_worker = ResponseGenerationWorker(
+            self.client, self.currentModelConfig, messages
+        )
+        
+        # 连接信号
+        self.response_worker.chunk_signal.connect(self.onResponseChunk)
+        self.response_worker.finished_signal.connect(self.onResponseFinished)
+        self.response_worker.error_signal.connect(self.onResponseError)
+        
+        # 更新状态
+        self.statusLabel.setText("正在生成回答...")
+        
+        # 启动线程
+        self.response_worker.start()
+    
+    def onResponseChunk(self, chunk):
+        """处理响应块"""
+        # 使用insertPlainText而不是append，确保文本连续
+        self.chatHistory.insertPlainText(chunk)
+        self.chatHistory.ensureCursorVisible()
+        QApplication.processEvents()  # 确保UI更新
+    
+    def onResponseError(self, error_message):
+        """处理响应生成错误"""
+        self.chatHistory.append(f"<b>系统:</b> 获取回答时出错: {error_message}<br>")
+        
+        # 处理特定错误类型
+        self.handleSpecificErrors(error_message)
+        
+        # 重新启用发送按钮
+        self.sendButton.setEnabled(True)
+        self.statusLabel.setText("就绪")
+    
+    def onResponseFinished(self, full_response):
+        """响应生成完成"""
+        # 添加换行，确保下一个消息从新行开始
+        self.chatHistory.insertPlainText("\n\n")
+        
+        # 记录分析数据
+        if self.currentModelConfig.get("enable_analytics", False):
+            end_time = time.time()
+            response_time = round((end_time - time.time()) * 1000)
+            self.chatHistory.append(
+                f"<span style='color: gray; font-size: 9px;'>响应时间: {response_time}ms, "
+                f"输出长度: {len(full_response)} 字符</span><br>"
+            )
+
+            # 记录查询日志
+            if self.currentModelConfig.get("log_queries", False):
+                self.logQuery(self.inputField.text().strip(), full_response, response_time)
+        
+        # 重新启用发送按钮
+        self.sendButton.setEnabled(True)
+        self.statusLabel.setText("就绪")

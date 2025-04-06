@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
 
 
 from custom_logger import CustomLogger
-from Tab.code_tab import CodeTab
+# 移除 CodeTab 导入
+# from Tab.code_tab import CodeTab
 
 
 class InfoBar(QWidget):
@@ -17,8 +18,7 @@ class InfoBar(QWidget):
         self.parent = parent
         self.tabWidget = QTabWidget()
         self.parent.registerComponent("Info", self, True)
-        self.codeTab = None
-        self.curShowCode = None
+        # 移除 codeTab 和 curShowCode 属性
         self.initUI()
 
     def initUI(self):
@@ -30,14 +30,11 @@ class InfoBar(QWidget):
         self.addInfoTabs()
 
     def initWorkspace(self):
-        file_path = self.parent.get_workspace_data('info_bar/code/file_path')
-        working_directory = self.parent.get_workspace_data('left_sidebar/working_directory')
-        self.parent.left_sidebar.open_file(file_path, working_directory, False)
+        # 由于移除了codeTab，修改workspace初始化逻辑
+        pass
 
     def addInfoTabs(self):
-        self.codeTab = CodeTab(self)
-        self.tabWidget.addTab(self.codeTab, "Code")
-        self.registerComponent("Code Tab", self.codeTab)
+        # 移除 codeTab 初始化和添加
 
         self.logTab = QTextEdit()
         self.tabWidget.addTab(self.logTab, "Log")
@@ -51,11 +48,12 @@ class InfoBar(QWidget):
         self.tabWidget.addTab(self.statusTab, "Status Information")
         self.registerComponent("Status Information", self.statusTab)
 
-    def runCodeWithAnalysis(self):
-        if self.curShowCode:
-            self.codeTab.executeCode(self.curShowCode)
-        else:
-            self.logger.warning("没有代码可执行")
+    # 移除 runCodeWithAnalysis 方法，因为它与 codeTab 相关
+    # def runCodeWithAnalysis(self):
+    #    if self.curShowCode:
+    #        self.codeTab.executeCode(self.curShowCode)
+    #    else:
+    #        self.logger.warning("没有代码可执行")
 
     def registerComponent(self, path, component):
         truePath = "Info/" + path

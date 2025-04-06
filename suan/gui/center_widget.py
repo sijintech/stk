@@ -64,10 +64,19 @@ class CenterWidget(QWidget):
         self.tabWidget.currentChanged.connect(self.onTabChanged)
 
     def initWorkspace(self):
-        active_tab_index = self.parent.get_workspace_data(
-            "center_widget/active_tab_index"
-        )
-        self.tabWidget.setCurrentIndex(active_tab_index)
+        # 获取工作区中的活动标签索引，如果不存在则默认为0
+        try:
+            active_tab_index = self.parent.get_workspace_data(
+                "center_widget/active_tab_index", 0
+            )
+            # 确保索引有效
+            if active_tab_index >= 0 and active_tab_index < self.tabWidget.count():
+                self.tabWidget.setCurrentIndex(active_tab_index)
+            else:
+                self.tabWidget.setCurrentIndex(0)
+        except Exception as e:
+            self.logger.error(f"初始化工作区标签失败: {e}")
+            self.tabWidget.setCurrentIndex(0)
         # self.vtkObject=self.parent.get_workspaceData('center_widget/vtk/view_port')
         # self.vtkWidget.GetRenderWindow().AddRenderer(
         #     self.vtkObject
@@ -116,8 +125,8 @@ class CenterWidget(QWidget):
 
         # AI Chat Tab
         self.aiChatTab = AIChatTab(self)
-        self.tabWidget.addTab(self.aiChatTab, "AI对话")
-        self.registerComponent("AI对话 Tab", self.aiChatTab, True)
+        self.tabWidget.addTab(self.aiChatTab, "AI")
+        self.registerComponent("AI Tab", self.aiChatTab, True)
         # 连接AI模型配置变更信号
         self.aiChatTab.modelConfigChanged.connect(self.onAIModelConfigChanged)
 
@@ -238,11 +247,16 @@ class CenterWidget(QWidget):
         if index < 0 or index >= self.tabWidget.count():
             return
 
+        # 先自动保存当前文件（如果已修改且开启了自动保存）
+        code_tab = self.parent.get_component_by_name("Code Tab")
+        if code_tab:
+            code_tab.save_if_auto()
+
         tab_name = self.tabWidget.tabText(index)
         self.logger.debug(f"切换到选项卡: {tab_name}")
 
         # 特殊处理AI对话选项卡
-        if tab_name == "AI对话" and hasattr(self, "aiChatTab"):
+        if tab_name == "AI" and hasattr(self, "aiChatTab"):
             # 如果AI对话选项卡未连接，尝试连接
             if not self.aiChatTab.client:
                 self.logger.debug("AI对话选项卡需要连接到模型")
@@ -254,18 +268,18 @@ class CenterWidget(QWidget):
     def switchToAIChat(self):
         """切换到AI对话选项卡"""
         for i in range(self.tabWidget.count()):
-            if self.tabWidget.tabText(i) == "AI对话":
+            if self.tabWidget.tabText(i) == "AI":
                 self.tabWidget.setCurrentIndex(i)
                 return True
 
         # 如果没有找到AI对话选项卡，尝试添加它
         if (
-            "AI对话 Tab"
+            "AI Tab"
             in self.parent.components["main"]["children"]["Visualization window"][
                 "children"
             ]
         ):
-            self.toggleComponentVisibility("AI对话 Tab")
+            self.toggleComponentVisibility("AI Tab")
             return self.switchToAIChat()  # 递归调用一次
 
         return False

@@ -132,13 +132,62 @@ class PreferenceTab(QWidget):
             self.table.removeRow(current_row)
 
     def save_preferences_to_file(self, preferences):
+        if not self.parent or not hasattr(self.parent, 'preferences'):
+            self.logger.error("父组件不存在或未包含preferences属性")
+            return
+        
         self.parent.preferences = preferences
-        self.parent.save_preferences
+        self.parent.save_preferences()
+        self.logger.debug("偏好设置已保存")
 
     def saveData(self):
-        rows = self.table.rowCount()  # 获取表格的行数
-        cols = self.table.columnCount()  # 获取表格的列数
+        try:
+            rows = self.table.rowCount()  # 获取表格的行数
+            cols = self.table.columnCount()  # 获取表格的列数
+            
+            # 添加数据验证，确保重要配置不会被错误修改
+            validated_data = self.validate_essential_data(self.parse_table_data(rows, cols))
+            
+            self.logger.debug(validated_data)
+            self.data = validated_data
+            self.save_preferences_to_file(self.data)
+        except Exception as e:
+            self.logger.error(f"保存数据失败: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
 
+    def validate_essential_data(self, data):
+        """验证并修复必要的配置项"""
+        # 确保UI_Init部分存在且包含所有必要的设置
+        if "UI_Init" not in data:
+            data["UI_Init"] = {}
+        
+        # 确保所有必要的UI设置存在
+        ui_defaults = {
+            "window_width": "800",
+            "window_height": "500",
+            "left_sidebar_width": "100",
+            "right_sidebar_width": "100",
+            "center_widget_height": "300"
+        }
+        
+        for key, default_value in ui_defaults.items():
+            if key not in data["UI_Init"] or not data["UI_Init"][key]:
+                data["UI_Init"][key] = default_value
+        
+        # 确保工作目录设置存在
+        if "Open_Last_Working_Directory" not in data or not data["Open_Last_Working_Directory"]:
+            import os
+            data["Open_Last_Working_Directory"] = os.path.expanduser("~")
+            
+        # 确保自动保存选项存在
+        if "Auto_Save" not in data:
+            data["Auto_Save"] = True
+        
+        return data
+
+    def parse_table_data(self, rows, cols):
+        """解析表格数据到字典结构"""
         # 得到子字典
         def get_subdict(row, col):
             data_dict = {}  # 用于存储子字典数据
@@ -146,32 +195,39 @@ class PreferenceTab(QWidget):
             while nextrow < rows:
                 father_index = self.check_single_cell(nextrow)
                 key_item = self.table.item(nextrow, col)  # 获取当前单元格的键项
-                key = (
-                    key_item.text() if key_item else None
-                )  # 获取键项的文本内容，如果键项为空则设置为None
+                if not key_item or not key_item.text().strip():
+                    nextrow += 1
+                    continue
+                    
+                key = key_item.text().strip()  # 获取键项的文本内容
+                
                 if father_index != -1:  # 是一个父子典
-
                     if father_index < col:  # 不是上一个父子典的子字典
                         return nextrow, data_dict
                     elif father_index == col:
                         nextrow, sub_dict = get_subdict(nextrow + 1, col + 1)
-                        if sub_dict is not None:
-                            data_dict[key] = sub_dict
-                        else:
-                            data_dict[key] = {}
-                        # nextrow += 1
-
+                        data_dict[key] = sub_dict if sub_dict else {}
                 else:  # 是叶字典
                     value_item = (
                         self.table.item(nextrow, col + 1) if col + 1 < cols else None
                     )  # 获取当前单元格的值项
                     value = (
-                        value_item.text() if value_item else None
-                    )  # 获取值项的文本内容，如果值项为空则设置为None
-                    if value == "True":
+                        value_item.text() if value_item else ""
+                    ).strip()  # 获取值项的文本内容，并去除首尾空格
+                    
+                    # 智能转换值类型
+                    if value.lower() == "true":
                         value = True
-                    elif value == "False":
+                    elif value.lower() == "false":
                         value = False
+                    elif value.isdigit():
+                        value = int(value)
+                    elif value and value[0].isdigit() and all(c.isdigit() or c == '.' for c in value):
+                        try:
+                            value = float(value)
+                        except ValueError:
+                            pass  # 保持为字符串
+                            
                     data_dict[key] = value
                     nextrow += 1
             return nextrow, data_dict
@@ -182,29 +238,37 @@ class PreferenceTab(QWidget):
 
         while row < rows:
             key_item = self.table.item(row, col)  # 获取当前单元格的键项
-            key = (
-                key_item.text() if key_item else None
-            )  # 获取键项的文本内容，如果键项为空则设置为None
+            if not key_item or not key_item.text().strip():
+                row += 1
+                continue
+                
+            key = key_item.text().strip()  # 获取键项的文本内容
+            
             if self.check_single_cell(row) != -1:
                 row, subdict = get_subdict(row + 1, col + 1)
                 data[key] = subdict
             elif self.check_double_cell(row) != -1:
-                value_item = (
-                    self.table.item(row, col + 1) if col + 1 < cols else None
-                )  # 获取当前单元格的值项
-                value = (
-                    value_item.text() if value_item else None
-                )  # 获取值项的文本内容，如果值项为空则设置为None
-                if value == "True":
-                    value = True
-                elif value == "False":
-                    value = False
-                data[key] = value
+                value_item = self.table.item(row, col + 1)
+                if value_item:
+                    value = value_item.text().strip()
+                    
+                    # 智能转换值类型
+                    if value.lower() == "true":
+                        value = True
+                    elif value.lower() == "false":
+                        value = False
+                    elif value.isdigit():
+                        value = int(value)
+                    elif value and value[0].isdigit() and all(c.isdigit() or c == '.' for c in value):
+                        try:
+                            value = float(value)
+                        except ValueError:
+                            pass  # 保持为字符串
+                        
+                    data[key] = value
                 row += 1
-
-        self.logger.debug(data)
-        self.data = data
-        self.save_preferences_to_file(self.data)
+        
+        return data
 
     def check_single_cell(self, row):
         """
