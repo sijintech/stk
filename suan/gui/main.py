@@ -70,7 +70,7 @@ class MainWindow(QMainWindow):
         self.isWorkspace = False
         self.is_first_launch = False
         self.create_workspace_if_no = create_workspace_if_no
-        
+        self.window_initialized = False
         # 先初始化首选项
         self.init_preferences()
         
@@ -163,7 +163,8 @@ class MainWindow(QMainWindow):
     def showEvent(self, event):
         self.logger.debug("showEvent")
         super().showEvent(event)
-        
+        if self.window_initialized:
+            return
         # 检查是否是首次启动
         if self.is_first_launch:
             self.show_welcome_dialog()

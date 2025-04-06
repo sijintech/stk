@@ -22,12 +22,14 @@ jobs:
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
 
-      # 添加Poetry缓存
+      # 添加Poetry缓存 - 优化缓存配置
       - name: Cache Poetry dependencies
         uses: actions/cache@v3
         with:
-          path: ~/.cache/pypoetry
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
+          path: |
+            ~/.cache/pypoetry
+            ~/.local/share/virtualenvs
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
           restore-keys: |
             ${{ runner.os }}-poetry-
 
@@ -112,16 +114,18 @@ jobs:
           python --version
           echo "Using system Python to avoid permission issues"
 
-      # 添加缓存机制
-      - name: Cache Poetry dependencies
+      # 添加缓存机制 - 优化Windows缓存配置
+      - name: Cache Python dependencies
         uses: actions/cache@v3
         with:
           path: |
+            ~\.cache\pip
             ~\.cache\pypoetry
             .venv
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+            $env:LOCALAPPDATA\pip\Cache
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/poetry.lock') }}
           restore-keys: |
-            ${{ runner.os }}-poetry-
+            ${{ runner.os }}-deps-
 
       - name: get tag
         id: get_tag
@@ -144,7 +148,13 @@ jobs:
           python -m venv .venv
           .\.venv\Scripts\Activate.ps1
           python -m pip install --upgrade pip
+          
+          # 验证缓存是否正常工作
+          echo "检查缓存是否已恢复..."
+          pip cache info
+          
           pip install poetry
+          poetry config virtualenvs.in-project true
           poetry install --no-interaction --no-root
           python suan\scripts\run_write_version.py
 
