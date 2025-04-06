@@ -129,32 +129,32 @@ jobs:
           # 修正Windows环境下的环境变量设置方式
           echo "TAG=$($env:GITHUB_REF -replace 'refs/tags/v','')" >> $env:GITHUB_ENV
 
-      - name: Cache Poetry dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pypoetry
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-poetry-
-
       - name: Install Poetry
+        shell: powershell
         run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+          $env:Path += ";$env:USERPROFILE\.poetry\bin"
+          echo "$env:USERPROFILE\.poetry\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Install dependencies
+        shell: powershell
         run: |
-          cd $GITHUB_WORKSPACE
-          poetry config virtualenvs.create false
+          cd $env:GITHUB_WORKSPACE
+          # 创建虚拟环境并安装依赖
+          python -m venv .venv
+          .\.venv\Scripts\Activate.ps1
+          python -m pip install --upgrade pip
+          pip install poetry
           poetry install --no-interaction --no-root
-          python suan/scripts/run_write_version.py
+          python suan\scripts\run_write_version.py
 
       - name: build exe
+        shell: powershell
         run: |
-          # 重新激活虚拟环境，确保路径正确
-          .\.venv\Scripts\activate.ps1
-          
-          cd suan/gui
-          python build.py --clean  # 使用优化后的打包脚本
+          # 激活虚拟环境
+          .\.venv\Scripts\Activate.ps1
+          cd suan\gui
+          python build.py --clean
 
       - name: Install NSIS
         if: ${{ false }}
