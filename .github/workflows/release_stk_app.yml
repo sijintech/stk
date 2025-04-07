@@ -34,8 +34,10 @@ jobs:
       # 使用Poetry安装依赖
       - name: Install Poetry
         run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          # 使用PowerShell适用的方式下载安装脚本
+          (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+          # 将Poetry添加到PATH
+          echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
 
       - name: Install dependencies
         run: |
@@ -131,7 +133,9 @@ jobs:
 
       - name: Install Poetry
         run: |
-          curl -sSL https://install.python-poetry.org | python -
+          # 使用PowerShell适用的方式下载安装脚本
+          (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+          # 将Poetry添加到PATH
           echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
 
       - name: Install dependencies with Poetry
@@ -141,10 +145,8 @@ jobs:
           poetry config virtualenvs.in-project true
           
           # 安装项目依赖
-          poetry install --no-interaction
+          poetry install --no-interaction --no-root
           
-          # 确保特定依赖已安装
-          poetry add toml pyinstaller==6.3.0 pyinstaller-hooks-contrib
           
           # 版本信息写入
           poetry run python suan/scripts/run_write_version.py
