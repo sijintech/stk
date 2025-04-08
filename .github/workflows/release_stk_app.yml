@@ -131,6 +131,7 @@ jobs:
           path: |
             ~\.cache\pypoetry
             .venv
+            ~\AppData\Python\Scripts
           key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
           restore-keys: |
             ${{ runner.os }}-poetry-
@@ -143,21 +144,27 @@ jobs:
 
       - name: Install Poetry
         run: |
-          # 使用PowerShell适用的方式下载安装脚本
-          (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
-          # 将Poetry添加到PATH
-          echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+          # 检查Poetry是否已安装
+          $poetryPath = "$env:APPDATA\Python\Scripts\poetry.exe"
+          if (-not (Test-Path $poetryPath)) {
+            Write-Host "Poetry not found at $poetryPath, installing..."
+            # 如果未安装，则安装Poetry
+            (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+            # 将Poetry添加到PATH
+            echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+          } else {
+            Write-Host "Poetry is already installed at $poetryPath"
+          }
 
       - name: Install dependencies with Poetry
         run: |
-          # 确保使用虚拟环境
+          # 配置Poetry使用项目内的虚拟环境
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
           
           # 安装项目依赖
           poetry lock
           poetry install --no-interaction --no-root
-          
           
           # 版本信息写入
           poetry run python suan/scripts/run_write_version.py
