@@ -19,9 +19,6 @@ vtk = "9.3.0"
 requests = "*"
 pandas = "*"
 ollama = "*"
-# 更改 torch 依赖为使用特定的 URL
-#torch = { url = "https://download.pytorch.org/whl/cu117/torch-1.13.1%2Bcu117-cp39-cp39-win_amd64.whl" }
-#transformers = "4.30.2"
 sentence-transformers = "4.0.1"
 PyPDF2 = "*"
 chardet = "*"
@@ -31,7 +28,7 @@ pyinstaller = "6.3.0"
 frontend = "*"
 pathspec= "*"
 psutil = "*"  
-pyinstaller-hooks-contrib = "*"  # 添加PyInstaller钩子库
+pyinstaller-hooks-contrib = "*" 
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]
@@ -63,7 +60,7 @@ generate-hooks = "suan.gui.packaging.hooks_generator:main"
 # PyInstaller配置
 [tool.pyinstaller]
 # 钩子目录
-hooks_dir = "suan/gui/packaging/hooks"
+hooks_dir = "suan/gui/pkg_tools/hooks"
 # 集中管理的所有隐藏导入
 hidden_imports = [
     # GUI组件
@@ -72,7 +69,12 @@ hidden_imports = [
     # 核心Python库
     "numpy.core._methods", "numpy.lib.format", "chardet",
     # 通用依赖
-    "requests", "toml"
+    "requests", "toml",
+    # 机器学习依赖
+    "scipy", "scipy.special", "scipy.special._cdflib", "scipy.special._ufuncs",
+    "sklearn", "sklearn.metrics", "sklearn.metrics.roc_curve", 
+    "sklearn.utils", "sklearn.utils.validation",
+    "transformers", "sentence_transformers"
 ]
 
 # 按库分类的特定依赖配置
@@ -125,6 +127,44 @@ modules = [
     "_libs.tslibs.offsets", "_libs.tslibs.parsing",
     "_libs.tslibs.period", "_libs.tslibs.strptime",
     "_libs.tslibs.vectorized"
+]
+
+[tool.pyinstaller.scipy]
+modules = [
+    "special._cdflib",
+    "special._ufuncs",
+    "special._ellip_harm_2",
+    "integrate",
+    "integrate.quadrature",
+    "integrate._quadpack",
+    "_lib.messagestream"
+]
+
+[tool.pyinstaller.sklearn]
+modules = [
+    "metrics.roc_curve",
+    "utils",
+    "utils.validation",
+    "utils._array_api",
+    "utils._param_validation",
+    "base"
+]
+
+[tool.pyinstaller.transformers]
+modules = [
+    "generation",
+    "generation.utils",
+    "generation.candidate_generator",
+    "models.auto",
+    "models.auto.modeling_auto",
+    "models.auto.auto_factory"
+]
+
+[tool.pyinstaller.sentence_transformers]
+modules = [
+    "cross_encoder",
+    "cross_encoder.CrossEncoder",
+    "util"
 ]
 
 
