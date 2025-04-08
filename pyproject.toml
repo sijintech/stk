@@ -28,7 +28,8 @@ pyinstaller = "6.3.0"
 frontend = "*"
 pathspec= "*"
 psutil = "*"  
-pyinstaller-hooks-contrib = "*" 
+pyinstaller-hooks-contrib = "*"
+tqdm = ">=4.27"
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]
@@ -69,7 +70,7 @@ hidden_imports = [
     # 核心Python库
     "numpy.core._methods", "numpy.lib.format", "chardet",
     # 通用依赖
-    "requests", "toml",
+    "requests", "toml", "tqdm",
     # 机器学习依赖
     "scipy", "scipy.special", "scipy.special._cdflib", "scipy.special._ufuncs",
     "sklearn", "sklearn.metrics", "sklearn.metrics.roc_curve", 
