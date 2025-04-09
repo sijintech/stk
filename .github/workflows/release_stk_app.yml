@@ -153,6 +153,7 @@ jobs:
             # 将Poetry添加到PATH
             echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
           } else {
+            echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
             Write-Host "Poetry is already installed at $poetryPath"
           }
 
