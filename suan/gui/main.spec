@@ -65,7 +65,7 @@ a = Analysis(
         ('center_widget.py', '.'),
     ],
     datas=added_files,
-    hiddenimports=all_hidden_imports
+    hiddenimports=all_hidden_imports,
     hookspath=[hooks_dir],  # 使用绝对路径
     hooksconfig={},
     runtime_hooks=[],
