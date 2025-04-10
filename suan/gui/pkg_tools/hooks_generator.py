@@ -165,7 +165,94 @@ def ensure_hooks_dir():
     if not HOOKS_DIR.exists():
         os.makedirs(HOOKS_DIR)
         print(f"创建钩子目录: {HOOKS_DIR}")
+    
+    # 确保有__init__.py文件
+    init_file = HOOKS_DIR / "__init__.py"
+    if not init_file.exists():
+        with open(init_file, "w", encoding="utf-8") as f:
+            f.write("# PyInstaller钩子目录\n")
+    
     return HOOKS_DIR
+
+
+def get_transformers_deps():
+    """获取transformers库的依赖"""
+    try:
+        from transformers.dependency_versions_check import deps_table
+        return deps_table
+    except (ImportError, AttributeError):
+        print("警告: 无法获取transformers依赖表")
+        return {}
+
+
+def generate_dependency_hooks():
+    """为transformers和sentence_transformers的依赖自动生成钩子文件"""
+    # 获取transformers的依赖表
+    deps_table = get_transformers_deps()
+    
+    # 基本的依赖列表
+    basic_deps = ["tqdm", "regex", "packaging", "importlib.metadata", "tokenizers"]
+    
+    # 合并依赖
+    all_deps = list(set(list(deps_table.keys()) + basic_deps))
+    
+    # 确保钩子目录存在
+    hooks_dir = ensure_hooks_dir()
+    
+    # 为每个依赖生成一个简单的钩子文件
+    for pkg_name in all_deps:
+        # 跳过不应该生成钩子的特殊包
+        if pkg_name in ["python"]:
+            continue
+            
+        # 构造钩子文件名
+        hook_file = hooks_dir / f"hook-{pkg_name.lower()}.py"
+        
+        # 如果钩子文件已存在，跳过
+        if hook_file.exists():
+            continue
+        
+        # 获取版本约束
+        version_constraint = deps_table.get(pkg_name, "")
+        
+        # 生成钩子内容
+        content = f"""# hook-{pkg_name}.py
+# 自动生成的钩子文件，用于处理{pkg_name}依赖
+
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+import sys
+import os
+
+# 版本约束: {version_constraint}
+
+# 收集{pkg_name}的所有子模块
+hiddenimports = collect_submodules('{pkg_name}')
+
+# 收集数据文件
+datas = collect_data_files('{pkg_name}')
+
+# 尝试导入并记录版本信息
+try:
+    import {pkg_name}
+    if hasattr({pkg_name}, "__version__"):
+        print(f"{pkg_name}钩子: 找到版本 {{{pkg_name}.__version__}}")
+except ImportError:
+    print(f"警告: {pkg_name}钩子: 无法导入模块")
+except Exception as e:
+    print(f"警告: {pkg_name}钩子: 导入时出错 {{e}}")
+
+print(f"{pkg_name}钩子: 收集了 {{len(hiddenimports)}} 个子模块和 {{len(datas)}} 个数据文件")
+"""
+        
+        # 写入钩子文件
+        try:
+            with open(hook_file, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"成功生成钩子文件: {hook_file}")
+        except Exception as e:
+            print(f"警告: 无法写入钩子文件 {hook_file}: {e}")
+    
+    print(f"共为 {len(all_deps)} 个依赖生成钩子文件")
 
 
 def generate_hook(hook_name):
@@ -226,6 +313,12 @@ def generate_all_hooks():
     for hook_name in HOOK_TEMPLATES:
         if generate_hook(hook_name):
             success_count += 1
+    
+    # 生成依赖钩子
+    try:
+        generate_dependency_hooks()
+    except Exception as e:
+        print(f"生成依赖钩子文件时出错: {e}")
     
     print(f"共生成 {success_count}/{len(HOOK_TEMPLATES)} 个钩子文件")
     return success_count == len(HOOK_TEMPLATES)

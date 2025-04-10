@@ -20,7 +20,9 @@ additional_modules = [
     'tqdm.auto',
     'tqdm.std', 
     'tqdm.utils',
-    'transformers.utils.versions',        # 依赖tqdm的版本检查模块
+    # 添加regex相关依赖
+    'regex',
+    'transformers.utils.versions',        # 依赖tqdm和regex的版本检查模块
     'transformers.dependency_versions_check',  # 依赖检查模块
 ]
 
@@ -34,6 +36,18 @@ try:
     print(f"sentence_transformers钩子: 找到tqdm版本 {tqdm.__version__}")
 except ImportError:
     print("WARNING: sentence_transformers钩子: 无法导入tqdm，这可能导致运行时错误")
+
+# 检查regex是否可用，并打印版本信息
+try:
+    import regex
+    regex_version = getattr(regex, "__version__", "未知")
+    print(f"sentence_transformers钩子: 找到regex版本 {regex_version}")
+    
+    # 检查是否为已知的问题版本
+    if regex_version == "2019.12.17":
+        print("警告: regex版本为2019.12.17，这可能与transformers不兼容")
+except ImportError:
+    print("WARNING: sentence_transformers钩子: 无法导入regex，这可能导致运行时错误")
 
 # 收集数据文件
 datas = collect_data_files('sentence_transformers')

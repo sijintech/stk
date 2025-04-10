@@ -23,7 +23,9 @@ packages_of_interest = [
     'transformers',
     'sentence_transformers',
     'torch',
-    'numpy'
+    'numpy',
+    'regex',
+    'packaging'
 ]
 
 # 收集关键包的元数据

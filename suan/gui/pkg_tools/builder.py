@@ -131,9 +131,10 @@ def check_dependencies(logger):
         "pyinstaller": ["pyinstaller", "PyInstaller"],
         "pyinstaller-hooks-contrib": ["_pyinstaller_hooks_contrib"],
         "toml": ["toml"],
-        "tqdm": ["tqdm"],  # 添加tqdm依赖检查
-        "sentence_transformers": ["sentence_transformers"],  # 添加sentence_transformers依赖检查
-        "transformers": ["transformers"]  # 添加transformers依赖检查
+        "tqdm": ["tqdm"],  # tqdm依赖检查
+        "regex": ["regex"],  # 添加regex依赖检查
+        "sentence_transformers": ["sentence_transformers"],  # sentence_transformers依赖检查
+        "transformers": ["transformers"]  # transformers依赖检查
     }
     
     missing_packages = []
@@ -163,6 +164,14 @@ def check_dependencies(logger):
                             from packaging import version
                             if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("4.27"):
                                 version_warnings.append(f"{package_name} 版本 {module.__version__} 低于推荐的 4.27，可能导致兼容性问题")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
+                    
+                    # 检查regex版本，确保不是已知的问题版本
+                    elif import_name == "regex":
+                        try:
+                            if hasattr(module, "__version__") and module.__version__ == "2019.12.17":
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 可能与transformers不兼容")
                         except Exception as e:
                             logger.warning(f"检查 {package_name} 版本时出错: {e}")
                 break
@@ -217,6 +226,71 @@ def create_spec_file(logger, platform_specific=True):
     return platform_spec
 
 
+def check_transformers_dependencies(logger):
+    """检查transformers包的依赖需求"""
+    # 尝试导入transformers
+    try:
+        import transformers
+        import importlib
+
+        logger.info(f"检测到transformers版本: {transformers.__version__}")
+        
+        # 检查transformers是否有依赖版本检查模块
+        try:
+            from transformers.dependency_versions_check import deps_table
+            logger.info(f"transformers依赖表: {deps_table}")
+            
+            # 检查依赖版本
+            for pkg_name, version_constraint in deps_table.items():
+                try:
+                    pkg_spec = f"{pkg_name}{version_constraint}" if version_constraint else pkg_name
+                    logger.info(f"检查依赖: {pkg_spec}")
+                    
+                    # 尝试导入依赖包
+                    try:
+                        if pkg_name == "tokenizers":
+                            import tokenizers
+                            ver = tokenizers.__version__
+                        elif pkg_name == "regex":
+                            import regex
+                            ver = getattr(regex, "__version__", "未知")
+                        elif pkg_name == "sacremoses":
+                            import sacremoses
+                            ver = sacremoses.__version__
+                        elif pkg_name == "sentencepiece":
+                            import sentencepiece
+                            ver = sentencepiece.__version__
+                        elif pkg_name == "protobuf":
+                            import google.protobuf
+                            ver = google.protobuf.__version__
+                        elif pkg_name == "tqdm":
+                            import tqdm
+                            ver = tqdm.__version__
+                        else:
+                            # 尝试通过importlib获取版本
+                            ver = "未知"
+                            try:
+                                import importlib.metadata
+                                ver = importlib.metadata.version(pkg_name)
+                            except:
+                                pass
+                                
+                        logger.info(f"  - 已安装 {pkg_name} 版本: {ver}")
+                    except ImportError:
+                        logger.warning(f"  - 缺少依赖: {pkg_name}")
+                
+                except Exception as e:
+                    logger.warning(f"检查依赖 {pkg_name} 时出错: {e}")
+        
+        except (ImportError, AttributeError):
+            logger.warning("无法获取transformers依赖表")
+        
+        return True
+    except ImportError:
+        logger.warning("无法导入transformers模块")
+        return False
+
+
 def run_pyinstaller(logger, args):
     """运行PyInstaller打包"""
     scripts_dir = Path(__file__).parent
@@ -231,6 +305,9 @@ def run_pyinstaller(logger, args):
             logger.warning("部分钩子文件生成失败，使用已有的钩子文件继续")
     except Exception as e:
         logger.warning(f"生成钩子文件失败: {e}，使用已有的钩子文件继续")
+    
+    # 检查transformers依赖，用于日志显示，不影响打包过程
+    check_transformers_dependencies(logger)
     
     # 确定要使用的spec文件
     if args.spec_file:
