@@ -130,10 +130,15 @@ def check_dependencies(logger):
     required_packages = {
         "pyinstaller": ["pyinstaller", "PyInstaller"],
         "pyinstaller-hooks-contrib": ["_pyinstaller_hooks_contrib"],
-        "toml": ["toml"]
+        "toml": ["toml"],
+        "tqdm": ["tqdm"],  # 添加tqdm依赖检查
+        "sentence_transformers": ["sentence_transformers"],  # 添加sentence_transformers依赖检查
+        "transformers": ["transformers"]  # 添加transformers依赖检查
     }
     
     missing_packages = []
+    version_warnings = []
+    
     for package_name, import_names in required_packages.items():
         found = False
         for import_name in import_names:
@@ -149,8 +154,17 @@ def check_dependencies(logger):
                             found = True
                             break
                 else:
-                    __import__(import_name)
+                    module = __import__(import_name)
                     found = True
+                    
+                    # 检查特定包的版本
+                    if import_name == "tqdm":
+                        try:
+                            from packaging import version
+                            if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("4.27"):
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 低于推荐的 4.27，可能导致兼容性问题")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
                 break
             except ImportError:
                 continue
@@ -164,6 +178,10 @@ def check_dependencies(logger):
         pip_cmd = "pip install " + " ".join(missing_packages)
         logger.info(f"  {pip_cmd}")
         return False
+    
+    if version_warnings:
+        for warning in version_warnings:
+            logger.warning(warning)
     
     logger.info("所有必要的依赖已安装")
     return True
