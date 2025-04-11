@@ -31,7 +31,8 @@ packages_of_interest = [
     'certifi',
     'idna',
     'charset_normalizer',
-    'chardet'
+    'chardet',
+    'filelock'
 ]
 
 # 收集关键包的元数据

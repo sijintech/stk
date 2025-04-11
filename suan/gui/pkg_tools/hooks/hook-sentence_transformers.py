@@ -28,6 +28,8 @@ additional_modules = [
     'certifi',
     'idna',
     'charset_normalizer',
+    # 添加filelock依赖
+    'filelock',
     'transformers.utils.versions',        # 依赖tqdm和regex的版本检查模块
     'transformers.dependency_versions_check',  # 依赖检查模块
 ]
@@ -62,6 +64,14 @@ try:
     print(f"sentence_transformers钩子: 找到requests版本 {requests_version}")
 except ImportError:
     print("WARNING: sentence_transformers钩子: 无法导入requests，这可能导致运行时错误")
+
+# 检查filelock是否可用，并打印版本信息
+try:
+    import filelock
+    filelock_version = getattr(filelock, "__version__", "未知")
+    print(f"sentence_transformers钩子: 找到filelock版本 {filelock_version}")
+except ImportError:
+    print("WARNING: sentence_transformers钩子: 无法导入filelock，这可能导致运行时错误")
 
 # 收集数据文件
 datas = collect_data_files('sentence_transformers')

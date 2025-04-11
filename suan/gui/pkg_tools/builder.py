@@ -133,6 +133,8 @@ def check_dependencies(logger):
         "toml": ["toml"],
         "tqdm": ["tqdm"],  # tqdm依赖检查
         "regex": ["regex"],  # 添加regex依赖检查
+        "requests": ["requests"],  # requests依赖检查
+        "filelock": ["filelock"],  # filelock依赖检查
         "sentence_transformers": ["sentence_transformers"],  # sentence_transformers依赖检查
         "transformers": ["transformers"]  # transformers依赖检查
     }
@@ -172,6 +174,15 @@ def check_dependencies(logger):
                         try:
                             if hasattr(module, "__version__") and module.__version__ == "2019.12.17":
                                 version_warnings.append(f"{package_name} 版本 {module.__version__} 可能与transformers不兼容")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
+                    
+                    # 检查filelock版本
+                    elif import_name == "filelock":
+                        try:
+                            from packaging import version
+                            if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("3.0.0"):
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 低于推荐的 3.0.0，可能导致兼容性问题")
                         except Exception as e:
                             logger.warning(f"检查 {package_name} 版本时出错: {e}")
                 break

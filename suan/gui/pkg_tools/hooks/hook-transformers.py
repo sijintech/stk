@@ -25,6 +25,7 @@ additional_modules = [
     'requests',  # 添加requests依赖
     'urllib3',  # requests的依赖
     'certifi',  # requests的依赖
+    'filelock',  # 添加filelock依赖
     'packaging.version',  # 版本解析模块
     'packaging.specifiers',  # 版本规格模块
     'importlib.metadata',  # 用于版本检查
@@ -66,6 +67,16 @@ try:
     print(f"transformers钩子: 使用的requests版本 {requests_version}")
 except ImportError:
     print("WARNING: transformers钩子: 无法导入requests，可能导致运行时错误")
+
+# 确保将filelock库捆绑到打包内容中
+try:
+    import filelock
+    filelock_path = os.path.dirname(filelock.__file__)
+    filelock_version = getattr(filelock, "__version__", "未知")
+    print(f"transformers钩子: filelock库路径 {filelock_path}")
+    print(f"transformers钩子: 使用的filelock版本 {filelock_version}")
+except ImportError:
+    print("WARNING: transformers钩子: 无法导入filelock，可能导致运行时错误")
 
 # 尝试添加importlib.metadata依赖
 try:
