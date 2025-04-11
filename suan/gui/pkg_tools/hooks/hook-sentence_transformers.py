@@ -22,6 +22,12 @@ additional_modules = [
     'tqdm.utils',
     # 添加regex相关依赖
     'regex',
+    # 添加requests相关依赖
+    'requests',
+    'urllib3',
+    'certifi',
+    'idna',
+    'charset_normalizer',
     'transformers.utils.versions',        # 依赖tqdm和regex的版本检查模块
     'transformers.dependency_versions_check',  # 依赖检查模块
 ]
@@ -48,6 +54,14 @@ try:
         print("警告: regex版本为2019.12.17，这可能与transformers不兼容")
 except ImportError:
     print("WARNING: sentence_transformers钩子: 无法导入regex，这可能导致运行时错误")
+
+# 检查requests是否可用，并打印版本信息
+try:
+    import requests
+    requests_version = getattr(requests, "__version__", "未知")
+    print(f"sentence_transformers钩子: 找到requests版本 {requests_version}")
+except ImportError:
+    print("WARNING: sentence_transformers钩子: 无法导入requests，这可能导致运行时错误")
 
 # 收集数据文件
 datas = collect_data_files('sentence_transformers')

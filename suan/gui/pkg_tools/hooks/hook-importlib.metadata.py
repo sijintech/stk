@@ -25,7 +25,13 @@ packages_of_interest = [
     'torch',
     'numpy',
     'regex',
-    'packaging'
+    'packaging',
+    'requests',
+    'urllib3',
+    'certifi',
+    'idna',
+    'charset_normalizer',
+    'chardet'
 ]
 
 # 收集关键包的元数据

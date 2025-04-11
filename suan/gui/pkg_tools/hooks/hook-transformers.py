@@ -22,6 +22,9 @@ additional_modules = [
     'tqdm',  # 直接加入tqdm依赖
     'tqdm.auto',  # tqdm自动选择模块
     'regex',  # 添加regex依赖
+    'requests',  # 添加requests依赖
+    'urllib3',  # requests的依赖
+    'certifi',  # requests的依赖
     'packaging.version',  # 版本解析模块
     'packaging.specifiers',  # 版本规格模块
     'importlib.metadata',  # 用于版本检查
@@ -53,6 +56,16 @@ try:
         print("警告: regex版本为2019.12.17，这可能与transformers不兼容")
 except ImportError:
     print("WARNING: transformers钩子: 无法导入regex，可能导致运行时错误")
+
+# 确保将requests库捆绑到打包内容中
+try:
+    import requests
+    requests_path = os.path.dirname(requests.__file__)
+    requests_version = getattr(requests, "__version__", "未知")
+    print(f"transformers钩子: requests库路径 {requests_path}")
+    print(f"transformers钩子: 使用的requests版本 {requests_version}")
+except ImportError:
+    print("WARNING: transformers钩子: 无法导入requests，可能导致运行时错误")
 
 # 尝试添加importlib.metadata依赖
 try:
