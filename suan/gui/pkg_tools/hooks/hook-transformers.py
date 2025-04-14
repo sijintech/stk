@@ -26,6 +26,9 @@ additional_modules = [
     'urllib3',  # requests的依赖
     'certifi',  # requests的依赖
     'filelock',  # 添加filelock依赖
+    'huggingface_hub',  # 添加huggingface_hub依赖
+    'huggingface_hub.utils',  # hub的关键模块
+    'huggingface_hub.file_download',  # hub的文件下载模块
     'packaging.version',  # 版本解析模块
     'packaging.specifiers',  # 版本规格模块
     'importlib.metadata',  # 用于版本检查
@@ -77,6 +80,21 @@ try:
     print(f"transformers钩子: 使用的filelock版本 {filelock_version}")
 except ImportError:
     print("WARNING: transformers钩子: 无法导入filelock，可能导致运行时错误")
+
+# 确保将huggingface_hub库捆绑到打包内容中
+try:
+    import huggingface_hub
+    hub_path = os.path.dirname(huggingface_hub.__file__)
+    hub_version = getattr(huggingface_hub, "__version__", "未知")
+    print(f"transformers钩子: huggingface_hub库路径 {hub_path}")
+    print(f"transformers钩子: 使用的huggingface_hub版本 {hub_version}")
+    
+    # 检查是否满足最低版本要求
+    from packaging import version
+    if version.parse(hub_version) < version.parse("0.26.0"):
+        print(f"警告: huggingface_hub版本 {hub_version} 低于transformers要求的最低版本0.26.0")
+except ImportError:
+    print("WARNING: transformers钩子: 无法导入huggingface_hub，可能导致运行时错误")
 
 # 尝试添加importlib.metadata依赖
 try:

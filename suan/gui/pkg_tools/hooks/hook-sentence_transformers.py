@@ -30,6 +30,12 @@ additional_modules = [
     'charset_normalizer',
     # 添加filelock依赖
     'filelock',
+    # 添加huggingface_hub依赖
+    'huggingface_hub',
+    'huggingface_hub.utils',
+    'huggingface_hub.file_download',
+    'huggingface_hub.hf_api',
+    'huggingface_hub.hub_mixin',
     'transformers.utils.versions',        # 依赖tqdm和regex的版本检查模块
     'transformers.dependency_versions_check',  # 依赖检查模块
 ]
@@ -72,6 +78,19 @@ try:
     print(f"sentence_transformers钩子: 找到filelock版本 {filelock_version}")
 except ImportError:
     print("WARNING: sentence_transformers钩子: 无法导入filelock，这可能导致运行时错误")
+
+# 检查huggingface_hub是否可用，并打印版本信息
+try:
+    import huggingface_hub
+    hub_version = getattr(huggingface_hub, "__version__", "未知")
+    print(f"sentence_transformers钩子: 找到huggingface_hub版本 {hub_version}")
+    
+    # 检查版本是否满足要求
+    from packaging import version
+    if version.parse(hub_version) < version.parse("0.26.0"):
+        print(f"警告: huggingface_hub版本 {hub_version} 低于transformers要求的最低版本0.26.0")
+except ImportError:
+    print("WARNING: sentence_transformers钩子: 无法导入huggingface_hub，这可能导致运行时错误")
 
 # 收集数据文件
 datas = collect_data_files('sentence_transformers')

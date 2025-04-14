@@ -32,7 +32,8 @@ packages_of_interest = [
     'idna',
     'charset_normalizer',
     'chardet',
-    'filelock'
+    'filelock',
+    'huggingface-hub'
 ]
 
 # 收集关键包的元数据
@@ -54,12 +55,12 @@ for package in packages_of_interest:
                 # 直接包含整个site-packages目录中的.dist-info或.egg-info目录
                 if os.path.isdir(metadata_location):
                     for item in os.listdir(metadata_location):
-                        if item.endswith('.dist-info') and package in item:
+                        if item.endswith('.dist-info') and package.replace('-', '_') in item.replace('-', '_'):
                             info_dir = os.path.join(metadata_location, item)
                             datas.append((info_dir, item))
                             metadata_added.append(info_dir)
                             print(f"添加元数据目录: {info_dir}")
-                        elif item.endswith('.egg-info') and package in item:
+                        elif item.endswith('.egg-info') and package.replace('-', '_') in item.replace('-', '_'):
                             info_dir = os.path.join(metadata_location, item)
                             datas.append((info_dir, item))
                             metadata_added.append(info_dir)
