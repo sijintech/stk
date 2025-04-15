@@ -29,6 +29,8 @@ additional_modules = [
     'huggingface_hub',  # 添加huggingface_hub依赖
     'huggingface_hub.utils',  # hub的关键模块
     'huggingface_hub.file_download',  # hub的文件下载模块
+    'safetensors',  # 添加safetensors依赖
+    'safetensors.torch',  # safetensors的torch相关功能
     'packaging.version',  # 版本解析模块
     'packaging.specifiers',  # 版本规格模块
     'importlib.metadata',  # 用于版本检查
@@ -95,6 +97,21 @@ try:
         print(f"警告: huggingface_hub版本 {hub_version} 低于transformers要求的最低版本0.26.0")
 except ImportError:
     print("WARNING: transformers钩子: 无法导入huggingface_hub，可能导致运行时错误")
+
+# 确保将safetensors库捆绑到打包内容中
+try:
+    import safetensors
+    safetensors_path = os.path.dirname(safetensors.__file__)
+    safetensors_version = getattr(safetensors, "__version__", "未知")
+    print(f"transformers钩子: safetensors库路径 {safetensors_path}")
+    print(f"transformers钩子: 使用的safetensors版本 {safetensors_version}")
+    
+    # 检查是否满足最低版本要求
+    from packaging import version
+    if version.parse(safetensors_version) < version.parse("0.4.3"):
+        print(f"警告: safetensors版本 {safetensors_version} 低于transformers要求的最低版本0.4.3")
+except ImportError:
+    print("WARNING: transformers钩子: 无法导入safetensors，可能导致运行时错误")
 
 # 尝试添加importlib.metadata依赖
 try:

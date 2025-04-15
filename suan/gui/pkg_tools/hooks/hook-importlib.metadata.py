@@ -33,7 +33,8 @@ packages_of_interest = [
     'charset_normalizer',
     'chardet',
     'filelock',
-    'huggingface-hub'
+    'huggingface-hub',
+    'safetensors'
 ]
 
 # 收集关键包的元数据

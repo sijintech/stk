@@ -136,6 +136,7 @@ def check_dependencies(logger):
         "requests": ["requests"],  # requests依赖检查
         "filelock": ["filelock"],  # filelock依赖检查
         "huggingface-hub": ["huggingface_hub"],  # huggingface-hub依赖检查
+        "safetensors": ["safetensors"],  # safetensors依赖检查
         "sentence_transformers": ["sentence_transformers"],  # sentence_transformers依赖检查
         "transformers": ["transformers"]  # transformers依赖检查
     }
@@ -193,6 +194,15 @@ def check_dependencies(logger):
                             from packaging import version
                             if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("0.26.0"):
                                 version_warnings.append(f"{package_name} 版本 {module.__version__} 低于transformers要求的最低版本0.26.0")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
+                    
+                    # 检查safetensors版本
+                    elif import_name == "safetensors":
+                        try:
+                            from packaging import version
+                            if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("0.4.3"):
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 低于transformers要求的最低版本0.4.3")
                         except Exception as e:
                             logger.warning(f"检查 {package_name} 版本时出错: {e}")
                 break
