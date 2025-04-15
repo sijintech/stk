@@ -40,6 +40,10 @@ additional_modules = [
     'safetensors',
     'safetensors.torch',
     'safetensors.numpy',
+    # 添加yaml依赖
+    'yaml',
+    'yaml.loader',
+    'yaml.dumper',
     'transformers.utils.versions',        # 依赖tqdm和regex的版本检查模块
     'transformers.dependency_versions_check',  # 依赖检查模块
 ]
@@ -108,6 +112,19 @@ try:
         print(f"警告: safetensors版本 {safetensors_version} 低于transformers要求的最低版本0.4.3")
 except ImportError:
     print("WARNING: sentence_transformers钩子: 无法导入safetensors，这可能导致运行时错误")
+
+# 检查yaml是否可用，并打印版本信息
+try:
+    import yaml
+    yaml_version = getattr(yaml, "__version__", "未知")
+    print(f"sentence_transformers钩子: 找到yaml版本 {yaml_version}")
+    
+    # 检查版本是否满足要求
+    from packaging import version
+    if version.parse(yaml_version) < version.parse("5.1"):
+        print(f"警告: yaml版本 {yaml_version} 低于transformers要求的最低版本5.1")
+except ImportError:
+    print("WARNING: sentence_transformers钩子: 无法导入yaml，这可能导致运行时错误")
 
 # 收集数据文件
 datas = collect_data_files('sentence_transformers')

@@ -31,6 +31,9 @@ additional_modules = [
     'huggingface_hub.file_download',  # hub的文件下载模块
     'safetensors',  # 添加safetensors依赖
     'safetensors.torch',  # safetensors的torch相关功能
+    'yaml',  # 添加yaml依赖
+    'yaml.loader',  # yaml的加载器
+    'yaml.dumper',  # yaml的导出器
     'packaging.version',  # 版本解析模块
     'packaging.specifiers',  # 版本规格模块
     'importlib.metadata',  # 用于版本检查
@@ -112,6 +115,21 @@ try:
         print(f"警告: safetensors版本 {safetensors_version} 低于transformers要求的最低版本0.4.3")
 except ImportError:
     print("WARNING: transformers钩子: 无法导入safetensors，可能导致运行时错误")
+
+# 确保将yaml库捆绑到打包内容中
+try:
+    import yaml
+    yaml_path = os.path.dirname(yaml.__file__)
+    yaml_version = getattr(yaml, "__version__", "未知")
+    print(f"transformers钩子: yaml库路径 {yaml_path}")
+    print(f"transformers钩子: 使用的yaml版本 {yaml_version}")
+    
+    # 检查是否满足最低版本要求
+    from packaging import version
+    if version.parse(yaml_version) < version.parse("5.1"):
+        print(f"警告: yaml版本 {yaml_version} 低于transformers要求的最低版本5.1")
+except ImportError:
+    print("WARNING: transformers钩子: 无法导入yaml，可能导致运行时错误")
 
 # 尝试添加importlib.metadata依赖
 try:
