@@ -389,17 +389,64 @@ logger.info("加载transformers运行时钩子...")
         if not spec_file:
             return False
     
+    # 将运行时钩子添加到spec文件中
+    if runtime_hook_path.exists():
+        try:
+            logger.info(f"将运行时钩子添加到spec文件: {spec_file}")
+            with open(spec_file, "r", encoding="utf-8") as f:
+                spec_content = f.read()
+            
+            # 检查spec文件是否已包含runtime_hooks
+            if "runtime_hooks=" in spec_content:
+                # 已有runtime_hooks定义，修改它
+                if str(runtime_hook_path) not in spec_content:
+                    # 找到runtime_hooks列表并添加我们的钩子
+                    if "runtime_hooks=[]" in spec_content:
+                        # 空列表，直接替换
+                        spec_content = spec_content.replace(
+                            "runtime_hooks=[]", 
+                            f"runtime_hooks=[r'{runtime_hook_path}']"
+                        )
+                    else:
+                        # 非空列表，在列表末尾添加
+                        import re
+                        pattern = r"runtime_hooks=\[(.*?)\]"
+                        match = re.search(pattern, spec_content, re.DOTALL)
+                        if match:
+                            hooks_list = match.group(1)
+                            if hooks_list.strip().endswith(","):
+                                new_hooks_list = f"{hooks_list} r'{runtime_hook_path}'"
+                            else:
+                                new_hooks_list = f"{hooks_list}, r'{runtime_hook_path}'"
+                            spec_content = spec_content.replace(
+                                f"runtime_hooks=[{hooks_list}]", 
+                                f"runtime_hooks=[{new_hooks_list}]"
+                            )
+            else:
+                # 没有runtime_hooks定义，在a = Analysis(...)中添加
+                pattern = r"a = Analysis\(\[(.*?)\](.*?)\)"
+                import re
+                spec_content = re.sub(
+                    pattern, 
+                    f"a = Analysis(\\1]\\2,\n    runtime_hooks=[r'{runtime_hook_path}'])", 
+                    spec_content, 
+                    flags=re.DOTALL
+                )
+            
+            # 写回spec文件
+            with open(spec_file, "w", encoding="utf-8") as f:
+                f.write(spec_content)
+            
+            logger.info("成功将运行时钩子添加到spec文件")
+        except Exception as e:
+            logger.warning(f"向spec文件添加runtime_hook时出错: {e}")
+    
     # 构建PyInstaller命令 - 注意工作目录需要是gui目录
     os.chdir(gui_dir)
     cmd = ["pyinstaller"]
     
     # 添加参数
     cmd.append(str(spec_file))
-    
-    # 添加运行时钩子
-    if runtime_hook_path.exists():
-        cmd.append(f"--runtime-hook={runtime_hook_path}")
-        logger.info(f"添加运行时钩子: {runtime_hook_path}")
     
     if args.clean:
         clean_build_dirs(logger, dry_run=False)
