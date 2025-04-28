@@ -350,6 +350,37 @@ def run_pyinstaller(logger, args):
     # 检查transformers依赖，用于日志显示，不影响打包过程
     check_transformers_dependencies(logger)
     
+    # 确保transformers运行时钩子存在
+    runtime_hook_path = scripts_dir / "transformers_runtime_hooks.py"
+    if not runtime_hook_path.exists():
+        logger.warning(f"找不到transformers运行时钩子: {runtime_hook_path}")
+        logger.info("尝试创建默认的运行时钩子...")
+        try:
+            # 创建一个简单的运行时钩子
+            with open(runtime_hook_path, "w", encoding="utf-8") as f:
+                f.write("""#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+\"\"\"
+Transformers库的PyInstaller运行时钩子
+\"\"\"
+import os
+import sys
+import logging
+
+logger = logging.getLogger("TransformersRuntimeHook")
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+logger.info("加载transformers运行时钩子...")
+""")
+            logger.info(f"创建了默认的运行时钩子: {runtime_hook_path}")
+        except Exception as e:
+            logger.warning(f"创建运行时钩子失败: {e}")
+    else:
+        logger.info(f"找到transformers运行时钩子: {runtime_hook_path}")
+    
     # 确定要使用的spec文件
     if args.spec_file:
         spec_file = args.spec_file
@@ -364,6 +395,11 @@ def run_pyinstaller(logger, args):
     
     # 添加参数
     cmd.append(str(spec_file))
+    
+    # 添加运行时钩子
+    if runtime_hook_path.exists():
+        cmd.append(f"--runtime-hook={runtime_hook_path}")
+        logger.info(f"添加运行时钩子: {runtime_hook_path}")
     
     if args.clean:
         clean_build_dirs(logger, dry_run=False)

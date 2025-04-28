@@ -4,6 +4,8 @@
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 import sys
 import os
+import glob
+import importlib
 
 # 收集transformers的所有子模块
 hiddenimports = collect_submodules('transformers')
@@ -16,6 +18,11 @@ additional_modules = [
     'transformers.models.auto',
     'transformers.models.auto.modeling_auto',
     'transformers.models.auto.auto_factory',
+    # 显式添加albert模型相关模块
+    'transformers.models.albert',
+    'transformers.models.albert.modeling_albert',
+    'transformers.models.albert.tokenization_albert',
+    'transformers.models.albert.configuration_albert',
     # 添加关键依赖模块
     'transformers.utils.versions',  # 依赖检查模块
     'transformers.dependency_versions_check',  # 依赖版本检查模块
@@ -140,5 +147,33 @@ except ImportError:
 
 # 收集数据文件
 datas = collect_data_files('transformers')
+
+# 添加：手动收集transformers模型目录（特别关注albert模型）
+try:
+    import transformers
+    transformers_path = os.path.dirname(transformers.__file__)
+    models_path = os.path.join(transformers_path, 'models')
+    
+    # 查找所有模型目录
+    model_dirs = glob.glob(os.path.join(models_path, '*'))
+    for model_dir in model_dirs:
+        if os.path.isdir(model_dir):
+            model_name = os.path.basename(model_dir)
+            rel_path = os.path.join('transformers', 'models', model_name)
+            # 添加整个模型目录到datas
+            print(f"添加模型目录: {model_name}")
+            datas.append((model_dir, rel_path))
+    
+    # 特别确保添加albert模型
+    albert_dir = os.path.join(models_path, 'albert')
+    if os.path.isdir(albert_dir):
+        print(f"添加albert模型目录: {albert_dir}")
+        datas.append((albert_dir, os.path.join('transformers', 'models', 'albert')))
+    else:
+        print(f"警告: 找不到albert模型目录: {albert_dir}")
+except ImportError:
+    print("WARNING: 无法导入transformers，无法收集模型目录")
+except Exception as e:
+    print(f"WARNING: 收集transformers模型目录时出错: {str(e)}")
 
 print(f"transformers钩子: 收集了 {len(hiddenimports)} 个子模块和 {len(datas)} 个数据文件") 

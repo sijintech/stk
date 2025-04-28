@@ -2,6 +2,9 @@
 # 确保正确包含sentence_transformers及其子模块
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+import os
+import glob
+import importlib
 
 # 收集sentence_transformers的所有子模块
 hiddenimports = collect_submodules('sentence_transformers')
@@ -15,6 +18,20 @@ additional_modules = [
     'transformers.models.auto',
     'transformers.models.auto.modeling_auto',
     'transformers.models.auto.auto_factory',
+    # 显式添加albert模型相关模块
+    'transformers.models.albert',
+    'transformers.models.albert.modeling_albert', 
+    'transformers.models.albert.tokenization_albert',
+    'transformers.models.albert.configuration_albert',
+    # 添加其他常用模型
+    'transformers.models.bert',
+    'transformers.models.roberta',
+    'transformers.models.distilbert',
+    'transformers.models.electra',
+    'transformers.models.mpnet',
+    'transformers.models.deberta',
+    'transformers.models.deberta_v2',
+    'transformers.models.xlm_roberta',
     # 添加tqdm相关依赖
     'tqdm',
     'tqdm.auto',
@@ -128,5 +145,41 @@ except ImportError:
 
 # 收集数据文件
 datas = collect_data_files('sentence_transformers')
+
+# 添加：手动收集sentence_transformers使用的transformers模型目录
+try:
+    import transformers
+    transformers_path = os.path.dirname(transformers.__file__)
+    models_path = os.path.join(transformers_path, 'models')
+    
+    # 查找所有模型目录
+    model_dirs = glob.glob(os.path.join(models_path, '*'))
+    for model_dir in model_dirs:
+        if os.path.isdir(model_dir):
+            model_name = os.path.basename(model_dir)
+            rel_path = os.path.join('transformers', 'models', model_name)
+            # 添加整个模型目录到datas
+            print(f"添加模型目录: {model_name}")
+            datas.append((model_dir, rel_path))
+    
+    # 特别确保添加albert模型
+    albert_dir = os.path.join(models_path, 'albert')
+    if os.path.isdir(albert_dir):
+        print(f"添加albert模型目录: {albert_dir}")
+        datas.append((albert_dir, os.path.join('transformers', 'models', 'albert')))
+    else:
+        print(f"警告: 找不到albert模型目录: {albert_dir}")
+    
+    # 添加sentence_transformers可能使用的其他模型
+    common_models = ['bert', 'roberta', 'distilbert', 'mpnet', 'deberta', 'deberta_v2', 'xlm_roberta']
+    for model_name in common_models:
+        model_dir = os.path.join(models_path, model_name)
+        if os.path.isdir(model_dir):
+            print(f"添加常用模型目录: {model_name}")
+            datas.append((model_dir, os.path.join('transformers', 'models', model_name)))
+except ImportError:
+    print("WARNING: 无法导入transformers，无法收集模型目录")
+except Exception as e:
+    print(f"WARNING: 收集transformers模型目录时出错: {str(e)}")
 
 print(f"sentence_transformers钩子: 收集了 {len(hiddenimports)} 个子模块和 {len(datas)} 个数据文件") 
