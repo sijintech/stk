@@ -19,7 +19,7 @@ logger.setLevel(logging.INFO)
 logger.info("正在加载transformers运行时钩子...")
 
 # 获取应用程序的根目录
-base_dir = os._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.abspath(os.path.dirname(sys.argv[0]))
+base_dir = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.abspath(os.path.dirname(sys.argv[0]))
 logger.info(f"应用根目录: {base_dir}")
 
 # 确保transformers模型目录存在
