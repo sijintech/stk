@@ -1,7 +1,7 @@
 # hook-sentence_transformers.py
 # 确保正确包含sentence_transformers及其子模块
 
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 import os
 import glob
 import importlib
@@ -18,6 +18,12 @@ additional_modules = [
     'transformers.models.auto',
     'transformers.models.auto.modeling_auto',
     'transformers.models.auto.auto_factory',
+    # 显式添加trainer相关模块
+    'transformers.trainer',
+    'transformers.processing_utils',
+    'transformers.trainer_pt_utils',
+    'transformers.trainer_utils',
+    'transformers.training_args',
     # 显式添加albert模型相关模块
     'transformers.models.albert',
     'transformers.models.albert.modeling_albert', 
@@ -143,14 +149,75 @@ try:
 except ImportError:
     print("WARNING: sentence_transformers钩子: 无法导入yaml，这可能导致运行时错误")
 
+# 收集元数据
+try:
+    metadata_st = copy_metadata('sentence_transformers')
+    print(f"sentence_transformers钩子: 收集到 {len(metadata_st)} 个元数据文件")
+    metadata_tf = copy_metadata('transformers')
+    print(f"sentence_transformers钩子: 收集到 {len(metadata_tf)} 个transformers元数据文件")
+except Exception as e:
+    print(f"WARNING: 收集元数据时出错: {str(e)}")
+
 # 收集数据文件
 datas = collect_data_files('sentence_transformers')
+
+# 手动收集sentence_transformers库的所有Python文件
+try:
+    import sentence_transformers
+    st_path = os.path.dirname(sentence_transformers.__file__)
+    print(f"sentence_transformers钩子: 库路径: {st_path}")
+    
+    # 收集所有.py文件
+    py_files = []
+    for root, dirs, files in os.walk(st_path):
+        for file in files:
+            if file.endswith('.py'):
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, os.path.dirname(st_path))
+                rel_dir = os.path.dirname(rel_path)
+                py_files.append((full_path, rel_dir))
+    
+    # 添加到datas
+    for py_file, rel_dir in py_files:
+        if not any(src == py_file for src, _ in datas):
+            datas.append((py_file, rel_dir))
+    
+    print(f"sentence_transformers钩子: 手动收集了 {len(py_files)} 个Python文件")
+    
+    # 特别处理__init__.py文件
+    init_file = os.path.join(st_path, '__init__.py')
+    if os.path.exists(init_file):
+        print(f"sentence_transformers钩子: 确认__init__.py存在: {init_file}")
+        if not any(src == init_file for src, _ in datas):
+            datas.append((init_file, 'sentence_transformers'))
+    else:
+        print(f"警告: sentence_transformers钩子: 找不到__init__.py文件: {init_file}")
+except ImportError:
+    print("WARNING: 无法导入sentence_transformers，无法收集Python文件")
+except Exception as e:
+    print(f"WARNING: 收集sentence_transformers文件时出错: {str(e)}")
 
 # 添加：手动收集sentence_transformers使用的transformers模型目录
 try:
     import transformers
     transformers_path = os.path.dirname(transformers.__file__)
     models_path = os.path.join(transformers_path, 'models')
+    
+    # 确保添加transformers核心Python文件
+    tf_init = os.path.join(transformers_path, '__init__.py')
+    if os.path.exists(tf_init):
+        print(f"sentence_transformers钩子: 确认transformers/__init__.py存在: {tf_init}")
+        datas.append((tf_init, 'transformers'))
+    else:
+        print(f"警告: sentence_transformers钩子: 找不到transformers/__init__.py文件: {tf_init}")
+    
+    # 添加transformers/trainer.py文件（确保存在）
+    trainer_file = os.path.join(transformers_path, 'trainer.py')
+    if os.path.exists(trainer_file):
+        print(f"sentence_transformers钩子: 确认transformers/trainer.py存在: {trainer_file}")
+        datas.append((trainer_file, 'transformers'))
+    else:
+        print(f"警告: sentence_transformers钩子: 找不到transformers/trainer.py文件: {trainer_file}")
     
     # 查找所有模型目录
     model_dirs = glob.glob(os.path.join(models_path, '*'))

@@ -1,11 +1,12 @@
 # hook-transformers.py
 # 确保正确包含transformers及其子模块
 
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 import sys
 import os
 import glob
 import importlib
+import shutil
 
 # 收集transformers的所有子模块
 hiddenimports = collect_submodules('transformers')
@@ -23,6 +24,12 @@ additional_modules = [
     'transformers.models.albert.modeling_albert',
     'transformers.models.albert.tokenization_albert',
     'transformers.models.albert.configuration_albert',
+    # 显式添加trainer和processing_utils模块
+    'transformers.trainer',
+    'transformers.processing_utils',
+    'transformers.trainer_pt_utils',
+    'transformers.trainer_utils',
+    'transformers.training_args',
     # 添加关键依赖模块
     'transformers.utils.versions',  # 依赖检查模块
     'transformers.dependency_versions_check',  # 依赖版本检查模块
@@ -145,17 +152,54 @@ try:
 except ImportError:
     print("WARNING: transformers钩子: 无法导入importlib.metadata")
 
-# 收集数据文件
+# 收集transformers的元数据
+try:
+    metadata = copy_metadata('transformers')
+    print(f"transformers钩子: 收集到 {len(metadata)} 个元数据文件")
+except Exception as e:
+    print(f"WARNING: 收集transformers元数据时出错: {str(e)}")
+
+# 收集数据文件 - 确保包含所有transformers的Python文件
 datas = collect_data_files('transformers')
 
-# 添加：手动收集transformers模型目录（特别关注albert模型）
+# 添加：手动收集transformers库的所有Python文件
 try:
     import transformers
     transformers_path = os.path.dirname(transformers.__file__)
-    models_path = os.path.join(transformers_path, 'models')
+    print(f"transformers钩子: transformers库路径: {transformers_path}")
+    
+    # 添加整个transformers目录（确保包含__init__.py文件）
+    py_files = []
+    
+    # 收集所有.py文件 - 包括__init__.py
+    for root, dirs, files in os.walk(transformers_path):
+        for file in files:
+            if file.endswith('.py'):
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, os.path.dirname(transformers_path))
+                rel_dir = os.path.dirname(rel_path)
+                py_files.append((full_path, rel_dir))
+    
+    # 确保所有收集到的Python文件都被添加到datas中
+    for py_file, rel_dir in py_files:
+        # 避免重复添加
+        if not any(src == py_file for src, _ in datas):
+            datas.append((py_file, rel_dir))
+    
+    print(f"transformers钩子: 手动收集了 {len(py_files)} 个Python文件")
+    
+    # 特别处理__init__.py文件
+    init_file = os.path.join(transformers_path, '__init__.py')
+    if os.path.exists(init_file):
+        print(f"transformers钩子: 确认__init__.py存在: {init_file}")
+        # 确保已添加到datas
+        if not any(src == init_file for src, _ in datas):
+            datas.append((init_file, 'transformers'))
+    else:
+        print(f"警告: transformers钩子: 找不到__init__.py文件: {init_file}")
     
     # 查找所有模型目录
-    model_dirs = glob.glob(os.path.join(models_path, '*'))
+    model_dirs = glob.glob(os.path.join(transformers_path, 'models', '*'))
     for model_dir in model_dirs:
         if os.path.isdir(model_dir):
             model_name = os.path.basename(model_dir)
@@ -165,7 +209,7 @@ try:
             datas.append((model_dir, rel_path))
     
     # 特别确保添加albert模型
-    albert_dir = os.path.join(models_path, 'albert')
+    albert_dir = os.path.join(transformers_path, 'models', 'albert')
     if os.path.isdir(albert_dir):
         print(f"添加albert模型目录: {albert_dir}")
         datas.append((albert_dir, os.path.join('transformers', 'models', 'albert')))
