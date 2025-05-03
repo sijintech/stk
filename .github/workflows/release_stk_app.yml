@@ -22,14 +22,12 @@ jobs:
         run: |
           echo "TAG=$(echo $GITHUB_REF | sed 's|refs/tags/v||')" >> "$GITHUB_ENV"
 
-      # 添加Poetry缓存 - 优化缓存配置
+      # 添加Poetry缓存
       - name: Cache Poetry dependencies
         uses: actions/cache@v3
         with:
-          path: |
-            ~/.cache/pypoetry
-            ~/.local/share/virtualenvs
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-poetry-
 
@@ -105,27 +103,36 @@ jobs:
 
   windows_build:
     runs-on: [ self-hosted, Windows ]
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: 1
 
     steps:
       - uses: actions/checkout@v3
+      
+      - name: Configure PowerShell encoding
+        run: |
+          # 配置PowerShell使用UTF-8编码
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+
       
       - name: Check Python Version
         run: |
           python --version
           echo "Using system Python to avoid permission issues"
 
-      # 添加缓存机制 - 优化Windows缓存配置
-      - name: Cache Python dependencies
+      # 添加缓存机制
+      - name: Cache Poetry dependencies
         uses: actions/cache@v3
         with:
           path: |
-            ~\.cache\pip
             ~\.cache\pypoetry
             .venv
-            $env:LOCALAPPDATA\pip\Cache
-          key: ${{ runner.os }}-deps-${{ hashFiles('**/poetry.lock') }}
+            ~\AppData\Python\Scripts
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
           restore-keys: |
-            ${{ runner.os }}-deps-
+            ${{ runner.os }}-poetry-
 
       - name: get tag
         id: get_tag
@@ -134,37 +141,38 @@ jobs:
           echo "TAG=$($env:GITHUB_REF -replace 'refs/tags/v','')" >> $env:GITHUB_ENV
 
       - name: Install Poetry
-        shell: powershell
         run: |
-          (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
-          $env:Path += ";$env:USERPROFILE\.poetry\bin"
-          echo "$env:USERPROFILE\.poetry\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # 检查Poetry是否已安装
+          $poetryPath = "$env:APPDATA\Python\Scripts\poetry.exe"
+          if (-not (Test-Path $poetryPath)) {
+            Write-Host "Poetry not found at $poetryPath, installing..."
+            # 如果未安装，则安装Poetry
+            (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+            # 将Poetry添加到PATH
+            echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+          } else {
+            echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+            Write-Host "Poetry is already installed at $poetryPath"
+          }
 
-      - name: Install dependencies
-        shell: powershell
+      - name: Install dependencies with Poetry
         run: |
-          cd $env:GITHUB_WORKSPACE
-          # 创建虚拟环境并安装依赖
-          python -m venv .venv
-          .\.venv\Scripts\Activate.ps1
-          python -m pip install --upgrade pip
-          
-          # 验证缓存是否正常工作
-          echo "检查缓存是否已恢复..."
-          pip cache info
-          
-          pip install poetry
+          # 配置Poetry使用项目内的虚拟环境
+          poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
+          
+          # 安装项目依赖
+          poetry lock
           poetry install --no-interaction --no-root
-          python suan\scripts\run_write_version.py
+          
+          # 版本信息写入
+          poetry run python suan/scripts/run_write_version.py
 
       - name: build exe
-        shell: powershell
         run: |
-          # 激活虚拟环境
-          .\.venv\Scripts\Activate.ps1
+          # 使用Poetry运行命令，无需手动激活环境
           cd suan\gui
-          python build.py --clean
+          poetry run python build.py --clean
 
       - name: Install NSIS
         if: ${{ false }}
