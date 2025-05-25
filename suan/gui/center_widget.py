@@ -12,7 +12,7 @@ from custom_logger import CustomLogger
 from Tab.code_tab import CodeTab
 from Tab.data_table_tab import DataTableTab
 from Tab.preference_tab import PreferenceTab
-from Tab.ai_chat_tab import AIChatTab
+from Tab.ai import AIChatTab
 
 
 class CustomFigureCanvas(FigureCanvasQTAgg):
