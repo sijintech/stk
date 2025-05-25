@@ -130,10 +130,21 @@ def check_dependencies(logger):
     required_packages = {
         "pyinstaller": ["pyinstaller", "PyInstaller"],
         "pyinstaller-hooks-contrib": ["_pyinstaller_hooks_contrib"],
-        "toml": ["toml"]
+        "toml": ["toml"],
+        "tqdm": ["tqdm"],  # tqdm依赖检查
+        "regex": ["regex"],  # 添加regex依赖检查
+        "requests": ["requests"],  # requests依赖检查
+        "filelock": ["filelock"],  # filelock依赖检查
+        "huggingface-hub": ["huggingface_hub"],  # huggingface-hub依赖检查
+        "safetensors": ["safetensors"],  # safetensors依赖检查
+        "PyYAML": ["yaml"],  # PyYAML依赖检查 (注意：导入名是yaml)
+        "sentence_transformers": ["sentence_transformers"],  # sentence_transformers依赖检查
+        "transformers": ["transformers"]  # transformers依赖检查
     }
     
     missing_packages = []
+    version_warnings = []
+    
     for package_name, import_names in required_packages.items():
         found = False
         for import_name in import_names:
@@ -149,8 +160,61 @@ def check_dependencies(logger):
                             found = True
                             break
                 else:
-                    __import__(import_name)
+                    module = __import__(import_name)
                     found = True
+                    
+                    # 检查特定包的版本
+                    if import_name == "tqdm":
+                        try:
+                            from packaging import version
+                            if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("4.27"):
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 低于推荐的 4.27，可能导致兼容性问题")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
+                    
+                    # 检查regex版本，确保不是已知的问题版本
+                    elif import_name == "regex":
+                        try:
+                            if hasattr(module, "__version__") and module.__version__ == "2019.12.17":
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 可能与transformers不兼容")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
+                    
+                    # 检查filelock版本
+                    elif import_name == "filelock":
+                        try:
+                            from packaging import version
+                            if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("3.0.0"):
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 低于推荐的 3.0.0，可能导致兼容性问题")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
+                            
+                    # 检查huggingface_hub版本
+                    elif import_name == "huggingface_hub":
+                        try:
+                            from packaging import version
+                            if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("0.26.0"):
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 低于transformers要求的最低版本0.26.0")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
+                    
+                    # 检查safetensors版本
+                    elif import_name == "safetensors":
+                        try:
+                            from packaging import version
+                            if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("0.4.3"):
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 低于transformers要求的最低版本0.4.3")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
+                            
+                    # 检查yaml版本
+                    elif import_name == "yaml":
+                        try:
+                            from packaging import version
+                            if hasattr(module, "__version__") and version.parse(module.__version__) < version.parse("5.1"):
+                                version_warnings.append(f"{package_name} 版本 {module.__version__} 低于transformers要求的最低版本5.1")
+                        except Exception as e:
+                            logger.warning(f"检查 {package_name} 版本时出错: {e}")
                 break
             except ImportError:
                 continue
@@ -164,6 +228,10 @@ def check_dependencies(logger):
         pip_cmd = "pip install " + " ".join(missing_packages)
         logger.info(f"  {pip_cmd}")
         return False
+    
+    if version_warnings:
+        for warning in version_warnings:
+            logger.warning(warning)
     
     logger.info("所有必要的依赖已安装")
     return True
@@ -199,6 +267,71 @@ def create_spec_file(logger, platform_specific=True):
     return platform_spec
 
 
+def check_transformers_dependencies(logger):
+    """检查transformers包的依赖需求"""
+    # 尝试导入transformers
+    try:
+        import transformers
+        import importlib
+
+        logger.info(f"检测到transformers版本: {transformers.__version__}")
+        
+        # 检查transformers是否有依赖版本检查模块
+        try:
+            from transformers.dependency_versions_check import deps_table
+            logger.info(f"transformers依赖表: {deps_table}")
+            
+            # 检查依赖版本
+            for pkg_name, version_constraint in deps_table.items():
+                try:
+                    pkg_spec = f"{pkg_name}{version_constraint}" if version_constraint else pkg_name
+                    logger.info(f"检查依赖: {pkg_spec}")
+                    
+                    # 尝试导入依赖包
+                    try:
+                        if pkg_name == "tokenizers":
+                            import tokenizers
+                            ver = tokenizers.__version__
+                        elif pkg_name == "regex":
+                            import regex
+                            ver = getattr(regex, "__version__", "未知")
+                        elif pkg_name == "sacremoses":
+                            import sacremoses
+                            ver = sacremoses.__version__
+                        elif pkg_name == "sentencepiece":
+                            import sentencepiece
+                            ver = sentencepiece.__version__
+                        elif pkg_name == "protobuf":
+                            import google.protobuf
+                            ver = google.protobuf.__version__
+                        elif pkg_name == "tqdm":
+                            import tqdm
+                            ver = tqdm.__version__
+                        else:
+                            # 尝试通过importlib获取版本
+                            ver = "未知"
+                            try:
+                                import importlib.metadata
+                                ver = importlib.metadata.version(pkg_name)
+                            except:
+                                pass
+                                
+                        logger.info(f"  - 已安装 {pkg_name} 版本: {ver}")
+                    except ImportError:
+                        logger.warning(f"  - 缺少依赖: {pkg_name}")
+                
+                except Exception as e:
+                    logger.warning(f"检查依赖 {pkg_name} 时出错: {e}")
+        
+        except (ImportError, AttributeError):
+            logger.warning("无法获取transformers依赖表")
+        
+        return True
+    except ImportError:
+        logger.warning("无法导入transformers模块")
+        return False
+
+
 def run_pyinstaller(logger, args):
     """运行PyInstaller打包"""
     scripts_dir = Path(__file__).parent
@@ -214,6 +347,40 @@ def run_pyinstaller(logger, args):
     except Exception as e:
         logger.warning(f"生成钩子文件失败: {e}，使用已有的钩子文件继续")
     
+    # 检查transformers依赖，用于日志显示，不影响打包过程
+    check_transformers_dependencies(logger)
+    
+    # 确保transformers运行时钩子存在
+    runtime_hook_path = scripts_dir / "transformers_runtime_hooks.py"
+    if not runtime_hook_path.exists():
+        logger.warning(f"找不到transformers运行时钩子: {runtime_hook_path}")
+        logger.info("尝试创建默认的运行时钩子...")
+        try:
+            # 创建一个简单的运行时钩子
+            with open(runtime_hook_path, "w", encoding="utf-8") as f:
+                f.write("""#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+\"\"\"
+Transformers库的PyInstaller运行时钩子
+\"\"\"
+import os
+import sys
+import logging
+
+logger = logging.getLogger("TransformersRuntimeHook")
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+logger.info("加载transformers运行时钩子...")
+""")
+            logger.info(f"创建了默认的运行时钩子: {runtime_hook_path}")
+        except Exception as e:
+            logger.warning(f"创建运行时钩子失败: {e}")
+    else:
+        logger.info(f"找到transformers运行时钩子: {runtime_hook_path}")
+    
     # 确定要使用的spec文件
     if args.spec_file:
         spec_file = args.spec_file
@@ -221,6 +388,58 @@ def run_pyinstaller(logger, args):
         spec_file = create_spec_file(logger, args.platform_specific)
         if not spec_file:
             return False
+    
+    # 将运行时钩子添加到spec文件中
+    if runtime_hook_path.exists():
+        try:
+            logger.info(f"将运行时钩子添加到spec文件: {spec_file}")
+            with open(spec_file, "r", encoding="utf-8") as f:
+                spec_content = f.read()
+            
+            # 检查spec文件是否已包含runtime_hooks
+            if "runtime_hooks=" in spec_content:
+                # 已有runtime_hooks定义，修改它
+                if str(runtime_hook_path) not in spec_content:
+                    # 找到runtime_hooks列表并添加我们的钩子
+                    if "runtime_hooks=[]" in spec_content:
+                        # 空列表，直接替换
+                        spec_content = spec_content.replace(
+                            "runtime_hooks=[]", 
+                            f"runtime_hooks=[r'{runtime_hook_path}']"
+                        )
+                    else:
+                        # 非空列表，在列表末尾添加
+                        import re
+                        pattern = r"runtime_hooks=\[(.*?)\]"
+                        match = re.search(pattern, spec_content, re.DOTALL)
+                        if match:
+                            hooks_list = match.group(1)
+                            if hooks_list.strip().endswith(","):
+                                new_hooks_list = f"{hooks_list} r'{runtime_hook_path}'"
+                            else:
+                                new_hooks_list = f"{hooks_list}, r'{runtime_hook_path}'"
+                            spec_content = spec_content.replace(
+                                f"runtime_hooks=[{hooks_list}]", 
+                                f"runtime_hooks=[{new_hooks_list}]"
+                            )
+            else:
+                # 没有runtime_hooks定义，在a = Analysis(...)中添加
+                pattern = r"a = Analysis\(\[(.*?)\](.*?)\)"
+                import re
+                spec_content = re.sub(
+                    pattern, 
+                    f"a = Analysis(\\1]\\2,\n    runtime_hooks=[r'{runtime_hook_path}'])", 
+                    spec_content, 
+                    flags=re.DOTALL
+                )
+            
+            # 写回spec文件
+            with open(spec_file, "w", encoding="utf-8") as f:
+                f.write(spec_content)
+            
+            logger.info("成功将运行时钩子添加到spec文件")
+        except Exception as e:
+            logger.warning(f"向spec文件添加runtime_hook时出错: {e}")
     
     # 构建PyInstaller命令 - 注意工作目录需要是gui目录
     os.chdir(gui_dir)

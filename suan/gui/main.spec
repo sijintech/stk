@@ -66,7 +66,7 @@ a = Analysis(
     ],
     datas=added_files,
     hiddenimports=all_hidden_imports,
-    hookspath=['pkg_tools/hooks'],  # 更新钩子目录路径
+    hookspath=[hooks_dir],  # 使用绝对路径
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
@@ -90,7 +90,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # 设置为False隐藏终端窗口，True显示终端窗口
+    console=True,  # 设置为False隐藏终端窗口，True显示终端窗口
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
