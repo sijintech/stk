@@ -115,9 +115,7 @@ jobs:
           # 配置PowerShell使用UTF-8编码
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
-          # 验证编码设置
-          Write-Host "当前输出编码: $([Console]::OutputEncoding.WebName)"
-          Write-Host "测试中文输出: 你好，世界！"
+
       
       - name: Check Python Version
         run: |
@@ -131,6 +129,7 @@ jobs:
           path: |
             ~\.cache\pypoetry
             .venv
+            ~\AppData\Python\Scripts
             ~\AppData\Python\Scripts
           key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
           restore-keys: |
@@ -156,14 +155,29 @@ jobs:
             echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
             Write-Host "Poetry is already installed at $poetryPath"
           }
+          # 检查Poetry是否已安装
+          $poetryPath = "$env:APPDATA\Python\Scripts\poetry.exe"
+          if (-not (Test-Path $poetryPath)) {
+            Write-Host "Poetry not found at $poetryPath, installing..."
+            # 如果未安装，则安装Poetry
+            (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+            # 将Poetry添加到PATH
+            echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+          } else {
+            echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+            Write-Host "Poetry is already installed at $poetryPath"
+          }
 
       - name: Install dependencies with Poetry
         run: |
+          # 配置Poetry使用项目内的虚拟环境
           # 配置Poetry使用项目内的虚拟环境
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
           
           # 安装项目依赖
+          poetry lock
+          poetry install --no-interaction --no-root
           poetry lock
           poetry install --no-interaction --no-root
           
