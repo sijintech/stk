@@ -13,7 +13,7 @@ class FileIconProvider(QFileIconProvider):
             return QIcon("./icons/dir.png")
         else:
             return QIcon("./icons/file.png")
-        # return super().icon(file_info)
+
 
 
 class LeftSidebar(QWidget):
@@ -23,7 +23,7 @@ class LeftSidebar(QWidget):
         super().__init__()
         self.logger = CustomLogger()
         self.parent = parent
-        # self.curFile=None
+
         self.parent.registerComponent('File structure', self, True)
         self.initUI()
 
@@ -37,46 +37,39 @@ class LeftSidebar(QWidget):
         self.setupFileSystemModel()
 
     def setupFileSystemModel(self):
-        # 
+
         self.model = QFileSystemModel(self)
         root_path = os.getcwd()  # 
         self.logger.debug(f": {root_path}")
         self.model.setRootPath(root_path)
 
-        # 
+
         root_index = self.model.index(root_path)
         self.logger.debug(f": {root_index.isValid()}")
 
-        # 
         self.treeView.setModel(self.model)
         if root_index.isValid():
             self.treeView.setRootIndex(root_index)
         else:
             self.logger.error("")
 
-        # 
         self.model.setIconProvider(FileIconProvider())
 
-        # 
         self.treeView.header().hide()
 
-        # 
         self.treeView.setColumnHidden(1, True)
         self.treeView.setColumnHidden(2, True)
         self.treeView.setColumnHidden(3, True)
 
-        # 
         self.treeView.doubleClicked.connect(self.onDoubleClick)
     def initWorkspace(self):
         working_directory = self.parent.get_workspace_data('left_sidebar/working_directory')
         self.logger.debug(f": {working_directory}")
 
-        # 
         if not hasattr(self, 'model') or self.model is None:
             self.logger.error(" setupFileSystemModel")
             return
 
-        # 
         index = self.model.index(working_directory)
         self.logger.debug(f": {index.isValid()}")
 
@@ -86,7 +79,7 @@ class LeftSidebar(QWidget):
             self.logger.error(f": {working_directory}")
 
     def onDoubleClick(self, index: QModelIndex):
-        # 
+
         path = self.model.filePath(index)
         if os.path.isdir(path):
             self.open_dir(path)
@@ -94,7 +87,7 @@ class LeftSidebar(QWidget):
             self.open_file(path)
 
     def open_dir(self, directory):
-        # 
+
         index = self.model.index(directory)
         if os.path.exists(directory):
             index = self.model.index(directory)
@@ -104,7 +97,7 @@ class LeftSidebar(QWidget):
             QMessageBox.warning(self, "", f": {directory}")
 
     def open_directory(self, directory, workspace_data=None, init_workspace=True):
-        # 
+
         self.logger.debug(f": {self.parent.curWorkDir}")
 
         if self.parent.curWorkDir is not None and not self.parent.curWorkDir == directory:
@@ -113,16 +106,13 @@ class LeftSidebar(QWidget):
             else:
                 self.parent.check_and_save_curfile()
 
-        # 
         self.logger.debug(f": {directory}")
         self.parent.curWorkDir = directory
 
-        # 
         if not hasattr(self, 'model') or self.model is None:
             self.logger.error(" setupFileSystemModel")
             return
 
-        # 
         index = self.model.index(directory)
         self.logger.debug(f": {index.isValid()}")
 
@@ -144,7 +134,7 @@ class LeftSidebar(QWidget):
             self.parent.question_and_create_workspace(directory, False)
 
     def create_new_file(self):
-        # 
+
         index = self.treeView.currentIndex()
         if not index.isValid():
             QMessageBox.warning(self, "", "")
@@ -162,7 +152,7 @@ class LeftSidebar(QWidget):
             QMessageBox.critical(self, "", f": {e}")
 
     def create_new_dir(self):
-        # 
+
         index = self.treeView.currentIndex()
         if not index.isValid():
             QMessageBox.warning(self, "", "")
@@ -186,53 +176,40 @@ class LeftSidebar(QWidget):
             return encoding
 
     def open_file(self, path, working_directory="", is_init=False):
-        # TODO:
 
-        # 
         if working_directory == "":
             working_directory = os.path.dirname(os.path.abspath(path))
 
         if self.parent.curWorkFile is not None and not is_init:
-            # self.parent.checkAndSaveCurFile()
-            # if self.parent.isWorkspace and not os.path.samefile(self.parent.curWorkDir, working_directory):
-            #     self.parent.check_and_save_curworkspace()
-            # else:
             self.parent.check_and_save_curfile()
         if os.path.isdir(path):
-            # self.open_dir(path)
             self.logger.debug("")
             return
-        # 
+
         self.parent.curWorkFile = path
-        # self.parent.center_widget.update_code();
-        # if not os.path.samefile(self.parent.curWorkDir, working_directory):
-        #     self.open_directory(working_directory, not is_init)
+
         if self.parent.isWorkspace:
             self.parent.modify_workspaceData('info_bar/code/file_path', path)
 
-        # 
         if QFileInfo(path).isFile():
             extension = QFileInfo(path).suffix().lower()
             if extension == 'vtk':
                 reader = vtk.vtkStructuredPointsReader()
                 reader.SetFileName(path)
                 reader.Update()
-                # 
+
                 structured_points = reader.GetOutput()
-                # 
+
                 dimensions = structured_points.GetDimensions()
                 origin = structured_points.GetOrigin()
                 spacing = structured_points.GetSpacing()
 
-                # 
                 vertex_data = {}
 
-                # 
                 num_x = dimensions[0]
                 num_y = dimensions[1]
                 num_z = dimensions[2]
 
-                # 
                 for i in range(num_x):
                     for j in range(num_y):
                         for k in range(num_z):
@@ -242,14 +219,12 @@ class LeftSidebar(QWidget):
 
                             scalar_value = structured_points.GetScalarComponentAsFloat(i, j, k, 0)
 
-                            # (x, y, z)
                             vertex_data[(x, y, z)] = scalar_value
                 self.parent.center_widget.updateDataTable(vertex_data)
                 try:
                     with open(path, 'r', encoding='utf-8') as file:
                         content = file.read()
-                        # self.openFilePath.emit(path)
-                        # InfoBar
+
                         self.parent.get_component_by_name('Code Tab').showContent(content)
                 except Exception as e:
                     self.logger.error(f"Error reading file:{e}")
@@ -258,21 +233,20 @@ class LeftSidebar(QWidget):
                     file_encoding = self.detect_file_encoding(path)
                     with open(path, 'r', encoding=file_encoding, errors='ignore') as file:
                         content = file.read()
-                        # self.openFilePath.emit(path)
-                        # InfoBar
+
                         self.parent.get_component_by_name('Code Tab').encoding = file_encoding
                         self.parent.get_component_by_name('Code Tab').showContent(content)
                 except Exception as e:
                     self.logger.error(f"Error reading file:{e}")
 
     def tree_double_clicked(self, item, column):
-        # 获得点击的文件路径
+
         self.check_auto_save()
         
         if item.childCount() == 0:  # 判断是否是叶子节点
             file_path = self.get_file_path(item)
             self.logger.debug(f"双击了文件: {file_path}")
-            # 发送打开文件的信号
+
             self.openFilePath.emit(file_path)
             code_tab = self.parent.get_component_by_name("Code Tab")
             if code_tab:

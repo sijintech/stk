@@ -95,9 +95,9 @@ class MessageWidget(QFrame):
 
         self.copy_btn = QPushButton("复制")
         self.copy_btn.setIcon(QIcon.fromTheme("edit-copy"))  # 设置复制图标
-        self.copy_btn.setFixedSize(QSize(60, 24))  # 固定按钮大小
+        self.copy_btn.setFixedSize(QSize(80, 40))  # 调大按钮大小
         self.copy_btn.clicked.connect(self.copyContent)  # 连接点击事件
-        self.copy_btn.setStyleSheet("font-size: 9px;")  # 设置更小的字体大小
+        self.copy_btn.setStyleSheet("font-size: 13px; font-weight: bold;")  # 设置更大更明显的字体
 
         actions_layout.addStretch()  # 添加弹性空间，使按钮靠右
         actions_layout.addWidget(self.copy_btn)
@@ -190,15 +190,12 @@ class AIMessageWidget(MessageWidget):
         """
         )
 
-
         self.stop_btn = QPushButton("停止")
         self.stop_btn.setIcon(QIcon.fromTheme("process-stop"))  # 停止图标
-        self.stop_btn.setFixedSize(QSize(60, 24))  # 固定按钮大小
-        self.stop_btn.setStyleSheet("font-size: 9px;")  # 设置更小的字体大小
+        self.stop_btn.setFixedSize(QSize(80, 40))  # 调大按钮大小
+        self.stop_btn.setStyleSheet("font-size: 13px; font-weight: bold; color: #d32f2f;")  # 设置更大更明显的字体，红色突出显示
         self.stop_btn.clicked.connect(self.stopGeneration)  # 连接停止信号
         self.stop_btn.setVisible(False)  # 初始隐藏，只在生成回答时显示
-
-
 
         actions_layout = self.layout().itemAt(2).layout()
         actions_layout.insertWidget(1, self.stop_btn)  # 插入到复制按钮之前

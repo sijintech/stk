@@ -9,7 +9,7 @@ import argparse
 import getpass
 import click
 
-#===============================================================================
+# ===============================================================================
 #
 #          FILE:  sjob
 #
@@ -26,7 +26,7 @@ import click
 #       VERSION:  1.0
 #       CREATED:  01/26/2025
 #      REVISION:  ---
-#===============================================================================
+# ===============================================================================
 
 
 @click.group()
@@ -35,13 +35,13 @@ def sjob():
 
 
 def getShell():
-    if os.name == 'nt':
-        return 'powershell'
+    if os.name == "nt":
+        return "powershell"
     else:
-        return 'bash'
+        return "bash"
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getJsonVar
 #   DESCRIPTION: Use python to parse the json file and obtain the value of chosen
 #                 keyword.
@@ -49,42 +49,42 @@ def getShell():
 #       Json file - String file name
 #       Keyword - File, VarName, VarValue, Command, Condition, Separator, Format
 #       RETURNS: Decorated string for the given keyword.
-#===============================================================================
+# ===============================================================================
 
 
 def getJsonVar(file_name, var_name):
     # open and read json file
-    with open(file_name, 'r') as json_data:
+    with open(file_name, "r") as json_data:
         data = json.load(json_data)
 
     if var_name == "FreeFile":  # NewFile
-        output = " ".join(["&" + name for name in data['FreeFile']])
+        output = " ".join(["&" + name for name in data["FreeFile"]])
     elif var_name == "FixFile":  # OldFile
-        output = " ".join(["@" + name for name in data['FixFile']])
+        output = " ".join(["@" + name for name in data["FixFile"]])
     elif var_name == "CopyFile":  # CopyFile
-        output = " ".join(data['CopyFile'])
+        output = " ".join(data["CopyFile"])
     elif var_name == "FreeVarName":  # New varName
-        output = "#".join(["&" + name for name in data['FreeVarName']])
+        output = "#".join(["&" + name for name in data["FreeVarName"]])
     elif var_name == "FixVarName":  # Old varName
-        output = "#".join(["@" + name for name in data['FixVarName']])
+        output = "#".join(["@" + name for name in data["FixVarName"]])
     elif var_name == "DependVarName":  # Old varName
-        output = "#".join(data['DependVarName'])
+        output = "#".join(data["DependVarName"])
     elif var_name == "File":  # all files
         output_list = []
-        output_list.append(" ".join(["&" + name for name in data['FreeFile']]))
-        output_list.append(" ".join(["@" + name for name in data['FixFile']]))
-        output_list.append(" ".join(data['CopyFile']))
+        output_list.append(" ".join(["&" + name for name in data["FreeFile"]]))
+        output_list.append(" ".join(["@" + name for name in data["FixFile"]]))
+        output_list.append(" ".join(data["CopyFile"]))
         output = " ".join(output_list)
     elif var_name == "VarName":  # all var name
         output_list = []
-        for var_seq in data['VarSequence']:
+        for var_seq in data["VarSequence"]:
             temp = []
             prefix = ""
             if isinstance(var_seq, list):
                 for var in var_seq:
-                    if var in data['FreeVarName']:
+                    if var in data["FreeVarName"]:
                         prefix = "&"
-                    elif var in data['FixVarName']:
+                    elif var in data["FixVarName"]:
                         prefix = "@"
                     else:
                         raise ValueError("The keyword not in Free or Fix VarName")
@@ -96,17 +96,17 @@ def getJsonVar(file_name, var_name):
         output = "#".join(output_list)
     elif var_name == "VarValue":  # Var value
         output_list = []
-        for var_seq in data['VarSequence']:
+        for var_seq in data["VarSequence"]:
             temp = []
             if isinstance(var_seq, list):
                 for var in var_seq:
                     temp_val = []
-                    for val in data['VarValue'][var]:
+                    for val in data["VarValue"][var]:
                         temp_val.append(":".join(str(val).split()))
                     temp.append(" ".join(temp_val))
                 output_list.append("~".join(temp))
             else:
-                for val in data['VarValue'][var_seq]:
+                for val in data["VarValue"][var_seq]:
                     temp_val = ":".join(str(val).split())
                     temp.append(temp_val)
                 output_list.append(" ".join(temp))
@@ -117,34 +117,40 @@ def getJsonVar(file_name, var_name):
     return output
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: parseJson
 #   DESCRIPTION: Call getJsonVar to get needed values, and create a script for
 #                 generating folder structures. Input json is batch.json
 #    PARAMETERS: None
 #       RETURNS: batch.sh script for generating htp jobs
-#===============================================================================
+# ===============================================================================
 
 
 def parseJson():
-    file = getJsonVar('batch.json', 'File')
-    varName = getJsonVar('batch.json', 'VarName')
-    varValue = getJsonVar('batch.json', 'VarValue')
-    command = getJsonVar('batch.json', 'Command')
-    condition = getJsonVar('batch.json', 'Condition')
-    separator = getJsonVar('batch.json', 'Separator')
-    format = getJsonVar('batch.json', 'Format')
+    file = getJsonVar("batch.json", "File")
+    varName = getJsonVar("batch.json", "VarName")
+    varValue = getJsonVar("batch.json", "VarValue")
+    command = getJsonVar("batch.json", "Command")
+    condition = getJsonVar("batch.json", "Condition")
+    separator = getJsonVar("batch.json", "Separator")
+    format = getJsonVar("batch.json", "Format")
 
-    schedule_args = {'k': varName, 'v': varValue, 'c': condition, 's': separator, 'f': format}
-    create_args = {'f': file}
-    execute_args = {'c': command}
+    schedule_args = {
+        "k": varName,
+        "v": varValue,
+        "c": condition,
+        "s": separator,
+        "f": format,
+    }
+    create_args = {"f": file}
+    execute_args = {"c": command}
 
     scheduleCommand(schedule_args)
     createCommand(create_args)
     executeCommand(execute_args)
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getJobNum
 #   DESCRIPTION: Get the amount of jobs currently you're running, including jobs from other sources
 #                 The number is obtained by counting the number lines when using qstat command,
@@ -154,7 +160,7 @@ def parseJson():
 #    PARAMETERS:
 #      User name [optional] String name, default value is `whoami`
 #       RETURNS: Total number of all jobs.
-#===============================================================================
+# ===============================================================================
 
 
 def getJobNum(user_name=None, command="qstat", header=5):
@@ -163,7 +169,7 @@ def getJobNum(user_name=None, command="qstat", header=5):
         user_name = getpass.getuser()
     # Execute the command and get the output
     try:
-        if os.name != 'nt':
+        if os.name != "nt":
             result = subprocess.check_output([command, "-u", user_name], text=True)
             # Calculate the number of lines, subtracting the header count
             number_of_lines = len(result.splitlines())
@@ -177,12 +183,12 @@ def getJobNum(user_name=None, command="qstat", header=5):
         return None
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getRunning
 #   DESCRIPTION: Get the amount of jobs currently you're running of only jobs submitted by sjob
 #    PARAMETERS: None
 #       RETURNS: Total number of running jobs.
-#===============================================================================
+# ===============================================================================
 
 
 def getRunning():
@@ -191,8 +197,10 @@ def getRunning():
 
     # Get the output of the qstat command
     try:
-        if os.name != 'nt':
-            qstat_output = subprocess.check_output(["qstat", "-u", user_name], text=True)
+        if os.name != "nt":
+            qstat_output = subprocess.check_output(
+                ["qstat", "-u", user_name], text=True
+            )
         else:
             print("Windows 系统可能没有直接对应的作业查询命令，请根据实际情况修改。")
             return None
@@ -201,19 +209,21 @@ def getRunning():
         return None
 
     # Extract job IDs from lines after the 6th line and save to allRunningList.log
-    all_running_list_path = os.path.expanduser('~/allRunningList.log')
-    with open(all_running_list_path, 'w') as file:
+    all_running_list_path = os.path.expanduser("~/allRunningList.log")
+    with open(all_running_list_path, "w") as file:
         lines = qstat_output.splitlines()[5:]  # Skip the first five lines
         for line in lines:
             job_id = line.split()[0]  # Assume the job ID is in the first column
-            file.write(job_id + '\n')
+            file.write(job_id + "\n")
 
     # Read originalList.log and allRunningList.log to perform a diff comparison
-    original_list_path = os.path.expanduser('~/originalList.log')
-    running_list_path = os.path.expanduser('~/runningList.log')
+    original_list_path = os.path.expanduser("~/originalList.log")
+    running_list_path = os.path.expanduser("~/runningList.log")
 
     try:
-        with open(all_running_list_path, 'r') as all_file, open(original_list_path, 'r') as original_file:
+        with open(all_running_list_path, "r") as all_file, open(
+                original_list_path, "r"
+        ) as original_file:
             all_lines = set(all_file.readlines())
             original_lines = set(original_file.readlines())
 
@@ -221,7 +231,7 @@ def getRunning():
         running_lines = all_lines - original_lines
 
         # Save the differences to runningList.log
-        with open(running_list_path, 'w') as running_file:
+        with open(running_list_path, "w") as running_file:
             running_file.writelines(running_lines)
 
         # Return the number of running jobs
@@ -233,7 +243,7 @@ def getRunning():
         return None
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: registerToRun
 #   DESCRIPTION: If the amount of jobs is too many, for example 1000, and your account
 #                 can only submit 100 jobs at a time. You can create a job submission
@@ -244,22 +254,22 @@ def getRunning():
 #         Ending index - The ending calculation index in batchList.txt file, default last line
 #         Registered folder - Identify the folder for auto job submission, default is current folder
 #       RETURNS: Create a autoJobSubmission.sh file in your root directory.
-#===============================================================================
+# ===============================================================================
 
 
 def registerToRun(start=1, end=None, register_folder="."):
     # Set file paths
-    to_run_list_path = os.path.expanduser('~/toRunList.log')
-    finished_list_path = os.path.expanduser('~/finishedList.log')
-    original_list_path = os.path.expanduser('~/originalList.log')
-    auto_job_submission_script_path = os.path.expanduser('~/autoJobSubmission.sh')
+    to_run_list_path = os.path.expanduser("~/toRunList.log")
+    finished_list_path = os.path.expanduser("~/finishedList.log")
+    original_list_path = os.path.expanduser("~/originalList.log")
+    auto_job_submission_script_path = os.path.expanduser("~/autoJobSubmission.sh")
 
     # If the ~/toRunList.log file exists, delete it and recreate it
     if os.path.exists(to_run_list_path):
         os.remove(to_run_list_path)
 
     # Create ~/toRunList.log and ~/finishedList.log files
-    with open(to_run_list_path, 'w'), open(finished_list_path, 'w'):
+    with open(to_run_list_path, "w"), open(finished_list_path, "w"):
         pass  # Create empty files
 
     # Change to the specified directory
@@ -271,7 +281,7 @@ def registerToRun(start=1, end=None, register_folder="."):
     # If end is None, calculate end
     if end is None:
         try:
-            with open('batchList.txt', 'r') as file:
+            with open("batchList.txt", "r") as file:
                 lines = file.readlines()
             end = len(lines) - 1
         except FileNotFoundError:
@@ -279,18 +289,18 @@ def registerToRun(start=1, end=None, register_folder="."):
             return
 
     # Generate the content of the ~/toRunList.log file
-    with open(to_run_list_path, 'a') as to_run_file:
+    with open(to_run_list_path, "a") as to_run_file:
         for i in range(start, end + 1):
             folder_name = getFolderName(i)
             to_run_file.write(f"{current_folder}/{folder_name}\n")
 
     # Execute the qstat command and save the output to ~/originalList.log
     try:
-        if os.name != 'nt':
+        if os.name != "nt":
             qstat_output = subprocess.check_output(["qstat", "-u", "xuc116"], text=True)
         else:
             print("Windows 系统可能没有直接对应的作业查询命令，请根据实际情况修改。")
-        with open(original_list_path, 'w') as original_list_file:
+        with open(original_list_path, "w") as original_list_file:
             for line in qstat_output.splitlines()[5:]:  # Skip the first five lines
                 job_id = line.split()[0]  # Assume the job ID is in the first column
                 original_list_file.write(f"{job_id}\n")
@@ -299,31 +309,33 @@ def registerToRun(start=1, end=None, register_folder="."):
         return
 
     # Create the autoJobSubmission.sh script
-    with open(auto_job_submission_script_path, 'w') as script_file:
-        script_file.write('date;echo auto submitting;prepareNextRun 25 "qsub job.pbs" >> ~/autoJobSubmission.log\n')
+    with open(auto_job_submission_script_path, "w") as script_file:
+        script_file.write(
+            'date;echo auto submitting;prepareNextRun 25 "qsub job.pbs" >> ~/autoJobSubmission.log\n'
+        )
 
     print(f"Files have been set up in {register_folder}.")
     print("Registration process completed.")
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: oneRun
 #   DESCRIPTION: Get the next scheduled jobs (1st in toRun list) and perform some command in its folder
 #    PARAMETERS:
 #         Command - The command that you want to execute, default is echo folder name
 #       RETURNS: Update the finishedList.log, toRunList.log
-#===============================================================================
+# ===============================================================================
 def oneRun(command="echo $folder"):
-    to_run_list_path = os.path.expanduser('~/toRunList.log')
-    finished_list_path = os.path.expanduser('~/finishedList.log')
-    temp_list_path = os.path.expanduser('~/temp.log')
-    original_list_path = os.path.expanduser('~/originalList.log')
-    running_list_path = os.path.expanduser('~/runningList.log')
-    all_running_list_path = os.path.expanduser('~/allRunningList.log')
+    to_run_list_path = os.path.expanduser("~/toRunList.log")
+    finished_list_path = os.path.expanduser("~/finishedList.log")
+    temp_list_path = os.path.expanduser("~/temp.log")
+    original_list_path = os.path.expanduser("~/originalList.log")
+    running_list_path = os.path.expanduser("~/runningList.log")
+    all_running_list_path = os.path.expanduser("~/allRunningList.log")
 
     # Step 1: Read the first folder path from toRunList.log
     if os.path.exists(to_run_list_path):
-        with open(to_run_list_path, 'r') as file:
+        with open(to_run_list_path, "r") as file:
             folder = file.readline().strip()
     else:
         print(f"{to_run_list_path} does not exist.")
@@ -335,7 +347,9 @@ def oneRun(command="echo $folder"):
 
     try:
         # Execute the provided command
-        result = subprocess.run([getShell(), '-c', command], shell=False, text=True, capture_output=True)
+        result = subprocess.run(
+            [getShell(), "-c", command], shell=False, text=True, capture_output=True
+        )
         print(result.stdout)
     except subprocess.CalledProcessError as e:
         print(f"Error executing the command: {e}")
@@ -346,15 +360,15 @@ def oneRun(command="echo $folder"):
     os.chdir(current_folder)
 
     # Step 4: Update the toRunList.log and finishedList.log
-    with open(to_run_list_path, 'r') as file:
+    with open(to_run_list_path, "r") as file:
         lines = file.readlines()
 
     # Add the first folder path to finishedList.log
-    with open(finished_list_path, 'a') as finished_file:
+    with open(finished_list_path, "a") as finished_file:
         finished_file.write(f"{folder}\n")
 
     # Remove the first line from toRunList.log and update it
-    with open(temp_list_path, 'w') as temp_file:
+    with open(temp_list_path, "w") as temp_file:
         temp_file.writelines(lines[1:])
 
     # Replace toRunList.log with the updated version
@@ -368,20 +382,20 @@ def oneRun(command="echo $folder"):
         os.remove(all_running_list_path)
 
         # Add the current date to finishedList.log
-        with open(finished_list_path, 'a') as finished_file:
+        with open(finished_list_path, "a") as finished_file:
             finished_file.write(f"Finished at: {datetime.now()}\n")
 
     print(f"Process completed for {folder}")
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: prepareNextRun
 #   DESCRIPTION: Prepare the designated number jobs for next round of submission
 #    PARAMETERS:
 #         maxRun - Total number of jobs for next round of submission
 #         Command - The command that you want to execute, default is echo folder name
 #       RETURNS: Print in console number of current running jobs, and jobs to be run
-#===============================================================================
+# ===============================================================================
 
 
 def prepare_next_run(max_run=100, command="qsub cxx.pbs"):
@@ -395,15 +409,19 @@ def prepare_next_run(max_run=100, command="qsub cxx.pbs"):
     allow_next_submit = max(0, max_run - running_number)
 
     # Get the number of jobs waiting to be submitted
-    to_run_list_path = os.path.expanduser('~/toRunList.log')
+    to_run_list_path = os.path.expanduser("~/toRunList.log")
 
-    with open(to_run_list_path, 'r') as file:
-        jobs_left = sum(1 for _ in file.readlines())  # Count the number of lines in toRunList.log
+    with open(to_run_list_path, "r") as file:
+        jobs_left = sum(
+            1 for _ in file.readlines()
+        )  # Count the number of lines in toRunList.log
 
     next_submit = min(max_next_submit, allow_next_submit, jobs_left)
 
-    print(f"Current running jobs: {running_number} ({all_running_number}), "
-          f"to be submitted: {next_submit}, command: {command}")
+    print(
+        f"Current running jobs: {running_number} ({all_running_number}), "
+        f"to be submitted: {next_submit}, command: {command}"
+    )
 
     # Submit jobs
     for _ in range(next_submit):
@@ -412,14 +430,14 @@ def prepare_next_run(max_run=100, command="qsub cxx.pbs"):
     print(f"Process completed. Submitted {next_submit} jobs.")
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: checkFinished
 #   DESCRIPTION: Go into one calculation folder and look or a specific file that mark the end of a calculation
 #    PARAMETERS:
 #         fileName [required] The file that marked the end of a calculation
 #         checkList [optional] Text log file for recording the finished calculations, default is finishedJobs.log
 #       RETURNS: The log file
-#===============================================================================
+# ===============================================================================
 
 
 def checkFinished(file_name, check_list="finishedJobs.log"):
@@ -441,23 +459,23 @@ def checkFinished(file_name, check_list="finishedJobs.log"):
 
         # Check if the file exists in the directory
         if os.path.isfile(os.path.join(folder_path, file_name)):
-            with open(check_list, 'a') as check_file:
+            with open(check_list, "a") as check_file:
                 check_file.write(f"{folder_path}\n")
         else:
-            with open(uncheck_list, 'a') as uncheck_file:
+            with open(uncheck_list, "a") as uncheck_file:
                 uncheck_file.write(f"{folder_path}\n")
 
     print(f"Finished checking. Logs are saved in {check_list} and {uncheck_list}.")
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getFirstString
 #   DESCRIPTION: Get the part of string before a specific separator
 #    PARAMETERS:
 #         parse_string [required] The string that you want to split
 #         separator [required] The separator you use
 #       RETURNS: The string before the separator in the string you passed to this function
-#===============================================================================
+# ===============================================================================
 
 
 def getFirstString(parse_string, separator):
@@ -466,14 +484,14 @@ def getFirstString(parse_string, separator):
     return first
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getRemainString
 #   DESCRIPTION: Get the rest part of string after a specific separator
 #    PARAMETERS:
 #         parse_string [required] The string that you want to split
 #         separator [required] The separator you use
 #       RETURNS: The string after the separator in the string you passed to this function
-#===============================================================================
+# ===============================================================================
 
 
 def getRemainString(parse_string, separator):
@@ -489,16 +507,16 @@ def getRemainString(parse_string, separator):
         return ""
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: stdOutWithTab
 #   DESCRIPTION: redirect the command output through paste command that add certain level of tab before
 #    PARAMETERS:
 #         level [required] tab levels
 #       RETURNS: None
-#===============================================================================
+# ===============================================================================
 def stdOutWithTab(level):
     # Generate the specified number of tab characters
-    tab_string = '\t' * level
+    tab_string = "\t" * level
 
     # # Redirect the standard output to include tab characters when printing
     # def custom_print(*args, **kwargs):
@@ -510,36 +528,38 @@ def stdOutWithTab(level):
     return tab_string
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: restoreStdOut
 #   DESCRIPTION: restore the normal command output behaviour
 #    PARAMETERS:
 #       RETURNS: None
-#===============================================================================
+# ===============================================================================
 def restoreStdOut(origin_stdout):
     sys.stdout = origin_stdout
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getColumnOfIndex
 #   DESCRIPTION: Get the value of specific row and column in batchList.txt
 #    PARAMETERS:
 #             row [required] the row number, or the index number at column 1
 #             column [required] the column number
 #       RETURNS: the value at row, column in batchList.txt
-#===============================================================================
+# ===============================================================================
 
 
 def getColumnOfIndex(index, column, file_path="batchList.txt"):
-    with open(file_path, 'r') as file:
+    with open(file_path, "r") as file:
         # Read all lines and store them as a list
         lines = file.readlines()
 
     # Get the specified line (index starts from 0, so use index directly)
-    line = lines[index].strip()  # .strip() is used to remove the newline character at the end of the line
+    line = lines[
+        index
+    ].strip()  # .strip() is used to remove the newline character at the end of the line
 
     # Split the fields by '|'
-    fields = line.split('|')
+    fields = line.split("|")
 
     # Get the specified column (note that column starts from 1, so subtract 1 for indexing)
     if column <= len(fields):
@@ -549,49 +569,51 @@ def getColumnOfIndex(index, column, file_path="batchList.txt"):
         return None  # If the column number exceeds the number of fields in the line, return None
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getVariableOfIndex
 #   DESCRIPTION: Get the value of specific row in batchList.txt, the variables are separted by '|'
 #    PARAMETERS:
 #             row [required] the row number, or the index number at column 1
 #       RETURNS: all the variables at row in batchList.txt
-#===============================================================================
+# ===============================================================================
 
 
 def getVariableOfIndex(index, file_path="batchList.txt"):
     # Read the file
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         lines = f.readlines()
 
     # Get the specified line (index starts from 0, so we directly take the index line)
     line = lines[index].strip()  # Remove trailing whitespace characters
 
     # Split the string by '|' and get the part starting from the second column
-    columns = line.split('|')[1:-1]  # Exclude the first and last columns
+    columns = line.split("|")[1:-1]  # Exclude the first and last columns
 
     # Rejoin the columns
-    result = '|'.join([col[::1] for col in columns])  # This part seems redundant as col[::1] is the same as col
+    result = "|".join(
+        [col[::1] for col in columns]
+    )  # This part seems redundant as col[::1] is the same as col
 
     return result
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getVariableNumber
 #   DESCRIPTION: Get the amount of variables in batchList.txt, which equals to number of columns -2
 #                 since the first column is index, and the last column is condition
 #    PARAMETERS:
 #       RETURNS: Total number of variables listed in batchList.txt, column number - 2
-#===============================================================================
+# ===============================================================================
 
 
 def getVariableNumber(file_path="batchList.txt"):
     try:
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             # Read the first line of the file
             line = file.readline().strip()
 
             # Split the line by '|'
-            columns = line.split('|')
+            columns = line.split("|")
 
             # Return the number of columns minus 2
             return len(columns) - 2
@@ -601,7 +623,7 @@ def getVariableNumber(file_path="batchList.txt"):
         return None
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: increaseIndex
 #   DESCRIPTION: One of the key function for batch job creation, for incrementing a multidimensional index
 #                 $1 is the current index, $2 is the boundary of the index
@@ -615,7 +637,7 @@ def getVariableNumber(file_path="batchList.txt"):
 #         choice [required] set the level of for each index, same number means at the same level
 #                           only adjacent indices can be at the same level, for example 1 1 2 2 3, there are 3 levels
 #       RETURNS: the incremeted indices
-#===============================================================================
+# ===============================================================================
 
 
 def increaseIndex(index_bound, current_index, choice):
@@ -647,7 +669,7 @@ def increaseIndex(index_bound, current_index, choice):
         return current_index
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: replaceKeywordsString
 #   DESCRIPTION: replacing the keywords in a string with the values provided
 #    PARAMETERS:
@@ -656,7 +678,7 @@ def increaseIndex(index_bound, current_index, choice):
 #         variable_list [required] the list of variables separated by 'separator'
 #         sep [optional] the separator char for keyword list an dvariable list, default is #
 #       RETURNS: The processed string
-#===============================================================================
+# ===============================================================================
 
 
 def replaceKeywordsString(string, keyword_list, variable_list, sep="#", sep2="~"):
@@ -670,15 +692,15 @@ def replaceKeywordsString(string, keyword_list, variable_list, sep="#", sep2="~"
         # print("keyword", keyword)
         # print("variable_list", variable_list)
         # print(keyword.strip().startswith('@'))
-        if keyword.strip().startswith('@') or keyword.strip().startswith('&'):
-            out = (re.sub(re.escape(keyword.strip()[1:]), variable, out))
+        if keyword.strip().startswith("@") or keyword.strip().startswith("&"):
+            out = re.sub(re.escape(keyword.strip()[1:]), variable, out)
         else:
-            out = (re.sub(re.escape(keyword.strip()), variable, out))
+            out = re.sub(re.escape(keyword.strip()), variable, out)
 
     return out
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: replaceKeywordsStringIndex
 #   DESCRIPTION: replacing the keywords in a string with the values of specific line in batchList.txt file
 #                 The keywords are obtained from the first line of the batchList.txt file
@@ -686,13 +708,17 @@ def replaceKeywordsString(string, keyword_list, variable_list, sep="#", sep2="~"
 #         string [required] the string you want to process
 #         index [required] the line index in batchList.txt
 #       RETURNS: The processed string
-#===============================================================================
+# ===============================================================================
 
 
 def replaceKeywordsStringIndex(string, index, file_path="batchList.txt"):
     # Get the variable names and values
-    var_name = getVariableOfIndex(0, file_path)  # Get variable names from the first line
-    var_val = getVariableOfIndex(index, file_path)  # Get variable values from the specified line
+    var_name = getVariableOfIndex(
+        0, file_path
+    )  # Get variable names from the first line
+    var_val = getVariableOfIndex(
+        index, file_path
+    )  # Get variable values from the specified line
 
     # Debugging prints (optional)
     # print("string", string)
@@ -704,7 +730,7 @@ def replaceKeywordsStringIndex(string, index, file_path="batchList.txt"):
     return replaceKeywordsString(string, var_name, var_val, sep="|")
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: replaceKeywordsFile
 #   DESCRIPTION: replacing the keywords in a file with the values provided
 #                 & sign before file name means its a free format file,
@@ -721,17 +747,17 @@ def replaceKeywordsStringIndex(string, index, file_path="batchList.txt"):
 #         var_val [required] keyword value list for substitution
 #         sep [required] separator between keywords and keywords values
 #       RETURNS: The processed file
-#===============================================================================
+# ===============================================================================
 
 
 def replaceKeywordsFile(file, var_name, var_val, sep):
     # Get the number of columns in var_name and var_val
     columns = len(var_name.split(sep))
-    if file[0] == '&' or file[0] == '@':
-        with open(file[1:], 'r') as f:
+    if file[0] == "&" or file[0] == "@":
+        with open(file[1:], "r") as f:
             content = f.read()
     else:
-        with open(file, 'r') as f:
+        with open(file, "r") as f:
             content = f.read()
 
     for i in range(columns):
@@ -743,37 +769,49 @@ def replaceKeywordsFile(file, var_name, var_val, sep):
         var_val = getRemainString(var_val, sep)
 
         # Handle replacement rules
-        if file[0] == '&' or file[0] == '@':
-            if file[0] == '&' and variable_name[0] != '@':
+        if file[0] == "&" or file[0] == "@":
+            if file[0] == "&" and variable_name[0] != "@":
                 # Free format (direct replacement)
-                if variable_name[0] == '&':
-                    content = re.sub(f"{re.escape(variable_name[1:])}", f"{variable_name[1:]} = {variable_val}", content)
+                if variable_name[0] == "&":
+                    content = re.sub(
+                        f"{re.escape(variable_name[1:])}",
+                        f"{variable_name[1:]} = {variable_val}",
+                        content,
+                    )
                 else:
-                    content = re.sub(f"{re.escape(variable_name)}", f"{variable_name} = {variable_val}", content)
+                    content = re.sub(
+                        f"{re.escape(variable_name)}",
+                        f"{variable_name} = {variable_val}",
+                        content,
+                    )
             else:
                 # Fixed format (line-by-line replacement)
-                if variable_name[0] == '@':
-                    content = re.sub(f"{re.escape(variable_name[1:])}", variable_val, content)
+                if variable_name[0] == "@":
+                    content = re.sub(
+                        f"{re.escape(variable_name[1:])}", variable_val, content
+                    )
                 else:
-                    content = re.sub(f"{re.escape(variable_name)}", variable_val, content)
+                    content = re.sub(
+                        f"{re.escape(variable_name)}", variable_val, content
+                    )
 
     # Write the modified content back to the file
-    if file[0] == '&' or file[0] == '@':
-        with open(file[1:], 'w') as f:
+    if file[0] == "&" or file[0] == "@":
+        with open(file[1:], "w") as f:
             f.write(content)
     else:
-        with open(file, 'w') as f:
+        with open(file, "w") as f:
             f.write(content)
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: replaceKeywordsFileIndex
 #   DESCRIPTION: replace the keywords in file with value from a row in batchList.txt
 #    PARAMETERS:
 #         file [required] file name
 #         index [required] line index of batchList.txt that to be substitute
 #       RETURNS: The processed file
-#===============================================================================
+# ===============================================================================
 
 
 def replaceKeywordsFileIndex(file, index):
@@ -785,25 +823,29 @@ def replaceKeywordsFileIndex(file, index):
     replaceKeywordsFile(file, var_name, var_val, "|")
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: getFolderName
 #   DESCRIPTION: generate the folder name based on variable name and value pairs
 #                 for the separator between key-value pair, you may use "/" to create subfolders
 #    PARAMETERS:
 #         index [required] line index of batchList.txt that to be substitute
 #       RETURNS: the folder name for one htp calculation which is named by keyword, value pairs
-#===============================================================================
+# ===============================================================================
 
 
 def getFolderName(index, file_path="batchList.txt"):
     # Read the batchList.txt file
     try:
-        with open(file_path, 'r') as file:
-            columns = len(file.readline().strip().split('|'))  # Get the number of columns
+        with open(file_path, "r") as file:
+            columns = len(
+                file.readline().strip().split("|")
+            )  # Get the number of columns
             lines = file.readlines()  # Read all lines
 
         # Get the separator and other necessary values
-        sep = getColumnOfIndex(0, 1).strip()  # Get the separator from the first line, second column
+        sep = getColumnOfIndex(
+            0, 1
+        ).strip()  # Get the separator from the first line, second column
         index_1 = index + 1
         first_line = getVariableOfIndex(0)  # Get the first line variables
         line = getVariableOfIndex(index)  # Get the variables from the specified line
@@ -813,19 +855,27 @@ def getFolderName(index, file_path="batchList.txt"):
         digits = len(str(last_index))  # Number of digits in the last index
 
         # Format pad_index
-        pad_index = str(index).zfill(digits)  # Zero-pad the index to match the number of digits
+        pad_index = str(index).zfill(
+            digits
+        )  # Zero-pad the index to match the number of digits
 
         if sep == "/":
             name = ""  # If the separator is "/", do not prepend the index
         else:
             name = f"{pad_index}{sep}"  # Prepend the zero-padded index and separator
 
-        for j in range(2, columns):  # Iterate through the columns starting from the third column
-            var_name = getColumnOfIndex(0, j).strip()  # Get the variable name from the first line
+        for j in range(
+                2, columns
+        ):  # Iterate through the columns starting from the third column
+            var_name = getColumnOfIndex(
+                0, j
+            ).strip()  # Get the variable name from the first line
             if var_name.startswith("@"):
                 var_name = var_name[1:]  # Remove "@" if present
 
-            var_val = getColumnOfIndex(index, j).strip().replace(" ", "_")  # Get the variable value and replace spaces with underscores
+            var_val = (
+                getColumnOfIndex(index, j).strip().replace(" ", "_")
+            )  # Get the variable value and replace spaces with underscores
 
             if j == columns_1:
                 sep = ""  # No separator for the last column
@@ -841,7 +891,7 @@ def getFolderName(index, file_path="batchList.txt"):
         return None
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: createFolderConditionOneLine
 #   DESCRIPTION: create the one folder based on information of one row in the batchList.txt
 #                 and then copy the files into the folder
@@ -849,20 +899,20 @@ def getFolderName(index, file_path="batchList.txt"):
 #         index [required] line index of batchList.txt that to be substitute
 #         fiel_list [required] list of files to be processed and copied into the folder
 #       RETURNS: a folder with htp processed input files copied into it
-#===============================================================================
+# ===============================================================================
 
 
 def createFolderConditionOneLine(index, file_list, file_path="batchList.txt"):
     # Get the folder name
     name = getFolderName(index, file_path)
     print(f"Creating folder {name}")
-    file_list = file_list.split(' ')
+    file_list = file_list.split(" ")
 
     # Create the folder
     os.makedirs(name, exist_ok=True)
     # Iterate through the file list and process each file
     for file in file_list:
-        if file == '':
+        if file == "":
             pass
         elif file[0] == "&" or file[0] == "@":
             # Special handling for path prefixes
@@ -877,7 +927,7 @@ def createFolderConditionOneLine(index, file_list, file_path="batchList.txt"):
             replaceKeywordsFileIndex(dest_file, index)
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: printInfo
 #   DESCRIPTION: print the information when writing the batchList.txt file
 #    PARAMETERS:
@@ -886,7 +936,7 @@ def createFolderConditionOneLine(index, file_list, file_path="batchList.txt"):
 #         sep [required] separator char for keywords and values
 #       RETURNS: print one line of keyword=value, for example printInfo "AAA#BBB" "111#222" "#"
 #                will give output of AAA=111 , BBB=222
-#===============================================================================
+# ===============================================================================
 
 
 def printInfo(name, val, sep):
@@ -907,25 +957,25 @@ def printInfo(name, val, sep):
         print(f"{first_name}={first_val}")
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: writeBatchOneline
 #   DESCRIPTION: Write one line of the batchList.txt file
 #    PARAMETERS:
 #         $1 [required] The string lists for the line, could be either the keywords or keyword values
 #       RETURNS: write one line of variables into batchList.txt file, separated by "|"
-#===============================================================================
+# ===============================================================================
 
 
 def writeBatchOneline(columns, file_path="batchList.txt"):
     # Get the first part and the remaining part
     first = getFirstString(columns, "#")
     remain = getRemainString(columns, "#")
-    file = open(file_path, 'a')
+    file = open(file_path, "a")
     while remain:
         first_sep = first.replace(":", " ")
         file.write(f"{first_sep:15} | ")
-        first = getFirstString(remain, '#')
-        remain = getRemainString(remain, '#')
+        first = getFirstString(remain, "#")
+        remain = getRemainString(remain, "#")
 
     file.write(f"{first:15}\n")
     file.close()
@@ -944,7 +994,7 @@ def writeBatchOneline(columns, file_path="batchList.txt"):
     #         file.write(f"{first:15}\n")
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: makeFolders
 #   DESCRIPTION: create all folders and copy the files into the folders
 #    PARAMETERS:
@@ -952,7 +1002,7 @@ def writeBatchOneline(columns, file_path="batchList.txt"):
 #         start [optional] the initial index, default is 1
 #         end [optional] the last index, default is total number of rows
 #       RETURNS: None
-#===============================================================================
+# ===============================================================================
 
 
 def makeFolders(file_list, start=None, end=None, batch_list_file="batchList.txt"):
@@ -960,7 +1010,7 @@ def makeFolders(file_list, start=None, end=None, batch_list_file="batchList.txt"
     if start is None:
         start = 1
     try:
-        with open(batch_list_file, 'r') as f:
+        with open(batch_list_file, "r") as f:
             lines = f.readlines()
             last_index = len(lines) - 1
     except FileNotFoundError:
@@ -976,7 +1026,7 @@ def makeFolders(file_list, start=None, end=None, batch_list_file="batchList.txt"
         createFolderConditionOneLine(i, file_list)
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: execFolders
 #   DESCRIPTION: execute commands inside the folders created from batchList.txt file
 #    PARAMETERS:
@@ -985,9 +1035,9 @@ def makeFolders(file_list, start=None, end=None, batch_list_file="batchList.txt"
 #         start [optional] the initial index, default is 1
 #         end [optional] the last index, default is total number of rows
 #       RETURNS: Print the command executed to screen
-#===============================================================================
+# ===============================================================================
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: execFolders
 #   DESCRIPTION: Execute commands inside the folders created from batchList.txt file
 #    PARAMETERS:
@@ -996,7 +1046,7 @@ def makeFolders(file_list, start=None, end=None, batch_list_file="batchList.txt"
 #         start [optional] the initial index, default is 1
 #         end [optional] the last index, default is total number of rows
 #       RETURNS: None
-#===============================================================================
+# ===============================================================================
 
 
 def execFolders(command_string, start=1, end=None, batch_list_file="batchList.txt"):
@@ -1030,7 +1080,12 @@ def execFolders(command_string, start=1, end=None, batch_list_file="batchList.tx
         try:
 
             # Execute the command
-            result = subprocess.run([getShell(), '-c', temp_cmd], shell=False, text=True, capture_output=True)
+            result = subprocess.run(
+                [getShell(), "-c", temp_cmd],
+                shell=False,
+                text=True,
+                capture_output=True,
+            )
             print(stdOutWithTab(1), end="")
             print(result.stdout.strip())
 
@@ -1044,7 +1099,7 @@ def execFolders(command_string, start=1, end=None, batch_list_file="batchList.tx
         restoreStdOut(origin_stdout)
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: execFoldersSilent
 #   DESCRIPTION: Execute commands inside the folders created from batchList.txt file silently
 #    PARAMETERS:
@@ -1053,14 +1108,16 @@ def execFolders(command_string, start=1, end=None, batch_list_file="batchList.tx
 #         start [optional] the initial index, default is 1
 #         end [optional] the last index, default is total number of rows
 #       RETURNS: None
-#===============================================================================
+# ===============================================================================
 
 
-def execFoldersSilent(command_string, start=1, end=None, batch_list_file="batchList.txt"):
+def execFoldersSilent(
+        command_string, start=1, end=None, batch_list_file="batchList.txt"
+):
     origin_stdout = sys.stdout
     try:
         # Calculate the total number of lines in batchList.txt
-        with open(batch_list_file, 'r') as f:
+        with open(batch_list_file, "r") as f:
             lines = f.readlines()
             last_index = len(lines) - 1
     except FileNotFoundError:
@@ -1088,7 +1145,12 @@ def execFoldersSilent(command_string, start=1, end=None, batch_list_file="batchL
 
         try:
             # Execute the command
-            result = subprocess.run([getShell(), '-c', temp_cmd], shell=False, text=True, capture_output=True)
+            result = subprocess.run(
+                [getShell(), "-c", temp_cmd],
+                shell=False,
+                text=True,
+                capture_output=True,
+            )
             print(result.stdout)
         except subprocess.CalledProcessError as e:
             print(f"Error executing command in folder {folder_name}: {e}")
@@ -1100,7 +1162,7 @@ def execFoldersSilent(command_string, start=1, end=None, batch_list_file="batchL
         restoreStdOut(origin_stdout)
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: execFoldersUnfinished
 #   DESCRIPTION: Execute commands inside the folders created from batchList.txt file silently
 #    PARAMETERS:
@@ -1110,14 +1172,16 @@ def execFoldersSilent(command_string, start=1, end=None, batch_list_file="batchL
 #         start [optional] the initial index, default is 1
 #         end [optional] the last index, default is total number of rows
 #       RETURNS: Print either "folder already finished" or "exec command" to screen
-#===============================================================================
+# ===============================================================================
 
 
-def execFoldersUnfinished(command_string, file_name, start=1, end=None, batch_list_file="batchList.txt"):
+def execFoldersUnfinished(
+        command_string, file_name, start=1, end=None, batch_list_file="batchList.txt"
+):
     origin_stdout = sys.stdout
     try:
         # Calculate the total number of lines in batchList.txt
-        with open(batch_list_file, 'r') as f:
+        with open(batch_list_file, "r") as f:
             lines = f.readlines()
             last_index = len(lines) - 1
     except FileNotFoundError:
@@ -1142,9 +1206,11 @@ def execFoldersUnfinished(command_string, file_name, start=1, end=None, batch_li
 
         # Check if batchList.txt contains the current folder path
         if os.path.isfile(f"../{file_name}"):
-            with open(f"../{file_name}", 'r') as file:
+            with open(f"../{file_name}", "r") as file:
                 lines = file.readlines()
-                folder_path = os.path.abspath(folder_name)  # Get the absolute path of the current folder
+                folder_path = os.path.abspath(
+                    folder_name
+                )  # Get the absolute path of the current folder
                 if folder_path in [line.strip() for line in lines]:
                     print(f"Folder {folder_name}, already finished, see {file_name}")
                     os.chdir(current_pwd)
@@ -1155,7 +1221,12 @@ def execFoldersUnfinished(command_string, file_name, start=1, end=None, batch_li
         # print(stdOutWithTab(1), end="")
 
         try:
-            result = subprocess.run([getShell(), '-c', temp_cmd], shell=False, text=True, capture_output=True)
+            result = subprocess.run(
+                [getShell(), "-c", temp_cmd],
+                shell=False,
+                text=True,
+                capture_output=True,
+            )
             print(result.stdout.strip())
             # pass
         except subprocess.CalledProcessError as e:
@@ -1168,7 +1239,7 @@ def execFoldersUnfinished(command_string, file_name, start=1, end=None, batch_li
         os.chdir(current_pwd)
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: evaluateEachField
 #   DESCRIPTION: Apply the format to each of the variables
 #    PARAMETERS:
@@ -1177,16 +1248,16 @@ def execFoldersUnfinished(command_string, file_name, start=1, end=None, batch_li
 #         sep [required] The separator
 #         format [optional] The format style, could be either one or several separated by "sep"
 #       RETURNS: The formatted variable list
-#===============================================================================
+# ===============================================================================
 
 
 def evaluateEachField(expression_list, folder_string, sep, format="%s"):
     folder_list = folder_string.split(sep)
     expression_list = expression_list.split(sep)
-    first_first = 'anything'
-    first_folder = 'anything'
+    first_first = "anything"
+    first_folder = "anything"
     hold = ""
-    curr_format = '%s'
+    curr_format = "%s"
     remain_format = format
     for index, expression in enumerate(expression_list):
         first = expression
@@ -1202,11 +1273,17 @@ def evaluateEachField(expression_list, folder_string, sep, format="%s"):
         # Process the first string
         while first:
             first_first = getFirstString(first, ":")
-            first = getRemainString(first, ":")
+            first = getRemainString(
+                first, ":"
+            )  # 直接使用Python字符串格式化，避免依赖xargs
+            try:
+                formatted_value = curr_format % first_first
+                temp += formatted_value
+            except (ValueError, TypeError) as e:
+                # 格式化失败时，使用原始值
+                print(f"格式化错误: {e}，使用原始值: {first_first}")
+                temp += str(first_first)
 
-            # Use Python string formatting
-            bash_command = f'echo "{first_first}" | xargs printf "{curr_format}"'
-            temp += subprocess.check_output(bash_command, shell=True, text=True)
             if first:  # If there are remaining parts, add the separator
                 temp += ":"
 
@@ -1219,7 +1296,7 @@ def evaluateEachField(expression_list, folder_string, sep, format="%s"):
     return hold
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: writeBatchList
 #   DESCRIPTION: One of the most important functions, generate the batchList.txt that
 #                 is needed by all of the following steps, creating folders or executing commands
@@ -1234,10 +1311,17 @@ def evaluateEachField(expression_list, folder_string, sep, format="%s"):
 #         sep [required] The separator
 #         format [optional] The format style, could be either one or several separated by "sep"
 #       RETURNS: batchList.txt file
-#===============================================================================
+# ===============================================================================
 
 
-def writeBatchList(folder_string, variable_string, condition_string="1>0", sep="+", format="%s", file_path="batchList.txt"):
+def writeBatchList(
+        folder_string,
+        variable_string,
+        condition_string="1>0",
+        sep="+",
+        format="%s",
+        file_path="batchList.txt",
+):
     origin_variable_string = variable_string
     folder_string = folder_string.replace("~", "#")
     variable_string = variable_string.replace("~", "#")
@@ -1247,7 +1331,7 @@ def writeBatchList(folder_string, variable_string, condition_string="1>0", sep="
 
     # Get the number of variable lists
     variable_index = [1] * (variable_string.count("#") + 1)
-    variable_list_count = [len(record.split()) for record in variable_string.split('#')]
+    variable_list_count = [len(record.split()) for record in variable_string.split("#")]
     index = 0
     replaced_variable = ""
     current_condition = condition_string
@@ -1268,56 +1352,74 @@ def writeBatchList(folder_string, variable_string, condition_string="1>0", sep="
         replaced_previous = current_variable
         while replaced_previous != replaced_variable:
             replaced_previous = current_variable
-            replaced_variable = replaceKeywordsString(current_variable, folder_string, current_variable, "#")
+            replaced_variable = replaceKeywordsString(
+                current_variable, folder_string, current_variable, "#"
+            )
             current_variable = replaced_variable
 
         # Process formatting and other fields
-        processed_variable = evaluateEachField(replaced_variable, folder_string, "#", format)
+        processed_variable = evaluateEachField(
+            replaced_variable, folder_string, "#", format
+        )  # Replace keywords in the condition
+        current_condition = replaceKeywordsString(
+            condition_string, folder_string, processed_variable, "#"
+        )
+        # Evaluate the condition using Python's eval function
+        try:
+            # 对于简单条件，可以使用Python的eval直接评估
+            condition_result = eval(current_condition)
+            result_str = "true" if condition_result else "false"
+        except Exception as e:
+            print(f"条件评估错误: {e}，条件为: {current_condition}，默认为真")
+            result_str = "true"  # 出错时默认为真
 
-        # Replace keywords in the condition
-        current_condition = replaceKeywordsString(condition_string, folder_string, processed_variable, "#")
-        # Evaluate the condition
-        bash_command = f"awk 'BEGIN{{if({current_condition}){{print \"true\"}}else{{print \"false\"}}}}'"
-        result_str = subprocess.getoutput(bash_command)
-        if result_str.strip() == "true":
+        if result_str == "true":
             index += 1
             print(f"Condition fulfilled: {current_condition}")
 
             # Record output
-            with open(file_path, 'a') as file:
+            with open(file_path, "a") as file:
                 print("\t", index, end="\t", flush=True)
                 printInfo(folder_string, processed_variable, "#")
-                writeBatchOneline(f"{index}#{processed_variable}#{current_condition}", file_path)
+                writeBatchOneline(
+                    f"{index}#{processed_variable}#{current_condition}", file_path
+                )
         else:
             print(f"Condition not fulfilled: {current_condition}")
 
         # Increment the index
-        variable_index = increaseIndex(variable_list_count, variable_index, incrementChoice)
+        variable_index = increaseIndex(
+            variable_list_count, variable_index, incrementChoice
+        )
 
 
 def incrementChoiceProcess(processStr):
     # Split the input string into multiple records based on "#"
-    records = processStr.split('#')
+    records = processStr.split("#")
 
     result = []
 
     # Process each record
     for record in records:
         # Split each record into fields based on "~"
-        fields = record.split('~')
+        fields = record.split("~")
 
         # If the number of fields >= 2, the record's line number will be output multiple times, output the line number for each field
         if len(fields) >= 2:
-            result.extend([len(result) + 1] * len(fields))  # Here len(result) + 1 is the line number
+            result.extend(
+                [len(result) + 1] * len(fields)
+            )  # Here len(result) + 1 is the line number
         else:
-            result.append(len(result) + 1)  # For a single field, output the line number once
+            result.append(
+                len(result) + 1
+            )  # For a single field, output the line number once
 
     return result
 
 
 def currentVariableProcess(variable_string, variable_index):
     # Split the string based on "#"
-    records = variable_string.split('#')
+    records = variable_string.split("#")
     result = ""
 
     # Iterate through the records and output fields as needed
@@ -1328,23 +1430,23 @@ def currentVariableProcess(variable_string, variable_index):
         if i > 0:  # For the second record and beyond
             # Output the field specified by list_of_indices[i], note that the index starts from 1
             index = int(variable_index[i]) - 1  # Convert to 0-based index
-            result += (f"#{fields[index]}")
+            result += f"#{fields[index]}"
         else:
             # Output the specified field of the first record
             index = int(variable_index[i]) - 1  # Convert to 0-based index
-            result += (fields[index])
+            result += fields[index]
 
     return result
 
 
-#===  FUNCTION  ================================================================
+# ===  FUNCTION  ================================================================
 #          NAME: batchAllCommand
 #   DESCRIPTION: loop through all folders and execute a command
 #    PARAMETERS:
 #         command_string [required] the command you want to execute
 #         $2 [optional]  integer that tune the indentation before output, default is 0
 #       RETURNS: command output
-#===============================================================================
+# ===============================================================================
 
 
 def batchAllCommand(command_string, batch_depth=0):
@@ -1358,7 +1460,7 @@ def batchAllCommand(command_string, batch_depth=0):
     current_dir = os.getcwd()
 
     # Get all subfolders
-    folder_array = [f for f in os.listdir('.') if os.path.isdir(f)]
+    folder_array = [f for f in os.listdir(".") if os.path.isdir(f)]
 
     print(stdOutWithTab(batch_depth), end="")
 
@@ -1372,7 +1474,9 @@ def batchAllCommand(command_string, batch_depth=0):
             os.chdir(dir)
             batch_depth_plus = batch_depth + 1
             restoreStdOut(origin_stdout)
-            batchAllCommand(command_string, batch_depth_plus)  # Recursively enter subfolders and execute
+            batchAllCommand(
+                command_string, batch_depth_plus
+            )  # Recursively enter subfolders and execute
             print(stdOutWithTab(batch_depth), end="")
             os.chdir(current_dir)  # Return to the parent directory
             print(f"Return from {dir}, to {current_dir}")
@@ -1595,17 +1699,19 @@ Example:
 
 def printArguements():
     print(f"Command is {sys.argv[1]}")  # Print the first argument
-    for index, arg in enumerate(sys.argv[2:], start=1):  # Iterate from the second argument
+    for index, arg in enumerate(
+            sys.argv[2:], start=1
+    ):  # Iterate from the second argument
         print(f"Argument {index}: {arg}")
 
 
 def custom_subcommand_help(command=None):
     """Custom help information function, displayed by subcommand"""
-    if command == 'schedule':
+    if command == "schedule":
         usageSchedule()
-    elif command == 'create':
+    elif command == "create":
         usageCreate()
-    elif command == 'execute':
+    elif command == "execute":
         usageExecute()
     else:
         usageStudio()
@@ -1656,77 +1762,108 @@ class CustomArgumentParser(argparse.ArgumentParser):
 
 # schedule function
 # sjob schedule -k '@FREQ#PERIOD' -v "1e12 1e13#1e12/FREQ" -c "1>0" -f='%s'
-@sjob.command(name='schedule')
-@click.argument('json_file', type=click.Path(exists=True), default=None)
-@click.option('--keyword', '-k', help='Keywords for batch list')
-@click.option('--value', '-v', help='Values for each keyword')
-@click.option('--condition', '-c', help='Condition for filtering jobs', default="1>0")
-@click.option('--separater', '-s', help='Separator', default="+")
-@click.option('--format', '-f', help='Format', default="%s")
+@sjob.command(name="schedule")
+@click.option(
+    "--json-file",
+    "json_file",
+    type=click.Path(exists=True),
+    default=None,
+    help="JSON configuration file",
+)
+@click.option("--keyword", "-k", type=str, help="Keywords for batch list")
+@click.option("--value", "-v", type=str, help="Values for each keyword")
+@click.option(
+    "--condition", "-c", type=str, help="Condition for filtering jobs", default="1>0"
+)
+@click.option("--separater", "-s", type=str, help="Separator", default="+")
+@click.option("--format", "-f", type=str, help="Format", default="%s")
 def scheduleCommand(json_file, keyword, value, condition, separater, format):
-    '''Main function to create the batchList.txt file.'''
+    """Main function to create the batchList.txt file."""
     # init config dict
     config = {}
-    config['json_set'] = False
+    config["json_set"] = False
 
     # check if json file is provided
     if json_file is not None:
         print("Stage 1: Create the batchList.txt file")
         print(f"Using the {json_file} configuration file")
-        config['json_set'] = True
-        config['var_name'] = getJsonVar(json_file, "VarName")
-        config['var_value'] = getJsonVar(json_file, "VarValue")
-        config['condition'] = getJsonVar(json_file, "Condition")
-        config['separator'] = getJsonVar(json_file, "Separator")
-        config['format_str'] = getJsonVar(json_file, "Format")
-        if config['var_name'] and config['var_value']:
-            writeBatchList(config['var_name'], config['var_value'], config['condition'], config['separator'], config['format_str'])
+        config["json_set"] = True
+        config["var_name"] = getJsonVar(json_file, "VarName")
+        config["var_value"] = getJsonVar(json_file, "VarValue")
+        config["condition"] = getJsonVar(json_file, "Condition")
+        config["separator"] = getJsonVar(json_file, "Separator")
+        config["format_str"] = getJsonVar(json_file, "Format")
+        if config["var_name"] and config["var_value"]:
+            writeBatchList(
+                config["var_name"],
+                config["var_value"],
+                config["condition"],
+                config["separator"],
+                config["format_str"],
+            )
     else:
-        config['json_set'] = False
-        config['var_name'] = keyword
-        config['var_value'] = value
-        config['condition'] = condition
-        config['separator'] = separater
-        config['format_str'] = format
+        config["json_set"] = False
+        config["var_name"] = keyword
+        config["var_value"] = value
+        config["condition"] = condition
+        config["separator"] = separater
+        config["format_str"] = format
 
-        if config['var_name'] is None:
-            raise ValueError("The -k or --keyword option is mandatory for batch list command, which sets the keywords for creating the batchList.txt file.")
-        if config['var_value'] is None:
-            raise ValueError("The -v or --value option is mandatory for batch list command, which sets the sweeping values for each keyword in the input file.")
-        writeBatchList(config['var_name'], config['var_value'], config['condition'], config['separator'], config['format_str'])
+        if config["var_name"] is None:
+            raise ValueError(
+                "The -k or --keyword option is mandatory for batch list command, which sets the keywords for creating the batchList.txt file."
+            )
+        if config["var_value"] is None:
+            raise ValueError(
+                "The -v or --value option is mandatory for batch list command, which sets the sweeping values for each keyword in the input file."
+            )
+        writeBatchList(
+            config["var_name"],
+            config["var_value"],
+            config["condition"],
+            config["separator"],
+            config["format_str"],
+        )
 
 
 # create function
-@sjob.command(name='create')
-@click.argument('json_file', type=click.Path(exists=True), default=None)
-@click.option('--file_list', '-f', help='Files to copy', default=None)
-@click.option('--start', '-s', type=int, help='Start index', default=None)
-@click.option('--end', '-e', type=int, help='End index', default=None)
+@sjob.command(name="create")
+# @click.argument('json_file', type=click.Path(exists=True), default=None)
+@click.option(
+    "--json-file",
+    "json_file",
+    type=click.Path(exists=True),
+    default=None,
+    help="JSON configuration file",
+)
+@click.option("--file_list", "-f", help="Files to copy", default=None)
+@click.option("--start", "-s", type=int, help="Start index", default=None)
+@click.option("--end", "-e", type=int, help="End index", default=None)
 def createCommand(json_file, file_list, start, end):
-    '''Main function to create the folder structure and copy files into the folders.'''
+    """Main function to create the folder structure and copy files into the folders."""
 
     config = {}
-    config['file_set'] = False
-    config['json_set'] = False
+    config["file_set"] = False
+    config["json_set"] = False
     if file_list is not None:
-        config['file_set'] = True
-        config['file_list'] = file_list
+        config["file_set"] = True
+        config["file_list"] = file_list
     if json_file is not None:
         print("Stage 2: Create the folder structure")
         print(f"Using the {json_file} configuration file")
-        config['file_list'] = getJsonVar(json_file, "File")
-        config['file_set'] = True
+        config["file_list"] = getJsonVar(json_file, "File")
+        config["file_set"] = True
 
-    if config['file_set'] == True:
-        makeFolders(config['file_list'], start, end)
+    if config["file_set"] == True:
+        makeFolders(config["file_list"], start, end)
     else:
         raise ValueError("The -f or --file option is mandatory.")
 
 
 def getEndIndex(file_path):
-    """ Calculate the number of lines in the file and return the value of the line count minus 1 """
+    """Calculate the number of lines in the file and return the value of the line count minus 1"""
     try:
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             lines = file.readlines()
             return len(lines) - 1  # Subtract 1 to get the last index
     except FileNotFoundError:
@@ -1737,36 +1874,47 @@ def getEndIndex(file_path):
         return None
 
 
-@sjob.command(name='execute')
-@click.argument('json_file', type=click.Path(exists=True), default=None)
-@click.option('--command', '-c', default=None, help='Command to execute in each folder')
-@click.option('--start', '-s', type=int, help='Start index', default=1)
-@click.option('--end', '-e', type=int, help='End index', default=None)
+@sjob.command(name="execute")
+# @click.argument('json_file', type=click.Path(exists=True), default=None)
+@click.option(
+    "--json-file",
+    "json_file",
+    type=click.Path(exists=True),
+    default=None,
+    help="JSON configuration file",
+)
+@click.option("--command", "-c", default=None, help="Command to execute in each folder")
+@click.option("--start", "-s", type=int, help="Start index", default=1)
+@click.option("--end", "-e", type=int, help="End index", default=None)
 def executeCommand(json_file, command, start, end):
-    """ Main function to execute the provided command in each folder. """
+    """Main function to execute the provided command in each folder."""
     config = {}
-    config['command_set'] = False
-    config['json_set'] = False
-    config['start'] = start
-    config['end'] = getEndIndex('batchList.txt')
-    config['exec_command'] = 'ls'
+    config["command_set"] = False
+    config["json_set"] = False
+    config["start"] = start
+    config["end"] = getEndIndex("batchList.txt")
+    config["exec_command"] = "ls"
 
     if command is not None:
-        command['exec_command'] = command
-        config['command_set'] = True
+        command["exec_command"] = command
+        config["command_set"] = True
     elif json_file:
-        json_command = getJsonVar(json_file, 'Command')
+        json_command = getJsonVar(json_file, "Command")
         if json_command:
-            config['exec_command'] = json_command
-            config['command_set'] = True
+            config["exec_command"] = json_command
+            config["command_set"] = True
 
-    if not config['command_set']:
+    if not config["command_set"]:
         if not command:
-            print("The -c or --command option is mandatory if no JSON file is provided.")
+            print(
+                "The -c or --command option is mandatory if no JSON file is provided."
+            )
             return
     else:
-        print(f"Executing command: {config['exec_command']} from index {config['start']} to {config['end']}")
-        execFolders(config['exec_command'], config['start'], config['end'])
+        print(
+            f"Executing command: {config['exec_command']} from index {config['start']} to {config['end']}"
+        )
+        execFolders(config["exec_command"], config["start"], config["end"])
 
 
 # # main function
@@ -1783,5 +1931,5 @@ def executeCommand(json_file, command, start, end):
 
 # if __name__ == '__main__':
 #     runCommand()
-if __name__ == '__main__':
+if __name__ == "__main__":
     sjob()

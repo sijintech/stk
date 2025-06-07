@@ -1,10 +1,8 @@
 
-
-
 from PySide6 import QtWidgets, QtCore, QtGui
 import os
 import sys
-import subprocess
+
 
 
 class Terminal(QtWidgets.QWidget):
@@ -149,16 +147,24 @@ class Terminal(QtWidgets.QWidget):
             
         if self.handle_builtin_command(parts):
             return
-            
         try:
             self.process.setWorkingDirectory(self.current_directory)
-            
+
+            # 设置环境变量确保命令行使用UTF-8编码输出
+            environment = QtCore.QProcessEnvironment.systemEnvironment()
+            environment.insert("PYTHONIOENCODING", "utf-8")
+            # 对于Windows cmd，设置代码页为65001(UTF-8)
             if self.is_windows:
+                environment.insert("CHCP", "65001")
+            self.process.setProcessEnvironment(environment)
 
-
-                self.process.start("cmd.exe", ["/c", command])
+            if self.is_windows:
+                # Windows下使用cmd.exe执行命令，但命令需要完整传递，不能被shell拆分
+                # 使用/V:OFF关闭变量延迟展开，/C表示执行命令后退出
+                # 先通过chcp 65001设置控制台为UTF-8模式
+                self.process.start("cmd.exe", ["/V:OFF", "/C", "chcp 65001 >nul && " + command])
             else:
-
+                # Linux下使用bash执行命令
                 self.process.start("/bin/sh", ["-c", command])
             
         except Exception as e:
@@ -198,23 +204,23 @@ class Terminal(QtWidgets.QWidget):
     def handle_stdout(self):
         data = self.process.readAllStandardOutput()
         try:
-
-            text = bytes(data).decode(self.system_encoding, errors='replace')
-        except UnicodeDecodeError:
-
+            # 首先尝试使用UTF-8解码，因为Python进程的输出通常是UTF-8编码的
             text = bytes(data).decode('utf-8', errors='replace')
+        except UnicodeDecodeError:
+            # 如果UTF-8失败，再尝试使用系统编码
+            text = bytes(data).decode(self.system_encoding, errors='replace')
         self.append_output(text)
     
     def handle_stderr(self):
         data = self.process.readAllStandardError()
         try:
-
-            text = bytes(data).decode(self.system_encoding, errors='replace')
-        except UnicodeDecodeError:
-
+            # 首先尝试使用UTF-8解码
             text = bytes(data).decode('utf-8', errors='replace')
+        except UnicodeDecodeError:
+            # 如果UTF-8失败，再尝试使用系统编码
+            text = bytes(data).decode(self.system_encoding, errors='replace')
         self.append_error(text)
-    
+
     def handle_finished(self, exit_code, exit_status):
         if exit_code != 0:
             self.append_error(f"\n命令退出，代码: {exit_code}\n")
@@ -222,20 +228,74 @@ class Terminal(QtWidgets.QWidget):
         else:
             self.append_output("\n")
             self.commandExecuted.emit(self.last_command, True)
-    
+
     def execute_stk_command(self, command, args_dict=None):
-        cmd_str = command
-        
+        """
+        执行STK命令，使用Python模块导入方式
+        command: 模块路径和命令，如 "-m suan.cli.main sjob schedule"
+        args_dict: 参数字典，如 {"keyword": "FREQ", "value": "1e12 1e13"}
+        """
+        # 准备Python命令参数列表
+        cmd_parts = ["python"]
+
+        # 添加命令模块和子命令
+        cmd_parts.extend(command.split())
+
+        # 构建显示用的命令字符串
+        cmd_str = f"python {command}"
+
         if args_dict:
+            # 处理所有选项参数
             for name, value in args_dict.items():
+                # 忽略空字符串值
+                if isinstance(value, str) and not value.strip():
+                    continue
+
+                # 构建显示用的命令字符串
                 if isinstance(value, bool) and value:
                     cmd_str += f" --{name}"
                 elif value:
-                    cmd_str += f" --{name} {value}"
-        
+                    # 对于包含特殊字符的值进行引用处理（仅用于显示）
+                    if isinstance(value, str) and any(c in value for c in ' <>|&;()$`\\"\''):
+                        cmd_str += f" --{name} \"{value}\""
+                    else:
+                        cmd_str += f" --{name} {value}"
+
+                # 构建实际执行的参数列表
+                if isinstance(value, bool) and value:
+                    cmd_parts.append(f"--{name}")
+                elif value:
+                    cmd_parts.append(f"--{name}")
+                    # 直接添加值作为单独的参数，无需引用处理
+                    cmd_parts.append(str(value))
+
+            # 处理json_file参数（位置参数）
+            if 'json_file' in args_dict and args_dict['json_file']:
+                json_file_value = args_dict['json_file']
+                # 添加到显示字符串
+                if isinstance(json_file_value, str) and any(c in json_file_value for c in ' <>|&;()$`\\"\''):
+                    cmd_str += f" \"{json_file_value}\""
+                else:
+                    cmd_str += f" {json_file_value}"
+                # 添加到参数列表（作为单独参数）
+                cmd_parts.append(str(json_file_value))
+
+        # 记录命令并显示
         self.last_command = cmd_str
-        
-        self.execute_command(cmd_str)
+        self.append_command(cmd_str)
+        # 使用完整参数列表启动Python进程
+        try:
+            self.process.setWorkingDirectory(self.current_directory)
+
+            # 设置环境变量确保Python使用UTF-8编码输出
+            environment = QtCore.QProcessEnvironment.systemEnvironment()
+            environment.insert("PYTHONIOENCODING", "utf-8")
+            self.process.setProcessEnvironment(environment)
+
+            print(f"执行命令: {' '.join(cmd_parts)}")  # 调试输出
+            self.process.start(cmd_parts[0], cmd_parts[1:])
+        except Exception as e:
+            self.append_error(f"执行错误: {str(e)}\n")
         
     def keyPressEvent(self, event):
         if self.input_field.hasFocus():
