@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "stk-toolkit": {
+      "command": "cmd",
+      "args": ["/c", "conda run -n mcp python -m suan.mcp_server"],
+      "cwd": "D:/work/sijin/stk",
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONLEGACYWINDOWSSTDIO": "1"
+      }
+    }
+  }
+}
