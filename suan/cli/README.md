@@ -8,6 +8,9 @@
 └── toolkits/ # 插件目录
 ├── sjob/
 │ └── cli.py # 插件的 CLI 逻辑
+│ └── docs # 放入命令说明文件，以供gui自动识别
+|   └── schedule.md # 有关schedule子命令的介绍
+|   └── create.md # 有关create子命令的介绍
 ├── sdata/
 │ └── cli.py # 插件的 CLI 逻辑
 └── ... # 更多插件

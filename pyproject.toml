@@ -30,6 +30,7 @@ pathspec= "*"
 psutil = "*"  
 pyinstaller-hooks-contrib = "*"
 tqdm = ">=4.27"
+markdown= "*"
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]
