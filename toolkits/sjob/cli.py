@@ -1768,17 +1768,51 @@ class CustomArgumentParser(argparse.ArgumentParser):
     "json_file",
     type=click.Path(exists=True),
     default=None,
-    help="JSON configuration file",
+    help="指定包含批处理配置的JSON文件路径，此文件包含所有需要的参数如变量名、变量值、条件等",
 )
-@click.option("--keyword", "-k", type=str, help="Keywords for batch list")
-@click.option("--value", "-v", type=str, help="Values for each keyword")
 @click.option(
-    "--condition", "-c", type=str, help="Condition for filtering jobs", default="1>0"
+    "--keyword", 
+    "-k", 
+    type=str, 
+    help="要循环的关键字列表，使用#分隔，例如'VAR1#@VAR2'。@表示固定格式变量，无前缀表示自由格式变量"
 )
-@click.option("--separater", "-s", type=str, help="Separator", default="+")
-@click.option("--format", "-f", type=str, help="Format", default="%s")
+@click.option(
+    "--value", 
+    "-v", 
+    type=str, 
+    help="每个关键字对应的值列表，使用#分隔，例如'1 2 3#10 20 30'。空格分隔同一变量的不同值"
+)
+@click.option(
+    "--condition", 
+    "-c", 
+    type=str, 
+    help="用于过滤作业的条件表达式，例如'FREQ>1e9'，满足条件的组合才会被添加到批处理列表中", 
+    default="1>0"
+)
+@click.option(
+    "--separater", 
+    "-s", 
+    type=str, 
+    help="在创建的文件夹名称中用于分隔关键字的字符，例如'+'会创建类似'VAR1+100+VAR2+200'的文件夹名", 
+    default="+"
+)
+@click.option(
+    "--format", 
+    "-f", 
+    type=str, 
+    help="用于设置batchList.txt文件中变量值格式的C风格格式说明符，例如'%.2e'表示科学计数法", 
+    default="%s"
+)
 def scheduleCommand(json_file, keyword, value, condition, separater, format):
-    """Main function to create the batchList.txt file."""
+    """创建批处理作业调度文件batchList.txt。
+    
+    这是批处理作业生成的第一阶段，用于定义变量及其值的组合，创建一个包含所有组合信息的batchList.txt文件。
+    该文件将作为后续create和execute命令的输入，包含了创建文件夹和执行命令所需的所有信息。
+    
+    可以通过两种方式使用：
+    1. 提供一个包含完整配置的JSON文件
+    2. 通过命令行选项直接指定参数
+    """
     # init config dict
     config = {}
     config["json_set"] = False
@@ -1834,13 +1868,37 @@ def scheduleCommand(json_file, keyword, value, condition, separater, format):
     "json_file",
     type=click.Path(exists=True),
     default=None,
-    help="JSON configuration file",
+    help="指定包含批处理配置的JSON文件路径，该文件包含FreeFile、FixFile和CopyFile等配置项",
 )
-@click.option("--file_list", "-f", help="Files to copy", default=None)
-@click.option("--start", "-s", type=int, help="Start index", default=None)
-@click.option("--end", "-e", type=int, help="End index", default=None)
+@click.option(
+    "--file_list", 
+    "-f", 
+    help="需要复制的文件列表，以空格分隔。文件名前的修饰符表示文件类型：@表示固定格式文件，&表示自由格式文件，无修饰符表示仅复制不修改内容。例如：'&input.in @jobs.pbs pot.in'", 
+    default=None
+)
+@click.option(
+    "--start", 
+    "-s", 
+    type=int, 
+    help="batchList.txt中的起始索引，表示从哪一行开始创建文件夹，默认从第1行开始（跳过标题行）", 
+    default=None
+)
+@click.option(
+    "--end", 
+    "-e", 
+    type=int, 
+    help="batchList.txt中的结束索引，表示创建到哪一行为止，默认处理到最后一行", 
+    default=None
+)
 def createCommand(json_file, file_list, start, end):
-    """Main function to create the folder structure and copy files into the folders."""
+    """创建文件夹结构并将文件复制到各个文件夹中。
+    
+    这是批处理作业生成的第二阶段，基于batchList.txt中的信息创建文件夹并处理输入文件。
+    对于每一组变量组合，将创建一个文件夹，并根据文件类型复制并修改文件内容：
+    - 自由格式文件(&前缀)：替换"关键字 = 值"格式中的值
+    - 固定格式文件(@前缀)：直接替换文件中出现的关键字
+    - 普通文件(无前缀)：仅复制不修改内容
+    """
 
     config = {}
     config["file_set"] = False
@@ -1881,13 +1939,37 @@ def getEndIndex(file_path):
     "json_file",
     type=click.Path(exists=True),
     default=None,
-    help="JSON configuration file",
+    help="指定包含批处理配置的JSON文件路径，该文件包含Command配置项，定义在每个文件夹中执行的命令",
 )
-@click.option("--command", "-c", default=None, help="Command to execute in each folder")
-@click.option("--start", "-s", type=int, help="Start index", default=1)
-@click.option("--end", "-e", type=int, help="End index", default=None)
+@click.option(
+    "--command", 
+    "-c", 
+    default=None, 
+    help="在每个创建的文件夹中执行的命令，可以包含batchList.txt中定义的关键字，这些关键字将被替换为相应的值。例如：'python script.py --temp TEMPERATURE --pressure PRESSURE'"
+)
+@click.option(
+    "--start", 
+    "-s", 
+    type=int, 
+    help="batchList.txt中的起始索引，表示从哪一行对应的文件夹开始执行命令，默认从第1行开始（跳过标题行）", 
+    default=1
+)
+@click.option(
+    "--end", 
+    "-e", 
+    type=int, 
+    help="batchList.txt中的结束索引，表示执行到哪一行对应的文件夹为止，默认处理到最后一行", 
+    default=None
+)
 def executeCommand(json_file, command, start, end):
-    """Main function to execute the provided command in each folder."""
+    """在每个创建的文件夹中执行指定命令。
+    
+    这是批处理作业生成的第三阶段，根据batchList.txt中的信息，在每个创建的文件夹中执行命令。
+    命令字符串中可以包含batchList.txt第一行中定义的关键字，这些关键字会在执行前被替换为对应文件夹的具体值。
+    例如，如果命令包含"TEMPERATURE"关键字，它会被替换为当前文件夹对应的温度值。
+    
+    此功能常用于执行模拟、提交作业、运行脚本等操作，使每个文件夹中的命令能够使用对应的参数值。
+    """
     config = {}
     config["command_set"] = False
     config["json_set"] = False

@@ -1,0 +1,16 @@
+{
+    "FreeFile": ["input.in"],
+    "FixFile": [],
+    "CopyFile": [],
+    "FreeVarName": ["TEMPERATURE", "PRESSURE"],
+    "FixVarName": [],
+    "VarValue": {
+        "TEMPERATURE": [300, 400, 500],
+        "PRESSURE": [1.0, 2.0, 3.0]
+    },
+    "VarSequence": ["TEMPERATURE", "PRESSURE"],
+    "Separator": "+",
+    "Format": "%s",
+    "Condition": "1>0",
+    "Command": "echo \"运行模拟，温度: TEMPERATURE, 压力: PRESSURE\""
+}
