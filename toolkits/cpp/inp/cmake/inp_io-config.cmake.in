@@ -1,0 +1,30 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# 检查组件
+set(_supported_components static shared)
+
+foreach(_comp ${inp_io_FIND_COMPONENTS})
+    if (NOT _comp IN_LIST _supported_components)
+        set(inp_io_FOUND False)
+        set(inp_io_NOT_FOUND_MESSAGE "Unsupported component: ${_comp}")
+    endif()
+endforeach()
+
+# 包含目标定义
+include("${CMAKE_CURRENT_LIST_DIR}/inp_io-targets.cmake")
+
+# 设置变量
+set(INP_IO_LIBRARIES)
+set(INP_IO_INCLUDE_DIRS "${PACKAGE_PREFIX_DIR}/include")
+
+if("static" IN_LIST inp_io_FIND_COMPONENTS OR NOT inp_io_FIND_COMPONENTS)
+    list(APPEND INP_IO_LIBRARIES inp_io_static)
+endif()
+
+if("shared" IN_LIST inp_io_FIND_COMPONENTS)
+    list(APPEND INP_IO_LIBRARIES inp_io_shared)
+endif()
+
+check_required_components(inp_io)

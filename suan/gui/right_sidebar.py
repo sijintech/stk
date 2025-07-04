@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QPushButton,
     QMenu,
+    QStackedLayout,  # 新增
 )
 from custom_logger import CustomLogger
 
@@ -17,24 +18,35 @@ class RightSidebar(QWidget):
         self.table_widget = None
         self.variable_info = None
         self.parent = parent
+        self.param_form = None  # CLI参数表单
         self.initUI()
         self.parent.registerComponent("Status", self, True)
 
     def initUI(self):
-        layout = QVBoxLayout()
-
+        self.stacked_layout = QStackedLayout()
         # 创建表格部件
         self.table_widget = QTableWidget()
         self.table_widget.setColumnCount(2)  # 设置表格列数为2
-        self.table_widget.setHorizontalHeaderLabels(
-            ["变量名", "变量值"]
-        )  # 设置表头标签
-        layout.addWidget(self.table_widget)
-
+        self.table_widget.setHorizontalHeaderLabels([
+            "变量名", "变量值"
+        ])  # 设置表头标签
         self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.stacked_layout.addWidget(self.table_widget)
+        self.setLayout(self.stacked_layout)
 
-        self.setLayout(layout)
+    def set_param_form(self, param_form):
+        """注入CLI参数表单，并加入堆叠布局"""
+        self.param_form = param_form
+        self.stacked_layout.addWidget(param_form)
+
+    def show_variable_table(self):
+        """显示变量表格"""
+        self.stacked_layout.setCurrentWidget(self.table_widget)
+
+    def show_param_form(self):
+        """显示CLI参数表单"""
+        if self.param_form:
+            self.stacked_layout.setCurrentWidget(self.param_form)
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)

@@ -1,0 +1,95 @@
+"""
+CLI文档查看器，用于显示命令文档
+"""
+
+from PySide6 import QtWidgets, QtCore, QtGui
+
+
+class CLIDocViewer(QtWidgets.QTextBrowser):
+    """CLI文档查看器，用于显示命令文档"""
+
+    def __init__(self, cli_manager, parent=None):
+        super().__init__(parent)
+
+        self.cli_manager = cli_manager
+
+        self.setOpenLinks(False)  # 禁止直接打开链接，以便可以自定义链接处理
+        self.setOpenExternalLinks(True)  # 允许打开外部链接
+
+        self.setStyleSheet("""
+            QTextBrowser {
+                background-color: white;
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                padding: 8px;
+            }
+        """)
+
+        self.anchorClicked.connect(self._handle_link_clicked)
+
+    def _handle_link_clicked(self, url):
+        """处理链接点击事件"""
+
+        url_str = url.toString()
+
+        if url_str.startswith("http://") or url_str.startswith("https://"):
+            QtGui.QDesktopServices.openUrl(url)
+
+
+
+        elif url_str.startswith("cli://"):
+            parts = url_str[6:].split("/")
+            if len(parts) == 2:
+                group_name, command_name = parts
+
+                self.cli_manager.load_command_doc_and_params(group_name, command_name)
+
+    def setHtml(self, html):
+        """重写setHtml方法，添加自定义样式和处理"""
+
+        print(f"接收到HTML内容: {len(html)} 字符")
+        if not html or len(html) < 5:
+            html = "<p>未接收到有效文档内容</p>"
+
+        styled_html = f"""
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 0; padding: 10px; }}
+                h1 {{ color: #333; border-bottom: 1px solid #ddd; padding-bottom: 10px; }}
+                h2 {{ color: #444; margin-top: 20px; }}
+                code {{ background-color: #f5f5f5; padding: 2px 4px; border-radius: 3px; }}
+                pre {{ background-color: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; }}
+                table {{ border-collapse: collapse; width: 100%; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
+                a {{ color: #0066cc; text-decoration: none; }}
+                a:hover {{ text-decoration: underline; }}
+            </style>
+        </head>
+        <body>
+            {html}
+        </body>
+        </html>
+        """
+
+        print("设置HTML内容到文档查看器")
+        super().setHtml(styled_html)
+        print("HTML内容已设置")
+
+
+class CLITab(QtWidgets.QWidget):
+    """CLI文档标签页，只显示命令文档"""
+
+    def __init__(self, cli_manager, parent=None):
+        super().__init__(parent)
+
+        self.cli_manager = cli_manager
+
+        self.layout = QtWidgets.QVBoxLayout(self)
+
+        self.doc_viewer = CLIDocViewer(self.cli_manager)
+        self.layout.addWidget(self.doc_viewer)
+
+        self.cli_manager.docLoaded.connect(self.doc_viewer.setHtml)
