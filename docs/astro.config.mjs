@@ -25,11 +25,12 @@ export default defineConfig({
             en: {
                 // 英文文档在 `src/content/docs/en/` 中。
                 label: "English",
-                lang: "en", // lang 是 root 语言必须的
+                lang: "en" // lang 是 root 语言必须的
+            },
         },
       },
       social: {
-        github: "https://github.com/withastro/starlight",
+        github: "https://github.com/sijintech/stk",
       },
       logo: {
         src: "./src/assets/logo.png",
@@ -67,6 +68,13 @@ export default defineConfig({
                         en: "structure",
                       },
                       link: "/dev_guide/pyqt/structure",
+                    },
+                    {
+                      label: "添加MCP工具",
+                      translations: {
+                        en: "Add MCP Tool",
+                      },
+                      link: "/dev_guide/pyqt/add-mcp-tool",
                     },
                   ],
                 },
@@ -142,6 +150,20 @@ export default defineConfig({
                                               en: "visualization module",
                                           },
                                           link: "/user_guide/pyqt/function/visualization",
+                                      },
+                                      {
+                                          label: "AI对话模块",
+                                          translations: {
+                                              en: "AI Chat module",
+                                          },
+                                          link: "/user_guide/pyqt/function/ai",
+                                      },
+                                      {
+                                          label: "MCP工具模块",
+                                          translations: {
+                                              en: "MCP Tools module",
+                                          },
+                                          link: "/user_guide/pyqt/function/mcp-tools",
                                       },
                                   ]
                               },
