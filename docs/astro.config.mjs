@@ -28,14 +28,13 @@ export default defineConfig({
                 lang: "en" // lang 是 root 语言必须的
             },
         },
-      },
-      social: {
+        social: {
         github: "https://github.com/sijintech/stk",
       },
-      logo: {
+        logo: {
         src: "./src/assets/logo.png",
       },
-      sidebar: [
+        sidebar: [
         {
           label: "开发者指南",
           translations: {
@@ -169,7 +168,7 @@ export default defineConfig({
                               },
 
                           ],
-                      },]
+                      }]
               }
           ],
         },
