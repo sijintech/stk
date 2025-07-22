@@ -14,4 +14,4 @@ In addition to viewing the current initial value of variables, users can also mo
 This way, users can quickly test different situations and scenarios by editing the values in the status bar. Once a user has modified the initial value of a variable, they can right-click the "Save and Modify" button to test the code accordingly.
 This feature provides users with a convenient way to test different inputs and conditions for their code, helping them to more effectively debug and optimize their code.
 As shown in the figure below, this is the effect after declaring the variables filename and background1 in the info bar code section.
-![img.png](../../../../../assets/statebar.png)
+![img.png](../../../../../../assets/statebar.png)

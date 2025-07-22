@@ -10,4 +10,4 @@ When a user double-clicks on a file node on the left, the file system module fin
 
 ## Execute and Analyze Code
 The user can then right-click the "Analyze and Run the current code" button to run and analyze the corresponding code, and finally display the corresponding results in the visualization interface module and status bar module.
-![img.png](../../../../../assets/infobar1.png)
+![img.png](../../../../../../assets/infobar1.png)
