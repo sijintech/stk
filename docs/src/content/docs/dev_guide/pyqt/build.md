@@ -1,3 +1,8 @@
+---
+title: STK 应用打包指南
+description: STK应用打包指南
+---
+
 # STK 应用打包指南
 
 ## 添加新的第三方库到 STK 打包过程

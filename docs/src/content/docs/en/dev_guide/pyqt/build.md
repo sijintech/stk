@@ -1,3 +1,8 @@
+---
+title: STK Application Packaging Guide
+description: Guide for packaging STK applications
+---
+
 # STK Application Packaging Guide
 
 ## Adding New Third-Party Libraries to STK Packaging Process
