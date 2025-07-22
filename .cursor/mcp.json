@@ -1,0 +1,17 @@
+{
+    "mcpServers": {
+      "stk-toolkit": {
+        "command": "cmd.exe",
+        "args": ["/c", "python -m suan.mcp"],
+        "cwd": "D:/stk/work/stk",
+        "env": {
+          "PYTHONIOENCODING": "utf-8",
+          "PYTHONLEGACYWINDOWSSTDIO": "1"
+        }
+      },
+        "serena": {
+            "command": "C:\\Users\\zhou\\AppData\\Roaming\\Python\\Python311\\Scripts\\uv.exe",
+            "args": ["run", "--directory", "D:\\stk\\work\\serena", "serena-mcp-server"]
+      }
+    }
+  }

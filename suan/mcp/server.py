@@ -362,74 +362,77 @@ async def generate_plot(
 async def run_smesh(command: str) -> str:
     """
     直接运行smesh工具命令
-    
+
     Args:
         command: 要执行的smesh命令参数
     """
+    smesh_help = """
+smesh - 网格处理工具
+
+主要功能:
+  生成、处理和分析科学计算中的网格数据
+
+主要命令:
+  run         运行网格生成或处理任务
+  info        显示网格文件或网格参数信息
+使用方法:
+    一定要先查看子命令具体帮助再使用，不能想当然的输入参数，要根据具体帮助来输入参数。
+
+如果要查看子命令具体帮助，请输入参数:
+  run --help
+  info --help
+    """
     try:
-        # 在Windows上，使用python直接调用smesh模块可能更可靠
+        if command == "--help" or command == "-h":
+            return smesh_help
+
+        logger.info(f"获取smesh子命令: {command}")
+        main_py_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'cli', 'main.py')
         if sys.platform == "win32":
-            # 构建使用Python执行smesh模块的命令
-            smesh_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolkits', 'smesh')
-            full_command = f"python -m smesh {command}"
-        else:
-            full_command = f"smesh {command}"
-            
-        logger.info(f"执行smesh命令: {full_command}")
-        
-        # 在Windows上处理编码问题
-        if sys.platform == "win32":
-            process = subprocess.run(
-                full_command,
-                shell=True,
-                capture_output=True,
-                text=False,  # 不自动解码
-                timeout=COMMAND_TIMEOUT
-            )
-            
-            # 尝试不同的编码方式解码输出
-            encodings = ['utf-8', 'gbk', 'gb2312', 'cp936']
-            stdout = None
-            stderr = None
-            
-            for encoding in encodings:
+            full_command = f'python "{main_py_path}" smesh {command}'
+            logger.info(f"执行smesh命令: {full_command}")
+            try:
+                process = subprocess.run(
+                    full_command,
+                    shell=True,
+                    capture_output=True,
+                    text=False,
+                    timeout=100
+                )
                 try:
-                    if not stdout and process.stdout:
-                        stdout = process.stdout.decode(encoding, errors='replace')
-                    if not stderr and process.stderr:
-                        stderr = process.stderr.decode(encoding, errors='replace')
-                    if stdout and stderr:
-                        break
-                except UnicodeDecodeError:
-                    continue
-            
-            # 如果所有编码都失败，使用'replace'策略的utf-8
-            if not stdout and process.stdout:
-                stdout = process.stdout.decode('utf-8', errors='replace')
-            if not stderr and process.stderr:
-                stderr = process.stderr.decode('utf-8', errors='replace')
+                    stdout = process.stdout.decode('utf-8', errors='replace') if process.stdout else ""
+                    stderr = process.stderr.decode('utf-8', errors='replace') if process.stderr else ""
+                except Exception:
+                    stdout = str(process.stdout)
+                    stderr = str(process.stderr)
+                if process.returncode == 0:
+                    return stdout or "命令执行成功，无输出"
+                else:
+                    error_msg = f"smesh命令执行失败 (错误码 {process.returncode}):\n{stderr}"
+                    logger.error(error_msg)
+                    return error_msg
+            except subprocess.TimeoutExpired:
+                return "smesh命令执行超时 (超过 100 秒)"
         else:
-            # 非Windows系统使用原来的方法
-            process = subprocess.run(
-                full_command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=COMMAND_TIMEOUT
-            )
-            stdout = process.stdout
-            stderr = process.stderr
-        
-        if process.returncode == 0:
-            return stdout
-        else:
-            error_msg = f"smesh命令执行失败 (错误码 {process.returncode}):\n{stderr}"
-            logger.error(error_msg)
-            return error_msg
-    
-    except subprocess.TimeoutExpired:
-        return f"smesh命令执行超时 (超过 {COMMAND_TIMEOUT} 秒)"
+            full_command = f'python "{main_py_path}" smesh {command}'
+            logger.info(f"执行smesh命令: {full_command}")
+            try:
+                process = subprocess.run(
+                    full_command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=10
+                )
+                if process.returncode == 0:
+                    return process.stdout or "命令执行成功，无输出"
+                else:
+                    error_msg = f"smesh命令执行失败 (错误码 {process.returncode}):\n{process.stderr}"
+                    logger.error(error_msg)
+                    return error_msg
+            except subprocess.TimeoutExpired:
+                return "smesh命令执行超时 (超过 10 秒)"
     except Exception as e:
         error_msg = f"执行smesh命令时发生错误: {str(e)}"
         logger.error(error_msg)
@@ -439,74 +442,79 @@ async def run_smesh(command: str) -> str:
 async def run_sviz(command: str) -> str:
     """
     直接运行sviz可视化工具命令
-    
+
     Args:
         command: 要执行的sviz命令参数
     """
+    sviz_help = """
+sviz - 可视化工具
+
+主要功能:
+  对科学数据进行可视化，包括标量场、矢量场等
+
+主要命令:
+  plot-scalar    绘制标量场
+  plot-vector    绘制矢量场
+  info           显示可视化支持信息
+使用方法:
+    一定要先查看子命令具体帮助再使用，不能想当然的输入参数，要根据具体帮助来输入参数。
+
+如果要查看子命令具体帮助，请输入参数:
+  plot-scalar --help
+  plot-vector --help
+  info --help
+    """
     try:
-        # 在Windows上，使用python直接调用sviz模块可能更可靠
+        if command == "--help" or command == "-h":
+            return sviz_help
+
+        logger.info(f"获取sviz子命令: {command}")
+        main_py_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'cli', 'main.py')
         if sys.platform == "win32":
-            # 构建使用Python执行sviz模块的命令
-            sviz_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolkits', 'sviz')
-            full_command = f"python -m sviz {command}"
-        else:
-            full_command = f"sviz {command}"
-            
-        logger.info(f"执行sviz命令: {full_command}")
-        
-        # 在Windows上处理编码问题
-        if sys.platform == "win32":
-            process = subprocess.run(
-                full_command,
-                shell=True,
-                capture_output=True,
-                text=False,  # 不自动解码
-                timeout=COMMAND_TIMEOUT
-            )
-            
-            # 尝试不同的编码方式解码输出
-            encodings = ['utf-8', 'gbk', 'gb2312', 'cp936']
-            stdout = None
-            stderr = None
-            
-            for encoding in encodings:
+            full_command = f'python "{main_py_path}" sviz {command}'
+            logger.info(f"执行sviz命令: {full_command}")
+            try:
+                process = subprocess.run(
+                    full_command,
+                    shell=True,
+                    capture_output=True,
+                    text=False,
+                    timeout=100
+                )
                 try:
-                    if not stdout and process.stdout:
-                        stdout = process.stdout.decode(encoding, errors='replace')
-                    if not stderr and process.stderr:
-                        stderr = process.stderr.decode(encoding, errors='replace')
-                    if stdout and stderr:
-                        break
-                except UnicodeDecodeError:
-                    continue
-            
-            # 如果所有编码都失败，使用'replace'策略的utf-8
-            if not stdout and process.stdout:
-                stdout = process.stdout.decode('utf-8', errors='replace')
-            if not stderr and process.stderr:
-                stderr = process.stderr.decode('utf-8', errors='replace')
+                    stdout = process.stdout.decode('utf-8', errors='replace') if process.stdout else ""
+                    stderr = process.stderr.decode('utf-8', errors='replace') if process.stderr else ""
+                except Exception:
+                    stdout = str(process.stdout)
+                    stderr = str(process.stderr)
+                if process.returncode == 0:
+                    return stdout or "命令执行成功，无输出"
+                else:
+                    error_msg = f"sviz命令执行失败 (错误码 {process.returncode}):\n{stderr}"
+                    logger.error(error_msg)
+                    return error_msg
+            except subprocess.TimeoutExpired:
+                return "sviz命令执行超时 (超过 100 秒)"
         else:
-            # 非Windows系统使用原来的方法
-            process = subprocess.run(
-                full_command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=COMMAND_TIMEOUT
-            )
-            stdout = process.stdout
-            stderr = process.stderr
-        
-        if process.returncode == 0:
-            return stdout
-        else:
-            error_msg = f"sviz命令执行失败 (错误码 {process.returncode}):\n{stderr}"
-            logger.error(error_msg)
-            return error_msg
-    
-    except subprocess.TimeoutExpired:
-        return f"sviz命令执行超时 (超过 {COMMAND_TIMEOUT} 秒)"
+            full_command = f'python "{main_py_path}" sviz {command}'
+            logger.info(f"执行sviz命令: {full_command}")
+            try:
+                process = subprocess.run(
+                    full_command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=10
+                )
+                if process.returncode == 0:
+                    return process.stdout or "命令执行成功，无输出"
+                else:
+                    error_msg = f"sviz命令执行失败 (错误码 {process.returncode}):\n{process.stderr}"
+                    logger.error(error_msg)
+                    return error_msg
+            except subprocess.TimeoutExpired:
+                return "sviz命令执行超时 (超过 10 秒)"
     except Exception as e:
         error_msg = f"执行sviz命令时发生错误: {str(e)}"
         logger.error(error_msg)
