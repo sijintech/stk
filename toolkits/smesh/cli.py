@@ -36,7 +36,18 @@ def run(input, output):
     示例:
       smesh run --input mesh.in --output mesh.out
     """
-    click.echo(f"[smesh] 运行网格处理: 输入={input}, 输出={output}")
+    from pathlib import Path
+    if not input or not output:
+        raise click.UsageError('--input and --output are required')
+    try:
+        if Path(input).suffix.lower() == '.toml':
+            from .core import generate_structure
+            click.echo(generate_structure(input, output))
+        else:
+            from toolkits.sviz.field import read_field, write_field
+            click.echo(write_field(output, read_field(input)))
+    except (ValueError, OSError, KeyError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 @click.command()
 @click.option('--file', '-f', required=True, help='要显示信息的网格文件')
@@ -47,7 +58,12 @@ def info(file):
     示例:
       smesh info --file mesh.out
     """
-    click.echo(f"[smesh] 显示网格信息: {file}")
+    import json
+    from toolkits.sviz.field import field_info
+    try:
+        click.echo(json.dumps(field_info(file), ensure_ascii=False))
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 smesh.add_command(run)
 smesh.add_command(info)

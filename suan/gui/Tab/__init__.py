@@ -1,4 +1,4 @@
 from .code_tab import CodeTab
 from .data_table_tab import DataTableTab
 from .preference_tab import PreferenceTab
-from .ai.chat_interface import AIChatTab
+from .ai import AIChatTab

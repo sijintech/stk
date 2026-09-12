@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-10",
+  "stk": {
+    "suite": "tests",
+    "passed": 90,
+    "warnings": 3,
+    "seconds": 29.96
+  },
+  "synorder": {
+    "suite": "tests/enterprise tests/kernel tests/workbench + installed STK plugin tests",
+    "passed": 718,
+    "seconds": 146.08
+  },
+  "final_focused": {
+    "suite": "GUI contracts, native clients, interaction pipeline, installed STK plugin",
+    "passed": 59,
+    "seconds": 48.71
+  },
+  "lint": "Ruff F/E9 passed on new Python modules",
+  "frontend": "TypeScript and production Vite build passed; scientific renderer chunk is lazy loaded",
+  "browser": "browser-report.json",
+  "native": "native-report.json",
+  "models": "No live cloud model called; existing structured-tool tests use mocks",
+  "private_configuration_modified": false,
+  "deployment_performed": false,
+  "pr_preparation": {
+    "date": "2026-09-11",
+    "synorder_revision": "3c29694",
+    "stk": {
+      "passed": 90,
+      "seconds": 31.89,
+      "warnings": 3
+    },
+    "host_and_plugin": {
+      "passed": 59,
+      "seconds": 52.0
+    },
+    "packaging": "Root wheel/sdist and clean-source plugin wheel built; visualization extra and packaged resources verified"
+  }
+}

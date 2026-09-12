@@ -53,6 +53,10 @@ code_url = "https://github.com/sijintech/stk"
 os.environ["QT_API"] = "pyside"
 
 
+def stk_config_dir():
+    return os.environ.get("STK_CONFIG_DIR", os.path.join(os.path.expanduser("~"), ".stk"))
+
+
 class MainWindow(QMainWindow):
     def __init__(self, create_workspace_if_no):
         super().__init__()
@@ -594,7 +598,7 @@ class MainWindow(QMainWindow):
         self.workspaceData = self.load_workspace_data()
 
         try:
-            user_config_dir = os.path.join(os.path.expanduser("~"), ".stk", "workspaces")
+            user_config_dir = os.path.join(stk_config_dir(), "workspaces")
             os.makedirs(user_config_dir, exist_ok=True)
 
             workspace_id = self.curWorkDir.replace(":", "_").replace("\\", "_").replace("/", "_")
@@ -725,7 +729,7 @@ class MainWindow(QMainWindow):
     def backup_workspace_file(self, directory, workspace_file):
         """备份工作区文件到用户配置目录"""
         try:
-            user_config_dir = os.path.join(os.path.expanduser("~"), ".stk", "workspaces")
+            user_config_dir = os.path.join(stk_config_dir(), "workspaces")
             os.makedirs(user_config_dir, exist_ok=True)
 
             workspace_id = directory.replace(":", "_").replace("\\", "_").replace("/", "_")
@@ -891,7 +895,7 @@ class MainWindow(QMainWindow):
         """从备份恢复工作区配置"""
         try:
 
-            user_config_dir = os.path.join(os.path.expanduser("~"), ".stk", "workspaces")
+            user_config_dir = os.path.join(stk_config_dir(), "workspaces")
             workspace_id = self.curWorkDir.replace(":", "_").replace("\\", "_").replace("/", "_")
             backup_path = os.path.join(user_config_dir, f"{workspace_id}.suan.bak")
             
@@ -946,7 +950,7 @@ class MainWindow(QMainWindow):
                 os.rename(temp_path, self.workspace_conf_path)
 
             try:
-                user_config_dir = os.path.join(os.path.expanduser("~"), ".stk", "workspaces")
+                user_config_dir = os.path.join(stk_config_dir(), "workspaces")
                 os.makedirs(user_config_dir, exist_ok=True)
                 
                 workspace_id = self.curWorkDir.replace(":", "_").replace("\\", "_").replace("/", "_")
@@ -987,7 +991,7 @@ class MainWindow(QMainWindow):
 
     def init_preferences(self):
 
-        user_config_dir = os.path.join(os.path.expanduser("~"), ".stk")
+        user_config_dir = stk_config_dir()
         os.makedirs(user_config_dir, exist_ok=True)
 
         this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1181,21 +1185,9 @@ class MainWindow(QMainWindow):
             return -1
         if version2 == "":
             return 1
-        v1_parts = list(map(int, version1.split(".")))
-        v2_parts = list(map(int, version2.split(".")))
-
-        while len(v1_parts) < len(v2_parts):
-            v1_parts.append(0)
-        while len(v2_parts) < len(v1_parts):
-            v2_parts.append(0)
-
-        for part1, part2 in zip(v1_parts, v2_parts):
-            if part1 < part2:
-                return -1
-            elif part1 > part2:
-                return 1
-
-        return 0
+        from packaging.version import Version
+        first, second = Version(version1), Version(version2)
+        return (first > second) - (first < second)
 
     def registerComponent(self, path, component, isVisible):
         """按路径注册组件,根组件为main"""
@@ -1347,7 +1339,7 @@ def apply_qss(app, qss):
 def get_resource_path(relative_path):
     if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
 
 def check_resource():
@@ -1377,11 +1369,11 @@ def ensure_config_directories():
     user_home = os.path.expanduser("~")
 
     config_dirs = [
-        os.path.join(user_home, ".stk"),
-        os.path.join(user_home, ".stk", "workspaces"),
-        os.path.join(user_home, ".stk", "logs"),
-        os.path.join(user_home, ".stk", "cache"),
-        os.path.join(user_home, ".stk", "temp"),
+        stk_config_dir(),
+        os.path.join(stk_config_dir(), "workspaces"),
+        os.path.join(stk_config_dir(), "logs"),
+        os.path.join(stk_config_dir(), "cache"),
+        os.path.join(stk_config_dir(), "temp"),
     ]
     
     success = True
@@ -1426,7 +1418,7 @@ def check_system_compatibility():
             if temp_dir and not os.access(temp_dir, os.W_OK):
                 print(f"警告: Windows临时目录不可写: {temp_dir}")
 
-                user_temp = os.path.join(os.path.expanduser("~"), ".stk", "temp")
+                user_temp = os.path.join(stk_config_dir(), "temp")
                 os.environ["TEMP"] = user_temp
                 print(f"已将临时目录重定向到: {user_temp}")
         except Exception as e:
@@ -1460,7 +1452,7 @@ def check_system_compatibility():
     except Exception as e:
         print(f"临时文件创建测试失败: {e}")
 
-        user_temp = os.path.join(os.path.expanduser("~"), ".stk", "temp")
+        user_temp = os.path.join(stk_config_dir(), "temp")
         tempfile.tempdir = user_temp
         print(f"已将Python临时文件目录重定向到: {user_temp}")
 

@@ -1,46 +1,39 @@
-import click
+"""Installed and source-tree CLI entry point."""
+
 import importlib
-import os
+from pathlib import Path
 import sys
+
+import click
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 @click.group()
-@click.version_option('1.0.0')  # 添加版本信息
-# @click.group(invoke_without_command=True)
+@click.version_option(package_name="suan_toolkits")
 def cli():
-    pass
+    """STK scientific tools and persistent task runtime."""
 
 
-toolkits_path = '../../toolkits'  # 未打包时测试用
-
-
-# toolkits_path= 'toolkits' #打包时用
 def load_plugins():
-    """加载插件并返回每个插件的click.Group对象"""
-    # 获取toolkits目录的绝对路径
-    plugins_dir = os.path.join(os.path.dirname(__file__), toolkits_path)
-
-    # 将toolkits目录添加到sys.path，确保可以动态导入插件
-    sys.path.insert(0, plugins_dir)
-
-    for plugin_name in os.listdir(plugins_dir):
-        plugin_path = os.path.join(plugins_dir, plugin_name, 'cli.py')
-        if os.path.exists(plugin_path):
-            # 动态加载插件的cli.py文件
-            plugin_module = importlib.import_module(f'{plugin_name}.cli')
-
-            # 获取插件定义的click.Group对象，插件的命令组函数名即为插件名称
-            if hasattr(plugin_module, plugin_name):
-                plugin_group = getattr(plugin_module, plugin_name)
-                cli.add_command(plugin_group)
+    """Use package imports so discovery also works from an installed wheel."""
+    import toolkits
+    # sjob and third-party toolkits may be namespace packages without __init__.
+    names = {path.parent.name for root in toolkits.__path__ for path in Path(root).glob('*/cli.py')}
+    for name in sorted(names):
+        module = importlib.import_module(f"toolkits.{name}.cli")
+        command = getattr(module, name, None)
+        if isinstance(command, click.Command):
+            cli.add_command(command)
 
 
-def show_commands():
-    """打印所有的子命令"""
-    print("Available commands:")
-    for command in cli.commands:
-        print(f"- {command}")
-if __name__ == '__main__':
-    load_plugins()
-    show_commands()
+load_plugins()
+from suan.runtime.cli import server, jobs, workspaces, connect
+
+for command in (server, jobs, workspaces, connect):
+    cli.add_command(command)
+
+
+if __name__ == "__main__":
     cli()

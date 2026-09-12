@@ -42,15 +42,12 @@ class CLIManager(QtCore.QObject):
             for group_name in os.listdir(self.toolkits_path):
 
                 group_path = os.path.join(self.toolkits_path, group_name)
-                print(f'{group_name}:{group_path}')
                 cli_path = os.path.join(group_path, 'cli.py')
 
                 if os.path.isdir(group_path) and os.path.exists(cli_path):
                     try:
 
-                        spec = importlib.util.spec_from_file_location(f"{group_name}.cli", cli_path)
-                        module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(module)
+                        module = importlib.import_module(f"toolkits.{group_name}.cli")
 
                         if hasattr(module, group_name):
                             group_obj = getattr(module, group_name)

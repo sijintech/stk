@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "purpose": "STK domain plugin extraction; existing Synorder research example retained for compatibility",
+  "source_repository": "synorder-enterprise/synorder",
+  "source_revision": "2c69474 (working tree research implementation)",
+  "files": {
+    "capability.py": "6de111757732f1f5afeed84946f84c3a3d9c608272321c67bf4a76a72aa33052",
+    "method.py": "926ce0f221b873f5106fbe9ea98cd2d533aae95efaeb24eff614f182e74d7dce",
+    "examples/simulate.py": "12bd97dc26f0466a53869acc1589e07993a4efb0e4351435493aa3d6c7e58aa8"
+  },
+  "changes": [
+    "Independent synorder.stk capability, action/view/method IDs",
+    "Declarative native/web/mobile ViewSpec provider",
+    "STK-owned scientific queries and existing Runtime task adoption"
+  ],
+  "runtime_owner": "STK",
+  "gui_owner": "Synorder"
+}

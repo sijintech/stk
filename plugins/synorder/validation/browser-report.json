@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "mobile_viewport": [
+    390,
+    844
+  ],
+  "desktop_viewport": [
+    1440,
+    1000
+  ],
+  "tasks": 1,
+  "native_scene": true,
+  "javascript_errors": [],
+  "model_called": false
+}

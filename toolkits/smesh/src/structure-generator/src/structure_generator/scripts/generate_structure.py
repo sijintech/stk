@@ -18,7 +18,11 @@ def generate_structure():
     args = parser.parse_args()
 
 
-    total_config = read_toml(args.filename)
+    generate_from_config(read_toml(args.filename))
+
+
+def generate_from_config(total_config):
+    """Generate using explicit configuration and output paths; does not change cwd."""
     target_program = total_config.get('target_program', None)
 
     if not target_program:
@@ -50,7 +54,6 @@ def generate_structure():
 
     elif target_program == 'muPRODICT':
 
-        total_config = read_toml(args.filename)
         common_config = total_config["common_config"]
         eta_config    = total_config["eta_config"]
         comp_config   = total_config["comp_config"]
@@ -67,6 +70,8 @@ def generate_structure():
           print("Start to generate comp file")
           generateCompFileWithConfig(common_config, comp_case_config,comp_case)
           print("Finish to generate comp file")
+    else:
+        raise ValueError(f"Unsupported target_program: {target_program}")
 
 def generateEtaFileWithConfig(common_config, eta_case_config, case):
     eta_selected_config = {}

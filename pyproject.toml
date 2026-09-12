@@ -4,33 +4,68 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "suan_toolkits"
-version = "0.0.0"
-description = "This is a tool to vtk and matploblib."
+version = "0.1.0a1"
+description = "Scientific workflows with desktop, CLI and persistent local/cluster runtimes."
 readme = "README.md"
 authors = ["Zhou Hanjie <2625553453@qq.com>"]
+packages = [
+    { include = "suan" },
+    # Specific source roots must precede the enclosing toolkit package: Poetry
+    # deduplicates source files using the first package mapping encountered.
+    { include = "structure_generator", from = "toolkits/smesh/src/structure-generator/src" },
+    { include = "stk_data", from = "toolkits/smesh/src" },
+    { include = "toolkits" },
+]
+exclude = ["toolkits/cpp/**", "toolkits/**/tests/**", "toolkits/**/test/**", "**/__pycache__/**", "**/*.pyc"]
+include = [
+    { path = "docs/runtime*.md", format = "sdist" },
+    { path = "examples/runtime", format = "sdist" },
+    { path = "deploy/systemd", format = "sdist" },
+    { path = "tests", format = "sdist" },
+    { path = "blender", format = "sdist" },
+]
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.12"
-numpy = "1.24.3"
-toml = ">=0.8.2"
-matplotlib = "3.6.2"
-PySide6 = "6.4.1"
-vtk = "9.3.0"
-requests = "*"
-pandas = "*"
-ollama = "*"
-sentence-transformers = "4.0.1"
-PyPDF2 = "*"
-chardet = "*"
-qtpy = "*"
-pygments = "*"
-pyinstaller = "6.3.0"
-frontend = "*"
-pathspec= "*"
-psutil = "*"  
-pyinstaller-hooks-contrib = "*"
-tqdm = ">=4.27"
-markdown= "*"
+python = ">=3.10,<3.15"
+click = ">=8,<9"
+psutil = ">=5.9,<8"
+toml = ">=0.10,<1"
+numpy = { version = ">=1.24,<3", optional = true }
+matplotlib = { version = ">=3.6,<4", optional = true }
+PySide6 = { version = ">=6.4,<7", optional = true }
+vtk = { version = ">=9.3,<10", optional = true }
+requests = { version = ">=2.31,<3", optional = true }
+pandas = { version = ">=2,<4", optional = true }
+h5py = { version = ">=3.8,<4", optional = true }
+ollama = { version = ">=0.4,<1", optional = true }
+sentence-transformers = { version = ">=4,<6", optional = true }
+PyPDF2 = { version = ">=3,<4", optional = true }
+chardet = { version = ">=5,<6", optional = true }
+qtpy = { version = ">=2,<3", optional = true }
+pygments = { version = ">=2,<3", optional = true }
+pyinstaller = { version = ">=6.3,<7", optional = true }
+pathspec = { version = ">=0.12,<2", optional = true }
+pyinstaller-hooks-contrib = { version = ">=2024", optional = true }
+tqdm = { version = ">=4.27,<5", optional = true }
+markdown = { version = ">=3,<4", optional = true }
+packaging = { version = ">=23,<27", optional = true }
+mcp = { version = ">=1,<2", optional = true }
+pytest = { version = ">=8,<10", optional = true }
+fastapi = { version = "==0.141.1", optional = true }
+uvicorn = { version = ">=0.34,<1", optional = true }
+httpx = { version = ">=0.28,<1", optional = true }
+websockets = { version = "==15.0.1", optional = true }
+
+[tool.poetry.extras]
+server = []
+science = ["numpy", "matplotlib", "pandas", "h5py"]
+desktop = ["numpy", "matplotlib", "pandas", "h5py", "PySide6", "vtk", "requests", "chardet", "qtpy", "pygments", "pathspec", "tqdm", "markdown", "packaging"]
+ai = ["ollama", "sentence-transformers", "PyPDF2", "requests"]
+mcp = ["mcp", "numpy", "matplotlib"]
+build = ["pyinstaller", "pyinstaller-hooks-contrib"]
+test = ["pytest"]
+control = ["fastapi", "uvicorn", "httpx", "websockets"]
+visualization = ["numpy", "vtk"]
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]
@@ -48,16 +83,27 @@ Issues = "https://github.com/sijintech/stk/issues/"
 
 # 打包和开发工具，放在可选依赖中
 [tool.poetry.group.dev.dependencies]
-pyinstaller = "6.3.0"
+pyinstaller = ">=6.3,<7"
 black = "^23.3.0"
 isort = "^5.12.0"
 flake8 = "^6.0.0"
 
 # 添加脚本命令
 [tool.poetry.scripts]
-build-app = "suan.gui.packaging.builder:main"
-extract-deps = "suan.gui.packaging.dependencies:extract_dependencies"
-generate-hooks = "suan.gui.packaging.hooks_generator:main"
+suan = "suan.cli.main:cli"
+suan-gui = "suan.gui.launcher:main"
+suan-control = "suan.control.cli:control"
+suan-node = "suan.control.cli:node"
+suan-blender = "suan.blender_client.launcher:main"
+suan-workbench = "suan.workbench:main"
+suan-synorder-node = "suan.runtime.synorder_node:main"
+build-app = "suan.gui.pkg_tools.builder:main"
+extract-deps = "suan.gui.pkg_tools.dependencies:main"
+generate-hooks = "suan.gui.pkg_tools.hooks_generator:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["desktop: requires PySide6/VTK and an offscreen Qt platform"]
 
 # PyInstaller配置
 [tool.pyinstaller]
@@ -168,5 +214,3 @@ modules = [
     "cross_encoder.CrossEncoder",
     "util"
 ]
-
-

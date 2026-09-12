@@ -62,23 +62,13 @@ class UpdateWindow(QDialog):
         if self.允许关闭 is False:
             event.ignore()
     def compare_versions(self,version1, version2):
-        v1_parts = list(map(int, version1.split('.')))
-        v2_parts = list(map(int, version2.split('.')))
-
-        # 补齐版本号，使其长度一致
-        while len(v1_parts) < len(v2_parts):
-            v1_parts.append(0)
-        while len(v2_parts) < len(v1_parts):
-            v2_parts.append(0)
-
-        # 逐部分比较版本号
-        for part1, part2 in zip(v1_parts, v2_parts):
-            if part1 < part2:
-                return -1
-            elif part1 > part2:
-                return 1
-
-        return 0
+        from packaging.version import Version
+        if not version1:
+            return -1
+        if not version2:
+            return 1
+        first, second = Version(version1), Version(version2)
+        return (first > second) - (first < second)
 
     def check_update_and_callback(self, data):
         print("数据", data)

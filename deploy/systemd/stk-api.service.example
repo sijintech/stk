@@ -1,0 +1,13 @@
+[Unit]
+Description=STK personal runtime API
+After=network.target
+
+[Service]
+Type=simple
+# Replace both absolute paths before installing as a user service.
+ExecStart=/opt/stk/venv/bin/python -m suan.runtime.server --state-dir /local-disk/stk-state
+Restart=on-failure
+UMask=0077
+
+[Install]
+WantedBy=default.target

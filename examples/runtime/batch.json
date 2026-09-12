@@ -1,0 +1,13 @@
+{
+  "FreeFile": [],
+  "FixFile": ["input.json"],
+  "CopyFile": ["simulate.py"],
+  "FreeVarName": [],
+  "FixVarName": ["AMPLITUDE"],
+  "VarValue": {"AMPLITUDE": [1, 2]},
+  "VarSequence": ["AMPLITUDE"],
+  "Separator": "+",
+  "Format": "%s",
+  "Condition": "1>0",
+  "Command": "python simulate.py"
+}

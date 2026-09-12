@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-10",
+  "os": "Ubuntu 26.04.1 LTS",
+  "kernel": "Linux 7.0.0-29-generic",
+  "cpu": "2 x Intel Xeon E5-2690 v3 @ 2.60GHz",
+  "logical_cpus": 48,
+  "system_memory_gib": 121,
+  "compiler": "GCC 15.2",
+  "cmake": "4.2.3",
+  "python": "3.12.13",
+  "native_python": "3.13 (upstream bundled)",
+  "build_profile": "Release / blender_lite.cmake / X11 / OpenGL / Wayland OFF / Vulkan OFF",
+  "source": "../upstream.json",
+  "python_dependencies": {
+    "numpy": "2.5.3",
+    "vtk": "9.7.0",
+    "fastapi": "0.141.1",
+    "starlette": "1.6.0",
+    "uvicorn": "0.52.4",
+    "websockets": "15.0.1",
+    "httpx": "0.28.1",
+    "PySide6": "6.11.2",
+    "pytest": "9.1.1",
+    "psutil": "7.2.2",
+    "click": "8.5.0",
+    "toml": "0.10.2"
+  },
+  "native_binary_sha256": "4a52cc39a43907756701288d6034a5205e8d4454865624668e0c97d166f6083b",
+  "source_overlay_sha256": {
+    "source/blender/editors/space_stk/space_stk.cc": "81d87627dce12f90525e452fb056331cac470f0e45bd8b8e628c909413137ec6",
+    "source/blender/editors/space_stk/stk_scene.hh": "acca7e87b40a7bfcba5634e0c67abcb709caef4e8c86093c074460a412d167d5",
+    "source/blender/editors/space_stk/CMakeLists.txt": "24fb16a80733cb5fd5f4a621ea563a42fc54b2632ab9c150f03be4cc6c6ab142",
+    "scripts/startup/bl_app_templates_system/STK/__init__.py": "a2b07d24b06ebb45564e5365a4bfdc22075f8dba69ecb3b7d3f5b4022e9bd069",
+    "patches/0001-register-stk-editor.patch": "c792860ac11b34a6e1f111d12c3197ffd2cc41b91b45720fae1f91361f6f8a96"
+  }
+}

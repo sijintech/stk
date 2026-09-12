@@ -1,0 +1,28 @@
+{
+  "host_python": "3.11.15",
+  "platform": "Linux-7.0.0-29-generic-x86_64-with-glibc2.43",
+  "packages": {
+    "numpy": "2.4.6",
+    "vtk": "9.7.0",
+    "fastapi": "0.141.1",
+    "httpx": "0.28.1",
+    "jsonschema": "4.26.0",
+    "playwright": "1.62.0"
+  },
+  "stk_base_revision": "8ee26e6408a86f3fa397013ab3401ad9dd6242d3",
+  "synorder_base_revision": "2c69474b5f5f080db7db3663cc6472a94ecb85b2",
+  "blender": "5.2.1 LTS",
+  "verification_scope": "Working tree implementation, not a released tag",
+  "native_source_sha256": "984bda7d9278423bce3145c908973cfc5b0c5bfb085f42ee02fd8962ed9702de",
+  "plugin_sources_sha256": {
+    "src/synorder_stk/views.py": "22a27f28c9ff4c739a30be13980ca7095cee0d5a62de6cc4681276021398411d",
+    "src/synorder_stk/science.py": "2d553b75d7a078d38f056c69d6c4fee57f1028aafa0fc16c88981c8897374a27",
+    "src/synorder_stk/history.py": "39c9f899ec3d9db9306207660b037012dacaeff10c469c3b1e712ac7765fd81d",
+    "src/synorder_stk/capability.py": "0a80287be2f97558cfbfcdd9bb0faecf50a1f46fbbc6004b0a1db07a207a46ba",
+    "src/synorder_stk/method.py": "0850f27484aef44492bd53ee452fe30754ba43a673da48d57c116e5999adc9f1",
+    "src/synorder_stk/__init__.py": "72c97feff1dec99130e44534ef2e56bdfa95c45e0a1f8be6ac955f30737326b7",
+    "src/synorder_stk/pack.yaml": "8281f7208bc00affd06b9feff5bbd0dbfadcda5d3ccb83946adfec82f47ce284",
+    "src/synorder_stk/examples/simulate.py": "12bd97dc26f0466a53869acc1589e07993a4efb0e4351435493aa3d6c7e58aa8",
+    "src/synorder_stk/skills/scientific-workbench/SKILL.md": "08e1aa86170af42134abb97ddb1da531df66b024d44163197999eefe710ec7e5"
+  }
+}
