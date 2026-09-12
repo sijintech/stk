@@ -1,0 +1,37 @@
+{
+  "status": "passed",
+  "ime_composition_tested": false,
+  "first_display_seconds": 1.2721662078984082,
+  "resolution": [
+    1440,
+    1000
+  ],
+  "editor_size": [
+    1440,
+    1000
+  ],
+  "renderer": "llvmpipe (LLVM 21.1.8, 256 bits)",
+  "vendor": "Mesa",
+  "graphics_version": "4.5 (Core Profile) Mesa 26.0.8-1ubuntu0.3",
+  "blender_version": "5.2.1 LTS",
+  "ui_scale": 1.0416666269302368,
+  "capture_source": "native_editor_framebuffer",
+  "vertices": 1024,
+  "triangles": 1922,
+  "frame_sha256": {
+    "baseline": "bf476c8dbbdc5db3da862c8e48bfe392831e02f13649cbf938827c7acbf3ba81",
+    "rotated": "f81a4dfdffdf6a53e9969c9804f4956bd65547e00d76ccdd6f8f0dbb9013373d",
+    "resized": "cfe67a3379a5937a6ceffcac382feae9c1cefce36bc71be7cca764d8974cf2e1",
+    "chinese-input": "a52dc20116b151c79c19cda0771f76c57c38cde4e420928844194a488fbe5c5e"
+  },
+  "redraw_iterations": 30,
+  "redraw_seconds": 0.5404640906490386,
+  "forced_redraws_per_second": 55.50785060293879,
+  "rotation_changed_channels": 410393,
+  "resize_changed_channels": 612405,
+  "unicode_commit_and_submit": true,
+  "gpu_memory_measured": false,
+  "idle_sample_seconds": 1.1989419241435826,
+  "idle_editor_redraws": 0,
+  "process_peak_rss_kib": 446196
+}

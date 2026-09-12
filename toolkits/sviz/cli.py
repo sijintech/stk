@@ -31,26 +31,39 @@ def sviz():
 @click.command()
 @click.option('--input', '-i', required=True, help='输入数据文件')
 @click.option('--output', '-o', required=False, help='输出图片文件')
-def plot_scalar(input, output):
+@click.option('--axis', type=click.Choice(['x', 'y', 'z']), default='z')
+@click.option('--index', type=int)
+@click.option('--component', type=int, default=0)
+def plot_scalar(input, output, axis, index, component):
     """
     绘制标量场
 
     示例:
       sviz plot-scalar --input data.dat --output fig.png
     """
-    click.echo(f"[sviz] 绘制标量场: 输入={input}, 输出={output}")
+    from .field import plot_field
+    try:
+        click.echo(plot_field(input, output or 'scalar.png', axis=axis, index=index, component=component))
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 @click.command()
 @click.option('--input', '-i', required=True, help='输入矢量数据文件')
 @click.option('--output', '-o', required=False, help='输出图片文件')
-def plot_vector(input, output):
+@click.option('--axis', type=click.Choice(['x', 'y', 'z']), default='z')
+@click.option('--index', type=int)
+def plot_vector(input, output, axis, index):
     """
     绘制矢量场
 
     示例:
       sviz plot-vector --input vec.dat --output fig.png
     """
-    click.echo(f"[sviz] 绘制矢量场: 输入={input}, 输出={output}")
+    from .field import plot_field
+    try:
+        click.echo(plot_field(input, output or 'vector.png', vector=True, axis=axis, index=index))
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 @click.command()
 def info():

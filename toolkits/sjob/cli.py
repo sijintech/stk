@@ -844,11 +844,11 @@ def getFolderName(index, file_path="batchList.txt"):
 
         # Get the separator and other necessary values
         sep = getColumnOfIndex(
-            0, 1
+            0, 1, file_path
         ).strip()  # Get the separator from the first line, second column
         index_1 = index + 1
-        first_line = getVariableOfIndex(0)  # Get the first line variables
-        line = getVariableOfIndex(index)  # Get the variables from the specified line
+        first_line = getVariableOfIndex(0, file_path)  # Get the first line variables
+        line = getVariableOfIndex(index, file_path)  # Get the variables from the specified line
 
         columns_1 = columns - 1  # Number of columns minus one
         last_index = len(lines)  # Total number of lines
@@ -868,13 +868,13 @@ def getFolderName(index, file_path="batchList.txt"):
                 2, columns
         ):  # Iterate through the columns starting from the third column
             var_name = getColumnOfIndex(
-                0, j
+                0, j, file_path
             ).strip()  # Get the variable name from the first line
             if var_name.startswith("@"):
                 var_name = var_name[1:]  # Remove "@" if present
 
             var_val = (
-                getColumnOfIndex(index, j).strip().replace(" ", "_")
+                getColumnOfIndex(index, j, file_path).strip().replace(" ", "_")
             )  # Get the variable value and replace spaces with underscores
 
             if j == columns_1:
@@ -1367,11 +1367,11 @@ def writeBatchList(
         # Evaluate the condition using Python's eval function
         try:
             # 对于简单条件，可以使用Python的eval直接评估
-            condition_result = eval(current_condition)
+            from .core import condition
+            condition_result = condition(current_condition)
             result_str = "true" if condition_result else "false"
         except Exception as e:
-            print(f"条件评估错误: {e}，条件为: {current_condition}，默认为真")
-            result_str = "true"  # 出错时默认为真
+            raise ValueError(f"条件评估错误: {current_condition}: {e}") from e
 
         if result_str == "true":
             index += 1
@@ -1913,7 +1913,8 @@ def createCommand(json_file, file_list, start, end):
         config["file_set"] = True
 
     if config["file_set"] == True:
-        makeFolders(config["file_list"], start, end)
+        from .core import create_batch
+        create_batch(config["file_list"], os.getcwd(), start=start or 1, end=end)
     else:
         raise ValueError("The -f or --file option is mandatory.")
 
@@ -1974,11 +1975,11 @@ def executeCommand(json_file, command, start, end):
     config["command_set"] = False
     config["json_set"] = False
     config["start"] = start
-    config["end"] = getEndIndex("batchList.txt")
+    config["end"] = end if end is not None else getEndIndex("batchList.txt")
     config["exec_command"] = "ls"
 
     if command is not None:
-        command["exec_command"] = command
+        config["exec_command"] = command
         config["command_set"] = True
     elif json_file:
         json_command = getJsonVar(json_file, "Command")
@@ -1988,15 +1989,16 @@ def executeCommand(json_file, command, start, end):
 
     if not config["command_set"]:
         if not command:
-            print(
-                "The -c or --command option is mandatory if no JSON file is provided."
-            )
-            return
+            raise click.UsageError("The -c or --command option is mandatory if no JSON file is provided.")
     else:
         print(
             f"Executing command: {config['exec_command']} from index {config['start']} to {config['end']}"
         )
-        execFolders(config["exec_command"], config["start"], config["end"])
+        from .core import execute_batch
+        try:
+            execute_batch(config["exec_command"], os.getcwd(), start=config["start"], end=config["end"])
+        except (subprocess.CalledProcessError, ValueError, OSError) as exc:
+            raise click.ClickException(str(exc)) from exc
 
 
 # # main function

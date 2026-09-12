@@ -13,6 +13,7 @@ from Tab.code_tab import CodeTab
 from Tab.data_table_tab import DataTableTab
 from Tab.preference_tab import PreferenceTab
 from Tab.ai import AIChatTab
+from Tab.runtime_tab import RuntimeTab
 
 
 class CustomFigureCanvas(FigureCanvasQTAgg):
@@ -85,7 +86,8 @@ class CenterWidget(QWidget):
 
     def closeEvent(self, QCloseEvent):
         super().closeEvent(QCloseEvent)
-        self.vtkWidget.Finalize()
+        if self.vtkWidget is not None:
+            self.vtkWidget.Finalize()
 
     def registerComponent(self, path, component, isVisible):
         truePath = "Visualization window/" + path
@@ -111,6 +113,10 @@ class CenterWidget(QWidget):
 
     def addMainOperationTabs(self):
 
+        self.runtimeTab = RuntimeTab(self)
+        self.tabWidget.addTab(self.runtimeTab, "Tasks")
+        self.registerComponent("Tasks Tab", self.runtimeTab, True)
+
         self.codeTab = CodeTab(self)
         self.tabWidget.addTab(self.codeTab, "Code")
         self.registerComponent("Code Tab", self.codeTab, True)
@@ -121,13 +127,9 @@ class CenterWidget(QWidget):
 
         self.aiChatTab.modelConfigChanged.connect(self.onAIModelConfigChanged)
 
-        self.vtkWidget = QVTKRenderWindowInteractor()  # 创建VTK渲染窗口交互器
-        self.vtkWidget.Initialize()
-
+        self.vtkWidget = None
         self.vtkVisualizationTab = QWidget()
-        vtkLayout = QVBoxLayout()
-        vtkLayout.addWidget(self.vtkWidget)
-        self.vtkVisualizationTab.setLayout(vtkLayout)
+        self.vtkLayout = QVBoxLayout(self.vtkVisualizationTab)
         self.tabWidget.addTab(self.vtkVisualizationTab, "VTK Visualization")
         self.registerComponent("VTK Visualization Tab", self.vtkVisualizationTab, True)
 
@@ -190,9 +192,20 @@ class CenterWidget(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-    def updateVTKVisualization(self, vtkObject):
+    def ensure_vtk_widget(self):
+        # Task monitoring and image previews do not need an OpenGL context.
+        if self.vtkWidget is None:
+            self.vtkWidget = QVTKRenderWindowInteractor(self.vtkVisualizationTab)
+            self.vtkLayout.addWidget(self.vtkWidget)
+            self.vtkWidget.Initialize()
+        return self.vtkWidget
+
+    def updateVTKVisualization(self, vtkObject, replace=False):
 
         self.vtkObject = vtkObject
+        self.ensure_vtk_widget()
+        if replace:
+            self.vtkWidget.GetRenderWindow().GetRenderers().RemoveAllItems()
         self.vtkWidget.GetRenderWindow().AddRenderer(
             vtkObject
         )  # 将渲染器添加到渲染窗口

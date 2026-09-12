@@ -1,0 +1,14 @@
+[Unit]
+Description=STK personal task supervisor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/stk/venv/bin/python -m suan.runtime.supervisor --state-dir /local-disk/stk-state
+Restart=on-failure
+# Worker lifetimes intentionally outlive dispatcher restarts. Cancel tasks via API.
+KillMode=process
+UMask=0077
+
+[Install]
+WantedBy=default.target

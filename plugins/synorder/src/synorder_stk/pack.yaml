@@ -1,0 +1,16 @@
+schema_version: 1
+id: synorder.stk
+version: 0.1.0
+skills: skills
+interaction:
+  entry_point: synorder_stk:capability
+  objects: [configuration, execution, visualization, research-object]
+  actions: [stk.configuration.save, stk.submit, stk.visualize, stk.accept, stk.attach]
+  views: [stk.workbench]
+  connections: [stk]
+  methods: [stk.analytic-field.v1, stk.existing-task.v1]
+  queries: [stk.scene, stk.probe]
+gui:
+  api_version: 1
+  entry_point: synorder_stk.views:presentations
+  views: [stk.workbench]

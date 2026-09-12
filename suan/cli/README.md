@@ -1,66 +1,11 @@
-## 命令行项目结构
+# STK CLI
 
-└── suan/
-│ ├── cli/ # 主命令行程序目录
-│ ├── main.py # 主 CLI 程序文件
-│ ├── main.spec # 用于打包成可执行文件的配置文件
-│
-└── toolkits/ # 插件目录
-├── sjob/
-│ └── cli.py # 插件的 CLI 逻辑
-│ └── docs # 放入命令说明文件，以供gui自动识别
-|   └── schedule.md # 有关schedule子命令的介绍
-|   └── create.md # 有关create子命令的介绍
-├── sdata/
-│ └── cli.py # 插件的 CLI 逻辑
-└── ... # 更多插件
+持久任务与安装说明统一维护在 [runtime 使用指南](../../docs/runtime.md)。
 
-## 命令行编码要求
+`suan sjob/smesh/sviz` 保留科学工具入口。`suan server` 管理本机服务，
+`suan connect` 保存连接，`suan workspaces` 管理输入，`suan jobs` 管理持久任务。
+每个命令组均支持 `--help`；工作区与任务命令可通过 `--profile` 连接 SSH 转发端口。
 
-命令行程序使用click库编写，详情请查阅click使用文档(https://click-docs-zh-cn.readthedocs.io/zh/latest/)
-为了方便该程序的运行，在toolkits目录下扩充和修改插件时，请遵守下面约束
-1.该命令行程序只能识别注册在toolkits目录下的插件
-2.插件的目录名即为该插件的命令行名称，在命名组时请保持一致，否则会出现注册失败的情况
-3.只有插件的目录下包含cli.py文件，才会被识别注册该插件，并且打包该插件进入命令行程序中。插件有关命令行的代码请放在该文件中
-4.请使用@click.option注入函数参数，不要使用@click.argument，否则gui无法识别
-5.每个命令参数都应该有具体的help，否则大模型通过mcp无法识别如何使用
-
-## cli.py文件示例
-
-```python
-import click
-#创建子命令组
-@click.group()
-def sjob():
-    """与sjob插件相关的命令"""
-    pass
-
-#往指定子命令组里添加子命令
-@sjob.command()
-@click.option('--command', '-c', type=str, default='', help='每个目录中要执行的命令字符串')
-@click.option('--folder_pattern', '-f', type=str, default='./*', help='目录通配符，默认为当前目录下的所有子目录')
-def batch_all_command(command, folder_pattern):
-    """遍历所有符合指定模式的目录，并在每个目录中执行指定的命令"""
-    pass
-
-@sjob.command()
-@click.option('--name', '-n',type=str,default='job')
-@click.option('--message', '-m', multiple=True)
-def create():
-    """创建一个新任务"""
-    pass
-
-```
-
-## 如何打包
-
-在当前目录下执行：
-pyinstaller main.spec
-
-## 如何使用命令行
-
-如果不知道有什么命令可以使用--help"查询命令，如：
-./suan.exe sjob --help
-命令参数赋值可以用等号连接(如果值使用了通配符，请务必用等号连接)，也可以把值直接放在参数名后面，如：
-./suan.exe sjob batchCommand -f='./*' -c 'dir'
-    
+部署排查使用 `suan server doctor --backend local --science`；服务器上可将后端改为
+`pbs`／`slurm`。客户端使用 `suan connect check NAME` 检查已保存连接。
+两个诊断命令都支持 `--json` 和 `--timeout`，有失败项时退出码为 1。

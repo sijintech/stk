@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synorder-stk"
+version = "0.1.0"
+description = "STK scientific workbench plugin for the Synorder native and web hosts"
+requires-python = ">=3.11"
+dependencies = ["synorder>=0.1.0,<0.2.0"]
+
+[project.optional-dependencies]
+science = ["suan_toolkits[visualization]>=0.1.0a1"]
+
+[project.entry-points."synorder.packs"]
+"synorder.stk" = "synorder_stk"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+synorder_stk = ["pack.yaml", "skills/*/*.md", "examples/*.py"]

@@ -9,10 +9,13 @@ import chardet
 
 class FileIconProvider(QFileIconProvider):
     def icon(self, file_info):
+        if not isinstance(file_info, QFileInfo):
+            return super().icon(file_info)
+        icons = os.path.join(os.path.dirname(__file__), 'icons')
         if file_info.isDir():
-            return QIcon("./icons/dir.png")
+            return QIcon(os.path.join(icons, 'dir.png'))
         else:
-            return QIcon("./icons/file.png")
+            return QIcon(os.path.join(icons, 'file.png'))
 
 
 
