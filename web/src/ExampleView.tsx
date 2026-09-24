@@ -3,6 +3,7 @@
 // directory form (manifest.json + <sha256>.bin), exercising sha256 blob fetching and verification.
 import {useEffect, useState} from 'react';
 import Viewer, {type PickInfo} from './Viewer';
+import ErrorBoundary from './ErrorBoundary';
 import {loadPayload, loadStkp, type LoadedPayload} from './payload';
 
 // Asset URLs of the example files (outside the Vite root; import.meta.glob keeps them servable in dev).
@@ -25,12 +26,14 @@ async function loadExample(mode: string | null): Promise<LoadedPayload> {
 export default function ExampleView() {
   const mode = new URLSearchParams(location.search).get('example');
   const [payload, setPayload] = useState<LoadedPayload | null>(null);
+  // Each opened file starts from its own camera (the view keeps the camera only within one source).
+  const [source, setSource] = useState('example');
   const [error, setError] = useState('');
   const [pick, setPick] = useState('点击立方体表面查看物理坐标与探针数据源');
   useEffect(() => { loadExample(mode).then(setPayload).catch(e => setError(e instanceof Error ? e.message : String(e))); }, [mode]);
   async function open(file: File | undefined) {
     if (!file) return;
-    try { setPayload(await loadStkp(await file.arrayBuffer())); setError(''); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    try { setPayload(await loadStkp(await file.arrayBuffer())); setSource(`file|${file.name}|${Date.now()}`); setError(''); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }
   const onPick = (position: number[], info?: PickInfo) =>
     setPick(`${info?.layerName ?? ''} · (${position.map(v => v.toFixed(3)).join(', ')}) · probe ${JSON.stringify(info?.probe ?? null)}`);
@@ -38,7 +41,7 @@ export default function ExampleView() {
     <header><div className="wordmark">STK <span>渲染数据包示例（开发模式）</span></div>
       <label className="file-pick">打开 .stkp<input type="file" accept=".stkp" onChange={e => void open(e.target.files?.[0])}/></label></header>
     <section className="analysis">
-      {payload && <Viewer scene={payload} resetKey="example" onPick={onPick}/>}
+      {payload && <ErrorBoundary resetKey={payload}><Viewer scene={payload} resetKey={source} onPick={onPick}/></ErrorBoundary>}
       <p className="muted" data-testid="pick">{pick}</p>
       {error && <p role="alert">{error}</p>}
     </section>

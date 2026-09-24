@@ -10,7 +10,7 @@ export interface Preset {id: string, name?: string, description?: string, graph?
   parameters?: GraphParameter[]}
 export interface GraphResult {schema?: string, graph_sha256?: string, graph_hash?: string, outputs?: Record<string, any>,
   parameters?: Record<string, {value?: unknown, choices?: unknown[]}>, timings?: Record<string, number>, cache?: {hits?: number, misses?: number},
-  warnings?: unknown[]}
+  warnings?: unknown[], errors?: unknown[]}
 export interface Artifact {path: string, size?: number, sha256?: string}
 
 /** muFerro published frame names, as `suan/mupro/run.py` FRAME. */
@@ -18,6 +18,8 @@ export const FRAME = /(?:^|\/)([A-Za-z][A-Za-z0-9_]{0,7})\.(\d{8})\.dat$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const isObj = (v: unknown): v is Record<string, any> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isParamRef = (v: unknown): v is {$param: string} => isObj(v) && Object.keys(v).length === 1 && typeof v.$param === 'string';
+/** Own-property lookup (names come from graphs and results; "__proto__" must not reach Object.prototype). */
+const own = (table: unknown, key: unknown): any => isObj(table) && typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
 
 export function presetParameters(preset: Preset | undefined): GraphParameter[] {
   const list = preset?.parameters ?? preset?.graph?.parameters ?? [];
@@ -40,11 +42,20 @@ export function editorKind(p: GraphParameter): EditorKind {
 export function initialValues(params: GraphParameter[]): Record<string, unknown> {
   const values: Record<string, unknown> = {};
   for (const p of params) {
-    const value = p.default ?? (p.type === 'step' ? 'latest' : p.type === 'boolean' ? false : p.type === 'enum' ? p.choices?.[0] : undefined);
+    const declared = 'default' in p && (p.default !== null || editorKind(p) === 'json');
+    const value = declared ? p.default : (p.type === 'step' ? 'latest' : p.type === 'boolean' ? false : p.type === 'enum' ? p.choices?.[0] : undefined);
     values[p.name] = editorKind(p) === 'json' && value !== undefined ? JSON.stringify(value) : value;
   }
   return values;
 }
+
+const isNumberOrNull = (v: unknown) => v === null || (typeof v === 'number' && Number.isFinite(v));
+/** Graph parameter types edited as JSON (stk-graph-v1 parameter types) and their expected shapes. */
+const JSON_SHAPES: Record<string, {test: (v: unknown) => boolean, text: string}> = {
+  vector3: {test: v => Array.isArray(v) && v.length === 3 && v.every(x => typeof x === 'number' && Number.isFinite(x)), text: ' 3 个数的数组，例如 [0, 0, 1]'},
+  int3: {test: v => Array.isArray(v) && v.length === 3 && v.every(x => Number.isInteger(x)), text: ' 3 个整数的数组'},
+  range: {test: v => Array.isArray(v) && v.length === 2 && v.every(isNumberOrNull), text: ' [最小值, 最大值]（null 表示数据范围）'},
+};
 
 /** Typed parameter values for graph.evaluate; editors hold strings for numbers and JSON types. */
 export function coerceParameters(params: GraphParameter[], values: Record<string, unknown>): {parameters: Record<string, unknown>, errors: string[]} {
@@ -76,8 +87,13 @@ export function coerceParameters(params: GraphParameter[], values: Record<string
         break;
       }
       case 'string': parameters[p.name] = String(raw); break;
-      default:
-        try { parameters[p.name] = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { errors.push(`参数 ${label} 不是有效的 JSON`); }
+      default: {
+        let value: unknown;
+        try { value = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { errors.push(`参数 ${label} 不是有效的 JSON`); continue; }
+        const shape = JSON_SHAPES[p.type];
+        if (shape && !shape.test(value)) { errors.push(`参数 ${label} 必须是${shape.text}`); continue; }
+        parameters[p.name] = value;
+      }
     }
   }
   return {parameters, errors};
@@ -170,7 +186,7 @@ export function framesFromArtifacts(artifacts: Artifact[], dataset: string | nul
 }
 
 export function stepChoices(result: GraphResult | null | undefined, name: string | null, fallback: number[]): {value: number | null, choices: number[]} {
-  const info = name ? result?.parameters?.[name] : undefined;
+  const info: {value?: unknown, choices?: unknown[]} | undefined = name ? own(result?.parameters, name) : undefined;
   const choices = Array.isArray(info?.choices) ? info!.choices.filter((c): c is number => Number.isInteger(c) && (c as number) >= 0).sort((a, b) => a - b) : [];
   const value = Number.isInteger(info?.value) ? info!.value as number : null;
   return {value, choices: choices.length ? choices : fallback};
@@ -190,7 +206,7 @@ export function resolveProbeTarget(graph: GraphDocument | undefined, probe: {nod
   const parameterDefaults = new Map((graph.parameters ?? []).map(p => [p.name, p.default]));
   const param = (node: GraphNode, name: string) => {
     const v = node.params?.[name];
-    return isParamRef(v) ? (ctx.values[v.$param] ?? parameterDefaults.get(v.$param)) : v;
+    return isParamRef(v) ? (own(ctx.values, v.$param) ?? parameterDefaults.get(v.$param)) : v;
   };
   const queue = [probe.node];
   const seen = new Set<string>();
@@ -205,7 +221,7 @@ export function resolveProbeTarget(graph: GraphDocument | undefined, probe: {nod
     const extra = Object.keys(metadata).length ? {metadata} : {};
     if (node.type.startsWith('stk.source.file@')) {
       const binding = param(node, 'binding'), path = param(node, 'path');
-      const task = typeof binding === 'string' ? ctx.bindings[binding] : undefined;
+      const task = own(ctx.bindings, binding);
       if (!task) return {error: `数据源 ${String(binding)} 尚未绑定任务`};
       if (typeof path !== 'string' || !path) return {error: `节点 ${id} 缺少文件路径`};
       return {task_id: task, path, node: id, ...extra};
@@ -213,12 +229,12 @@ export function resolveProbeTarget(graph: GraphDocument | undefined, probe: {nod
     if (node.type.startsWith('stk.source.muferro_frame@')) {
       const dataset = String(param(node, 'dataset') ?? probe.dataset ?? 'Polar');
       const ref = node.params?.step;
-      const resolved = isParamRef(ref) ? ctx.result?.parameters?.[ref.$param]?.value ?? ctx.values[ref.$param] : Number.isInteger(ref) ? ref : ctx.result?.parameters?.[`${id}.step`]?.value;
+      const resolved = isParamRef(ref) ? own(ctx.result?.parameters, ref.$param)?.value ?? own(ctx.values, ref.$param) : Number.isInteger(ref) ? ref : own(ctx.result?.parameters, `${id}.step`)?.value;
       const step = typeof resolved === 'string' && /^\d+$/.test(resolved) ? Number(resolved) : resolved;
       if (!Number.isInteger(step) || (step as number) < 0) return {error: '请先完成一次图谱计算以确定探针所在的时间步'};
       const run = nodes.get(linkedNode(node.inputs?.frames) ?? '');
       const binding = run ? param(run, 'binding') : undefined;
-      const task = typeof binding === 'string' ? ctx.bindings[binding] : undefined;
+      const task = own(ctx.bindings, binding);
       if (!task) return {error: `数据源 ${String(binding ?? '?')} 尚未绑定任务`};
       const caseDir = run ? String(param(run, 'case_dir') ?? '.') : '.';
       const name = `${dataset}.${String(step).padStart(8, '0')}.dat`;
@@ -230,6 +246,55 @@ export function resolveProbeTarget(graph: GraphDocument | undefined, probe: {nod
   }
   return {error: `从节点 ${probe.node} 向上未找到场数据源`};
 }
+
+// ---------------------------------------------------------------------------------------------
+// Waiting for a graph.evaluate action (hub action lifecycle: review → queued → succeeded | failed | rejected).
+
+export interface WaitOptions {
+  /** Reads the action again (GET /api/v1/actions/{id}). */
+  poll: () => Promise<any>,
+  /** False once the request was superseded (a newer evaluation, another preset, the panel unmounted). */
+  isCurrent: () => boolean,
+  sleep: (ms: number) => Promise<unknown>,
+  /** Called before each wait with the action still pending. */
+  onPending?: (item: any) => void,
+  initialDelayMs?: number, maxDelayMs?: number,
+  /** Consecutive failed reads tolerated (network hiccups) before giving up. */
+  maxFailures?: number,
+}
+
+/**
+ * Polls an action while it awaits review or is queued, with backoff (2 s → 10 s) and no deadline: an evaluation
+ * may wait behind others on a busy node and must still be shown when it completes. Resolves with the finished
+ * action, or null when the request is no longer current (then nothing more is fetched).
+ */
+export async function waitForAction(item: any, options: WaitOptions): Promise<any | null> {
+  const {poll, isCurrent, sleep, onPending, initialDelayMs = 2000, maxDelayMs = 10000, maxFailures = 5} = options;
+  let delay = initialDelayMs, failures = 0;
+  while (item?.state === 'review' || item?.state === 'queued') {
+    if (!isCurrent()) return null;
+    onPending?.(item);
+    await sleep(delay);
+    if (!isCurrent()) return null;
+    try {
+      item = await poll();
+      failures = 0;
+      delay = Math.min(maxDelayMs, delay * 1.5);
+    } catch (error) {
+      if (++failures >= maxFailures) throw error;
+      delay = Math.min(maxDelayMs, delay * 2);
+    }
+  }
+  return isCurrent() ? item : null;
+}
+
+/** task.events polling interval: 10 s while events arrive, backing off to 30 s while the log is quiet. */
+export const EVENTS_POLL_MS = {min: 10000, max: 30000};
+export function nextEventsDelay(current: number, received: boolean): number {
+  return received ? EVENTS_POLL_MS.min : Math.min(EVENTS_POLL_MS.max, Math.round(current * 1.5));
+}
+/** A long event log is read from its last 256 KiB (the progress line needs only the latest events). */
+export const EVENTS_TAIL_BYTES = 256 * 1024;
 
 // ---------------------------------------------------------------------------------------------
 // Monitoring events (docs/specs/stk-events-v1.md) → one progress line.

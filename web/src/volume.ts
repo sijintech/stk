@@ -7,7 +7,7 @@ import vtkVolume from '@kitware/vtk.js/Rendering/Core/Volume';
 import vtkVolumeMapper from '@kitware/vtk.js/Rendering/Core/VolumeMapper';
 import vtkPiecewiseFunction from '@kitware/vtk.js/Common/DataModel/PiecewiseFunction';
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
-import {greyColormap, resolveColormap} from './colormaps';
+import {resolveColormap, volumeColorPoints} from './colormaps';
 import type {Trash} from './layers';
 import type {LayerSpec, LoadedPayload} from './payload';
 
@@ -29,12 +29,8 @@ export function buildVolume(p: LoadedPayload, layer: LayerSpec, trash: Trash, wa
   const scale = layer.value_scale ?? 1, offset = layer.value_offset ?? 0;
   const stored = (v: number) => (scale !== 0 ? (v - offset) / scale : 0);
   const tf = layer.transfer_function;
-  let cm = resolveColormap(p, tf.colormap);
-  if (!cm || cm.kind !== 'continuous') { warnings.push(`体图层 ${layer.id} 的颜色表无效，使用灰度`); cm = greyColormap(); }
-  const [lo, hi] = tf.range as [number, number];
   const ctf = trash.add(vtkColorTransferFunction.newInstance()) as any;
-  if (hi === lo) ctf.addRGBPoint(stored(lo), cm.lut[512] / 255, cm.lut[513] / 255, cm.lut[514] / 255);
-  else for (let i = 0; i < 256; i++) ctf.addRGBPoint(stored(lo + ((i + 0.5) / 256) * (hi - lo)), cm.lut[i * 4] / 255, cm.lut[i * 4 + 1] / 255, cm.lut[i * 4 + 2] / 255);
+  for (const [value, r, g, b] of volumeColorPoints(resolveColormap(p, tf.colormap), tf.range as [number, number], layer.id, warnings)) ctf.addRGBPoint(stored(value), r, g, b);
   const opacity = trash.add(vtkPiecewiseFunction.newInstance()) as any;
   for (const [value, alpha] of tf.opacity as [number, number][]) opacity.addPoint(stored(value), Math.max(0, Math.min(1, alpha)));
 

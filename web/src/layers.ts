@@ -17,7 +17,7 @@ import vtkSphereSource from '@kitware/vtk.js/Filters/Sources/SphereSource';
 import vtkCubeSource from '@kitware/vtk.js/Filters/Sources/CubeSource';
 import vtkLineSource from '@kitware/vtk.js/Filters/Sources/LineSource';
 import {layerColors, scalarValues, type ColorResult} from './colormaps';
-import type {LayerSpec, LoadedPayload, ProbeRef, TypedArray, Vec3} from './payload';
+import {own, probeOf, type LayerSpec, type LoadedPayload, type ProbeRef, type TypedArray, type Vec3} from './payload';
 
 export interface BuiltLayer {
   id: string, name: string, type: string, spec: LayerSpec,
@@ -109,7 +109,7 @@ function buildTriangles(p: LoadedPayload, layer: LayerSpec, trash: Trash, warnin
   mapper.setInputData(poly);
   const actor = trash.add(vtkActor.newInstance()) as any;
   actor.setMapper(mapper);
-  const association = layer.attributes?.[app.color?.attribute ?? '']?.association === 'cell' ? 'cell' : 'point';
+  const association = own(layer.attributes, app.color?.attribute)?.association === 'cell' ? 'cell' : 'point';
   const color = layerColors(p, layer, app.color, association === 'cell' ? idx.length / 3 : pos.length / 3, association);
   warnings.push(...color.warnings);
   applyColors(trash, color, poly, mapper, actor, association);
@@ -167,7 +167,7 @@ function buildLines(p: LoadedPayload, layer: LayerSpec, trash: Trash, warnings: 
   const app = layer.appearance ?? {};
   const poly = trash.add(vtkPolyData.newInstance()) as any;
   poly.getPoints().setData(pos, 3);
-  const attr = layer.attributes?.[app.color?.attribute ?? ''];
+  const attr = own(layer.attributes, app.color?.attribute);
   const association = attr?.association === 'cell' ? 'cell' : 'point';
   let cellCount: number;
   if (layer.mode === 'polylines') {
@@ -265,7 +265,7 @@ function buildInstances(p: LoadedPayload, layer: LayerSpec, trash: Trash, warnin
   const scales = layer.scales ? p.floats(layer.scales) : null;
   let attribute: Float64Array | null = null;
   if (!scales && scale.by === 'attribute') {
-    const attr = layer.attributes?.[scale.attribute];
+    const attr = own(layer.attributes, scale.attribute);
     if (attr) attribute = scalarValues(p.floats(attr.accessor), p.accessorSpec(attr.accessor).components, null);
     else warnings.push(`图层 ${layer.id} 的缩放属性 ${scale.attribute} 不存在`);
   }
@@ -335,7 +335,7 @@ export async function buildScene(p: LoadedPayload): Promise<BuiltScene> {
       }
       if (prop) { placeActor(p, layer, prop); if (layer.type !== 'volume') applyLighting(prop, lighting); }
       layers.push({id: layer.id, name: layer.name || layer.id, type: layer.type, spec: layer, prop,
-        pickable: layer.type === 'triangles' || layer.type === 'slice_image', probe: layer.pick?.probe});
+        pickable: layer.type === 'triangles' || layer.type === 'slice_image', probe: probeOf(layer)});
     }
   } catch (error) {
     trash.dispose();

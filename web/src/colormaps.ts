@@ -1,7 +1,7 @@
 // Colour mapping for stk.payload/2 (spec §5) and the orientation colours of docs/specs/domain-classifiers.md §6.
 // Colormaps travel in the payload as 256-entry RGBA8 LUTs or categorical palettes; nothing is hard-coded here
 // except the function colormap stk:orientation-hsl and the generic stk:categorical fallback.
-import type {AttributeSpec, ColorSpec, LayerSpec, LoadedPayload, TypedArray} from './payload';
+import {own, type AttributeSpec, type ColorSpec, type LayerSpec, type LoadedPayload, type TypedArray} from './payload';
 
 export const ORIENTATION_HSL = 'stk:orientation-hsl';
 export type RGB = [number, number, number];
@@ -68,6 +68,28 @@ export function greyColormap(): ContinuousColormap {
   return {kind: 'continuous', id: 'grey', name: 'gray', lut, nan: rgba8(GREY, GREY), below: lut.slice(0, 4), above: lut.slice(1020)};
 }
 
+/**
+ * Colour transfer function points [physical value, r, g, b] (spec §6.6, as the offscreen renderer): a
+ * continuous LUT spread over `range` (bin centres), or for label volumes each categorical entry held
+ * constant over value ± 0.499, so neighbouring labels never blend.
+ */
+export function volumeColorPoints(cm: Colormap | null, range: [number, number], layerId: string, warnings: string[]): [number, number, number, number][] {
+  const points: [number, number, number, number][] = [];
+  if (cm?.kind === 'categorical' && cm.entries.length) {
+    for (const e of cm.entries) {
+      const [r, g, b] = [e.color[0] / 255, e.color[1] / 255, e.color[2] / 255];
+      points.push([e.value - 0.499, r, g, b], [e.value + 0.499, r, g, b]);
+    }
+    return points;
+  }
+  if (!cm || cm.kind !== 'continuous') { warnings.push(`体图层 ${layerId} 的颜色表无效，使用灰度`); cm = greyColormap(); }
+  const [lo, hi] = range;
+  const lut = cm.lut;
+  if (hi === lo) points.push([lo, lut[512] / 255, lut[513] / 255, lut[514] / 255]);
+  else for (let i = 0; i < 256; i++) points.push([lo + ((i + 0.5) / 256) * (hi - lo), lut[i * 4] / 255, lut[i * 4 + 1] / 255, lut[i * 4 + 2] / 255]);
+  return points;
+}
+
 /** LUT index of value v over [lo, hi] (spec §5): −1 below, 256 above, NaN → −2. */
 export function lutIndex(v: number, lo: number, hi: number): number {
   if (Number.isNaN(v)) return -2;
@@ -125,7 +147,7 @@ export function layerColors(p: LoadedPayload, layer: LayerSpec, spec: ColorSpec 
   if (spec.by === 'direction') {
     let source = vectors;
     if (spec.attribute) {
-      const attr = layer.attributes?.[spec.attribute];
+      const attr = own(layer.attributes, spec.attribute);
       if (attr) source = {values: p.floats(attr.accessor), components: p.accessorSpec(attr.accessor).components};
     }
     if (!source || source.components < 3) { warnings.push(`图层 ${layer.id} 缺少方向着色所需的三分量向量`); return none; }
@@ -141,7 +163,7 @@ export function layerColors(p: LoadedPayload, layer: LayerSpec, spec: ColorSpec 
     return {colors, solid, categorical: false, nearest: false, warnings};
   }
   const name = spec.attribute ?? '';
-  const attr: AttributeSpec | undefined = layer.attributes?.[name];
+  const attr: AttributeSpec | undefined = own(layer.attributes, name);
   if (!attr) { warnings.push(`图层 ${layer.id} 的着色属性 ${name} 不存在`); return none; }
   if ((attr.association ?? 'point') !== association) warnings.push(`图层 ${layer.id} 的属性 ${name} 关联方式与图层不符`);
   const accessor = p.accessorSpec(attr.accessor);

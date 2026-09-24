@@ -8,7 +8,8 @@ export type AccessorType = 'i8' | 'u8' | 'i16' | 'u16' | 'i32' | 'u32' | 'f32' |
 export type TypedArray = Int8Array | Uint8Array | Int16Array | Uint16Array | Int32Array | Uint32Array | Float32Array | Float64Array;
 type TypedCtor = {new(buffer: ArrayBufferLike, byteOffset: number, length: number): TypedArray, BYTES_PER_ELEMENT: number};
 
-export const ACCESSOR_TYPES: Record<AccessorType, {ctor: TypedCtor, integer: boolean, signed: boolean, max: number}> = {
+export interface AccessorInfo {ctor: TypedCtor, integer: boolean, signed: boolean, max: number}
+export const ACCESSOR_TYPES: Record<AccessorType, AccessorInfo> = {
   i8: {ctor: Int8Array, integer: true, signed: true, max: 127},
   u8: {ctor: Uint8Array, integer: true, signed: false, max: 255},
   i16: {ctor: Int16Array, integer: true, signed: true, max: 32767},
@@ -18,6 +19,11 @@ export const ACCESSOR_TYPES: Record<AccessorType, {ctor: TypedCtor, integer: boo
   f32: {ctor: Float32Array, integer: false, signed: true, max: 1},
   f64: {ctor: Float64Array, integer: false, signed: true, max: 1},
 };
+/** Own-property lookup, so manifest strings such as "__proto__" or "toString" never reach Object.prototype. */
+export const own = <T>(table: Record<string, T> | null | undefined, key: unknown): T | undefined =>
+  table && typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+/** Storage type of an accessor type name (undefined for unknown names). */
+export const accessorInfo = (type: unknown): AccessorInfo | undefined => own(ACCESSOR_TYPES as Record<string, AccessorInfo>, type);
 
 export interface BufferSpec {id: string, uri: string, sha256: string, byteLength: number, encoding?: 'raw'}
 export interface AccessorSpec {id: string, buffer: string, byteOffset: number, count: number, type: AccessorType,
@@ -66,6 +72,8 @@ export interface LoadedPayload {
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const ID = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$/;
+/** Ids are used as object keys by the viewer; "__proto__" would address the prototype. */
+const validId = (v: unknown): v is string => typeof v === 'string' && ID.test(v) && v !== '__proto__';
 const isObj = (v: unknown): v is Record<string, any> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -86,7 +94,7 @@ export function validateManifest(input: unknown): PayloadManifest {
 
   const buffers = new Map<string, BufferSpec>();
   for (const b of m.buffers) {
-    if (!isObj(b) || typeof b.id !== 'string' || !ID.test(b.id)) { bad('缓冲区 id 无效'); continue; }
+    if (!isObj(b) || !validId(b.id)) { bad('缓冲区 id 无效'); continue; }
     if (buffers.has(b.id)) bad(`缓冲区 ${b.id} 重复`);
     if (typeof b.sha256 !== 'string' || !HEX64.test(b.sha256)) bad(`缓冲区 ${b.id} 的 sha256 无效`);
     if (!isInt(b.byteLength) || b.byteLength < 0) bad(`缓冲区 ${b.id} 的 byteLength 无效`);
@@ -97,12 +105,12 @@ export function validateManifest(input: unknown): PayloadManifest {
   }
   const accessors = new Map<string, AccessorSpec>();
   for (const a of m.accessors) {
-    if (!isObj(a) || typeof a.id !== 'string' || !ID.test(a.id)) { bad('访问器 id 无效'); continue; }
+    if (!isObj(a) || !validId(a.id)) { bad('访问器 id 无效'); continue; }
     if (accessors.has(a.id)) bad(`访问器 ${a.id} 重复`);
     accessors.set(a.id, a);
-    const info = ACCESSOR_TYPES[a.type as AccessorType];
+    const info = accessorInfo(a.type);
     const buffer = buffers.get(a.buffer);
-    if (!info) { bad(`访问器 ${a.id} 的类型 ${a.type} 无效`); continue; }
+    if (!info) { bad(`访问器 ${a.id} 的类型 ${String(a.type)} 无效`); continue; }
     if (!isInt(a.components) || a.components < 1 || a.components > 16) { bad(`访问器 ${a.id} 的分量数无效`); continue; }
     if (!isInt(a.count) || a.count < 0) { bad(`访问器 ${a.id} 的 count 无效`); continue; }
     if (!isInt(a.byteOffset) || a.byteOffset < 0 || a.byteOffset % 8 !== 0) { bad(`访问器 ${a.id} 的 byteOffset 未按 8 字节对齐`); continue; }
@@ -118,7 +126,8 @@ export function validateManifest(input: unknown): PayloadManifest {
     colormaps.set(c.id, c);
     if (c.categorical) {
       if (!Array.isArray(c.entries)) bad(`分类颜色表 ${c.id} 缺少 entries`);
-      else for (const e of c.entries) if (!isObj(e) || !isInt(e.value) || !Array.isArray(e.color) || e.color.length < 3 || !e.color.every(finite)) { bad(`分类颜色表 ${c.id} 含无效条目`); break; }
+      else for (const e of c.entries) if (!isObj(e) || !isInt(e.value) || typeof e.name !== 'string' || !Array.isArray(e.color) || e.color.length < 3 || !e.color.every(finite)) { bad(`分类颜色表 ${c.id} 含无效条目`); break; }
+      if (c.unknown_color !== undefined && !(Array.isArray(c.unknown_color) && c.unknown_color.length >= 3 && c.unknown_color.every(finite))) bad(`分类颜色表 ${c.id} 的 unknown_color 无效`);
     } else {
       const lut = c.lut === undefined ? undefined : accessors.get(c.lut);
       if (!lut) bad(`颜色表 ${c.id} 引用了不存在的查找表访问器 ${c.lut}`);
@@ -130,7 +139,7 @@ export function validateManifest(input: unknown): PayloadManifest {
     if (id === undefined || id === null) { if (!opts.optional) bad(`图层 ${layer} 缺少 ${key}`); return undefined; }
     const a = typeof id === 'string' ? accessors.get(id) : undefined;
     if (!a) { bad(`图层 ${layer} 的 ${key} 引用了不存在的访问器 ${String(id)}`); return undefined; }
-    const info = ACCESSOR_TYPES[a.type];
+    const info = accessorInfo(a.type);
     if (!info) return undefined;
     if (opts.components !== undefined && a.components !== opts.components) bad(`图层 ${layer} 的 ${key} 应为 ${opts.components} 分量（${a.id} 为 ${a.components}）`);
     if (opts.integer && !info.integer) bad(`图层 ${layer} 的 ${key} 必须是整数类型`);
@@ -161,20 +170,22 @@ export function validateManifest(input: unknown): PayloadManifest {
     if (color === undefined) return;
     if (!isObj(color)) { bad(`图层 ${layer.id} 的颜色设置格式错误`); return; }
     if (color.by === 'attribute') {
-      if (typeof color.attribute !== 'string' || !layer.attributes?.[color.attribute]) bad(`图层 ${layer.id} 的着色属性 ${String(color.attribute)} 不存在`);
+      if (!own(layer.attributes, color.attribute)) bad(`图层 ${layer.id} 的着色属性 ${String(color.attribute)} 不存在`);
       needMap(layer.id, color.colormap);
     } else if (color.by === 'direction') {
       if (color.colormap !== undefined && color.colormap !== ORIENTATION_HSL) bad(`图层 ${layer.id}：方向着色仅支持 ${ORIENTATION_HSL}`);
-      if (color.attribute !== undefined && !layer.attributes?.[color.attribute]) bad(`图层 ${layer.id} 的方向属性 ${color.attribute} 不存在`);
+      if (color.attribute !== undefined && !own(layer.attributes, color.attribute)) bad(`图层 ${layer.id} 的方向属性 ${String(color.attribute)} 不存在`);
     }
     if (color.range !== undefined && !isVec(color.range, 2)) bad(`图层 ${layer.id} 的颜色范围无效`);
   };
 
   const layerIds = new Set<string>();
   for (const layer of m.layers) {
-    if (!isObj(layer) || typeof layer.id !== 'string' || !ID.test(layer.id)) { bad('图层 id 无效'); continue; }
+    if (!isObj(layer) || !validId(layer.id)) { bad('图层 id 无效'); continue; }
     if (layerIds.has(layer.id)) bad(`图层 ${layer.id} 重复`);
     layerIds.add(layer.id);
+    // Shown as text by the viewer (layer list, legends): wrong types would break rendering.
+    if (layer.name !== undefined && layer.name !== null && typeof layer.name !== 'string') bad(`图层 ${layer.id} 的 name 必须是字符串`);
     if (!LAYER_TYPES.has(layer.type)) continue; // unknown types are skipped by clients (spec §1)
     if (layer.origin !== undefined && !isVec(layer.origin, 3)) bad(`图层 ${layer.id} 的 origin 必须是 3 个有限数`);
     const id = layer.id;
@@ -237,7 +248,7 @@ export function validateManifest(input: unknown): PayloadManifest {
         checkColor(layer, app.color);
         const scale = app.scale;
         if (scale !== undefined && (!isObj(scale) || !finite(scale.factor) || scale.factor <= 0)) bad(`图层 ${id} 的缩放设置无效`);
-        if (scale?.by === 'attribute' && !layer.attributes?.[scale.attribute]) bad(`图层 ${id} 的缩放属性 ${String(scale.attribute)} 不存在`);
+        if (scale?.by === 'attribute' && !own(layer.attributes, scale.attribute)) bad(`图层 ${id} 的缩放属性 ${String(scale.attribute)} 不存在`);
         break;
       }
       case 'volume': {
@@ -252,7 +263,7 @@ export function validateManifest(input: unknown): PayloadManifest {
         if (!isVec(layer.value_range, 2)) bad(`图层 ${id} 的 value_range 无效`);
         const tf = layer.transfer_function;
         if (!isObj(tf) || !isVec(tf.range, 2) || !Array.isArray(tf.opacity) || tf.opacity.length < 2 || !tf.opacity.every((p: unknown) => isVec(p, 2))) bad(`图层 ${id} 的 transfer_function 无效`);
-        else needMap(id, tf.colormap, 'continuous');
+        else needMap(id, tf.colormap); // a continuous LUT, or a categorical palette for label volumes (value ± 0.499)
         break;
       }
       case 'overlay': {
@@ -266,6 +277,59 @@ export function validateManifest(input: unknown): PayloadManifest {
   }
   if (problems.length) throw new PayloadError(problems);
   return m;
+}
+
+const isStr = (v: unknown) => v === undefined || v === null || typeof v === 'string';
+/** Optional field: absent/null, or passing `ok` (the overlay code falls back to its defaults for absent fields). */
+const opt = (v: unknown, ok: (v: any) => boolean) => v === undefined || v === null || ok(v);
+const isColor = (v: unknown) => Array.isArray(v) && (v.length === 3 || v.length === 4) && v.every(finite);
+
+/**
+ * Presentation fields of an overlay (spec §6.7) with a wrong type. Such overlays are skipped with a warning
+ * (overlays only explain the view); drawing them would break the HTML overlay layer.
+ */
+export function overlayProblems(layer: LayerSpec): string[] {
+  const problems: string[] = [];
+  const check = (ok: boolean, key: string, text: string) => { if (!ok) problems.push(`${key} ${text}`); };
+  check(isStr(layer.title), 'title', '必须是字符串');
+  check(isStr(layer.anchor), 'anchor', '必须是字符串');
+  check(isStr(layer.source_layer), 'source_layer', '必须是字符串');
+  check(opt(layer.offset_px, v => isVec(v, 2)), 'offset_px', '必须是 2 个有限数');
+  check(opt(layer.size_px, v => (finite(v) && v > 0) || (isVec(v, 2) && v.every((x: number) => x > 0))), 'size_px', '必须是正数或 2 个正数');
+  switch (layer.kind) {
+    case 'scalar_bar':
+      check(isStr(layer.unit), 'unit', '必须是字符串');
+      check(isStr(layer.format), 'format', '必须是字符串');
+      check(isStr(layer.orientation), 'orientation', '必须是字符串');
+      check(opt(layer.label_count, isInt), 'label_count', '必须是整数');
+      break;
+    case 'legend':
+      check(opt(layer.values, v => Array.isArray(v) && v.every(isInt)), 'values', '必须是整数数组');
+      check(opt(layer.columns, isInt), 'columns', '必须是整数');
+      break;
+    case 'orientation_legend':
+      check(opt(layer.lightness_range, v => isVec(v, 2)), 'lightness_range', '必须是 2 个有限数');
+      break;
+    case 'text':
+      check(opt(layer.font_size_px, v => finite(v) && v > 0), 'font_size_px', '必须是正数');
+      check(opt(layer.color, isColor), 'color', '必须是 3 或 4 个有限数');
+      break;
+    case 'axes_triad':
+      check(opt(layer.labels, v => Array.isArray(v) && v.length === 3 && v.every((x: unknown) => typeof x === 'string')), 'labels', '必须是 3 个字符串');
+      break;
+  }
+  return problems;
+}
+
+/**
+ * Where `view.probe` should read for a layer (spec §6 `pick.probe`); layers without it fall back to their
+ * own graph node (`layer.node`), from which clients walk upstream to the field source.
+ */
+export function probeOf(layer: LayerSpec): ProbeRef | undefined {
+  const probe = isObj(layer.pick) && isObj(layer.pick.probe) ? layer.pick.probe : {};
+  const node = typeof probe.node === 'string' && probe.node ? probe.node : typeof layer.node === 'string' && layer.node ? layer.node : undefined;
+  if (!node) return undefined;
+  return typeof probe.dataset === 'string' && probe.dataset ? {node, dataset: probe.dataset} : {node};
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -408,7 +472,7 @@ export async function loadPayload(input: unknown, options: LoadOptions = {}): Pr
     if (cached) return cached;
     const spec = accessorSpec(id);
     const bytes = buffers.get(spec.buffer)!;
-    const {ctor} = ACCESSOR_TYPES[spec.type];
+    const {ctor} = accessorInfo(spec.type)!;
     const length = spec.count * spec.components;
     const start = bytes.byteOffset + spec.byteOffset;
     const view = start % ctor.BYTES_PER_ELEMENT === 0
@@ -426,7 +490,7 @@ export async function loadPayload(input: unknown, options: LoadOptions = {}): Pr
     if (raw instanceof Float32Array) out = raw;
     else {
       out = new Float32Array(raw.length);
-      const info = ACCESSOR_TYPES[spec.type];
+      const info = accessorInfo(spec.type)!;
       const scale = spec.normalized && info.integer ? 1 / info.max : 1;
       for (let i = 0; i < raw.length; i++) out[i] = spec.normalized && info.signed ? Math.max(-1, raw[i] * scale) : raw[i] * scale;
     }
@@ -436,8 +500,12 @@ export async function loadPayload(input: unknown, options: LoadOptions = {}): Pr
 
   const layers: LayerSpec[] = [];
   for (const layer of manifest.layers) {
-    if (!LAYER_TYPES.has(layer.type)) { warnings.push(`跳过未知图层类型 ${layer.type}（${layer.id}）`); continue; }
-    if (layer.type === 'overlay' && !OVERLAY_KINDS.has(layer.kind)) { warnings.push(`跳过未知叠加层 ${layer.kind}（${layer.id}）`); continue; }
+    if (!LAYER_TYPES.has(layer.type)) { warnings.push(`跳过未知图层类型 ${String(layer.type)}（${layer.id}）`); continue; }
+    if (layer.type === 'overlay' && !OVERLAY_KINDS.has(layer.kind)) { warnings.push(`跳过未知叠加层 ${String(layer.kind)}（${layer.id}）`); continue; }
+    if (layer.type === 'overlay') {
+      const issues = overlayProblems(layer);
+      if (issues.length) { warnings.push(`跳过叠加层 ${layer.id}：${issues.join('；')}`); continue; }
+    }
     layers.push(layer);
   }
   const loaded: LoadedPayload = {

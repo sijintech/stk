@@ -61,6 +61,7 @@ label.check input{width:auto}
 .data-table th,.data-table td{padding:3px 8px;border-bottom:1px solid #2c2d3a;text-align:right;white-space:nowrap}
 .data-table th{position:sticky;top:0;background:#1b1c25;color:#a6a69c;font-weight:500}
 .data-table th small{display:block;font-size:10px;color:#8d8f96}
+.data-table .swatch{display:inline-block;width:9px;height:9px;margin-right:5px;border-radius:2px;border:1px solid #454555;vertical-align:-1px}
 .result-summary{margin:8px 0 0}
 .graph-extra{margin:12px 0 0}
 .graph-extra label{max-width:360px}

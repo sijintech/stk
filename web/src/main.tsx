@@ -1,6 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {action,api,events,hasToken,Json,setToken,uid} from './api';
+import ErrorBoundary from './ErrorBoundary';
 import './style.css';
 const Viewer=React.lazy(()=>import('./Viewer'));
 const GraphPanel=React.lazy(()=>import('./GraphPanel'));
@@ -55,7 +56,7 @@ function App(){
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}
       {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>setLevel(Number(e.target.value))}/></label>}
       <button disabled={busy||!path} onClick={()=>void run(loadView)}>加载视图</button></div>
-      <React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={scene} onPick={setProbe}/></React.Suspense>
+      <ErrorBoundary resetKey={scene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={scene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {scene&&<div className="legend"><span>{scene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{scene.manifest.value_range[1].toPrecision(5)} {scene.manifest.units}</span><small>{scene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
       <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!scene} onClick={()=>void run(async()=>{const a=await invoke('view.probe',{task_id:task,path,position:probe});setLogs(JSON.stringify(a.result,null,2));})}>查询原始值</button></div></>}
       <details className="logs" open><summary>日志 / 探针结果</summary><pre>{logs||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
