@@ -285,6 +285,68 @@ mpirun/srun，也不会自动分配本机 GPU。
   服务器保留完整日志；桌面仅保留最近 10,000 个文本块。
 - 本版是个人可信程序环境。用户程序具有运行账户的权限；不提供多租户隔离。
 
+## 监控事件
+
+运行中的程序可以把进度、指标和已完成的结果帧写成监控事件，客户端按字节偏移增量读取。格式是
+[监控事件 v1](specs/stk-events-v1.md)：每行一个 JSON 对象
+`{"v": 1, "seq", "ts"（Unix 秒）, "type", "src", "data"}`，每行最多 16 KiB，非有限数写成字符串
+`"NaN"`、`"Inf"`、`"-Inf"`。
+
+- worker 在应用 TaskSpec 的 `env` **之后**设置 `STK_MONITOR_PATH=<任务目录>/events.jsonl` 与
+  `STK_TASK_ID`。两者都在保留变量中（`suan.runtime.models.RESERVED_ENV`），TaskSpec 的 `env` 设置它们
+  会被拒绝（400），任务也无法改写或伪造。事件文件与 `stdout.log` 同在任务目录，位于 `work/` 之外，
+  不会出现在结果列表中。
+- worker.py 在提交时复制到任务目录，升级前已排队或已交给调度器的任务仍用旧 worker，不产生事件。
+- 每个事件文件只有一个写入者，只由 MPI rank 0 写；写入失败只在 stderr 报告一次，绝不影响计算。
+  未设置 `STK_MONITOR_PATH` 时写入器什么都不做，程序在 STK 之外行为不变。
+
+读取：
+
+```bash
+# token 取自服务器 config.json；经 SSH 隧道时换成本机转发端口
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:8765/v1/tasks/TASK_ID/events?offset=0&limit=1048576"
+suan jobs --profile cluster show TASK_ID     # 任务记录中的 monitor 摘要
+```
+
+- `GET /v1/tasks/{id}/events?offset=…&limit=…` 返回
+  `{"events", "offset", "next_offset", "size", "terminal", "invalid": [{"offset", "reason"}]}`。
+  `limit` 以字节计，范围 1 … 1 MiB（默认 1 MiB）。只返回完整的行，`next_offset` 是最后一个完整行之后的
+  字节位置，下次以它为 `offset` 继续；单行超过 `limit` 时仍整行返回。无效或超长的行跳过，并在
+  `invalid` 中给出字节偏移。偏移超过文件大小返回 400；还没有事件文件时返回空列表。`terminal` 为 true
+  表示任务已结束、文件不再增长，读到 `next_offset` 等于 `size` 即已读完。
+- `GET /v1/health` 增加 `"features": ["events"]`；客户端用 `"events" in health.get("features", [])`
+  判断服务端是否支持。
+- `RuntimeClient.events(task_id, offset=0, limit=1048576)` 返回同样的结构。
+- `GET /v1/tasks/{id}` 的任务记录在事件文件存在时增加 `monitor`：`{"events_size", "last_progress",
+  "last_ts"}`，取自文件末尾 64 KiB 内最后一个 `progress` 事件的 `data` 和最后一个有效事件的 `ts`。
+  任务列表 `GET /v1/tasks` 不含此字段。
+- 控制服务操作 `task.events {task_id, offset, limit}`（见 [控制服务指南](hub.md)）、MCP 工具
+  `get_task_events` 和网页“图谱”模式的进度行返回或使用同一结构。
+
+事件类型有 `run.started`、`run.phase`、`progress`、`metric.declare`、`metrics`、`frame`（已发布、
+内容不再改变的结果帧）、`checkpoint`、`artifact`、`message`、`usage`、`verification`、
+`run.completed`。`run.completed` 只是程序自己的声明；任务是否成功以 Runtime 状态和结果校验为准。
+事件中的 `ts` 仅供参考（计算节点时钟可能有偏差），顺序以文件偏移为准。
+
+自己的 Python 程序可以用标准库实现的写入器（MPI 程序只在 rank 0 写）：
+
+```python
+from suan.monitor import Emitter
+
+with Emitter() as mon:          # 路径取自 $STK_MONITOR_PATH；未设置时不写
+    mon.started("my-solver", total_steps=1000)
+    mon.declare("residual", "1", label="Residual")
+    mon.progress(step=120, total_steps=1000)       # 合并为每秒最多一次，最后一次总会写出
+    mon.metrics({"residual": 1.2e-6}, step=120)
+    mon.frame("T", 120, "out/T.00000120.vti", components=1)   # 路径相对 work/
+    mon.completed("succeeded")
+```
+
+`STK_MONITOR_FAKE_TIME`（浮点秒）固定 `ts`，用于测试。C／Fortran SDK 属于后续里程碑。
+MuPRO 启动器 `python -m suan.mupro run` 以适配器方式把 muFerro 的原生输出转成事件，见
+[MuPRO 指南](runtime-mupro.md#运行中的进度与结果查看)。
+
 ## 可视化与科学工具
 
 ```bash
@@ -301,6 +363,9 @@ suan sviz plot-vector --input vector.dat --output vectors.png --axis z
 VTK 导出支持单标量或三分量矢量。PNG 使用 FigureCanvasAgg，不创建 Qt 或 OpenGL 窗口。
 桌面可直接预览 PNG，下载 VTK 后在已有 VTK 页中交互。
 
+节点图、预设、渲染数据包与二维图（`suan graph catalog/validate/run/doctor`）见
+[可视化指南](visualization.md)。
+
 旧桌面代码分析／本地绘图入口保留用于兼容；需要持久后台计算时使用 Tasks 页。
 旧 `sjob schedule/create/execute` 继续可用。`Command` 仍按历史约定作为 shell 脚本执行，
 `execute --command`、起止范围和失败退出码已修正。新的 `sjob.core` 函数显式接收目录。
@@ -309,7 +374,9 @@ VTK 导出支持单标量或三分量矢量。PNG 使用 FigureCanvasAgg，不�
 
 安装 `.[mcp]` 后以 `python -m suan.mcp` 启动。通过 `STK_STATE_DIR` 或
 `STK_RUNTIME_URL` / `STK_RUNTIME_TOKEN` 连接同一个 runtime。工具包括工作区创建、
-输入上传、`submit_task`、状态、日志、取消、结果下载。
+输入上传、`submit_task`、状态、日志、取消、结果下载，以及读取监控事件的 `get_task_events`。
+图谱与绘图工具（`graph_catalog`、`graph_validate`、`graph_evaluate`、`graph_render`、`plot_table`）
+见 [可视化指南](visualization.md)。
 
 MCP 长任务返回任务记录，不同步等待计算完成。旧 `run_stk_command` 迁移为持久任务：
 必须提供 `workspace_id` 与 `idempotency_key`，返回值由文本改为任务记录。
@@ -323,7 +390,7 @@ JSON；文件分块使用二进制响应。日志响应含 base64 `data` 与 `ne
 
 | 方法与路径（省略 `/v1`） | 用途 |
 |---|---|
-| `GET /health` | API 版本、supervisor 存活状态、可用资源键 `resources`、argv 占位符 `argv_tokens` |
+| `GET /health` | API 版本、supervisor 存活状态、可用资源键 `resources`、argv 占位符 `argv_tokens`、功能列表 `features` |
 | `GET/POST /workspaces` | 工作区列表／创建 |
 | `GET /workspaces/{id}/files` | 输入清单与校验值 |
 | `POST /workspaces/{id}/uploads` | 以 path、size、sha256 建立／恢复上传 |
@@ -331,9 +398,10 @@ JSON；文件分块使用二进制响应。日志响应含 base64 `data` 与 `ne
 | `POST /workspaces/{id}/uploads/{upload_id}/finish` | 校验后原子提交 |
 | `GET /workspaces/{id}/file?path=…&offset=…&limit=…` | 读取输入分块 |
 | `GET/POST /tasks` | 列表／用 spec 与 idempotency_key 提交，返回 202 |
-| `GET /tasks/{id}` | 状态与输入快照清单 |
+| `GET /tasks/{id}` | 状态与输入快照清单；有事件时含 `monitor` 摘要 |
 | `POST /tasks/{id}/cancel` | 持久化取消意图 |
 | `GET /tasks/{id}/logs?stream=stdout&offset=…` | 增量日志 |
+| `GET /tasks/{id}/events?offset=…&limit=…` | 增量监控事件（见“监控事件”） |
 | `GET /tasks/{id}/artifacts` | 完成任务的结果清单 |
 | `GET /tasks/{id}/file?path=…&offset=…&limit=…` | 结果分块下载 |
 
@@ -345,8 +413,10 @@ v1 只做增量扩展，没有增删或改名任何路径：本轮在 `/health` 
 客户端用 `"ranks" in health.get("resources", [])` 判断服务端是否支持 MPI 布局；
 `suan mupro submit` 遇到不支持的旧服务会拒绝提交。已有 TaskSpec 的幂等键不变；
 其中若有参数恰好等于 `{ranks}`、`{threads_per_rank}` 或 `{nodes}`，执行时该参数现在
-会被替换。v1 的使用方包括节点代理（`suan/control/agent.py`）、可选的
-Synorder 节点（`suan-synorder-node`）和今后的 Synthrix。
+会被替换。里程碑 1 增加 `GET /tasks/{id}/events`、`/health` 的 `features`（`["events"]`）和
+单个任务记录中的 `monitor`，并把 `STK_MONITOR_PATH`、`STK_TASK_ID` 列为保留变量。
+v1 的使用方包括节点代理（`suan/control/agent.py`）、可选的 Synorder 节点
+（`suan-synorder-node`）和今后的 Synthrix。
 
 模块关系：`models` 定义合同，`store/service` 管理持久记录与文件，`server` 提供 API，
 `supervisor` 调度与恢复，`backends` 适配执行方式，独立 `worker.py` 记录实际退出状态。

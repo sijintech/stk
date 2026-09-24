@@ -26,6 +26,18 @@ suan mupro submit --workspace WORKSPACE_ID --input ./case16 --ranks 1 --wait
 suan mupro result TASK_ID
 ```
 
+里程碑 1 的可视化以节点图 `stk.graph/1` 描述：图送到数据旁求值并缓存，返回渲染数据包 `stk.payload/2`、
+PNG、二维图与表格，网页“图谱”模式、离屏渲染和 LLM 工具共用同一套契约：
+
+```bash
+python -m pip install '.[visualization,science]'
+suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param step=all
+```
+
+用法、预设与限制见 [可视化指南](docs/visualization.md)；控制服务的图谱计算、结果 blob 与反向代理设置见
+[控制服务指南](docs/hub.md)；运行中任务的监控事件见 [runtime 使用指南](docs/runtime.md#监控事件)；
+英文契约与 JSON Schema 见 [规范索引](docs/specs/README.md)。
+
 文件夹结构：
 
 - suan：提供用户使用的界面，有cli，gui
@@ -35,10 +47,20 @@ suan mupro result TASK_ID
 - suan/blender_client：Blender 工作台启动器与网络桥接。
 - suan/visualization：执行节点上的场数据视图与原始数据探针。
 - suan/mupro：STK 自有的 MuPRO 提交、计算节点启动与逐次结果校验。
+- suan/contracts：JSON Schema 契约与物理量词表，只用标准库加载。
+- suan/data：统一数据模型、快速 DAT 读取、VTKHDF（STK 附加信息）、结果清单与 VTK 转换、过滤算法。
+- suan/analysis：净室实现的畴取向分类、薄膜检测、标签统计与调色板（仅依赖 NumPy）。
+- suan/connectors：连接器接口与注册、本机／Runtime 文件源、内置 VTK/NumPy/表格读取与 muFerro 连接器。
+- suan/graph：节点图的校验、节点目录、求值器、缓存、绑定解析、预设与 `suan graph` 命令。
+- suan/render：渲染数据包 v2、scene v1 降级、颜色表与子进程离屏渲染。
+- suan/plot：二维图规格 `stk.plot/1` 与 matplotlib 渲染。
+- suan/monitor：监控事件的写入、读取与原生输出跟踪（标准库）。
+- suan/skills：供 LLM 使用的技能说明（`suan skills export`）。
 - blender：STK Blender 原生工作台源码定制（桌面主线）。
 - web：控制服务提供的网页／手机 PWA。
 - deploy/systemd：Linux 用户服务模板。
-- docs：runtime、MuPRO 与站点验收文档。
+- docs：runtime、MuPRO、可视化、控制服务与站点验收文档。
+- docs/specs：数据格式、节点图、渲染数据包、监控事件与畴分类的英文规范，附节点目录与示例。
 - plugins/synorder：Synorder 插件（暂缓，可选集成）。
 - native：早期 Rust/egui 原型（暂停）。
 - examples/runtime：确定性参数扫描与 PNG／VTK 结果验收示例。
