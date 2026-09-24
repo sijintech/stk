@@ -81,7 +81,7 @@ DISPLAY=:95 LIBGL_ALWAYS_SOFTWARE=1 \
 
 ## 尚未通过的发布条件
 
-当前通过的是 Linux X11 软件渲染原型。Windows、Apple Silicon macOS、Wayland 与 AMD Linux、国产 GPU 的具体驱动组合仍需编译和实机验收。
+当前通过的是 Linux X11 软件渲染原型。Windows 与 Apple Silicon macOS 客户端工作台、Wayland / AMD Linux / 国产 GPU 的具体驱动组合仍需编译和实机验收；Runtime、控制服务与节点代理只在 Linux 验收。
 
 中文测试覆盖字体绘制和提交后的 Unicode 文本，未覆盖平台输入法的候选窗与组合文本。当前 X11 精简配置不具备 Blender 的 Wayland IME 路径；正式 Linux 包需启用 Wayland 并测试中文输入法。剪贴板、多个 DPI/缩放比例、休眠恢复、图形设备丢失、无障碍和长期稳定性仍待专项验收。
 

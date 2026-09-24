@@ -1,12 +1,12 @@
 # STK Blender 原生工作台
 
-当前桌面主线为 [Synorder Blender 宿主 + STK 插件](../plugins/synorder/README.md)。本目录保留此前的 **Blender 5.2.1 源码定制版**，用于迁移回退和回归验证。`SPACE_STK` 是新增的 C++ 编辑器，界面分区、控件编排、绘制、三维交互均由 STK 控制。Blender 提供窗口、输入、字体、基础文本控件和 GPU 后端；应用模板只负责启动编辑器和写入操作队列。
+本目录是 STK 桌面主线：**Blender 5.2.1 源码定制版**，独立于 Synorder 工作台开发（[Synorder 插件](../plugins/synorder/README.md) 暂缓，作为可选集成保留）。`SPACE_STK` 是新增的 C++ 编辑器，界面分区、控件编排、绘制、三维交互均由 STK 控制。Blender 提供窗口、输入、字体、基础文本控件和 GPU 后端；应用模板只负责启动编辑器和写入操作队列。
 
 固定版本、源码 SHA256 和依赖提交见 [upstream.json](upstream.json)。这与已有 `native/` Rust/egui 技术原型分开；后者暂停扩展。Qt 界面与 Runtime 回归测试继续保留。
 
 ## 源码与构建
 
-需要 Python 3、Git、Git LFS、CMake、C++20 编译器，以及该平台的 Blender 上游构建依赖。
+需要 Python 3、Git、Git LFS、CMake、C++20 编译器，以及该平台的 Blender 上游构建依赖；下面的 `lfs pull` 必须安装 Git LFS。源码与构建目录合计约需 15–20 GB；下文示例位于 `/tmp`，若 `/tmp` 是 tmpfs（重启即清空，此前的构建产物即因此丢失），请把这些目录改到 `/home` 下的持久磁盘。
 
 ```bash
 curl -fL https://download.blender.org/source/blender-5.2.1.tar.xz -o /tmp/blender-5.2.1.tar.xz
@@ -31,23 +31,28 @@ macOS 使用 `lib/macos_arm64`；Windows 使用对应的 Windows 子模块及上
 
 ## 启动与计算闭环
 
-安装当前 STK Python 项目及控制、科学视图依赖：
+在 Linux 开发机安装当前 STK Python 项目及控制、科学视图依赖。Windows / macOS 客户端只需 `python -m pip install .` 与定制 Blender；Runtime、控制服务与节点代理在 Linux 服务器运行。
 
 ```bash
 python -m pip install -e '.[control,visualization]' -c blender/requirements-tested.txt
-suan-blender --blender /tmp/stk-blender-build/bin/blender --demo
+suan-workbench --blender /tmp/stk-blender-build/bin/blender --demo
 ```
+
+`suan-workbench` 是工作台启动器，兼容名 `suan-blender`。连接控制服务时使用 `suan-workbench --blender … --url … [--template muferro-example]`；`--url` 接受 HTTPS 或回环 HTTP，Windows / macOS 客户端可先用 `ssh -N -L 8790:127.0.0.1:8790 my-linux-server` 转发控制服务再填 `http://127.0.0.1:8790`。
 
 `--demo` 加载明确标注“非计算结果”的本地着色曲面。也可用 `--scene /path/scene.json` 打开版本 1 的科学显示数据。只能使用包含 `SPACE_STK` 的定制二进制；普通 Blender 不能代替。
 
-运行计算前，在独立终端启动已有 Runtime、控制服务与节点代理：
+运行计算前，在 Linux 服务器的独立终端启动 Runtime、控制服务与节点代理。这些命令在其他系统上会提示只支持 Linux 并退出。Runtime 使用固定端口（默认 8765）：`suan-node` 按 `config.json` 中的端口连接，不要用 `--port 0` 初始化。
 
 ```bash
-suan server init --state-dir /path/runtime
-suan server start --state-dir /path/runtime
+suan server --state-dir /path/runtime init
+suan server --state-dir /path/runtime start
 suan-control init --state-dir /path/control
+(cd web && npm ci && npm run build)   # 只有网页／手机 PWA 客户端需要 web/dist
 suan-control serve --state-dir /path/control --allow-demo-template --web-dir web/dist
 ```
+
+`web/dist` 是构建产物，不在仓库中；只用 Blender 工作台时省略 `--web-dir`，也不需要构建网页。
 
 控制服务启动后，在另一终端签发节点配对码：
 
@@ -70,6 +75,22 @@ suan-control pair --state-dir /path/control --role client
 
 当前时间步通过选择对应结果文件切换。示例 VTI 在 FieldData 中存储 `STK_timestep`、`STK_units` 和 `STK_coordinate_units`，视图读取原文件元数据；请求时间步与已知元数据不一致会被拒绝。通用时间序列索引是后续验收项。
 
+## MuPRO 模板与时间步
+
+控制服务用 `--template muferro-example` 注册内置 muFerro 示例模板：固定命令 `{python} -m suan.mupro run --ranks {ranks} --threads-per-rank {threads_per_rank} --example`，资源为 1 rank、每 rank 1 线程，时限 600 秒，内存 4096 MB，与 `suan mupro submit --example --walltime 600 --memory-mb 4096` 相同。集群后端（`slurm`／`pbs`）的模板必须写 `resources.walltime_seconds`，否则控制服务启动时拒绝；请求中缺少时限的集群任务一律进入复核。运维人员也可用 `--template-file` 注册审定过的固定变体：JSON 对象把模板 ID 映射到 `argv`、`inputs`、`outputs`、`resources`、`backend`，不能设置 `env`。执行节点的 Runtime 服务环境需提供 `MUPRO_SDK_PREFIX`、`STK_MUPRO_ENV_SCRIPTS` 和 `MUPROROOT`，见 [MuPRO 指南](../docs/runtime-mupro.md)。
+
+```bash
+suan-control serve --state-dir /path/control --template muferro-example --allow-demo-template
+suan-workbench --blender /tmp/stk-blender-build/bin/blender --url http://127.0.0.1:8790 --template muferro-example
+```
+
+- 当前按钮“运行已授权解析场模板”运行启动器 `--template` 选定的模板：C++ 编辑器仍发送 `demo-field`，桥接程序把它换成 `client.json` 中的 `template`。因此配置 `muferro-example` 后，这个按钮运行的是 muFerro 示例；未配置时仍运行解析场示例。这是 C++ 增加模板选择前的临时做法。`--template` 保存在状态目录（默认 `~/.suan/blender`）的 `client.json` 中，之后以相同地址启动（包括不带 `--url`）都沿用该模板；换用新的 `--url` 而不带 `--template` 会清除原模板和配对凭据，在工作台中向另一地址配对同样会清除原模板。连接远程控制服务时，用 `--url <远程地址> --template <ID>` 启动，再在工作台向同一地址配对。要恢复解析场示例，以 `--template demo-field` 启动、删除 `client.json` 中的 `"template"` 一项，或换用另一个 `--state-dir`。
+- 只有与注册模板完全一致的请求自动执行；改动任何字段（例如改为 `slurm` 后端或指定队列）进入复核。网页“运行解析场示例”仍固定提交 `demo-field`，需要 `--allow-demo-template` 才会自动执行。
+- “读取结果文件”列表中每个 `<Stem>.<8位步号>.dat` 文件是一个时间步，例如 `Polar.00000100.dat`。执行节点按文件名确定场名和时间步，“时间步”标签即来自文件名；列表按路径排序，同一场按步号递增。
+- DAT 帧支持切片、等值面、向量箭头和视口探针。`energy_out.dat` 是能量时间序列而不是场，选择它会报 `Not a regular-grid field DAT`。
+- 坐标为从 0 开始的网格索引（`grid index`），单位未标注：坐标 x 对应 DAT 行中的 i = x + 1（y、z 同理），切片索引同样从 0 开始。`Polar.00000000.dat` 与后续 Polar 帧的归一化不同，见 MuPRO 指南。
+- 模板选择器和按帧步进需要更新 C++ 编辑器，尚未完成；Runtime 在任务结束后才列出结果文件。
+
 ## 自动验证
 
 `requirements-tested.txt` 记录本次 Linux / Python 3.12 通过验证的直接依赖约束；其他系统仍需建立各自的验收记录。
@@ -90,7 +111,7 @@ flowchart LR
   Desktop[C++ STK 编辑器] <-->|私有文件队列 / 状态快照| Bridge[独立 Python 桥接]
   Bridge <-->|HTTPS + SSE| Control
   Node[执行节点代理] -->|主动 WSS 连接| Control
-  Node <-->|回环 HTTP| Runtime[现有 Runtime / Local / PBS / Slurm]
+  Node <-->|回环 HTTP| Runtime[STK Runtime（Linux）/ Local / PBS / Slurm]
   Node --> Post[Python / VTK 后处理与原始场探针]
 ```
 

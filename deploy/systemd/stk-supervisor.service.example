@@ -6,6 +6,8 @@ After=network.target
 Type=simple
 ExecStart=/opt/stk/venv/bin/python -m suan.runtime.supervisor --state-dir /local-disk/stk-state
 Restart=on-failure
+# Workers inherit this environment; MuPRO node settings, see stk-mupro.env.example:
+# EnvironmentFile=%h/.config/stk/mupro.env
 # Worker lifetimes intentionally outlive dispatcher restarts. Cancel tasks via API.
 KillMode=process
 UMask=0077

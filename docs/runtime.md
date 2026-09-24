@@ -1,14 +1,19 @@
 # STK 本地与服务器 runtime
 
-STK 0.1.0a1 提供个人使用的持久任务服务。桌面 Tasks、CLI 和 MCP 共用
-`RuntimeClient`。本机进程、OpenPBS/PBS Professional、Slurm 使用同一任务合同。
+STK 0.1.0a1 提供个人使用的持久任务服务。Blender 工作台（经节点代理）、旧桌面 Tasks、
+CLI 和 MCP 共用 `RuntimeClient`。本机进程、OpenPBS/PBS Professional、Slurm 使用同一任务合同；
+MuPRO 作业的排队也由 STK Runtime 负责，见 [MuPRO 指南](runtime-mupro.md)。
+服务器仅支持 Linux，Windows / macOS 只作客户端。
 服务器仅监听回环地址；远程连接通过 SSH 端口转发。
 
 ```mermaid
 flowchart LR
-  Desktop[桌面 Tasks] --> API[HTTP API v1]
+  Desktop[旧桌面 Tasks] --> API[HTTP API v1]
   CLI[CLI] --> API
   MCP[MCP stdio] --> API
+  Workbench[Blender 工作台] --> Control[控制服务]
+  Node[节点代理] -->|主动 WSS| Control
+  Node --> API
   API <--> DB[(本机 SQLite)]
   Supervisor[独立 supervisor] <--> DB
   Supervisor --> Backend[Local / PBS / Slurm]
@@ -22,13 +27,16 @@ flowchart LR
 
 ## 安装与启动
 
-在仓库根目录安装；Python 要求为 3.10–3.14。服务器、桌面和计算节点可采用
+在仓库根目录安装；Python 要求为 3.10–3.14。服务器与计算节点仅支持 Linux；
+客户端可在 Windows、macOS 或 Linux 上运行。服务器、客户端和计算节点可采用
 不同环境；求解器、MPI 和集群命令由目标机器提供。
 
 ```bash
 # 服务器：不安装 Qt、VTK、AI 模型
 python -m pip install '.[server,science]'
-# 桌面／远程客户端
+# 客户端：CLI 与 Blender 工作台桥接，任意系统
+python -m pip install .
+# 旧 Qt 桌面客户端
 python -m pip install '.[desktop]'
 # 可选 AI 对话、MCP
 python -m pip install '.[ai,mcp]'
@@ -38,18 +46,24 @@ suan server --state-dir /local-disk/stk-state init \
 suan server --state-dir /local-disk/stk-state start
 suan server --state-dir /local-disk/stk-state status
 suan server --state-dir /local-disk/stk-state doctor --science
-suan-gui
+# 客户端：suan-workbench（Blender 工作台）或旧 Qt 客户端 suan-gui
 ```
 
 `state-dir` 中的 SQLite 必须放在本机磁盘；不要放在 NFS 等网络文件系统。
 `workspace-root` 在集群部署时必须是登录／服务节点和计算节点均可访问的共享目录。
 配置文件首次创建后不会被 `init` 覆盖。需要改变端口、Python 路径或并发数时，
 先停止 API 和 supervisor，再编辑 `config.json` 并重新启动。
+常驻 runtime 使用固定端口（默认 8765）。`suan-node` 按 `config.json` 中的端口连接，
+SSH 隧道和已保存的连接也依赖固定端口；`--port 0` 每次启动都会换端口，不要用于
+常驻 runtime 或 `suan-node`，API 停止后 `status` 的 `url` 为 `null`。多人共用的登录节点上
+改用未被占用的非默认端口。
+`init`、`start` 等服务器命令在 Windows / macOS 上会提示只支持 Linux 并退出，不创建任何文件。
 
 `config.json` 中的 `python` 是实际运行 worker 的解释器路径。每个计算节点必须
 能运行它并导入 `psutil`；科学示例另需 `science` 依赖。worker.py 会被复制到任务
 目录，因此任意外部程序任务无需在计算节点导入 STK。调用 `smesh/sviz` 的任务
-则需要计算环境已安装相应 STK 包。
+则需要计算环境已安装相应 STK 包。复制在提交时进行：升级 STK 后，已排队或已交给
+调度器的任务仍运行提交时的 worker.py。
 
 API 与 supervisor 是独立后台进程，`start` 返回后仍继续运行。默认状态目录为
 `~/.stk/runtime`，也可通过 `STK_STATE_DIR` 指定。
@@ -63,6 +77,11 @@ suan server --state-dir /local-disk/stk-state stop --supervisor
 
 Linux 长期部署可使用 `deploy/systemd/` 的用户服务模板，管理员须允许该用户服务
 在退出 SSH 后持续运行。集群节点必须允许常驻管理服务，重型计算应通过队列执行。
+worker 继承 supervisor 的环境；MuPRO 所需变量放在 `stk-mupro.env.example` 所示的
+EnvironmentFile 中，用 `suan server start` 启动时则取自执行该命令的 shell。`start` 不会
+重启已在运行的 supervisor：修改这些变量后先 `suan server stop --supervisor`，再从导出了
+新变量的 shell 执行 `suan server start`（systemd 部署则重启 supervisor 服务）。已在运行的
+worker 保留原来的环境。
 
 ## 部署诊断
 
@@ -84,8 +103,59 @@ suan server --state-dir /local-disk/stk-state doctor --backend slurm --science -
 JSON 包含 `schema_version`、`checked_at`、`scope`、`ok` 和逐项 `checks`；
 每项状态为 `pass`、`warn` 或 `fail`。有 `fail` 时退出码为 1，其余为 0。
 `ok=true` 仅表示本次检查没有失败项。PBS／Slurm 检查当前主机 PATH 中的提交、
-查询和取消命令；计算节点的解释器、共享目录可见性及实际队列／历史查询能力
-仍须通过下面的站点案例验证。报告不包含连接令牌。
+查询和取消命令，并在 `scheduler_profile` 中报告生效的站点配置。Slurm 另做不提交
+作业的探针：`sbatch --version`（`slurm_version`）、`sinfo` 查看分区是否 up、时限、
+每节点 CPU 和内存（`slurm_partition`）、`sbatch --test-only` 校验分区／账户／QOS
+（`slurm_submit_test`）、`sacct` 历史是否可用（`slurm_accounting`）。
+`--partition`、`--account`、`--qos` 覆盖站点配置中的对应值；未给分区时
+`slurm_partition` 为警告。站点配置含 `preamble` 时默认不执行；`--probe-preamble`
+在本机用 `job_shell` 试运行一次（`scheduler_preamble`），计算节点环境可能不同。
+计算节点的解释器、共享目录可见性仍须通过下面的站点案例验证。报告不包含连接令牌。
+
+## 站点配置（scheduler）
+
+集群可在 `config.json` 中加入可选的 `scheduler` 对象。它只由运维人员编辑，不能通过
+TaskSpec 或 API 设置，也不影响幂等键。与改端口相同，先停止 API 和 supervisor，
+编辑后重新启动。并行云风格的示例（路径与模块名以站点为准）：
+
+```json
+"scheduler": {
+  "queue": "PARTITION",
+  "job_shell": "/bin/bash",
+  "preamble": ["source /public1/soft/modules/module.sh", "module load mpi/intel/VERSION"]
+}
+```
+
+- `queue`、`account`：任务未写 `queue`／`account` 时使用的默认分区与账户。`qos`
+  映射为 Slurm `--qos`，PBS 忽略。取值只含字母、数字和 `_ . @ / -`。
+- `job_shell`：job.sh 首行 `#!` 之后的内容，即解释器绝对路径，默认 `/bin/sh`；preamble
+  使用 `source` 或 module 时设为 `/bin/bash`。与 `#!` 行相同，可以带一个参数（如
+  `/bin/bash -l`）：内核把解释器之后的全部内容作为一个参数传入，所以 `/usr/bin/env bash -l`
+  在 Linux 上不可用，doctor 的 `--probe-preamble` 也按同样方式运行。PBS 可能忽略 `#!` 行，
+  除非 qsub 带 `-S`，STK 目前不添加 `-S`。
+- `preamble`：逐行原样写在 job.sh 的 `exec` worker 之前，每行不得含换行，也不得是
+  `#SBATCH`／`#PBS` 指令：调度器把第一条命令之前的指令当作提交参数，会绕过下面对
+  `submit_args` 的检查。站点示例作业头中的调度参数请写到 `submit_args`。
+- `submit_args`：追加在 STK 生成的参数之后、job.sh 之前，必须是以 `-` 开头、至少
+  两个字符的选项。不得设置 STK 自己使用或依赖的选项：`--job-name`、`--parsable`、
+  `--chdir`、`--output`、`--error`、`--wrap`、`--array`、`--test-only`、`--wait`、
+  `--export`、`--help`、`--usage`、`--version`、`--clusters`、`--quiet`（含其无歧义前缀，
+  如 `--out=`、`--test`、`--cluster=`）、单独的 `--`，以及 `-J -D -o -e -a -W -N -I -h -V`。
+  Slurm 另外不得使用 `-M`（`--clusters`：作业提交到其他集群，STK 查询和取消时找不到）和
+  `-Q`（`--quiet`：不打印作业号）；PBS 不得使用 `-z`（不打印作业号），`-M`（邮件地址）
+  可以使用。doctor 按 `--backend` 所选调度器检查，不带 `--backend` 时按两种调度器一起检查。
+  也不要重复 STK 已生成的布局与资源参数（`--nodes`、`--ntasks`、`--cpus-per-task`、
+  `--time`、`--mem`、`--partition`、PBS `-l` 等）：调度器以最后一次出现为准，会使实际
+  分配与 worker 的线程设置和 `{ranks}` 不一致。组合短选项（如 `-vJname`）不会被拆开检查。
+
+没有 `scheduler` 时 job.sh 与之前完全相同。未知键或非法值会让任务在调用 sbatch／qsub
+之前失败，原因包含 `Invalid scheduler profile: …`；doctor 的 `config` 检查报告同一信息。
+修改后在服务所在机器检查：
+
+```bash
+suan server --state-dir /local-disk/stk-state doctor --backend slurm \
+  --partition PARTITION --probe-preamble
+```
 
 ## 远程连接
 
@@ -105,13 +175,22 @@ suan jobs --profile cluster list
 ```
 
 桌面 Tasks 页提供相同的连接保存、工作区新建、文件上传、任务提交、取消和结果查看。
-点击“本机 → 连接”会初始化并启动本机 runtime。服务器连接使用先前建立的 SSH 隧道。
+点击“本机 → 连接”只在 Linux 上初始化并启动本机 runtime；Windows / macOS 上会显示
+只支持 Linux 的提示。服务器连接使用先前建立的 SSH 隧道。
 连接令牌保存在用户私有的 `~/.stk/connections.json`；不写入共享 `.suan` 工作区。
 可通过 `STK_PROFILES_FILE` 指定连接配置文件位置。
 
 `suan connect check cluster --json` 可在客户端检查已保存连接的 API 版本、认证和
 supervisor 状态。它沿用现有 SSH 隧道，报告范围为 `connection`；若需检查服务器
 的磁盘和 worker 环境，在服务器上运行 `suan server doctor`。
+
+Windows / macOS 只作客户端：按上面的方式建立 SSH 隧道并用 `suan connect add` 保存连接，
+然后在 `suan jobs`、`suan workspaces`、`suan mupro` 中传 `--profile cluster`；也可设置
+`STK_RUNTIME_URL` 与 `STK_RUNTIME_TOKEN`。在这些系统上运行 `suan server init/start` 会退出
+并提示 `The STK server Runtime runs on Linux only. …`；`suan-control init/serve/pair` 与
+`suan-node pair/run` 提示 `The STK control service and node agent run on Linux only, …`，
+并说明工作台经 SSH 隧道用 `suan-workbench --url http://127.0.0.1:8790` 连接控制服务。
+两者都不创建任何文件。
 
 桌面配置可通过 `STK_CONFIG_DIR` 移至其他目录。Linux 桌面需可用的 Qt 系统库
 （包括 EGL）；打开三维结果还需 OpenGL 驱动。服务器生成 PNG 无需这些图形库。
@@ -121,7 +200,7 @@ supervisor 状态。它沿用现有 SSH 隧道，报告范围为 `connection`；
 ```bash
 suan workspaces --profile cluster upload WORKSPACE_ID ./inputs
 suan jobs --profile cluster submit --workspace WORKSPACE_ID \
-  --backend slurm --key my-run-001 -- /path/to/mupro input.in
+  --backend slurm --key my-run-001 -- /path/to/solver input.json
 suan jobs --profile cluster show TASK_ID
 suan jobs --profile cluster logs TASK_ID --follow
 suan jobs --profile cluster cancel TASK_ID
@@ -129,28 +208,51 @@ suan jobs --profile cluster artifacts TASK_ID
 suan jobs --profile cluster download TASK_ID result.vtk ./result.vtk
 ```
 
-复杂任务使用 `--spec task.json`：
+命令行形式的 `submit` 不能设置 `walltime_seconds`，集群作业因此按分区默认时限运行（并行云
+BSCC 分区默认为 `infinite`，按核时计费）；集群任务应使用 `--spec` 写明 `walltime_seconds`。
+MuPRO 作业使用 `suan mupro submit … --backend slurm --queue PARTITION --walltime 秒数`，见
+[MuPRO 指南](runtime-mupro.md)。
+
+复杂任务使用 `--spec task.json`。下例为 2 节点、共 8 个 MPI rank、每 rank 2 线程：
 
 ```json
 {
   "workspace_id": "替换为工作区 ID",
-  "argv": ["{python}", "simulate.py"],
-  "backend": "pbs",
-  "name": "parameter-001",
-  "inputs": ["simulate.py", "input.json"],
-  "outputs": ["field.vtk", "preview.png"],
-  "env": {"OMP_NUM_THREADS": "4"},
-  "resources": {"cpus": 4, "nodes": 1, "memory_mb": 4096,
-                "walltime_seconds": 3600, "queue": "workq"}
+  "argv": ["/bin/bash", "run.sh", "{nodes}", "{ranks}", "{threads_per_rank}"],
+  "backend": "slurm",
+  "name": "mpi-001",
+  "inputs": ["run.sh", "input.json"],
+  "outputs": ["field.vtk"],
+  "env": {},
+  "resources": {"nodes": 2, "ranks": 8, "threads_per_rank": 2, "memory_mb": 4096,
+                "walltime_seconds": 3600, "queue": "compute"}
 }
 ```
 
-`argv` 是参数列表，`{python}` 表示配置中的 Python。需要 shell、module load 或 MPI
-启动逻辑时，上传显式脚本并以 `[/bin/bash, run.sh]` 等参数列表执行。不会自动添加
-mpirun/srun，也不会自动分配本机 GPU。`cpus` 是每节点 CPU；`memory_mb` 为每节点
-请求，`nodes` 为节点数。PBS 用 `select` 资源语法，Torque 尚未列入兼容基线。
-`gpus` 同样按每节点计数。Slurm 显式使用每节点一个任务槽，并将 `cpus` 映射为
-该槽的 CPU 数，GPU 映射为 `--gpus-per-node`；MPI 进程布局仍由上传的启动脚本指定。
+`argv` 是参数列表。与占位符完全相同的整个参数由 worker 替换：`{python}` 为配置中的
+Python；`{ranks}` 为 `ranks`（默认 1）；`{threads_per_rank}` 为每 rank 线程数
+（MPI 布局取 `threads_per_rank`，默认 1，否则取 `cpus`，默认 1）；`{nodes}` 为 `nodes`
+（默认 1）。只替换整个参数，不做子串或格式化替换。需要 shell、module load 或 MPI
+启动逻辑时，上传显式脚本并以 `[/bin/bash, run.sh]` 等参数列表执行。除 MuPRO 启动器
+（`python -m suan.mupro run`，见 [MuPRO 指南](runtime-mupro.md)）外，STK 不会自动添加
+mpirun/srun，也不会自动分配本机 GPU。
+
+资源有两种布局，不能混用：
+
+- 每节点一个进程（原有布局）：`cpus` 是该进程的 CPU 数。Slurm 为
+  `--ntasks-per-node=1 --cpus-per-task=cpus --nodes=N`，PBS 为 `select=N:ncpus=cpus`。
+  worker 的 `OMP_NUM_THREADS` 依次取 `env`、继承的环境值、`cpus`（默认 1），
+  不设置 `MKL_NUM_THREADS`。
+- MPI 布局（出现 `ranks` 或 `threads_per_rank`）：`ranks` 是所有节点的 MPI 进程总数，
+  必须是 `nodes` 的整数倍；`threads_per_rank` 是每 rank 的 OpenMP/MKL 线程数，默认 1；
+  不能同时写 `cpus`。Slurm 为 `--nodes=N --ntasks=R --ntasks-per-node=R/N
+  --cpus-per-task=T`，PBS 为 `select=N:ncpus=(R/N)×T:mpiprocs=R/N:ompthreads=T`。
+  worker 先把 `OMP_NUM_THREADS` 与 `MKL_NUM_THREADS` 设为 T，覆盖登录 shell 或 PBS
+  继承的值；`env` 中的显式值仍优先。
+
+`memory_mb` 为每节点请求，`nodes` 为节点数，`gpus` 同样按每节点计数，Slurm 映射为
+`--gpus-per-node`。PBS 用 `select` 资源语法，Torque 尚未列入兼容基线。任务目录中的
+`environment.json` 记录实际 argv、`layout` 与 `threads`。
 参数语义参照 [Slurm sbatch 手册](https://slurm.schedmd.com/sbatch.html)。
 本机采用独立进程、可配置并发数、时间限制和进程树内存监测；这些是运行管理，
 不是不可信程序的安全沙箱。
@@ -172,6 +274,9 @@ mpirun/srun，也不会自动分配本机 GPU。`cpus` 是每节点 CPU；`memor
   同一键对应不同 TaskSpec 会被拒绝。桌面提供“重试上次提交”，保留同一键。
 - 发生调度提交超时或无法识别返回值时，保存 `unknown`，通过任务名和调度历史核对；
   不自动再次提交。历史不可用时保持待核实，管理员可依据原生队列信息排查。
+  调度器明确拒绝（无效分区／账户／QOS、违反账户或 QOS 策略等）直接记为失败。
+- 本机 worker 无法启动时任务失败并释放并发名额；进程、内存或文件描述符暂时耗尽时
+  任务退回队列，稍后重试。
 - 单机通过 PID 和创建时间识别原 worker，避免将复用的 PID 当作原任务。
   worker 独立记录完成状态，supervisor 停止期间完成的任务在重启后也能核对。
 - API 重启不影响 worker；主机重启或 worker 意外退出后会报告失败／待核实。
@@ -218,7 +323,7 @@ JSON；文件分块使用二进制响应。日志响应含 base64 `data` 与 `ne
 
 | 方法与路径（省略 `/v1`） | 用途 |
 |---|---|
-| `GET /health` | API 版本、supervisor 存活状态 |
+| `GET /health` | API 版本、supervisor 存活状态、可用资源键 `resources`、argv 占位符 `argv_tokens` |
 | `GET/POST /workspaces` | 工作区列表／创建 |
 | `GET /workspaces/{id}/files` | 输入清单与校验值 |
 | `POST /workspaces/{id}/uploads` | 以 path、size、sha256 建立／恢复上传 |
@@ -235,9 +340,18 @@ JSON；文件分块使用二进制响应。日志响应含 base64 `data` 与 `ne
 上传／下载分块上限为 1 MiB。非法参数返回 400，认证失败 401，资源缺失 404，
 请求体过大 413；服务端异常返回 500。202 仅表示登记成功。
 
+v1 只做增量扩展，没有增删或改名任何路径：本轮在 `/health` 增加 `resources` 与
+`argv_tokens`，在 TaskSpec 的 `resources` 中增加可选的 `ranks`、`threads_per_rank`。
+客户端用 `"ranks" in health.get("resources", [])` 判断服务端是否支持 MPI 布局；
+`suan mupro submit` 遇到不支持的旧服务会拒绝提交。已有 TaskSpec 的幂等键不变；
+其中若有参数恰好等于 `{ranks}`、`{threads_per_rank}` 或 `{nodes}`，执行时该参数现在
+会被替换。v1 的使用方包括节点代理（`suan/control/agent.py`）、可选的
+Synorder 节点（`suan-synorder-node`）和今后的 Synthrix。
+
 模块关系：`models` 定义合同，`store/service` 管理持久记录与文件，`server` 提供 API，
 `supervisor` 调度与恢复，`backends` 适配执行方式，独立 `worker.py` 记录实际退出状态。
-`client` 被 `runtime/cli.py`、`gui/Tab/runtime_tab.py` 和 `mcp/server.py` 共用。
+`client` 被 `runtime/cli.py`、`gui/Tab/runtime_tab.py`、`mcp/server.py`、`control/agent.py`
+和 `suan/mupro` 共用。
 新增科学能力可作为 `TaskSpec.argv` 中的程序接入，无需依赖 GUI 或修改传输协议。
 
 结果首次登记后保留 SHA-256 manifest，反复查看任务不会重新扫描大结果文件。
@@ -246,12 +360,15 @@ JSON；文件分块使用二进制响应。日志响应含 base64 `data` 与 `ne
 ## 验收与限制
 
 ```bash
-python -m pip install '.[science,test]'
+# Linux：服务器、控制服务与工作台协议测试
+python -m pip install '.[server,science,control,visualization,test]'
 python -m pytest -m 'not desktop'
+# Windows / macOS 客户端：安装 '.[science,test]'，只运行客户端测试
+python -m pytest -m 'not server and not desktop'
 # 安装 desktop/mcp/test 后检查桌面与 MCP
 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_desktop.py tests/test_mcp.py
 python examples/runtime/run_demo.py --state-dir /local-disk/stk-state --output /tmp/stk-results
-# 对真实集群重复同一案例；配置环境和队列后运行
+# 对真实集群重复同一案例；配置环境和队列后运行。首个真实站点为并行云（Slurm），见 runtime-paratera.md
 python examples/runtime/run_demo.py --profile cluster --backend pbs --queue workq --output /tmp/stk-pbs
 python examples/runtime/run_demo.py --profile cluster --backend slurm --queue compute --output /tmp/stk-slurm
 ```
@@ -279,9 +396,14 @@ python examples/runtime/run_demo.py --profile cluster --backend slurm --queue co
 调度历史保留、权限与内存／时间资源语义。未设置吞吐量或并行扩展性能承诺。
 验收报告中的耗时用于复现记录，不作为扩展性能基准；通过此案例也不代表
 MuPRO／MPI／module 环境或物理计算精度已经验收。
+首个真实站点验收计划在并行云进行，尚未开始，见 [并行云站点验收清单](runtime-paratera.md)；
+MuPRO 本机验收流程见 [MuPRO 指南](runtime-mupro.md)。
 
 当前安装验收以 Python wheel／源码安装为准。已有 PyInstaller 配置保留；冻结桌面
 二进制的 runtime 进程启动与解释器打包尚未列入已验证发布物。不要把 wheel 安装验证
-视为 Windows/macOS/Linux 独立安装器验收。
+视为 Windows/macOS/Linux 独立安装器验收。服务器端只支持 Linux；Windows / macOS
+只作客户端，CI 只在 Windows 上运行客户端测试。`poetry.lock` 尚未随本轮依赖重新生成（例如缺少 fastapi、websockets、
+tomli），安装以 `pyproject.toml` 为准。
 
-交互式 Python 内核、远程实时三维渲染、Web/手机和团队权限留在后续版本。
+交互式 Python 内核、远程实时三维渲染和团队权限留在后续版本。网页／手机 PWA 由控制服务
+提供，见 [Blender 工作台指南](../blender/README.md)。

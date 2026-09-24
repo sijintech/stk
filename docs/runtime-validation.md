@@ -45,6 +45,71 @@ Linux / Python 3.12.13 验证结果：
 本轮没有进行真实集群、外部 SSH 或独立桌面安装器验收；新增检查的通过状态
 不改变下方站点验收边界。
 
+## 2026-09-24 方向调整
+
+用户确定的方向：
+
+1. STK 独立于 Synorder 发展；桌面主线为 STK 自有的 Blender 原生工作台（`blender/`、
+   `suan/blender_client`、`suan-control`、`suan-node` 与 Runtime）。
+2. Synorder 集成推迟；`plugins/synorder` 与 `suan-synorder-node` 保留为可选。
+3. MuPRO 作业的排队由 STK Runtime 负责。
+4. 首个集群为并行云（Paratera），账号尚未开通。
+5. 服务器 Runtime 仅支持 Linux；Windows 只作客户端。
+
+据此完成的改动：
+
+- Runtime：MPI 布局 `ranks`／`threads_per_rank`、argv 占位符 `{ranks}`／`{threads_per_rank}`／
+  `{nodes}`、OMP／MKL 线程设置及 Slurm／PBS 映射；站点配置 `scheduler` 与不提交作业的 Slurm
+  doctor 探针；本机 worker 启动失败不再占住并发名额；`/health` 增加 `resources`、`argv_tokens`，
+  HTTP API 仍为 v1，已有任务的幂等键不变。
+- 平台：`suan server init/start`、`suan-control init/serve`、`suan-node pair/run` 在非 Linux 上
+  拒绝运行；`suan` 在 cp1252 控制台改用 UTF-8 输出；新增 pytest `server` 标记，CI 在 Linux 运行
+  全部非桌面测试，在 Windows 只运行客户端测试与入口冒烟。
+- MuPRO：`suan mupro submit/result/verify`、计算节点 `python -m suan.mupro run/verify/check`、
+  逐次校验 `stk-mupro-1` 与本机多 rank 保护，见 [MuPRO 指南](runtime-mupro.md)。
+- 工作台：控制模板 `muferro-example` 与 `--template`／`--template-file`，启动器 `--template`，
+  按 MuPRO 帧名确定场名与时间步；`suan-workbench` 改为 STK 工作台启动器，Synorder 宿主改用
+  `python -m suan.workbench`。
+- 并行云站点清单见 [并行云站点验收清单](runtime-paratera.md)，尚未执行。
+
+Linux / Python 3.12.14，`.[server,science,control,visualization,test]` 环境，
+`python -m pytest -p no:cacheprovider -m "not desktop"`：**303 passed，2 skipped**，约 45 秒；
+Python 3.10.21 同一命令结果相同。
+跳过项为可选 MCP 组件未安装，以及需要 `STK_TEST_MUPRO_PREFIX` 的真实 muFerro 测试。
+MuPRO 测试使用模拟的 muFerro、mpiexec 和 srun；Slurm／PBS 为模拟命令；非 Linux 行为通过修改
+`sys.platform` 的测试检查，尚未在真实 Windows 或 CI 上运行。本轮没有运行多 rank MPI。
+
+### MuPRO 本机验收
+
+2026-09-24 04:09–04:13（UTC+8），r730xd 测试主机（`mnemora-test`，Linux x86_64，48 个逻辑 CPU），
+Python 3.12.14。STK 为 `feature/independent-runtime-mupro` 分支上基于 217bd86 的未提交工作树，
+以非可编辑方式安装到临时 venv。按 [MuPRO 指南](runtime-mupro.md) 的“本机验收流程”执行，
+结果：**通过**，完成两次真实 muFerro 单 rank 运行。逐步记录见该指南的“结果”。
+
+- 程序：Release 构建 muFerro（muprosdk b2adf41，SHA-256
+  `c0c1f3454f5ff5384c76e70455b0441bb8ebeeb40b711b2360f2f0f1d099683a`），Release 许可检查通过，
+  没有改用 muFerrod。两次运行都是 1 rank、1 线程、`launcher` 为 `none` 的 MPI singleton，
+  没有启动 mpiexec 或 hydra。
+- 耗时：CLI 提交 `--wait` 5.24 秒（求解器 3.02 秒）；模板任务从派发到结束 4.57 秒（求解器 2.83 秒）；
+  无界面视图检查 0.89 秒；全程 279.6 秒，其中 pip 安装 246 秒。
+- 校验：两次均为 `stk-mupro-1` `passed`（完成 101 步，101 行有限能量，101 条进度，30 个 16³ 场帧），
+  `qoi.total_energy` 均为 −727.9144455（step 101），与不经 STK 直接运行 muFerro 的 1 rank 参考值相同。任务为
+  `b19c4c0fdbbd41708acf4373e6a3f383`（CLI）与 `89213f88715844a7941a3f7601711a0c`（`muferro-example` 模板）。
+- 网络：Runtime 只监听 127.0.0.1；运行期间本次运行没有其他监听。
+- 幂等：同一 `--key` 返回同一任务 ID，没有新的运行目录。
+- 视图：节点代理生成的 slice、等值面和向量箭头可用，slice 通过 `validate_scene`；`view.probe`
+  与直接解析 DAT 的值完全相同；`energy_out.dat` 按预期被拒绝。
+- 模板链路：C++ 按钮的等价命令按 `client.json` 换成 `muferro-example`，经节点代理在真实 Runtime 上
+  运行成功，桥接写出的 `scene.json` 通过 `validate_scene`。
+- 清理：Runtime 已停止，没有残留进程或套接字；muprosdk 工作树与许可文件元数据前后一致；
+  `$A/shared` 为 31M（每次运行约 16 MB）。
+- 发现两个小问题：`muferro-example` 模板没有声明 `ranks`／`threads_per_rank`，模板运行在 Runtime
+  `environment.json` 中的 `MKL_NUM_THREADS` 为 null（求解器实际为 1）；以 `--port 0` 初始化时，
+  停止后 `status` 的 `url` 显示端口 0。验收后均已修复：模板改为 1 rank、每 rank 1 线程，停止后
+  `url` 为 `null`。
+
+本次没有覆盖多 rank MPI、真实集群（含并行云）以及 GPU／Blender C++ 界面构建。
+
 ## 覆盖范围
 
 | 验收项 | 证据 |
@@ -66,14 +131,16 @@ Linux / Python 3.12.13 验证结果：
 
 ## 尚需站点验收
 
-- 真实 PBS / Slurm 集群、MuPRO 可执行程序、MPI / module 环境、共享文件系统、
-  队列和站点资源策略；本次调度器测试为协议模拟，不是实际集群性能验证。
+- 真实 PBS / Slurm 集群（首个站点为并行云，账号待开通）、集群上的 MuPRO 可执行程序与许可、
+  多 rank MPI / module 环境、共享文件系统、队列和站点资源策略；本次调度器测试为协议模拟，
+  不是实际集群性能验证。MuPRO 目前只在本机完成单 rank 验收（见上）。
 - 真实 SSH 网络断线／重连；本次已验证客户端重建和服务端任务寿命独立，
   未对外部服务器执行 SSH 测试。
-- Windows / macOS 运行；已添加 Linux / Windows CI 矩阵，但本次仅在 Linux 执行。
+- Windows / macOS 客户端运行；服务器端只支持 Linux。CI 在 Linux 运行服务器测试，
+  在 Windows 运行客户端路径，本次仅在 Linux 执行。
 - PyInstaller 冻结桌面二进制的多进程启动与 Python 解释器分发；当前验收发布物
   为 Python wheel / sdist，未发布到 PyPI 或创建远程 release。
 
-交互式 Python 内核、远程实时三维渲染、Web / 手机界面和团队权限属于后续阶段。
+交互式 Python 内核、远程实时三维渲染和团队权限属于后续阶段。
 
 安装、API、SSH 与真实集群验收命令见 [runtime 使用指南](runtime.md)。
