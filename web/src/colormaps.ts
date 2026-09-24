@@ -1,0 +1,193 @@
+// Colour mapping for stk.payload/2 (spec §5) and the orientation colours of docs/specs/domain-classifiers.md §6.
+// Colormaps travel in the payload as 256-entry RGBA8 LUTs or categorical palettes; nothing is hard-coded here
+// except the function colormap stk:orientation-hsl and the generic stk:categorical fallback.
+import type {AttributeSpec, ColorSpec, LayerSpec, LoadedPayload, TypedArray} from './payload';
+
+export const ORIENTATION_HSL = 'stk:orientation-hsl';
+export type RGB = [number, number, number];
+
+export interface ContinuousColormap {kind: 'continuous', id: string, name: string, lut: Uint8Array, nan: Uint8Array, below: Uint8Array, above: Uint8Array}
+export interface CategoricalColormap {kind: 'categorical', id: string, name: string, entries: {value: number, name: string, color: Uint8Array}[],
+  lookup: Map<number, Uint8Array>, unknown: Uint8Array}
+export type Colormap = ContinuousColormap | CategoricalColormap;
+
+/** 8-bit value of a colour component in [0, 1] (spec: floor(255·c + 0.5)). */
+export const byte = (c: number) => Math.max(0, Math.min(255, Math.floor(255 * c + 0.5)));
+export const rgba8 = (c: ArrayLike<number> | undefined, fallback: number[]): Uint8Array => {
+  const v = c && c.length >= 3 ? c : fallback;
+  return Uint8Array.of(byte(v[0]), byte(v[1]), byte(v[2]), byte(v.length > 3 ? v[3] : 1));
+};
+
+/** CSS Color 4 HSL → RGB, h in degrees, s and l in [0, 1] (domain-classifiers.md §6.1). */
+export function hslToRgb(h: number, s: number, l: number): RGB {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = (((h % 360) + 360) % 360) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  const [r, g, b] = hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
+  const m = l - c / 2;
+  return [r + m, g + m, b + m];
+}
+
+/** stk:orientation-hsl (domain-classifiers.md §6.2): colour of vector p for maximum magnitude M. */
+export function orientationHsl(px: number, py: number, pz: number, M: number, l0 = 0, l1 = 1): RGB {
+  const m = Math.hypot(px, py, pz);
+  const mxy = Math.hypot(px, py);
+  if (!(M > 0) || m === 0 || !Number.isFinite(m)) return hslToRgb(0, 0, l0 + (l1 - l0) / 2);
+  if (mxy < 1e-5 * M) return hslToRgb(0, 0, l0 + (l1 - l0) * Math.min(1, Math.max(0, (pz + M) / (2 * M))));
+  const h = (Math.atan2(py, px) * 180) / Math.PI;
+  return hslToRgb(h, Math.min(m / M, 1), l0 + (l1 - l0) * (pz / m + 1) / 2);
+}
+
+/** stk:categorical (domain-classifiers.md §6.5) for label fields without a palette. */
+export function genericCategoryColor(v: number): RGB {
+  if (v === 0) return [0.75, 0.75, 0.75];
+  if (v === -1) return [1, 1, 1];
+  if (v < -1 || !Number.isInteger(v)) return [0.5, 0.5, 0.5];
+  const i = v - 1;
+  return hslToRgb((i * 137.50776405003785) % 360, 0.65, [0.5, 0.38, 0.62][i % 3]);
+}
+
+const GREY = [0.5, 0.5, 0.5, 1];
+
+export function resolveColormap(p: LoadedPayload, id: string | undefined): Colormap | null {
+  const spec = p.colormap(id);
+  if (!spec) return null;
+  if (spec.categorical) {
+    const entries = (spec.entries ?? []).map(e => ({value: e.value, name: e.name, color: rgba8(e.color, GREY)}));
+    return {kind: 'categorical', id: spec.id, name: spec.name, entries, lookup: new Map(entries.map(e => [e.value, e.color])), unknown: rgba8(spec.unknown_color, GREY)};
+  }
+  const lut = p.accessor(spec.lut!) as Uint8Array;
+  return {kind: 'continuous', id: spec.id, name: spec.name, lut, nan: rgba8(spec.nan_color, GREY),
+    below: spec.below_color ? rgba8(spec.below_color, GREY) : lut.slice(0, 4), above: spec.above_color ? rgba8(spec.above_color, GREY) : lut.slice(1020, 1024)};
+}
+
+/** A grey ramp used when a payload names no continuous colormap (reported as a warning by callers). */
+export function greyColormap(): ContinuousColormap {
+  const lut = new Uint8Array(1024);
+  for (let i = 0; i < 256; i++) lut.set([i, i, i, 255], i * 4);
+  return {kind: 'continuous', id: 'grey', name: 'gray', lut, nan: rgba8(GREY, GREY), below: lut.slice(0, 4), above: lut.slice(1020)};
+}
+
+/** LUT index of value v over [lo, hi] (spec §5): −1 below, 256 above, NaN → −2. */
+export function lutIndex(v: number, lo: number, hi: number): number {
+  if (Number.isNaN(v)) return -2;
+  const t = hi === lo ? 0.5 : (v - lo) / (hi - lo);
+  if (t < 0) return -1;
+  if (t > 1) return 256;
+  return Math.min(255, Math.floor(t * 256));
+}
+
+export function writeContinuous(cm: ContinuousColormap, v: number, lo: number, hi: number, out: Uint8Array, o: number) {
+  const i = lutIndex(v, lo, hi);
+  if (i === -2) out.set(cm.nan, o);
+  else if (i === -1) out.set(cm.below, o);
+  else if (i === 256) out.set(cm.above, o);
+  else { out[o] = cm.lut[i * 4]; out[o + 1] = cm.lut[i * 4 + 1]; out[o + 2] = cm.lut[i * 4 + 2]; out[o + 3] = cm.lut[i * 4 + 3]; }
+}
+
+/** Scalar per tuple: the given component, or the magnitude (component "magnitude", or null on vectors). */
+export function scalarValues(values: ArrayLike<number>, components: number, component: number | 'magnitude' | null | undefined): Float64Array {
+  const n = Math.floor(values.length / components);
+  const out = new Float64Array(n);
+  const magnitude = component === 'magnitude' || ((component === null || component === undefined) && components > 1);
+  const c = typeof component === 'number' ? Math.min(component, components - 1) : 0;
+  for (let i = 0; i < n; i++) {
+    if (!magnitude) { out[i] = values[i * components + c]; continue; }
+    let s = 0;
+    for (let k = 0; k < components; k++) { const x = values[i * components + k]; s += x * x; }
+    out[i] = Math.sqrt(s);
+  }
+  return out;
+}
+
+export function finiteRange(values: ArrayLike<number>): [number, number] {
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < values.length; i++) { const v = values[i]; if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+  return lo <= hi ? [lo, hi] : [0, 1];
+}
+
+export interface ColorResult {
+  /** RGBA8 per tuple, or null for a solid colour. */
+  colors: Uint8Array | null,
+  solid: number[],
+  categorical: boolean,
+  nearest: boolean,
+  range?: [number, number],
+  warnings: string[],
+}
+
+/** Colours for `count` tuples of a layer per its colour spec (spec §5). */
+export function layerColors(p: LoadedPayload, layer: LayerSpec, spec: ColorSpec | undefined, count: number, association: 'point' | 'cell', vectors?: {values: ArrayLike<number>, components: number}): ColorResult {
+  const warnings: string[] = [];
+  const solid = spec?.solid && spec.solid.length >= 3 ? spec.solid : [0.8, 0.8, 0.8];
+  const none: ColorResult = {colors: null, solid, categorical: false, nearest: false, warnings};
+  if (!spec || !spec.by || spec.by === 'solid') return none;
+  if (spec.by === 'direction') {
+    let source = vectors;
+    if (spec.attribute) {
+      const attr = layer.attributes?.[spec.attribute];
+      if (attr) source = {values: p.floats(attr.accessor), components: p.accessorSpec(attr.accessor).components};
+    }
+    if (!source || source.components < 3) { warnings.push(`图层 ${layer.id} 缺少方向着色所需的三分量向量`); return none; }
+    const {values, components} = source;
+    let M = spec.max_magnitude ?? 0;
+    if (!(M > 0)) for (let i = 0; i < count; i++) M = Math.max(M, Math.hypot(values[i * components], values[i * components + 1], values[i * components + 2]) || 0);
+    const [l0, l1] = spec.lightness_range ?? [0, 1];
+    const colors = new Uint8Array(count * 4);
+    for (let i = 0; i < count; i++) {
+      const [r, g, b] = orientationHsl(values[i * components], values[i * components + 1], values[i * components + 2], M, l0, l1);
+      colors[i * 4] = byte(r); colors[i * 4 + 1] = byte(g); colors[i * 4 + 2] = byte(b); colors[i * 4 + 3] = 255;
+    }
+    return {colors, solid, categorical: false, nearest: false, warnings};
+  }
+  const name = spec.attribute ?? '';
+  const attr: AttributeSpec | undefined = layer.attributes?.[name];
+  if (!attr) { warnings.push(`图层 ${layer.id} 的着色属性 ${name} 不存在`); return none; }
+  if ((attr.association ?? 'point') !== association) warnings.push(`图层 ${layer.id} 的属性 ${name} 关联方式与图层不符`);
+  const accessor = p.accessorSpec(attr.accessor);
+  const raw: TypedArray = p.accessor(attr.accessor);
+  let cm = resolveColormap(p, spec.colormap ?? attr.palette);
+  const categorical = attr.categorical === true || cm?.kind === 'categorical';
+  const colors = new Uint8Array(count * 4);
+  if (categorical) {
+    const values = scalarValues(raw, accessor.components, typeof spec.component === 'number' ? spec.component : 0);
+    const palette = cm?.kind === 'categorical' ? cm : null;
+    if (!palette) warnings.push(`图层 ${layer.id} 的分类属性 ${name} 未附带调色板，使用 stk:categorical`);
+    for (let i = 0; i < count; i++) {
+      const v = values[i];
+      const c = palette ? (palette.lookup.get(v) ?? palette.unknown) : rgba8(genericCategoryColor(v), GREY);
+      colors.set(c, i * 4);
+    }
+    return {colors, solid, categorical: true, nearest: true, warnings};
+  }
+  if (!cm || cm.kind !== 'continuous') { warnings.push(`图层 ${layer.id} 未指定连续颜色表，使用灰度`); cm = greyColormap(); }
+  const values = scalarValues(accessor.normalized ? p.floats(attr.accessor) : raw, accessor.components, spec.component);
+  const scalarComponent = accessor.components === 1 || typeof spec.component === 'number';
+  const hint = scalarComponent && accessor.min && accessor.max ? [accessor.min[typeof spec.component === 'number' ? spec.component : 0], accessor.max[typeof spec.component === 'number' ? spec.component : 0]] as [number, number] : undefined;
+  const range = spec.range ?? attr.range ?? (hint && hint.every(Number.isFinite) ? hint : finiteRange(values));
+  for (let i = 0; i < count; i++) writeContinuous(cm, values[i], range[0], range[1], colors, i * 4);
+  return {colors, solid, categorical: false, nearest: spec.interpolate === 'nearest', range, warnings};
+}
+
+/** d3/Python-style number formatting for legend labels: ".3g" (default), ".2f", ".1e", ".0%", "d". */
+export function formatNumber(v: number, format = '.3g'): string {
+  if (!Number.isFinite(v)) return String(v);
+  const match = /^(?:\.(\d+))?([efgd%])?$/.exec(format.trim());
+  const precision = match?.[1] !== undefined ? Number(match[1]) : 3;
+  const kind = match?.[2] ?? 'g';
+  if (kind === 'f') return v.toFixed(Math.min(precision, 20));
+  if (kind === 'e') return v.toExponential(Math.min(precision, 20)).replace(/e([+-])(\d)$/, 'e$10$2');
+  if (kind === 'd') return String(Math.round(v));
+  if (kind === '%') return `${(v * 100).toFixed(Math.min(precision, 20))}%`;
+  if (v === 0) return '0';
+  const p = Math.max(1, Math.min(precision, 21));
+  const exponent = Math.floor(Math.log10(Math.abs(Number(v.toPrecision(p)))));
+  if (exponent < -4 || exponent >= p) return v.toExponential(p - 1).replace(/\.?0+e/, 'e').replace(/e([+-])(\d)$/, 'e$10$2');
+  const fixed = v.toFixed(Math.max(0, p - 1 - exponent));
+  return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
+}
+
+/** CSS colour of an RGBA8 tuple. */
+export const cssColor = (c: ArrayLike<number>) => `rgba(${c[0]},${c[1]},${c[2]},${c.length > 3 ? (c[3] / 255).toFixed(3) : 1})`;
+/** CSS colour of float RGB(A) components in [0, 1]. */
+export const cssFloatColor = (c: ArrayLike<number>) => cssColor([byte(c[0]), byte(c[1]), byte(c[2]), byte(c.length > 3 ? c[3] : 1)]);

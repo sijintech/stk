@@ -8,8 +8,19 @@ import vtkDataArray from '@kitware/vtk.js/Common/Core/DataArray';
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
 import vtkCellPicker from '@kitware/vtk.js/Rendering/Core/CellPicker';
 import type {Json} from './api';
+import PayloadViewer,{type PickInfo} from './PayloadViewer';
+import {PAYLOAD_SCHEMA,type LoadedPayload} from './payload';
 
-export default function Viewer({scene,onPick}:{scene:Json|null,onPick:(p:number[])=>void}){
+export type {PickInfo};
+const isPayloadV2=(scene:Json|LoadedPayload|null):scene is LoadedPayload=>scene?.manifest?.schema===PAYLOAD_SCHEMA&&typeof (scene as LoadedPayload).accessor==='function';
+
+// Branch on the manifest schema: stk.payload/2 (graph results) or the unchanged scene v1 path (view.build).
+export default function Viewer({scene,onPick,resetKey}:{scene:Json|LoadedPayload|null,onPick:(p:number[],info?:PickInfo)=>void,resetKey?:string}){
+  if(isPayloadV2(scene))return <PayloadViewer payload={scene} onPick={onPick} resetKey={resetKey}/>;
+  return <SceneV1Viewer scene={scene} onPick={onPick}/>;
+}
+
+function SceneV1Viewer({scene,onPick}:{scene:Json|null,onPick:(p:number[])=>void}){
   const ref=useRef<HTMLDivElement>(null),pick=useRef(onPick);pick.current=onPick;
   const [error,setError]=useState('');
   useEffect(()=>{
