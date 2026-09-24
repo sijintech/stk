@@ -1,0 +1,21 @@
+{
+ "schema": "stk.graph/1",
+ "id": "muferro-energy-plot",
+ "name": "muFerro energy trace",
+ "description": "The energy terms of energy_out.dat against the step, as an SVG/PNG plot plus the table itself. muFerro energies are normalized (unit 'normalized'); do not convert them to physical units.",
+ "catalog": {"stk": 1},
+ "parameters": [
+  {"name": "last_n", "type": "json", "default": null, "label": "Only the last N rows (null = all)"}
+ ],
+ "nodes": [
+  {"id": "run", "type": "stk.source.muferro_run@1", "params": {"binding": "run"}},
+  {"id": "energy_plot", "type": "stk.plot.line@1", "inputs": {"table": {"from": "run.energy"}},
+   "params": {"x": "step", "y": ["Total Energy"], "y2": ["Landau Energy"], "last_n": {"$param": "last_n"},
+              "y_label": "Total energy (normalized)", "y2_label": "Landau energy (normalized)",
+              "title": "Energy trace"}},
+  {"id": "terms", "type": "stk.plot.line@1", "inputs": {"table": {"from": "run.energy"}},
+   "params": {"x": "step", "y": ["Elastic Energy", "Electric Energy", "Landau Energy", "Gradient P Energy"],
+              "y_label": "Energy terms (normalized)"}}
+ ],
+ "outputs": {"energy_plot": "energy_plot.plot", "terms_plot": "terms.plot", "energy": "run.energy"}
+}

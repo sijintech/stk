@@ -5,11 +5,17 @@ return task IDs and never inherit MCP transport lifetimes or timeouts.
 """
 
 import asyncio
+import json
 import os
 import shlex
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import Image
+except ImportError:  # older 1.x releases export it only from the utilities module
+    from mcp.server.fastmcp.utilities.types import Image
+from suan.mcp import graph_tools
 from suan.runtime.cli import get_client
 from suan.runtime.models import TaskSpec
 
@@ -106,6 +112,78 @@ async def run_stk_command(command: str, workspace_id: str, idempotency_key: str,
         raise ValueError("Expected sjob, smesh or sviz")
     spec = TaskSpec(workspace_id, ["{python}", "-m", "suan.cli.main"] + argv, backend=backend)
     return await asyncio.to_thread(get_client().submit, spec, idempotency_key)
+
+
+@mcp.tool()
+async def get_task_events(task_id: str, offset: int = 0, limit: Optional[int] = None) -> dict:
+    """Monitoring events of a task (stk-events-v1: progress, metrics, frame, message, run.completed).
+
+    Pass next_offset back as offset to continue; terminal is true once the task
+    has ended and every event was read. Progress is not success: check the task
+    state and the program's own result record.
+    """
+    return await asyncio.to_thread(graph_tools.get_task_events, task_id, offset, limit)
+
+
+@mcp.tool()
+async def graph_catalog(family: Optional[str] = None, node_type: Optional[str] = None) -> dict:
+    """STK graph node types (compact) and graph presets; node_type returns one full declaration.
+
+    family filters by source, filter, analysis, render, view, output or plot.
+    """
+    return await asyncio.to_thread(graph_tools.graph_catalog, family, node_type)
+
+
+@mcp.tool()
+async def graph_validate(graph: Optional[dict] = None, preset: Optional[str] = None,
+                         parameters: Optional[dict] = None) -> dict:
+    """Validate an stk.graph/1 document (or a preset with parameter overrides) without running it.
+
+    Each error has a code, a JSON pointer path, the node and a hint for fixing it.
+    """
+    return await asyncio.to_thread(graph_tools.graph_validate, graph, preset, parameters)
+
+
+@mcp.tool()
+async def graph_evaluate(graph: Optional[dict] = None, preset: Optional[str] = None, bindings: Optional[dict] = None,
+                         parameters: Optional[dict] = None, outputs: Optional[list] = None, profile: str = "web",
+                         plot_format: str = "svg", output_dir: Optional[str] = None) -> dict:
+    """Evaluate a graph or preset on this host; returns a JSON summary plus local file paths.
+
+    bindings map source binding names to {"task_id": id} (a finished Runtime task)
+    or {"dir": path} (a run directory on this host). Tables with few rows are
+    inlined; payloads are written as manifest.json + <sha256>.bin.
+    """
+    return await asyncio.to_thread(graph_tools.graph_evaluate, graph, preset, bindings, parameters, outputs, profile,
+                                   plot_format, None, output_dir)
+
+
+@mcp.tool()
+async def graph_render(graph: Optional[dict] = None, preset: Optional[str] = None, bindings: Optional[dict] = None,
+                       parameters: Optional[dict] = None, output: Optional[str] = None, width: Optional[int] = None,
+                       height: Optional[int] = None, output_dir: Optional[str] = None):
+    """Render a graph's image output (or its first scene) offscreen and return the PNG plus a summary.
+
+    Fails with a clear message when this host has no offscreen OpenGL.
+    """
+    rendered = await asyncio.to_thread(graph_tools.graph_render, graph, preset, bindings, parameters, output, width,
+                                       height, output_dir)
+    return [Image(data=rendered["png"], format="png"), json.dumps(rendered["summary"], ensure_ascii=False)]
+
+
+@mcp.tool()
+async def plot_table(columns: Optional[dict] = None, y: Optional[list] = None, x: Optional[str] = None,
+                     kind: str = "line", units: Optional[dict] = None, title: Optional[str] = None,
+                     x_label: Optional[str] = None, y_label: Optional[str] = None, spec: Optional[dict] = None,
+                     output_dir: Optional[str] = None):
+    """Plot table columns ({name: [values]}) as line, scatter, bar or hist (or render a full stk.plot/1 spec).
+
+    Returns the PNG plus the file paths of the image and of the plotted data.
+    Units default to "unspecified"; never guess them.
+    """
+    rendered = await asyncio.to_thread(graph_tools.plot_table, columns, y, x, kind, units, title, x_label, y_label,
+                                       spec, "png", output_dir)
+    return [Image(data=rendered["bytes"], format="png"), json.dumps(rendered["summary"], ensure_ascii=False)]
 
 
 def run_server():

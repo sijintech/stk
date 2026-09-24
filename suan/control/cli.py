@@ -61,7 +61,10 @@ def init(state_dir):
               help="Authorize a built-in exact command template (repeatable).")
 @click.option("--template-file", "files", multiple=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help="JSON object mapping template IDs to exact commands (repeatable).")
-def serve(state_dir, host, port, web_dir, allow_demo_template, names, files):
+@click.option("--blob-max-mib", default=512, show_default=True, type=click.IntRange(1, 65536),
+              help="Largest blob a node may upload (graph payload buffers, images, plots). A reverse proxy in "
+                   "front of the hub needs a request body limit at least this large for /api/v1/blobs/.")
+def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blob_max_mib):
     linux_server()
     import uvicorn
     from .app import create_app
@@ -74,7 +77,8 @@ def serve(state_dir, host, port, web_dir, allow_demo_template, names, files):
     model = None
     if os.environ.get("STK_MODEL_URL") and os.environ.get("STK_MODEL_NAME"):
         model = ChatModel(os.environ["STK_MODEL_URL"], os.environ.get("STK_MODEL_KEY", ""), os.environ["STK_MODEL_NAME"])
-    app = create_app(state_dir, config["owner_token"], templates, model, web_dir)
+    app = create_app(state_dir, config["owner_token"], templates, model, web_dir,
+                     blob_max_bytes=blob_max_mib * 1024 * 1024)
     uvicorn.run(app, host=host, port=port, ws_max_size=16*1024*1024, access_log=False)
 
 
@@ -114,12 +118,15 @@ def pair_node(control_url, code, name, runtime_state_dir, state_dir):
 
 @node.command("run")
 @click.option("--state-dir", type=click.Path(path_type=Path, exists=True), required=True)
-def run_node(state_dir):
+@click.option("--graph-workers", default=1, show_default=True, type=click.IntRange(1, 2),
+              help="Graph evaluations run at the same time (other actions never wait for them).")
+def run_node(state_dir, graph_workers):
     linux_server()
     data = json.loads((state_dir / "node.json").read_text())
     runtime = load_config(data["runtime_state_dir"])
     client = RuntimeClient(f"http://127.0.0.1:{runtime['port']}", runtime["token"])
     try:
-        asyncio.run(NodeAgent(client, state_dir / "cache").run(data["control_url"], data["token"]))
+        agent = NodeAgent(client, state_dir / "cache", graph_workers=graph_workers)
+        asyncio.run(agent.run(data["control_url"], data["token"]))
     except KeyboardInterrupt:
         pass

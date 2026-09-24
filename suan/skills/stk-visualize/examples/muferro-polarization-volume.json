@@ -1,0 +1,33 @@
+{
+ "schema": "stk.graph/1",
+ "id": "muferro-polarization-volume",
+ "name": "|P| volume rendering",
+ "description": "Direct volume rendering of the polarization magnitude with a colour bar. The colour bar states the value range; read numbers from the data (statistics, probes), never from the colours.",
+ "catalog": {"stk": 1},
+ "parameters": [
+  {"name": "step", "type": "step", "default": "latest", "label": "Step"},
+  {"name": "colormap", "type": "enum", "choices": ["viridis", "coolwarm", "gray"], "default": "viridis"},
+  {"name": "view", "type": "enum", "choices": ["iso", "+x", "-x", "+y", "-y", "+z", "-z"], "default": "iso"}
+ ],
+ "nodes": [
+  {"id": "run", "type": "stk.source.muferro_run@1", "params": {"binding": "run"}},
+  {"id": "polar", "type": "stk.source.muferro_frame@1", "inputs": {"frames": {"from": "run.frames"}},
+   "params": {"dataset": "Polar", "step": {"$param": "step"}}},
+  {"id": "magnitude", "type": "stk.filter.calculator@1", "inputs": {"in": {"from": "polar.out"}},
+   "params": {"operation": "magnitude", "field": "Polar", "result": "P_magnitude"}},
+  {"id": "volume", "type": "stk.render.volume@1", "inputs": {"in": {"from": "magnitude.out"}},
+   "params": {"field": "P_magnitude", "colormap": {"$param": "colormap"}, "opacity": [[0.0, 0.0], [1.0, 0.8]],
+              "name": "|P|"}},
+  {"id": "bar", "type": "stk.render.scalar_bar@1", "inputs": {"source": {"from": "volume.layer"}}},
+  {"id": "box", "type": "stk.render.outline@1", "inputs": {"in": {"from": "polar.out"}}},
+  {"id": "axes", "type": "stk.render.axes@1"},
+  {"id": "camera", "type": "stk.view.camera@1", "params": {"preset": {"$param": "view"}}},
+  {"id": "scene", "type": "stk.view.scene@1",
+   "inputs": {"layers": [{"from": "volume.layer"}, {"from": "bar.layer"}, {"from": "box.layer"},
+                         {"from": "axes.layer"}],
+              "camera": {"from": "camera.camera"}}},
+  {"id": "payload", "type": "stk.output.payload@1", "inputs": {"scene": {"from": "scene.scene"}}},
+  {"id": "png", "type": "stk.output.image@1", "inputs": {"source": {"from": "scene.scene"}}}
+ ],
+ "outputs": {"payload": "payload.payload", "image": "png.image"}
+}
