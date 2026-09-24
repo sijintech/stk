@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import secrets
+import sys
 import uuid
 
 from .models import relative_path
@@ -101,7 +102,21 @@ def instance_lock(path):
         stream.close()
 
 
+class UnsupportedServerPlatform(ValueError):
+    """The server Runtime was asked to run on a client-only platform."""
+
+
+def require_linux_server():
+    """API, supervisor, workers and schedulers run on Linux; other hosts are clients."""
+    if not sys.platform.startswith("linux"):
+        raise UnsupportedServerPlatform(
+            "The STK server Runtime runs on Linux only. On this computer use a Linux runtime as a client: "
+            "suan connect add NAME --url http://127.0.0.1:PORT (through an SSH tunnel), then pass --profile NAME, "
+            "or set STK_RUNTIME_URL and STK_RUNTIME_TOKEN.")
+
+
 def init_config(state_dir, workspace_root=None, port=8765, concurrency=1):
+    require_linux_server()
     state = Path(state_dir).expanduser().resolve()
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     with instance_lock(state / "config.lock"):
@@ -112,7 +127,6 @@ def init_config(state_dir, workspace_root=None, port=8765, concurrency=1):
             raise ValueError("Invalid port or concurrency")
         root = Path(workspace_root).expanduser().resolve() if workspace_root else state / "workspaces"
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        import sys
         config = {"state_dir": str(state), "workspace_root": str(root), "port": port,
                   "concurrency": concurrency, "poll_interval": 1.0, "scheduler_interval": 10.0,
                   "token": secrets.token_urlsafe(32), "python": sys.executable}
@@ -121,6 +135,7 @@ def init_config(state_dir, workspace_root=None, port=8765, concurrency=1):
 
 
 def load_config(state_dir):
+    require_linux_server()
     config = read_json(Path(state_dir).expanduser().resolve() / "config.json")
     if config is None:
         raise ValueError("Runtime is not initialized; run suan server init")

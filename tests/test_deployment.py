@@ -15,6 +15,8 @@ from suan.runtime.common import atomic_json, init_config, read_json, alive
 from suan.runtime.models import TaskSpec
 from suan.runtime.cli import connect, server
 
+pytestmark = pytest.mark.server
+
 
 @pytest.fixture
 def deployed(tmp_path):
@@ -136,6 +138,21 @@ def test_doctor_and_saved_connection_check_running_stopped_and_bad_token(
     assert not json.loads(result.output)["ok"]
     assert not daemon.status(state)["api_running"]
     assert not daemon.status(state)["supervisor_running"]
+
+
+def test_stopped_runtime_with_port_zero_has_no_url(tmp_path, monkeypatch):
+    import click
+    from suan.runtime.cli import get_client
+    for name in ("STK_RUNTIME_URL", "STK_RUNTIME_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    state = tmp_path / "state"
+    init_config(state, tmp_path / "shared", port=0)
+    # The API picks its port at start; a stopped one has no address to report.
+    assert daemon.status(state) == {"api_running": False, "supervisor_running": False, "url": None}
+    with pytest.raises(click.ClickException, match="not running"):
+        get_client(None, state)
+    init_config(tmp_path / "fixed", tmp_path / "shared", port=8765)
+    assert daemon.status(tmp_path / "fixed")["url"] == "http://127.0.0.1:8765"
 
 
 def test_acceptance_timeout_persists_keys_and_does_not_cancel_tasks(deployed, tmp_path):
