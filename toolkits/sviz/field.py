@@ -15,7 +15,7 @@ def read_field(filename):
         if data.ndim == 3:
             data = data[..., None]
     elif path.suffix.lower() == ".vtk":
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         if len(lines) < 10 or lines[2].strip() != "ASCII" or lines[3].strip() != "DATASET STRUCTURED_POINTS":
             raise ValueError("Preview supports ASCII STRUCTURED_POINTS VTK; convert other VTK types first")
         tokens = " ".join(lines[4:]).split()
