@@ -233,8 +233,11 @@ def contour(ctx, inputs, params):
 
 - `node(type, *, version=1, impl_version=1, title, description=None, inputs=(), outputs, params=None,
   stage=None, time_dependent=False, deterministic=True, cache="memory", finalize=None,
-  fingerprint=None, meta=None, tags=(), stretch=False, registry=None)` attaches
-  `fn.stk_node_type` (a `NodeType`); `Registry.node(...)` also registers it.
+  fingerprint=None, meta=None, tags=(), stretch=False, selectors=(), registry=None)` attaches
+  `fn.stk_node_type` (a `NodeType`); `Registry.node(...)` also registers it. `selectors` (source
+  nodes with a `fingerprint` only) names the data params that merely select which content is read
+  (e.g. `("step", "policy")`); they are left out of the data key (§5). It is an evaluation detail of
+  the Python registration and is not exported in the catalog.
 - `Port(name, type, *, accepts=None, kind=None, kind_from=None, value_type=None, required=True,
   multi=False, title=None, description=None)`.
 - Param helpers (all accept `default` first, then keyword `nullable`, `stage` (`"data"`/`"client"`),
@@ -253,7 +256,8 @@ def contour(ctx, inputs, params):
 - Registration checks: ids and names; known port types and kinds; kinds only on dataset/table
   ports; `kind_from` names a dataset input; defaults satisfy their schemas; no client params on
   source/data/analysis nodes; disk cache only for deterministic dataset/table/value outputs; source
-  nodes with an `impl` need a `fingerprint` unless `cache="none"`.
+  nodes with an `impl` need a `fingerprint` unless `cache="none"`; `selectors` are data params of a
+  source node.
 
 ### 4.4 Implementation contract
 
@@ -266,8 +270,12 @@ def contour(ctx, inputs, params):
   `finalize(ctx, outputs, client_params) -> outputs`. The default `attach_appearance` merges
   `{"appearance": {...client params}}` into dict layers or calls `value.with_appearance(dict)`.
 - `fingerprint(ctx, inputs, params) -> JSON`: describes the content a node reads (e.g.
-  `[{"path", "sha256", "reader", "selector"}]`); it becomes `source_content` in the data key. Two
-  steps that resolve to the same frame file share one cache entry.
+  `[{"path", "sha256", "reader", "selector"}]`); it becomes `source` in the data key. A source
+  node's keys do not include its selector params or the keys of its inputs (§5), so the fingerprint
+  must describe everything the node reads, including what it takes from its inputs (for
+  `stk.source.muferro_frame`: the chosen row's path, sha256, reader and components). Two steps
+  that resolve to the same frame file share one cache entry. Choices reported by a fingerprint
+  (`ctx.report_choices`) are fresh for every evaluation.
 - `meta(ctx, input_metas, params) -> {port: meta}` (optional): cheap metadata pass (kinds, fields,
   ranges, frames) for UIs (`graph.meta`).
 - Nodes must not import NumPy/VTK at module import time (the hub imports catalogs without them).
@@ -322,12 +330,41 @@ full_key(N) = sha256(canonical({"data": data_key(N), "client": client-stage para
                                 "inputs": {port: [full_key(upstream) + ":" + upstream_port, ...]}}))
 ```
 
+**Content-keyed source nodes.** A source node (stage `source`) with a `fingerprint` is keyed by
+the content it resolved, not by how it was selected:
+
+```
+data_key(S) = sha256(canonical({"type": id, "impl": impl_version,
+                                "params": data-stage params without the node's selectors,
+                                "inputs": {}, "source": fingerprint(resolved content)}))
+full_key(S) = sha256(canonical({"data": data_key(S), "client": {}, "inputs": {}}))
+```
+
+The selectors (`stk.source.muferro_frame@1`: `step`, `policy`) and the upstream keys (the frame
+listing of `stk.source.muferro_run@1`, whose key changes whenever a live run appends an energy row
+or a progress line) are excluded once the fingerprint has resolved the frame; the fingerprint
+(path, sha256, reader, components of the chosen frame) stands for both. Consequences: `step: 3`
+(resolving to frame 2 under `latest_at_or_before`), `step: 2` and a `latest` that resolves to frame
+2 share one entry; appending energy rows to a live run re-runs the run index and what reads the
+energy trace, never the frame reader or the nodes derived from an unchanged frame. Every other node
+keeps the Merkle keys above (its keys include its upstream keys).
+
+Choices and warnings are stored with a cache entry and replayed on hits, but choices reported
+during the current evaluation (a fingerprint resolving the step on a live run) win over replayed
+ones, so the step scrubber always lists the frames that exist now.
+
+**Request profile.** A node param named `profile` whose value is `"auto"` is replaced by the
+evaluation's `Budget.profile` (the request profile) before keys are computed, so the key names the
+effective profile. `stk.output.payload@1` defaults to `profile: "auto"`; an explicit profile wins.
+
 - Source/data/analysis nodes: value cached by `data_key` (then `full_key` adds nothing).
 - Representation nodes: `impl` result cached by `data_key` (or `full_key` if an input has a client
   type); `finalize` output keyed by `full_key` (memory only).
 - View/output/plot nodes: cached by `full_key`.
-- Consequences (tested in Phase B2): a camera or colormap change re-runs only view/output nodes; a
-  step change re-runs from the frame reader onward; revisiting a step hits the cache.
+- Consequences (tested in Phase B2 and `tests/test_graph_live.py`): a camera or colormap change
+  re-runs only view/output nodes (on a live run also the run index and energy-derived nodes); a step
+  change re-runs from the frame reader onward unless it resolves to a frame already read; revisiting
+  a step hits the cache.
 - Tiers: an in-memory LRU (bytes-bounded) and a disk store `<cache>/objects/aa/<key>` for nodes with
   `cache="disk"`; `ctx.cached(name, ...)` sub-keys by `(data_key, name)`.
 - `graph_hash(graph)` = `"sha256:" + sha256(canonical(graph without id/name/description/ui/x-*,
@@ -346,7 +383,8 @@ between nodes (and by `ctx.check()` inside long nodes). Runtime error codes: `ca
   `ctx.report_choices("step", steps, value=resolved)`; choices appear in
   `EvaluationResult.parameters` keyed by the graph parameter name when the node param is bound with
   `$param` (here `"step"`), else by `"<node>.<param>"`, and drive the web step scrubber.
-- Keys use the resolved frame content, so `latest` is safe on live runs.
+- Keys use the resolved frame content (§5), so `latest` is safe on live runs and step aliases of
+  one frame share a cache entry.
 - Batch re-render (SimViz): `suan graph run g.json --bind run=DIR --param step=all` evaluates each
   step and writes `<output>.%08d.png` plus an `stk.series/1` manifest `{"schema": "stk.series/1",
   "parameter": "step", "frames": [{"step", "outputs": {name: file}}]}`.
@@ -401,6 +439,12 @@ Returned by `suan.graph.service` (agent action `graph.evaluate`, MCP, CLI `--jso
 PNGs, tables > 256 KiB as `{"type": "table", "blob": {"sha256", "size", "media_type":
 "application/json"}}`) go to the hub blob store or, for the CLI, to files in `--out`.
 
+The request `budget.max_output_bytes` limits the delivered bytes (blobs plus this document) and
+defaults to the request profile's payload budget (phone 32 MiB, web 128 MiB, desktop 2 GiB;
+`stk-render-payload-v2.md` §7); the evaluation itself has no output-byte limit (in-memory values such
+as a full-resolution scene are reduced when encoded). Plots rendered for delivery are memoized by
+the plot node's full key and the format, so a warm request renders nothing.
+
 ## 10. Presets (content owned by Phase C1, `suan/graph/presets/*.json`)
 
 `slice`, `iso`, `vectors` (reproduce today's `view.build` modes), `volume`, `muferro-domains`,
@@ -448,7 +492,10 @@ code. `check_graph(...)` raises `GraphValidationError` with all errors.
 `suan graph catalog [--json]`, `suan graph schema`, `suan graph validate FILE [--param k=v]`,
 `suan graph run FILE --bind NAME=DIR|task:ID [--param k=v ...] [--output NAME ...] --out DIR
 [--cache DIR] [--profile web]`, `suan graph doctor` (checks offscreen rendering in a subprocess).
-`python -m suan.graph` is equivalent.
+`python -m suan.graph` is equivalent. `run` writes `result.json` (with `--param NAME=all`:
+`result.<value>.json` per value plus `series.json`) next to the output files; an output whose file
+would take one of these names is written as `<name>.output.json` instead. With `NAME=all` the errors
+of every failed value are printed (`step=100: error [...]`) and the exit status is 1.
 
 ## 13. Milestone-1 node catalog
 
@@ -718,7 +765,7 @@ Encode a scene as stk.payload/2 within the profile budget (optionally with a sce
 
 | param | type | default | stage |
 |---|---|---|---|
-| `profile` | enum "phone" \| "web" \| "desktop" | `"web"` | client |
+| `profile` | enum "auto" \| "phone" \| "web" \| "desktop" | `"auto"` | client |
 | `budget` | null \| object | `null` | client |
 | `v1_fallback` | boolean | `false` | client |
 
@@ -905,7 +952,7 @@ Scalar bar overlay explaining the continuous colouring of the linked layer.
 | `anchor` | enum "top_left" \| "top" \| "top_right" \| "left" \| "center" \| "right" \| "bottom_left" \| "bottom" \| "bottom_right" | `"right"` | client |
 | `orientation` | enum "vertical" \| "horizontal" | `"vertical"` | client |
 | `label_count` | integer (>=2, <=20) | `5` | client |
-| `format` | string | `".3g"` | client |
+| `format` | string (pattern) | `".3g"` | client |
 
 #### `stk.render.surface@1` — Surface / 表面
 
@@ -1153,8 +1200,9 @@ of layer bounds.
 
 **Output**
 
-- `payload`: encodes the scene (`stk-render-payload-v2.md`) within the profile budget (`budget`
-  overrides individual limits); `v1_fallback` also attaches a scene v1 downgrade
+- `payload`: encodes the scene (`stk-render-payload-v2.md`) within the profile budget (`profile:
+  "auto"`, the default, is the request profile, see §5; `budget` overrides individual limits);
+  `v1_fallback` also attaches a scene v1 downgrade
   (`suan/render/v1.py`), delivered as `"scene_v1"` next to the manifest.
 - `image`: a scene is rendered by offscreen VTK **in a subprocess** from its desktop-profile payload
   at `width` × `height` (default: the scene viewport) × `magnification` (PNG, RGBA if `transparent`);
@@ -1162,7 +1210,11 @@ of layer bounds.
   plot-only (`unsupported` for scenes).
 - `dataset`: `vtkhdf` (any M1 kind, STK profile), `vti` (image), `npy` (image, `(x, y, z, c)` like
   `read_field`), `csv`/`json` (tables). File `<name or node id>.<ext>`; value `{name, media_type,
-  sha256, size, path}`.
+  sha256, size, path}` with a disk cache, else `{name, media_type, sha256, size, bytes}`. The file
+  is written to a private temporary file, `sha256`/`size` are those of the bytes written, and it
+  is renamed to the content-addressed `<scratch>/exports/<sha256>/<name>` (concurrent evaluations
+  never collide). Scratch space counts towards the cache's disk budget and is pruned least recently
+  used; a request whose cached export file was pruned re-runs the export node.
 
 **Plot**
 

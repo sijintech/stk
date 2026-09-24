@@ -50,6 +50,8 @@ COMPONENTS = {"Charges": 1, "Displace": 3, "Eigen_St": 6, "Elas_For": 3, "Elast_
               "Strain": 6, "Stress": 6}
 FRAME = re.compile(r"(?:^|/)([A-Za-z][A-Za-z0-9_]{0,7})\.(\d{8})\.dat$")
 ENERGY_ROW = re.compile(r"^\s*kt:\s*(\d+)\s+energy:\s*(.*?)\s*$")
+# Fortran Ew.d output drops the exponent letter when |exponent| > 99: 0.15E+102 is written 0.1500000000+102.
+_FORTRAN_EXPONENT = re.compile(r"(?<=[0-9.])([+-]\d{3})$")
 # muFerro appends to an existing energy trace and progress log (output.f90:31-43, 85-86).
 RUN_OUTPUTS = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
 MAX_INCLUDE_DEPTH = 16  # muprosdk library/L0_Base/toml.f90 max_include_depth
@@ -59,6 +61,13 @@ class MuproError(ValueError):
     def __init__(self, message, classification="configuration"):
         super().__init__(message)
         self.classification = classification
+
+
+def fortran_float(token):
+    """A Fortran real as written by muFerro: ``D`` exponents and the three-digit exponent without a
+    letter (``0.1500000000+102`` = 1.5e101) are accepted; raises ``ValueError`` otherwise."""
+    text = token.strip().replace("D", "E").replace("d", "e")
+    return float(_FORTRAN_EXPONENT.sub(r"E\1", text))
 
 
 def _integer(value, minimum):
@@ -240,7 +249,7 @@ def verify_run(work_dir=".", case_dir="."):
             match = ENERGY_ROW.fullmatch(line)
             if not match:
                 raise MuproError("Malformed energy row", "invalid_result")
-            values = [float(v.replace("D", "E").replace("d", "e")) for v in match[2].split()]
+            values = [fortran_float(v) for v in match[2].split()]
             if len(values) != 5 or not all(math.isfinite(v) for v in values):
                 raise MuproError("Missing or non-finite energy values", "numerical_failure")
             rows.append((int(match[1]), values))

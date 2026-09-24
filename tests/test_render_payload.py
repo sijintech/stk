@@ -112,11 +112,64 @@ def _mutated(mutate):
     (lambda m: m["buffers"][0].update(byteLength=1), "byteLength"),
     (lambda m: m.update(render_origin=[0, 0, float("inf")]), "finite"),
     (lambda m: m["layers"][4].update(colormap="pal0"), "continuous colormap"),
+    # Volume transfer functions and scalar-bar labels (review finding RP7/RP4).
+    (lambda m: m["layers"][2]["transfer_function"].update(range=[0, float("nan")]), "two finite numbers"),
+    (lambda m: m["layers"][2]["transfer_function"].update(range=[0]), "two finite numbers"),
+    (lambda m: m["layers"][2]["transfer_function"].update(opacity=[[0.0, 2.0]]), "alpha in"),
+    (lambda m: m["layers"][2]["transfer_function"].update(opacity="ramp"), "non-empty list"),
+    (lambda m: m["layers"][2].update(transfer_function=["cm0"]), "must be an object"),
+    (lambda m: m["layers"][4].update(format="999999"), "unsupported label format"),
+    (lambda m: m["layers"][4].update(format="{}"), "unsupported label format"),
+    (lambda m: m["layers"][4].update(label_count=1), "label_count"),
+    (lambda m: m["layers"][4].update(range=[0, "1"]), "two finite numbers"),
+    # Wrong JSON types where objects are expected: PayloadError, never AttributeError/TypeError.
+    (lambda m: m["layers"][0]["attributes"].update(height="accessor"), "malformed manifest"),
+    (lambda m: m["layers"][1].update(glyph="arrow"), "malformed manifest"),
+    (lambda m: m["layers"][0]["appearance"].update(color="red"), "malformed manifest"),
+    (lambda m: m["layers"][2].update(lods=[7]), "must be an object"),
+    (lambda m: m["layers"][2].update(grid={"dimensions": [8, 8, 8], "origin": None, "spacing": [1, 1, 1]}),
+     "3 finite numbers"),
 ])
 def test_decoder_rejects_invalid_manifests(mutate, message):
     manifest, blobs = _mutated(mutate)
     with pytest.raises(PayloadError, match=message):
         decode(manifest, blobs)
+
+
+def test_decoder_rejects_manifests_that_are_not_objects(tmp_path):
+    def stkp(manifest):
+        data = json.dumps(manifest).encode()
+        body = struct.pack("<Q4sI", len(data), b"JSON", 0) + data + b" " * (-len(data) % 8)
+        return b"STKP" + struct.pack("<IQ", 2, 16 + len(body)) + body
+
+    example = read_directory(EXAMPLE)
+    for manifest, message in (([], "JSON object"), ("payload", "JSON object"),
+                              ({"schema": "stk.payload/2", "buffers": "none"}, "list of objects"),
+                              ({"buffers": [1]}, "list of objects")):
+        with pytest.raises(PayloadError, match=message):
+            decode(manifest, example.blobs.get)
+        with pytest.raises(PayloadError, match=message):
+            unpack_stkp(stkp(manifest))
+        (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+        with pytest.raises(PayloadError, match=message):
+            read_directory(tmp_path)
+
+
+def test_scalar_bar_formats_are_validated_when_encoding():
+    from suan.render.payload import LABEL_FORMAT
+    for good in (".3g", ".2f", "+.1e", ".0%", "08.3f", ",.2f", "", "g"):
+        assert LABEL_FORMAT.match(good), good
+        format(1234.5678, good)  # every accepted format is also a valid Python format for floats
+    for good in ("d", ",d", "+05d"):  # integers (as in d3): the offscreen renderer rounds the value first
+        assert LABEL_FORMAT.match(good), good
+        format(1234, good)
+    for bad in ("999999", ".999f", "{}", "abc", ".3d", "~s", "x" * 3, "999d"):
+        assert not LABEL_FORMAT.match(bad), bad
+    scene = volume_scene()
+    scene.layer("bar").appearance["format"] = "999999"
+    with pytest.raises(PayloadError, match="label format") as error:
+        encode_scene(scene, profile="web")
+    assert error.value.code == "invalid_param"
 
 
 def test_decoder_rejects_out_of_range_indices_and_non_finite_positions():

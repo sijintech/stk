@@ -205,6 +205,36 @@ def test_pruning_is_least_recently_used(tmp_path):
     assert rebuilt.stats()["disk"]["entries"] == len(list((root / "objects").glob("*/*")))
 
 
+def test_scratch_directories_are_counted_and_pruned(tmp_path):
+    root = tmp_path / "cache"
+    cache = GraphCache(root, disk_bytes=10**9)
+    assert GraphCache().scratch_dir(key(1)) is None and cache.scratch_dir("../x") is None
+    for n in range(3):
+        directory = cache.scratch_dir(key(n))
+        (directory / "exports").mkdir()
+        (directory / "exports" / "a.bin").write_bytes(b"x" * 10_000)
+        os.utime(directory, (1000 + n, 1000 + n))  # key 0 least recently requested
+    cache.put(key(9), {"a": np.zeros(1000)}, disk=True)  # a newer disk entry (~8.3 kB)
+    stats = cache.stats()
+    assert stats["scratch"] == {"entries": 3, "bytes": 30_000} and stats["disk"]["entries"] == 1
+    result = cache.prune(max_bytes=30_000)  # LRU across entries and scratch: key 0's scratch goes first
+    assert result["removed"] == 1 and result["freed"] == 10_000
+    assert not (root / "scratch" / key(0)[:2] / key(0)).exists() and GraphCache(root).contains(key(9)) == "disk"
+    assert cache.stats()["scratch"]["entries"] == 2
+    cache.prune(0)
+    assert cache.stats()["scratch"] == {"entries": 0, "bytes": 0} and cache.stats()["disk"]["entries"] == 0
+    assert list((root / "trash").iterdir()) == []
+    # Scratch space counts towards the budget: a directory requested when the cache is over budget
+    # triggers pruning of the older ones, and the one handed out survives.
+    small = GraphCache(root, disk_bytes=15_000)
+    old = small.scratch_dir(key(1))
+    (old / "big.bin").write_bytes(b"y" * 20_000)
+    os.utime(old, (1000, 1000))
+    small._scratch_scan = (-math.inf, 0)
+    fresh = small.scratch_dir(key(2))
+    assert fresh.is_dir() and not old.exists()
+
+
 def test_concurrent_writers_and_readers(tmp_path):
     root = tmp_path / "cache"
     value = {"a": np.arange(200_000, dtype=np.float64)}

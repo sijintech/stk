@@ -180,13 +180,22 @@ def _check_thresholds(min_magnitude, max_angle_deg):
 def _classify_chunk(vectors, start, stop, transposed, min_magnitude, limit, out):
     np = _np()
     p = np.asarray(vectors[start:stop], dtype=np.float64)
-    magnitude = np.sqrt(np.einsum("ij,ij->i", p, p))
-    valid = np.isfinite(p).all(axis=1) & (magnitude > min_magnitude)
+    # Scale each vector by its largest component before the norm: |p|^2 would overflow for |p| > 1.3e154
+    # (and underflow for tiny vectors), which made huge vectors classify as the first direction.
+    finite = np.isfinite(p).all(axis=1)
+    with np.errstate(invalid="ignore"):
+        scale = np.abs(p).max(axis=1) if len(p) else np.zeros(0)
+    scale = np.where(finite & (scale > 0), scale, 1.0)
+    p = p / scale[:, None]
+    norm = np.sqrt(np.einsum("ij,ij->i", p, p))
+    with np.errstate(over="ignore"):
+        magnitude = norm * scale
+    valid = finite & (magnitude > min_magnitude)
     if not valid.all():
         p = np.where(valid[:, None], p, 0.0)
-        magnitude = np.where(valid, magnitude, 1.0)
+        norm = np.where(valid, norm, 1.0)
     cosine = p @ transposed
-    cosine /= magnitude[:, None]
+    cosine /= norm[:, None]
     best = cosine.argmax(axis=1)  # first maximum: ties go to the lower label
     labels = best.astype(np.int16)
     labels += 1

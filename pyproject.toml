@@ -53,6 +53,7 @@ markdown = { version = ">=3,<4", optional = true }
 packaging = { version = ">=23,<27", optional = true }
 mcp = { version = ">=1,<2", optional = true }
 pytest = { version = ">=8,<10", optional = true }
+jsonschema = { version = ">=4.18,<5", optional = true }
 fastapi = { version = "==0.141.1", optional = true }
 uvicorn = { version = ">=0.34,<1", optional = true }
 httpx = { version = ">=0.28,<1", optional = true }
@@ -65,7 +66,7 @@ desktop = ["numpy", "matplotlib", "pandas", "h5py", "PySide6", "vtk", "requests"
 ai = ["ollama", "sentence-transformers", "PyPDF2", "requests"]
 mcp = ["mcp", "numpy", "matplotlib"]
 build = ["pyinstaller", "pyinstaller-hooks-contrib"]
-test = ["pytest"]
+test = ["pytest", "jsonschema"]
 control = ["fastapi", "uvicorn", "httpx", "websockets"]
 visualization = ["numpy", "vtk", "h5py"]
 

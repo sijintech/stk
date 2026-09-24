@@ -58,6 +58,10 @@ def test_parsers():
     assert step == 7 and list(values) == list(ENERGY_METRICS)
     assert values["elastic_energy"] == 1.5 and values["landau_energy"] == -3.0
     assert math.isnan(values["gradient_energy"]) and math.isnan(values["total_energy"])
+    # Fortran e18.10 drops the exponent letter when |exponent| > 99.
+    step, values = parse_energy("kt:      8 energy:  0.1500000000+102 -0.2000000000-119  0.1E+01 0.30000000x0+100 1")
+    assert step == 8 and values["elastic_energy"] == 1.5e101 and values["electric_energy"] == -2e-120
+    assert math.isnan(values["gradient_energy"]) and values["total_energy"] == 1.0
     assert parse_energy("kt: 3 energy: 1 2 3") == (3, None)
     assert parse_energy(HEADER) is None and parse_energy("") is None
     assert header_labels(HEADER) == DEFAULT_LABELS

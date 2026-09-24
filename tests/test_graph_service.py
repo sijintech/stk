@@ -114,6 +114,24 @@ def test_cache_is_shared_between_requests(service):
     assert shared_cache(None) is shared_cache(None)
 
 
+def test_warm_requests_do_not_render_plots_again(service):
+    calls = []
+
+    def counting(plot, *, format="svg"):
+        calls.append(format)
+        return render_plot(plot, format=format)
+    first = service({"graph": graph(), "outputs": ["plot"]}, render_plot=counting)
+    again = service({"graph": graph(), "outputs": ["plot"]}, render_plot=counting)
+    assert calls == ["svg"] and again["outputs"]["plot"] == first["outputs"]["plot"]
+    png = service({"graph": graph(), "outputs": ["plot"], "plot_format": "png"}, render_plot=counting)
+    assert calls == ["svg", "png"] and png["outputs"]["plot"]["media_type"] == "image/png"
+    changed = service({"graph": graph(), "outputs": ["plot"], "parameters": {"factor": 3.0}}, render_plot=counting)
+    assert calls == ["svg", "png", "svg"]
+    assert changed["outputs"]["plot"]["data_blob"] != first["outputs"]["plot"]["data_blob"]
+    assert service({"graph": graph(), "outputs": ["plot"]}, render_plot=counting, cache=GraphCache())
+    assert calls[-1] == "svg" and len(calls) == 4  # another cache has not seen the plot
+
+
 def test_request_validation(service):
     bad = [
         ({"graph": graph(), "extra": 1}, "Unknown request key"),
@@ -240,3 +258,91 @@ def test_default_registry_and_cache_dir(service, tmp_path):
         evaluate_request({"graph": graph()}, resolver=service.resolver, cache_dir=None, blob_sink=MemoryBlobSink())
     cache = shared_cache(tmp_path / "shared")
     assert isinstance(cache, GraphCache) and cache is shared_cache(tmp_path / "shared" / ".")
+
+
+def test_output_byte_limit_applies_to_delivery_not_to_in_memory_values(service):
+    # A 64^3 vector field (6.3 MB in memory) delivered as a dataset descriptor (a few KB): the evaluator runs
+    # without an output-byte limit and only the delivered bytes count against the request budget.
+    from suan.data.model import ImageData
+    from suan.graph.registry import Port
+
+    @service.registry.node("test.analysis.huge", inputs=[Port("in", "dataset", accepts=["image"])],
+                           outputs=[Port("out", "dataset", kind="image")])
+    def huge(ctx, inputs, params):
+        image = ImageData((64, 64, 64), id="huge")
+        image.add_field("v", np.ones((64, 64, 64, 3)), tensor="vector")
+        return image
+    document = graph()
+    document["nodes"].append({"id": "huge", "type": "test.analysis.huge@1", "inputs": {"in": {"from": "frame.out"}}})
+    document["outputs"]["huge"] = "huge.out"
+    result = service({"graph": document, "outputs": ["huge"], "budget": {"max_output_bytes": 1024 * 1024}})
+    assert result["outputs"]["huge"]["type"] == "dataset"
+    with pytest.raises(BudgetExceeded):  # the delivered document itself is still limited
+        service({"graph": document, "outputs": ["huge"], "budget": {"max_output_bytes": 256}})
+
+
+def test_default_delivery_limits_follow_the_request_profile():
+    from suan.graph.service import PROFILE_OUTPUT_BYTES, _budget
+    assert PROFILE_OUTPUT_BYTES == {"phone": 32 * 2**20, "web": 128 * 2**20, "desktop": 2 * 2**30}
+    for profile, limit in PROFILE_OUTPUT_BYTES.items():
+        budget = _budget(parse_request({"graph": graph(), "profile": profile}))
+        assert budget.max_output_bytes == limit and budget.profile == profile
+    explicit = _budget(parse_request({"graph": graph(), "profile": "desktop", "budget": {"max_output_bytes": 5}}))
+    assert explicit.max_output_bytes == 5
+    assert _budget(parse_request({"graph": graph(), "budget": {"max_output_bytes": None}})).max_output_bytes is None
+
+
+def test_pruned_exports_are_written_again(tmp_path):
+    # Exports live in the cache's scratch space; if pruning removed the file of a value still held in the
+    # memory tier, the request re-runs the export node instead of failing.
+    data = tmp_path / "data"
+    data.mkdir()
+    np.save(data / "field.npy", np.arange(24, dtype=np.float64).reshape(2, 3, 4))
+    document = {"schema": "stk.graph/1", "catalog": {"stk": 1}, "nodes": [
+        {"id": "src", "type": "stk.source.file@1", "params": {"binding": "data", "path": "field.npy"}},
+        {"id": "exp", "type": "stk.output.dataset@1", "inputs": {"in": {"from": "src.out"}},
+         "params": {"format": "npy"}}], "outputs": {"export": "exp.file"}}
+    cache, sink = GraphCache(tmp_path / "cache"), MemoryBlobSink()
+
+    def request():
+        return evaluate_request({"graph": document}, resolver=LocalDirResolver({"data": data}), cache_dir=None,
+                                blob_sink=sink, cache=cache)
+    first = request()
+    export = first["outputs"]["export"]
+    assert export["type"] == "file" and export["name"] == "exp.npy"
+    assert np.array_equal(np.load(__import__("io").BytesIO(blob(sink, export["blob"]))),
+                          np.arange(24, dtype=np.float64).reshape(2, 3, 4))
+    assert cache.stats()["scratch"]["entries"] == 1
+    assert request()["evaluated"] == []
+    cache.prune(0)  # removes the scratch export (and the disk entries)
+    again = request()
+    assert "exp" in again["evaluated"] and again["outputs"]["export"]["blob"] == export["blob"]
+
+
+def test_payload_profile_auto_follows_the_request_profile(tmp_path):
+    pytest.importorskip("suan.render.payload")
+    from mupro_fake import write_case, write_outputs
+    run = tmp_path / "run"
+    write_case(run, grid=(4, 3, 2), steps=2, interval=2)
+    write_outputs(run, grid=(4, 3, 2), steps=2, interval=2)
+    document = {"schema": "stk.graph/1", "catalog": {"stk": 1}, "nodes": [
+        {"id": "run", "type": "stk.source.muferro_run@1", "params": {"binding": "run"}},
+        {"id": "polar", "type": "stk.source.muferro_frame@1", "inputs": {"frames": {"from": "run.frames"}}},
+        {"id": "box", "type": "stk.render.outline@1", "inputs": {"in": {"from": "polar.out"}}},
+        {"id": "scene", "type": "stk.view.scene@1", "inputs": {"layers": [{"from": "box.layer"}]}},
+        {"id": "auto", "type": "stk.output.payload@1", "inputs": {"scene": {"from": "scene.scene"}}},
+        {"id": "web", "type": "stk.output.payload@1", "inputs": {"scene": {"from": "scene.scene"}},
+         "params": {"profile": "web"}}],
+        "outputs": {"auto": "auto.payload", "web": "web.payload"}}
+    cache, sink = GraphCache(), MemoryBlobSink()
+    seen = {}
+    for profile in ("phone", "desktop", "phone"):
+        result = evaluate_request({"graph": document, "profile": profile}, resolver=LocalDirResolver({"run": run}),
+                                  cache_dir=None, blob_sink=sink, cache=cache)
+        auto, web = (result["outputs"][name]["manifest"] for name in ("auto", "web"))
+        assert auto["source"]["profile"] == auto["budget"]["profile"] == profile  # unset -> the request profile
+        assert web["source"]["profile"] == "web"  # an explicit profile wins
+        seen.setdefault(profile, result["keys"]["auto"]["full"])
+        assert result["keys"]["auto"]["full"] == seen[profile]  # the key names the effective profile
+    assert seen["phone"] != seen["desktop"]
+    assert result["evaluated"] == []  # the second phone request is served from the cache

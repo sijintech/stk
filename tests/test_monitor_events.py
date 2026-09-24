@@ -172,6 +172,11 @@ def test_nonfinite_numbers_travel_as_strings():
 def test_numpy_scalars_are_encoded_when_numpy_is_present():
     np = pytest.importorskip("numpy")
     assert sanitize({"a": np.float32(np.nan), "b": np.int64(4), "c": np.float64(0.5)}) == {"a": "NaN", "b": 4, "c": 0.5}
+    # 0-d arrays (e.g. array.sum() on an np.matrix, or np.array(x)) are their scalar; they used to raise TypeError.
+    assert sanitize({"a": np.array(1.5), "b": np.array(3), "c": np.array(np.inf), "d": [np.array(2.0)]}) == {
+        "a": 1.5, "b": 3, "c": "Inf", "d": [2.0]}
+    with pytest.raises(EventError):
+        sanitize({"a": np.array([1.0, 2.0])})  # arrays with elements are not numbers
 
 
 def test_line_encoding_and_decoding_rules():

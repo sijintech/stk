@@ -2,17 +2,22 @@
 
 Uses ``matplotlib.figure.Figure`` with ``FigureCanvasAgg`` only -- never
 ``pyplot`` -- so it neither opens windows, nor keeps global figures, nor
-switches the process-wide backend; it is safe in services and threads. Style
-settings apply through ``matplotlib.rc_context`` for the duration of one call.
-Services should point ``MPLCONFIGDIR`` at a writable cache directory.
+switches the process-wide backend. Style settings apply through
+``matplotlib.rc_context``, which changes the process-wide ``rcParams`` for the
+duration of one call; a module lock serializes those calls, so threads never
+see each other's settings and ``rcParams`` are restored afterwards (safe in
+services and threads). Services should point ``MPLCONFIGDIR`` at a writable
+cache directory.
 
     from suan.plot.mpl import plot_data, render, render_plot
     png = render(spec, format="png")
     svg = render_plot(spec, format="svg")   # {"bytes", "media_type", "data"}
     data = plot_data(spec)                  # exactly the values that were drawn
 """
+from contextlib import contextmanager
 import io
 import math
+import threading
 
 from .spec import axis_label, categories_table, check, mark_data
 
@@ -29,6 +34,15 @@ STYLES = {
                    "font.family": "DejaVu Sans"},
 }
 _DETERMINISTIC = {"svg.hashsalt": "stk-plot", "svg.fonttype": "path", "pdf.fonttype": 42}
+# rc_context mutates the global rcParams: one styled build/save at a time (matplotlib is not thread-safe here).
+_RC_LOCK = threading.RLock()
+
+
+@contextmanager
+def _rc(settings):
+    import matplotlib
+    with _RC_LOCK, matplotlib.rc_context(settings):
+        yield
 
 
 def _np():
@@ -304,7 +318,6 @@ def render(spec, *, format="png", dpi=None, width_px=None, height_px=None, magni
 
 
 def _render(spec, *, format, dpi, width_px, height_px, magnification, transparent, metrics, plotted=None):
-    import matplotlib
     figure_spec = spec.get("figure") or {}
     base_dpi = int(dpi or figure_spec.get("dpi", 200))
     size = list(figure_spec.get("size_in") or [6.0, 4.0])
@@ -313,7 +326,7 @@ def _render(spec, *, format, dpi, width_px, height_px, magnification, transparen
     if height_px:
         size[1] = height_px / base_dpi
     style = STYLES.get(figure_spec.get("style", "stk-paper"), STYLES["stk-paper"])
-    with matplotlib.rc_context({**style, **_DETERMINISTIC}):
+    with _rc({**style, **_DETERMINISTIC}):
         fig, data = build_figure(spec, metrics=metrics, dpi=base_dpi, size_in=size)
         if plotted is not None:
             plotted["plotted"] = data
@@ -344,7 +357,6 @@ def render_all(spec, formats=("png", "svg"), **kw):
 def plot_data(spec, *, metrics=None):
     """The plotted data: ``{"schema": "stk.plot-data/1", "marks": [{index, type, axes, y_axis, label, table,
     columns {role: column}, data {role: [...]}}]}`` (non-finite values as ``null``)."""
-    import matplotlib
-    with matplotlib.rc_context(_DETERMINISTIC):
+    with _rc(_DETERMINISTIC):
         _, plotted = build_figure(spec, metrics=metrics)
     return plotted

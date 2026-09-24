@@ -8,7 +8,9 @@
 3. computes every needed node's keys in that order: ``$param`` substitution,
    :meth:`NodeType.normalize_params`, the data/client split, and for source
    nodes ``fingerprint(ctx, inputs, params)`` (the file content becomes part of
-   the data key);
+   the data key; a fingerprinted source node is keyed by the content it
+   resolved, without its selector params and upstream keys, so step aliases
+   share one entry and a growing frame listing does not invalidate a frame);
 4. pulls values lazily from the requested outputs: a node whose result is
    cached is loaded without touching its ancestors; otherwise its inputs are
    pulled first and ``impl`` runs (then ``finalize`` for representation nodes).
@@ -18,7 +20,8 @@ geometry are keyed by the data key, so a client-stage change (colormap,
 opacity, camera, image size) never re-runs them; view/output/plot nodes are
 keyed by the full key; ``finalize`` output is memory-only. Choices reported
 with ``ctx.report_choices`` and warnings are stored with the cache entry and
-replayed on hits.
+replayed on hits; choices reported during this evaluation (e.g. by a
+fingerprint on a live run) win over replayed ones.
 
 Contract for node implementations: values passed between nodes are shared
 with the cache and read-only (NumPy arrays are marked non-writeable; datasets
@@ -193,6 +196,7 @@ class _Evaluation:
         self.failed = {}     # node id -> issue dict (root causes)
         self.skipped = set()  # nodes not evaluated because an upstream node failed
         self.replayed = set()  # cache keys whose notes (choices, warnings) were replayed
+        self.fresh_choices = set()  # choice names reported by a node during this evaluation
         self.result = EvaluationResult(graph_hash=graph_hash(graph))
         for name, value in self.parameter_values.items():
             self.result.parameters[name] = {"value": _plain(value)}
@@ -216,7 +220,11 @@ class _Evaluation:
             self.result.warnings.append(issue)
         self.emit({"type": "warning", "node": issue.get("node"), "code": issue["code"], "message": issue["message"]})
 
-    def add_choices(self, name, entry):
+    def add_choices(self, name, entry, *, replayed=False):
+        if replayed and name in self.fresh_choices:
+            return  # a cached note never overrides what a node reported now (live runs grow)
+        if not replayed:
+            self.fresh_choices.add(name)
         self.result.parameters[name] = dict(entry)
 
     def check(self):
@@ -242,6 +250,9 @@ class _Evaluation:
             source = self.resolver[binding] if isinstance(self.resolver, Mapping) else self.resolver.resolve(binding)
         except KeyError:
             raise GraphError("unknown_binding", f"Binding '{binding}' is not bound", node=node_id, hint=hint) from None
+        with_check = getattr(source, "with_check", None)
+        if callable(with_check):  # e.g. Runtime downloads check cancellation and the budget between chunks
+            source = with_check(self.check)
         self.sources[binding] = source
         return source
 
@@ -323,12 +334,16 @@ class _Evaluation:
         self.check()
         node, node_type = self.nodes[node_id], self.types[node_id]
         params = node_type.normalize_params(substitute_params(node.get("params") or {}, self.parameter_values))
+        if params.get("profile") == "auto" and "profile" in node_type.params and self.budget.profile:
+            # "auto" means the request profile; the key names the effective profile (spec §5).
+            params = {**params, "profile": self.budget.profile}
         data_params, client_params = node_type.split_params(params)
         data_inputs, full_inputs = {}, {}
         for port, pairs in self.links[node_id].items():
             data_inputs[port] = [f"{self.keys[up].data}:{up_port}" for up, up_port in pairs]
             full_inputs[port] = [f"{self.keys[up].full}:{up_port}" for up, up_port in pairs]
         source = None
+        key_params = data_params
         if node_type.fingerprint is not None and node_type.cache != "none":
             inputs = self._inputs(node_id)
             context = _Context(self, node_id, node_type, None, params)  # data_key is not known yet
@@ -338,7 +353,12 @@ class _Evaluation:
             except TypeError as exc:
                 raise NodeExecutionError(f"fingerprint() returned a value that is not plain JSON: {exc}",
                                          node=node_id) from None
-        data = make_data_key(node_type.id, node_type.impl_version, data_params, data_inputs, source)
+            if node_type.stage == "source":
+                # Keyed by the resolved content: selectors (step/policy) and the upstream keys (the growing
+                # frame listing of a live run) are left out, so aliases share an entry (spec §5).
+                key_params = {name: value for name, value in data_params.items() if name not in node_type.selectors}
+                data_inputs, full_inputs = {}, {}
+        data = make_data_key(node_type.id, node_type.impl_version, key_params, data_inputs, source)
         full = make_full_key(data, client_params, full_inputs)
         impl = data if node_type.keyed_by_data else full
         final = None
@@ -487,7 +507,7 @@ class _Evaluation:
             return
         self.replayed.add(key)
         for name, entry in (notes.get("choices") or {}).items():
-            self.add_choices(name, entry)
+            self.add_choices(name, entry, replayed=True)
         for issue in notes.get("warnings") or ():
             self.add_warning(issue)
 

@@ -123,7 +123,7 @@ def muferro_run(ctx, inputs, params):
           "quantity": _nullable_string(pattern=r"^([a-z0-9_]+:)?[a-z0-9_]+$", title="Quantity override"),
           "precision": enum(["float64", "float32"], "float64"),
       },
-      time_dependent=True, cache="disk", fingerprint=_todo)
+      time_dependent=True, cache="disk", fingerprint=_todo, selectors=("step", "policy"))
 def muferro_frame(ctx, inputs, params):
     _todo()
 
@@ -506,7 +506,8 @@ def axes(ctx, inputs, params):
           "anchor": enum(ANCHORS, "right", stage="client"),
           "orientation": enum(["vertical", "horizontal"], "vertical", stage="client"),
           "label_count": integer(5, minimum=2, maximum=20, stage="client"),
-          "format": string(".3g", min_length=1, max_length=16, stage="client"),
+          "format": string(".3g", min_length=1, max_length=16, stage="client",
+                           pattern=r"^[+\- ]?#?0?(?:[1-9][0-9]?)?,?(?:(?:\.[0-9]{1,2})?[eEfFgG%]?|d)$"),
       })
 def scalar_bar(ctx, inputs, params):
     _todo()
@@ -590,7 +591,8 @@ def scene(ctx, inputs, params):
       inputs=[Port("scene", "scene")],
       outputs=[Port("payload", "payload")],
       params={
-          "profile": enum(["phone", "web", "desktop"], "web"),
+          "profile": enum(["auto", "phone", "web", "desktop"], "auto",
+                          description="Payload budget profile; auto = the request profile (Budget.profile)"),
           "budget": json_param({"anyOf": [{"type": "null"}, {
               "type": "object", "additionalProperties": False,
               "properties": {key: {"type": "integer", "minimum": 0}

@@ -22,6 +22,9 @@ Tiers:
   directories written to ``<root>/tmp`` and renamed into place, pruned
   least-recently-used when they exceed ``disk_bytes`` (default 20 GiB), with
   SQLite metadata. Readers never see partial entries; a corrupt entry is a miss.
+  The scratch directories (``NodeContext.cache_dir``, e.g. dataset exports)
+  count towards ``disk_bytes`` too and are pruned by the same LRU order (their
+  recency is the last time a node asked for them).
 
 Disk layout::
 
@@ -481,6 +484,8 @@ class GraphCache:
         self._memory_used = 0
         self._lock = threading.RLock()
         self._touched = {}
+        self._scratch_touched = {}
+        self._scratch_scan = (-math.inf, 0)  # (monotonic time of the last scan, scratch bytes)
         self._index_ready = False
         if self.root is not None:
             for sub in ("", "objects", "tmp", "trash"):
@@ -565,22 +570,37 @@ class GraphCache:
                 self._remove_disk(directory.name)
 
     def scratch_dir(self, key):
-        """A private directory for large intermediates of the node with this key (``None`` without a root)."""
-        if self.root is None or not KEY_RE.match(key or ""):
+        """A private directory for large intermediates of the node with this key (``None`` without a root).
+
+        Its contents count towards the disk budget and may be pruned (least recently requested first)
+        once no evaluation asked for it recently; nodes recreate what they need.
+        """
+        if self.root is None or not isinstance(key, str) or not KEY_RE.match(key):
             return None
+        self._maybe_prune()  # before creating it: the directory handed out is never the one pruned
         path = self.root / "scratch" / key[:2] / key
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        now = time.monotonic()
+        if now - self._scratch_touched.get(key, -math.inf) >= _TOUCH_INTERVAL:
+            self._scratch_touched[key] = now
+            try:
+                os.utime(path, None)  # recency for pruning
+            except OSError:
+                pass
         return path
 
     def stats(self):
         with self._lock:
             memory = {"entries": len(self._memory), "bytes": self._memory_used, "limit": self.memory_bytes}
         disk = {"entries": 0, "bytes": 0, "limit": self.disk_bytes, "root": str(self.root) if self.root else None}
+        scratch = {"entries": 0, "bytes": 0}
         if self.root is not None:
             rows = self._index_query("SELECT COUNT(*), COALESCE(SUM(bytes), 0) FROM entries")
             if rows:
                 disk["entries"], disk["bytes"] = rows[0]
-        return {"memory": memory, "disk": disk}
+            entries = self._scratch_entries()
+            scratch = {"entries": len(entries), "bytes": sum(size for _, size, _ in entries)}
+        return {"memory": memory, "disk": disk, "scratch": scratch}
 
     # -- memory tier --------------------------------------------------------
 
@@ -708,29 +728,67 @@ class GraphCache:
         self._touched.pop(key, None)
 
     def prune(self, max_bytes=None):
-        """Remove least-recently-used disk entries until they use at most ``max_bytes`` (default: the budget).
+        """Remove least-recently-used disk entries and scratch directories until together they use at most
+        ``max_bytes`` (default: the budget).
 
         Returns ``{"removed": n, "freed": bytes}``.
         """
         if self.root is None:
             return {"removed": 0, "freed": 0}
         limit = self.disk_bytes if max_bytes is None else int(max_bytes)
-        rows = self._index_query("SELECT key, bytes FROM entries ORDER BY accessed ASC, created ASC") or []
-        total = sum(size for _, size in rows)
+        rows = self._index_query("SELECT key, bytes, accessed, created FROM entries") or []
+        candidates = [(accessed, created, size, "entry", key) for key, size, accessed, created in rows]
+        candidates += [(accessed, accessed, size, "scratch", directory)
+                       for accessed, size, directory in self._scratch_entries()]
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        total = sum(item[2] for item in candidates)
         removed = freed = 0
-        for key, size in rows:
+        for _, _, size, kind, target in candidates:
             if total <= limit:
                 break
-            self._remove_disk(key)
+            if kind == "entry":
+                self._remove_disk(target)
+            else:
+                self._remove_scratch(target)
             total -= size
             removed += 1
             freed += size
+        self._scratch_scan = (-math.inf, 0)
         return {"removed": removed, "freed": freed}
 
     def _maybe_prune(self):
         rows = self._index_query("SELECT COALESCE(SUM(bytes), 0) FROM entries")
-        if rows and rows[0][0] > self.disk_bytes:
+        scanned, scratch = self._scratch_scan
+        if time.monotonic() - scanned >= _TOUCH_INTERVAL:  # scanning the scratch tree is not free
+            scratch = sum(size for _, size, _ in self._scratch_entries())
+            self._scratch_scan = (time.monotonic(), scratch)
+        if rows and rows[0][0] + scratch > self.disk_bytes:
             self.prune(int(self.disk_bytes * _PRUNE_TARGET))
+
+    def _scratch_entries(self):
+        """``[(accessed, bytes, directory)]`` of the scratch directories (``accessed`` = mtime of the directory)."""
+        if self.root is None:
+            return []
+        result = []
+        for directory in (self.root / "scratch").glob("*/*"):
+            if not KEY_RE.match(directory.name):
+                continue
+            try:
+                accessed = directory.stat().st_mtime
+                size = sum(path.stat().st_size for path in directory.rglob("*") if path.is_file())
+            except OSError:  # removed while scanning
+                continue
+            result.append((accessed, size, directory))
+        return result
+
+    def _remove_scratch(self, directory):
+        trash = self.root / "trash" / uuid.uuid4().hex
+        try:
+            os.rename(directory, trash)
+        except OSError:
+            trash = directory
+        shutil.rmtree(trash, ignore_errors=True)
+        self._scratch_touched.pop(directory.name, None)
 
     def _touch(self, key, force=False):
         now = time.monotonic()

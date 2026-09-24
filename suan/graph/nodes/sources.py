@@ -9,7 +9,11 @@ stay inside the functions (the hub imports catalogs without NumPy).
 Fingerprints describe the file content a node reads, so cache keys follow the
 data: ``muferro_run`` lists the frame files (path, size) and hashes the small
 run outputs; ``muferro_frame``, ``file`` and ``table`` give the path and
-sha256 of the file they read.
+sha256 of the file they read. A fingerprinted source node is keyed by that
+resolved content (docs/specs/stk-graph-v1.md §5): ``muferro_frame`` declares
+``step``/``policy`` as selectors and its key leaves out the frame listing, so
+``step=3`` resolving to frame 2, ``step=2`` and ``latest`` share one entry, and
+energy rows appended by a live run do not invalidate frame-derived nodes.
 """
 from suan.graph.registry import (NodeExecutionError, Port, binding, enum, integer, json_param, node, rel_path, step,
                                  string, string_list, vector3)
@@ -185,8 +189,10 @@ def _resolve_frame(ctx, inputs, params):
 
 
 def _muferro_frame_fingerprint(ctx, inputs, params):
+    # Everything the node takes from the frames table: the key does not include the table's key.
     _, chosen = _resolve_frame(ctx, inputs, params)
-    return {"path": chosen["path"], "sha256": chosen["sha256"], "reader": chosen["reader"]}
+    return {"path": chosen["path"], "sha256": chosen["sha256"], "reader": chosen["reader"],
+            "components": chosen["components"]}
 
 
 @node("stk.source.muferro_frame", title={"en": "muFerro frame", "zh": "muFerro 帧"},
@@ -205,7 +211,7 @@ def _muferro_frame_fingerprint(ctx, inputs, params):
           "quantity": _nullable_string(pattern=r"^([a-z0-9_]+:)?[a-z0-9_]+$", title="Quantity override"),
           "precision": enum(["float64", "float32"], "float64"),
       },
-      time_dependent=True, cache="disk", fingerprint=_muferro_frame_fingerprint)
+      time_dependent=True, cache="disk", fingerprint=_muferro_frame_fingerprint, selectors=("step", "policy"))
 def muferro_frame(ctx, inputs, params):
     from suan.connectors.files import materialize
     from suan.connectors.mupro import CONNECTOR_ID, READER, VERSION, stem_field

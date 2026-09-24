@@ -12,10 +12,19 @@ draws square brackets as parentheses), else VTK's Times.
 
 Parent API (standard library only):
 
-* :func:`probe` -- cached capability check (a tiny render in a child);
-* :func:`render_payload` / :func:`render_scene` -- PNG bytes;
+* :func:`probe` -- cached capability check (a tiny render in a child); a
+  working renderer and definitive failures are cached, transient failures (a
+  timeout, a child killed from outside) are probed again next time;
+* :func:`render_payload` / :func:`render_scene` -- PNG bytes; ``poll`` (e.g.
+  ``NodeContext.check``) is called while the child runs and an exception it
+  raises (cancellation, the evaluation's time budget) kills the child;
 * :class:`OffscreenUnavailable` (no usable GL; carries an actionable ``hint``)
   and :class:`OffscreenError` (the child failed).
+
+Children run in an empty temporary directory (so a stray ``vtk.py`` in the
+parent's working directory is never imported). Text is drawn literally with
+FreeType (VTK would otherwise treat ``$…$`` and ``|`` as MathText markup and
+turn a title such as ``|v|`` into ``v``).
 
 The render interpreter is ``python=``, else ``$STK_RENDER_PYTHON``, else
 ``sys.executable`` -- e.g. a separate environment with Kitware's
@@ -33,10 +42,12 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 __all__ = [
     "ENV_PYTHON", "HINT", "OffscreenError", "OffscreenUnavailable",
@@ -51,6 +62,10 @@ HINT = ("Offscreen rendering needs an OpenGL context without a display. Install 
         "(pip install --extra-index-url https://wheels.vtk.org vtk-osmesa).")
 _PROBES = {}
 _LOCK = threading.Lock()
+_POLL_INTERVAL = 0.1  # seconds between poll() calls while a child runs
+# A child killed from outside (OOM killer, an operator) says nothing about the GL stack: probe again next time.
+_TRANSIENT_SIGNALS = {getattr(signal, name) for name in ("SIGKILL", "SIGTERM", "SIGINT", "SIGHUP")
+                      if hasattr(signal, name)}
 _PACKAGE_ROOT = str(Path(__file__).resolve().parents[2])
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -89,36 +104,70 @@ def _tail(text, lines=6):
     return "\n".join(cleaned[-lines:])
 
 
-def _run(python, args, timeout):
+class _Outcome(tuple):
+    """``(result, error, stderr)`` of a child run plus ``transient`` (a timeout or an outside kill)."""
+
+    transient = False
+
+
+def _outcome(result, error, stderr, transient=False):
+    outcome = _Outcome((result, error, stderr))
+    outcome.transient = transient
+    return outcome
+
+
+def _run(python, args, timeout, *, cwd=None, poll=None):
+    """Run the child in ``cwd`` (default: a fresh empty directory); ``poll()`` is called while it runs."""
+    if cwd is None:
+        with tempfile.TemporaryDirectory(prefix="stk-render-cwd-") as tmp:
+            return _run(python, args, timeout, cwd=tmp, poll=poll)
     command = [python, "-c", _BOOTSTRAP.format(root=_PACKAGE_ROOT), *args]
     try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=_child_env(),
-                                   stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired as error:
-        return None, f"render child timed out after {timeout:g} s", _tail(error.stderr if isinstance(error.stderr, str)
-                                                                          else "")
+        child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 env=_child_env(), stdin=subprocess.DEVNULL, cwd=str(cwd))
     except OSError as error:
-        return None, f"cannot start the render interpreter {python!r}: {error}", ""
+        return _outcome(None, f"cannot start the render interpreter {python!r}: {error}", "")
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                stdout, stderr = child.communicate(timeout=_POLL_INTERVAL if poll is not None else
+                                                   max(0.0, deadline - time.monotonic()))
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() >= deadline:
+                    child.kill()
+                    _, stderr = child.communicate()
+                    return _outcome(None, f"render child timed out after {timeout:g} s", _tail(stderr), True)
+                poll()  # raises Cancelled / BudgetExceeded: the finally clause kills the child
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate()
     result = None
-    for line in reversed(completed.stdout.splitlines()):
+    for line in reversed(stdout.splitlines()):
         if line.startswith("{"):
             try:
                 result = json.loads(line)
             except ValueError:
                 continue
             break
-    if completed.returncode < 0:
-        return result, f"render child killed by signal {-completed.returncode}", _tail(completed.stderr)
-    if completed.returncode != 0:
-        message = (result or {}).get("error") or f"render child exited with status {completed.returncode}"
-        return result, message, _tail(completed.stderr)
-    return result, None, _tail(completed.stderr)
+    if child.returncode < 0:
+        return _outcome(result, f"render child killed by signal {-child.returncode}", _tail(stderr),
+                        -child.returncode in _TRANSIENT_SIGNALS)
+    if child.returncode != 0:
+        message = (result or {}).get("error") or f"render child exited with status {child.returncode}"
+        return _outcome(result, message, _tail(stderr))
+    return _outcome(result, None, _tail(stderr))
 
 
 def probe(*, python=None, timeout=120.0, refresh=False):
     """Check offscreen rendering in a child process (cached per interpreter and GL settings).
 
-    Returns ``{"ok", "python", "vtk", "window", "renderer", "error", "hint"}``.
+    Returns ``{"ok", "python", "vtk", "window", "renderer", "error", "hint"}``. Success and
+    definitive failures (the child reported a failure, crashed, or cannot be started) are cached;
+    transient ones (a timeout, a child killed by SIGKILL/SIGTERM) are not, so the next call probes
+    again. ``refresh=True`` always probes.
     """
     python = render_python(python)
     key = (python, os.environ.get("VTK_DEFAULT_OPENGL_WINDOW"), os.environ.get("DISPLAY"),
@@ -126,7 +175,8 @@ def probe(*, python=None, timeout=120.0, refresh=False):
     with _LOCK:
         if not refresh and key in _PROBES:
             return dict(_PROBES[key])
-    result, error, stderr = _run(python, ["--probe"], timeout)
+    outcome = _run(python, ["--probe"], timeout)
+    result, error, stderr = outcome
     info = {"ok": error is None and bool(result and result.get("ok")), "python": python}
     info.update({k: v for k, v in (result or {}).items() if k in ("vtk", "window", "renderer")})
     if not info["ok"]:
@@ -134,8 +184,9 @@ def probe(*, python=None, timeout=120.0, refresh=False):
         if stderr:
             info["stderr"] = stderr
         info["hint"] = HINT
-    with _LOCK:
-        _PROBES[key] = info
+    if info["ok"] or not outcome.transient:
+        with _LOCK:
+            _PROBES[key] = info
     return dict(info)
 
 
@@ -144,12 +195,14 @@ def available(**kw):
 
 
 def render_payload(payload, *, width=None, height=None, magnification=1, transparent=False, python=None,
-                   timeout=300.0, check=True):
+                   timeout=300.0, check=True, poll=None):
     """PNG bytes of a :class:`suan.render.payload.Payload` (or a path to an ``.stkp`` file).
 
     ``width``/``height`` default to the payload view's viewport; the image is
     ``width x magnification`` by ``height x magnification`` pixels (RGBA when
     ``transparent``). Raises :class:`OffscreenUnavailable` when the probe fails.
+    ``poll`` (optional) is called about every 0.1 s while the child renders; an
+    exception it raises (e.g. ``Cancelled``) kills the child and propagates.
     """
     python = render_python(python)
     if check:
@@ -174,7 +227,9 @@ def render_payload(payload, *, width=None, height=None, magnification=1, transpa
             args += ["--height", str(int(height))]
         if transparent:
             args.append("--transparent")
-        result, error, stderr = _run(python, args, timeout)
+        work = Path(tmp) / "cwd"
+        work.mkdir()
+        result, error, stderr = _run(python, args, timeout, cwd=work, poll=poll)
         if error is not None or not out.is_file():
             detail = f"\n{stderr}" if stderr else ""
             raise OffscreenError(f"Offscreen render failed: {error or 'no image written'}{detail}")
@@ -206,12 +261,22 @@ def _place(anchor, offset, size, window):
     return x, y
 
 
+def _literal_text(vtk):
+    """Draw every text with FreeType, literally: VTK's detection would render ``$...$`` and ``|`` as MathText."""
+    renderer_class = getattr(vtk, "vtkTextRenderer", None)
+    instance = renderer_class.GetInstance() if renderer_class is not None and hasattr(renderer_class,
+                                                                                         "GetInstance") else None
+    if instance is not None and hasattr(instance, "SetDefaultBackend"):
+        instance.SetDefaultBackend(renderer_class.FreeType)
+
+
 class _Renderer:
     def __init__(self, payload, *, width=None, height=None, magnification=1, transparent=False):
         import numpy as np
         import vtk
         from vtk.util import numpy_support
         self.np, self.vtk, self.nps = np, vtk, numpy_support
+        _literal_text(vtk)
         self.payload = payload
         self.m = payload.manifest
         self.view = dict(self.m.get("view") or {})
@@ -559,6 +624,9 @@ class _Renderer:
         prop = vtk.vtkVolumeProperty()
         prop.SetColor(color)
         prop.SetScalarOpacity(opacity)
+        # Opacity is per smallest voxel spacing (payload spec §6.6, as the web viewer does), so the picture
+        # does not depend on the absolute spacing (nm vs grid index) of the grid.
+        prop.SetScalarOpacityUnitDistance(float(min(grid["spacing"])))
         if layer.get("sampling", "linear") == "nearest":
             prop.SetInterpolationTypeToNearest()
         else:
@@ -650,7 +718,7 @@ class _Renderer:
         lo, hi = (float(v) for v in layer["range"])
         count = int(layer.get("label_count", 5))
         fmt = layer.get("format", ".3g")
-        labels = [format(lo + (hi - lo) * k / (count - 1), fmt) for k in range(count)]
+        labels = [_label(lo + (hi - lo) * k / (count - 1), fmt) for k in range(count)]
         font = 12.0
         window = (self.W / self.mag, self.H / self.mag)
         vertical = layer.get("orientation", "vertical") == "vertical"
@@ -925,6 +993,11 @@ class _Renderer:
         writer.SetInputConnection(grab.GetOutputPort())
         writer.Write()
         return {"width": self.W, "height": self.H}
+
+
+def _label(value, fmt):
+    """A scalar-bar label: Python's format(), with ``d`` (integers, as in d3) applied to the rounded value."""
+    return format(int(round(value)), fmt) if fmt.endswith("d") else format(value, fmt)
 
 
 def _font_files():

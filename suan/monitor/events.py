@@ -79,8 +79,13 @@ def sanitize(value):
         return result
     if isinstance(value, (list, tuple)):
         return [sanitize(item) for item in value]
+    if getattr(value, "shape", None) == () and hasattr(value, "ndim") and type(value).__name__ == "ndarray":
+        return sanitize(value[()])  # a 0-d NumPy array: its scalar
     if hasattr(value, "__index__"):  # e.g. NumPy integers
-        return int(value.__index__())
+        try:
+            return int(value.__index__())
+        except TypeError:  # __index__ exists but refuses (e.g. a float array)
+            pass
     if hasattr(value, "__float__") and not hasattr(value, "__len__"):  # e.g. NumPy floating scalars
         return encode_number(float(value))
     raise EventError(f"Cannot encode a {type(value).__name__} in an event")

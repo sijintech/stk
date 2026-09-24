@@ -28,7 +28,7 @@ import struct
 from .colormaps import ORIENTATION_HSL, canonical_name, lut_rgba8_bytes, opacity_points
 
 __all__ = [
-    "ENCODINGS", "MIB", "PROFILES", "SCHEMA", "TYPE_DTYPES", "TYPE_SIZES",
+    "ENCODINGS", "LABEL_FORMAT", "MIB", "PROFILES", "SCHEMA", "TYPE_DTYPES", "TYPE_SIZES",
     "Payload", "PayloadBuilder", "PayloadError",
     "budget_limits", "cluster_decimate", "decode", "encode_scene", "pack_stkp", "read_directory", "read_stkp",
     "unpack_stkp",
@@ -50,6 +50,10 @@ TYPE_DTYPES = {"i8": "<i1", "u8": "<u1", "i16": "<i2", "u16": "<u2", "i32": "<i4
 TYPE_SIZES = {name: int(dtype[-1]) for name, dtype in TYPE_DTYPES.items()}
 _ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
+# Scalar-bar label formats: the subset of Python/d3 format specs both understand, with at most two width and
+# precision digits (a width such as "999999" would make every label a megabyte of blanks); "d" labels are
+# rounded to integers.
+LABEL_FORMAT = re.compile(r"^[+\- ]?#?0?(?:[1-9][0-9]?)?,?(?:(?:\.[0-9]{1,2})?[eEfFgG%]?|d)$")
 _MAGIC = b"STKP"
 _VERSION = 2
 UNKNOWN_COLOR = [0.5, 0.5, 0.5]
@@ -354,7 +358,13 @@ class Payload(dict):
 
     def validate(self):
         """Raise :class:`PayloadError` unless the payload satisfies spec §10; returns ``self``."""
-        _Validator(self).run()
+        try:
+            _Validator(self).run()
+        except PayloadError:
+            raise
+        except (AttributeError, TypeError, KeyError, IndexError, ValueError) as error:
+            # A manifest whose structure is wrong where the validator expected an object or a list.
+            raise PayloadError(f"malformed manifest ({type(error).__name__}: {error})") from None
         return self
 
     def to_stkp(self):
@@ -426,7 +436,7 @@ def unpack_stkp(data):
     except (UnicodeDecodeError, ValueError) as error:
         raise PayloadError(f".stkp manifest is not valid JSON: {error}") from None
     blobs = {}
-    for index, buffer in enumerate(manifest.get("buffers", ())):
+    for index, buffer in enumerate(_buffer_entries(manifest)):
         uri = buffer.get("uri", "")
         match = re.fullmatch(r"#([1-9][0-9]*)", uri) if isinstance(uri, str) else None
         if not match or int(match.group(1)) >= len(chunks):
@@ -455,7 +465,7 @@ def read_directory(path):
     except ValueError as error:
         raise PayloadError(f"{manifest_path.name} is not valid JSON: {error}") from None
     blobs = {}
-    for index, buffer in enumerate(manifest.get("buffers", ())):
+    for index, buffer in enumerate(_buffer_entries(manifest)):
         digest = buffer.get("sha256")
         if not isinstance(digest, str) or not _SHA.match(digest) or buffer.get("uri") != "sha256:" + digest:
             raise PayloadError("Directory payloads reference buffers as 'sha256:<hex>'", path=f"/buffers/{index}")
@@ -469,9 +479,22 @@ def read_directory(path):
 def decode(manifest, blobs):
     """Validate a manifest against its buffers: ``blobs`` maps sha256 -> bytes, or is ``callable(sha256)``."""
     if callable(blobs):
-        blobs = {b["sha256"]: blobs(b["sha256"]) for b in manifest.get("buffers", ()) if isinstance(b, dict)
-                 and "sha256" in b}
+        blobs = {b["sha256"]: blobs(b["sha256"]) for b in _buffer_entries(manifest) if "sha256" in b}
     return Payload(manifest, blobs).validate()
+
+
+def _buffer_entries(manifest):
+    """The manifest's ``buffers`` list (objects only), or :class:`PayloadError`."""
+    if not isinstance(manifest, dict):
+        raise PayloadError("manifest must be a JSON object")
+    buffers = manifest.get("buffers", [])
+    if not isinstance(buffers, list) or not all(isinstance(b, dict) for b in buffers):
+        raise PayloadError("buffers must be a list of objects", path="/buffers")
+    return buffers
+
+
+def _finite_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _check_blob(buffer, blob, path):
@@ -617,6 +640,10 @@ class _Validator:
                            for v in value)):
             self.fail("must be 3 finite numbers", path)
 
+    def interval(self, value, path):
+        if not isinstance(value, list) or len(value) != 2 or not all(_finite_number(v) for v in value):
+            self.fail("must be [lo, hi] (two finite numbers)", path)
+
     def rgb(self, value, path):
         if (not isinstance(value, list) or len(value) not in (3, 4)
                 or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1 for v in value)):
@@ -753,9 +780,20 @@ class _Validator:
             self.fail("spacing must be positive", path + "/grid/spacing")
         self.expect(layer["data"], ("u8", "u16", "f32"), 1, math.prod(dims), path + "/data")
         tf = layer["transfer_function"]
-        if tf.get("colormap") not in self.colormaps:
-            self.fail(f"unknown colormap {tf.get('colormap')!r}", path + "/transfer_function/colormap")
-        for j, lod in enumerate(layer.get("lods", [])):
+        tpath = path + "/transfer_function"
+        if not isinstance(tf, dict):
+            self.fail("transfer_function must be an object", tpath)
+        if tf.get("colormap") not in self.colormaps:  # continuous LUT, or a categorical palette (values +- 0.499)
+            self.fail(f"unknown colormap {tf.get('colormap')!r}", tpath + "/colormap")
+        self.interval(tf.get("range"), tpath + "/range")
+        opacity = tf.get("opacity")
+        if not isinstance(opacity, list) or not opacity:
+            self.fail("opacity must be a non-empty list of [value, alpha]", tpath + "/opacity")
+        for j, point in enumerate(opacity):
+            if (not isinstance(point, list) or len(point) != 2 or not all(_finite_number(v) for v in point)
+                    or not 0 <= point[1] <= 1):
+                self.fail("opacity points are [finite value, alpha in [0, 1]]", f"{tpath}/opacity/{j}")
+        for j, lod in enumerate(self.list(layer.get("lods", []), path + "/lods")):
             self.expect(lod.get("data"), ("u8", "u16", "f32"), 1, math.prod(lod.get("dimensions") or [0]),
                         f"{path}/lods/{j}/data")
 
@@ -766,8 +804,17 @@ class _Validator:
         colormap = layer.get("colormap")
         if kind in ("scalar_bar", "legend") and colormap not in self.colormaps:
             self.fail(f"unknown colormap {colormap!r}", path + "/colormap")
-        if kind == "scalar_bar" and self.colormaps[colormap].get("categorical"):
-            self.fail("a scalar bar needs a continuous colormap", path + "/colormap")
+        if kind == "scalar_bar":
+            if self.colormaps[colormap].get("categorical"):
+                self.fail("a scalar bar needs a continuous colormap", path + "/colormap")
+            self.interval(layer.get("range"), path + "/range")
+            count = layer.get("label_count", 5)
+            if isinstance(count, bool) or not isinstance(count, int) or not 2 <= count <= 20:
+                self.fail("label_count must be an integer from 2 to 20", path + "/label_count")
+            label_format = layer.get("format", ".3g")
+            if not isinstance(label_format, str) or not LABEL_FORMAT.match(label_format):
+                self.fail(f"unsupported label format {label_format!r} (e.g. '.3g', '.2f', '.1e', '+.0%', 'd')",
+                          path + "/format")
         if kind == "legend" and not self.colormaps[colormap].get("categorical"):
             self.fail("a legend needs a categorical colormap", path + "/colormap")
         if kind == "text" and not isinstance(layer.get("text"), str):
@@ -1292,6 +1339,9 @@ class _Encoder:
             entry["orientation"] = a.get("orientation", "vertical")
             entry["label_count"] = int(a.get("label_count", 5))
             entry["format"] = a.get("format", ".3g")
+            if not isinstance(entry["format"], str) or not LABEL_FORMAT.match(entry["format"]):
+                raise PayloadError(f"Unsupported scalar-bar label format {entry['format']!r} (e.g. '.3g', '.2f', "
+                                   f"'.1e', '+.0%', 'd')", path=f"/layers/{layer.id}/format", code="invalid_param")
         elif kind == "legend":
             entry["colormap"] = self.builder.add_palette(props.get("palette") or "stk:categorical", props["entries"])
             entry["values"] = [int(v) for v in props["values"]]

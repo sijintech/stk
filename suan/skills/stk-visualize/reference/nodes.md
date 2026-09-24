@@ -480,7 +480,7 @@ Encode a scene as stk.payload/2 within the profile budget (optionally with a sce
 
 | param | type | default | stage | notes |
 |---|---|---|---|---|
-| `profile` | "phone" \| "web" \| "desktop" | "web" | client |  |
+| `profile` | "auto" \| "phone" \| "web" \| "desktop" | "auto" | client |  |
 | `budget` | null \| object {triangles, instances, points, voxels, bytes} | null | client |  |
 | `v1_fallback` | boolean | false | client |  |
 

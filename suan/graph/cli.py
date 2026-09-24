@@ -237,7 +237,17 @@ def _suffix(value):
 
 
 def _write_outputs(result, sink, out_dir, suffix=""):
-    """Write each delivered output under ``out_dir``; returns ``{output: relative path}``."""
+    """Write each delivered output under ``out_dir``; returns ``{output: relative path}``.
+
+    ``result<suffix>.json`` and ``series.json`` belong to the CLI: an output whose file would take
+    one of these names is written as ``<name><suffix>.output.json`` instead.
+    """
+    reserved = {f"result{suffix}.json", "series.json"}
+
+    def target_of(stem, extension):
+        name = stem + extension
+        return out_dir / (f"{stem}.output{extension}" if name in reserved else name)
+
     files = {}
     for name, entry in result["outputs"].items():
         kind, stem = entry["type"], f"{name}{suffix}"
@@ -250,18 +260,18 @@ def _write_outputs(result, sink, out_dir, suffix=""):
                 _write_json(directory / "scene_v1.json", entry["scene_v1"])
             files[name] = f"{stem}/manifest.json"
         elif kind in ("image", "plot"):
-            target = out_dir / (stem + MEDIA_EXTENSIONS.get(entry.get("media_type"), ".bin"))
+            target = target_of(stem, MEDIA_EXTENSIONS.get(entry.get("media_type"), ".bin"))
             sink.write(entry["blob"], target)
             files[name] = target.name
             if entry.get("data_blob"):
                 _write_json(out_dir / f"{stem}.data.json", sink.json(entry["data_blob"]))
         elif kind == "file":
             ext = Path(entry.get("name") or "").suffix
-            target = out_dir / (stem + (ext if re.fullmatch(r"\.[A-Za-z0-9_]{1,16}", ext) else ".bin"))
+            target = target_of(stem, ext if re.fullmatch(r"\.[A-Za-z0-9_]{1,16}", ext) else ".bin")
             sink.write(entry["blob"], target)
             files[name] = target.name
         else:  # table, value, dataset
-            target = out_dir / f"{stem}.json"
+            target = target_of(stem, ".json")
             if entry.get("blob"):
                 sink.write(entry["blob"], target)
             elif kind == "table":
@@ -375,7 +385,7 @@ def run_command(source, binds, params, outputs, out_dir, cache_dir, no_cache, pr
             values = _series_values(graph_doc, name, first)
             if not values:
                 raise click.ClickException(f"Parameter {name!r} reported no choices; nothing to render")
-            frames, failed = [], False
+            frames, failed, frame_errors = [], False, []
             for value in values:
                 result, sink = run_once({**base, name: value})
                 suffix = _suffix(value)
@@ -383,6 +393,7 @@ def run_command(source, binds, params, outputs, out_dir, cache_dir, no_cache, pr
                 _write_json(out_dir / f"result{suffix}.json", result)
                 frames.append({name: value, "outputs": result["files"], "result": f"result{suffix}.json"})
                 failed = failed or bool(result.get("errors"))
+                frame_errors += [(value, issue) for issue in result.get("errors") or ()]
                 if verbose:
                     click.echo(f"{name}={value}: {result['cache']}", err=True)
             document = {"schema": "stk.series/1", "parameter": name, "graph_hash": result["graph_hash"],
@@ -400,8 +411,12 @@ def run_command(source, binds, params, outputs, out_dir, cache_dir, no_cache, pr
         for issue in document.get("warnings", ()) if not series else ():
             click.echo(_issue_text(issue), err=True)
     if failed:
-        for issue in (document.get("errors") or ()) if not series else ():
-            click.echo(_issue_text(issue), err=True)
+        if series:
+            for value, issue in frame_errors:
+                click.echo(f"{series[0]}={json.dumps(value)}: {_issue_text(issue)}", err=True)
+        else:
+            for issue in document.get("errors") or ():
+                click.echo(_issue_text(issue), err=True)
         sys.exit(1)
 
 

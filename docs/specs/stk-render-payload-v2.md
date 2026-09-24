@@ -172,10 +172,23 @@ prefix is an unbiased subsample (clients may draw while loading).
 3×3, default identity)}`; `data` = accessor of nx·ny·nz scalars, **x fastest, then y, then z**
 (`u8`, `u16` or `f32`); physical value = stored × `value_scale` + `value_offset` (defaults 1, 0);
 `value_range` = physical [min, max]; `unit`, `quantity`; `transfer_function {colormap (id),
-range [lo, hi] (physical values mapped over the LUT as in §5), opacity [[value, alpha], …]
-(physical values, piecewise linear, constant beyond the ends)}`; `sampling: "linear" | "nearest"`
-(nearest for labels); `shade` (false); optional `lods [{level, data, dimensions, spacing}]`
-(2× mip levels, coarse to fine).
+range [lo, hi] (two finite physical values mapped over the LUT as in §5), opacity [[value, alpha], …]
+(finite physical values, alpha in [0, 1], piecewise linear, constant beyond the ends)}`;
+`sampling: "linear" | "nearest"` (nearest for labels); `shade` (false); optional `lods [{level,
+data, dimensions, spacing}]` (2× mip levels, coarse to fine).
+
+- **Categorical volumes.** `transfer_function.colormap` may reference a **categorical** palette
+  (§5) instead of a continuous LUT (label volumes): the colour transfer function has two points per
+  entry, `value − 0.499` and `value + 0.499`, both with the entry's `color`, so every integer label
+  with an entry gets exactly its colour (a label without an entry gets an interpolated or clamped
+  colour; hide it with the opacity function). `range` is then the label range and is not
+  used for colour; `sampling` is `nearest`. The offscreen renderer and the web viewer follow this
+  rule.
+- **Opacity unit distance.** Opacity values are per unit of length equal to the **smallest grid
+  spacing** `min(spacing)` of the layer's grid (VTK `SetScalarOpacityUnitDistance(min(spacing))`,
+  vtk.js `setScalarOpacityUnitDistance`): an `alpha` is the opacity accumulated over one voxel of
+  the finest axis, so the picture does not depend on the absolute scale of the spacing (grid
+  indices, nm or m) and a strided (reduced) volume looks like the full one.
 
 ### 6.7 `overlay`
 
@@ -185,11 +198,15 @@ Screen-space items: `kind`, `anchor` (`top_left`, `top`, `top_right`, `left`, `c
 
 | kind | keys |
 |---|---|
-| `scalar_bar` | `colormap` (continuous id), `range`, `unit`, `orientation` (`vertical`), `label_count` (5), `format` (`.3g`, Python/d3 format) |
+| `scalar_bar` | `colormap` (continuous id), `range` (two finite numbers), `unit`, `orientation` (`vertical`), `label_count` (5, 2–20), `format` (`.3g`; the Python/d3 format subset `[sign][#][0][width ≤ 2 digits][,][.precision ≤ 2 digits][e E f F g G %]` or `[sign][#][0][width][,]d` (integers)) |
 | `legend` | `colormap` (categorical id), `values` (entries to list; default all), `columns` (1) |
 | `orientation_legend` | `colormap: "stk:orientation-hsl"`, `lightness_range`: a shaded sphere whose surface point n is coloured `orientation-hsl(n, M = 1)` |
 | `text` | `text`, `font_size_px`, `color` |
 | `axes_triad` | `labels` (`["x", "y", "z"]`); red x, green y, blue z arrows following the camera rotation |
+
+All overlay texts (titles, labels, `text`) are plain text: renderers draw them literally and never
+interpret markup (VTK's MathText would otherwise treat `$…$` and `|` specially and draw the title
+`|v|` as `v`).
 
 ## 7. Profiles and budgets
 
@@ -241,7 +258,10 @@ Reject (with a clear error) when: `schema` differs; a buffer's bytes do not hash
 `byteLength` differs; an accessor is out of its buffer or misaligned; `count`/`components` mismatch
 the layer's needs (positions ×3; triangle indices a multiple of 3; attribute counts per association;
 `slice_image` w·h; volume nx·ny·nz; LUT 256 × 4 u8); an index is ≥ the position count; a position
-or origin is non-finite; a referenced accessor/colormap id is missing.
+or origin is non-finite; a referenced accessor/colormap id is missing; a volume `transfer_function`
+`range`/`opacity` or a scalar bar `range`/`label_count`/`format` is malformed (§6.6, §6.7); any
+member has the wrong JSON type (e.g. a string where an object is expected). `suan/render/payload.py`
+raises `PayloadError` for all of these.
 
 ## 11. Scene v1 downgrade (`suan/render/v1.py`)
 

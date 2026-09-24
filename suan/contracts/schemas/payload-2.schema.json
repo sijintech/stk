@@ -444,7 +444,7 @@
         "unit": {"type": ["string", "null"]},
         "orientation": {"enum": ["vertical", "horizontal"]},
         "label_count": {"type": "integer", "minimum": 2, "maximum": 20},
-        "format": {"type": "string"},
+        "format": {"type": "string", "pattern": "^[+\\- ]?#?0?(?:[1-9][0-9]?)?,?(?:(?:\\.[0-9]{1,2})?[eEfFgG%]?|d)$", "description": "Label format: the Python/d3 format subset both understand."},
         "values": {"type": "array", "items": {"type": "integer"}, "description": "legend: category values to list (default: all entries)."},
         "columns": {"type": "integer", "minimum": 1, "maximum": 8},
         "lightness_range": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 2, "maxItems": 2},

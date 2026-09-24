@@ -41,7 +41,10 @@ def _e18(value):
     if value == 0:
         return "0.0000000000E+00".rjust(18)
     mantissa, exponent = f"{abs(value):.9E}".split("E")
-    return f"{'-' if value < 0 else ''}0.{mantissa.replace('.', '')}E{int(exponent) + 1:+03d}".rjust(18)
+    exponent = int(exponent) + 1
+    # Ew.d drops the exponent letter when |exponent| > 99: 0.1500000000+102.
+    suffix = f"{exponent:+04d}" if abs(exponent) > 99 else f"E{exponent:+03d}"
+    return f"{'-' if value < 0 else ''}0.{mantissa.replace('.', '')}{suffix}".rjust(18)
 
 
 def _frame(path, grid, components, step, scalar=False):

@@ -109,12 +109,17 @@ class RuntimeClient:
             meta = self.request("POST", f"{prefix}/{meta['id']}/finish", {})
         return meta
 
-    def download(self, task_id, remote_path, destination):
+    def download(self, task_id, remote_path, destination, *, check=None):
+        """Download a task artifact (resumable, size and sha256 verified).
+
+        ``check`` (optional) is called before each chunk; an exception it raises (e.g. a graph
+        evaluation's ``Cancelled``) stops the download and keeps the partial file for a later resume.
+        """
         items = self.artifacts(task_id)
         item = next((a for a in items if a["path"] == remote_path), None)
         if item is None:
             raise ValueError("Artifact not found; wait for the task to finish")
-        return self._download(f"tasks/{task_id}/file", item, destination)
+        return self._download(f"tasks/{task_id}/file", item, destination, check=check)
 
     def download_input(self, workspace_id, remote_path, destination):
         item = next((a for a in self.files(workspace_id) if a["path"] == remote_path), None)
@@ -122,7 +127,7 @@ class RuntimeClient:
             raise ValueError("Workspace file not found")
         return self._download(f"workspaces/{workspace_id}/file", item, destination)
 
-    def _download(self, route, item, destination):
+    def _download(self, route, item, destination, check=None):
         path = Path(destination)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.is_file() and sha256(path) == item["sha256"]:
@@ -135,6 +140,8 @@ class RuntimeClient:
         offset = part.stat().st_size if part.exists() else 0
         with open(part, "ab") as stream:
             while offset < item["size"]:
+                if check is not None:
+                    check()
                 query = urlencode({"path": item["path"], "offset": offset, "limit": CHUNK_SIZE})
                 chunk = self.request("GET", route + "?" + query, binary=True)
                 if not chunk:

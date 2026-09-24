@@ -231,6 +231,38 @@ def test_evaluator_confines_graph_paths(tree):
     assert registry.runs["f"] == 1  # only the valid file was ever read
 
 
+def test_runtime_downloads_stop_when_the_evaluation_is_cancelled(tmp_path):
+    pytest.importorskip("numpy")
+    from graph_testnodes import make_registry
+    from suan.graph.evaluator import evaluate
+    from suan.graph.registry import CancelToken, Cancelled
+    from suan.runtime.client import RuntimeClient
+    data = b"0123456789" * 10
+    cancel = CancelToken()
+
+    class Chunked(RuntimeClient):  # a real RuntimeClient download loop over a fake transport, 10 bytes a chunk
+        requests = 0
+
+        def __init__(self):
+            pass
+
+        def artifacts(self, task_id):
+            return [{"path": "big.dat", "size": len(data), "sha256": sha(data)}]
+
+        def request(self, method, route, binary=False, **kw):
+            Chunked.requests += 1
+            if Chunked.requests == 3:
+                cancel.cancel("user")  # the user cancels while the file downloads
+            offset = (Chunked.requests - 1) * 10
+            return data[offset:offset + 10]
+    document = {"schema": "stk.graph/1", "outputs": {"out": "f.out"},
+                "nodes": [{"id": "f", "type": "test.source.file@1", "params": {"binding": "run", "path": "big.dat"}}]}
+    resolver = RuntimeResolver(Chunked(), tmp_path / "downloads", {"run": "a" * 32})
+    with pytest.raises(Cancelled):
+        evaluate(document, registry=make_registry(), resolver=resolver, cancel=cancel)
+    assert Chunked.requests == 3  # stopped before the fourth chunk, not after the whole file
+
+
 def test_runtime_resolver_against_a_real_runtime(runtime, tmp_path):
     from conftest import finish
     from suan.runtime.models import TaskSpec

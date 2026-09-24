@@ -19,9 +19,11 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from render_scenes import domains_scene, glyph_scene, iso_scene, mixed_scene, volume_scene  # noqa: E402
+from render_scenes import (domains_scene, gaussian_volume, glyph_scene, iso_scene, mixed_scene,  # noqa: E402
+                           volume_scene)
 from suan.render import offscreen  # noqa: E402
 from suan.render.colormaps import lut_rgba8, rgba8  # noqa: E402
+from suan.render.layers import Layer, Scene  # noqa: E402
 from suan.render.payload import Payload, encode_scene, read_directory  # noqa: E402
 from suan.render.png import decode_png, png_size  # noqa: E402
 
@@ -105,6 +107,52 @@ def test_png_decoder_without_pillow_matches_pillow(monkeypatch, name):
     assert fast.shape == slow.shape == (*png_size(data)[::-1], 3) and (fast == slow).all()
 
 
+def test_transient_probe_failures_are_not_cached(tmp_path):
+    # A child killed from outside (here: SIGKILL on the first start) says nothing about the GL stack.
+    marker = tmp_path / "first"
+    flaky = tmp_path / "flaky-python"
+    flaky.write_text(f"#!/bin/sh\nif [ ! -e {marker} ]; then touch {marker}; kill -9 $$; fi\n"
+                     f"exec {sys.executable} -c "
+                     "'import json; print(json.dumps({\"ok\": False, \"error\": \"no GL\"}))'\n")
+    flaky.chmod(0o755)
+    if sys.platform.startswith("win"):
+        pytest.skip("POSIX shell script")
+    first = offscreen.probe(python=str(flaky))
+    assert first["ok"] is False and "signal 9" in first["error"]
+    second = offscreen.probe(python=str(flaky))  # probed again: the child now answers (a definitive failure)
+    assert second["ok"] is False and second["error"] == "no GL"
+    marker.unlink()
+    assert offscreen.probe(python=str(flaky)) == second  # definitive failures stay cached
+    assert "signal 9" in offscreen.probe(python=str(flaky), refresh=True)["error"]
+
+
+def test_children_run_in_an_empty_directory_and_poll_can_stop_them(tmp_path, monkeypatch):
+    # Stray modules in the parent's working directory (vtk.py, json.py, ...) are never imported by the child.
+    for name in ("vtk", "json"):
+        (tmp_path / f"{name}.py").write_text(f"raise SystemExit('shadowed {name} imported from the cwd')\n")
+    monkeypatch.chdir(tmp_path)
+    result, error, stderr = offscreen._run(sys.executable, ["--help"], 60)
+    assert error is None and "shadowed" not in stderr
+    # poll() runs while the child works; what it raises kills the child and propagates at once.
+    slow = tmp_path / "slow-python"
+    slow.write_text("#!/bin/sh\nexec sleep 30\n")
+    slow.chmod(0o755)
+    if sys.platform.startswith("win"):
+        pytest.skip("POSIX shell script")
+    calls = []
+
+    def poll():
+        calls.append(1)
+        if len(calls) >= 3:
+            raise KeyboardInterrupt("cancelled")
+    started = __import__("time").monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        offscreen._run(str(slow), [], 60, poll=poll)
+    assert __import__("time").monotonic() - started < 5 and len(calls) == 3
+    outcome = offscreen._run(str(slow), [], 0.3)
+    assert "timed out" in outcome[1] and outcome.transient
+
+
 def test_parent_side_never_imports_vtk():
     code = ("import sys; import suan.render.offscreen, suan.render.payload, suan.render.v1, suan.render.layers; "
             "print(json.dumps(sorted(m for m in ('vtk', 'vtkmodules') if m in sys.modules)))")
@@ -154,6 +202,64 @@ def test_spec_example_renders_every_layer_type(renderer):
     payload = read_directory(ROOT / "docs/specs/examples/payload-v2")
     image = _golden("payload-example", offscreen.render_payload(payload, width=480, height=360))
     assert _count(image, (255, 0, 0)) >= 20                              # T[100] legend swatch and cube
+
+
+@pytest.mark.render
+def test_volume_opacity_does_not_depend_on_the_absolute_spacing(renderer):
+    # Opacity is per smallest voxel spacing (payload spec §6.6): nm, grid indices or metres look alike.
+    images = []
+    for spacing in (1.0, 0.01, 50.0):
+        data, grid = gaussian_volume(n=24, spacing=spacing, origin=(0.0, 0.0, 0.0))
+        layer = Layer("volume", id="v", geometry={"grid": grid, "data": data, "encoding": "f32", "field": "v",
+                                                  "unit": "1", "quantity": None, "categorical": False},
+                      appearance={"colormap": "viridis", "range": [0.0, 1.0], "opacity": [[0.0, 0.0], [1.0, 0.5]]})
+        scene = Scene([layer], view={"schema": "stk.view/1", "camera": {"preset": "iso"},
+                                     "viewport": {"width": 96, "height": 72}})
+        images.append(decode_png(offscreen.render_scene(scene)).astype(float))
+    darkness = [255 - image[..., :3].mean() for image in images]
+    assert darkness[0] > 5, "the volume is visible"
+    for image in images[1:]:
+        assert np.abs(image - images[0]).max() <= 2
+
+
+@pytest.mark.render
+def test_overlay_text_is_drawn_literally(renderer):
+    # VTK's MathText detection would draw the title |v| as v (and eat $...$); STK texts are plain text.
+    def ink(text):
+        scene = Scene([Layer("overlay", id="t", props={"kind": "text", "text": text, "font_size_px": 40,
+                                                       "anchor": "top_left", "offset_px": [4, 4]})],
+                      view={"schema": "stk.view/1", "viewport": {"width": 200, "height": 80}})
+        image = decode_png(offscreen.render_scene(scene)).astype(int)
+        return int((image[..., :3].min(axis=-1) < 128).sum())
+    bars, plain = ink("|v|"), ink("v")
+    assert bars > plain * 1.5, (bars, plain)
+    assert ink("$x$") > ink("x") * 1.5
+    assert offscreen._label(2.6, "d") == "3" and offscreen._label(0.25, ".0%") == "25%"
+
+
+@pytest.mark.render
+def test_image_node_cancellation_stops_the_render_child(renderer):
+    import threading
+    import time
+    from suan.data.model import ImageData
+    from suan.graph.nodes import output, render as render_nodes, view
+    from suan.graph.registry import Budget, CancelToken, Cancelled
+    from test_nodes_render import FakeContext, run_node
+    n = 96
+    x = np.linspace(-1, 1, n)
+    image = ImageData((n, n, n), (0, 0, 0), (1, 1, 1))
+    gaussian = np.exp(-(x[:, None, None] ** 2 + x[None, :, None] ** 2 + x[None, None, :] ** 2) * 4)
+    image.add_field("phi", gaussian[..., None])
+    layer, _ = run_node(render_nodes.volume, {"in": image}, {})
+    scene, _ = run_node(view.scene, {"layers": [layer["layer"]]}, {})
+    node_type = output.image_output.stk_node_type
+    ctx = FakeContext(node_type, "img")
+    ctx.cancel = CancelToken()
+    threading.Timer(0.3, lambda: ctx.cancel.cancel("user cancelled")).start()
+    started = time.monotonic()
+    with pytest.raises(Cancelled):
+        output.image_output(ctx, {"source": scene["scene"]}, node_type.normalize_params({"magnification": 4}))
+    assert time.monotonic() - started < 5
 
 
 @pytest.mark.render

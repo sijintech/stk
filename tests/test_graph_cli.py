@@ -128,6 +128,39 @@ def test_run_errors(cli, tmp_path):
     assert json.loads((cli.out / "info.json").read_text())["step"] == 200  # independent outputs still written
 
 
+def test_outputs_never_overwrite_the_result_documents(cli, tmp_path):
+    document = cli.graph()
+    document["outputs"] = {"result": "info.info", "series": "stats.out", "image": "image.image"}
+    graph_file = tmp_path / "named.json"
+    graph_file.write_text(json.dumps(document))
+    result = invoke("run", graph_file, "--bind", f"run={cli.run}", "--out", cli.out, "--no-cache")
+    assert result.exit_code == 0, result.output
+    assert json.loads((cli.out / "result.json").read_text())["schema"] == "stk.graph-result/1"
+    assert json.loads((cli.out / "result.output.json").read_text())["step"] == 200
+    assert json.loads((cli.out / "series.output.json").read_text())["columns"]["stat"] == ["min", "max", "mean"]
+    files = json.loads((cli.out / "result.json").read_text())["files"]
+    assert files == {"result": "result.output.json", "series": "series.output.json", "image": "image.png"}
+    series = invoke("run", graph_file, "--bind", f"run={cli.run}", "--out", tmp_path / "all", "--no-cache",
+                    "--param", "step=all")
+    assert series.exit_code == 0, series.output
+    assert json.loads((tmp_path / "all" / "series.json").read_text())["schema"] == "stk.series/1"
+    assert json.loads((tmp_path / "all" / "result.00000100.json").read_text())["schema"] == "stk.graph-result/1"
+    assert json.loads((tmp_path / "all" / "result.00000100.output.json").read_text())["step"] == 100
+    assert (tmp_path / "all" / "series.00000100.json").is_file()
+
+
+def test_series_prints_the_errors_of_each_frame(cli, tmp_path):
+    partial = cli.graph(scale={"mode": "fail"})
+    partial_file = tmp_path / "partial.json"
+    partial_file.write_text(json.dumps(partial))
+    result = CliRunner().invoke(graph_cli, ["run", str(partial_file), "--bind", f"run={cli.run}", "--out",
+                                            str(cli.out), "--no-cache", "--param", "step=all"])
+    assert result.exit_code == 1
+    for step in (0, 100, 200):
+        assert f"step={step}: error [node_failed]" in result.output and "synthetic failure" in result.output
+    assert json.loads((cli.out / "info.00000100.json").read_text())["step"] == 100  # other outputs still written
+
+
 def test_doctor_reports_without_failing(cli):
     result = invoke("doctor", "--json", "--timeout", "60")
     document = json.loads(result.output)

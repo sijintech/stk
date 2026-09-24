@@ -3,13 +3,15 @@
 ``energy_out.dat`` is a header line (``step`` and five names) followed by rows
 ``kt: <step> energy: e1 e2 e3 e4 e5`` (``suan.mupro.run.ENERGY_ROW``). Values
 are solver-normalized (unit ``normalized``, quantity ``energy``); ``NaN`` is
-kept. Without a header the columns are ``energy_1..5``. An unterminated last
+kept; Fortran exponents without a letter (``0.1500000000+102``) are read
+(``suan.mupro.run.fortran_float``) and other unreadable values are ``invalid_data``.
+Without a header the columns are ``energy_1..5``. An unterminated last
 line (a live run) is skipped. Progress records are
 ``{"step", "completed_steps", "total_steps"}`` per line.
 """
 import re
 
-from suan.mupro.run import ENERGY_ROW
+from suan.mupro.run import ENERGY_ROW, fortran_float
 
 from ..api import ConnectorError
 from ..builtin.tables import columns_table, read_jsonl
@@ -61,7 +63,10 @@ def read_energy(text, *, id="energy", keep=None):
                 raise ConnectorError(f"energy_out.dat line {number} is not 'kt: N energy: e1..e5'", "invalid_data")
             names = header
             continue
-        row = [float(v.replace("D", "E").replace("d", "e")) for v in match[2].split()]
+        try:
+            row = [fortran_float(v) for v in match[2].split()]
+        except ValueError as exc:
+            raise ConnectorError(f"energy_out.dat line {number}: {exc}", "invalid_data") from None
         if len(row) != 5:
             raise ConnectorError(f"energy_out.dat line {number} has {len(row)} values; expected 5", "invalid_data")
         steps.append(int(match[1]))

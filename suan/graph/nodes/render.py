@@ -413,7 +413,8 @@ def axes(ctx, inputs, params):
           "anchor": enum(ANCHORS, "right", stage="client"),
           "orientation": enum(["vertical", "horizontal"], "vertical", stage="client"),
           "label_count": integer(5, minimum=2, maximum=20, stage="client"),
-          "format": string(".3g", min_length=1, max_length=16, stage="client"),
+          "format": string(".3g", min_length=1, max_length=16, stage="client",
+                           pattern=r"^[+\- ]?#?0?(?:[1-9][0-9]?)?,?(?:(?:\.[0-9]{1,2})?[eEfFgG%]?|d)$"),
       })
 def scalar_bar(ctx, inputs, params):
     source = inputs["source"]

@@ -144,7 +144,10 @@ def test_vtk_hdf_reader_cross_read(tmp_path):
 
 
 def test_vtk_hdf_reader_reads_numeric_tables(tmp_path):
-    pytest.importorskip("vtk")
+    vtk = pytest.importorskip("vtk")
+    version = (vtk.vtkVersion.GetVTKMajorVersion(), vtk.vtkVersion.GetVTKMinorVersion())
+    if version < (9, 4):  # docs/specs/stk-data-format-v1.md §10: VTK 9.3 rejects the Table type
+        pytest.skip(f"vtkHDFReader of VTK {vtk.vtkVersion.GetVTKVersion()} cannot read VTKHDF tables")
     table = Table.from_columns({"step": np.arange(3), "e": np.array([0.5, 1.5, 2.5])}, index="step", id="energy")
     path = write_vtkhdf(tmp_path / "t.vtkhdf", table)
     # In a subprocess: an unsupported table layout crashes vtkHDFReader instead of raising.

@@ -172,6 +172,8 @@ class NodeAgent:
         self.runtime = runtime
         self.cache = Path(cache_dir)
         self.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+        from suan.plot import ensure_mplconfigdir
+        ensure_mplconfigdir(self.cache / "graph")  # before graph.evaluate imports matplotlib (plots)
         self.blob_sink = blob_sink
         self.graph_workers = max(1, min(2, int(graph_workers)))
         self.hub_features = None  # None: unknown (not connected through run())

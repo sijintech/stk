@@ -154,6 +154,16 @@ def label_fractions(values, categories, *, exclude=(-1, 0), include_empty=True, 
     return rows, family_rows, attrs, warnings
 
 
+def _table_id(field, suffix):
+    """``<field><suffix>`` as a dataset id (``^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$``): field names may hold any
+    character but ``/`` and ``.``, e.g. blanks or CJK text."""
+    import re
+    stem = re.sub(r"[^A-Za-z0-9_.:-]", "_", field)[:128 - len(suffix)] or "labels"
+    if not re.match(r"[A-Za-z0-9_]", stem):
+        stem = "_" + stem[:127 - len(suffix)]
+    return stem + suffix
+
+
 def fractions_tables(dataset, *, field=None, exclude=(-1, 0), include_empty=True):
     """``(out Table, families Table, warnings)`` for a dataset's label field (``None`` = the first one)."""
     from suan.data.model import Table
@@ -169,14 +179,14 @@ def fractions_tables(dataset, *, field=None, exclude=(-1, 0), include_empty=True
             raise ValueError(f"Field {chosen.name!r} is not a label field")
     rows, families, attrs, warnings = label_fractions(chosen.values, chosen.categories, exclude=exclude,
                                                       include_empty=include_empty, field=chosen.name)
-    out = Table(id=f"{chosen.name}_fractions", attrs=attrs)
+    out = Table(id=_table_id(chosen.name, "_fractions"), attrs=attrs)
     out.add_column("value", np.array([r["value"] for r in rows], dtype=np.int64), role="label")
     out.add_column("name", np.array([r["name"] for r in rows], dtype=str))
     out.add_column("family", np.array([r["family"] for r in rows], dtype=str))
     out.add_column("count", np.array([r["count"] for r in rows], dtype=np.int64))
     out.add_column("fraction", np.array([r["fraction"] for r in rows], dtype=np.float64), unit="1")
     out.add_column("color", np.array([r["color"] for r in rows], dtype=str))
-    table = Table(id=f"{chosen.name}_families", attrs=dict(attrs))
+    table = Table(id=_table_id(chosen.name, "_families"), attrs=dict(attrs))
     table.add_column("family", np.array([r["family"] for r in families], dtype=str))
     table.add_column("count", np.array([r["count"] for r in families], dtype=np.int64))
     table.add_column("fraction", np.array([r["fraction"] for r in families], dtype=np.float64), unit="1")

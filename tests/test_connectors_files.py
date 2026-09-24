@@ -1,6 +1,7 @@
 """File sources: LocalFiles (confined to the binding root, sha256 cache) and RuntimeFiles (content-addressed cache)."""
 import hashlib
 import os
+from pathlib import Path
 
 import pytest
 
@@ -122,6 +123,106 @@ def test_materialize_copies_stream_sources(tmp_path):
     path = materialize(StreamOnly(b"abc"), "x/field.npy", cache_dir=tmp_path)
     assert path.read_bytes() == b"abc" and path.suffix == ".npy" and tmp_path in path.parents
     assert materialize(StreamOnly(b"abc"), "field.npy", cache_dir=tmp_path) == path
+
+
+def test_materialize_uses_a_private_directory_and_rehashes_cached_copies(tmp_path):
+    import stat
+    import tempfile
+    path = materialize(StreamOnly(b"abc"), "field.npy")  # no cache_dir: a private per-process directory
+    private = path.parents[2]
+    assert private.name.startswith("stk-files-") and private.parent == Path(tempfile.gettempdir())
+    assert stat.S_IMODE(private.stat().st_mode) == 0o700 and path.read_bytes() == b"abc"
+    assert materialize(StreamOnly(b"abc"), "other.npy").parents[2] == private
+    # A cached copy that no longer matches its sha256 is copied again, never trusted.
+    cached = materialize(StreamOnly(b"abc"), "x/field.npy", cache_dir=tmp_path)
+    cached.write_bytes(b"evil")
+    again = materialize(StreamOnly(b"abc"), "x/field.npy", cache_dir=tmp_path)
+    assert again == cached and again.read_bytes() == b"abc"
+    assert not [p for p in cached.parent.iterdir() if p.name.endswith(".part")]
+
+    class Changing(StreamOnly):  # the bytes read differ from the advertised sha256
+        def sha256(self, path):
+            return hashlib.sha256(b"something else").hexdigest()
+    with pytest.raises(ConnectorError) as error:
+        materialize(Changing(b"abc"), "y.npy", cache_dir=tmp_path)
+    assert error.value.code == "invalid_data"
+    assert not [p for p in (tmp_path / "objects").rglob("*.part")]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX")
+def test_fifos_are_not_regular_files_and_never_block(tree):
+    import threading
+    os.mkfifo(tree / "case16" / "Stream.00000001.dat")
+    source = LocalFiles(tree)
+    outcome = {}
+
+    def attempt():
+        for name, call in (("open", lambda: source.open("case16/Stream.00000001.dat")),
+                           ("sha256", lambda: source.sha256("case16/Stream.00000001.dat"))):
+            try:
+                call()
+                outcome[name] = "returned"
+            except ConnectorError as exc:
+                outcome[name] = exc.code
+    worker = threading.Thread(target=attempt, daemon=True)
+    worker.start()
+    worker.join(10)
+    assert not worker.is_alive(), "reading a FIFO blocked"
+    assert outcome == {"open": "missing_file", "sha256": "missing_file"}
+    assert source.local_path("case16/Stream.00000001.dat") is None
+    assert "case16/Stream.00000001.dat" not in [f.path for f in source.list()]
+    with source.open("case16/energy_out.dat") as stream:  # regular files read normally (blocking mode)
+        assert stream.read() == b"step\n"
+
+
+def test_runtime_downloads_check_between_chunks(tmp_path):
+    from suan.runtime.client import RuntimeClient
+    data = b"x" * 10
+
+    class Chunked(RuntimeClient):
+        def __init__(self):
+            self.requests = 0
+
+        def artifacts(self, task_id):
+            return [{"path": "f.dat", "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}]
+
+        def request(self, method, route, binary=False, **kw):
+            self.requests += 1
+            return data[self.requests - 1:self.requests]  # one byte per chunk
+
+    class Stop(Exception):
+        pass
+    calls = []
+
+    def check():
+        calls.append(1)
+        if len(calls) > 4:
+            raise Stop()
+    client = Chunked()
+    source = RuntimeFiles(client, "t", tmp_path / "cache").with_check(check)
+    with pytest.raises(Stop):
+        source.open("f.dat")
+    assert client.requests == 3  # stopped between chunks (1 check before the download, 1 per chunk)
+    assert list((tmp_path / "cache").rglob("*.part"))  # the partial file is kept for a resume
+    calls.clear()
+    plain = RuntimeFiles(client, "t", tmp_path / "cache")  # no check: resumes and finishes
+    with plain.open("f.dat") as stream:
+        assert stream.read() == data
+    # Clients without a check keyword (older clients, test fakes) still download; check runs around them.
+    fake = FakeClient({"g.dat": b"abc"})
+    seen = []
+    with RuntimeFiles(fake, "t", tmp_path / "c2").with_check(lambda: seen.append(1)).open("g.dat") as stream:
+        assert stream.read() == b"abc"
+    assert fake.downloads == 1 and len(seen) == 2
+
+
+def test_vtk_connector_never_downloads_remote_hdf5_to_probe_it(tmp_path):
+    pytest.importorskip("numpy")
+    pytest.importorskip("h5py")
+    from suan.connectors.builtin.vtk import VTKConnector
+    client = FakeClient({"run.h5": b"\x89HDF\r\n\x1a\n" + b"0" * 1000, "notes.txt": b"x"})
+    source = RuntimeFiles(client, "t", tmp_path / "cache")
+    assert VTKConnector()._files(source) == [] and client.downloads == 0
 
 
 def test_listing_prefixes_links_and_loops(tmp_path):

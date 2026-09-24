@@ -5,6 +5,8 @@ params are normalized; representation nodes get only data-stage params and
 then ``finalize`` attaches the client-stage appearance. Input arrays are made
 read-only, as the evaluator hands them over.
 """
+import dataclasses
+import io
 import json
 import os
 from pathlib import Path
@@ -401,6 +403,52 @@ def test_dataset_output_formats(tmp_path):
     back = read_vtkhdf(hdf["path"])
     assert hdf["name"] == "polar.vtkhdf" and back.dimensions == image.dimensions
     assert np.array_equal(back.xyz("Polar"), image.xyz("Polar"))
+
+
+def test_scalar_bar_label_format_is_validated_with_the_graph():
+    from suan.graph.schema import check_value
+    schema = render.scalar_bar.stk_node_type.params["format"].schema
+    for good in (".3g", ".2f", "+.1e", ".0%", "d"):
+        assert check_value(good, schema) == [], good
+    for bad in ("999999", "{}", ".3d", "abc"):  # "999999" made every label a 999999-character string
+        assert check_value(bad, schema), bad
+
+
+def test_dataset_exports_are_atomic_content_addressed_and_hash_what_they_wrote(tmp_path):
+    import hashlib
+    import threading
+    image = polar_image()
+    doubled = image.copy()
+    doubled.fields = {"Polar": dataclasses.replace(image.field("Polar"), values=image.array("Polar") * 2)}
+    values, errors = [], []
+
+    def export(dataset):
+        try:
+            values.append(run_node(output.dataset_output, {"in": dataset}, {"format": "npy", "name": "polar"},
+                                   cache_dir=tmp_path)[0]["file"])
+        except Exception as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+    threads = [threading.Thread(target=export, args=(image if n % 2 else doubled,)) for n in range(16)]
+    [thread.start() for thread in threads]
+    [thread.join() for thread in threads]
+    assert not errors and len(values) == 16
+    for value in values:  # every value names a file whose bytes it hashed, however the writers interleaved
+        data = Path(value["path"]).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == value["sha256"] and len(data) == value["size"]
+        assert Path(value["path"]) == tmp_path / "exports" / value["sha256"] / "polar.npy"
+    assert len({v["sha256"] for v in values}) == 2  # same name, different content: different files
+    assert sorted(p.name for p in (tmp_path / "exports").iterdir()) == sorted({v["sha256"] for v in values})
+
+
+def test_dataset_exports_without_a_cache_directory_leave_nothing_behind(tmp_path, monkeypatch):
+    import hashlib
+    import tempfile
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    value = run_node(output.dataset_output, {"in": polar_image()}, {"format": "npy"})[0]["file"]
+    assert "path" not in value and value["size"] == len(value["bytes"])
+    assert hashlib.sha256(value["bytes"]).hexdigest() == value["sha256"]
+    assert np.load(io.BytesIO(value["bytes"])).shape == (6, 5, 4, 3)
+    assert list(tmp_path.iterdir()) == []  # no stk-export-* directory is leaked
 
 
 # -- plot -------------------------------------------------------------------------------------

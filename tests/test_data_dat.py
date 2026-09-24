@@ -271,6 +271,44 @@ def test_chunked_parse_bounds_memory(tmp_path):
     assert path.stat().st_size > 3 * 1024 * 1024
 
 
+def test_header_promising_huge_grids_fails_before_allocating(tmp_path):
+    # 124 bytes whose header promises 30 000 000 z points: the size check comes before any index table.
+    bomb = tmp_path / "bomb.dat"
+    bomb.write_text("1 1 1 30000000 1\n" + "".join(str(1).rjust(18) for _ in range(5)) + "  1.0000000E+000\n")
+    tracemalloc.start()
+    try:
+        with pytest.raises(DatError, match="does not match the header"):
+            read_dat(bomb)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 16 * 1024 * 1024, peak
+
+
+def test_general_parser_streams_lines_with_fortran_exponents_and_old_line_breaks(tmp_path):
+    data = np.arange(3 * 2 * 2 * 3, dtype=float).reshape(3, 2, 2, 3) * 1.5e-3 - 0.25
+    text = "3 2 2 3\n# free format\n" + "".join(
+        f"{i + 1} {j + 1} {k + 1} {c + 1}   {float(data[i, j, k, c]):.16E}\n".replace("E", "D" if c else "d")
+        for i, j, k, c in np.ndindex(3, 2, 2, 3))
+    for newline in ("\n", "\r\n", "\r"):
+        path = tmp_path / "free.dat"
+        path.write_bytes(text.replace("\n", newline).encode())
+        assert same(read_dat(path, layout="xyzc"), data), repr(newline)
+    rows = 200_000
+    big = tmp_path / "big-free.dat"
+    with open(big, "w") as stream:
+        stream.write(f"{rows} 1 1\n# free\n")
+        stream.writelines(f"{n + 1} 1 1 {n * 0.5:.6f}\n" for n in range(rows))
+    tracemalloc.start()  # the fallback streams the text into loadtxt: no whole-file string copies
+    try:
+        values = read_dat(big, layout="xyzc")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert values.shape == (rows, 1, 1, 1) and values[-1, 0, 0, 0] == (rows - 1) * 0.5
+    assert peak < 5 * big.stat().st_size, (peak, big.stat().st_size)  # a whole-file StringIO needed > 37 MB
+
+
 @pytest.mark.skipif(os.environ.get("STK_PERF") != "1", reason="performance benchmark: set STK_PERF=1")
 def test_perf_128_cubed_parse(tmp_path):
     """Milestone-1 target: a 128^3 x 3 muFerro Polar frame parses in <= 2 s (x STK_PERF_FACTOR)."""

@@ -34,7 +34,8 @@ import platform
 from suan.monitor.emit import Emitter
 from suan.monitor.events import VERIFICATION_STATUSES
 from suan.monitor.tail import LineTail, PollThread, StableFiles, report, safe_call
-from .run import COMPONENTS, ENERGY_ROW, FRAME, VERIFIER, _case_folder, _header, read_case, verify_run
+from .run import (COMPONENTS, ENERGY_ROW, FRAME, VERIFIER, _case_folder, _header, fortran_float, read_case,
+                  verify_run)
 
 APP = "muFerro"
 READER = "mupro.dat@1"
@@ -68,8 +69,9 @@ def parse_progress(line):
 def parse_energy(line):
     """``(step, values)`` for an energy row; ``(step, None)`` without five values; None for other lines.
 
-    Values are floats keyed by ENERGY_METRICS; Fortran ``D`` exponents are accepted and a
-    token that is not a number (``NaN``, overflow asterisks) becomes NaN.
+    Values are floats keyed by ENERGY_METRICS; Fortran ``D`` exponents and three-digit exponents
+    without a letter (``0.1500000000+102``) are accepted and a token that is not a number
+    (``NaN``, overflow asterisks) becomes NaN.
     """
     match = ENERGY_ROW.fullmatch(line)
     if not match:
@@ -80,7 +82,7 @@ def parse_energy(line):
     values = {}
     for name, token in zip(ENERGY_METRICS, tokens):
         try:
-            values[name] = float(token.replace("D", "E").replace("d", "e"))
+            values[name] = fortran_float(token)
         except ValueError:
             values[name] = math.nan
     return int(match[1]), values

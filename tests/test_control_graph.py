@@ -88,6 +88,9 @@ def test_graph_evaluate_node_budgets_go_to_review():
     graph = muferro_graph()
     graph["nodes"][8]["params"] = {"profile": "desktop"}
     assert "桌面级渲染数据包" in policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}})
+    graph["nodes"][8]["params"] = {"profile": "auto"}  # the request profile, which is checked on its own
+    assert policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}}) == ""
+    assert "桌面级结果配置" in policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}, "profile": "desktop"})
     graph = muferro_graph()
     graph["nodes"][8]["params"] = {"budget": {"voxels": 512 ** 3}}
     assert "渲染数据包预算" in policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}})

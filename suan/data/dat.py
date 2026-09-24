@@ -487,9 +487,12 @@ def _read_fixed(stream, header, layout, dtype, chunk_bytes, check, threads):
     dims = header.dimensions
     nx, ny, nz = dims[:3]
     stream.seek(header.size)
-    rows = _Rows(stream.readline(_MAX_LINE), header)
-    width, nc = rows.width, rows.components
-    n_rows = header.rows
+    first = stream.readline(_MAX_LINE)
+    width, n_rows = len(first), header.rows
+    spans = _token_spans(first)
+    trailing = width - 1 - spans[-1][1] if spans else 0
+    # The file size is checked before any index table is built: a tiny file whose header promises
+    # 30 000 000 rows must not allocate gigabytes of tables first.
     missing = n_rows * width - (os.fstat(stream.fileno()).st_size - header.size)
     if missing < 0:  # only blank lines or blanks may follow the last row
         if -missing > _MAX_LINE:
@@ -497,8 +500,10 @@ def _read_fixed(stream, header, layout, dtype, chunk_bytes, check, threads):
         stream.seek(header.size + n_rows * width)
         if stream.read().strip(_WHITESPACE):
             raise _NotFixed
-    elif missing > rows.trailing + 1:  # the last row may lack its trailing blanks and line break
+    elif missing > trailing + 1:  # the last row may lack its trailing blanks and line break
         raise _NotFixed
+    rows = _Rows(first, header)
+    nc = rows.components
     rows_per_line = nz * rows.rows_per_point
     lines_total = nx * ny
     chunk_lines = max(1, int(chunk_bytes) // (rows_per_line * width))
@@ -587,12 +592,17 @@ def _scatter(view, chunks, dims, rows, rows_per_line, n_rows):
 
 
 def _read_general(stream, header, layout, dtype):
-    """Whitespace tokens (comments and blank lines allowed), with the checks of ``read_field``."""
+    """Whitespace tokens (comments and blank lines allowed), with the checks of ``read_field``.
+
+    The text is streamed line by line into ``numpy.loadtxt`` (no whole-file string copies).
+    """
     np = _np()
-    text = stream.read().decode("utf-8")
-    if "D" in text or "d" in text:
-        text = text.translate({ord("D"): "E", ord("d"): "e"})
-    rows = np.loadtxt(io.StringIO(text, newline=None), ndmin=2)
+    exponents = {ord("D"): "E", ord("d"): "e"}
+    text = io.TextIOWrapper(stream, encoding="utf-8", newline=None)
+    try:
+        rows = np.loadtxt((line.translate(exponents) for line in text), ndmin=2)
+    finally:
+        text.detach()  # the caller owns (and closes) the binary stream
     dimensions = header.dimensions
     coordinates = len(dimensions)
     shape = dimensions[:3]

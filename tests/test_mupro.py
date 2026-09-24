@@ -275,6 +275,26 @@ def test_verify_accepts_fortran_d_exponents_and_restarts(tmp_path):
     assert report["qoi"] == {"total_energy": -13.5, "step": 12}
 
 
+def test_verify_accepts_three_digit_exponents_without_a_letter(tmp_path):
+    # Fortran e18.10 writes |exponent| > 99 as 0.1500000000+102 (no 'E').
+    write_case(tmp_path)
+    write_outputs(tmp_path)
+    energy = tmp_path / "energy_out.dat"
+    lines = energy.read_text().splitlines()
+    lines[-1] = lines[-1][:lines[-1].index("energy:") + 7] + "".join(
+        v.rjust(18) for v in ("0.1500000000+102", "-0.2000000000-119", "0.3000000000+100", "0.1000000000E+01",
+                              "-0.4500000000+101"))
+    energy.write_text("\n".join(lines) + "\n")
+    report = verify_run(tmp_path)
+    assert report["verification"]["status"] == "passed", report
+    assert report["qoi"]["total_energy"] == -4.5e100
+    # Semantics are otherwise unchanged: a token that is not a number is still an invalid result.
+    energy.write_text(energy.read_text().replace("0.3000000000+100", "0.30000000x0+100"))
+    report = verify_run(tmp_path)
+    assert report["classification"] == "invalid_result"
+    assert [c["id"] for c in report["verification"]["checks"] if c["status"] == "fail"] == ["energy"]
+
+
 def test_expected_frames_match_muferro_naming():
     frames = expected_frames({"grid": [16, 16, 16], "start_step": 0, "steps": 101, "output_interval": 100})
     assert len(frames) == 30 and all(FRAME.search(name) for name in frames)

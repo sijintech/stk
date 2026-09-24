@@ -223,8 +223,18 @@ groups `Vertices`, `Lines`, `Polygons`, `Strips`, each with `NumberOfCells` [c],
 `CellData` shaped `(n[, nc])`.
 
 **Table** (`Type` = `"Table"`, the VTKHDF table layout of recent VTK releases): `RowData/<column>` shaped
-`(rows[, nc])`; string columns as variable-length UTF-8. STK reads and writes it with h5py regardless
-of VTK support.
+`(rows[, nc])`; string columns as variable-length UTF-8; `NumberOfRows` = `[rows]` (int64 dataset
+under `/VTKHDF`) — `vtkHDFReader` needs it to read a table. STK reads and writes it with h5py
+regardless of VTK support.
+
+**`vtkHDFReader` caveats** (checked with VTK 9.3.1 and 9.7.0):
+
+- ImageData with `ny = 1` or `nz = 1` (2D frames, e.g. a 64×64×1 slice) cannot be read: the reader
+  reports the dimensions but no point or cell arrays. Such files are valid STK VTKHDF (STK reads
+  them back with h5py), but ParaView and other VTK readers show an empty grid; export 2D frames as
+  VTI (`stk.output.dataset@1`, `format: "vti"`) when they must open in ParaView.
+- VTK 9.3 does not know the `Table` type ("HDF dataset type unknown"); VTK 9.7 reads STK tables
+  (the conformance test skips on VTK < 9.4). Image `Direction` is honoured by both versions.
 
 **STK profile** (ignored by VTK):
 

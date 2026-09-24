@@ -141,12 +141,13 @@ class VTKConnector(SingleFileConnector):
 
     def _files(self, run):
         from suan.data.vtkhdf import is_vtkhdf
-        from ..files import materialize
         found = []
         for item in super()._files(run):
             if PurePosixPath(item.path).suffix.lower() in (".hdf", ".h5", ".hdf5"):
-                local = run.local_path(item.path)
-                if local is None or not is_vtkhdf(materialize(run, item.path)):
+                # Generic HDF5 names are probed only when the file is already on this host: probing a remote
+                # file would download it (e.g. a multi-GB MuPRO run.h5). Remote VTKHDF uses '.vtkhdf'.
+                local = None if hasattr(run, "fetch") else run.local_path(item.path)
+                if local is None or not is_vtkhdf(local):
                     continue  # plain HDF5 (e.g. MuPRO run.h5) is not a VTKHDF dataset
             found.append(item)
         return found

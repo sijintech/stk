@@ -42,7 +42,10 @@ Implementation contract (evaluated by ``suan.graph.evaluator`` in Phase B2):
 * ``fingerprint(ctx, inputs, params) -> JSON`` describes the file content a
   node reads (e.g. ``[{"path", "sha256", "reader", "selector"}]``); it becomes
   ``source_content`` in the data key. Required for stage ``source`` unless
-  ``cache == "none"``.
+  ``cache == "none"``. A source node with a fingerprint is keyed by the content
+  it resolved: its keys leave out the upstream keys and its ``selectors``
+  params (e.g. ``step``/``policy``), so the fingerprint must describe everything
+  it reads, including what it takes from its inputs.
 * ``meta(ctx, input_metas, params) -> {port: meta}`` is optional (``graph.meta``).
 """
 from dataclasses import dataclass, field, fields as dataclass_fields
@@ -554,12 +557,14 @@ class NodeType:
     meta: Callable | None = None
     tags: tuple = ()
     stretch: bool = False
+    selectors: tuple = ()
 
     def __post_init__(self):
         self.inputs = tuple(self.inputs)
         self.outputs = tuple(self.outputs)
         self.params = dict(self.params or {})
         self.tags = tuple(self.tags)
+        self.selectors = tuple(self.selectors or ())
         self.title = _text(self.title) or {"en": self.type}
         self.description = _text(self.description)
         namespace, family, name = self.type.split(".") if self.type.count(".") == 2 else (None, None, None)
@@ -650,6 +655,11 @@ class NodeType:
                 raise ValueError(f"{self.id}: disk cache only for dataset/table/value outputs")
         if self.stage == "source" and self.fingerprint is None and self.cache != "none" and self.impl is not None:
             raise ValueError(f"{self.id}: source nodes need a fingerprint() (or cache='none')")
+        for name in self.selectors:
+            if name not in self.params:
+                raise ValueError(f"{self.id}: selector {name!r} is not a parameter")
+            if self.stage != "source" or self.param_stage(name) != "data":
+                raise ValueError(f"{self.id}: selectors are data-stage params of source nodes ({name!r})")
 
     # -- parameters ---------------------------------------------------------
 
@@ -751,14 +761,19 @@ class NodeType:
 
 def node(type, *, version=1, impl_version=1, title=None, description=None, inputs=(), outputs=(), params=None,
          stage=None, time_dependent=False, deterministic=True, cache="memory", finalize=None, fingerprint=None,
-         meta=None, tags=(), stretch=False, registry=None):
-    """Decorator declaring a node type; attaches ``fn.stk_node_type`` (and registers into ``registry`` if given)."""
+         meta=None, tags=(), stretch=False, selectors=(), registry=None):
+    """Decorator declaring a node type; attaches ``fn.stk_node_type`` (and registers into ``registry`` if given).
+
+    ``selectors`` (source nodes with a ``fingerprint``) names the params that only select which content
+    the node reads, e.g. a step and its policy: they are left out of the data key, since the
+    fingerprint describes the content they resolved to (docs/specs/stk-graph-v1.md §5).
+    """
     def decorate(fn):
         node_type = NodeType(type=type, version=version, impl_version=impl_version, title=title,
                              description=description, inputs=inputs, outputs=outputs, params=params or {},
                              stage=stage, time_dependent=time_dependent, deterministic=deterministic, cache=cache,
                              impl=fn, finalize=finalize, fingerprint=fingerprint, meta=meta, tags=tags,
-                             stretch=stretch)
+                             stretch=stretch, selectors=selectors)
         fn.stk_node_type = node_type
         if registry is not None:
             registry.register(node_type)

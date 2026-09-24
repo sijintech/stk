@@ -21,6 +21,7 @@ hub can check specs without scientific packages.
 """
 import copy
 import math
+import operator
 
 __all__ = [
     "MARK_TYPES", "SCHEMA", "PlotSpecError",
@@ -31,6 +32,8 @@ SCHEMA = "stk.plot/1"
 MARK_TYPES = ("line", "scatter", "bar", "hist", "heatmap", "quiver", "errorbar", "fill_between")
 DATA_ROLES = ("x", "y", "z", "u", "v", "yerr", "y2")
 OPS = ("==", "!=", ">", ">=", "<", "<=")
+_COMPARE = {"==": operator.eq, "!=": operator.ne, ">": operator.gt, ">=": operator.ge, "<": operator.lt,
+            "<=": operator.le}
 
 
 class PlotSpecError(ValueError):
@@ -192,19 +195,33 @@ def select_rows(spec, table, data):
     n = len(next(iter(columns.values()))) if columns else 0
     keep = np.ones(n, dtype=bool)
     for condition in data.get("filter", ()):
-        values = column(spec, table, condition["column"])
-        target = condition["value"]
-        if values.dtype == object:
-            values = np.array(["" if v is None else v for v in values], dtype=str)
-            target = str(target)
-        with np.errstate(invalid="ignore"):
-            keep &= {"==": values == target, "!=": values != target, ">": values > target,
-                     ">=": values >= target, "<": values < target, "<=": values <= target}[condition["op"]]
+        keep &= _filter_mask(column(spec, table, condition["column"]), condition)
     index = np.flatnonzero(keep)
     index = index[::int(data.get("stride", 1))]
     if data.get("last_n"):
         index = index[-int(data["last_n"]):]
     return index
+
+
+def _filter_mask(values, condition):
+    """Rows where ``values <op> value`` holds, compared in the column's type (only the requested operator runs).
+
+    A numeric column compares numbers (a numeric string such as ``"3"`` is converted; any other value is
+    a :class:`PlotSpecError`); a string column compares strings (``null`` = ``""``).
+    """
+    np = _np()
+    compare = _COMPARE[condition["op"]]
+    target = condition["value"]
+    if values.dtype.kind in "iufb":
+        try:
+            target = float(target)
+        except (TypeError, ValueError):
+            raise PlotSpecError(f"filter on the numeric column {condition['column']!r} needs a number, "
+                                f"got {target!r}") from None
+        with np.errstate(invalid="ignore"):
+            return np.asarray(compare(values.astype(np.float64), target), dtype=bool)
+    strings = np.array(["" if v is None else str(v) for v in values], dtype=str)
+    return np.asarray(compare(strings, "" if target is None else str(target)), dtype=bool)
 
 
 def mark_data(spec, mark, metrics=None):

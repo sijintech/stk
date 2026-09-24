@@ -88,6 +88,72 @@ def test_filters_stride_and_last_n(tmp_path):
     assert 0 not in index.tolist() and len(index) == 19
 
 
+def test_filters_compare_in_the_column_type():
+    spec = {"schema": "stk.plot/1", "axes": [{"id": "a"}], "marks": [],
+            "tables": {"t": {"columns": {"kt": [1, 2, 3, 4], "name": ["a", "b", None, "10"]}}}}
+
+    def rows(column, op, value):
+        return select_rows(spec, "t", {"filter": [{"column": column, "op": op, "value": value}]}).tolist()
+    assert rows("kt", "==", "3") == [2] and rows("kt", ">=", "2.5") == [2, 3]  # numeric strings on numbers
+    assert rows("kt", "<", True) == []  # booleans are numbers (1)
+    with pytest.raises(PlotSpecError, match="numeric column 'kt' needs a number"):
+        rows("kt", ">", "abc")
+    with pytest.raises(PlotSpecError):
+        rows("kt", "==", None)
+    assert rows("name", "==", 10) == [3] and rows("name", "!=", "a") == [1, 2, 3]  # strings compare as strings
+    assert rows("name", "==", None) == [2] and rows("name", ">", "a") == [1]  # "10" < "a" as strings
+    spec["tables"]["t"]["columns"]["kt"] = np.arange(1, 5)  # in-memory arrays too
+    assert rows("kt", "<=", "2") == [0, 1]
+
+
+def test_threaded_renders_are_identical_and_leave_rcparams_alone():
+    import threading
+    import matplotlib
+    table = Table.from_columns({"t": np.arange(20.0), "v": np.sin(np.arange(20.0))})
+    spec = check({"schema": "stk.plot/1", "figure": {"size_in": [3, 2], "dpi": 60, "style": "stk-screen"},
+                  "axes": [{"id": "a"}], "marks": [{"type": "line", "axes": "a", "data": {"table": "t", "x": "t",
+                                                                                        "y": "v"}}],
+                  "tables": {"t": table_payload(table)}})
+    reference = render(spec, format="svg")
+    before = dict(matplotlib.rcParams)
+    results, errors = [], []
+
+    def work():
+        try:
+            for _ in range(3):
+                results.append(render(spec, format="svg"))
+        except Exception as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+    threads = [threading.Thread(target=work) for _ in range(4)]
+    [thread.start() for thread in threads]
+    [thread.join() for thread in threads]
+    assert not errors and len(results) == 12 and all(result == reference for result in results)
+    assert {k: v for k, v in matplotlib.rcParams.items() if before.get(k) != v} == {}
+
+
+def test_services_point_mplconfigdir_at_their_cache(tmp_path, monkeypatch):
+    import stat
+    from suan.plot import ensure_mplconfigdir
+    monkeypatch.delenv("MPLCONFIGDIR", raising=False)
+    path = ensure_mplconfigdir(tmp_path / "graph")
+    assert path == tmp_path / "graph" / "matplotlib" and os.environ["MPLCONFIGDIR"] == str(path)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o700
+    assert ensure_mplconfigdir(tmp_path / "other") == path  # an existing setting always wins
+    monkeypatch.delenv("MPLCONFIGDIR")
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    assert ensure_mplconfigdir(blocker) is None and "MPLCONFIGDIR" not in os.environ  # not writable: unchanged
+    # The node agent and the MCP graph tools set it before anything imports matplotlib.
+    from suan.control.agent import NodeAgent
+    NodeAgent(object(), tmp_path / "agent")
+    assert os.environ["MPLCONFIGDIR"] == str(tmp_path / "agent" / "graph" / "matplotlib")
+    monkeypatch.delenv("MPLCONFIGDIR")
+    monkeypatch.setenv("STK_GRAPH_CACHE", str(tmp_path / "mcp"))
+    from suan.mcp.graph_tools import plot_table
+    plot_table(columns={"v": [1, 2, 3]}, y=["v"], output_dir=str(tmp_path / "out"))
+    assert os.environ["MPLCONFIGDIR"] == str(tmp_path / "mcp" / "matplotlib")
+
+
 def test_pyplot_is_never_used_and_the_backend_is_unchanged(tmp_path):
     # The raw rcParams value is compared: matplotlib.get_backend() itself would import pyplot.
     code = ("import json, sys, matplotlib; raw = lambda: dict.__getitem__(matplotlib.rcParams, 'backend'); "

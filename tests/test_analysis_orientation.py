@@ -146,6 +146,11 @@ def test_thresholds_ties_and_invalid_values():
     assert classify([[1, 1, 0]], direction_set("custom", directions=[[0, 1, 0], [1, 0, 0]])).tolist() == [1]
     # Non-finite components are unclassified.
     assert classify([[np.nan, 1, 0], [np.inf, 0, 0], [1, 0, 0]], variants).tolist() == [-1, -1, 1]
+    # Huge and tiny vectors keep their direction (|p|^2 used to overflow to inf and classify as T[100]).
+    assert classify([[0, 0, -1e160], [0, 0, -1e150], [1e200, 1e200, 0], [1e308, -1e308, 1e308]],
+                    variants).tolist() == [6, 6, 7, classify([[1, -1, 1]], variants)[0]]
+    assert classify([[0, 1e-200, 0]], variants, min_magnitude=0.0).tolist() == [3]
+    assert classify([[0, 1e-200, 0]], variants).tolist() == [-1]
     with pytest.raises(OrientationError):
         classify([[1, 0, 0]], variants, max_angle_deg=0)
     with pytest.raises(OrientationError):

@@ -153,7 +153,8 @@ def _payload_budget_reasons(graph, values):
         node_type = str(node.get("type", ""))
         params = params_of(node)
         if node_type.startswith("stk.output.payload@"):
-            if params.get("profile", "web") not in GRAPH_AUTO_PROFILES:
+            # "auto" (the default) is the request profile, which is checked on its own.
+            if params.get("profile", "auto") not in GRAPH_AUTO_PROFILES | {"auto"}:
                 reasons.append("桌面级渲染数据包")
             budget = params.get("budget") or {}
             if isinstance(budget, dict) and any(not isinstance(budget.get(key), int) or budget[key] > limit

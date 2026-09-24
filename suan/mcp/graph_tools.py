@@ -159,7 +159,9 @@ def _run(document, *, bindings, parameters, outputs, profile, plot_format, budge
     from suan.graph.cli import _CollectSink, default_cache_dir
     from suan.graph.schema import GraphError, GraphValidationError
     from suan.graph.service import evaluate_request, shared_cache
+    from suan.plot import ensure_mplconfigdir
     cache_root = default_cache_dir()
+    ensure_mplconfigdir(cache_root)  # before plots import matplotlib
     sink = _CollectSink()
     request = {"graph": document, "parameters": parameters or {}, "outputs": outputs, "profile": profile,
                "plot_format": plot_format}
@@ -291,6 +293,9 @@ def graph_render(graph=None, preset=None, bindings=None, parameters=None, output
 def plot_table(columns=None, y=None, x=None, kind="line", units=None, title=None, x_label=None, y_label=None,
                spec=None, format="png", output_dir=None):
     """Plot table columns (or a full ``stk.plot/1`` ``spec``) with matplotlib; writes the image and plotted data."""
+    from suan.graph.cli import default_cache_dir
+    from suan.plot import ensure_mplconfigdir
+    ensure_mplconfigdir(default_cache_dir())  # before matplotlib is imported
     from suan.plot.mpl import render_plot
     from suan.plot.spec import PlotSpecError, check
     if spec is None:

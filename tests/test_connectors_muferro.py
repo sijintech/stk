@@ -138,8 +138,39 @@ def test_tables_parse_live_and_headerless_traces():
     assert table.n_rows == 1 and table.column("energy_2")[0] == 2.0 and math.isnan(table.column("energy_5")[0])
     with pytest.raises(ConnectorError):
         read_energy("kt: 1 energy: 1.0 2.0\n")
+    with pytest.raises(ConnectorError) as error:  # an unreadable value is invalid data, not a ValueError
+        read_energy("kt: 1 energy: 1.0 2.0 3.0 4.0 0.25x\n")
+    assert error.value.code == "invalid_data"
     progress = read_progress('{"step":1,"completed_steps":1,"total_steps":3}\n{"step":2,"comp')
     assert progress.n_rows == 1 and progress.column("step").dtype == np.int64
+
+
+def test_energy_rows_with_three_digit_exponents(tmp_path):
+    # Fortran e18.10 writes exponents beyond +-99 without the letter (0.1500000000+102 = 1.5e101).
+    row = ("kt:      5 energy:   0.1500000000+102 -0.2000000000-119 -0.1125000000E+01  0.3000000000+100"
+           "  -0.4500000000+101\n")
+    table = read_energy(row)
+    assert table.column("energy_1")[0] == 1.5e101 and table.column("energy_2")[0] == -2e-120
+    assert table.column("energy_4")[0] == 3e99 and table.column("energy_5")[0] == -4.5e100
+    run_dir(tmp_path)
+    with open(tmp_path / "energy_out.dat", "a") as stream:
+        stream.write(row)
+    connector = MuFerroConnector()
+    source = LocalFiles(tmp_path)
+    result = connector.describe(source, live=True)
+    assert any(d["id"] == "energy" for d in result["datasets"])
+    total = next(q for q in result["qoi"] if q["name"] == "total_energy")
+    assert total["value"] == -4.5e100 and total["step"] == 5
+    energy = connector.open(source, "energy", result=result).read(frame=None)
+    assert energy.column("step")[-1] == 5 and energy.column("Elastic Energy")[-1] == 1.5e101
+    # A value that is not a number at all: describe still lists the table, reading it is invalid_data.
+    with open(tmp_path / "energy_out.dat", "a") as stream:
+        stream.write(row.replace("kt:      5", "kt:      6").replace("0.3000000000+100", "0.30000000x0+100"))
+    result = connector.describe(source, live=True)
+    assert any(d["id"] == "energy" for d in result["datasets"])
+    with pytest.raises(ConnectorError) as error:
+        connector.open(source, "energy", result=result).read(frame=None)
+    assert error.value.code == "invalid_data"
 
 
 class FakeClient:

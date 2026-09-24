@@ -98,8 +98,16 @@ def test_fractions_tables_columns():
     assert out.attrs["denominator"] == 3 and families.columns == ["family", "count", "fraction"]
     assert families.column("family").tolist() == ["T", "O"] and families.column("count").tolist() == [2, 1]
     assert out.to_json()["columns"]["fraction"][0] == "NaN"
+    assert out.id == "domain_fractions" and families.id == "domain_families"
     with pytest.raises(ValueError):
         fractions_tables(ImageData((1, 1, 1)))
+    # Field names may hold blanks, CJK text or a leading '-'; the table ids stay valid dataset ids.
+    for name, expected in (("domain labels", "domain_labels_fractions"), ("畴", "__fractions"),
+                           ("-x", "_-x_fractions"), ("L" * 128, "L" * 118 + "_fractions")):
+        other = ImageData((4, 1, 1))
+        other.add_field(name, np.array([1, 1, -1, 7], dtype=np.int16).reshape(1, 1, 4), categories=CATEGORIES)
+        out, families, _ = fractions_tables(other)
+        assert out.id == expected and len(families.id) <= 128 and out.attrs["field"] == name
 
 
 def test_peloop_film_and_fractions():

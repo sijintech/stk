@@ -27,6 +27,12 @@ Blobs (payload buffers, images, plots, file exports, tables and values over
 a local file path; the result only references them by sha256. ``scene``
 outputs are delivered as payloads encoded for the request profile.
 
+``budget.max_output_bytes`` limits the delivered bytes (blobs plus the result
+document); it defaults to the request profile's payload budget (phone 32 MiB,
+web 128 MiB, desktop 2 GiB; docs/specs/stk-render-payload-v2.md §7). The
+evaluation itself runs without an output-byte limit, since in-memory values
+(e.g. a full-resolution scene) are reduced when they are encoded.
+
 Request bindings only name Runtime tasks (``{"task_id": ...}``); requests never
 carry filesystem paths. ``resolver`` is bound to them with
 ``resolver.bind(bindings)`` (``RuntimeResolver``) when it supports that.
@@ -40,6 +46,7 @@ with ``manifest`` (stk.payload/2) and ``buffers`` (``{sha256: bytes}`` or a list
 in manifest order), optionally ``scene_v1``.
 """
 from collections.abc import Mapping, Sequence
+import dataclasses
 import hashlib
 import json
 import os
@@ -47,13 +54,13 @@ from pathlib import Path
 import threading
 import uuid
 
-from .cache import GraphCache, plain_json
+from .cache import GraphCache, plain_json, sub_key
 from .evaluator import EvaluationFailed, evaluate
 from .registry import Budget, BudgetExceeded, GraphError
-from .schema import ID_RE
+from .schema import ID_RE, parse_port_ref
 
 __all__ = [
-    "INLINE_LIMIT", "PROFILES", "RESULT_SCHEMA",
+    "INLINE_LIMIT", "PROFILE_OUTPUT_BYTES", "PROFILES", "RESULT_SCHEMA",
     "DirectoryBlobSink", "MemoryBlobSink", "evaluate_request", "parse_request", "shared_cache",
 ]
 
@@ -62,6 +69,8 @@ PROFILES = ("phone", "web", "desktop")
 INLINE_LIMIT = 256 * 1024
 DEFAULT_MAX_SECONDS = 300.0
 DEFAULT_MAX_OUTPUT_BYTES = 128 * 1024**2
+# Default delivery limits per request profile (docs/specs/stk-render-payload-v2.md §7, "bytes").
+PROFILE_OUTPUT_BYTES = {"phone": 32 * 1024**2, "web": DEFAULT_MAX_OUTPUT_BYTES, "desktop": 2 * 1024**3}
 REQUEST_KEYS = frozenset({"graph", "preset", "bindings", "parameters", "outputs", "profile", "budget",
                           "plot_format", "accept"})
 PLOT_FORMATS = {"svg": "image/svg+xml", "png": "image/png"}
@@ -199,7 +208,9 @@ def parse_request(payload):
 
 
 def _budget(request):
-    limits = {"max_seconds": DEFAULT_MAX_SECONDS, "max_memory_mb": None, "max_output_bytes": DEFAULT_MAX_OUTPUT_BYTES}
+    """The request's limits; ``max_output_bytes`` (default: per profile) limits the *delivered* bytes."""
+    limits = {"max_seconds": DEFAULT_MAX_SECONDS, "max_memory_mb": None,
+              "max_output_bytes": PROFILE_OUTPUT_BYTES[request["profile"]]}
     limits.update(request["budget"])
     if limits["max_memory_mb"] is not None:
         limits["max_memory_mb"] = int(limits["max_memory_mb"])
@@ -238,17 +249,34 @@ def evaluate_request(payload, *, resolver, cache_dir, blob_sink, registry=None, 
     resolver = _bind(resolver, request["bindings"])
     cache = cache if cache is not None else shared_cache(cache_dir)
     budget = _budget(request)
-    errors, skipped = [], []
-    try:
-        result = evaluate(graph, registry=registry, resolver=resolver, outputs=request["outputs"],
-                          parameters=request["parameters"], cache=cache, budget=budget, cancel=cancel,
-                          on_event=on_event)
-    except EvaluationFailed as exc:
-        if not exc.partial.outputs:
-            raise
-        result, errors, skipped = exc.partial, exc.errors, exc.skipped
+    for attempt in range(2):
+        errors, skipped = [], []
+        try:
+            # The byte limit applies to what is delivered (blobs + the result document, checked below), not to
+            # the in-memory outputs: a scene holds full-resolution arrays that encoding reduces to the profile.
+            result = evaluate(graph, registry=registry, resolver=resolver, outputs=request["outputs"],
+                              parameters=request["parameters"], cache=cache,
+                              budget=dataclasses.replace(budget, max_output_bytes=None), cancel=cancel,
+                              on_event=on_event)
+        except EvaluationFailed as exc:
+            if not exc.partial.outputs:
+                raise
+            result, errors, skipped = exc.partial, exc.errors, exc.skipped
+        stale = _stale_files(graph, result)
+        if not stale or attempt:
+            break
+        # An export file of a cached value was pruned from the scratch space: forget it and evaluate again
+        # (only the export nodes re-run).
+        for key in stale:
+            cache.discard(key, disk=False)
+    keys = {}
+    for name in result.outputs:
+        node_id, port = parse_port_ref(graph["outputs"][name])
+        if node_id in result.keys:
+            keys[name] = f"{result.keys[node_id]['full']}:{port}"
     delivery = _Delivery(blob_sink, profile=request["profile"], plot_format=request["plot_format"],
-                         max_bytes=budget.max_output_bytes, encode_scene=encode_scene, render_plot=render_plot)
+                         max_bytes=budget.max_output_bytes, encode_scene=encode_scene, render_plot=render_plot,
+                         cache=cache, keys=keys)
     outputs = {}
     for name, value in result.outputs.items():
         outputs[name] = delivery.deliver(name, result.output_types[name], value)
@@ -271,6 +299,20 @@ def evaluate_request(payload, *, resolver, cache_dir, blob_sink, registry=None, 
     return document
 
 
+def _stale_files(graph, result):
+    """Full keys of the nodes whose ``file`` outputs name a local path that no longer exists."""
+    stale = []
+    for name, value in result.outputs.items():
+        if result.output_types.get(name) != "file" or _get(value, "bytes") is not None:
+            continue
+        path = _get(value, "path")
+        if path is not None and not Path(path).is_file():
+            node_id, _ = parse_port_ref(graph["outputs"][name])
+            if node_id in result.keys:
+                stale.append(result.keys[node_id]["full"])
+    return stale
+
+
 # ---------------------------------------------------------------------------
 # Delivery of output values
 
@@ -291,14 +333,17 @@ def _get(value, key, default=None):
 
 
 class _Delivery:
-    def __init__(self, sink, *, profile, plot_format, max_bytes, encode_scene, render_plot):
+    def __init__(self, sink, *, profile, plot_format, max_bytes, encode_scene, render_plot, cache=None, keys=None):
         self.sink = sink
         self.profile = profile
         self.plot_format = plot_format
         self.max_bytes = max_bytes
         self.encode_scene = encode_scene
         self.render_plot = render_plot
+        self.cache = cache
+        self.keys = keys or {}   # output name -> "<full key of its node>:<port>"
         self.bytes = 0
+        self._name = None
 
     def blob(self, data, size=None, expected=None):
         is_path = isinstance(data, os.PathLike)
@@ -316,6 +361,7 @@ class _Delivery:
         method = getattr(self, "_" + port_type, None)
         if method is None:
             raise GraphError("bad_output", f"Output '{name}' has type '{port_type}', which cannot be delivered")
+        self._name = name
         try:
             return method(value)
         except GraphError as exc:
@@ -376,11 +422,31 @@ class _Delivery:
                 result[key] = int(_get(value, key))
         return result
 
+    def _rendered(self, kind, render):
+        """``render()`` memoized in the cache's memory tier by the output's full key, ``kind`` and the renderer."""
+        key = self.keys.get(self._name)
+        if self.cache is None or key is None:
+            return render()
+        renderer = self.render_plot or _default_render_plot
+        key = sub_key(key, f"delivery:{kind}:{getattr(renderer, '__module__', '')}."
+                           f"{getattr(renderer, '__qualname__', type(renderer).__name__)}")
+        hit = self.cache.get(key, disk=False)
+        if hit is not None:
+            return dict(hit.value)
+        rendered = render()
+        self.cache.put(key, dict(rendered), disk=False)
+        return rendered
+
     def _plot(self, value):
         render = self.render_plot or _default_render_plot
-        rendered = render(value, format=self.plot_format)
-        if isinstance(rendered, (tuple, list)):
-            rendered = dict(zip(("bytes", "media_type", "data"), rendered))
+
+        def run():
+            rendered = render(value, format=self.plot_format)
+            if isinstance(rendered, (tuple, list)):
+                rendered = dict(zip(("bytes", "media_type", "data"), rendered))
+            return dict(rendered)
+        # A warm request re-delivers the same bytes without rendering the plot again (~0.3 s with matplotlib).
+        rendered = self._rendered(f"plot:{self.plot_format}", run)
         data = rendered.get("bytes")
         if data is None:
             raise GraphError("bad_outputs", "The plot renderer returned no bytes")

@@ -29,9 +29,17 @@ continues after it: a directory (``"case16"`` or ``"case16/"``; listed
 recursively) or a file-name prefix inside one (``"case16/Polar."``). Paths are
 reported as requested, also when the prefix is a symbolic link to a directory
 inside the root; links that leave the root, and link loops, are skipped.
+
+Only regular files are read: local files are opened without blocking
+(``O_NONBLOCK``) and checked with ``fstat``, so a FIFO or device node in a
+binding is a missing file instead of a hung reader. ``RuntimeFiles`` sources
+bound to an evaluation (:meth:`RuntimeFiles.with_check`) call the evaluation's
+``check`` between download chunks (cancellation and time budget).
 """
+import atexit
 from contextlib import closing
 import hashlib
+import inspect
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -40,11 +48,12 @@ import sqlite3
 import stat as _stat
 import tempfile
 import threading
+import uuid
 
 from .api import ConnectorError, FileInfo
 
-__all__ = ["MAX_DOWNLOAD_BYTES", "HashMemo", "LocalFiles", "MissingFile", "PathNotAllowed", "RuntimeFiles",
-           "check_path", "materialize"]
+__all__ = ["MAX_DOWNLOAD_BYTES", "HashMemo", "LocalFiles", "MissingFile", "NotRegularFile", "PathNotAllowed",
+           "RuntimeFiles", "check_path", "materialize", "open_regular"]
 
 MAX_DOWNLOAD_BYTES = 1024**3  # same first-release field limit as view.build
 _SUFFIX_RE = re.compile(r"^\.[A-Za-z0-9_]{1,16}$")
@@ -64,6 +73,29 @@ class PathNotAllowed(ConnectorError, PermissionError):
 
     def __init__(self, message, code="invalid_path"):
         ConnectorError.__init__(self, message, code)
+
+
+class NotRegularFile(OSError):
+    """``open_regular``: the path names a FIFO, device, socket or directory, not a regular file."""
+
+
+def open_regular(path):
+    """Open a regular file for binary reading; never blocks on a FIFO (``O_NONBLOCK`` + ``fstat``).
+
+    Raises ``FileNotFoundError`` or :class:`NotRegularFile` (an ``OSError``).
+    """
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, os.O_RDONLY | nonblock | getattr(os, "O_BINARY", 0))
+    try:
+        if not _stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise NotRegularFile(f"Not a regular file: {path}")
+        if nonblock:
+            import fcntl
+            fcntl.fcntl(descriptor, fcntl.F_SETFL, fcntl.fcntl(descriptor, fcntl.F_GETFL) & ~nonblock)
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def check_path(path):
@@ -126,7 +158,7 @@ class HashMemo:
         digest = self._load(key)
         if digest is None:
             result = hashlib.sha256()
-            with open(path, "rb") as stream:
+            with open_regular(path) as stream:
                 for block in iter(lambda: stream.read(_BLOCK), b""):
                     result.update(block)
             digest = result.hexdigest()
@@ -271,17 +303,18 @@ class LocalFiles:
 
     def open(self, path):
         target = self._resolve(path)
-        if not target.is_file():
-            raise self._missing(path)
         try:
-            return open(target, "rb")
-        except FileNotFoundError:
+            return open_regular(target)
+        except NotRegularFile:
+            raise MissingFile(f"Not a regular file: {path}{self._where()}") from None
+        except (FileNotFoundError, NotADirectoryError):
             raise self._missing(path) from None
 
     def local_path(self, path):
-        """The confined local path (``""``/``"."`` = the directory itself), or ``None`` if it does not exist."""
+        """The confined local path (``""``/``"."`` = the directory itself), or ``None`` if it does not exist
+        or is neither a regular file nor a directory (a FIFO would block its readers)."""
         target = self._resolve(path)
-        return target if target.exists() else None
+        return target if target.is_file() or target.is_dir() else None
 
     def sha256(self, path):
         target = self._resolve(path)
@@ -289,6 +322,8 @@ class LocalFiles:
             raise self._missing(path)
         try:
             return self._memo.sha256(target)
+        except NotRegularFile:
+            raise MissingFile(f"Not a regular file: {path}{self._where()}") from None
         except FileNotFoundError:
             raise self._missing(path) from None
 
@@ -329,9 +364,22 @@ class RuntimeFiles:
         self.binding = binding
         self._items = None
         self._lock = threading.Lock()
+        self._evaluation_check = None
 
     def __repr__(self):
         return f"{type(self).__name__}(task_id={self.task_id!r})"
+
+    def with_check(self, check):
+        """A view of this source whose downloads call ``check()`` between chunks (cancellation, time budget).
+
+        The view shares the listing; ``check`` is passed to ``client.download(..., check=check)`` when the
+        client accepts it (``suan.runtime.client.RuntimeClient`` does) and is also called before and after
+        each download.
+        """
+        view = object.__new__(type(self))
+        view.__dict__.update(self.__dict__)
+        view._evaluation_check = check
+        return view
 
     def refresh(self):
         with self._lock:
@@ -418,7 +466,15 @@ class RuntimeFiles:
             except FileNotFoundError:
                 pass
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            self.client.download(self.task_id, item["path"], target)  # resumable; verifies size and sha256
+            if self._evaluation_check is not None:
+                self._evaluation_check()
+            if self._evaluation_check is not None and _accepts_check(self.client.download):
+                # resumable; verifies size and sha256; check() between chunks may abort (the part file stays)
+                self.client.download(self.task_id, item["path"], target, check=self._evaluation_check)
+            else:
+                self.client.download(self.task_id, item["path"], target)  # resumable; verifies size and sha256
+            if self._evaluation_check is not None:
+                self._evaluation_check()
             if not target.is_file() or target.stat().st_size != size:
                 raise MissingFile(f"Download of {path!r} from task {self.task_id} failed")
             self._verified[str(target)] = (size, target.stat().st_mtime_ns)
@@ -433,12 +489,52 @@ class RuntimeFiles:
             return cls._locks.setdefault(str(target), threading.Lock())
 
 
+_ACCEPTS_CHECK = {}
+
+
+def _accepts_check(function):
+    """True if ``function`` takes a ``check`` keyword (``RuntimeClient.download``; test fakes may not)."""
+    key = getattr(function, "__func__", function)
+    if key not in _ACCEPTS_CHECK:
+        try:
+            parameters = inspect.signature(function).parameters.values()
+            _ACCEPTS_CHECK[key] = any(p.name == "check" or p.kind is p.VAR_KEYWORD for p in parameters)
+        except (TypeError, ValueError):
+            _ACCEPTS_CHECK[key] = False
+    return _ACCEPTS_CHECK[key]
+
+
+_PRIVATE_DIR = None
+_PRIVATE_LOCK = threading.Lock()
+_MATERIALIZED = {}  # copies verified by this process: path -> (size, mtime_ns)
+
+
+def _private_dir():
+    """A per-process directory only this user can read (``mkdtemp``, mode 0700), removed at exit."""
+    global _PRIVATE_DIR
+    with _PRIVATE_LOCK:
+        if _PRIVATE_DIR is None or not _PRIVATE_DIR.is_dir():
+            _PRIVATE_DIR = Path(tempfile.mkdtemp(prefix="stk-files-"))
+            atexit.register(shutil.rmtree, str(_PRIVATE_DIR), True)
+        return _PRIVATE_DIR
+
+
+def _hash_file(path):
+    digest = hashlib.sha256()
+    with open_regular(path) as stream:
+        for block in iter(lambda: stream.read(_BLOCK), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def materialize(source, path, cache_dir=None):
     """A local filesystem path for ``path`` of any file source (zero copy when local).
 
     Sources with ``fetch`` (e.g. :class:`RuntimeFiles`) use their cache; other
-    sources are copied once into ``cache_dir`` (default: a temporary directory),
-    named by sha256.
+    sources are copied once into ``cache_dir`` (default: a private per-process
+    temporary directory), named by sha256. The copy is hashed while it is written
+    and must match the source's sha256; an existing copy is re-hashed before it is
+    trusted (once per process while its size and mtime stay the same).
     """
     local = source.local_path(path)
     if local is not None:
@@ -448,12 +544,32 @@ def materialize(source, path, cache_dir=None):
     if hasattr(source, "fetch"):
         return Path(source.fetch(path))
     digest = source.sha256(path)
-    base = Path(cache_dir) if cache_dir is not None else Path(tempfile.gettempdir()) / "stk-files"
-    target = base / "objects" / digest[:2] / (digest + PurePosixPath(path).suffix)
-    if not target.is_file():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(target.name + f".{os.getpid()}.part")
+    if not isinstance(digest, str) or not _SHA_RE.match(digest):
+        raise ConnectorError(f"The source reported no sha256 for {path}", "invalid_data")
+    base = Path(cache_dir) if cache_dir is not None else _private_dir()
+    suffix = PurePosixPath(path).suffix
+    target = base / "objects" / digest[:2] / (digest + (suffix if _SUFFIX_RE.match(suffix) else ""))
+    try:
+        info = target.stat()
+        if _MATERIALIZED.get(str(target)) == (info.st_size, info.st_mtime_ns) or _hash_file(target) == digest:
+            _MATERIALIZED[str(target)] = (info.st_size, info.st_mtime_ns)
+            return target
+    except (FileNotFoundError, NotRegularFile):
+        pass
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.part")
+    try:
+        written = hashlib.sha256()
         with source.open(path) as stream, open(temporary, "wb") as out:
-            shutil.copyfileobj(stream, out, 1 << 20)
+            for block in iter(lambda: stream.read(_BLOCK), b""):
+                written.update(block)
+                out.write(block)
+        if written.hexdigest() != digest:
+            raise ConnectorError(f"{path} changed while it was copied (sha256 mismatch)", "invalid_data")
         os.replace(temporary, target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    info = target.stat()
+    _MATERIALIZED[str(target)] = (info.st_size, info.st_mtime_ns)
     return target

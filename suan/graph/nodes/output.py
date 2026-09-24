@@ -2,17 +2,26 @@
 
 * payload: the scene encoded as ``stk.payload/2`` within a profile budget
   (``suan.render.payload.encode_scene``), optionally with a scene v1 downgrade
-  (``Payload.scene_v1``).
+  (``Payload.scene_v1``). ``profile: "auto"`` (the default) is the request
+  profile (``Budget.profile``, substituted by the evaluator before keys are
+  computed); an explicit profile wins.
 * image: a scene rendered by offscreen VTK **in a child process** from its
   desktop-profile payload, or a plot rendered by matplotlib (PNG/SVG/PDF).
   The value is ``{media_type, sha256, width, height, bytes, format}``.
 * dataset: a dataset written to VTKHDF, VTI, NPY, CSV or JSON; the value is
-  ``{name, media_type, sha256, size, path}``.
+  ``{name, media_type, sha256, size, path}`` with a disk cache (the file is
+  written to a private temporary file, hashed and renamed to the
+  content-addressed ``<cache_dir>/exports/<sha256>/<name>``, so concurrent
+  evaluations never collide), else ``{name, media_type, sha256, size, bytes}``
+  (written in a temporary directory that is removed at once).
 
 Declarations are copied from docs/specs/catalog/m1_nodes.py (frozen).
 """
 import hashlib
+import os
 from pathlib import Path
+import shutil
+import tempfile
 
 from suan.graph.registry import NodeExecutionError, Port, boolean, enum, integer, json_param, node, string, string_list
 
@@ -42,7 +51,8 @@ def _check(ctx):
       inputs=[Port("scene", "scene")],
       outputs=[Port("payload", "payload")],
       params={
-          "profile": enum(["phone", "web", "desktop"], "web"),
+          "profile": enum(["auto", "phone", "web", "desktop"], "auto",
+                          description="Payload budget profile; auto = the request profile (Budget.profile)"),
           "budget": json_param({"anyOf": [{"type": "null"}, {
               "type": "object", "additionalProperties": False,
               "properties": {key: {"type": "integer", "minimum": 0}
@@ -51,8 +61,11 @@ def _check(ctx):
       })
 def payload_output(ctx, inputs, params):
     from suan.render.payload import PayloadError, encode_scene
+    profile = params["profile"]
+    if profile == "auto":  # the evaluator substitutes the request profile; direct calls use the budget's
+        profile = getattr(getattr(ctx, "budget", None), "profile", None) or "web"
     try:
-        payload = encode_scene(inputs["scene"], profile=params["profile"], budget=params.get("budget"))
+        payload = encode_scene(inputs["scene"], profile=profile, budget=params.get("budget"))
     except PayloadError as error:
         _fail(str(error), code=error.code)
     for reduction in payload.manifest.get("budget", {}).get("reductions", ()):
@@ -102,8 +115,11 @@ def image_output(ctx, inputs, params):
         budget = getattr(ctx, "budget", None)
         timeout = min(600.0, float(getattr(budget, "max_seconds", None) or 600.0))
         try:
+            # ctx.check runs while the child renders: cancellation or the evaluation's remaining time budget
+            # kills the child at once (the timeout is only a hard cap).
             data = render_payload(payload, width=width, height=height, magnification=mag,
-                                  transparent=params["transparent"], timeout=timeout)
+                                  transparent=params["transparent"], timeout=timeout,
+                                  poll=getattr(ctx, "check", None))
         except OffscreenUnavailable as error:
             _fail(str(error), code="render_unavailable", hint=error.hint)
         except OffscreenError as error:
@@ -129,14 +145,47 @@ def image_output(ctx, inputs, params):
     _fail(f"stk.output.image needs a scene or a plot, got {type(source).__name__}", code="kind_mismatch")
 
 
-def _output_dir(ctx):
+def _file_digest(path):
+    digest, size = hashlib.sha256(), 0
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+            size += len(block)
+    return digest.hexdigest(), size
+
+
+def _export(ctx, name, write):
+    """Run ``write(path)`` on a private temporary file and return ``{sha256, size, path | bytes}``.
+
+    The hash is that of the bytes this call wrote. With a cache directory the file is renamed to the
+    content-addressed ``<cache_dir>/exports/<sha256>/<name>`` (identical content, identical path: a
+    concurrent writer of the same export replaces it with the same bytes); without one the bytes are
+    returned and nothing is left behind.
+    """
     base = getattr(ctx, "cache_dir", None)
     if base is None:
-        import tempfile
-        base = tempfile.mkdtemp(prefix="stk-export-")
-    directory = Path(base) / "exports" / str(getattr(ctx, "data_key", None) or getattr(ctx, "node_id", "node"))
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
+        with tempfile.TemporaryDirectory(prefix="stk-export-") as tmp:
+            path = Path(tmp) / name
+            write(path)
+            data = path.read_bytes()
+        return {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "bytes": data}
+    directory = Path(base) / "exports"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=".tmp-", dir=directory))
+    try:
+        path = work / name
+        write(path)
+        digest, size = _file_digest(path)
+        final = directory / digest / name
+        final.parent.mkdir(mode=0o700, exist_ok=True)
+        try:
+            os.replace(path, final)
+        except OSError:
+            if not final.is_file():  # e.g. Windows while another reader holds the same (identical) file
+                raise
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return {"sha256": digest, "size": size, "path": str(final)}
 
 
 def _subset(dataset, fields, precision):
@@ -230,16 +279,17 @@ def dataset_output(ctx, inputs, params):
     dataset = _subset(inputs["in"], params.get("fields"), params["precision"])
     fmt = params["format"]
     name = (params.get("name") or getattr(ctx, "node_id", None) or "export") + EXTENSIONS[fmt]
-    path = _output_dir(ctx) / name
     if fmt in ("csv", "json"):
         if not isinstance(dataset, Table):
             _fail(f"Format {fmt!r} is for tables; use vtkhdf, vti or npy for {dataset.kind} datasets",
                   code="unsupported")
         if fmt == "csv":
-            _write_table_csv(dataset, path)
+            def write(path):
+                _write_table_csv(dataset, path)
         else:
-            path.write_text(json.dumps({"id": dataset.id, **dataset.to_json()}, ensure_ascii=False) + "\n",
-                            encoding="utf-8")
+            def write(path):
+                path.write_text(json.dumps({"id": dataset.id, **dataset.to_json()}, ensure_ascii=False) + "\n",
+                                encoding="utf-8")
     elif fmt == "npy":
         if not isinstance(dataset, ImageData):
             _fail("NPY export needs an image dataset", code="unsupported")
@@ -247,11 +297,16 @@ def dataset_output(ctx, inputs, params):
         if field is None:
             _fail("The image has no point field to export")
         values = np.ascontiguousarray(dataset.xyz(field.name))
-        np.save(path, values[..., 0] if field.components == 1 else values)
+
+        def write(path):
+            with open(path, "wb") as stream:
+                np.save(stream, values[..., 0] if field.components == 1 else values)
     elif fmt == "vti":
         if not isinstance(dataset, ImageData):
             _fail("VTI export needs an image dataset", code="unsupported")
-        _write_vti(dataset, path)
+
+        def write(path):
+            _write_vti(dataset, path)
     else:
         try:
             from suan.data import vtkhdf
@@ -260,7 +315,7 @@ def dataset_output(ctx, inputs, params):
                 raise
             _fail(f"VTKHDF export is unavailable ({error.name} is not installed)", code="unsupported",
                   hint="install the 'visualization' extra (h5py) or export vti/npy")
-        vtkhdf.write_vtkhdf(path, dataset)
-    data = path.read_bytes()
-    return {"name": name, "media_type": MEDIA_TYPES[fmt], "sha256": hashlib.sha256(data).hexdigest(),
-            "size": len(data), "path": str(path)}
+
+        def write(path):
+            vtkhdf.write_vtkhdf(path, dataset)
+    return {"name": name, "media_type": MEDIA_TYPES[fmt], **_export(ctx, name, write)}
