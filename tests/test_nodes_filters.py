@@ -13,7 +13,7 @@ from suan.graph.nodes import filters  # noqa: E402
 from suan.graph.registry import Budget, CancelToken, Cancelled, NodeExecutionError, Registry  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = json.loads((ROOT / "docs" / "specs" / "catalog" / "stk-catalog-m1.json").read_text())
+SPEC = json.loads((ROOT / "docs" / "specs" / "catalog" / "stk-catalog-m1.json").read_text(encoding="utf-8"))
 
 
 class Context:

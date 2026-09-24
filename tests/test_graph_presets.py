@@ -18,7 +18,7 @@ PRESETS = ("energy-plot", "iso", "muferro-domains", "muferro-polarization-glyphs
 
 def spec_registry():
     """The frozen spec catalog as a declaration-only registry (what the hub validates with, NumPy-free)."""
-    return Registry.from_catalog(json.loads((ROOT / "docs/specs/catalog/stk-catalog-m1.json").read_text()))
+    return Registry.from_catalog(json.loads((ROOT / "docs/specs/catalog/stk-catalog-m1.json").read_text(encoding="utf-8")))
 
 
 def test_every_preset_validates_against_the_spec_and_live_catalogs():

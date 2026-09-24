@@ -173,7 +173,7 @@ def test_corrupt_and_foreign_entries_are_misses(tmp_path):
     (entry / "00.npy").write_bytes(b"garbage")
     assert GraphCache(root).get(KEY) is None and not entry.exists()  # removed
     other = root / "objects" / key(1)[:2] / key(1)
-    data = json.loads((other / "entry.json").read_text())
+    data = json.loads((other / "entry.json").read_text(encoding="utf-8"))
     data["ports"]["a"]["codec"] = "vtkhdf-from-the-future"
     (other / "entry.json").write_text(json.dumps(data))
     assert GraphCache(root).get(key(1)) is None and other.exists()  # kept for the codec that wrote it

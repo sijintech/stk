@@ -996,7 +996,7 @@ class _Renderer:
         self.renderer.ResetCameraClippingRange()
         for method, layer in overlays:
             for actor in method(layer):
-                self.renderer.AddActor2D(actor)
+                self.renderer.AddViewProp(actor)  # AddActor2D is gone in VTK >= 9.4
         for renderer, centre, radius in self.corners:
             window.AddRenderer(renderer)
             self.sync_corner(renderer, centre, radius)

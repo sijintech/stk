@@ -214,13 +214,13 @@ def test_verify_classifies_outputs(tmp_path):
     write_case(case)
     write_outputs(case)
     frame = case / "Polar.00000002.dat"
-    frame.write_text("     4     4     2     3\n" + frame.read_text().split("\n", 1)[1])
+    frame.write_text("     4     4     2     3\n" + frame.read_text(encoding="utf-8").split("\n", 1)[1])
     report = verify_run(case)
     assert report["classification"] == "invalid_result" and "Polar.00000002.dat" in report["reason"]
     assert report["verification"]["checks"][3]["id"] == "frames"
-    frame.write_text("     4     3     2     3\n" + frame.read_text().split("\n", 1)[1])
+    frame.write_text("     4     3     2     3\n" + frame.read_text(encoding="utf-8").split("\n", 1)[1])
     strain = case / "Strain.00000001.dat"
-    strain.write_text("     4     3     2     3\n" + strain.read_text().split("\n", 1)[1])
+    strain.write_text("     4     3     2     3\n" + strain.read_text(encoding="utf-8").split("\n", 1)[1])
     report = verify_run(case)
     assert report["classification"] == "invalid_result" and "component" in report["reason"]
 
@@ -228,14 +228,14 @@ def test_verify_classifies_outputs(tmp_path):
 def _replace(name, old, new):
     def edit(case):
         path = case / name
-        path.write_text(path.read_text().replace(old, new, 1))
+        path.write_text(path.read_text(encoding="utf-8").replace(old, new, 1))
     return edit
 
 
 def _drop_last_line(name):
     def edit(case):
         path = case / name
-        path.write_text("".join(path.read_text().splitlines(keepends=True)[:-1]))
+        path.write_text("".join(path.read_text(encoding="utf-8").splitlines(keepends=True)[:-1]))
     return edit
 
 
@@ -265,7 +265,7 @@ def test_verify_accepts_fortran_d_exponents_and_restarts(tmp_path):
     write_case(tmp_path)
     write_outputs(tmp_path)
     energy = tmp_path / "energy_out.dat"
-    energy.write_text(energy.read_text().replace("E+", "D+").replace("E-", "D-"))
+    energy.write_text(energy.read_text(encoding="utf-8").replace("E+", "D+").replace("E-", "D-"))
     assert verify_run(tmp_path)["verification"]["status"] == "passed"
     restart = tmp_path / "restart"
     write_case(restart, start=10, steps=2, interval=1)
@@ -280,7 +280,7 @@ def test_verify_accepts_three_digit_exponents_without_a_letter(tmp_path):
     write_case(tmp_path)
     write_outputs(tmp_path)
     energy = tmp_path / "energy_out.dat"
-    lines = energy.read_text().splitlines()
+    lines = energy.read_text(encoding="utf-8").splitlines()
     lines[-1] = lines[-1][:lines[-1].index("energy:") + 7] + "".join(
         v.rjust(18) for v in ("0.1500000000+102", "-0.2000000000-119", "0.3000000000+100", "0.1000000000E+01",
                               "-0.4500000000+101"))
@@ -289,7 +289,7 @@ def test_verify_accepts_three_digit_exponents_without_a_letter(tmp_path):
     assert report["verification"]["status"] == "passed", report
     assert report["qoi"]["total_energy"] == -4.5e100
     # Semantics are otherwise unchanged: a token that is not a number is still an invalid result.
-    energy.write_text(energy.read_text().replace("0.3000000000+100", "0.30000000x0+100"))
+    energy.write_text(energy.read_text(encoding="utf-8").replace("0.3000000000+100", "0.30000000x0+100"))
     report = verify_run(tmp_path)
     assert report["classification"] == "invalid_result"
     assert [c["id"] for c in report["verification"]["checks"] if c["status"] == "fail"] == ["energy"]
@@ -312,7 +312,7 @@ def test_read_case_uses_muferro_defaults(tmp_path):
     write_case(tmp_path)  # Includes the example's mixed int/float array.
     assert read_case(tmp_path) == {"grid": [4, 3, 2], "start_step": 0, "steps": 3, "output_interval": 2}
     path = tmp_path / "input.toml"
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     path.write_text(text.replace("timestep_start = 0\n", "").replace("timestep_total = 3\n", ""))
     assert read_case(tmp_path) == {"grid": [4, 3, 2], "start_step": 0, "steps": 1000, "output_interval": 2}
     path.write_text(text.replace("interval = 2\n", ""))
@@ -334,7 +334,7 @@ def test_read_case_resolves_includes_like_muferro(tmp_path):
     work = tmp_path / "work"
     case = work / "case"
     write_case(case, steps=3, interval=2)
-    text = (case / "input.toml").read_text()
+    text = (case / "input.toml").read_text(encoding="utf-8")
     (case / "input.toml").write_text("include = 'common.toml'\n" + text.replace("timestep_total = 3\n", "")
                                       .split("[output]")[0])
     (case / "common.toml").write_text("include = ['lib/steps.toml', 'lib/late.toml']\n"
@@ -372,7 +372,7 @@ def test_read_case_resolves_includes_like_muferro(tmp_path):
 
 def test_read_case_reports_any_unreadable_case_as_configuration(tmp_path, monkeypatch):
     write_case(tmp_path)
-    text = (tmp_path / "input.toml").read_text()
+    text = (tmp_path / "input.toml").read_text(encoding="utf-8")
     (tmp_path / "input.toml").write_text("x = " + "[" * 5000 + "]" * 5000 + "\n" + text)
     with pytest.raises(MuproError, match="Cannot read input.toml") as info:
         read_case(tmp_path)
@@ -392,7 +392,7 @@ def test_read_case_reports_any_unreadable_case_as_configuration(tmp_path, monkey
 
 def test_verify_uses_included_layout(tmp_path):
     write_case(tmp_path, steps=3, interval=2)
-    text = (tmp_path / "input.toml").read_text()
+    text = (tmp_path / "input.toml").read_text(encoding="utf-8")
     (tmp_path / "input.toml").write_text("include = 'common.toml'\n" + text.replace("timestep_total = 3\n", "")
                                          .replace("[output]\ninterval = 2\n", ""))
     (tmp_path / "common.toml").write_text("[system]\ntimestep_total = 3\n[output]\ninterval = 2\n")
@@ -441,10 +441,10 @@ def test_run_example_single_rank_sets_threads_and_verifies(node, tmp_path, monke
                             cwd=work, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stderr
     assert "fake muFerro finished" in result.stdout and "verification passed" in result.stdout
-    fake = json.loads((work / "fake-muferro.json").read_text())
+    fake = json.loads((work / "fake-muferro.json").read_text(encoding="utf-8"))
     assert fake["OMP_NUM_THREADS"] == fake["MKL_NUM_THREADS"] == "1"
     assert fake["cwd"] == str(work)
-    record = json.loads((work / "stk-mupro.json").read_text())
+    record = json.loads((work / "stk-mupro.json").read_text(encoding="utf-8"))
     program = sdk / "bin" / "muFerro"
     assert_fake_command(record, tmp_path)
     assert record["command"] == [str(program)]
@@ -493,7 +493,7 @@ def test_run_uploaded_case_dir_and_launch_failure(node, tmp_path):
     code, record = launch(sdk, "--case-dir", "case16")
     assert code == 0, record["reason"]
     assert_fake_command(record, tmp_path)
-    assert json.loads((work / "case16" / "fake-muferro.json").read_text())["cwd"] == str(work / "case16")
+    assert json.loads((work / "case16" / "fake-muferro.json").read_text(encoding="utf-8"))["cwd"] == str(work / "case16")
     assert (work / "stk-mupro.json").is_file() and not (work / "case16" / "stk-mupro.json").exists()
     assert record["case_dir"] == "case16" and record["verification"]["status"] == "passed"
     assert all(frame["path"].startswith("case16/") for frame in record["frames"])
@@ -533,7 +533,7 @@ def test_local_multirank_requires_operator_opt_in(node, tmp_path, monkeypatch):
     assert_fake_command(record, tmp_path)
     assert record["command"] == [str(mpiexec), "-n", "2", str(sdk / "bin" / "muFerro")]
     assert record["layout"] == {"ranks": 2, "threads_per_rank": 1, "launcher": "mpiexec"}
-    assert json.loads((work / "fake-muferro.json").read_text())["OMP_NUM_THREADS"] == "1"
+    assert json.loads((work / "fake-muferro.json").read_text(encoding="utf-8"))["OMP_NUM_THREADS"] == "1"
 
 
 @pytest.mark.server
@@ -550,7 +550,7 @@ def test_slurm_launcher_uses_srun_with_cpus_per_task(node, tmp_path, monkeypatch
     assert code == 0, record["reason"]
     assert_fake_command(record, tmp_path)
     assert record["command"] == [str(srun), "--ntasks=2", "--cpus-per-task=2", str(sdk / "bin" / "muFerro")]
-    fake = json.loads((work / "fake-muferro.json").read_text())
+    fake = json.loads((work / "fake-muferro.json").read_text(encoding="utf-8"))
     assert fake["SRUN_CPUS_PER_TASK"] == "2"
     assert fake["OMP_NUM_THREADS"] == fake["MKL_NUM_THREADS"] == "2"
     assert record["environment"]["SRUN_CPUS_PER_TASK"] == "2"
@@ -576,7 +576,7 @@ def test_env_scripts_and_license_path(node, tmp_path, monkeypatch):
     code, record = launch(sdk, "--example", "--env-script", str(script), "--license-dir", str(licence))
     assert code == 0, record["reason"]
     assert_fake_command(record, tmp_path)
-    fake = json.loads((work / "fake-muferro.json").read_text())
+    fake = json.loads((work / "fake-muferro.json").read_text(encoding="utf-8"))
     assert fake["STK_FAKE_MARK"] == "1" and fake["MUPROROOT"] == str(licence)
     assert record["environment"]["MUPROROOT"] == str(licence) and record["env_scripts"] == [str(script)]
     assert "STK_FAKE_MARK" not in json.dumps(record)
@@ -642,7 +642,7 @@ def test_run_resolves_included_case_and_fake_reads_it(node, tmp_path):
     work, _ = node
     sdk = make_fake_sdk(tmp_path / "sdk")
     write_case(work / "case", steps=3, interval=2)
-    text = (work / "case" / "input.toml").read_text()
+    text = (work / "case" / "input.toml").read_text(encoding="utf-8")
     (work / "case" / "input.toml").write_text("include = '../lib/common.toml'\n" + text.replace(
         "timestep_total = 3\n", "timestep_total = 4\n").replace("[output]\ninterval = 2\n", ""))
     (work / "lib").mkdir()
@@ -663,7 +663,7 @@ def test_run_always_writes_its_result(node, tmp_path, monkeypatch):
     work, _ = node
     sdk = make_fake_sdk(tmp_path / "sdk")
     write_case(work / "case")
-    text = (work / "case" / "input.toml").read_text()
+    text = (work / "case" / "input.toml").read_text(encoding="utf-8")
     (work / "case" / "input.toml").write_text('include = "x\\u0000.toml"\n' + text)
     code, record = launch(sdk, "--case-dir", "case")
     assert (code, record["classification"], record["command"]) == (2, "configuration", [])

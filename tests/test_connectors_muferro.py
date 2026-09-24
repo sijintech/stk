@@ -195,7 +195,7 @@ class FakeClient:
 
 def test_describe_and_read_through_the_runtime(tmp_path):
     root = run_dir(tmp_path / "work", case_dir="case16")
-    (root / "case16" / "input.toml").write_text((root / "case16" / "input.toml").read_text()
+    (root / "case16" / "input.toml").write_text((root / "case16" / "input.toml").read_text(encoding="utf-8")
                                                 .replace("material = 'material.toml'",
                                                          "material = 'material.toml'\ninclude = 'extra.toml'"))
     (root / "case16" / "extra.toml").write_text("[output]\ninterval = 99\n")  # the including file wins
@@ -232,7 +232,7 @@ def test_inputs_light_half(tmp_path):
     assert inputs.read_case(LocalFiles(tmp_path / "case"))["case_id"] != case["case_id"]
     written = inputs.write_case(case, tmp_path / "out")
     assert written[0]["path"] == "input.toml" and written[0]["generated"]
-    assert tomllib.loads((tmp_path / "out" / "input.toml").read_text()) == case["parameters"]
+    assert tomllib.loads((tmp_path / "out" / "input.toml").read_text(encoding="utf-8")) == case["parameters"]
     checks = {c["id"]: c["status"] for c in inputs.validate_case(tmp_path / "case")}
     assert checks == {"input": "pass", "material": "pass", "clean": "pass"}
     write_outputs(tmp_path / "case", grid=(8, 6, 4), steps=3, interval=2)

@@ -119,7 +119,7 @@ def read_toml(path, depth=0):
             elif isinstance(destination[key], dict) and isinstance(value, dict):
                 merge(destination[key], value)
 
-    data = tomllib.loads(Path(path).read_text())
+    data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     includes = data.pop("include", [])
     if includes and depth >= 16:
         raise ValueError("include nested more than 16 deep")

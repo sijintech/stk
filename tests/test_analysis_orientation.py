@@ -167,7 +167,7 @@ def test_thresholds_ties_and_invalid_values():
 
 def _nt_vtk_tables():
     """domainOrth / domainRGB assignments of STK's own MIT nt_vtk.py, applied in file order."""
-    source = (ROOT / "toolkits/sviz/nt_vtk.py").read_text()
+    source = (ROOT / "toolkits/sviz/nt_vtk.py").read_text(encoding="utf-8")
     tables = {"domainOrth": np.zeros((27, 3)), "domainRGB": np.zeros((27, 3))}
     for name, row, column, expression in re.findall(
             r"(domainOrth|domainRGB)\[(\d+)\]\[(\d+)\]\s*=\s*([-+0-9./()sqrt ]+)", source):
@@ -184,7 +184,7 @@ def test_cross_check_legacy_against_nt_vtk():
 
 
 def test_cross_check_legacy_palette_against_mupro_domain_json():
-    lut = json.loads((ROOT / "toolkits/sviz/mupro_domain.json").read_text())[0]
+    lut = json.loads((ROOT / "toolkits/sviz/mupro_domain.json").read_text(encoding="utf-8"))[0]
     points = np.array(lut["RGBPoints"], dtype=float).reshape(-1, 4)
     constant = {}
     for (x0, *c0), (x1, *c1) in zip(points[:-1], points[1:]):

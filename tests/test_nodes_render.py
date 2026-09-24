@@ -382,10 +382,10 @@ def test_dataset_output_formats(tmp_path):
     assert np.load(npy["path"]).shape == (6, 5, 4, 3) and npy["size"] == Path(npy["path"]).stat().st_size
     table = Table.from_columns({"step": np.arange(3), "v": np.array([[1.0, 2.0]] * 3)}, id="t")
     csv = run_node(output.dataset_output, {"in": table}, {"format": "csv"}, cache_dir=tmp_path)[0]["file"]
-    assert Path(csv["path"]).read_text().splitlines()[:2] == ["step,v_0,v_1", "0,1.0,2.0"]
+    assert Path(csv["path"]).read_text(encoding="utf-8").splitlines()[:2] == ["step,v_0,v_1", "0,1.0,2.0"]
     data = run_node(output.dataset_output, {"in": table}, {"format": "json", "precision": "float32"},
                     cache_dir=tmp_path)[0]["file"]
-    assert json.loads(Path(data["path"]).read_text())["columns"]["v"] == [[1.0, 2.0]] * 3
+    assert json.loads(Path(data["path"]).read_text(encoding="utf-8"))["columns"]["v"] == [[1.0, 2.0]] * 3
     with pytest.raises(NodeExecutionError) as error:
         run_node(output.dataset_output, {"in": image}, {"format": "csv"}, cache_dir=tmp_path)
     assert error.value.code == "unsupported"

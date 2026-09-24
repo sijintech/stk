@@ -151,7 +151,7 @@ def test_header_variants_and_exponent_styles(tmp_path, fast_only):
                    {"component_shape": ()}, {"digits": 12}, {"trailing_space": False},
                    {"newline": "\r\n"}, {"pad_header": False}]:
         path = write_dat(tmp_path / "field.dat", data, **kwargs)
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         legacy = legacy_read_dat(path) if kwargs.get("exponent_char") != "D" else \
             legacy_read_dat(_d_to_e(path, tmp_path / "e.dat"))
         assert same(read_dat(path, layout="xyzc"), legacy), kwargs
@@ -168,14 +168,14 @@ def test_header_variants_and_exponent_styles(tmp_path, fast_only):
 
 
 def _d_to_e(source, target):
-    target.write_text(source.read_text().replace("D", "E"))
+    target.write_text(source.read_text(encoding="utf-8").replace("D", "E"))
     return target
 
 
 def test_last_line_without_break_and_trailing_blank_lines(tmp_path, fast_only):
     data = np.arange(24, dtype=float).reshape(2, 3, 4, 1) * 1.25
     path = write_dat(tmp_path / "f.dat", data)
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     for variant in (text.rstrip("\n"), text.rstrip(" \n"), text + "\n\n  \n"):
         path.write_text(variant)
         assert same(read_dat(path, layout="xyzc"), data)
@@ -184,7 +184,7 @@ def test_last_line_without_break_and_trailing_blank_lines(tmp_path, fast_only):
 def test_unordered_rows_and_general_fallback(tmp_path):
     data = np.arange(5 * 4 * 3 * 3, dtype=float).reshape(5, 4, 3, 3) - 17.5
     path = write_dat(tmp_path / "f.dat", data)
-    header, *rows = path.read_text().splitlines()
+    header, *rows = path.read_text(encoding="utf-8").splitlines()
     rng = np.random.default_rng(3)
     order = rng.permutation(len(rows))
     shuffled = tmp_path / "shuffled.dat"

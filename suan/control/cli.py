@@ -73,7 +73,7 @@ def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blo
         templates = load_templates((("demo-field",) if allow_demo_template else ()) + names, files)
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    config = json.loads((state_dir / "control.json").read_text())
+    config = json.loads((state_dir / "control.json").read_text(encoding="utf-8"))
     model = None
     if os.environ.get("STK_MODEL_URL") and os.environ.get("STK_MODEL_NAME"):
         model = ChatModel(os.environ["STK_MODEL_URL"], os.environ.get("STK_MODEL_KEY", ""), os.environ["STK_MODEL_NAME"])
@@ -122,7 +122,7 @@ def pair_node(control_url, code, name, runtime_state_dir, state_dir):
               help="Graph evaluations run at the same time (other actions never wait for them).")
 def run_node(state_dir, graph_workers):
     linux_server()
-    data = json.loads((state_dir / "node.json").read_text())
+    data = json.loads((state_dir / "node.json").read_text(encoding="utf-8"))
     runtime = load_config(data["runtime_state_dir"])
     client = RuntimeClient(f"http://127.0.0.1:{runtime['port']}", runtime["token"])
     try:

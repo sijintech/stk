@@ -103,7 +103,7 @@ def test_cli_lists_and_exports(tmp_path):
         files("suan.skills").joinpath("stk-visualize").joinpath("SKILL.md").read_bytes()
     reference = (dest / "stk-visualize" / "reference" / "nodes.md").read_text(encoding="utf-8")
     assert reference == nodes_markdown(catalog_document())  # regenerated from the installed catalog
-    assert json.loads((dest / "stk-visualize" / "examples" / "muferro-domains.json").read_text())["schema"] == \
+    assert json.loads((dest / "stk-visualize" / "examples" / "muferro-domains.json").read_text(encoding="utf-8"))["schema"] == \
         "stk.graph/1"
     assert (dest / "stk-monitor" / "SKILL.md").is_file()
     assert not list(dest.rglob("__pycache__")) and not list(dest.rglob("*.py"))

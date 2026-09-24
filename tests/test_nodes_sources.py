@@ -71,7 +71,7 @@ def test_declarations_match_the_frozen_catalog():
     registry = Registry()
     registry.register(sources)
     assert sorted(registry.types()) == sorted(SOURCE_NODES.values())
-    catalog = json.loads((ROOT / "docs/specs/catalog/stk-catalog-m1.json").read_text())
+    catalog = json.loads((ROOT / "docs/specs/catalog/stk-catalog-m1.json").read_text(encoding="utf-8"))
     frozen = {entry["id"]: entry for entry in catalog["nodes"]}
     for node_type in registry:
         exported = node_type.to_json(include_impl=False)

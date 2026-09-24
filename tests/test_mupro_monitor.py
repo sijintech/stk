@@ -275,7 +275,7 @@ def test_launcher_adapts_and_the_solver_never_gets_the_path(node, tmp_path, monk
     monkeypatch.setenv("STK_TASK_ID", "c" * 32)
     code, record = launch(sdk, "--example")
     assert code == plain_code and comparable(record) == comparable(plain)
-    assert json.loads((other / "solver-env.json").read_text()) == {"STK_MONITOR_PATH": None, "STK_TASK_ID": "c" * 32}
+    assert json.loads((other / "solver-env.json").read_text(encoding="utf-8")) == {"STK_MONITOR_PATH": None, "STK_TASK_ID": "c" * 32}
     assert not (work.parent / "events.jsonl").exists()
     events = events_of(path)
     assert events[0]["type"] == "run.started" and events[0]["src"] == "launcher"

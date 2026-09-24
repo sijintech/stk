@@ -63,7 +63,7 @@ def test_evaluate_writes_files_and_a_summary(run_dir, tmp_path):
     assert read_directory(Path(payload["file"]).parent).manifest["schema"] == "stk.payload/2"
     plot = outputs["energy_plot"]
     assert plot["media_type"] == "image/svg+xml" and Path(plot["file"]).read_bytes().lstrip().startswith(b"<")
-    assert json.loads(Path(plot["data_file"]).read_text())["marks"][0]["data"]["y"] == [-1.125, -2.25, -3.375]
+    assert json.loads(Path(plot["data_file"]).read_text(encoding="utf-8"))["marks"][0]["data"]["y"] == [-1.125, -2.25, -3.375]
     assert Path(outputs["energy_png"]["file"]).read_bytes().startswith(b"\x89PNG")
     energy = outputs["energy"]
     assert energy["rows"] == 3 and energy["columns"]["step"] == [1, 2, 3]
@@ -110,7 +110,7 @@ def test_plot_table(tmp_path):
                                       units={"Total Energy": "normalized"}, title="Energy",
                                       output_dir=str(tmp_path))
     assert rendered["bytes"].startswith(b"\x89PNG") and Path(rendered["summary"]["file"]).is_file()
-    data = json.loads(Path(rendered["summary"]["data_file"]).read_text())
+    data = json.loads(Path(rendered["summary"]["data_file"]).read_text(encoding="utf-8"))
     assert [mark["data"]["y"] for mark in data["marks"]] == [columns["Total Energy"], columns["Landau"]]
     svg = graph_tools.plot_table(columns=columns, y="Landau", kind="scatter", format="svg", output_dir=str(tmp_path))
     assert svg["summary"]["media_type"] == "image/svg+xml"
@@ -138,8 +138,8 @@ def test_default_output_directories_are_private_and_per_call(run_dir, tmp_path, 
                                         outputs=["payload"])
     assert first["graph_sha256"] == second["graph_sha256"] and first["output_dir"] != second["output_dir"]
     # The first call's files still hold its own result.
-    assert json.loads(Path(first["result_file"]).read_text())["parameters"]["step"]["value"] == 0
-    assert json.loads(Path(second["result_file"]).read_text())["parameters"]["step"]["value"] == 2
+    assert json.loads(Path(first["result_file"]).read_text(encoding="utf-8"))["parameters"]["step"]["value"] == 0
+    assert json.loads(Path(second["result_file"]).read_text(encoding="utf-8"))["parameters"]["step"]["value"] == 2
     base = Path(first["output_dir"]).parent
     assert Path(first["output_dir"]).name.startswith(first["graph_sha256"][:16] + "-")
     if hasattr(os, "getuid"):
@@ -165,7 +165,7 @@ def test_output_files_never_follow_planted_links_or_share_temporary_names(tmp_pa
     (out / "energy.svg").symlink_to(victim)
     (out / "energy.svg.part").symlink_to(victim)  # the fixed temporary name of earlier versions
     write_atomic(out / "energy.svg", b"<svg/>")
-    assert victim.read_text() == "precious\n"
+    assert victim.read_text(encoding="utf-8") == "precious\n"
     assert not (out / "energy.svg").is_symlink() and (out / "energy.svg").read_bytes() == b"<svg/>"
     assert sorted(p.name for p in out.iterdir()) == ["energy.svg", "energy.svg.part"]
 

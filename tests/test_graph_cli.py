@@ -73,17 +73,17 @@ def test_run_writes_every_output(cli):
     result = invoke("run", cli.graph_file, "--bind", f"run={cli.run}", "--out", cli.out, "--cache", cli.cache)
     assert result.exit_code == 0, result.output
     out = cli.out
-    manifest = json.loads((out / "payload" / "manifest.json").read_text())
+    manifest = json.loads((out / "payload" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["schema"] == "stk.payload/2"
     for entry in manifest["buffers"]:
         assert (out / "payload" / f"{entry['sha256']}.bin").stat().st_size == entry["byteLength"]
     assert (out / "scene" / "manifest.json").is_file()
     assert (out / "image.png").read_bytes().startswith(b"\x89PNG")
     assert (out / "plot.png").read_bytes().startswith(b"\x89PNG")
-    assert json.loads((out / "plot.data.json").read_text())["t"]["columns"]["stat"] == ["min", "max", "mean"]
-    assert json.loads((out / "stats.json").read_text())["columns"]["stat"] == ["min", "max", "mean"]
-    assert json.loads((out / "info.json").read_text())["step"] == 200
-    document = json.loads((out / "result.json").read_text())
+    assert json.loads((out / "plot.data.json").read_text(encoding="utf-8"))["t"]["columns"]["stat"] == ["min", "max", "mean"]
+    assert json.loads((out / "stats.json").read_text(encoding="utf-8"))["columns"]["stat"] == ["min", "max", "mean"]
+    assert json.loads((out / "info.json").read_text(encoding="utf-8"))["step"] == 200
+    document = json.loads((out / "result.json").read_text(encoding="utf-8"))
     assert document["schema"] == "stk.graph-result/1" and document["files"]["image"] == "image.png"
     assert "cache: 0 hits, 12 misses" in result.output
     again = invoke("run", cli.graph_file, "--bind", f"run={cli.run}", "--out", cli.out, "--cache", cli.cache,
@@ -97,12 +97,12 @@ def test_run_series_over_steps_and_choices(cli):
     result = invoke("run", cli.graph_file, "--bind", f"run={cli.run}", "--out", cli.out, "--no-cache",
                     "--param", "step=all", "--output", "image", "--output", "info")
     assert result.exit_code == 0, result.output
-    series = json.loads((cli.out / "series.json").read_text())
+    series = json.loads((cli.out / "series.json").read_text(encoding="utf-8"))
     assert series["schema"] == "stk.series/1" and series["parameter"] == "step"
     assert [frame["step"] for frame in series["frames"]] == [0, 100, 200]
     assert series["frames"][0]["outputs"] == {"image": "image.00000000.png", "info": "info.00000000.json"}
     for step in (0, 100, 200):
-        assert json.loads((cli.out / f"info.{step:08d}.json").read_text())["step"] == step
+        assert json.loads((cli.out / f"info.{step:08d}.json").read_text(encoding="utf-8"))["step"] == step
         assert (cli.out / f"result.{step:08d}.json").is_file()
     views = invoke("run", cli.graph_file, "--bind", f"run={cli.run}", "--out", cli.out / "views", "--no-cache",
                    "--param", "view=all", "--output", "image", "--json")
@@ -125,7 +125,7 @@ def test_run_errors(cli, tmp_path):
     partial_file.write_text(json.dumps(partial))
     result = invoke("run", partial_file, "--bind", f"run={cli.run}", "--out", cli.out, "--no-cache")
     assert result.exit_code == 1 and "node_failed" in result.output
-    assert json.loads((cli.out / "info.json").read_text())["step"] == 200  # independent outputs still written
+    assert json.loads((cli.out / "info.json").read_text(encoding="utf-8"))["step"] == 200  # independent outputs still written
 
 
 def test_outputs_never_overwrite_the_result_documents(cli, tmp_path):
@@ -135,17 +135,17 @@ def test_outputs_never_overwrite_the_result_documents(cli, tmp_path):
     graph_file.write_text(json.dumps(document))
     result = invoke("run", graph_file, "--bind", f"run={cli.run}", "--out", cli.out, "--no-cache")
     assert result.exit_code == 0, result.output
-    assert json.loads((cli.out / "result.json").read_text())["schema"] == "stk.graph-result/1"
-    assert json.loads((cli.out / "result.output.json").read_text())["step"] == 200
-    assert json.loads((cli.out / "series.output.json").read_text())["columns"]["stat"] == ["min", "max", "mean"]
-    files = json.loads((cli.out / "result.json").read_text())["files"]
+    assert json.loads((cli.out / "result.json").read_text(encoding="utf-8"))["schema"] == "stk.graph-result/1"
+    assert json.loads((cli.out / "result.output.json").read_text(encoding="utf-8"))["step"] == 200
+    assert json.loads((cli.out / "series.output.json").read_text(encoding="utf-8"))["columns"]["stat"] == ["min", "max", "mean"]
+    files = json.loads((cli.out / "result.json").read_text(encoding="utf-8"))["files"]
     assert files == {"result": "result.output.json", "series": "series.output.json", "image": "image.png"}
     series = invoke("run", graph_file, "--bind", f"run={cli.run}", "--out", tmp_path / "all", "--no-cache",
                     "--param", "step=all")
     assert series.exit_code == 0, series.output
-    assert json.loads((tmp_path / "all" / "series.json").read_text())["schema"] == "stk.series/1"
-    assert json.loads((tmp_path / "all" / "result.00000100.json").read_text())["schema"] == "stk.graph-result/1"
-    assert json.loads((tmp_path / "all" / "result.00000100.output.json").read_text())["step"] == 100
+    assert json.loads((tmp_path / "all" / "series.json").read_text(encoding="utf-8"))["schema"] == "stk.series/1"
+    assert json.loads((tmp_path / "all" / "result.00000100.json").read_text(encoding="utf-8"))["schema"] == "stk.graph-result/1"
+    assert json.loads((tmp_path / "all" / "result.00000100.output.json").read_text(encoding="utf-8"))["step"] == 100
     assert (tmp_path / "all" / "series.00000100.json").is_file()
 
 
@@ -158,7 +158,7 @@ def test_series_prints_the_errors_of_each_frame(cli, tmp_path):
     assert result.exit_code == 1
     for step in (0, 100, 200):
         assert f"step={step}: error [node_failed]" in result.output and "synthetic failure" in result.output
-    assert json.loads((cli.out / "info.00000100.json").read_text())["step"] == 100  # other outputs still written
+    assert json.loads((cli.out / "info.00000100.json").read_text(encoding="utf-8"))["step"] == 100  # other outputs still written
 
 
 def test_doctor_reports_without_failing(cli):
