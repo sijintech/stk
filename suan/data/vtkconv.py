@@ -5,7 +5,9 @@ VTK's point order, so ``image_to_vtk`` hands NumPy buffers to VTK without a
 copy (the VTK arrays keep the NumPy arrays alive). ``vtk_to_image`` and
 ``vtk_to_polydata`` return NumPy views of VTK buffers unless ``copy=True``;
 the dataset keeps a reference to the VTK arrays. Polydata cells use int64
-offsets/connectivity on both sides (zero copy when vtkIdType is 64-bit).
+offsets/connectivity on both sides; they are copied into VTK (a shallow
+``vtkIdTypeArray`` in a ``vtkCellArray`` does not keep its NumPy buffer alive
+on VTK 9.3) and viewed without a copy on the way back.
 Triangle strips are not an STK cell type (triangulate first).
 
 VTK is imported when a function is called.
@@ -87,9 +89,11 @@ def _cells(cell_array):
     cells = vtk.vtkCellArray()
     offsets = np.ascontiguousarray(cell_array.offsets, dtype=np.int64)
     connectivity = np.ascontiguousarray(cell_array.connectivity, dtype=np.int64)
+    # Deep copies: a shallow vtkIdTypeArray handed to vtkCellArray.SetData does not keep the NumPy
+    # buffer alive on VTK 9.3 (use-after-free once the STK dataset is freed).
     if vtk.vtkIdTypeArray().GetDataTypeSize() == 8:
-        cells.SetData(support.numpy_to_vtkIdTypeArray(offsets, deep=False),
-                      support.numpy_to_vtkIdTypeArray(connectivity, deep=False))
+        cells.SetData(support.numpy_to_vtkIdTypeArray(offsets, deep=True),
+                      support.numpy_to_vtkIdTypeArray(connectivity, deep=True))
     else:  # pragma: no cover - 32-bit vtkIdType builds
         cells.SetData(support.numpy_to_vtk(offsets, deep=True, array_type=vtk.VTK_ID_TYPE),
                       support.numpy_to_vtk(connectivity, deep=True, array_type=vtk.VTK_ID_TYPE))

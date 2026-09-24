@@ -69,6 +69,21 @@ def _common_props(dataset):
     return props
 
 
+def _pick(ctx, dataset):
+    """``pick {probe: {node, dataset}}`` (payload §6): where ``view.probe`` reads for this layer.
+
+    The node is the graph source that read the data (``provenance.agent.node``, set by
+    the source nodes and carried by filters and analysis nodes); clients walk upstream
+    from it to the frame file. Without provenance it is this layer's own node.
+    """
+    agent = getattr(getattr(dataset, "provenance", None), "agent", None)
+    source = agent.get("node") if isinstance(agent, dict) else None
+    probe = {"node": source or _layer_id(ctx)}
+    if source and getattr(dataset, "id", None):
+        probe["dataset"] = dataset.id
+    return {"probe": probe}
+
+
 def image_grid(image):
     """Grid description of an ImageData (used for outlines, volumes and the scene's render origin)."""
     return {"bounds": image.bounds(), "dimensions": list(image.dimensions), "origin": list(image.origin),
@@ -141,7 +156,8 @@ def _polydata_layer(ctx, poly, requested):
     n_verts, n_lines, n_polys = poly.verts.n_cells, poly.lines.n_cells, poly.polys.n_cells
     normals = poly.fields.get("Normals")
     use_normals = normals is not None and normals.association == "point" and normals.components == 3
-    props = {**_common_props(poly), "default_color": {"by": "solid", "solid": [0.8, 0.8, 0.8]}}
+    props = {**_common_props(poly), "default_color": {"by": "solid", "solid": [0.8, 0.8, 0.8]},
+             "pick": _pick(ctx, poly)}
     common = {"id": _layer_id(ctx), "node": _layer_id(ctx), "name": poly.label or poly.id, "props": props}
     if n_polys:
         cell, tris = _fan(poly.polys, np)
@@ -194,7 +210,7 @@ def _slice_layer(ctx, image, requested):
         values = np.squeeze(values, axis=2 - axis)       # zyx index of the flat axis is 2 - axis
         attributes[f.name] = _attribute(f, values.reshape(dims[u_axis] * dims[v_axis], f.components))
     props = {**_common_props(image), "default_color": {"by": "field"} if attributes else
-             {"by": "solid", "solid": [0.8, 0.8, 0.8]}}
+             {"by": "solid", "solid": [0.8, 0.8, 0.8]}, "pick": _pick(ctx, image)}
     geometry = {"plane": {"origin": origin.tolist(), "u": u.tolist(), "v": v.tolist()},
                 "size": [dims[u_axis], dims[v_axis]]}
     return Layer("slice_image", id=_layer_id(ctx), name=image.label or image.id, geometry=geometry,
@@ -276,7 +292,7 @@ def glyphs(ctx, inputs, params):
     attributes = {f.name: _attribute(f, np.asarray(f.values)[order]) for f in fields}
     props = {**_common_props(poly), "default_color": {"by": "orientation"},
              "progressive": {"shuffled": True, "seed": SHUFFLE_SEED},
-             "vectors": vector_field.name, "vector_unit": vector_field.unit}
+             "vectors": vector_field.name, "vector_unit": vector_field.unit, "pick": _pick(ctx, poly)}
     spacing = poly.attrs.get("sample_spacing")
     if spacing is not None:
         props["sample_spacing"] = float(spacing)
@@ -338,7 +354,7 @@ def volume(ctx, inputs, params):
                 "quantity": field.quantity, "categorical": field.is_label,
                 "categories": [c.to_json() for c in field.categories or ()], "palette": field.palette}
     return Layer("volume", id=_layer_id(ctx), name=image.label or field.name, geometry=geometry,
-                 props=_common_props(image), grid=image_grid(image))
+                 props={**_common_props(image), "pick": _pick(ctx, image)}, grid=image_grid(image))
 
 
 @node("stk.render.outline", title={"en": "Outline", "zh": "外框"},

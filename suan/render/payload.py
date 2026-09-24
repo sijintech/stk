@@ -958,6 +958,10 @@ class _Encoder:
             entry["name"] = layer.name
         if not layer.visible:
             entry["visible"] = False
+        pick = layer.props.get("pick")
+        if isinstance(pick, dict) and isinstance(pick.get("probe"), dict):
+            entry["pick"] = {"probe": {key: str(value) for key, value in pick["probe"].items()
+                                       if key in ("node", "dataset") and value is not None}}
         return entry
 
     def layer_origin(self, layer, entry):

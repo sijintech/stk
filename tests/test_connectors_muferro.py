@@ -212,6 +212,40 @@ def test_inputs_light_half(tmp_path):
         inputs.task_spec(case, {}, case_dir="case")
 
 
+def test_monitor_adapter_replays_and_polls_a_run(tmp_path):
+    from suan.monitor.events import make_event, validate_event
+    connector = MuFerroConnector()
+    assert connector.info()["capabilities"]["monitor_adapter"] is True
+    root = run_dir(tmp_path / "run")
+    adapter = connector.monitor_adapter(LocalFiles(root), None)
+    events = adapter.replay()
+    kinds = [e["type"] for e in events]
+    assert kinds[0] == "run.started" and kinds[-2:] == ["verification", "run.completed"]
+    assert {"progress", "metric.declare", "metrics", "frame", "message"} <= set(kinds)
+    for index, event in enumerate(events):  # v1 data: the caller's emitter adds the envelope
+        assert set(event) == {"type", "data"}
+        validate_event(make_event(index, event["type"], event["data"], "adapter", 0.0))
+    frames = sorted((e["data"]["dataset"], e["data"]["step"]) for e in events if e["type"] == "frame")
+    assert ("Polar", 4) in frames and len(frames) == len(list(root.glob("*.0000000?.dat")))
+    assert events[-1]["data"]["status"] == "succeeded" and events[-2]["data"]["status"] == "passed"
+    metrics = [e["data"] for e in events if e["type"] == "metrics"]
+    assert [m["step"] for m in metrics] == [1, 2, 3, 4] and metrics[-1]["values"]["total_energy"] == -4.5
+    live = connector.monitor_adapter(LocalFiles(root), None)
+    first = live.poll()
+    assert [e["type"] for e in first if e["type"] == "progress"] == ["progress"]
+    second = live.poll()  # only what is new: frames whose size stayed the same over two polls
+    assert second and all(e["type"] == "frame" for e in second)
+    final = live.poll(final=True, exit_code=0)
+    published = [(e["data"]["dataset"], e["data"]["step"]) for e in first + second + final if e["type"] == "frame"]
+    assert len(published) == len(set(published)) == len(frames)
+    nested = run_dir(tmp_path / "work", case_dir="case16")
+    adapter = MuFerroConnector(case_dir="case16").monitor_adapter(LocalFiles(nested), None)
+    frames = [e["data"]["path"] for e in adapter.replay() if e["type"] == "frame"]
+    assert frames and all(path.startswith("case16/") for path in frames)
+    client = FakeClient(root)
+    assert connector.monitor_adapter(RuntimeFiles(client, "t" * 32, tmp_path / "cache"), None) is None
+
+
 def test_toml_writer_round_trip():
     document = {"material": "m.toml", "system": {"simulation_grid": [4, 3, 2], "dt": 0.01, "flag": True,
                                                  "name": 'a "quoted" é', "nested": {"x": [1.5, 2]}},

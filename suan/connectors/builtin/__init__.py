@@ -73,9 +73,11 @@ def read_file(source, path, *, format="auto", fields=None, association="auto", c
     local = materialize(source, path)
     name = dataset_id(path)
     if kind == "dat":
-        from suan.data.dat import DatError, read_dat_image
+        from suan.data.dat import DatError, frame_name, read_dat_image
+        # Names come from the path inside the binding: a downloaded copy is named by its sha256.
+        stem, step = frame_name(PurePosixPath(path).name)
         try:
-            dataset = read_dat_image(local, check=check)
+            dataset = read_dat_image(local, name=stem or name, id=stem or name, step=step, check=check)
         except DatError as exc:
             raise ConnectorError(str(exc), "invalid_data") from None
     elif kind == "npy":

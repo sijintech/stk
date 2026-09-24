@@ -1,0 +1,46 @@
+{
+ "id": "muferro-polarization-glyphs",
+ "name": "muFerro polarization glyphs",
+ "description": "Instanced arrows of the polarization of one muFerro frame on a stride lattice, coloured by direction with the stk:orientation-hsl map (hue = in-plane azimuth, lightness = P_z) and scaled by |P|, with the orientation colour sphere, an outline and axes (SimViz vector view). Points with |P| below the threshold are left out.",
+ "bindings": [{"name": "run", "description": "The muFerro run: a Runtime task or a local run directory."}],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "muferro-polarization-glyphs",
+  "name": "muFerro polarization glyphs",
+  "description": "Polarization arrows coloured by orientation (stk:orientation-hsl) with the orientation legend.",
+  "catalog": {"stk": 1},
+  "parameters": [
+   {"name": "step", "type": "step", "default": "latest", "label": "Step"},
+   {"name": "stride", "type": "int3", "default": [2, 2, 2], "label": "Stride",
+    "description": "Keep every n-th grid point along x, y, z (grows automatically above max_points)."},
+   {"name": "max_points", "type": "integer", "default": 20000, "minimum": 1, "maximum": 5000000,
+    "label": "Max arrows"},
+   {"name": "min_magnitude", "type": "number", "default": 0.0, "minimum": 0, "label": "|P| threshold",
+    "unit": "unspecified"},
+   {"name": "view", "type": "enum", "choices": ["iso", "+x", "-x", "+y", "-y", "+z", "-z"], "default": "iso",
+    "label": "View"}
+  ],
+  "nodes": [
+   {"id": "run", "type": "stk.source.muferro_run@1", "params": {"binding": "run"}},
+   {"id": "polar", "type": "stk.source.muferro_frame@1", "inputs": {"frames": {"from": "run.frames"}},
+    "params": {"dataset": "Polar", "step": {"$param": "step"}}},
+   {"id": "samples", "type": "stk.filter.glyph_source@1", "inputs": {"in": {"from": "polar.out"}},
+    "params": {"field": "Polar", "sampling": "stride", "stride": {"$param": "stride"},
+               "max_points": {"$param": "max_points"}, "magnitude_range": [{"$param": "min_magnitude"}, null]}},
+   {"id": "arrows", "type": "stk.render.glyphs@1", "inputs": {"in": {"from": "samples.out"}},
+    "params": {"vectors": "Polar", "shape": "arrow", "center": true, "scale": {"by": "magnitude", "factor": "auto"},
+               "color": {"by": "orientation"}, "name": "Polarization"}},
+   {"id": "legend", "type": "stk.render.orientation_legend@1", "params": {"title": "Orientation"}},
+   {"id": "box", "type": "stk.render.outline@1", "inputs": {"in": {"from": "polar.out"}}},
+   {"id": "axes", "type": "stk.render.axes@1"},
+   {"id": "camera", "type": "stk.view.camera@1", "params": {"preset": {"$param": "view"}}},
+   {"id": "scene", "type": "stk.view.scene@1",
+    "inputs": {"layers": [{"from": "arrows.layer"}, {"from": "box.layer"}, {"from": "legend.layer"},
+                          {"from": "axes.layer"}],
+               "camera": {"from": "camera.camera"}}},
+   {"id": "png", "type": "stk.output.image@1", "inputs": {"source": {"from": "scene.scene"}},
+    "params": {"width": 1600, "height": 1200}}
+  ],
+  "outputs": {"view": "scene.scene", "image": "png.image"}
+ }
+}

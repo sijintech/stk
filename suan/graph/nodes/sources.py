@@ -51,7 +51,8 @@ def _muferro_run_fingerprint(ctx, inputs, params):
     from suan.mupro.run import FRAME, RESULT
     source = _source(ctx, params["binding"])
     prefix = _prefix(params["case_dir"])
-    names = {item.path: item for item in source.list("")}
+    from suan.connectors.mupro import run_files
+    names = run_files(source, prefix)
     frames = sorted([path, item.size] for path, item in names.items()
                     if path.startswith(prefix) and "/" not in path[len(prefix):] and FRAME.search(path))
     try:

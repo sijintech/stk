@@ -33,7 +33,8 @@ from ..api import API_VERSION, ConnectorError, Match
 from ..builtin import crop_sample, field_stats, select_frame
 from .tables import read_energy, read_progress
 
-__all__ = ["CONNECTOR_ID", "MuFerroConnector", "VERSION", "case_prefix", "field_descriptor", "frame_rows", "stem_field"]
+__all__ = ["CONNECTOR_ID", "MuFerroConnector", "VERSION", "case_prefix", "field_descriptor", "frame_rows", "run_files",
+           "stem_field"]
 
 CONNECTOR_ID = "mupro.muferro"
 VERSION = "0.1.0"
@@ -97,12 +98,18 @@ def frame_rows(result):
 
 
 def case_prefix(case_dir):
-    """``""`` for the binding root, else ``"<case_dir>/"`` (a checked relative path)."""
-    case_dir = case_dir or "."
-    if case_dir == ".":
-        return ""
+    """``""`` for the binding root (``"."``, ``"./"``), else ``"<case_dir>/"`` (a checked relative path)."""
     from ..files import check_path
-    return check_path(case_dir).rstrip("/") + "/"
+    relative = check_path(case_dir or ".")
+    return relative.rstrip("/") + "/" if relative else ""
+
+
+def run_files(run, prefix=""):
+    """``{path: FileInfo}`` of a run: the whole binding plus the case directory (which may be a linked directory)."""
+    names = {item.path: item for item in run.list("")}
+    if prefix:
+        names.update({item.path: item for item in run.list(prefix)})
+    return names
 
 
 def _read_text(run, path, limit=64 * 1024 * 1024):
@@ -151,7 +158,7 @@ class MuFerroConnector:
                 "license": "MIT",
                 "capabilities": {"read": ["image", "table"],
                                  "inputs": {"schema": "mupro.muferro/input@1", "read": True, "write": True},
-                                 "verify": "stk-mupro-1", "monitor_adapter": False, "task_spec": True,
+                                 "verify": "stk-mupro-1", "monitor_adapter": True, "task_spec": True,
                                  "default_graphs": ["muferro-domains", "energy-plot"]},
                 "runs_on": {"describe": "node", "read": "node|desktop", "inputs": "any", "monitor_adapter": "task"}}
 
@@ -172,19 +179,21 @@ class MuFerroConnector:
                 return Match(self.id, 0.6, CONNECTOR_ID, f"{name} with [system].simulation_grid")
         return None
 
-    def _record(self, run):
+    def _record(self, run, names=None):
+        """The launcher's ``stk-mupro.json`` (``None`` when absent or unreadable)."""
+        names = names if names is not None else {item.path for item in run.list("")}
+        if RESULT not in names:
+            return None
         try:
             record = json.loads(_read_text(run, RESULT, 1 << 22))
-        except ConnectorError:
-            return None
-        except ValueError:
+        except (ConnectorError, FileNotFoundError, ValueError):
             return None
         return record if isinstance(record, dict) else None
 
-    def _case(self, run, case_dir, record):
+    def _case(self, run, case_dir, record, files=None):
         """``(case dict | None, error message | None)`` from input.toml (and includes) or the launcher record."""
         prefix = case_prefix(case_dir)
-        names = [item.path for item in run.list("") if item.path.endswith(".toml")]
+        names = [path for path in (files if files is not None else run_files(run, prefix)) if path.endswith(".toml")]
         if prefix + "input.toml" in names:
             local = run.local_path(".")
             mirror = None
@@ -232,8 +241,9 @@ class MuFerroConnector:
         from suan.data.manifest import file_entry, qoi_entry, result_manifest
         case_dir = case_dir or self.case_dir
         prefix = case_prefix(case_dir)
-        record = self._record(run)
-        case, case_error = self._case(run, case_dir, record)
+        names = run_files(run, prefix)
+        record = self._record(run, names)
+        case, case_error = self._case(run, case_dir, record, names)
         frames = self._frames(run, prefix)
         grid, header = self._grid(run, case, frames)
         known = getattr(run, "known_sha256", None)
@@ -249,7 +259,6 @@ class MuFerroConnector:
             if stem != "Polar" and stem not in COMPONENTS:
                 components = self._components(run, entries[0]["sources"][stem]["path"])
             datasets.append(field_descriptor(stem, grid, entries, components))
-        names = {item.path: item for item in run.list("")}
         qoi = []
         energy_path = prefix + "energy_out.dat"
         if energy_path in names:
@@ -389,9 +398,19 @@ class MuFerroConnector:
                     "checks": list(recorded.get("checks", ()))}
         return None
 
-    def monitor_adapter(self, run, case):
-        """The muFerro adapter runs inside the launcher (``python -m suan.mupro run``), not through this API."""
-        return None
+    def monitor_adapter(self, run, case, *, case_dir=None):
+        """A :class:`~.monitor.MuferroMonitorAdapter` over a run directory on this host (``None`` for remote runs).
+
+        It applies the adapt-mode rules of ``suan.mupro.monitor`` (the launcher's own adapter:
+        progress, energy metrics, published frames, completion) and returns ``{type, data}``
+        events from ``poll``; ``replay()`` gives every event of a finished run, including
+        ``verification`` and ``run.completed``.
+        """
+        local = run.local_path(".")
+        if local is None:
+            return None
+        from .monitor import MuferroMonitorAdapter
+        return MuferroMonitorAdapter(local, case_dir or self.case_dir)
 
     def default_graphs(self, result):
         """The ``muferro-domains`` and ``energy-plot`` presets bound to ``run``, when installed."""

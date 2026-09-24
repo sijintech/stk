@@ -1,0 +1,45 @@
+{
+ "id": "slice",
+ "name": "Grid slice",
+ "description": "The grid plane of a field file at an index along x, y or z (exact samples; label fields keep their categories), coloured by one component or the magnitude with a scalar bar, plus an outline and axes. Reproduces view.build's 'slice' mode (component 0, middle index by default).",
+ "bindings": [{"name": "data", "description": "The directory (or Runtime task) holding the field file."}],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "slice",
+  "name": "Grid slice",
+  "description": "stk.filter.slice (axis mode) -> slice_image layer coloured by a component, with a scalar bar.",
+  "catalog": {"stk": 1},
+  "parameters": [
+   {"name": "path", "type": "string", "default": "Polar.00000000.dat", "label": "Field file",
+    "description": "Path inside the binding: DAT, NPY, VTI, legacy VTK or VTKHDF."},
+   {"name": "axis", "type": "enum", "choices": ["x", "y", "z"], "default": "z", "label": "Axis"},
+   {"name": "index", "type": "json", "default": null, "label": "Index",
+    "description": "Grid index along the axis (null = the middle)."},
+   {"name": "component", "type": "json", "default": 0, "label": "Component",
+    "description": "Component index, or \"magnitude\" (null = the magnitude of a vector field)."},
+   {"name": "colormap", "type": "enum", "choices": ["viridis", "cividis", "coolwarm", "turbo", "gray"],
+    "default": "viridis", "label": "Colormap"},
+   {"name": "view", "type": "enum", "choices": ["iso", "+x", "-x", "+y", "-y", "+z", "-z"], "default": "iso",
+    "label": "View"}
+  ],
+  "nodes": [
+   {"id": "src", "type": "stk.source.file@1", "params": {"binding": "data", "path": {"$param": "path"}}},
+   {"id": "cut", "type": "stk.filter.slice@1", "inputs": {"in": {"from": "src.out"}},
+    "params": {"mode": "axis", "axis": {"$param": "axis"}, "index": {"$param": "index"}}},
+   {"id": "plane", "type": "stk.render.surface@1", "inputs": {"in": {"from": "cut.out"}},
+    "params": {"color": {"by": "field", "field": null, "component": {"$param": "component"},
+                         "colormap": {"$param": "colormap"}},
+               "lighting": false, "name": "Slice"}},
+   {"id": "bar", "type": "stk.render.scalar_bar@1", "inputs": {"source": {"from": "plane.layer"}}},
+   {"id": "box", "type": "stk.render.outline@1", "inputs": {"in": {"from": "src.out"}}},
+   {"id": "axes", "type": "stk.render.axes@1"},
+   {"id": "camera", "type": "stk.view.camera@1", "params": {"preset": {"$param": "view"}}},
+   {"id": "scene", "type": "stk.view.scene@1",
+    "inputs": {"layers": [{"from": "plane.layer"}, {"from": "box.layer"}, {"from": "bar.layer"},
+                          {"from": "axes.layer"}],
+               "camera": {"from": "camera.camera"}}},
+   {"id": "png", "type": "stk.output.image@1", "inputs": {"source": {"from": "scene.scene"}}}
+  ],
+  "outputs": {"view": "scene.scene", "image": "png.image"}
+ }
+}

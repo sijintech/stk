@@ -122,3 +122,41 @@ def test_materialize_copies_stream_sources(tmp_path):
     path = materialize(StreamOnly(b"abc"), "x/field.npy", cache_dir=tmp_path)
     assert path.read_bytes() == b"abc" and path.suffix == ".npy" and tmp_path in path.parents
     assert materialize(StreamOnly(b"abc"), "field.npy", cache_dir=tmp_path) == path
+
+
+def test_listing_prefixes_links_and_loops(tmp_path):
+    root = tmp_path / "run"
+    (root / "case" / "deep").mkdir(parents=True)
+    (root / "case" / "Polar.00000001.dat").write_text("p")
+    (root / "case" / "deep" / "x.dat").write_text("x")
+    (root / "case.txt").write_text("sibling")
+    (root / "real").mkdir()
+    (root / "real" / "a.dat").write_text("a")
+    (root / "current").symlink_to("real")
+    (root / "loop").symlink_to("loop")
+    source = LocalFiles(root)
+    assert [f.path for f in source.list("case")] == ["case/Polar.00000001.dat", "case/deep/x.dat"]
+    assert [f.path for f in source.list("case/")] == ["case/Polar.00000001.dat", "case/deep/x.dat"]
+    assert [f.path for f in source.list("case/P")] == ["case/Polar.00000001.dat"]
+    assert source.list("case.txt") == [] and source.list("./") == source.list("")
+    assert [f.path for f in source.list("current")] == ["current/a.dat"]  # the path as requested
+    assert "loop" not in [f.path for f in source.list()]
+    for bad in ("../x", "/etc", "a\\b"):
+        with pytest.raises(ConnectorError) as error:
+            source.list(bad)
+        assert error.value.code == "invalid_path"
+    with pytest.raises(FileNotFoundError):
+        source.open("loop")
+    client = FakeClient({"case/a.dat": b"1", "case/b/c.dat": b"2", "case.txt": b"3", "../evil": b"4"})
+    remote = RuntimeFiles(client, "t", tmp_path / "cache")
+    assert [f.path for f in remote.list("case")] == ["case/a.dat", "case/b/c.dat"]
+    assert [f.path for f in remote.list("case/a")] == ["case/a.dat"] and remote.list("case.txt") == []
+    assert [f.path for f in remote.list()] == ["case.txt", "case/a.dat", "case/b/c.dat"]
+
+
+def test_runtime_download_cap(tmp_path):
+    client = FakeClient({"big.dat": b"0" * 64})
+    source = RuntimeFiles(client, "t", tmp_path / "cache", max_bytes=32)
+    with pytest.raises(ConnectorError) as error:
+        source.open("big.dat")
+    assert error.value.code == "budget_exceeded" and "1 GiB" in str(error.value) and client.downloads == 0

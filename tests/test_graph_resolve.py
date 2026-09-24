@@ -245,3 +245,89 @@ def test_runtime_resolver_against_a_real_runtime(runtime, tmp_path):
     assert source.sha256("out/field.dat") == sha(b"1 2 3")
     assert source.open("out/field.dat").read() == b"1 2 3"
     assert source.local_path("out/field.dat").name == sha(b"1 2 3") + ".dat"
+
+
+# ---------------------------------------------------------------------------
+# The built-in muFerro/file sources through both resolvers (one FileSource implementation, one missing-file error)
+
+
+class DirectoryRuntime:
+    """RuntimeClient.artifacts/download over a local directory tree (what a finished task publishes)."""
+
+    def __init__(self, root):
+        self.root = Path(root)
+        self.downloads = []
+
+    def artifacts(self, task_id):
+        return [{"path": p.relative_to(self.root).as_posix(), "size": p.stat().st_size, "sha256": sha(p.read_bytes())}
+                for p in sorted(self.root.rglob("*")) if p.is_file()]
+
+    def download(self, task_id, remote_path, destination):
+        self.downloads.append(remote_path)
+        Path(destination).write_bytes((self.root / remote_path).read_bytes())
+        return Path(destination)
+
+
+def muferro_graph(case_dir=".", frame="Polar.00000002.dat"):
+    prefix = "" if case_dir in (".", "./") else case_dir.rstrip("/") + "/"
+    return {"schema": "stk.graph/1", "outputs": {"frames": "run.frames", "energy": "run.energy", "polar": "polar.out",
+                                                 "file": "file.out"},
+            "nodes": [{"id": "run", "type": "stk.source.muferro_run@1", "params": {"binding": "run", "case_dir": case_dir}},
+                      {"id": "polar", "type": "stk.source.muferro_frame@1", "inputs": {"frames": {"from": "run.frames"}},
+                       "params": {"step": 2}},
+                      {"id": "file", "type": "stk.source.file@1", "params": {"binding": "run", "path": prefix + frame}}]}
+
+
+@pytest.mark.parametrize("kind", ["local", "runtime"])
+@pytest.mark.parametrize("case_dir", [".", "./", "case16"])
+def test_muferro_sources_through_resolvers_without_a_launcher_record(tmp_path, kind, case_dir):
+    pytest.importorskip("numpy")
+    from mupro_fake import write_case, write_outputs
+    from suan.graph.catalog import build_registry
+    from suan.graph.evaluator import evaluate
+    root = tmp_path / "work"
+    folder = root if case_dir in (".", "./") else root / case_dir
+    write_case(folder)
+    write_outputs(folder)
+    assert not (root / "stk-mupro.json").exists()  # a run STK did not launch
+    if kind == "local":
+        resolver = LocalDirResolver({"run": root})
+    else:
+        resolver = RuntimeResolver(DirectoryRuntime(root), tmp_path / "downloads", {"run": "task1"})
+    result = evaluate(muferro_graph(case_dir), registry=build_registry(entry_points=False), resolver=resolver)
+    frames, energy = result.outputs["frames"], result.outputs["energy"]
+    assert frames.n_rows > 0 and energy.n_rows == 3 and "Total Energy" in energy.fields
+    for name in ("polar", "file"):  # the field and dataset keep the frame's name, not the download's sha256
+        image = result.outputs[name]
+        assert image.id == "Polar" and list(image.fields) == ["Polar"] and image.time.step == 2
+    assert result.parameters["polar.step"] == {"value": 2, "choices": [0, 2]}
+
+
+def test_missing_files_raise_one_error_everywhere(tree, tmp_path):
+    from suan.connectors.api import ConnectorError
+    from suan.connectors.files import LocalFiles, MissingFile, RuntimeFiles
+    sources = [LocalFiles(tree), LocalDirSource(tree, binding="run"),
+               RuntimeFiles(DirectoryRuntime(tree), "t", tmp_path / "a"),
+               RuntimeTaskSource(DirectoryRuntime(tree), "task1", tmp_path / "b")]
+    for source in sources:
+        for call in (source.open, source.sha256):
+            with pytest.raises(MissingFile) as info:
+                call("nope.dat")
+            assert isinstance(info.value, FileNotFoundError) and isinstance(info.value, ConnectorError)
+            assert info.value.code == "missing_file"
+
+
+def test_symlinked_case_directory_and_link_loops(tmp_path):
+    root = tmp_path / "run"
+    (root / "real").mkdir(parents=True)
+    (root / "real" / "Polar.00000000.dat").write_bytes(b"p")
+    (root / "real" / "energy_out.dat").write_bytes(b"e")
+    symlink(root / "current", "real")
+    symlink(root / "loop", "loop")
+    source = LocalDirSource(root)
+    assert [f.path for f in source.list("current")] == ["current/Polar.00000000.dat", "current/energy_out.dat"]
+    assert [f.path for f in source.list("current/")] == [f.path for f in source.list("current")]
+    assert [f.path for f in source.list("current/Polar.")] == ["current/Polar.00000000.dat"]
+    assert [f.path for f in source.list("")] == ["real/Polar.00000000.dat", "real/energy_out.dat"]  # loop skipped
+    with pytest.raises(FileNotFoundError):
+        source.open("loop")
