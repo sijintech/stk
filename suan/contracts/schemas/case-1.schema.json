@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:case-1",
+  "title": "STK case manifest v1 (stk.case/1)",
+  "description": "Neutral description of one simulation case: JSON parameters validated by a connector-supplied parameter schema, the native files the connector wrote from them, input datasets from other runs and suggested resources. STK never parses native input syntax; the connector converts both ways.",
+  "type": "object",
+  "required": ["schema", "app", "connector", "parameters"],
+  "properties": {
+    "schema": {"const": "stk.case/1"},
+    "app": {"type": "string"},
+    "connector": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {"id": {"type": "string"}, "version": {"type": ["string", "null"]}},
+      "additionalProperties": false
+    },
+    "parameters_schema": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string", "description": "e.g. 'mupro.muferro/input@1'"},
+        "sha256": {"type": ["string", "null"]},
+        "source": {"type": ["string", "null"], "description": "Where the schema came from, e.g. 'sdk:share/mupro/schemas/muferro-input-1.schema.json'."}
+      },
+      "additionalProperties": false
+    },
+    "parameters": {"type": "object"},
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "target", "from"],
+        "properties": {
+          "role": {"type": "string"},
+          "target": {"type": "string", "description": "Native file name the connector writes, relative to the case directory."},
+          "writer": {"type": ["string", "null"]},
+          "from": {"$ref": "urn:stk:schema:ref-1"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "native": {
+      "type": "object",
+      "properties": {
+        "format": {"type": "string", "description": "e.g. 'toml' or 'inp'; a per-connector choice."},
+        "entry": {"type": "string"},
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": {"type": "string"},
+              "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+              "generated": {"type": "boolean"}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "case_id": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$", "description": "sha256 of canonical {app, files: sorted [{path, sha256}]} over the native files."},
+    "resources": {
+      "type": "object",
+      "properties": {
+        "suggested": {"type": "object"},
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["rule", "message"],
+            "properties": {"rule": {"type": "string"}, "message": {"type": "string"}},
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "created_by": {"type": "string", "description": "'desktop', 'web' or 'agent:<id>'."},
+        "derived_from": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "extensions": {"type": "object"}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false
+}

@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:result-1",
+  "title": "STK result manifest v1 (stk.result/1)",
+  "description": "Index of one run: application, runtime identity, state, verification, quantities of interest, datasets (with frames) and files. Produced by a connector's describe(); in M1 it is derived on demand from the run directory. Invariant: manifest = fold(events) + files + verification.",
+  "type": "object",
+  "required": ["schema", "producer", "complete", "run", "state", "datasets"],
+  "properties": {
+    "schema": {"const": "stk.result/1"},
+    "producer": {
+      "type": "object",
+      "required": ["connector"],
+      "properties": {
+        "connector": {"type": "string"},
+        "connector_version": {"type": ["string", "null"]},
+        "stk": {"type": ["string", "null"]},
+        "generated_at": {"type": ["string", "null"], "description": "RFC 3339 UTC timestamp."}
+      },
+      "additionalProperties": false
+    },
+    "complete": {"type": "boolean", "description": "False while the run is live or when files are missing."},
+    "run": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": {"type": "string"},
+            "name": {"type": ["string", "null"]},
+            "version": {"type": ["string", "null"]},
+            "executable_sha256": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "node_id": {"type": ["string", "null"]},
+            "task_id": {"type": ["string", "null"]},
+            "workspace_id": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "case": {
+          "type": "object",
+          "properties": {
+            "case_id": {"type": ["string", "null"]},
+            "dir": {"type": ["string", "null"]},
+            "manifest": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "layout": {
+          "type": "object",
+          "properties": {
+            "ranks": {"type": ["integer", "null"], "minimum": 1},
+            "threads_per_rank": {"type": ["integer", "null"], "minimum": 1},
+            "launcher": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "started_at": {"type": ["string", "null"]},
+        "finished_at": {"type": ["string", "null"]},
+        "exit_code": {"type": ["integer", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "state": {"enum": ["prepared", "queued", "running", "succeeded", "failed", "cancelled", "interrupted", "unknown"]},
+    "outcome": {
+      "type": "object",
+      "properties": {
+        "classification": {"type": ["string", "null"]},
+        "retryable": {"type": "boolean"},
+        "reason": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "scientific_status": {"type": "string", "description": "e.g. 'exploratory'. Free text agreed with the application owner."},
+    "verification": {
+      "type": ["object", "null"],
+      "required": ["verifier", "status"],
+      "properties": {
+        "verifier": {"type": "string"},
+        "status": {"enum": ["passed", "failed", "pending", "skipped", "unknown"]},
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "status"],
+            "properties": {
+              "id": {"type": "string"},
+              "status": {"enum": ["pass", "fail", "warn", "skip"]},
+              "message": {"type": "string"},
+              "classification": {"type": ["string", "null"]}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "frames_of_reference": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/coordinate_frame"}
+    },
+    "qoi": {"type": "array", "items": {"$ref": "#/$defs/qoi"}},
+    "datasets": {"type": "array", "items": {"$ref": "urn:stk:schema:dataset-1"}},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": {"$ref": "urn:stk:schema:dataset-1#/$defs/relative_path"},
+          "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "size": {"type": ["integer", "null"], "minimum": 0},
+          "media_type": {"type": ["string", "null"]},
+          "role": {"enum": ["input", "output", "log", "checkpoint", "manifest", "other"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "native": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {"path": {"type": "string"}, "schema": {"type": ["string", "null"]}},
+        "additionalProperties": false
+      }
+    },
+    "extensions": {"type": "object"}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "coordinate_frame": {
+      "type": "object",
+      "required": ["length_unit"],
+      "properties": {
+        "length_unit": {"type": "string"},
+        "parent": {"type": ["string", "null"]},
+        "transform": {
+          "type": "array",
+          "description": "Row-major 4x4 float64 affine transform from this frame to its parent.",
+          "items": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "description": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "qoi": {
+      "type": "object",
+      "required": ["name", "value", "unit"],
+      "properties": {
+        "name": {"type": "string"},
+        "value": {"oneOf": [{"type": "number"}, {"enum": ["NaN", "Inf", "-Inf"]}, {"type": "null"}]},
+        "unit": {"type": "string"},
+        "quantity": {"type": ["string", "null"]},
+        "step": {"type": ["integer", "null"]},
+        "time": {"type": ["number", "null"]},
+        "source": {
+          "type": "object",
+          "properties": {
+            "dataset": {"type": "string"},
+            "column": {"type": "string"},
+            "field": {"type": "string"},
+            "path": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "definition": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

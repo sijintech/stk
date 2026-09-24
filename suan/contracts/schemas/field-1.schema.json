@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:field-1",
+  "title": "STK field descriptor v1",
+  "description": "One named array of a dataset: association, dtype, components, tensor type, units, quantity and optional categories. Values are never part of the descriptor. See docs/specs/stk-data-format-v1.md.",
+  "type": "object",
+  "required": ["name", "association", "dtype", "components", "tensor", "unit"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[^/.]{1,128}$", "description": "VTKHDF forbids '/' and '.' in array names."},
+    "association": {"enum": ["point", "cell", "field", "row"]},
+    "dtype": {"enum": ["float64", "float32", "int64", "int32", "int16", "int8", "uint64", "uint32", "uint16", "uint8", "string"]},
+    "components": {"type": "integer", "minimum": 1, "maximum": 4096},
+    "tensor": {"enum": ["scalar", "vector", "symmetric_tensor", "tensor", "quaternion", "array", "label"]},
+    "component_names": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 64}, "minItems": 1},
+    "quantity": {"type": "string", "pattern": "^([a-z0-9_]+:)?[a-z0-9_]+$", "description": "Id from suan/contracts/quantities.json or a namespaced extension such as 'mupro:landau_force'."},
+    "unit": {"type": "string", "minLength": 1, "maxLength": 64, "description": "UCUM case-sensitive code, or one of the reserved tokens 'unspecified', '1', 'normalized', 'grid_index'."},
+    "normalization": {
+      "type": "object",
+      "properties": {
+        "reference_value": {"type": "number"},
+        "reference_unit": {"type": "string"},
+        "note": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "categories": {"type": "array", "items": {"$ref": "#/$defs/category"}},
+    "palette": {"type": "string", "description": "Palette id, e.g. 'stk:cubic-26-orientation', 'stk-legacy:ferro27' or 'stk:categorical'."},
+    "range": {
+      "type": "array",
+      "description": "Per-component [min, max]; filled lazily, never required.",
+      "items": {"$ref": "#/$defs/interval"}
+    },
+    "magnitude_range": {"$ref": "#/$defs/interval"},
+    "role": {"enum": ["index", "time", "value", "label", "coordinate"], "description": "Table columns only."},
+    "description": {"type": "string"},
+    "lossy": {"type": "boolean", "description": "True for display caches that were down-converted (e.g. float32)."}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "allOf": [
+    {"if": {"properties": {"tensor": {"const": "scalar"}}, "required": ["tensor"]},
+     "then": {"properties": {"components": {"const": 1}}}},
+    {"if": {"properties": {"tensor": {"const": "vector"}}, "required": ["tensor"]},
+     "then": {"properties": {"components": {"enum": [2, 3]}}}},
+    {"if": {"properties": {"tensor": {"const": "symmetric_tensor"}}, "required": ["tensor"]},
+     "then": {"properties": {"components": {"const": 6}}, "required": ["component_names"]}},
+    {"if": {"properties": {"tensor": {"const": "tensor"}}, "required": ["tensor"]},
+     "then": {"properties": {"components": {"enum": [4, 9]}}, "required": ["component_names"]}},
+    {"if": {"properties": {"tensor": {"const": "quaternion"}}, "required": ["tensor"]},
+     "then": {"properties": {"components": {"const": 4}}, "required": ["component_names"]}},
+    {"if": {"properties": {"tensor": {"const": "label"}}, "required": ["tensor"]},
+     "then": {"properties": {"components": {"const": 1}, "dtype": {"enum": ["int64", "int32", "int16", "int8", "uint64", "uint32", "uint16", "uint8"]}}, "required": ["categories"]}},
+    {"if": {"properties": {"dtype": {"const": "string"}}, "required": ["dtype"]},
+     "then": {"properties": {"association": {"enum": ["row", "field"]}, "tensor": {"enum": ["scalar", "array"]}}}}
+  ],
+  "$defs": {
+    "interval": {
+      "type": "array",
+      "prefixItems": [{"type": ["number", "null"]}, {"type": ["number", "null"]}],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "category": {
+      "type": "object",
+      "required": ["value", "name"],
+      "properties": {
+        "value": {"type": "integer"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "direction": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+        "color": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 3, "maxItems": 4},
+        "family": {"type": "string"},
+        "aliases": {"type": "array", "items": {"type": "string"}},
+        "description": {"type": "string"}
+      },
+      "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    }
+  }
+}

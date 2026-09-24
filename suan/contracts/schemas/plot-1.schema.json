@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:plot-1",
+  "title": "STK plot spec v1 (stk.plot/1)",
+  "description": "Declarative 2D plot rendered by matplotlib (Figure + FigureCanvasAgg, never pyplot) to PNG/SVG/PDF plus the plotted data as JSON. Marks bind columns of named tables (embedded under 'tables' when the spec travels with its data) or live hub metric series.",
+  "type": "object",
+  "required": ["schema", "axes", "marks"],
+  "properties": {
+    "schema": {"const": "stk.plot/1"},
+    "figure": {
+      "type": "object",
+      "properties": {
+        "size_in": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 100}, "minItems": 2, "maxItems": 2},
+        "dpi": {"type": "integer", "minimum": 30, "maximum": 1200},
+        "style": {"enum": ["stk-paper", "stk-screen"]},
+        "title": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "axes": {"type": "array", "items": {"$ref": "#/$defs/axes"}, "minItems": 1, "maxItems": 16},
+    "marks": {"type": "array", "items": {"$ref": "#/$defs/mark"}, "minItems": 1, "maxItems": 64},
+    "tables": {"type": "object", "additionalProperties": {"$ref": "#/$defs/table"}}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "axis": {
+      "type": "object",
+      "properties": {
+        "label": {"type": ["string", "null"]},
+        "unit": {"type": ["string", "null"]},
+        "scale": {"enum": ["linear", "log", "symlog"]},
+        "range": {"type": "array", "prefixItems": [{"type": ["number", "null"]}, {"type": ["number", "null"]}], "minItems": 2, "maxItems": 2},
+        "ticks": {"enum": ["auto", "pi"]}
+      },
+      "additionalProperties": false
+    },
+    "axes": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}$"},
+        "grid": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 2, "maxItems": 2},
+        "title": {"type": ["string", "null"]},
+        "x": {"$ref": "#/$defs/axis"},
+        "y": {"$ref": "#/$defs/axis"},
+        "y2": {"$ref": "#/$defs/axis"},
+        "legend": {
+          "oneOf": [
+            {"const": false},
+            {"type": "object", "properties": {"loc": {"type": "string"}}, "additionalProperties": false}
+          ]
+        },
+        "grid_lines": {"type": "boolean"},
+        "aspect": {"enum": ["auto", "equal"]},
+        "stats": {"type": "boolean", "description": "Show a min/max/mean box for the plotted columns (SimViz column stats)."}
+      },
+      "additionalProperties": false
+    },
+    "filter": {
+      "type": "object",
+      "required": ["column", "op", "value"],
+      "properties": {
+        "column": {"type": "string"},
+        "op": {"enum": ["==", "!=", ">", ">=", "<", "<="]},
+        "value": {"type": ["number", "string"]}
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "table": {"type": "string"},
+        "x": {"type": "string"},
+        "y": {"type": "string"},
+        "z": {"type": "string"},
+        "u": {"type": "string"},
+        "v": {"type": "string"},
+        "yerr": {"type": "string"},
+        "y2": {"type": "string"},
+        "filter": {"type": "array", "items": {"$ref": "#/$defs/filter"}},
+        "stride": {"type": "integer", "minimum": 1},
+        "last_n": {"type": "integer", "minimum": 1},
+        "metric": {
+          "type": "object",
+          "required": ["names"],
+          "properties": {
+            "run": {"type": "object"},
+            "names": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "style": {
+      "type": "object",
+      "properties": {
+        "color": {"type": "string", "description": "Matplotlib color: 'C0'..'C9', '#rrggbb' or a named color."},
+        "linestyle": {"enum": ["-", "--", "-.", ":", "none"]},
+        "linewidth": {"type": "number", "minimum": 0},
+        "marker": {"type": ["string", "null"]},
+        "markersize": {"type": "number", "minimum": 0},
+        "alpha": {"type": "number", "minimum": 0, "maximum": 1},
+        "label": {"type": ["string", "null"]},
+        "cmap": {"type": "string"},
+        "colors": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "mark": {
+      "type": "object",
+      "required": ["type", "axes", "data"],
+      "properties": {
+        "type": {"enum": ["line", "scatter", "bar", "hist", "heatmap", "quiver", "errorbar", "fill_between"]},
+        "axes": {"type": "string"},
+        "y_axis": {"enum": ["y", "y2"]},
+        "data": {"$ref": "#/$defs/data"},
+        "style": {"$ref": "#/$defs/style"},
+        "bins": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "range": {"type": "array", "prefixItems": [{"type": ["number", "null"]}, {"type": ["number", "null"]}], "minItems": 2, "maxItems": 2},
+        "density": {"type": "boolean"},
+        "log": {"type": "boolean"},
+        "categorical": {"type": "boolean"},
+        "colorbar": {"type": "object", "properties": {"label": {"type": ["string", "null"]}}, "additionalProperties": false},
+        "extent": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4}
+      },
+      "additionalProperties": false
+    },
+    "table": {
+      "type": "object",
+      "required": ["columns"],
+      "properties": {
+        "columns": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {"oneOf": [{"type": "number"}, {"type": "string"}, {"type": "null"}, {"type": "array"}]}
+          }
+        },
+        "units": {"type": "object", "additionalProperties": {"type": "string"}},
+        "shape": {"type": "array", "items": {"type": "integer", "minimum": 0}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

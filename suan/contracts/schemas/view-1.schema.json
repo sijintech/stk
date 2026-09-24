@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:view-1",
+  "title": "STK view document v1 (stk.view/1)",
+  "description": "Camera, viewport, background, lighting and overlay placement for one view (SimViz's 'status document', generalized). Camera values are float64 in physical coordinates of 'camera.frame' (not relative to a payload render_origin). See docs/specs/stk-graph-v1.md.",
+  "type": "object",
+  "required": ["schema"],
+  "properties": {
+    "schema": {"const": "stk.view/1"},
+    "camera": {"$ref": "#/$defs/camera"},
+    "preset": {"$ref": "#/$defs/preset"},
+    "viewport": {
+      "type": "object",
+      "properties": {
+        "width": {"type": "integer", "minimum": 16, "maximum": 16384},
+        "height": {"type": "integer", "minimum": 16, "maximum": 16384},
+        "magnification": {"type": "integer", "minimum": 1, "maximum": 8},
+        "lock_aspect": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "background": {
+      "type": "object",
+      "properties": {
+        "type": {"enum": ["solid", "gradient", "transparent"]},
+        "color": {"$ref": "#/$defs/rgb"},
+        "color2": {"$ref": "#/$defs/rgb"}
+      },
+      "additionalProperties": false
+    },
+    "lighting": {
+      "type": "object",
+      "properties": {
+        "preset": {"enum": ["three_point", "headlight", "none"]},
+        "intensity": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "render": {
+      "type": "object",
+      "properties": {
+        "engine": {"enum": ["interactive", "vtk", "eevee", "cycles"]},
+        "samples": {"type": "integer", "minimum": 1},
+        "transparent": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "overlays": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {
+          "layer": {"type": "string"},
+          "anchor": {"$ref": "#/$defs/anchor"},
+          "offset_px": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+          "size_px": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 2, "maxItems": 2}
+        },
+        "additionalProperties": false
+      }
+    },
+    "visibility": {"type": "object", "additionalProperties": {"type": "boolean"}},
+    "time": {
+      "type": ["object", "null"],
+      "properties": {"step": {"type": ["integer", "null"]}, "time": {"type": ["number", "null"]}},
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "vec3": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+    "rgb": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 3, "maxItems": 4},
+    "preset": {"enum": ["iso", "+x", "-x", "+y", "-y", "+z", "-z", null]},
+    "anchor": {"enum": ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right"]},
+    "camera": {
+      "type": "object",
+      "properties": {
+        "projection": {"enum": ["perspective", "parallel"]},
+        "frame": {"type": "string"},
+        "position": {"$ref": "#/$defs/vec3"},
+        "focal_point": {"$ref": "#/$defs/vec3"},
+        "view_up": {"$ref": "#/$defs/vec3"},
+        "view_angle_deg": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 180},
+        "parallel_scale": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "zoom": {"type": "number", "exclusiveMinimum": 0},
+        "preset": {"$ref": "#/$defs/preset"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

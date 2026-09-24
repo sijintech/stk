@@ -1,0 +1,481 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:payload-2",
+  "title": "STK render payload v2 (stk.payload/2)",
+  "description": "glTF-style JSON manifest plus content-addressed binary buffers. One payload feeds every renderer (web vtk.js, offscreen VTK, Blender). Positions are float32 relative to the float64 render_origin; colormaps travel as 256-entry RGBA8 lookup tables; attribute values are raw and clients map them to colours. Single-file form: .stkp. See docs/specs/stk-render-payload-v2.md.",
+  "type": "object",
+  "required": ["schema", "render_origin", "length_unit", "buffers", "accessors", "layers"],
+  "properties": {
+    "schema": {"const": "stk.payload/2"},
+    "source": {
+      "type": "object",
+      "properties": {
+        "graph": {"type": ["string", "null"]},
+        "graph_hash": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "view": {"type": ["string", "null"]},
+        "time": {
+          "type": ["object", "null"],
+          "properties": {"step": {"type": ["integer", "null"]}, "time": {"type": ["number", "null"]}},
+          "additionalProperties": false
+        },
+        "profile": {"$ref": "#/$defs/profile"},
+        "reduced": {"type": "boolean"},
+        "generated_at": {"type": "string"},
+        "generator": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "render_origin": {"$ref": "#/$defs/vec3"},
+    "length_unit": {"type": "string", "minLength": 1},
+    "bounds": {"$ref": "#/$defs/bounds"},
+    "buffers": {"type": "array", "items": {"$ref": "#/$defs/buffer"}},
+    "accessors": {"type": "array", "items": {"$ref": "#/$defs/accessor"}},
+    "colormaps": {"type": "array", "items": {"$ref": "#/$defs/colormap"}},
+    "layers": {"type": "array", "items": {"$ref": "#/$defs/layer"}},
+    "view": {"$ref": "urn:stk:schema:view-1"},
+    "stats": {
+      "type": "object",
+      "properties": {
+        "triangles": {"type": "integer", "minimum": 0},
+        "instances": {"type": "integer", "minimum": 0},
+        "points": {"type": "integer", "minimum": 0},
+        "line_segments": {"type": "integer", "minimum": 0},
+        "voxels": {"type": "integer", "minimum": 0},
+        "texels": {"type": "integer", "minimum": 0},
+        "bytes": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "profile": {"$ref": "#/$defs/profile"},
+        "limits": {
+          "type": "object",
+          "properties": {
+            "triangles": {"type": "integer", "minimum": 0},
+            "instances": {"type": "integer", "minimum": 0},
+            "points": {"type": "integer", "minimum": 0},
+            "voxels": {"type": "integer", "minimum": 0},
+            "bytes": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "reductions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["layer", "reason"],
+            "properties": {"layer": {"type": "string"}, "reason": {"type": "string"}, "from": {"type": "integer"}, "to": {"type": "integer"}},
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "extensions": {"type": "object"}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "vec3": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+    "rgb": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 3, "maxItems": 4},
+    "interval": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2},
+    "bounds": {"type": "array", "prefixItems": [{"$ref": "#/$defs/vec3"}, {"$ref": "#/$defs/vec3"}], "minItems": 2, "maxItems": 2},
+    "profile": {"enum": ["phone", "web", "desktop"]},
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$"},
+    "anchor": {"enum": ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right"]},
+    "buffer": {
+      "type": "object",
+      "required": ["id", "uri", "byteLength", "sha256"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "uri": {"type": "string", "pattern": "^(sha256:[0-9a-f]{64}|#[1-9][0-9]*)$", "description": "'sha256:<hex>' (blob store / directory form) or '#<k>' (k-th chunk of a .stkp file, chunk 0 being the JSON manifest)."},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "byteLength": {"type": "integer", "minimum": 0},
+        "encoding": {"const": "raw"}
+      },
+      "additionalProperties": false
+    },
+    "accessor": {
+      "type": "object",
+      "required": ["id", "buffer", "byteOffset", "count", "type", "components"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "buffer": {"$ref": "#/$defs/id"},
+        "byteOffset": {"type": "integer", "minimum": 0},
+        "count": {"type": "integer", "minimum": 0, "description": "Number of elements (tuples)."},
+        "type": {"enum": ["i8", "u8", "i16", "u16", "i32", "u32", "f32", "f64"]},
+        "components": {"type": "integer", "minimum": 1, "maximum": 16},
+        "normalized": {"type": "boolean", "description": "Integer values map to [0,1] (unsigned) or [-1,1] (signed)."},
+        "min": {"type": "array", "items": {"type": "number"}},
+        "max": {"type": "array", "items": {"type": "number"}}
+      },
+      "additionalProperties": false
+    },
+    "category_entry": {
+      "type": "object",
+      "required": ["value", "name", "color"],
+      "properties": {
+        "value": {"type": "integer"},
+        "name": {"type": "string"},
+        "color": {"$ref": "#/$defs/rgb"},
+        "family": {"type": "string"},
+        "direction": {"$ref": "#/$defs/vec3"},
+        "aliases": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "colormap": {
+      "type": "object",
+      "required": ["id", "name", "categorical"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "name": {"type": "string"},
+        "categorical": {"type": "boolean"},
+        "lut": {"$ref": "#/$defs/id", "description": "Accessor of 'size' RGBA8 entries (type u8, components 4)."},
+        "size": {"const": 256},
+        "entries": {"type": "array", "items": {"$ref": "#/$defs/category_entry"}},
+        "nan_color": {"$ref": "#/$defs/rgb"},
+        "below_color": {"$ref": "#/$defs/rgb"},
+        "above_color": {"$ref": "#/$defs/rgb"},
+        "unknown_color": {"$ref": "#/$defs/rgb", "description": "Categorical: colour for values without an entry."}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {"if": {"properties": {"categorical": {"const": true}}, "required": ["categorical"]},
+         "then": {"required": ["entries"]},
+         "else": {"required": ["lut", "size"]}}
+      ]
+    },
+    "attribute": {
+      "type": "object",
+      "required": ["accessor"],
+      "properties": {
+        "accessor": {"$ref": "#/$defs/id"},
+        "association": {"enum": ["point", "cell"]},
+        "categorical": {"type": "boolean"},
+        "range": {"$ref": "#/$defs/interval"},
+        "unit": {"type": "string"},
+        "quantity": {"type": "string"},
+        "component_names": {"type": "array", "items": {"type": "string"}},
+        "palette": {"type": "string", "description": "Categorical: id of the colormaps[] entry describing the categories."}
+      },
+      "additionalProperties": false
+    },
+    "attributes": {"type": "object", "propertyNames": {"pattern": "^[^/.]{1,128}$"}, "additionalProperties": {"$ref": "#/$defs/attribute"}},
+    "color_spec": {
+      "type": "object",
+      "required": ["by"],
+      "properties": {
+        "by": {"enum": ["solid", "attribute", "direction"]},
+        "solid": {"$ref": "#/$defs/rgb"},
+        "attribute": {"type": "string"},
+        "component": {"oneOf": [{"type": "integer", "minimum": 0}, {"const": "magnitude"}, {"type": "null"}]},
+        "colormap": {"type": "string", "description": "Id of a colormaps[] entry, or the built-in function colormap 'stk:orientation-hsl' (by: direction)."},
+        "range": {"$ref": "#/$defs/interval"},
+        "interpolate": {"enum": ["linear", "nearest"]},
+        "max_magnitude": {"type": "number", "exclusiveMinimum": 0, "description": "stk:orientation-hsl: saturation = |v| / max_magnitude."},
+        "lightness_range": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 2, "maxItems": 2}
+      },
+      "additionalProperties": false
+    },
+    "pick": {
+      "type": "object",
+      "properties": {"probe": {"type": "object", "properties": {"node": {"type": "string"}, "dataset": {"type": "string"}}, "additionalProperties": false}},
+      "additionalProperties": false
+    },
+    "layer_common": {
+      "type": "object",
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "node": {"type": ["string", "null"]},
+        "name": {"type": ["string", "null"]},
+        "visible": {"type": "boolean"},
+        "origin": {"$ref": "#/$defs/vec3", "description": "Absolute float64 origin of this layer's positions (multi-scale); default render_origin."},
+        "pick": {"$ref": "#/$defs/pick"},
+        "time": {"type": ["object", "null"]}
+      }
+    },
+    "surface_appearance": {
+      "type": "object",
+      "properties": {
+        "color": {"$ref": "#/$defs/color_spec"},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "shading": {"enum": ["smooth", "flat"]},
+        "lighting": {"type": "boolean"},
+        "edges": {
+          "type": "object",
+          "properties": {"visible": {"type": "boolean"}, "color": {"$ref": "#/$defs/rgb"}, "width_px": {"type": "number", "minimum": 0}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "triangles": {
+      "type": "object",
+      "required": ["id", "type", "positions", "indices"],
+      "allOf": [{"$ref": "#/$defs/layer_common"}],
+      "properties": {
+        "id": true, "node": true, "name": true, "visible": true, "origin": true, "pick": true, "time": true,
+        "type": {"const": "triangles"},
+        "positions": {"$ref": "#/$defs/id"},
+        "normals": {"$ref": "#/$defs/id"},
+        "indices": {"$ref": "#/$defs/id"},
+        "attributes": {"$ref": "#/$defs/attributes"},
+        "appearance": {"$ref": "#/$defs/surface_appearance"},
+        "lods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["level", "positions", "indices"],
+            "properties": {
+              "level": {"type": "integer", "minimum": 1},
+              "positions": {"$ref": "#/$defs/id"},
+              "normals": {"$ref": "#/$defs/id"},
+              "indices": {"$ref": "#/$defs/id"},
+              "attributes": {"$ref": "#/$defs/attributes"}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "slice_image": {
+      "type": "object",
+      "required": ["id", "type", "plane", "size", "attributes"],
+      "allOf": [{"$ref": "#/$defs/layer_common"}],
+      "properties": {
+        "id": true, "node": true, "name": true, "visible": true, "origin": true, "pick": true, "time": true,
+        "type": {"const": "slice_image"},
+        "plane": {
+          "type": "object",
+          "required": ["origin", "u", "v"],
+          "properties": {
+            "origin": {"$ref": "#/$defs/vec3", "description": "Position of sample (0,0), relative to the layer origin."},
+            "u": {"$ref": "#/$defs/vec3", "description": "Vector from sample (0,0) to sample (w-1,0)."},
+            "v": {"$ref": "#/$defs/vec3", "description": "Vector from sample (0,0) to sample (0,h-1)."}
+          },
+          "additionalProperties": false
+        },
+        "size": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 2, "maxItems": 2, "description": "[w, h] samples; attribute accessors hold w*h tuples, u index fastest."},
+        "attributes": {"$ref": "#/$defs/attributes"},
+        "appearance": {
+          "type": "object",
+          "properties": {
+            "color": {"$ref": "#/$defs/color_spec"},
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+            "lighting": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "lines": {
+      "type": "object",
+      "required": ["id", "type", "positions", "mode", "indices"],
+      "allOf": [{"$ref": "#/$defs/layer_common"}],
+      "properties": {
+        "id": true, "node": true, "name": true, "visible": true, "origin": true, "pick": true, "time": true,
+        "type": {"const": "lines"},
+        "positions": {"$ref": "#/$defs/id"},
+        "mode": {"enum": ["segments", "polylines"]},
+        "indices": {"$ref": "#/$defs/id", "description": "segments: point index pairs; polylines: connectivity."},
+        "offsets": {"$ref": "#/$defs/id", "description": "polylines only: n+1 offsets into indices."},
+        "attributes": {"$ref": "#/$defs/attributes"},
+        "appearance": {
+          "type": "object",
+          "properties": {
+            "color": {"$ref": "#/$defs/color_spec"},
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+            "width_px": {"type": "number", "minimum": 0},
+            "lighting": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "if": {"properties": {"mode": {"const": "polylines"}}, "required": ["mode"]},
+      "then": {"required": ["offsets"]}
+    },
+    "progressive": {
+      "type": "object",
+      "properties": {"shuffled": {"type": "boolean"}, "seed": {"type": "integer"}},
+      "additionalProperties": false
+    },
+    "points": {
+      "type": "object",
+      "required": ["id", "type", "positions"],
+      "allOf": [{"$ref": "#/$defs/layer_common"}],
+      "properties": {
+        "id": true, "node": true, "name": true, "visible": true, "origin": true, "pick": true, "time": true,
+        "type": {"const": "points"},
+        "positions": {"$ref": "#/$defs/id"},
+        "radii": {"$ref": "#/$defs/id"},
+        "attributes": {"$ref": "#/$defs/attributes"},
+        "appearance": {
+          "type": "object",
+          "properties": {
+            "color": {"$ref": "#/$defs/color_spec"},
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+            "render_as": {"enum": ["points", "spheres"]},
+            "size_px": {"type": "number", "minimum": 0},
+            "radius": {"type": "number", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "progressive": {"$ref": "#/$defs/progressive"}
+      },
+      "additionalProperties": false
+    },
+    "instances": {
+      "type": "object",
+      "required": ["id", "type", "positions", "directions", "glyph"],
+      "allOf": [{"$ref": "#/$defs/layer_common"}],
+      "properties": {
+        "id": true, "node": true, "name": true, "visible": true, "origin": true, "pick": true, "time": true,
+        "type": {"const": "instances"},
+        "positions": {"$ref": "#/$defs/id"},
+        "directions": {"$ref": "#/$defs/id", "description": "f32 x3, raw vectors (not normalized)."},
+        "scales": {"$ref": "#/$defs/id", "description": "Optional f32 x1 per-instance scale; overrides appearance.scale.by."},
+        "attributes": {"$ref": "#/$defs/attributes"},
+        "glyph": {
+          "type": "object",
+          "required": ["shape"],
+          "properties": {
+            "shape": {"enum": ["arrow", "cone", "sphere", "line", "cube"]},
+            "resolution": {"type": "integer", "minimum": 3, "maximum": 64},
+            "center": {"type": "boolean", "description": "Translate the glyph by -0.5 along its axis so it is centred on the position."}
+          },
+          "additionalProperties": false
+        },
+        "appearance": {
+          "type": "object",
+          "properties": {
+            "color": {"$ref": "#/$defs/color_spec"},
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+            "scale": {
+              "type": "object",
+              "required": ["by", "factor"],
+              "properties": {
+                "by": {"enum": ["uniform", "magnitude", "attribute"]},
+                "attribute": {"type": "string"},
+                "factor": {"type": "number", "exclusiveMinimum": 0}
+              },
+              "additionalProperties": false
+            },
+            "lighting": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        },
+        "progressive": {"$ref": "#/$defs/progressive"}
+      },
+      "additionalProperties": false
+    },
+    "volume": {
+      "type": "object",
+      "required": ["id", "type", "grid", "data", "value_range", "transfer_function"],
+      "allOf": [{"$ref": "#/$defs/layer_common"}],
+      "properties": {
+        "id": true, "node": true, "name": true, "visible": true, "origin": true, "pick": true, "time": true,
+        "type": {"const": "volume"},
+        "grid": {
+          "type": "object",
+          "required": ["dimensions", "origin", "spacing"],
+          "properties": {
+            "dimensions": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 3, "maxItems": 3},
+            "origin": {"$ref": "#/$defs/vec3", "description": "Relative to the layer origin."},
+            "spacing": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 3, "maxItems": 3},
+            "direction": {"type": "array", "items": {"type": "number"}, "minItems": 9, "maxItems": 9}
+          },
+          "additionalProperties": false
+        },
+        "data": {"$ref": "#/$defs/id", "description": "Accessor with nx*ny*nz scalars, x fastest, then y, then z."},
+        "value_scale": {"type": "number"},
+        "value_offset": {"type": "number"},
+        "value_range": {"$ref": "#/$defs/interval"},
+        "unit": {"type": "string"},
+        "quantity": {"type": "string"},
+        "transfer_function": {
+          "type": "object",
+          "required": ["colormap", "range", "opacity"],
+          "properties": {
+            "colormap": {"type": "string"},
+            "range": {"$ref": "#/$defs/interval"},
+            "opacity": {"type": "array", "items": {"$ref": "#/$defs/interval"}, "minItems": 2, "description": "Piecewise-linear [value, alpha] points in physical values."}
+          },
+          "additionalProperties": false
+        },
+        "sampling": {"enum": ["linear", "nearest"]},
+        "shade": {"type": "boolean"},
+        "lods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["level", "data", "dimensions", "spacing"],
+            "properties": {
+              "level": {"type": "integer", "minimum": 1},
+              "data": {"$ref": "#/$defs/id"},
+              "dimensions": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 3, "maxItems": 3},
+              "spacing": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 3, "maxItems": 3}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "overlay": {
+      "type": "object",
+      "required": ["id", "type", "kind"],
+      "properties": {
+        "id": true, "node": true, "name": true, "visible": true, "origin": true, "pick": true, "time": true,
+        "type": {"const": "overlay"},
+        "kind": {"enum": ["scalar_bar", "legend", "orientation_legend", "text", "axes_triad"]},
+        "anchor": {"$ref": "#/$defs/anchor"},
+        "offset_px": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+        "size_px": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 2, "maxItems": 2},
+        "title": {"type": ["string", "null"]},
+        "source_layer": {"type": ["string", "null"], "description": "Layer whose colouring this overlay explains."},
+        "colormap": {"type": "string"},
+        "range": {"$ref": "#/$defs/interval"},
+        "unit": {"type": ["string", "null"]},
+        "orientation": {"enum": ["vertical", "horizontal"]},
+        "label_count": {"type": "integer", "minimum": 2, "maximum": 20},
+        "format": {"type": "string"},
+        "values": {"type": "array", "items": {"type": "integer"}, "description": "legend: category values to list (default: all entries)."},
+        "columns": {"type": "integer", "minimum": 1, "maximum": 8},
+        "lightness_range": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 2, "maxItems": 2},
+        "text": {"type": "string"},
+        "font_size_px": {"type": "number", "exclusiveMinimum": 0},
+        "color": {"$ref": "#/$defs/rgb"},
+        "labels": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3}
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {"$ref": "#/$defs/layer_common"},
+        {"if": {"properties": {"kind": {"const": "scalar_bar"}}, "required": ["kind"]}, "then": {"required": ["colormap", "range"]}},
+        {"if": {"properties": {"kind": {"const": "legend"}}, "required": ["kind"]}, "then": {"required": ["colormap"]}},
+        {"if": {"properties": {"kind": {"const": "text"}}, "required": ["kind"]}, "then": {"required": ["text"]}}
+      ]
+    },
+    "layer": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "type": {"enum": ["triangles", "slice_image", "lines", "points", "instances", "volume", "overlay"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"const": "triangles"}}, "required": ["type"]}, "then": {"$ref": "#/$defs/triangles"}},
+        {"if": {"properties": {"type": {"const": "slice_image"}}, "required": ["type"]}, "then": {"$ref": "#/$defs/slice_image"}},
+        {"if": {"properties": {"type": {"const": "lines"}}, "required": ["type"]}, "then": {"$ref": "#/$defs/lines"}},
+        {"if": {"properties": {"type": {"const": "points"}}, "required": ["type"]}, "then": {"$ref": "#/$defs/points"}},
+        {"if": {"properties": {"type": {"const": "instances"}}, "required": ["type"]}, "then": {"$ref": "#/$defs/instances"}},
+        {"if": {"properties": {"type": {"const": "volume"}}, "required": ["type"]}, "then": {"$ref": "#/$defs/volume"}},
+        {"if": {"properties": {"type": {"const": "overlay"}}, "required": ["type"]}, "then": {"$ref": "#/$defs/overlay"}}
+      ]
+    }
+  }
+}
