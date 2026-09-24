@@ -36,7 +36,13 @@ def read_field(filename):
         data = values.reshape((shape[2], shape[1], shape[0], components)).transpose(2, 1, 0, 3)
     else:
         with open(path, encoding="utf-8") as stream:
-            dimensions = tuple(map(int, stream.readline().split()))
+            first = stream.readline()
+            try:
+                # MuPRO's library writer appends a Fortran comment: 'nx ny nz ! comment: nx ny nz'.
+                dimensions = tuple(map(int, first.split("!", 1)[0].split()))
+            except ValueError:
+                raise ValueError("Not a regular-grid field DAT: the first line must hold 3–5 integer dimensions "
+                                 "(tables such as energy_out.dat are time series)") from None
             if not 3 <= len(dimensions) <= 5 or any(n < 1 for n in dimensions):
                 raise ValueError("DAT header must contain 3–5 positive dimensions")
             rows = np.loadtxt(stream, ndmin=2)

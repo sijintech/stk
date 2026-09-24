@@ -20,6 +20,8 @@ import uuid
 from suan.control.agent import endpoint
 from suan.runtime.common import atomic_json, instance_lock, read_json
 
+DEFAULT_CONTROL_URL = "http://127.0.0.1:8790"
+
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
@@ -91,7 +93,7 @@ class Bridge:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         (self.root / "commands").mkdir(exist_ok=True, mode=0o700)
         (self.root / "receipts").mkdir(exist_ok=True, mode=0o700)
-        self.config = read_json(self.root / "client.json", {"url": "http://127.0.0.1:8790", "token": ""})
+        self.config = {"url": DEFAULT_CONTROL_URL, "token": "", **read_json(self.root / "client.json", {})}
         self.connection = connection or ControlConnection(self.config["url"], self.config.get("token", ""))
         self.state = read_json(self.root / "state.json", {})
         self.state.setdefault("selection", {"node_id": "", "workspace_id": "", "task_id": "", "path": ""})
@@ -151,7 +153,10 @@ class Bridge:
             result = connection.request("POST", "pairings/claim", {"code": p["code"], "name": "STK Blender 工作台"})
             if result["role"] != "client":
                 raise ValueError("Use a client pairing code")
-            self.config = {"url": connection.url, "token": result["token"]}
+            # As in the launcher, the template belongs to the service it was chosen for.
+            same = self.config["url"] == connection.url
+            self.config = {**({"template": self.config["template"]} if same and self.config.get("template") else {}),
+                           "url": connection.url, "token": result["token"]}
             atomic_json(self.root / "client.json", self.config)
             self.connection = ControlConnection(connection.url, result["token"])
             self.state["event_cursor"] = 0
@@ -188,6 +193,10 @@ class Bridge:
         elif kind == "refresh":
             self.last_refresh = 0
         else:
+            if kind == "task.submit" and "template" in p and "spec" not in p and self.config.get("template"):
+                # The native run button sends demo-field; run the workbench's configured template.
+                # The receipt keeps the original command, so a replay stays idempotent.
+                p = {**p, "template": self.config["template"]}
             body = {"id": identity, "node_id": command.get("node_id", selection["node_id"]), "kind": kind, "payload": p}
             if not body["node_id"]:
                 raise ValueError("请先选择执行节点")
