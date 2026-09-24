@@ -14,6 +14,10 @@ Outside an allocation, Hydra listens on 0.0.0.0, so local mpiexec is refused
 unless the operator sets STK_MUPRO_ALLOW_LOCAL_MPI=1 in the Runtime environment.
 That guards against accidental local runs; it is not an access control, since
 Runtime clients can run any command.
+
+Under the STK Runtime ($STK_MONITOR_PATH set) the launcher also writes monitoring events
+while the solver runs (suan/mupro/monitor.py, adapt mode); outcomes and exit codes are
+the same either way.
 """
 
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -31,6 +35,7 @@ try:
 except ModuleNotFoundError:  # Python < 3.11
     import tomli as tomllib
 
+from suan.monitor.events import ENV_PATH as MONITOR_ENV
 from suan.runtime.common import atomic_json, now, sha256
 from suan.runtime.models import relative_path
 from .spec import LAUNCHERS
@@ -379,7 +384,28 @@ def _stage_example(prefix, folder):
         raise MuproError(f"Cannot stage the SDK example case: {exc}") from exc
 
 
+def _run_solver(command, folder, env, monitor):
+    """Run the solver to completion while the monitor tails its outputs; returns its exit code.
+
+    Like subprocess.run, the child is killed if anything interrupts the wait.
+    """
+    try:
+        process = subprocess.Popen(command, cwd=folder, env=env, stdin=subprocess.DEVNULL)
+    except OSError as exc:
+        raise MuproError(f"Cannot start {command[0]}: {exc}", "launch_failed") from exc
+    try:
+        monitor.watch()
+        return process.wait()
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        monitor.stop(process.returncode)
+
+
 def run(args):
+    from .monitor import MuferroMonitor
     work = Path.cwd().resolve()
     record = {"schema_version": 1, "app": "muFerro", "state": "running", "classification": None, "reason": "",
               "case_dir": args.case_dir, "case": None,
@@ -388,10 +414,14 @@ def run(args):
               "environment": {key: None for key in ENVIRONMENT}, "exit_code": None,
               "started_at": now(), "finished_at": None,
               "verification": {"verifier": VERIFIER, "status": "not_run", "checks": []}, "qoi": None, "frames": []}
+    # Adapt mode (docs/specs/stk-events-v1.md): this launcher is the only writer of
+    # $STK_MONITOR_PATH; a no-op outside the STK Runtime. It never changes the outcome.
+    monitor = MuferroMonitor()
     try:
         case_dir, folder = _case_folder(work, args.case_dir)
         record["case_dir"] = case_dir
         record["env_scripts"], env = _prepare_env(args)
+        env.pop(MONITOR_ENV, None)  # one writer per events file: the solver never gets the path
         # MuPRO keeps the licence directory in a character(len=256); its contents are never read here.
         if len(os.fsencode(env.get("MUPROROOT", ""))) > 256:
             raise MuproError("MUPROROOT must be at most 256 characters")
@@ -414,13 +444,10 @@ def run(args):
         record.update(command=command, program={"path": str(program), "sha256": digest},
                       environment={key: env.get(key) for key in ENVIRONMENT})
         atomic_json(work / RESULT, record)
-        try:
-            completed = subprocess.run(command, cwd=folder, env=env, stdin=subprocess.DEVNULL)
-        except OSError as exc:
-            raise MuproError(f"Cannot start {command[0]}: {exc}", "launch_failed") from exc
-        record["exit_code"] = completed.returncode
-        if completed.returncode:
-            raise MuproError(f"muFerro exited with code {completed.returncode}; inspect stdout.log and stderr.log",
+        monitor.started(folder, case_dir, case, args.ranks)
+        record["exit_code"] = _run_solver(command, folder, env, monitor)
+        if record["exit_code"]:
+            raise MuproError(f"muFerro exited with code {record['exit_code']}; inspect stdout.log and stderr.log",
                              "solver_failed")
         record.update(verify_run(work, case_dir))
         record["state"] = "succeeded" if record["verification"]["status"] == "passed" else "failed"
@@ -430,6 +457,7 @@ def run(args):
         record.update(state="failed", classification="configuration", reason=f"{type(exc).__name__}: {exc}")
     record["finished_at"] = now()
     atomic_json(work / RESULT, record)
+    monitor.finish(record)
     if record["state"] == "succeeded":
         print(f"MuPRO muFerro succeeded: verification passed, total_energy {record['qoi']['total_energy']} "
               f"at step {record['qoi']['step']}")

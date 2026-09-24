@@ -84,6 +84,13 @@ class RuntimeClient:
         response["bytes"] = base64.b64decode(response["data"])
         return response
 
+    def events(self, task_id, offset=0, limit=CHUNK_SIZE):
+        """Monitoring events from byte ``offset``: {events, offset, next_offset, size, terminal, invalid}.
+
+        Needs a Runtime whose health lists the "events" feature.
+        """
+        return self.request("GET", f"tasks/{task_id}/events?" + urlencode({"offset": offset, "limit": limit}))
+
     def artifacts(self, task_id):
         return self.request("GET", f"tasks/{task_id}/artifacts")
 
