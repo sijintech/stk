@@ -67,7 +67,7 @@ mcp = ["mcp", "numpy", "matplotlib"]
 build = ["pyinstaller", "pyinstaller-hooks-contrib"]
 test = ["pytest"]
 control = ["fastapi", "uvicorn", "httpx", "websockets"]
-visualization = ["numpy", "vtk"]
+visualization = ["numpy", "vtk", "h5py"]
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]
@@ -108,6 +108,8 @@ testpaths = ["tests"]
 markers = [
     "desktop: requires PySide6/VTK and an offscreen Qt platform",
     "server: exercises the Linux-only STK server Runtime (API, supervisor, workers, schedulers)",
+    "render: needs offscreen OpenGL (EGL or OSMesa); skipped unless `python -m suan.render.offscreen --probe` succeeds in a subprocess",
+    "perf: performance targets measured on the reference host; excluded from default CI",
 ]
 
 # PyInstaller配置

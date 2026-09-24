@@ -31,8 +31,9 @@ def load_plugins():
 load_plugins()
 from suan.runtime.cli import server, jobs, workspaces, connect
 from suan.mupro.cli import mupro
+from suan.graph.cli import graph
 
-for command in (server, jobs, workspaces, connect, mupro):
+for command in (server, jobs, workspaces, connect, mupro, graph):
     cli.add_command(command)
 
 

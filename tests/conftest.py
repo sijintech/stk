@@ -22,6 +22,42 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+@pytest.fixture(autouse=True, scope='session')
+def _private_graph_cache(tmp_path_factory):
+    """`suan graph run` defaults to the user cache directory; tests never write there."""
+    previous = os.environ.get('STK_GRAPH_CACHE')
+    os.environ['STK_GRAPH_CACHE'] = str(tmp_path_factory.mktemp('stk-graph-cache'))
+    yield
+    if previous is None:
+        os.environ.pop('STK_GRAPH_CACHE', None)
+    else:
+        os.environ['STK_GRAPH_CACHE'] = previous
+
+
+_RENDER_PROBE = {}
+
+
+def render_probe():
+    """Offscreen GL capability, probed once per session in a child process (VTK aborts without EGL/OSMesa)."""
+    if not _RENDER_PROBE:
+        from suan.graph.cli import probe_offscreen
+        _RENDER_PROBE.update(probe_offscreen())
+    return dict(_RENDER_PROBE)
+
+
+def pytest_runtest_setup(item):
+    if item.get_closest_marker('render'):
+        probe = render_probe()
+        if not probe['ok']:
+            pytest.skip(f"offscreen rendering unavailable: {probe['reason']}")
+
+
+@pytest.fixture(scope='session')
+def offscreen_probe():
+    """``{"ok", "missing", "reason", "returncode"}`` of ``python -m suan.render.offscreen --probe``."""
+    return render_probe()
+
+
 @pytest.fixture
 def runtime(tmp_path):
     config = init_config(tmp_path / 'state', tmp_path / 'shared', port=0)
