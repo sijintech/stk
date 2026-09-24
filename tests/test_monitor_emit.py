@@ -68,7 +68,8 @@ def test_events_are_whole_lines_with_increasing_seq(tmp_path, monkeypatch):
         assert mon.verification("stk-mupro-1", "passed")
         assert mon.emit("x.custom", {"k": [1, 2]})
         assert mon.completed(True)
-    assert (os.stat(path).st_mode & 0o777) == 0o600
+    if os.name == "posix":
+        assert (os.stat(path).st_mode & 0o777) == 0o600
     events = lines(path)
     assert [e["seq"] for e in events] == list(range(12))
     assert {e["ts"] for e in events} == {1790000000.5} and {e["src"] for e in events} == {"adapter"}

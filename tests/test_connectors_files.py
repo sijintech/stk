@@ -13,8 +13,8 @@ from suan.connectors.files import LocalFiles, RuntimeFiles, check_path, material
 def tree(tmp_path):
     root = tmp_path / "run"
     (root / "case16").mkdir(parents=True)
-    (root / "case16" / "Polar.00000000.dat").write_text("2 1 1\n")
-    (root / "case16" / "energy_out.dat").write_text("step\n")
+    (root / "case16" / "Polar.00000000.dat").write_bytes(b"2 1 1\n")
+    (root / "case16" / "energy_out.dat").write_bytes(b"step\n")
     (root / "stk-mupro.json").write_text("{}")
     (tmp_path / "secret.txt").write_text("outside")
     return root
@@ -131,7 +131,9 @@ def test_materialize_uses_a_private_directory_and_rehashes_cached_copies(tmp_pat
     path = materialize(StreamOnly(b"abc"), "field.npy")  # no cache_dir: a private per-process directory
     private = path.parents[2]
     assert private.name.startswith("stk-files-") and private.parent == Path(tempfile.gettempdir())
-    assert stat.S_IMODE(private.stat().st_mode) == 0o700 and path.read_bytes() == b"abc"
+    assert path.read_bytes() == b"abc"
+    if os.name == "posix":
+        assert stat.S_IMODE(private.stat().st_mode) == 0o700
     assert materialize(StreamOnly(b"abc"), "other.npy").parents[2] == private
     # A cached copy that no longer matches its sha256 is copied again, never trusted.
     cached = materialize(StreamOnly(b"abc"), "x/field.npy", cache_dir=tmp_path)

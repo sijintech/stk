@@ -60,7 +60,7 @@ def _frame(path, grid, components, step, scalar=False):
                     rows.extend(f"{i:6d}{j:6d}{k:6d}{c:6d} {_es(i + 10*j + 100*k + 1000*c + step)} "
                                 for c in range(1, components + 1))
     header = "".join(f"{n:6d}" for n in (grid if scalar else (*grid, components)))
-    path.write_text("\n".join([header.ljust(len(rows[0])), *rows]) + "\n")
+    path.write_text("\n".join([header.ljust(len(rows[0])), *rows]) + "\n", newline="\n")
 
 
 def write_outputs(case_dir, *, grid=(4, 3, 2), steps=3, interval=2, start=0, mode="ok"):
@@ -94,9 +94,9 @@ def write_outputs(case_dir, *, grid=(4, 3, 2), steps=3, interval=2, start=0, mod
             break  # muFerro stops on a NaN total before that step's progress record (output.f90:187-192).
         progress.append(json.dumps({"step": step, "completed_steps": step - start, "total_steps": steps},
                                    separators=(",", ":")))
-    with open(case_dir / "energy_out.dat", "a") as stream:
+    with open(case_dir / "energy_out.dat", "a", newline="\n") as stream:
         stream.write("".join(line + "\n" for line in energy[0 if header else 1:]))
-    with open(case_dir / "mupro_progress.jsonl", "a") as stream:
+    with open(case_dir / "mupro_progress.jsonl", "a", newline="\n") as stream:
         stream.write("".join(line + "\n" for line in progress))
     if mode in {"ok", "missing_frame"}:
         (case_dir / "mupro_completion.json").write_text(
@@ -214,8 +214,8 @@ def write_domain_run(case_dir, *, grid=(16, 12, 10), steps=2, interval=1, start=
             energy.append(f"kt: {step:6d} energy: " + "".join(_e18(v) for v in values))
             progress.append(json.dumps({"step": step, "completed_steps": step - start, "total_steps": steps},
                                        separators=(",", ":")))
-        (case_dir / "energy_out.dat").write_text("".join(line + "\n" for line in energy))
-        (case_dir / "mupro_progress.jsonl").write_text("".join(line + "\n" for line in progress))
+        (case_dir / "energy_out.dat").write_text("".join(line + "\n" for line in energy), newline="\n")
+        (case_dir / "mupro_progress.jsonl").write_text("".join(line + "\n" for line in progress), newline="\n")
         (case_dir / "mupro_completion.json").write_text(
             f'{{"app":"muFerro","completed_steps":{steps},"final_step":{start + steps}}}\n')
     frames = {}

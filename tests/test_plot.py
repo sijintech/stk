@@ -137,7 +137,8 @@ def test_services_point_mplconfigdir_at_their_cache(tmp_path, monkeypatch):
     monkeypatch.delenv("MPLCONFIGDIR", raising=False)
     path = ensure_mplconfigdir(tmp_path / "graph")
     assert path == tmp_path / "graph" / "matplotlib" and os.environ["MPLCONFIGDIR"] == str(path)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o700
+    if os.name == "posix":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o700
     assert ensure_mplconfigdir(tmp_path / "other") == path  # an existing setting always wins
     monkeypatch.delenv("MPLCONFIGDIR")
     blocker = tmp_path / "file"
