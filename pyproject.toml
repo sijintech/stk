@@ -19,6 +19,8 @@ packages = [
 exclude = ["toolkits/cpp/**", "toolkits/**/tests/**", "toolkits/**/test/**", "**/__pycache__/**", "**/*.pyc"]
 include = [
     { path = "docs/runtime*.md", format = "sdist" },
+    { path = "docs/visualization.md", format = "sdist" },
+    { path = "docs/hub.md", format = "sdist" },
     { path = "docs/specs", format = "sdist" },
     { path = "examples/runtime", format = "sdist" },
     { path = "deploy/systemd", format = "sdist" },

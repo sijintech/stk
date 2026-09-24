@@ -118,3 +118,32 @@ def test_cli_lists_and_exports(tmp_path):
     assert unknown.exit_code != 0 and "Unknown skill" in unknown.output
     with pytest.raises(ValueError):
         export_skills(tmp_path / "y", ["nope"])
+
+
+def test_forced_export_replaces_links_and_files_without_touching_their_targets(tmp_path):
+    from suan.cli.main import cli
+    runner = CliRunner()
+    dest, shared = tmp_path / "skills", tmp_path / "shared-skill"
+    dest.mkdir()
+    shared.mkdir()
+    (shared / "keep.md").write_text("mine")
+    (dest / "stk-monitor").symlink_to(shared, target_is_directory=True)  # e.g. a skill linked from a repo
+    (dest / "stk-visualize").write_text("a stray file")
+    refused = runner.invoke(cli, ["skills", "export", "--dest", str(dest)])
+    assert refused.exit_code != 0 and "--force" in refused.output
+    forced = runner.invoke(cli, ["skills", "export", "--dest", str(dest), "--force"])
+    assert forced.exit_code == 0, forced.output
+    assert not (dest / "stk-monitor").is_symlink() and (dest / "stk-monitor" / "SKILL.md").is_file()
+    assert (dest / "stk-visualize" / "SKILL.md").is_file()
+    assert sorted(p.name for p in shared.iterdir()) == ["keep.md"]  # the link's target is untouched
+    (dest / "stk-monitor").rename(tmp_path / "old")
+    (dest / "stk-monitor").symlink_to(tmp_path / "missing", target_is_directory=True)  # a dangling link
+    assert "--force" in runner.invoke(cli, ["skills", "export", "--dest", str(dest)]).output
+    assert runner.invoke(cli, ["skills", "export", "--dest", str(dest), "--force"]).exit_code == 0
+    assert (dest / "stk-monitor" / "SKILL.md").is_file()
+    # Errors of the file system are reported as messages, not tracebacks.
+    blocked = tmp_path / "file"
+    blocked.write_text("a file where a directory is expected")
+    failed = runner.invoke(cli, ["skills", "export", "--dest", str(blocked / "skills")])
+    assert failed.exit_code == 1 and "Error:" in failed.output, failed.output
+    assert isinstance(failed.exception, SystemExit)

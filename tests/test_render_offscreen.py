@@ -23,7 +23,7 @@ from render_scenes import (domains_scene, gaussian_volume, glyph_scene, iso_scen
                            volume_scene)
 from suan.render import offscreen  # noqa: E402
 from suan.render.colormaps import lut_rgba8, rgba8  # noqa: E402
-from suan.render.layers import Layer, Scene  # noqa: E402
+from suan.render.layers import Attribute, Layer, Scene  # noqa: E402
 from suan.render.payload import Payload, encode_scene, read_directory  # noqa: E402
 from suan.render.png import decode_png, png_size  # noqa: E402
 
@@ -310,3 +310,44 @@ def test_every_layer_type_renders_far_from_the_origin(renderer):
     assert image.shape == (240, 320, 3)
     drawn = (np.abs(image.astype(int) - 255).max(axis=-1) > 30).mean()
     assert 0.05 < drawn < 0.9
+
+
+def test_the_first_use_probe_honours_cancellation(tmp_path):
+    # render_payload probes the interpreter on first use; a cancelled evaluation must not wait for it, even
+    # when the interpreter is a wrapper whose own child keeps the output pipes open.
+    if sys.platform.startswith("win"):
+        pytest.skip("POSIX shell script")
+    slow = tmp_path / "slow-python"
+    slow.write_text("#!/bin/sh\nsleep 30\nexit 1\n")
+    slow.chmod(0o755)
+    calls = []
+
+    def poll():
+        calls.append(1)
+        if len(calls) >= 3:
+            raise KeyboardInterrupt("cancelled")
+    started = __import__("time").monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        offscreen.render_payload(tmp_path / "scene.stkp", python=str(slow), poll=poll)
+    assert __import__("time").monotonic() - started < 5 and len(calls) == 3
+    assert not [key for key in offscreen._PROBES if key[0] == str(slow)]  # nothing cached
+
+
+@pytest.mark.render
+def test_slice_textures_do_not_wrap_at_their_edges(renderer):
+    # vtkTexture repeats by default: linear interpolation blended the first column into the last one.
+    w, h = 8, 6
+    values = np.full((h, w), 0.5)
+    values[:, 0] = 0.0
+    layer = Layer("slice_image", id="slice",
+                  geometry={"plane": {"origin": [0.0, 0.0, 0.0], "u": [7.0, 0.0, 0.0], "v": [0.0, 5.0, 0.0]},
+                            "size": [w, h]},
+                  attributes={"value": Attribute(values.reshape(-1))},
+                  appearance={"color": {"by": "field", "field": "value", "colormap": "gray", "range": [0.0, 1.0]}})
+    scene = Scene([layer], view={"schema": "stk.view/1", "camera": {"preset": "+z"},
+                                 "viewport": {"width": 160, "height": 120}})
+    image = decode_png(offscreen.render_scene(scene)).astype(float)
+    row = image[image.shape[0] // 2, :, :3].mean(axis=1)
+    inside = np.flatnonzero(row < 250)
+    assert len(inside) > 40 and row[inside[0]] < 40  # the black first column
+    assert np.abs(row[inside[-4:]] - 128).max() <= 3  # the last column keeps its own grey

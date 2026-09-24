@@ -108,6 +108,9 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             if not any(d["id"] == body["node_id"] and d["role"] == "node" and not d["revoked"] for d in store.devices()):
                 raise ValueError("Execution node not found")
             return body, reason
+        except RecursionError:
+            # A request nested too deeply for the validators (JSON, graphs): a client error, never a 500.
+            raise HTTPException(400, "The request is nested too deeply") from None
         except (ValueError, TypeError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 

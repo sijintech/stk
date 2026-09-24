@@ -108,6 +108,72 @@ def test_graph_evaluate_node_budgets_go_to_review():
     assert "图像像素" in policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}})
 
 
+def test_graph_evaluate_integral_float_image_sizes_are_budgeted():
+    # Integer params accept integral floats (16384.0 renders as 16384): the pixel budget must count them.
+    graph = muferro_graph()
+    graph["nodes"][10]["params"] = {"width": 16384.0, "height": 16384.0, "magnification": 8.0}
+    assert "图像像素" in policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}})
+    graph["nodes"][10]["params"] = {"width": 4000.0, "height": 2000.0, "magnification": 1.0}
+    assert policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}}) == ""
+    graph = muferro_graph()
+    graph["nodes"].append({"id": "png", "type": "stk.output.image@1", "inputs": {"source": {"from": "scene.scene"}}})
+    graph["outputs"]["png"] = "png.image"
+    graph["nodes"][7]["params"] = {"width": 16000.0, "height": 9000.0}
+    assert "图像像素" in policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}})
+    # Integer params take integral floats as integers and refuse other numbers.
+    from suan.graph.catalog import default_registry
+    from suan.graph.schema import validate_graph
+    image_type = default_registry()["stk.output.image@1"]
+    normalized = image_type.normalize_params({"width": 400.0, "magnification": 2.0})
+    assert normalized["width"] == 400 and type(normalized["width"]) is int and type(normalized["magnification"]) is int
+    graph = muferro_graph()
+    graph["nodes"][10]["params"] = {"width": 400.5}
+    assert [i.code for i in validate_graph(graph, default_registry()) if i.severity == "error"] == ["invalid_param"]
+    # Sizes the policy cannot compute fail closed (a node type unknown to the hub skips validation).
+    from suan.control.policy import _payload_budget_reasons
+    for bad in ("16384", float("nan"), float("inf"), True, [16384]):
+        broken = muferro_graph()
+        broken["nodes"][10]["params"] = {"width": bad, "height": 100}
+        assert "图像像素" in _payload_budget_reasons(broken, {}), bad
+
+
+def test_graph_evaluate_plot_pixels_are_budgeted():
+    # A plot delivered as PNG is a raster of size_in x dpi (x magnification^2 through stk.output.image).
+    graph = muferro_graph()
+    graph["nodes"][9]["params"].update(size_in=[54, 54], dpi=1200)
+    request = {"graph": graph, "bindings": {"run": {"task_id": TASK}}, "outputs": ["energy_plot"]}
+    assert "图像像素" in policy({**request, "plot_format": "png"})
+    assert policy({**request, "plot_format": "svg"}) == ""  # vector output
+    assert policy({**request, "outputs": ["payload"], "plot_format": "png"}) == ""  # the plot is not delivered
+    graph["nodes"][10]["params"] = {}  # the image takes the plot's size_in x dpi
+    assert "图像像素" in policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}, "outputs": ["energy_png"]})
+    graph["nodes"][10]["params"] = {"width": 800, "height": 600}  # its own size wins
+    assert policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}, "outputs": ["energy_png"]}) == ""
+    graph["nodes"][10]["params"] = {"width": 4000, "height": 3000, "magnification": 4}
+    assert "图像像素" in policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}, "outputs": ["energy_png"]})
+    graph["nodes"][10]["params"] = {"format": "svg"}
+    assert policy({"graph": graph, "bindings": {"run": {"task_id": TASK}}, "outputs": ["energy_png"]}) == ""
+    assert policy({"preset": "energy-plot", "bindings": {"run": {"task_id": TASK}}, "plot_format": "png"}) == ""
+
+
+def test_graph_validation_of_long_chains_never_recurses():
+    from suan.graph.catalog import default_registry
+    from suan.graph.schema import validate_graph
+
+    def chain(n):
+        nodes = [{"id": "run", "type": "stk.source.muferro_run@1", "params": {"binding": "run"}},
+                 {"id": "f", "type": "stk.source.muferro_frame@1", "inputs": {"frames": {"from": "run.frames"}}}]
+        for i in range(n):
+            nodes.append({"id": f"c{i}", "type": "stk.filter.crop@1",
+                          "inputs": {"in": {"from": f"{nodes[-1]['id']}.out"}}})
+        return {"schema": "stk.graph/1", "nodes": nodes, "outputs": {"o": f"{nodes[-1]['id']}.out"}}
+    issues = validate_graph(chain(1200), default_registry())  # was a RecursionError (hub 500)
+    assert [i.code for i in issues] == ["too_large"]
+    assert not [i for i in validate_graph(chain(190), default_registry()) if i.severity == "error"]
+    with pytest.raises(ValueError, match="too_large"):
+        policy({"graph": chain(1200), "bindings": {"run": {"task_id": TASK}}})
+
+
 def test_graph_evaluate_unknown_node_types_go_to_review():
     graph = muferro_graph()
     graph["nodes"].append({"id": "private", "type": "mupro.analysis.vo2_classify@1",
@@ -349,6 +415,56 @@ def test_agent_reports_errors_and_needs_a_blob_channel(tmp_path):
     with pytest.raises(ValueError, match="invalid_param|param_ref_type|invalid_parameter"):
         agent.execute(broken)
     assert not list((tmp_path / "agent").glob("*.json"))  # failures are never cached
+
+
+def test_concurrent_downloads_of_one_artifact_are_serialized(tmp_path):
+    # The agent's fast lane runs view.build and view.probe of one artifact at once: both download to
+    # <cache>/fields/<sha><suffix> through the same resumable .part file.
+    from urllib.parse import parse_qs, urlsplit
+    from suan.runtime.client import RuntimeClient
+    data = os.urandom(3 * 1024 * 1024 + 17)
+    item = {"path": "Polar.00000000.dat", "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+    class Runtime(RuntimeClient):
+        def __init__(self):
+            pass
+
+        def artifacts(self, task_id):
+            return [dict(item)]
+
+        def request(self, method, path, data_=None, binary=False):
+            query = parse_qs(urlsplit(path).query)
+            offset, limit = int(query["offset"][0]), int(query["limit"][0])
+            time.sleep(0.02)  # a network hop: the downloads interleave
+            return data[offset:offset + limit]
+
+    target = tmp_path / "fields" / (item["sha256"] + ".dat")
+    results, errors = [], []
+
+    def fetch():
+        try:
+            results.append(Runtime().download(TASK, item["path"], target))
+        except Exception as exc:  # pragma: no cover - the regression
+            errors.append(exc)
+    threads = [threading.Thread(target=fetch) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+    assert not errors and results == [target] * 4
+    assert target.read_bytes() == data and sorted(p.name for p in target.parent.iterdir()) == [target.name]
+
+
+def test_agent_errors_never_carry_host_paths(tmp_path):
+    from suan.control.agent import NodeAgent
+    agent = NodeAgent(None, tmp_path / "agent")
+    part = tmp_path / "agent" / "fields" / "abc.dat.part"
+    message = agent.public_error(FileNotFoundError(2, "No such file or directory", str(part), str(part) + ".x"))
+    assert message == "FileNotFoundError: No such file or directory" and str(tmp_path) not in message
+    message = agent.public_error(RuntimeError(f"cannot read {tmp_path / 'agent' / 'fields' / 'x.dat'}"))
+    assert str(tmp_path) not in message and "<agent cache>" in message
+    assert agent.public_error(ValueError("Select a completed task's published field artifact")) == \
+        "Select a completed task's published field artifact"
 
 
 # ---------------------------------------------------------------------------

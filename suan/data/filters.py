@@ -804,8 +804,32 @@ def _smooth(poly, smoothing, iterations, factor):
     return smoother.GetOutput()
 
 
-def _label_surface(values, value, spacing, close, smoothing, iterations, factor, normals):
-    """``(local points, triangles, normals | None)`` of one label (points relative to the field grid origin)."""
+def _clamp_points(poly, bounds):
+    """``poly`` with its points clamped into ``bounds`` (``[(lo, hi)]`` per x, y, z; ``None`` = unclamped)."""
+    import vtk
+    np = _np()
+    from vtkmodules.util import numpy_support
+    points = _vtk_points(poly)
+    lo = np.array([b[0] if b is not None else -np.inf for b in bounds])
+    hi = np.array([b[1] if b is not None else np.inf for b in bounds])
+    clamped = np.clip(points, lo, hi)
+    if np.array_equal(clamped, points):
+        return poly
+    result = vtk.vtkPolyData()
+    result.ShallowCopy(poly)
+    vtk_points = vtk.vtkPoints()
+    vtk_points.SetData(numpy_support.numpy_to_vtk(np.ascontiguousarray(clamped), deep=True))
+    result.SetPoints(vtk_points)
+    return result
+
+
+def _label_surface(values, value, spacing, close, smoothing, iterations, factor, normals, bounds=None):
+    """``(local points, triangles, normals | None)`` of one label (points relative to the field grid origin).
+
+    ``bounds`` (``[(lo, hi) | None]`` per x, y, z in the same local coordinates) clamps the smoothed
+    surface into the grid: the closing faces that the padding puts half a cell outside (and smoothing may
+    push further) are projected onto the bounding box, so the surface stays closed and never overhangs.
+    """
     import vtk
     np = _np()
     from vtkmodules.util import numpy_support
@@ -839,6 +863,8 @@ def _label_surface(values, value, spacing, close, smoothing, iterations, factor,
     poly = _smooth(surface.GetOutput(), smoothing, iterations, factor)
     if poly.GetNumberOfPoints() == 0:
         return None
+    if bounds is not None:
+        poly = _clamp_points(poly, bounds)  # before the normals, which follow the clamped faces
     normal_values = None
     if normals:
         filter_ = vtk.vtkPolyDataNormals()
@@ -868,10 +894,13 @@ def label_surfaces(image, field=None, labels="present", exclude=(-1, 0), *, smoo
     -> smoothing (windowed sinc: ``smooth_iterations``, pass band ``smooth_factor``,
     boundary/feature-edge smoothing off, normalized coordinates; or Laplacian with
     relaxation ``smooth_factor``; or none) -> point normals (consistent, no
-    splitting). Each label is processed inside its bounding box (the result is the
-    same as on the whole grid), up to ``threads`` labels at a time (VTK releases the
-    GIL). The surfaces are appended in label order; cell field ``label`` (int32)
-    carries the input field's categories and palette. Label fields may be point or
+    splitting). Vertices are clamped into the dataset's bounds before the normals are
+    computed, so the closing faces lie on the grid's bounding box instead of half a
+    cell (or, after smoothing, more) outside it; surfaces stay closed. Each label is
+    processed inside its bounding box (the result is the same as on the whole grid),
+    up to ``threads`` labels at a time (VTK releases the GIL). The surfaces are
+    appended in label order; cell field ``label`` (int32) carries the input field's
+    categories and palette. Label fields may be point or
     cell fields (cell fields are sampled at the cell centres).
     """
     np = _np()
@@ -896,10 +925,14 @@ def label_surfaces(image, field=None, labels="present", exclude=(-1, 0), *, smoo
         wanted = sorted({int(v) for v in labels})
     dims, offset = _grid(image, source.association)
     spacing = image.spacing
+    # The dataset's bounds in the local coordinates of the label samples (cell centres are offset by half a
+    # cell): surfaces never leave the grid. Axes of one sample keep their half-cell slab (no flat surfaces).
+    bounds = [(-offset[axis], (image.dimensions[axis] - 1) * spacing[axis] - offset[axis])
+              if image.dimensions[axis] > 1 else None for axis in range(3)]
     pieces = {}
     workers = max(1, min(int(threads) if threads is not None else min(16, os.cpu_count() or 1), len(wanted) or 1))
     args = (spacing, bool(close_boundaries), smoothing, int(smooth_iterations), float(smooth_factor),
-            bool(compute_normals))
+            bool(compute_normals), bounds)
     if workers == 1:
         for value in wanted:
             if check is not None:

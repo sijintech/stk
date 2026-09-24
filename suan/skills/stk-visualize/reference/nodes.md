@@ -64,7 +64,7 @@ Index of a muFerro run directory: published field frames, the energy trace, the 
 | param | type | default | stage | notes |
 |---|---|---|---|---|
 | `binding` | string | **required** | data | Run binding; binding |
-| `case_dir` | string | "." | data | Case directory; path |
+| `case_dir` | string | "auto" | data | Case directory; path |
 
 ## `stk.source.table@1` — Table file
 
@@ -403,7 +403,7 @@ Dense volume texture with colour and opacity transfer functions (client-side).
 | `encoding` | "auto" \| "u8" \| "u16" \| "f32" | "auto" | data |  |
 | `colormap` | string | "viridis" | client |  |
 | `range` | [number \| null, number \| null] | [null, null] | client |  |
-| `opacity` | array of [number (≥0, ≤1), number (≥0, ≤1)] | [[0.0, 0.0], [1.0, 0.8]] | client | Opacity points [x, alpha], x normalized over range |
+| `opacity` | array of [number (≥0, ≤1), number (≥0, ≤1)] \| null | null | client | Opacity points [x, alpha], x normalized over range |
 | `sampling` | "linear" \| "nearest" | "linear" | client |  |
 | `shade` | boolean | false | client |  |
 | `name` | string \| null | null | client |  |

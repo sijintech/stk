@@ -12,7 +12,7 @@ from suan.connectors.api import ConnectorError, DatasetHandle, InputConnector  #
 from suan.connectors.files import LocalFiles, RuntimeFiles  # noqa: E402
 from suan.connectors.mupro import MuFerroConnector, frame_rows, stem_field  # noqa: E402
 from suan.connectors.mupro.inputs import MINIMAL_SCHEMA, MuFerroInputs, dump_toml  # noqa: E402
-from suan.connectors.mupro.tables import energy_columns, read_energy, read_progress  # noqa: E402
+from suan.connectors.mupro.tables import ENERGY_COLUMNS, energy_columns, read_energy, read_progress  # noqa: E402
 from suan.data.manifest import validate_result  # noqa: E402
 
 try:
@@ -134,8 +134,12 @@ def test_tables_parse_live_and_headerless_traces():
     rows = ("kt:      1 energy:   0.1000000000E+01  0.2000000000D+01  0.3000000000E+01  0.4000000000E+01"
             "               NaN\n")
     table = read_energy(rows + "kt:      2 energy:   0.1")  # the unterminated last line is still being written
-    assert table.columns == ["step", "energy_1", "energy_2", "energy_3", "energy_4", "energy_5"]
-    assert table.n_rows == 1 and table.column("energy_2")[0] == 2.0 and math.isnan(table.column("energy_5")[0])
+    # Without a header the columns keep muFerro's own names (graphs and presets name them before the header).
+    assert table.columns == ["step", "Elastic Energy", "Electric Energy", "Landau Energy", "Gradient P Energy",
+                             "Total Energy"]
+    assert table.columns[1:] == list(ENERGY_COLUMNS)
+    assert table.n_rows == 1 and table.column("Electric Energy")[0] == 2.0
+    assert math.isnan(table.column("Total Energy")[0])
     with pytest.raises(ConnectorError):
         read_energy("kt: 1 energy: 1.0 2.0\n")
     with pytest.raises(ConnectorError) as error:  # an unreadable value is invalid data, not a ValueError
@@ -150,8 +154,8 @@ def test_energy_rows_with_three_digit_exponents(tmp_path):
     row = ("kt:      5 energy:   0.1500000000+102 -0.2000000000-119 -0.1125000000E+01  0.3000000000+100"
            "  -0.4500000000+101\n")
     table = read_energy(row)
-    assert table.column("energy_1")[0] == 1.5e101 and table.column("energy_2")[0] == -2e-120
-    assert table.column("energy_4")[0] == 3e99 and table.column("energy_5")[0] == -4.5e100
+    assert table.column("Elastic Energy")[0] == 1.5e101 and table.column("Electric Energy")[0] == -2e-120
+    assert table.column("Gradient P Energy")[0] == 3e99 and table.column("Total Energy")[0] == -4.5e100
     run_dir(tmp_path)
     with open(tmp_path / "energy_out.dat", "a") as stream:
         stream.write(row)

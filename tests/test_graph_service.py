@@ -346,3 +346,43 @@ def test_payload_profile_auto_follows_the_request_profile(tmp_path):
         assert result["keys"]["auto"]["full"] == seen[profile]  # the key names the effective profile
     assert seen["phone"] != seen["desktop"]
     assert result["evaluated"] == []  # the second phone request is served from the cache
+
+
+def test_scene_outputs_report_payload_reductions_as_warnings(tmp_path):
+    # A scene output is encoded at delivery; its budget reductions are warned like stk.output.payload@1's.
+    pytest.importorskip("suan.render.payload")
+    data = tmp_path / "data"
+    data.mkdir()
+    np.save(data / "field.npy", np.random.default_rng(0).random((6, 5, 4)))
+    document = {"schema": "stk.graph/1", "catalog": {"stk": 1}, "nodes": [
+        {"id": "src", "type": "stk.source.file@1", "params": {"binding": "data", "path": "field.npy"}},
+        {"id": "vol", "type": "stk.render.volume@1", "inputs": {"in": {"from": "src.out"}}},
+        {"id": "scene", "type": "stk.view.scene@1", "inputs": {"layers": [{"from": "vol.layer"}]}},
+        {"id": "payload", "type": "stk.output.payload@1", "inputs": {"scene": {"from": "scene.scene"}}}],
+        "outputs": {"view": "scene.scene", "payload": "payload.payload"}}
+    result = evaluate_request({"graph": document, "profile": "phone"}, resolver=LocalDirResolver({"data": data}),
+                              cache_dir=None, blob_sink=MemoryBlobSink(), cache=GraphCache())
+    reductions = result["outputs"]["view"]["manifest"]["budget"]["reductions"]
+    assert reductions and "quantized" in reductions[0]["reason"]
+    reduced = [w for w in result["warnings"] if w["code"] == "payload_reduced"]
+    by_scene = [w for w in reduced if w["node"] == "scene"]
+    assert len(by_scene) == len(reductions) and by_scene[0]["path"] == "/outputs/view"
+    assert by_scene[0]["severity"] == "warning" and "'vol'" in by_scene[0]["message"]
+    assert [w for w in reduced if w["node"] == "payload"]  # the payload node's own warning, as before
+
+
+def test_table_outputs_list_their_column_names_in_order(tmp_path):
+    from suan.data.model import Table
+    from suan.graph.service import _Delivery
+    table = Table(id="t")
+    for name in ("value", "name", "count", "10"):  # an integer-like name moves first in a JS object
+        table.add_column(name, np.arange(3) if name != "name" else np.array(["a", "b", "c"]))
+    delivery = _Delivery(MemoryBlobSink(), profile="web", plot_format="svg", max_bytes=None, encode_scene=None,
+                         render_plot=None)
+    inline = delivery.deliver("t", "table", table)
+    assert inline["column_names"] == ["value", "name", "count", "10"] == list(inline["columns"])
+    big = Table(id="big")
+    big.add_column("z", np.arange(40_000, dtype=np.float64))
+    big.add_column("a", np.arange(40_000, dtype=np.float64))
+    offloaded = delivery.deliver("big", "table", big)
+    assert "blob" in offloaded and offloaded["column_names"] == ["z", "a"]

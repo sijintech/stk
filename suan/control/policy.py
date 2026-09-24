@@ -5,6 +5,7 @@ node catalog are standard library only), so a malformed graph never reaches a
 node.
 """
 import json
+import math
 from pathlib import PurePosixPath
 import re
 from suan.runtime.models import TaskSpec, layout, relative_path
@@ -137,7 +138,44 @@ def _graph_paths(graph, registry, values):
                 _binding_path(value, f"/nodes/{index}/params/{name}")
 
 
-def _payload_budget_reasons(graph, values):
+def _finite(value):
+    """``float(value)`` for a finite JSON number, else ``None`` (booleans, strings, NaN and infinities)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
+def _pixels(width, height, magnification=1):
+    """Raster pixels of ``width x height`` at ``magnification`` (per axis); ``None`` when not computable.
+
+    Values are compared as floats, so integral floats (``16384.0``, accepted for integer params and
+    rendered as integers) count like integers, and anything that is not a finite number fails closed.
+    """
+    size = [_finite(v) for v in (width, height, magnification)]
+    if any(v is None or v < 0 for v in size):
+        return None
+    return size[0] * size[1] * size[2] ** 2
+
+
+def _plot_size(params):
+    """``(width_px, height_px)`` of a ``stk.plot.*`` node's figure (``size_in`` x ``dpi``), or ``None``."""
+    size_in = params.get("size_in", [6.0, 4.0])
+    dpi = _finite(params.get("dpi", 200))
+    if not isinstance(size_in, (list, tuple)) or len(size_in) != 2 or dpi is None:
+        return None
+    inches = [_finite(v) for v in size_in]
+    if any(v is None for v in inches):
+        return None
+    return inches[0] * dpi, inches[1] * dpi
+
+
+def _payload_budget_reasons(graph, values, outputs=None, plot_format="svg"):
+    """Review reasons of the graph's payload, image and plot budgets (fail closed on uncomputable sizes).
+
+    ``outputs`` are the requested graph outputs (``None``: all) and ``plot_format`` the format plot
+    outputs are delivered in: a plot delivered as PNG is a raster of ``size_in x dpi`` pixels.
+    """
     from suan.graph.schema import substitute_params
 
     def params_of(node):
@@ -146,6 +184,15 @@ def _payload_budget_reasons(graph, values):
         except (KeyError, TypeError):
             return {}
         return params if isinstance(params, dict) else {}
+
+    def linked(node, port):
+        link = (node.get("inputs") or {}).get(port)
+        if isinstance(link, list) and len(link) == 1:
+            link = link[0]
+        return nodes.get(str(link.get("from", "")).split(".")[0]) if isinstance(link, dict) else None
+
+    def too_many(pixels):
+        return pixels is None or pixels > GRAPH_AUTO_PIXELS
 
     nodes = {node.get("id"): node for node in graph.get("nodes") or () if isinstance(node, dict)}
     reasons = []
@@ -161,14 +208,32 @@ def _payload_budget_reasons(graph, values):
                                                 for key, limit in GRAPH_AUTO_PAYLOAD.items() if key in budget):
                 reasons.append("渲染数据包预算")
         elif node_type.startswith("stk.output.image@"):
-            # An image without its own size takes the scene's viewport (1600 x 1200 by default).
-            link = (node.get("inputs") or {}).get("source")
-            source = nodes.get(str(link.get("from", "")).split(".")[0]) if isinstance(link, dict) else None
-            viewport = params_of(source) if source and str(source.get("type", "")).startswith("stk.view.scene@") else {}
-            size = [params.get("width") or viewport.get("width") or 1600,
-                    params.get("height") or viewport.get("height") or 1200, params.get("magnification") or 1]
-            if all(isinstance(v, int) and not isinstance(v, bool) for v in size):
-                if size[0] * size[1] * size[2] ** 2 > GRAPH_AUTO_PIXELS:
+            source = linked(node, "source")
+            source_type = str(source.get("type", "")) if source else ""
+            magnification = params.get("magnification", 1)
+            if source_type.startswith("stk.plot."):
+                # A plot image is size_in x dpi unless the image sets its own size; SVG/PDF are vector output.
+                if params.get("format", "png") == "png":
+                    figure = _plot_size(params_of(source))
+                    if figure is None:
+                        reasons.append("图像像素")
+                    elif too_many(_pixels(params.get("width") or figure[0], params.get("height") or figure[1],
+                                          magnification)):
+                        reasons.append("图像像素")
+            else:
+                # A scene image without its own size takes the scene's viewport (1600 x 1200 by default).
+                viewport = params_of(source) if source_type.startswith("stk.view.scene@") else {}
+                if too_many(_pixels(params.get("width") or viewport.get("width") or 1600,
+                                    params.get("height") or viewport.get("height") or 1200, magnification)):
+                    reasons.append("图像像素")
+    # Plot outputs delivered by the service itself (plot_format png) are rasters too.
+    if plot_format == "png":
+        declared = graph.get("outputs") if isinstance(graph.get("outputs"), dict) else {}
+        for name in (outputs if outputs is not None else list(declared)):
+            node = nodes.get(str(declared.get(name, "")).split(".")[0])
+            if node and str(node.get("type", "")).startswith("stk.plot."):
+                figure = _plot_size(params_of(node))
+                if figure is None or too_many(_pixels(*figure)):
                     reasons.append("图像像素")
     return reasons
 
@@ -224,7 +289,7 @@ def validate_graph_evaluate(p):
         reasons.append("输出大小")
     if request["profile"] not in GRAPH_AUTO_PROFILES:
         reasons.append("桌面级结果配置")
-    reasons += _payload_budget_reasons(graph, values)
+    reasons += _payload_budget_reasons(graph, values, request["outputs"], request["plot_format"])
     notes = []
     if reasons:
         notes.append(f"{GRAPH_REVIEW}（{'、'.join(dict.fromkeys(reasons))}），请检查图谱与预算后批准执行。")

@@ -94,12 +94,12 @@ function TableView({out}: {out: any}) {
     setData(inline);
     if (!sha) return;
     let alive = true;
-    cachedBlob(sha, fetchBlob).then(bytes => { if (alive) setData(tableData(JSON.parse(new TextDecoder().decode(bytes)))); }).catch(e => { if (alive) setError(message(e)); });
+    cachedBlob(sha, fetchBlob).then(bytes => { if (alive) setData(tableData(JSON.parse(new TextDecoder().decode(bytes)), out?.column_names)); }).catch(e => { if (alive) setError(message(e)); });
     return () => { alive = false; };
   }, [out]);
   if (error) return <p className="muted">{error}</p>;
   if (!data) return <p className="muted">正在读取表格…</p>;
-  const names = Object.keys(data.columns);
+  const names = data.names;
   const rows = Math.max(...names.map(n => data.columns[n].length));
   const shown = Math.min(rows, 100);
   return <div className="data-table"><table><thead><tr>{names.map(n => <th key={n}>{n}{data.units[n] ? <small>{unitLabel(data.units[n])}</small> : null}</th>)}</tr></thead>

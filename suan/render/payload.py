@@ -25,7 +25,8 @@ from pathlib import Path
 import re
 import struct
 
-from .colormaps import ORIENTATION_HSL, canonical_name, lut_rgba8_bytes, opacity_points
+from .colormaps import (DEFAULT_OPACITY, ORIENTATION_HSL, canonical_name, categorical_opacity, lut_rgba8_bytes,
+                        opacity_points)
 
 __all__ = [
     "ENCODINGS", "LABEL_FORMAT", "MIB", "PROFILES", "SCHEMA", "TYPE_DTYPES", "TYPE_SIZES",
@@ -1310,9 +1311,13 @@ class _Encoder:
         else:
             colormap = self.builder.add_lut(info["colormap"])
             value_range = info["range"]
-        entry["transfer_function"] = {"colormap": colormap, "range": value_range,
-                                      "opacity": opacity_points(a.get("opacity") or [[0.0, 0.0], [1.0, 0.8]],
-                                                                value_range)}
+        if a.get("opacity"):
+            opacity = opacity_points(a["opacity"], value_range)
+        elif categorical:
+            opacity = categorical_opacity(value_range)  # every label visible, -1 transparent
+        else:
+            opacity = opacity_points(DEFAULT_OPACITY, value_range)
+        entry["transfer_function"] = {"colormap": colormap, "range": value_range, "opacity": opacity}
         entry["sampling"] = "nearest" if categorical else a.get("sampling", "linear")
         entry["shade"] = bool(a.get("shade", False))
         self.stats["voxels"] += math.prod(dims)

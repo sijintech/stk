@@ -301,8 +301,13 @@ For each label v in the requested set (`labels: "present"` = values present in t
    (default 30) and pass band `smooth_factor` (default 0.1), boundary and feature-edge smoothing off,
    coordinates normalized; or `laplacian` with relaxation factor `smooth_factor` (SimViz used
    Laplacian, 30 iterations, 0.1); or `none`.
-5. Normals if `compute_normals` (consistent orientation, no splitting).
-6. Cell field `label` = v (int32) with the input field's categories and palette.
+5. Clamp the vertices into the dataset's bounds (per axis `[0, (n − 1)·spacing]` in grid
+   coordinates; axes of one sample keep their slab): the closing faces that the padding put half a
+   cell outside the grid (and smoothing may push further) are projected onto the bounding box, so
+   surfaces never overhang the grid or its outline, picks on them land inside the grid, and the
+   surface stays closed and outward oriented.
+6. Normals if `compute_normals` (consistent orientation, no splitting).
+7. Cell field `label` = v (int32) with the input field's categories and palette.
 
 The per-label surfaces are appended into one polydata (triangles). Where two labels touch, two
 coincident faces are drawn (as in SimViz); a later `method: discrete` may remove them. Target: 26

@@ -123,6 +123,78 @@ def test_plot_table(tmp_path):
         graph_tools.plot_table(columns={"a": 1})
 
 
+def test_default_output_directories_are_private_and_per_call(run_dir, tmp_path, monkeypatch):
+    pytest.importorskip("numpy")
+    import stat
+    import tempfile
+    monkeypatch.delenv("STK_MCP_OUTPUT_DIR", raising=False)
+    monkeypatch.setenv("STK_GRAPH_CACHE", str(tmp_path / "cache"))
+    (tmp_path / "tmp").mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))  # stands in for the shared /tmp
+    bindings = {"run": {"dir": str(run_dir)}}
+    first = graph_tools.graph_evaluate(graph=muferro_graph(), bindings=bindings, parameters={"step": 0},
+                                       outputs=["payload"])
+    second = graph_tools.graph_evaluate(graph=muferro_graph(), bindings=bindings, parameters={"step": 2},
+                                        outputs=["payload"])
+    assert first["graph_sha256"] == second["graph_sha256"] and first["output_dir"] != second["output_dir"]
+    # The first call's files still hold its own result.
+    assert json.loads(Path(first["result_file"]).read_text())["parameters"]["step"]["value"] == 0
+    assert json.loads(Path(second["result_file"]).read_text())["parameters"]["step"]["value"] == 2
+    base = Path(first["output_dir"]).parent
+    assert Path(first["output_dir"]).name.startswith(first["graph_sha256"][:16] + "-")
+    if hasattr(os, "getuid"):
+        assert base == (tmp_path / "tmp" / f"stk-mcp-{os.getuid()}").resolve()
+        assert stat.S_IMODE(base.stat().st_mode) == 0o700
+        assert stat.S_IMODE(Path(first["output_dir"]).stat().st_mode) == 0o700
+        # Somebody else's (or a world-readable) directory, or a planted symlink, is refused.
+        os.chmod(base, 0o755)
+        with pytest.raises(GraphToolError, match="0700"):
+            graph_tools.graph_evaluate(graph=muferro_graph(), bindings=bindings, outputs=["energy"])
+        base.rename(tmp_path / "moved")
+        base.symlink_to(tmp_path / "moved", target_is_directory=True)
+        with pytest.raises(GraphToolError, match="not a directory"):
+            graph_tools.graph_evaluate(graph=muferro_graph(), bindings=bindings, outputs=["energy"])
+
+
+def test_output_files_never_follow_planted_links_or_share_temporary_names(tmp_path):
+    from suan.graph.cli import write_atomic
+    victim = tmp_path / "victim.txt"
+    victim.write_text("precious\n")
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "energy.svg").symlink_to(victim)
+    (out / "energy.svg.part").symlink_to(victim)  # the fixed temporary name of earlier versions
+    write_atomic(out / "energy.svg", b"<svg/>")
+    assert victim.read_text() == "precious\n"
+    assert not (out / "energy.svg").is_symlink() and (out / "energy.svg").read_bytes() == b"<svg/>"
+    assert sorted(p.name for p in out.iterdir()) == ["energy.svg", "energy.svg.part"]
+
+
+def test_concurrent_renders_return_their_own_image(run_dir, tmp_path):
+    pytest.importorskip("numpy")
+    pytest.importorskip("matplotlib")
+    import threading
+    from suan.render.png import png_size
+    graph = muferro_graph()
+    graph["parameters"].append({"name": "w", "type": "integer", "default": 320})
+    next(n for n in graph["nodes"] if n["id"] == "energy_png")["params"]["width"] = {"$param": "w"}
+    wrong = []
+
+    def render(width):
+        rendered = graph_tools.graph_render(graph=graph, bindings={"run": {"dir": str(run_dir)}},
+                                            parameters={"w": width}, output="energy_png",
+                                            output_dir=str(tmp_path / "shared"))  # one directory for all calls
+        if png_size(rendered["png"])[0] != width:
+            wrong.append((width, png_size(rendered["png"])[0]))
+    for _ in range(2):
+        threads = [threading.Thread(target=render, args=(width,)) for width in (320, 480, 640)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(120)
+    assert wrong == []
+
+
 def test_task_bindings_and_events_through_the_runtime(runtime, tmp_path, monkeypatch):
     pytest.importorskip("numpy")
     pytest.importorskip("matplotlib")

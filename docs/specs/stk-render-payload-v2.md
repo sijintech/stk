@@ -108,7 +108,9 @@ multi-component attribute means the magnitude. Defaults: `by: "solid"`, `solid: 
 ## 6. Layers
 
 Common keys: `id` (unique), `type`, `node` (graph node id), `name`, `visible` (default true),
-`origin`, `pick {probe: {node, dataset}}` (where `view.probe` should read), `time`.
+`origin`, `pick {probe: {node, dataset}}` (where `view.probe` should read: a node of the graph that
+produced the payload, upstream of the layer; clients walk upstream from it, or from `node` when `pick`
+is absent, to the source), `time`.
 
 An **attribute** is `{accessor, association: "point" | "cell", categorical?, palette?, range?,
 unit?, quantity?, component_names?}`: point attributes have one tuple per position (per sample for
@@ -183,7 +185,11 @@ data, dimensions, spacing}]` (2× mip levels, coarse to fine).
   with an entry gets exactly its colour (a label without an entry gets an interpolated or clamped
   colour; hide it with the opacity function). `range` is then the label range and is not
   used for colour; `sampling` is `nearest`. The offscreen renderer and the web viewer follow this
-  rule.
+  rule. The encoder's default opacity of a categorical volume (`stk.render.volume@1` with
+  `opacity: null`) is one alpha (0.8) for every label ≥ 0 and 0 for negative labels (−1 =
+  unclassified/no data/air): `[[lo, 0], [−0.5, 0], [−0.499, 0.8], [hi, 0.8]]` over the label range
+  `[lo, hi]` (`[[lo, 0.8], [hi, 0.8]]` without negative labels), so the lowest label never becomes
+  transparent the way a ramp over the range would make it.
 - **Opacity unit distance.** Opacity values are per unit of length equal to the **smallest grid
   spacing** `min(spacing)` of the layer's grid (VTK `SetScalarOpacityUnitDistance(min(spacing))`,
   vtk.js `setScalarOpacityUnitDistance`): an `alpha` is the opacity accumulated over one voxel of

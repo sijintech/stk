@@ -31,10 +31,10 @@ from suan.mupro.run import COMPONENTS, FRAME, RESULT, MuproError, expected_frame
 
 from ..api import API_VERSION, ConnectorError, Match
 from ..builtin import crop_sample, field_stats, select_frame
-from .tables import read_energy, read_progress
+from .tables import ENERGY_COLUMNS, read_energy, read_progress
 
-__all__ = ["CONNECTOR_ID", "MuFerroConnector", "VERSION", "case_prefix", "field_descriptor", "frame_rows", "run_files",
-           "stem_field"]
+__all__ = ["CONNECTOR_ID", "MuFerroConnector", "VERSION", "case_prefix", "field_descriptor", "frame_rows",
+           "recorded_case_dir", "run_files", "stem_field"]
 
 CONNECTOR_ID = "mupro.muferro"
 VERSION = "0.1.0"
@@ -104,6 +104,26 @@ def case_prefix(case_dir):
     return relative.rstrip("/") + "/" if relative else ""
 
 
+def recorded_case_dir(run):
+    """The ``case_dir`` the STK launcher recorded in ``stk-mupro.json`` at the binding root, else ``"."``.
+
+    Runs submitted with ``suan mupro submit --input DIR`` keep their case (input.toml, frames, energy)
+    in ``DIR/`` of the task; ``case_dir: "auto"`` of ``stk.source.muferro_run@1`` reads it from here.
+    An unreadable record or an unsafe path gives ``"."``.
+    """
+    try:
+        record = json.loads(_read_text(run, RESULT, 1 << 22))
+    except (ConnectorError, OSError, ValueError):
+        return "."
+    value = record.get("case_dir") if isinstance(record, dict) else None
+    if not isinstance(value, str) or not value:
+        return "."
+    try:
+        return case_prefix(value).rstrip("/") or "."
+    except (ConnectorError, ValueError):
+        return "."
+
+
 def run_files(run, prefix=""):
     """``{path: FileInfo}`` of a run: the whole binding plus the case directory (which may be a linked directory)."""
     names = {item.path: item for item in run.list("")}
@@ -152,6 +172,11 @@ class MuFerroConnector:
 
     def __init__(self, *, case_dir="."):
         self.case_dir = case_dir
+
+    def _case_dir(self, run, case_dir):
+        """``case_dir`` (default: the connector's); ``"auto"`` is the one recorded in ``stk-mupro.json``."""
+        case_dir = case_dir or self.case_dir
+        return recorded_case_dir(run) if case_dir == "auto" else case_dir
 
     def info(self):
         return {"id": self.id, "version": self.version, "api": self.api, "apps": [CONNECTOR_ID], "priority": 0,
@@ -223,6 +248,21 @@ class MuFerroConnector:
                 found.setdefault(match[1], []).append((int(match[2]), item))
         return found
 
+    @staticmethod
+    def _settled(frames):
+        """Drop the newest frame of a stem while it is still being written.
+
+        muFerro writes fixed-width DAT rows, so every frame of a stem has the same size; a newest frame
+        whose size differs from the frame before it is incomplete (a live run is writing it).
+        """
+        settled = {}
+        for stem, items in frames.items():
+            items = sorted(items, key=lambda pair: pair[0])
+            if len(items) >= 2 and items[-1][1].size != items[-2][1].size:
+                items = items[:-1]
+            settled[stem] = items
+        return settled
+
     def _grid(self, run, case, frames):
         if case:
             return list(case["grid"]), None
@@ -239,12 +279,16 @@ class MuFerroConnector:
     def describe(self, run, *, live=False, case_dir=None):
         """stk.result/1 of a muFerro run directory (``live``: frames so far, ``complete: false``)."""
         from suan.data.manifest import file_entry, qoi_entry, result_manifest
-        case_dir = case_dir or self.case_dir
+        case_dir = self._case_dir(run, case_dir)
         prefix = case_prefix(case_dir)
         names = run_files(run, prefix)
         record = self._record(run, names)
         case, case_error = self._case(run, case_dir, record, names)
         frames = self._frames(run, prefix)
+        if live:
+            # A live view may race the solver (also after a restart that keeps an earlier completion file):
+            # skip a newest frame that is still being written.
+            frames = self._settled(frames)
         grid, header = self._grid(run, case, frames)
         known = getattr(run, "known_sha256", None)
         datasets = []
@@ -267,7 +311,7 @@ class MuFerroConnector:
                 table = read_energy(_read_text(run, energy_path))
             except ConnectorError:
                 pass
-            columns = table.columns[1:] if table is not None else [f"energy_{i}" for i in range(1, 6)]
+            columns = table.columns[1:] if table is not None else list(ENERGY_COLUMNS)
             datasets.append(self._table("energy", energy_path, names[energy_path], "mupro.energy@1",
                                         ["step"] + list(columns), "normalized", table))
             if table is not None and table.n_rows:
@@ -381,7 +425,7 @@ class MuFerroConnector:
 
     def verify(self, run, *, case_dir=None):
         """``verify_run`` of a local run directory, else the launcher's recorded verification (or ``None``)."""
-        case_dir = case_dir or self.case_dir
+        case_dir = self._case_dir(run, case_dir)
         local = run.local_path(".")
         if local is not None:
             result = verify_run(local, case_dir)
@@ -410,7 +454,7 @@ class MuFerroConnector:
         if local is None:
             return None
         from .monitor import MuferroMonitorAdapter
-        return MuferroMonitorAdapter(local, case_dir or self.case_dir)
+        return MuferroMonitorAdapter(local, self._case_dir(run, case_dir))
 
     def default_graphs(self, result):
         """The ``muferro-domains`` and ``energy-plot`` presets bound to ``run``, when installed."""
@@ -463,6 +507,11 @@ class FrameHandle:
                                    tensor=entry["tensor"], component_names=entry.get("component_names"),
                                    step=chosen["step"], provenance=provenance, check=check)
         except DatError as exc:
+            raise ConnectorError(f"{chosen['path']}: {exc}", "invalid_data") from None
+        except ValueError as exc:
+            if isinstance(exc, ConnectorError):
+                raise
+            # Rows the general DAT parser cannot read (numpy's ValueError), e.g. a frame still being written.
             raise ConnectorError(f"{chosen['path']}: {exc}", "invalid_data") from None
         expected = self.descriptor["geometry"]["dimensions"]
         if list(image.dimensions) != list(expected) or image.field(entry["name"]).components != entry["components"]:

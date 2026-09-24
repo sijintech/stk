@@ -239,3 +239,17 @@ def test_invalid_specs_are_rejected(tmp_path, mutate, message):
         check(spec)
     with pytest.raises(ValueError):
         render(line_spec(table), format="gif")
+
+
+def test_png_rasters_are_capped_before_matplotlib_allocates_them():
+    from suan.plot.mpl import MAX_PIXELS, render, render_plot
+    from suan.plot.spec import PlotSpecError
+    spec = {"schema": "stk.plot/1", "figure": {"size_in": [54, 54], "dpi": 1200}, "axes": [{"id": "a0"}],
+            "marks": [{"type": "line", "axes": "a0", "data": {"table": "t", "x": "x", "y": "y"}}],
+            "tables": {"t": {"columns": {"x": [0, 1], "y": [1, 2]}, "units": {"x": "1", "y": "1"}}}}
+    with pytest.raises(PlotSpecError, match="limit"):
+        render(spec, format="png")
+    with pytest.raises(PlotSpecError, match="limit"):
+        render_plot({**spec, "figure": {"size_in": [6, 4], "dpi": 200}}, format="png", width_px=16384,
+                    height_px=16384, magnification=2)
+    assert MAX_PIXELS == 16384 ** 2

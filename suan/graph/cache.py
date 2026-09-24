@@ -114,10 +114,15 @@ def canonical(value):
     return canonical_json(plain_json(value))
 
 
-def data_key(type_id, impl_version, params, inputs, source=None):
-    """Data key of a node: type, implementation version, data-stage params, upstream data keys, source content."""
-    return sha256_hex(canonical({"type": type_id, "impl": impl_version, "params": params, "inputs": inputs,
-                                 "source": source}))
+def data_key(type_id, impl_version, params, inputs, source=None, ids=None):
+    """Data key of a node: type, implementation version, data-stage params, upstream data keys, source content.
+
+    ``ids`` (node ids that the node's value embeds, e.g. layer ids) enter the key only when given.
+    """
+    document = {"type": type_id, "impl": impl_version, "params": params, "inputs": inputs, "source": source}
+    if ids is not None:
+        document["ids"] = ids
+    return sha256_hex(canonical(document))
 
 
 def full_key(data, client_params, inputs):

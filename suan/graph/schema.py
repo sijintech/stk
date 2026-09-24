@@ -754,8 +754,10 @@ def validate_graph(graph, registry, *, parameters=None):
     elif not nodes:
         add("bad_structure", "'nodes' must not be empty", "/nodes")
     if len(nodes) > MAX_NODES:
+        # Stop here: the per-node checks below are linear, but a longer chain is not worth validating.
         add("too_large", f"{len(nodes)} nodes; the limit is {MAX_NODES}", "/nodes",
             hint="Split the work into several graphs")
+        return issues
     by_id = {}  # id -> (index, node dict, NodeType or None)
     for index, node in enumerate(nodes):
         path = pointer("nodes", index)
@@ -996,16 +998,21 @@ def validate_graph(graph, registry, *, parameters=None):
 
 
 def _output_kinds(node_id, port_name, by_id, seen):
-    """Possible dataset kinds of an output port (``None`` = unknown / any)."""
-    key = (node_id, port_name)
-    if key in seen:
-        return None
-    seen.add(key)
-    node_type = by_id[node_id][2]
-    port = next((p for p in node_type.outputs if p.name == port_name), None) if node_type else None
-    if port is None:
-        return None
-    if port.kind_from:
+    """Possible dataset kinds of an output port (``None`` = unknown / any).
+
+    Follows ``kind_from`` links upstream iteratively (a long chain never exhausts the stack).
+    """
+    while True:
+        key = (node_id, port_name)
+        if key in seen:
+            return None
+        seen.add(key)
+        node_type = by_id[node_id][2]
+        port = next((p for p in node_type.outputs if p.name == port_name), None) if node_type else None
+        if port is None:
+            return None
+        if not port.kind_from:
+            return port.kinds
         entry = (by_id[node_id][1].get("inputs") or {}).get(port.kind_from)
         links = _links(entry) if entry is not None else None
         if links:
@@ -1014,10 +1021,10 @@ def _output_kinds(node_id, port_name, by_id, seen):
             except ValueError:
                 return None
             if source in by_id and by_id[source][2] is not None:
-                return _output_kinds(source, source_port, by_id, seen)
+                node_id, port_name = source, source_port
+                continue
         source_input = next((p for p in node_type.inputs if p.name == port.kind_from), None)
         return tuple(source_input.accepts) if source_input and source_input.accepts else None
-    return port.kinds
 
 
 def _port_label(port, kinds=None):

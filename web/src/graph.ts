@@ -152,12 +152,19 @@ export function outputImages(out: any): OutputImage[] {
   return list.sort((a, b) => rank(a.mediaType) - rank(b.mediaType));
 }
 
-export interface TableData {columns: Record<string, unknown[]>, units: Record<string, string>}
-export function tableData(value: unknown): TableData | null {
+export interface TableData {columns: Record<string, unknown[]>, units: Record<string, string>, names: string[]}
+const isNames = (v: unknown): v is string[] => Array.isArray(v) && v.every(n => typeof n === 'string');
+/** Table columns in the table's own order: `column_names` of the output (or `order`), else the object key order. */
+export function tableData(value: unknown, order?: unknown): TableData | null {
   if (!isObj(value)) return null;
-  const columns = isObj(value.columns) ? value.columns : value;
+  const wrapped = isObj(value.columns);
+  const columns = wrapped ? value.columns : value;
   if (!Object.values(columns).every(Array.isArray) || !Object.keys(columns).length) return null;
-  return {columns: columns as Record<string, unknown[]>, units: isObj(value.units) ? value.units as Record<string, string> : {}};
+  const keys = Object.keys(columns);
+  // JSON object key order is not reliable (stores may sort keys, integer-like names move first).
+  const given = [wrapped ? value.column_names : undefined, order].find(isNames);
+  const names = given ? [...given.filter(n => keys.includes(n)), ...keys.filter(n => !given.includes(n))] : keys;
+  return {columns: columns as Record<string, unknown[]>, units: isObj(value.units) ? value.units as Record<string, string> : {}, names};
 }
 
 export function payloadOutputs(result: GraphResult | null | undefined): {name: string, manifest: any}[] {
@@ -236,10 +243,11 @@ export function resolveProbeTarget(graph: GraphDocument | undefined, probe: {nod
       const binding = run ? param(run, 'binding') : undefined;
       const task = own(ctx.bindings, binding);
       if (!task) return {error: `数据源 ${String(binding ?? '?')} 尚未绑定任务`};
-      const caseDir = run ? String(param(run, 'case_dir') ?? '.') : '.';
+      // 'auto' (the default): the case directory recorded by the launcher; the published frame names it.
+      const caseDir = run ? String(param(run, 'case_dir') ?? 'auto') : 'auto';
       const name = `${dataset}.${String(step).padStart(8, '0')}.dat`;
       const published = ctx.artifacts?.find(a => { const m = FRAME.exec(a.path); return !!m && m[1] === dataset && Number(m[2]) === step; });
-      const path = published?.path ?? (caseDir && caseDir !== '.' ? `${caseDir.replace(/\/+$/, '')}/${name}` : name);
+      const path = published?.path ?? (caseDir && caseDir !== '.' && caseDir !== 'auto' ? `${caseDir.replace(/\/+$/, '')}/${name}` : name);
       return {task_id: task, path, node: id, ...extra};
     }
     queue.push(...linkedNodes(node.inputs));

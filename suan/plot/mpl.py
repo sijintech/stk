@@ -24,6 +24,9 @@ from .spec import axis_label, categories_table, check, mark_data
 __all__ = ["FORMATS", "MEDIA_TYPES", "STYLES", "build_figure", "plot_data", "render", "render_all", "render_plot"]
 
 FORMATS = ("png", "svg", "pdf")
+# Largest PNG raster (16384^2 pixels, 1 GiB of RGBA): a hard cap below matplotlib's 2^16 per axis, whatever
+# the graph requested (the control hub reviews anything above 7680 x 4320 before it runs).
+MAX_PIXELS = 16384 * 16384
 MEDIA_TYPES = {"png": "image/png", "svg": "image/svg+xml", "pdf": "application/pdf"}
 STYLES = {
     "stk-paper": {"font.size": 9.0, "axes.titlesize": 10.0, "axes.labelsize": 9.0, "legend.fontsize": 8.0,
@@ -318,6 +321,7 @@ def render(spec, *, format="png", dpi=None, width_px=None, height_px=None, magni
 
 
 def _render(spec, *, format, dpi, width_px, height_px, magnification, transparent, metrics, plotted=None):
+    from .spec import PlotSpecError
     figure_spec = spec.get("figure") or {}
     base_dpi = int(dpi or figure_spec.get("dpi", 200))
     size = list(figure_spec.get("size_in") or [6.0, 4.0])
@@ -325,6 +329,14 @@ def _render(spec, *, format, dpi, width_px, height_px, magnification, transparen
         size[0] = width_px / base_dpi
     if height_px:
         size[1] = height_px / base_dpi
+    if format == "png":
+        # Refuse before matplotlib allocates the canvas (4 bytes per pixel).
+        scale = base_dpi * int(magnification)
+        pixels = float(size[0]) * scale * float(size[1]) * scale
+        if not math.isfinite(pixels) or pixels > MAX_PIXELS:
+            raise PlotSpecError(f"The PNG would have {pixels:.0f} pixels ({size[0]:g} x {size[1]:g} in at "
+                                f"{scale} dpi); the limit is {MAX_PIXELS} pixels. Lower size_in, dpi, width, height "
+                                "or magnification, or render SVG/PDF")
     style = STYLES.get(figure_spec.get("style", "stk-paper"), STYLES["stk-paper"])
     with _rc({**style, **_DETERMINISTIC}):
         fig, data = build_figure(spec, metrics=metrics, dpi=base_dpi, size_in=size)

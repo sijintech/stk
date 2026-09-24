@@ -7,12 +7,26 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 import base64
 import json
 import os
+import threading
 import time
 import uuid
 
 from .common import atomic_json, read_json, sha256
 from .models import TaskSpec, TERMINAL
 from .service import CHUNK_SIZE
+
+
+# One download at a time per destination file in this process: the resumable ``<name>.part`` file is shared
+# by design (a later call resumes it), so concurrent calls for the same destination (the agent's fast lane,
+# graph evaluations) must not append to it together.
+_DOWNLOAD_LOCKS = {}
+_DOWNLOAD_GUARD = threading.Lock()
+
+
+def _download_lock(path):
+    key = os.path.abspath(path)
+    with _DOWNLOAD_GUARD:
+        return _DOWNLOAD_LOCKS.setdefault(key, threading.Lock())
 
 
 class RuntimeErrorResponse(RuntimeError):
@@ -129,6 +143,10 @@ class RuntimeClient:
 
     def _download(self, route, item, destination, check=None):
         path = Path(destination)
+        with _download_lock(path):
+            return self._download_locked(route, item, path, check)
+
+    def _download_locked(self, route, item, path, check):
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.is_file() and sha256(path) == item["sha256"]:
             return path
@@ -155,7 +173,7 @@ class RuntimeClient:
             meta.unlink(missing_ok=True)
             raise RuntimeError("Downloaded file checksum mismatch; retry the download")
         os.replace(part, path)
-        meta.unlink()
+        meta.unlink(missing_ok=True)
         return path
 
     def wait(self, task_id, timeout=300, interval=0.5):

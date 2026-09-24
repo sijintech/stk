@@ -50,6 +50,8 @@ from .schema import (GraphIssue, check_graph, graph_hash, parameter_values, pars
 __all__ = ["EvaluationFailed", "evaluate"]
 
 _DATASET_PORTS = ("dataset", "table")
+# Stages whose values embed node ids; their keys include the ids (spec §5).
+ID_STAGES = frozenset({"representation", "view", "output"})
 
 
 class EvaluationFailed(GraphError):
@@ -126,6 +128,11 @@ class _Context:
         return self._keys.data
 
     @property
+    def ancestors(self):
+        """Ids of the nodes upstream of this one in the graph being evaluated (a frozenset)."""
+        return self._evaluation.ancestors(self.node_id)
+
+    @property
     def cache_dir(self):
         if self._keys is None:
             return None
@@ -192,6 +199,7 @@ class _Evaluation:
         self.sources = {}
         self.keys = {}
         self.links = {node_id: self._node_links(node) for node_id, node in self.nodes.items()}
+        self._ancestors = {}
         self.done = {}
         self.failed = {}     # node id -> issue dict (root causes)
         self.skipped = set()  # nodes not evaluated because an upstream node failed
@@ -304,6 +312,19 @@ class _Evaluation:
             links[port] = [parse_port_ref(item["from"]) for item in items]
         return links
 
+    def ancestors(self, node_id):
+        """Every node upstream of ``node_id`` (transitively) in this graph."""
+        memo = self._ancestors
+        if node_id not in memo:
+            found, stack = set(), list(self._upstream(node_id))
+            while stack:
+                current = stack.pop()
+                if current not in found:
+                    found.add(current)
+                    stack.extend(memo[current] if current in memo else self._upstream(current))
+            memo[node_id] = frozenset(found)
+        return memo[node_id]
+
     def _upstream(self, node_id):
         seen, result = set(), []
         for pairs in self.links[node_id].values():
@@ -358,7 +379,15 @@ class _Evaluation:
                 # frame listing of a live run) are left out, so aliases share an entry (spec §5).
                 key_params = {name: value for name, value in data_params.items() if name not in node_type.selectors}
                 data_inputs, full_inputs = {}, {}
-        data = make_data_key(node_type.id, node_type.impl_version, key_params, data_inputs, source)
+        ids = None
+        if node_type.stage in ID_STAGES:
+            # Their values carry node ids (layer ids and pick targets, the scene title, export names), and
+            # every other key is content-only: a graph naming its nodes differently must not get these
+            # values from the cache of another graph (spec §5).
+            ids = {"node": node_id}
+            if node_type.stage == "representation":
+                ids["upstream"] = sorted(self.ancestors(node_id))
+        data = make_data_key(node_type.id, node_type.impl_version, key_params, data_inputs, source, ids)
         full = make_full_key(data, client_params, full_inputs)
         impl = data if node_type.keyed_by_data else full
         final = None

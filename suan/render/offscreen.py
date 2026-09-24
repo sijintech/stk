@@ -63,6 +63,7 @@ HINT = ("Offscreen rendering needs an OpenGL context without a display. Install 
 _PROBES = {}
 _LOCK = threading.Lock()
 _POLL_INTERVAL = 0.1  # seconds between poll() calls while a child runs
+PROBE_TIMEOUT = 120.0  # seconds a capability probe may take
 # A child killed from outside (OOM killer, an operator) says nothing about the GL stack: probe again next time.
 _TRANSIENT_SIGNALS = {getattr(signal, name) for name in ("SIGKILL", "SIGTERM", "SIGINT", "SIGHUP")
                       if hasattr(signal, name)}
@@ -116,6 +117,17 @@ def _outcome(result, error, stderr, transient=False):
     return outcome
 
 
+def _kill(child):
+    """Kill the render child and its process group (POSIX), else the child alone."""
+    if os.name == "posix":
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+            return
+        except OSError:
+            pass
+    child.kill()
+
+
 def _run(python, args, timeout, *, cwd=None, poll=None):
     """Run the child in ``cwd`` (default: a fresh empty directory); ``poll()`` is called while it runs."""
     if cwd is None:
@@ -123,8 +135,11 @@ def _run(python, args, timeout, *, cwd=None, poll=None):
             return _run(python, args, timeout, cwd=tmp, poll=poll)
     command = [python, "-c", _BOOTSTRAP.format(root=_PACKAGE_ROOT), *args]
     try:
+        # Its own process group (POSIX): a kill also stops anything the interpreter started (a wrapper
+        # script's children would otherwise keep the pipes open).
         child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                 env=_child_env(), stdin=subprocess.DEVNULL, cwd=str(cwd))
+                                 env=_child_env(), stdin=subprocess.DEVNULL, cwd=str(cwd),
+                                 start_new_session=os.name == "posix")
     except OSError as error:
         return _outcome(None, f"cannot start the render interpreter {python!r}: {error}", "")
     deadline = time.monotonic() + timeout
@@ -136,13 +151,13 @@ def _run(python, args, timeout, *, cwd=None, poll=None):
                 break
             except subprocess.TimeoutExpired:
                 if time.monotonic() >= deadline:
-                    child.kill()
+                    _kill(child)
                     _, stderr = child.communicate()
                     return _outcome(None, f"render child timed out after {timeout:g} s", _tail(stderr), True)
                 poll()  # raises Cancelled / BudgetExceeded: the finally clause kills the child
     finally:
         if child.poll() is None:
-            child.kill()
+            _kill(child)
             child.communicate()
     result = None
     for line in reversed(stdout.splitlines()):
@@ -161,13 +176,15 @@ def _run(python, args, timeout, *, cwd=None, poll=None):
     return _outcome(result, None, _tail(stderr))
 
 
-def probe(*, python=None, timeout=120.0, refresh=False):
+def probe(*, python=None, timeout=PROBE_TIMEOUT, refresh=False, poll=None):
     """Check offscreen rendering in a child process (cached per interpreter and GL settings).
 
     Returns ``{"ok", "python", "vtk", "window", "renderer", "error", "hint"}``. Success and
     definitive failures (the child reported a failure, crashed, or cannot be started) are cached;
     transient ones (a timeout, a child killed by SIGKILL/SIGTERM) are not, so the next call probes
-    again. ``refresh=True`` always probes.
+    again. ``refresh=True`` always probes. ``poll`` (optional) is called about every 0.1 s while
+    the child runs; an exception it raises (e.g. ``Cancelled``) kills the child, propagates and
+    caches nothing.
     """
     python = render_python(python)
     key = (python, os.environ.get("VTK_DEFAULT_OPENGL_WINDOW"), os.environ.get("DISPLAY"),
@@ -175,7 +192,7 @@ def probe(*, python=None, timeout=120.0, refresh=False):
     with _LOCK:
         if not refresh and key in _PROBES:
             return dict(_PROBES[key])
-    outcome = _run(python, ["--probe"], timeout)
+    outcome = _run(python, ["--probe"], timeout, poll=poll)
     result, error, stderr = outcome
     info = {"ok": error is None and bool(result and result.get("ok")), "python": python}
     info.update({k: v for k, v in (result or {}).items() if k in ("vtk", "window", "renderer")})
@@ -206,7 +223,8 @@ def render_payload(payload, *, width=None, height=None, magnification=1, transpa
     """
     python = render_python(python)
     if check:
-        info = probe(python=python)
+        # The first-use probe honours the caller's cancellation and never outlasts the render timeout.
+        info = probe(python=python, timeout=min(PROBE_TIMEOUT, float(timeout)), poll=poll)
         if not info["ok"]:
             raise OffscreenUnavailable(f"Offscreen rendering is unavailable in {python}: {info['error']}",
                                        probe=info)
@@ -453,6 +471,10 @@ class _Renderer:
         texture.SetInputData(image)
         color = (layer.get("appearance") or {}).get("color") or {}
         texture.SetInterpolate(color.get("interpolate", "linear") == "linear")
+        # One copy of the samples: no wrap-around at the edges (vtkTexture repeats by default, so linear
+        # interpolation blended the first column into the last).
+        texture.RepeatOff()
+        texture.EdgeClampOn()
         texture.SetColorModeToDirectScalars()
         mapper = vtk.vtkPolyDataMapper()
         mapper.SetInputConnection(plane.GetOutputPort())

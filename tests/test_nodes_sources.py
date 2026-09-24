@@ -99,8 +99,11 @@ def test_muferro_run_and_frame(tmp_path):
     assert frames.column("components")[polar].tolist() == [3, 3, 3] and frames.column("sha256")[0] == ""
     assert outputs["energy"].column("step").tolist() == [1, 2, 3, 4]
     assert outputs["progress"].n_rows == 4 and outputs["result"]["schema"] == "stk.result/1"
-    assert [path for path, _ in fingerprint["frames"]][:1] == ["Charges.00000001.dat"]
-    assert set(fingerprint["sha256"]) == {"energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json"}
+    assert [path for path, *_ in fingerprint["frames"]][:1] == ["Charges.00000001.dat"]
+    assert all(len(entry) == 3 for entry in fingerprint["frames"])  # path, size, mtime
+    assert set(fingerprint["sha256"]) == {"energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json",
+                                          "input.toml", "material.toml"}  # the case and its includes
+    assert fingerprint["case_dir"] == "."  # "auto" (the default) without a launcher record
     assert ctx.warnings == []
     # Frame reader: latest by default, choices reported, fingerprint = the frame file content.
     image, ctx, fingerprint = call(sources.muferro_frame, {"run": tmp_path}, {}, {"frames": frames})

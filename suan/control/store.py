@@ -24,7 +24,13 @@ LISTING_COLUMNS = ("id", "request", "node_id", "state", "error", "created", "upd
 
 
 def encode(value):
+    """Canonical JSON (sorted keys): requests and snapshots are compared as text."""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def encode_result(value):
+    """JSON of an action result in its own key order (table columns keep the order the node gave them)."""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 def decode_result(text):
@@ -184,7 +190,7 @@ class ControlStore:
         return self.action(identity)
 
     def complete(self, identity, node_id, result=None, error=""):
-        body = encode(result)
+        body = encode_result(result)
         with self.db() as db:
             row = db.execute("SELECT state,node_id FROM actions WHERE id=?", (identity,)).fetchone()
             if not row or row["node_id"] != node_id or row["state"] != "queued":

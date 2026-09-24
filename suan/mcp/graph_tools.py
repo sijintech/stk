@@ -8,10 +8,11 @@ they can be called (and tested) directly. Evaluation is local to the MCP host:
   configured Runtime: ``STK_RUNTIME_URL``/``STK_RUNTIME_TOKEN`` or the local
   service) or, like ``suan graph run --bind``, a directory on this host
   (``{"dir": "/path"}``);
-* outputs are written as files under ``output_dir`` (default
-  ``$STK_MCP_OUTPUT_DIR`` or ``<tmp>/stk-mcp``) and returned as paths plus a
-  compact JSON summary (payload manifests in the ``.stkp`` directory form:
-  ``manifest.json`` + ``<sha256>.bin``);
+* outputs are written as files under ``output_dir`` (default: a new private
+  directory per call, ``<base>/<graph sha256[:16]>-<random>``, where ``<base>`` is
+  ``$STK_MCP_OUTPUT_DIR`` or the per-user ``<tmp>/stk-mcp-<uid>`` (mode 0700)) and
+  returned as paths plus a compact JSON summary (payload manifests in the ``.stkp``
+  directory form: ``manifest.json`` + ``<sha256>.bin``);
 * ``graph_render`` renders a scene offscreen (VTK in a subprocess) and fails
   with a clear message when this host cannot render.
 """
@@ -19,6 +20,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 
 __all__ = ["GraphToolError", "get_task_events", "graph_catalog", "graph_evaluate", "graph_render", "graph_validate",
@@ -121,12 +123,39 @@ def graph_validate(graph=None, preset=None, parameters=None):
 # Evaluation
 
 
+def _private_dir(path):
+    """``path`` as a directory only this user can use: created 0700, else verified (no symlink, owner, mode)."""
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = os.lstat(path)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise GraphToolError(f"{path} is not a directory; remove it or set STK_MCP_OUTPUT_DIR")
+    if hasattr(os, "getuid") and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+        raise GraphToolError(f"{path} must be owned by this user with mode 0700; remove it or set STK_MCP_OUTPUT_DIR")
+    return path
+
+
+def _output_base():
+    """``$STK_MCP_OUTPUT_DIR``, else a per-user private directory ``<tmp>/stk-mcp-<uid>``."""
+    configured = os.environ.get("STK_MCP_OUTPUT_DIR")
+    if configured:
+        base = Path(configured).expanduser()
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    suffix = f"-{os.getuid()}" if hasattr(os, "getuid") else ""
+    return _private_dir(Path(tempfile.gettempdir()) / f"stk-mcp{suffix}")
+
+
 def _output_root(output_dir, name):
-    base = Path(output_dir) if output_dir else Path(os.environ.get("STK_MCP_OUTPUT_DIR")
-                                                     or Path(tempfile.gettempdir()) / "stk-mcp")
-    root = base.expanduser() / name if not output_dir else base.expanduser()
-    root.mkdir(parents=True, exist_ok=True)
-    return root.resolve()
+    """The directory one call writes into: ``output_dir`` as given, else a new private directory per call.
+
+    Default directories are ``<base>/<name>-<random>`` (``tempfile.mkdtemp``, mode 0700), so calls that
+    differ only in parameters, bindings or outputs, or run at the same time, never share files.
+    """
+    if output_dir:
+        root = Path(output_dir).expanduser()
+        root.mkdir(parents=True, exist_ok=True)
+        return root.resolve()
+    return Path(tempfile.mkdtemp(prefix=f"{name}-", dir=_output_base())).resolve()
 
 
 def _resolver(bindings, cache_root):
@@ -213,11 +242,9 @@ def _summary(result, files, root):
     return summary
 
 
-def graph_evaluate(graph=None, preset=None, bindings=None, parameters=None, outputs=None, profile="web",
-                   plot_format="svg", budget=None, output_dir=None):
-    """Evaluate on this host and write the outputs; returns a summary with absolute file paths."""
+def _evaluate(document, *, bindings, parameters, outputs, profile, plot_format, budget, output_dir):
+    """``(summary, result, sink)`` of one evaluation whose outputs are written under its own directory."""
     from suan.graph.cli import _write_json, _write_outputs
-    document = _load(graph, preset)
     result, sink = _run(document, bindings=bindings, parameters=parameters, outputs=outputs, profile=profile,
                         plot_format=plot_format, budget=budget)
     root = _output_root(output_dir, result["graph_sha256"][:16])
@@ -225,6 +252,17 @@ def graph_evaluate(graph=None, preset=None, bindings=None, parameters=None, outp
     _write_json(root / "result.json", {**result, "files": files})
     summary = _summary(result, files, root)
     summary["result_file"] = str(root / "result.json")
+    return summary, result, sink
+
+
+def graph_evaluate(graph=None, preset=None, bindings=None, parameters=None, outputs=None, profile="web",
+                   plot_format="svg", budget=None, output_dir=None):
+    """Evaluate on this host and write the outputs; returns a summary with absolute file paths.
+
+    Without ``output_dir`` every call writes into a new private directory (``output_dir`` in the summary).
+    """
+    summary, _, _ = _evaluate(_load(graph, preset), bindings=bindings, parameters=parameters, outputs=outputs,
+                              profile=profile, plot_format=plot_format, budget=budget, output_dir=output_dir)
     return summary
 
 
@@ -278,12 +316,13 @@ def graph_render(graph=None, preset=None, bindings=None, parameters=None, output
                                               **({"width": int(width)} if width else {}),
                                               **({"height": int(height)} if height else {})}}
                              if n.get("id") == target else n for n in document["nodes"]]
-    summary = graph_evaluate(document, bindings=bindings, parameters=parameters, outputs=[name],
-                             output_dir=output_dir)
+    summary, result, sink = _evaluate(document, bindings=bindings, parameters=parameters, outputs=[name],
+                                      profile="web", plot_format="svg", budget=None, output_dir=output_dir)
     item = summary["outputs"][name]
     if item.get("media_type") != "image/png":
         raise GraphToolError(f"Output {name!r} is {item.get('media_type')}, not a PNG image")
-    return {"png": Path(item["file"]).read_bytes(), "summary": summary}
+    # The bytes this evaluation produced (the file may be replaced by a concurrent call to the same output_dir).
+    return {"png": sink.read(result["outputs"][name]["blob"]), "summary": summary}
 
 
 # ---------------------------------------------------------------------------
@@ -335,12 +374,13 @@ def plot_table(columns=None, y=None, x=None, kind="line", units=None, title=None
     except (PlotSpecError, ValueError) as exc:
         raise GraphToolError(f"Invalid plot: {exc}") from None
     import hashlib
+    from suan.graph.cli import write_atomic
     digest = hashlib.sha256(rendered["bytes"]).hexdigest()
     root = _output_root(output_dir, "plots")
     target = root / f"plot-{digest[:16]}.{format}"
-    target.write_bytes(rendered["bytes"])
+    write_atomic(target, rendered["bytes"])
     data_file = root / f"plot-{digest[:16]}.data.json"
-    data_file.write_text(json.dumps(rendered["data"], ensure_ascii=False, allow_nan=False), encoding="utf-8")
+    write_atomic(data_file, json.dumps(rendered["data"], ensure_ascii=False, allow_nan=False).encode("utf-8"))
     return {"bytes": rendered["bytes"], "summary": {"file": str(target), "data_file": str(data_file),
                                                     "media_type": rendered["media_type"]}}
 

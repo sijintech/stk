@@ -355,7 +355,8 @@ Registration: when two connectors claim one id the higher `priority` wins (priva
   point samples.
 - `energy_out.dat` → table `energy` (reader `mupro.energy@1`): `step` (int64, role index) plus the
   native header names (`Elastic Energy`, `Electric Energy`, `Landau Energy`, `Gradient P Energy`,
-  `Total Energy`; `energy_1..5` without a header), float64, `unit: "normalized"`, quantity `energy`.
+  `Total Energy`; the same names without a header or before the first row), float64,
+  `unit: "normalized"`, quantity `energy`.
 - `mupro_progress.jsonl` → table `progress` (`step`, `completed_steps`, `total_steps`).
 - `verify` wraps `suan.mupro.run.verify_run` (`stk-mupro-1`).
 - The full muFerro parameter schema belongs to MuPRO (installed with the SDK); the public connector

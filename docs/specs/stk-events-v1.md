@@ -108,15 +108,24 @@ with Emitter(src="adapter") as mon:            # path from $STK_MONITOR_PATH; no
 
 ## 6. muFerro legacy adapter (adapt mode, a thread in `python -m suan.mupro run`)
 
+The launcher removes `$STK_MONITOR_PATH` from the solver's environment (one writer per file) and a
+thread polls the case directory every 2 s. Lifecycle events (`run.started`, `verification`,
+`run.completed`) have `src: "launcher"`; the events derived from native outputs have
+`src: "adapter"`.
+
 | native source | trigger | event |
 |---|---|---|
-| launch | before exec | `run.started {app: "muFerro", total_steps, ranks}`; `metric.declare` ×5 (`elastic_energy`, `electric_energy`, `landau_energy`, `gradient_energy`, `total_energy`; labels from the header; unit `normalized`) |
-| `mupro_progress.jsonl` line `{step, completed_steps, total_steps}` | new complete line | `progress {…, fraction}` |
-| `energy_out.dat` row `kt: N energy: e1..e5` | new complete line | `metrics {step: N, values}`; non-finite → `"NaN"` plus `message {warning, code: "nonfinite_energy"}` |
-| `<Stem>.<step:08d>.dat` | size unchanged over 2 polls and progress ≥ step (or the child exited) | `frame {dataset: Stem, step, path, reader: "mupro.dat@1", components}` |
-| `mupro_completion.json` | appears | `message {info}` |
-| child exit + `verify_run` | after exit | `verification {…}`, `run.completed {status, classification, reason}` |
+| launch | before exec | `run.started {app: "muFerro", total_steps, ranks, host, pid}` (`src: "launcher"`) |
+| `mupro_progress.jsonl` line `{step, completed_steps, total_steps}` | new complete line (the latest of each poll) | `progress {step, completed_steps, total_steps, fraction}`; an unreadable line → `message {warning, code: "malformed_progress"}` |
+| `energy_out.dat` header, or its first row without a header | first read | `metric.declare` ×5 (`elastic_energy`, `electric_energy`, `landau_energy`, `gradient_energy`, `total_energy`; `label` from the header's right-aligned 18-character columns, else muFerro's names `Elastic Energy` … `Total Energy`; unit `normalized`, group `energy`), once |
+| `energy_out.dat` row `kt: N energy: e1..e5` | new complete line | `metrics {step: N, values}`; a non-finite or unreadable value is written as `"NaN"`/`"Inf"`/`"-Inf"` plus `message {warning, code: "nonfinite_energy"}`; a row without five values → `message {warning, code: "malformed_energy_row"}` |
+| `<Stem>.<step:08d>.dat` | size **and mtime** unchanged over 2 polls and progress has reached its step; after the solver exits with code 0, every remaining frame; after a non-zero exit only frames at or before the last progress step (later ones may be cut off mid-write) | `frame {dataset: Stem, step, path, reader: "mupro.dat@1", components, size}` (`path` includes the case directory) |
+| `mupro_completion.json` | appears and parses (at the final pass also when unreadable) | `message {info, code: "native_completion"}`, once |
+| child exit + `verify_run` | after exit (or a failure before launch) | `verification {verifier, status, failed_checks}` only when the solver was launched (the launcher's `not_run` → `skipped`); then always `run.completed {status, classification, reason}` (`src: "launcher"`) |
+
+Warnings of one code are written at most 5 times, then one "further … suppressed" message.
 
 The adapter never fails the run (errors go to stderr); exit codes and records of the launcher stay
-identical. The same rules can replay a finished directory. If muFerro later links the SDK itself,
+identical. The same rules can replay a finished directory (`suan.mupro.monitor.replay`: every frame is
+published and every event carries the emitter's own `src`). If muFerro later links the SDK itself,
 the launcher switches to delegate mode and the adapter turns off.

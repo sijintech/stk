@@ -340,6 +340,16 @@ data_key(S) = sha256(canonical({"type": id, "impl": impl_version,
 full_key(S) = sha256(canonical({"data": data_key(S), "client": {}, "inputs": {}}))
 ```
 
+**Node ids in keys.** Keys are content-only, so graphs that name their nodes differently share the
+cache entries of their source, filter and analysis nodes. Representation, view and output nodes put
+node ids into their values (layer `id`/`node` and `pick.probe.node`, the scene title overlay, the
+`scene_v1` dataset id, export file names), so their `data_key` also holds
+`"ids": {"node": <own id>}`, and for representation nodes `"upstream": [the sorted ids of every
+ancestor]`. A layer is therefore never reused under another graph's ids, and `pick.probe.node` (the
+source node recorded in the dataset's provenance) is always a node upstream of the layer in the graph
+being evaluated, else the layer's own node (`ctx.ancestors` lists them). Nodes of other stages keep
+the key above (no `ids` member).
+
 The selectors (`stk.source.muferro_frame@1`: `step`, `policy`) and the upstream keys (the frame
 listing of `stk.source.muferro_run@1`, whose key changes whenever a live run appends an energy row
 or a progress line) are excluded once the fingerprint has resolved the frame; the fingerprint
@@ -372,9 +382,16 @@ effective profile. `stk.output.payload@1` defaults to `profile: "auto"`; an expl
 
 Security: a graph is data; node types are code installed by the operator. No `eval` (the M1
 calculator has fixed operations only). Sources read only through bindings. Budgets are enforced
-between nodes (and by `ctx.check()` inside long nodes). Runtime error codes: `cancelled`,
-`budget_exceeded`, `node_failed`, `bad_outputs`, `kind_mismatch`, `unknown_binding`,
-`frame_not_found`, `missing_file`, `unsupported`.
+between nodes (and by `ctx.check()` inside long nodes). Runtime error codes (the `code` of a node error
+in `errors`, or of the failed request): `bad_request` (a malformed request), `unknown_preset`,
+`cancelled`, `budget_exceeded`, `node_failed` (an unexpected exception), `bad_outputs` (a value that
+cannot be delivered), `kind_mismatch`, `invalid_param`, `invalid_input` (an input a node cannot use,
+e.g. a frames table without its binding), `invalid_data` (unreadable or inconsistent file content),
+`invalid_payload`, `invalid_direction` and `numbering_unsupported` (classifier inputs), `not_planar`,
+`unknown_binding`, `frame_not_found`, `missing_file`, `path_not_allowed` (a path leaving its binding),
+`invalid_path`, `connector_error` (a connector failure without a more specific code),
+`render_unavailable` (no offscreen OpenGL; the hint says how to get it), `render_failed` (the render
+child failed) and `unsupported`; an invalid graph fails with the validation codes of §11.
 
 ## 6. Time and animation
 
@@ -420,24 +437,43 @@ its unit (`unspecified` shown).
 Returned by `suan.graph.service` (agent action `graph.evaluate`, MCP, CLI `--json`):
 
 ```json
-{"schema": "stk.graph-result/1", "graph_hash": "sha256:…",
+{"schema": "stk.graph-result/1", "graph_sha256": "<hex>", "graph_hash": "sha256:<hex>", "profile": "web",
  "outputs": {
-   "payload":  {"type": "payload", "manifest": {"schema": "stk.payload/2", "…": "buffers as sha256: uris"}},
-   "image":    {"type": "image", "media_type": "image/png", "sha256": "…", "size": 123, "width": 1600, "height": 1200},
-   "fractions":{"type": "table", "columns": {"value": [1, 2]}, "units": {"fraction": "1"}, "attrs": {}},
+   "view":     {"type": "payload", "manifest": {"schema": "stk.payload/2", "…": "buffers as \"sha256:<hex>\" uris"},
+                "scene_v1": {"…": "only with v1_fallback"}},
+   "image":    {"type": "image", "blob": "<sha256>", "media_type": "image/png", "size": 123, "width": 1600,
+                "height": 1200},
+   "fractions":{"type": "table", "column_names": ["value", "name", "family", "count", "fraction", "color"],
+                "columns": {"value": [1, 2], "…": []}, "units": {"fraction": "1"}, "attrs": {}},
+   "big":      {"type": "table", "blob": "<sha256>", "media_type": "application/json", "size": 300000,
+                "rows": 20000, "column_names": ["step", "Total Energy"]},
    "info":     {"type": "value", "value": {"detected": true}},
-   "energy":   {"type": "plot", "spec": {"schema": "stk.plot/1"},
-                "images": [{"media_type": "image/png", "sha256": "…", "size": 1}]},
-   "export":   {"type": "file", "name": "domains.vtkhdf", "media_type": "application/x-hdf5", "sha256": "…", "size": 1},
+   "large":    {"type": "value", "blob": "<sha256>", "media_type": "application/json", "size": 300000},
+   "energy":   {"type": "plot", "blob": "<sha256>", "media_type": "image/svg+xml", "size": 1,
+                "data_blob": "<sha256 of the plotted data, stk.plot-data/1 JSON>"},
+   "export":   {"type": "file", "name": "domains.vtkhdf", "media_type": "application/x-hdf5", "blob": "<sha256>",
+                "size": 1},
    "polar":    {"type": "dataset", "descriptor": {"schema": "stk.dataset/1"}}},
  "parameters": {"step": {"value": 1000, "choices": [0, 500, 1000]}},
  "keys": {"polar": {"data": "…", "full": "…"}}, "evaluated": ["polar"], "timings": {"polar": 0.8},
- "cache": {"hits": 5, "misses": 3}, "warnings": []}
+ "cache": {"hits": 5, "misses": 3},
+ "warnings": [{"code": "payload_reduced", "message": "Layer 'vol': volume quantized to u16", "path": "/outputs/view",
+               "node": "scene", "hint": null, "severity": "warning", "details": {"layer": "vol"}}],
+ "errors": [{"code": "frame_not_found", "message": "…", "path": "", "node": "polar", "hint": null,
+             "severity": "error", "skipped": ["scene"]}]}
 ```
 
-`scene` outputs are delivered as `payload` (encoded with the request profile). Blobs (buffers,
-PNGs, tables > 256 KiB as `{"type": "table", "blob": {"sha256", "size", "media_type":
-"application/json"}}`) go to the hub blob store or, for the CLI, to files in `--out`.
+`graph_sha256` is the hex digest of `graph_hash`; `profile` is the request profile. `blob` values
+are sha256 strings of blobs in the hub blob store (`GET /api/v1/blobs/{sha256}`) or, for the CLI and
+MCP, files written next to the result. `scene` outputs are delivered as `payload` (encoded with the
+request profile); budget reductions of that encoding are reported as `payload_reduced` warnings
+(`node` = the scene node, `path` = the output), like those of `stk.output.payload@1`. Tables whose
+JSON exceeds 256 KiB, and such values, are blobs (`rows` = the row count); `column_names` always
+gives the table's column order (JSON object order is not reliable across stores and clients). Plots
+are delivered in the request's `plot_format` (`svg` default, `png`, `pdf`) with the plotted data as
+`data_blob`. `errors` is present only when some requested outputs failed while others were
+delivered (the first error lists the outputs it `skipped`); when nothing can be delivered the
+request fails with the node's error code (§5).
 
 The request `budget.max_output_bytes` limits the delivered bytes (blobs plus this document) and
 defaults to the request profile's payload budget (phone 32 MiB, web 128 MiB, desktop 2 GiB;
@@ -986,7 +1022,7 @@ Dense volume texture with colour and opacity transfer functions (client-side).
 | `encoding` | enum "auto" \| "u8" \| "u16" \| "f32" | `"auto"` | data |
 | `colormap` | string | `"viridis"` | client |
 | `range` | [number \| null, number \| null] | `[null, null]` | client |
-| `opacity` | [number (>=0, <=1), number (>=0, <=1)][2..64] | `[[0.0, 0.0], [1.0, 0.8]]` | client |
+| `opacity` | [number (>=0, <=1), number (>=0, <=1)][2..64] \| null | `null` | client |
 | `sampling` | enum "linear" \| "nearest" | `"linear"` | client |
 | `shade` | boolean | `false` | client |
 | `name` | string \| null | `null` | client |
@@ -1044,7 +1080,7 @@ Index of a muFerro run directory: published field frames, the energy trace, the 
 | param | type | default | stage |
 |---|---|---|---|
 | `binding` | string (pattern) | **required** | data |
-| `case_dir` | string (pattern) | `"."` | data |
+| `case_dir` | string (pattern) | `"auto"` | data |
 
 #### `stk.source.table@1` — Table file / 表格文件
 
@@ -1108,20 +1144,29 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
 
 **Sources**
 
-- `muferro_run`: uses the `mupro.muferro` connector (`describe(live=True)`). `frames` columns:
-  `dataset` (string stem), `step` (int64), `time` (float64, NaN = unknown), `path` (string, relative
-  to the binding), `size` (int64), `sha256` (string, `""` if not computed), `reader` (string,
-  `mupro.dat@1`), `components` (int64); attrs `{binding, case_dir, complete}`. `energy` and
-  `progress` as in `stk-data-format-v1.md` §14; `result` is the stk.result/1 manifest.
-  Fingerprint: the (path, size) listing of frame files plus the sha256 of `energy_out.dat`,
-  `mupro_progress.jsonl`, `mupro_completion.json` and `stk-mupro.json` when present.
+- `muferro_run`: uses the `mupro.muferro` connector (`describe(live=True)`). `case_dir: "auto"` (the
+  default) is the `case_dir` the STK launcher recorded in `stk-mupro.json` at the binding root (runs
+  submitted with `suan mupro submit --input DIR` keep their case in `DIR/`), else `"."`; an unsafe
+  recorded path also gives `"."`. `frames` columns: `dataset` (string stem), `step` (int64), `time`
+  (float64, NaN = unknown), `path` (string, relative to the binding), `size` (int64), `sha256`
+  (string, `""` if not computed; informational), `reader` (string, `mupro.dat@1`), `components`
+  (int64); attrs `{binding, case_dir (resolved), complete}`. On a live view the newest frame of a stem
+  whose size differs from the frame before it is left out (muFerro is still writing it; frames of a
+  stem are fixed-width, so all have one size). `energy` and `progress` as in `stk-data-format-v1.md`
+  §14 (before the first row, or without a header, the energy columns keep muFerro's names);
+  `result` is the stk.result/1 manifest. Fingerprint: the resolved `case_dir`, the (path, size,
+  mtime) listing of frame files plus the sha256 of `energy_out.dat`, `mupro_progress.jsonl`,
+  `mupro_completion.json`, `stk-mupro.json` and the case's `*.toml` files when present.
 - `muferro_frame`: picks rows with `dataset` = the stem, resolves `step` with `policy` (unknown →
   `frame_not_found`) and reports the steps as choices. Output `ImageData` (id = stem) with one point
   field named after the stem, `time.step` = the resolved step, provenance `used` = the file. Geometry:
   spacing/origin overrides else 1/0 with `length_unit` (default `grid_index`); `unit` and `quantity`
   (default from the connector, e.g. Polar → `polarization`) apply to the field. `precision:
-  "float32"` marks the field `lossy`. Fingerprint `{path, sha256, reader}` (two steps resolving to
-  one file share a cache entry).
+  "float32"` marks the field `lossy`. Fingerprint `{path, sha256, reader, components}` with the
+  sha256 of the file as it is now (`FileSource.sha256`, memoized by path, size, mtime and inode;
+  never the frames table's column, which may come from a cached index or another run with the same
+  listing); two steps resolving to one file share a cache entry. Rows the DAT reader cannot parse
+  (e.g. a frame being written) are `invalid_data`.
 - `file`: `format: auto` by extension (`.dat`, `.npy`, `.vti`, `.vtk`, `.vtkhdf`/`.hdf`/`.h5` with
   a `/VTKHDF` group). NPY holds `(x, y, z)` or `(x, y, z, c)` like today's `read_field`. VTI/VTK honour
   the `STK_units`, `STK_coordinate_units`, `STK_timestep` FieldData of `scene.load_grid`; VTKHDF
@@ -1185,12 +1230,19 @@ name, index or `magnitude`), `count` (finite values, int64), `nan_count` (non-fi
   (`value_scale` = (max − min)/(2^bits − 1), `value_offset` = min) or `f32` raw; `auto` = u8 (phone),
   u16 (web), f32 (desktop). Over the voxel budget the volume is strided and the reduction recorded.
   Label fields force `nearest` sampling and their palette. Built-in colormaps: `viridis`, `cividis`,
-  `coolwarm`, `turbo`, `gray`. Opacity points are `[x, alpha]` with x normalized over `range`.
+  `coolwarm`, `turbo`, `gray`. Opacity points are `[x, alpha]` with x normalized over `range`;
+  `opacity: null` (the default) is `[[0, 0], [1, 0.8]]` for scalars and, for label fields, alpha 0.8
+  for every label ≥ 0 and 0 for negative labels (−1 = unclassified/air), so no present category
+  disappears (`stk-render-payload-v2.md` §6.6). A layer's `pick.probe.node` is the source node of
+  the dataset's provenance when it is upstream of the layer in the evaluated graph, else the layer's
+  own node (clients walk upstream to the source).
 - `outline`: the 12 edges of the grid box (oriented by `direction`) or of the polydata bounds.
 - `scalar_bar`: colormap and range of the source layer's continuous colouring after `finalize`;
   title default `<field> [<unit>]`; a categorical source warns (`use_legend`).
 - `categorical_legend`: entries from the source's categories (layer attribute palette or the
-  dataset's label field); `only_present` lists values present in the data except −1.
+  dataset's label field); `only_present` lists values present in the data except −1 (none present:
+  an empty legend and an `empty_result` warning). Render nodes keep an empty result drawable: an
+  empty polydata becomes an empty `triangles` layer with its point and cell attributes.
 - `axes`, `orientation_legend`: overlays `axes_triad` and `orientation_legend`.
 
 **View**: `camera` → the camera object of §7. `scene`: layers in link order, camera default preset
@@ -1207,7 +1259,9 @@ of layer bounds.
 - `image`: a scene is rendered by offscreen VTK **in a subprocess** from its desktop-profile payload
   at `width` × `height` (default: the scene viewport) × `magnification` (PNG, RGBA if `transparent`);
   a plot by matplotlib (pixel width/height override `size_in` at the spec's dpi). `svg`/`pdf` are
-  plot-only (`unsupported` for scenes).
+  plot-only (`unsupported` for scenes). A PNG plot is refused above 16384² pixels
+  (`suan.plot.mpl.MAX_PIXELS`) before matplotlib allocates it; the control hub reviews images and PNG
+  plots above 7680 × 4320 pixels before they run.
 - `dataset`: `vtkhdf` (any M1 kind, STK profile), `vti` (image), `npy` (image, `(x, y, z, c)` like
   `read_field`), `csv`/`json` (tables). File `<name or node id>.<ext>`; value `{name, media_type,
   sha256, size, path}` with a disk cache, else `{name, media_type, sha256, size, bytes}`. The file

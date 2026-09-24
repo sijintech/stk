@@ -387,3 +387,98 @@ def test_perf_muferro_domains_128_cubed(tmp_path, offscreen_probe):
     assert cold_seconds <= 10.0 * factor, cold_seconds
     assert render_seconds <= 1.5 * factor, render_seconds
     assert np.isfinite(cold["outputs"]["fractions"]["attrs"]["denominator"])
+
+
+def test_muferro_domains_with_nothing_classified_still_draws(domain_run, tmp_path, offscreen_probe):
+    # Spec §14: a node that produces nothing returns an empty result and warns; the view, its legend and the
+    # image are still delivered (a zero initial frame, or a threshold above every |P|).
+    from suan.graph.service import MemoryBlobSink
+    from suan.render.payload import decode
+    run, _ = domain_run
+    sink = MemoryBlobSink()
+    outputs = ["view", "fractions"] + (["image"] if offscreen_probe["ok"] else [])
+    result = evaluate_preset(run, tmp_path / "cache", sink, outputs, {"min_magnitude": 50.0})
+    assert sorted(result["outputs"]) == sorted(outputs) and not result.get("errors")
+    codes = {(w["node"], w["code"]) for w in result["warnings"]}
+    assert {("surfaces", "empty_result"), ("legend", "empty_result")} <= codes
+    payload = decode(result["outputs"]["view"]["manifest"], sink.blobs)
+    layers = {layer["id"]: layer for layer in payload.manifest["layers"]}
+    domains = layers["surface_layer"]
+    assert domains["type"] == "triangles" and payload.array(domains["positions"]).shape[0] == 0
+    assert domains["attributes"]["label"]["association"] == "cell"  # the colouring field is kept
+    assert layers["legend"]["kind"] == "legend" and layers["legend"]["values"] == []
+
+
+def test_energy_outputs_before_the_first_energy_row(domain_run, tmp_path):
+    # A live run without energy_out.dat (or with only its header) names muFerro's columns all the same.
+    from suan.graph.resolve import LocalDirResolver
+    from suan.graph.service import MemoryBlobSink, evaluate_request
+    run, _ = domain_run
+    registry = catalog.build_registry(entry_points=False)
+    header = "      step     " + "".join(f"{h:>18}" for h in ("Elastic Energy", "Electric Energy", "Landau Energy",
+                                                            "Gradient P Energy", "Total Energy")) + "\n"
+    for label, content in (("missing", None), ("header only", header)):
+        energy = run / "energy_out.dat"
+        if content is None:
+            energy.unlink(missing_ok=True)
+        else:
+            energy.write_text(content)
+        for preset, outputs in (("energy-plot", ["energy", "table"]), ("muferro-domains", ["energy"])):
+            result = evaluate_request({"preset": preset, "outputs": outputs}, resolver=LocalDirResolver({"run": run}),
+                                      cache_dir=tmp_path / label, blob_sink=MemoryBlobSink(), registry=registry)
+            assert sorted(result["outputs"]) == sorted(outputs) and not result.get("errors"), (label, preset)
+            assert result["outputs"]["energy"]["type"] == "plot"
+
+
+def test_presets_find_a_case_submitted_with_input_dir(tmp_path):
+    # `suan mupro submit --input DIR` keeps the case in DIR/ of the task and records case_dir in stk-mupro.json.
+    pytest.importorskip("numpy")
+    pytest.importorskip("vtk")
+    pytest.importorskip("matplotlib")
+    from mupro_fake import write_domain_run
+    from suan.graph.evaluator import EvaluationFailed, evaluate
+    from suan.graph.resolve import LocalDirResolver
+    from suan.graph.service import MemoryBlobSink, evaluate_request
+    task = tmp_path / "task"
+    write_domain_run(task / "mycase", grid=(8, 6, 4), steps=2, interval=1)
+    (task / "stk-mupro.json").write_text(json.dumps({"schema_version": 1, "case_dir": "mycase",
+                                                      "state": "succeeded"}))
+    registry = catalog.build_registry(entry_points=False)
+    resolver = LocalDirResolver({"run": task})
+    result = evaluate_request({"preset": "muferro-domains", "outputs": ["fractions", "energy"]}, resolver=resolver,
+                              cache_dir=tmp_path / "cache", blob_sink=MemoryBlobSink(), registry=registry)
+    assert not result.get("errors") and result["parameters"]["step"] == {"value": 2, "choices": [0, 1, 2]}
+    graph = catalog.load_preset("muferro-domains")
+    run_node = next(node for node in graph["nodes"] if node["id"] == "run")
+    assert "case_dir" not in run_node["params"]  # the catalog default, "auto"
+    run_node["params"]["case_dir"] = "."  # the binding root holds no frames
+    with pytest.raises(EvaluationFailed) as error:
+        evaluate(graph, registry=registry, resolver=resolver, outputs=["fractions"])
+    assert error.value.errors[0]["code"] == "frame_not_found"
+    run_node["params"]["case_dir"] = "mycase"
+    assert evaluate(graph, registry=registry, resolver=resolver, outputs=["fractions"]).outputs["fractions"].n_rows
+    # An unsafe recorded path falls back to the binding root.
+    (task / "stk-mupro.json").write_text(json.dumps({"case_dir": "../elsewhere"}))
+    run_node["params"].pop("case_dir")
+    with pytest.raises(EvaluationFailed) as error:
+        evaluate(graph, registry=registry, resolver=resolver, outputs=["fractions"])
+    assert error.value.errors[0]["code"] == "frame_not_found"
+
+
+def test_table_outputs_carry_their_column_order(domain_run, tmp_path):
+    from suan.graph.service import MemoryBlobSink
+    run, _ = domain_run
+    result = evaluate_preset(run, tmp_path / "cache", MemoryBlobSink(), ["fractions", "families"])
+    for name in ("fractions", "families"):
+        table = result["outputs"][name]
+        assert table["column_names"] == list(table["columns"]), name
+    assert result["outputs"]["fractions"]["column_names"][:2] == ["value", "name"]
+    # The hub stores results in their own key order (requests stay canonical for idempotency).
+    from suan.control.store import ControlStore
+    store = ControlStore(tmp_path / "hub")
+    request = {"id": "a" * 32, "node_id": "b" * 32, "kind": "graph.evaluate", "payload": {"preset": "muferro-domains"}}
+    store.create_action(request)
+    store.complete(request["id"], request["node_id"], result)
+    stored = store.action(request["id"])["result"]["outputs"]["fractions"]
+    assert list(stored["columns"]) == result["outputs"]["fractions"]["column_names"]
+    assert list(stored) == list(result["outputs"]["fractions"])

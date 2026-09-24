@@ -208,25 +208,60 @@ class _CollectSink:
 
     def write(self, digest, target):
         data = self.blobs[digest]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".part")
         if isinstance(data, Path):
             import shutil
-            shutil.copyfile(data, tmp)
+            with open(data, "rb") as source:
+                write_atomic(target, lambda stream: shutil.copyfileobj(source, stream, 1024 * 1024))
         else:
-            tmp.write_bytes(data)
-        os.replace(tmp, target)
+            write_atomic(target, data)
+
+    def read(self, digest):
+        data = self.blobs[digest]
+        return data.read_bytes() if isinstance(data, Path) else data
 
     def json(self, digest):
-        data = self.blobs[digest]
-        return json.loads(data.read_bytes() if isinstance(data, Path) else data)
+        return json.loads(self.read(digest))
+
+
+def write_atomic(target, data):
+    """Write ``data`` (bytes, or ``write(stream)``) to ``target`` through a private temporary file.
+
+    The temporary file gets a random name next to the target and is created with
+    ``O_CREAT | O_EXCL | O_NOFOLLOW`` (mode 0666 minus the umask), then renamed over ``target``:
+    concurrent writers of one target never share a partial file, a planted symlink is never
+    followed, and readers see either the old or the new file.
+    """
+    import secrets
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    for _ in range(64):
+        tmp = target.with_name(f".{target.name}.{secrets.token_hex(8)}.part")
+        try:
+            fd = os.open(tmp, flags, 0o666)
+            break
+        except FileExistsError:
+            continue
+    else:  # pragma: no cover - 64 random names taken
+        raise FileExistsError(f"Cannot create a temporary file next to {target}")
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            if callable(data):
+                data(stream)
+            else:
+                stream.write(data)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _write_json(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".part")
-    tmp.write_text(json.dumps(value, indent=1, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    text = json.dumps(value, indent=1, ensure_ascii=False, allow_nan=False) + "\n"
+    write_atomic(path, text.encode("utf-8"))
 
 
 def _suffix(value):

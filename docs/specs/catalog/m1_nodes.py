@@ -99,8 +99,10 @@ def _plot_common():
       params={
           "binding": binding(title="Run binding",
                              description="Binding name resolved by the caller to {task_id} or a local directory."),
-          "case_dir": rel_path(".", title="Case directory",
-                               description="Directory inside the binding holding input.toml and the outputs."),
+          "case_dir": rel_path("auto", title="Case directory",
+                               description="Directory inside the binding holding input.toml and the outputs; "
+                                           "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
+                                           "(runs submitted with --input DIR), else the binding root."),
       },
       time_dependent=True, fingerprint=_todo)
 def muferro_run(ctx, inputs, params):
@@ -462,8 +464,10 @@ def glyphs(ctx, inputs, params):
                                  "items": {"type": "array", "prefixItems": [
                                      {"type": "number", "minimum": 0, "maximum": 1},
                                      {"type": "number", "minimum": 0, "maximum": 1}], "minItems": 2, "maxItems": 2}},
-                                [[0.0, 0.0], [1.0, 0.8]], stage="client", widget="transfer_function",
-                                title="Opacity points [x, alpha], x normalized over range"),
+                                None, nullable=True, stage="client", widget="transfer_function",
+                                title="Opacity points [x, alpha], x normalized over range",
+                                description="null = automatic: a ramp [[0, 0], [1, 0.8]] for scalars; 0.8 for "
+                                            "every label of a categorical field (0 for -1)"),
           "sampling": enum(["linear", "nearest"], "linear", stage="client"),
           "shade": boolean(False, stage="client"),
           "name": _nullable_string(stage="client"),

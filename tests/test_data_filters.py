@@ -335,7 +335,8 @@ def chamfered_box_area(a, b, c):
 
 
 def test_label_surfaces_are_closed_and_block_area_is_known():
-    image = label_image(block_labels())
+    # Blocks inside the grid (a margin of -1): the chamfered 0.5-contour is not clamped by the grid bounds.
+    image = label_image(np.pad(block_labels(), 1, constant_values=-1))
     raw = filters.label_surfaces(image, smoothing="none")
     labels = raw.array("label")[:, 0]
     assert raw.fields["label"].association == "cell" and raw.fields["label"].dtype == "int32"
@@ -362,6 +363,37 @@ def test_label_surfaces_are_closed_and_block_area_is_known():
     normals = smooth.array("Normals")
     assert normals.shape == (smooth.n_points, 3) and np.allclose(np.linalg.norm(normals, axis=1), 1, atol=1e-3)
     assert smooth.provenance.agent == {"node": "src"}
+
+
+def test_label_surfaces_stay_inside_the_grid_and_closed():
+    # The padding closes surfaces at the grid boundary half a cell outside it (smoothing pushed them further):
+    # the vertices are clamped onto the bounding box, so picks land inside the grid and the outline shows.
+    labels = block_labels()  # labels 1 and 2 touch the x, y (not z) faces of the grid
+    for spacing, origin in (((1.0, 1.0, 1.0), (0.0, 0.0, 0.0)), ((0.5, 0.25, 2.0), (3.0, -2.0, 1.0))):
+        image = label_image(labels, spacing=spacing, origin=origin)
+        low = np.asarray(origin)
+        high = low + (np.asarray(image.dimensions) - 1) * np.asarray(spacing)
+        for smoothing in ("none", "windowed_sinc", "laplacian"):
+            poly = filters.label_surfaces(image, smoothing=smoothing)
+            assert (poly.points >= low - 1e-9).all() and (poly.points <= high + 1e-9).all(), smoothing
+            assert np.isclose(poly.points.min(axis=0)[:2], low[:2]).all()  # the clamped faces lie on the box
+            assert np.isclose(poly.points.max(axis=0)[:2], high[:2]).all()
+            tris = poly.polys.connectivity.reshape(-1, 3)
+            values = poly.array("label")[:, 0]
+            for value in (1, 2):
+                own = tris[values == value]
+                assert open_edges(poly.points, own) == 0, (smoothing, value)  # still watertight
+                assert signed_volume(poly.points, own) > 0, (smoothing, value)  # still outward
+    # A label filling the whole grid: its unsmoothed surface is exactly the grid's bounding box.
+    full = label_image(np.full((4, 5, 6), 1, dtype=np.int16), spacing=(0.5, 1.0, 2.0))
+    box = filters.label_surfaces(full, smoothing="none")
+    tris = box.polys.connectivity.reshape(-1, 3)
+    size = (np.asarray(full.dimensions) - 1) * np.asarray(full.spacing)
+    area = 0.5 * np.linalg.norm(np.cross(box.points[tris[:, 1]] - box.points[tris[:, 0]],
+                                         box.points[tris[:, 2]] - box.points[tris[:, 0]]), axis=1).sum()
+    assert area == pytest.approx(2 * (size[0] * size[1] + size[1] * size[2] + size[0] * size[2]))
+    assert signed_volume(box.points, tris) == pytest.approx(float(np.prod(size)))
+    assert open_edges(box.points, tris) == 0
 
 
 def test_label_surfaces_sphere_area_and_geometry():

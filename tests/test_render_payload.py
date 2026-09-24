@@ -399,3 +399,31 @@ def test_pack_stkp_matches_payload_method_and_hashes():
     for buffer in payload.manifest["buffers"]:
         assert hashlib.sha256(payload.blobs[buffer["sha256"]]).hexdigest() == buffer["sha256"]
     assert isinstance(read_stkp(data), Payload)
+
+
+def test_categorical_volumes_default_to_one_opacity_for_every_label():
+    # The scalar ramp made the lowest label (here 15) fully transparent; -1 (unclassified/air) stays hidden.
+    from suan.render.colormaps import opacity_at
+    grid = {"dimensions": [2, 2, 1], "origin": [0, 0, 0], "spacing": [1, 1, 1]}
+
+    def opacity(labels, appearance=None):
+        layer = Layer("volume", id="lab", geometry={"grid": grid, "data": np.array(labels, dtype=np.int16),
+                                                    "categorical": True, "palette": "stk:categorical",
+                                                    "categories": [{"value": 15, "name": "a"}]},
+                      appearance=appearance or {})
+        tf = encode_scene(Scene(layers=[layer]), profile="web").layer("lab")["transfer_function"]
+        return tf["opacity"], opacity_at(np.unique(labels), tf["opacity"]).tolist()
+    points, alphas = opacity([[[15, 16], [19, 15]]])
+    assert alphas == [0.8, 0.8, 0.8] and len(points) >= 2
+    _, alphas = opacity([[[-1, 0], [7, 19]]])
+    assert alphas == [0.0, 0.8, 0.8, 0.8]
+    _, alphas = opacity([[[-1, -1], [-1, -1]]])
+    assert alphas == [0.0]
+    # An explicit opacity still applies over the label range; scalar volumes keep their ramp.
+    _, alphas = opacity([[[15, 16], [19, 15]]], {"opacity": [[0.0, 0.0], [1.0, 1.0]]})
+    assert alphas == [0.0, 0.25, 1.0]
+    density = volume_scene().layers[0]
+    density.appearance.pop("opacity")
+    scalar = encode_scene(Scene(layers=[density]), profile="web").layer("density")["transfer_function"]
+    low, high = scalar["range"]
+    assert scalar["opacity"] == [[low, 0.0], [high, 0.8]]  # the automatic scalar ramp

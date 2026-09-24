@@ -57,7 +57,7 @@ import uuid
 from .cache import GraphCache, plain_json, sub_key
 from .evaluator import EvaluationFailed, evaluate
 from .registry import Budget, BudgetExceeded, GraphError
-from .schema import ID_RE, parse_port_ref
+from .schema import ID_RE, GraphIssue, parse_port_ref
 
 __all__ = [
     "INLINE_LIMIT", "PROFILE_OUTPUT_BYTES", "PROFILES", "RESULT_SCHEMA",
@@ -269,14 +269,15 @@ def evaluate_request(payload, *, resolver, cache_dir, blob_sink, registry=None, 
         # (only the export nodes re-run).
         for key in stale:
             cache.discard(key, disk=False)
-    keys = {}
+    keys, nodes = {}, {}
     for name in result.outputs:
         node_id, port = parse_port_ref(graph["outputs"][name])
+        nodes[name] = node_id
         if node_id in result.keys:
             keys[name] = f"{result.keys[node_id]['full']}:{port}"
     delivery = _Delivery(blob_sink, profile=request["profile"], plot_format=request["plot_format"],
                          max_bytes=budget.max_output_bytes, encode_scene=encode_scene, render_plot=render_plot,
-                         cache=cache, keys=keys)
+                         cache=cache, keys=keys, nodes=nodes)
     outputs = {}
     for name, value in result.outputs.items():
         outputs[name] = delivery.deliver(name, result.output_types[name], value)
@@ -285,7 +286,8 @@ def evaluate_request(payload, *, resolver, cache_dir, blob_sink, registry=None, 
         "schema": RESULT_SCHEMA, "graph_sha256": digest, "graph_hash": result.graph_hash, "outputs": outputs,
         "parameters": result.parameters,
         "timings": {node: round(seconds, 6) for node, seconds in result.timings.items()},
-        "cache": dict(result.cache), "warnings": list(result.warnings), "keys": result.keys,
+        "cache": dict(result.cache), "warnings": _merge_warnings(result.warnings, delivery.warnings),
+        "keys": result.keys,
         "evaluated": list(result.evaluated), "profile": request["profile"],
     }
     if errors:
@@ -297,6 +299,15 @@ def evaluate_request(payload, *, resolver, cache_dir, blob_sink, registry=None, 
         raise BudgetExceeded(f"The result needs {delivery.bytes + size} bytes; the budget is "
                              f"{budget.max_output_bytes} bytes")
     return document
+
+
+def _merge_warnings(*groups):
+    merged = []
+    for group in groups:
+        for issue in group:
+            if issue not in merged:
+                merged.append(issue)
+    return merged
 
 
 def _stale_files(graph, result):
@@ -333,8 +344,11 @@ def _get(value, key, default=None):
 
 
 class _Delivery:
-    def __init__(self, sink, *, profile, plot_format, max_bytes, encode_scene, render_plot, cache=None, keys=None):
+    def __init__(self, sink, *, profile, plot_format, max_bytes, encode_scene, render_plot, cache=None, keys=None,
+                 nodes=None):
         self.sink = sink
+        self.nodes = nodes or {}  # output name -> node id
+        self.warnings = []        # issues found while delivering (GraphIssue.to_dict() form)
         self.profile = profile
         self.plot_format = plot_format
         self.max_bytes = max_bytes
@@ -408,7 +422,21 @@ class _Delivery:
 
     def _scene(self, value):
         encode = self.encode_scene or _default_encode_scene
-        return self._payload(encode(value, profile=self.profile, budget=None))
+        payload = encode(value, profile=self.profile, budget=None)
+        # The profile budget reduced layers: say so, as stk.output.payload@1 does (code payload_reduced).
+        manifest = _get(payload, "manifest")
+        budget = manifest.get("budget") if isinstance(manifest, Mapping) else None
+        for reduction in (budget.get("reductions") if isinstance(budget, Mapping) else None) or ():
+            if not isinstance(reduction, Mapping):
+                continue
+            issue = GraphIssue("payload_reduced", f"Layer {reduction.get('layer')!r}: {reduction.get('reason')}",
+                               f"/outputs/{self._name}", self.nodes.get(self._name), None, "warning").to_dict()
+            details = {k: reduction[k] for k in ("layer", "from", "to") if k in reduction}
+            if details:
+                issue["details"] = _json_safe(details)
+            if issue not in self.warnings:
+                self.warnings.append(issue)
+        return self._payload(payload)
 
     def _image(self, value):
         data = _get(value, "bytes")
@@ -462,11 +490,14 @@ class _Delivery:
             raise GraphError("bad_outputs", f"A table output must be a Table, got {type(value).__name__}")
         document = _json_safe(value.to_json())
         attrs = _json_safe(getattr(value, "attrs", None) or {})
+        # The table's column order, explicitly: JSON object order does not survive every store or client.
+        names = [str(name) for name in (document.get("columns") or {})]
         encoded = _dumps(document)
         if len(encoded) > INLINE_LIMIT:
             return {"type": "table", "blob": self.blob(encoded), "media_type": "application/json",
-                    "size": len(encoded), "rows": int(getattr(value, "n_rows", 0) or 0)}
-        result = {"type": "table", "columns": document["columns"], "units": document.get("units", {})}
+                    "size": len(encoded), "rows": int(getattr(value, "n_rows", 0) or 0), "column_names": names}
+        result = {"type": "table", "column_names": names, "columns": document["columns"],
+                  "units": document.get("units", {})}
         if attrs:
             result["attrs"] = attrs
         return result

@@ -74,10 +74,15 @@ def _pick(ctx, dataset):
 
     The node is the graph source that read the data (``provenance.agent.node``, set by
     the source nodes and carried by filters and analysis nodes); clients walk upstream
-    from it to the frame file. Without provenance it is this layer's own node.
+    from it to the frame file. Without provenance it is this layer's own node. Datasets are cached by
+    content, so their provenance may name a node of another graph: a node that is not upstream of this
+    one in the graph being evaluated (``ctx.ancestors``) is never named.
     """
     agent = getattr(getattr(dataset, "provenance", None), "agent", None)
     source = agent.get("node") if isinstance(agent, dict) else None
+    ancestors = getattr(ctx, "ancestors", None)
+    if source is not None and ancestors is not None and source not in ancestors:
+        source = None
     probe = {"node": source or _layer_id(ctx)}
     if source and getattr(dataset, "id", None):
         probe["dataset"] = dataset.id
@@ -159,7 +164,9 @@ def _polydata_layer(ctx, poly, requested):
     props = {**_common_props(poly), "default_color": {"by": "solid", "solid": [0.8, 0.8, 0.8]},
              "pick": _pick(ctx, poly)}
     common = {"id": _layer_id(ctx), "node": _layer_id(ctx), "name": poly.label or poly.id, "props": props}
-    if n_polys:
+    # An empty result (no points, no cells: e.g. no label surfaces) stays an empty triangles layer with its
+    # point and cell attributes, so colours by field and legends still resolve (spec §14 empty results).
+    if n_polys or (not n_lines and not n_verts and len(poly.points) == 0):
         cell, tris = _fan(poly.polys, np)
         fields = _selected_fields(ctx, poly, requested, associations=("point", "cell"),
                                   skip=("Normals",) if use_normals else ())
@@ -314,8 +321,10 @@ def glyphs(ctx, inputs, params):
                                  "items": {"type": "array", "prefixItems": [
                                      {"type": "number", "minimum": 0, "maximum": 1},
                                      {"type": "number", "minimum": 0, "maximum": 1}], "minItems": 2, "maxItems": 2}},
-                                [[0.0, 0.0], [1.0, 0.8]], stage="client", widget="transfer_function",
-                                title="Opacity points [x, alpha], x normalized over range"),
+                                None, nullable=True, stage="client", widget="transfer_function",
+                                title="Opacity points [x, alpha], x normalized over range",
+                                description="null = automatic: a ramp [[0, 0], [1, 0.8]] for scalars; 0.8 for "
+                                            "every label of a categorical field (0 for -1)"),
           "sampling": enum(["linear", "nearest"], "linear", stage="client"),
           "shade": boolean(False, stage="client"),
           "name": _nullable_string(stage="client"),
@@ -497,6 +506,8 @@ def categorical_legend(ctx, inputs, params):
         palette, title, source_layer = field.palette, field.name, None
     if params["only_present"]:
         values = [v for v in present if v != -1]
+        if not values:
+            ctx.warn("No categories to show: nothing is classified", code="empty_result")
     else:
         values = [e["value"] for e in entries]
     return _overlay(ctx, "legend", entries=entries, palette=palette or "stk:categorical", values=values, title=title,

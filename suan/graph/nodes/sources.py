@@ -19,6 +19,7 @@ from suan.graph.registry import (NodeExecutionError, Port, binding, enum, intege
                                  string, string_list, vector3)
 
 RUN_FILES = ("energy_out.dat", "mupro_progress.jsonl", "mupro_completion.json")
+MAX_TOML_FILES = 64  # case files hashed into the muferro_run fingerprint
 TABLE_LIMIT = 256 * 1024 * 1024
 
 
@@ -40,6 +41,14 @@ def _prefix(case_dir):
     return case_prefix(case_dir)
 
 
+def _case_dir(source, case_dir):
+    """The case directory ``muferro_run`` reads: ``"auto"`` is the one recorded in ``stk-mupro.json``, else ``"."``."""
+    if case_dir != "auto":
+        return case_dir
+    from suan.connectors.mupro import recorded_case_dir
+    return recorded_case_dir(source)
+
+
 def _muferro():
     """The active ``mupro.muferro`` connector (a private higher-priority package wins)."""
     from suan.connectors.registry import default_registry
@@ -54,18 +63,22 @@ def _muferro_run_fingerprint(ctx, inputs, params):
     from suan.connectors.api import ConnectorError
     from suan.mupro.run import FRAME, RESULT
     source = _source(ctx, params["binding"])
-    prefix = _prefix(params["case_dir"])
+    case_dir = _case_dir(source, params["case_dir"])
+    prefix = _prefix(case_dir)
     from suan.connectors.mupro import run_files
     names = run_files(source, prefix)
-    frames = sorted([path, item.size] for path, item in names.items()
+    # Frames by (path, size, mtime): a frame rewritten in place (same size) changes the run key.
+    frames = sorted([path, item.size, item.mtime] for path, item in names.items()
                     if path.startswith(prefix) and "/" not in path[len(prefix):] and FRAME.search(path))
+    small = [prefix + name for name in RUN_FILES] + [RESULT]
+    # The case (input.toml and its includes) is part of the run: the frames table records its grid.
+    small += sorted(path for path in names if path.endswith(".toml"))[:MAX_TOML_FILES]
     try:
-        hashed = {path: source.sha256(path) for path in [prefix + name for name in RUN_FILES] + [RESULT]
-                  if path in names}
+        hashed = {path: source.sha256(path) for path in dict.fromkeys(small) if path in names}
     except ConnectorError as exc:
         raise _failure(exc) from None
     connector = _muferro()
-    return {"connector": f"{connector.id}@{connector.version}", "case_dir": params["case_dir"], "frames": frames,
+    return {"connector": f"{connector.id}@{connector.version}", "case_dir": case_dir, "frames": frames,
             "sha256": hashed}
 
 
@@ -106,8 +119,10 @@ def _empty_table(table_id, columns, index="step"):
       params={
           "binding": binding(title="Run binding",
                              description="Binding name resolved by the caller to {task_id} or a local directory."),
-          "case_dir": rel_path(".", title="Case directory",
-                               description="Directory inside the binding holding input.toml and the outputs."),
+          "case_dir": rel_path("auto", title="Case directory",
+                               description="Directory inside the binding holding input.toml and the outputs; "
+                                           "\"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json "
+                                           "(runs submitted with --input DIR), else the binding root."),
       },
       time_dependent=True, fingerprint=_muferro_run_fingerprint)
 def muferro_run(ctx, inputs, params):
@@ -116,11 +131,12 @@ def muferro_run(ctx, inputs, params):
     from suan.connectors.mupro import MuFerroConnector
     source = _source(ctx, params["binding"])
     connector = _muferro()
+    case_dir = _case_dir(source, params["case_dir"])
     # A replacement connector (e.g. the private stk-mupro package) implements the plain protocol.
     ours = isinstance(connector, MuFerroConnector)
-    if params["case_dir"] != "." and not ours:
+    if case_dir != "." and not ours:
         raise NodeExecutionError(f"Connector {connector.id} does not take a case directory", code="unsupported")
-    extra = {"case_dir": params["case_dir"]} if ours else {}
+    extra = {"case_dir": case_dir} if ours else {}
     try:
         result = connector.describe(source, live=True, **extra)
         datasets = {d["id"] for d in result["datasets"]}
@@ -136,9 +152,8 @@ def muferro_run(ctx, inputs, params):
         progress = _empty_table("progress", ("step", "completed_steps", "total_steps"))
     files = {f["path"] for f in result.get("files", ())}
     extension = (result.get("extensions") or {}).get("mupro") or {}
-    complete = _prefix(params["case_dir"]) + "mupro_completion.json" in files and not extension.get("missing_frames")
-    frames = _frames_table(result, {"binding": params["binding"], "case_dir": params["case_dir"],
-                                    "complete": bool(complete)})
+    complete = _prefix(case_dir) + "mupro_completion.json" in files and not extension.get("missing_frames")
+    frames = _frames_table(result, {"binding": params["binding"], "case_dir": case_dir, "complete": bool(complete)})
     if not frames.n_rows:
         ctx.warn("The run has no field frames yet", code="empty_result")
     return {"frames": frames, "energy": energy, "progress": progress, "result": result}
@@ -180,11 +195,13 @@ def _resolve_frame(ctx, inputs, params):
         raise NodeExecutionError(f"{params['dataset']}: {exc}", code=exc.code) from None
     ctx.report_choices("step", steps, value=chosen["step"])
     source = _source(ctx, frames.attrs["binding"])
-    if not chosen["sha256"]:
-        try:
-            chosen = dict(chosen, sha256=source.sha256(chosen["path"]))
-        except ConnectorError as exc:
-            raise _failure(exc) from None
+    # Always the file's current hash (memoized by path, size, mtime_ns and inode for local runs; the listed
+    # hash of an immutable Runtime artifact): the frames table may come from the cache of an earlier
+    # evaluation, or from another run directory with the same listing.
+    try:
+        chosen = dict(chosen, sha256=source.sha256(chosen["path"]))
+    except ConnectorError as exc:
+        raise _failure(exc) from None
     return source, chosen
 
 
@@ -237,6 +254,10 @@ def muferro_frame(ctx, inputs, params):
     except Exception as exc:
         if getattr(exc, "code", None):
             raise _failure(exc) from None
+        if isinstance(exc, ValueError):
+            # Rows the general DAT parser cannot read (numpy's ValueError, like read_field's), e.g. a frame
+            # that a live run is still writing.
+            raise NodeExecutionError(f"{chosen['path']}: {exc}", code="invalid_data") from None
         raise
     if image.field(stem).components != entry["components"]:
         raise NodeExecutionError(f"{chosen['path']} has {image.field(stem).components} components; muFerro's "

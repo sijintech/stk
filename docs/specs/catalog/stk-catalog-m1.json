@@ -3776,38 +3776,37 @@
       "x-stk-stage": "client"
      },
      "opacity": {
-      "type": "array",
-      "minItems": 2,
-      "maxItems": 64,
-      "items": {
-       "type": "array",
-       "prefixItems": [
-        {
-         "type": "number",
-         "minimum": 0,
-         "maximum": 1
-        },
-        {
-         "type": "number",
-         "minimum": 0,
-         "maximum": 1
+      "anyOf": [
+       {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 64,
+        "items": {
+         "type": "array",
+         "prefixItems": [
+          {
+           "type": "number",
+           "minimum": 0,
+           "maximum": 1
+          },
+          {
+           "type": "number",
+           "minimum": 0,
+           "maximum": 1
+          }
+         ],
+         "minItems": 2,
+         "maxItems": 2
         }
-       ],
-       "minItems": 2,
-       "maxItems": 2
-      },
-      "title": "Opacity points [x, alpha], x normalized over range",
-      "x-stk-widget": "transfer_function",
-      "default": [
-       [
-        0.0,
-        0.0
-       ],
-       [
-        1.0,
-        0.8
-       ]
+       },
+       {
+        "type": "null"
+       }
       ],
+      "title": "Opacity points [x, alpha], x normalized over range",
+      "description": "null = automatic: a ramp [[0, 0], [1, 0.8]] for scalars; 0.8 for every label of a categorical field (0 for -1)",
+      "x-stk-widget": "transfer_function",
+      "default": null,
       "x-stk-stage": "client"
      },
      "sampling": {
@@ -4229,9 +4228,9 @@
       "maxLength": 1024,
       "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$",
       "title": "Case directory",
-      "description": "Directory inside the binding holding input.toml and the outputs.",
+      "description": "Directory inside the binding holding input.toml and the outputs; \"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json (runs submitted with --input DIR), else the binding root.",
       "x-stk-widget": "path",
-      "default": ".",
+      "default": "auto",
       "x-stk-stage": "data"
      }
     },

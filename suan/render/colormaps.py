@@ -22,11 +22,12 @@ helpers is standard-library only; NumPy is imported lazily.
 import math
 
 __all__ = [
-    "ALIASES", "BUILTIN", "CATEGORICAL_PALETTES", "DEFAULT_NAN_COLOR", "DEFAULT_UNKNOWN_COLOR", "ORIENTATION_HSL",
-    "canonical_name", "category_color", "colormap_names", "hsl_to_rgb", "is_builtin", "lut_colors", "lut_index",
-    "lut_rgba8", "lut_rgba8_bytes", "map_categories", "map_scalars", "opacity_at", "opacity_lut",
-    "opacity_points", "orientation_hsl", "orientation_rgb", "palette_entries", "rgba8", "stk_categorical_color",
-    "to_hex", "transfer_function", "transfer_function_rgba8",
+    "ALIASES", "BUILTIN", "CATEGORICAL_OPACITY", "CATEGORICAL_PALETTES", "DEFAULT_NAN_COLOR", "DEFAULT_OPACITY",
+    "DEFAULT_UNKNOWN_COLOR", "ORIENTATION_HSL", "canonical_name", "categorical_opacity", "category_color",
+    "colormap_names", "hsl_to_rgb", "is_builtin", "lut_colors", "lut_index", "lut_rgba8", "lut_rgba8_bytes",
+    "map_categories", "map_scalars", "opacity_at", "opacity_lut", "opacity_points", "orientation_hsl",
+    "orientation_rgb", "palette_entries", "rgba8", "stk_categorical_color", "to_hex", "transfer_function",
+    "transfer_function_rgba8",
 ]
 
 BUILTIN = ("viridis", "cividis", "coolwarm", "turbo", "gray")
@@ -373,6 +374,27 @@ def opacity_points(points, value_range):
     lo, hi = float(value_range[0]), float(value_range[1])
     result = [[lo + float(x) * (hi - lo), float(a)] for x, a in points]
     return sorted(result, key=lambda pair: pair[0])
+
+
+# Automatic volume opacity (stk.render.volume@1 ``opacity: null``): a ramp over the colour range for scalars;
+# one alpha for every label of a categorical volume, 0 for the reserved negative labels (-1 = unclassified,
+# no data or air), so no present category disappears (render payload spec §6.6).
+DEFAULT_OPACITY = ((0.0, 0.0), (1.0, 0.8))
+CATEGORICAL_OPACITY = 0.8
+
+
+def categorical_opacity(value_range, alpha=CATEGORICAL_OPACITY):
+    """Physical ``[[value, alpha], ...]`` of a categorical volume over integer labels ``value_range``.
+
+    Labels >= 0 get ``alpha``, negative labels 0 (the step sits at -0.5, like the colour steps at +-0.499).
+    """
+    lo, hi = float(value_range[0]), float(value_range[1])
+    alpha = float(alpha)
+    if hi < 0:
+        return [[lo, 0.0], [hi, 0.0]]
+    if lo >= 0:
+        return [[lo, alpha], [hi, alpha]]
+    return [[lo, 0.0], [-0.5, 0.0], [-0.499, alpha], [hi, alpha]]
 
 
 def opacity_at(values, points):

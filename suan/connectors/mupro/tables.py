@@ -5,7 +5,8 @@
 are solver-normalized (unit ``normalized``, quantity ``energy``); ``NaN`` is
 kept; Fortran exponents without a letter (``0.1500000000+102``) are read
 (``suan.mupro.run.fortran_float``) and other unreadable values are ``invalid_data``.
-Without a header the columns are ``energy_1..5``. An unterminated last
+Without a header the columns take muFerro's canonical names (``ENERGY_COLUMNS``:
+``Elastic Energy`` ... ``Total Energy``). An unterminated last
 line (a live run) is skipped. Progress records are
 ``{"step", "completed_steps", "total_steps"}`` per line.
 """
@@ -18,7 +19,9 @@ from ..builtin.tables import columns_table, read_jsonl
 
 __all__ = ["ENERGY_COLUMNS", "energy_columns", "read_energy", "read_progress"]
 
-ENERGY_COLUMNS = tuple(f"energy_{i}" for i in range(1, 6))
+# muFerro's own header names (output.f90), also used when the header is missing or not written yet, so
+# graphs name the same columns before and after the first energy row (suan.mupro.monitor.DEFAULT_LABELS).
+ENERGY_COLUMNS = ("Elastic Energy", "Electric Energy", "Landau Energy", "Gradient P Energy", "Total Energy")
 PROGRESS_COLUMNS = ("step", "completed_steps", "total_steps")
 
 

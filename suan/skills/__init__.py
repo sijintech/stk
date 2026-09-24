@@ -8,6 +8,7 @@ from the installed node catalog, so it lists exactly the nodes this install
 can evaluate. Standard library only.
 """
 from importlib import resources
+import os
 from pathlib import Path
 import re
 import shutil
@@ -65,7 +66,8 @@ def _files(folder, prefix=""):
 def export_skills(dest, names=None, *, force=False, catalog=None):
     """Copy skills into ``dest/<name>/``; returns the written paths.
 
-    Existing skill folders are replaced only with ``force``. ``catalog`` (an
+    Existing skill folders are replaced only with ``force`` (a symlink or file in their place is
+    removed itself; what a symlink points to is never touched). ``catalog`` (an
     ``stk.catalog/1`` document, default: the installed registry) regenerates
     the node reference.
     """
@@ -75,13 +77,18 @@ def export_skills(dest, names=None, *, force=False, catalog=None):
     if unknown:
         raise ValueError(f"Unknown skill(s): {', '.join(unknown)}; available: {', '.join(available)}")
     dest = Path(dest)
-    existing = [name for name in names if (dest / name).exists()]
+    if dest.exists() and not dest.is_dir():
+        raise NotADirectoryError(f"{dest} is not a directory")
+    # lexists: a dangling symlink is an existing entry too.
+    existing = [name for name in names if os.path.lexists(dest / name)]
     if existing and not force:
         raise FileExistsError(f"{', '.join(str(dest / name) for name in existing)} already exist; use --force to replace")
     written = []
     for name in names:
         target = dest / name
-        if target.exists():
+        if target.is_symlink() or (os.path.lexists(target) and not target.is_dir()):
+            target.unlink()  # a link (never what it points to) or a stray file
+        elif target.exists():
             shutil.rmtree(target)
         source = skills_root().joinpath(name)
         for relative in sorted(_files(source)):

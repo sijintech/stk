@@ -342,13 +342,29 @@ class NodeAgent:
         task.add_done_callback(finished)
         return task
 
+    def public_error(self, exc):
+        """Error text for the hub: file-system errors without their paths, and no host path of the agent cache."""
+        if isinstance(exc, OSError) and (getattr(exc, "filename", None) is not None
+                                         or getattr(exc, "filename2", None) is not None):
+            text = f"{type(exc).__name__}: {exc.strerror or 'file system error'}"
+        else:
+            text = str(exc)
+        roots = {str(self.cache)}
+        try:
+            roots.add(str(self.cache.resolve()))
+        except OSError:
+            pass
+        for root in sorted(roots, key=len, reverse=True):
+            text = text.replace(root, "<agent cache>")
+        return text[:2000]
+
     async def _perform(self, action, lane):
         async with lane:
             try:
                 result = await asyncio.to_thread(self.execute, action)
                 reply = {"type": "result", "id": action["id"], "result": result}
             except Exception as exc:
-                reply = {"type": "result", "id": action["id"], "error": str(exc)[:2000]}
+                reply = {"type": "result", "id": action["id"], "error": self.public_error(exc)}
         send = self._send
         if send is None:
             return  # disconnected: the action stays queued and the hub dispatches it again

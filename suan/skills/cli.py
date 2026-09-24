@@ -33,7 +33,7 @@ def export_command(dest, names, force):
     from . import export_skills
     try:
         written = export_skills(dest, names, force=force)
-    except (ValueError, FileExistsError) as exc:
+    except (ValueError, OSError) as exc:  # FileExistsError, NotADirectoryError, permissions, ...
         raise click.ClickException(str(exc)) from None
     for folder in sorted({path.relative_to(dest).parts[0] for path in written}):
         click.echo(f"exported {dest / folder}")
