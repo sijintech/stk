@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import sys
 import threading
 import time
 
@@ -9,6 +10,16 @@ from suan.runtime.client import RuntimeClient
 from suan.runtime.common import init_config
 from suan.runtime.server import RuntimeHTTPServer
 from suan.runtime.supervisor import Supervisor
+
+
+@pytest.hookimpl(tryfirst=True)  # before -m deselection reads the markers
+def pytest_collection_modifyitems(config, items):
+    skip = pytest.mark.skip(reason='STK server Runtime is Linux-only; this platform runs client tests')
+    for item in items:
+        if {'runtime', 'deployed'} & set(getattr(item, 'fixturenames', ())):
+            item.add_marker(pytest.mark.server)
+        if not sys.platform.startswith('linux') and item.get_closest_marker('server'):
+            item.add_marker(skip)
 
 
 @pytest.fixture
