@@ -153,6 +153,8 @@ TEST(Retry, ReadsAndKeyedCreatesOnly)
   EXPECT_FALSE(method_is_retry_safe("workspace.create", Json{{"name", "n"}}));
   EXPECT_TRUE(method_is_retry_safe("task.cancel", Json{{"idempotency_key", "k"}}));
   EXPECT_FALSE(method_is_retry_safe("task.cancel", Json::object()));
+  EXPECT_TRUE(method_is_retry_safe("upload.start", Json{{"idempotency_key", "k"}}));
+  EXPECT_TRUE(method_is_retry_safe("download.start", Json{{"idempotency_key", "k"}}));
   EXPECT_TRUE(method_is_retry_safe("graph.evaluate", Json{{"mode", "hub"}}));
   EXPECT_FALSE(method_is_retry_safe("graph.evaluate", Json{{"mode", "local"}}));
   EXPECT_FALSE(method_is_retry_safe("graph.evaluate", Json::object()));
@@ -337,7 +339,34 @@ TEST(Types, ParamsBuildClosedObjects)
   EXPECT_FALSE(e.contains("mode"));
   EXPECT_FALSE(e.contains("connection"));
   EXPECT_EQ(e["local_bindings"]["run"], "/data/run");
+  UploadParams upload;
+  upload.target = {"runtime:rt", ""};
+  upload.workspace_id = std::string(32, 'a');
+  upload.source = "/data/in.bin";
+  upload.idempotency_key = "up-1";
+  DownloadParams download;
+  download.target = {"runtime:rt", ""};
+  download.task_id = "t1";
+  download.path = "out.bin";
+  download.idempotency_key = "dl-1";
   const ProtocolSchema &schema = ProtocolSchema::embedded();
+  EXPECT_TRUE(schema.check_request({{"id", 1}, {"method", "upload.start"}, {"params", upload.to_json()}}).empty());
+  EXPECT_TRUE(
+      schema.check_request({{"id", 1}, {"method", "download.start"}, {"params", download.to_json()}}).empty());
+  /* logs.end offsets are typed now; logs.chunk / events.batch carry `bytes`. */
+  EXPECT_TRUE(schema.check_event({{"event", "logs.end"}, {"data", {{"sub", std::string(32, 'a')},
+                                                                   {"offsets", {{"stdout", 5}}}}}})
+                  .empty());
+  EXPECT_FALSE(schema.check_event({{"event", "logs.end"}, {"data", {{"sub", std::string(32, 'a')},
+                                                                    {"offsets", {{"stdout", "5"}}}}}})
+                   .empty());
+  EXPECT_FALSE(schema.check_event({{"event", "logs.end"}, {"data", {{"sub", std::string(32, 'a')},
+                                                                    {"offsets", {{"stdin", 5}}}}}})
+                   .empty());
+  EXPECT_TRUE(schema.check_event({{"event", "logs.chunk"},
+                                  {"data", {{"sub", std::string(32, 'a')}, {"stream", "stdout"}, {"text", "\xef\xbf\xbd"},
+                                            {"offset", 0}, {"next_offset", 1}, {"bytes", 1}}}})
+                  .empty());
   EXPECT_TRUE(schema.check_request({{"id", 1}, {"method", "logs.subscribe"}, {"params", p}}).empty());
   EXPECT_TRUE(schema.check_request({{"id", 1}, {"method", "graph.evaluate"}, {"params", e}}).empty());
   HubSubscribeParams hub{"hub:lab", 7};

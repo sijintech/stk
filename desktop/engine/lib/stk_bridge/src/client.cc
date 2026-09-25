@@ -141,6 +141,8 @@ double now_s()
 
 /** Exit status of a bridge that refused to start because another bridge owns its state dir. */
 constexpr int kStateDirBusyExit = 3;
+/** How long a dead bridge's pipes may take to reach EOF before the reads are aborted. */
+constexpr double kDrainTimeoutS = 5.0;
 
 }  // namespace
 
@@ -155,7 +157,8 @@ struct Client::Impl : std::enable_shared_from_this<Client::Impl> {
     std::deque<std::string> wq;
     bool wq_close = false; /* close stdin after the queued lines */
     bool wq_stop = false;  /* stop now */
-    std::atomic<bool> eof{false};
+    std::atomic<bool> eof{false};     /* stdout reached EOF (every complete line was handled) */
+    std::atomic<bool> err_eof{false}; /* stderr reached EOF (every byte is in the log) */
     double started_at = 0.0;
     double hello_deadline = 0.0;
     bool hello_done = false;
@@ -732,6 +735,8 @@ struct Client::Impl : std::enable_shared_from_this<Client::Impl> {
           chunk.text = io::get_string(data, "text");
           chunk.offset = io::get_int(data, "offset", 0);
           chunk.next_offset = io::get_int(data, "next_offset", 0);
+          /* `bytes` since the WP8 follow-up; older bridges: the offsets say the same. */
+          chunk.bytes = io::get_int(data, "bytes", chunk.next_offset - chunk.offset);
           {
             std::lock_guard sl(sub->m);
             auto known = sub->log_offsets.find(chunk.stream);
@@ -742,12 +747,13 @@ struct Client::Impl : std::enable_shared_from_this<Client::Impl> {
                      std::to_string(chunk.next_offset) + ", expected " + std::to_string(expected) + ")");
                 return;
               }
-              if (chunk.offset < expected &&
-                  int64_t(chunk.text.size()) == chunk.next_offset - chunk.offset)
-              {
-                /* Overlap on a character boundary (expected was a next_offset): keep the new bytes. */
+              if (chunk.offset < expected && chunk.exact()) {
+                /* Overlap on a character boundary (expected was a next_offset) of text that is the
+                 * source bytes exactly: keep the new bytes. (Text with U+FFFD replacements cannot
+                 * be cut by byte count; such a chunk is delivered whole, with a note.) */
                 chunk.text.erase(0, size_t(expected - chunk.offset));
                 chunk.offset = expected;
+                chunk.bytes = chunk.next_offset - chunk.offset;
               }
               else {
                 note("logs.chunk " + chunk.stream + " starts at " + std::to_string(chunk.offset) +
@@ -791,6 +797,7 @@ struct Client::Impl : std::enable_shared_from_this<Client::Impl> {
           batch.invalid = data.contains("invalid") ? data["invalid"] : Json::array();
           batch.offset = io::get_int(data, "offset", 0);
           batch.next_offset = io::get_int(data, "next_offset", 0);
+          batch.bytes = io::get_int(data, "bytes", batch.next_offset - batch.offset);
           {
             std::lock_guard sl(sub->m);
             if (sub->subscribe_count > 0 && batch.next_offset <= sub->events_offset && sub->events_offset > 0) {
@@ -1014,6 +1021,7 @@ struct Client::Impl : std::enable_shared_from_this<Client::Impl> {
       log.append_bytes(std::string_view(buffer.data(), size_t(n)));
     }
     log.flush();
+    g->err_eof = true;
   }
 
   static void writer_main(std::shared_ptr<Generation> g)
@@ -1096,11 +1104,14 @@ struct Client::Impl : std::enable_shared_from_this<Client::Impl> {
     lock.unlock();
     g->child->kill();
     const std::optional<ExitStatus> status = g->child->wait(-1.0);
-    /* stderr: let the last lines arrive, then stop (a detached helper may hold the pipe). */
-    for (int i = 0; i < 50 && !g->eof.load(); i++) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    /* Drain both pipes to EOF, so a response or stderr line the bridge wrote before it died is
+     * never lost, however late the reader threads get scheduled. Only a helper that inherited a
+     * pipe (outside the killed process group) can keep it open: after kDrainTimeout the reads
+     * are aborted. */
+    const double drain_deadline = now_s() + kDrainTimeoutS;
+    while (!(g->eof.load() && g->err_eof.load()) && now_s() < drain_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
     g->child->abort_reads();
     if (g->reader.joinable()) {
       g->reader.join();

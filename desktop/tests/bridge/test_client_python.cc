@@ -215,6 +215,10 @@ class PythonBridge : public ::testing::Test {
     {
       stop();
     }
+    void open_gate() const
+    {
+      std::ofstream(info["gate"].get<std::string>()) << "go\n";
+    }
     void stop()
     {
       if (!process) {
@@ -450,11 +454,34 @@ TEST_F(PythonBridge, LogsSubscribeAgainstALoopbackRuntime)
   params.streams = {"stdout"};
   params.chunk_bytes = 64;
   LogsHandlers handlers;
-  handlers.on_chunk = [&](const LogChunk &c) { text += c.text; };
+  bool bytes_ok = true;
+  handlers.on_chunk = [&](const LogChunk &c) {
+    text += c.text;
+    bytes_ok &= c.bytes == c.next_offset - c.offset && c.exact();
+  };
   handlers.on_end = [&](const LogsEnd &) { ended = true; };
   Subscription sub = client->subscribe_logs(params, handlers);
+  runtime.open_gate(); /* the task starts writing only now: the stream is live, never replayed whole */
   ASSERT_TRUE(loop.pump_until([&] { return ended; }, 120)) << client->bridge_log().text();
   EXPECT_EQ(text, runtime.info["expected_stdout"].get<std::string>());
+  EXPECT_TRUE(bytes_ok);
+  /* A keyed upload is started once: the repeat (as after a bridge restart) names the same transfer. */
+  const std::string upload_source = dir_.str() + "/上传.txt";
+  std::ofstream(upload_source) << "数据\n";
+  UploadParams upload;
+  upload.target = {connection, ""};
+  upload.workspace_id = runtime.info["workspace_id"].get<std::string>();
+  upload.source = upload_source;
+  upload.idempotency_key = "stk-bridge-upload-1";
+  const Result<Transfer> first_upload = client->upload_start(upload).get();
+  ASSERT_TRUE(first_upload.ok()) << first_upload.error().describe();
+  const Result<Transfer> second_upload = client->upload_start(upload).get();
+  ASSERT_TRUE(second_upload.ok()) << second_upload.error().describe();
+  EXPECT_EQ(second_upload.value().id, first_upload.value().id);
+  upload.remote = "elsewhere.txt";
+  const Result<Transfer> conflicting = client->upload_start(upload).get();
+  ASSERT_FALSE(conflicting.ok());
+  EXPECT_EQ(conflicting.error().code, ErrorCode::Conflict);
   /* The token went into the bridge only. */
   std::ifstream token_file(runtime.info["token_file"].get<std::string>());
   std::string token;
@@ -499,6 +526,7 @@ TEST_F(PythonBridge, Kill9MidSubscriptionResumesWithoutGapsOrDuplicates)
   };
   handlers.on_end = [&](const LogsEnd &) { ended = true; };
   Subscription sub = client->subscribe_logs(params, handlers);
+  runtime.open_gate(); /* the task starts writing only now: the stream is live, never replayed whole */
   /* Also a watch: it is re-subscribed and snapshots continue after the restart. */
   int snapshots = 0;
   WatchParams watch_params;
@@ -507,9 +535,9 @@ TEST_F(PythonBridge, Kill9MidSubscriptionResumesWithoutGapsOrDuplicates)
   Subscription watch = client->watch(watch_params, {[&](const WatchSnapshot &) { snapshots++; }, nullptr});
 
   const std::string expected = runtime.info["expected_stdout"].get<std::string>();
-  ASSERT_TRUE(loop.pump_until([&] { return !chunks.empty() && text.size() < expected.size() / 2; }, 120) &&
-              text.size() < expected.size())
-      << "the log stream finished before the kill";
+  /* Kill as soon as the first chunk arrived: the task keeps writing for seconds after that. */
+  ASSERT_TRUE(loop.pump_until([&] { return !chunks.empty(); }, 120)) << client->bridge_log().text();
+  ASSERT_LT(text.size(), expected.size()) << "the log stream finished before the kill";
   const int64_t first_pid = client->bridge_pid();
   const size_t before_kill = chunks.size();
   test::kill_hard(first_pid);

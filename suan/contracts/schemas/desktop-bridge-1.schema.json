@@ -1014,6 +1014,10 @@
             },
             "dest": {
               "$ref": "#/$defs/absPath"
+            },
+            "idempotency_key": {
+              "$ref": "#/$defs/key",
+              "description": "The same key returns the same transfer (also after a bridge restart); the same key with a different request is conflict"
             }
           },
           "required": [
@@ -2284,6 +2288,10 @@
             },
             "remote": {
               "$ref": "#/$defs/relPath"
+            },
+            "idempotency_key": {
+              "$ref": "#/$defs/key",
+              "description": "The same key returns the same transfer (also after a bridge restart); the same key with a different request is conflict"
             }
           },
           "required": [
@@ -2474,6 +2482,11 @@
           "next_offset": {
             "type": "integer",
             "minimum": 0
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "next_offset - offset: the bytes of the events file this batch covers"
           }
         },
         "required": [
@@ -2566,6 +2579,11 @@
           "next_offset": {
             "type": "integer",
             "minimum": 0
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "next_offset - offset: the source bytes this message covers (text may differ in length where invalid UTF-8 became U+FFFD)"
           }
         },
         "required": [
@@ -2583,7 +2601,15 @@
             "$ref": "#/$defs/hex32"
           },
           "offsets": {
-            "type": "object"
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false,
+            "patternProperties": {
+              "^(stdout|stderr|scheduler\\.out|scheduler\\.err|wrapper)$": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
           }
         },
         "required": [

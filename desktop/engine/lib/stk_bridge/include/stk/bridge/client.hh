@@ -24,12 +24,15 @@
  * |-------------------------------------------|---------------------------------------------------------|
  * | reads (list/get/check/catalog/presets/...) | sent again to the new bridge (same id)                 |
  * | task.submit (key), workspace.create /      | sent again: the idempotency key returns the first      |
- * | task.cancel with idempotency_key           | result (Runtime key or hub action id)                  |
+ * | task.cancel / upload.start / download.start| result (Runtime key, hub action id, or the transfer    |
+ * | with idempotency_key                       | the key names in the journal)                          |
  * | graph.evaluate mode=hub                    | sent again: the action id derives from eval_id         |
  * | graph.evaluate mode=local                  | fails `unavailable` (the evaluation died with it)      |
  * | everything else (add_runtime, pair_hub,    | fails `unavailable` (retryable): it may or may not     |
- * | review, upload/download.start, transfer.*, | have happened; the caller decides (transfers resume    |
- * | local_start, graph.cancel, ...)            | by themselves, see hello below)                        |
+ * | review, upload/download.start without a    | have happened; the caller decides (transfers resume    |
+ * | key, transfer.*, local_start, graph.cancel)| by themselves, see hello below)                        |
+ * | hub.review approval                        | the new bridge forgot the inspection: run hub.action   |
+ * |                                            | again before approving (spec §7)                       |
  * | logs.subscribe                             | re-subscribed with offsets = last next_offset / stream |
  * | events.subscribe                           | re-subscribed with offset = last next_offset           |
  * | hub.subscribe                              | re-subscribed with after = last cursor                 |

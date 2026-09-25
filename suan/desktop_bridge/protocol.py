@@ -12,13 +12,15 @@ import re
 
 __all__ = [
     "ERROR_CODES", "MAX_LINE_BYTES", "PROTOCOL_VERSION", "BridgeError", "LineReader", "check_envelope",
-    "decode_line", "encode_message", "error_object",
+    "decode_line", "encode_message", "error_object", "leading_id",
 ]
 
 PROTOCOL_VERSION = 1
 MAX_LINE_BYTES = 16 * 1024 * 1024
 MAX_ID_LENGTH = 128
 METHOD_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
+# A request line that starts with its id member: {"id": 7, ...} or {"id": "a-1", ...}.
+LEADING_ID_RE = re.compile(rb'^[ \t]*\{[ \t]*"id"[ \t]*:[ \t]*(0|[1-9][0-9]{0,15}|"[^"\\\x00-\x1f]{1,512}")[ \t]*[,}]')
 
 # Stable error codes (spec §4). "retryable" is the default for each code.
 ERROR_CODES = {
@@ -98,6 +100,27 @@ def decode_line(raw):
         raise BridgeError("parse_error", f"The line is not strict JSON: {exc}"[:500]) from None
 
 
+def leading_id(raw):
+    """The request id of a line that cannot be decoded, when the line starts with its ``"id"`` member.
+
+    Lets the error response of an undecodable line (``parse_error``, ``line_too_long``) name the
+    request (spec §3): clients that write ``id`` first get every error attributed. ``None`` when the
+    line does not start that way or the id is not a valid request id.
+    """
+    match = LEADING_ID_RE.match(bytes(raw[:1024]))
+    if not match:
+        return None
+    token = match.group(1)
+    if token.startswith(b'"'):
+        try:
+            identity = token[1:-1].decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        return identity if 1 <= len(identity) <= MAX_ID_LENGTH else None
+    identity = int(token)
+    return identity if identity <= 2**53 - 1 else None
+
+
 def encode_message(message):
     """One NDJSON line (bytes, ending in ``\\n``); ``allow_nan=False`` keeps it strict JSON."""
     text = json.dumps(message, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
@@ -108,8 +131,9 @@ class LineReader:
     """Bounded line reader over a binary stream.
 
     ``next()`` returns ``(line_bytes, None)`` for a complete line, ``(None, BridgeError)`` for a
-    line longer than ``max_bytes`` (the rest of that line is discarded), and ``(None, None)`` at
-    EOF. A final line without a newline is still delivered.
+    line longer than ``max_bytes`` (the rest of that line is discarded; the error's ``request_id``
+    is the line's :func:`leading_id`), and ``(None, None)`` at EOF. A final line without a newline
+    is still delivered.
     """
 
     def __init__(self, stream, max_bytes=MAX_LINE_BYTES):
@@ -126,7 +150,9 @@ class LineReader:
                 rest = self.stream.readline(self.max_bytes)
                 if not rest or rest.endswith(b"\n"):
                     break
-            return None, BridgeError("line_too_long", f"A message line must be at most {self.max_bytes} bytes")
+            error = BridgeError("line_too_long", f"A message line must be at most {self.max_bytes} bytes")
+            error.request_id = leading_id(line)
+            return None, error
         return line, None
 
 

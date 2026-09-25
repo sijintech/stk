@@ -139,8 +139,11 @@ class _Logs(_Subscription):
                         elif data:
                             drained[stream] = False
                         if text:
+                            # bytes: the source bytes covered; len(text.encode()) differs where
+                            # invalid bytes became U+FFFD, so clients count offsets with this.
                             self.emit("logs.chunk", {"stream": stream, "text": text, "offset": start,
-                                                     "next_offset": decoder.decoded_offset})
+                                                     "next_offset": decoder.decoded_offset,
+                                                     "bytes": decoder.decoded_offset - start})
                         budget -= len(data)
                         if not data or budget <= 0 or self.stop.is_set():
                             break
@@ -168,7 +171,8 @@ class _Events(_Subscription):
                 events, invalid = result.get("events") or [], result.get("invalid") or []
                 if events or invalid:
                     self.emit("events.batch", {"events": events, "invalid": invalid, "offset": offset,
-                                               "next_offset": result["next_offset"]})
+                                               "next_offset": result["next_offset"],
+                                               "bytes": result["next_offset"] - offset})
                 progressed = result["next_offset"] > offset
                 offset = result["next_offset"]
                 self.recovered()

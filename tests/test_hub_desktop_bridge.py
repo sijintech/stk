@@ -425,7 +425,8 @@ def test_a_second_bridge_process_answers_busy_and_exits(bridge_env):  # noqa: F8
     assert first.call("hello", {"protocol": 1})["protocol"] == 1
     second = ProcessBridge(state)
     error = second.error("hello", {"protocol": 1})
-    assert error["code"] == "busy" and error["retryable"] is True and error["data"]["state_dir"] == str(state)
+    # Not retryable: unlike the in-flight limit, repeating cannot help while the other bridge runs.
+    assert error["code"] == "busy" and error["retryable"] is False and error["data"]["state_dir"] == str(state)
     assert second.error("transfer.list")["code"] == "busy"  # every request, until EOF
     assert second.close() == 3
     assert "Another STK desktop bridge" in second.stderr_text()

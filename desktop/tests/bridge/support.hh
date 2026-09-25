@@ -105,6 +105,13 @@ bool process_group_alive(long pgid);
 bool process_alive(long pid);
 void kill_hard(long pid);
 
+/**
+ * Bounded polls for state that other threads produce (the bridge log, counters): tests never
+ * assume those are complete the moment a call returns.
+ */
+bool log_eventually_contains(Client &client, const std::string &text, double timeout_s = 30.0);
+bool protocol_errors_reach(Client &client, uint64_t count, double timeout_s = 30.0);
+
 /** Path of the stk-bridge-fake executable (next to the test binary). */
 std::string fake_bridge_path();
 

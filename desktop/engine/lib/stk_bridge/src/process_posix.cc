@@ -400,18 +400,31 @@ std::optional<ExitStatus> ChildProcess::wait(const double timeout_s)
   }
 }
 
+/* Once the leader is reaped its pid (and so the group id) may be reused by an unrelated process:
+ * never signal it again. Before that, the group id stays reserved even while the leader is a
+ * zombie, so killing the group is safe. */
 void ChildProcess::terminate()
 {
-  ::kill(-impl_->pid, SIGTERM);
+  std::lock_guard lock(impl_->wait_mutex);
+  if (!impl_->reaped) {
+    ::kill(-impl_->pid, SIGTERM);
+  }
 }
 
 void ChildProcess::kill()
 {
-  ::kill(-impl_->pid, SIGKILL);
+  std::lock_guard lock(impl_->wait_mutex);
+  if (!impl_->reaped) {
+    ::kill(-impl_->pid, SIGKILL);
+  }
 }
 
 bool ChildProcess::group_alive() const
 {
+  std::lock_guard lock(impl_->wait_mutex);
+  if (impl_->reaped) {
+    return false; /* wait() killed what the leader left in its group before reaping it */
+  }
   if (::kill(-impl_->pid, 0) == 0) {
     return true;
   }

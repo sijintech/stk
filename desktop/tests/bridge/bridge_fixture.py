@@ -5,8 +5,9 @@
                                              exit 0 when that part can run here (else prints why)
     bridge_fixture.py write-run DIR          a fake muFerro run (tests/mupro_fake.write_domain_run)
     bridge_fixture.py runtime WORKDIR        a loopback Runtime (127.0.0.1, ephemeral port) running one
-                                             task that writes UTF-8 log lines slowly; prints one JSON
-                                             line {url, token_file, task_id, expected_stdout} and serves
+                                             task that, once the file `gate` exists, writes UTF-8 log
+                                             lines slowly (so a test can subscribe first); prints one JSON
+                                             line {url, token_file, task_id, gate, expected_stdout}, and serves
                                              until stdin reaches EOF, then cancels its tasks and stops.
 
 The token never appears on stdout: it goes to WORKDIR/token (mode 0600) for connections.add_runtime
@@ -24,14 +25,21 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
 LOG_LINES = 30
-LOG_PROGRAM = (
-    "import sys, time\n"
-    f"for i in range({LOG_LINES}):\n"
-    "    sys.stdout.write(f'第{i}步 计算完成：能量 −1.5e-3 🧲\\n')\n"
-    "    sys.stdout.flush()\n"
-    "    time.sleep(0.12)\n"
-    "sys.stdout.write('结束')\n"
-)
+
+
+def log_program(gate):
+    """Waits for ``gate`` to exist (the test subscribed), then writes UTF-8 lines slowly."""
+    return (
+        "import os, sys, time\n"
+        "deadline = time.monotonic() + 300\n"
+        f"while not os.path.exists({str(gate)!r}) and time.monotonic() < deadline:\n"
+        "    time.sleep(0.02)\n"
+        f"for i in range({LOG_LINES}):\n"
+        "    sys.stdout.write(f'第{i}步 计算完成：能量 −1.5e-3 🧲\\n')\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.12)\n"
+        "sys.stdout.write('结束')\n"
+    )
 
 
 def expected_stdout():
@@ -87,7 +95,8 @@ def runtime(workdir):
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
         stream.write(config["token"])
     workspace = client.create_workspace("桥接测试")["id"]
-    task = client.submit({"workspace_id": workspace, "argv": ["{python}", "-c", LOG_PROGRAM], "name": "日志"},
+    gate = workdir / "go"
+    task = client.submit({"workspace_id": workspace, "argv": ["{python}", "-c", log_program(gate)], "name": "日志"},
                          idempotency_key="stk-bridge-logs")
     stop = threading.Event()
 
@@ -101,7 +110,7 @@ def runtime(workdir):
     ticker = threading.Thread(target=tick, daemon=True)
     ticker.start()
     print(json.dumps({"url": url, "token_file": str(token_file), "task_id": task["id"], "workspace_id": workspace,
-                      "expected_stdout": expected_stdout()}, ensure_ascii=False), flush=True)
+                      "gate": str(gate), "expected_stdout": expected_stdout()}, ensure_ascii=False), flush=True)
     try:
         sys.stdin.read()  # until the test closes our stdin (or dies)
     finally:

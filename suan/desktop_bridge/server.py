@@ -25,7 +25,7 @@ from .hub import HubResponseError, hub_error
 from .connections import ConnectionStore
 from .graphs import GraphService
 from .protocol import (MAX_LINE_BYTES, PROTOCOL_VERSION, BridgeError, LineReader, check_envelope, decode_line,
-                       encode_message, error_object)
+                       encode_message, error_object, leading_id)
 from .subscriptions import SubscriptionManager
 from .transfers import TransferManager
 
@@ -61,9 +61,11 @@ class StateDirLock:
                 fcntl.flock(self.stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             self.stream.close()
+            # Not retryable (unlike the in-flight limit's busy): repeating the request cannot help
+            # while the other bridge runs; data.state_dir tells the two apart.
             raise BridgeError("busy", f"Another STK desktop bridge is using the state directory {state_dir}; "
                               "close it first or start this one with another --state-dir",
-                              data={"state_dir": str(state_dir)}) from None
+                              data={"state_dir": str(state_dir)}, retryable=False) from None
 
     def release(self):
         if self.stream.closed:
@@ -89,7 +91,7 @@ def refuse(stream, writer, error, max_line=MAX_LINE_BYTES):
             return
         if line is None and problem is None:
             return
-        identity = None
+        identity = getattr(problem, "request_id", None)
         if line is not None:
             if not line.strip():
                 continue
@@ -97,6 +99,8 @@ def refuse(stream, writer, error, max_line=MAX_LINE_BYTES):
                 identity = check_envelope(decode_line(line))[0]
             except BridgeError as exc:
                 identity = getattr(exc, "request_id", None)
+                if identity is None:
+                    identity = leading_id(line)
         try:
             writer.write(encode_message({"id": identity, "error": error.to_json()}))
             writer.flush()
@@ -233,7 +237,7 @@ class Bridge:
         try:
             message = decode_line(raw)
         except BridgeError as exc:
-            self.respond_error(None, exc)
+            self.respond_error(leading_id(raw), exc)  # the id when the line starts with it (spec §3)
             return
         try:
             identity, method, params = check_envelope(message)
@@ -295,7 +299,7 @@ class Bridge:
             except (OSError, ValueError):
                 break
             if error is not None:
-                self.respond_error(None, error)
+                self.respond_error(getattr(error, "request_id", None), error)
                 continue
             if line is None:
                 break
@@ -455,7 +459,8 @@ class Bridge:
 
     def upload_start(self, params, context):
         transfer = self.transfers.start_upload(params["connection"], params["workspace_id"], params["source"],
-                                               params.get("remote"), params.get("node"))
+                                               params.get("remote"), params.get("node"),
+                                               idempotency_key=params.get("idempotency_key"))
         return {"transfer": transfer}
 
     def download_start(self, params, context):
@@ -473,7 +478,7 @@ class Bridge:
             except ValueError as exc:
                 raise BridgeError("invalid_params", str(exc)) from None
         transfer = self.transfers.start_download(params["connection"], owner, owner_id, params["path"], dest,
-                                                 params.get("node"))
+                                                 params.get("node"), idempotency_key=params.get("idempotency_key"))
         return {"transfer": transfer}
 
     def unsubscribe(self, params, context):

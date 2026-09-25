@@ -387,6 +387,14 @@ def test_malformed_requests_get_stable_errors(inproc):
         (b'{"id": "h", "method": "task.get", "params": {"connection": "runtime:nowhere", "task_id": "x"}}\n', "h",
          "not_found"),
     ]
+    # Undecodable lines that start with their id member name the request (spec §3).
+    cases += [
+        (b'{"id": 41, "method": "hello", "params": {"v": NaN}}\n', 41, "parse_error"),
+        (b'{"id":"k-1","method":"hello",\xff}\n', "k-1", "parse_error"),
+        (b'{"id": 42 "method": "hello"}\n', None, "parse_error"),  # no ',' after the id: not attributed
+        (b'{"method": "hello", "id": 43, "params": {"v": NaN}}\n', None, "parse_error"),  # id not first
+        (b'{"id": 9007199254740992, "x": NaN}\n', None, "parse_error"),  # not a valid request id
+    ]
     for raw, identity, code in cases:
         before = len(harness.lines)
         harness.send_line(raw)
@@ -415,7 +423,22 @@ def test_serve_handles_oversized_lines_and_eof(bridge_env):
         time.sleep(0.01)
     messages = [_strict(line + b"\n") for line in output.getvalue().splitlines()]
     assert {m["id"] for m in messages if "result" in m} == {1, 3}
-    assert [m["error"]["code"] for m in messages if "error" in m] == ["line_too_long"]
+    assert [(m["id"], m["error"]["code"]) for m in messages if "error" in m] == [(2, "line_too_long")]
+
+
+def test_leading_id_names_undecodable_requests():
+    from suan.desktop_bridge.protocol import leading_id
+    assert leading_id(b'{"id": 7, "method": ') == 7
+    assert leading_id(b' \t{ "id" :0}') == 0
+    assert leading_id(b'{"id":"a b","method"') == "a b"
+    assert leading_id(b'{"id":"' + "中".encode() * 3 + b'",') == "中中中"
+    assert leading_id(b'{"id":"' + b"x" * 129 + b'",') is None  # longer than 128 characters
+    assert leading_id(b'{"id":"a\\"b",') is None  # escapes are not decoded: not attributed
+    assert leading_id(b'{"id": 007,') is None and leading_id(b'{"id": -1,') is None
+    assert leading_id(b'{"id": 1.5,') is None and leading_id(b'{"id": true,') is None
+    assert leading_id(b'{"id": 9007199254740991,') == 2**53 - 1
+    assert leading_id(b'{"id": 9007199254740992,') is None
+    assert leading_id(b'garbage') is None and leading_id(b'') is None
 
 
 NOISY = r"""

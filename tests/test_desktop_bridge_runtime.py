@@ -218,6 +218,7 @@ def test_logs_split_mid_character_decode_exactly(runtime, inproc):  # noqa: F811
     position = 0
     for chunk in stdout:  # contiguous, on character boundaries
         assert chunk["offset"] == position and chunk["text"] == data[position:chunk["next_offset"]].decode("utf-8")
+        assert chunk["bytes"] == chunk["next_offset"] - chunk["offset"] == len(chunk["text"].encode("utf-8"))
         position = chunk["next_offset"]
     assert any(len(c["text"].encode("utf-8")) != 5 for c in stdout)  # characters really were split by chunks
     # Replaying the subscription from a reported offset (a restarted bridge) continues exactly.
@@ -227,6 +228,77 @@ def test_logs_split_mid_character_decode_exactly(runtime, inproc):  # noqa: F811
     harness.wait_event(lambda e: e["event"] == "logs.end" and e["data"]["sub"] == again)
     assert "".join(c["text"] for c in harness.events_of("logs.chunk", again)) == data[middle:].decode("utf-8")
     harness.close()
+
+
+INVALID_PROGRAM = (
+    "import sys\n"
+    "sys.stdout.buffer.write(b'ok \\xff\\xfe bad \\xe8\\xae cut ' + '完成'.encode() + b'\\n')\n"
+)
+
+
+def test_log_chunks_count_source_bytes_when_invalid_utf8_was_replaced(runtime, inproc):  # noqa: F811
+    client, supervisor, _, _ = runtime
+    harness = inproc()
+    add_profile(harness, runtime)
+    workspace = client.create_workspace("无效字节")["id"]
+    spec = {"workspace_id": workspace, "argv": ["{python}", "-c", INVALID_PROGRAM]}
+    task = harness.call("task.submit", {"connection": CONNECTION, "idempotency_key": "invalid-utf8", "spec": spec})
+    task_id = task["task"]["id"]
+    assert finish(client, supervisor, task_id)["state"] == "succeeded"
+    raw = b"ok \xff\xfe bad \xe8\xae cut " + "完成".encode() + b"\n"
+    sub = harness.call("logs.subscribe", {"connection": CONNECTION, "task_id": task_id, "streams": ["stdout"],
+                                          "chunk_bytes": 4})["sub"]
+    end = harness.wait_event(lambda e: e["event"] == "logs.end" and e["data"]["sub"] == sub)
+    chunks = harness.events_of("logs.chunk", sub)
+    assert "".join(c["text"] for c in chunks) == raw.decode("utf-8", "replace")
+    # Replacement characters make the text longer than the bytes it came from; `bytes` (and the
+    # offsets) count the source bytes, so a client can resume or trim by byte count.
+    assert sum(c["bytes"] for c in chunks) == len(raw) == end["data"]["offsets"]["stdout"]
+    assert any(len(c["text"].encode("utf-8")) != c["bytes"] for c in chunks)
+    position = 0
+    for chunk in chunks:
+        assert chunk["offset"] == position and chunk["bytes"] == chunk["next_offset"] - chunk["offset"]
+        position = chunk["next_offset"]
+    harness.close()
+
+
+def test_transfers_with_an_idempotency_key_are_started_once(runtime, inproc, tmp_path):  # noqa: F811
+    client, supervisor, _, _ = runtime
+    harness = inproc()
+    add_profile(harness, runtime)
+    workspace = client.create_workspace("幂等传输")["id"]
+    source = tmp_path / "数据.txt"
+    source.write_text("一次", encoding="utf-8")
+    params = {"connection": CONNECTION, "workspace_id": workspace, "source": str(source),
+              "idempotency_key": "upload-1"}
+    first = harness.call("upload.start", params)["transfer"]
+    again = harness.call("upload.start", params)["transfer"]
+    assert again["id"] == first["id"]
+    assert harness.wait_transfer(first["id"])["state"] == "completed"
+    other = tmp_path / "other.txt"
+    other.write_text("二", encoding="utf-8")
+    error = harness.error("upload.start", {**params, "source": str(other)})
+    assert error["code"] == "conflict" and error["data"]["transfer_id"] == first["id"]
+    harness.close()
+    # A restarted bridge (same state directory) answers the key with the journaled transfer.
+    restarted = inproc()
+    repeated = restarted.call("upload.start", params)["transfer"]
+    assert repeated["id"] == first["id"] and repeated["state"] == "completed"
+    assert [f["path"] for f in client.files(workspace)] == ["数据.txt"]
+    # Downloads likewise; the key spaces of uploads and downloads are separate.
+    spec = {"workspace_id": workspace, "argv": ["{python}", "-c", RESULT_PROGRAM], "outputs": ["结果.txt", "big.bin"]}
+    task = restarted.call("task.submit", {"connection": CONNECTION, "idempotency_key": "keyed-dl",
+                                          "spec": spec})["task"]
+    assert finish(client, supervisor, task["id"])["state"] == "succeeded"
+    download = {"connection": CONNECTION, "task_id": task["id"], "path": "结果.txt",
+                "dest": str(tmp_path / "out" / "结果.txt"), "idempotency_key": "upload-1"}
+    started = restarted.call("download.start", download)["transfer"]
+    assert started["id"] != first["id"]
+    assert restarted.call("download.start", download)["transfer"]["id"] == started["id"]
+    assert restarted.wait_transfer(started["id"])["state"] == "completed"
+    assert restarted.error("download.start", {**download, "path": "big.bin"})["code"] == "conflict"
+    assert len(restarted.call("transfer.list")["transfers"]) == 2
+    restarted.close()
 
 
 RESULT_PROGRAM = (

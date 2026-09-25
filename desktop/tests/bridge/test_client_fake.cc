@@ -91,17 +91,24 @@ TEST_F(FakeBridge, ResponseSplitAcrossManyReads)
 TEST_F(FakeBridge, OversizedInvalidUtf8AndBadJsonLinesAreDropped)
 {
   auto client = started(options({}));
-  EXPECT_EQ(client->call("oversize").get().value()["after"], "oversize");
-  EXPECT_EQ(client->stats().protocol_errors, 1u);
-  EXPECT_EQ(client->call("badutf8").get().value()["after"], "badutf8");
-  EXPECT_EQ(client->stats().protocol_errors, 2u);
+  /* The junk lines precede each response on the pipe, so they are counted before the call
+   * completes; the checks still poll (bounded) rather than rely on that ordering. */
+  const auto answer = [&](const char *method) {
+    const Result<Json> r = client->call(method).get();
+    EXPECT_TRUE(r.ok()) << method << ": " << (r.ok() ? "" : r.error().describe());
+    return r.ok() ? io::get_string(r.value(), "after") : std::string();
+  };
+  EXPECT_EQ(answer("oversize"), "oversize");
+  EXPECT_TRUE(test::protocol_errors_reach(*client, 1));
+  EXPECT_EQ(answer("badutf8"), "badutf8");
+  EXPECT_TRUE(test::protocol_errors_reach(*client, 2));
   /* garbage, a duplicate key (its id must not complete the call), NaN, a non-object, result+error */
-  EXPECT_EQ(client->call("badjson").get().value()["after"], "badjson");
-  EXPECT_EQ(client->stats().protocol_errors, 7u);
-  const std::string log = client->bridge_log().text();
-  EXPECT_NE(log.find("over the line limit"), std::string::npos);
-  EXPECT_NE(log.find("not valid UTF-8"), std::string::npos);
-  EXPECT_NE(log.find("duplicate key"), std::string::npos);
+  EXPECT_EQ(answer("badjson"), "badjson");
+  EXPECT_TRUE(test::protocol_errors_reach(*client, 7));
+  EXPECT_TRUE(test::log_eventually_contains(*client, "over the line limit"));
+  EXPECT_TRUE(test::log_eventually_contains(*client, "not valid UTF-8"));
+  EXPECT_TRUE(test::log_eventually_contains(*client, "duplicate key"));
+  EXPECT_EQ(client->stats().protocol_errors, 7u); /* and not more */
   EXPECT_EQ(client->state(), BridgeState::Ready); /* junk never kills the session */
 }
 
@@ -237,7 +244,7 @@ TEST_F(FakeBridge, APartialLineAtDeathIsNeverDelivered)
   const Result<Json> r = client->call("partial_crash").get();
   ASSERT_FALSE(r.ok());
   EXPECT_EQ(r.error().code, ErrorCode::Unavailable);
-  EXPECT_NE(client->bridge_log().text().find("unterminated final line"), std::string::npos);
+  EXPECT_TRUE(test::log_eventually_contains(*client, "unterminated final line"));
   EXPECT_TRUE(client->wait_ready(20));
   track(*client);
 }
@@ -274,6 +281,8 @@ TEST_F(FakeBridge, LogSubscriptionResumesExactlyAfterKill9)
   int64_t position = 0;
   for (const LogChunk &c : chunks) {
     EXPECT_EQ(c.offset, position);
+    EXPECT_EQ(c.bytes, c.next_offset - c.offset); /* the fake sends no `bytes`: derived from the offsets */
+    EXPECT_TRUE(c.exact());
     position = c.next_offset;
   }
   EXPECT_EQ(position, int64_t(expected.size()));
@@ -376,14 +385,16 @@ TEST_F(FakeBridge, ABusyStateDirectoryIsNotRetried)
 
 TEST_F(FakeBridge, HelloTimeoutRestartsTheBridge)
 {
-  ClientOptions opts = options({"--hello-delay-once", "3000"});
-  opts.hello_timeout_s = 0.3;
+  /* The first bridge sleeps far past the hello timeout; the second answers at once (a loaded
+   * machine may still need more than one retry, hence >= 2). */
+  ClientOptions opts = options({"--hello-delay-once", "20000"});
+  opts.hello_timeout_s = 1.5;
   auto client = Client::create(std::move(opts));
   ASSERT_TRUE(client->start());
-  ASSERT_TRUE(client->wait_ready(20));
+  ASSERT_TRUE(client->wait_ready(60));
   track(*client);
-  EXPECT_EQ(client->stats().spawned, 2u);
-  EXPECT_NE(client->bridge_log().text().find("no hello answer"), std::string::npos);
+  EXPECT_GE(client->stats().spawned, 2u);
+  EXPECT_TRUE(test::log_eventually_contains(*client, "no hello answer"));
 }
 
 TEST_F(FakeBridge, CloseTerminatesABridgeThatIgnoresEofAndItsHelpers)
@@ -396,7 +407,7 @@ TEST_F(FakeBridge, CloseTerminatesABridgeThatIgnoresEofAndItsHelpers)
   const auto started_at = std::chrono::steady_clock::now();
   client->close();
   EXPECT_LT(std::chrono::steady_clock::now() - started_at, std::chrono::seconds(5));
-  EXPECT_NE(client->bridge_log().text().find("did not exit"), std::string::npos);
+  EXPECT_TRUE(test::log_eventually_contains(*client, "did not exit"));
   EXPECT_TRUE(wait_until([&] { return !test::process_group_alive(pgid); }, 10));
   const Result<Json> r = client->call("echo").get();
   EXPECT_EQ(r.error().code, ErrorCode::ShuttingDown);
@@ -415,7 +426,8 @@ TEST_F(FakeBridge, CloseFailsPendingCallsWithShuttingDown)
 TEST_F(FakeBridge, StderrGoesToTheBridgeLog)
 {
   auto client = started(options({"--stderr-noise"}));
-  EXPECT_TRUE(wait_until([&] { return client->bridge_log().text().find("启动 ok") != std::string::npos; }, 10));
+  EXPECT_TRUE(test::log_eventually_contains(*client, "启动 ok"));
+  /* close() drains stderr to EOF before it returns: nothing written before the exit is lost. */
   client->close();
   const std::string log = client->bridge_log().text();
   EXPECT_NE(log.find("bad bytes: \xef\xbf\xbd\xef\xbf\xbd end"), std::string::npos);

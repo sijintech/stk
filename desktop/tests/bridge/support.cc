@@ -121,6 +121,17 @@ void kill_hard(const long pid)
 #endif
 }
 
+bool log_eventually_contains(Client &client, const std::string &text, const double timeout_s)
+{
+  return wait_until([&] { return client.bridge_log().text().find(text) != std::string::npos; }, timeout_s);
+}
+
+bool protocol_errors_reach(Client &client, const uint64_t count, const double timeout_s)
+{
+  /* Never more than expected: once reached, the count must stay (checked by the caller). */
+  return wait_until([&] { return client.stats().protocol_errors >= count; }, timeout_s);
+}
+
 std::string fake_bridge_path()
 {
   return STK_BRIDGE_FAKE;
@@ -134,8 +145,10 @@ ClientOptions fake_options(const std::vector<std::string> &args, Executor execut
   options.executor = std::move(executor);
   options.restart.initial_backoff_s = 0.02;
   options.restart.max_backoff_s = 0.2;
-  options.call_timeout_s = 20.0;
-  options.hello_timeout_s = 10.0;
+  /* Generous: a loaded CI machine must not turn a slow answer into a failure. Tests of the
+   * timeouts themselves set their own. */
+  options.call_timeout_s = 120.0;
+  options.hello_timeout_s = 60.0;
   options.shutdown_grace_s = 5.0;
   return options;
 }

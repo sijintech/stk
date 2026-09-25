@@ -181,6 +181,14 @@ struct EvaluateResult {
 struct LogChunk {
   std::string stream, text;
   int64_t offset = 0, next_offset = 0;
+  /** Source bytes covered (next_offset - offset). The UTF-8 length of `text` differs where invalid
+   * bytes became U+FFFD: count positions with the offsets, never with text.size(). */
+  int64_t bytes = 0;
+  /** `text` is byte-for-byte the source range (no replacement happened), so it may be cut by bytes. */
+  bool exact() const
+  {
+    return int64_t(text.size()) == bytes;
+  }
 };
 struct LogsEnd {
   std::map<std::string, int64_t> offsets;
@@ -188,6 +196,7 @@ struct LogsEnd {
 struct EventsBatch {
   Json events, invalid;
   int64_t offset = 0, next_offset = 0;
+  int64_t bytes = 0; /* next_offset - offset */
 };
 struct EventsEnd {
   int64_t next_offset = 0;
@@ -243,6 +252,9 @@ struct UploadParams {
   std::string workspace_id;
   std::string source; /* absolute file or folder */
   std::string remote; /* relative; empty: the source name */
+  /** The same key returns the same transfer, also from a restarted bridge (then the client may
+   * repeat the call by itself); a different request under the key is `conflict`. */
+  std::string idempotency_key;
   Json to_json() const;
 };
 
@@ -252,6 +264,7 @@ struct DownloadParams {
   std::string task_id, workspace_id;
   std::string path;
   std::string dest; /* absolute; empty: <download_dir>/<server>/<owner>/<path> */
+  std::string idempotency_key; /* as UploadParams::idempotency_key */
   Json to_json() const;
 };
 

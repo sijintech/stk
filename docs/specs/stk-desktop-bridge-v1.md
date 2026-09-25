@@ -6,7 +6,9 @@
 > sha256 校验；提交任务带幂等键；日志按字节偏移增量推送且跨块多字节字符安全；关闭程序不会停止任务。
 
 Status: **frozen for Milestone D1** (WP7), with the additive hub-mode changes of WP11 (§7.1, §9,
-§10, §1 state-directory lock; still `protocol: 1`). Schema: `suan/contracts/schemas/desktop-bridge-1.schema.json`
+§10, §1 state-directory lock) and the WP8 follow-ups (`bytes` in offset-based events, transfer
+idempotency keys, ids of undecodable lines, clarifications in §2, §3, §7, §8, §12); still
+`protocol: 1`. Schema: `suan/contracts/schemas/desktop-bridge-1.schema.json`
 (`suan.contracts.load_schema("desktop-bridge-1")`). Implementation: `suan/desktop_bridge/` (standard
 library plus the STK core it drives). Conformance tests: `tests/test_desktop_bridge*.py`. The C++
 client is `desktop/engine/lib/stk_bridge` (WP8), written against this document and the schema.
@@ -31,8 +33,9 @@ The bridge replaces the file-queue bridge of the Blender workbench (`suan/blende
   `<state-dir>/bridge.lock` (`fcntl.flock` on POSIX, `msvcrt.locking` on Windows), before it reads
   or rewrites any journal. The OS releases it when the process exits or crashes. A second bridge on
   the same state directory does not start: it answers **every** request with error `busy`
-  (`data.state_dir`; the message names the directory), writes the reason to stderr, and exits with
-  status **3** at stdin EOF. The app shows the message and either closes the other bridge or uses
+  (`data.state_dir`; the message names the directory; `retryable: false`, because repeating cannot
+  help while the other bridge runs), writes the reason to stderr, and exits with status **3** at
+  stdin EOF. The app must not restart such a bridge in a loop. The app shows the message and either closes the other bridge or uses
   another `--state-dir`. (In-process, `Bridge(...)` raises `BridgeError("busy")`.)
 - **Lifetime.** The bridge exits when stdin reaches EOF or after answering `shutdown`: it stops
   subscriptions, cancels local graph evaluations, pauses transfers at the next chunk boundary
@@ -48,10 +51,12 @@ The bridge replaces the file-queue bridge of the Blender workbench (`suan/blende
 - One message per line: a UTF-8 JSON object followed by `\n` (a final `\r` is tolerated on input).
   JSON is **strict**: no `NaN`/`Infinity`, no duplicate keys. Non-finite numbers inside data
   (monitoring events, graph results) are the strings `"NaN"`, `"Inf"`, `"-Inf"`, as in events v1.
-- A line holds at most **16 MiB** (`limits.max_line_bytes`, excluding the newline). A longer input
-  line is discarded and answered with `line_too_long` (`id: null`); a result that would be longer is
-  replaced by a `result_too_large` error. Large data never travels inline: it goes through the blob
-  cache (§9) or files.
+- A line holds at most **16 MiB** (`limits.max_line_bytes`, excluding the newline). The limit is
+  16 MiB in protocol 1 **before `hello` too**: an app may rely on it for the `hello` request itself
+  and then use the value `hello` reports. A longer input line is discarded and answered with
+  `line_too_long` (with the line's id when it starts with it, see §3, else `id: null`); a result that
+  would be longer is replaced by a `result_too_large` error. Large data never travels inline: it goes
+  through the blob cache (§9) or files.
 - Blank input lines are ignored.
 - **stdout carries nothing but protocol lines.** Before anything else runs, the bridge moves its
   protocol stream to a private duplicate of file descriptor 1 and points descriptor 1, `sys.stdout`
@@ -63,13 +68,13 @@ The bridge replaces the file-queue bridge of the Blender workbench (`suan/blende
 {"id": 7, "method": "task.get", "params": {"connection": "runtime:cluster", "task_id": "…"}}
 {"id": 7, "result": {"task": {"id": "…", "state": "running", "…": "…"}}}
 {"id": 7, "error": {"code": "not_found", "message": "Task not found", "retryable": false}}
-{"event": "logs.chunk", "data": {"sub": "…", "stream": "stdout", "text": "…", "offset": 0, "next_offset": 42}}
+{"event": "logs.chunk", "data": {"sub": "…", "stream": "stdout", "text": "…", "offset": 0, "next_offset": 42, "bytes": 42}}
 ```
 
 | Message | Keys | Notes |
 |---|---|---|
 | request (app → bridge) | `id`, `method`, `params`? | `id`: integer 0..2^53−1 or string of 1..128 characters, unique among the app's outstanding requests. `params` defaults to `{}`. No other keys. |
-| response (bridge → app) | `id`, and exactly one of `result` (object) / `error` | `id` is `null` only when the request's id could not be read (`parse_error`, `line_too_long`, `invalid_request`). |
+| response (bridge → app) | `id`, and exactly one of `result` (object) / `error` | `id` is `null` only when the request's id could not be read (`parse_error`, `line_too_long`, `invalid_request`; see below). |
 | event (bridge → app) | `event`, `data` (object) | Pushed at any time. Subscription events carry `data.sub`. |
 
 - **Concurrency.** Requests run concurrently (at most 64 in flight, else `busy`); responses arrive in
@@ -77,8 +82,18 @@ The bridge replaces the file-queue bridge of the Blender workbench (`suan/blende
   response.
 - **Params are closed**: unknown keys are `invalid_params`, so typos fail loudly. Results and event
   data are **open**: clients ignore keys they do not know (additions are not breaking).
+- **Errors of undecodable lines.** A line that is not UTF-8, not strict JSON or too long cannot be
+  parsed, but when it **starts with its `id` member** (`{"id": 7, ...` or `{"id": "a-1", ...`:
+  optional blanks, `"id"`, `:`, an integer 0..2^53−1 without leading zeros or a string of 1..128
+  characters without escapes, then `,` or `}`) the error response carries that id, so the app
+  completes exactly that call. Apps should therefore write `id` first. Otherwise the error has
+  `id: null` and cannot be attributed: responses to other lines arrive in any order, so "the oldest
+  pending call" would be a guess. The app logs it, and the call it belongs to ends by the app's own
+  timeout.
 - There is no request cancellation message; long operations have their own (`graph.cancel`,
-  `transfer.cancel`, `unsubscribe`).
+  `transfer.cancel`, `unsubscribe`). A call the app abandons (timeout, user cancel) still runs to
+  completion in the bridge and keeps one of the 64 in-flight slots until then; its late response is
+  dropped by the app. A `cancel {id}` request is a protocol 2 item (§12).
 
 ## 4. Errors
 
@@ -104,7 +119,7 @@ request (same idempotency key) may succeed.
 | `graph_error` | no | Graph validation or evaluation failed: `data.graph_code` (stk-graph-v1 codes), `issues`, `node`, `errors` |
 | `cancelled` | no | The operation was cancelled |
 | `timeout` | yes | A hub action has not finished within the wait; repeat the request to keep waiting |
-| `busy` | yes | Too many requests in flight, or another bridge holds the state directory (§1) |
+| `busy` | yes / no | Two meanings: too many requests in flight (`retryable: true`: repeat later), or another bridge holds the state directory (§1; `data.state_dir`, `retryable: false`: the bridge will not serve anything and exits with status 3) |
 | `result_too_large` | no | The response would exceed `max_line_bytes` |
 | `shutting_down` | no | The bridge is exiting |
 | `internal_error` | no | A bridge bug (details on stderr) |
@@ -183,7 +198,9 @@ Connection ids are opaque to the app; the bridge resolves them:
   actions are `remote_error` with `data.action`.
 - **Review.** `hub.review {approved: true}` is refused with `review_not_inspected` unless this
   bridge read that action with `hub.action` first (the app shows the full request before the user
-  approves). Rejections need no inspection.
+  approves). Rejections need no inspection. The inspection is remembered by the bridge process only:
+  **after a bridge restart the app must run `hub.action` again before `hub.review`** (and should
+  show the request again, since it may have changed).
 - Through a hub, `workspace.list`, `task.list` and `task.get` read the node's latest heartbeat
   snapshot (tasks without their spec); `task.artifacts`, `workspace.files`, logs, events and
   download chunks use the hub's read path (§7.2), never reviewed; uploads go through the hub's blob
@@ -257,17 +274,30 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 | Method | Params | Events |
 |---|---|---|
 | `watch` | `connection, node?, workspace_id?, task_ids?, interval?=2` (s, ≥ 0.5) | `watch.snapshot {sub, tasks, time}`: the first poll, then whenever the task list changed |
-| `logs.subscribe` | `connection, node?, task_id, streams?=[stdout, stderr], offsets?, chunk_bytes?` | `logs.chunk {sub, stream, text, offset, next_offset}`; `logs.end {sub, offsets}` |
-| `events.subscribe` | `connection, node?, task_id, offset?=0` | `events.batch {sub, events, invalid, offset, next_offset}`; `events.end {sub, next_offset}` |
+| `logs.subscribe` | `connection, node?, task_id, streams?=[stdout, stderr], offsets?, chunk_bytes?` | `logs.chunk {sub, stream, text, offset, next_offset, bytes}`; `logs.end {sub, offsets}` |
+| `events.subscribe` | `connection, node?, task_id, offset?=0` | `events.batch {sub, events, invalid, offset, next_offset, bytes}`; `events.end {sub, next_offset}` |
 | `hub.subscribe` | `connection, after?=0` | `hub.event {sub, cursor, kind, payload}` (hub SSE: `actions.changed`, `devices.changed`, …) |
 
 - **Logs are UTF-8 safe.** The bridge reads byte ranges (`chunk_bytes`, default 256 KiB, max 1 MiB)
   and decodes them incrementally: a character split across reads is held back until complete;
-  invalid bytes become U+FFFD. `offset`/`next_offset` are byte offsets **on character boundaries**:
-  `text` is exactly the bytes `[offset, next_offset)`. Streams: `stdout`, `stderr`,
-  `scheduler.out`, `scheduler.err`, `wrapper`.
+  invalid bytes become U+FFFD. `offset`/`next_offset` are byte offsets of the **source stream** and
+  lie on character boundaries; `text` is the decoding of the source bytes `[offset, next_offset)`,
+  and `bytes = next_offset − offset` is their count. Where the stream held invalid UTF-8, each
+  invalid sequence became U+FFFD, so the UTF-8 length of `text` can differ from `bytes`: clients
+  count positions with `offset`/`next_offset`/`bytes`, never with the length of `text` (in
+  particular a client that trims an overlapping chunk may cut `text` by bytes only when its UTF-8
+  length equals `bytes`; otherwise it drops or keeps the chunk whole). Streams: `stdout`, `stderr`,
+  `scheduler.out`, `scheduler.err`, `wrapper`. `logs.end.offsets` maps each stream to its final
+  offset (integers).
+- `events.batch` carries `bytes = next_offset − offset` as well (bytes of the events file).
+  `bytes` was added after the D1 freeze: clients use `next_offset − offset` when it is missing.
 - **Replay.** After a restart the app resubscribes with `offsets: {stream: last next_offset}` (logs)
-  or `offset: last next_offset` (events) and continues exactly, without duplicates.
+  or `offset: last next_offset` (events) and continues exactly, without duplicates. `hub.subscribe`
+  resumes with `after: last cursor`.
+- **Snapshots are state, not deltas.** Each `watch.snapshot` is the complete current task list
+  (filtered by `workspace_id`/`task_ids`); a client replaces its view with it. A resubscribed
+  `watch` therefore starts with a snapshot equal to the last one seen before the restart, which is
+  not a duplicate event to reconcile, and a missed snapshot loses nothing.
 - A log stream ends after two empty reads of a finished task (so bytes written just before the task
   finished are not lost); `logs.end` then carries the final offsets. Events follow events v1 §5
   (whole lines, invalid lines reported by offset in `invalid`); `events.end` follows the last batch
@@ -277,8 +307,8 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 
 | Method | Params | Result |
 |---|---|---|
-| `upload.start` | `connection, node?, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name) | `{transfer}` |
-| `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`) | `{transfer}` |
+| `upload.start` | `connection, node?, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name), `idempotency_key?` | `{transfer}` |
+| `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`), `idempotency_key?` | `{transfer}` |
 | `transfer.list` / `transfer.get {id}` | – / `id` | `{transfers}` / `{transfer}` |
 | `transfer.resume` | `id` | `{transfer}` (continues an `interrupted` or `failed` transfer) |
 | `transfer.cancel` | `id` | `{transfer}` in state `cancelled` |
@@ -289,6 +319,14 @@ files_total, current?, sha256?, error?, action?, created_at, updated_at}` (`acti
 `workspace.import` of an upload through a hub). `transfer.updated {transfer}` is sent
 on every state change and at most every 250 ms while bytes move.
 
+- **Idempotency.** With `idempotency_key` the transfer id is `sha256("<kind>.start\0<key>")[:32]`
+  (`kind` = `upload` / `download`, so the two key spaces are separate) and the key and request are
+  kept in the journal: repeating the request with the same key (also from a new bridge after a
+  crash) returns that transfer in whatever state it is now, without starting another; the same key
+  with a different request (`connection, node, workspace_id, source, remote` or `connection, node,
+  task/workspace, path, dest`) is `conflict` with `data.transfer_id`. A failed or cancelled keyed
+  transfer is continued with `transfer.resume`, not by repeating `*.start`. Keys are remembered as
+  long as the journal (finished journals are kept 7 days).
 - **Journal.** `<state-dir>/transfers/<id>.json` is written atomically before and during the work. A
   transfer found `queued`/`running` at start-up was interrupted: it becomes `interrupted` and
   continues on `transfer.resume` or `hello` (`resume_transfers`, default true). One bridge runs a
@@ -393,8 +431,8 @@ on every state change and at most every 250 ms while bytes move.
 |---|---|
 | `transfer.updated` | `{transfer}` |
 | `watch.snapshot` | `{sub, tasks, time}` |
-| `logs.chunk` / `logs.end` | `{sub, stream, text, offset, next_offset}` / `{sub, offsets}` |
-| `events.batch` / `events.end` | `{sub, events, invalid, offset, next_offset}` / `{sub, next_offset}` |
+| `logs.chunk` / `logs.end` | `{sub, stream, text, offset, next_offset, bytes}` / `{sub, offsets: {stream: integer}}` |
+| `events.batch` / `events.end` | `{sub, events, invalid, offset, next_offset, bytes}` / `{sub, next_offset}` |
 | `hub.event` | `{sub, cursor, kind, payload}` |
 | `subscription.error` | `{sub, error, final?}` |
 | `graph.progress` | `{eval_id, event: {type, …}}` |
@@ -420,3 +458,6 @@ on every state change and at most every 250 ms while bytes move.
   keep `protocol: 1`; clients detect new methods through `hello.methods` and must ignore unknown
   events and result keys. The error codes of §4 are closed in protocol 1. Removing or changing the
   meaning of anything needs protocol 2.
+- **Protocol 2 candidates** (not in protocol 1): request cancellation (`cancel {id}`, freeing the
+  in-flight slot of an abandoned call, §3); a distinct error code for the state-directory lock
+  instead of the second meaning of `busy` (§4); `bytes` required in offset-based events.

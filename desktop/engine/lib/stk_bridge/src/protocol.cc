@@ -331,7 +331,9 @@ bool method_is_retry_safe(const std::string_view method, const Json &params)
   if (method == "task.submit") {
     return true; /* idempotency_key is required */
   }
-  if (method == "workspace.create" || method == "task.cancel") {
+  if (method == "workspace.create" || method == "task.cancel" || method == "upload.start" ||
+      method == "download.start")
+  {
     return params.is_object() && params.contains("idempotency_key");
   }
   /* Hub evaluations are hub actions named by eval_id: a repeat waits for the same action. A local

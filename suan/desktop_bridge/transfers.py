@@ -134,15 +134,46 @@ class TransferManager:
 
     # -- starting -------------------------------------------------------------------------------
 
-    def _new(self, kind, **fields):
-        record = {"id": uuid.uuid4().hex, "kind": kind, "state": "queued", "bytes_done": 0, "files_done": 0,
-                  "created_at": now(), **fields}
+    @staticmethod
+    def keyed_id(kind, key):
+        """The transfer id of an idempotency key: ``sha256("<kind>.start\\0<key>")[:32]``."""
+        return hashlib.sha256(f"{kind}.start\0{key}".encode("utf-8")).hexdigest()[:32]
+
+    def _existing(self, kind, key, request):
+        """The journaled transfer of ``key`` (same request), ``None`` when there is none; else conflict."""
+        if key is None:
+            return None
+        record = read_json(self._path(self.keyed_id(kind, key)))
+        if record is None:
+            return None
+        if record.get("request") != request:
+            raise BridgeError("conflict", f"The idempotency key names an earlier {kind} with a different request",
+                              data={"transfer_id": record.get("id")})
+        return self.public(record)
+
+    def _new(self, kind, key=None, request=None, **fields):
+        record = {"id": self.keyed_id(kind, key) if key is not None else uuid.uuid4().hex, "kind": kind,
+                  "state": "queued", "bytes_done": 0, "files_done": 0, "created_at": now(), **fields}
+        if key is not None:
+            record["idempotency_key"] = key
+            record["request"] = request
         record["files_total"] = len(record["items"])
         record["bytes_total"] = sum(item["size"] for item in record["items"] if item["size"] is not None)
         self.save(record)
         return record
 
-    def start_upload(self, connection, workspace_id, source, remote=None, node=None):
+    def start_upload(self, connection, workspace_id, source, remote=None, node=None, idempotency_key=None):
+        """A new upload, or with ``idempotency_key`` the transfer an earlier request with that key
+        started (whatever its state now; a different request under the key is ``conflict``)."""
+        request = {"connection": connection, "node": node, "workspace_id": workspace_id, "source": str(source),
+                   "remote": remote}
+        with self.lock:  # one transfer per key, also for concurrent repeats
+            existing = self._existing("upload", idempotency_key, request)
+            if existing is not None:
+                return existing
+            return self._start_upload(connection, workspace_id, source, remote, node, idempotency_key, request)
+
+    def _start_upload(self, connection, workspace_id, source, remote, node, key, request):
         source = Path(source)
         if not source.is_absolute():
             raise BridgeError("invalid_params", "'source' must be an absolute local path")
@@ -180,7 +211,7 @@ class TransferManager:
             if encoded_size(request) > IMPORT_REQUEST_BYTES:
                 raise BridgeError("invalid_params", f"The file list of this upload exceeds the hub's "
                                   f"{IMPORT_REQUEST_BYTES}-byte import request limit; upload the folder in parts")
-        record = self._new("upload", connection=connection, node=node, workspace_id=workspace_id,
+        record = self._new("upload", key, request, connection=connection, node=node, workspace_id=workspace_id,
                            local=str(source), remote=remote or source.name, items=items)
         self._launch(record["id"])
         return self.public(record)
@@ -195,7 +226,18 @@ class TransferManager:
         return {"local": str(path), "remote": remote, "size": info.st_size, "mtime_ns": info.st_mtime_ns,
                 "sha256": None, "done": False}
 
-    def start_download(self, connection, owner, owner_id, path, dest, node=None):
+    def start_download(self, connection, owner, owner_id, path, dest, node=None, idempotency_key=None):
+        """A new download, or with ``idempotency_key`` the transfer an earlier request with that key
+        started (a different request under the key is ``conflict``)."""
+        request = {"connection": connection, "node": node, "owner": owner, "owner_id": owner_id, "path": path,
+                   "dest": str(dest)}
+        with self.lock:
+            existing = self._existing("download", idempotency_key, request)
+            if existing is not None:
+                return existing
+            return self._start_download(connection, owner, owner_id, path, dest, node, idempotency_key, request)
+
+    def _start_download(self, connection, owner, owner_id, path, dest, node, key, request):
         try:
             path = relative_path(path)
         except ValueError as exc:
@@ -203,7 +245,7 @@ class TransferManager:
         dest = Path(dest)
         if not dest.is_absolute():
             raise BridgeError("invalid_params", "'dest' must be an absolute local path")
-        record = self._new("download", connection=connection, node=node, owner=owner,
+        record = self._new("download", key, request, connection=connection, node=node, owner=owner,
                            task_id=owner_id if owner == "task" else None,
                            workspace_id=owner_id if owner == "workspace" else None,
                            local=str(dest), remote=path,

@@ -333,6 +333,9 @@ Json UploadParams::to_json() const
   if (!remote.empty()) {
     p["remote"] = remote;
   }
+  if (!idempotency_key.empty()) {
+    p["idempotency_key"] = idempotency_key;
+  }
   return p;
 }
 
@@ -349,6 +352,9 @@ Json DownloadParams::to_json() const
   p["path"] = path;
   if (!dest.empty()) {
     p["dest"] = dest;
+  }
+  if (!idempotency_key.empty()) {
+    p["idempotency_key"] = idempotency_key;
   }
   return p;
 }
