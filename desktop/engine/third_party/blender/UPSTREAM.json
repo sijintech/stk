@@ -1,0 +1,18 @@
+{
+  "version": "5.2.1",
+  "tag": "v5.2.1",
+  "commit": "9e2066aef7ef7e20c142ad7bd3303138a4304c93",
+  "repository": "https://github.com/blender/blender.git",
+  "source_archive": "https://download.blender.org/source/blender-5.2.1.tar.xz",
+  "source_sha256": "14ca60236b029f575c2a8b6042554c956736206adef5ecb396445a394c0c9213",
+  "linux_x64_libraries": "ecbd06cf6d2a4aa6b00a61ffb479fc81b17aba08",
+  "editor_id": 24,
+  "editor_identifier": "STK",
+  "platform_acceptance": {
+    "linux_x64": "x11_llvmpipe_smoke_passed_hardware_acceptance_pending",
+    "windows_x64": "pending",
+    "macos_arm64": "pending",
+    "harmony_simulator": "pending_sdk",
+    "harmony_hardware": "pending_hardware"
+  }
+}
