@@ -4,6 +4,11 @@ Requests are handled concurrently (one thread each, at most :data:`MAX_INFLIGHT`
 can arrive in any order; the app matches them by ``id``. Every write to the protocol stream is one
 complete line under a lock. Params are validated against ``desktop-bridge-1.schema.json`` before a
 handler runs; with ``strict`` the bridge also validates every message it sends (tests, CI).
+
+One bridge owns a state directory at a time: :class:`StateDirLock` takes an exclusive,
+non-blocking OS lock on ``<state_dir>/bridge.lock`` (``fcntl.flock`` on POSIX, ``msvcrt.locking``
+on Windows; the OS drops it when the process dies). A second bridge raises ``busy``; run as a
+process it answers every request with that error (:func:`refuse`) and exits with status 3.
 """
 import os
 from pathlib import Path
@@ -23,15 +28,75 @@ from .protocol import (MAX_LINE_BYTES, PROTOCOL_VERSION, BridgeError, LineReader
 from .subscriptions import SubscriptionManager
 from .transfers import TransferManager
 
-__all__ = ["Bridge", "default_state_dir"]
+__all__ = ["Bridge", "StateDirLock", "default_state_dir", "refuse"]
 
 VERSION = "1.0.0"
 MAX_INFLIGHT = 64
 SHUTDOWN_GRACE = 5.0
+LOCK_NAME = "bridge.lock"
 
 
 def default_state_dir():
     return Path(os.environ.get("STK_DESKTOP_BRIDGE_DIR", str(Path.home() / ".stk" / "desktop-bridge")))
+
+
+class StateDirLock:
+    """An exclusive lock on ``<state_dir>/bridge.lock`` held for the bridge's lifetime (``busy`` otherwise)."""
+
+    def __init__(self, state_dir):
+        self.path = Path(state_dir) / LOCK_NAME
+        self.stream = open(self.path, "a+b")
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self.stream.seek(0)
+                msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self.stream.close()
+            raise BridgeError("busy", f"Another STK desktop bridge is using the state directory {state_dir}; "
+                              "close it first or start this one with another --state-dir",
+                              data={"state_dir": str(state_dir)}) from None
+
+    def release(self):
+        if self.stream.closed:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self.stream.seek(0)
+                msvcrt.locking(self.stream.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        finally:
+            self.stream.close()  # closing also drops a POSIX flock
+
+
+def refuse(stream, writer, error, max_line=MAX_LINE_BYTES):
+    """Answer every request on ``stream`` with ``error`` until EOF (a bridge that could not start)."""
+    reader = LineReader(stream, max_line)
+    while True:
+        try:
+            line, problem = reader.next()
+        except (OSError, ValueError):
+            return
+        if line is None and problem is None:
+            return
+        identity = None
+        if line is not None:
+            if not line.strip():
+                continue
+            try:
+                identity = check_envelope(decode_line(line))[0]
+            except BridgeError as exc:
+                identity = getattr(exc, "request_id", None)
+        try:
+            writer.write(encode_message({"id": identity, "error": error.to_json()}))
+            writer.flush()
+        except (OSError, ValueError):
+            return
 
 
 class _Context:
@@ -48,6 +113,7 @@ class Bridge:
                  on_exit=None):
         self.state_dir = Path(state_dir) if state_dir else default_state_dir()
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.state_lock = StateDirLock(self.state_dir)  # before anything reads or rewrites journals
         self.cache_dir = Path(cache_dir) if cache_dir else self.state_dir / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.download_dir = self.cache_dir / "downloads"
@@ -80,6 +146,7 @@ class Bridge:
             "hub.actions": self.hub_actions,
             "hub.action": self.hub_action,
             "hub.review": self.hub_review,
+            "hub.policy": self.hub_policy,
             "hub.subscribe": lambda p, c: self._subscribe("hub", p, c),
             "workspace.list": lambda p, c: self._backend(p).workspaces(),
             "workspace.create": lambda p, c: self._backend(p).create_workspace(p["name"], p.get("idempotency_key")),
@@ -104,13 +171,14 @@ class Bridge:
             "graph.presets": lambda p, c: self.graphs.presets(),
             "graph.validate": lambda p, c: self.graphs.validate(p["graph"], p.get("parameters")),
             "graph.evaluate": lambda p, c: self.graphs.evaluate(p),
-            "graph.cancel": lambda p, c: self.graphs.cancel(p["eval_id"]),
+            "graph.cancel": lambda p, c: self.graphs.cancel(p["eval_id"], p.get("connection"), p.get("node")),
             "blob.ensure": lambda p, c: self.graphs.ensure(p["sha256"], p.get("connection")),
             "probe": lambda p, c: self.graphs.probe(p),
             "colormaps.list": lambda p, c: self.graphs.colormaps(),
         }
         missing = set(self.methods) ^ set(bridge_schema.method_names())
         if missing:
+            self.state_lock.release()
             raise RuntimeError(f"Bridge methods and schema disagree: {sorted(missing)}")
 
     # -- output -------------------------------------------------------------------------------
@@ -248,6 +316,7 @@ class Bridge:
                 break
             time.sleep(0.02)
         self.closed.set()
+        self.state_lock.release()
 
     # -- helpers ------------------------------------------------------------------------------
 
@@ -350,6 +419,10 @@ class Bridge:
         record = hub.call(hub.hub.action, params["action_id"])
         self.inspected[(params["connection"], record["id"])] = record["request"]
         return {"action": record}
+
+    def hub_policy(self, params, context):
+        hub = self._hub(params)
+        return {"policy": hub.policy()}
 
     def hub_review(self, params, context):
         hub = self._hub(params)

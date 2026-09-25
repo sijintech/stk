@@ -246,6 +246,9 @@
               "type": "null"
             }
           ]
+        },
+        "profile": {
+          "type": "string"
         }
       },
       "required": [
@@ -524,6 +527,9 @@
         },
         "updated_at": {
           "type": "string"
+        },
+        "action": {
+          "$ref": "#/$defs/actionSummary"
         }
       },
       "required": [
@@ -1058,12 +1064,18 @@
         }
       },
       "graph.cancel": {
-        "description": "Cancel a running local evaluation (hub mode: stop waiting).",
+        "description": "Cancel an evaluation: a local one, or a hub one on its node (with connection and node also one this bridge is not waiting for).",
         "params": {
           "type": "object",
           "properties": {
             "eval_id": {
               "$ref": "#/$defs/evalId"
+            },
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
             }
           },
           "required": [
@@ -1076,6 +1088,12 @@
           "properties": {
             "cancelled": {
               "type": "boolean"
+            },
+            "action": {
+              "$ref": "#/$defs/actionSummary"
+            },
+            "error": {
+              "$ref": "#/$defs/error"
             }
           },
           "required": [
@@ -1522,6 +1540,70 @@
           },
           "required": [
             "devices"
+          ]
+        }
+      },
+      "hub.policy": {
+        "description": "The hub's limits for this device: desktop auto-run cap, upload sizes, read kinds.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "policy": {
+              "type": "object",
+              "properties": {
+                "device_profile": {
+                  "type": "string"
+                },
+                "desktop_auto_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "desktop_auto": {
+                  "type": "boolean"
+                },
+                "graph_auto_seconds": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "upload_max_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "upload_chunk_bytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "import_max_files": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "read_kinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "desktop_auto_bytes",
+                "upload_max_bytes"
+              ]
+            }
+          },
+          "required": [
+            "policy"
           ]
         }
       },
@@ -2162,7 +2244,7 @@
         }
       },
       "upload.start": {
-        "description": "Upload a file or a folder (resumable, journaled, sha256-verified by the Runtime).",
+        "description": "Upload a file or a folder (resumable, journaled, sha256-verified): into a Runtime workspace, or through a hub into its blob store and then a reviewed workspace.import on the node.",
         "params": {
           "type": "object",
           "properties": {
@@ -2276,7 +2358,7 @@
         }
       },
       "workspace.files": {
-        "description": "Input files of a workspace with size and sha256 (Runtime connections).",
+        "description": "Input files of a workspace with size and sha256 (Runtime and hub connections).",
         "params": {
           "type": "object",
           "properties": {

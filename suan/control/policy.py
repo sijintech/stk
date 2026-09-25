@@ -1,8 +1,17 @@
-"""Only registered exact command templates, and graph evaluations within budget, bypass review.
+"""Only registered exact command templates, reads, and graph evaluations within budget, bypass review.
 
 Graph requests are validated here without NumPy (``suan.graph.schema`` and the
 node catalog are standard library only), so a malformed graph never reaches a
 node.
+
+Desktop auto-run: a client device the owner paired with ``profile: "desktop"``
+(``suan-control pair --role client --profile desktop``) may also run
+``graph.evaluate`` requests of the ``desktop`` result profile without review, as
+long as the expected transfer (``budget.max_output_bytes``, else the profile's
+default delivery limit) stays within the hub's desktop cap (``desktop_bytes``,
+default :data:`DESKTOP_AUTO_BYTES`). Time, image and unknown-node limits still
+apply. Writes (``workspace.import``) and non-template submissions always go to
+review, whoever asks.
 """
 import json
 import math
@@ -11,8 +20,21 @@ import re
 from suan.runtime.models import TaskSpec, layout, relative_path
 
 KINDS = {"workspace.create", "task.submit", "task.cancel", "task.logs", "task.artifacts",
-         "file.read", "view.build", "view.probe", "graph.evaluate", "graph.meta", "task.events"}
+         "file.read", "view.build", "view.probe", "graph.evaluate", "graph.meta", "task.events",
+         "workspace.files", "workspace.import", "graph.cancel"}
+# Reads the hub may forward to a node without an action row (POST /api/v1/nodes/{id}/read).
+READ_KINDS = frozenset({"task.logs", "task.events", "task.artifacts", "file.read", "workspace.files"})
 TASK_ID = re.compile(r"[a-f0-9]{32}")
+SHA256 = re.compile(r"[a-f0-9]{64}")
+MIB = 1024 * 1024
+# Default expected-transfer cap of desktop auto-run; the hub owner changes it (suan-control serve
+# --desktop-auto-mib, or "desktop_auto_mib" in control.json); 0 turns desktop auto-run off.
+DESKTOP_AUTO_BYTES = 256 * MIB
+# Payload counts a desktop device may request without review (the desktop profile of stk-render-payload-v2 §7).
+GRAPH_DESKTOP_PAYLOAD = {"triangles": 20_000_000, "instances": 5_000_000, "points": 20_000_000, "voxels": 1024 ** 3}
+IMPORT_MAX_FILES = 10_000
+IMPORT_PATH_BYTES = 1024
+IMPORT_REVIEW = "导入上传的文件会写入工作区（可能覆盖同名输入文件），请检查文件列表后批准。"
 EVENTS_LIMIT = 1024 * 1024
 GRAPH_META_PARTS = ("catalog", "presets", "features", "render")
 # Automatic execution budget of graph.evaluate (m1-plan section 7): 300 s, 128 MiB of output and the
@@ -29,7 +51,12 @@ DEMO_TEMPLATE = {"argv": ["@python", "-m", "suan.control.demo_job"],
                  "outputs": ["scalar-0.vti", "scalar-1.vti", "vector.vti"]}
 
 
-def validate_action(body, templates):
+def validate_action(body, templates, *, desktop_bytes=None):
+    """The review reason of an action (``""``: runs at once); raises ``ValueError`` for invalid actions.
+
+    ``desktop_bytes`` is the hub's desktop auto-run cap when the requesting device holds the
+    desktop profile (``None`` or 0 otherwise); it only widens what ``graph.evaluate`` may run.
+    """
     if set(body) - {"id", "node_id", "kind", "payload"}:
         raise ValueError("Unknown action property")
     for key in ("id", "node_id"):
@@ -42,9 +69,16 @@ def validate_action(body, templates):
     if kind == "workspace.create":
         if set(p) != {"name"} or not isinstance(p["name"], str) or not 1 <= len(p["name"].strip()) <= 200:
             raise ValueError("Workspace name is required")
-    if kind in {"task.cancel", "task.logs", "task.artifacts", "file.read", "view.build", "view.probe"}:
+    if kind in {"task.cancel", "task.logs", "task.artifacts", "view.build", "view.probe"}:
         if not re.fullmatch(r"[a-f0-9]{32}", str(p.get("task_id", ""))):
             raise ValueError("Task ID required")
+    if kind == "file.read":
+        # A task artifact (task_id) or, since the hub upload path, a workspace input (workspace_id).
+        owners = [key for key in ("task_id", "workspace_id") if key in p]
+        if len(owners) != 1 or not TASK_ID.fullmatch(str(p[owners[0]])):
+            raise ValueError("file.read needs exactly one of task_id or workspace_id")
+        if "offset" in p:
+            _count(p["offset"], "offset")
     if kind in {"file.read", "view.build", "view.probe"}:
         relative_path(p.get("path"))
     if kind == "task.events":
@@ -52,7 +86,17 @@ def validate_action(body, templates):
     if kind == "graph.meta":
         return validate_graph_meta(p)
     if kind == "graph.evaluate":
-        return validate_graph_evaluate(p)
+        return validate_graph_evaluate(p, desktop_bytes=desktop_bytes)
+    if kind == "workspace.files":
+        if set(p) != {"workspace_id"} or not TASK_ID.fullmatch(str(p["workspace_id"])):
+            raise ValueError("workspace.files accepts only workspace_id")
+        return ""
+    if kind == "graph.cancel":
+        if set(p) != {"action_id"} or not TASK_ID.fullmatch(str(p["action_id"])):
+            raise ValueError("graph.cancel accepts only action_id (the graph.evaluate action)")
+        return ""
+    if kind == "workspace.import":
+        return validate_workspace_import(p)
     if kind != "task.submit":
         return ""
     if set(p) - {"spec", "template"}:
@@ -102,6 +146,47 @@ def validate_graph_meta(p):
     if not isinstance(include, list) or any(item not in GRAPH_META_PARTS for item in include):
         raise ValueError("graph.meta include lists catalog, presets, features or render")
     return ""
+
+
+def import_path(value):
+    """A normalized POSIX path relative to the workspace inputs (checked on the hub and again on the node)."""
+    if not isinstance(value, str) or any(ord(c) < 0x20 or ord(c) == 0x7f for c in value):
+        raise ValueError("Import paths are nonempty strings without control characters")
+    if relative_path(value) != value or value.endswith("/"):
+        raise ValueError(f"Import path {value!r} must be a normalized relative path (no '.', '..', '//', "
+                         "absolute paths, backslashes or drive letters)")
+    if len(value.encode("utf-8")) > IMPORT_PATH_BYTES or any(len(part.encode("utf-8")) > 255
+                                                              for part in value.split("/")):
+        raise ValueError(f"Import path {value[:80]!r} is too long")
+    return value
+
+
+def validate_workspace_import(p):
+    """``{workspace_id, files: [{path, sha256, size}]}``: hub blobs into workspace inputs; always reviewed."""
+    if not isinstance(p, dict) or set(p) != {"workspace_id", "files"}:
+        raise ValueError("workspace.import accepts only workspace_id and files")
+    if not TASK_ID.fullmatch(str(p["workspace_id"])):
+        raise ValueError("Workspace ID required")
+    files = p["files"]
+    if not isinstance(files, list) or not 1 <= len(files) <= IMPORT_MAX_FILES:
+        raise ValueError(f"workspace.import imports 1 to {IMPORT_MAX_FILES} files")
+    paths = set()
+    for item in files:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256", "size"}:
+            raise ValueError("Each imported file is {path, sha256, size}")
+        path = import_path(item["path"])
+        if path in paths:
+            raise ValueError(f"Duplicate import path {path!r}")
+        paths.add(path)
+        if not isinstance(item["sha256"], str) or not SHA256.fullmatch(item["sha256"]):
+            raise ValueError("Each imported file names its blob by sha256")
+        _count(item["size"], "size")
+    # A path cannot be both a file and the folder of another file.
+    for path in paths:
+        parts = path.split("/")
+        if any("/".join(parts[:i]) in paths for i in range(1, len(parts))):
+            raise ValueError(f"Import path {path!r} lies inside another imported file")
+    return IMPORT_REVIEW
 
 
 def _issue_text(issue):
@@ -170,12 +255,15 @@ def _plot_size(params):
     return inches[0] * dpi, inches[1] * dpi
 
 
-def _payload_budget_reasons(graph, values, outputs=None, plot_format="svg"):
+def _payload_budget_reasons(graph, values, outputs=None, plot_format="svg", desktop_bytes=None):
     """Review reasons of the graph's payload, image and plot budgets (fail closed on uncomputable sizes).
 
     ``outputs`` are the requested graph outputs (``None``: all) and ``plot_format`` the format plot
     outputs are delivered in: a plot delivered as PNG is a raster of ``size_in x dpi`` pixels.
+    ``desktop_bytes`` (desktop devices): payloads may use the desktop profile and its counts, with
+    ``bytes`` up to the cap.
     """
+    payload_limits = {**GRAPH_DESKTOP_PAYLOAD, "bytes": desktop_bytes} if desktop_bytes else GRAPH_AUTO_PAYLOAD
     from suan.graph.schema import substitute_params
 
     def params_of(node):
@@ -201,11 +289,12 @@ def _payload_budget_reasons(graph, values, outputs=None, plot_format="svg"):
         params = params_of(node)
         if node_type.startswith("stk.output.payload@"):
             # "auto" (the default) is the request profile, which is checked on its own.
-            if params.get("profile", "auto") not in GRAPH_AUTO_PROFILES | {"auto"}:
+            if params.get("profile", "auto") not in GRAPH_AUTO_PROFILES | {"auto"} and not (
+                    desktop_bytes and params.get("profile") == "desktop"):
                 reasons.append("桌面级渲染数据包")
             budget = params.get("budget") or {}
             if isinstance(budget, dict) and any(not isinstance(budget.get(key), int) or budget[key] > limit
-                                                for key, limit in GRAPH_AUTO_PAYLOAD.items() if key in budget):
+                                                for key, limit in payload_limits.items() if key in budget):
                 reasons.append("渲染数据包预算")
         elif node_type.startswith("stk.output.image@"):
             source = linked(node, "source")
@@ -238,15 +327,19 @@ def _payload_budget_reasons(graph, values, outputs=None, plot_format="svg"):
     return reasons
 
 
-def validate_graph_evaluate(p):
+def validate_graph_evaluate(p, desktop_bytes=None):
     """``{graph | preset, bindings: {name: {task_id}}, parameters, outputs, profile, budget, plot_format, accept}``.
 
     Returns a review reason when the request exceeds the automatic budget, ``""``
-    otherwise; raises ``ValueError`` for invalid requests and graphs.
+    otherwise; raises ``ValueError`` for invalid requests and graphs. ``desktop_bytes``
+    (a desktop device's cap) replaces the output-size and profile rules by the
+    expected-transfer rule (see the module docstring).
     """
     from suan.graph.catalog import default_registry, load_preset
     from suan.graph.schema import GraphError, parameter_values, validate_graph
-    from suan.graph.service import parse_request
+    from suan.graph.service import PROFILE_OUTPUT_BYTES, parse_request
+    if isinstance(desktop_bytes, bool) or not isinstance(desktop_bytes, int) or desktop_bytes <= 0:
+        desktop_bytes = None
     if len(json.dumps(p, ensure_ascii=False, allow_nan=False).encode("utf-8")) > GRAPH_REQUEST_BYTES:
         raise ValueError(f"graph.evaluate requests are limited to {GRAPH_REQUEST_BYTES // 1024} KiB")
     try:
@@ -284,12 +377,19 @@ def validate_graph_evaluate(p):
     budget = request["budget"]
     if "max_seconds" in budget and (budget["max_seconds"] is None or budget["max_seconds"] > GRAPH_AUTO_SECONDS):
         reasons.append("计算时长")
-    if "max_output_bytes" in budget and (budget["max_output_bytes"] is None
-                                         or budget["max_output_bytes"] > GRAPH_AUTO_OUTPUT_BYTES):
-        reasons.append("输出大小")
-    if request["profile"] not in GRAPH_AUTO_PROFILES:
-        reasons.append("桌面级结果配置")
-    reasons += _payload_budget_reasons(graph, values, request["outputs"], request["plot_format"])
+    if desktop_bytes:
+        # The node refuses to deliver more than max_output_bytes (default: the profile's limit).
+        expected = budget["max_output_bytes"] if "max_output_bytes" in budget else PROFILE_OUTPUT_BYTES[
+            request["profile"]]
+        if expected is None or expected > desktop_bytes:
+            reasons.append(f"预计传输超过桌面自动执行上限 {desktop_bytes // MIB} MiB（请设置 budget.max_output_bytes）")
+    else:
+        if "max_output_bytes" in budget and (budget["max_output_bytes"] is None
+                                             or budget["max_output_bytes"] > GRAPH_AUTO_OUTPUT_BYTES):
+            reasons.append("输出大小")
+        if request["profile"] not in GRAPH_AUTO_PROFILES:
+            reasons.append("桌面级结果配置")
+    reasons += _payload_budget_reasons(graph, values, request["outputs"], request["plot_format"], desktop_bytes)
     notes = []
     if reasons:
         notes.append(f"{GRAPH_REVIEW}（{'、'.join(dict.fromkeys(reasons))}），请检查图谱与预算后批准执行。")

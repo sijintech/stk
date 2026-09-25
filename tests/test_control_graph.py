@@ -14,6 +14,9 @@ import pytest
 
 from suan.control.policy import GRAPH_REVIEW, validate_action
 
+AGENT_FEATURES = ["graph.evaluate", "graph.meta", "task.events", "graph.cancel", "read", "workspace.files",
+                  "workspace.import"]
+
 OWNER = "test-owner-credential-" + "x" * 32
 AUTH = {"Authorization": "Bearer " + OWNER}
 TASK = "d" * 32
@@ -598,7 +601,7 @@ def test_graph_evaluate_end_to_end_through_the_hub(runtime, fake_sdk, tmp_path):
             _, meta = run("graph.meta", {"include": ["catalog", "presets", "features"]})
             assert meta["state"] == "succeeded", meta["error"]
             assert {n["id"] for n in meta["result"]["catalog"]["nodes"]} >= {"stk.source.muferro_run@1"}
-            assert meta["result"]["features"]["agent"] == ["graph.evaluate", "graph.meta", "task.events"]
+            assert meta["result"]["features"]["agent"] == AGENT_FEATURES
             with app.state.store.db() as db:
                 row = db.execute("SELECT result, result_ref FROM actions WHERE id=?", (meta["id"],)).fetchone()
             from suan.control.store import RESULT_INLINE_LIMIT, encode
@@ -689,7 +692,7 @@ def test_agent_loop_over_loopback_http_and_websocket(runtime, fake_sdk, tmp_path
             decode(records["graph"]["result"]["outputs"]["payload"]["manifest"], fetch)
             assert records["events"]["result"]["terminal"] is True
             device = next(d for d in http.get("/api/v1/devices", headers=AUTH).json() if d["id"] == node["device_id"])
-            assert device["online"] and device["snapshot"]["features"] == ["graph.evaluate", "graph.meta", "task.events"]
+            assert device["online"] and device["snapshot"]["features"] == AGENT_FEATURES
     finally:
         if "task" in holder:
             loop.call_soon_threadsafe(holder["task"].cancel)

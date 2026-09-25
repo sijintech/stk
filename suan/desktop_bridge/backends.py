@@ -4,7 +4,10 @@ A :class:`RuntimeBackend` talks to an STK Runtime (``suan.runtime.client.Runtime
 or an SSH tunnel). A :class:`HubBackend` reaches one execution node of a paired control hub: reads
 come from the node's heartbeat snapshot, and operations become hub actions (``suan.control``) whose
 ids are derived from the caller's idempotency keys, so a retried request never creates a second
-operation. Actions that need review return with ``state: "review"``.
+operation. Actions that need review return with ``state: "review"``. Polled reads (logs, events,
+artifacts, file chunks, workspace inputs) use the hub's read path (``POST /api/v1/nodes/<id>/read``,
+no action row); a hub or node agent without it gets a read action instead. Uploads go into the hub's
+blob store (resumable sessions) and then into the workspace through a ``workspace.import`` action.
 """
 import base64
 import hashlib
@@ -17,7 +20,7 @@ from urllib.parse import urlencode
 from suan.runtime.client import RuntimeClient, RuntimeErrorResponse
 from suan.runtime.models import TaskSpec
 
-from .hub import HubClient, hub_error
+from .hub import HubClient, HubResponseError, hub_error
 from .protocol import BridgeError
 
 __all__ = ["HubBackend", "RuntimeBackend", "action_id", "runtime_error"]
@@ -26,6 +29,20 @@ LOG_STREAMS = ("stdout", "stderr", "scheduler.out", "scheduler.err", "wrapper")
 FILE_CHUNK = 1024 * 1024
 ACTION_WAIT = 30.0
 FINISHED_ACTIONS = {"succeeded", "failed", "rejected"}
+READ_PATH_RETRY = 60.0
+# (hub url, node id) -> monotonic time the hub or node answered that it has no read path.
+_NO_READ_PATH = {}
+
+
+def action_failure(record, message=None):
+    """The BridgeError of a failed or rejected hub action (``cancelled`` for a cancelled evaluation)."""
+    data = {"action": summary(record)}
+    if record["state"] == "rejected":
+        return BridgeError("remote_error", message or "The action was rejected in review", data=data)
+    error = record.get("error") or "The node reported a failure"
+    if error.startswith("cancelled:"):
+        return BridgeError("cancelled", error.partition(":")[2].strip() or "Cancelled", data=data)
+    return BridgeError("remote_error", error, data=data)
 
 
 def runtime_error(exc):
@@ -229,7 +246,10 @@ class HubBackend:
         return {"task": found}
 
     def files(self, workspace_id):
-        raise BridgeError("unsupported", "Listing workspace inputs through the hub is not available yet")
+        return {"files": self._read("workspace.files", {"workspace_id": workspace_id})}
+
+    def policy(self):
+        return self.call(self.hub.policy)
 
     # -- actions --------------------------------------------------------------------------------
 
@@ -249,11 +269,8 @@ class HubBackend:
             time.sleep(delay)
             delay = min(0.5, delay * 1.5)
             record = self.call(self.hub.action, identity)
-        if record["state"] == "failed":
-            raise BridgeError("remote_error", record.get("error") or "The node reported a failure",
-                              data={"action": summary(record)})
-        if record["state"] == "rejected":
-            raise BridgeError("remote_error", "The action was rejected in review", data={"action": summary(record)})
+        if record["state"] in ("failed", "rejected"):
+            raise action_failure(record)
         return record
 
     def _operation(self, kind, payload, identity, result_key):
@@ -287,7 +304,27 @@ class HubBackend:
         return self._operation("task.cancel", {"task_id": _check_task_id(task_id)}, identity, "task")
 
     def _read(self, kind, payload):
-        # Reads are never reviewed; a fresh id per call (the node caches results by action id).
+        """A review-free read: the hub's read path (no action row), else a read action.
+
+        Hubs and node agents from before the read path answer 404/405 (no route) or 501 (agent);
+        they get read actions (a fresh id per call: the node caches results by action id), and the
+        read path is tried again a minute later.
+        """
+        key = (self.hub.url, self.node_id)
+        refused = _NO_READ_PATH.get(key)
+        if refused is None or time.monotonic() - refused > READ_PATH_RETRY:
+            try:
+                return self.hub.read(self.node_id, kind, payload)
+            except HubResponseError as exc:
+                if exc.status == 422:  # the node answered with an error (unknown task, missing file, ...)
+                    raise BridgeError("remote_error", exc.message) from None
+                if not (exc.status in (405, 501) or (exc.status == 404 and exc.message == "Not Found")):
+                    raise hub_error(exc) from None
+                _NO_READ_PATH[key] = time.monotonic()
+            except BridgeError:
+                raise
+            except Exception as exc:
+                raise hub_error(exc) from None
         return self.run_action(kind, payload, uuid.uuid4().hex)["result"]
 
     def artifacts(self, task_id):
@@ -303,22 +340,51 @@ class HubBackend:
         return self._read("task.events", {"task_id": task_id, "offset": offset})
 
     def describe(self, owner, owner_id, path):
-        if owner != "task":
-            raise BridgeError("unsupported", "Downloading workspace inputs through the hub is not available yet")
-        item = next((a for a in self.artifacts(owner_id)["artifacts"] if a["path"] == path), None)
+        items = self.artifacts(owner_id)["artifacts"] if owner == "task" else self.files(owner_id)["files"]
+        item = next((a for a in items if a["path"] == path), None)
         if item is None:
-            raise BridgeError("not_found", "Artifact not found; wait for the task to finish")
+            raise BridgeError("not_found", "Artifact not found; wait for the task to finish" if owner == "task"
+                              else "Workspace file not found")
         return item
 
     def read_chunk(self, owner, owner_id, path, offset, limit=FILE_CHUNK):
-        result = self._read("file.read", {"task_id": owner_id, "path": path, "offset": offset})
+        key = "task_id" if owner == "task" else "workspace_id"
+        result = self._read("file.read", {key: owner_id, "path": path, "offset": offset})
         return base64.b64decode(result["data"])
 
-    def upload_begin(self, *args, **kwargs):
-        raise BridgeError("unsupported", "Uploads through the control hub are not available yet; connect to the "
-                          "Runtime directly (SSH tunnel)")
+    # Uploads: the bytes go into the hub's blob store (the same begin/chunk/finish/abort shape as the
+    # Runtime's sessions); workspace.import then moves them into the workspace on the node.
+    def upload_begin(self, workspace_id, path, size, digest):
+        return self.call(self.hub.upload_begin, digest, size)
 
-    upload_status = upload_chunk = upload_finish = upload_abort = upload_begin
+    def upload_status(self, workspace_id, upload_id):
+        return self.call(self.hub.upload_status, upload_id)
+
+    def upload_chunk(self, workspace_id, upload_id, offset, data):
+        return self.call(self.hub.upload_chunk, upload_id, offset, data)
+
+    def upload_finish(self, workspace_id, upload_id):
+        return self.call(self.hub.upload_finish, upload_id)
+
+    def upload_abort(self, workspace_id, upload_id):
+        return self.call(self.hub.upload_abort, upload_id)
+
+    def post_import(self, workspace_id, files, identity):
+        """Create (idempotently) the ``workspace.import`` action; returns its record without waiting."""
+        return self.call(self.hub.post_action, {"id": identity, "node_id": self.node_id, "kind": "workspace.import",
+                                                "payload": {"workspace_id": workspace_id, "files": files}})
+
+    def action_record(self, identity):
+        return self.call(self.hub.action, identity)
+
+    def reject(self, identity):
+        return self.call(self.hub.review, identity, False)
+
+    def cancel_evaluation(self, target, wait=10.0):
+        """Ask the hub to cancel ``graph.evaluate`` action ``target`` (in review: at once; running: on the node)."""
+        record = self.run_action("graph.cancel", {"action_id": target},
+                                 action_id("graph.cancel", self.node_id, target), wait=wait)
+        return record
 
 
 def summary(record):

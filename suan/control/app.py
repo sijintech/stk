@@ -12,17 +12,55 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .blobs import BlobError, BlobMismatch, BlobTooLarge
-from .policy import validate_action
+from .policy import DESKTOP_AUTO_BYTES, GRAPH_AUTO_SECONDS, IMPORT_MAX_FILES, READ_KINDS, validate_action
 from .store import ControlStore, encode
+from .uploads import CHUNK_MAX, UploadConflict, UploadLimit, UploadSessions
 
 # Advertised in GET /api/v1/health so agents and clients can detect additive hub features.
-FEATURES = ["blobs", "graph", "task.events"]
+FEATURES = ["blobs", "graph", "task.events", "desktop.profile", "graph.cancel", "node.read", "uploads",
+            "workspace.import"]
+READ_TIMEOUT = 30
+READ_INFLIGHT = 16
 BLOB_HEADERS = {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
                 "Content-Security-Policy": "default-src 'none'; sandbox"}
 
 
 class Pairing(BaseModel):
     role: str = "client"
+    profile: str = ""
+
+
+class UploadBegin(BaseModel):
+    sha256: str
+    size: int
+
+
+class NodeRead(BaseModel):
+    kind: str
+    payload: dict
+
+
+class NodeLink:
+    """One open node WebSocket: serialized sends and the node's outstanding reads."""
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.lock = asyncio.Lock()
+        self.pending = {}
+
+    async def send(self, message):
+        async with self.lock:
+            await self.ws.send_json(message)
+
+    def resolve(self, message):
+        future = self.pending.get(message.get("id")) if isinstance(message.get("id"), str) else None
+        if future is not None and not future.done():
+            future.set_result(message)
+
+    def close(self):
+        for future in self.pending.values():
+            if not future.done():
+                future.set_exception(ConnectionError("The execution node disconnected"))
 
 
 class Claim(BaseModel):
@@ -39,16 +77,23 @@ class Chat(BaseModel):
     content: str = Field(min_length=1, max_length=12000)
 
 
-def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None, blob_max_bytes=None):
+def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None, blob_max_bytes=None,
+               desktop_auto_bytes=DESKTOP_AUTO_BYTES):
+    """The control API. ``desktop_auto_bytes``: expected-transfer cap of desktop auto-run (0 turns it off)."""
     if not owner_token or len(owner_token) < 24:
         raise ValueError("Control owner token must contain at least 24 characters")
+    if isinstance(desktop_auto_bytes, bool) or not isinstance(desktop_auto_bytes, int) or desktop_auto_bytes < 0:
+        raise ValueError("desktop_auto_bytes must be a nonnegative integer")
     app = FastAPI(title="STK Control", version="1.0", docs_url=None, redoc_url=None)
     store = ControlStore(state_dir, blob_max_bytes=blob_max_bytes)
     blobs = store.blobs
+    uploads = UploadSessions(blobs)
     app.state.store = store
+    app.state.desktop_auto_bytes = desktop_auto_bytes
     graph_documents = {}
     templates = templates or {}
     connections = {}
+    links = {}
     chat_locks = {}
 
     def identity(authorization):
@@ -56,7 +101,7 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             raise HTTPException(401, "Authentication required")
         token = authorization[7:]
         if hmac.compare_digest(token.encode(), owner_token.encode()):
-            return {"id": "owner", "role": "owner"}
+            return {"id": "owner", "role": "owner", "profile": ""}
         device = store.authenticate(token)
         if device is None:
             raise HTTPException(401, "Device credential invalid or revoked")
@@ -95,7 +140,15 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
         return FileResponse(path, media_type="application/octet-stream",
                             headers={**BLOB_HEADERS, "ETag": '"' + sha256 + '"'})
 
-    def prepare_action(body):
+    def desktop_cap(who):
+        """The desktop auto-run cap for this requester (``None``: the ordinary rules)."""
+        if who is not None and who.get("role") == "client" and who.get("profile") == "desktop":
+            return desktop_auto_bytes or None
+        return None
+
+    def prepare_action(body, who=None):
+        if who is None and isinstance(body, dict) and body.get("kind") == "graph.cancel":
+            raise HTTPException(400, "graph.cancel is a client request")  # never a model proposal
         try:
             if body.get("kind") == "task.submit" and "spec" not in body.get("payload", {}):
                 payload = body["payload"]
@@ -104,9 +157,15 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
                     raise ValueError("Select a registered template and workspace")
                 body = {**body, "payload": {"template": payload["template"], "spec": {
                     **template, "workspace_id": payload["workspace_id"], "name": payload["template"]}}}
-            reason = validate_action(body, templates)
-            if not any(d["id"] == body["node_id"] and d["role"] == "node" and not d["revoked"] for d in store.devices()):
+            reason = validate_action(body, templates, desktop_bytes=desktop_cap(who))
+            node = store.device(body["node_id"])
+            if node is None or node["role"] != "node" or node["revoked"]:
                 raise ValueError("Execution node not found")
+            if body["kind"] == "workspace.import":
+                for item in body["payload"]["files"]:
+                    if blobs.size(item["sha256"]) != item["size"]:
+                        raise ValueError(f"Upload the bytes of {item['path']} (POST /api/v1/uploads) before "
+                                         "importing them")
             return body, reason
         except RecursionError:
             # A request nested too deeply for the validators (JSON, graphs): a client error, never a 500.
@@ -114,12 +173,25 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
         except (ValueError, TypeError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    def action(body):
-        request, reason = prepare_action(body)
+    def action(body, who=None):
+        request, reason = prepare_action(body, who)
         try:
+            if request["kind"] == "graph.cancel":
+                return store.create_cancel(request)
             return store.create_action(request, reason)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    def upload_error(exc):
+        if isinstance(exc, KeyError):
+            return HTTPException(404, "Upload not found")
+        if isinstance(exc, BlobTooLarge):
+            return HTTPException(413, str(exc))
+        if isinstance(exc, UploadConflict):
+            return HTTPException(409, str(exc))
+        if isinstance(exc, UploadLimit):
+            return HTTPException(429, str(exc))
+        return HTTPException(400, str(exc))
 
     @app.get("/api/v1/health")
     def health():
@@ -129,7 +201,10 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
     def pairing(body: Pairing):
         if body.role not in {"node", "client"}:
             raise HTTPException(400, "Role must be node or client")
-        return store.pairing(body.role)
+        try:
+            return store.pairing(body.role, body.profile)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.post("/api/v1/pairings/claim")
     def claim(body: Claim):
@@ -156,9 +231,17 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
     def get_templates():
         return templates
 
-    @app.post("/api/v1/actions", dependencies=[Depends(client)], status_code=202)
-    def post_action(body: dict):
-        return action(body)
+    @app.get("/api/v1/policy")
+    def get_policy(who=Depends(client)):
+        """The limits a client plans its requests with (desktop auto-run cap, upload sizes)."""
+        return {"device_profile": who.get("profile") or "", "desktop_auto_bytes": desktop_auto_bytes,
+                "desktop_auto": desktop_cap(who) is not None, "graph_auto_seconds": GRAPH_AUTO_SECONDS,
+                "upload_max_bytes": blobs.max_bytes, "upload_chunk_bytes": CHUNK_MAX,
+                "import_max_files": IMPORT_MAX_FILES, "read_kinds": sorted(READ_KINDS)}
+
+    @app.post("/api/v1/actions", status_code=202)
+    def post_action(body: dict, who=Depends(client)):
+        return action(body, who)
 
     @app.get("/api/v1/actions", dependencies=[Depends(client)])
     def actions():
@@ -206,6 +289,111 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             upload.abort()
         return JSONResponse({"sha256": sha256, "size": upload.size, "created": created},
                             status_code=201 if created else 200)
+
+    # -- client uploads (suan.control.uploads) ---------------------------------------------------
+
+    @app.post("/api/v1/uploads")
+    def begin_upload(body: UploadBegin, who=Depends(client)):
+        try:
+            return uploads.begin(who["id"], body.sha256, body.size)
+        except (KeyError, BlobError) as exc:
+            raise upload_error(exc) from exc
+
+    @app.get("/api/v1/uploads/{upload_id}")
+    def upload_status(upload_id: str, who=Depends(client)):
+        try:
+            return uploads.status(who["id"], upload_id)
+        except (KeyError, BlobError) as exc:
+            raise upload_error(exc) from exc
+
+    @app.put("/api/v1/uploads/{upload_id}")
+    async def upload_chunk(upload_id: str, request: Request, offset: int, who=Depends(client)):
+        try:
+            declared = int(request.headers.get("content-length", "-1"))
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid Content-Length") from exc
+        if declared > CHUNK_MAX:
+            raise HTTPException(413, f"Upload chunks are limited to {CHUNK_MAX} bytes")
+        data = bytearray()
+        async for part in request.stream():
+            data += part
+            if len(data) > CHUNK_MAX:
+                raise HTTPException(413, f"Upload chunks are limited to {CHUNK_MAX} bytes")
+        try:
+            return await asyncio.to_thread(uploads.chunk, who["id"], upload_id, offset, bytes(data))
+        except (KeyError, BlobError) as exc:
+            raise upload_error(exc) from exc
+
+    @app.post("/api/v1/uploads/{upload_id}/finish")
+    def finish_upload(upload_id: str, who=Depends(client)):
+        try:
+            return uploads.finish(who["id"], upload_id)
+        except (KeyError, BlobError) as exc:
+            raise upload_error(exc) from exc
+
+    @app.delete("/api/v1/uploads/{upload_id}")
+    def abort_upload(upload_id: str, who=Depends(client)):
+        try:
+            return uploads.abort(who["id"], upload_id)
+        except (KeyError, BlobError) as exc:
+            raise upload_error(exc) from exc
+
+    @app.get("/api/v1/actions/{action_id}/blobs/{sha256}")
+    def import_blob(action_id: str, sha256: str, who=Depends(node_device)):
+        """A node fetches the blobs of a queued workspace.import action addressed to it (nothing else)."""
+        blob_path(sha256)
+        try:
+            record = store.action(action_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Blob not found") from exc
+        request = record["request"]
+        if (record["node_id"] != who["id"] or record["state"] != "queued" or request.get("kind") != "workspace.import"
+                or sha256 not in {item.get("sha256") for item in request["payload"].get("files", ())}):
+            raise HTTPException(404, "Blob not found")
+        return blob_file(sha256)
+
+    # -- reads forwarded to a node without an action row ---------------------------------------
+
+    @app.post("/api/v1/nodes/{node_id}/read")
+    async def node_read(node_id: str, body: NodeRead, who=Depends(client)):
+        """A review-free read (logs, events, artifacts, file chunks, workspace inputs) answered by the node live.
+
+        No action row and no hub event: polling clients do not grow the action table. 503 when the
+        node is offline, 501 when its agent predates the read path (clients then use an action).
+        """
+        if body.kind not in READ_KINDS:
+            raise HTTPException(400, "Reads are " + ", ".join(sorted(READ_KINDS)))
+        try:
+            validate_action({"id": "0" * 32, "node_id": node_id, "kind": body.kind, "payload": body.payload}, templates)
+        except RecursionError:
+            raise HTTPException(400, "The request is nested too deeply") from None
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        node = store.device(node_id)
+        if node is None or node["role"] != "node" or node["revoked"]:
+            raise HTTPException(404, "Execution node not found")
+        if "read" not in (node["snapshot"].get("features") or ()):
+            raise HTTPException(501, "This node agent has no read path; upgrade suan-node")
+        link = links.get(node_id)
+        if link is None:
+            raise HTTPException(503, "The execution node is offline")
+        if len(link.pending) >= READ_INFLIGHT:
+            raise HTTPException(429, "Too many reads in flight on this node; retry")
+        read_id = uuid.uuid4().hex
+        future = asyncio.get_running_loop().create_future()
+        link.pending[read_id] = future
+        try:
+            await link.send({"type": "read", "id": read_id, "kind": body.kind, "payload": body.payload})
+            reply = await asyncio.wait_for(future, READ_TIMEOUT)
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(504, "The execution node did not answer in time; retry") from exc
+        except (ConnectionError, RuntimeError, WebSocketDisconnect) as exc:
+            raise HTTPException(503, "The execution node disconnected; retry") from exc
+        finally:
+            link.pending.pop(read_id, None)
+        if reply.get("error"):
+            raise HTTPException(422, str(reply["error"])[:2000])
+        return {"result": reply.get("result")}
 
     @app.head("/api/v1/blobs/{sha256}", dependencies=[Depends(any_device)])
     def head_blob(sha256: str):
@@ -323,8 +511,12 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
             return
         node_id = who["id"]
         await ws.accept()
+        link = NodeLink(ws)
         # Register first: closing a replaced socket that is already gone must not end this one.
         previous, connections[node_id] = connections.get(node_id), ws
+        replaced, links[node_id] = links.get(node_id), link
+        if replaced is not None:
+            replaced.close()
         if previous is not None:
             try:
                 await previous.close(code=1012)
@@ -337,7 +529,7 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
                 identity(ws.headers.get("authorization", ""))
                 for item in reversed(store.actions(node_id, pending=True)):
                     if item["id"] not in sent:
-                        await ws.send_json({"type": "action", "action": item["request"]})
+                        await link.send({"type": "action", "action": item["request"]})
                         sent.add(item["id"])
                 await asyncio.sleep(.5)
 
@@ -349,6 +541,8 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
                     store.heartbeat(node_id, data["snapshot"])
                 elif data.get("type") == "result":
                     store.complete(data.get("id"), node_id, data.get("result"), str(data.get("error", "")))
+                elif data.get("type") == "read_result":
+                    link.resolve(data)
                 else:
                     await ws.close(code=1008)
                     break
@@ -357,6 +551,9 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None,
         finally:
             sender.cancel()
             # Deregister before any await, so a cancelled handler cannot leave a stale socket.
+            if links.get(node_id) is link:
+                links.pop(node_id)
+            link.close()
             if connections.get(node_id) is ws:
                 connections.pop(node_id)
                 with store.db() as db:

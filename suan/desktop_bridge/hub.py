@@ -61,9 +61,14 @@ class HubClient:
         headers.update(extra or {})
         return headers
 
-    def request(self, method, path, body=None):
-        data = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8") if body is not None else None
-        request = Request(self.url + "/api/v1/" + path, data=data, method=method, headers=self._headers())
+    def request(self, method, path, body=None, raw=None):
+        """A JSON request (``body``) or, with ``raw`` bytes, an octet-stream upload; returns the JSON reply."""
+        if raw is not None:
+            data, headers = bytes(raw), self._headers({"Content-Type": "application/octet-stream"})
+        else:
+            data = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8") if body is not None else None
+            headers = self._headers()
+        request = Request(self.url + "/api/v1/" + path, data=data, method=method, headers=headers)
         try:
             with self._open(request) as response:
                 return json.loads(response.read())
@@ -96,6 +101,29 @@ class HubClient:
 
     def review(self, action_id, approved):
         return self.request("POST", f"actions/{action_id}/review", {"approved": bool(approved)})
+
+    def policy(self):
+        return self.request("GET", "policy")
+
+    def read(self, node_id, kind, payload):
+        """A review-free node read without an action row (``POST /api/v1/nodes/<id>/read``)."""
+        return self.request("POST", f"nodes/{node_id}/read", {"kind": kind, "payload": payload})["result"]
+
+    # Resumable uploads into the hub's blob store (suan.control.uploads).
+    def upload_begin(self, digest, size):
+        return self.request("POST", "uploads", {"sha256": digest, "size": size})
+
+    def upload_status(self, upload_id):
+        return self.request("GET", "uploads/" + upload_id)
+
+    def upload_chunk(self, upload_id, offset, data):
+        return self.request("PUT", f"uploads/{upload_id}?offset={int(offset)}", raw=data)
+
+    def upload_finish(self, upload_id):
+        return self.request("POST", f"uploads/{upload_id}/finish", {})
+
+    def upload_abort(self, upload_id):
+        return self.request("DELETE", "uploads/" + upload_id)
 
     def blob(self, digest, target, check=None):
         """Download blob ``digest`` into ``target`` (atomic; sha256 verified); returns its size."""
@@ -179,10 +207,14 @@ def hub_error(exc):
             return BridgeError("unauthorized", f"The control hub refused this device ({status}): {message}")
         if status == 404:
             return BridgeError("not_found", message)
+        if status == 409 or "already used for a different" in message or "reused" in message:
+            return BridgeError("conflict", message)
+        if status == 413:
+            return BridgeError("invalid_params", f"The control hub refused the size: {message}")
+        if status == 501:
+            return BridgeError("unsupported", message)
         if status in (408, 429) or status >= 500:
             return BridgeError("unavailable", f"The control hub is unavailable ({status}); retry", retryable=True)
-        if "already used for a different" in message or "reused" in message:
-            return BridgeError("conflict", message)
         return BridgeError("remote_error", message)
     if isinstance(exc, (socket.timeout, TimeoutError)):
         return BridgeError("unavailable", "The control hub did not answer in time; retry")

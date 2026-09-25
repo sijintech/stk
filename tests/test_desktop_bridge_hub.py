@@ -2,10 +2,13 @@
 
 The hub (``suan.control.app``) runs under uvicorn on 127.0.0.1; a node loop in the test executes
 queued actions with the real :class:`suan.control.agent.NodeAgent` against the loopback Runtime
-fixture and completes them in the hub store, exactly as a connected agent would.
+fixture and completes them in the hub store, exactly as a connected agent would. This node never
+opens the WebSocket, so its heartbeat leaves out the ``read`` feature and the bridge falls back to
+read actions (``tests/test_hub_desktop*.py`` cover the read path with a connected agent).
 """
 import hashlib
 from pathlib import Path
+import shutil
 import threading
 import time
 
@@ -50,7 +53,9 @@ class Hub:
         def sink(data):
             return self.store.blobs.put(data if isinstance(data, (bytes, bytearray, memoryview))
                                         else Path(data).read_bytes())
-        self.agent = NodeAgent(self.client, tmp_path / "agent", blob_sink=sink)
+        def source(action_id, digest, target, size):
+            shutil.copyfile(self.store.blobs.path(digest), target)
+        self.agent = NodeAgent(self.client, tmp_path / "agent", blob_sink=sink, blob_source=source)
         self.stop = threading.Event()
         self.executed = []
         self.loop = threading.Thread(target=self.run_node, daemon=True)
@@ -65,7 +70,9 @@ class Hub:
             try:
                 self.supervisor.tick()
                 if time.monotonic() - beat > 0.3:
-                    self.store.heartbeat(self.node_id, self.agent.snapshot())
+                    snapshot = self.agent.snapshot()
+                    snapshot["features"] = [f for f in snapshot["features"] if f != "read"]  # not connected
+                    self.store.heartbeat(self.node_id, snapshot)
                     beat = time.monotonic()
                 for action in reversed(self.store.actions(self.node_id, pending=True)):
                     try:
@@ -169,10 +176,20 @@ def test_hub_review_flow(hub, inproc, tmp_path):  # noqa: F811
     done = harness.wait_transfer(transfer["id"])
     assert done["state"] == "completed" and Path(done["local"]).read_text(encoding="utf-8") == "模板结果"
     assert hashlib.sha256(Path(done["local"]).read_bytes()).hexdigest() == artifacts[0]["sha256"]
+    # An upload goes into the hub's blob store, then a reviewed workspace.import (read actions here).
     source = tmp_path / "up.txt"
-    source.write_text("x", encoding="utf-8")
-    error = harness.error("upload.start", {**target, "workspace_id": workspace, "source": str(source)})
-    assert error["code"] == "unsupported"
+    source.write_bytes(b"x")
+    mark = harness.mark()
+    upload = harness.call("upload.start", {**target, "workspace_id": workspace, "source": str(source)})["transfer"]
+    waiting = harness.wait_event(lambda e: e["event"] == "transfer.updated" and e["data"]["transfer"]["id"] ==
+                                 upload["id"] and e["data"]["transfer"].get("action", {}).get("state") == "review",
+                                 start=mark)["data"]["transfer"]
+    assert waiting["state"] == "running" and waiting["action"]["kind"] == "workspace.import"
+    harness.call("hub.action", {"connection": hub_id, "action_id": waiting["action"]["id"]})
+    harness.call("hub.review", {"connection": hub_id, "action_id": waiting["action"]["id"], "approved": True})
+    assert harness.wait_transfer(upload["id"], start=mark)["state"] == "completed"
+    files = harness.call("workspace.files", {**target, "workspace_id": workspace})["files"]
+    assert [(f["path"], f["sha256"]) for f in files] == [("up.txt", hashlib.sha256(b"x").hexdigest())]
     # Hub events stream into the app.
     events = harness.call("hub.subscribe", {"connection": hub_id})["sub"]
     harness.wait_event(lambda e: e["event"] == "hub.event" and e["data"]["sub"] == events)

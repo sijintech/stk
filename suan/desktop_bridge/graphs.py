@@ -145,14 +145,39 @@ class GraphService:
         with self.lock:
             self.running.pop(eval_id, None)
 
-    def cancel(self, eval_id):
+    def cancel(self, eval_id, connection=None, node=None):
+        """Cancel an evaluation: a local one in this process, a hub one on its node.
+
+        A hub evaluation this bridge is waiting for stops waiting at once; the hub then fails it if
+        it is still in review, or the node cancels it (running, or pending in its graph lane). With
+        ``connection`` and ``node``, an evaluation this bridge is not waiting for (e.g. started
+        before a restart) is cancelled on the hub by its ``eval_id``.
+        """
         with self.lock:
             entry = self.running.get(eval_id)
-        if entry is None:
+        hub = None
+        if entry is not None:
+            entry["cancelled"].set()
+            entry["token"].cancel("Cancelled by the desktop app")
+            hub = entry.get("hub")
+            if hub is None:
+                return {"cancelled": True}
+        elif connection and node:
+            backend = self.connections.backend(connection, node)
+            if not isinstance(backend, HubBackend):
+                raise BridgeError("invalid_params", "graph.cancel by 'connection' needs a hub connection and 'node'")
+            hub = (backend, action_id("graph.evaluate", backend.node_id, eval_id))
+        if hub is None:
             return {"cancelled": False}
-        entry["cancelled"].set()
-        entry["token"].cancel("Cancelled by the desktop app")
-        return {"cancelled": True}
+        backend, target = hub
+        try:
+            record = backend.cancel_evaluation(target)
+        except BridgeError as exc:
+            out = {"cancelled": False, "error": exc.to_json()}
+            if isinstance(exc.data, dict) and "action" in exc.data:
+                out["action"] = exc.data["action"]
+            return out
+        return {"cancelled": bool((record.get("result") or {}).get("cancelled")), "action": summary(record)}
 
     def cancel_all(self):
         with self.lock:
@@ -210,6 +235,7 @@ class GraphService:
         if not isinstance(backend, HubBackend):
             raise BridgeError("invalid_params", "Hub evaluation needs a hub connection and 'node'")
         identity = action_id("graph.evaluate", backend.node_id, params["eval_id"])
+        entry["hub"] = (backend, identity)
         record = backend.run_action("graph.evaluate", params["request"], identity,
                                     wait=float(params.get("wait", 600)), cancel=entry["cancelled"].is_set)
         out = {"action": summary(record), "result": None, "blob_dir": str(self.blobs.root)}

@@ -67,7 +67,7 @@ class ConnectionStore:
         for name, config in sorted(self._hubs().items()):
             if isinstance(config, dict) and isinstance(config.get("url"), str):
                 connections.append({"id": "hub:" + name, "kind": "hub", "name": name, "url": config["url"],
-                                    "device_id": config.get("device_id")})
+                                    "device_id": config.get("device_id"), "profile": config.get("profile") or ""})
         return connections
 
     def describe(self, connection_id):
@@ -132,7 +132,8 @@ class ConnectionStore:
                               "'client')")
         with self.lock:
             hubs = self._hubs()
-            hubs[name] = {"url": hub.url, "token": claimed["token"], "device_id": claimed["device_id"]}
+            hubs[name] = {"url": hub.url, "token": claimed["token"], "device_id": claimed["device_id"],
+                          "profile": claimed.get("profile") or ""}
             atomic_json(self.hubs_path, hubs)
         return self.describe("hub:" + name)
 

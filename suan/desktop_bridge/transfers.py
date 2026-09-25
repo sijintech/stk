@@ -7,6 +7,13 @@ during the work, so a bridge that crashed or was closed resumes where it stopped
   offset the Runtime already holds; ``PUT`` appends 1 MiB chunks; ``finish`` verifies size and
   sha256). The journal keeps each file's size, mtime and sha256, so a resumed upload re-hashes
   only files that changed; a changed file starts a new upload revision.
+* **Uploads through a hub** send each file into the hub's blob store with the same kind of
+  resumable session (``suan.control.uploads``), then create one ``workspace.import`` action (id
+  derived from the transfer id and ``import_attempt``, so a resumed transfer re-reads the same
+  action). Imports are always reviewed: the transfer stays ``running`` with ``action.state:
+  "review"`` until the owner decides, without holding a transfer slot. A rejected or failed import
+  fails the transfer; ``transfer.resume`` then asks again with a new action. ``transfer.cancel``
+  rejects an import still in review.
 * **Downloads** append to ``<dest>.part`` next to the destination (its expected ``{path, size,
   sha256}`` in ``<dest>.part.json``), resume from the part's size, and move the file into place
   only after its sha256 matched the Runtime's listing (``checksum_mismatch`` otherwise; the part
@@ -27,6 +34,7 @@ import uuid
 from suan.runtime.common import atomic_json, instance_lock, now, read_json
 from suan.runtime.models import relative_path
 
+from .backends import action_failure, action_id, summary
 from .protocol import BridgeError
 
 __all__ = ["TransferManager"]
@@ -38,6 +46,8 @@ MAX_FILES = 100_000
 MAX_CONCURRENT = 4
 PROGRESS_INTERVAL = 0.25
 KEEP_FINISHED_SECONDS = 7 * 24 * 3600
+IMPORT_MAX_FILES = 10_000  # suan.control.policy.IMPORT_MAX_FILES
+REVIEW_POLL = 2.0
 
 
 def _sha256(path, check=None):
@@ -66,6 +76,7 @@ class TransferManager:
         self.notified = {}
         self.stopping = threading.Event()
         self.slots = threading.BoundedSemaphore(MAX_CONCURRENT)
+        self.releasers = {}
         self._recover()
 
     # -- journal --------------------------------------------------------------------------------
@@ -105,7 +116,7 @@ class TransferManager:
     def public(self, record):
         """The transfer as the app sees it (spec ``Transfer``)."""
         keys = ("id", "kind", "state", "connection", "node", "workspace_id", "task_id", "local", "remote",
-                "bytes_done", "bytes_total", "files_done", "files_total", "current", "sha256", "error",
+                "bytes_done", "bytes_total", "files_done", "files_total", "current", "sha256", "error", "action",
                 "created_at", "updated_at")
         return {key: record[key] for key in keys if record.get(key) is not None}
 
@@ -157,10 +168,9 @@ class TransferManager:
                 raise BridgeError("invalid_params", "The folder holds no regular files")
         else:
             raise BridgeError("invalid_params", "Upload a regular file or a folder")
-        # Fail before starting when the connection is unknown or cannot upload (hub connections).
-        if self.backend_for(connection, node).kind != "runtime":
-            raise BridgeError("unsupported", "Uploads through the control hub are not available yet; connect to "
-                              "the Runtime directly (SSH tunnel)")
+        # Fail before starting when the connection is unknown (or a hub connection has no node).
+        if self.backend_for(connection, node).kind == "hub" and len(items) > IMPORT_MAX_FILES:
+            raise BridgeError("invalid_params", f"An upload through a hub is limited to {IMPORT_MAX_FILES} files")
         record = self._new("upload", connection=connection, node=node, workspace_id=workspace_id,
                            local=str(source), remote=remote or source.name, items=items)
         self._launch(record["id"])
@@ -228,6 +238,13 @@ class TransferManager:
         return self.public(self.load(transfer_id))
 
     def _finish_cancel(self, record):
+        action = record.get("action") or {}
+        if record["kind"] == "upload" and action.get("state") == "review":
+            try:  # a cancelled upload must not be imported later by an approval
+                backend = self.backend_for(record["connection"], record.get("node"))
+                record["action"] = summary(backend.reject(action["id"]))
+            except BridgeError:
+                pass
         if record["kind"] == "upload":
             # A pending upload session blocks task submission in that workspace: abort it.
             for item in record["items"]:
@@ -282,6 +299,15 @@ class TransferManager:
                 self._finish_cancel(self.load(transfer_id))
                 return
             acquired = self.slots.acquire(timeout=0.2)
+        released = threading.Event()
+
+        def release():
+            # Once per run: a hub import waiting for review gives its slot back early.
+            if not released.is_set():
+                released.set()
+                self.slots.release()
+        with self.lock:
+            self.releasers[transfer_id] = release
         try:
             guard = instance_lock(self.root / (transfer_id + ".lock"))
             try:
@@ -296,7 +322,9 @@ class TransferManager:
             finally:
                 guard.__exit__(None, None, None)
         finally:
-            self.slots.release()
+            with self.lock:
+                self.releasers.pop(transfer_id, None)
+            release()
 
     def _run_locked(self, transfer_id):
         record = self.load(transfer_id)
@@ -372,7 +400,7 @@ class TransferManager:
                 try:
                     backend.upload_finish(workspace, meta["id"])
                 except BridgeError as exc:
-                    if "checksum" not in exc.message:
+                    if "checksum" not in exc.message and "sha256" not in exc.message:  # Runtime / hub wording
                         raise
                     # Discard the Runtime's copy and re-hash the source, so a retry starts clean.
                     try:
@@ -381,7 +409,7 @@ class TransferManager:
                         pass
                     item.update(sha256=None, upload_id=None)
                     self.save(record)
-                    raise BridgeError("checksum_mismatch", f"The Runtime's copy of {item['remote']} does not "
+                    raise BridgeError("checksum_mismatch", f"The {backend.kind} copy of {item['remote']} does not "
                                       "match its sha256; the file changed while uploading. Retry the upload"
                                       ) from None
             item["done"] = True
@@ -391,6 +419,41 @@ class TransferManager:
             record["bytes_done"] = done_bytes
             self.save(record)
             self._notify(record)
+        if backend.kind == "hub":
+            self._import(record, backend)
+
+    def _import(self, record, backend):
+        """Every file is in the hub's blob store: import them into the workspace (reviewed) and wait."""
+        transfer_id = record["id"]
+        with self.lock:
+            release = self.releasers.get(transfer_id)
+        if release is not None:
+            release()  # no local bytes move from here on; waiting for review must not block other transfers
+        attempt = int(record.get("import_attempt", 0))
+        identity = action_id("workspace.import", backend.node_id, transfer_id, attempt)
+        files = [{"path": item["remote"], "sha256": item["sha256"], "size": item["size"]} for item in record["items"]]
+        record["current"] = None
+        self._check(transfer_id)
+        action = backend.post_import(record["workspace_id"], files, identity)
+        delay = 0.25
+        while True:
+            view = summary(action)
+            if view != record.get("action"):
+                record["action"] = view
+                self.save(record)
+                self._notify(record, force=True)
+            if action["state"] == "succeeded":
+                return
+            if action["state"] in ("failed", "rejected"):
+                record["import_attempt"] = attempt + 1  # a resume asks again with a new action
+                raise action_failure(action, "The import was rejected in review")
+            wait = REVIEW_POLL if action["state"] == "review" else delay
+            delay = min(1.0, delay * 1.5)
+            deadline = time.monotonic() + wait
+            while time.monotonic() < deadline:
+                self._check(transfer_id)
+                time.sleep(0.05)
+            action = backend.action_record(identity)
 
     def _download(self, record, backend):
         transfer_id = record["id"]

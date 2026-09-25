@@ -5,7 +5,8 @@ private duplicate of file descriptor 1, and descriptor 1 itself (plus ``sys.stdo
 is pointed at stderr, so stray ``print`` calls, library output and child processes can never
 corrupt the NDJSON stream. Likewise requests are read from a private duplicate of descriptor 0,
 which is pointed at the null device, so child processes never see the protocol input. The process
-exits when stdin reaches EOF (or on ``shutdown``).
+exits when stdin reaches EOF (or on ``shutdown``). When another bridge holds the state directory,
+every request is answered with ``busy`` and the process exits with status 3 at EOF.
 """
 import argparse
 import logging
@@ -57,13 +58,13 @@ def _protocol_stdin():
     return os.fdopen(fd, "rb")
 
 
-def _exit():
+def _exit(code=0):
     for stream in (sys.stderr, sys.__stderr__):
         try:
             stream.flush()
         except (OSError, ValueError, AttributeError):
             pass
-    os._exit(0)
+    os._exit(code)
 
 
 def main(argv=None):
@@ -80,9 +81,15 @@ def main(argv=None):
     reader = _protocol_stdin()
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING,
                         format="stk-desktop-bridge %(levelname)s %(name)s: %(message)s")
-    from .server import Bridge
-    bridge = Bridge(args.state_dir, args.cache_dir, writer=writer, strict=args.strict,
-                    on_exit=_exit)
+    from .protocol import BridgeError
+    from .server import Bridge, refuse
+    try:
+        bridge = Bridge(args.state_dir, args.cache_dir, writer=writer, strict=args.strict,
+                        on_exit=_exit)
+    except BridgeError as exc:  # "busy": another bridge owns this state directory
+        print(f"stk-desktop-bridge: {exc.message}", file=sys.stderr)
+        refuse(reader, writer, exc)
+        _exit(3)
     try:
         bridge.serve(reader)
     except KeyboardInterrupt:

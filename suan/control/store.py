@@ -17,6 +17,7 @@ import uuid
 from .blobs import BlobStore
 
 RESULT_INLINE_LIMIT = 64 * 1024
+PROFILES = ("", "desktop")
 ACTION_COLUMNS = ("id", "request", "node_id", "state", "result", "error", "created", "updated", "review_reason",
                   "result_ref")
 # Everything a listing needs; results are loaded one action at a time.
@@ -66,6 +67,10 @@ class ControlStore:
             # Additive migration of databases created before result offloading.
             if "result_ref" not in {row["name"] for row in db.execute("PRAGMA table_info(actions)")}:
                 db.execute("ALTER TABLE actions ADD COLUMN result_ref TEXT")
+            # Additive migration: the owner-granted client profile ("desktop": see policy.py).
+            for table in ("devices", "pairings"):
+                if "profile" not in {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN profile TEXT NOT NULL DEFAULT ''")
             db.execute("CREATE INDEX IF NOT EXISTS actions_node_state ON actions(node_id, state, created)")
             db.execute("CREATE INDEX IF NOT EXISTS actions_state ON actions(state, created)")
             db.execute("CREATE INDEX IF NOT EXISTS actions_created ON actions(created)")
@@ -85,13 +90,17 @@ class ControlStore:
     def event(db, kind, payload):
         db.execute("INSERT INTO events(kind,payload,created) VALUES(?,?,?)", (kind, encode(payload), time.time()))
 
-    def pairing(self, role):
+    def pairing(self, role, profile=""):
+        """A one-time pairing code; ``profile`` ("desktop", clients only) is granted by the owner here."""
+        if profile not in PROFILES or (profile and role != "client"):
+            raise ValueError("Profile must be empty or 'desktop' (client pairings only)")
         code = secrets.token_urlsafe(24)
         expires = time.time() + 300
         with self.db() as db:
             db.execute("DELETE FROM pairings WHERE expires < ?", (time.time(),))
-            db.execute("INSERT INTO pairings VALUES(?,?,?)", (digest(code), role, expires))
-        return {"code": code, "expires_at": expires, "role": role}
+            db.execute("INSERT INTO pairings(code_hash,role,expires,profile) VALUES(?,?,?,?)",
+                       (digest(code), role, expires, profile))
+        return {"code": code, "expires_at": expires, "role": role, **({"profile": profile} if profile else {})}
 
     def claim(self, code, name):
         token, identity = secrets.token_urlsafe(32), uuid.uuid4().hex
@@ -101,20 +110,33 @@ class ControlStore:
             if pair is None or pair["expires"] < time.time():
                 raise ValueError("Pairing code expired or already used")
             db.execute("DELETE FROM pairings WHERE code_hash=?", (digest(code),))
-            db.execute("INSERT INTO devices VALUES(?,?,?,?,0,NULL,'{}')", (identity, name, pair["role"], digest(token)))
+            db.execute("INSERT INTO devices(id,name,role,token_hash,revoked,last_seen,snapshot,profile) "
+                       "VALUES(?,?,?,?,0,NULL,'{}',?)", (identity, name, pair["role"], digest(token), pair["profile"]))
             self.event(db, "devices.changed", {"device_id": identity})
-        return {"device_id": identity, "token": token, "role": pair["role"]}
+        return {"device_id": identity, "token": token, "role": pair["role"], "profile": pair["profile"]}
 
     def authenticate(self, token):
         with self.db() as db:
-            row = db.execute("SELECT id,role FROM devices WHERE token_hash=? AND revoked=0", (digest(token),)).fetchone()
+            row = db.execute("SELECT id,role,profile FROM devices WHERE token_hash=? AND revoked=0",
+                             (digest(token),)).fetchone()
         return dict(row) if row else None
+
+    @staticmethod
+    def _device(r):
+        return {**dict(r), "snapshot": json.loads(r["snapshot"]),
+                "online": not r["revoked"] and r["last_seen"] is not None and time.time()-r["last_seen"] < 20}
 
     def devices(self):
         with self.db() as db:
-            rows = db.execute("SELECT id,name,role,revoked,last_seen,snapshot FROM devices").fetchall()
-        return [{**dict(r), "snapshot": json.loads(r["snapshot"]),
-                 "online": not r["revoked"] and r["last_seen"] is not None and time.time()-r["last_seen"] < 20} for r in rows]
+            rows = db.execute("SELECT id,name,role,profile,revoked,last_seen,snapshot FROM devices").fetchall()
+        return [self._device(r) for r in rows]
+
+    def device(self, identity):
+        """One device (``None`` when unknown)."""
+        with self.db() as db:
+            row = db.execute("SELECT id,name,role,profile,revoked,last_seen,snapshot FROM devices WHERE id=?",
+                             (identity,)).fetchone()
+        return self._device(row) if row else None
 
     def revoke(self, identity):
         with self.db() as db:
@@ -142,6 +164,42 @@ class ControlStore:
                            "VALUES(?,?,?,?,NULL,'',?,?,?)", (
                                identity, body, request["node_id"], "review" if review_reason else "queued",
                                time.time(), time.time(), review_reason))
+                self.event(db, "actions.changed", {"action_id": identity})
+        return self.action(identity)
+
+    def create_cancel(self, request):
+        """Create a ``graph.cancel`` action for ``request["payload"]["action_id"]`` in one transaction.
+
+        A target still in review is failed here (it never reaches the node) and the cancel action is
+        created ``succeeded``; a finished target leaves the cancel ``succeeded`` with
+        ``cancelled: false``; a queued target (possibly running) gets a queued cancel the node runs.
+        Raises ``ValueError`` for an unknown target, another node's action or a non-graph action.
+        """
+        identity, target_id = request["id"], request["payload"]["action_id"]
+        body = encode(request)
+        now = time.time()
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute("SELECT request FROM actions WHERE id=?", (identity,)).fetchone()
+            if old and old[0] != body:
+                raise ValueError("Action ID already used for a different request")
+            if not old:
+                target = db.execute("SELECT request,node_id,state FROM actions WHERE id=?", (target_id,)).fetchone()
+                if (target is None or target["node_id"] != request["node_id"]
+                        or json.loads(target["request"]).get("kind") != "graph.evaluate"):
+                    raise ValueError("graph.cancel needs a graph.evaluate action of the same node")
+                state, result = "succeeded", {"cancelled": False, "state": target["state"]}
+                if target["state"] == "review":
+                    db.execute("UPDATE actions SET state='failed',error=?,updated=? WHERE id=? AND state='review'",
+                               ("cancelled: Cancelled by a client before review", now, target_id))
+                    self.event(db, "actions.changed", {"action_id": target_id})
+                    result = {"cancelled": True, "state": "failed"}
+                elif target["state"] == "queued":
+                    state, result = "queued", None
+                db.execute("INSERT INTO actions(id,request,node_id,state,result,error,created,updated,review_reason) "
+                           "VALUES(?,?,?,?,?,'',?,?,'')", (identity, body, request["node_id"], state,
+                                                           None if result is None else encode_result(result), now,
+                                                           now))
                 self.event(db, "actions.changed", {"action_id": identity})
         return self.action(identity)
 

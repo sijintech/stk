@@ -10,6 +10,7 @@ import click
 from suan.runtime.common import UnsupportedServerPlatform, atomic_json, load_config, require_linux_server
 from suan.runtime.client import RuntimeClient
 from .agent import NodeAgent, endpoint
+from .policy import DESKTOP_AUTO_BYTES
 from .store import ControlStore
 from .templates import BUILTIN_TEMPLATES, load_templates
 
@@ -62,9 +63,13 @@ def init(state_dir):
 @click.option("--template-file", "files", multiple=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help="JSON object mapping template IDs to exact commands (repeatable).")
 @click.option("--blob-max-mib", default=512, show_default=True, type=click.IntRange(1, 65536),
-              help="Largest blob a node may upload (graph payload buffers, images, plots). A reverse proxy in "
-                   "front of the hub needs a request body limit at least this large for /api/v1/blobs/.")
-def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blob_max_mib):
+              help="Largest blob a node or client may upload (graph payload buffers, images, plots, client "
+                   "files for workspace.import). A reverse proxy in front of the hub needs a request body limit "
+                   "at least this large for /api/v1/blobs/ and at least 8 MiB for /api/v1/uploads/.")
+@click.option("--desktop-auto-mib", type=click.IntRange(0, 65536), default=None,
+              help="Expected-transfer cap under which desktop-profile clients run graph evaluations without "
+                   "review (default: \"desktop_auto_mib\" in control.json, else 256; 0 turns it off).")
+def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blob_max_mib, desktop_auto_mib):
     linux_server()
     import uvicorn
     from .app import create_app
@@ -74,21 +79,31 @@ def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blo
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     config = json.loads((state_dir / "control.json").read_text(encoding="utf-8"))
+    if desktop_auto_mib is None:
+        desktop_auto_mib = config.get("desktop_auto_mib", DESKTOP_AUTO_BYTES // (1024 * 1024))
+        if isinstance(desktop_auto_mib, bool) or not isinstance(desktop_auto_mib, int) or not \
+                0 <= desktop_auto_mib <= 65536:
+            raise click.ClickException("control.json desktop_auto_mib must be an integer from 0 to 65536")
     model = None
     if os.environ.get("STK_MODEL_URL") and os.environ.get("STK_MODEL_NAME"):
         model = ChatModel(os.environ["STK_MODEL_URL"], os.environ.get("STK_MODEL_KEY", ""), os.environ["STK_MODEL_NAME"])
     app = create_app(state_dir, config["owner_token"], templates, model, web_dir,
-                     blob_max_bytes=blob_max_mib * 1024 * 1024)
+                     blob_max_bytes=blob_max_mib * 1024 * 1024, desktop_auto_bytes=desktop_auto_mib * 1024 * 1024)
     uvicorn.run(app, host=host, port=port, ws_max_size=16*1024*1024, access_log=False)
 
 
 @control.command()
 @click.option("--state-dir", type=click.Path(path_type=Path, exists=True), required=True)
 @click.option("--role", type=click.Choice(["node", "client"]), default="client")
-def pair(state_dir, role):
+@click.option("--profile", type=click.Choice(["desktop"]), default=None,
+              help="Grant the client the desktop profile: graph evaluations within the desktop cap run "
+                   "without review (writes and new commands are still reviewed).")
+def pair(state_dir, role, profile):
     """Issue a one-time pairing code; expires in five minutes."""
     linux_server()
-    click.echo(json.dumps(ControlStore(state_dir).pairing(role)))
+    if profile and role != "client":
+        raise click.ClickException("--profile desktop is for client pairings")
+    click.echo(json.dumps(ControlStore(state_dir).pairing(role, profile or "")))
 
 
 @click.group()

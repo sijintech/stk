@@ -5,7 +5,8 @@
 > 程序只见不透明的连接 ID；大数据经内容寻址缓存 `<cache>/blobs/<aa>/<sha256>` 由程序内存映射。上传下载可续传、有日志、下载经
 > sha256 校验；提交任务带幂等键；日志按字节偏移增量推送且跨块多字节字符安全；关闭程序不会停止任务。
 
-Status: **frozen for Milestone D1** (WP7). Schema: `suan/contracts/schemas/desktop-bridge-1.schema.json`
+Status: **frozen for Milestone D1** (WP7), with the additive hub-mode changes of WP11 (§7.1, §9,
+§10, §1 state-directory lock; still `protocol: 1`). Schema: `suan/contracts/schemas/desktop-bridge-1.schema.json`
 (`suan.contracts.load_schema("desktop-bridge-1")`). Implementation: `suan/desktop_bridge/` (standard
 library plus the STK core it drives). Conformance tests: `tests/test_desktop_bridge*.py`. The C++
 client is `desktop/engine/lib/stk_bridge` (WP8), written against this document and the schema.
@@ -26,6 +27,13 @@ The bridge replaces the file-queue bridge of the Blender workbench (`suan/blende
     schema and turns a violating response into `internal_error` (tests and CI run this way).
   - Also read: `STK_PROFILES_FILE` (Runtime profiles, shared with `suan connect`; default
     `~/.stk/connections.json`) and `STK_STATE_DIR` (the local Runtime; default `~/.stk/runtime`).
+- **One bridge per state directory.** At start the bridge takes an exclusive, non-blocking OS lock on
+  `<state-dir>/bridge.lock` (`fcntl.flock` on POSIX, `msvcrt.locking` on Windows), before it reads
+  or rewrites any journal. The OS releases it when the process exits or crashes. A second bridge on
+  the same state directory does not start: it answers **every** request with error `busy`
+  (`data.state_dir`; the message names the directory), writes the reason to stderr, and exits with
+  status **3** at stdin EOF. The app shows the message and either closes the other bridge or uses
+  another `--state-dir`. (In-process, `Bridge(...)` raises `BridgeError("busy")`.)
 - **Lifetime.** The bridge exits when stdin reaches EOF or after answering `shutdown`: it stops
   subscriptions, cancels local graph evaluations, pauses transfers at the next chunk boundary
   (their journals stay resumable) and waits up to 5 s for in-flight requests. **Runtime tasks and
@@ -85,7 +93,7 @@ request (same idempotency key) may succeed.
 | `invalid_request` | no | The envelope is malformed |
 | `unknown_method` | no | `data.methods` lists the known methods |
 | `invalid_params` | no | Params fail the schema or a semantic check; `data.errors: [{path, message}]` (JSON pointers) |
-| `unsupported` | no | The protocol version or the connection cannot do this (e.g. uploads through a hub) |
+| `unsupported` | no | The protocol version or the connection cannot do this (e.g. a hub read path the node lacks) |
 | `not_found` | no | Unknown connection, workspace, task, artifact, transfer, subscription or preset |
 | `unauthorized` | no | The Runtime or hub refused the stored credential (re-add or re-pair) |
 | `unavailable` | yes | The Runtime or hub cannot be reached (tunnel down, service stopped) |
@@ -96,7 +104,7 @@ request (same idempotency key) may succeed.
 | `graph_error` | no | Graph validation or evaluation failed: `data.graph_code` (stk-graph-v1 codes), `issues`, `node`, `errors` |
 | `cancelled` | no | The operation was cancelled |
 | `timeout` | yes | A hub action has not finished within the wait; repeat the request to keep waiting |
-| `busy` | yes | Too many requests in flight |
+| `busy` | yes | Too many requests in flight, or another bridge holds the state directory (§1) |
 | `result_too_large` | no | The response would exceed `max_line_bytes` |
 | `shutting_down` | no | The bridge is exiting |
 | `internal_error` | no | A bridge bug (details on stderr) |
@@ -132,11 +140,11 @@ Connection ids are opaque to the app; the bridge resolves them:
 
 | Method | Params | Result |
 |---|---|---|
-| `connections.list` | – | `{connections: [{id, kind: local\|runtime\|hub, name, url, device_id?}]}` |
+| `connections.list` | – | `{connections: [{id, kind: local\|runtime\|hub, name, url, device_id?, profile?}]}` (`profile: "desktop"` for a hub device paired with a desktop code) |
 | `connections.add_runtime` | `name, url, token \| token_file, check?=true` | `{connection}` (health-checked unless `check: false`) |
 | `connections.remove` | `id` | `{removed}` (forgets the profile; never revokes on the hub) |
 | `connections.check` | `id` | `{id, ok, health?, nodes?, error?}`: `ok: false` with `error` when unreachable or refused |
-| `connections.pair_hub` | `name, url, code, device_name?` | `{connection}`; only client pairing codes are accepted |
+| `connections.pair_hub` | `name, url, code, device_name?` | `{connection}`; only client pairing codes are accepted. A code the owner issued with `suan-control pair --role client --profile desktop` pairs a **desktop device** (§7.1) |
 | `connections.local` | – | `{initialized, api_running, supervisor_running, url, state_dir, error?}` |
 | `connections.local_start` | – | as `connections.local`, after starting the API and supervisor (Linux) |
 
@@ -146,7 +154,7 @@ Connection ids are opaque to the app; the bridge resolves them:
 |---|---|---|
 | `workspace.list` | `connection, node?` | `{workspaces: [{id, name, created_at}]}` |
 | `workspace.create` | `connection, node?, name, idempotency_key?` | `{workspace?, action?}` |
-| `workspace.files` | `connection, workspace_id` | `{files: [{path, size, sha256, media_type}]}` (Runtime connections) |
+| `workspace.files` | `connection, node?, workspace_id` | `{files: [{path, size, sha256, media_type?}]}` |
 | `task.submit` | `connection, node?, idempotency_key, spec \| (template, workspace_id)` | `{task?, action?}` |
 | `task.list` | `connection, node?, workspace_id?` | `{tasks}` newest first |
 | `task.get` | `connection, node?, task_id` | `{task}` (with `monitor` once events exist) |
@@ -157,6 +165,7 @@ Connection ids are opaque to the app; the bridge resolves them:
 | `hub.actions` | `connection` | `{actions}`: recent actions plus every action in review |
 | `hub.action` | `connection, action_id` | `{action}` with full `request` and `result`; marks it *inspected* |
 | `hub.review` | `connection, action_id, approved` | `{action}` |
+| `hub.policy` | `connection` | `{policy: {device_profile, desktop_auto, desktop_auto_bytes, graph_auto_seconds, upload_max_bytes, upload_chunk_bytes, import_max_files, read_kinds}}` (WP11) |
 
 - `spec` is a Runtime `TaskSpec` (`workspace_id, argv, backend?, name?, inputs?, outputs?, env?,
   resources?` including MPI `ranks`/`threads_per_rank`; see docs/runtime.md). It is validated before
@@ -176,8 +185,53 @@ Connection ids are opaque to the app; the bridge resolves them:
   bridge read that action with `hub.action` first (the app shows the full request before the user
   approves). Rejections need no inspection.
 - Through a hub, `workspace.list`, `task.list` and `task.get` read the node's latest heartbeat
-  snapshot (tasks without their spec); `task.artifacts`, logs, events and downloads are hub actions
-  (never reviewed); uploads and `workspace.files` are `unsupported` until the hub upload path (WP11).
+  snapshot (tasks without their spec); `task.artifacts`, `workspace.files`, logs, events and
+  download chunks use the hub's read path (§7.2), never reviewed; uploads go through the hub's blob
+  store and a reviewed `workspace.import` (§9).
+
+### 7.1 Desktop devices and automatic execution (WP11)
+
+A hub client device paired with a **desktop** code (the owner grants it; a device cannot claim it)
+runs graph evaluations and read-only data actions on a node without per-action review, as long as
+the **expected transfer** stays under the hub's cap: `budget.max_output_bytes` of the request, or
+when unset the result profile's default delivery limit (phone 32 MiB, web 128 MiB, desktop 2 GiB;
+the node enforces it). The cap defaults to **256 MiB**; it is a default the hub owner changes
+(`suan-control serve --desktop-auto-mib N`, or `"desktop_auto_mib"` in the hub's `control.json`;
+0 turns desktop auto-run off). `hub.policy` reports it, so the app sets `budget.max_output_bytes`
+accordingly for `profile: "desktop"` requests.
+
+| Request | Other clients, owner token | Desktop device |
+|---|---|---|
+| `graph.evaluate` phone/web within the ordinary budget | runs | runs (expected transfer ≤ cap) |
+| `graph.evaluate` with result profile `desktop` or desktop payloads (desktop payload counts, `bytes` ≤ cap) | review | runs when expected transfer ≤ cap |
+| expected transfer > cap (including `desktop` without `max_output_bytes`) | review | review |
+| `max_seconds` > 300, image pixels over budget, node types the hub lacks | review | review |
+| logs, events, artifacts, file chunks, `workspace.files`, `view.build`, `view.probe`, `graph.meta`, `graph.cancel` | runs | runs |
+| `workspace.create`, `task.cancel`, exact template `task.submit` | runs | runs (unchanged) |
+| any other `task.submit`, and `workspace.import` (writes) | review | review |
+
+A revoked device is refused everywhere (the hub answers 401, the bridge `unauthorized`).
+
+### 7.2 The hub read path (WP11)
+
+Polled reads (logs, events, artifact lists, workspace input lists, download chunks) through a hub
+use `POST /api/v1/nodes/<node>/read {kind, payload}`: the hub forwards the read over the node's open
+WebSocket (`{"type": "read"}`), the node agent answers on a separate read lane (`read_result`), and
+the hub returns the result. **No action row and no `actions.changed` event is created.**
+
+Why this and not one long-lived action with a cursor or a stream: reads are idempotent and small (at
+most 1 MiB of data per request), so they need neither durability nor review, while every action row
+is kept forever (M1 has no retention), wakes every hub subscriber through `actions.changed`, and
+competes with reviews in the 200-row listing. A per-subscription cursor action would still need a
+hub-side stream protocol, state that survives reconnects, and cleanup of abandoned cursors; a
+request/response over the connection the node already keeps open needs none of that. Reads fail
+fast when the node is offline (`unavailable`, retryable) instead of queuing, so an outage does not
+leave a backlog of stale polls to run later.
+
+Compatibility: a node agent without the read path (no `read` in its snapshot features) makes the hub
+answer 501, and a hub without the route answers 404/405; the bridge then uses a read action as
+before (one row per call) and tries the read path again a minute later. A node's own error (unknown
+task, missing file) is `remote_error` with the node's message.
 
 ## 8. Subscriptions
 
@@ -208,7 +262,7 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 
 | Method | Params | Result |
 |---|---|---|
-| `upload.start` | `connection, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name) | `{transfer}` |
+| `upload.start` | `connection, node?, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name) | `{transfer}` |
 | `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`) | `{transfer}` |
 | `transfer.list` / `transfer.get {id}` | – / `id` | `{transfers}` / `{transfer}` |
 | `transfer.resume` | `id` | `{transfer}` (continues an `interrupted` or `failed` transfer) |
@@ -216,7 +270,8 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 
 `transfer = {id, kind: upload|download, state: queued|running|interrupted|completed|failed|cancelled,
 connection, node?, workspace_id?, task_id?, local, remote, bytes_done, bytes_total, files_done,
-files_total, current?, sha256?, error?, created_at, updated_at}`. `transfer.updated {transfer}` is sent
+files_total, current?, sha256?, error?, action?, created_at, updated_at}` (`action`: the hub
+`workspace.import` of an upload through a hub). `transfer.updated {transfer}` is sent
 on every state change and at most every 250 ms while bytes move.
 
 - **Journal.** `<state-dir>/transfers/<id>.json` is written atomically before and during the work. A
@@ -229,6 +284,26 @@ on every state change and at most every 250 ms while bytes move.
   sends every regular file below it (symbolic links are never followed) under `remote/…`. A file
   that changed since it was hashed is re-hashed and starts a new revision. `transfer.cancel` aborts
   the Runtime's session (pending sessions block submissions in that workspace).
+- **Uploads through a hub** (`connection` a hub, `node` the execution node; WP11) keep the same
+  journal semantics in two stages:
+  1. Each file goes into the hub's content-addressed blob store through a resumable session
+     (`POST /api/v1/uploads` returns the bytes the hub holds, 1 MiB chunks are appended from there,
+     `finish` checks size and sha256; the session belongs to this device). A file the hub already
+     holds moves no bytes. Sizes are limited by the hub's blob cap (`hub.policy.upload_max_bytes`);
+     a folder through a hub holds at most 10 000 files.
+  2. One `workspace.import` action (id `sha256("workspace.import\0<node>\0<transfer id>\0<attempt>")[:32]`)
+     asks the node to copy the blobs into the workspace. The node re-verifies every sha256 and the
+     paths (§7.1 confinement rules: normalized relative paths, no `..`, absolute paths, drive letters,
+     backslashes or control characters), and the Runtime checks again. **Imports always need
+     review** (they write, and may replace inputs of the same name): the transfer stays `running`
+     with `bytes_done == bytes_total` and `action.state: "review"` until the owner decides, and does
+     not hold one of the 4 transfer slots meanwhile. After approval it completes when the node
+     reports success.
+  A bridge restart during either stage resumes it (`interrupted`, then `transfer.resume` or
+  `hello`): stage 1 continues from the hub's offsets, stage 2 re-reads the same action. A rejected or
+  failed import fails the transfer (`remote_error`, `data.action`); `transfer.resume` then asks again
+  with a new action. `transfer.cancel` aborts unfinished hub sessions and rejects an import still in
+  review.
 - **Downloads** append to `<dest>.part` (expected `{path, size, sha256}` in `<dest>.part.json`) from
   its current size and move the file into place only after its sha256 matched the listing; a
   mismatch discards the part and fails with `checksum_mismatch` (retryable). A destination that
@@ -246,7 +321,7 @@ on every state change and at most every 250 ms while bytes move.
 | `graph.presets` | – | `{presets: [{id, name, description, graph, bindings, parameters}]}` |
 | `graph.validate` | `graph, parameters?` | `{ok, issues: [{code, message, path, node, hint, severity}]}` |
 | `graph.evaluate` | `eval_id, request, mode?=local \| hub, local_bindings?, connection?, node?, wait?` | `{result, blob_dir, action?}` |
-| `graph.cancel` | `eval_id` | `{cancelled}` |
+| `graph.cancel` | `eval_id, connection?, node?` | `{cancelled, action?, error?}` |
 | `probe` | `graph \| preset, pick: {node, dataset?}, context?: {bindings, values, result, artifacts}, local_bindings?, connection?, node?, position?` | `{target: {binding, task_id?, path, node, metadata?}, sample?}` |
 | `colormaps.list` | – | `{colormaps: [{name, lut_rgba8}], aliases, categorical_palettes, reserved_colors, nan_color}` |
 
@@ -262,8 +337,20 @@ on every state change and at most every 250 ms while bytes move.
   `sha256("graph.evaluate\0<node>\0<eval_id>")[:32]` and waits up to `wait` seconds (default 600).
   Requests over the automatic budget return with `action.state: "review"` and `result: null`;
   repeating the request with the same `eval_id` after approval waits for it. Every blob the result
-  references is fetched into the cache before the response. `graph.cancel` stops the wait only
-  (hub-side cancellation is WP11).
+  references is fetched into the cache before the response.
+- **Hub-side cancellation** (WP11). `graph.cancel {eval_id}` of a hub evaluation this bridge is
+  waiting for stops the wait at once (the evaluate request answers `cancelled`) and creates a
+  `graph.cancel` hub action (id `sha256("graph.cancel\0<node>\0<evaluate action id>")[:32]`): an
+  evaluation still in review is failed by the hub without reaching the node; a queued or running one
+  is cancelled on the node through the evaluator's `CancelToken` (checked between nodes and between
+  Runtime download chunks), also when it is still waiting for the graph lane or the node agent
+  restarts. The cancelled evaluate action ends `failed` with an error starting `cancelled:`;
+  repeating `graph.evaluate` with that `eval_id` answers `cancelled` (use a new `eval_id` to run it
+  again). With `connection` and `node`, `graph.cancel` also cancels a hub evaluation this bridge is
+  not waiting for (e.g. one in review, or started before a bridge restart). The result: `cancelled`
+  is whether the hub or node stopped (or will stop) the evaluation, `action` the `graph.cancel` hub
+  action, `error` why the hub could not be asked (e.g. `remote_error` for an unknown evaluation);
+  a local evaluation answers `{cancelled: true}` as before.
 - `eval_id` is the app's name for one evaluation (`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`); two
   evaluations with the same id cannot run at once (`conflict`).
 - `graph_error` carries `data.graph_code` (e.g. `unknown_preset`, `unknown_binding`,
@@ -302,6 +389,10 @@ on every state change and at most every 250 ms while bytes move.
   nothing else (including stray prints, raw writes to descriptor 1 and child processes), and cover
   resumed uploads after a bridge restart, idempotent submission, logs split inside multibyte
   characters, verified downloads, the hub review flow and local evaluation of a fake muFerro run.
+  `tests/test_hub_desktop*.py` (WP11) cover the desktop auto-run policy, the hub upload and import
+  path (resume, review, sha256 and path checks at the node), hub-side `graph.cancel`, the read path
+  with a node agent connected over its WebSocket, auth on every new hub route, and the state-directory
+  lock.
 - **Versioning.** Additive changes (new methods, events, optional params, result keys)
   keep `protocol: 1`; clients detect new methods through `hello.methods` and must ignore unknown
   events and result keys. The error codes of §4 are closed in protocol 1. Removing or changing the
