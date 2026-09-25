@@ -449,6 +449,44 @@ TEST_F(JobsFake, ReviewPolicyRefusalIsExplained)
   ASSERT_TRUE(f.pump([&] { return j.submission()->state == SubmitState::Failed; }));
 }
 
+TEST_F(JobsFake, AWorkspaceCreatedThroughAHubStaysSelectedWhileTheListingIsStale)
+{
+  /* Found by the D1 acceptance: a hub lists workspaces from the node's heartbeat snapshot, so the
+   * new workspace was missing from the refresh after creating it and another one got selected. */
+  FakeJobs f({"--stale-workspace-lists", "3"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.connect("hub:mesh"));
+  const std::string before = j.workspace();
+  bool done = false;
+  j.create_workspace("d1-accept", [&](const std::optional<bridge::Error> &e) {
+    EXPECT_FALSE(e.has_value());
+    done = true;
+  });
+  ASSERT_TRUE(f.pump([&] { return done; }));
+  std::string created;
+  ASSERT_TRUE(f.pump([&] {
+    for (const app::WorkspaceRow &w : j.workspaces()) {
+      if (w.name == "d1-accept") {
+        created = w.id;
+      }
+    }
+    return !created.empty() && j.workspace() == created;
+  }));
+  EXPECT_NE(created, before);
+  /* Once the snapshot lists it, it stays selected and appears exactly once. */
+  ASSERT_TRUE(f.pump([&] {
+    const auto log = f.methods();
+    return std::count(log.begin(), log.end(), std::string("workspace.list")) >= 5;
+  }));
+  f.settle(0.2);
+  EXPECT_EQ(j.workspace(), created);
+  int seen = 0;
+  for (const app::WorkspaceRow &w : j.workspaces()) {
+    seen += w.id == created;
+  }
+  EXPECT_EQ(seen, 1);
+}
+
 TEST_F(JobsFake, ApprovalAfterABridgeRestartReadsTheActionAgain)
 {
   FakeJobs f({"--forget-inspected-once"});

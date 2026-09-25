@@ -463,6 +463,8 @@
   "probe.failed": "查询失败：{error}",
   "probe.hint": "在查看器中单击表面、切片、箭头或点：这里会显示其物理坐标，以及从原始场数据读取的数值（三线性插值）。",
   "probe.interpolation": "原始点数据的{method}插值",
+  "probe.method.trilinear": "三线性",
+  "probe.method.nearest": "最近点",
   "probe.layer": "图层",
   "probe.magnitude": "模",
   "probe.no_value": "此位置没有数值",

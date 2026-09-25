@@ -463,6 +463,8 @@
   "probe.failed": "Probe failed: {error}",
   "probe.hint": "Click a surface, slice, glyph or point in the Viewer: its physical position appears here with the original data value read from the source field (trilinear).",
   "probe.interpolation": "{method} interpolation of the original point data",
+  "probe.method.trilinear": "trilinear",
+  "probe.method.nearest": "nearest-point",
   "probe.layer": "Layer",
   "probe.magnitude": "Magnitude",
   "probe.no_value": "No value at this position",

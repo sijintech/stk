@@ -58,9 +58,9 @@ foreach(_t stk_jobs_test_support stk-jobs-tests)
 endforeach()
 if(WIN32)
   gtest_discover_tests(stk-jobs-tests TEST_FILTER "JobsSpec.*:JobsLayout.*"
-    PROPERTIES LABELS "jobs" DISCOVERY_TIMEOUT 60)
+    PROPERTIES LABELS "jobs" ENVIRONMENT "TZ=UTC" DISCOVERY_TIMEOUT 60)
 else()
-  gtest_discover_tests(stk-jobs-tests PROPERTIES LABELS "jobs" TIMEOUT 600 DISCOVERY_TIMEOUT 60)
+  gtest_discover_tests(stk-jobs-tests PROPERTIES LABELS "jobs" ENVIRONMENT "TZ=UTC" TIMEOUT 600 DISCOVERY_TIMEOUT 60)
 endif()
 
 # -------------------------------------------------------------------------------------------
@@ -75,7 +75,8 @@ if(TARGET stk-bridge-fake)
   add_dependencies(stk-jobs-live stk-bridge-fake)
 endif()
 
-set(_jobs_env "XDG_CACHE_HOME=${CMAKE_CURRENT_BINARY_DIR}/cache" "LIBGL_ALWAYS_SOFTWARE=1")
+# TZ: task times are shown in local time; goldens are rendered in UTC.
+set(_jobs_env "XDG_CACHE_HOME=${CMAKE_CURRENT_BINARY_DIR}/cache" "LIBGL_ALWAYS_SOFTWARE=1" "TZ=UTC")
 if(STK_TEST_VK_ICD AND EXISTS "${STK_TEST_VK_ICD}")
   list(APPEND _jobs_env "VK_DRIVER_FILES=${STK_TEST_VK_ICD}" "VK_ICD_FILENAMES=${STK_TEST_VK_ICD}")
 endif()

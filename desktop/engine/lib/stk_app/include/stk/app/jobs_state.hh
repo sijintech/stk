@@ -21,6 +21,7 @@
  */
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -444,6 +445,13 @@ class JobsState {
   uint64_t conn_epoch_ = 0; /**< bumped when the connection changes */
   uint64_t epoch_ = 0;      /**< bumped when the connection, node or workspace changes */
   std::string preferred_connection_, preferred_node_, preferred_workspace_;
+  /** A workspace this client just created: kept listed and selected until the listing catches
+   * up (a hub lists workspaces from the node's heartbeat snapshot, a few seconds stale). */
+  struct CreatedWorkspace {
+    WorkspaceRow row;
+    std::chrono::steady_clock::time_point at;
+  };
+  std::optional<CreatedWorkspace> created_workspace_;
   std::optional<bridge::LocalRuntimeStatus> local_;
   bool local_busy_ = false;
 

@@ -1142,6 +1142,23 @@ void JobsState::apply_workspaces(const Json &workspaces)
       workspaces_.push_back({get_str(w, "id"), get_str(w, "name"), get_str(w, "created_at")});
     }
   }
+  bool relist = false; /* the listing is stale (hub heartbeat): look again shortly */
+  if (created_workspace_) {
+    bool present = false;
+    for (const WorkspaceRow &w : workspaces_) {
+      present |= w.id == created_workspace_->row.id;
+    }
+    if (present || std::chrono::steady_clock::now() - created_workspace_->at > std::chrono::seconds(30)) {
+      created_workspace_.reset();
+    }
+    else {
+      workspaces_.push_back(created_workspace_->row);
+      if (workspace_ != created_workspace_->row.id) {
+        workspace_.clear();
+      }
+      relist = true;
+    }
+  }
   bool listed = false;
   for (const WorkspaceRow &w : workspaces_) {
     listed |= w.id == workspace_;
@@ -1158,6 +1175,14 @@ void JobsState::apply_workspaces(const Json &workspaces)
     }
     workspace_.clear();
     select_workspace(pick);
+  }
+  if (relist && schedule) { /* never re-list at once: that would spin while the snapshot is stale */
+    std::weak_ptr<Alive> weak = alive_;
+    schedule(1.0, [weak, epoch = epoch_] {
+      if (auto a = weak.lock(); a && a->self->epoch_ == epoch && a->self->created_workspace_) {
+        a->self->refresh_workspaces();
+      }
+    });
   }
   changed();
 }
@@ -1241,6 +1266,8 @@ void JobsState::create_workspace(const std::string &name, Done done)
        }
        if (r.value().object.is_object()) {
          preferred_workspace_ = get_str(r.value().object, "id");
+         created_workspace_ = CreatedWorkspace{{preferred_workspace_, name, get_str(r.value().object, "created_at")},
+                                               std::chrono::steady_clock::now()};
          workspace_.clear();
          set_status(store_.catalog().format("jobs.status.workspace_created", {{"name", name}}), ui::ToastKind::Success);
        }

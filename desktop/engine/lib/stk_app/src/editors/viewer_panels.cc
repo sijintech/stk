@@ -357,7 +357,8 @@ class ProbeEditor final : public Editor {
     }
     const std::string interp = io::get_string(sample, "interpolation");
     if (!interp.empty()) {
-      l.label(ctx.store.catalog().format("probe.interpolation", {{"method", interp}})).disable();
+      const std::string method(ctx.store.catalog().tr_or("probe.method." + interp, interp));
+      l.label(ctx.store.catalog().format("probe.interpolation", {{"method", method}})).disable();
     }
   }
 

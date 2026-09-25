@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 
 #include "stk/app/jobs_state.hh"
 #include "stk/platform/file_dialog.hh"
@@ -32,13 +33,50 @@ std::string issue_text(const AppStore &store, const FormIssue &issue)
   return text;
 }
 
+/* Runtime timestamps are ISO 8601 in UTC ("2026-09-25T13:19:02.5+00:00" or "...Z"); the table
+ * shows them as local "MM-DD HH:MM:SS". Anything unparsable is shown as is. */
 std::string short_time(const std::string &iso)
 {
-  /* YYYY-MM-DDTHH:MM:SS... */
-  if (iso.size() >= 19 && iso[10] == 'T') {
-    return iso.substr(5, 5) + " " + iso.substr(11, 8);
+  int y, mo, d, h, mi, s;
+  if (iso.size() < 19 || iso[10] != 'T' || sscanf(iso.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d", &y, &mo, &d, &h, &mi, &s) != 6) {
+    return iso;
   }
-  return iso;
+  size_t z = 19;
+  while (z < iso.size() && (iso[z] == '.' || (iso[z] >= '0' && iso[z] <= '9'))) {
+    z++;
+  }
+  long offset = 0; /* seconds east of UTC */
+  if (z < iso.size() && (iso[z] == '+' || iso[z] == '-')) {
+    int oh = 0, om = 0;
+    if (sscanf(iso.c_str() + z + 1, "%2d:%2d", &oh, &om) < 1) {
+      return iso;
+    }
+    offset = (iso[z] == '-' ? -1 : 1) * (oh * 3600L + om * 60L);
+  }
+  else if (z < iso.size() && iso[z] != 'Z') {
+    return iso;
+  }
+  /* days_from_civil (H. Hinnant), then UTC seconds since the epoch. */
+  const int yy = y - (mo <= 2);
+  const int era = (yy >= 0 ? yy : yy - 399) / 400;
+  const unsigned yoe = unsigned(yy - era * 400);
+  const unsigned doy = (153 * unsigned(mo + (mo > 2 ? -3 : 9)) + 2) / 5 + unsigned(d) - 1;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  const long long days = era * 146097LL + doe - 719468;
+  const time_t utc = time_t(days * 86400 + h * 3600LL + mi * 60LL + s - offset);
+  struct tm local {};
+#ifdef _WIN32
+  if (localtime_s(&local, &utc) != 0) {
+    return iso;
+  }
+#else
+  if (!localtime_r(&utc, &local)) {
+    return iso;
+  }
+#endif
+  char buf[32];
+  strftime(buf, sizeof(buf), "%m-%d %H:%M:%S", &local);
+  return buf;
 }
 
 std::string transfer_state_text(const AppStore &store, const bridge::Transfer &t)

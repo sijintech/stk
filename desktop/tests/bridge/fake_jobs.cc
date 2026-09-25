@@ -17,7 +17,8 @@
  * with `unavailable` (retryable). Through the hub, a template runs at once, a custom spec becomes
  * a task.submit action in review until approved (hub.action first; --review-refuse makes the
  * hub refuse approvals with unauthorized / review_policy; --forget-inspected-once drops the first
- * approval's inspection as a bridge restart would; --local-uninitialized lists `local` as
+ * approval's inspection as a bridge restart would; --stale-workspace-lists N hides a hub-created
+ * workspace from the next N workspace.list calls (node heartbeat lag); --local-uninitialized lists `local` as
  * not_initialized until connections.local_start {initialize: true}). Uploads of a source whose name contains
  * "interrupt" stop half-way as `interrupted` until transfer.resume. Uploads complete after two progress
  * events (through the hub: bytes done, then action "review" until the workspace.import is
@@ -61,7 +62,9 @@ struct Options {
   bool forget_inspected_once = false;
   bool local_uninitialized = false;
   int submit_fail = 0;
+  int stale_workspace_lists = 0; /**< hub: new workspaces missing from the next N listings */
 } g_opt;
+std::map<std::string, int> g_ws_hidden; /**< workspace id -> listings it is still missing from */
 
 SendFn g_send;
 std::mutex g_m;
@@ -508,6 +511,9 @@ void init(const std::string &dir, std::vector<std::string> args, SendFn send)
     else if (args[i] == "--local-uninitialized") {
       g_opt.local_uninitialized = true;
     }
+    else if (args[i] == "--stale-workspace-lists" && i + 1 < args.size()) {
+      g_opt.stale_workspace_lists = std::atoi(args[++i].c_str());
+    }
     else if (args[i] == "--submit-fail" && i + 1 < args.size()) {
       g_opt.submit_fail = std::atoi(args[++i].c_str());
     }
@@ -725,7 +731,15 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     return true;
   }
   if (method == "workspace.list") {
-    Json list = g_model["workspaces"].value(sc, Json::array());
+    Json list = Json::array();
+    for (const Json &w : g_model["workspaces"].value(sc, Json::array())) {
+      auto hidden = g_ws_hidden.find(w.value("id", std::string()));
+      if (hidden != g_ws_hidden.end() && hidden->second > 0) {
+        hidden->second--; /* a hub lists from the node's heartbeat snapshot: still stale */
+        continue;
+      }
+      list.push_back(w);
+    }
     respond(id, {{"workspaces", list}});
     return true;
   }
@@ -739,6 +753,9 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     save_locked();
     Json out = {{"workspace", ws}};
     if (conn.rfind("hub:", 0) == 0) {
+      if (g_opt.stale_workspace_lists > 0) {
+        g_ws_hidden[ws["id"].get<std::string>()] = g_opt.stale_workspace_lists;
+      }
       out["action"] = {{"id", hex32("wsaction")}, {"kind", "workspace.create"}, {"state", "succeeded"},
                        {"node_id", p.value("node", std::string())}};
     }
