@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <thread>
 
 #include "MEM_guardedalloc.h"
@@ -25,6 +26,9 @@
 
 #include "stk/gfx/fonts.hh"
 #include "stk/gfx/offscreen.hh"
+
+#include "ghost_native.hh"
+#include "post_queue.hh"
 
 namespace stk::wm {
 
@@ -333,8 +337,28 @@ std::unique_ptr<WindowManager> WindowManager::create(const WmOptions &options, s
   wm->quit_on_last_ = options.quit_on_last_window_closed;
   /* Framebuffers at full native resolution on HiDPI (Retina, Wayland scale > 1). */
   wm->system_->useNativePixel();
+  /* Idle wait and cross-thread wake-up per back-end (see WindowManager::post). GHOST's Wayland
+   * wait ignores timers and its Cocoa back-end never waits, so both poll every 5 ms like Blender's
+   * WM. STK_WM_WAIT=poll forces the polling mode (diagnostics, tests). */
   const char *backend_id = GHOST_ISystem::getSystemBackend();
-  wm->blocking_wait_ = !(backend_id && strcmp(backend_id, "WAYLAND") == 0);
+  const char *force = getenv("STK_WM_WAIT");
+  const bool force_poll = force && strcmp(force, "poll") == 0;
+  if (!force_poll && detail::ghost_x11_wait_supported(*wm->system_) && wm->posts_->fd() >= 0) {
+    wm->wait_mode_ = WaitMode::X11;
+    wm->posts_->set_wake(detail::PostQueue::Wake::Fd);
+  }
+#if defined(_WIN32)
+  else if (!force_poll && backend_id && strcmp(backend_id, "WIN32") == 0) {
+    /* The main thread is the calling thread (GHOST's Win32 windows belong to it). */
+    wm->wait_mode_ = WaitMode::GhostBlocking;
+    wm->posts_->set_wake(detail::PostQueue::Wake::Win32Message);
+  }
+#endif
+  else {
+    (void)backend_id;
+    wm->wait_mode_ = WaitMode::Poll;
+    wm->posts_->set_wake(detail::PostQueue::Wake::Condition);
+  }
 
   auto *consumer = new EventConsumer(wm.get());
   wm->consumer_ = consumer;
@@ -363,8 +387,12 @@ std::unique_ptr<WindowManager> WindowManager::create(const WmOptions &options, s
   return wm;
 }
 
+WindowManager::WindowManager() : posts_(std::make_shared<detail::PostQueue>()) {}
+
 WindowManager::~WindowManager()
 {
+  /* Executors handed out keep the queue alive; from now on they drop their calls. */
+  posts_->close();
   while (!windows_.empty()) {
     close_window(windows_.back().get());
   }
@@ -519,19 +547,31 @@ bool WindowManager::process(const bool wait)
   for (auto &w : windows_) {
     dirty |= w->needs_redraw() || w->close_pending_;
   }
-  if (wait && !dirty && blocking_wait_) {
-    /* X11, Win32 and Cocoa sleep in the OS until an event arrives or the next timer is due. */
-    system_->processEvents(true);
-  }
-  else {
-    const bool any = system_->processEvents(false);
-    if (wait && !dirty && !any) {
-      /* GHOST's Wayland wait ignores timers: poll like Blender's WM (5 ms sleep when idle). */
-      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  const bool idle = wait && !dirty && !posts_->has_pending();
+  switch (wait_mode_) {
+    case WaitMode::X11:
+      /* Sleep until an X event, a post or the next timer, then let GHOST drain everything. */
+      if (idle) {
+        detail::ghost_x11_wait(*system_, posts_->fd());
+      }
+      system_->processEvents(false);
+      break;
+    case WaitMode::GhostBlocking:
+      /* Win32: GHOST waits for a message (a post sends WM_NULL) or the next timer. */
+      system_->processEvents(idle);
+      break;
+    case WaitMode::Poll: {
+      const bool any = system_->processEvents(false);
+      if (idle && !any) {
+        /* Blender's WM polls every 5 ms here; a post ends the wait early. */
+        posts_->wait(5);
+      }
+      break;
     }
   }
   system_->dispatchEvents();
   purge_timers();
+  run_posted();
   close_pending();
   if (!quit_) {
     draw_dirty();
@@ -913,6 +953,46 @@ bool WindowManager::supports_ime() const
 bool WindowManager::supports_clipboard_image() const
 {
   return (system_->getCapabilities() & GHOST_kCapabilityClipboardImage) != 0;
+}
+
+bool WindowManager::post(std::function<void()> fn)
+{
+  return posts_->post(std::move(fn));
+}
+
+std::function<void(std::function<void()>)> WindowManager::executor() const
+{
+  std::shared_ptr<detail::PostQueue> queue = posts_;
+  return [queue](std::function<void()> fn) { queue->post(std::move(fn)); };
+}
+
+const char *WindowManager::wake_mechanism() const
+{
+  switch (wait_mode_) {
+    case WaitMode::X11:
+      return "x11-poll-fd";
+    case WaitMode::GhostBlocking:
+      return "win32-thread-message";
+    case WaitMode::Poll:
+      break;
+  }
+  return "condition-5ms";
+}
+
+void WindowManager::run_posted()
+{
+  std::deque<std::function<void()>> tasks = posts_->take();
+  while (!tasks.empty()) {
+    std::function<void()> task = std::move(tasks.front());
+    tasks.pop_front();
+    try {
+      task();
+    }
+    catch (...) {
+      posts_->requeue_front(std::move(tasks));
+      throw;
+    }
+  }
 }
 
 uint64_t WindowManager::time_ms() const

@@ -10,9 +10,11 @@
  *   return wm->run();
  *
  * Redraws happen only when something called Window::request_redraw / Region::tag_redraw, or on
- * resize, expose and DPI changes. An idle application sleeps in the OS event wait (X11, Win32,
- * Cocoa) or polls every 5 ms like Blender's WM (Wayland, where GHOST's wait ignores timers).
- * Main thread only; other threads must not touch the engine (WP8 adds a wake-up channel).
+ * resize, expose and DPI changes. An idle application sleeps in the OS event wait (X11, Win32) or
+ * polls every 5 ms like Blender's WM (Wayland, where GHOST's wait ignores timers, and Cocoa, whose
+ * GHOST back-end never waits).
+ * Main thread only; other threads hand work to the main loop with WindowManager::post (or the
+ * #WindowManager::executor), which also wakes a blocking wait.
  */
 #pragma once
 
@@ -37,6 +39,9 @@ struct GPUContext;
 
 namespace stk::wm {
 
+namespace detail {
+class PostQueue;
+}
 class WindowManager;
 
 struct WindowOptions {
@@ -246,6 +251,26 @@ class WindowManager {
   uint64_t add_timer(uint64_t delay_ms, uint64_t interval_ms, TimerFn fn);
   void remove_timer(uint64_t id);
 
+  /**
+   * Thread-safe: queues `fn` to run on the main thread during the next #process (after event
+   * dispatch, before redraws), in posting order, and wakes a blocking #process(true) at once.
+   * A task posted by a task runs in a later iteration. Returns false (dropping `fn`) once the
+   * manager is being destroyed. Tasks should not throw; if one does, the exception propagates
+   * out of #process and the remaining tasks run in the next iteration.
+   *
+   * Wake-up per back-end: X11 polls an eventfd (self-pipe off Linux) together with the X
+   * connection; Win32 posts WM_NULL to the main thread, which ends GHOST's message wait; Wayland
+   * and Cocoa wait on a condition variable for at most their 5 ms poll interval.
+   */
+  bool post(std::function<void()> fn);
+  /**
+   * A thread-safe #post that may outlive the manager (calls after its destruction are dropped):
+   * the main-loop executor for stk_bridge and other background services.
+   */
+  std::function<void(std::function<void()>)> executor() const;
+  /** "x11-poll-fd", "win32-thread-message" or "condition-5ms" (diagnostics, tests). */
+  const char *wake_mechanism() const;
+
   /** Called for events that have no window (e.g. Cmd+Q). Default: quit. */
   std::function<void(const Event &)> on_quit_request;
 
@@ -258,7 +283,9 @@ class WindowManager {
   friend class Window;
   friend class EventConsumer;
   struct Timer;
-  WindowManager() = default;
+  enum class WaitMode { Poll, X11, GhostBlocking };
+  WindowManager();
+  void run_posted();
   std::unique_ptr<Window> create_window(const WindowOptions &options,
                                         const GHOST_GPUSettings &settings,
                                         std::string &r_error);
@@ -278,8 +305,9 @@ class WindowManager {
   uint64_t next_timer_id_ = 1;
   float user_scale_ = 1.0f;
   bool quit_on_last_ = true;
-  /** GHOST's blocking wait honors timers (all backends except Wayland). */
-  bool blocking_wait_ = true;
+  /** How an idle #process(true) sleeps (see #post for the wake-up of each mode). */
+  WaitMode wait_mode_ = WaitMode::Poll;
+  std::shared_ptr<detail::PostQueue> posts_;
   bool quit_ = false;
   int exit_code_ = 0;
 };

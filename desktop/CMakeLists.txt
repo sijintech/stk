@@ -65,3 +65,7 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/CMakeLists.txt")
   add_subdirectory(tests/unit)
 endif()
+# stk_bridge tests (label `bridge`); they use the googletest that tests/unit provides.
+if(TARGET stk_bridge AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/bridge/CMakeLists.txt")
+  add_subdirectory(tests/bridge)
+endif()
