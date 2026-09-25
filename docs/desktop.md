@@ -289,10 +289,10 @@ Windows 为 `%APPDATA%\stk\desktop\`。内容包括窗口大小与位置、语�
 | 时间 | 归档内容 |
 |---|---|
 | 已归档 | `native/`（Rust/egui 原型，标签 `archive/native-egui-2026-09`）；`toolkits/cpp/EffectivePropertiesDesktop/gui`（Electron） |
-| D1 结束 | `blender/` SPACE_STK 定制版、`suan/blender_client`、`suan-workbench`／`suan-blender`（先打标签）；`validate_scene` 移入 `suan/render/v1.py` |
+| D1 结束（已完成） | `blender/` SPACE_STK 定制版、`suan/blender_client`、`suan-workbench`／`suan-blender`（标签 `archive/blender-workbench-2026-09`）；`validate_scene` 已移入 `suan/render/v1.py` |
 | M-D2 结束 | `suan/gui`（Qt）及其依赖组、`tests/test_desktop.py`、文档站点的 Qt 页面 |
 
-归档前旧界面仍可使用：`suan-gui`（Qt）、`suan-workbench`（Blender 工作台）。新功能只加在桌面程序中。
+M-D2 结束前旧 Qt 界面 `suan-gui` 仍可使用。新功能只加在桌面程序中。
 
 ---
 
@@ -416,7 +416,7 @@ preedit is built in; Pinyin acceptance on a real Mac pending. Windows: M-D2.
 | When | What |
 |---|---|
 | Archived | `native/` (tag `archive/native-egui-2026-09`); `toolkits/cpp/EffectivePropertiesDesktop/gui` (Electron) |
-| D1 exit | `blender/` SPACE_STK fork overlay, `suan/blender_client`, `suan-workbench` / `suan-blender` (tag first); `validate_scene` moves into `suan/render/v1.py` |
+| D1 exit (done) | `blender/` SPACE_STK fork overlay, `suan/blender_client`, `suan-workbench` / `suan-blender` (tag `archive/blender-workbench-2026-09`); `validate_scene` moved into `suan/render/v1.py` |
 | M-D2 exit | `suan/gui` (Qt) and its extras, `tests/test_desktop.py`, the Qt pages of the docs site |
 
-Until then `suan-gui` and `suan-workbench` keep working; new features go into the desktop app only.
+Until M-D2 exit the Qt `suan-gui` keeps working; new features go into the desktop app only.

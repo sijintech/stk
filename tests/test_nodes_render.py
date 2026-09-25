@@ -332,7 +332,7 @@ def test_camera_presets_numeric_cameras_and_render_origin():
 
 
 def test_payload_output_budget_warning_and_v1_fallback():
-    from suan.blender_client.scene import validate_scene
+    from suan.render.v1 import validate_scene
     j, i = np.meshgrid(np.arange(20), np.arange(20), indexing="ij")
     points = np.stack([i.reshape(-1), j.reshape(-1), np.zeros(400)], axis=1).astype(float)
     a = (j[:-1, :-1] * 20 + i[:-1, :-1]).reshape(-1)

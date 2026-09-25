@@ -13,7 +13,8 @@ idempotency keys, ids of undecodable lines, clarifications in §2, §3, §7, §8
 library plus the STK core it drives). Conformance tests: `tests/test_desktop_bridge*.py`. The C++
 client is `desktop/engine/lib/stk_bridge` (WP8), written against this document and the schema.
 
-The bridge replaces the file-queue bridge of the Blender workbench (`suan/blender_client/bridge.py`).
+The bridge replaces the file-queue bridge of the Blender workbench (`suan/blender_client/bridge.py`,
+archived at D1 exit under the tag `archive/blender-workbench-2026-09`).
 
 ## 1. Process model
 

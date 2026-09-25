@@ -14,8 +14,9 @@ evaluated with a tri-state evaluator: macros listed as disabled features are
 pruned, platform macros stay "unknown" so every platform's includes are
 checked (macOS and Windows sources are vendored too).
 
-The archive check mirrors ``blender/prepare.py`` (sha256 of the whole official
-archive against the pin, no absolute or ``..`` member paths).
+The archive check mirrors the former ``blender/prepare.py`` (archived under the
+tag ``archive/blender-workbench-2026-09``): sha256 of the whole official archive
+against the pin, no absolute or ``..`` member paths.
 
 Usage:
   vendor.py [--archive PATH] [--download]   extract + check + write VENDORED.json

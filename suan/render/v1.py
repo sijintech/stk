@@ -1,21 +1,53 @@
 """Downgrade an ``stk.payload/2`` payload to a scene v1 (docs/specs/stk-render-payload-v2.md §11).
 
-For clients that accept only ``stk.scene/1`` (the C++ ``SPACE_STK`` editor,
-the current web viewer, Synorder): take the first visible ``triangles`` layer,
-else expand the first ``instances`` layer into glyph triangles, else turn the
+For clients that accept only ``stk.scene/1`` (the web viewer's ``view.build``
+path, Synorder; the C++ ``SPACE_STK`` editor is archived under the tag
+``archive/blender-workbench-2026-09``): take the first visible ``triangles``
+layer, else expand the first ``instances`` layer into glyph triangles, else turn the
 first ``slice_image`` into two triangles per texel quad. The mesh is reduced
 to the v1 budget (80 000 vertices, 480 000 indices) with
 ``suan.visualization.scene._poly_mesh`` (VTK decimation; a NumPy vertex
 clustering is used when VTK is not importable), coloured by the layer's active
 attribute (the magnitude for vectors and directions), and keeps
-``render_origin``. The result passes ``suan.blender_client.scene.validate_scene``.
+``render_origin``. The result passes :func:`validate_scene`, the scene v1 wire
+check (also used on ``view.build`` scenes).
 """
 import math
 
-__all__ = ["MAX_INDICES", "MAX_VERTICES", "glyph_mesh", "to_scene_v1"]
+__all__ = ["MAX_INDICES", "MAX_VERTICES", "glyph_mesh", "to_scene_v1", "validate_scene"]
 
 MAX_VERTICES = 80_000
 MAX_INDICES = 480_000
+
+
+def validate_scene(scene):
+    """Check a scene v1 ``{"manifest", "mesh"}`` before handing its untrusted numeric arrays to native code.
+
+    Returns ``scene`` unchanged; raises ``ValueError`` on an unsupported version or association,
+    invalid spatial metadata or scalar range, non-finite samples, or a mesh over the v1 budget.
+    """
+    m, mesh = scene["manifest"], scene["mesh"]
+    if m["version"] != 1 or m.get("association", "point") != "point":
+        raise ValueError("Unsupported scientific scene version or association")
+    for key in ("origin", "render_origin", "spacing", "dimensions"):
+        if len(m[key]) != 3 or not all(isinstance(v, (float, int)) and math.isfinite(v) for v in m[key]):
+            raise ValueError("Invalid spatial metadata")
+    if any(n < 1 or int(n) != n for n in m["dimensions"]) or min(m["spacing"]) <= 0:
+        raise ValueError("Invalid grid dimensions/spacing")
+    if len(m["value_range"]) != 2 or not all(math.isfinite(v) for v in m["value_range"]) or m["value_range"][1] < m["value_range"][0]:
+        raise ValueError("Invalid scalar range")
+    if len(mesh["positions"]) > MAX_VERTICES or len(mesh["values"]) != len(mesh["positions"]):
+        raise ValueError("Invalid point count")
+    if len(mesh["indices"]) % 3 or len(mesh["indices"]) > MAX_INDICES:
+        raise ValueError("Invalid triangle count")
+    for p in mesh["positions"]:
+        if len(p) != 3 or not all(math.isfinite(v) and abs(v) < 1e30 for v in p):
+            raise ValueError("Invalid render coordinates")
+    if not all(math.isfinite(v) for v in mesh["values"]):
+        raise ValueError("Invalid scalar samples")
+    if any(isinstance(i, bool) or not isinstance(i, int) or not 0 <= i < len(mesh["positions"]) for i in mesh["indices"]):
+        raise ValueError("Triangle index outside point array")
+    return scene
 
 
 def _np():

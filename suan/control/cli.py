@@ -31,11 +31,14 @@ def linux_server():
     try:
         require_linux_server()
     except UnsupportedServerPlatform as exc:
-        # The Runtime's hint (suan connect --profile) configures the suan CLI, not the workbench.
+        # The Runtime's hint (suan connect add ... --profile NAME) configures the suan CLI; this
+        # computer is a hub client, so point it at stk-desktop's hub pairing instead.
         raise click.ClickException(
             "The STK control service and node agent run on Linux only, on the server next to the Runtime. "
-            "Connect this computer's workbench through an SSH tunnel: ssh -N -L 8790:127.0.0.1:8790 HOST, "
-            "then suan-workbench --url http://127.0.0.1:8790.") from exc
+            "Connect this computer as a hub client: on the server run "
+            "suan-control pair --state-dir DIR --role client --profile desktop, open an SSH tunnel "
+            "ssh -N -L 8790:127.0.0.1:8790 HOST, then pair stk-desktop with http://127.0.0.1:8790 "
+            "and the one-time code.") from exc
 
 
 @click.group()

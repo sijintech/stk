@@ -415,11 +415,12 @@ viewer cannot hash buffers and reports that as a warning.
 
 ## 11. Scene v1 downgrade (`suan/render/v1.py`)
 
-For clients that accept only `stk.scene/1` (C++ `SPACE_STK`, the current web viewer, Synorder):
+For clients that accept only `stk.scene/1` (the current web viewer, Synorder; C++ `SPACE_STK` until its
+archive under the tag `archive/blender-workbench-2026-09`):
 take the first `triangles` layer (else expand `instances` into triangles, else convert a
 `slice_image` into two triangles per texel quad), decimate to the v1 budget (80 000 vertices,
 480 000 indices) with `scene._poly_mesh`, colour by the active attribute (magnitude for vectors),
-keep `render_origin`, and return a scene that passes `suan.blender_client.scene.validate_scene`.
+keep `render_origin`, and return a scene that passes `suan.render.v1.validate_scene`.
 
 ## 12. Example
 

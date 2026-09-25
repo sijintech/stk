@@ -1,7 +1,7 @@
 # STK 的 Synorder 插件
 
-> 状态：暂缓。STK 独立发展，桌面主线为 [STK Blender 原生工作台](../../blender/README.md)；
-> STK 的基础安装、工作台与 Runtime 均不需要本插件或 Synorder。本插件与 `suan-synorder-node` 作为今后的可选集成保留。
+> 状态：暂缓。STK 独立发展，桌面主线为 [STK 桌面程序 stk-desktop](../../docs/desktop.md)；
+> STK 的基础安装、桌面程序与 Runtime 均不需要本插件或 Synorder。本插件与 `suan-synorder-node` 作为今后的可选集成保留。
 
 本插件是可选集成：在 **Synorder Blender 宿主** 中加载 `synorder-stk` 插件。
 在该集成中，插件不实现窗口、控件、面板或三维绘制代码；桌面与网页分别消费同一份 `ViewSpec v1`。
@@ -42,7 +42,8 @@ python -m suan.workbench --server https://YOUR_HUB --state-dir /path/to/private-
 # 等价：synorder-native --workbench stk.workbench ...
 ```
 
-`suan-workbench` 现在启动 STK 自有的 Blender 工作台，不再启动 Synorder 宿主。
+Synorder 宿主只经上面的 `python -m suan.workbench` 启动；`suan-workbench` 后来启动的 STK 自有 Blender 工作台
+已归档于标签 `archive/blender-workbench-2026-09`，该命令随之移除。
 
 用网页生成的一次性配对码连接桌面。网页和手机 PWA 在导航中选择“STK 科学工作台”。
 客户端缓存必须是独立目录；不接管旧客户端缓存、不复制旧服务令牌。
@@ -95,8 +96,8 @@ synorder pack enable --workspace /path/to/workspace synorder.stk
 包升级和移除检查正在执行的版本引用。不要用包管理器强删尚有任务的版本。
 既有 Synorder `research` 示例与历史资源保留；新插件使用独立 Action、View 和 Method ID，可并行运行。
 
-STK 自有 Blender 工作台（`suan-workbench`，兼容名 `suan-blender`）、控制服务与节点代理是
-STK 的桌面主线，不是待删除的迁移遗留；Qt 界面保留为旧客户端。两条路径的数据不会自动导入或重放。
+STK 桌面程序 `stk-desktop`、控制服务与节点代理是 STK 的桌面主线，不是待删除的迁移遗留；此前的 STK 自有
+Blender 工作台（`suan-workbench`，兼容名 `suan-blender`）已归档于标签 `archive/blender-workbench-2026-09`；Qt 界面保留为旧客户端。两条路径的数据不会自动导入或重放。
 Rust/egui 原型不再扩展。
 
 ## 验证

@@ -1,6 +1,6 @@
 # 控制服务（hub）：图谱计算、结果 blob 与监控事件
 
-里程碑 1 中，控制服务 `suan-control` 是自托管的 hub：客户端（网页／手机 PWA、Blender 工作台）向它
+里程碑 1 中，控制服务 `suan-control` 是自托管的 hub：客户端（网页／手机 PWA、桌面程序 `stk-desktop`）向它
 提交操作，执行节点代理 `suan-node` 主动连入并在数据所在的机器上执行。M1 在原有任务操作之外增加三类
 操作 `graph.evaluate`、`graph.meta`、`task.events`，一个内容寻址的 blob 存储，以及节点目录和预设两个
 只读路由。桌面程序（WP11）又增加了桌面配置（`profile: "desktop"`）的自动执行额度、客户端上传与
@@ -8,12 +8,12 @@
 增量的：原有路由、操作与消息类型不变。
 
 控制服务、节点代理与 Runtime 只在 Linux 运行，Windows / macOS 只作客户端（见
-[runtime 使用指南](runtime.md)）。节点图本身的用法见 [可视化指南](visualization.md)，配对、模板与
-工作台见 [Blender 工作台指南](../blender/README.md)。
+[runtime 使用指南](runtime.md)）。节点图本身的用法见 [可视化指南](visualization.md)，配对与模板见下文，
+桌面程序见 [桌面程序指南](desktop.md)。
 
 ```mermaid
 flowchart LR
-  Client[网页 / 工作台 / 手机] -->|HTTPS：操作、SSE、GET blob| Hub[控制服务 suan-control]
+  Client[网页 / 桌面程序 / 手机] -->|HTTPS：操作、SSE、GET blob| Hub[控制服务 suan-control]
   Hub <-->|WSS：action / result / snapshot| Node[节点代理 suan-node]
   Node -->|HTTPS：HEAD / PUT blob| Hub
   Node <-->|回环 HTTP| Runtime[STK Runtime]
@@ -37,7 +37,7 @@ suan-control pair --state-dir /path/control --role client [--profile desktop]
 suan-node run --state-dir /path/node [--graph-workers 1]
 ```
 
-- `web/dist` 由 `(cd web && npm ci && npm run build)` 生成，只用工作台时可省略 `--web-dir`。
+- `web/dist` 由 `(cd web && npm ci && npm run build)` 生成，只用桌面程序时可省略 `--web-dir`。
 - `--host` 默认 `127.0.0.1`，`--port` 默认 8790。远程客户端经 HTTPS 入口（反向代理加认证）或
   SSH 隧道访问；不要把 `--host` 改为局域网或公网地址来代替入口，绑定局域网地址并不等于隔离。
 - `--blob-max-mib`（默认 512，范围 1–65536）是节点或客户端可上传的单个 blob 上限（客户端上传的每个文件
@@ -46,7 +46,7 @@ suan-node run --state-dir /path/node [--graph-workers 1]
   是可以修改的默认值**：不给参数时读取 `control.json` 中的 `"desktop_auto_mib"`，没有时取 256；设为 0 即关闭
   桌面自动执行。见“桌面配置的自动执行”。
 - `suan-control pair --role client --profile desktop` 签发桌面配置的配对码。桌面配置只能由所有者在签发配对码
-  时授予，设备不能自行声明；其他客户端（网页、工作台）照旧用不带 `--profile` 的配对码。
+  时授予，设备不能自行声明；其他客户端（网页）照旧用不带 `--profile` 的配对码。
 - `--review-policy`（`control.json` 的 `"review_policy"`，默认 `any`）决定谁能批准需要复核的操作，见“复核是什么”。
   **从互联网可达的 hub 建议用 `not-self`。**
 - 客户端上传（只有桌面配置设备可以上传）：`--upload-quota-mib`（`"upload_quota_mib"`，默认 4096）是每台设备

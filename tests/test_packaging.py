@@ -2,6 +2,7 @@
 
 from importlib import import_module
 from importlib.resources import files
+from importlib.util import find_spec
 from pathlib import Path
 import os
 import re
@@ -48,12 +49,26 @@ def test_base_install_never_requires_synorder(tmp_path):
     assert not [name for name in names if re.search('synorder|taskos', name, re.IGNORECASE)]
     scripts = project['scripts']
     assert scripts['suan'] == 'suan.cli.main:main'
-    assert scripts['suan-workbench'] == 'suan.blender_client.launcher:main'
     for name, target in scripts.items():
         if name != 'suan-synorder-node':
             assert 'synorder' not in target and target != 'suan.workbench:main', name
-    result = subprocess.run([sys.executable, '-m', 'suan.blender_client.launcher', '--help'],
+    # stk-desktop starts this bridge; its help works without Synorder.
+    result = subprocess.run([sys.executable, '-m', 'suan.desktop_bridge', '--help'],
                             cwd=tmp_path, capture_output=True)
     assert result.returncode == 0, result.stderr.decode('utf-8', 'replace')
     output = result.stdout.decode('utf-8')
-    assert '--blender' in output and 'Synorder' not in output
+    assert '--stdio' in output and 'Synorder' not in output
+
+
+def test_blender_workbench_is_archived():
+    """D1 exit: the Blender workbench lives only under the tag archive/blender-workbench-2026-09."""
+    root = Path(__file__).resolve().parents[1]
+    project = toml.load(root / 'pyproject.toml')['tool']['poetry']
+    scripts = project['scripts']
+    assert 'suan-workbench' not in scripts and 'suan-blender' not in scripts
+    assert not [target for target in scripts.values() if 'blender_client' in target]
+    assert not [item for item in project.get('include', [])
+                if (item['path'] if isinstance(item, dict) else item).split('/')[0] == 'blender']
+    # Also true of an installed wheel: the package is gone, the scene v1 check moved to suan.render.v1.
+    assert find_spec('suan.blender_client') is None
+    assert callable(import_module('suan.render.v1').validate_scene)
