@@ -21,8 +21,8 @@ __all__ = [
 ]
 
 URN_PREFIX = "urn:stk:schema:"
-SCHEMA_IDS = ("case-1", "dataset-1", "event-1", "field-1", "graph-1", "node-type-1", "payload-2", "plot-1",
-              "ref-1", "result-1", "view-1")
+SCHEMA_IDS = ("case-1", "dataset-1", "desktop-bridge-1", "event-1", "field-1", "graph-1", "node-type-1",
+              "payload-2", "plot-1", "ref-1", "result-1", "view-1")
 # Document "schema" tags and the schema file that describes them.
 DOCUMENT_SCHEMAS = {
     "stk.case/1": "case-1", "stk.catalog/1": "node-type-1", "stk.dataset/1": "dataset-1", "stk.graph/1": "graph-1",
