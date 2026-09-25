@@ -12,12 +12,27 @@ default delivery limit) stays within the hub's desktop cap (``desktop_bytes``,
 default :data:`DESKTOP_AUTO_BYTES`). Time, image and unknown-node limits still
 apply. Writes (``workspace.import``) and non-template submissions always go to
 review, whoever asks.
+
+What review is: with the hub's default ``review_policy: any``, any client device
+(including the one that submitted the action) may approve it, so review is a
+confirmation step against mistakes, not an authorization boundary. The security
+boundary is that only the owner pairs devices (and grants the desktop profile)
+and can revoke them. Hubs reachable from the internet should run with
+``review_policy: not-self`` (a device cannot approve its own action; the owner
+token always can) or ``owner`` (only the owner token approves).
+
+Every request is also bounded: the payload keys of each kind are exact (unknown
+keys raise :class:`UnknownKeys`) and its encoded size is capped
+(:class:`RequestTooLarge`, see :mod:`suan.control.limits`), so nothing the hub
+stores can exceed the node connection's frame limit.
 """
 import json
 import math
 from pathlib import PurePosixPath
 import re
 from suan.runtime.models import TaskSpec, layout, relative_path
+
+from .limits import ACTION_REQUEST_BYTES, IMPORT_MAX_FILES, IMPORT_REQUEST_BYTES, encoded_size
 
 KINDS = {"workspace.create", "task.submit", "task.cancel", "task.logs", "task.artifacts",
          "file.read", "view.build", "view.probe", "graph.evaluate", "graph.meta", "task.events",
@@ -32,8 +47,50 @@ MIB = 1024 * 1024
 DESKTOP_AUTO_BYTES = 256 * MIB
 # Payload counts a desktop device may request without review (the desktop profile of stk-render-payload-v2 §7).
 GRAPH_DESKTOP_PAYLOAD = {"triangles": 20_000_000, "instances": 5_000_000, "points": 20_000_000, "voxels": 1024 ** 3}
-IMPORT_MAX_FILES = 10_000
 IMPORT_PATH_BYTES = 1024
+REVIEW_POLICIES = ("any", "not-self", "owner")
+LOG_STREAMS = ("stdout", "stderr", "scheduler.out", "scheduler.err", "wrapper")
+# Exact payload keys per kind: (required, optional). task.submit, graph.evaluate and file.read
+# (task_id or workspace_id) are checked by their own rules below.
+PAYLOAD_KEYS = {
+    "workspace.create": ({"name"}, set()),
+    "task.cancel": ({"task_id"}, set()),
+    "task.logs": ({"task_id"}, {"stream", "offset"}),
+    "task.artifacts": ({"task_id"}, set()),
+    "file.read": ({"path"}, {"task_id", "workspace_id", "offset"}),
+    "view.build": ({"task_id", "path"}, {"options", "metadata"}),
+    "view.probe": ({"task_id", "path", "position"}, {"metadata"}),
+    "task.events": ({"task_id"}, {"offset", "limit"}),
+    "graph.meta": (set(), {"include"}),
+    "workspace.files": ({"workspace_id"}, set()),
+    "graph.cancel": ({"action_id"}, set()),
+    "workspace.import": ({"workspace_id", "files"}, set()),
+    "task.submit": (set(), {"spec", "template"}),
+}
+
+
+class UnknownKeys(ValueError):
+    """A request with keys its kind does not define (HTTP 422)."""
+
+
+class RequestTooLarge(ValueError):
+    """A request over its encoded size cap (HTTP 413)."""
+
+
+def check_keys(kind, payload):
+    """Exact payload keys of ``kind``: :class:`UnknownKeys` for extra keys, ``ValueError`` for missing ones."""
+    if kind == "graph.evaluate":
+        from suan.graph.service import REQUEST_KEYS
+        required, optional = set(), set(REQUEST_KEYS)
+    else:
+        required, optional = PAYLOAD_KEYS[kind]
+    unknown = sorted(set(payload) - required - optional)
+    if unknown:
+        raise UnknownKeys(f"Unknown request key(s) for {kind}: {', '.join(repr(k)[:40] for k in unknown[:5])}; "
+                          "allowed: " + ", ".join(sorted(required | optional)))
+    missing = sorted(required - set(payload))
+    if missing:
+        raise ValueError(f"{kind} needs {', '.join(missing)}")
 IMPORT_REVIEW = "导入上传的文件会写入工作区（可能覆盖同名输入文件），请检查文件列表后批准。"
 EVENTS_LIMIT = 1024 * 1024
 GRAPH_META_PARTS = ("catalog", "presets", "features", "render")
@@ -57,8 +114,10 @@ def validate_action(body, templates, *, desktop_bytes=None):
     ``desktop_bytes`` is the hub's desktop auto-run cap when the requesting device holds the
     desktop profile (``None`` or 0 otherwise); it only widens what ``graph.evaluate`` may run.
     """
+    if not isinstance(body, dict):
+        raise ValueError("An action is a JSON object")
     if set(body) - {"id", "node_id", "kind", "payload"}:
-        raise ValueError("Unknown action property")
+        raise UnknownKeys("An action has only id, node_id, kind and payload")
     for key in ("id", "node_id"):
         if not isinstance(body.get(key), str) or not re.fullmatch(r"[a-f0-9]{32}", body[key]):
             raise ValueError("Action and node IDs must be 32 lowercase hexadecimal characters")
@@ -66,12 +125,34 @@ def validate_action(body, templates, *, desktop_bytes=None):
         raise ValueError("Unknown action kind or invalid payload")
     p = body["payload"]
     kind = body["kind"]
+    limit = IMPORT_REQUEST_BYTES if kind == "workspace.import" else ACTION_REQUEST_BYTES
+    try:
+        size = encoded_size(body)
+    except (TypeError, ValueError):
+        raise ValueError("The request is not JSON") from None
+    if size > limit:
+        raise RequestTooLarge(f"{kind} requests are limited to {limit} bytes of JSON (this one has {size})")
+    check_keys(kind, p)
     if kind == "workspace.create":
-        if set(p) != {"name"} or not isinstance(p["name"], str) or not 1 <= len(p["name"].strip()) <= 200:
+        if not isinstance(p["name"], str) or not 1 <= len(p["name"].strip()) <= 200:
             raise ValueError("Workspace name is required")
     if kind in {"task.cancel", "task.logs", "task.artifacts", "view.build", "view.probe"}:
         if not re.fullmatch(r"[a-f0-9]{32}", str(p.get("task_id", ""))):
             raise ValueError("Task ID required")
+    if kind == "task.logs":
+        if "stream" in p and p["stream"] not in LOG_STREAMS:
+            raise ValueError("stream is one of " + ", ".join(LOG_STREAMS))
+        if "offset" in p:
+            _count(p["offset"], "offset")
+    if kind in {"view.build", "view.probe"}:
+        for key in ("options", "metadata"):
+            if key in p and not isinstance(p[key], dict):
+                raise ValueError(f"{key} must be an object")
+    if kind == "view.probe":
+        position = p["position"]
+        if (not isinstance(position, list) or len(position) != 3
+                or any(_finite(v) is None for v in position)):
+            raise ValueError("position is three finite numbers")
     if kind == "file.read":
         # A task artifact (task_id) or, since the hub upload path, a workspace input (workspace_id).
         owners = [key for key in ("task_id", "workspace_id") if key in p]
@@ -99,8 +180,8 @@ def validate_action(body, templates, *, desktop_bytes=None):
         return validate_workspace_import(p)
     if kind != "task.submit":
         return ""
-    if set(p) - {"spec", "template"}:
-        raise ValueError("Unknown submission property")
+    if not isinstance(p.get("spec", {}), dict):
+        raise ValueError("spec must be an object")
     spec = TaskSpec(**p.get("spec", {})).to_dict()
     template = templates.get(p.get("template"))
     r = spec["resources"]
@@ -127,8 +208,7 @@ def _count(value, name, minimum=0, maximum=None):
 
 def validate_task_events(p):
     """``{task_id, offset?, limit?}``: a read of the task's monitoring events; never reviewed."""
-    if set(p) - {"task_id", "offset", "limit"}:
-        raise ValueError("task.events accepts only task_id, offset and limit")
+    check_keys("task.events", p)
     if not TASK_ID.fullmatch(str(p.get("task_id", ""))):
         raise ValueError("Task ID required")
     if "offset" in p:
@@ -140,8 +220,7 @@ def validate_task_events(p):
 
 def validate_graph_meta(p):
     """``{include?: [catalog|presets|features|render]}``: the node's graph capabilities; never reviewed."""
-    if set(p) - {"include"}:
-        raise ValueError("graph.meta accepts only include")
+    check_keys("graph.meta", p)
     include = p.get("include", [])
     if not isinstance(include, list) or any(item not in GRAPH_META_PARTS for item in include):
         raise ValueError("graph.meta include lists catalog, presets, features or render")
@@ -163,8 +242,9 @@ def import_path(value):
 
 def validate_workspace_import(p):
     """``{workspace_id, files: [{path, sha256, size}]}``: hub blobs into workspace inputs; always reviewed."""
-    if not isinstance(p, dict) or set(p) != {"workspace_id", "files"}:
+    if not isinstance(p, dict):
         raise ValueError("workspace.import accepts only workspace_id and files")
+    check_keys("workspace.import", p)
     if not TASK_ID.fullmatch(str(p["workspace_id"])):
         raise ValueError("Workspace ID required")
     files = p["files"]
@@ -172,7 +252,11 @@ def validate_workspace_import(p):
         raise ValueError(f"workspace.import imports 1 to {IMPORT_MAX_FILES} files")
     paths = set()
     for item in files:
-        if not isinstance(item, dict) or set(item) != {"path", "sha256", "size"}:
+        if not isinstance(item, dict):
+            raise ValueError("Each imported file is {path, sha256, size}")
+        if set(item) - {"path", "sha256", "size"}:
+            raise UnknownKeys("Each imported file is {path, sha256, size}")
+        if set(item) != {"path", "sha256", "size"}:
             raise ValueError("Each imported file is {path, sha256, size}")
         path = import_path(item["path"])
         if path in paths:

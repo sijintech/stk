@@ -71,6 +71,16 @@ class ControlStore:
             for table in ("devices", "pairings"):
                 if "profile" not in {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN profile TEXT NOT NULL DEFAULT ''")
+            # Additive migration: the device that submitted an action (review_policy "not-self").
+            if "submitted_by" not in {row["name"] for row in db.execute("PRAGMA table_info(actions)")}:
+                db.execute("ALTER TABLE actions ADD COLUMN submitted_by TEXT NOT NULL DEFAULT ''")
+            # Client uploads (suan.control.uploads): which device stored which blob, and which
+            # workspace.import actions reference them (quota and garbage collection).
+            db.execute("CREATE TABLE IF NOT EXISTS client_blobs(device_id TEXT, sha256 TEXT, size INTEGER, "
+                       "created REAL, PRIMARY KEY(device_id, sha256))")
+            db.execute("CREATE TABLE IF NOT EXISTS import_refs(action_id TEXT, sha256 TEXT, "
+                       "PRIMARY KEY(action_id, sha256))")
+            db.execute("CREATE INDEX IF NOT EXISTS import_refs_sha ON import_refs(sha256)")
             db.execute("CREATE INDEX IF NOT EXISTS actions_node_state ON actions(node_id, state, created)")
             db.execute("CREATE INDEX IF NOT EXISTS actions_state ON actions(state, created)")
             db.execute("CREATE INDEX IF NOT EXISTS actions_created ON actions(created)")
@@ -151,7 +161,13 @@ class ControlStore:
             if old and old[0] != body:
                 self.event(db, "devices.changed", {"device_id": identity})
 
-    def create_action(self, request, review_reason=""):
+    @staticmethod
+    def _import_refs(db, request):
+        if request.get("kind") == "workspace.import":
+            db.executemany("INSERT OR IGNORE INTO import_refs(action_id,sha256) VALUES(?,?)",
+                           [(request["id"], item["sha256"]) for item in request["payload"]["files"]])
+
+    def create_action(self, request, review_reason="", submitted_by=""):
         identity = request["id"]
         body = encode(request)
         with self.db() as db:
@@ -160,14 +176,79 @@ class ControlStore:
             if old and old[0] != body:
                 raise ValueError("Action ID already used for a different request")
             if not old:
-                db.execute("INSERT INTO actions(id,request,node_id,state,result,error,created,updated,review_reason) "
-                           "VALUES(?,?,?,?,NULL,'',?,?,?)", (
+                db.execute("INSERT INTO actions(id,request,node_id,state,result,error,created,updated,review_reason,"
+                           "submitted_by) VALUES(?,?,?,?,NULL,'',?,?,?,?)", (
                                identity, body, request["node_id"], "review" if review_reason else "queued",
-                               time.time(), time.time(), review_reason))
+                               time.time(), time.time(), review_reason, submitted_by))
+                self._import_refs(db, request)
                 self.event(db, "actions.changed", {"action_id": identity})
         return self.action(identity)
 
-    def create_cancel(self, request):
+    def submitter(self, identity):
+        """The device id that submitted an action (``""`` for actions from before the column existed)."""
+        with self.db() as db:
+            row = db.execute("SELECT submitted_by FROM actions WHERE id=?", (identity,)).fetchone()
+        if row is None:
+            raise KeyError("Action not found")
+        return row[0]
+
+    def fail(self, identity, error, states=("queued", "review")):
+        """Move an unfinished action to ``failed`` (oversized for the node link, or stopped by the owner).
+
+        Returns ``True`` when it changed; a node result that arrives later is ignored.
+        """
+        with self.db() as db:
+            changed = db.execute(f"UPDATE actions SET state='failed',error=?,updated=? WHERE id=? AND state IN "
+                                 f"({','.join('?' * len(states))})", (error[:2000], time.time(), identity, *states))
+            if changed.rowcount:
+                self.event(db, "actions.changed", {"action_id": identity})
+            return bool(changed.rowcount)
+
+    # -- client blobs (uploads, quota, garbage collection) --------------------------------------
+
+    def record_client_blob(self, device, digest, size):
+        with self.db() as db:
+            db.execute("INSERT INTO client_blobs(device_id,sha256,size,created) VALUES(?,?,?,?) "
+                       "ON CONFLICT(device_id,sha256) DO UPDATE SET created=excluded.created",
+                       (device, digest, size, time.time()))
+
+    def is_client_blob(self, digest):
+        with self.db() as db:
+            return db.execute("SELECT 1 FROM client_blobs WHERE sha256=?", (digest,)).fetchone() is not None
+
+    def forget_client_blob(self, digest, db=None):
+        """The hub or a node stored the same bytes for itself: never collect them as a client upload."""
+        if db is not None:
+            db.execute("DELETE FROM client_blobs WHERE sha256=?", (digest,))
+            return
+        with self.db() as connection:
+            connection.execute("DELETE FROM client_blobs WHERE sha256=?", (digest,))
+
+    def client_usage(self, device):
+        """Bytes of this device's client blobs no queued or succeeded import references yet (its quota)."""
+        with self.db() as db:
+            row = db.execute("SELECT COALESCE(SUM(c.size),0) FROM client_blobs c WHERE c.device_id=? AND NOT EXISTS("
+                             "SELECT 1 FROM import_refs r JOIN actions a ON a.id=r.action_id WHERE r.sha256=c.sha256 "
+                             "AND a.state IN ('queued','succeeded'))", (device,)).fetchone()
+        return int(row[0])
+
+    def collect_client_blobs(self, cutoff):
+        """Forget client blobs stored before ``cutoff`` that no pending or done import references.
+
+        Returns their sha256s (the caller deletes the files). A blob several devices uploaded is
+        collected only when every device's copy qualifies.
+        """
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("SELECT c.sha256 FROM client_blobs c GROUP BY c.sha256 HAVING MAX(c.created) < ? "
+                              "AND NOT EXISTS(SELECT 1 FROM import_refs r JOIN actions a ON a.id=r.action_id "
+                              "WHERE r.sha256=c.sha256 AND a.state IN ('review','queued','succeeded'))",
+                              (cutoff,)).fetchall()
+            digests = [row[0] for row in rows]
+            db.executemany("DELETE FROM client_blobs WHERE sha256=?", [(d,) for d in digests])
+        return digests
+
+    def create_cancel(self, request, submitted_by=""):
         """Create a ``graph.cancel`` action for ``request["payload"]["action_id"]`` in one transaction.
 
         A target still in review is failed here (it never reaches the node) and the cancel action is
@@ -196,10 +277,10 @@ class ControlStore:
                     result = {"cancelled": True, "state": "failed"}
                 elif target["state"] == "queued":
                     state, result = "queued", None
-                db.execute("INSERT INTO actions(id,request,node_id,state,result,error,created,updated,review_reason) "
-                           "VALUES(?,?,?,?,?,'',?,?,'')", (identity, body, request["node_id"], state,
-                                                           None if result is None else encode_result(result), now,
-                                                           now))
+                db.execute("INSERT INTO actions(id,request,node_id,state,result,error,created,updated,review_reason,"
+                           "submitted_by) VALUES(?,?,?,?,?,'',?,?,'',?)",
+                           (identity, body, request["node_id"], state,
+                            None if result is None else encode_result(result), now, now, submitted_by))
                 self.event(db, "actions.changed", {"action_id": identity})
         return self.action(identity)
 
@@ -258,6 +339,7 @@ class ControlStore:
             if len(data) > RESULT_INLINE_LIMIT:
                 # Large results (views, catalogs) move out of the row; listings stay cheap.
                 reference, body = self.blobs.put(data), None
+                self.forget_client_blob(reference, db)
             db.execute("UPDATE actions SET state=?,result=?,result_ref=?,error=?,updated=? WHERE id=?",
                        ("failed" if error else "succeeded", body, reference, error[:2000], time.time(), identity))
             self.event(db, "actions.changed", {"action_id": identity})
@@ -281,7 +363,7 @@ class ControlStore:
             db.execute("INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?)", (identity, session_id, role, content, time.time()))
             self.event(db, "sessions.changed", {"session_id": session_id})
 
-    def publish_reply(self, identity, session_id, content, proposals):
+    def publish_reply(self, identity, session_id, content, proposals, submitted_by=""):
         """Publish all validated tools and the assistant reply in one transaction.
 
         A malformed later tool, crash, or concurrent retry cannot expose a
@@ -300,8 +382,10 @@ class ControlStore:
                 state = "review" if reason else "queued"
                 if not old:
                     db.execute("INSERT INTO actions(id,request,node_id,state,result,error,created,updated,"
-                               "review_reason) VALUES(?,?,?,?,NULL,'',?,?,?)", (
-                                   request["id"], body, request["node_id"], state, time.time(), time.time(), reason))
+                               "review_reason,submitted_by) VALUES(?,?,?,?,NULL,'',?,?,?,?)", (
+                                   request["id"], body, request["node_id"], state, time.time(), time.time(), reason,
+                                   submitted_by))
+                    self._import_refs(db, request)
                     self.event(db, "actions.changed", {"action_id": request["id"]})
                 states.append(f"操作 {request['id']}：{state}")
             if states:

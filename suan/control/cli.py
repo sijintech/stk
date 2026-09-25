@@ -10,7 +10,8 @@ import click
 from suan.runtime.common import UnsupportedServerPlatform, atomic_json, load_config, require_linux_server
 from suan.runtime.client import RuntimeClient
 from .agent import NodeAgent, endpoint
-from .policy import DESKTOP_AUTO_BYTES
+from .limits import FRAME_LIMIT
+from .policy import DESKTOP_AUTO_BYTES, REVIEW_POLICIES
 from .store import ControlStore
 from .templates import BUILTIN_TEMPLATES, load_templates
 
@@ -69,7 +70,21 @@ def init(state_dir):
 @click.option("--desktop-auto-mib", type=click.IntRange(0, 65536), default=None,
               help="Expected-transfer cap under which desktop-profile clients run graph evaluations without "
                    "review (default: \"desktop_auto_mib\" in control.json, else 256; 0 turns it off).")
-def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blob_max_mib, desktop_auto_mib):
+@click.option("--upload-quota-mib", type=click.IntRange(0, 1048576), default=None,
+              help="Per desktop device: bytes of unfinished uploads plus uploaded files not imported yet "
+                   "(default: \"upload_quota_mib\" in control.json, else 4096).")
+@click.option("--upload-gc-hours", type=click.FloatRange(0, 8760), default=None,
+              help="Delete uploaded files no workspace.import references this long after upload (default: "
+                   "\"upload_gc_hours\" in control.json, else 24).")
+@click.option("--upload-min-free-mib", type=click.IntRange(0, 1048576), default=None,
+              help="Refuse uploads (HTTP 507) while the blob store has less free disk space (default: "
+                   "\"upload_min_free_mib\" in control.json, else 5120).")
+@click.option("--review-policy", type=click.Choice(REVIEW_POLICIES), default=None,
+              help="Who may approve reviewed actions: any client (default; review is a confirmation step), "
+                   "not-self (not the submitting device; recommended for internet-reachable hubs) or owner "
+                   "(default: \"review_policy\" in control.json, else any).")
+def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blob_max_mib, desktop_auto_mib,
+          upload_quota_mib, upload_gc_hours, upload_min_free_mib, review_policy):
     linux_server()
     import uvicorn
     from .app import create_app
@@ -79,17 +94,35 @@ def serve(state_dir, host, port, web_dir, allow_demo_template, names, files, blo
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     config = json.loads((state_dir / "control.json").read_text(encoding="utf-8"))
-    if desktop_auto_mib is None:
-        desktop_auto_mib = config.get("desktop_auto_mib", DESKTOP_AUTO_BYTES // (1024 * 1024))
-        if isinstance(desktop_auto_mib, bool) or not isinstance(desktop_auto_mib, int) or not \
-                0 <= desktop_auto_mib <= 65536:
-            raise click.ClickException("control.json desktop_auto_mib must be an integer from 0 to 65536")
+    desktop_auto_mib = setting(config, "desktop_auto_mib", desktop_auto_mib, DESKTOP_AUTO_BYTES // (1024 * 1024),
+                               65536)
+    upload_quota_mib = setting(config, "upload_quota_mib", upload_quota_mib, 4096, 1048576)
+    upload_gc_hours = setting(config, "upload_gc_hours", upload_gc_hours, 24, 8760, number=True)
+    upload_min_free_mib = setting(config, "upload_min_free_mib", upload_min_free_mib, 5120, 1048576)
+    if review_policy is None:
+        review_policy = config.get("review_policy", "any")
+        if review_policy not in REVIEW_POLICIES:
+            raise click.ClickException("control.json review_policy must be one of " + ", ".join(REVIEW_POLICIES))
     model = None
     if os.environ.get("STK_MODEL_URL") and os.environ.get("STK_MODEL_NAME"):
         model = ChatModel(os.environ["STK_MODEL_URL"], os.environ.get("STK_MODEL_KEY", ""), os.environ["STK_MODEL_NAME"])
+    mib = 1024 * 1024
     app = create_app(state_dir, config["owner_token"], templates, model, web_dir,
-                     blob_max_bytes=blob_max_mib * 1024 * 1024, desktop_auto_bytes=desktop_auto_mib * 1024 * 1024)
-    uvicorn.run(app, host=host, port=port, ws_max_size=16*1024*1024, access_log=False)
+                     blob_max_bytes=blob_max_mib * mib, desktop_auto_bytes=desktop_auto_mib * mib,
+                     upload_quota_bytes=upload_quota_mib * mib, upload_ttl_seconds=upload_gc_hours * 3600,
+                     upload_min_free_bytes=upload_min_free_mib * mib, review_policy=review_policy)
+    uvicorn.run(app, host=host, port=port, ws_max_size=FRAME_LIMIT, access_log=False)
+
+
+def setting(config, key, value, default, maximum, number=False):
+    """A command-line value, else ``control.json[key]``, else ``default`` (checked like the option)."""
+    if value is not None:
+        return value
+    value = config.get(key, default)
+    kinds = (int, float) if number else (int,)
+    if isinstance(value, bool) or not isinstance(value, kinds) or not 0 <= value <= maximum:
+        raise click.ClickException(f"control.json {key} must be a number from 0 to {maximum}")
+    return value
 
 
 @control.command()

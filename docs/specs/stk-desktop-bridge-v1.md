@@ -165,7 +165,7 @@ Connection ids are opaque to the app; the bridge resolves them:
 | `hub.actions` | `connection` | `{actions}`: recent actions plus every action in review |
 | `hub.action` | `connection, action_id` | `{action}` with full `request` and `result`; marks it *inspected* |
 | `hub.review` | `connection, action_id, approved` | `{action}` |
-| `hub.policy` | `connection` | `{policy: {device_profile, desktop_auto, desktop_auto_bytes, graph_auto_seconds, upload_max_bytes, upload_chunk_bytes, import_max_files, read_kinds}}` (WP11) |
+| `hub.policy` | `connection` | `{policy: {device_profile, desktop_auto, desktop_auto_bytes, graph_auto_seconds, uploads, upload_max_bytes, upload_chunk_bytes, upload_quota_bytes, import_max_files, import_request_bytes, action_request_bytes, read_kinds, review_policy}}` (WP11) |
 
 - `spec` is a Runtime `TaskSpec` (`workspace_id, argv, backend?, name?, inputs?, outputs?, env?,
   resources?` including MPI `ranks`/`threads_per_rank`; see docs/runtime.md). It is validated before
@@ -211,6 +211,21 @@ accordingly for `profile: "desktop"` requests.
 | any other `task.submit`, and `workspace.import` (writes) | review | review |
 
 A revoked device is refused everywhere (the hub answers 401, the bridge `unauthorized`).
+
+**Review is a confirmation step by default.** Under the hub's default `review_policy: any`, any
+client device, including the one that submitted an action, may approve it; the security boundary
+is owner-granted pairing plus revocation. A hub owner can make review an authorization boundary
+with `review_policy: not-self` (a device cannot approve its own action; the owner token always can;
+recommended for hubs reachable from the internet) or `owner` (only the owner token approves).
+`hub.policy.review_policy` reports it. An approval the policy refuses is `unauthorized` with
+`data: {action_id, reason: "review_policy"}` and the hub's message; rejections are always allowed
+(so `transfer.cancel` can still withdraw its own import).
+
+**Request limits.** The hub checks every action and read exactly: unknown payload keys are refused
+(HTTP 422, bridge `remote_error`), and an action's encoded request is at most 1 MiB (a
+`workspace.import` at most 4 MiB and 4096 files; HTTP 413). Nothing the hub stores can therefore
+exceed the 16 MiB node connection frame; the hub also fails, instead of sending, any stored action
+that would not fit, and the owner can stop a stuck action (`POST /api/v1/actions/<id>/fail`).
 
 ### 7.2 The hub read path (WP11)
 
@@ -289,8 +304,16 @@ on every state change and at most every 250 ms while bytes move.
   1. Each file goes into the hub's content-addressed blob store through a resumable session
      (`POST /api/v1/uploads` returns the bytes the hub holds, 1 MiB chunks are appended from there,
      `finish` checks size and sha256; the session belongs to this device). A file the hub already
-     holds moves no bytes. Sizes are limited by the hub's blob cap (`hub.policy.upload_max_bytes`);
-     a folder through a hub holds at most 10 000 files.
+     holds moves no bytes. Only **desktop devices** may upload (others get `unauthorized`). Limits:
+     the hub's blob cap per file (`hub.policy.upload_max_bytes`); a per-device quota
+     (`upload_quota_bytes`, default 4 GiB) over unfinished uploads plus uploaded files no queued or
+     succeeded import references (`invalid_params` when exceeded); a free-disk floor on the hub
+     (default 5 GiB; `unavailable` while below it); at most 4 chunks per device in flight. A folder
+     through a hub holds at most 4096 files and its file list must fit the 4 MiB import request
+     (`invalid_params` at `upload.start`, before any byte moves; upload large folders in parts).
+     Uploaded files that no pending or finished import references are deleted by the hub after a
+     day by default (`--upload-gc-hours`), so an interrupted upload should be resumed within that
+     time or it starts over.
   2. One `workspace.import` action (id `sha256("workspace.import\0<node>\0<transfer id>\0<attempt>")[:32]`)
      asks the node to copy the blobs into the workspace. The node re-verifies every sha256 and the
      paths (§7.1 confinement rules: normalized relative paths, no `..`, absolute paths, drive letters,

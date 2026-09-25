@@ -207,7 +207,7 @@ def test_invalid_imports_are_refused(files):
 
 def test_import_file_count_is_limited():
     files = [{"path": f"f{i}", "sha256": DIGEST, "size": 0} for i in range(IMPORT_MAX_FILES + 1)]
-    with pytest.raises(ValueError, match="1 to 10000 files"):
+    with pytest.raises(ValueError, match=f"1 to {IMPORT_MAX_FILES} files"):
         validate_workspace_import({"workspace_id": WORKSPACE, "files": files})
     assert validate_workspace_import({"workspace_id": WORKSPACE, "files": files[:IMPORT_MAX_FILES]}) == IMPORT_REVIEW
     with pytest.raises(ValueError):

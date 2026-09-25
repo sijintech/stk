@@ -1594,6 +1594,28 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "review_policy": {
+                  "enum": [
+                    "any",
+                    "not-self",
+                    "owner"
+                  ]
+                },
+                "uploads": {
+                  "type": "boolean"
+                },
+                "upload_quota_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "import_request_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "action_request_bytes": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               },
               "required": [

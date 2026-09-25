@@ -31,6 +31,7 @@ import threading
 import time
 import uuid
 
+from suan.control.limits import IMPORT_MAX_FILES, IMPORT_REQUEST_BYTES, encoded_size
 from suan.runtime.common import atomic_json, instance_lock, now, read_json
 from suan.runtime.models import relative_path
 
@@ -46,7 +47,6 @@ MAX_FILES = 100_000
 MAX_CONCURRENT = 4
 PROGRESS_INTERVAL = 0.25
 KEEP_FINISHED_SECONDS = 7 * 24 * 3600
-IMPORT_MAX_FILES = 10_000  # suan.control.policy.IMPORT_MAX_FILES
 REVIEW_POLL = 2.0
 
 
@@ -169,8 +169,17 @@ class TransferManager:
         else:
             raise BridgeError("invalid_params", "Upload a regular file or a folder")
         # Fail before starting when the connection is unknown (or a hub connection has no node).
-        if self.backend_for(connection, node).kind == "hub" and len(items) > IMPORT_MAX_FILES:
-            raise BridgeError("invalid_params", f"An upload through a hub is limited to {IMPORT_MAX_FILES} files")
+        if self.backend_for(connection, node).kind == "hub":
+            # The workspace.import request must fit the hub's caps (checked here, before any byte moves).
+            if len(items) > IMPORT_MAX_FILES:
+                raise BridgeError("invalid_params", f"An upload through a hub is limited to {IMPORT_MAX_FILES} "
+                                  "files; upload the folder in parts")
+            request = {"id": "0" * 32, "node_id": "0" * 32, "kind": "workspace.import", "payload": {
+                "workspace_id": workspace_id, "files": [{"path": i["remote"], "sha256": "0" * 64, "size": i["size"]}
+                                                        for i in items]}}
+            if encoded_size(request) > IMPORT_REQUEST_BYTES:
+                raise BridgeError("invalid_params", f"The file list of this upload exceeds the hub's "
+                                  f"{IMPORT_REQUEST_BYTES}-byte import request limit; upload the folder in parts")
         record = self._new("upload", connection=connection, node=node, workspace_id=workspace_id,
                            local=str(source), remote=remote or source.name, items=items)
         self._launch(record["id"])
@@ -434,7 +443,17 @@ class TransferManager:
         files = [{"path": item["remote"], "sha256": item["sha256"], "size": item["size"]} for item in record["items"]]
         record["current"] = None
         self._check(transfer_id)
-        action = backend.post_import(record["workspace_id"], files, identity)
+        try:
+            action = backend.post_import(record["workspace_id"], files, identity)
+        except BridgeError as exc:
+            if "before importing" not in exc.message:
+                raise
+            # The hub collected the uploaded files (unreferenced for too long): upload them again on resume.
+            for item in record["items"]:
+                item.update(done=False, upload_id=None)
+            record.update(bytes_done=0, files_done=0)
+            raise BridgeError("remote_error", "The hub no longer holds the uploaded files (they expired before "
+                              "the import); resume the transfer to upload them again") from None
         delay = 0.25
         while True:
             view = summary(action)

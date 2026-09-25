@@ -49,6 +49,7 @@ def graph_request(**change):
 @pytest.fixture
 def hub(tmp_path):
     def make(**options):
+        options.setdefault("upload_min_free_bytes", 0)  # the disk floor has its own test
         app = create_app(tmp_path / f"control-{len(made)}", OWNER, **options)
         client = TestClient(app)
         client.__enter__()
@@ -167,7 +168,7 @@ def test_a_revoked_desktop_device_is_refused_everywhere(hub):
 def test_upload_endpoints_need_the_right_device(hub):
     app, c = hub()
     node = pair(c, "node")
-    first, second = pair(c, profile="desktop"), pair(c)
+    first, second, plain = pair(c, profile="desktop"), pair(c, profile="desktop"), pair(c)
     data = b"resumable bytes"
     digest = hashlib.sha256(data).hexdigest()
     began = c.post("/api/v1/uploads", json={"sha256": digest, "size": len(data)}, headers=bearer(first["token"]))
@@ -181,7 +182,10 @@ def test_upload_endpoints_need_the_right_device(hub):
         assert getattr(c, method)(path, **extra).status_code == 401, path  # unauthenticated
         assert getattr(c, method)(path, headers=bearer("x" * 40), **extra).status_code == 401, path
         assert getattr(c, method)(path, headers=bearer(node["token"]), **extra).status_code == 403, path
-    # Another device never sees the first device's session.
+        # Uploads take disk space: ordinary clients and the owner token are refused.
+        assert getattr(c, method)(path, headers=bearer(plain["token"]), **extra).status_code == 403, path
+        assert getattr(c, method)(path, headers=AUTH, **extra).status_code == 403, path
+    # Another desktop device never sees the first device's session.
     for method, path, extra in routes[1:]:
         assert getattr(c, method)(path, headers=bearer(second["token"]), **extra).status_code == 404, path
     assert c.get(f"/api/v1/uploads/{upload_id}", headers=bearer(first["token"])).json()["offset"] == 0
@@ -240,7 +244,7 @@ def test_uploads_resume_verify_and_limit_sizes(hub):
 
 def test_empty_file_upload(hub):
     app, c = hub()
-    device = bearer(pair(c)["token"])
+    device = bearer(pair(c, profile="desktop")["token"])
     digest = hashlib.sha256(b"").hexdigest()
     began = c.post("/api/v1/uploads", json={"sha256": digest, "size": 0}, headers=device).json()
     assert c.post(f"/api/v1/uploads/{began['id']}/finish", headers=device).json()["completed"] is True
@@ -272,7 +276,7 @@ def test_workspace_import_needs_uploaded_blobs_and_safe_paths(hub):
 def test_import_blobs_are_served_only_to_the_importing_node(hub):
     app, c = hub()
     node, other = pair(c, "node"), pair(c, "node")
-    device = bearer(pair(c)["token"])
+    device = bearer(pair(c, profile="desktop")["token"])
     digest = upload(c, device, b"import me")
     unrelated = upload(c, device, b"not part of the import")
     action = c.post("/api/v1/actions", headers=device, json=operation(

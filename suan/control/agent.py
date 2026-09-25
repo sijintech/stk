@@ -34,6 +34,8 @@ from suan.runtime.client import RuntimeClient
 from suan.runtime.common import atomic_json, read_json
 from suan.runtime.models import relative_path
 
+from .limits import FRAME_LIMIT, READ_QUEUE, READ_TIMEOUT
+
 # muFerro writes field frames as <Stem>.<kt:08d>.dat with stems of at most 8 characters.
 MUPRO_FRAME = re.compile(r"(?:^|/)([A-Za-z][A-Za-z0-9_]{0,7})\.(\d{8})\.dat$")
 # Operations this agent implements beyond the first release (advertised in the snapshot).
@@ -217,7 +219,7 @@ class NodeAgent:
         self.blob_source = blob_source  # workspace.import: blob_source(action_id, sha256, target, size)
         self._graph_tokens = {}         # graph.evaluate action id -> CancelToken while it evaluates
         self._cancel_lock = threading.Lock()
-        self._reads = set()
+        self._reads = {}  # read id -> {"task", "arrived", "started"}
         self.cache = Path(cache_dir)
         self.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
         from suan.plot import ensure_mplconfigdir
@@ -488,9 +490,40 @@ class NodeAgent:
             text = text.replace(root, "<agent cache>")
         return text[:2000]
 
-    async def _read(self, message, send):
-        """Answer one hub read (``type: read``) on the read lane."""
+    def _accept_read(self, message, send):
+        """Queue one hub read, or answer at once when :data:`READ_QUEUE` reads are already held."""
+        self._ensure_lanes()
+        if len(self._reads) >= READ_QUEUE:
+            reply = {"type": "read_result", "id": message["id"], "error": "The node is busy with reads; retry"}
+            task = asyncio.create_task(self._reply(send, reply))
+        else:
+            entry = {"arrived": time.monotonic(), "started": False}
+            task = asyncio.create_task(self._read(message, send, entry))
+            entry["task"] = task
+            self._reads[message["id"]] = entry
+            task.add_done_callback(lambda _, key=message["id"], item=entry: self._reads.pop(key, None)
+                                   if self._reads.get(key) is item else None)
+        return task
+
+    def _cancel_read(self, read_id):
+        """The hub gave up on a read (``read_cancel``): drop it unless it already started."""
+        entry = self._reads.get(read_id) if isinstance(read_id, str) else None
+        if entry is not None and not entry["started"]:
+            entry["task"].cancel()
+
+    @staticmethod
+    async def _reply(send, reply):
+        try:
+            await send(reply)
+        except Exception:
+            pass
+
+    async def _read(self, message, send, entry):
+        """Answer one hub read (``type: read``) on the read lane; reads the hub gave up on are skipped."""
         async with self._lanes["read"]:
+            if time.monotonic() - entry["arrived"] > READ_TIMEOUT:
+                return  # the hub answered 504 already; a slow Runtime must not build a backlog
+            entry["started"] = True
             try:
                 result = await asyncio.to_thread(self.read, message.get("kind"), message.get("payload"))
                 if len(json.dumps(result)) > RESULT_LIMIT:
@@ -544,10 +577,9 @@ class NodeAgent:
                 if data.get("type") == "action" and isinstance(data.get("action"), dict):
                     self.dispatch(data["action"])
                 elif data.get("type") == "read" and isinstance(data.get("id"), str):
-                    self._ensure_lanes()
-                    task = asyncio.create_task(self._read(data, send))
-                    self._reads.add(task)
-                    task.add_done_callback(self._reads.discard)
+                    self._accept_read(data, send)
+                elif data.get("type") == "read_cancel":
+                    self._cancel_read(data.get("id"))
         finally:
             if self._send is send:
                 self._send = None
@@ -570,7 +602,7 @@ class NodeAgent:
                     if self.hub_features is None:
                         self.hub_features = set()  # unknown hub: no blob uploads until a health check succeeds
                 async with connect(url, additional_headers={"Authorization": "Bearer " + token},
-                                   max_size=16*1024*1024, proxy=None) as ws:
+                                   max_size=FRAME_LIMIT, proxy=None) as ws:
                     delay = 1
                     await self.serve(ws)
             except Exception as exc:

@@ -39,7 +39,7 @@ class LiveHub:
         from suan.control.agent import NodeAgent
         from suan.control.app import create_app
         self.client, self.supervisor, _, _ = runtime
-        self.app = create_app(tmp_path / "control", OWNER, {"echo": ECHO_TEMPLATE})
+        self.app = create_app(tmp_path / "control", OWNER, {"echo": ECHO_TEMPLATE}, upload_min_free_bytes=0)
         self.store = self.app.state.store
         config = uvicorn.Config(self.app, host="127.0.0.1", port=0, log_level="warning", access_log=False,
                                 ws_max_size=16 * MIB)

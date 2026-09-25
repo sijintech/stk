@@ -21,6 +21,7 @@ from suan.runtime.common import inside
 
 from . import schema as bridge_schema
 from .backends import HubBackend
+from .hub import HubResponseError, hub_error
 from .connections import ConnectionStore
 from .graphs import GraphService
 from .protocol import (MAX_LINE_BYTES, PROTOCOL_VERSION, BridgeError, LineReader, check_envelope, decode_line,
@@ -49,6 +50,10 @@ class StateDirLock:
         try:
             if os.name == "nt":
                 import msvcrt
+                self.stream.seek(0, os.SEEK_END)
+                if self.stream.tell() == 0:  # lock a byte that exists (as suan.runtime.common.instance_lock)
+                    self.stream.write(b"0")
+                    self.stream.flush()
                 self.stream.seek(0)
                 msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
             else:
@@ -434,7 +439,17 @@ class Bridge:
             current = hub.call(hub.hub.action, params["action_id"])
             if current["request"] != self.inspected[key]:
                 raise BridgeError("conflict", "The action changed since it was inspected; inspect it again")
-        record = hub.call(hub.hub.review, params["action_id"], params["approved"])
+        try:
+            record = hub.hub.review(params["action_id"], params["approved"])
+        except HubResponseError as exc:
+            if exc.status == 403:  # the hub's review_policy (not-self / owner) refuses this device
+                raise BridgeError("unauthorized", exc.message, data={"action_id": params["action_id"],
+                                                                     "reason": "review_policy"}) from None
+            raise hub_error(exc) from None
+        except BridgeError:
+            raise
+        except Exception as exc:
+            raise hub_error(exc) from None
         self.inspected.pop(key, None)
         return {"action": record}
 

@@ -34,7 +34,7 @@ class Hub:
         from suan.control.agent import NodeAgent
         from suan.control.app import create_app
         self.client, self.supervisor, _, _ = runtime
-        self.app = create_app(tmp_path / "control", OWNER, {"echo": ECHO_TEMPLATE})
+        self.app = create_app(tmp_path / "control", OWNER, {"echo": ECHO_TEMPLATE}, upload_min_free_bytes=0)
         self.store = self.app.state.store
         config = uvicorn.Config(self.app, host="127.0.0.1", port=0, log_level="warning", access_log=False)
         self.server = uvicorn.Server(config)
@@ -61,8 +61,10 @@ class Hub:
         self.loop = threading.Thread(target=self.run_node, daemon=True)
         self.loop.start()
 
-    def client_code(self):
-        return self.http.post("/api/v1/pairings", json={"role": "client"}, headers=AUTH).json()["code"]
+    def client_code(self, profile="desktop"):
+        # Desktop devices: the only clients that may upload (the review flow uploads a file).
+        body = {"role": "client", **({"profile": profile} if profile else {})}
+        return self.http.post("/api/v1/pairings", json=body, headers=AUTH).json()["code"]
 
     def run_node(self):
         beat = 0.0
