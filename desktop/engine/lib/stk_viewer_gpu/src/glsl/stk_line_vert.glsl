@@ -58,10 +58,13 @@ void main()
   v_tf = 0.0;
   v_rgba = vec4(1.0);
   v_rgbaf = vec4(1.0);
+  v_nan = 0;
   int mode = stk_color_mode();
   if (mode == STK_COLOR_LUT) {
     v_t = stk_cval_float(ci);
     v_tf = stk_cval_float(cflat);
+    bool any_nan = stk_flag(STK_F_CELL) ? stk_cval_nan(seg) : (stk_cval_nan(ia) || stk_cval_nan(ib));
+    v_nan = (any_nan ? STK_NAN_SMOOTH : 0) | (stk_cval_nan(cflat) ? STK_NAN_FLAT : 0);
   }
   else if (mode == STK_COLOR_RGBA) {
     v_rgba = stk_cval_rgba(ci);

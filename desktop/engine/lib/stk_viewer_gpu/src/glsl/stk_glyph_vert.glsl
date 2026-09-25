@@ -25,10 +25,12 @@ void main()
   v_tf = 0.0;
   v_rgba = vec4(1.0);
   v_rgbaf = vec4(1.0);
+  v_nan = 0;
   int mode = stk_color_mode();
   if (mode == STK_COLOR_LUT) {
     v_t = stk_cval_float(inst);
     v_tf = v_t;
+    v_nan = stk_cval_nan(inst) ? (STK_NAN_SMOOTH | STK_NAN_FLAT) : 0;
   }
   else if (mode == STK_COLOR_RGBA) {
     v_rgba = stk_cval_rgba(inst);

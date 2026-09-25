@@ -432,7 +432,7 @@ void Renderer::draw_volume(const GpuScene &scene,
   const float vol2[4] = {float(unit), float(lv.stored_lo), float(lv.stored_hi), float(lv.tex_scale)};
   GPU_shader_uniform_4fv(sh, "u_vol", vol);
   GPU_shader_uniform_4fv(sh, "u_vol2", vol2);
-  const float light[4] = {0, 0, layer.opacity, 0};
+  const float light[4] = {0, 0, layer.opacity, float(lv.hole_below)};
   GPU_shader_uniform_4fv(sh, "u_light", light);
   GPU_texture_bind(lv.texture->texture, slot::lut);
   GPU_texture_bind(lv.tf->texture, slot::tf);

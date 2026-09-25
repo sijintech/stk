@@ -8,6 +8,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <type_traits>
 
 #include "GPU_capabilities.hh"
 #include "GPU_texture.hh"
@@ -97,12 +98,38 @@ std::string accessor_key(const io::Payload &p, const io::PayloadAccessor &a)
 template<typename T> ResourcePtr upload(ResourceCache &cache, std::string_view kind, std::span<const T> data)
 {
   const std::string key = content_key(kind, data);
+  if constexpr (std::is_same_v<T, float>) {
+    return cache.get(key, [&] { return make_float_storage(data, "stk_viewer_derived"); });
+  }
   return cache.get(key, [&] { return make_storage(as_bytes(data), "stk_viewer_derived"); });
 }
 
+/** A raw accessor upload; f32 accessors (positions, normals) pass the float upload gate. */
 ResourcePtr upload_accessor(ResourceCache &cache, const io::Payload &p, const io::PayloadAccessor &a)
 {
-  return cache.get(accessor_key(p, a), [&] { return make_storage(p.accessor_bytes(a), "stk_viewer_accessor"); });
+  return cache.get(accessor_key(p, a), [&] {
+    const std::span<const uint8_t> bytes = p.accessor_bytes(a);
+    if (a.type == io::ComponentType::F32) {
+      return make_float_storage({reinterpret_cast<const float *>(bytes.data()), bytes.size() / 4},
+                                "stk_viewer_accessor");
+    }
+    return make_storage(bytes, "stk_viewer_accessor");
+  });
+}
+
+/** `values` with every non-finite value replaced by `replacement` (nullopt when all are finite). */
+std::optional<std::vector<float>> finite_copy(std::span<const float> values, float replacement = 0.0f)
+{
+  if (std::all_of(values.begin(), values.end(), [](float v) { return std::isfinite(v); })) {
+    return std::nullopt;
+  }
+  std::vector<float> out(values.begin(), values.end());
+  for (float &v : out) {
+    if (!std::isfinite(v)) {
+      v = replacement;
+    }
+  }
+  return out;
 }
 
 ResourcePtr dummy_storage(ResourceCache &cache)
@@ -239,10 +266,29 @@ std::vector<float> smooth_normals(std::span<const float> pos, const viewer::Inde
 /* -------------------------------------------------------------------- */
 /* Colours */
 
-/** The GPU bin of a float t (stk_lut_texel in stk_common_lib.glsl). */
+/* s_cval value of a NaN (STK_NAN_SENTINEL in stk_common_lib.glsl): the finite float with these
+ * bits (-3.4028232e38). Real LUT coordinates are clamped to +-kMaxT, so they never collide. */
+constexpr uint32_t kNanSentinelBits = 0xFF7FFFFEu;
+constexpr float kMaxT = 1e6f; /* keeps interpolated varyings far from float32 overflow */
+
+float nan_sentinel()
+{
+  float f;
+  std::memcpy(&f, &kNanSentinelBits, 4);
+  return f;
+}
+
+bool is_nan_sentinel(const float t)
+{
+  uint32_t bits;
+  std::memcpy(&bits, &t, 4);
+  return bits == kNanSentinelBits;
+}
+
+/** The GPU bin of a float t (stk_lut_texel in stk_common_lib.glsl, texel 258 for the sentinel). */
 int gpu_texel(const float t)
 {
-  if (std::isnan(t)) {
+  if (std::isnan(t) || is_nan_sentinel(t)) {
     return 258;
   }
   if (t < 0.0f) {
@@ -264,11 +310,12 @@ float exact_t(const double v, const double lo, const double hi)
 {
   constexpr float kBinMargin = 1.0f / float(1 << 22);
   if (std::isnan(v)) {
-    return std::numeric_limits<float>::quiet_NaN();
+    /* No NaN on the GPU (Metal fast math): a sentinel the shaders test as an integer. */
+    return nan_sentinel();
   }
   const int want = viewer::ContinuousColormap::texel(v, lo, hi);
   const double td = hi == lo ? 0.5 : (v - lo) / (hi - lo);
-  float t = std::isfinite(td) ? float(td) : (td > 0 ? 2.0f : -1.0f);
+  float t = std::isfinite(td) ? float(std::clamp(td, -double(kMaxT), double(kMaxT))) : (td > 0 ? 2.0f : -1.0f);
   if (want == 0) { /* below */
     t = std::min(t, -kBinMargin);
   }
@@ -532,7 +579,14 @@ struct Builder {
     if (const std::string nrm_id = io::get_string(src, "normals"); !nrm_id.empty() && smooth) {
       std::vector<float> owned;
       const std::span<const float> n = positions_of(p, nrm_id, owned);
-      m.nrm = owned.empty() ? upload_accessor(cache, p, p.accessor(nrm_id)) : upload(cache, "nrm", std::span<const float>(owned));
+      /* Non-finite normals become 0 (the shader lights zero normals as facing the viewer). */
+      if (auto finite = finite_copy(n)) {
+        m.nrm = upload(cache, "nrm", std::span<const float>(*finite));
+      }
+      else {
+        m.nrm = owned.empty() ? upload_accessor(cache, p, p.accessor(nrm_id)) :
+                                upload(cache, "nrm", std::span<const float>(owned));
+      }
       m.has_normals = n.size() == m.positions.size();
     }
     else if (smooth && L.lighting) {
@@ -692,6 +746,10 @@ struct Builder {
     d.world_spheres = d.spheres && (!radii_id.empty() || d.radius > 0);
     if (!radii_id.empty() && d.spheres) {
       d.radii_cpu = p.floats(radii_id);
+      /* A non-finite radius draws (and picks) nothing, as a zero radius. */
+      if (auto finite = finite_copy(d.radii_cpu)) {
+        d.radii_cpu = std::move(*finite);
+      }
       d.radii = upload(cache, "radii", std::span<const float>(d.radii_cpu));
     }
     else {
@@ -750,7 +808,19 @@ struct Builder {
     ColorBinding all = build_color(cache, p, layer, spec, n, n, scene.warnings, g.directions);
     std::vector<float> inst;
     for (size_t i = 0; i < n; i++) {
-      if (std::isfinite(g.scales[i])) {
+      if (!std::isfinite(g.scales[i])) {
+        continue;
+      }
+      /* Scales that would overflow float32 on the GPU (|entry| > 1e30) are dropped like non-finite ones. */
+      const dvec3 dir{g.directions[i * 3], g.directions[i * 3 + 1], g.directions[i * 3 + 2]};
+      const viewer::dmat4 m = viewer::instance_matrix(dvec3{}, dir, g.scales[i]);
+      bool finite = true;
+      for (int row = 0; row < 3 && finite; row++) {
+        for (int col = 0; col < 3 && finite; col++) {
+          finite = std::abs(m.m[size_t(col)][size_t(row)]) <= 1e30; /* false for NaN */
+        }
+      }
+      if (finite) {
         g.kept.push_back(uint32_t(i));
       }
     }
@@ -935,6 +1005,19 @@ struct Builder {
     }
     lv.stored_lo = lo;
     lv.stored_hi = hi;
+    /* Non-finite f32 voxels (no NaN/Inf on the GPU) become a finite value far below the data, which
+     * the ray marcher skips as a hole (transparent); u8/u16 data has none. */
+    if (!u8 && !u16) {
+      const double gap = std::max(hi - lo, std::abs(lo)) + 1.0;
+      lv.hole_below = std::max(lo - gap, -1e37);
+      const float sentinel = float(std::max(lo - 2.0 * gap, -2e37));
+      for (float &f : floats) {
+        if (!std::isfinite(f)) {
+          f = sentinel;
+        }
+      }
+      check_finite_upload(floats, "volume data");
+    }
     lv.texture = cache.get(key, [&] {
       auto r = std::make_shared<GpuResource>();
       const int w = int(dims[0]), h = int(dims[1]), d = int(dims[2]);
@@ -965,7 +1048,11 @@ struct Builder {
     GPU_texture_filter_mode(lv.texture->texture, !L.volume.transfer.nearest);
     /* Transfer-function LUT over the stored domain. */
     constexpr int kLut = 4096;
-    const std::vector<std::array<float, 4>> lut = viewer::transfer_lut(L.volume.transfer, lo, hi, kLut);
+    std::vector<std::array<float, 4>> lut = viewer::transfer_lut(L.volume.transfer, lo, hi, kLut);
+    std::vector<float> sanitized;
+    if (check_finite_upload({lut[0].data(), lut.size() * 4}, "volume transfer function", &sanitized) > 0) {
+      std::memcpy(lut[0].data(), sanitized.data(), sanitized.size() * 4);
+    }
     const std::span<const float> flat(lut[0].data(), lut.size() * 4);
     const std::string tf_key = content_key("tf", flat) + (L.volume.transfer.nearest ? ":nn" : ":lin");
     lv.tf = cache.get(tf_key, [&] {

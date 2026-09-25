@@ -36,10 +36,22 @@ void main()
   v_tf = 0.0;
   v_rgba = vec4(1.0);
   v_rgbaf = vec4(1.0);
+  v_nan = 0;
   int mode = stk_color_mode();
   if (mode == STK_COLOR_LUT) {
     v_t = stk_cval_float(ci);
     v_tf = v_t;
+    if (stk_flag(STK_F_CELL)) {
+      v_nan = stk_cval_nan(ci) ? (STK_NAN_SMOOTH | STK_NAN_FLAT) : 0;
+    }
+    else {
+      /* A NaN at any corner makes the whole triangle NaN (as NaN interpolation would), the same
+       * flag on its three vertices; the flat value is the provoking vertex's own. */
+      uint first = tri * 3u;
+      bool any_nan = stk_cval_nan(stk_index(first)) || stk_cval_nan(stk_index(first + 1u)) ||
+                     stk_cval_nan(stk_index(first + 2u));
+      v_nan = (any_nan ? STK_NAN_SMOOTH : 0) | (stk_cval_nan(ci) ? STK_NAN_FLAT : 0);
+    }
   }
   else if (mode == STK_COLOR_RGBA) {
     v_rgba = stk_cval_rgba(ci);

@@ -121,6 +121,7 @@ struct VolumeLevel {
   ResourcePtr texture;
   double tex_scale = 1.0;           /* texture value -> stored value */
   double stored_lo = 0, stored_hi = 1; /* domain of the transfer-function LUT */
+  double hole_below = -3e38;           /* stored values below this are non-finite voxels */
   ResourcePtr tf;
   uint64_t voxels = 0;
 };

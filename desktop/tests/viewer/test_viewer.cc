@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <random>
 #include <set>
 
@@ -24,6 +25,7 @@
 #include "stk/gfx/offscreen.hh"
 #include "stk/viewer/camera.hh"
 #include "stk/viewer/colormap.hh"
+#include "stk/viewer_gpu/diagnostics.hh"
 
 namespace stk::viewer_gpu::test {
 namespace {
@@ -212,6 +214,160 @@ TEST(Categorical, MixedPointLabelsGetOneExactColourPerTriangle)
   allowed.insert({245, 245, 245}); /* background 0.96 */
   allowed.insert({26, 26, 26});    /* edges 0.1 */
   expect_only_colors(img, allowed, required, 200);
+}
+
+/* -------------------------------------------------------------------- */
+/* Non-finite values without GPU NaN/Inf semantics (Metal compiles shaders with fast math): NaN
+ * colours come from integer-tested sentinels, never from NaN arithmetic, and no non-finite float is
+ * ever uploaded (the upload gate of stk/viewer_gpu/diagnostics.hh). */
+
+TEST(NonFinite, NanAndInfWithoutGpuNanSemantics)
+{
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  const float fnan = std::numeric_limits<float>::quiet_NaN();
+  const uint64_t gate_before = nonfinite_float_uploads();
+  PayloadBuilder b({-3.0e5, 7.0e5, 1.0e6});
+  std::vector<uint8_t> lut;
+  for (int i = 0; i < 256; i++) {
+    lut.insert(lut.end(), {uint8_t(i), uint8_t(255 - i), uint8_t((i * 7) % 256), 255});
+  }
+  b.accessor("lut", lut, "u8", 4);
+  b.manifest()["colormaps"] = {{{"id", "cm"}, {"name", "ramp"}, {"categorical", false}, {"lut", "lut"},
+                                {"size", 256}, {"below_color", {0.0, 0.0, 1.0}}, {"above_color", {1.0, 0.0, 0.0}},
+                                {"nan_color", {0.0, 1.0, 0.0}}}};
+  const io::Json cm_color = {{"by", "attribute"}, {"attribute", "v"}, {"colormap", "cm"}};
+  /* Quads at x = 0, 2, 4, ...: (a) one NaN corner, smooth -> the whole quad is nan_color (as NaN
+   * interpolation); (b) cell values NaN / finite; (c) +inf / -inf (above / below); (d) NaN normals,
+   * lit, finite values; (e) NaN corner with nearest (flat) sampling of a finite provoking vertex. */
+  std::vector<float> pos;
+  std::vector<uint32_t> idx;
+  std::vector<double> point_v;
+  auto quad = [&](float x0, std::array<double, 4> v) {
+    const uint32_t a = uint32_t(pos.size() / 3);
+    pos.insert(pos.end(), {x0, 0, 0, x0 + 1.5f, 0, 0, x0 + 1.5f, 1.5f, 0, x0, 1.5f, 0});
+    idx.insert(idx.end(), {a, a + 1, a + 2, a, a + 2, a + 3});
+    point_v.insert(point_v.end(), v.begin(), v.end());
+  };
+  quad(0, {nan, 0.5, 0.5, 0.5});
+  b.accessor("qa_pos", pos, "f32", 3);
+  b.accessor("qa_idx", idx, "u32", 1);
+  b.accessor("qa_v", point_v, "f64", 1);
+  b.layer({{"id", "smooth"}, {"type", "triangles"}, {"positions", "qa_pos"}, {"indices", "qa_idx"},
+           {"attributes", {{"v", {{"accessor", "qa_v"}, {"association", "point"}, {"range", {0.0, 1.0}}}}}},
+           {"appearance", {{"color", cm_color}, {"lighting", false}}}});
+  std::vector<float> pos_b = {2, 0, 0, 3.5f, 0, 0, 3.5f, 1.5f, 0, 2, 1.5f, 0};
+  b.accessor("qb_pos", pos_b, "f32", 3);
+  b.accessor("qb_idx", std::vector<uint32_t>{0, 1, 2, 0, 2, 3}, "u32", 1);
+  b.accessor("qb_v", std::vector<double>{nan, 0.25}, "f64", 1);
+  b.layer({{"id", "cell"}, {"type", "triangles"}, {"positions", "qb_pos"}, {"indices", "qb_idx"},
+           {"attributes", {{"v", {{"accessor", "qb_v"}, {"association", "cell"}, {"range", {0.0, 1.0}}}}}},
+           {"appearance", {{"color", cm_color}, {"lighting", false}}}});
+  std::vector<float> pos_c = {4, 0, 0, 5.5f, 0, 0, 5.5f, 1.5f, 0, 4, 1.5f, 0, 4, 2, 0, 5.5f, 2, 0, 5.5f, 3.5f, 0, 4, 3.5f, 0};
+  b.accessor("qc_pos", pos_c, "f32", 3);
+  b.accessor("qc_idx", std::vector<uint32_t>{0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7}, "u32", 1);
+  b.accessor("qc_v", std::vector<double>{inf, inf, inf, inf, -inf, -inf, -inf, -inf}, "f64", 1);
+  b.layer({{"id", "infinite"}, {"type", "triangles"}, {"positions", "qc_pos"}, {"indices", "qc_idx"},
+           {"attributes", {{"v", {{"accessor", "qc_v"}, {"association", "point"}, {"range", {0.0, 1.0}}}}}},
+           {"appearance", {{"color", cm_color}, {"lighting", false}}}});
+  std::vector<float> pos_d = {6, 0, 0, 7.5f, 0, 0, 7.5f, 1.5f, 0, 6, 1.5f, 0};
+  b.accessor("qd_pos", pos_d, "f32", 3);
+  b.accessor("qd_nrm", std::vector<float>{fnan, fnan, fnan, 0, 0, 1, 0, 0, 1, fnan, 0, 1}, "f32", 3);
+  b.accessor("qd_idx", std::vector<uint32_t>{0, 1, 2, 0, 2, 3}, "u32", 1);
+  b.layer({{"id", "nan_normals"}, {"type", "triangles"}, {"positions", "qd_pos"}, {"normals", "qd_nrm"},
+           {"indices", "qd_idx"}, {"appearance", {{"color", {{"by", "solid"}, {"solid", {0.5, 0.5, 0.5}}}}}}});
+  /* Lines: a segment with a NaN endpoint (point values) is nan_color; one with finite values is not. */
+  b.accessor("ln_pos", std::vector<float>{0, -2, 0, 3, -2, 0, 4, -2, 0, 7, -2, 0}, "f32", 3);
+  b.accessor("ln_idx", std::vector<uint32_t>{0, 1, 2, 3}, "u32", 1);
+  b.accessor("ln_v", std::vector<double>{0.5, nan, 0.75, 0.75}, "f64", 1);
+  b.layer({{"id", "lines"}, {"type", "lines"}, {"positions", "ln_pos"}, {"mode", "segments"}, {"indices", "ln_idx"},
+           {"attributes", {{"v", {{"accessor", "ln_v"}, {"association", "point"}, {"range", {0.0, 1.0}}}}}},
+           {"appearance", {{"color", cm_color}, {"width_px", 7.0}}}});
+  /* Points: NaN value, finite value; spheres with NaN and finite radii. */
+  b.accessor("pt_pos", std::vector<float>{0, -4, 0, 2, -4, 0}, "f32", 3);
+  b.accessor("pt_v", std::vector<double>{nan, 0.5}, "f64", 1);
+  b.layer({{"id", "points"}, {"type", "points"}, {"positions", "pt_pos"},
+           {"attributes", {{"v", {{"accessor", "pt_v"}, {"association", "point"}, {"range", {0.0, 1.0}}}}}},
+           {"appearance", {{"color", cm_color}, {"render_as", "points"}, {"size_px", 14}}}});
+  b.accessor("sp_pos", std::vector<float>{4, -4, 0, 6, -4, 0}, "f32", 3);
+  b.accessor("sp_r", std::vector<float>{fnan, 0.5f}, "f32", 1);
+  b.layer({{"id", "spheres"}, {"type", "points"}, {"positions", "sp_pos"}, {"radii", "sp_r"},
+           {"appearance", {{"color", {{"by", "solid"}, {"solid", {1.0, 0.5, 0.0}}}}, {"render_as", "spheres"},
+                           {"lighting", false}}}});
+  /* Glyphs: NaN colour value, finite value, and a float32-overflowing scale (dropped). */
+  b.accessor("gl_pos", std::vector<float>{0, -6, 0, 2, -6, 0, 4, -6, 0}, "f32", 3);
+  b.accessor("gl_dir", std::vector<float>{1, 0, 0, 1, 0, 0, 1, 0, 0}, "f32", 3);
+  b.accessor("gl_s", std::vector<float>{0.8f, 0.8f, 3.0e38f}, "f32", 1);
+  b.accessor("gl_v", std::vector<double>{nan, 0.5, 0.5}, "f64", 1);
+  b.layer({{"id", "glyphs"}, {"type", "instances"}, {"positions", "gl_pos"}, {"directions", "gl_dir"},
+           {"scales", "gl_s"}, {"glyph", {{"shape", "cube"}}},
+           {"attributes", {{"v", {{"accessor", "gl_v"}, {"association", "point"}, {"range", {0.0, 1.0}}}}}},
+           {"appearance", {{"color", cm_color}, {"lighting", false}}}});
+  /* A float volume whose voxels are all NaN / Inf: transparent. */
+  std::vector<float> voxels(4 * 4 * 4, fnan);
+  voxels[5] = std::numeric_limits<float>::infinity();
+  voxels[9] = -std::numeric_limits<float>::infinity();
+  b.accessor("vol", voxels, "f32", 1);
+  b.layer({{"id", "volume"}, {"type", "volume"},
+           {"grid", {{"dimensions", {4, 4, 4}}, {"origin", {8.5, -6.5, -0.5}}, {"spacing", {0.4, 0.4, 0.4}}}},
+           {"data", "vol"}, {"value_range", {0.0, 1.0}},
+           {"transfer_function", {{"colormap", "cm"}, {"range", {0.0, 1.0}}, {"opacity", {{0.0, 1.0}, {1.0, 1.0}}}}}});
+  b.manifest()["bounds"] = {{-1.0, -8.0, -1.0}, {11.0, 4.0, 1.0}};
+  b.manifest()["view"] = {{"schema", "stk.view/1"},
+                          {"camera", {{"preset", "+z"}, {"projection", "parallel"}}},
+                          {"background", {{"type", "solid"}, {"color", {1.0, 1.0, 1.0}}}},
+                          {"lighting", {{"preset", "three_point"}}}};
+  auto payload = b.build();
+  Viewer v(gpu().fonts());
+  v.set_payload(payload);
+  const int W = 1200, H = 1200;
+  const gfx::Image img = render(v, "nonfinite", size(W, H));
+  const viewer::Viewport vp{double(W), double(H)};
+  auto at = [&](double x, double y) {
+    const auto s = viewer::project(v.camera(), vp, dvec3{x, y, 0.0});
+    EXPECT_TRUE(s.has_value());
+    const uint8_t *p = img.px(int(s->x), int(s->y));
+    return std::array<uint8_t, 3>{p[0], p[1], p[2]};
+  };
+  const auto cm = viewer::resolve_colormap(*payload, "cm");
+  ASSERT_TRUE(cm && cm->continuous);
+  const std::array<uint8_t, 3> green{0, 255, 0}, red{255, 0, 0}, blue{0, 0, 255}, white{255, 255, 255};
+  const auto mid = rgb(cm->continuous->map(0.5, 0, 1));
+  /* (a) smooth quad with a NaN corner: nan_color everywhere, including far from the NaN vertex. */
+  EXPECT_EQ(at(0.2, 0.2), green);
+  EXPECT_EQ(at(1.3, 1.3), green);
+  EXPECT_EQ(at(1.3, 0.2), green);
+  /* (b) cell values: triangle 0 NaN, triangle 1 = 0.25. */
+  EXPECT_EQ(at(3.3, 0.3), green);
+  EXPECT_EQ(at(2.2, 1.2), rgb(cm->continuous->map(0.25, 0, 1)));
+  /* (c) +inf above, -inf below. */
+  EXPECT_EQ(at(4.75, 0.75), red);
+  EXPECT_EQ(at(4.75, 2.75), blue);
+  /* (d) NaN normals: drawn (lit or facing the viewer), finite, not background. */
+  EXPECT_NE(at(6.75, 0.75), white);
+  /* Lines: NaN endpoint -> nan_color over the whole segment; finite segment -> its LUT colour. */
+  EXPECT_EQ(at(1.5, -2), green);
+  EXPECT_EQ(at(2.8, -2), green);
+  EXPECT_EQ(at(5.5, -2), rgb(cm->continuous->map(0.75, 0, 1)));
+  /* Points: NaN -> nan_color, 0.5 -> LUT. Spheres: NaN radius draws nothing. */
+  EXPECT_EQ(at(0, -4), green);
+  EXPECT_EQ(at(2, -4), mid);
+  EXPECT_EQ(at(4, -4), white);
+  EXPECT_EQ(at(6, -4), (std::array<uint8_t, 3>{255, 128, 0}));
+  /* Glyphs: NaN -> nan_color, 0.5 -> LUT; the overflowing scale is dropped. */
+  EXPECT_EQ(at(0, -6), green);
+  EXPECT_EQ(at(2, -6), mid);
+  EXPECT_EQ(v.layers()[size_t(payload->layers().size() - 2)].elements, 2u);
+  /* The all-non-finite volume is fully transparent. */
+  EXPECT_EQ(at(9.1, -5.9), white);
+  EXPECT_EQ(at(9.5, -5.5), white);
+  /* Nothing non-finite reached the GPU. */
+  EXPECT_EQ(nonfinite_float_uploads(), gate_before);
+  /* Picking still works on the NaN quad. */
+  const auto s = viewer::project(v.camera(), vp, dvec3{0.75, 0.75, 0.0});
+  const PickResult r = v.pick(s->x, s->y, W, H);
+  EXPECT_TRUE(r.hit);
+  EXPECT_EQ(r.layer_id, "smooth");
 }
 
 /* -------------------------------------------------------------------- */

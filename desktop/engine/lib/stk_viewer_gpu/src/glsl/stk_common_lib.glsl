@@ -7,7 +7,12 @@
  *   u_light        : ambient, diffuse, opacity, unused
  *   u_params       : flags, layer tag (id pass), element base (id pass), program-specific
  * Storage buffer s_cval holds one value per point or element: the float bits of the normalized LUT
- * coordinate t (colour mode LUT) or packed RGBA8 (colour mode RGBA). */
+ * coordinate t (colour mode LUT) or packed RGBA8 (colour mode RGBA).
+ *
+ * No NaN or Inf semantics anywhere: Metal compiles with fast math (isnan() and IEEE infinities are
+ * not reliable). The CPU never uploads a non-finite float (resources.cc checks every upload); a NaN
+ * value is the sentinel bit pattern STK_NAN_SENTINEL in s_cval, compared as an integer before any
+ * float use, and travels to the fragment stage as flat integer flags (STK_NAN_*). */
 
 #define STK_COLOR_MODE_MASK 3
 #define STK_COLOR_SOLID 0
@@ -25,6 +30,12 @@
 #define STK_F_WORLD_SPHERES 2048
 #define STK_F_ROUND_SPRITES 4096
 
+/* s_cval sentinel of a NaN value (the bits of -3.4028232e38: finite, never a real t, which the CPU
+ * clamps to +-1e6), and the flags of v_nan. */
+#define STK_NAN_SENTINEL 0xFF7FFFFEu
+#define STK_NAN_SMOOTH 1 /* a value interpolated into this primitive is NaN */
+#define STK_NAN_FLAT 2   /* the per-element (flat) value is NaN */
+
 bool stk_flag(int bit)
 {
   return (u_params.x & bit) != 0;
@@ -40,9 +51,6 @@ int stk_color_mode()
  * 259-texel texture [below, lut 0..255, above, nan] (ContinuousColormap::texture / texel). */
 int stk_lut_texel(float t)
 {
-  if (isnan(t)) {
-    return 258;
-  }
   if (t < 0.0) {
     return 0;
   }
@@ -52,13 +60,16 @@ int stk_lut_texel(float t)
   return 1 + min(255, int(floor(t * 256.0)));
 }
 
-/* Base colour of a fragment from the interpolated (smooth) and per-element (flat) values. */
-vec4 stk_base_color(float t_smooth, float t_flat, vec4 rgba_smooth, vec4 rgba_flat)
+/* Base colour of a fragment from the interpolated (smooth) and per-element (flat) values; `nan`
+ * holds the STK_NAN_* flags (texel 258 is nan_color). */
+vec4 stk_base_color(float t_smooth, float t_flat, vec4 rgba_smooth, vec4 rgba_flat, int nan)
 {
   int mode = stk_color_mode();
   bool use_flat = stk_flag(STK_F_CELL) || stk_flag(STK_F_FLAT_VALUE);
   if (mode == STK_COLOR_LUT) {
-    return texelFetch(s_lut, ivec2(stk_lut_texel(use_flat ? t_flat : t_smooth), 0), 0);
+    bool is_nan = (nan & (use_flat ? STK_NAN_FLAT : STK_NAN_SMOOTH)) != 0;
+    int texel = is_nan ? 258 : stk_lut_texel(use_flat ? t_flat : t_smooth);
+    return texelFetch(s_lut, ivec2(texel, 0), 0);
   }
   if (mode == STK_COLOR_RGBA) {
     return use_flat ? rgba_flat : rgba_smooth;
@@ -80,8 +91,11 @@ vec3 stk_shade(vec3 color, vec3 normal_eye, vec3 eye_pos)
   if (!stk_flag(STK_F_LIGHTING)) {
     return color;
   }
-  vec3 n = normalize(normal_eye);
-  vec3 to_eye = stk_flag(STK_F_PARALLEL) ? vec3(0.0, 0.0, 1.0) : normalize(-eye_pos);
+  /* Zero-length normals (degenerate triangles, zero normals in the payload) face the viewer. */
+  float len = length(normal_eye);
+  vec3 n = len > 1e-37 ? normal_eye / len : vec3(0.0, 0.0, 1.0);
+  float eye_len = length(eye_pos);
+  vec3 to_eye = (stk_flag(STK_F_PARALLEL) || !(eye_len > 1e-37)) ? vec3(0.0, 0.0, 1.0) : -eye_pos / eye_len;
   if (dot(n, to_eye) < 0.0) {
     n = -n;
   }
@@ -107,10 +121,16 @@ vec3 stk_shade(vec3 color, vec3 normal_eye, vec3 eye_pos)
 }
 
 #ifndef STK_NO_COLOR_LIB
-/* The value of point/element i in s_cval. */
+/* Whether the LUT value of point/element i is NaN (integer comparison of the raw bits). */
+bool stk_cval_nan(uint i)
+{
+  return s_cval[i] == STK_NAN_SENTINEL;
+}
+
+/* The LUT value of point/element i; 0 for NaN (never interpolate the sentinel). */
 float stk_cval_float(uint i)
 {
-  return uintBitsToFloat(s_cval[i]);
+  return stk_cval_nan(i) ? 0.0 : uintBitsToFloat(s_cval[i]);
 }
 
 vec4 stk_cval_rgba(uint i)

@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include "stk/gfx/gpu.hh"
+#include "stk/viewer_gpu/diagnostics.hh"
 
 namespace stk::viewer_gpu::test {
 extern gfx::Gpu *g_gpu;
@@ -63,6 +64,12 @@ int main(int argc, char **argv)
     viewer_gpu::test::g_backend = gfx::backend_id(gpu->backend());
     std::printf("backend %s: %s\n", gpu->backend_name(), gpu->device_info().c_str());
     rc = RUN_ALL_TESTS();
+    /* No test may have uploaded a non-finite float to the GPU (shaders have no NaN/Inf semantics on
+     * Metal). */
+    if (const uint64_t bad = viewer_gpu::nonfinite_float_uploads()) {
+      std::fprintf(stderr, "FAIL: %llu non-finite float values reached GPU buffers\n", (unsigned long long)bad);
+      rc = 1;
+    }
     viewer_gpu::test::g_gpu = nullptr;
     gpu.reset();
   }

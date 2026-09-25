@@ -75,7 +75,7 @@ if(STK_GPU_METAL)
   list(APPEND _backends metal)
 endif()
 
-set(_groups Golden Categorical Lut Tiling Picking Steps Lod Viewport CrossCheck Perf)
+set(_groups Golden Categorical Lut NonFinite Tiling Picking Steps Lod Viewport CrossCheck Perf)
 foreach(_be ${_backends})
   foreach(_group ${_groups})
     set(_name viewer_${_be}_${_group})

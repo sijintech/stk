@@ -6,7 +6,10 @@
  *  - samples every u_vol.w eye units; the stored value (texture value * u_vol2.w) indexes the
  *    transfer-function LUT over the stored domain [u_vol2.y, u_vol2.z] (colour, and opacity per unit
  *    distance u_vol2.x = min(spacing), corrected per step: 1 - (1 - a)^(step / unit));
- *  - front-to-back compositing into premultiplied colour. */
+ *  - front-to-back compositing into premultiplied colour.
+ * No IEEE infinities or NaN (Metal fast math): ray directions parallel to a box face use a large
+ * finite reciprocal, and non-finite voxels arrive as a finite sentinel far below the stored domain
+ * (scene.cc) and are skipped (transparent). */
 
 void main()
 {
@@ -27,7 +30,9 @@ void main()
   vec3 id = (u_eye_to_index * vec4(rd, 0.0)).xyz;
   vec3 box_lo = mix(vec3(0.0), vec3(-0.5), vec3(lessThan(dims, vec3(1.5))));
   vec3 box_hi = max(dims - 1.0, vec3(0.5) * vec3(lessThan(dims, vec3(1.5))));
-  vec3 inv = 1.0 / id;
+  /* Components near zero get a tiny signed finite value, so the slab test never divides by zero. */
+  vec3 id_safe = mix(id, mix(vec3(1e-20), vec3(-1e-20), lessThan(id, vec3(0.0))), lessThan(abs(id), vec3(1e-20)));
+  vec3 inv = 1.0 / id_safe;
   vec3 ta = (box_lo - io) * inv;
   vec3 tb = (box_hi - io) * inv;
   vec3 tmin3 = min(ta, tb);
@@ -41,11 +46,17 @@ void main()
   float unit = u_vol2.x;
   float lo = u_vol2.y, hi = u_vol2.z;
   float inv_range = hi > lo ? 1.0 / (hi - lo) : 0.0;
+  /* Below this stored value (u_light.w) a sample is a non-finite voxel (a hole); data values are
+   * >= lo, holes are stored far below it. */
+  float hole = u_light.w;
   vec4 acc = vec4(0.0);
   float t = t0 + 0.5 * step_len;
   for (int i = 0; i < 16384 && t < t1; i++, t += step_len) {
     vec3 p = io + id * t;
     float stored = texture(s_vol, (p + 0.5) / dims).r * u_vol2.w;
+    if (stored < hole) {
+      continue;
+    }
     float u = (stored - lo) * inv_range;
     vec4 tf = texture(s_tf, vec2(u, 0.5));
     float a = clamp(tf.a, 0.0, 1.0);

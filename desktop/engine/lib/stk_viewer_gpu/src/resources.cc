@@ -3,11 +3,16 @@
 #include "resources.hh"
 
 #include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
 #include "GPU_storage_buffer.hh"
 #include "GPU_texture.hh"
+
+#include "stk/viewer_gpu/diagnostics.hh"
 
 namespace stk::viewer_gpu {
 
@@ -39,6 +44,47 @@ ResourcePtr make_storage(std::span<const uint8_t> data, const char *name)
   }
   r->bytes = size;
   return r;
+}
+
+namespace {
+std::atomic<uint64_t> g_nonfinite{0};
+}
+
+uint64_t nonfinite_float_uploads()
+{
+  return g_nonfinite.load();
+}
+
+size_t check_finite_upload(std::span<const float> data, const char *what, std::vector<float> *sanitized)
+{
+  size_t bad = 0;
+  for (const float v : data) {
+    bad += std::isfinite(v) ? 0 : 1;
+  }
+  if (bad == 0) {
+    return 0;
+  }
+  g_nonfinite += bad;
+  std::fprintf(stderr, "stk_viewer_gpu: non-finite float upload: %zu of %zu values of %s (replaced by 0)\n", bad,
+               data.size(), what);
+  if (sanitized) {
+    sanitized->assign(data.begin(), data.end());
+    for (float &v : *sanitized) {
+      if (!std::isfinite(v)) {
+        v = 0.0f;
+      }
+    }
+  }
+  return bad;
+}
+
+ResourcePtr make_float_storage(std::span<const float> data, const char *name)
+{
+  std::vector<float> sanitized;
+  if (check_finite_upload(data, name, &sanitized) > 0) {
+    data = sanitized;
+  }
+  return make_storage({reinterpret_cast<const uint8_t *>(data.data()), data.size_bytes()}, name);
 }
 
 ResourceCache::~ResourceCache()

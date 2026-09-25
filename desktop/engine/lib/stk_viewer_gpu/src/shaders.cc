@@ -28,6 +28,7 @@ StageInterfaceInfo &surface_iface()
     i.smooth(Type::float4_t, "v_rgba");
     i.flat(Type::float4_t, "v_rgbaf");
     i.flat(Type::uint_t, "v_id");
+    i.flat(Type::int_t, "v_nan");
     return i;
   }();
   return iface;
@@ -44,6 +45,7 @@ StageInterfaceInfo &point_iface()
     i.flat(Type::float_t, "v_t");
     i.flat(Type::float4_t, "v_rgba");
     i.flat(Type::uint_t, "v_id");
+    i.flat(Type::int_t, "v_nan");
     return i;
   }();
   return iface;

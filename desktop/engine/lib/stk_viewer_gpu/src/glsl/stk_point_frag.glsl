@@ -18,7 +18,7 @@ void main()
     }
     float t = -b - sqrt(disc);
     vec3 hit = ro + rd * t;
-    normal = (hit - v_center) / max(v_radius, 1e-30);
+    normal = (hit - v_center) / max(v_radius, 1e-30); /* radius > 0: zero radii give empty quads */
     surface = hit;
     vec4 clip = u_proj * vec4(hit, 1.0);
     gl_FragDepth = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 1.0);
@@ -36,7 +36,7 @@ void main()
 #ifdef STK_ID_PASS
   out_id = uvec2(uint(u_params.y), v_id);
 #else
-  vec4 base = stk_base_color(v_t, v_t, v_rgba, v_rgba);
+  vec4 base = stk_base_color(v_t, v_t, v_rgba, v_rgba, v_nan);
   vec3 color = base.rgb;
   bool shaded = stk_flag(STK_F_WORLD_SPHERES) || stk_flag(STK_F_ROUND_SPRITES);
   if (shaded) {

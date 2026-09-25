@@ -16,6 +16,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace blender::gpu {
 class StorageBuf;
@@ -38,8 +39,17 @@ struct GpuResource {
 using ResourcePtr = std::shared_ptr<GpuResource>;
 
 /** A storage buffer with a copy of `data` (padded to a multiple of 16 bytes; empty data gives a
- * 16-byte zero buffer). */
+ * 16-byte zero buffer). Use make_float_storage for float data the shaders read. */
 ResourcePtr make_storage(std::span<const uint8_t> data, const char *name);
+
+/**
+ * The upload gate of float data read by shaders (see stk/viewer_gpu/diagnostics.hh): returns the
+ * number of non-finite values in `data`, counting and reporting them. `sanitized` receives a copy
+ * with those values replaced by 0 when there are any.
+ */
+size_t check_finite_upload(std::span<const float> data, const char *what, std::vector<float> *sanitized = nullptr);
+/** make_storage of float32 data through the upload gate. */
+ResourcePtr make_float_storage(std::span<const float> data, const char *name);
 
 class ResourceCache {
  public:

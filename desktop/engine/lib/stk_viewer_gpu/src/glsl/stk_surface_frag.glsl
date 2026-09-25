@@ -7,7 +7,7 @@ void main()
 #ifdef STK_ID_PASS
   out_id = uvec2(uint(u_params.y), v_id);
 #else
-  vec4 base = stk_base_color(v_t, v_tf, v_rgba, v_rgbaf);
+  vec4 base = stk_base_color(v_t, v_tf, v_rgba, v_rgbaf, v_nan);
   vec3 color = base.rgb;
   if (stk_flag(STK_F_LIGHTING)) {
     vec3 n = v_nrm;
