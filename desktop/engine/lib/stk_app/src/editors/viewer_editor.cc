@@ -67,18 +67,19 @@ const char *preset_key(const viewer::CameraPreset p)
   return "viewer.camera.iso";
 }
 
-/** A short tool label for the narrow tool column (until an icon set exists): the first character
- * of a CJK label ("旋"), the first two letters of a Latin one ("Or", "Pa", "Zo", "Pi"). */
-std::string first_char(std::string_view s)
+/** The narrow tool column's icon-like glyph (until an icon set exists), the same in every language;
+ * the tooltip names the tool. Orbit U+21BB, pan U+271A (move cross), zoom U+00B1 (in / out), pick
+ * U+2299 (target). Inter or Noto Sans CJK has each (BLF finds DejaVu Sans Mono's symbols, e.g.
+ * U+2725 or the magnifier U+2315, through no fallback). */
+const char *tool_glyph(const Tool t)
 {
-  if (s.size() >= 2 && uint8_t(s[0]) < 0x80 && uint8_t(s[1]) < 0x80) {
-    return std::string(s.substr(0, 2));
+  switch (t) {
+    case Tool::Orbit: return "\xe2\x86\xbb";
+    case Tool::Pan: return "\xe2\x9c\x9a";
+    case Tool::Zoom: return "\xc2\xb1";
+    case Tool::Pick: return "\xe2\x8a\x99";
   }
-  size_t n = 1;
-  while (n < s.size() && (uint8_t(s[n]) & 0xc0) == 0x80) {
-    n++;
-  }
-  return std::string(s.substr(0, std::min(n, s.size())));
+  return "?";
 }
 
 class ViewerEditor final : public Editor {
@@ -159,7 +160,7 @@ class ViewerEditor final : public Editor {
       const std::string key = std::string("editor.viewer.tool.") + tool_key(t);
       const std::string_view label = ctx.tr(key);
       /* A one-tab strip per tool: the selected look marks the active tool. */
-      l.tabs(std::string("tool.") + tool_key(t), {first_char(label)},
+      l.tabs(std::string("tool.") + tool_key(t), {tool_glyph(t)},
              {[this, t]() { return tool_ == t ? 0 : -1; }, [this, t](int) { tool_ = t; }})
           .tip(std::string(label) + "\n" + std::string(ctx.tr(std::string("viewer.tool.") + tool_key(t) + ".tip")));
     }
