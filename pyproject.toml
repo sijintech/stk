@@ -16,7 +16,7 @@ packages = [
     { include = "stk_data", from = "toolkits/smesh/src" },
     { include = "toolkits" },
 ]
-exclude = ["toolkits/cpp/**", "toolkits/**/tests/**", "toolkits/**/test/**", "**/__pycache__/**", "**/*.pyc"]
+exclude = ["desktop/**", "toolkits/cpp/**", "toolkits/**/tests/**", "toolkits/**/test/**", "**/__pycache__/**", "**/*.pyc"]
 include = [
     { path = "docs/runtime*.md", format = "sdist" },
     { path = "docs/visualization.md", format = "sdist" },

@@ -1,0 +1,2542 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:desktop-bridge-1",
+  "title": "STK desktop bridge protocol v1",
+  "description": "NDJSON messages between the STK desktop app and its Python bridge (python -m suan.desktop_bridge --stdio): requests, responses and events. $defs/methods/<name>/params|result and $defs/events/<name> describe each method and event. See docs/specs/stk-desktop-bridge-v1.md.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    },
+    {
+      "$ref": "#/$defs/event"
+    }
+  ],
+  "$defs": {
+    "id": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "method": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "maxLength": 64
+        },
+        "params": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "method"
+      ],
+      "additionalProperties": false
+    },
+    "response": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "result": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "id",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error": {
+              "$ref": "#/$defs/error"
+            }
+          },
+          "required": [
+            "id",
+            "error"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "event",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "busy",
+            "cancelled",
+            "checksum_mismatch",
+            "conflict",
+            "graph_error",
+            "internal_error",
+            "invalid_params",
+            "invalid_request",
+            "line_too_long",
+            "not_found",
+            "parse_error",
+            "remote_error",
+            "result_too_large",
+            "review_not_inspected",
+            "shutting_down",
+            "timeout",
+            "unauthorized",
+            "unavailable",
+            "unknown_method",
+            "unsupported"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "data": {}
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "hex32": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{32}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "evalId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "profileName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "connectionId": {
+      "type": "string",
+      "pattern": "^(local|runtime:.{1,64}|hub:.{1,64})$"
+    },
+    "absPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32767
+    },
+    "relPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "logStream": {
+      "enum": [
+        "stdout",
+        "stderr",
+        "scheduler.out",
+        "scheduler.err",
+        "wrapper"
+      ]
+    },
+    "subscribed": {
+      "type": "object",
+      "properties": {
+        "sub": {
+          "$ref": "#/$defs/hex32"
+        }
+      },
+      "required": [
+        "sub"
+      ]
+    },
+    "connection": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/connectionId"
+        },
+        "kind": {
+          "enum": [
+            "local",
+            "runtime",
+            "hub"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "device_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "url"
+      ]
+    },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/hex32"
+        },
+        "name": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "media_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "sha256"
+      ]
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/taskId"
+        },
+        "state": {
+          "type": "string"
+        },
+        "spec": {
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cancel_requested": {
+          "type": "boolean"
+        },
+        "monitor": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ]
+    },
+    "actionSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/hex32"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "review",
+            "queued",
+            "succeeded",
+            "failed",
+            "rejected"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created": {
+          "type": "number"
+        },
+        "updated": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state"
+      ]
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/hex32"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "request": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "payload": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        },
+        "state": {
+          "enum": [
+            "review",
+            "queued",
+            "succeeded",
+            "failed",
+            "rejected"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {}
+      },
+      "required": [
+        "id",
+        "request",
+        "state"
+      ]
+    },
+    "transfer": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/hex32"
+        },
+        "kind": {
+          "enum": [
+            "upload",
+            "download"
+          ]
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "running",
+            "interrupted",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "connection": {
+          "$ref": "#/$defs/connectionId"
+        },
+        "node": {
+          "$ref": "#/$defs/hex32"
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/hex32"
+        },
+        "task_id": {
+          "$ref": "#/$defs/taskId"
+        },
+        "local": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "bytes_done": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_done": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "connection",
+        "local",
+        "remote",
+        "bytes_done",
+        "bytes_total",
+        "files_done",
+        "files_total",
+        "created_at"
+      ]
+    },
+    "graphIssue": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warning"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "graphResult": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "stk.graph-result/1"
+        },
+        "outputs": {
+          "type": "object"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema",
+        "outputs"
+      ]
+    },
+    "methods": {
+      "blob.ensure": {
+        "description": "Make blobs available in the local cache (fetched from a hub connection when given).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "sha256": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sha256"
+              },
+              "minItems": 1,
+              "maxItems": 4096
+            },
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "blobs": {
+              "type": "object",
+              "properties": {},
+              "patternProperties": {
+                "^[a-f0-9]{64}$": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "size"
+                  ]
+                }
+              }
+            },
+            "missing": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sha256"
+              }
+            },
+            "blob_dir": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "blobs",
+            "missing",
+            "blob_dir"
+          ]
+        }
+      },
+      "colormaps.list": {
+        "description": "Built-in colormap LUTs (256 x RGBA8, base64) and palette names.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "colormaps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "lut_rgba8": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "lut_rgba8"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object"
+            },
+            "categorical_palettes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "reserved_colors": {
+              "type": "object"
+            },
+            "nan_color": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "colormaps",
+            "aliases",
+            "categorical_palettes"
+          ]
+        }
+      },
+      "connections.add_runtime": {
+        "description": "Save a loopback Runtime endpoint and its token (inbound only); checks health unless check=false.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "$ref": "#/$defs/profileName"
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "token": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "token_file": {
+              "$ref": "#/$defs/absPath"
+            },
+            "check": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connection"
+            }
+          },
+          "required": [
+            "connection"
+          ]
+        }
+      },
+      "connections.check": {
+        "description": "Health of a connection; ok=false with an error when unreachable.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "health": {
+              "type": "object"
+            },
+            "nodes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "error": {
+              "$ref": "#/$defs/error"
+            }
+          },
+          "required": [
+            "id",
+            "ok"
+          ]
+        }
+      },
+      "connections.list": {
+        "description": "Saved connections: the local Runtime, Runtime profiles and paired hubs (no credentials).",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "connections": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/connection"
+              }
+            }
+          },
+          "required": [
+            "connections"
+          ]
+        }
+      },
+      "connections.local": {
+        "description": "Status of the Runtime initialized on this computer.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "initialized": {
+              "type": "boolean"
+            },
+            "api_running": {
+              "type": "boolean"
+            },
+            "supervisor_running": {
+              "type": "boolean"
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state_dir": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "initialized",
+            "api_running",
+            "supervisor_running",
+            "url",
+            "state_dir"
+          ]
+        }
+      },
+      "connections.local_start": {
+        "description": "Start the local Runtime API and supervisor (Linux server Runtime only).",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "initialized": {
+              "type": "boolean"
+            },
+            "api_running": {
+              "type": "boolean"
+            },
+            "supervisor_running": {
+              "type": "boolean"
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state_dir": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "initialized",
+            "api_running",
+            "supervisor_running",
+            "url",
+            "state_dir"
+          ]
+        }
+      },
+      "connections.pair_hub": {
+        "description": "Claim a one-time client pairing code of a control hub; the device token stays in the bridge.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "$ref": "#/$defs/profileName"
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "code": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 200
+            },
+            "device_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "name",
+            "url",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connection"
+            }
+          },
+          "required": [
+            "connection"
+          ]
+        }
+      },
+      "connections.remove": {
+        "description": "Forget a Runtime profile or a paired hub.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "removed": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "removed"
+          ]
+        }
+      },
+      "download.start": {
+        "description": "Download a task artifact or workspace input (resumable, journaled, sha256-verified).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "task_id": {
+              "$ref": "#/$defs/taskId"
+            },
+            "workspace_id": {
+              "$ref": "#/$defs/hex32"
+            },
+            "path": {
+              "$ref": "#/$defs/relPath"
+            },
+            "dest": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "required": [
+            "connection",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "transfer": {
+              "$ref": "#/$defs/transfer"
+            }
+          },
+          "required": [
+            "transfer"
+          ]
+        }
+      },
+      "events.subscribe": {
+        "description": "Monitoring events (events.batch) from a byte offset; events.end once the task finished.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "task_id": {
+              "$ref": "#/$defs/taskId"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "connection",
+            "task_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/subscribed"
+        }
+      },
+      "graph.cancel": {
+        "description": "Cancel a running local evaluation (hub mode: stop waiting).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "eval_id": {
+              "$ref": "#/$defs/evalId"
+            }
+          },
+          "required": [
+            "eval_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "cancelled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "cancelled"
+          ]
+        }
+      },
+      "graph.catalog": {
+        "description": "The node catalog stk.catalog/1 of this installation.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "catalog": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "catalog"
+          ]
+        }
+      },
+      "graph.evaluate": {
+        "description": "Evaluate a graph request locally or on a hub node; every referenced blob is in the local blob cache.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "eval_id": {
+              "$ref": "#/$defs/evalId"
+            },
+            "mode": {
+              "enum": [
+                "local",
+                "hub"
+              ]
+            },
+            "request": {
+              "type": "object"
+            },
+            "local_bindings": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[a-z][a-z0-9_]{0,63}$": {
+                  "$ref": "#/$defs/absPath"
+                }
+              },
+              "maxProperties": 64
+            },
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "wait": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            }
+          },
+          "required": [
+            "eval_id",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/graphResult"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "blob_dir": {
+              "type": "string"
+            },
+            "action": {
+              "$ref": "#/$defs/actionSummary"
+            }
+          },
+          "required": [
+            "result",
+            "blob_dir"
+          ]
+        }
+      },
+      "graph.presets": {
+        "description": "Shipped graph presets with their bindings and parameters.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "presets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "graph": {
+                    "type": "object"
+                  },
+                  "bindings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "parameters": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "graph",
+                  "bindings",
+                  "parameters"
+                ]
+              }
+            }
+          },
+          "required": [
+            "presets"
+          ]
+        }
+      },
+      "graph.validate": {
+        "description": "Validate an stk.graph/1 document (issues with stable codes and JSON pointers).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "graph": {
+              "type": "object"
+            },
+            "parameters": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "graph"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/graphIssue"
+              }
+            }
+          },
+          "required": [
+            "ok",
+            "issues"
+          ]
+        }
+      },
+      "hello": {
+        "description": "Negotiate the protocol; returns capabilities, limits and local cache paths. Send it first.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "client": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "version": {
+                  "type": "string",
+                  "maxLength": 100
+                }
+              },
+              "additionalProperties": false
+            },
+            "resume_transfers": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "protocol"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "const": 1
+            },
+            "server": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "python": {
+                  "type": "string"
+                },
+                "platform": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "version",
+                "python",
+                "platform",
+                "pid"
+              ]
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "limits": {
+              "type": "object",
+              "properties": {
+                "max_line_bytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max_inflight": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "watch_interval_s": {
+                  "type": "number"
+                },
+                "log_chunk_bytes": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "transfer_chunk_bytes": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "max_line_bytes",
+                "max_inflight",
+                "watch_interval_s",
+                "log_chunk_bytes",
+                "transfer_chunk_bytes"
+              ]
+            },
+            "paths": {
+              "type": "object",
+              "properties": {
+                "state_dir": {
+                  "type": "string"
+                },
+                "cache_dir": {
+                  "type": "string"
+                },
+                "blob_dir": {
+                  "type": "string"
+                },
+                "download_dir": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state_dir",
+                "cache_dir",
+                "blob_dir",
+                "download_dir"
+              ]
+            },
+            "resumed_transfers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/hex32"
+              }
+            }
+          },
+          "required": [
+            "protocol",
+            "server",
+            "methods",
+            "events",
+            "limits",
+            "paths",
+            "resumed_transfers"
+          ]
+        }
+      },
+      "hub.action": {
+        "description": "One action with its full request and result; marks it inspected for review.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "action_id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "connection",
+            "action_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/action"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      },
+      "hub.actions": {
+        "description": "Recent actions and every action awaiting review (without results).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/action"
+              }
+            }
+          },
+          "required": [
+            "actions"
+          ]
+        }
+      },
+      "hub.devices": {
+        "description": "Devices of a hub: execution nodes with their latest snapshot (workspaces, tasks, features).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "devices": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/hex32"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "online": {
+                    "type": "boolean"
+                  },
+                  "snapshot": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "role",
+                  "online"
+                ]
+              }
+            }
+          },
+          "required": [
+            "devices"
+          ]
+        }
+      },
+      "hub.review": {
+        "description": "Approve or reject an action in review; approving needs a prior hub.action (review_not_inspected).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "action_id": {
+              "$ref": "#/$defs/hex32"
+            },
+            "approved": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connection",
+            "action_id",
+            "approved"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/action"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      },
+      "hub.subscribe": {
+        "description": "Stream hub events (hub.event) from a cursor, reconnecting with backoff.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "after": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/subscribed"
+        }
+      },
+      "hub.templates": {
+        "description": "Command templates the hub runs without review.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "templates": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "templates"
+          ]
+        }
+      },
+      "logs.subscribe": {
+        "description": "Incremental UTF-8 log text (logs.chunk) from byte offsets on character boundaries; logs.end when done.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "task_id": {
+              "$ref": "#/$defs/taskId"
+            },
+            "streams": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/logStream"
+              },
+              "minItems": 1,
+              "maxItems": 5
+            },
+            "offsets": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false,
+              "patternProperties": {
+                "^(stdout|stderr|scheduler\\.out|scheduler\\.err|wrapper)$": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "chunk_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            }
+          },
+          "required": [
+            "connection",
+            "task_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/subscribed"
+        }
+      },
+      "probe": {
+        "description": "Resolve where a picked layer's original data lives (suan.graph.probe) and sample it at position.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "graph": {
+              "type": "object"
+            },
+            "preset": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "pick": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "dataset": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "node"
+              ]
+            },
+            "context": {
+              "type": "object",
+              "properties": {
+                "bindings": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false,
+                  "patternProperties": {
+                    "^[a-z][a-z0-9_]{0,63}$": {
+                      "$ref": "#/$defs/taskId"
+                    }
+                  }
+                },
+                "values": {
+                  "type": "object"
+                },
+                "result": {
+                  "anyOf": [
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "artifacts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "local_bindings": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[a-z][a-z0-9_]{0,63}$": {
+                  "$ref": "#/$defs/absPath"
+                }
+              },
+              "maxProperties": 64
+            },
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "position": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            }
+          },
+          "required": [
+            "pick"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "binding": {
+                  "type": "string"
+                },
+                "task_id": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "metadata": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "binding",
+                "path",
+                "node"
+              ]
+            },
+            "sample": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "type": [
+                      "number",
+                      "string"
+                    ]
+                  }
+                },
+                "units": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "interpolation": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "position",
+                "values"
+              ]
+            }
+          },
+          "required": [
+            "target"
+          ]
+        }
+      },
+      "shutdown": {
+        "description": "Respond, then shut down gracefully (as on stdin EOF). Jobs keep running.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        }
+      },
+      "task.artifacts": {
+        "description": "Published files of a finished task with size and sha256 (empty while it runs).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "task_id": {
+              "$ref": "#/$defs/taskId"
+            }
+          },
+          "required": [
+            "connection",
+            "task_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/artifact"
+              }
+            }
+          },
+          "required": [
+            "artifacts"
+          ]
+        }
+      },
+      "task.cancel": {
+        "description": "Request cancellation of a task.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "task_id": {
+              "$ref": "#/$defs/taskId"
+            },
+            "idempotency_key": {
+              "$ref": "#/$defs/key"
+            }
+          },
+          "required": [
+            "connection",
+            "task_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/task"
+            },
+            "action": {
+              "$ref": "#/$defs/actionSummary"
+            }
+          }
+        }
+      },
+      "task.get": {
+        "description": "One task record (with the monitoring summary when events exist).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "task_id": {
+              "$ref": "#/$defs/taskId"
+            }
+          },
+          "required": [
+            "connection",
+            "task_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/task"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      },
+      "task.list": {
+        "description": "Tasks, newest first, optionally of one workspace.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "workspace_id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/task"
+              }
+            }
+          },
+          "required": [
+            "tasks"
+          ]
+        }
+      },
+      "task.submit": {
+        "description": "Submit a TaskSpec (or a hub template); the same key returns the same task, a different spec is a conflict.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "idempotency_key": {
+              "$ref": "#/$defs/key"
+            },
+            "spec": {
+              "type": "object"
+            },
+            "template": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "workspace_id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "connection",
+            "idempotency_key"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/task"
+            },
+            "action": {
+              "$ref": "#/$defs/actionSummary"
+            }
+          }
+        }
+      },
+      "transfer.cancel": {
+        "description": "Stop a transfer; aborts the Runtime upload session or discards the partial download.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "transfer": {
+              "$ref": "#/$defs/transfer"
+            }
+          },
+          "required": [
+            "transfer"
+          ]
+        }
+      },
+      "transfer.get": {
+        "description": "One transfer.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "transfer": {
+              "$ref": "#/$defs/transfer"
+            }
+          },
+          "required": [
+            "transfer"
+          ]
+        }
+      },
+      "transfer.list": {
+        "description": "Every journaled transfer (finished ones are kept for 7 days).",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "transfers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/transfer"
+              }
+            }
+          },
+          "required": [
+            "transfers"
+          ]
+        }
+      },
+      "transfer.resume": {
+        "description": "Continue an interrupted or failed transfer from its journal.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "transfer": {
+              "$ref": "#/$defs/transfer"
+            }
+          },
+          "required": [
+            "transfer"
+          ]
+        }
+      },
+      "unsubscribe": {
+        "description": "Stop a subscription.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "sub": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "sub"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        }
+      },
+      "upload.start": {
+        "description": "Upload a file or a folder (resumable, journaled, sha256-verified by the Runtime).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "workspace_id": {
+              "$ref": "#/$defs/hex32"
+            },
+            "source": {
+              "$ref": "#/$defs/absPath"
+            },
+            "remote": {
+              "$ref": "#/$defs/relPath"
+            }
+          },
+          "required": [
+            "connection",
+            "workspace_id",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "transfer": {
+              "$ref": "#/$defs/transfer"
+            }
+          },
+          "required": [
+            "transfer"
+          ]
+        }
+      },
+      "watch": {
+        "description": "Task snapshots (watch.snapshot) every interval (2 s) when they change.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "workspace_id": {
+              "$ref": "#/$defs/hex32"
+            },
+            "task_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/taskId"
+              },
+              "maxItems": 1000
+            },
+            "interval": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 3600
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/subscribed"
+        }
+      },
+      "workspace.create": {
+        "description": "Create a workspace; the same idempotency_key returns the same workspace.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "idempotency_key": {
+              "$ref": "#/$defs/key"
+            }
+          },
+          "required": [
+            "connection",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "$ref": "#/$defs/workspace"
+            },
+            "action": {
+              "$ref": "#/$defs/actionSummary"
+            }
+          }
+        }
+      },
+      "workspace.files": {
+        "description": "Input files of a workspace with size and sha256 (Runtime connections).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "workspace_id": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "connection",
+            "workspace_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/artifact"
+              }
+            }
+          },
+          "required": [
+            "files"
+          ]
+        }
+      },
+      "workspace.list": {
+        "description": "Workspaces of a Runtime (or of a hub node's snapshot).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "connection"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "workspaces": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/workspace"
+              }
+            }
+          },
+          "required": [
+            "workspaces"
+          ]
+        }
+      }
+    },
+    "events": {
+      "events.batch": {
+        "type": "object",
+        "properties": {
+          "sub": {
+            "$ref": "#/$defs/hex32"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "invalid": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "next_offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "sub",
+          "events",
+          "invalid",
+          "offset",
+          "next_offset"
+        ]
+      },
+      "events.end": {
+        "type": "object",
+        "properties": {
+          "sub": {
+            "$ref": "#/$defs/hex32"
+          },
+          "next_offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "sub",
+          "next_offset"
+        ]
+      },
+      "graph.progress": {
+        "type": "object",
+        "properties": {
+          "eval_id": {
+            "$ref": "#/$defs/evalId"
+          },
+          "event": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "required": [
+          "eval_id",
+          "event"
+        ]
+      },
+      "hub.event": {
+        "type": "object",
+        "properties": {
+          "sub": {
+            "$ref": "#/$defs/hex32"
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "sub",
+          "cursor",
+          "kind",
+          "payload"
+        ]
+      },
+      "logs.chunk": {
+        "type": "object",
+        "properties": {
+          "sub": {
+            "$ref": "#/$defs/hex32"
+          },
+          "stream": {
+            "$ref": "#/$defs/logStream"
+          },
+          "text": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "next_offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "sub",
+          "stream",
+          "text",
+          "offset",
+          "next_offset"
+        ]
+      },
+      "logs.end": {
+        "type": "object",
+        "properties": {
+          "sub": {
+            "$ref": "#/$defs/hex32"
+          },
+          "offsets": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "sub",
+          "offsets"
+        ]
+      },
+      "subscription.error": {
+        "type": "object",
+        "properties": {
+          "sub": {
+            "$ref": "#/$defs/hex32"
+          },
+          "error": {
+            "$ref": "#/$defs/error"
+          },
+          "final": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sub",
+          "error"
+        ]
+      },
+      "transfer.updated": {
+        "type": "object",
+        "properties": {
+          "transfer": {
+            "$ref": "#/$defs/transfer"
+          }
+        },
+        "required": [
+          "transfer"
+        ]
+      },
+      "watch.snapshot": {
+        "type": "object",
+        "properties": {
+          "sub": {
+            "$ref": "#/$defs/hex32"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/task"
+            }
+          },
+          "time": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "sub",
+          "tasks"
+        ]
+      }
+    }
+  }
+}
