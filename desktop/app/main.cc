@@ -593,16 +593,12 @@ int main(int argc, char **argv)
     stk::gfx::Runtime runtime;
     rc = args.headless ? run_headless(args, backend) : run_gui(args, backend);
   }
-  /* Everything engine-side is shut down now; guardedalloc also aborts at exit on leaks. */
-  const unsigned int blocks = stk::gfx::Runtime::memory_blocks_in_use();
-  if (blocks != 0) {
-    fprintf(stderr, "stk-desktop: %u guardedalloc block(s) leaked (report follows at exit)\n", blocks);
-    if (rc == kOk) {
-      rc = kFailure;
-    }
-  }
-  else if (args.verbose) {
-    printf("guardedalloc: 0 blocks in use at exit\n");
+  /* Everything engine-side is shut down now. Function-local statics of the engine may still hold
+   * blocks until static destruction (e.g. the Metal shader generator's `glsl_builtin_types` set),
+   * so the leak check itself is guardedalloc's at-exit one, which aborts when a block remains. */
+  if (args.verbose) {
+    printf("guardedalloc: %u block(s) in use after shutdown (leaks are checked at exit)\n",
+           stk::gfx::Runtime::memory_blocks_in_use());
   }
   return rc;
 }

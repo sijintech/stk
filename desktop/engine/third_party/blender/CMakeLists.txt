@@ -185,6 +185,10 @@ target_compile_definitions(bf_intern_eigen PUBLIC EIGEN_MALLOC_ALREADY_ALIGNED=0
 set(BLI "${BF}/source/blender/blenlib/intern")
 file(GLOB BLENLIB_SRC CONFIGURE_DEPENDS "${BLI}/*.cc")
 list(FILTER BLENLIB_SRC EXCLUDE REGEX "/(winstuff|winstuff_dir|system_win32)\\.cc$")
+# The math *_inline.cc files are headers (#pragma once, included by BLI_math_*.h through
+# BLI_MATH_DO_INLINE); upstream marks them HEADER_FILE_ONLY. GCC honours #pragma once in the main
+# file and skips the re-include, Clang/MSVC do not and report redefinitions.
+list(FILTER BLENLIB_SRC EXCLUDE REGEX "/math_[a-z_]+_inline\\.cc$")
 if(WIN32)
   list(APPEND BLENLIB_SRC ${BLI}/winstuff.cc ${BLI}/winstuff_dir.cc ${BLI}/winstuff_registration.cc
     ${BLI}/system_win32.cc)
@@ -327,6 +331,16 @@ if(STK_GPU_METAL)
 endif()
 
 bf_add_lib(bf_gpu ${GPU_SRC})
+if(NOT STK_GPU_VULKAN)
+  # gpu_context.cc uses blender::Mutex without including BLI_mutex.hh; upstream gets it through
+  # vk_backend.hh (every upstream Windows/Linux build has Vulkan). Provide it without a patch.
+  if(MSVC)
+    set(_force_mutex /FIBLI_mutex.hh)
+  else()
+    set(_force_mutex -include BLI_mutex.hh)
+  endif()
+  set_property(SOURCE ${BF_GPU}/intern/gpu_context.cc APPEND PROPERTY COMPILE_OPTIONS ${_force_mutex})
+endif()
 target_include_directories(bf_gpu
   PUBLIC ${BF_GPU}
   PRIVATE
@@ -466,4 +480,9 @@ target_link_libraries(bf_blenfont PUBLIC bf_gpu bf_blenlib Freetype::Freetype st
 # Everything the engine needs, as one link target.
 add_library(stk_blender INTERFACE)
 target_link_libraries(stk_blender INTERFACE bf_blenfont bf_gpu bf_intern_ghost bf_blenlib stk_blender_shims)
+if(WIN32)
+  # Every executable linking the engine gets the application manifest (Common Controls 6, UTF-8
+  # code page), as upstream embeds blender.exe.manifest.
+  target_sources(stk_blender INTERFACE "${PROJECT_SOURCE_DIR}/cmake/windows/stk-desktop.manifest")
+endif()
 set(STK_BLENDER_DATAFILES "${BF}/release/datafiles" CACHE INTERNAL "Vendored Blender datafiles (fonts)")

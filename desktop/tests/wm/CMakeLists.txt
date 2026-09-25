@@ -92,7 +92,7 @@ foreach(_be ${_backends})
     set_tests_properties(wm_headless_export_${_be}_${_tag}x PROPERTIES
       LABELS "gpu" TIMEOUT 300 ENVIRONMENT "${_env_headless}"
       FIXTURES_SETUP wm_export_${_be}
-      # A leak makes stk-desktop fail (exit 1, then guardedalloc's report).
+      # A leak makes guardedalloc print its report and abort at exit.
       FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory")
     list(APPEND _check_args "${_s}=${_png}")
   endforeach()

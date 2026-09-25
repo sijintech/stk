@@ -1059,7 +1059,7 @@ void PayloadValidator::run()
     throw PayloadError("manifest must be a JSON object");
   }
   const Json *schema = get(m_, "schema");
-  if (!schema || *schema != kPayloadSchema) {
+  if (!schema || *schema != Json(std::string(kPayloadSchema))) {
     fail("schema must be 'stk.payload/2', got " + repr(schema), "/schema");
   }
   for (const char *key : {"render_origin", "length_unit", "buffers", "accessors", "layers"}) {

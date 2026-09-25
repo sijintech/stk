@@ -51,6 +51,7 @@
   "source/blender/blenlib/intern/fileops_c.cc",
   "source/blender/blenlib/intern/fileops.cc",
   "source/blender/blenlib/intern/fileops_apple.mm",
+  "source/blender/blenlib/intern/fnmatch.cc",
   "source/blender/blenlib/intern/hash_mm2a.cc",
   "source/blender/blenlib/intern/hash_tables.cc",
   "source/blender/blenlib/intern/index_range.cc",

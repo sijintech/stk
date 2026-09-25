@@ -76,6 +76,7 @@
   "cstdlib",
   "cstring",
   "ctime",
+  "ctype.h",
   "cwchar",
   "cwctype",
   "dbghelp.h",
@@ -91,6 +92,7 @@
   "epoxy/gl.h",
   "epoxy/glx.h",
   "epoxy/wgl.h",
+  "errno.h",
   "execinfo.h",
   "fcntl.h",
   "filesystem",
@@ -215,10 +217,10 @@
   "zstd.h"
  ],
  "counts": {
-  "files": 1094,
+  "files": 1095,
   "by_reason": {
    "tree": 853,
-   "file": 66,
+   "file": 67,
    "closure": 175
   }
  },
@@ -585,6 +587,7 @@
   "source/blender/blenlib/intern/fileops.cc": "f05177d52c32e2e324012ac002110ecb6013ca9109eecd75b1cba238b4c88579",
   "source/blender/blenlib/intern/fileops_apple.mm": "89385c56edea455cf0abf127248f60e1f28024ccc8763a5934f2dbf749f7232a",
   "source/blender/blenlib/intern/fileops_c.cc": "dbe2f5abb2a1fe3e3d3bd8684aa6ebc5520dc091ea5017fed61bce8c14392c4f",
+  "source/blender/blenlib/intern/fnmatch.cc": "999783c4fff214f69ebc88eebb1d6a89006a46a803e6da77ec38286216154944",
   "source/blender/blenlib/intern/hash_mm2a.cc": "c8b0087f06687e4c195735c69c1934ce12a6cb1105d4d2ab2610f3fbbcb23986",
   "source/blender/blenlib/intern/hash_tables.cc": "56b00b9f240461c8f9d29f2cd45e06426ec5af0ab71243d031070d79ad32993a",
   "source/blender/blenlib/intern/index_range.cc": "81eaf3bc80bb657cfaaade5c91913c5383cbbe74cd2bd6a311022b3a739a6976",
