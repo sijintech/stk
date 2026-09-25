@@ -1,17 +1,25 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# STK desktop engine (desktop/, GPL-2.0-or-later): build and test on GitHub-hosted runners.
+# STK desktop engine (desktop/, GPL-2.0-or-later): build, test and package on GitHub-hosted runners.
 #
-#   linux   : Ubuntu 26.04 container (the package set the engine is developed against), full
-#             build, vendoring / Phase 0 go-criteria checks, all ctests: headless GPU goldens on
-#             Mesa lavapipe (Vulkan) and llvmpipe (OpenGL/EGL), live windows on Xvfb and a
-#             headless weston (unix sockets only, inside the job container).
-#   macos   : arm64, Cocoa + Metal, full build; CPU, CLI, UI and bridge tests; headless Metal
-#             goldens and viewer tests on the runner's paravirtual Metal device; stk-render smoke.
-#   windows : MSVC build of every target (OpenGL backend, Win32 GHOST); CPU, CLI, UI and bridge
-#             tests (no GPU on the runner).
+#   linux         : Ubuntu 26.04 container (the package set the engine is developed against), full
+#                   build, vendoring / Phase 0 go-criteria checks, all ctests: headless GPU goldens on
+#                   Mesa lavapipe (Vulkan) and llvmpipe (OpenGL/EGL), live windows on Xvfb and a
+#                   headless weston (unix sockets only, inside the job container). A venv with STK's
+#                   runtime, science, visualization and control extras backs the real-bridge tests,
+#                   the loopback-Runtime Jobs test and the e2e golden; they must run, not skip.
+#   linux-package : Ubuntu 24.04 container (the oldest supported glibc): relocatable Release build,
+#                   CPack tarball with the non-system libraries bundled (shaderc, libepoxy).
+#   linux-package-smoke : a fresh Ubuntu 24.04 container with only the runtime libraries a desktop
+#                   has: unpack the tarball, render headless (OpenGL and Vulkan) and run the e2e
+#                   preset command against a venv with `pip install` of the repository.
+#   macos         : arm64, Cocoa + Metal, full build; CPU, CLI, UI and bridge tests (with the venv);
+#                   headless Metal goldens, viewer and e2e tests on the runner's paravirtual Metal
+#                   device; STK.app (unsigned, ad-hoc signed), zipped, then run headless from the zip.
+#   windows       : MSVC build of every target (OpenGL backend, Win32 GHOST); CPU, CLI, UI and bridge
+#                   tests (no GPU on the runner). Packaging is milestone M-D2.
 #
-# No secrets are used; the token is read-only.
+# No secrets are used; the token is read-only; actions are pinned by commit SHA.
 
 name: desktop
 
@@ -19,6 +27,9 @@ on:
   pull_request:
     paths:
       - "desktop/**"
+      - "suan/**"
+      - "tests/mupro_fake.py"
+      - "pyproject.toml"
       - ".github/workflows/desktop.yml"
   push:
     branches:
@@ -27,6 +38,9 @@ on:
       - "ci/desktop-*"
     paths:
       - "desktop/**"
+      - "suan/**"
+      - "tests/mupro_fake.py"
+      - "pyproject.toml"
       - ".github/workflows/desktop.yml"
 
 permissions:
@@ -40,7 +54,7 @@ jobs:
   linux:
     name: Linux (Ubuntu 26.04, GL + Vulkan, X11 + Wayland)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     container:
       # ubuntu:26.04, pinned by digest (multi-arch index).
       image: ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
@@ -52,6 +66,8 @@ jobs:
         shell: bash
     env:
       DEBIAN_FRONTEND: noninteractive
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      STK_VENV: /opt/stk-venv
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -61,7 +77,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates g++ cmake ninja-build python3 \
+            ca-certificates g++ cmake ninja-build python3 python3-venv \
             libx11-dev libxi-dev libxfixes-dev libxrender-dev libxxf86vm-dev libxext-dev \
             libxkbcommon-dev libwayland-dev libwayland-bin wayland-protocols libdecor-0-dev libdbus-1-dev \
             libepoxy-dev libegl-dev libgl-dev libgles-dev libglx-dev libopengl-dev \
@@ -69,6 +85,14 @@ jobs:
             libvulkan-dev libshaderc-dev glslang-dev spirv-headers \
             mesa-vulkan-drivers libegl-mesa0 libgl1-mesa-dri libglx-mesa0 \
             xvfb weston
+
+      - name: Python for the bridge tests (runtime, science, visualization and control extras)
+        run: |
+          set -euo pipefail
+          python3 -m venv "$STK_VENV"
+          "$STK_VENV/bin/python" -m pip install ".[science,visualization,control,test]"
+          PYTHONPATH="$PWD/desktop/tests/bridge" "$STK_VENV/bin/python" desktop/tests/bridge/bridge_fixture.py check graph
+          PYTHONPATH="$PWD/desktop/tests/bridge" "$STK_VENV/bin/python" desktop/tests/bridge/bridge_fixture.py check runtime
 
       - name: Vendoring and Phase 0 go criteria
         run: |
@@ -91,34 +115,196 @@ jobs:
 
       - name: Configure
         # No user sysroot on CI: system packages are used (STK_SYSROOT does not exist).
-        run: cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTK_SYSROOT=/nonexistent
+        run: |
+          cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTK_SYSROOT=/nonexistent \
+            -DSTK_BRIDGE_TEST_PYTHON="$STK_VENV/bin/python" -DSTK_APP_TEST_PYTHON="$STK_VENV/bin/python"
 
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Test (headless GPU goldens, live windows on Xvfb and weston)
-        run: ctest --test-dir build --output-on-failure --parallel 4 --timeout 600
+      - name: Test (headless GPU goldens, live windows on Xvfb and weston, real Python bridge)
+        run: ctest --test-dir build --output-on-failure --parallel 4 --timeout 600 --output-junit "$PWD/build/ctest-junit.xml"
 
-      - name: Upload rendered frames
+      - name: The Python-backed tests ran (none skipped)
+        if: success() || failure()
+        run: |
+          python3 desktop/tests/check_required_tests.py build/ctest-junit.xml \
+            'PythonBridge\..*' 'JobsPython\..*' 'app_viewer_python_(vulkan|opengl)' \
+            'app_viewer_e2e_(vulkan|opengl)' 'app_viewer_window_(xvfb|weston)' 'package_install_check'
+
+      - name: Upload rendered frames and e2e images
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: desktop-linux-frames
           path: |
             build/tests/wm/out/*.png
+            build/tests/app/out/*.png
+            build/tests/app/e2e_*/out.png
+            build/tests/app/e2e_*/seq/*.png
+            build/packaging/check/*.png
             build/spike/*.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+  linux-package:
+    name: Linux package (Ubuntu 24.04, relocatable tarball)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container:
+      # ubuntu:24.04, pinned by digest (multi-arch index): the package runs on glibc >= 2.39.
+      image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl xz-utils g++ cmake ninja-build python3 file \
+            libx11-dev libxi-dev libxfixes-dev libxrender-dev libxxf86vm-dev libxext-dev \
+            libxkbcommon-dev libwayland-dev libwayland-bin libdecor-0-dev libdbus-1-dev \
+            libepoxy-dev libegl-dev libgl-dev libgles-dev libglx-dev libopengl-dev \
+            libfreetype-dev libbrotli-dev libpng-dev zlib1g-dev libzstd-dev libeigen3-dev libfmt-dev \
+            libvulkan-dev libshaderc-dev glslang-dev spirv-headers
+
+      - name: Newer Vulkan headers and Wayland protocol XML (build-time only)
+        # Ubuntu 24.04 has Vulkan headers 1.3.275 and wayland-protocols 1.34; Blender 5.2's GHOST and
+        # GPU module need VK_KHR_dynamic_rendering_local_read / line rasterization (1.4 headers) and
+        # the color-management and xdg-toplevel-icon protocols. Both are headers / XML: the binaries
+        # still use 24.04's libvulkan loader and libwayland. The versions match Ubuntu 26.04 (the
+        # development sysroot); pinned by sha256.
+        run: |
+          set -euo pipefail
+          cd /opt
+          curl -fsSL -o vh.tar.gz https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.341.tar.gz
+          echo "8876aad926b2e72bdefddc34885472d5332e2d20aa3ed57313466f0bc982cf3f  vh.tar.gz" | sha256sum -c
+          curl -fsSL -o wp.tar.xz https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.47/downloads/wayland-protocols-1.47.tar.xz
+          echo "5fd4349bcbc9bab9a46f8cf77d1f434296a7a052c87440a094f63fcf62a58e20  wp.tar.xz" | sha256sum -c
+          tar xzf vh.tar.gz
+          tar xJf wp.tar.xz
+          test -f /opt/Vulkan-Headers-1.4.341/include/vulkan/vulkan_core.h
+          test -f /opt/wayland-protocols-1.47/stable/xdg-shell/xdg-shell.xml
+
+      - name: Configure (Release, relocatable, bundle non-system libraries)
+        run: |
+          cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTK_SYSROOT=/nonexistent \
+            -DVulkan_INCLUDE_DIR=/opt/Vulkan-Headers-1.4.341/include -DWAYLAND_PROTOCOLS_DIR=/opt/wayland-protocols-1.47 \
+            -DSTK_DESKTOP_RELOCATABLE=ON -DSTK_DESKTOP_BUNDLE_LIBS=ON
+
+      - name: Build stk-desktop and stk-render
+        run: cmake --build build --parallel --target stk-desktop stk-render -- -k 0
+
+      - name: Package (CPack TGZ)
+        run: |
+          set -euo pipefail
+          cd build
+          cpack --config CPackConfig.cmake
+          sha256sum stk-desktop-*.tar.gz | tee "$(ls stk-desktop-*.tar.gz).sha256"
+          tar tzvf stk-desktop-*.tar.gz | grep -E '/(bin|lib/stk-desktop)/'
+          f=$(ls stk-desktop-*.tar.gz); echo "size: $(du -h "$f" | cut -f1) $f"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-linux-package
+          path: |
+            build/stk-desktop-*.tar.gz
+            build/stk-desktop-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-package-smoke:
+    name: Linux package smoke (fresh Ubuntu 24.04)
+    needs: linux-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+      options: --init
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the runtime libraries of a desktop (no development packages)
+        # No libshaderc1 / libepoxy0: the tarball must bring them.
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates python3 python3-venv \
+            libgl1 libegl1 libglx-mesa0 libegl-mesa0 libgl1-mesa-dri libvulkan1 mesa-vulkan-drivers \
+            libfreetype6 libpng16-16t64 libzstd1 libx11-6 libxi6 libxfixes3 libxext6 libxrender1 libxxf86vm1 \
+            libxcursor1 libxkbcommon0 libwayland-client0 libwayland-cursor0 libwayland-egl1 libdbus-1-3
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: desktop-linux-package
+          path: pkg
+
+      - name: Python with STK installed (pip install of the repository; the tarball has no Python)
+        run: |
+          set -euo pipefail
+          python3 -m venv /opt/stk-venv
+          /opt/stk-venv/bin/python -m pip install ".[science,visualization,control]"
+
+      - name: Unpack into a fresh directory
+        run: |
+          set -euo pipefail
+          (cd pkg && sha256sum -c ./*.sha256)
+          mkdir -p /tmp/fresh
+          tar xzf pkg/stk-desktop-*.tar.gz -C /tmp/fresh
+          ls /tmp/fresh/*/bin /tmp/fresh/*/lib/stk-desktop
+
+      - name: Smoke (OpenGL on llvmpipe; e2e preset command against the golden)
+        env:
+          EGL_PLATFORM: surfaceless
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          /opt/stk-venv/bin/python desktop/packaging/check_install.py --prefix /tmp/fresh/stk-desktop-* \
+            --workdir /tmp/smoke-opengl --backend opengl --payload docs/specs/examples/payload-v2 \
+            --python /opt/stk-venv/bin/python --repo "$PWD" --golden desktop/tests/app/golden/e2e_muferro_domains.png
+
+      - name: Smoke (Vulkan on lavapipe)
+        env:
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: |
+          /opt/stk-venv/bin/python desktop/packaging/check_install.py --prefix /tmp/fresh/stk-desktop-* \
+            --workdir /tmp/smoke-vulkan --backend vulkan --payload docs/specs/examples/payload-v2 \
+            --python /opt/stk-venv/bin/python --repo "$PWD" --golden desktop/tests/app/golden/e2e_muferro_domains.png
+
+      - name: Upload smoke images
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-linux-package-smoke
+          path: |
+            /tmp/smoke-*/*.png
           if-no-files-found: ignore
           retention-days: 14
 
   macos:
     name: macOS arm64 (Cocoa + Metal)
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
       VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/.vcpkg-triplets
       # FreeType must decode WOFF2 (brotli): Homebrew's freetype is built without it, vcpkg's is not.
       VCPKG_PACKAGES: freetype[core,brotli,zlib] fmt eigen3 zstd zlib
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -159,28 +345,93 @@ jobs:
           # shellcheck disable=SC2086
           "$VCPKG_INSTALLATION_ROOT/vcpkg" install --triplet arm64-osx $VCPKG_PACKAGES
 
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Python for the bridge tests (science, visualization and control extras)
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/stk-venv"
+          "$RUNNER_TEMP/stk-venv/bin/python" -m pip install ".[science,visualization,control,test]"
+          PYTHONPATH="$PWD/desktop/tests/bridge" "$RUNNER_TEMP/stk-venv/bin/python" desktop/tests/bridge/bridge_fixture.py check graph
+          echo "STK_VENV=$RUNNER_TEMP/stk-venv" >> "$GITHUB_ENV"
+
       - name: Configure
         run: |
           cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_TARGET_TRIPLET=arm64-osx
+            -DVCPKG_TARGET_TRIPLET=arm64-osx \
+            -DSTK_BRIDGE_TEST_PYTHON="$STK_VENV/bin/python" -DSTK_APP_TEST_PYTHON="$STK_VENV/bin/python"
 
       - name: Build
         run: cmake --build build --parallel
 
       - name: Test (CPU unit tests, CLI, leak self-test, UI core, bridge)
-        run: ctest --test-dir build --output-on-failure -L "unit|wm|ui|bridge" -LE "gpu|window"
+        run: ctest --test-dir build --output-on-failure -L "unit|wm|ui|bridge" -LE "gpu|window" --output-junit "$PWD/build/ctest-cpu.xml"
 
-      - name: Test on Metal (headless goldens, viewer)
+      - name: Test on Metal (headless goldens, viewer, e2e, install layout)
         # macos-15 runners expose the "Apple Paravirtual device" (argument buffers tier 2,
         # barycentrics, MTLGPUFamilyMac2); macos-14 runners have no Metal device at all.
         # Metal compiles shaders with fast math, so stk_viewer_gpu never relies on NaN/Inf in a
         # shader (viewer_metal_Lut / viewer_metal_NonFinite check the NaN colour).
-        run: ctest --test-dir build --output-on-failure -L gpu -LE window
+        run: ctest --test-dir build --output-on-failure -L gpu -LE window --output-junit "$PWD/build/ctest-metal.xml"
+
+      - name: The Python-backed tests ran (the Runtime ones are Linux-only)
+        if: success() || failure()
+        run: |
+          python3 desktop/tests/check_required_tests.py build/ctest-cpu.xml \
+            'PythonBridge\.(HelloListsTheProtocol|ColormapsList|GraphPresets|LocalGraphEvaluateOnAFakeMuferroRun)'
+          python3 desktop/tests/check_required_tests.py build/ctest-metal.xml \
+            'app_viewer_python_metal' 'app_viewer_e2e_metal' 'package_install_check'
 
       - name: stk-render smoke (Metal, spec example payload)
         run: build/bin/stk-render --payload docs/specs/examples/payload-v2 --export build/stk-render-metal.png
+
+      - name: STK.app (relocatable, unsigned; ad-hoc code signature), zipped
+        run: |
+          set -euo pipefail
+          # Drop the source-tree fallbacks: only the executables that embed them are rebuilt.
+          cmake -S desktop -B build -DSTK_DESKTOP_RELOCATABLE=ON
+          cmake --build build --parallel --target stk-desktop stk-render
+          rm -rf build/stage
+          cmake --install build --prefix build/stage --strip
+          codesign --force --sign - build/stage/STK.app/Contents/MacOS/stk-render
+          codesign --force --sign - build/stage/STK.app
+          codesign --verify --strict --verbose=2 build/stage/STK.app
+          plutil -lint build/stage/STK.app/Contents/Info.plist
+          # Only system libraries and frameworks (the vcpkg dependencies are static).
+          for exe in build/stage/STK.app/Contents/MacOS/*; do
+            otool -L "$exe"
+            if otool -L "$exe" | tail -n +2 | grep -v -E '^\s+(/System/Library/|/usr/lib/)'; then
+              echo "::error::$exe links a non-system library"; exit 1
+            fi
+          done
+          version=$(sed -n 's/^project(stk_desktop VERSION \([0-9.]*\).*/\1/p' desktop/CMakeLists.txt)
+          ditto -c -k --keepParent build/stage/STK.app "build/stk-desktop-$version-macos-arm64.zip"
+          shasum -a 256 build/stk-desktop-*-macos-arm64.zip | tee "build/stk-desktop-$version-macos-arm64.zip.sha256"
+          du -h build/stk-desktop-*-macos-arm64.zip
+
+      - name: STK.app smoke (unzipped into a fresh directory, headless on Metal, e2e preset command)
+        run: |
+          set -euo pipefail
+          fresh="$RUNNER_TEMP/fresh-app"
+          rm -rf "$fresh" && mkdir -p "$fresh"
+          ditto -x -k build/stk-desktop-*-macos-arm64.zip "$fresh"
+          "$STK_VENV/bin/python" desktop/packaging/check_install.py --prefix "$fresh" --workdir "$RUNNER_TEMP/smoke-metal" \
+            --backend metal --payload docs/specs/examples/payload-v2 \
+            --python "$STK_VENV/bin/python" --repo "$PWD" --golden desktop/tests/app/golden/e2e_muferro_domains.png
+          cp "$RUNNER_TEMP"/smoke-metal/*.png build/stage/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-macos-app
+          path: |
+            build/stk-desktop-*-macos-arm64.zip
+            build/stk-desktop-*-macos-arm64.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload rendered frames
         if: always()
@@ -190,6 +441,8 @@ jobs:
           path: |
             build/tests/wm/out/*.png
             build/tests/viewer/out/*.png
+            build/tests/app/e2e_*/out.png
+            build/stage/*.png
             build/stk-render-metal.png
           if-no-files-found: ignore
           retention-days: 14

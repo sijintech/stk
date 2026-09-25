@@ -447,14 +447,16 @@ TEST(App, ImeCaretFollowsTheEditedField)
   EXPECT_FALSE(screen.ime_caret().has_value());
   const ui::Widget *w = screen.ui()->find("a2/main/other");
   ASSERT_NE(w, nullptr);
-  d.click(int(w->rect.cx()), 399 - int(w->rect.cy()));
+  /* A copy: the click rebuilds the blocks, which frees the widget `w` points to. */
+  const auto field = w->rect;
+  d.click(int(field.cx()), 399 - int(field.cy()));
   const auto caret = screen.ime_caret();
   ASSERT_TRUE(caret.has_value());
   /* Bottom-left window pixels inside the field of the right area. */
-  EXPECT_GE(caret->xmin, int(w->rect.x));
-  EXPECT_LE(caret->xmax, int(w->rect.x1()) + 1);
-  EXPECT_GE(caret->ymin, 400 - int(w->rect.y1()));
-  EXPECT_LE(caret->ymax, 400 - int(w->rect.y));
+  EXPECT_GE(caret->xmin, int(field.x));
+  EXPECT_LE(caret->xmax, int(field.x1()) + 1);
+  EXPECT_GE(caret->ymin, 400 - int(field.y1()));
+  EXPECT_LE(caret->ymax, 400 - int(field.y));
   EXPECT_GE(caret->xmin, right.rect().xmin);
   d.key(wm::Key::End);
   wm::Event ime;
