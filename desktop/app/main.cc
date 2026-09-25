@@ -10,6 +10,11 @@
  */
 
 #include <charconv>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <mutex>
 #include <filesystem>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +23,8 @@
 #include <string_view>
 
 #include "stk/app/bridge_status.hh"
+#include "stk/app/viewer_export.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/app/shell.hh"
 #include "stk/bridge/client.hh"
 #include "stk/core/paths.hh"
@@ -27,6 +34,8 @@
 #include "stk/wm/csd.hh"
 #include "stk/wm/layout_store.hh"
 #include "stk/wm/window.hh"
+#include "stk/viewer/camera.hh"
+#include "stk/viewer_gpu/viewer.hh"
 
 #include "sample_screen.hh"
 
@@ -67,6 +76,21 @@ struct Args {
   bool gpu_debug = false;
   bool verbose = false;
   long exit_after_frames = 0;
+  /* WP10 headless viewer export (--preset / --run / --open). */
+  std::string preset;
+  std::string run;
+  std::string open;
+  std::string camera;
+  std::string state_dir;
+  std::vector<std::pair<std::string, std::string>> params;
+  int magnification = 1;
+  bool transparent = false;
+  bool no_overlays = false;
+  bool sequence = false;
+  bool viewer() const
+  {
+    return !preset.empty() || !run.empty() || !open.empty();
+  }
 };
 
 void print_help(FILE *f)
@@ -101,6 +125,23 @@ void print_help(FILE *f)
           "                           $STK_BLENDER_DATAFILES, or the source tree in dev builds).\n"
           "  --i18n DIR               Directory of the message catalogs (default: next to the\n"
           "                           program, $STK_I18N_DIR, or the source tree in dev builds).\n"
+          "\n"
+          "Headless viewer export (WP10; renders the Viewer's image, not the screen):\n"
+          "  --run DIR                Evaluate a run folder locally through the Python bridge.\n"
+          "  --open PATH              Show a payload (.stkp / folder), result folder or run folder\n"
+          "                           (also in the GUI: opened in the Viewer at start).\n"
+          "  --preset ID              Graph preset for --run (default: guessed, muferro-domains).\n"
+          "  --param NAME=JSON        Preset parameter (repeatable), e.g. --param step=1.\n"
+          "  --camera PRESET          iso, +x, -x, +y, -y, +z or -z (default: the result's view).\n"
+          "  --magnification N        1..8, tiled (default 1). --size is the logical image size\n"
+          "                           (default: the result's viewport).\n"
+          "  --transparent            Keep a transparent background.\n"
+          "  --no-overlays            Hide scalar bars, legends, axes and text.\n"
+          "  --sequence               Export every time step: <stem>.%%08d.png and an stk.series/1\n"
+          "                           manifest <stem>.series.json next to --export.\n"
+          "  --state-dir DIR          Bridge state and cache under DIR (default: the user's).\n"
+          "  --python PATH            Interpreter of the bridge (default: $STK_PYTHON, python3).\n"
+          "\n"
           "  --gpu-debug              Create debug GPU contexts.\n"
           "  --exit-after-frames N    GUI: quit after N frames were presented (smoke tests).\n"
           "  --verbose                Print backend and device details.\n"
@@ -206,6 +247,47 @@ bool parse_args(int argc, char **argv, Args &a, std::string &err)
         return false;
       }
     }
+    else if (arg == "--transparent") {
+      a.transparent = true;
+    }
+    else if (arg == "--no-overlays") {
+      a.no_overlays = true;
+    }
+    else if (arg == "--sequence") {
+      a.sequence = true;
+    }
+    else if (arg == "--preset" || arg == "--run" || arg == "--open" || arg == "--camera" || arg == "--state-dir") {
+      if (!value(v)) {
+        return false;
+      }
+      std::string &dst = arg == "--preset" ? a.preset :
+                         arg == "--run"    ? a.run :
+                         arg == "--open"   ? a.open :
+                         arg == "--camera" ? a.camera :
+                                             a.state_dir;
+      dst = v;
+    }
+    else if (arg == "--param") {
+      if (!value(v)) {
+        return false;
+      }
+      const size_t eq = v.find('=');
+      if (eq == std::string_view::npos || eq == 0) {
+        err = "--param: expected NAME=VALUE";
+        return false;
+      }
+      a.params.emplace_back(std::string(v.substr(0, eq)), std::string(v.substr(eq + 1)));
+    }
+    else if (arg == "--magnification") {
+      if (!value(v)) {
+        return false;
+      }
+      a.magnification = int(strtol(std::string(v).c_str(), nullptr, 10));
+      if (a.magnification < 1 || a.magnification > 8) {
+        err = "--magnification: expected 1..8";
+        return false;
+      }
+    }
     else if (arg == "--export" || arg == "--gpu-backend" || arg == "--datafiles" || arg == "--i18n" ||
              arg == "--layout" || arg == "--save-layout" || arg == "--python")
     {
@@ -242,6 +324,14 @@ bool parse_args(int argc, char **argv, Args &a, std::string &err)
   }
   if (a.sample && !a.headless) {
     err = "--sample requires --headless";
+    return false;
+  }
+  if ((!a.run.empty() || !a.params.empty() || !a.camera.empty()) && !a.headless) {
+    err = "--run / --param / --camera require --headless (the GUI takes --open PATH [--preset ID])";
+    return false;
+  }
+  if (!a.camera.empty() && !stk::viewer::parse_camera_preset(a.camera)) {
+    err = "--camera: expected iso, +x, -x, +y, -y, +z or -z";
     return false;
   }
   return true;
@@ -355,6 +445,222 @@ int run_app_headless(const Args &a, stk::gfx::Gpu &gpu, const int w, const int h
   return rc;
 }
 
+/** A main loop for the bridge's callbacks in headless runs: the executor queues, pump() runs. */
+class HeadlessLoop {
+ public:
+  stk::bridge::Executor executor()
+  {
+    return [this](std::function<void()> fn) {
+      {
+        std::lock_guard lock(mutex_);
+        tasks_.push_back(std::move(fn));
+      }
+      cv_.notify_all();
+    };
+  }
+  /** Runs tasks (and `each`) until `until()` or the timeout; false on timeout. */
+  bool pump_until(const std::function<bool()> &until, const std::function<void()> &each, const double timeout_s)
+  {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(int64_t(timeout_s * 1000));
+    while (true) {
+      while (true) {
+        std::function<void()> fn;
+        {
+          std::lock_guard lock(mutex_);
+          if (tasks_.empty()) {
+            break;
+          }
+          fn = std::move(tasks_.front());
+          tasks_.pop_front();
+        }
+        fn();
+      }
+      each();
+      if (until()) {
+        return true;
+      }
+      std::unique_lock lock(mutex_);
+      if (std::chrono::steady_clock::now() >= deadline) {
+        return false;
+      }
+      cv_.wait_for(lock, std::chrono::milliseconds(10), [&] { return !tasks_.empty(); });
+    }
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::deque<std::function<void()>> tasks_;
+};
+
+/**
+ * WP10 headless viewer export: opens --open / --run (evaluated through the Python bridge with
+ * --preset and --param), renders the Viewer's image with stk_viewer_gpu and writes --export.
+ * This is the end-to-end path of the WP12 golden:
+ *   stk-desktop --headless --preset muferro-domains --run DIR --export out.png --size 800x600
+ */
+int run_viewer_headless(const Args &a, stk::gfx::Gpu &gpu)
+{
+  using namespace stk;
+  app::ShellOptions so = shell_options(a, false);
+  app::AppStore store;
+  std::string err;
+  if (!so.i18n_dir.empty()) {
+    store.catalog().load_dir(so.i18n_dir, &err);
+    store.catalog().set_language(so.language);
+  }
+  app::ViewerState &vs = store.viewer();
+  const std::string path = a.open.empty() ? a.run : a.open;
+  if (path.empty()) {
+    fprintf(stderr, "stk-desktop: --preset needs --run DIR (or --open PATH)\n");
+    return kUsage;
+  }
+  const app::ViewerSource kind = app::classify_path(path, &err);
+  if (kind.kind == app::SourceKind::None) {
+    fprintf(stderr, "stk-desktop: %s\n", err.c_str());
+    return kFailure;
+  }
+  io::Json params = io::Json::object();
+  for (const auto &[name, text] : a.params) {
+    try {
+      params[name] = io::parse_json(text);
+    }
+    catch (const std::exception &) {
+      params[name] = text; /* a bare string such as --param view=+x */
+    }
+  }
+  HeadlessLoop loop;
+  std::unique_ptr<bridge::Client> client;
+  if (kind.evaluates()) {
+    bridge::ClientOptions bo;
+    bo.executor = loop.executor();
+    bo.python.configured = a.python;
+    bo.client_version = STK_DESKTOP_VERSION;
+    bo.call_timeout_s = 1800.0;
+    if (!a.state_dir.empty()) {
+      bo.state_dir = a.state_dir + "/state";
+      bo.cache_dir = a.state_dir + "/cache";
+    }
+#ifdef STK_DESKTOP_SOURCE_REPO
+    {
+      const std::string repo = STK_DESKTOP_SOURCE_REPO;
+      std::error_code ec;
+      if (std::filesystem::exists(core::path_from_utf8(repo + "/suan/desktop_bridge/__main__.py"), ec)) {
+        const auto old = core::getenv_utf8("PYTHONPATH");
+#  ifdef _WIN32
+        const char sep = ';';
+#  else
+        const char sep = ':';
+#  endif
+        bo.env["PYTHONPATH"] = old && !old->empty() ? repo + sep + *old : repo;
+      }
+    }
+#endif
+    client = bridge::Client::create(std::move(bo));
+    if (!client->start(&err) || !client->wait_ready(180.0)) {
+      fprintf(stderr, "stk-desktop: bridge: %s\n%s\n", err.empty() ? "did not start" : err.c_str(),
+              client->bridge_log().text().c_str());
+      return kFailure;
+    }
+    store.set_bridge(client.get());
+    /* The parameters apply to the preset's form, which needs the presets and the catalog. */
+    vs.refresh_metadata();
+  }
+  int rc = kOk;
+  auto each = [&vs]() { vs.pump(); };
+  if (!vs.open_path(path, a.preset, params)) {
+    fprintf(stderr, "stk-desktop: cannot open %s: %s\n", path.c_str(), vs.open_error().c_str());
+    rc = kFailure;
+  }
+  else if (!loop.pump_until(
+               [&vs]() {
+                 return (vs.payload() != nullptr && !vs.evaluating()) || !vs.eval_error().empty() ||
+                        !vs.metadata_error().empty();
+               },
+               each,
+               1800.0))
+  {
+    fprintf(stderr, "stk-desktop: timed out waiting for the evaluation\n");
+    rc = kFailure;
+  }
+  else if (!vs.payload()) {
+    fprintf(stderr, "stk-desktop: evaluation failed: %s%s\n", vs.eval_error().c_str(), vs.metadata_error().c_str());
+    rc = kFailure;
+  }
+  if (rc == kOk) {
+    viewer_gpu::Viewer v(gpu.fonts());
+    v.set_payload(vs.payload());
+    if (!a.camera.empty()) {
+      v.set_camera_preset(*viewer::parse_camera_preset(a.camera));
+    }
+    viewer_gpu::ExportOptions eo;
+    if (a.size_given) {
+      eo.width = a.width;
+      eo.height = a.height;
+    }
+    eo.magnification = a.magnification;
+    eo.transparent = a.transparent;
+    eo.overlays = !a.no_overlays;
+    if (!a.export_path.empty() && a.sequence) {
+      /* Every step: evaluated (or read from the series) first, then rendered in order. */
+      vs.export_settings.path = a.export_path;
+      vs.export_settings.sequence = true;
+      vs.export_settings.width = eo.width;
+      vs.export_settings.height = eo.height;
+      vs.export_settings.magnification = eo.magnification;
+      vs.export_settings.transparent = eo.transparent;
+      vs.export_settings.overlays = eo.overlays;
+      vs.request_export();
+      if (!vs.export_job() || !loop.pump_until([&vs]() { return vs.export_job() && vs.export_job()->ready; }, each, 1800.0))
+      {
+        fprintf(stderr, "stk-desktop: sequence export: %s\n", vs.export_status().c_str());
+        rc = kFailure;
+      }
+      else {
+        std::string message;
+        if (!app::render_export_job(v, *vs.export_job(), store, vs.payload(), message)) {
+          rc = kFailure;
+        }
+        printf("%s\n", message.c_str());
+        vs.finish_export(rc == kOk, message);
+      }
+    }
+    else if (!a.export_path.empty()) {
+      if (!v.export_png(core::path_from_utf8(a.export_path), eo, err)) {
+        fprintf(stderr, "stk-desktop: export failed: %s\n", err.c_str());
+        rc = kFailure;
+      }
+    }
+    if (rc == kOk) {
+      std::string evaluated;
+      if (vs.last_eval()) {
+        for (const std::string &n : vs.last_eval()->evaluated) {
+          evaluated += (evaluated.empty() ? "" : ",") + n;
+        }
+      }
+      printf("%s %s (%s, preset %s, step %s, %zu layers, %s, evaluated [%s])\n",
+             a.export_path.empty() ? "rendered" : "wrote",
+             a.export_path.empty() ? path.c_str() :
+             a.sequence            ? app::sequence_manifest_path(a.export_path).c_str() :
+                                     a.export_path.c_str(),
+             app::source_kind_name(vs.source().kind), vs.preset_id().empty() ? "-" : vs.preset_id().c_str(),
+             vs.shown_step().is_null() ? "-" : vs.shown_step().dump().c_str(), vs.layers().size(), gpu.backend_name(),
+             evaluated.c_str());
+      for (const std::string &w : vs.warnings()) {
+        printf("warning: %s\n", w.c_str());
+      }
+    }
+  }
+  vs.close();
+  store.set_bridge(nullptr);
+  if (client) {
+    client->close();
+    loop.pump_until([]() { return true; }, []() {}, 1.0);
+    client.reset();
+  }
+  return rc;
+}
+
 int run_headless(const Args &a, const stk::gfx::Backend backend)
 {
   using namespace stk;
@@ -384,7 +690,9 @@ int run_headless(const Args &a, const stk::gfx::Backend backend)
              gpu->fonts().fonts_dir.c_str());
     }
     gfx::set_ui_scale(a.scale);
-    rc = a.sample ? run_sample_headless(a, *gpu, w, h) : run_app_headless(a, *gpu, w, h);
+    rc = a.sample     ? run_sample_headless(a, *gpu, w, h) :
+         a.viewer()   ? run_viewer_headless(a, *gpu) :
+                        run_app_headless(a, *gpu, w, h);
   }
   gfx::dispose_system();
   return rc;
@@ -467,6 +775,10 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
   win->on_event = [&](const wm::Event &e) {
     if (e.type == wm::EventType::Close) {
       save_layout();
+      /* The window (and its screen) goes away now: later store changes (bridge callbacks, the
+       * viewer state) must not tag its screen for redraw. */
+      shell.store().on_change = nullptr;
+      shell.store().toast = nullptr;
     }
     return false;
   };
@@ -513,6 +825,13 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
     if (!bridge_client->start(&berr)) {
       shell.store().set_bridge_error(berr);
       fprintf(stderr, "stk-desktop: bridge: %s\n", berr.c_str());
+    }
+  }
+
+  if (!a.open.empty()) {
+    /* WP10: open a payload / result / run folder in the Viewer at start. */
+    if (!shell.store().viewer().open_path(a.open, a.preset)) {
+      fprintf(stderr, "stk-desktop: cannot open %s: %s\n", a.open.c_str(), shell.store().viewer().open_error().c_str());
     }
   }
 

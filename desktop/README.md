@@ -17,7 +17,7 @@ Python packages stay MIT.
 | `engine/lib/stk_wm` | GHOST glue: window manager, windows, on-demand event loop, events (keys, mouse, wheel, IME preedit, drag and drop), DPI, clipboard, cursors; `WindowManager::post` / `executor()` (thread-safe work for the main loop, wakes an idle wait). Screen model (`screen.hh`): a tree of areas with draggable splitters and minimum sizes, split / join / maximize, docked regions (header, toolbar, sidebar, main) and global bars; one `stk_ui` context per window (a block per region, overlays on top, IME placement, wake-up timers); `ui_bridge.hh` (event adapter, clipboard, `UiRegion`); `layout_store.hh` (versioned layout JSON); `csd.hh` (GNOME client-side decorations). |
 | `engine/lib/stk_bridge` | Client of the Python bridge (`python -m suan.desktop_bridge --stdio`, `docs/specs/stk-desktop-bridge-v1.md`): spawn (posix_spawn + process group; CreateProcessW + job object), strict NDJSON framing, futures with timeout / cancel, typed wrappers, RAII subscriptions, restart with replay, stderr ring for the "Bridge log". CPU only. |
 | `engine/lib/stk_viewer_gpu` | Payload-v2 viewer on the GPU module: lit LUT-coloured triangles, slices, instanced glyphs, lines, points and sphere impostors, ray-marched volumes; overlays through BLF (scalar bar, legend, orientation sphere, triad, text); GPU id-pass picking refined in float64; tiled PNG export x1-x8; GPU budget, LOD and timestep prefetch. |
-| `engine/lib/stk_app` | Application shell (`shell.hh`: top bar with File / View / Language / UI scale menus, status bar, default layout, layout files, shortcuts), `AppStore`, editor registry and `EditorArea` (tabs, header, toolbar / sidebar, area menu), the WP3 placeholder editors (Jobs, Viewer, Properties, Logs, Probe, Transfers, Bridge log). |
+| `engine/lib/stk_app` | Application shell (`shell.hh`: top bar with File / View / Language / UI scale menus, status bar, default layout, layout files, shortcuts), `AppStore`, editor registry and `EditorArea` (tabs, header, toolbar / sidebar, area menu), the WP3 placeholder editors (Jobs, Logs, Transfers, Bridge log) and the WP10 Viewer, Properties and Probe editors (`src/editors/viewer_*.cc`) on `ViewerState` (`viewer_state.hh`: the shown result, shared by them) and `viewer_export.hh` (PNG / sequence export). |
 | `engine/lib/stk_ui` | Blender-style UI toolkit. `stk_ui_core` (no GPU/GHOST headers): blocks rebuilt per frame, layouts in UI units, widgets bound by getter/setter closures, Blender dark theme, CJK line breaking, text editing with IME preedit, i18n catalogs, JSON Schema forms, draw lists. `stk_ui_gpu`: painter on the GPU module's widget shader + BLF. Also adds `tests/ui` and `tools/widget_gallery`. |
 | `app/` | `stk-desktop` (GUI and `--headless` export of the application screen; `--sample` renders the WP1 sample frame). `app/i18n/`: `zh_CN.json` (default) / `en.json` message catalogs and `check_i18n.py` (fails on missing keys). |
 | `tests/ui` | stk_ui tests (label `ui`): events, text/IME, numbers, forms against the catalog and presets, layout goldens (en/zh at 1x/1.5x/2x; `STK_UPDATE_GOLDENS=1` rewrites them), i18n checker. |
@@ -26,6 +26,8 @@ Python packages stay MIT.
 | `tests/unit` | gtest suites of the CPU libraries (label `unit`). |
 | `tests/wm` | Engine tests: headless goldens and CJK crispness (label `gpu`), CLI and leak self-test (`wm`), live windows on Xvfb / weston (`window`); WP3: `stk_wm_tests` (gtest, no GPU: layout maths, screen tree, routing, persistence, layout goldens), application-screen PNG goldens, `stk-app-smoke`. |
 | `tests/bridge` | stk_bridge tests (label `bridge`): protocol units, `ChildProcess`, the client against a scripted fake bridge and against the real Python bridge, and `WindowManager::post` under Xvfb / weston. |
+| `tests/app` | Application editor tests (label `app`), one `<name>.cmake` per work package: WP10 `viewer.cmake` (ViewerState against the fake bridge, Properties form goldens for all 7 presets, the real-bridge + GPU integration test, the headless e2e golden, live windows). |
+| `docs/parity-viewer.md` | The Viewer's SimViz / web-viewer parity checklist with status. |
 | `tests/viewer` | stk_viewer_gpu tests: render goldens on Vulkan and GL, exact categorical colours, tiled vs single-pass export, picking accuracy at `render_origin` ~1e6, VTK offscreen cross-check (mask IoU), budget/LOD/prefetch, 1M-triangle perf smoke (`STK_VIEWER_PERF_BUDGET_MS`). Fixtures: `fixtures/make_fixtures.py [--vtk]`. |
 | `spike/` | Phase 0 spike `stk-gpu-spike` and its golden image. |
 
@@ -71,8 +73,8 @@ stk-desktop --version | --help
 
 The window shows a top bar (menus File / View / Language / UI scale, title), a tree of areas and a
 status bar (bridge state, connection, hints). The default layout is Jobs | Viewer | Properties over
-a bottom strip with the tabs Logs / Probe / Transfers / Bridge log; the editors are placeholders
-until WP9 / WP10.
+a bottom strip with the tabs Logs / Probe / Transfers / Bridge log; Jobs, Logs, Transfers and
+Bridge log are placeholders until WP9 (the Viewer, Properties and Probe: see below).
 
 - Areas: drag a splitter to resize (minimum sizes hold, the other areas keep their size),
   double-click it to join the two areas beside it (the larger stays). The area menu (header button
@@ -80,7 +82,8 @@ until WP9 / WP10.
   adds / closes tabs; the editor-type dropdown switches the editor. Ctrl+Space maximizes the area
   under the pointer and restores it; T / N toggle the toolbar / sidebar (N-panel, resizable by its
   edge); Ctrl+PageUp / PageDown switch tabs. Files dropped on an area go to its editor
-  (`Editor::on_drop`: Jobs and Transfers queue placeholder uploads, the Viewer reports `.stkp`).
+  (`Editor::on_drop`: Jobs and Transfers queue placeholder uploads, the Viewer opens payloads and
+  result / run folders).
   Internal drag and drop between widgets is deferred.
 - UI: one `stk_ui` context per window. Each visible region builds its blocks in window coordinates
   every (on-demand) frame; popups, tooltips, modals and toasts are overlay blocks above all areas.
@@ -122,6 +125,41 @@ until WP9 / WP10.
 - The bridge's interpreter: the app setting, else `STK_PYTHON`, else a bundled one, else
   `python3` / `python` on PATH. `STK_BRIDGE_VALIDATE=1` makes the client validate every message both
   ways against the built-in copy of `desktop-bridge-1.schema.json`.
+
+### Viewer, Properties and Probe (WP10)
+
+All three show `AppStore::viewer()` (`stk/app/viewer_state.hh`), the result on screen:
+
+- **Opening**: File > Open payload / result (a path field until WP9's native dialog), drag and drop on
+  the Viewer, `--open PATH` at start, and the Jobs editor's "Open in viewer" (`take_open_result`). A
+  `.stkp` / payload folder is shown as is; a result folder of `suan graph run` (`result.json`, or
+  `series.json` whose steps drive the scrubber) is read from disk; a run folder (e.g. muFerro) is
+  evaluated in the bridge (`graph.evaluate`, local mode, `local_bindings`); a task through a Runtime
+  task binding (local mode) or a hub (hub mode). Only the preset's payload outputs are requested.
+- **Viewer** (`draws_gpu`: `stk_viewer_gpu` under a transparent main block): Blender navigation by default
+  (middle drag orbit, Shift pan, Ctrl zoom, wheel; the left button uses the toolbar tool orbit / pan /
+  zoom / pick), ParaView optional; a click picks (GPU id pass + float64) and the Probe editor shows it;
+  numpad 1 / 3 / 7 / 0 / 9, Home, Space (play), ← / →. Sidebar: layers (visibility, opacity), camera
+  (7 presets, reset, numeric camera in physical coordinates), time steps (scrubber, play / pause, fps,
+  loop, prefetch, latest), display (overlays, lighting, navigation). Payload warnings and stats sit at
+  the bottom of the view. Picking and exports run outside the frame (`WindowManager::post`).
+- **Properties**: preset picker (`graph.presets`), the parameter form generated from JSON Schema
+  (`stk_ui` `preset_schema` / `build_form`, `x-stk-group` panels) in a data-stage box and a
+  client-stage box; colormap parameters use the colormap dropdown fed by `colormaps.list`. Edits are
+  debounced (data 0.35 s, client 0.06 s) and a newer evaluation cancels the running one
+  (`graph.cancel`); `graph.progress` drives the progress bar; the summary names the evaluated nodes
+  (`result.evaluated`). Results are cached per parameters and step; the steps next to the shown one
+  are evaluated in the background and uploaded to the GPU ahead, so a cached step switches without a
+  bridge call and keeps the camera.
+- **Probe**: layer, element and physical position (`format_label`) of the last pick, the original value
+  from the bridge `probe` (trilinear sample of the source field), and a typed position to query.
+- **Export dialog**: size, magnification ×1–×8 (tiled), transparent background, overlays, and "all time
+  steps" (`<stem>.%08d.png` + an `stk.series/1` manifest `<stem>.series.json`).
+- **Headless** (the WP12 e2e golden): `stk-desktop --headless --preset muferro-domains --run DIR
+  --export out.png [--size WxH] [--camera iso|+x|…] [--param NAME=JSON] [--magnification N]
+  [--transparent] [--no-overlays] [--sequence] [--state-dir DIR] [--python PY]` evaluates through the
+  real bridge and renders the Viewer's image (not the screen).
+- Parity with SimViz and the web viewer: `docs/parity-viewer.md`.
 
 To run binaries by hand against sysroot-only libraries, `source ~/opt/stk-sysroot/env.sh` first.
 
@@ -167,6 +205,21 @@ To run binaries by hand against sysroot-only libraries, `source ~/opt/stk-sysroo
   cache), else `python3`; parts it cannot run (no numpy/VTK, no Runtime) are skipped with the reason.
   Runtimes bind 127.0.0.1 only and are stopped afterwards; every test checks that no bridge process
   or helper of it is left.
+
+- `ctest -L app` (WP10, `tests/app/viewer.cmake`): `stk_app_viewer_tests` (gtest, no GPU):
+  `ViewerState` against `stk-bridge-fake` (whose graph methods serve the muferro-domains fixture:
+  evaluated nodes after client- and data-stage edits, debounce, cancellation of superseded
+  evaluations, `graph.progress`, prefetch and cached step switches with the camera kept, playback,
+  probe, layer overrides, sequence export), result / series folders, drop and the open / export
+  dialogs, and layout goldens of the Properties forms of all 7 presets in zh and en
+  (`tests/app/golden/props_forms_*.json`, `STK_UPDATE_GOLDENS=1`). `app_viewer_python_<backend>`: the
+  real bridge evaluates muferro-domains on a fake muFerro run; a client-stage change re-runs no data
+  node and re-renders, a data-stage change re-runs them, a cached step switch stays under 300 ms, a GPU
+  pick is probed. `app_viewer_e2e_<backend>` (`run_e2e.py`): the headless command against
+  `tests/app/golden/e2e_muferro_domains.png` (SSIM ≥ 0.98) and the VTK reference (mask IoU ≥ 0.9),
+  plus a sequence export. `app_viewer_window_{xvfb,weston}` (`stk-viewer-live`): open a run in the
+  application window, orbit with a synthesized drag, pick, and the Probe editor shows the value;
+  `app_viewer_gui_open_*`: `stk-desktop --open` draws a payload and quits without leaks.
 
 ## CI
 

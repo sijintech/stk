@@ -4,8 +4,8 @@
 # AppStore, the editor registry and the WP3 placeholder editors (Jobs, Viewer, Properties, Logs,
 # Probe, Transfers, Bridge log). See include/stk/app/*.hh.
 
-if(NOT TARGET stk_wm OR NOT TARGET stk_bridge)
-  message(STATUS "stk_app: skipped (needs stk_wm and stk_bridge)")
+if(NOT TARGET stk_wm OR NOT TARGET stk_bridge OR NOT TARGET stk_viewer_gpu)
+  message(STATUS "stk_app: skipped (needs stk_wm, stk_bridge and stk_viewer_gpu)")
   return()
 endif()
 
@@ -18,12 +18,20 @@ add_library(stk_app STATIC
   src/editor.cc
   src/editor_area.cc
   src/editors.cc
+  src/editors/viewer_common.cc
+  src/editors/viewer_editor.cc
+  src/editors/viewer_panels.cc
   src/shell.cc
+  src/viewer_export.cc
+  src/viewer_state.cc
 )
 target_include_directories(stk_app PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_compile_features(stk_app PUBLIC cxx_std_20)
 # stk_bridge (CPU only): BridgeStatus mirrors the bridge client into the status bar.
 target_link_libraries(stk_app PUBLIC stk_wm stk_ui_core stk_core stk_bridge)
+# WP10: the Viewer editor draws with stk_viewer_gpu; ViewerState decodes payloads (stk_io) and
+# formats labels (stk_viewer_model).
+target_link_libraries(stk_app PUBLIC stk_viewer_gpu stk_viewer_model stk_io)
 target_compile_definitions(stk_app PRIVATE STK_APP_VERSION="${PROJECT_VERSION}")
 option(STK_APP_SOURCE_I18N_FALLBACK "Let binaries fall back to the source tree for message catalogs" ON)
 if(STK_APP_SOURCE_I18N_FALLBACK)

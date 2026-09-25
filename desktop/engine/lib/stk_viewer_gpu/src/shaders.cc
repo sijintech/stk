@@ -5,6 +5,7 @@
 #include "glsl_sources.hh"
 
 #include <cstdio>
+#include <optional>
 
 #include "GPU_shader.hh"
 #include "gpu_shader_create_info.hh"
@@ -16,11 +17,17 @@ using namespace blender::gpu::shader;
 
 namespace {
 
-/* Stage interfaces (names are referenced, so they live as static objects). */
-StageInterfaceInfo &surface_iface()
+/* Stage interfaces. The create info references them until the program is compiled, so they live
+ * as long as one compilation (ShaderCache::get); static objects would keep guardedalloc blocks
+ * until exit, which the application's leak check at shutdown counts. */
+struct Interfaces {
+  std::optional<StageInterfaceInfo> surface, point, slice, volume;
+};
+
+StageInterfaceInfo &surface_iface(Interfaces &store)
 {
-  static StageInterfaceInfo iface = [] {
-    StageInterfaceInfo i("stk_surface_iface", "");
+  if (!store.surface) {
+    StageInterfaceInfo &i = store.surface.emplace("stk_surface_iface", "");
     i.smooth(Type::float3_t, "v_eye");
     i.smooth(Type::float3_t, "v_nrm");
     i.smooth(Type::float_t, "v_t");
@@ -29,15 +36,14 @@ StageInterfaceInfo &surface_iface()
     i.flat(Type::float4_t, "v_rgbaf");
     i.flat(Type::uint_t, "v_id");
     i.flat(Type::int_t, "v_nan");
-    return i;
-  }();
-  return iface;
+  }
+  return *store.surface;
 }
 
-StageInterfaceInfo &point_iface()
+StageInterfaceInfo &point_iface(Interfaces &store)
 {
-  static StageInterfaceInfo iface = [] {
-    StageInterfaceInfo i("stk_point_iface", "");
+  if (!store.point) {
+    StageInterfaceInfo &i = store.point.emplace("stk_point_iface", "");
     i.smooth(Type::float3_t, "v_eye");
     i.flat(Type::float3_t, "v_center");
     i.smooth(Type::float2_t, "v_corner");
@@ -46,30 +52,27 @@ StageInterfaceInfo &point_iface()
     i.flat(Type::float4_t, "v_rgba");
     i.flat(Type::uint_t, "v_id");
     i.flat(Type::int_t, "v_nan");
-    return i;
-  }();
-  return iface;
+  }
+  return *store.point;
 }
 
-StageInterfaceInfo &slice_iface()
+StageInterfaceInfo &slice_iface(Interfaces &store)
 {
-  static StageInterfaceInfo iface = [] {
-    StageInterfaceInfo i("stk_slice_iface", "");
+  if (!store.slice) {
+    StageInterfaceInfo &i = store.slice.emplace("stk_slice_iface", "");
     i.smooth(Type::float3_t, "v_eye");
     i.smooth(Type::float2_t, "v_uv");
-    return i;
-  }();
-  return iface;
+  }
+  return *store.slice;
 }
 
-StageInterfaceInfo &volume_iface()
+StageInterfaceInfo &volume_iface(Interfaces &store)
 {
-  static StageInterfaceInfo iface = [] {
-    StageInterfaceInfo i("stk_volume_iface", "");
+  if (!store.volume) {
+    StageInterfaceInfo &i = store.volume.emplace("stk_volume_iface", "");
     i.no_perspective(Type::float2_t, "v_ndc");
-    return i;
-  }();
-  return iface;
+  }
+  return *store.volume;
 }
 
 void common_3d(ShaderCreateInfo &info)
@@ -103,7 +106,7 @@ struct Sources {
   std::string vert, frag;
 };
 
-Sources describe(const Program program, const bool id_pass, ShaderCreateInfo &info)
+Sources describe(const Program program, const bool id_pass, ShaderCreateInfo &info, Interfaces &ifaces)
 {
   const std::string common = glsl::stk_common_lib;
   Sources s;
@@ -115,7 +118,7 @@ Sources describe(const Program program, const bool id_pass, ShaderCreateInfo &in
       info.storage_buf(slot::pos, Qualifier::read, "float", "s_pos[]");
       info.storage_buf(slot::idx, Qualifier::read, "uint", "s_idx[]");
       info.storage_buf(slot::nrm, Qualifier::read, "float", "s_nrm[]");
-      info.vertex_out(surface_iface());
+      info.vertex_out(surface_iface(ifaces));
       s.vert = common + glsl::stk_mesh_vert;
       s.frag = common + glsl::stk_surface_frag;
       break;
@@ -124,7 +127,7 @@ Sources describe(const Program program, const bool id_pass, ShaderCreateInfo &in
       color_resources(info);
       info.storage_buf(slot::pos, Qualifier::read, "float", "s_pos[]");
       info.storage_buf(slot::idx, Qualifier::read, "float", "s_inst[]");
-      info.vertex_out(surface_iface());
+      info.vertex_out(surface_iface(ifaces));
       s.vert = common + glsl::stk_glyph_vert;
       s.frag = common + glsl::stk_surface_frag;
       break;
@@ -133,7 +136,7 @@ Sources describe(const Program program, const bool id_pass, ShaderCreateInfo &in
       color_resources(info);
       info.storage_buf(slot::pos, Qualifier::read, "float", "s_pos[]");
       info.storage_buf(slot::idx, Qualifier::read, "uint", "s_idx[]");
-      info.vertex_out(surface_iface());
+      info.vertex_out(surface_iface(ifaces));
       s.vert = common + glsl::stk_line_vert;
       s.frag = common + glsl::stk_surface_frag;
       break;
@@ -143,7 +146,7 @@ Sources describe(const Program program, const bool id_pass, ShaderCreateInfo &in
       info.push_constant(Type::float4x4_t, "u_proj");
       info.storage_buf(slot::pos, Qualifier::read, "float", "s_pos[]");
       info.storage_buf(slot::nrm, Qualifier::read, "float", "s_rad[]");
-      info.vertex_out(point_iface());
+      info.vertex_out(point_iface(ifaces));
       info.depth_write(DepthWrite::ANY);
       s.vert = common + glsl::stk_point_vert;
       s.frag = common + glsl::stk_point_frag;
@@ -155,7 +158,7 @@ Sources describe(const Program program, const bool id_pass, ShaderCreateInfo &in
       info.push_constant(Type::float4_t, "u_plane_u");
       info.push_constant(Type::float4_t, "u_plane_v");
       info.sampler(slot::lut, ImageType::Float2D, "s_img");
-      info.vertex_out(slice_iface());
+      info.vertex_out(slice_iface(ifaces));
       s.vert = common + glsl::stk_slice_vert;
       s.frag = common + glsl::stk_slice_frag;
       break;
@@ -168,7 +171,7 @@ Sources describe(const Program program, const bool id_pass, ShaderCreateInfo &in
       info.sampler(slot::lut, ImageType::Float3D, "s_vol");
       info.sampler(slot::tf, ImageType::Float2D, "s_tf");
       info.sampler(slot::depth, ImageType::Depth2D, "s_depth");
-      info.vertex_out(volume_iface());
+      info.vertex_out(volume_iface(ifaces));
       s.vert = glsl::stk_volume_vert;
       s.frag = glsl::stk_volume_frag;
       break;
@@ -264,8 +267,9 @@ gpu::Shader *ShaderCache::get(const Program program, const bool id_pass)
     return shaders_[p][v];
   }
   std::string name = std::string(program_name(program)) + (id_pass ? "_id" : "");
+  Interfaces ifaces; /* outlives `info` (declared first) */
   ShaderCreateInfo info(name.c_str());
-  const Sources sources = describe(program, id_pass, info);
+  const Sources sources = describe(program, id_pass, info, ifaces);
   std::string err;
   gpu::Shader *shader = compile(info, sources, err);
   if (!shader) {
