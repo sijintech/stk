@@ -25,6 +25,8 @@
 #include "stk/gfx/gpu.hh"
 #include "stk/gfx/image.hh"
 #include "stk/gfx/offscreen.hh"
+#include "stk/ui/gpu_painter.hh"
+#include "stk/wm/ui_bridge.hh"
 #include "stk/wm/window.hh"
 
 #include "gallery_wm.hh"
@@ -312,27 +314,32 @@ int run_gui(const Args &a, gfx::Backend backend, const std::string &lang)
   g::State state;
   init_state(state, lang);
   state.image_texture = g::create_demo_texture(state.image_w, state.image_h);
-  g::WmClipboard clipboard(*wm);
+  /* One UI context per window (the screen's); the gallery screen builds its blocks inside a
+   * wm::UiRegion. Measurer (BLF) and clipboard (the window manager's) are filled in by stk_wm. */
   ContextConfig cfg;
-  cfg.clipboard = &clipboard;
   cfg.catalog = &state.catalog;
 #ifdef __APPLE__
   cfg.mac_shortcuts = true;
 #endif
+  stk::wm::Screen &wscreen = wm->main_window()->screen();
+  wscreen.set_ui_config(cfg);
   const g::Screen screen = a.screen;
-  g::UiRegion &region = wm->main_window()->screen().add_area("gallery").emplace_region<g::UiRegion>(
-      "gallery", *wm, cfg, [&state, screen](Context &ctx, Vec2 size, double now) {
-        g::build(ctx, state, screen, size, now);
+  auto region = std::make_unique<stk::wm::UiRegion>(
+      "gallery", stk::wm::RegionAlign::Fill, 0.0f,
+      [&state, screen](Context &ctx, const Rect &rect, const stk::wm::DrawContext &) {
+        g::build_blocks(ctx, state, screen, rect);
       });
+  stk::wm::UiRegion *gallery_region = region.get();
+  wscreen.add_area("gallery").add_region(std::move(region));
   long frames = 0;
   if (a.exit_after_frames > 0) {
     /* Smoke test: keep presenting frames, then quit cleanly. */
-    region.after_draw = [&]() {
+    gallery_region->after_build = [&]() {
       if (++frames >= a.exit_after_frames) {
         wm->quit(0);
       }
       else {
-        region.tag_redraw();
+        gallery_region->tag_redraw();
       }
     };
   }

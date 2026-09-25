@@ -65,6 +65,11 @@ bool load_form(State &s, const std::string &repo_root, std::string *err = nullpt
 /** Builds one frame of a screen (begin_frame .. end_frame). */
 void build(Context &ctx, State &s, Screen screen, Vec2 window, double now);
 /**
+ * Builds the screen's blocks inside `rect` of a frame someone else begins and ends (the window
+ * manager's shared context: stk::wm::UiRegion in the interactive gallery).
+ */
+void build_blocks(Context &ctx, State &s, Screen screen, Rect rect);
+/**
  * Builds the screen and stages the interactive overlays shown by the gallery and the overlay
  * golden: IME preedit in the job-name field, the view dropdown open, the Run tooltip, a toast
  * (and the modal, which the screen builds while `modal_open`).

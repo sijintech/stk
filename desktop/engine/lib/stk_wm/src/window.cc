@@ -26,6 +26,7 @@
 
 #include "stk/gfx/fonts.hh"
 #include "stk/gfx/offscreen.hh"
+#include "stk/wm/csd.hh"
 
 #include "ghost_native.hh"
 #include "post_queue.hh"
@@ -363,6 +364,9 @@ std::unique_ptr<WindowManager> WindowManager::create(const WmOptions &options, s
   auto *consumer = new EventConsumer(wm.get());
   wm->consumer_ = consumer;
   wm->system_->addEventConsumer(consumer);
+  /* Client-side decorations (GNOME on Wayland): the layout callback must exist before any
+   * window is configured. */
+  csd_install(*wm);
 
   /* The main window is created before the GPU module's offscreen context (see
    * gfx::Gpu::FirstContextFn), once per backend candidate until one works. */
@@ -431,8 +435,8 @@ std::unique_ptr<Window> WindowManager::create_window(const WindowOptions &option
                                                      std::string &r_error)
 {
   GHOST_IWindow *ghost = system_->createWindow(options.title.c_str(),
-                                               0,
-                                               0,
+                                               options.x,
+                                               options.y,
                                                uint32_t(std::max(1, options.width)),
                                                uint32_t(std::max(1, options.height)),
                                                options.maximized ? GHOST_kWindowStateMaximized :

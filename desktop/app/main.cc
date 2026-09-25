@@ -1,21 +1,31 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** \file
- * stk-desktop: the STK desktop application (WP1: engine bootstrap).
+ * stk-desktop: the STK desktop application.
  *
- * GUI mode opens a window titled "STK" showing the sample frame; `--headless` renders the same
- * frame offscreen and exports it as PNG. See `stk-desktop --help`.
+ * GUI mode opens the main window with the application shell (top bar, areas, status bar) and
+ * restores the saved layout (`<user config>/desktop/layout.json`, or `--layout FILE`), falling
+ * back to the default layout; the layout is saved again when the window closes. `--headless`
+ * renders the default (or `--layout`) screen offscreen and exports it as PNG; `--sample` renders
+ * the WP1 engine sample frame instead. See `stk-desktop --help`.
  */
 
 #include <charconv>
+#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
 
+#include "stk/app/bridge_status.hh"
+#include "stk/app/shell.hh"
+#include "stk/bridge/client.hh"
+#include "stk/core/paths.hh"
 #include "stk/gfx/gpu.hh"
 #include "stk/gfx/image.hh"
 #include "stk/gfx/offscreen.hh"
+#include "stk/wm/csd.hh"
+#include "stk/wm/layout_store.hh"
 #include "stk/wm/window.hh"
 
 #include "sample_screen.hh"
@@ -40,11 +50,20 @@ struct Args {
   bool help = false;
   bool version = false;
   bool size_given = false;
+  bool scale_given = false;
+  bool sample = false;
+  bool no_save_layout = false;
+  bool no_bridge = false;
   int width = 0, height = 0;
   float scale = 1.0f;
   std::string export_path;
   std::string gpu_backend;
   std::string datafiles;
+  std::string i18n_dir;
+  std::string lang;
+  std::string layout;
+  std::string save_layout;
+  std::string python;
   bool gpu_debug = false;
   bool verbose = false;
   long exit_after_frames = 0;
@@ -61,22 +80,41 @@ void print_help(FILE *f)
           "Options:\n"
           "  --headless               Render one frame offscreen (no display needed), then exit.\n"
           "  --export FILE.png        Headless: write the rendered frame to FILE.png.\n"
+          "  --sample                 Headless: render the engine sample frame instead of the\n"
+          "                           application screen.\n"
           "  --size WxH               Headless: frame size in pixels (default 960x600).\n"
-          "                           GUI: initial window size in points (default 1280x800).\n"
+          "                           GUI: initial window size in points (default: saved, else\n"
+          "                           1280x800).\n"
           "  --scale S                Headless: UI scale of the frame (default 1).\n"
           "                           GUI: user scale, multiplied with the display DPI factor.\n"
+          "  --lang zh|en             UI language (default: saved, else zh).\n"
+          "  --layout FILE            Load this layout instead of the saved one (not written back).\n"
+          "  --save-layout FILE       Write the layout of the screen to FILE (headless: the\n"
+          "                           rendered screen; GUI: on exit).\n"
+          "  --no-save-layout         GUI: do not save the layout on exit.\n"
+          "  --no-bridge              GUI: do not start the Python bridge (status bar shows it).\n"
+          "  --python PATH            GUI: interpreter for the bridge (default: $STK_PYTHON, else\n"
+          "                           python3 / python on PATH).\n"
           "  --gpu-backend B          auto, opengl, vulkan or metal (default: $STK_GPU_BACKEND,\n"
           "                           else OpenGL on Linux/Windows and Metal on macOS).\n"
           "  --datafiles DIR          Directory containing fonts/ (default: next to the program,\n"
           "                           $STK_BLENDER_DATAFILES, or the source tree in dev builds).\n"
+          "  --i18n DIR               Directory of the message catalogs (default: next to the\n"
+          "                           program, $STK_I18N_DIR, or the source tree in dev builds).\n"
           "  --gpu-debug              Create debug GPU contexts.\n"
           "  --exit-after-frames N    GUI: quit after N frames were presented (smoke tests).\n"
           "  --verbose                Print backend and device details.\n"
           "  --version                Print the version and exit.\n"
           "  --help                   Print this help and exit.\n"
           "\n"
-          "GUI keys: type to echo text (IME supported), Ctrl+V / Ctrl+C clipboard,\n"
-          "Ctrl + / - / 0 change the UI scale, drop files onto the window.\n"
+          "Layout: saved to $XDG_CONFIG_HOME/stk/desktop/layout.json (~/.config/stk/...) when the\n"
+          "window closes; a corrupt file is moved to layout.json.corrupt and the default layout\n"
+          "is used.\n"
+          "\n"
+          "GUI keys: Ctrl+Space maximize / restore the area under the pointer, T / N toggle the\n"
+          "toolbar / sidebar, Ctrl+PageUp / PageDown switch tabs, Ctrl+S save the layout,\n"
+          "Ctrl + / - / 0 UI scale, Ctrl+Q quit. Drag splitters to resize areas, double-click\n"
+          "one to join the areas beside it; right-click an area header for the area menu.\n"
           "\n"
           "Exit codes: 0 success, 1 failure, 2 usage error, 3 no display available.\n");
 }
@@ -115,11 +153,20 @@ bool parse_args(int argc, char **argv, Args &a, std::string &err)
     else if (arg == "--headless") {
       a.headless = true;
     }
+    else if (arg == "--sample") {
+      a.sample = true;
+    }
     else if (arg == "--gpu-debug") {
       a.gpu_debug = true;
     }
     else if (arg == "--verbose") {
       a.verbose = true;
+    }
+    else if (arg == "--no-save-layout") {
+      a.no_save_layout = true;
+    }
+    else if (arg == "--no-bridge") {
+      a.no_bridge = true;
     }
     else if (arg == "--size") {
       if (!value(v)) {
@@ -142,24 +189,37 @@ bool parse_args(int argc, char **argv, Args &a, std::string &err)
         err = "--scale: expected a number between 0.25 and 8";
         return false;
       }
+      a.scale_given = true;
     }
-    else if (arg == "--export") {
+    else if (arg == "--lang") {
       if (!value(v)) {
         return false;
       }
-      a.export_path = v;
+      if (v == "zh" || v == "zh_CN") {
+        a.lang = "zh_CN";
+      }
+      else if (v == "en") {
+        a.lang = "en";
+      }
+      else {
+        err = "--lang: expected zh or en";
+        return false;
+      }
     }
-    else if (arg == "--gpu-backend") {
+    else if (arg == "--export" || arg == "--gpu-backend" || arg == "--datafiles" || arg == "--i18n" ||
+             arg == "--layout" || arg == "--save-layout" || arg == "--python")
+    {
       if (!value(v)) {
         return false;
       }
-      a.gpu_backend = v;
-    }
-    else if (arg == "--datafiles") {
-      if (!value(v)) {
-        return false;
-      }
-      a.datafiles = v;
+      std::string &dst = arg == "--export"      ? a.export_path :
+                         arg == "--gpu-backend" ? a.gpu_backend :
+                         arg == "--datafiles"   ? a.datafiles :
+                         arg == "--i18n"        ? a.i18n_dir :
+                         arg == "--layout"      ? a.layout :
+                         arg == "--python"      ? a.python :
+                                                  a.save_layout;
+      dst = v;
     }
     else if (arg == "--exit-after-frames") {
       if (!value(v)) {
@@ -180,7 +240,119 @@ bool parse_args(int argc, char **argv, Args &a, std::string &err)
     err = "--export requires --headless";
     return false;
   }
+  if (a.sample && !a.headless) {
+    err = "--sample requires --headless";
+    return false;
+  }
   return true;
+}
+
+stk::app::ShellOptions shell_options(const Args &a, const bool interactive)
+{
+  stk::app::ShellOptions so;
+  so.i18n_dir = stk::app::locate_i18n_dir(a.i18n_dir);
+  if (!a.lang.empty()) {
+    so.language = a.lang;
+  }
+  so.interactive = interactive;
+  return so;
+}
+
+/** Loads `--layout` (or the saved layout) into the screen, else the default layout. */
+void restore_or_default(stk::app::AppShell &shell, stk::wm::Screen &screen, const Args &a, const std::string &path)
+{
+  const bool explicit_file = !a.layout.empty();
+  if (!shell.restore(screen, stk::core::path_from_utf8(path), !explicit_file)) {
+    if (explicit_file) {
+      fprintf(stderr, "stk-desktop: cannot use layout %s, using the default layout\n", path.c_str());
+    }
+    shell.build_default_layout(screen);
+  }
+  if (!a.lang.empty()) {
+    /* An explicit --lang wins over the saved language. */
+    shell.set_language(a.lang);
+  }
+}
+
+int run_sample_headless(const Args &a, stk::gfx::Gpu &gpu, const int w, const int h)
+{
+  using namespace stk;
+  std::string err;
+  wm::Screen screen;
+  app::build_sample_screen(screen, nullptr);
+  wm::DrawContext ctx;
+  ctx.ui_scale = a.scale;
+  ctx.fonts = &gpu.fonts();
+  ctx.rect = {0, 0, w, h};
+  gfx::Image img;
+  if (!gfx::render_offscreen(w, h, [&] { screen.draw(ctx); }, img, err)) {
+    fprintf(stderr, "stk-desktop: render failed: %s\n", err.c_str());
+    return kFailure;
+  }
+  if (!a.export_path.empty()) {
+    if (!gfx::png_write(a.export_path, img)) {
+      fprintf(stderr, "stk-desktop: cannot write %s\n", a.export_path.c_str());
+      return kFailure;
+    }
+    printf("wrote %s (%dx%d, scale %g, %s)\n", a.export_path.c_str(), w, h, a.scale, gpu.backend_name());
+  }
+  else {
+    printf("rendered %dx%d at scale %g with %s (no --export given)\n", w, h, a.scale, gpu.backend_name());
+  }
+  return kOk;
+}
+
+int run_app_headless(const Args &a, stk::gfx::Gpu &gpu, const int w, const int h)
+{
+  using namespace stk;
+  std::string err;
+  app::AppShell shell(shell_options(a, false));
+  if (!shell.catalogs_loaded()) {
+    fprintf(stderr, "stk-desktop: %s\n", shell.catalog_error().c_str());
+  }
+  shell.layout_path.clear();
+  wm::Screen screen;
+  shell.install(screen, nullptr);
+  if (!a.layout.empty()) {
+    restore_or_default(shell, screen, a, a.layout);
+  }
+  else {
+    shell.build_default_layout(screen);
+  }
+  wm::DrawContext ctx;
+  ctx.ui_scale = a.scale;
+  ctx.fonts = &gpu.fonts();
+  ctx.rect = {0, 0, w, h};
+  /* A fixed clock keeps exports deterministic (no tooltips, toasts or animations). */
+  ctx.now = 100.0;
+  gfx::Image img;
+  if (!gfx::render_offscreen(w, h, [&] { screen.draw(ctx); }, img, err)) {
+    fprintf(stderr, "stk-desktop: render failed: %s\n", err.c_str());
+    return kFailure;
+  }
+  /* A window ignores the framebuffer alpha; keep exported PNGs opaque the same way. */
+  for (size_t i = 3; i < img.rgba.size(); i += 4) {
+    img.rgba[i] = 255;
+  }
+  int rc = kOk;
+  if (!a.save_layout.empty() && !shell.save(screen, nullptr, core::path_from_utf8(a.save_layout))) {
+    fprintf(stderr, "stk-desktop: cannot write layout %s\n", a.save_layout.c_str());
+    rc = kFailure;
+  }
+  const size_t areas = screen.areas().size();
+  if (!a.export_path.empty()) {
+    if (!gfx::png_write(a.export_path, img)) {
+      fprintf(stderr, "stk-desktop: cannot write %s\n", a.export_path.c_str());
+      return kFailure;
+    }
+    printf("wrote %s (%dx%d, scale %g, %s, %s, %zu areas)\n", a.export_path.c_str(), w, h, a.scale,
+           shell.store().language().c_str(), gpu.backend_name(), areas);
+  }
+  else {
+    printf("rendered %dx%d (scale %g, %s, %s, %zu areas, no --export given)\n", w, h, a.scale,
+           shell.store().language().c_str(), gpu.backend_name(), areas);
+  }
+  return rc;
 }
 
 int run_headless(const Args &a, const stk::gfx::Backend backend)
@@ -211,35 +383,8 @@ int run_headless(const Args &a, const stk::gfx::Backend backend)
       printf("backend: %s | %s\nfonts: %s\n", gpu->backend_name(), gpu->device_info().c_str(),
              gpu->fonts().fonts_dir.c_str());
     }
-
     gfx::set_ui_scale(a.scale);
-    wm::Screen screen;
-    app::build_sample_screen(screen, nullptr);
-    wm::DrawContext ctx;
-    ctx.ui_scale = a.scale;
-    ctx.fonts = &gpu->fonts();
-    ctx.rect = {0, 0, w, h};
-    screen.layout(ctx.rect, ctx);
-
-    gfx::Image img;
-    if (!gfx::render_offscreen(w, h, [&] { screen.draw(ctx); }, img, err)) {
-      fprintf(stderr, "stk-desktop: render failed: %s\n", err.c_str());
-      rc = kFailure;
-    }
-    else if (!a.export_path.empty()) {
-      if (!gfx::png_write(a.export_path, img)) {
-        fprintf(stderr, "stk-desktop: cannot write %s\n", a.export_path.c_str());
-        rc = kFailure;
-      }
-      else {
-        printf("wrote %s (%dx%d, scale %g, %s)\n", a.export_path.c_str(), w, h, a.scale,
-               gpu->backend_name());
-      }
-    }
-    else {
-      printf("rendered %dx%d at scale %g with %s (no --export given)\n", w, h, a.scale,
-             gpu->backend_name());
-    }
+    rc = a.sample ? run_sample_headless(a, *gpu, w, h) : run_app_headless(a, *gpu, w, h);
   }
   gfx::dispose_system();
   return rc;
@@ -248,15 +393,36 @@ int run_headless(const Args &a, const stk::gfx::Backend backend)
 int run_gui(const Args &a, const stk::gfx::Backend backend)
 {
   using namespace stk;
+  app::AppShell shell(shell_options(a, true));
+  if (!shell.catalogs_loaded()) {
+    fprintf(stderr, "stk-desktop: %s\n", shell.catalog_error().c_str());
+  }
+  const std::string layout_path = a.layout.empty() ? core::path_to_utf8(wm::default_layout_path()) : a.layout;
+  /* The saved window geometry and UI scale are needed before the window exists. */
+  wm::LayoutFile saved;
+  const bool have_saved = wm::load_layout_file(core::path_from_utf8(layout_path), saved) == wm::LayoutLoad::Ok;
+
   wm::WmOptions opts;
   opts.gpu.backend = backend;
   opts.gpu.datafiles = a.datafiles;
   opts.gpu.debug = a.gpu_debug;
-  opts.user_scale = a.scale;
+  opts.user_scale = a.scale_given ? a.scale : (have_saved ? saved.ui_scale : 1.0f);
   opts.window.title = "STK";
+  opts.window.width = app::kDefaultWindowWidth;
+  opts.window.height = app::kDefaultWindowHeight;
+  if (have_saved && saved.window.width > 0 && saved.window.height > 0) {
+    opts.window.width = saved.window.width;
+    opts.window.height = saved.window.height;
+    if (saved.window.has_position) {
+      opts.window.x = saved.window.x;
+      opts.window.y = saved.window.y;
+    }
+    opts.window.maximized = saved.window.maximized;
+  }
   if (a.size_given) {
     opts.window.width = a.width;
     opts.window.height = a.height;
+    opts.window.maximized = false;
   }
 
   std::string err;
@@ -271,26 +437,83 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
   }
 
   wm::Window *win = wm->main_window();
-  app::build_sample_screen(win->screen(), wm.get());
-  printf("stk-desktop: %s, %s, window %dx%d px, UI scale %.3g\n", wm->system_backend(),
-         wm->gpu().backend_name(), win->width(), win->height(), win->ui_scale());
-  if (a.verbose) {
-    printf("device: %s\nfonts: %s\n", wm->gpu().device_info().c_str(),
-           wm->gpu().fonts().fonts_dir.c_str());
+  wm::Screen &screen = win->screen();
+  shell.install(screen, win);
+  shell.set_ui_scale(opts.user_scale);
+  restore_or_default(shell, screen, a, layout_path);
+  if (a.scale_given) {
+    shell.set_ui_scale(a.scale);
   }
-  fflush(stdout);
-
-  win->on_event = [win](const wm::Event &e) {
-    /* The whole window is one text field in the sample: enable IME while focused. */
-    if (e.type == wm::EventType::FocusIn) {
-      win->ime_begin({0, 0, 1, 1}, true);
-      win->request_redraw();
+  /* Saving: the per-user layout unless --layout (read-only) or --no-save-layout; --save-layout
+   * adds an explicit target. */
+  std::string save_path;
+  if (!a.save_layout.empty()) {
+    save_path = a.save_layout;
+  }
+  else if (a.layout.empty() && !a.no_save_layout) {
+    save_path = layout_path;
+  }
+  shell.layout_path = core::path_from_utf8(save_path);
+  bool saved_once = false;
+  auto save_layout = [&]() {
+    if (!saved_once && !save_path.empty() && wm->main_window()) {
+      saved_once = shell.save(wm->main_window()->screen(), wm->main_window(), shell.layout_path);
     }
-    else if (e.type == wm::EventType::FocusOut) {
-      win->ime_end();
+  };
+  shell.on_quit = [&]() {
+    save_layout();
+    wm->quit(kOk);
+  };
+  win->on_event = [&](const wm::Event &e) {
+    if (e.type == wm::EventType::Close) {
+      save_layout();
     }
     return false;
   };
+
+  printf("stk-desktop: %s, %s, window %dx%d px, UI scale %.3g, CSD %s\n", wm->system_backend(),
+         wm->gpu().backend_name(), win->width(), win->height(), win->ui_scale(), wm->csd_active() ? "on" : "off");
+  if (a.verbose) {
+    printf("device: %s\nfonts: %s\ni18n: %s\nlayout: %s\n", wm->gpu().device_info().c_str(),
+           wm->gpu().fonts().fonts_dir.c_str(), shell.options().i18n_dir.c_str(), layout_path.c_str());
+  }
+  fflush(stdout);
+  shell.store().log(shell.store().catalog().format(
+      "app.log.started", {{"backend", wm->system_backend()}, {"gpu", wm->gpu().backend_name()}}));
+
+  /* The Python bridge: its callbacks run on the main loop (the window manager's executor); the
+   * status bar and the Bridge log editor follow it through BridgeStatus. */
+  std::unique_ptr<bridge::Client> bridge_client;
+  std::unique_ptr<app::BridgeStatus> bridge_status;
+  if (!a.no_bridge) {
+    bridge::ClientOptions bo;
+    bo.executor = wm->executor();
+    bo.python.configured = a.python;
+    bo.client_version = STK_DESKTOP_VERSION;
+#ifdef STK_DESKTOP_SOURCE_REPO
+    /* Development builds: make the repository's suan package importable. */
+    {
+      const std::string repo = STK_DESKTOP_SOURCE_REPO;
+      std::error_code ec;
+      if (std::filesystem::exists(core::path_from_utf8(repo + "/suan/desktop_bridge/__main__.py"), ec)) {
+        const auto old = core::getenv_utf8("PYTHONPATH");
+#  ifdef _WIN32
+        const char sep = ';';
+#  else
+        const char sep = ':';
+#  endif
+        bo.env["PYTHONPATH"] = old && !old->empty() ? repo + sep + *old : repo;
+      }
+    }
+#endif
+    bridge_client = bridge::Client::create(std::move(bo));
+    bridge_status = std::make_unique<app::BridgeStatus>(shell.store(), *bridge_client, wm.get());
+    std::string berr;
+    if (!bridge_client->start(&berr)) {
+      shell.store().set_bridge_error(berr);
+      fprintf(stderr, "stk-desktop: bridge: %s\n", berr.c_str());
+    }
+  }
 
   if (a.exit_after_frames > 0) {
     const long target = a.exit_after_frames;
@@ -312,6 +535,19 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
     });
   }
   const int rc = wm->run();
+  save_layout();
+  if (a.verbose) {
+    printf("bridge: %s%s%s\n",
+           bridge_client ? std::string(bridge::bridge_state_name(bridge_client->state())).c_str() : "off",
+           shell.store().bridge_error().empty() ? "" : ", ", shell.store().bridge_error().c_str());
+  }
+  /* Reverse order: status mirror, bridge (EOF, grace period, terminate), then the windows. */
+  bridge_status.reset();
+  bridge_client.reset();
+  if (a.verbose) {
+    printf("csd: %s, %llu layout callback(s)\n", wm->csd_active() ? "on" : "off",
+           (unsigned long long)wm::csd_layout_calls());
+  }
   wm.reset();
   return rc;
 }

@@ -50,6 +50,9 @@ struct WindowOptions {
   int width = 1280;
   int height = 800;
   bool maximized = false;
+  /** Initial top-left position in screen coordinates (ignored on Wayland). */
+  int x = 0;
+  int y = 0;
 };
 
 class Window {
@@ -127,6 +130,12 @@ class Window {
 
   /** Behaves like the user closing the window (emits Close; closes unless consumed). */
   void request_close();
+
+  /** Window state and geometry (layout persistence; window_state.cc). */
+  bool maximized() const;
+  void set_maximized(bool maximized);
+  /** Client area in logical points: position in screen coordinates (0, 0 on Wayland) and size. */
+  void client_geometry(int &r_x, int &r_y, int &r_width, int &r_height) const;
 
   /**
    * Called for every event before the screen routes it; return true to consume. A Close event
@@ -236,6 +245,9 @@ class WindowManager {
   bool has_clipboard_image() const;
   bool clipboard_image(gfx::Image &r_image) const;
   bool set_clipboard_image(const gfx::Image &image);
+
+  /** The platform needs client-side decorations drawn by the application (see stk/wm/csd.hh). */
+  bool csd_active() const;
 
   /** Whether the platform backend supports inline IME / clipboard images. */
   bool supports_ime() const;

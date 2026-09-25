@@ -14,16 +14,17 @@ Python packages stay MIT.
 | `engine/third_party/blender/` | `vendor.py`, `manifest.json`, `UPSTREAM.json` (pin), `VENDORED.json` (per-file sha256), `shims/`, `patches/` (none needed), `src/` (vendored upstream files in upstream layout, including `release/datafiles/fonts` and `release/license`), and our `CMakeLists.txt`. |
 | `engine/lib/stk_core`, `stk_io`, `stk_viewer_model` | CPU-only libraries (no GHOST/GPU headers): UTF-8, paths, logging, payload/JSON/schema models, PNG I/O, viewer maths. |
 | `engine/lib/stk_gfx` | GPU bootstrap: process runtime (guardedalloc leak detection), backend selection, main GPU context, font stack, UI scale, offscreen render to PNG. |
-| `engine/lib/stk_wm` | GHOST glue: window manager, windows, on-demand event loop, events (keys, mouse, wheel, IME preedit, drag and drop), DPI, clipboard, cursors; screen / area / region layout; `WindowManager::post` / `executor()` (thread-safe work for the main loop, wakes an idle wait). |
+| `engine/lib/stk_wm` | GHOST glue: window manager, windows, on-demand event loop, events (keys, mouse, wheel, IME preedit, drag and drop), DPI, clipboard, cursors; `WindowManager::post` / `executor()` (thread-safe work for the main loop, wakes an idle wait). Screen model (`screen.hh`): a tree of areas with draggable splitters and minimum sizes, split / join / maximize, docked regions (header, toolbar, sidebar, main) and global bars; one `stk_ui` context per window (a block per region, overlays on top, IME placement, wake-up timers); `ui_bridge.hh` (event adapter, clipboard, `UiRegion`); `layout_store.hh` (versioned layout JSON); `csd.hh` (GNOME client-side decorations). |
 | `engine/lib/stk_bridge` | Client of the Python bridge (`python -m suan.desktop_bridge --stdio`, `docs/specs/stk-desktop-bridge-v1.md`): spawn (posix_spawn + process group; CreateProcessW + job object), strict NDJSON framing, futures with timeout / cancel, typed wrappers, RAII subscriptions, restart with replay, stderr ring for the "Bridge log". CPU only. |
 | `engine/lib/stk_viewer_gpu` | Payload-v2 viewer on the GPU module: lit LUT-coloured triangles, slices, instanced glyphs, lines, points and sphere impostors, ray-marched volumes; overlays through BLF (scalar bar, legend, orientation sphere, triad, text); GPU id-pass picking refined in float64; tiled PNG export x1-x8; GPU budget, LOD and timestep prefetch. |
+| `engine/lib/stk_app` | Application shell (`shell.hh`: top bar with File / View / Language / UI scale menus, status bar, default layout, layout files, shortcuts), `AppStore`, editor registry and `EditorArea` (tabs, header, toolbar / sidebar, area menu), the WP3 placeholder editors (Jobs, Viewer, Properties, Logs, Probe, Transfers, Bridge log). |
 | `engine/lib/stk_ui` | Blender-style UI toolkit. `stk_ui_core` (no GPU/GHOST headers): blocks rebuilt per frame, layouts in UI units, widgets bound by getter/setter closures, Blender dark theme, CJK line breaking, text editing with IME preedit, i18n catalogs, JSON Schema forms, draw lists. `stk_ui_gpu`: painter on the GPU module's widget shader + BLF. Also adds `tests/ui` and `tools/widget_gallery`. |
-| `app/` | `stk-desktop` (GUI and `--headless` export) and the WP1 sample screen. `app/i18n/`: `zh_CN.json` (default) / `en.json` message catalogs and `check_i18n.py` (fails on missing keys). |
+| `app/` | `stk-desktop` (GUI and `--headless` export of the application screen; `--sample` renders the WP1 sample frame). `app/i18n/`: `zh_CN.json` (default) / `en.json` message catalogs and `check_i18n.py` (fails on missing keys). |
 | `tests/ui` | stk_ui tests (label `ui`): events, text/IME, numbers, forms against the catalog and presets, layout goldens (en/zh at 1x/1.5x/2x; `STK_UPDATE_GOLDENS=1` rewrites them), i18n checker. |
 | `tools/stk_render/` | `stk-render --payload <dir\|manifest.json\|.stkp> --export out.png [--size WxH] [--scale N] [--camera preset] [--pick x,y] [--bench N]`: headless payload renderer. |
 | `tools/widget_gallery/` | `widget_gallery`: every widget rendered headless (`--headless --export out.png --lang zh\|en --scale S`, label `gpu` goldens) or in a window for the manual IME matrix. |
 | `tests/unit` | gtest suites of the CPU libraries (label `unit`). |
-| `tests/wm` | Engine tests: headless goldens and CJK crispness (label `gpu`), CLI and leak self-test (`wm`), live windows on Xvfb / weston (`window`). |
+| `tests/wm` | Engine tests: headless goldens and CJK crispness (label `gpu`), CLI and leak self-test (`wm`), live windows on Xvfb / weston (`window`); WP3: `stk_wm_tests` (gtest, no GPU: layout maths, screen tree, routing, persistence, layout goldens), application-screen PNG goldens, `stk-app-smoke`. |
 | `tests/bridge` | stk_bridge tests (label `bridge`): protocol units, `ChildProcess`, the client against a scripted fake bridge and against the real Python bridge, and `WindowManager::post` under Xvfb / weston. |
 | `tests/viewer` | stk_viewer_gpu tests: render goldens on Vulkan and GL, exact categorical colours, tiled vs single-pass export, picking accuracy at `render_origin` ~1e6, VTK offscreen cross-check (mask IoU), budget/LOD/prefetch, 1M-triangle perf smoke (`STK_VIEWER_PERF_BUDGET_MS`). Fixtures: `fixtures/make_fixtures.py [--vtk]`. |
 | `spike/` | Phase 0 spike `stk-gpu-spike` and its golden image. |
@@ -48,7 +49,9 @@ same relative layout as an install: `<prefix>/bin` + `<prefix>/share/stk-desktop
 
 ```sh
 stk-desktop                                   # window titled "STK" (Wayland, else X11)
-stk-desktop --headless --size 960x600 --scale 2 --export frame.png
+stk-desktop --lang en --layout my-layout.json # English, a given layout (not written back)
+stk-desktop --headless --size 1280x800 --lang zh --export screen.png
+stk-desktop --headless --sample --size 960x600 --scale 2 --export frame.png   # WP1 sample frame
 stk-desktop --version | --help
 ```
 
@@ -61,11 +64,54 @@ stk-desktop --version | --help
   source tree (development builds).
 - Vulkan SPIR-V and pipeline caches go to `$XDG_CACHE_HOME/stk-desktop` (tests point it into the
   build tree).
-- The sample window echoes typed text, IME preedit (inline on Wayland text-input-v3, macOS and
-  Windows; commit-only on X11/XIM), Ctrl+V/Ctrl+C clipboard text and dropped file paths in its
-  status line, as a manual IME / clipboard / drag-and-drop test bed.
-- Known WP1 gaps: GNOME on Wayland uses client-side decorations, which the app does not draw yet
-  (no title bar; WP3).
+- Message catalogs: `--i18n DIR` or `STK_I18N_DIR`, else next to the executable (`i18n/`,
+  `../share/stk-desktop/i18n/`), else the source tree. Default language zh (`--lang zh|en`).
+
+### Screen (WP3)
+
+The window shows a top bar (menus File / View / Language / UI scale, title), a tree of areas and a
+status bar (bridge state, connection, hints). The default layout is Jobs | Viewer | Properties over
+a bottom strip with the tabs Logs / Probe / Transfers / Bridge log; the editors are placeholders
+until WP9 / WP10.
+
+- Areas: drag a splitter to resize (minimum sizes hold, the other areas keep their size),
+  double-click it to join the two areas beside it (the larger stays). The area menu (header button
+  or right-click on the header) splits, joins, maximizes, closes, toggles toolbar / sidebar and
+  adds / closes tabs; the editor-type dropdown switches the editor. Ctrl+Space maximizes the area
+  under the pointer and restores it; T / N toggle the toolbar / sidebar (N-panel, resizable by its
+  edge); Ctrl+PageUp / PageDown switch tabs. Files dropped on an area go to its editor
+  (`Editor::on_drop`: Jobs and Transfers queue placeholder uploads, the Viewer reports `.stkp`).
+  Internal drag and drop between widgets is deferred.
+- UI: one `stk_ui` context per window. Each visible region builds its blocks in window coordinates
+  every (on-demand) frame; popups, tooltips, modals and toasts are overlay blocks above all areas.
+  Painting goes region by region (GPU content via `Region::draw`, then its UI blocks), overlays last.
+  Events go to the UI first (widgets, popups, text editing, IME), then to the region and area under
+  the pointer (keys: under the pointer, else the last clicked region), then to application
+  shortcuts. The IME candidate window follows the edited text field. Redraws are on demand, with
+  per-region redraw tags (`Region::redraw_tagged`, for cached GPU content) and a wake-up timer for
+  tooltips and toasts.
+- Layout persistence: saved when the window closes (and File > Save layout, Ctrl+S) to
+  `$XDG_CONFIG_HOME/stk/desktop/layout.json` (`~/Library/Application Support/stk/desktop/`,
+  `%APPDATA%\stk\desktop\`): format `stk.desktop.layout`, `version` 1, window size / position /
+  maximized, language, UI scale and the screen tree (splits with factors, areas with id, editor
+  type, region sizes and visibility, and editor state such as tabs). A missing file gives the default
+  layout; a corrupt, invalid or newer-version file is moved to `layout.json.corrupt`, logged, and the
+  default layout is used. `--layout FILE` loads a file without writing it back; `--no-save-layout`
+  disables saving; `--save-layout FILE` writes the (headless: rendered) layout.
+- Bridge: the GUI starts the Python bridge (stk_bridge; `--no-bridge` disables it, `--python PATH`
+  or `STK_PYTHON` picks the interpreter; development builds add the source tree to its
+  `PYTHONPATH`). `stk::app::BridgeStatus` mirrors the client into the status bar and the Bridge log
+  editor: state changes arrive through `WindowManager::executor()` on the main loop, the stderr ring
+  is copied by a main-loop timer.
+- Client-side decorations: GNOME on Wayland draws no title bars. Blender 5.2's GHOST no longer uses
+  libdecor (the sysroot's libdecor is unused): it has its own CSD (`WITH_GHOST_CSD`, compiled in),
+  enabled when `XDG_CURRENT_DESKTOP` contains GNOME. GHOST moves, resizes, maximizes, minimizes and
+  closes the window on the elements the application reports through a layout callback; stk_wm
+  installs it (`csd.hh`), and the top bar doubles as the title bar: drag zone right of the menus,
+  resize borders at the window edges, and the buttons of the GNOME button layout (`gsettings
+  button-layout`, e.g. close only) drawn at the right. GHOST asks for the layout on compositor
+  configures after the first one (GNOME activates, resizes or changes the state of the window
+  soon after mapping); a UI scale change reaches the decorations at the next configure.
 - Other threads hand work to the main loop with `WindowManager::post` (or the `executor()` it gives
   to background services such as stk_bridge). The wake-up per back-end: X11 polls an eventfd (a
   self-pipe off Linux) together with the X connection, bounded by GHOST's next timer, then lets GHOST
@@ -87,10 +133,23 @@ To run binaries by hand against sysroot-only libraries, `source ~/opt/stk-sysroo
   pixels may differ by more than 40), checks the theme colors, and checks that "中文" glyph heights
   scale linearly and that edges stay as sharp as at 1× (clearly sharper than an upscaled 1× bitmap).
   Refresh goldens with `stk-wm-image-check --golden-dir desktop/tests/wm/golden --update-golden 1=… 1.5=… 2=…`.
+- `ctest -L gpu` (WP3): `stk-desktop --headless` exports of the default screen (en at 1× 1280×800,
+  zh at 1.5× 1440×900) per backend, compared by `stk-png-diff` with `tests/wm/golden/app_default_*.png`
+  (at most 2% of the pixels may differ by more than 48; refresh with `stk-png-diff OUT GOLDEN
+  --update`), and layout files through the CLI (save, load, corrupt-file fallback).
 - `ctest -L wm`: CLI, and a leak self-test proving that guardedalloc's fail-on-leak is armed (every
-  engine binary aborts at exit when a block leaks).
+  engine binary aborts at exit when a block leaks). `stk_wm_tests` (no GPU, fake text measurer):
+  size distribution with minimum sizes, split / join / resize / maximize, hit testing and event
+  routing (splitter and region-edge drags, focus, pointer and UI capture across areas, keys, drops,
+  deferred changes, IME caret, tooltip wake-ups), the shell (tabs, editor switching, area menu,
+  language), persistence round trips and corrupt-file fallback, CSD geometry, and layout goldens of
+  the default screen (areas, regions, splitters, UI blocks and widgets) for zh / en at 1×, 1.5×
+  and 2× in `tests/wm/golden/layout_default_*.json` (`STK_UPDATE_GOLDENS=1` rewrites them).
 - `ctest -L window`: `stk-wm-smoke` (first frame, window read-back, resize, user-scale DPI change,
-  cursors, clipboard, timers, close, leak check) and `stk-desktop --exit-after-frames 3`, each under a
+  cursors, clipboard, timers, close, leak check), `stk-desktop --exit-after-frames 3` and
+  `stk-app-smoke` (application screen: pixels, a splitter dragged with synthesized events, resize with
+  minimum sizes, UI scale, close with the layout saved and reloaded; plus a GNOME CSD run on weston's
+  desktop shell with `XDG_CURRENT_DESKTOP=GNOME`), each under a
   private Xvfb (`-nolisten tcp`, cookie auth, `-displayfd`) and a headless weston (pixman, own
   `XDG_RUNTIME_DIR` in the build tree), started by `tests/wm/run_with_display.py`. The runner refuses
   to continue if a server listens on TCP, stops the server afterwards, and skips (exit 77) when the

@@ -194,7 +194,11 @@ void Context::end_frame()
   static constexpr Block::Kind order[] = {Block::Kind::Region, Block::Kind::Modal, Block::Kind::Popup,
                                           Block::Kind::Tooltip, Block::Kind::Toast};
   bool dimmed = false;
+  overlay_begin_ = 0;
   for (const Block::Kind k : order) {
+    if (k == Block::Kind::Modal) {
+      overlay_begin_ = draw_.size();
+    }
     for (const auto &b : blocks_) {
       if (b->kind_ != k) {
         continue;
@@ -203,7 +207,9 @@ void Context::end_frame()
         draw_.rect({0, 0, window_.x, window_.y}, config_.theme.modal_dim);
         dimmed = true;
       }
+      b->draw_begin_ = draw_.size();
       draw_block(*b);
+      b->draw_end_ = draw_.size();
     }
   }
   building_ = false;

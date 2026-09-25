@@ -1,0 +1,32 @@
+{
+  "window": [0,0,1280,800],
+  "scale": 1.0,
+  "tree": [0,30,1280,770],
+  "areas": [
+    {"id":"a1","type":"jobs","rect":[0,239,281,770],"regions":[{"name":"header","visible":true,"rect":[0,742,281,770]},{"name":"toolbar","visible":false,"rect":[0,0,0,0]},{"name":"sidebar","visible":false,"rect":[0,0,0,0]},{"name":"main","visible":true,"rect":[0,239,281,742]}]},
+    {"id":"a2","type":"viewer","rect":[283,239,959,770],"regions":[{"name":"header","visible":true,"rect":[283,742,959,770]},{"name":"toolbar","visible":true,"rect":[283,239,331,742]},{"name":"sidebar","visible":true,"rect":[739,239,959,742]},{"name":"main","visible":true,"rect":[331,239,739,742]}]},
+    {"id":"a3","type":"properties","rect":[961,239,1280,770],"regions":[{"name":"header","visible":true,"rect":[961,742,1280,770]},{"name":"toolbar","visible":false,"rect":[0,0,0,0]},{"name":"sidebar","visible":false,"rect":[0,0,0,0]},{"name":"main","visible":true,"rect":[961,239,1280,742]}]},
+    {"id":"a4","type":"logs","rect":[0,30,1280,237],"regions":[{"name":"header","visible":true,"rect":[0,209,1280,237]},{"name":"toolbar","visible":false,"rect":[0,0,0,0]},{"name":"sidebar","visible":false,"rect":[0,0,0,0]},{"name":"main","visible":true,"rect":[0,30,1280,209]}]},
+    {"id":"topbar","type":"topbar","rect":[0,772,1280,800],"regions":[{"name":"topbar","visible":true,"rect":[0,772,1280,800]}]},
+    {"id":"statusbar","type":"statusbar","rect":[0,0,1280,28],"regions":[{"name":"statusbar","visible":true,"rect":[0,0,1280,28]}]}
+  ],
+  "splitters": [
+    {"dir":"horizontal","index":0,"rect":[281,239,283,770]},
+    {"dir":"horizontal","index":1,"rect":[959,239,961,770]},
+    {"dir":"vertical","index":0,"rect":[0,237,1280,239]}
+  ],
+  "blocks": [
+    {"name":"a1/header","rect":[0.0,30.0,281.0,28.0],"widgets":[{"key":"a1/header/editor_type","type":"dropdown","rect":[8.0,34.0,80.0,20.0]},{"key":"a1/header/submit","type":"button","rect":[96.0,34.0,45.0,20.0]},{"key":"a1/header/#2","type":"label","rect":[149.0,34.0,76.0,20.0]},{"key":"a1/header/area_menu","type":"menu_button","rect":[233.0,34.0,40.0,20.0]}]},
+    {"name":"a1/main","rect":[0.0,58.0,281.0,503.0],"widgets":[{"key":"a1/main/#0","type":"label","rect":[8.0,62.0,265.0,20.0]},{"key":"a1/main/#1","type":"paragraph","rect":[8.0,84.0,265.0,72.0]},{"key":"a1/main/#2","type":"label","rect":[8.0,158.0,265.0,20.0]},{"key":"a1/main/tasks","type":"table","rect":[8.0,188.0,265.0,122.0]}]},
+    {"name":"a2/header","rect":[283.0,30.0,676.0,28.0],"widgets":[{"key":"a2/header/editor_type","type":"dropdown","rect":[291.0,34.0,80.0,20.0]},{"key":"a2/header/#1","type":"label","rect":[379.0,34.0,524.0,20.0]},{"key":"a2/header/area_menu","type":"menu_button","rect":[911.0,34.0,40.0,20.0]}]},
+    {"name":"a2/toolbar","rect":[283.0,58.0,48.0,503.0],"widgets":[{"key":"a2/toolbar/editor.viewer.tool.orbit","type":"button","rect":[291.0,62.0,32.0,20.0]},{"key":"a2/toolbar/editor.viewer.tool.pan","type":"button","rect":[291.0,84.0,32.0,20.0]},{"key":"a2/toolbar/editor.viewer.tool.zoom","type":"button","rect":[291.0,106.0,32.0,20.0]},{"key":"a2/toolbar/editor.viewer.tool.pick","type":"button","rect":[291.0,128.0,32.0,20.0]}]},
+    {"name":"a2/sidebar","rect":[739.0,58.0,220.0,503.0],"widgets":[{"key":"a2/sidebar/layers","type":"panel","rect":[747.0,62.0,204.0,24.0]},{"key":"a2/sidebar/layers/#1","type":"paragraph","rect":[755.0,91.0,188.0,40.0]},{"key":"a2/sidebar/camera","type":"panel","rect":[747.0,143.0,204.0,24.0]},{"key":"a2/sidebar/camera/#3","type":"paragraph","rect":[755.0,172.0,188.0,24.0]},{"key":"a2/sidebar/steps","type":"panel","rect":[747.0,208.0,204.0,24.0]}]},
+    {"name":"a2/main","rect":[331.0,58.0,408.0,503.0],"widgets":[{"key":"a2/main/#0","type":"label","rect":[339.0,62.0,392.0,20.0]},{"key":"a2/main/#1","type":"paragraph","rect":[339.0,84.0,392.0,56.0]},{"key":"a2/main/#2","type":"label","rect":[339.0,142.0,392.0,20.0]}]},
+    {"name":"a3/header","rect":[961.0,30.0,319.0,28.0],"widgets":[{"key":"a3/header/editor_type","type":"dropdown","rect":[969.0,34.0,80.0,20.0]},{"key":"a3/header/#1","type":"label","rect":[1057.0,34.0,167.0,20.0]},{"key":"a3/header/area_menu","type":"menu_button","rect":[1232.0,34.0,40.0,20.0]}]},
+    {"name":"a3/main","rect":[961.0,58.0,319.0,503.0],"widgets":[{"key":"a3/main/#0","type":"label","rect":[969.0,62.0,303.0,20.0]},{"key":"a3/main/#1","type":"paragraph","rect":[969.0,84.0,303.0,40.0]},{"key":"a3/main/#2","type":"label","rect":[969.0,126.0,303.0,20.0]},{"key":"a3/main/editor.properties.panel.preset","type":"panel","rect":[969.0,156.0,303.0,24.0]},{"key":"a3/main/editor.properties.panel.parameters","type":"panel","rect":[969.0,188.0,303.0,24.0]},{"key":"a3/main/editor.properties.panel.export","type":"panel","rect":[969.0,220.0,303.0,24.0]}]},
+    {"name":"a4/header","rect":[0.0,563.0,1280.0,28.0],"widgets":[{"key":"a4/header/editor_type","type":"dropdown","rect":[8.0,567.0,80.0,20.0]},{"key":"a4/header/tabs","type":"tabs","rect":[96.0,567.0,240.0,20.0]},{"key":"a4/header/#2","type":"label","rect":[344.0,567.0,880.0,20.0]},{"key":"a4/header/area_menu","type":"menu_button","rect":[1232.0,567.0,40.0,20.0]}]},
+    {"name":"a4/main","rect":[0.0,591.0,1280.0,179.0],"widgets":[{"key":"a4/main/#0","type":"label","rect":[8.0,595.0,1264.0,20.0]},{"key":"a4/main/log","type":"log","rect":[8.0,617.0,1264.0,139.0]}]},
+    {"name":"topbar/topbar","rect":[0.0,0.0,1280.0,28.0],"widgets":[{"key":"topbar/topbar/file","type":"menu_button","rect":[8.0,4.0,40.0,20.0]},{"key":"topbar/topbar/view","type":"menu_button","rect":[56.0,4.0,40.0,20.0]},{"key":"topbar/topbar/language","type":"menu_button","rect":[104.0,4.0,40.0,20.0]},{"key":"topbar/topbar/scale","type":"menu_button","rect":[152.0,4.0,60.0,20.0]},{"key":"topbar/topbar/#4","type":"label","rect":[220.0,4.0,1052.0,20.0]}]},
+    {"name":"statusbar/statusbar","rect":[0.0,772.0,1280.0,28.0],"widgets":[{"key":"statusbar/statusbar/#0","type":"label","rect":[8.0,776.0,82.0,20.0]},{"key":"statusbar/statusbar/#1","type":"label","rect":[98.0,776.0,49.0,20.0]},{"key":"statusbar/statusbar/#2","type":"label","rect":[155.0,776.0,1043.0,20.0]},{"key":"statusbar/statusbar/#3","type":"label","rect":[1206.0,776.0,66.0,20.0]}]}
+  ]
+}

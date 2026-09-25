@@ -85,8 +85,11 @@ void Context::draw_block(const Block &b)
   const Theme &th = config_.theme;
   const Style &st = style_;
   switch (b.kind()) {
-    case Block::Kind::Region:
-      draw_.rect(b.rect(), th.region_back);
+    case Block::Kind::Region: {
+      const Color bg = b.has_background_ ? b.background_ : th.region_back;
+      if (bg.a > 0) {
+        draw_.rect(b.rect(), bg);
+      }
       draw_.clip_push(b.rect());
       draw_layout(*b.root_, b);
       if (b.content_height() > b.rect().h) {
@@ -95,6 +98,7 @@ void Context::draw_block(const Block &b)
       }
       draw_.clip_pop();
       break;
+    }
     case Block::Kind::Modal: {
       const WidgetColors &mb = th.menu_back;
       const float r = clamp_radius(mb.roundness * st.unit, b.frame());

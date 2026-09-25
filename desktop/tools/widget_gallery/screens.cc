@@ -303,32 +303,38 @@ static void modal(Context &ctx, State &s, Vec2 window)
   r.button("modal_cancel", ctx.tr("ui.cancel"), [&s]() { s.modal_open = false; });
 }
 
-void build(Context &ctx, State &s, Screen screen, Vec2 window, double now)
+void build_blocks(Context &ctx, State &s, Screen screen, Rect r)
 {
-  ctx.set_catalog(&s.catalog);
-  ctx.begin_frame(window, now);
+  const Vec2 window{r.x + r.w, r.y + r.h};
   switch (screen) {
     case Screen::Widgets:
     case Screen::Overlays:
-      widgets(ctx, s, ctx.block("widgets", {0, 0, window.x, window.y}).layout());
+      widgets(ctx, s, ctx.block("widgets", r).layout());
       break;
     case Screen::Lists:
-      lists(ctx, s, ctx.block("lists", {0, 0, window.x, window.y}).layout());
+      lists(ctx, s, ctx.block("lists", r).layout());
       break;
     case Screen::Form:
-      form(ctx, s, ctx.block("form", {0, 0, window.x, window.y}).layout());
+      form(ctx, s, ctx.block("form", r).layout());
       break;
     case Screen::Gallery: {
-      const float w0 = std::round(window.x * 0.31f), w1 = std::round(window.x * 0.38f);
-      widgets(ctx, s, ctx.block("widgets", {0, 0, w0, window.y}).layout());
-      lists(ctx, s, ctx.block("lists", {w0, 0, w1, window.y}).layout());
-      form(ctx, s, ctx.block("form", {w0 + w1, 0, window.x - w0 - w1, window.y}).layout());
+      const float w0 = std::round(r.w * 0.31f), w1 = std::round(r.w * 0.38f);
+      widgets(ctx, s, ctx.block("widgets", {r.x, r.y, w0, r.h}).layout());
+      lists(ctx, s, ctx.block("lists", {r.x + w0, r.y, w1, r.h}).layout());
+      form(ctx, s, ctx.block("form", {r.x + w0 + w1, r.y, r.w - w0 - w1, r.h}).layout());
       break;
     }
   }
   if ((screen == Screen::Overlays || screen == Screen::Gallery) && s.modal_open) {
     modal(ctx, s, window);
   }
+}
+
+void build(Context &ctx, State &s, Screen screen, Vec2 window, double now)
+{
+  ctx.set_catalog(&s.catalog);
+  ctx.begin_frame(window, now);
+  build_blocks(ctx, s, screen, {0, 0, window.x, window.y});
   ctx.end_frame();
 }
 

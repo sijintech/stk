@@ -6,7 +6,8 @@
 
 * ``xvfb``: Xvfb with ``-nolisten tcp`` (unix sockets only), an MIT-MAGIC-COOKIE
   Xauthority file and a display number chosen by the server (``-displayfd``).
-* ``weston``: weston's headless backend (pixman renderer, kiosk shell) with its own
+* ``weston``: weston's headless backend (pixman renderer, kiosk shell, or the desktop shell
+  with ``--weston-shell desktop`` for normal, non-fullscreen toplevels) with its own
   ``XDG_RUNTIME_DIR`` (mode 0700) under DIR; the socket lives there.
 
 The server never binds a TCP port (verified through /proc after start-up; the test
@@ -192,6 +193,7 @@ def start_weston(args, env: dict, workdir: Path):
         modules = {
             "headless-backend.so": lib / "libweston-14" / "headless-backend.so",
             "kiosk-shell.so": lib / "weston" / "kiosk-shell.so",
+            "desktop-shell.so": lib / "weston" / "desktop-shell.so",
         }
         cmd_env["WESTON_MODULE_MAP"] = ";".join(f"{k}={v}" for k, v in modules.items())
     rt = workdir / "xdg"
@@ -206,7 +208,18 @@ def start_weston(args, env: dict, workdir: Path):
     cmd_env.pop("DISPLAY", None)
     cmd_env.pop("WAYLAND_DISPLAY", None)
     cmd = [str(weston), "--backend=headless", "--renderer=pixman", f"--socket={sock}",
-           "--width=1280", "--height=800", "--no-config", "--shell=kiosk", "--idle-time=0"]
+           "--width=1280", "--height=800", f"--shell={args.weston_shell}", "--idle-time=0"]
+    if args.weston_shell == "desktop":
+        # The desktop shell starts its panel client; point it at the sysroot copy when the
+        # compiled-in libexec path does not exist.
+        client = Path("/usr/libexec/weston-desktop-shell")
+        if from_sysroot and not client.exists():
+            client = args.sysroot / "usr" / "libexec" / "weston-desktop-shell"
+        ini = workdir / "weston.ini"
+        ini.write_text(f"[shell]\nclient={client}\npanel-position=none\nlocking=false\n")
+        cmd.append(f"--config={ini}")
+    else:
+        cmd.append("--no-config")
     log = open(workdir / "server.log", "wb")
     proc = subprocess.Popen(cmd, cwd=workdir, env=cmd_env, stdout=log, stderr=subprocess.STDOUT)
     deadline = time.monotonic() + 15
@@ -246,6 +259,7 @@ def main() -> int:
     ap.add_argument("--workdir", type=Path, required=True)
     ap.add_argument("--sysroot", type=Path, default=None)
     ap.add_argument("--timeout", type=float, default=120)
+    ap.add_argument("--weston-shell", choices=("kiosk", "desktop"), default="kiosk")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd

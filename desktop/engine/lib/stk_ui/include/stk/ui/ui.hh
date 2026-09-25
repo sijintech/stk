@@ -320,6 +320,14 @@ class Block {
   /** Frame of overlay blocks (modal dialog, popup, tooltip); == rect for regions. */
   const Rect &frame() const { return frame_; }
   const std::string &title() const { return title_; }
+  /**
+   * Region blocks: background colour painted under the widgets (default Theme::region_back);
+   * alpha 0 paints none, so GPU content drawn under the block (a 3D viewport) stays visible.
+   */
+  void set_background(Color c) { background_ = c; has_background_ = true; }
+  /** Commands of this block in Context::draw_list(): [draw_begin, draw_end) (after end_frame). */
+  size_t draw_begin() const { return draw_begin_; }
+  size_t draw_end() const { return draw_end_; }
 
  private:
   friend class Context;
@@ -342,6 +350,9 @@ class Block {
   Vec2 pos_;
   std::function<void()> on_close;
   ToastKind toast_kind_ = ToastKind::Info;
+  Color background_;
+  bool has_background_ = false;
+  size_t draw_begin_ = 0, draw_end_ = 0;
 };
 
 struct ContextConfig {
@@ -387,6 +398,11 @@ class Context {
   Layout &modal(std::string_view key, std::string_view title, std::function<void()> on_close, ModalOptions opts = {});
   void end_frame();
   const DrawList &draw_list() const { return draw_; }
+  /**
+   * First draw-list command after the region blocks: modal dimming, modals, popups, tooltips and
+   * toasts follow from here, so a host can paint GPU content between region blocks and overlays.
+   */
+  size_t overlay_draw_begin() const { return overlay_begin_; }
   Vec2 window_size() const { return window_; }
 
   /* Services. */
@@ -529,6 +545,7 @@ class Context {
 
   std::vector<std::unique_ptr<Block>> blocks_;
   DrawList draw_;
+  size_t overlay_begin_ = 0;
 
   WidgetId hover_ = 0;
   int hover_zone_ = 0;
