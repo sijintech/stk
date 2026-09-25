@@ -175,13 +175,9 @@ jobs:
       - name: Test on Metal (headless goldens, viewer)
         # macos-15 runners expose the "Apple Paravirtual device" (argument buffers tier 2,
         # barycentrics, MTLGPUFamilyMac2); macos-14 runners have no Metal device at all.
-        run: ctest --test-dir build --output-on-failure -L gpu -LE window -E "^viewer_metal_Lut$"
-
-      - name: Known Metal gap (non-blocking) - NaN colormap bin
-        # A NaN value interpolated as a vertex output reaches the fragment shader as a value above
-        # the range (the "above" colour instead of nan_color); the Vulkan and OpenGL runs pass.
-        continue-on-error: true
-        run: ctest --test-dir build --output-on-failure -R "^viewer_metal_Lut$"
+        # Metal compiles shaders with fast math, so stk_viewer_gpu never relies on NaN/Inf in a
+        # shader (viewer_metal_Lut / viewer_metal_NonFinite check the NaN colour).
+        run: ctest --test-dir build --output-on-failure -L gpu -LE window
 
       - name: stk-render smoke (Metal, spec example payload)
         run: build/bin/stk-render --payload docs/specs/examples/payload-v2 --export build/stk-render-metal.png
