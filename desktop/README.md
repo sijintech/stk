@@ -15,7 +15,10 @@ Python packages stay MIT.
 | `engine/lib/stk_core`, `stk_io`, `stk_viewer_model` | CPU-only libraries (no GHOST/GPU headers): UTF-8, paths, logging, payload/JSON/schema models, PNG I/O, viewer maths. |
 | `engine/lib/stk_gfx` | GPU bootstrap: process runtime (guardedalloc leak detection), backend selection, main GPU context, font stack, UI scale, offscreen render to PNG. |
 | `engine/lib/stk_wm` | GHOST glue: window manager, windows, on-demand event loop, events (keys, mouse, wheel, IME preedit, drag and drop), DPI, clipboard, cursors; screen / area / region layout. |
-| `app/` | `stk-desktop` (GUI and `--headless` export) and the WP1 sample screen. |
+| `engine/lib/stk_ui` | Blender-style UI toolkit. `stk_ui_core` (no GPU/GHOST headers): blocks rebuilt per frame, layouts in UI units, widgets bound by getter/setter closures, Blender dark theme, CJK line breaking, text editing with IME preedit, i18n catalogs, JSON Schema forms, draw lists. `stk_ui_gpu`: painter on the GPU module's widget shader + BLF. Also adds `tests/ui` and `tools/widget_gallery`. |
+| `app/` | `stk-desktop` (GUI and `--headless` export) and the WP1 sample screen. `app/i18n/`: `zh_CN.json` (default) / `en.json` message catalogs and `check_i18n.py` (fails on missing keys). |
+| `tests/ui` | stk_ui tests (label `ui`): events, text/IME, numbers, forms against the catalog and presets, layout goldens (en/zh at 1x/1.5x/2x; `STK_UPDATE_GOLDENS=1` rewrites them), i18n checker. |
+| `tools/widget_gallery/` | `widget_gallery`: every widget rendered headless (`--headless --export out.png --lang zh\|en --scale S`, label `gpu` goldens) or in a window for the manual IME matrix. |
 | `tests/unit` | gtest suites of the CPU libraries (label `unit`). |
 | `tests/wm` | Engine tests: headless goldens and CJK crispness (label `gpu`), CLI and leak self-test (`wm`), live windows on Xvfb / weston (`window`). |
 | `spike/` | Phase 0 spike `stk-gpu-spike` and its golden image. |
