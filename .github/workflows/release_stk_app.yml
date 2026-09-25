@@ -1,8 +1,7 @@
 name: Build and Release App
+# Legacy Qt app release. Manual only: a v* tag must not publish the legacy desktop.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 jobs:
   ubuntu_build:

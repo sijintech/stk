@@ -1,7 +1,4 @@
 name: Deploy to Cloudflare Pages
-defaults:
-  run:
-    shell: bash -ieo pipefail {0}
 on:
   push:
     paths:
@@ -17,22 +14,25 @@ permissions:
   deployments: write
 jobs:
   build:
-    runs-on: [self-hosted, Linux]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
       - name: Build
         run: |
           cd docs
-          nvm use 18
           npm install
           npm run build
 
       - name: Publish
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          export CLOUDFLARE_API_TOKEN=${{ secrets.CF_API_TOKEN }}
-          export CLOUDFLARE_ACCOUNT_ID=${{secrets.CLOUDFLARE_ACCOUNT_ID}}
           cd docs
-          nvm use 18
           npm run deploy
