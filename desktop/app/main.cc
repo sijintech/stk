@@ -778,10 +778,6 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
   win->on_event = [&](const wm::Event &e) {
     if (e.type == wm::EventType::Close) {
       save_layout();
-      /* The window (and its screen) goes away now: later store changes (bridge callbacks, the
-       * viewer state) must not tag its screen for redraw. */
-      shell.store().on_change = nullptr;
-      shell.store().toast = nullptr;
     }
     return false;
   };

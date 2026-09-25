@@ -23,7 +23,7 @@
  *                         --log-interval MS (default 15)
  *   --jobs DIR            a fake Runtime and hub for the Jobs editor tests (fake_jobs.cc; its own
  *                         options: --review-policy P, --review-refuse, --forget-inspected-once,
- *                         --submit-fail N)
+ *                         --local-uninitialized, --submit-fail N)
  *
  * Graph methods (WP10 viewer tests):
  *   --presets-dir DIR     graph.presets lists DIR/<id>.json (suan/graph/presets)

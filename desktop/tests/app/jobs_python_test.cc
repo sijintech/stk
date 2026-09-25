@@ -8,6 +8,7 @@
  * completion. Skipped with the reason when Python, the bridge or the Runtime cannot run here.
  */
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -233,7 +234,8 @@ TEST(JobsPython, WorkspaceUploadSubmitLogsVerifiedDownloadAndJobsSurviveClosing)
     return false;
   }));
 
-  /* 3. Upload a folder (verified by the bridge), listed as workspace inputs. */
+  /* 3. Upload a folder (verified by the bridge; its contents at the workspace root, remote "."),
+   * listed as workspace inputs. */
   const std::string case_dir = dir.str() + "/case";
   {
     SpawnOptions co;
@@ -247,12 +249,20 @@ TEST(JobsPython, WorkspaceUploadSubmitLogsVerifiedDownloadAndJobsSurviveClosing)
   }
   j.upload({case_dir});
   ASSERT_TRUE(pump([&] { return j.workspace_files().size() == 3; })) << j.status().text;
+  {
+    std::vector<std::string> paths;
+    for (const bridge::FileEntry &e : j.workspace_files()) {
+      paths.push_back(e.path);
+    }
+    std::sort(paths.begin(), paths.end());
+    EXPECT_EQ(paths, (std::vector<std::string>{"input.json", "job.py", "sub/notes.txt"}));
+  }
   EXPECT_EQ(j.uploads_in_flight(), 0);
 
   /* 4. Submit a small task; it shows up in the watched list and succeeds. */
   j.form().name = "铁电畴 测试";
   j.form().program = "{python}";
-  j.form().arguments = "case/job.py 0";
+  j.form().arguments = "job.py 0";
   ASSERT_TRUE(j.submit()) << j.status().text;
   ASSERT_TRUE(pump([&] { return j.submission()->state == app::SubmitState::Done; })) << j.status().text;
   const std::string first = j.submission()->task_id;
@@ -313,7 +323,7 @@ TEST(JobsPython, WorkspaceUploadSubmitLogsVerifiedDownloadAndJobsSurviveClosing)
 
   /* 7. A slower task; close the app while it runs. */
   j.form().name = "关闭后继续";
-  j.form().arguments = "case/job.py 4";
+  j.form().arguments = "job.py 4";
   ASSERT_TRUE(j.submit());
   ASSERT_TRUE(pump([&] { return j.submission()->state == app::SubmitState::Done; }));
   const std::string second = j.submission()->task_id;

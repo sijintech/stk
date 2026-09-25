@@ -37,6 +37,13 @@ SHUTDOWN_GRACE = 5.0
 LOCK_NAME = "bridge.lock"
 
 
+def with_kind(record):
+    """A hub action record with a top-level ``kind`` (the hub keeps it in ``request.kind`` only)."""
+    if isinstance(record, dict) and "kind" not in record and isinstance(record.get("request"), dict):
+        return {**record, "kind": record["request"].get("kind")}
+    return record
+
+
 def default_state_dir():
     return Path(os.environ.get("STK_DESKTOP_BRIDGE_DIR", str(Path.home() / ".stk" / "desktop-bridge")))
 
@@ -149,7 +156,7 @@ class Bridge:
             "connections.check": self.check_connection,
             "connections.pair_hub": self.pair_hub,
             "connections.local": lambda p, c: self.connections.local_status(),
-            "connections.local_start": lambda p, c: self.connections.local_start(),
+            "connections.local_start": lambda p, c: self.connections.local_start(bool(p.get("initialize"))),
             "hub.devices": self.hub_devices,
             "hub.templates": self.hub_templates,
             "hub.actions": self.hub_actions,
@@ -402,7 +409,9 @@ class Bridge:
                         "nodes": sum(1 for d in devices if d.get("role") == "node" and not d.get("revoked"))}
             return {"id": connection, "ok": True, "health": self._backend({"connection": connection}).health()}
         except BridgeError as exc:
-            if exc.code in ("unavailable", "unauthorized", "remote_error", "timeout"):
+            # An uninitialized local Runtime is listed too: it is a state, not an unknown connection.
+            if exc.code in ("unavailable", "unauthorized", "remote_error", "timeout") or (
+                    connection == "local" and exc.code == "not_found"):
                 return {"id": connection, "ok": False, "error": exc.to_json()}
             raise
 
@@ -421,13 +430,13 @@ class Bridge:
 
     def hub_actions(self, params, context):
         hub = self._hub(params)
-        return {"actions": hub.call(hub.hub.actions)}
+        return {"actions": [with_kind(record) for record in hub.call(hub.hub.actions)]}
 
     def hub_action(self, params, context):
         hub = self._hub(params)
         record = hub.call(hub.hub.action, params["action_id"])
         self.inspected[(params["connection"], record["id"])] = record["request"]
-        return {"action": record}
+        return {"action": with_kind(record)}
 
     def hub_policy(self, params, context):
         hub = self._hub(params)

@@ -155,13 +155,13 @@ Connection ids are opaque to the app; the bridge resolves them:
 
 | Method | Params | Result |
 |---|---|---|
-| `connections.list` | – | `{connections: [{id, kind: local\|runtime\|hub, name, url, device_id?, profile?}]}` (`profile: "desktop"` for a hub device paired with a desktop code) |
+| `connections.list` | – | `{connections: [{id, kind: local\|runtime\|hub, name, url, device_id?, profile?, state?}]}` (`profile: "desktop"` for a hub device paired with a desktop code). `local` is always listed, with `state: "initialized"` or `"not_initialized"` (then `url` is null and `connections.check {id: "local"}` answers `ok: false` with `not_found`) |
 | `connections.add_runtime` | `name, url, token \| token_file, check?=true` | `{connection}` (health-checked unless `check: false`) |
 | `connections.remove` | `id` | `{removed}` (forgets the profile; never revokes on the hub) |
 | `connections.check` | `id` | `{id, ok, health?, nodes?, error?}`: `ok: false` with `error` when unreachable or refused |
 | `connections.pair_hub` | `name, url, code, device_name?` | `{connection}`; only client pairing codes are accepted. A code the owner issued with `suan-control pair --role client --profile desktop` pairs a **desktop device** (§7.1) |
 | `connections.local` | – | `{initialized, api_running, supervisor_running, url, state_dir, error?}` |
-| `connections.local_start` | – | as `connections.local`, after starting the API and supervisor (Linux) |
+| `connections.local_start` | `initialize?=false` | as `connections.local`, after starting the API and supervisor (Linux); with `initialize: true` an uninitialized local Runtime is initialized first (`suan server init` defaults), as the legacy Tasks tab did |
 
 ## 7. Workspaces, tasks and the hub
 
@@ -176,9 +176,9 @@ Connection ids are opaque to the app; the bridge resolves them:
 | `task.cancel` | `connection, node?, task_id, idempotency_key?` | `{task?, action?}` |
 | `task.artifacts` | `connection, node?, task_id` | `{artifacts: [{path, size, sha256, media_type}]}` (empty while running) |
 | `hub.devices` | `connection` | `{devices: [{id, name, role, online, snapshot}]}` |
-| `hub.templates` | `connection` | `{templates}` |
-| `hub.actions` | `connection` | `{actions}`: recent actions plus every action in review |
-| `hub.action` | `connection, action_id` | `{action}` with full `request` and `result`; marks it *inspected* |
+| `hub.templates` | `connection` | `{templates: {<name>: {argv, inputs?, outputs?, resources?, ...}}}`: an object keyed by template name (the hub's `GET /api/v1/templates`); the names are what `task.submit {template}` takes |
+| `hub.actions` | `connection` | `{actions}`: recent actions plus every action in review (without results); each record carries `kind` at the top level (the hub keeps it in `request.kind`, which stays) |
+| `hub.action` | `connection, action_id` | `{action}` with full `request`, `result` and top-level `kind`; marks it *inspected* |
 | `hub.review` | `connection, action_id, approved` | `{action}` |
 | `hub.policy` | `connection` | `{policy: {device_profile, desktop_auto, desktop_auto_bytes, graph_auto_seconds, uploads, upload_max_bytes, upload_chunk_bytes, upload_quota_bytes, import_max_files, import_request_bytes, action_request_bytes, read_kinds, review_policy}}` (WP11) |
 
@@ -191,6 +191,10 @@ Connection ids are opaque to the app; the bridge resolves them:
   `conflict`. Hub: the action id is `sha256("task.submit\0<node>\0<key>")[:32]` (likewise
   `workspace.create`, `task.cancel`), so a repeated request re-reads the same action, and the hub
   rejects a different request under that id (`conflict`).
+- **Retries are the client's.** The Runtime `TaskSpec` has no retry field and nothing in the bridge
+  re-runs a failed task. A retry policy (automatic re-sends after `unavailable`, `timeout`,
+  retryable `busy` or HTTP 5xx, or a "retry last submission" button) re-sends the **same request
+  with the same idempotency key**, which can never create a second task or hub action.
 - **Hub actions** (`action = {id, kind, state, node_id, error, review_reason, created, updated}`):
   a method that becomes a hub action waits up to 30 s for it (`timeout` otherwise; repeat to keep
   waiting). An action that needs review returns at once with `state: "review"` and no result; after
@@ -307,7 +311,7 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 
 | Method | Params | Result |
 |---|---|---|
-| `upload.start` | `connection, node?, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name), `idempotency_key?` | `{transfer}` |
+| `upload.start` | `connection, node?, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name; `"."` puts a folder's contents at the workspace root and keeps a file's name), `idempotency_key?` | `{transfer}` |
 | `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`), `idempotency_key?` | `{transfer}` |
 | `transfer.list` / `transfer.get {id}` | – / `id` | `{transfers}` / `{transfer}` |
 | `transfer.resume` | `id` | `{transfer}` (continues an `interrupted` or `failed` transfer) |
@@ -334,7 +338,9 @@ on every state change and at most every 250 ms while bytes move.
   days.
 - **Uploads** use the Runtime's resumable sessions: `begin` returns the byte offset the Runtime
   holds, 1 MiB chunks are appended from there, and `finish` checks size and sha256. A folder upload
-  sends every regular file below it (symbolic links are never followed) under `remote/…`. A file
+  sends every regular file below it (symbolic links are never followed) under `remote/…`, or at the
+  workspace root with `remote: "."`; any other `remote` must be a normalized relative path (no `..`,
+  absolute paths, drive letters or backslashes: `invalid_params`). A file
   that changed since it was hashed is re-hashed and starts a new revision. `transfer.cancel` aborts
   the Runtime's session (pending sessions block submissions in that workspace).
 - **Uploads through a hub** (`connection` a hub, `node` the execution node; WP11) keep the same

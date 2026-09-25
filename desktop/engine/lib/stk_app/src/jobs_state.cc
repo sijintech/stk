@@ -813,7 +813,9 @@ void JobsState::start_local()
   local_busy_ = true;
   set_status(std::string(store_.tr("jobs.status.local_starting")));
   changed();
-  on(client_->connections_local_start(), [this](const bridge::Result<bridge::LocalRuntimeStatus> &r) {
+  /* As the legacy tab: an uninitialized local Runtime is set up first. */
+  const bool initialize = local_ && !local_->initialized;
+  on(client_->connections_local_start(initialize), [this](const bridge::Result<bridge::LocalRuntimeStatus> &r) {
     local_busy_ = false;
     if (!r) {
       fail(std::string(store_.tr("jobs.op.local_start")), r.error());
@@ -1324,6 +1326,10 @@ void JobsState::start_upload(const std::string &path)
   p.target = target();
   p.workspace_id = workspace_;
   p.source = path;
+  std::error_code ec;
+  if (folder_into_root && std::filesystem::is_directory(core::path_from_utf8(path), ec)) {
+    p.remote = "."; /* the folder's contents at the workspace root */
+  }
   p.idempotency_key = new_idempotency_key();
   on(client_->upload_start(p), [this, path](const bridge::Result<bridge::Transfer> &r) {
     if (!r) {

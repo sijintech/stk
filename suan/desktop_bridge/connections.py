@@ -57,10 +57,10 @@ class ConnectionStore:
         return data if isinstance(data, dict) else {}
 
     def list(self):
-        connections = []
+        # The local Runtime is always listed, with its state, so the app can offer to set it up.
         local = self.local_status(check=False)
-        if local["initialized"]:
-            connections.append({"id": "local", "kind": "local", "name": "local", "url": local["url"]})
+        connections = [{"id": "local", "kind": "local", "name": "local", "url": local["url"],
+                        "state": "initialized" if local["initialized"] else "not_initialized"}]
         for name, config in sorted(self._profiles().items()):
             if isinstance(config, dict) and isinstance(config.get("url"), str):
                 connections.append({"id": "runtime:" + name, "kind": "runtime", "name": name, "url": config["url"]})
@@ -97,10 +97,12 @@ class ConnectionStore:
             result["error"] = f"{type(exc).__name__}: {exc}"[:500]
         return result
 
-    def local_start(self):
-        from suan.runtime.common import UnsupportedServerPlatform
+    def local_start(self, initialize=False):
+        from suan.runtime.common import UnsupportedServerPlatform, init_config
         from suan.runtime.daemon import start
         try:
+            if initialize:
+                init_config(local_state_dir())  # keeps an existing configuration as it is
             start(local_state_dir())
         except UnsupportedServerPlatform as exc:
             raise BridgeError("unsupported", str(exc)) from None

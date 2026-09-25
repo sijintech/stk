@@ -282,7 +282,8 @@ class Client {
   Future<ConnectionCheck> connections_check(const std::string &id);
   Future<ConnectionInfo> connections_pair_hub(const PairHubParams &params);
   Future<LocalRuntimeStatus> connections_local();
-  Future<LocalRuntimeStatus> connections_local_start();
+  /** `initialize`: set up an uninitialized local Runtime first (suan server init defaults). */
+  Future<LocalRuntimeStatus> connections_local_start(bool initialize = false);
 
   /* -- Hub (§7) ----------------------------------------------------------------------------- */
   Future<Json> hub_devices(const std::string &connection);

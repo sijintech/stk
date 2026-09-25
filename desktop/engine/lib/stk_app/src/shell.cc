@@ -266,8 +266,17 @@ AppShell::AppShell(ShellOptions options) : options_(std::move(options))
 
 AppShell::~AppShell()
 {
+  alive_.reset();
   store_.on_change = nullptr;
   store_.toast = nullptr;
+}
+
+void AppShell::forget(wm::Screen &screen, wm::Window *window)
+{
+  std::erase(screens_, &screen);
+  if (window && window == window_) {
+    window_ = nullptr;
+  }
 }
 
 void AppShell::install(wm::Screen &screen, wm::Window *window)
@@ -278,6 +287,14 @@ void AppShell::install(wm::Screen &screen, wm::Window *window)
   if (window) {
     window_ = window;
     wm_ = &window->manager();
+    /* Forget the screen (and window) when the window closes: store changes arriving later (bridge
+     * callbacks, the viewer and jobs states) must not reach a destroyed screen. */
+    std::weak_ptr<bool> alive = alive_;
+    window->add_close_listener([this, alive, s = &screen](wm::Window &w) {
+      if (alive.lock()) {
+        forget(*s, &w);
+      }
+    });
   }
   ui::ContextConfig cfg;
   cfg.measurer = options_.measurer;

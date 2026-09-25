@@ -498,6 +498,15 @@ void WindowManager::close_window(Window *window)
   }
   std::unique_ptr<Window> owned = std::move(*it);
   windows_.erase(it);
+  /* Listeners first: whoever keeps pointers to this window or its screen forgets them before
+   * the areas are released (their editors may still report changes while being destroyed). */
+  std::vector<std::function<void(Window &)>> listeners = std::move(owned->close_listeners_);
+  owned->close_listeners_.clear();
+  for (auto &fn : listeners) {
+    if (fn) {
+      fn(*owned);
+    }
+  }
   owned->ime_end();
   owned->ghost_->activateDrawingContext();
   GPU_context_active_set(owned->gpu_context_);

@@ -284,7 +284,7 @@ TEST(JobsLayout, NativeDialogPathsAndItsFallback)
   EXPECT_EQ(dialog.requests[0].mode, platform::FileDialogMode::OpenFolder);
   EXPECT_EQ(u.find("jobs_dialog_a1/paths"), nullptr);
   ASSERT_TRUE(u.pump([&] { return jobs.workspace_files().size() == 1; }));
-  EXPECT_EQ(jobs.workspace_files()[0].path, "输入/a.json");
+  EXPECT_EQ(jobs.workspace_files()[0].path, "a.json"); /* contents at the workspace root */
   /* Cancelled: nothing happens. */
   dialog.next = {};
   u.click("a1/main/workspace/upload_files");

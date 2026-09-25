@@ -91,6 +91,7 @@ ConnectionInfo ConnectionInfo::from_json(const Json &connection)
   info.url = get_string(connection, "url");
   info.device_id = get_string(connection, "device_id");
   info.profile = get_string(connection, "profile");
+  info.state = get_string(connection, "state");
   return info;
 }
 
@@ -129,6 +130,10 @@ HubActionSummary HubActionSummary::from_json(const Json &action)
   summary.raw = action;
   summary.id = get_string(action, "id");
   summary.kind = get_string(action, "kind");
+  if (summary.kind.empty()) {
+    /* Hub records keep the kind in request.kind (bridges before the top-level kind). */
+    summary.kind = get_string(member(action, "request"), "kind");
+  }
   summary.state = get_string(action, "state");
   summary.node_id = get_string(action, "node_id");
   summary.error = get_string(action, "error");

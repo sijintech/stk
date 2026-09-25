@@ -27,7 +27,7 @@ TERMINAL = {"succeeded", "failed", "cancelled"}
 JOB = r'''
 import json, struct, sys, time, zlib
 pause = float(sys.argv[1]) if len(sys.argv) > 1 else 0.0
-cfg = json.load(open("case/input.json", encoding="utf-8"))
+cfg = json.load(open("input.json", encoding="utf-8"))
 for i in range(5):
     print(f"第{i}步 能量 {cfg['e0'] * (i + 1):.4g}", flush=True)
     time.sleep(0.05)

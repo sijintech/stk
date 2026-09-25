@@ -160,14 +160,6 @@ int run(const gfx::Backend backend, const Options &opt)
   check(client->start(&err), "bridge started", err);
   store.set_bridge(client.get());
 
-  win->on_event = [&](const wm::Event &e) {
-    if (e.type == wm::EventType::Close) {
-      /* The screen dies with the window: store changes after this must not tag it. */
-      store.on_change = nullptr;
-      store.toast = nullptr;
-    }
-    return false;
-  };
   auto area = [&](const char *id) { return dynamic_cast<app::EditorArea *>(screen.find_area(id)); };
   auto dctx = [&]() {
     wm::DrawContext c;

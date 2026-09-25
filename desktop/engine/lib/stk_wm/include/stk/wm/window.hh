@@ -143,6 +143,16 @@ class Window {
    */
   std::function<bool(const Event &)> on_event;
 
+  /**
+   * Adds a function run once when the window is being destroyed (WindowManager::close_window or
+   * the manager's destruction), before its screen and GPU context go away. Code that keeps
+   * pointers to the window or its screen (the application shell) forgets them here.
+   */
+  void add_close_listener(std::function<void(Window &)> fn)
+  {
+    close_listeners_.push_back(std::move(fn));
+  }
+
   /** Escape hatch for code that needs GHOST directly (stk_wm internals, tests). */
   GHOST_IWindow *ghost_window() const
   {
@@ -174,6 +184,7 @@ class Window {
   bool ime_active_ = false;
   bool close_pending_ = false;
   uint64_t frames_drawn_ = 0;
+  std::vector<std::function<void(Window &)>> close_listeners_;
 };
 
 struct WmOptions {

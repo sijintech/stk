@@ -259,6 +259,10 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
   check(!cancel, "closing did not cancel tasks");
   check(last == "EOF", "the bridge got EOF", last);
   wm.reset();
+  /* The window is gone: the shell forgot its screen, and store changes are harmless. */
+  check(shell.screen_count() == 0, "shell forgot the closed window's screen");
+  shell.store().changed();
+  shell.store().toast("closed", ui::ToastKind::Info);
   return rc != 0 ? rc : (g_failures ? 1 : 0);
 }
 

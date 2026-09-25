@@ -652,6 +652,24 @@ def test_local_graph_evaluate_on_a_fake_domain_run(inproc, tmp_path):
     harness.close()
 
 
+def test_local_start_can_initialize_the_local_runtime(inproc, bridge_env, monkeypatch):
+    import suan.runtime.daemon as daemon
+    import suan.runtime.common as common
+    started = []
+    monkeypatch.setattr(daemon, "start", lambda state: started.append(state))
+    monkeypatch.setattr(common, "require_linux_server", lambda: None)
+    harness = inproc()
+    state = Path(os.environ["STK_STATE_DIR"])
+    # The daemon start is stubbed (no processes): initialize writes the configuration first.
+    status = harness.call("connections.local_start", {"initialize": True})
+    assert (state / "config.json").is_file() and started == [str(state)]
+    assert status["initialized"] is True
+    listed = harness.call("connections.list")["connections"]
+    assert listed[0]["id"] == "local" and listed[0]["state"] == "initialized"
+    assert harness.error("connections.local_start", {"initialize": "yes"})["code"] == "invalid_params"
+    harness.close()
+
+
 def test_credentials_never_reach_the_app(inproc, bridge_env):
     harness = inproc()
     secret = "runtime-secret-token-" + "q" * 20
@@ -664,7 +682,11 @@ def test_credentials_never_reach_the_app(inproc, bridge_env):
     harness.call("connections.add_runtime", {"name": "second", "url": "http://localhost:9",
                                              "token_file": str(token_file), "check": False})
     listed = harness.call("connections.list")["connections"]
-    assert [c["id"] for c in listed] == ["runtime:cluster", "runtime:second"]
+    # The local Runtime is always listed, here not initialized.
+    assert [c["id"] for c in listed] == ["local", "runtime:cluster", "runtime:second"]
+    assert listed[0] == {"id": "local", "kind": "local", "name": "local", "url": None, "state": "not_initialized"}
+    local = harness.call("connections.check", {"id": "local"})
+    assert local["ok"] is False and local["error"]["code"] == "not_found"
     checked = harness.call("connections.check", {"id": "runtime:cluster"})
     assert checked["ok"] is False and checked["error"]["code"] == "unavailable"
     error = harness.error("connections.add_runtime", {"name": "remote", "url": "http://example.com:1", "token": secret})

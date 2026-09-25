@@ -201,7 +201,7 @@ class JobsEditor final : public Editor {
   static std::string connection_name(EditorContext &ctx, const ConnectionRow &c)
   {
     if (c.info.kind == "local") {
-      return std::string(ctx.tr("conn.local"));
+      return std::string(ctx.tr(c.info.state == "not_initialized" ? "conn.local.unset" : "conn.local"));
     }
     return c.info.name + " (" + std::string(ctx.tr(c.info.kind == "hub" ? "conn.kind.hub" : "conn.kind.runtime")) + ")";
   }
@@ -378,6 +378,8 @@ class JobsEditor final : public Editor {
       })
         .disable(!connected)
         .tip(ctx.tr("jobs.upload.tip"));
+    p->checkbox("folder_root", ctx.tr("jobs.upload.folder_root"), ui::bind(jobs.folder_into_root))
+        .tip(ctx.tr("jobs.upload.folder_root.tip"));
 
     /* Input files of the workspace; Enter / double-click downloads one (verified). */
     const std::vector<bridge::FileEntry> &files = jobs.workspace_files();

@@ -99,6 +99,17 @@ def test_upload_folders_cancel_and_workspace_files(runtime, inproc, tmp_path):  
     assert harness.wait_transfer(transfer["id"])["state"] == "completed"
     files = harness.call("workspace.files", {"connection": CONNECTION, "workspace_id": workspace})["files"]
     assert [f["path"] for f in files] == ["case/c.toml", "case/sub/b.txt"]
+    # remote "." puts the folder's contents at the workspace root (the legacy Tasks tab's layout).
+    root = harness.call("upload.start", {"connection": CONNECTION, "workspace_id": workspace, "source": str(folder),
+                                         "remote": "."})["transfer"]
+    assert harness.wait_transfer(root["id"])["state"] == "completed"
+    files = harness.call("workspace.files", {"connection": CONNECTION, "workspace_id": workspace})["files"]
+    assert [f["path"] for f in files] == ["c.toml", "case/c.toml", "case/sub/b.txt", "sub/b.txt"]
+    # Anything else must be a safe relative path.
+    for bad in ("../up", "/abs", "a/../../b", "c:drive", "a\\b"):
+        error = harness.error("upload.start", {"connection": CONNECTION, "workspace_id": workspace,
+                                               "source": str(folder), "remote": bad})
+        assert error["code"] == "invalid_params", bad
     # Cancelling aborts the Runtime's upload session, so it cannot block submissions.
     big = tmp_path / "big.bin"
     big.write_bytes(b"z" * (3 * MiB))
@@ -448,7 +459,7 @@ def test_local_runtime_connection(runtime, inproc, monkeypatch):  # noqa: F811
     atomic_json(Path(config["state_dir"]) / "api.pid", {**identity(), "port": server.server_port})
     harness = inproc()
     listed = harness.call("connections.list")["connections"]
-    assert listed == [{"id": "local", "kind": "local", "name": "local", "url": client.url}]
+    assert listed == [{"id": "local", "kind": "local", "name": "local", "url": client.url, "state": "initialized"}]
     status = harness.call("connections.local")
     assert status["initialized"] and status["api_running"] and status["url"] == client.url
     assert [w["id"] for w in harness.call("workspace.list", {"connection": "local"})["workspaces"]] == [workspace]

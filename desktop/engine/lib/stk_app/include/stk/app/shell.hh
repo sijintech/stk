@@ -91,6 +91,14 @@ class AppShell {
    * parts: UI scale changes, client-side decorations and quitting.
    */
   void install(wm::Screen &screen, wm::Window *window);
+  /** Stops tagging `screen` for redraw and showing toasts on it (called automatically when an
+   * installed window closes; headless callers use it before destroying a screen). */
+  void forget(wm::Screen &screen, wm::Window *window = nullptr);
+  /** Screens the shell currently drives. */
+  size_t screen_count() const
+  {
+    return screens_.size();
+  }
   /** Replaces the screen's tree with the default layout. */
   void build_default_layout(wm::Screen &screen);
 
@@ -140,6 +148,8 @@ class AppShell {
   wm::WindowManager *wm_ = nullptr;
   wm::Window *window_ = nullptr;
   std::vector<wm::Screen *> screens_;
+  /** Expires with the shell: close listeners of windows that outlive it do nothing. */
+  std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };
 
 }  // namespace stk::app

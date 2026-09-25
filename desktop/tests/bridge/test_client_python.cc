@@ -306,7 +306,11 @@ TEST_F(PythonBridge, HelloListsTheProtocol)
   EXPECT_EQ(hello->paths.state_dir, dir_.str() + "/state");
   const Result<std::vector<ConnectionInfo>> connections = client->connections_list().get();
   ASSERT_TRUE(connections.ok()) << connections.error().describe();
-  EXPECT_TRUE(connections.value().empty());
+  /* Only the local Runtime, always listed; here not initialized. */
+  ASSERT_EQ(connections.value().size(), 1u);
+  EXPECT_EQ(connections.value()[0].id, "local");
+  EXPECT_EQ(connections.value()[0].state, "not_initialized");
+  EXPECT_TRUE(connections.value()[0].url.empty());
   const Result<Json> unknown = client->call("no.such.method").get();
   ASSERT_FALSE(unknown.ok());
   EXPECT_EQ(unknown.error().code, ErrorCode::UnknownMethod);

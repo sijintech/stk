@@ -179,12 +179,20 @@ class TransferManager:
             raise BridgeError("invalid_params", "'source' must be an absolute local path")
         if source.is_symlink() or not source.exists():
             raise BridgeError("not_found", "The upload source does not exist or is a symbolic link")
+        # remote "." puts a folder's contents at the workspace root (a file keeps its name there);
+        # anything else must be a safe relative path (no "..", absolute paths, drive letters, ...).
+        into_root = remote in (".", "./")
+        if remote is not None and not into_root:
+            try:
+                remote = relative_path(remote)
+            except ValueError as exc:
+                raise BridgeError("invalid_params", f"Invalid remote path {remote!r}: {exc}") from None
         items = []
         if source.is_file():
-            name = remote or source.name
+            name = source.name if into_root else (remote or source.name)
             items.append(self._upload_item(source, name))
         elif source.is_dir():
-            prefix = (remote or source.name).strip("/")
+            prefix = "" if into_root else (remote or source.name).strip("/")
             for directory, dirs, files in os.walk(source, followlinks=False):
                 dirs[:] = sorted(d for d in dirs if not (Path(directory) / d).is_symlink())
                 for file in sorted(files):
@@ -212,7 +220,8 @@ class TransferManager:
                 raise BridgeError("invalid_params", f"The file list of this upload exceeds the hub's "
                                   f"{IMPORT_REQUEST_BYTES}-byte import request limit; upload the folder in parts")
         record = self._new("upload", key, request, connection=connection, node=node, workspace_id=workspace_id,
-                           local=str(source), remote=remote or source.name, items=items)
+                           local=str(source), remote=(source.name if into_root and source.is_file() else
+                                                      remote or source.name), items=items)
         self._launch(record["id"])
         return self.public(record)
 

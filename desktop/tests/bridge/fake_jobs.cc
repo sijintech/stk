@@ -17,7 +17,8 @@
  * with `unavailable` (retryable). Through the hub, a template runs at once, a custom spec becomes
  * a task.submit action in review until approved (hub.action first; --review-refuse makes the
  * hub refuse approvals with unauthorized / review_policy; --forget-inspected-once drops the first
- * approval's inspection as a bridge restart would). Uploads of a source whose name contains
+ * approval's inspection as a bridge restart would; --local-uninitialized lists `local` as
+ * not_initialized until connections.local_start {initialize: true}). Uploads of a source whose name contains
  * "interrupt" stop half-way as `interrupted` until transfer.resume. Uploads complete after two progress
  * events (through the hub: bytes done, then action "review" until the workspace.import is
  * approved); downloads write the artifact bytes to `dest` (default DIR/downloads/...).
@@ -58,6 +59,7 @@ struct Options {
   std::string review_policy = "any";
   bool review_refuse = false;
   bool forget_inspected_once = false;
+  bool local_uninitialized = false;
   int submit_fail = 0;
 } g_opt;
 
@@ -177,11 +179,16 @@ void init_model()
   }
   g_model = Json::object();
   g_model["connections"] = Json::array(
-      {{{"id", "local"}, {"kind", "local"}, {"name", "local"}, {"url", "http://127.0.0.1:8765"}},
+      {{{"id", "local"}, {"kind", "local"}, {"name", "local"}, {"url", "http://127.0.0.1:8765"}, {"state", "initialized"}},
        {{"id", "runtime:lab"}, {"kind", "runtime"}, {"name", "lab"}, {"url", "http://127.0.0.1:9876"}},
        {{"id", "hub:mesh"}, {"kind", "hub"}, {"name", "mesh"}, {"url", "https://hub.example"},
         {"device_id", "dev1"}, {"profile", "desktop"}}});
   g_model["local_running"] = false;
+  g_model["local_initialized"] = !g_opt.local_uninitialized;
+  if (g_opt.local_uninitialized) {
+    g_model["connections"][0]["state"] = "not_initialized";
+    g_model["connections"][0]["url"] = nullptr;
+  }
   g_model["workspaces"] = Json::object();  /* "<connection>|<node>" -> [ws] */
   g_model["files"] = Json::object();       /* ws id -> [file] */
   g_model["tasks"] = Json::array();
@@ -498,6 +505,9 @@ void init(const std::string &dir, std::vector<std::string> args, SendFn send)
     else if (args[i] == "--forget-inspected-once") {
       g_opt.forget_inspected_once = true;
     }
+    else if (args[i] == "--local-uninitialized") {
+      g_opt.local_uninitialized = true;
+    }
     else if (args[i] == "--submit-fail" && i + 1 < args.size()) {
       g_opt.submit_fail = std::atoi(args[++i].c_str());
     }
@@ -614,12 +624,22 @@ bool handle(const Json &id, const std::string &method, const Json &p)
   }
   if (method == "connections.local" || method == "connections.local_start") {
     if (method == "connections.local_start") {
+      if (!g_model["local_initialized"].get<bool>()) {
+        if (!p.value("initialize", false)) {
+          error(id, "not_found", "No local Runtime is initialized on this computer");
+          return true;
+        }
+        g_model["local_initialized"] = true;
+        g_model["connections"][0]["state"] = "initialized";
+        g_model["connections"][0]["url"] = "http://127.0.0.1:8765";
+      }
       g_model["local_running"] = true;
       g_model["workspaces"]["local|"] = Json::array();
       save_locked();
     }
     const bool running = g_model["local_running"].get<bool>();
-    respond(id, {{"initialized", true}, {"api_running", running}, {"supervisor_running", running},
+    respond(id, {{"initialized", g_model["local_initialized"].get<bool>()}, {"api_running", running},
+                 {"supervisor_running", running},
                  {"url", "http://127.0.0.1:8765"}, {"state_dir", "/fake/runtime"}});
     return true;
   }
@@ -734,12 +754,17 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     std::error_code ec;
     Json files = Json::array();
     int64_t total = 0;
-    const std::string remote = p.value("remote", source.filename().string());
+    std::string remote = p.value("remote", source.filename().string());
+    const bool into_root = remote == ".";
+    if (into_root && !fs::is_directory(source, ec)) {
+      remote = source.filename().string();
+    }
     if (fs::is_directory(source, ec)) {
       for (auto it = fs::recursive_directory_iterator(source, ec); it != fs::recursive_directory_iterator(); ++it) {
         if (it->is_regular_file(ec) && !it->is_symlink(ec)) {
           const int64_t size = int64_t(it->file_size(ec));
-          files.push_back({{"path", remote + "/" + fs::relative(it->path(), source, ec).generic_string()},
+          const std::string rel = fs::relative(it->path(), source, ec).generic_string();
+          files.push_back({{"path", into_root ? rel : remote + "/" + rel},
                            {"size", size}, {"sha256", std::string(64, '0')}});
           total += size;
         }

@@ -375,6 +375,23 @@ TEST(App, TooltipWakeupAndRedraw)
   EXPECT_TRUE(tooltip);
 }
 
+TEST(App, AForgottenScreenIsNoLongerTaggedByStoreChanges)
+{
+  AppFixture f("en");
+  EXPECT_EQ(f.shell->screen_count(), 1u);
+  f.drv->frame();
+  f.screen.clear_redraw();
+  f.shell->store().changed();
+  EXPECT_TRUE(f.screen.needs_redraw());
+  /* What a closing window does (Window close listener): later changes leave the screen alone. */
+  f.shell->forget(f.screen);
+  EXPECT_EQ(f.shell->screen_count(), 0u);
+  f.screen.clear_redraw();
+  f.shell->store().changed();
+  f.shell->store().toast("after close", ui::ToastKind::Info);
+  EXPECT_FALSE(f.screen.needs_redraw());
+}
+
 TEST(App, EditorKeysExistInEveryCatalog)
 {
   AppFixture f("en");

@@ -249,6 +249,13 @@
         },
         "profile": {
           "type": "string"
+        },
+        "state": {
+          "enum": [
+            "initialized",
+            "not_initialized"
+          ],
+          "description": "Local Runtime only: whether $STK_STATE_DIR holds a Runtime configuration (the local connection is always listed)."
         }
       },
       "required": [
@@ -449,7 +456,11 @@
             }
           ]
         },
-        "result": {}
+        "result": {},
+        "kind": {
+          "type": "string",
+          "description": "request.kind, repeated at the top level by the bridge"
+        }
       },
       "required": [
         "id",
@@ -882,7 +893,12 @@
         "description": "Start the local Runtime API and supervisor (Linux server Runtime only).",
         "params": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "initialize": {
+              "type": "boolean",
+              "description": "Initialize the local Runtime ($STK_STATE_DIR) first when it has no configuration (default false)"
+            }
+          },
           "additionalProperties": false
         },
         "result": {
@@ -2287,7 +2303,8 @@
               "$ref": "#/$defs/absPath"
             },
             "remote": {
-              "$ref": "#/$defs/relPath"
+              "$ref": "#/$defs/relPath",
+              "description": "Relative destination (default: the source name). \".\" puts a folder's contents at the workspace root (a file keeps its name). Paths with \"..\", absolute paths, drive letters and backslashes are invalid_params."
             },
             "idempotency_key": {
               "$ref": "#/$defs/key",

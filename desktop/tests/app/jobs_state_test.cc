@@ -201,9 +201,20 @@ TEST_F(JobsFake, UploadsWaitForAWorkspaceThenCompleteAndBlockSubmitting)
   for (const bridge::FileEntry &e : j.workspace_files()) {
     paths.push_back(e.path);
   }
+  /* A folder's contents land at the workspace root by default (the legacy tab's layout). */
+  EXPECT_TRUE(has(paths, "input.toml"));
+  EXPECT_TRUE(has(paths, "sub/b.txt"));
+  EXPECT_TRUE(has(paths, "单个.dat"));
+  /* Off: under the folder's name. */
+  j.folder_into_root = false;
+  j.upload({folder.string()});
+  ASSERT_TRUE(f.pump([&] { return j.workspace_files().size() == 5; }));
+  paths.clear();
+  for (const bridge::FileEntry &e : j.workspace_files()) {
+    paths.push_back(e.path);
+  }
   EXPECT_TRUE(has(paths, "case/input.toml"));
   EXPECT_TRUE(has(paths, "case/sub/b.txt"));
-  EXPECT_TRUE(has(paths, "单个.dat"));
   EXPECT_NE(j.status().text.find("Uploaded"), std::string::npos) << j.status().text;
 }
 
@@ -361,6 +372,21 @@ TEST_F(JobsFake, AddPairRemoveConnectionsAndTheLocalRuntime)
   j.select_connection("local");
   ASSERT_TRUE(f.pump([&] { return j.active() && j.active()->health == app::Health::Online; }));
   EXPECT_TRUE(j.workspaces().empty()); /* a fresh local Runtime */
+}
+
+TEST_F(JobsFake, AnUninitializedLocalRuntimeIsListedAndSetUpOnStart)
+{
+  FakeJobs f({"--local-uninitialized"});
+  JobsState &j = f.jobs();
+  ASSERT_TRUE(f.pump([&] { return j.ready() && !j.connections().empty() && j.local_status().has_value(); }));
+  ASSERT_EQ(j.connections()[0].info.id, "local");
+  EXPECT_EQ(j.connections()[0].info.state, "not_initialized");
+  EXPECT_FALSE(j.local_status()->initialized);
+  j.start_local(); /* sends initialize: true, as the legacy tab set the Runtime up on Connect */
+  ASSERT_TRUE(f.pump([&] { return !j.local_busy(); }));
+  EXPECT_TRUE(j.local_status()->initialized);
+  EXPECT_TRUE(j.local_status()->api_running);
+  ASSERT_TRUE(f.pump([&] { return j.connections()[0].info.state == "initialized"; }));
 }
 
 TEST_F(JobsFake, HubCustomSubmitGoesToReviewThenRunsAfterApproval)

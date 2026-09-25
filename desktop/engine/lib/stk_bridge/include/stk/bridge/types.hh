@@ -55,6 +55,8 @@ struct ConnectionInfo {
   std::string device_id;
   /** "desktop" for a hub device paired with a desktop code (WP11), else empty. */
   std::string profile;
+  /** The local Runtime (always listed): "initialized" or "not_initialized"; empty otherwise. */
+  std::string state;
   Json raw;
   static ConnectionInfo from_json(const Json &connection);
 };
@@ -251,7 +253,7 @@ struct UploadParams {
   Target target;
   std::string workspace_id;
   std::string source; /* absolute file or folder */
-  std::string remote; /* relative; empty: the source name */
+  std::string remote; /* relative; empty: the source name; ".": a folder's contents at the root */
   /** The same key returns the same transfer, also from a restarted bridge (then the client may
    * repeat the call by itself); a different request under the key is `conflict`. */
   std::string idempotency_key;

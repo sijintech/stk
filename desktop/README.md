@@ -116,6 +116,9 @@ Bridge log; WP10: Viewer, Properties and Probe; see below).
   button-layout`, e.g. close only) drawn at the right. GHOST asks for the layout on compositor
   configures after the first one (GNOME activates, resizes or changes the state of the window
   soon after mapping); a UI scale change reaches the decorations at the next configure.
+- Closing a window runs its close listeners (`Window::add_close_listener`) before its screen and GPU
+  context go away; the shell uses one to forget that screen, so store changes that arrive later
+  (bridge callbacks, the Jobs and Viewer states) never reach a destroyed screen.
 - Other threads hand work to the main loop with `WindowManager::post` (or the `executor()` it gives
   to background services such as stk_bridge). The wake-up per back-end: X11 polls an eventfd (a
   self-pipe off Linux) together with the X connection, bounded by GHOST's next timer, then lets GHOST
@@ -133,13 +136,15 @@ The Jobs editor replaces the legacy PyQt Tasks tab (`docs/parity-jobs.md` lists 
 state is in `JobsState` (`AppStore::jobs()`, main thread; bridge callbacks arrive through the
 client's executor and are dropped once the connection, workspace or task changed):
 
-- Connection: this computer (local Runtime, with its status and Start), Runtime profiles (shared
+- Connection: this computer (local Runtime, always listed, with its status and Start, which sets it
+  up first when needed), Runtime profiles (shared
   with `suan connect`; Add… with token or token file, Remove… warns that the profile goes from
   `suan connect` too) and paired hubs (Pair… with a one-time code; node, templates and review
   policy); health in the editor and the status bar.
 - Workspace: list, New…, input files (double-click downloads and opens one), uploads of files or
-  folders (native dialog, else a path field; drag and drop onto Jobs or Transfers), progress,
-  hub uploads waiting for the `workspace.import` review.
+  folders (native dialog, else a path field; drag and drop onto Jobs or Transfers; a folder's
+  contents at the workspace root by default), progress, hub uploads waiting for the
+  `workspace.import` review.
 - New task: name (IME), program, arguments (Python `shlex` rules), backend, resources (CPUs or
   MPI ranks / threads per rank, nodes, memory, time limit, GPUs, queue, account), expected outputs,
   environment, retry policy; validated with the Runtime `TaskSpec` rules before sending; one

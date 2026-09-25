@@ -103,9 +103,15 @@ Future<LocalRuntimeStatus> Client::connections_local()
   return call("connections.local").map([](const Json &r) { return LocalRuntimeStatus::from_json(r); });
 }
 
-Future<LocalRuntimeStatus> Client::connections_local_start()
+Future<LocalRuntimeStatus> Client::connections_local_start(const bool initialize)
 {
-  return call("connections.local_start").map([](const Json &r) { return LocalRuntimeStatus::from_json(r); });
+  Json params = Json::object();
+  if (initialize) {
+    params["initialize"] = true;
+  }
+  return call("connections.local_start", std::move(params)).map([](const Json &r) {
+    return LocalRuntimeStatus::from_json(r);
+  });
 }
 
 /* -- Hub ---------------------------------------------------------------------------------- */

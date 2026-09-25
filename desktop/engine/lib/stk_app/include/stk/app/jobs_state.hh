@@ -292,6 +292,9 @@ class JobsState {
 
   /** Uploads files / folders into the current workspace; without one they wait as pending. */
   void upload(const std::vector<std::string> &paths);
+  /** A folder's contents go to the workspace root (the legacy Tasks tab's layout, `remote: "."`);
+   * off: under the folder's name. */
+  bool folder_into_root = true;
   const std::vector<std::string> &pending_uploads() const
   {
     return pending_;

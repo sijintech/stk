@@ -141,10 +141,14 @@ def test_hub_review_flow(hub, inproc, tmp_path):  # noqa: F811
     assert pending["action"]["review_reason"]
     listed = harness.call("hub.actions", {"connection": hub_id})["actions"]
     assert any(a["id"] == action_id and a["state"] == "review" for a in listed)
+    # Every listed record names its kind at the top level (the hub keeps it in request.kind).
+    assert all(a["kind"] == a["request"]["kind"] for a in listed)
+    assert next(a for a in listed if a["id"] == action_id)["kind"] == "task.submit"
     error = harness.error("hub.review", {"connection": hub_id, "action_id": action_id, "approved": True})
     assert error["code"] == "review_not_inspected"
     inspected = harness.call("hub.action", {"connection": hub_id, "action_id": action_id})["action"]
     assert inspected["request"]["payload"]["spec"]["argv"] == spec["argv"]
+    assert inspected["kind"] == "task.submit"
     approved = harness.call("hub.review", {"connection": hub_id, "action_id": action_id, "approved": True})
     assert approved["action"]["state"] == "queued"
     done = harness.call("task.submit", params)  # the same key waits for the same action

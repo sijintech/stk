@@ -21,14 +21,14 @@ windows on Xvfb and weston).
 
 | # | Legacy behaviour (runtime_tab.py) | Desktop | Status | Test |
 |---|---|---|---|---|
-| 1 | "运行位置" dropdown: 本机 plus the `suan connect` profiles | Connection dropdown from `connections.list`: this computer (local Runtime), Runtime profiles (shared with `suan connect`), paired hubs | done | `JobsFake.ConnectsChecksHealthAndWatchesTheWorkspace` |
-| 2 | "连接": starts the local Runtime daemon when needed, checks `health` (API version 1), "已连接" / "已连接，但任务调度服务未运行" | Selecting a connection checks it (`connections.check`); health shown as connected / connected with problems (supervisor stopped, API version, node offline) / unreachable with the reason, also in the status bar; local Runtime status line with a Start button (`connections.local_start`) | done | `JobsFake.ConnectsChecksHealthAndWatchesTheWorkspace`, `JobsFake.AddPairRemoveConnectionsAndTheLocalRuntime` |
+| 1 | "运行位置" dropdown: 本机 plus the `suan connect` profiles | Connection dropdown from `connections.list`: this computer (local Runtime, always listed, "not set up" until initialized), Runtime profiles (shared with `suan connect`), paired hubs | done | `JobsFake.ConnectsChecksHealthAndWatchesTheWorkspace`, `JobsFake.AnUninitializedLocalRuntimeIsListedAndSetUpOnStart` |
+| 2 | "连接": initializes and starts the local Runtime daemon when needed, checks `health` (API version 1), "已连接" / "已连接，但任务调度服务未运行" | Selecting a connection checks it (`connections.check`); health shown as connected / connected with problems (supervisor stopped, API version, node offline) / unreachable with the reason, also in the status bar; local Runtime status line with a Start button (`connections.local_start`, with `initialize: true` when it is not set up) | done | `JobsFake.ConnectsChecksHealthAndWatchesTheWorkspace`, `JobsFake.AddPairRemoveConnectionsAndTheLocalRuntime` |
 | 3 | "添加连接" dialog: name, forwarded URL (default `http://127.0.0.1:9876`), token (password echo), SSH-tunnel hint; health check before saving; then connect | Add Runtime dialog: name, address (same default), token (masked field) or token file (Browse…), "check before saving", the same hint; `connections.add_runtime`; errors shown in the dialog; connects to the new profile | done | `JobsLayout.AddRuntimeDialogAndThePathFieldFallback`, `JobsFake.AddPairRemoveConnectionsAndTheLocalRuntime` |
 | 4 | Status label: progress and errors ("操作未完成：…"); "关闭桌面不会取消服务器任务" | Status line at the top of the Jobs editor (every outcome also goes to the Logs editor); the hint "Closing the desktop never cancels tasks" | done | all `JobsFake.*` (status checks) |
 | 5 | Workspace dropdown; switching clears logs, outputs and inputs and refreshes | Workspace dropdown (`workspace.list`); switching drops the watch, detail, logs, artifacts and preview and re-subscribes; late results of the old selection are dropped (epochs) | done | `JobsFake.SwitchingConnectionDropsStaleResults` |
 | 6 | "新建" workspace (name prompt) | New… dialog → `workspace.create` with an idempotency key; the new workspace is selected | done | `JobsPython.*` |
 | 7 | "上传文件" (multi-select dialog) | Upload files… : native dialog (zenity / kdialog), else a path field (one per line or `;`, `file://` URIs, `~`) | done | `JobsLayout.NativeDialogPathsAndItsFallback`, `JobsLayout.AddRuntimeDialogAndThePathFieldFallback` |
-| 8 | "上传文件夹" (recursive) | Upload folder… → `upload.start` of the folder (every regular file, symbolic links not followed) | changed: files land under `<folder name>/…` (the bridge's rule), the legacy tab put the folder's contents at the workspace root | `JobsPython.*`, `JobsFake.UploadsWaitForAWorkspaceThenCompleteAndBlockSubmitting` |
+| 8 | "上传文件夹" (recursive, contents at the workspace root) | Upload folder… → `upload.start` of the folder with `remote: "."` (every regular file, symbolic links not followed, at the workspace root as in the legacy tab); a checkbox puts them under the folder's name instead | done | `JobsPython.*`, `JobsFake.UploadsWaitForAWorkspaceThenCompleteAndBlockSubmitting`, `JobsLayout.NativeDialogPathsAndItsFallback` |
 | 9 | Uploads verified; "已上传并校验 N 个文件"; Submit disabled while uploading | Resumable, sha256-verified uploads with progress bars; "Uploaded and verified N file(s)"; Submit disabled (and refused) while uploads into the workspace are unfinished | done | `JobsFake.UploadsWaitForAWorkspaceThenCompleteAndBlockSubmitting` |
 | 10 | Input-file list; double-click → save-as download → open | Input files list (`workspace.files`); Enter / double-click → destination chooser → verified `download.start` → opened (preview, Viewer or the system) | done | `JobsFake.InputFilesDownloadToAChosenDestination` |
 | 11 | Form: task name, program (`{python}`), arguments (shlex, quoting hint), backend local / pbs / slurm | Same fields; arguments split exactly like Python's `shlex.split`; the name accepts IME input (Chinese) | done | `JobsSpec.ShlexSplitsLikePython`, `JobsLayout.SubmitFromTheFormWithAChineseName`, `jobs_live_*` |
@@ -65,11 +65,12 @@ windows on Xvfb and weston).
 
 ## Differences and deferred items
 
-- Folder uploads keep the folder name as a prefix (`upload.start` has no way to put a folder's
-  contents at the workspace root: `remote` must be a non-empty relative path).
 - JPEG results open with the system application; only PNG is previewed.
 - Native file dialogs: Linux through `zenity` / `kdialog`; macOS and Windows use the path field
   until nativefiledialog-extended is wired (stk_platform keeps the same interface).
 - The Runtime `TaskSpec` has no retry field: the retry policy is the client re-sending the same
   idempotency key (never a duplicate task).
 - Hub node snapshots carry no task spec, so the backend column is empty for hub tasks.
+- Bridge additions made for this parity (protocol 1, additive): `connections.list` always lists
+  `local` with `state`; `connections.local_start {initialize}`; `upload.start {remote: "."}`;
+  `hub.actions` / `hub.action` records carry a top-level `kind`.
