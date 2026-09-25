@@ -22,7 +22,7 @@ get_filename_component(_repo_root "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUT
 set(_scratch "${CMAKE_CURRENT_BINARY_DIR}/scratch")
 
 if(NOT WIN32)
-  add_executable(stk-bridge-fake fake_bridge.cc)
+  add_executable(stk-bridge-fake fake_bridge.cc fake_jobs.cc)
   target_link_libraries(stk-bridge-fake PRIVATE stk_io stk_core)
 endif()
 

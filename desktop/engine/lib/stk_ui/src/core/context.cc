@@ -531,6 +531,7 @@ void Context::begin_edit(const Widget &w, bool select_all, std::string initial, 
   edit_ = {};
   edit_.id = w.id;
   edit_.numeric = w.type == WidgetType::Number || w.type == WidgetType::Slider;
+  edit_.password = !edit_.numeric && w.text_opts.password;
   std::string text;
   if (use_initial) {
     text = std::move(initial);
@@ -590,7 +591,10 @@ void Context::edit_click(const Widget &w, Vec2 p, bool extend, bool dbl)
 {
   const FontStyle &font = w.mono ? style_.mono : style_.font;
   const float local = p.x - (w.rect.x + style_.text_margin) + edit_.scroll_x;
-  const size_t idx = measurer().index_at_x(edit_.edit.text(), local, font);
+  const size_t idx = edit_.password ?
+                         unmask_offset(edit_.edit.text(),
+                                       measurer().index_at_x(mask_text(edit_.edit.text()), local, font)) :
+                         measurer().index_at_x(edit_.edit.text(), local, font);
   if (dbl) {
     edit_.edit.select_word_at(idx);
   }
@@ -650,12 +654,12 @@ bool Context::edit_key(const Event &e)
       }
       break;
     case Key::C:
-      if (prim && config_.clipboard && ed.has_selection()) {
+      if (prim && config_.clipboard && ed.has_selection() && !edit_.password) {
         config_.clipboard->set(ed.selected_text());
       }
       break;
     case Key::X:
-      if (prim && config_.clipboard && ed.has_selection()) {
+      if (prim && config_.clipboard && ed.has_selection() && !edit_.password) {
         config_.clipboard->set(ed.cut());
       }
       break;

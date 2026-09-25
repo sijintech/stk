@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "stk/core/utf8.hh"
 #include "stk/ui/utf8.hh"
 
 namespace stk::ui {
@@ -405,6 +406,32 @@ std::string strip_ansi(std::string_view s)
 {
   AnsiStripper st;
   return st.feed(s);
+}
+
+std::string mask_text(const std::string_view text)
+{
+  std::string out;
+  const size_t n = core::utf8::count_code_points(text);
+  out.reserve(n * 3);
+  for (size_t i = 0; i < n; i++) {
+    out += "\xe2\x80\xa2";
+  }
+  return out;
+}
+
+size_t mask_offset(const std::string_view text, const size_t byte)
+{
+  return core::utf8::count_code_points(text.substr(0, std::min(byte, text.size()))) * 3;
+}
+
+size_t unmask_offset(const std::string_view text, const size_t masked)
+{
+  const size_t chars = masked / 3;
+  size_t pos = 0;
+  for (size_t c = 0; c < chars && pos < text.size(); c++) {
+    pos += std::max<size_t>(1, core::utf8::decode(text, pos).length);
+  }
+  return std::min(pos, text.size());
 }
 
 }  // namespace stk::ui

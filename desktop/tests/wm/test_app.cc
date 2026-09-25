@@ -317,7 +317,7 @@ TEST(App, DropsRouteToTheAreaUnderThePointer)
   EXPECT_EQ(t->table->cell(0, 0), "phi.bin");
   /* Jobs lists pending uploads; Properties does not take files (logged). */
   EXPECT_TRUE(drop(f.area("a1"), {"/x/a.dat"}));
-  EXPECT_NE(f.screen.ui()->find("a1/main/pending"), nullptr);
+  EXPECT_NE(f.screen.ui()->find("a1/main/workspace/pending"), nullptr);
   const size_t lines = f.shell->store().app_log().line_count();
   EXPECT_TRUE(drop(f.area("a3"), {"/x/b.dat"}));
   EXPECT_EQ(f.shell->store().app_log().line_count(), lines + 1);
@@ -382,11 +382,9 @@ TEST(App, EditorKeysExistInEveryCatalog)
   std::vector<std::string> keys;
   for (const auto &t : f.shell->registry().types()) {
     keys.push_back(t->title_key);
-    keys.push_back("editor." + t->id + ".placeholder");
   }
   for (const char *k : {"editor.viewer.tool.orbit", "editor.viewer.tool.pan", "editor.viewer.tool.zoom",
-                        "editor.viewer.tool.pick", "editor.properties.panel.preset",
-                        "editor.properties.panel.parameters", "editor.properties.panel.export"})
+                        "editor.viewer.tool.pick"})
   {
     keys.emplace_back(k);
   }

@@ -27,6 +27,7 @@ class Client;
 namespace stk::app {
 
 class ViewerState;
+class JobsState;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -106,6 +107,9 @@ class AppStore {
     bridge_client_ = client;
   }
 
+  /** Connections, workspaces, transfers and tasks of the Jobs editors (WP9, jobs_state.hh). */
+  JobsState &jobs();
+
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
   /** Takes the pending request, if any (the Viewer editor calls this while building its UI). */
@@ -151,6 +155,7 @@ class AppStore {
   bridge::Client *bridge_client_ = nullptr;
   std::optional<OpenResultRequest> pending_open_;
   std::unique_ptr<ViewerState> viewer_;
+  std::unique_ptr<JobsState> jobs_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

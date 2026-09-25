@@ -2,6 +2,7 @@
 
 #include "stk/app/app_store.hh"
 
+#include "stk/app/jobs_state.hh"
 #include "stk/app/viewer_state.hh"
 
 #include <algorithm>
@@ -26,9 +27,19 @@ AppStore::AppStore() = default;
 
 AppStore::~AppStore()
 {
-  /* The viewer state's callbacks call changed(): drop it before the rest of the store. */
+  /* The editors' states call changed() from their callbacks and refer to this store: drop them
+   * (jobs first: its subscriptions may feed the viewer) before the rest of the store. */
   on_change = nullptr;
+  jobs_.reset();
   viewer_.reset();
+}
+
+JobsState &AppStore::jobs()
+{
+  if (!jobs_) {
+    jobs_ = std::make_unique<JobsState>(*this);
+  }
+  return *jobs_;
 }
 
 ViewerState &AppStore::viewer()

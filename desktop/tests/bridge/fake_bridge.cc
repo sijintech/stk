@@ -21,6 +21,9 @@
  *   --stderr-noise        write stderr lines (one with invalid UTF-8) at start
  *   --log-text T          the fake log stream's text (default: CJK lines), 7-byte chunks every
  *                         --log-interval MS (default 15)
+ *   --jobs DIR            a fake Runtime and hub for the Jobs editor tests (fake_jobs.cc; its own
+ *                         options: --review-policy P, --review-refuse, --forget-inspected-once,
+ *                         --submit-fail N)
  *
  * Graph methods (WP10 viewer tests):
  *   --presets-dir DIR     graph.presets lists DIR/<id>.json (suan/graph/presets)
@@ -66,6 +69,8 @@
 #include "stk/core/utf8.hh"
 #include "stk/io/json.hh"
 
+#include "fake_jobs.hh"
+
 extern char **environ;
 
 using stk::io::Json;
@@ -81,6 +86,7 @@ bool g_busy = false;
 bool g_ignore_eof = false;
 std::string g_log_text;
 int g_log_interval = 15;
+std::string g_jobs_dir;
 std::atomic<int> g_unsubscribes{0};
 std::atomic<bool> g_stop{false};
 
@@ -478,6 +484,9 @@ int main(int argc, char **argv)
         g_client_params.insert(item);
       }
     }
+    else if (a == "--jobs") {
+      g_jobs_dir = next();
+    }
   }
   if (g_log_text.empty()) {
     g_log_text = default_log_text();
@@ -492,6 +501,9 @@ int main(int argc, char **argv)
     std::cerr << "no newline at the end" << std::flush;
   }
 
+  if (!g_jobs_dir.empty()) {
+    fake_jobs::init(g_jobs_dir, std::vector<std::string>(argv + 1, argv + argc), [](const Json &m) { send(m); });
+  }
   std::vector<std::thread> threads;
   std::deque<std::pair<Json, Json>> held;
   std::string line;
@@ -517,6 +529,9 @@ int main(int argc, char **argv)
     }
     if (!g_die_once_on.empty() && method == g_die_once_on && once("die:" + method)) {
       _exit(1);
+    }
+    if (!g_jobs_dir.empty() && fake_jobs::handle(id, method, params)) {
+      continue;
     }
     if (method == "hello") {
       if (g_hello_delay_once > 0 && once("hello-delay")) {
@@ -736,6 +751,9 @@ int main(int argc, char **argv)
     }
   }
   g_stop = true;
+  if (!g_jobs_dir.empty()) {
+    fake_jobs::shutdown();
+  }
   for (std::thread &t : threads) {
     t.join();
   }

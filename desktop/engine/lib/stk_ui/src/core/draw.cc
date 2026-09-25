@@ -226,8 +226,12 @@ void Context::draw_widget(const Widget &w)
   /* Text field / number editing: selection, text, IME preedit underline, caret. */
   auto draw_editing = [&](const Rect &area) {
     const TextEdit &ed = edit_.edit;
-    const std::string disp = ed.display_text();
-    const size_t caret = ed.display_caret();
+    const bool pw = edit_.password;
+    const std::string raw = ed.display_text();
+    const std::string disp = pw ? mask_text(raw) : raw;
+    /* Byte offsets of the display text (masked for passwords). */
+    const auto dpos = [&](const size_t i) { return pw ? mask_offset(raw, i) : i; };
+    const size_t caret = dpos(ed.display_caret());
     const float caret_x = tm.caret_x(disp, caret, font);
     /* Keep the caret visible. */
     float &sx = edit_.scroll_x;
@@ -246,13 +250,14 @@ void Context::draw_widget(const Widget &w)
     draw_.clip_push(area);
     if (ed.has_selection() && !ed.composing()) {
       const auto [s0, s1] = ed.selection();
-      const float a = tm.caret_x(disp, s0, font), b = tm.caret_x(disp, s1, font);
+      const float a = tm.caret_x(disp, dpos(s0), font), b = tm.caret_x(disp, dpos(s1), font);
       draw_.rect(snap({x0 + a, area.y + 2 * px, b - a, area.h - 4 * px}), th.text.item);
     }
     draw_.text(disp, {x0, by}, font, th.text.text_sel);
     if (ed.composing()) {
       /* IME preedit: underline under the composition, thicker under the caret segment. */
-      const auto [p0, p1] = ed.display_preedit();
+      const auto [p0r, p1r] = ed.display_preedit();
+      const size_t p0 = dpos(p0r), p1 = dpos(p1r);
       const float a = tm.caret_x(disp, p0, font), b = tm.caret_x(disp, p1, font);
       const float uy = std::round(by + std::max(px, fm.descent * 0.5f));
       draw_.rect(snap({x0 + a, uy, b - a, px}), th.text.text_sel);
@@ -335,7 +340,7 @@ void Context::draw_widget(const Widget &w)
           text_in(area, w.text_opts.placeholder, Align::Left, c.text.scaled_alpha(0.45f));
         }
         else {
-          text_in(area, v, Align::Left, c.text);
+          text_in(area, w.text_opts.password ? mask_text(v) : v, Align::Left, c.text);
         }
       }
       break;
@@ -613,8 +618,15 @@ void Context::draw_widget(const Widget &w)
           for (int c = 0; c < int(w.table->columns.size()); c++) {
             const float cw = table_col_px(w, c);
             const Rect cell{x + st.text_margin, row.y, cw - 2 * st.text_margin, row.h};
+            Color cc = tc;
+            if (!sel && w.table->cell_color) {
+              const Color custom = w.table->cell_color(model, c);
+              if (custom.a != 0) {
+                cc = custom;
+              }
+            }
             text_in(cell, w.table->cell ? w.table->cell(model, c) : std::string(),
-                    w.table->columns[size_t(c)].numeric ? Align::Right : Align::Left, tc);
+                    w.table->columns[size_t(c)].numeric ? Align::Right : Align::Left, cc);
             x += cw;
           }
         }

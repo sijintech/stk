@@ -106,4 +106,11 @@ class AnsiStripper {
 
 std::string strip_ansi(std::string_view s);
 
+/** Password display: one bullet (U+2022) per code point of `text`. */
+std::string mask_text(std::string_view text);
+/** Byte offset in mask_text(text) of byte offset `byte` in `text`. */
+size_t mask_offset(std::string_view text, size_t byte);
+/** Byte offset in `text` of byte offset `masked` in mask_text(text) (rounded down to a character). */
+size_t unmask_offset(std::string_view text, size_t masked);
+
 }  // namespace stk::ui

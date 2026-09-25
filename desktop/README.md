@@ -17,7 +17,8 @@ Python packages stay MIT.
 | `engine/lib/stk_wm` | GHOST glue: window manager, windows, on-demand event loop, events (keys, mouse, wheel, IME preedit, drag and drop), DPI, clipboard, cursors; `WindowManager::post` / `executor()` (thread-safe work for the main loop, wakes an idle wait). Screen model (`screen.hh`): a tree of areas with draggable splitters and minimum sizes, split / join / maximize, docked regions (header, toolbar, sidebar, main) and global bars; one `stk_ui` context per window (a block per region, overlays on top, IME placement, wake-up timers); `ui_bridge.hh` (event adapter, clipboard, `UiRegion`); `layout_store.hh` (versioned layout JSON); `csd.hh` (GNOME client-side decorations). |
 | `engine/lib/stk_bridge` | Client of the Python bridge (`python -m suan.desktop_bridge --stdio`, `docs/specs/stk-desktop-bridge-v1.md`): spawn (posix_spawn + process group; CreateProcessW + job object), strict NDJSON framing, futures with timeout / cancel, typed wrappers, RAII subscriptions, restart with replay, stderr ring for the "Bridge log". CPU only. |
 | `engine/lib/stk_viewer_gpu` | Payload-v2 viewer on the GPU module: lit LUT-coloured triangles, slices, instanced glyphs, lines, points and sphere impostors, ray-marched volumes; overlays through BLF (scalar bar, legend, orientation sphere, triad, text); GPU id-pass picking refined in float64; tiled PNG export x1-x8; GPU budget, LOD and timestep prefetch. |
-| `engine/lib/stk_app` | Application shell (`shell.hh`: top bar with File / View / Language / UI scale menus, status bar, default layout, layout files, shortcuts), `AppStore`, editor registry and `EditorArea` (tabs, header, toolbar / sidebar, area menu), the WP3 placeholder editors (Jobs, Logs, Transfers, Bridge log) and the WP10 Viewer, Properties and Probe editors (`src/editors/viewer_*.cc`) on `ViewerState` (`viewer_state.hh`: the shown result, shared by them) and `viewer_export.hh` (PNG / sequence export). |
+| `engine/lib/stk_app` | Application shell (`shell.hh`: top bar with File / View / Language / UI scale menus, status bar, default layout, layout files, shortcuts), `AppStore`, editor registry and `EditorArea` (tabs, header, toolbar / sidebar, area menu); the WP9 editors Jobs, Transfers, Logs and Bridge log (`jobs_state.hh`: `JobsState`, the model and controller behind them, `AppStore::jobs()`; `jobs_spec.hh`: the submit form with the Runtime `TaskSpec` rules; `src/editors/jobs_*.cc`); the WP10 Viewer, Properties and Probe editors (`src/editors/viewer_*.cc`) on `ViewerState` (`viewer_state.hh`: the shown result, shared by them) and `viewer_export.hh` (PNG / sequence export). |
+| `engine/lib/stk_platform` | File dialogs (`file_dialog.hh`: native through `zenity` / `kdialog` on Linux, none yet on macOS / Windows, where editors fall back to an in-app path field; `split_path_list` parses what is typed or pasted there) and `open_with_system` (xdg-open / open in its own session). CPU only. |
 | `engine/lib/stk_ui` | Blender-style UI toolkit. `stk_ui_core` (no GPU/GHOST headers): blocks rebuilt per frame, layouts in UI units, widgets bound by getter/setter closures, Blender dark theme, CJK line breaking, text editing with IME preedit, i18n catalogs, JSON Schema forms, draw lists. `stk_ui_gpu`: painter on the GPU module's widget shader + BLF. Also adds `tests/ui` and `tools/widget_gallery`. |
 | `app/` | `stk-desktop` (GUI and `--headless` export of the application screen; `--sample` renders the WP1 sample frame). `app/i18n/`: `zh_CN.json` (default) / `en.json` message catalogs and `check_i18n.py` (fails on missing keys). |
 | `tests/ui` | stk_ui tests (label `ui`): events, text/IME, numbers, forms against the catalog and presets, layout goldens (en/zh at 1x/1.5x/2x; `STK_UPDATE_GOLDENS=1` rewrites them), i18n checker. |
@@ -26,8 +27,8 @@ Python packages stay MIT.
 | `tests/unit` | gtest suites of the CPU libraries (label `unit`). |
 | `tests/wm` | Engine tests: headless goldens and CJK crispness (label `gpu`), CLI and leak self-test (`wm`), live windows on Xvfb / weston (`window`); WP3: `stk_wm_tests` (gtest, no GPU: layout maths, screen tree, routing, persistence, layout goldens), application-screen PNG goldens, `stk-app-smoke`. |
 | `tests/bridge` | stk_bridge tests (label `bridge`): protocol units, `ChildProcess`, the client against a scripted fake bridge and against the real Python bridge, and `WindowManager::post` under Xvfb / weston. |
-| `tests/app` | Application editor tests (label `app`), one `<name>.cmake` per work package: WP10 `viewer.cmake` (ViewerState against the fake bridge, Properties form goldens for all 7 presets, the real-bridge + GPU integration test, the headless e2e golden, live windows). |
-| `docs/parity-viewer.md` | The Viewer's SimViz / web-viewer parity checklist with status. |
+| `tests/app` | Application editor tests, one `<name>.cmake` per work package: WP9 `jobs.cmake` (label `jobs`: `stk-jobs-tests` with the form rules, `JobsState` against `stk-bridge-fake --jobs`, UI with synthesized events and IME, layout goldens en / zh and the real Python bridge with a loopback Runtime; `stk-jobs-render` GPU goldens; `stk-jobs-live` live windows); WP10 `viewer.cmake` (label `app`: ViewerState against the fake bridge, Properties form goldens for all 7 presets, the real-bridge + GPU integration test, the headless e2e golden, live windows). |
+| `docs/parity-jobs.md`, `docs/parity-viewer.md` | Parity checklists with status: the legacy PyQt Tasks tab (Jobs) and SimViz / the web viewer (Viewer). |
 | `tests/viewer` | stk_viewer_gpu tests: render goldens on Vulkan and GL, exact categorical colours, tiled vs single-pass export, picking accuracy at `render_origin` ~1e6, VTK offscreen cross-check (mask IoU), budget/LOD/prefetch, 1M-triangle perf smoke (`STK_VIEWER_PERF_BUDGET_MS`). Fixtures: `fixtures/make_fixtures.py [--vtk]`. |
 | `spike/` | Phase 0 spike `stk-gpu-spike` and its golden image. |
 
@@ -73,8 +74,8 @@ stk-desktop --version | --help
 
 The window shows a top bar (menus File / View / Language / UI scale, title), a tree of areas and a
 status bar (bridge state, connection, hints). The default layout is Jobs | Viewer | Properties over
-a bottom strip with the tabs Logs / Probe / Transfers / Bridge log; Jobs, Logs, Transfers and
-Bridge log are placeholders until WP9 (the Viewer, Properties and Probe: see below).
+a bottom strip with the tabs Logs / Probe / Transfers / Bridge log (WP9: Jobs, Logs, Transfers and
+Bridge log; WP10: Viewer, Properties and Probe; see below).
 
 - Areas: drag a splitter to resize (minimum sizes hold, the other areas keep their size),
   double-click it to join the two areas beside it (the larger stays). The area menu (header button
@@ -82,8 +83,8 @@ Bridge log are placeholders until WP9 (the Viewer, Properties and Probe: see bel
   adds / closes tabs; the editor-type dropdown switches the editor. Ctrl+Space maximizes the area
   under the pointer and restores it; T / N toggle the toolbar / sidebar (N-panel, resizable by its
   edge); Ctrl+PageUp / PageDown switch tabs. Files dropped on an area go to its editor
-  (`Editor::on_drop`: Jobs and Transfers queue placeholder uploads, the Viewer opens payloads and
-  result / run folders).
+  (`Editor::on_drop`: Jobs and Transfers upload them, the Viewer opens payloads and result / run
+  folders).
   Internal drag and drop between widgets is deferred.
 - UI: one `stk_ui` context per window. Each visible region builds its blocks in window coordinates
   every (on-demand) frame; popups, tooltips, modals and toasts are overlay blocks above all areas.
@@ -126,11 +127,40 @@ Bridge log are placeholders until WP9 (the Viewer, Properties and Probe: see bel
   `python3` / `python` on PATH. `STK_BRIDGE_VALIDATE=1` makes the client validate every message both
   ways against the built-in copy of `desktop-bridge-1.schema.json`.
 
+### Jobs (WP9)
+
+The Jobs editor replaces the legacy PyQt Tasks tab (`docs/parity-jobs.md` lists every item). All
+state is in `JobsState` (`AppStore::jobs()`, main thread; bridge callbacks arrive through the
+client's executor and are dropped once the connection, workspace or task changed):
+
+- Connection: this computer (local Runtime, with its status and Start), Runtime profiles (shared
+  with `suan connect`; Add… with token or token file, Remove… warns that the profile goes from
+  `suan connect` too) and paired hubs (Pair… with a one-time code; node, templates and review
+  policy); health in the editor and the status bar.
+- Workspace: list, New…, input files (double-click downloads and opens one), uploads of files or
+  folders (native dialog, else a path field; drag and drop onto Jobs or Transfers), progress,
+  hub uploads waiting for the `workspace.import` review.
+- New task: name (IME), program, arguments (Python `shlex` rules), backend, resources (CPUs or
+  MPI ranks / threads per rank, nodes, memory, time limit, GPUs, queue, account), expected outputs,
+  environment, retry policy; validated with the Runtime `TaskSpec` rules before sending; one
+  idempotency key per submission, reused by automatic and manual retries; through a hub a
+  template, or a custom command that waits for review.
+- Tasks: the `watch` snapshots (state, not deltas) in a sortable table with state colours; Cancel
+  (confirmed); Open in Viewer (`AppStore::request_open_result`).
+- Task detail: Logs (stdout + stderr or each alone, follow-tail), Monitor (monitoring-events
+  summary), Results (artifacts; Download verifies the sha256 again on disk and opens the file,
+  Save as… picks the destination; PNGs are decoded with stk_io and shown as a GPU texture), Info.
+- Hub review: actions in review; Inspect (full request) before Approve; the hub's `review_policy`
+  refusal is explained; after a bridge restart the action is read again before approving.
+- Transfers: every journaled transfer with progress, resume and cancel. Logs: the application log.
+  Bridge log: the bridge's stderr, its state and a Restart after it failed.
+- Closing the app never stops jobs: detaching drops subscriptions; the bridge gets EOF (no cancel).
+
 ### Viewer, Properties and Probe (WP10)
 
 All three show `AppStore::viewer()` (`stk/app/viewer_state.hh`), the result on screen:
 
-- **Opening**: File > Open payload / result (a path field until WP9's native dialog), drag and drop on
+- **Opening**: File > Open payload / result (a path field), drag and drop on
   the Viewer, `--open PATH` at start, and the Jobs editor's "Open in viewer" (`take_open_result`). A
   `.stkp` / payload folder is shown as is; a result folder of `suan graph run` (`result.json`, or
   `series.json` whose steps drive the scrubber) is read from disk; a run folder (e.g. muFerro) is
@@ -194,6 +224,23 @@ To run binaries by hand against sysroot-only libraries, `source ~/opt/stk-sysroo
   servers are not installed. On this host they come from `fetch-sysroot.sh --with-test-servers`; the
   sysroot Xvfb is run from a copy whose compiled-in `/usr/bin` xkbcomp directory is redirected to the
   sysroot's xkbcomp.
+- `ctest -L jobs` (WP9, `tests/app`): `stk-jobs-tests` (gtest, no GPU): the submit form against the
+  `TaskSpec` rules and Python's `shlex`; `JobsState` against `stk-bridge-fake --jobs DIR` (a fake
+  Runtime and hub kept in `DIR/model.json`, every request method logged in `DIR/methods.log`):
+  connections and health, add / pair / remove, the local Runtime, uploads (pending until a
+  workspace, blocking submits), idempotent submits with automatic and manual retry, watch, logs,
+  monitoring events, verified downloads and PNG previews, cancel, the hub review flow, the
+  `review_policy` refusal, re-inspection after a restart (also after `kill -9` of the bridge), hub
+  import reviews, and closing without cancelling; the editor's UI driven with synthesized events
+  (dialogs, the path-field fallback of the file dialog, Chinese through IME events, the Transfers
+  editor) and layout goldens (`tests/app/golden/jobs_layout_*.json`, `STK_UPDATE_GOLDENS=1`); and
+  the real Python bridge with a loopback Runtime (`tests/app/jobs_fixture.py`): add the profile,
+  create a workspace, upload a folder, submit, see it listed, stream logs, download the PNG
+  artifact with its sha256 verified and decode it, then close the app while a second task runs and
+  check that it still finishes. `stk-jobs-render` (label `gpu`): the Jobs editor with a populated
+  fake task list and a PNG preview, per backend, against `tests/app/golden/jobs_editor_*.png`.
+  `stk-jobs-live` (label `window`): a live window on Xvfb and weston, Chinese typed into the task
+  name through IME events, submitted to the fake bridge, then closed without cancelling.
 - `ctest -L bridge`: `stk-bridge-tests` (gtest) and `stk-wm-post-check` (also `window`). The client
   runs against `stk-bridge-fake` (framing, oversized / invalid UTF-8 / non-strict lines, out-of-order
   responses, interleaved events, timeouts, cancellation, retries after a death, `kill -9` in the

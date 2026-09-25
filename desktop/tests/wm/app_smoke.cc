@@ -189,8 +189,9 @@ int run(const gfx::Backend backend, const std::string &layout_out, const bool ex
           gfx::Image img;
           if (win->read_pixels(img, err)) {
             const wm::Rect m = area("a1")->find_region("main")->rect();
-            /* The old bar position is now inside the Jobs area. */
-            const uint8_t *p = img.px_bl(drag_x, m.ymin + 4);
+            /* The old bar position is now inside the Jobs area: its main region's top margin
+             * (above the first row; the Jobs editor's content may reach the region's bottom). */
+            const uint8_t *p = img.px_bl(drag_x, m.ymax - 2);
             check(near(p, ui::Color::rgb(0x282828)), "splitter moved on screen", hex(p));
           }
           win->set_client_size(900, 600);

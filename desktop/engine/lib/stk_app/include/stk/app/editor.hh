@@ -7,9 +7,9 @@
  * with closures). Editors add header widgets, area-menu entries and shortcuts through hooks, and
  * receive file drops and GPU drawing for their main region.
  *
- * WP9 (Jobs) and WP10 (Viewer, Properties, Probe) replace the placeholders registered by
- * #register_builtin_editors: subclass #Editor, register an #EditorType with the same id, and the
- * layouts saved by WP3 keep working.
+ * #register_builtin_editors registers the D1 editors (WP9: Jobs, Transfers, Logs, Bridge log;
+ * WP10: Viewer, Properties, Probe) under the ids WP3 layouts were saved with. A new editor
+ * subclasses #Editor and registers an #EditorType.
  */
 #pragma once
 
@@ -155,7 +155,7 @@ inline constexpr const char *kEditorProbe = "probe";
 inline constexpr const char *kEditorTransfers = "transfers";
 inline constexpr const char *kEditorBridgeLog = "bridge_log";
 
-/** Registers the WP3 placeholder editors for all seven ids. */
+/** Registers the D1 editors for all seven ids. */
 void register_builtin_editors(EditorRegistry &registry);
 
 }  // namespace stk::app

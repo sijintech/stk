@@ -153,6 +153,9 @@ struct TableSpec {
   float visible_rows = 8.0f;
   /** Bump when the data changes so the cached sort order is rebuilt. */
   uint64_t data_version = 0;
+  /** Optional text colour of a cell (model row); alpha 0 keeps the list text colour. Selected rows
+   * keep the selection text colour. */
+  std::function<Color(int row, int col)> cell_color;
 };
 
 struct ImageSpec {
@@ -166,6 +169,8 @@ struct TextFieldOptions {
   std::string placeholder;
   size_t max_length = 0;
   bool mono = false;
+  /** Shows every character as a bullet (secrets); copying and cutting are disabled. */
+  bool password = false;
 };
 
 class Block;
@@ -449,6 +454,7 @@ class Context {
     TextEdit edit;
     float scroll_x = 0.0f;
     bool numeric = false;
+    bool password = false;
     std::function<bool(const std::string &)> commit;
   };
   struct DragState {

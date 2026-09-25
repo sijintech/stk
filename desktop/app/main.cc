@@ -9,6 +9,7 @@
  * the WP1 engine sample frame instead. See `stk-desktop --help`.
  */
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
@@ -23,6 +24,7 @@
 #include <string_view>
 
 #include "stk/app/bridge_status.hh"
+#include "stk/app/jobs_state.hh"
 #include "stk/app/viewer_export.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/app/shell.hh"
@@ -31,6 +33,7 @@
 #include "stk/gfx/gpu.hh"
 #include "stk/gfx/image.hh"
 #include "stk/gfx/offscreen.hh"
+#include "stk/platform/file_dialog.hh"
 #include "stk/wm/csd.hh"
 #include "stk/wm/layout_store.hh"
 #include "stk/wm/window.hh"
@@ -793,6 +796,15 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
   shell.store().log(shell.store().catalog().format(
       "app.log.started", {{"backend", wm->system_backend()}, {"gpu", wm->gpu().backend_name()}}));
 
+  /* Jobs editors (WP9): PNG previews as GPU textures, native file dialogs, retry timers. */
+  app::JobsState &jobs = shell.store().jobs();
+  app::use_gpu_textures(jobs);
+  std::unique_ptr<platform::FileDialog> file_dialog = platform::create_native_file_dialog(wm->executor());
+  jobs.file_dialog = file_dialog.get();
+  jobs.schedule = [&wm](const double seconds, std::function<void()> fn) {
+    wm->add_timer(uint64_t(std::max(0.0, seconds) * 1000.0), 0, std::move(fn));
+  };
+
   /* The Python bridge: its callbacks run on the main loop (the window manager's executor); the
    * status bar and the Bridge log editor follow it through BridgeStatus. */
   std::unique_ptr<bridge::Client> bridge_client;
@@ -821,6 +833,7 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
     bridge_client = bridge::Client::create(std::move(bo));
     shell.store().set_bridge(bridge_client.get());
     bridge_status = std::make_unique<app::BridgeStatus>(shell.store(), *bridge_client, wm.get());
+    jobs.attach(bridge_client.get());
     std::string berr;
     if (!bridge_client->start(&berr)) {
       shell.store().set_bridge_error(berr);
@@ -861,7 +874,15 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
            bridge_client ? std::string(bridge::bridge_state_name(bridge_client->state())).c_str() : "off",
            shell.store().bridge_error().empty() ? "" : ", ", shell.store().bridge_error().c_str());
   }
-  /* Reverse order: status mirror, bridge (EOF, grace period, terminate), then the windows. */
+  /* Reverse order: jobs (drops subscriptions, never cancels tasks; GPU textures while the GPU is
+   * up), status mirror, bridge (EOF, grace period, terminate), then the windows. */
+  jobs.attach(nullptr);
+  jobs.clear_preview();
+  jobs.create_texture = nullptr;
+  jobs.free_texture = nullptr;
+  jobs.schedule = nullptr;
+  jobs.file_dialog = nullptr;
+  file_dialog.reset();
   bridge_status.reset();
   shell.store().set_bridge(nullptr);
   bridge_client.reset();
