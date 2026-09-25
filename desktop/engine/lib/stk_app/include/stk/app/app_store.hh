@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -24,6 +25,8 @@ class Client;
 }
 
 namespace stk::app {
+
+class ViewerState;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -48,6 +51,7 @@ const char *bridge_state_key(BridgeState state);
 class AppStore {
  public:
   AppStore();
+  ~AppStore();
 
   ui::Catalog &catalog()
   {
@@ -111,6 +115,9 @@ class AppStore {
     return pending_open_.has_value();
   }
 
+  /** The result shown by the Viewer, Properties and Probe editors (WP10; created on first use). */
+  ViewerState &viewer();
+
   /** Application log (Logs editor) and bridge stderr / protocol log (Bridge log editor). */
   ui::LogBuffer &app_log()
   {
@@ -143,6 +150,7 @@ class AppStore {
   std::string connection_;
   bridge::Client *bridge_client_ = nullptr;
   std::optional<OpenResultRequest> pending_open_;
+  std::unique_ptr<ViewerState> viewer_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

@@ -20,7 +20,7 @@ target_include_directories(stk_app_sample PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(stk_app_sample PUBLIC stk_wm)
 
 add_executable(stk-desktop main.cc)
-target_link_libraries(stk-desktop PRIVATE stk_app stk_app_sample stk_wm stk_bridge)
+target_link_libraries(stk-desktop PRIVATE stk_app stk_app_sample stk_wm stk_bridge stk_viewer_gpu)
 target_compile_definitions(stk-desktop PRIVATE
   STK_DESKTOP_VERSION="${PROJECT_VERSION}"
   STK_BLENDER_VERSION="${STK_BLENDER_VERSION}"

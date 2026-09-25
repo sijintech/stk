@@ -69,3 +69,7 @@ endif()
 if(TARGET stk_bridge AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/bridge/CMakeLists.txt")
   add_subdirectory(tests/bridge)
 endif()
+# Application editor tests (label `app`; desktop/tests/app/*.cmake, one file per work package).
+if(TARGET stk_app AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/app/CMakeLists.txt")
+  add_subdirectory(tests/app)
+endif()

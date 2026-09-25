@@ -10,6 +10,7 @@
 #include <filesystem>
 
 #include "stk/app/editor_area.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/gfx/fonts.hh"
 #include "stk/ui/ui.hh"
@@ -431,6 +432,11 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
 {
   std::vector<ui::MenuEntry> m;
   wm::Screen *s = &screen;
+  /* WP10: open a payload (.stkp / directory), a result directory or a run directory in the Viewer. */
+  m.push_back({std::string(store_.tr("viewer.menu.open")), [this]() {
+                 store_.viewer().open_dialog = true;
+                 store_.changed();
+               }});
   m.push_back({std::string(store_.tr("app.menu.file.save_layout")),
                [this, s]() { save(*s, window_, layout_path); },
                !layout_path.empty()});

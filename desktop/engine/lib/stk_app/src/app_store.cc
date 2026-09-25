@@ -2,6 +2,8 @@
 
 #include "stk/app/app_store.hh"
 
+#include "stk/app/viewer_state.hh"
+
 #include <algorithm>
 #include <cmath>
 
@@ -21,6 +23,21 @@ const char *bridge_state_key(const BridgeState state)
 }
 
 AppStore::AppStore() = default;
+
+AppStore::~AppStore()
+{
+  /* The viewer state's callbacks call changed(): drop it before the rest of the store. */
+  on_change = nullptr;
+  viewer_.reset();
+}
+
+ViewerState &AppStore::viewer()
+{
+  if (!viewer_) {
+    viewer_ = std::make_unique<ViewerState>(*this);
+  }
+  return *viewer_;
+}
 
 void AppStore::set_language(const std::string &language)
 {

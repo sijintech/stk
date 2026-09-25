@@ -501,6 +501,9 @@ void WindowManager::close_window(Window *window)
   owned->ime_end();
   owned->ghost_->activateDrawingContext();
   GPU_context_active_set(owned->gpu_context_);
+  /* Areas may own GPU resources of this context (the Viewer's framebuffers and buffers): release
+   * them while it is current, before it is discarded. */
+  owned->screen_.clear();
   GPU_context_discard(owned->gpu_context_);
   owned->gpu_context_ = nullptr;
   owned->ghost_->setUserData(nullptr);

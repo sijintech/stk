@@ -15,6 +15,7 @@
 #include "stk/ui/ui.hh"
 
 #include "app_theme.hh"
+#include "editors/viewer_common.hh"
 
 namespace stk::app {
 
@@ -288,12 +289,12 @@ template<class T> EditorType make_type(const char *id, const char *title_key)
 void register_builtin_editors(EditorRegistry &registry)
 {
   registry.add(make_type<JobsEditor>(kEditorJobs, "editor.jobs.title"));
-  registry.add(make_type<ViewerEditor>(kEditorViewer, "editor.viewer.title"));
-  registry.add(make_type<PropertiesEditor>(kEditorProperties, "editor.properties.title"));
+  registry.add(viewer_editor_type());     /* WP10 (editors/viewer_editor.cc) */
+  registry.add(properties_editor_type()); /* WP10 (editors/viewer_panels.cc) */
   registry.add({kEditorLogs, "editor.logs.title", [](const EditorType &type) {
                   return std::make_unique<LogEditor>(type, "editor.logs.placeholder", false);
                 }});
-  registry.add(make_type<ProbeEditor>(kEditorProbe, "editor.probe.title"));
+  registry.add(probe_editor_type()); /* WP10 (editors/viewer_panels.cc) */
   registry.add(make_type<TransfersEditor>(kEditorTransfers, "editor.transfers.title"));
   registry.add({kEditorBridgeLog, "editor.bridge_log.title", [](const EditorType &type) {
                   return std::make_unique<LogEditor>(type, "editor.bridge_log.placeholder", true);

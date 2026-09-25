@@ -21,8 +21,23 @@
  *   --stderr-noise        write stderr lines (one with invalid UTF-8) at start
  *   --log-text T          the fake log stream's text (default: CJK lines), 7-byte chunks every
  *                         --log-interval MS (default 15)
+ *
+ * Graph methods (WP10 viewer tests):
+ *   --presets-dir DIR     graph.presets lists DIR/<id>.json (suan/graph/presets)
+ *   --catalog FILE        graph.catalog returns FILE (stk.catalog/1)
+ *   --payload-dir DIR     graph.evaluate delivers this payload (directory form) for every step, its
+ *                         buffers copied into --blob-dir DIR; view.time.step names the step
+ *   --eval-delay-ms MS    graph.evaluate answers after MS (graph.cancel {eval_id} answers the
+ *                         pending evaluation with `cancelled` at once)
+ *   --client-params A,B   parameters of the client stage (default "view"): changing only these
+ *                         re-runs the view nodes; others re-run the data nodes; a (params, step)
+ *                         seen before evaluates nothing (the bridge's node cache)
+ * graph.progress events (node.started / node.finished) precede each answer; `stats` also counts
+ * evaluations, cancels and probes. colormaps.list returns two 256-entry ramps; probe answers a
+ * fixed sample at the requested position.
  */
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -41,6 +56,12 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include <filesystem>
+#include <map>
+#include <memory>
+#include <set>
+#include <sstream>
 
 #include "stk/core/utf8.hh"
 #include "stk/io/json.hh"
@@ -165,6 +186,234 @@ void spawn_grandchild()
   std::cerr << "grandchild " << pid << std::endl;
 }
 
+/* ---- Graph methods (WP10) ---- */
+
+std::string g_presets_dir, g_catalog, g_payload_dir, g_blob_dir;
+int g_eval_delay_ms = 0;
+std::set<std::string> g_client_params = {"view"};
+std::atomic<int> g_evaluations{0}, g_cancels{0}, g_probes{0};
+std::mutex g_graph;
+/* eval_id -> cancelled flag of evaluations waiting for their delay. */
+std::map<std::string, std::shared_ptr<std::atomic<bool>>> g_pending;
+/* Per preset: the last parameters without the step, and the (parameters, step) already evaluated. */
+std::map<std::string, Json> g_last_params;
+std::set<std::string> g_seen;
+
+const std::vector<std::string> kDataNodes = {"run", "polar", "domains", "surfaces", "surface_layer", "box", "legend", "axes"};
+const std::vector<std::string> kClientNodes = {"camera", "scene"};
+const std::vector<std::string> kStepNodes = {"polar", "domains", "surfaces", "surface_layer", "legend", "scene"};
+const std::vector<int> kSteps = {0, 1, 2};
+
+Json read_file_json(const std::string &path)
+{
+  std::ifstream in(path, std::ios::binary);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  return stk::io::parse_json(ss.str());
+}
+
+std::string base64(const std::vector<uint8_t> &data)
+{
+  static const char *t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  size_t i = 0;
+  for (; i + 2 < data.size(); i += 3) {
+    const uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8) | data[i + 2];
+    out += t[(v >> 18) & 63];
+    out += t[(v >> 12) & 63];
+    out += t[(v >> 6) & 63];
+    out += t[v & 63];
+  }
+  if (i + 1 == data.size()) {
+    const uint32_t v = uint32_t(data[i]) << 16;
+    out += t[(v >> 18) & 63];
+    out += t[(v >> 12) & 63];
+    out += "==";
+  }
+  else if (i + 2 == data.size()) {
+    const uint32_t v = (uint32_t(data[i]) << 16) | (uint32_t(data[i + 1]) << 8);
+    out += t[(v >> 18) & 63];
+    out += t[(v >> 12) & 63];
+    out += t[(v >> 6) & 63];
+    out += '=';
+  }
+  return out;
+}
+
+Json graph_presets()
+{
+  Json list = Json::array();
+  std::vector<std::filesystem::path> files;
+  std::error_code ec;
+  for (std::filesystem::directory_iterator it(g_presets_dir, ec), end; !ec && it != end; it.increment(ec)) {
+    if (it->path().extension() == ".json") {
+      files.push_back(it->path());
+    }
+  }
+  std::sort(files.begin(), files.end());
+  for (const auto &f : files) {
+    const Json doc = read_file_json(f.string());
+    const Json graph = doc.value("graph", Json::object());
+    Json bindings = Json::array();
+    for (const Json &b : doc.value("bindings", Json::array())) {
+      bindings.push_back({{"name", b.value("name", "")}, {"description", b.value("description", "")}});
+    }
+    list.push_back({{"id", doc.value("id", f.stem().string())},
+                    {"name", doc.value("name", f.stem().string())},
+                    {"description", doc.value("description", "")},
+                    {"graph", graph},
+                    {"bindings", bindings},
+                    {"parameters", graph.value("parameters", Json::array())}});
+  }
+  return Json{{"presets", list}};
+}
+
+Json colormaps_list()
+{
+  Json maps = Json::array();
+  for (const char *name : {"grey", "reds"}) {
+    const bool grey = std::strcmp(name, "grey") == 0;
+    std::vector<uint8_t> lut(1024);
+    for (int i = 0; i < 256; i++) {
+      lut[size_t(i) * 4] = uint8_t(i);
+      lut[size_t(i) * 4 + 1] = grey ? uint8_t(i) : 0;
+      lut[size_t(i) * 4 + 2] = grey ? uint8_t(i) : 0;
+      lut[size_t(i) * 4 + 3] = 255;
+    }
+    maps.push_back({{"name", name}, {"lut_rgba8", base64(lut)}});
+  }
+  return Json{{"colormaps", maps},
+              {"aliases", Json::object()},
+              {"categorical_palettes", Json::array()},
+              {"reserved_colors", Json::object()},
+              {"nan_color", Json::array({0.5, 0.5, 0.5, 1.0})}};
+}
+
+/** The payload of one step: the fixture with view.time.step set, its buffers in the blob dir. */
+Json step_manifest(const int step)
+{
+  Json manifest = read_file_json(g_payload_dir + "/manifest.json");
+  for (Json &b : manifest["buffers"]) {
+    const std::string sha = b.value("sha256", "");
+    const std::filesystem::path dst = std::filesystem::path(g_blob_dir) / sha.substr(0, 2) / sha;
+    std::error_code ec;
+    if (!std::filesystem::exists(dst, ec)) {
+      std::filesystem::create_directories(dst.parent_path(), ec);
+      std::filesystem::copy_file(std::filesystem::path(g_payload_dir) / (sha + ".bin"), dst, ec);
+    }
+    b["uri"] = "sha256:" + sha;
+  }
+  if (manifest.contains("view") && manifest["view"].is_object()) {
+    manifest["view"]["time"] = Json{{"step", step}};
+  }
+  return manifest;
+}
+
+int resolve_step(const Json &value)
+{
+  if (value.is_number()) {
+    const int v = int(value.get<double>());
+    int best = kSteps.front();
+    for (const int s : kSteps) {
+      if (s <= v) {
+        best = s;
+      }
+    }
+    return best;
+  }
+  if (value.is_string() && value.get<std::string>() == "first") {
+    return kSteps.front();
+  }
+  return kSteps.back();
+}
+
+/** The evaluation result of a request (evaluated nodes as the bridge's node cache gives them). */
+Json evaluate_request(const Json &params)
+{
+  const Json request = params.value("request", Json::object());
+  const std::string preset = request.value("preset", "");
+  const Json parameters = request.value("parameters", Json::object());
+  const int step = resolve_step(parameters.value("step", Json("latest")));
+  Json rest = parameters;
+  rest.erase("step");
+  std::vector<std::string> evaluated;
+  {
+    std::lock_guard lock(g_graph);
+    const std::string seen_key = preset + "|" + rest.dump() + "|" + std::to_string(step);
+    const auto last = g_last_params.find(preset);
+    if (last == g_last_params.end()) {
+      evaluated = kDataNodes;
+      evaluated.insert(evaluated.end(), kClientNodes.begin(), kClientNodes.end());
+    }
+    else if (g_seen.count(seen_key)) {
+      evaluated = {};
+    }
+    else {
+      bool data_changed = false, client_changed = false;
+      std::set<std::string> names;
+      for (auto it = rest.begin(); it != rest.end(); ++it) {
+        names.insert(it.key());
+      }
+      for (auto it = last->second.begin(); it != last->second.end(); ++it) {
+        names.insert(it.key());
+      }
+      for (const std::string &n : names) {
+        if (rest.value(n, Json()) != last->second.value(n, Json())) {
+          (g_client_params.count(n) ? client_changed : data_changed) = true;
+        }
+      }
+      if (data_changed) {
+        evaluated = kDataNodes;
+        evaluated.insert(evaluated.end(), kClientNodes.begin(), kClientNodes.end());
+      }
+      else if (client_changed) {
+        evaluated = kClientNodes;
+      }
+      else {
+        evaluated = kStepNodes;
+      }
+    }
+    g_last_params[preset] = rest;
+    g_seen.insert(seen_key);
+  }
+  Json outputs = Json::object();
+  const Json names = request.value("outputs", Json::array({"view"}));
+  const std::string out_name = names.is_array() && !names.empty() ? names[0].get<std::string>() : "view";
+  outputs[out_name] = Json{{"type", "payload"}, {"manifest", step_manifest(step)}};
+  Json choices = Json::array();
+  for (const int s : kSteps) {
+    choices.push_back(s);
+  }
+  Json ev = Json::array();
+  for (const std::string &n : evaluated) {
+    ev.push_back(n);
+  }
+  const int nodes = int(kDataNodes.size() + kClientNodes.size());
+  return Json{{"result",
+               {{"schema", "stk.graph-result/1"},
+                {"graph_sha256", std::string(64, '0')},
+                {"graph_hash", "sha256:" + std::string(64, '0')},
+                {"profile", request.value("profile", "desktop")},
+                {"outputs", outputs},
+                {"parameters", {{"step", {{"value", step}, {"choices", choices}}}}},
+                {"keys", Json::object()},
+                {"evaluated", ev},
+                {"timings", Json::object()},
+                {"cache", {{"hits", nodes - int(evaluated.size())}, {"misses", int(evaluated.size())}}},
+                {"warnings", Json::array()}}},
+              {"blob_dir", g_blob_dir}};
+}
+
+void progress_events(const std::string &eval_id, const Json &result)
+{
+  for (const Json &n : result["result"]["evaluated"]) {
+    send(Json{{"event", "graph.progress"},
+              {"data", {{"eval_id", eval_id}, {"event", {{"type", "node.started"}, {"node", n}}}}}});
+    send(Json{{"event", "graph.progress"},
+              {"data", {{"eval_id", eval_id}, {"event", {{"type", "node.finished"}, {"node", n}}}}}});
+  }
+}
+
 }  // namespace
 
 int main(int argc, char **argv)
@@ -205,6 +454,29 @@ int main(int argc, char **argv)
     }
     else if (a == "--log-interval") {
       g_log_interval = std::atoi(next().c_str());
+    }
+    else if (a == "--presets-dir") {
+      g_presets_dir = next();
+    }
+    else if (a == "--catalog") {
+      g_catalog = next();
+    }
+    else if (a == "--payload-dir") {
+      g_payload_dir = next();
+    }
+    else if (a == "--blob-dir") {
+      g_blob_dir = next();
+    }
+    else if (a == "--eval-delay-ms") {
+      g_eval_delay_ms = std::atoi(next().c_str());
+    }
+    else if (a == "--client-params") {
+      g_client_params.clear();
+      std::stringstream ss(next());
+      std::string item;
+      while (std::getline(ss, item, ',')) {
+        g_client_params.insert(item);
+      }
     }
   }
   if (g_log_text.empty()) {
@@ -373,7 +645,85 @@ int main(int argc, char **argv)
       respond(id, Json{{"ok", true}});
     }
     else if (method == "stats") {
-      respond(id, Json{{"unsubscribes", g_unsubscribes.load()}});
+      respond(id, Json{{"unsubscribes", g_unsubscribes.load()},
+                       {"evaluations", g_evaluations.load()},
+                       {"cancels", g_cancels.load()},
+                       {"probes", g_probes.load()}});
+    }
+    else if (method == "graph.presets" && !g_presets_dir.empty()) {
+      respond(id, graph_presets());
+    }
+    else if (method == "graph.catalog" && !g_catalog.empty()) {
+      respond(id, Json{{"catalog", read_file_json(g_catalog)}});
+    }
+    else if (method == "colormaps.list") {
+      respond(id, colormaps_list());
+    }
+    else if (method == "graph.evaluate" && !g_payload_dir.empty()) {
+      g_evaluations++;
+      const std::string eval_id = params.value("eval_id", "");
+      Json result;
+      try {
+        result = evaluate_request(params);
+      }
+      catch (const std::exception &e) {
+        respond_error(id, "internal_error", e.what());
+        continue;
+      }
+      if (g_eval_delay_ms <= 0) {
+        progress_events(eval_id, result);
+        respond(id, result);
+      }
+      else {
+        auto cancelled = std::make_shared<std::atomic<bool>>(false);
+        {
+          std::lock_guard lock(g_graph);
+          g_pending[eval_id] = cancelled;
+        }
+        threads.emplace_back([id, eval_id, result, cancelled] {
+          const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(g_eval_delay_ms);
+          while (!cancelled->load() && !g_stop.load() && std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+          }
+          {
+            std::lock_guard lock(g_graph);
+            g_pending.erase(eval_id);
+          }
+          if (cancelled->load()) {
+            respond_error(id, "cancelled", "Evaluation " + eval_id + " was cancelled");
+            return;
+          }
+          progress_events(eval_id, result);
+          respond(id, result);
+        });
+      }
+    }
+    else if (method == "graph.cancel") {
+      const std::string eval_id = params.value("eval_id", "");
+      bool found = false;
+      {
+        std::lock_guard lock(g_graph);
+        if (auto it = g_pending.find(eval_id); it != g_pending.end()) {
+          it->second->store(true);
+          found = true;
+        }
+      }
+      if (found) {
+        g_cancels++;
+      }
+      respond(id, Json{{"cancelled", found}});
+    }
+    else if (method == "probe") {
+      g_probes++;
+      const Json pick = params.value("pick", Json::object());
+      const Json position = params.value("position", Json::array({0.0, 0.0, 0.0}));
+      respond(id, Json{{"target", {{"binding", "run"}, {"path", "Polar.00000002.dat"}, {"node", pick.value("node", "")}}},
+                       {"sample",
+                        {{"position", position},
+                         {"values", Json::array({0.25, -0.5, 0.75})},
+                         {"units", "unspecified"},
+                         {"interpolation", "trilinear"},
+                         {"source", "original_point_data"}}}});
     }
     else {
       respond(id, Json{{"method", method}});
