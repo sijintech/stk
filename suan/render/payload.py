@@ -15,6 +15,7 @@ Main entry points:
 * :class:`PayloadBuilder` -- low-level manifest/buffer assembly
 * :func:`read_stkp`, :func:`read_directory`, :func:`decode` -- decode + validate
 * :meth:`Payload.to_stkp`, :meth:`Payload.write_directory`, :meth:`Payload.validate`
+* :func:`format_label` -- scalar-bar labels (spec §6.7)
 """
 from contextlib import contextmanager
 from dataclasses import replace
@@ -29,10 +30,10 @@ from .colormaps import (DEFAULT_OPACITY, ORIENTATION_HSL, canonical_name, catego
                         opacity_points)
 
 __all__ = [
-    "ENCODINGS", "LABEL_FORMAT", "MIB", "PROFILES", "SCHEMA", "TYPE_DTYPES", "TYPE_SIZES",
-    "Payload", "PayloadBuilder", "PayloadError",
-    "budget_limits", "cluster_decimate", "decode", "encode_scene", "pack_stkp", "read_directory", "read_stkp",
-    "unpack_stkp",
+    "ENCODINGS", "LABEL_FORMAT", "MIB", "PROFILES", "RESERVED_IDS", "SAFE_INTEGER", "SCHEMA", "TYPE_DTYPES",
+    "TYPE_SIZES", "Payload", "PayloadBuilder", "PayloadError",
+    "budget_limits", "cluster_decimate", "decode", "encode_scene", "format_label", "overlay_problems", "pack_stkp",
+    "read_directory", "read_stkp", "unpack_stkp",
 ]
 
 SCHEMA = "stk.payload/2"
@@ -49,12 +50,17 @@ ENCODINGS = {"phone": "u8", "web": "u16", "desktop": "f32"}
 TYPE_DTYPES = {"i8": "<i1", "u8": "<u1", "i16": "<i2", "u16": "<u2", "i32": "<i4", "u32": "<u4", "f32": "<f4",
                "f64": "<f8"}
 TYPE_SIZES = {name: int(dtype[-1]) for name, dtype in TYPE_DTYPES.items()}
-_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$")
-_SHA = re.compile(r"^[0-9a-f]{64}$")
-# Scalar-bar label formats: the subset of Python/d3 format specs both understand, with at most two width and
-# precision digits (a width such as "999999" would make every label a megabyte of blanks); "d" labels are
-# rounded to integers.
-LABEL_FORMAT = re.compile(r"^[+\- ]?#?0?(?:[1-9][0-9]?)?,?(?:(?:\.[0-9]{1,2})?[eEfFgG%]?|d)$")
+# Patterns are used with fullmatch: "$" alone would also match before a trailing newline.
+_ID = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}")
+# Ids name object keys in JavaScript clients; these would address the prototype chain (spec §10).
+RESERVED_IDS = frozenset({"__proto__", "constructor", "prototype"})
+_SHA = re.compile(r"[0-9a-f]{64}")
+# Integers are integral JSON numbers within the range every client reads exactly (JavaScript safe integers).
+SAFE_INTEGER = 2 ** 53 - 1
+# Scalar-bar label formats (spec §6.7): the subset of Python/d3 format specs both understand, with at most two
+# width and precision digits (a width such as "999999" would make every label a megabyte of blanks); "d" labels
+# are rounded to integers. Anchored with \Z, so a trailing newline never matches.
+LABEL_FORMAT = re.compile(r"^[+\- ]?#?0?(?:[1-9][0-9]?)?,?(?:(?:\.[0-9]{1,2})?[eEfFgG%]?|d)\Z")
 _MAGIC = b"STKP"
 _VERSION = 2
 UNKNOWN_COLOR = [0.5, 0.5, 0.5]
@@ -81,6 +87,31 @@ def type_of(array):
     if name is None or f"{name}{size * 8}" not in TYPE_DTYPES:
         raise PayloadError(f"Unsupported array dtype {array.dtype}")
     return f"{name}{size * 8}"
+
+
+def format_label(value, label_format=".3g"):
+    """A scalar-bar label (spec §6.7): Python format-spec semantics for the ``LABEL_FORMAT`` subset.
+
+    Ties round half to even on the exact binary value; ``d`` formats the value rounded to the nearest
+    integer (ties to even); a label that shows zero never carries a minus sign (``-0.0001`` with
+    ``.2f`` is ``0.00``, as Python's ``z`` option); non-finite values print as ``inf``/``-inf``/``nan``
+    (also with ``d``). Formats outside the subset fall back to ``.3g``.
+    """
+    if not isinstance(label_format, str) or not LABEL_FORMAT.fullmatch(label_format):
+        label_format = ".3g"
+    value = float(value)
+
+    def text_of(v):
+        if not label_format.endswith("d"):
+            return format(v, label_format)
+        if math.isfinite(v):
+            return format(int(round(v)), label_format)
+        return format(v, label_format[:-1])
+
+    text = text_of(value)
+    if math.isfinite(value) and math.copysign(1.0, value) < 0 and not any(c in "123456789" for c in text):
+        text = text_of(-value)      # negative zero, or a negative value that rounds to zero
+    return text
 
 
 def budget_limits(profile="web", overrides=None):
@@ -138,7 +169,8 @@ class PayloadBuilder:
             self.buffers.append((group[0], bytes(group[1])))
 
     def _check_buffer_id(self, buffer_id):
-        if not isinstance(buffer_id, str) or not _ID.match(buffer_id) or buffer_id in self._buffer_ids:
+        if (not isinstance(buffer_id, str) or not _ID.fullmatch(buffer_id) or buffer_id in RESERVED_IDS
+                or buffer_id in self._buffer_ids):
             raise PayloadError(f"Invalid or duplicate buffer id {buffer_id!r}")
         self._buffer_ids.add(buffer_id)
 
@@ -151,7 +183,8 @@ class PayloadBuilder:
     def add_accessor(self, accessor_id, array, type=None, components=None, *, normalized=False, hints=True):
         """Append ``array`` (``(count,)`` or ``(count, components)``) and return ``accessor_id``."""
         np = _np()
-        if not isinstance(accessor_id, str) or not _ID.match(accessor_id) or accessor_id in self._ids:
+        if (not isinstance(accessor_id, str) or not _ID.fullmatch(accessor_id) or accessor_id in RESERVED_IDS
+                or accessor_id in self._ids):
             raise PayloadError(f"Invalid or duplicate accessor id {accessor_id!r}")
         array = np.asarray(array)
         type_name = type or type_of(array)
@@ -347,9 +380,10 @@ class Payload(dict):
             np = _np()
             accessor = self.accessor(accessor_id)
             data = self.buffer_bytes(accessor["buffer"])
-            n = accessor["count"] * accessor["components"]
-            array = np.frombuffer(data, dtype=TYPE_DTYPES[accessor["type"]], count=n, offset=accessor["byteOffset"])
-            components = accessor["components"]
+            components = int(accessor["components"])    # integral JSON numbers may arrive as floats (5.0)
+            n = int(accessor["count"]) * components
+            array = np.frombuffer(data, dtype=TYPE_DTYPES[accessor["type"]], count=n,
+                                  offset=int(accessor["byteOffset"]))
             self._arrays[accessor_id] = array if components == 1 else array.reshape(-1, components)
         return self._arrays[accessor_id]
 
@@ -357,15 +391,29 @@ class Payload(dict):
         """``(256, 4)`` uint8 LUT of a continuous colormap."""
         return self.array(self.colormap(colormap_id)["lut"])
 
+    @property
+    def warnings(self):
+        """Layers skipped by the last :meth:`validate` (spec §10): ``[{"path", "layer", "message"}]``."""
+        return self.__dict__.get("_warnings", [])
+
+    def skipped(self, layer):
+        """Whether clients skip ``layer`` (unknown type or overlay kind, malformed overlay presentation)."""
+        return any(w["layer"] == layer.get("id") for w in self.warnings)
+
     def validate(self):
-        """Raise :class:`PayloadError` unless the payload satisfies spec §10; returns ``self``."""
+        """Raise :class:`PayloadError` unless the payload satisfies spec §10; returns ``self``.
+
+        Skipped layers are reported in :attr:`warnings`, separately from errors.
+        """
+        validator = _Validator(self)
         try:
-            _Validator(self).run()
+            validator.run()
         except PayloadError:
             raise
         except (AttributeError, TypeError, KeyError, IndexError, ValueError) as error:
             # A manifest whose structure is wrong where the validator expected an object or a list.
             raise PayloadError(f"malformed manifest ({type(error).__name__}: {error})") from None
+        self._warnings = validator.warnings
         return self
 
     def to_stkp(self):
@@ -433,7 +481,7 @@ def unpack_stkp(data):
     if any(kind != b"BIN " for kind, _ in chunks[1:]):
         raise PayloadError(".stkp chunks after the manifest must be 'BIN '")
     try:
-        manifest = json.loads(bytes(chunks[0][1]).decode("utf-8"))
+        manifest = _parse_json(bytes(chunks[0][1]).decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as error:
         raise PayloadError(f".stkp manifest is not valid JSON: {error}") from None
     blobs = {}
@@ -462,19 +510,45 @@ def read_directory(path):
     path = Path(path)
     manifest_path = path / "manifest.json" if path.is_dir() else path
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = _parse_json(manifest_path.read_bytes().decode("utf-8"))
     except ValueError as error:
         raise PayloadError(f"{manifest_path.name} is not valid JSON: {error}") from None
     blobs = {}
     for index, buffer in enumerate(_buffer_entries(manifest)):
         digest = buffer.get("sha256")
-        if not isinstance(digest, str) or not _SHA.match(digest) or buffer.get("uri") != "sha256:" + digest:
+        if not isinstance(digest, str) or not _SHA.fullmatch(digest) or buffer.get("uri") != "sha256:" + digest:
             raise PayloadError("Directory payloads reference buffers as 'sha256:<hex>'", path=f"/buffers/{index}")
         file = manifest_path.parent / f"{digest}.bin"
         if not file.is_file():
             raise PayloadError(f"Missing buffer file {file.name}", path=f"/buffers/{index}")
         blobs[digest] = file.read_bytes()
     return Payload(manifest, blobs).validate()
+
+
+def _reject_constant(name):
+    raise ValueError(f"{name} is not JSON")
+
+
+def _finite_float(text):
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"the number {text[:40]} overflows a double")
+    return value
+
+
+def _double_int(text):
+    value = int(text)
+    try:
+        float(value)            # correctly rounded, as strtod/JavaScript read it
+    except OverflowError:
+        raise ValueError(f"the number {text[:40]}... overflows a double") from None
+    return value
+
+
+def _parse_json(text):
+    """RFC 8259 JSON as every client parses it: NaN/Infinity literals, numbers that overflow a double and a
+    byte-order mark are rejected."""
+    return json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float, parse_int=_double_int)
 
 
 def decode(manifest, blobs):
@@ -495,22 +569,95 @@ def _buffer_entries(manifest):
 
 
 def _finite_number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    """A finite JSON number (booleans are not numbers)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:       # an integer token too large for a double (JavaScript reads it as Infinity)
+        return False
+
+
+def _is_int(value):
+    """A JSON integer (spec §10): an integral number within +-(2**53 - 1); ``5`` and ``5.0`` are the same number."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return -SAFE_INTEGER <= value <= SAFE_INTEGER
+    return isinstance(value, float) and math.isfinite(value) and value.is_integer() and abs(value) <= SAFE_INTEGER
+
+
+def _is_str(value):
+    return value is None or isinstance(value, str)
+
+
+def overlay_problems(layer):
+    """Presentation members of an overlay (spec §6.7) with a wrong JSON type (``[]`` when fine).
+
+    Such overlays are skipped with a warning rather than rejected: overlays only explain the view.
+    """
+    problems = []
+
+    def check(ok, key, text):
+        if not ok:
+            problems.append(f"{key} {text}")
+
+    def optional(value, ok):
+        return value is None or ok(value)
+
+    def pair(value):
+        return isinstance(value, list) and len(value) == 2 and all(_finite_number(v) for v in value)
+
+    def size(value):
+        return ((_finite_number(value) and value > 0)
+                or (pair(value) and all(v > 0 for v in value)))
+
+    def colour(value):
+        return isinstance(value, list) and len(value) in (3, 4) and all(_finite_number(v) for v in value)
+
+    check(_is_str(layer.get("title")), "title", "must be a string")
+    check(_is_str(layer.get("anchor")), "anchor", "must be a string")
+    check(_is_str(layer.get("source_layer")), "source_layer", "must be a string")
+    check(optional(layer.get("offset_px"), pair), "offset_px", "must be 2 finite numbers")
+    check(optional(layer.get("size_px"), size), "size_px", "must be a positive number or 2 positive numbers")
+    kind = layer.get("kind")
+    if kind == "scalar_bar":
+        check(_is_str(layer.get("unit")), "unit", "must be a string")
+        check(_is_str(layer.get("orientation")), "orientation", "must be a string")
+    elif kind == "legend":
+        check(optional(layer.get("values"), lambda v: isinstance(v, list) and all(_is_int(x) for x in v)),
+              "values", "must be a list of integers")
+        check(optional(layer.get("columns"), _is_int), "columns", "must be an integer")
+    elif kind == "orientation_legend":
+        check(optional(layer.get("lightness_range"), pair), "lightness_range", "must be 2 finite numbers")
+    elif kind == "text":
+        check(optional(layer.get("font_size_px"), lambda v: _finite_number(v) and v > 0), "font_size_px",
+              "must be a positive number")
+        check(optional(layer.get("color"), colour), "color", "must be 3 or 4 finite numbers")
+    elif kind == "axes_triad":
+        check(optional(layer.get("labels"), lambda v: isinstance(v, list) and len(v) == 3
+                       and all(isinstance(x, str) for x in v)), "labels", "must be 3 strings")
+    return problems
 
 
 def _check_blob(buffer, blob, path):
     digest = buffer.get("sha256")
-    if not isinstance(digest, str) or not _SHA.match(digest):
+    if not isinstance(digest, str) or not _SHA.fullmatch(digest):
         raise PayloadError("sha256 must be 64 lower-case hex digits", path=path + "/sha256")
-    if buffer.get("byteLength") != len(blob):
-        raise PayloadError(f"byteLength {buffer.get('byteLength')} differs from the data size {len(blob)}",
-                           path=path + "/byteLength")
+    length = buffer.get("byteLength")
+    if not _is_int(length) or length != len(blob):
+        raise PayloadError(f"byteLength {length!r} differs from the data size {len(blob)}", path=path + "/byteLength")
     if hashlib.sha256(blob).hexdigest() != digest:
         raise PayloadError("buffer bytes do not hash to its sha256", path=path + "/sha256")
 
 
 class _Validator:
-    """Decoder validation (spec §10); raises on the first problem with a JSON-pointer path."""
+    """Decoder validation (spec §10); raises on the first problem with a JSON-pointer path.
+
+    Optional members that are ``null`` count as absent. Layers of an unknown ``type``, overlays of an
+    unknown ``kind`` and overlays whose presentation members have a wrong type are skipped: they are
+    reported in :attr:`warnings` (``[{"path", "layer", "message"}]``), never rejected.
+    """
 
     LAYER_REQUIRED = {
         "triangles": ("positions", "indices"), "slice_image": ("plane", "size", "attributes"),
@@ -518,13 +665,19 @@ class _Validator:
         "instances": ("positions", "directions", "glyph"),
         "volume": ("grid", "data", "value_range", "transfer_function"), "overlay": ("kind",),
     }
+    GLYPH_SHAPES = ("arrow", "cone", "sphere", "line", "cube")
+    OVERLAY_KINDS = ("scalar_bar", "legend", "orientation_legend", "text", "axes_triad")
 
     def __init__(self, payload):
         self.payload = payload
         self.m = payload.manifest
+        self.warnings = []
 
     def fail(self, message, path=""):
         raise PayloadError(message, path=path)
+
+    def warn(self, layer, path, message):
+        self.warnings.append({"path": path, "layer": layer.get("id"), "message": message})
 
     def run(self):
         np = _np()
@@ -544,9 +697,9 @@ class _Validator:
             path = f"/buffers/{i}"
             self.unique_id(buffer, self.buffers, path)
             digest = buffer.get("sha256")
-            if buffer.get("uri") != f"sha256:{digest}":
+            if not isinstance(digest, str) or buffer.get("uri") != f"sha256:{digest}":
                 self.fail("in-memory buffers are referenced as 'sha256:<hex>'", path + "/uri")
-            if buffer.get("encoding", "raw") != "raw":
+            if buffer.get("encoding") not in (None, "raw"):
                 self.fail("encoding must be 'raw'", path + "/encoding")
             if digest not in self.payload.blobs:
                 self.fail(f"missing bytes for sha256 {digest}", path)
@@ -556,15 +709,15 @@ class _Validator:
         for i, accessor in enumerate(self.list(m["accessors"], "/accessors")):
             path = f"/accessors/{i}"
             self.unique_id(accessor, self.accessors, path)
-            buffer = self.buffers.get(accessor.get("buffer"))
+            buffer = self.buffers.get(accessor.get("buffer")) if isinstance(accessor.get("buffer"), str) else None
             if buffer is None:
                 self.fail(f"unknown buffer {accessor.get('buffer')!r}", path + "/buffer")
             kind = accessor.get("type")
-            if kind not in TYPE_DTYPES:
+            if not isinstance(kind, str) or kind not in TYPE_DTYPES:
                 self.fail(f"unknown type {kind!r}", path + "/type")
             count, components, offset = accessor.get("count"), accessor.get("components"), accessor.get("byteOffset")
             for key, value, low in (("count", count, 0), ("components", components, 1), ("byteOffset", offset, 0)):
-                if isinstance(value, bool) or not isinstance(value, int) or value < low:
+                if not _is_int(value) or value < low:
                     self.fail(f"{key} must be an integer >= {low}", f"{path}/{key}")
             if components > 16:
                 self.fail("components must be <= 16", path + "/components")
@@ -572,50 +725,71 @@ class _Validator:
                 self.fail("byteOffset must be a multiple of 8", path + "/byteOffset")
             if offset + count * components * TYPE_SIZES[kind] > buffer["byteLength"]:
                 self.fail("accessor runs past the end of its buffer", path)
-            if accessor.get("normalized") and kind[0] == "f":
+            normalized = accessor.get("normalized")
+            if normalized is not None and not isinstance(normalized, bool):
+                self.fail("normalized must be a boolean", path + "/normalized")
+            if normalized and kind[0] == "f":
                 self.fail("normalized applies to integer types only", path + "/normalized")
             self.accessors[accessor["id"]] = accessor
         self.colormaps = {}
-        for i, colormap in enumerate(self.list(m.get("colormaps", []), "/colormaps")):
+        colormaps = m.get("colormaps")
+        for i, colormap in enumerate(self.list([] if colormaps is None else colormaps, "/colormaps")):
             path = f"/colormaps/{i}"
             self.unique_id(colormap, self.colormaps, path)
-            if colormap.get("categorical"):
+            categorical = colormap.get("categorical")
+            if categorical is not None and not isinstance(categorical, bool):
+                self.fail("categorical must be a boolean", path + "/categorical")
+            if categorical:
                 entries = self.list(colormap.get("entries"), path + "/entries")
                 values = []
                 for j, entry in enumerate(entries):
-                    value = entry.get("value") if isinstance(entry, dict) else None
-                    if isinstance(value, bool) or not isinstance(value, int):
-                        self.fail("category value must be an integer", f"{path}/entries/{j}/value")
-                    self.rgb(entry.get("color"), f"{path}/entries/{j}/color")
-                    values.append(value)
+                    epath = f"{path}/entries/{j}"
+                    if not _is_int(entry.get("value")):
+                        self.fail("category value must be an integer", epath + "/value")
+                    if not isinstance(entry.get("name"), str):
+                        self.fail("category name must be a string", epath + "/name")
+                    self.rgb(entry.get("color"), epath + "/color")
+                    values.append(int(entry["value"]))
                 if len(values) != len(set(values)):
                     self.fail("category values must be unique", path + "/entries")
+                keys = ("unknown_color",)
             else:
                 self.expect(colormap.get("lut"), ("u8",), 4, 256, path + "/lut")
-                if colormap.get("size") != 256:
+                size = colormap.get("size")
+                if not _is_int(size) or size != 256:
                     self.fail("size must be 256", path + "/size")
+                keys = ("nan_color", "below_color", "above_color")
+            for key in keys:
+                if colormap.get(key) is not None:
+                    self.rgb(colormap[key], f"{path}/{key}")
             self.colormaps[colormap["id"]] = colormap
         layers = {}
         for i, layer in enumerate(self.list(m["layers"], "/layers")):
             path = f"/layers/{i}"
             self.unique_id(layer, layers, path)
             layers[layer["id"]] = layer
+            if not _is_str(layer.get("name")):
+                self.fail("name must be a string", path + "/name")
             kind = layer.get("type")
+            if not isinstance(kind, str):
+                self.fail("type must be a string", path + "/type")
             if kind not in self.LAYER_REQUIRED:
-                continue            # clients skip layers of unknown type
+                self.warn(layer, path, f"unknown layer type {kind!r} (skipped)")
+                continue            # clients skip layers of unknown type (spec §1)
             for key in self.LAYER_REQUIRED[kind]:
                 if key not in layer:
                     self.fail(f"{kind} layer needs {key!r}", path)
-            if "origin" in layer:
+            if layer.get("origin") is not None:
                 self.vec3(layer["origin"], path + "/origin")
             getattr(self, "layer_" + kind)(layer, path, np)
-        if "bounds" in m:
+        if m.get("bounds") is not None:
             bounds = m["bounds"]
             if not isinstance(bounds, list) or len(bounds) != 2:
                 self.fail("bounds must be [[min], [max]]", "/bounds")
             self.vec3(bounds[0], "/bounds/0")
             self.vec3(bounds[1], "/bounds/1")
-        if "view" in m and (not isinstance(m["view"], dict) or m["view"].get("schema") != "stk.view/1"):
+        view = m.get("view")
+        if view is not None and (not isinstance(view, dict) or view.get("schema") != "stk.view/1"):
             self.fail("view must be an stk.view/1 document", "/view")
 
     # -- helpers --------------------------------------------------------------
@@ -628,17 +802,20 @@ class _Validator:
                 self.fail("must be an object", f"{path}/{i}")
         return value
 
+    def object(self, value, path, what):
+        if not isinstance(value, dict):
+            self.fail(f"{what} must be an object", path)
+        return value
+
     def unique_id(self, item, seen, path):
         value = item.get("id")
-        if not isinstance(value, str) or not _ID.match(value):
+        if not isinstance(value, str) or not _ID.fullmatch(value) or value in RESERVED_IDS:
             self.fail(f"invalid id {value!r}", path + "/id")
         if value in seen:
             self.fail(f"duplicate id {value!r}", path + "/id")
 
     def vec3(self, value, path):
-        if (not isinstance(value, list) or len(value) != 3
-                or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-                           for v in value)):
+        if not isinstance(value, list) or len(value) != 3 or not all(_finite_number(v) for v in value):
             self.fail("must be 3 finite numbers", path)
 
     def interval(self, value, path):
@@ -647,11 +824,11 @@ class _Validator:
 
     def rgb(self, value, path):
         if (not isinstance(value, list) or len(value) not in (3, 4)
-                or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1 for v in value)):
+                or not all(_finite_number(v) and 0 <= v <= 1 for v in value)):
             self.fail("colour must be 3 or 4 numbers in [0, 1]", path)
 
     def expect(self, accessor_id, types, components, count, path):
-        accessor = self.accessors.get(accessor_id)
+        accessor = self.accessors.get(accessor_id) if isinstance(accessor_id, str) else None
         if accessor is None:
             self.fail(f"unknown accessor {accessor_id!r}", path)
         if types and accessor["type"] not in types:
@@ -662,38 +839,55 @@ class _Validator:
             self.fail(f"accessor {accessor_id!r} has {accessor['count']} elements; expected {count}", path)
         return accessor
 
-    def positions(self, layer, path, np):
-        accessor = self.expect(layer["positions"], ("f32",), 3, None, path + "/positions")
+    def positions(self, owner, path, np):
+        accessor = self.expect(owner.get("positions"), ("f32",), 3, None, path + "/positions")
         if not np.isfinite(self.payload.array(accessor["id"])).all():
             self.fail("positions must be finite", path + "/positions")
         return accessor["count"]
 
     def attributes(self, layer, path, counts):
-        attributes = layer.get("attributes", {})
-        if not isinstance(attributes, dict):
-            self.fail("attributes must be an object", path + "/attributes")
+        attributes = layer.get("attributes")
+        if attributes is None:
+            return {}
+        self.object(attributes, path + "/attributes", "attributes")
         for name, attribute in attributes.items():
             apath = f"{path}/attributes/{name}"
-            association = attribute.get("association", "point")
-            if association not in counts:
+            self.object(attribute, apath, "an attribute")
+            association = attribute.get("association")
+            association = "point" if association is None else association
+            if not isinstance(association, str) or association not in counts:
                 self.fail(f"association {association!r} is not valid here", apath + "/association")
             self.expect(attribute.get("accessor"), None, None, counts[association], apath + "/accessor")
             palette = attribute.get("palette")
-            if palette is not None and not self.colormaps.get(palette, {}).get("categorical"):
+            if palette is not None and not (isinstance(palette, str)
+                                            and self.colormaps.get(palette, {}).get("categorical")):
                 self.fail(f"palette {palette!r} is not a categorical colormap", apath + "/palette")
         return attributes
+
+    def appearance(self, layer, path):
+        appearance = layer.get("appearance")
+        return {} if appearance is None else self.object(appearance, path + "/appearance", "appearance")
 
     def color(self, spec, attributes, path):
         if spec is None:
             return
+        self.object(spec, path, "a colour spec")
         by = spec.get("by")
-        if by not in ("solid", "attribute", "direction"):
+        by = "solid" if by is None else by          # spec §5: the default mode
+        if not isinstance(by, str) or by not in ("solid", "attribute", "direction"):
             self.fail(f"unknown colour mode {by!r}", path + "/by")
-        if by == "attribute" and spec.get("attribute") not in attributes:
-            self.fail(f"unknown attribute {spec.get('attribute')!r}", path + "/attribute")
+        attribute = spec.get("attribute")
+        if (by == "attribute" or (by == "direction" and attribute is not None)) and not (
+                isinstance(attribute, str) and attribute in attributes):
+            self.fail(f"unknown attribute {attribute!r}", path + "/attribute")
         colormap = spec.get("colormap")
-        if colormap is not None and colormap != ORIENTATION_HSL and colormap not in self.colormaps:
-            self.fail(f"unknown colormap {colormap!r}", path + "/colormap")
+        if colormap is not None:
+            if by == "direction" and colormap != ORIENTATION_HSL:
+                self.fail(f"direction colouring uses {ORIENTATION_HSL!r}, not {colormap!r}", path + "/colormap")
+            if colormap != ORIENTATION_HSL and not (isinstance(colormap, str) and colormap in self.colormaps):
+                self.fail(f"unknown colormap {colormap!r}", path + "/colormap")
+        if spec.get("range") is not None:
+            self.interval(spec["range"], path + "/range")
 
     def indices(self, accessor_id, n_points, multiple, path, np):
         accessor = self.expect(accessor_id, ("u32", "u16"), 1, None, path)
@@ -709,14 +903,17 @@ class _Validator:
     def layer_triangles(self, layer, path, np):
         n = self.positions(layer, path, np)
         n_tri = self.indices(layer["indices"], n, 3, path + "/indices", np)
-        if "normals" in layer:
+        if layer.get("normals") is not None:
             self.expect(layer["normals"], ("f32",), 3, n, path + "/normals")
         attributes = self.attributes(layer, path, {"point": n, "cell": n_tri})
-        self.color((layer.get("appearance") or {}).get("color"), attributes, path + "/appearance/color")
-        for j, lod in enumerate(layer.get("lods", [])):
+        self.color(self.appearance(layer, path).get("color"), attributes, path + "/appearance/color")
+        lods = layer.get("lods")
+        for j, lod in enumerate(self.list([] if lods is None else lods, path + "/lods")):
             lpath = f"{path}/lods/{j}"
-            count = self.expect(lod.get("positions"), ("f32",), 3, None, lpath + "/positions")["count"]
+            count = self.positions(lod, lpath, np)
             cells = self.indices(lod.get("indices"), count, 3, lpath + "/indices", np)
+            if lod.get("normals") is not None:
+                self.expect(lod["normals"], ("f32",), 3, count, lpath + "/normals")
             self.attributes(lod, lpath, {"point": count, "cell": cells})
 
     def layer_slice_image(self, layer, path, np):
@@ -724,11 +921,12 @@ class _Validator:
         for key in ("origin", "u", "v"):
             self.vec3(plane.get(key) if isinstance(plane, dict) else None, f"{path}/plane/{key}")
         size = layer["size"]
-        if (not isinstance(size, list) or len(size) != 2
-                or not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in size)):
+        if not isinstance(size, list) or len(size) != 2 or not all(_is_int(v) and v >= 1 for v in size):
             self.fail("size must be [w, h] positive integers", path + "/size")
         attributes = self.attributes(layer, path, {"point": size[0] * size[1]})
-        self.color((layer.get("appearance") or {}).get("color"), attributes, path + "/appearance/color")
+        if not attributes:
+            self.fail("slice_image layers need at least one attribute", path + "/attributes")
+        self.color(self.appearance(layer, path).get("color"), attributes, path + "/appearance/color")
 
     def layer_lines(self, layer, path, np):
         n = self.positions(layer, path, np)
@@ -736,90 +934,116 @@ class _Validator:
             segments = self.indices(layer["indices"], n, 2, path + "/indices", np)
         elif layer["mode"] == "polylines":
             count = self.indices(layer["indices"], n, 1, path + "/indices", np)
-            if "offsets" not in layer:
+            if layer.get("offsets") is None:
                 self.fail("polylines need offsets", path)
             offsets = self.payload.array(self.expect(layer["offsets"], ("u32",), 1, None, path + "/offsets")["id"])
             steps = np.diff(offsets.astype(np.int64))
             if len(offsets) < 1 or offsets[0] != 0 or offsets[-1] != count or (steps < 0).any():
                 self.fail("offsets must rise from 0 to the index count", path + "/offsets")
-            segments = int(np.maximum(steps - 1, 0).sum())
+            segments = int(np.maximum(steps - 1, 0).sum())      # cell attributes are per segment
         else:
             self.fail(f"unknown lines mode {layer['mode']!r}", path + "/mode")
         attributes = self.attributes(layer, path, {"point": n, "cell": segments})
-        self.color((layer.get("appearance") or {}).get("color"), attributes, path + "/appearance/color")
+        self.color(self.appearance(layer, path).get("color"), attributes, path + "/appearance/color")
 
     def layer_points(self, layer, path, np):
         n = self.positions(layer, path, np)
-        if "radii" in layer:
+        if layer.get("radii") is not None:
             self.expect(layer["radii"], ("f32",), 1, n, path + "/radii")
         attributes = self.attributes(layer, path, {"point": n})
-        self.color((layer.get("appearance") or {}).get("color"), attributes, path + "/appearance/color")
+        self.color(self.appearance(layer, path).get("color"), attributes, path + "/appearance/color")
 
     def layer_instances(self, layer, path, np):
         n = self.positions(layer, path, np)
         self.expect(layer["directions"], ("f32",), 3, n, path + "/directions")
-        if "scales" in layer:
+        if layer.get("scales") is not None:
             self.expect(layer["scales"], ("f32",), 1, n, path + "/scales")
-        if layer["glyph"].get("shape") not in ("arrow", "cone", "sphere", "line", "cube"):
-            self.fail(f"unknown glyph shape {layer['glyph'].get('shape')!r}", path + "/glyph/shape")
+        glyph = self.object(layer["glyph"], path + "/glyph", "glyph")
+        shape = glyph.get("shape")
+        if not isinstance(shape, str) or shape not in self.GLYPH_SHAPES:
+            self.fail(f"unknown glyph shape {shape!r}", path + "/glyph/shape")
         attributes = self.attributes(layer, path, {"point": n})
-        appearance = layer.get("appearance") or {}
+        appearance = self.appearance(layer, path)
         self.color(appearance.get("color"), attributes, path + "/appearance/color")
         scale = appearance.get("scale")
-        if scale is not None and scale.get("by") == "attribute" and scale.get("attribute") not in attributes:
-            self.fail(f"unknown scale attribute {scale.get('attribute')!r}", path + "/appearance/scale")
+        if scale is not None:
+            self.object(scale, path + "/appearance/scale", "scale")
+            attribute = scale.get("attribute")
+            if scale.get("by") == "attribute" and not (isinstance(attribute, str) and attribute in attributes):
+                self.fail(f"unknown scale attribute {attribute!r}", path + "/appearance/scale")
+            factor = scale.get("factor")
+            if factor is not None and not (_finite_number(factor) and factor > 0):
+                self.fail("scale factor must be a finite number > 0", path + "/appearance/scale/factor")
 
     def layer_volume(self, layer, path, np):
         grid = layer["grid"]
         dims = grid.get("dimensions") if isinstance(grid, dict) else None
-        if (not isinstance(dims, list) or len(dims) != 3
-                or not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in dims)):
+        if not isinstance(dims, list) or len(dims) != 3 or not all(_is_int(v) and v >= 1 for v in dims):
             self.fail("dimensions must be 3 positive integers", path + "/grid/dimensions")
         self.vec3(grid.get("origin"), path + "/grid/origin")
         self.vec3(grid.get("spacing"), path + "/grid/spacing")
         if min(grid["spacing"]) <= 0:
             self.fail("spacing must be positive", path + "/grid/spacing")
+        direction = grid.get("direction")
+        if direction is not None and (not isinstance(direction, list) or len(direction) != 9
+                                      or not all(_finite_number(v) for v in direction)):
+            self.fail("direction must be 9 finite numbers (row-major 3x3)", path + "/grid/direction")
         self.expect(layer["data"], ("u8", "u16", "f32"), 1, math.prod(dims), path + "/data")
-        tf = layer["transfer_function"]
+        self.interval(layer["value_range"], path + "/value_range")
+        for key in ("value_scale", "value_offset"):
+            if layer.get(key) is not None and not _finite_number(layer[key]):
+                self.fail(f"{key} must be a finite number", f"{path}/{key}")
         tpath = path + "/transfer_function"
-        if not isinstance(tf, dict):
-            self.fail("transfer_function must be an object", tpath)
-        if tf.get("colormap") not in self.colormaps:  # continuous LUT, or a categorical palette (values +- 0.499)
-            self.fail(f"unknown colormap {tf.get('colormap')!r}", tpath + "/colormap")
+        tf = self.object(layer["transfer_function"], tpath, "transfer_function")
+        colormap = tf.get("colormap")  # continuous LUT, or a categorical palette (values +- 0.499)
+        if not isinstance(colormap, str) or colormap not in self.colormaps:
+            self.fail(f"unknown colormap {colormap!r}", tpath + "/colormap")
         self.interval(tf.get("range"), tpath + "/range")
         opacity = tf.get("opacity")
-        if not isinstance(opacity, list) or not opacity:
-            self.fail("opacity must be a non-empty list of [value, alpha]", tpath + "/opacity")
+        if not isinstance(opacity, list) or len(opacity) < 2:
+            self.fail("opacity must be a list of at least two [value, alpha] points", tpath + "/opacity")
         for j, point in enumerate(opacity):
             if (not isinstance(point, list) or len(point) != 2 or not all(_finite_number(v) for v in point)
                     or not 0 <= point[1] <= 1):
                 self.fail("opacity points are [finite value, alpha in [0, 1]]", f"{tpath}/opacity/{j}")
-        for j, lod in enumerate(self.list(layer.get("lods", []), path + "/lods")):
-            self.expect(lod.get("data"), ("u8", "u16", "f32"), 1, math.prod(lod.get("dimensions") or [0]),
-                        f"{path}/lods/{j}/data")
+        lods = layer.get("lods")
+        for j, lod in enumerate(self.list([] if lods is None else lods, path + "/lods")):
+            lpath = f"{path}/lods/{j}"
+            lod_dims = lod.get("dimensions")
+            if (not isinstance(lod_dims, list) or len(lod_dims) != 3
+                    or not all(_is_int(v) and v >= 1 for v in lod_dims)):
+                self.fail("dimensions must be 3 positive integers", lpath + "/dimensions")
+            self.expect(lod.get("data"), ("u8", "u16", "f32"), 1, math.prod(lod_dims), lpath + "/data")
 
     def layer_overlay(self, layer, path, np):
         kind = layer["kind"]
-        if kind not in ("scalar_bar", "legend", "orientation_legend", "text", "axes_triad"):
-            self.fail(f"unknown overlay kind {kind!r}", path + "/kind")
+        if not isinstance(kind, str):
+            self.fail("kind must be a string", path + "/kind")
+        if kind not in self.OVERLAY_KINDS:
+            self.warn(layer, path, f"unknown overlay kind {kind!r} (skipped)")
+            return              # clients skip overlays of unknown kind (spec §1)
         colormap = layer.get("colormap")
-        if kind in ("scalar_bar", "legend") and colormap not in self.colormaps:
+        if kind in ("scalar_bar", "legend") and not (isinstance(colormap, str) and colormap in self.colormaps):
             self.fail(f"unknown colormap {colormap!r}", path + "/colormap")
         if kind == "scalar_bar":
             if self.colormaps[colormap].get("categorical"):
                 self.fail("a scalar bar needs a continuous colormap", path + "/colormap")
             self.interval(layer.get("range"), path + "/range")
-            count = layer.get("label_count", 5)
-            if isinstance(count, bool) or not isinstance(count, int) or not 2 <= count <= 20:
+            count = layer.get("label_count")
+            if count is not None and (not _is_int(count) or not 2 <= count <= 20):
                 self.fail("label_count must be an integer from 2 to 20", path + "/label_count")
-            label_format = layer.get("format", ".3g")
-            if not isinstance(label_format, str) or not LABEL_FORMAT.match(label_format):
+            label_format = layer.get("format")
+            if label_format is not None and (not isinstance(label_format, str)
+                                             or not LABEL_FORMAT.fullmatch(label_format)):
                 self.fail(f"unsupported label format {label_format!r} (e.g. '.3g', '.2f', '.1e', '+.0%', 'd')",
                           path + "/format")
         if kind == "legend" and not self.colormaps[colormap].get("categorical"):
             self.fail("a legend needs a categorical colormap", path + "/colormap")
         if kind == "text" and not isinstance(layer.get("text"), str):
             self.fail("text overlays need 'text'", path + "/text")
+        problems = overlay_problems(layer)
+        if problems:
+            self.warn(layer, path, f"overlay skipped: {'; '.join(problems)}")
 
 
 # ---------------------------------------------------------------------------
@@ -1344,7 +1568,7 @@ class _Encoder:
             entry["orientation"] = a.get("orientation", "vertical")
             entry["label_count"] = int(a.get("label_count", 5))
             entry["format"] = a.get("format", ".3g")
-            if not isinstance(entry["format"], str) or not LABEL_FORMAT.match(entry["format"]):
+            if not isinstance(entry["format"], str) or not LABEL_FORMAT.fullmatch(entry["format"]):
                 raise PayloadError(f"Unsupported scalar-bar label format {entry['format']!r} (e.g. '.3g', '.2f', "
                                    f"'.1e', '+.0%', 'd')", path=f"/layers/{layer.id}/format", code="invalid_param")
         elif kind == "legend":
@@ -1402,5 +1626,9 @@ def glyph_scale(layer):
             finite = reference[np.isfinite(reference)]
             peak = float(finite.max()) if len(finite) else 0.0
         factor = length / peak if reference is not None and peak > 0 else length
-    result["factor"] = float(factor)
+    factor = float(factor)
+    if not (math.isfinite(factor) and factor > 0):
+        raise PayloadError(f"Layer {layer.id!r}: the glyph scale factor must be a finite number > 0, got {factor!r}",
+                           code="invalid_param")
+    result["factor"] = factor
     return result

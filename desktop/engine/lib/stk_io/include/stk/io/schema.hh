@@ -5,7 +5,7 @@
  * suan.graph.schema.check_value / normalize_value that produces the same (JSON pointer, message)
  * list for the same value and schema: type (incl. lists), enum, const, minimum/maximum,
  * exclusiveMinimum/exclusiveMaximum, minLength/maxLength (code points), pattern (Python re.search,
- * see pyregex.hh), items/prefixItems, minItems/maxItems/uniqueItems, properties/patternProperties/
+ * see pyregex.hh, with `$` anchored at the very end as in JSON Schema: schema_pattern()), items/prefixItems, minItems/maxItems/uniqueItems, properties/patternProperties/
  * required/additionalProperties/propertyNames/minProperties/maxProperties, anyOf/oneOf/allOf/not,
  * if/then/else. Annotations (title, description, default, x-stk-*) are ignored. */
 
@@ -36,6 +36,12 @@ std::vector<SchemaIssue> check_value(const Json &value, const Json &schema, cons
 /** normalize_value: integral numbers as integers where the schema says integer, floats where it says
  * number (-0.0 -> 0.0); anyOf/oneOf use the first matching branch. The value must be valid. */
 Json normalize_value(const Json &value, const Json &schema);
+
+/** A JSON-Schema `pattern` for the Python-`re` engine: every `$` outside a character class becomes `\Z`, so
+ * `$` never matches before a trailing newline (suan.graph.schema.schema_pattern). */
+std::string schema_pattern(std::string_view pattern);
+/** JSON-Schema `pattern` search (suan.graph.schema.pattern_search); throws RegexError for bad patterns. */
+bool schema_pattern_search(std::string_view pattern, std::string_view text);
 
 /** RFC 6901 escaping of one reference token ("~" -> "~0", "/" -> "~1"). */
 std::string pointer_token(std::string_view key);

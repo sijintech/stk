@@ -32,7 +32,7 @@ RGBA8 rgba8_json(const io::Json *color, RGBA8 fallback = {128, 128, 128, 255});
 RGB hsl_to_rgb(double h, double s, double l);
 /** stk:orientation-hsl of vector p for maximum magnitude M (domain-classifiers.md §6.2). */
 RGB orientation_hsl(double px, double py, double pz, double max_magnitude, double l0 = 0.0, double l1 = 1.0);
-/** stk:categorical colour of a label value (domain-classifiers.md §6.5). */
+/** stk:categorical colour of a label value (domain-classifiers.md §6.5); non-integers are grey. */
 RGB categorical_color(double value);
 
 /** LUT entry of value v over [lo, hi] (spec §5): 0..255, -1 below, 256 above, -2 for NaN. */
@@ -83,7 +83,8 @@ std::array<double, 2> finite_range(std::span<const double> values);
 
 /**
  * Colour transfer points [physical value, r, g, b] of a volume (spec §6.6): a continuous LUT spread
- * over `range` at bin centres ((i + 0.5) / 256), or each categorical entry held over value +- 0.499.
+ * over `range` at bin centres ((i + 0.5) / 256) (one point, LUT entry 128, when hi <= lo), or each
+ * categorical entry (its RGBA8 colour) held over value +- 0.499.
  */
 std::vector<std::array<double, 4>> volume_color_points(const Colormap *colormap, std::array<double, 2> range,
                                                        std::vector<std::string> *warnings = nullptr);

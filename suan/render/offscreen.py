@@ -49,6 +49,9 @@ import tempfile
 import threading
 import time
 
+from .colormaps import volume_color_points
+from .payload import format_label
+
 __all__ = [
     "ENV_PYTHON", "HINT", "OffscreenError", "OffscreenUnavailable",
     "available", "main", "probe", "render_payload", "render_scene",
@@ -321,7 +324,7 @@ class _Renderer:
         return float(value) * self.mag
 
     def offset_of(self, layer):
-        if "origin" in layer:
+        if layer.get("origin") is not None:
             return self.np.asarray(layer["origin"], dtype=self.np.float64) - self.origin
         return self.np.zeros(3)
 
@@ -348,31 +351,39 @@ class _Renderer:
 
     def colors(self, layer):
         """``(rgba uint8 (n, 4), association)`` or ``(None, solid rgb)``."""
-        from .colormaps import map_categories, map_scalars, orientation_hsl
+        from .colormaps import lut_rgba8, map_categories, map_scalars, orientation_hsl, stk_categorical_color
         np = self.np
+        # Optional members that are null take their defaults (render payload spec §10), as in web layerColors.
         spec = (layer.get("appearance") or {}).get("color") or {"by": "solid", "solid": [0.8, 0.8, 0.8]}
-        by = spec.get("by", "solid")
+        by = spec.get("by") or "solid"
         if by == "solid":
             return None, [float(c) for c in (spec.get("solid") or (0.8, 0.8, 0.8))[:3]]
         attributes = layer.get("attributes") or {}
         if by == "direction":
             name = spec.get("attribute")
             if name is not None:
-                vectors, association = self.payload.array(attributes[name]["accessor"]), attributes[name].get(
-                    "association", "point")
+                vectors = self.payload.array(attributes[name]["accessor"])
+                association = attributes[name].get("association") or "point"
             else:
                 vectors, association = self.payload.array(layer["directions"]), "point"
             rgb = orientation_hsl(vectors, spec.get("max_magnitude"), spec.get("lightness_range") or (0.0, 1.0))
             rgba = np.concatenate([rgb, np.ones((len(rgb), 1))], axis=1)
             return np.floor(np.clip(rgba, 0, 1) * 255 + 0.5).astype(np.uint8), association
         attribute = attributes[spec["attribute"]]
-        association = attribute.get("association", "point")
+        association = attribute.get("association") or "point"
         values = self.payload.array(attribute["accessor"]).astype(np.float64)
-        colormap = self.payload.colormap(spec["colormap"])
-        if colormap.get("categorical"):
-            rgba = map_categories(values if values.ndim == 1 else values[:, 0], colormap["entries"],
-                                  unknown_color=colormap.get("unknown_color"))
+        colormap_id = spec.get("colormap") or attribute.get("palette")     # the attribute's palette by default
+        known = {c["id"] for c in self.m.get("colormaps") or ()}
+        colormap = self.payload.colormap(colormap_id) if colormap_id in known else None
+        if attribute.get("categorical") is True or (colormap or {}).get("categorical"):
+            labels = values if values.ndim == 1 else values[:, 0]
+            if (colormap or {}).get("categorical"):
+                rgba = map_categories(labels, colormap["entries"], unknown_color=colormap.get("unknown_color"))
+            else:           # no palette: the generic stk:categorical colours
+                rgba = np.array([list(stk_categorical_color(v)) + [1.0] for v in labels]).reshape(-1, 4)
         else:
+            if colormap is None:
+                colormap = {"lut": None}        # no continuous colormap: a grey ramp (as the web viewer)
             if values.ndim > 1:
                 component = spec.get("component")
                 values = values[:, component] if isinstance(component, int) else np.linalg.norm(values, axis=1)
@@ -380,7 +391,8 @@ class _Renderer:
             if value_range is None:
                 finite = values[np.isfinite(values)]
                 value_range = [finite.min(), finite.max()] if len(finite) else [0.0, 1.0]
-            rgba = map_scalars(values, self.payload.array(colormap["lut"]).reshape(256, 4), value_range,
+            lut = lut_rgba8("gray") if colormap["lut"] is None else self.payload.array(colormap["lut"]).reshape(256, 4)
+            rgba = map_scalars(values, lut, value_range,
                                nan_color=colormap.get("nan_color"), below_color=colormap.get("below_color"),
                                above_color=colormap.get("above_color"))
         return np.floor(np.clip(rgba, 0, 1) * 255 + 0.5).astype(np.uint8), association
@@ -402,8 +414,9 @@ class _Renderer:
 
     def finish_actor(self, actor, appearance, lighting_default=True):
         prop = actor.GetProperty()
-        prop.SetOpacity(float(appearance.get("opacity", 1.0)))
-        if not appearance.get("lighting", lighting_default) or self.lighting == "none":
+        opacity, lighting = appearance.get("opacity"), appearance.get("lighting")
+        prop.SetOpacity(float(1.0 if opacity is None else opacity))
+        if not (lighting_default if lighting is None else lighting) or self.lighting == "none":
             prop.SetAmbient(1.0)
             prop.SetDiffuse(0.0)
             prop.SetSpecular(0.0)
@@ -421,7 +434,7 @@ class _Renderer:
             normals = self.nps.numpy_to_vtk(np.ascontiguousarray(self.payload.array(layer["normals"]),
                                                                  dtype=np.float32), deep=True)
             poly.GetPointData().SetNormals(normals)
-        elif appearance.get("shading", "smooth") == "smooth":
+        elif (appearance.get("shading") or "smooth") == "smooth":
             filt = vtk.vtkPolyDataNormals()
             filt.SetInputData(poly)
             filt.SplittingOff()
@@ -438,13 +451,13 @@ class _Renderer:
         edges = appearance.get("edges") or {}
         if edges.get("visible"):
             actor.GetProperty().EdgeVisibilityOn()
-            actor.GetProperty().SetEdgeColor(*[float(c) for c in edges.get("color", (0, 0, 0))[:3]])
-            actor.GetProperty().SetLineWidth(self.px(edges.get("width_px", 1.0)))
+            actor.GetProperty().SetEdgeColor(*[float(c) for c in (edges.get("color") or (0, 0, 0))[:3]])
+            actor.GetProperty().SetLineWidth(self.px(edges.get("width_px") or 1.0))
         return [self.finish_actor(actor, appearance)]
 
     def layer_slice_image(self, layer):
         vtk, np = self.vtk, self.np
-        w, h = layer["size"]
+        w, h = (int(v) for v in layer["size"])
         shift = self.offset_of(layer)
         o, u, v = (np.asarray(layer["plane"][k], dtype=np.float64) for k in ("origin", "u", "v"))
         o = o + shift
@@ -470,7 +483,7 @@ class _Renderer:
         texture = vtk.vtkTexture()
         texture.SetInputData(image)
         color = (layer.get("appearance") or {}).get("color") or {}
-        texture.SetInterpolate(color.get("interpolate", "linear") == "linear")
+        texture.SetInterpolate((color.get("interpolate") or "linear") == "linear")
         # One copy of the samples: no wrap-around at the edges (vtkTexture repeats by default, so linear
         # interpolation blended the first column into the last).
         texture.RepeatOff()
@@ -501,7 +514,7 @@ class _Renderer:
         actor.SetMapper(mapper)
         self.apply_colors(poly, mapper, actor, layer)
         appearance = layer.get("appearance") or {}
-        actor.GetProperty().SetLineWidth(self.px(appearance.get("width_px", 1.0)))
+        actor.GetProperty().SetLineWidth(self.px(appearance.get("width_px") or 1.0))
         return [self.finish_actor(actor, appearance, lighting_default=False)]
 
     def layer_points(self, layer):
@@ -531,14 +544,14 @@ class _Renderer:
         actor = vtk.vtkActor()
         actor.SetMapper(mapper)
         self.apply_colors(poly, mapper, actor, layer)
-        actor.GetProperty().SetPointSize(self.px(appearance.get("size_px", 3.0)))
+        actor.GetProperty().SetPointSize(self.px(appearance.get("size_px") or 3.0))
         if appearance.get("render_as") == "spheres":
             actor.GetProperty().SetRenderPointsAsSpheres(True)
         return [self.finish_actor(actor, appearance)]
 
     def glyph_source(self, glyph):
         vtk = self.vtk
-        shape, res = glyph.get("shape", "arrow"), int(glyph.get("resolution", 8))
+        shape, res = glyph.get("shape") or "arrow", int(glyph.get("resolution") or 8)
         if shape == "arrow":
             source = vtk.vtkArrowSource()
             source.SetTipResolution(res)
@@ -578,7 +591,7 @@ class _Renderer:
         directions = np.asarray(self.payload.array(layer["directions"]), dtype=np.float64)
         appearance = layer.get("appearance") or {}
         scale = appearance.get("scale") or {"by": "uniform", "factor": 1.0}
-        factor = float(scale.get("factor", 1.0))
+        factor = float(scale.get("factor") or 1.0)       # validated: a finite number > 0, default 1
         if "scales" in layer:
             scales = np.asarray(self.payload.array(layer["scales"]), dtype=np.float64)
         elif scale.get("by") == "magnitude":
@@ -619,9 +632,10 @@ class _Renderer:
     def layer_volume(self, layer):
         vtk, np = self.vtk, self.np
         grid = layer["grid"]
-        nx, ny, nz = grid["dimensions"]
+        nx, ny, nz = (int(n) for n in grid["dimensions"])
         stored = np.asarray(self.payload.array(layer["data"]), dtype=np.float64)
-        values = (stored * float(layer.get("value_scale", 1.0)) + float(layer.get("value_offset", 0.0))).astype(
+        scale, offset = layer.get("value_scale"), layer.get("value_offset")
+        values = (stored * float(1.0 if scale is None else scale) + float(0.0 if offset is None else offset)).astype(
             np.float32)
         image = vtk.vtkImageData()
         image.SetDimensions(nx, ny, nz)
@@ -630,16 +644,9 @@ class _Renderer:
         tf = layer["transfer_function"]
         colormap = self.payload.colormap(tf["colormap"])
         color = vtk.vtkColorTransferFunction()
-        lo, hi = (float(v) for v in tf["range"])
-        if colormap.get("categorical"):
-            for entry in colormap["entries"]:
-                rgb = [float(c) for c in entry["color"][:3]]
-                color.AddRGBPoint(entry["value"] - 0.499, *rgb)
-                color.AddRGBPoint(entry["value"] + 0.499, *rgb)
-        else:
-            lut = np.asarray(self.payload.array(colormap["lut"])).reshape(256, 4) / 255.0
-            for k in range(256):
-                color.AddRGBPoint(lo + (k + 0.5) / 256 * (hi - lo if hi > lo else 1.0), *lut[k, :3])
+        lut = None if colormap.get("categorical") else np.asarray(self.payload.array(colormap["lut"])).reshape(256, 4)
+        for value, r, g, b in volume_color_points(colormap, lut, tf["range"]):
+            color.AddRGBPoint(value, r, g, b)
         opacity = vtk.vtkPiecewiseFunction()
         for value, alpha in tf["opacity"]:
             opacity.AddPoint(float(value), float(alpha))
@@ -738,12 +745,12 @@ class _Renderer:
         colormap = self.payload.colormap(layer["colormap"])
         lut = np.asarray(self.payload.array(colormap["lut"])).reshape(256, 4)
         lo, hi = (float(v) for v in layer["range"])
-        count = int(layer.get("label_count", 5))
-        fmt = layer.get("format", ".3g")
-        labels = [_label(lo + (hi - lo) * k / (count - 1), fmt) for k in range(count)]
+        count = int(layer.get("label_count") or 5)
+        fmt = layer.get("format") or ".3g"
+        labels = [format_label(lo + (hi - lo) * k / (count - 1), fmt) for k in range(count)]
         font = 12.0
         window = (self.W / self.mag, self.H / self.mag)
-        vertical = layer.get("orientation", "vertical") == "vertical"
+        vertical = (layer.get("orientation") or "vertical") == "vertical"
         thick, length = sorted(float(v) for v in layer.get("size_px") or (28, 320))
         length = min(length, 0.7 * (window[1] if vertical else window[0]))
         bar_w, bar_h = (thick, length) if vertical else (length, thick)
@@ -759,7 +766,7 @@ class _Renderer:
             box = (max(bar_w + label_w, title_w), bar_h + title_h + font / 2)
         else:
             box = (max(bar_w + label_w, title_w), bar_h + font * 1.6 + title_h)
-        anchor = layer.get("anchor", "right")
+        anchor = layer.get("anchor") or "right"
         x, y = _place(anchor, layer.get("offset_px") or (24, 24), box, window)
         fx = ANCHOR_FRACTIONS.get(anchor, (1, 0.5))[0]
         bar_x = x + box[0] - bar_w - (label_w if vertical else 0) if fx == 1 else x
@@ -788,9 +795,9 @@ class _Renderer:
         colormap = self.payload.colormap(layer["colormap"])
         entries = {e["value"]: e for e in colormap["entries"]}
         values = layer.get("values") or sorted(entries)
-        rows = [entries.get(v, {"value": v, "name": str(v), "color": colormap.get("unknown_color", (0.5, 0.5, 0.5))})
+        rows = [entries.get(v, {"value": v, "name": str(v), "color": colormap.get("unknown_color") or (0.5, 0.5, 0.5)})
                 for v in values]
-        font, columns = 12.0, max(1, int(layer.get("columns", 1)))
+        font, columns = 12.0, max(1, int(layer.get("columns") or 1))
         per_column = -(-len(rows) // columns) if rows else 0
         row_h = font * 1.5
         col_w = font * 1.4 + max([len(str(r["name"])) for r in rows] or [4]) * font * 0.62 + font
@@ -798,7 +805,7 @@ class _Renderer:
         title_h = font * 1.7 if title else 0.0
         title_w = len(title) * font * 0.68 if title else 0.0
         box = (max(columns * col_w, title_w), per_column * row_h + title_h)
-        anchor = layer.get("anchor", "right")
+        anchor = layer.get("anchor") or "right"
         x, y = _place(anchor, layer.get("offset_px") or (16, 16), box, (self.W / self.mag, self.H / self.mag))
         fx = ANCHOR_FRACTIONS.get(anchor, (1, 0.5))[0]
         title_x = x + box[0] if fx == 1 else x
@@ -824,8 +831,8 @@ class _Renderer:
         return actors
 
     def overlay_text(self, layer):
-        font = float(layer.get("font_size_px", 14))
-        anchor = layer.get("anchor", "top_left")
+        font = float(layer.get("font_size_px") or 14)
+        anchor = layer.get("anchor") or "top_left"
         fx, fy = ANCHOR_FRACTIONS.get(anchor, (0, 1))
         ox, oy = layer.get("offset_px") or (12, 12)
         x = ox if fx == 0 else (self.W / self.mag - ox if fx == 1 else self.W / self.mag / 2 + ox)
@@ -839,7 +846,7 @@ class _Renderer:
         size = layer.get("size_px") or (default_size, default_size)
         limit = 0.35 * min(self.W, self.H) / self.mag
         w, h = min(float(size[0]), limit), min(float(size[1]), limit)
-        x, y = _place(layer.get("anchor", default_anchor), layer.get("offset_px") or (12, 12), (w, h),
+        x, y = _place(layer.get("anchor") or default_anchor, layer.get("offset_px") or (12, 12), (w, h),
                       (self.W / self.mag, self.H / self.mag))
         window = (self.W / self.mag, self.H / self.mag)
         renderer = self.vtk.vtkRenderer()
@@ -914,33 +921,18 @@ class _Renderer:
     # -- scene ------------------------------------------------------------------
 
     def camera(self, bounds):
-        from .layers import default_view_up, fit_camera
-        np = self.np
-        spec = dict(self.view.get("camera") or {})
-        preset = spec.get("preset") or self.view.get("preset") or "iso"
-        if spec.get("position") is not None and spec.get("focal_point") is not None:
-            position = np.asarray(spec["position"], dtype=np.float64) - self.origin
-            focal = np.asarray(spec["focal_point"], dtype=np.float64) - self.origin
-            up = spec.get("view_up") or default_view_up(position.tolist(), focal.tolist())
-            fitted = None
-        else:
-            fitted = fit_camera(bounds, preset, view_angle_deg=float(spec.get("view_angle_deg", 30.0)),
-                                zoom=float(spec.get("zoom", 1.0)))
-            position, focal, up = (np.asarray(fitted[k]) for k in ("position", "focal_point", "view_up"))
+        # The interactive viewer's rules (render payload spec §2.1, web/src/camera.ts): numeric cameras win
+        # over presets, an explicit view_up is honoured, angles >= 180 degrees fall back to 30.
+        from .layers import camera_pose
+        pose = camera_pose(self.view, [float(v) for v in self.origin], bounds)
         camera = self.renderer.GetActiveCamera()
-        camera.SetFocalPoint(*focal)
-        camera.SetPosition(*position)
-        camera.SetViewUp(*up)
-        camera.SetViewAngle(float(spec.get("view_angle_deg", 30.0)))
-        if spec.get("projection") == "parallel":
+        camera.SetFocalPoint(*pose["focal_point"])
+        camera.SetPosition(*pose["position"])
+        camera.SetViewUp(*pose["view_up"])
+        camera.SetViewAngle(pose["view_angle_deg"])
+        if pose["parallel"]:
             camera.ParallelProjectionOn()
-            scale = spec.get("parallel_scale") or (fitted or {}).get("parallel_scale")
-            if scale is None:
-                radius = 0.5 * float(np.linalg.norm(np.subtract(*bounds[::-1]))) if bounds else 1.0
-                scale = radius / float(spec.get("zoom", 1.0))
-            camera.SetParallelScale(float(scale))
-        elif fitted is None and spec.get("zoom") not in (None, 1, 1.0):
-            camera.Zoom(float(spec["zoom"]))
+            camera.SetParallelScale(pose["parallel_scale"])
         camera.OrthogonalizeViewUp()
 
     def render(self, out_path):
@@ -967,6 +959,8 @@ class _Renderer:
         translucent = False
         for layer in self.layers:
             kind = layer.get("type")
+            if self.payload.skipped(layer):
+                continue            # unknown types/kinds and malformed overlays (validation warnings)
             if kind == "overlay":
                 method = getattr(self, "overlay_" + str(layer.get("kind")), None)
                 if method is not None:
@@ -1018,8 +1012,8 @@ class _Renderer:
 
 
 def _label(value, fmt):
-    """A scalar-bar label: Python's format(), with ``d`` (integers, as in d3) applied to the rounded value."""
-    return format(int(round(value)), fmt) if fmt.endswith("d") else format(value, fmt)
+    """A scalar-bar label (spec §6.7); see :func:`suan.render.payload.format_label`."""
+    return format_label(value, fmt)
 
 
 def _font_files():

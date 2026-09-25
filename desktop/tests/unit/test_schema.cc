@@ -62,6 +62,21 @@ TEST(SchemaParity, NormalizeValueMatchesPython)
   }
 }
 
+TEST(Schema, DollarMatchesOnlyAtTheVeryEnd)
+{
+  /* suan.graph.schema.schema_pattern: JSON-Schema (ECMA-262) `$`, not Python's before-a-final-newline `$`. */
+  EXPECT_EQ(io::schema_pattern(R"(^[a-z]+$)"), R"(^[a-z]+\Z)");
+  EXPECT_EQ(io::schema_pattern(R"(^[$]\$x$)"), R"(^[$]\$x\Z)");
+  EXPECT_EQ(io::schema_pattern(R"([]$]|[^]$]$)"), R"([]$]|[^]$]\Z)");
+  EXPECT_TRUE(io::schema_pattern_search("^[a-z]+$", "abc"));
+  EXPECT_FALSE(io::schema_pattern_search("^[a-z]+$", "abc\n"));
+  EXPECT_TRUE(io::schema_pattern_search("^[^/.]{1,128}$", "a\n")); /* the class admits "\n" */
+  const Json schema = io::parse_json(R"({"type": "object", "patternProperties": {"^[a-z]+$": {"type": "integer"}},
+                                         "additionalProperties": false})");
+  EXPECT_TRUE(io::check_value(io::parse_json(R"({"ab": 1})"), schema).empty());
+  EXPECT_EQ(io::check_value(io::parse_json(R"({"ab\n": 1})"), schema).size(), 1u);
+}
+
 TEST(Schema, CloseMatchesLikeDifflib)
 {
   /* difflib.get_close_matches */

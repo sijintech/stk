@@ -7,14 +7,18 @@ the offscreen label format and VTK glyph sources). Deterministic; small files on
 Writes next to this file:
   payload/scenes/<name>.stkp + <name>.json   encoded test scenes and per-accessor checksums
   payload/cases.json                          spec §10 cases, stkp corruptions and a seeded mutation
-                                              corpus, each with the Python verdict (ok / error path)
+                                              corpus (in that order), then the cases of the reconciled
+                                              rules (manifest patches, builder payloads, whole .stkp
+                                              files), each with the Python verdict (ok + warnings /
+                                              error path)
   schema_cases.json                           check_value(value, schema) -> [(path, message)]
   regex_cases.json                            re.search(pattern, text) and invalid patterns
   graph_cases.json                            graph_hash, canonical_json, parameter_schema,
                                               find_param_refs, node-param issues, normalize_value
-  format_cases.json                           offscreen scalar-bar labels (Python format, 'd' rounding)
-  colormap_cases.json                         lut_index, hsl/orientation colours, categorical opacity
-  camera_cases.json                           fit_camera, default_view_up
+  format_cases.json                           scalar-bar labels (payload.format_label, spec §6.7)
+  colormap_cases.json                         lut_index, hsl/orientation colours, categorical opacity,
+                                              volume colour transfer points
+  camera_cases.json                           fit_camera, default_view_up, camera_pose (spec §2.1)
   glyph_vtk.json                              VTK glyph source points/polygons (offscreen parameters)
   png/*.png + png/cases.json                  PNGs of every colour type with expected RGBA8 pixels
   fuzz_corpus/                                seeds of the payload decoder fuzzer
@@ -62,13 +66,23 @@ def b64(data):
 
 
 def verdict(fn):
+    """The Python verdict: ``{"ok": True, "warnings": [JSON pointers of skipped layers]}`` or the error."""
     try:
-        fn()
+        payload = fn()
     except P.PayloadError as error:
         return {"ok": False, "path": error.path, "message": str(error)}
     except Exception as error:  # noqa: BLE001 - a crash of the reference is recorded, never hidden
         return {"ok": False, "path": "", "message": f"CRASH {type(error).__name__}: {error}", "crash": True}
-    return {"ok": True}
+    return {"ok": True, "warnings": [w["path"] for w in payload.warnings]}
+
+
+def stkp_from_text(text, chunks):
+    """``.stkp`` bytes of a raw manifest text (bytes) and its buffer chunks (spec §9)."""
+    body = bytearray()
+    for kind, data in [(b"JSON", text)] + [(b"BIN ", c) for c in chunks]:
+        body += struct.pack("<Q4sI", len(data), kind, 0) + data
+        body += (b" " if kind == b"JSON" else b"\0") * (-len(data) % 8)
+    return b"STKP" + struct.pack("<IQ", 2, 16 + len(body)) + bytes(body)
 
 
 def apply_patch(manifest, patch):
@@ -159,10 +173,12 @@ def payload_cases():
     blobs = example.blobs
     cases = []
 
-    def example_case(name, patches):
+    extra_cases = []    # cases of the reconciled rules, appended after the original corpus
+
+    def example_case(name, patches, into=cases):
         m = patched(manifest, patches)
-        cases.append({"name": name, "kind": "example", "patches": patches,
-                      "python": verdict(lambda: P.decode(m, blobs))})
+        into.append({"name": name, "kind": "example", "patches": patches,
+                     "python": verdict(lambda: P.decode(m, blobs))})
 
     # The cases of tests/test_render_payload.py (spec §10), as JSON patches of the example manifest.
     layers_ = manifest["layers"]
@@ -259,6 +275,148 @@ def payload_cases():
     for name, patches in spec_cases:
         example_case(name, patches)
 
+    # The reconciled rules of spec §10 (Python, web and desktop give the same verdict and warnings).
+    pal = next(i for i, c in enumerate(manifest["colormaps"]) if c.get("categorical"))
+    cm = next(i for i, c in enumerate(manifest["colormaps"]) if not c.get("categorical"))
+    sphere = next(i for i, l in enumerate(layers_) if l.get("kind") == "orientation_legend")
+    triad = next(i for i, l in enumerate(layers_) if l.get("kind") == "axes_triad")
+    entries = manifest["colormaps"][pal]["entries"]
+    domain_acc = acc[layers_[tri]["attributes"]["domain"]["accessor"]]
+    reconcile_cases = [
+        # Colours, category entries and palettes.
+        ("categorical colour above 1", [["set", ["colormaps", pal, "entries", 0, "color"], [1.5, 0.0, 0.0]]]),
+        ("categorical colour negative", [["set", ["colormaps", pal, "entries", 0, "color"], [-0.1, 0.0, 0.0]]]),
+        ("categorical colour 5 numbers", [["set", ["colormaps", pal, "entries", 0, "color"], [0, 0, 0, 1, 1]]]),
+        ("categorical colour boolean", [["set", ["colormaps", pal, "entries", 0, "color"], [True, 0, 0]]]),
+        ("category value 1e300", [["set", ["colormaps", pal, "entries", 0, "value"], 1e300]]),
+        ("category value 2**53", [["set", ["colormaps", pal, "entries", 0, "value"], 2 ** 53]]),
+        ("category value boolean", [["set", ["colormaps", pal, "entries", 0, "value"], True]]),
+        ("category value integral float is an integer",
+         [["set", ["colormaps", pal, "entries", 0, "value"], float(entries[0]["value"])]]),
+        ("category values duplicate as integral float",
+         [["set", ["colormaps", pal, "entries", 1, "value"], float(entries[0]["value"])]]),
+        ("category name number", [["set", ["colormaps", pal, "entries", 0, "name"], 5]]),
+        ("category name missing", [["delete", ["colormaps", pal, "entries", 0, "name"]]]),
+        ("category name null", [["set", ["colormaps", pal, "entries", 0, "name"], None]]),
+        ("unknown_color out of range", [["set", ["colormaps", pal, "unknown_color"], [2.0, 0.0, 0.0]]]),
+        ("unknown_color null is the default", [["set", ["colormaps", pal, "unknown_color"], None]]),
+        ("nan_color out of range", [["set", ["colormaps", cm, "nan_color"], [0.0, 0.0, -1.0]]]),
+        ("below_color valid", [["set", ["colormaps", cm, "below_color"], [0.0, 0.0, 0.0, 0.5]]]),
+        ("above_color string", [["set", ["colormaps", cm, "above_color"], "red"]]),
+        ("categorical not a boolean", [["set", ["colormaps", pal, "categorical"], 1]]),
+        ("categorical false on a palette", [["set", ["colormaps", pal, "categorical"], False]]),
+        ("categorical null on a LUT", [["set", ["colormaps", cm, "categorical"], None]]),
+        ("lut size float 256.0", [["set", ["colormaps", cm, "size"], 256.0]]),
+        ("palette null is absent", [["set", ["layers", tri, "attributes", "domain", "palette"], None]]),
+        # Colour specs.
+        ("colour mode missing defaults to solid", [["delete", ["layers", tri, "appearance", "color", "by"]]]),
+        ("colour mode null defaults to solid", [["set", ["layers", tri, "appearance", "color", "by"], None]]),
+        ("colour mode number", [["set", ["layers", box, "appearance", "color", "by"], 3]]),
+        ("direction colouring with a LUT", [["set", ["layers", arrows, "appearance", "color", "colormap"], "cm0"]]),
+        ("direction colouring with an unknown attribute",
+         [["set", ["layers", arrows, "appearance", "color", "attribute"], "nope"]]),
+        ("direction colouring with an attribute",
+         [["set", ["layers", arrows, "appearance", "color", "attribute"], "magnitude"]]),
+        ("solid colour with an unknown colormap", [["set", ["layers", box, "appearance", "color", "colormap"], "x"]]),
+        ("colour range malformed", [["set", ["layers", tri, "appearance", "color", "range"], [0]]]),
+        ("colour range null is absent", [["set", ["layers", tri, "appearance", "color", "range"], None]]),
+        ("appearance string", [["set", ["layers", box, "appearance"], "red"]]),
+        ("appearance null is absent", [["set", ["layers", box, "appearance"], None]]),
+        ("colour spec null is absent", [["set", ["layers", tri, "appearance", "color"], None]]),
+        # Attributes and associations.
+        ("association null is point", [["set", ["layers", tri, "attributes", "height", "association"], None]]),
+        ("association cell on instances", [["set", ["layers", arrows, "attributes", "magnitude", "association"],
+                                            "cell"]]),
+        ("attributes null is absent", [["set", ["layers", arrows, "attributes"], None],
+                                       ["set", ["layers", arrows, "appearance", "scale"],
+                                        {"by": "magnitude", "factor": 1.0}]]),
+        ("attributes list", [["set", ["layers", arrows, "attributes"], []]]),
+        # Glyphs and scales.
+        ("glyph scale factor 0", [["set", ["layers", arrows, "appearance", "scale", "factor"], 0]]),
+        ("glyph scale factor negative", [["set", ["layers", arrows, "appearance", "scale", "factor"], -1.5]]),
+        ("glyph scale factor string", [["set", ["layers", arrows, "appearance", "scale", "factor"], "auto"]]),
+        ("glyph scale factor absent", [["delete", ["layers", arrows, "appearance", "scale", "factor"]]]),
+        ("glyph scale null is absent", [["set", ["layers", arrows, "appearance", "scale"], None]]),
+        ("glyph scale list", [["set", ["layers", arrows, "appearance", "scale"], [1]]]),
+        ("glyph shape missing", [["delete", ["layers", arrows, "glyph", "shape"]]]),
+        ("glyph shape number", [["set", ["layers", arrows, "glyph", "shape"], 1]]),
+        # Volumes.
+        ("grid direction with null", [["set", ["layers", density, "grid", "direction"],
+                                       [1, 0, 0, 0, 1, 0, 0, 0, None]]]),
+        ("grid direction 8 numbers", [["set", ["layers", density, "grid", "direction"], [1, 0, 0, 0, 1, 0, 0, 0]]]),
+        ("grid direction null is identity", [["set", ["layers", density, "grid", "direction"], None]]),
+        ("grid direction rotated", [["set", ["layers", density, "grid", "direction"], [0, -1, 0, 1, 0, 0, 0, 0, 1]]]),
+        ("volume opacity one point", [["set", ["layers", density, "transfer_function", "opacity"], [[0.0, 0.5]]]]),
+        ("volume opacity duplicate values", [["set", ["layers", density, "transfer_function", "opacity"],
+                                              [[0.0, 0.0], [0.5, 1.0], [0.5, 0.2], [1.0, 0.8]]]]),
+        ("volume value_range with null", [["set", ["layers", density, "value_range"], [0.0, None]]]),
+        ("volume value_range one value", [["set", ["layers", density, "value_range"], [0.0]]]),
+        ("volume value_scale string", [["set", ["layers", density, "value_scale"], "1"]]),
+        ("volume value_offset null is the default", [["set", ["layers", density, "value_offset"], None]]),
+        ("volume degenerate tf range", [["set", ["layers", density, "transfer_function", "range"], [0.5, 0.5]]]),
+        ("volume reversed tf range", [["set", ["layers", density, "transfer_function", "range"], [1.0, 0.0]]]),
+        ("volume lods valid", [["set", ["layers", density, "lods"], [{"level": 1, "dimensions": [8, 8, 8],
+                                                                       "data": "vol_u8"}]]]),
+        ("volume lod dimensions wrong", [["set", ["layers", density, "lods"], [{"level": 1, "dimensions": [8, 8, 4],
+                                                                                 "data": "vol_u8"}]]]),
+        ("volume lod dimensions missing", [["set", ["layers", density, "lods"], [{"level": 1, "data": "vol_u8"}]]]),
+        ("volume lods null is absent", [["set", ["layers", density, "lods"], None]]),
+        ("volume lods object", [["set", ["layers", density, "lods"], {}]]),
+        # Overlays.
+        ("unknown overlay kind is skipped", [["set", ["layers", legend, "kind"], "histogram"]]),
+        ("overlay kind missing", [["delete", ["layers", text, "kind"]]]),
+        ("overlay kind number", [["set", ["layers", text, "kind"], 5]]),
+        ("overlay title number is skipped", [["set", ["layers", text, "title"], 5]]),
+        ("overlay size_px negative is skipped", [["set", ["layers", triad, "size_px"], [-1, 80]]]),
+        ("overlay offset_px string is skipped", [["set", ["layers", bar, "offset_px"], "24"]]),
+        ("legend values not integers is skipped", [["set", ["layers", legend, "values"], ["a"]]]),
+        ("legend values integral floats", [["set", ["layers", legend, "values"], [1.0, 7.0, 19.0]]]),
+        ("axes labels short is skipped", [["set", ["layers", triad, "labels"], ["x"]]]),
+        ("orientation legend lightness string is skipped", [["set", ["layers", sphere, "lightness_range"], "0-1"]]),
+        ("text colour string is skipped", [["set", ["layers", text, "color"], "red"]]),
+        ("two overlays skipped", [["set", ["layers", text, "title"], 5], ["set", ["layers", triad, "kind"], "gizmo"]]),
+        ("scalar bar format trailing newline", [["set", ["layers", bar, "format"], ".2f\n"]]),
+        ("scalar bar format number", [["set", ["layers", bar, "format"], 3]]),
+        ("scalar bar format null is the default", [["set", ["layers", bar, "format"], None]]),
+        ("scalar bar format empty", [["set", ["layers", bar, "format"], ""]]),
+        ("scalar bar label_count null is the default", [["set", ["layers", bar, "label_count"], None]]),
+        ("scalar bar label_count string", [["set", ["layers", bar, "label_count"], "5"]]),
+        ("scalar bar label_count boolean", [["set", ["layers", bar, "label_count"], True]]),
+        ("scalar bar unit number is skipped", [["set", ["layers", bar, "unit"], 1]]),
+        # Layers.
+        ("layer type missing", [["delete", ["layers", box, "type"]]]),
+        ("layer type number", [["set", ["layers", box, "type"], 3]]),
+        ("layer type null", [["set", ["layers", box, "type"], None]]),
+        ("layer name number", [["set", ["layers", tri, "name"], 5]]),
+        ("layer name null", [["set", ["layers", tri, "name"], None]]),
+        ("layer origin null is absent", [["set", ["layers", tri, "origin"], None]]),
+        ("normals null is absent", [["set", ["layers", tri, "normals"], None]]),
+        ("unknown layer type with a bad name", [["append", ["layers"], {"id": "future", "type": "labels", "name": 1}]]),
+        ("unknown layer type duplicate id", [["append", ["layers"], {"id": "domains", "type": "labels"}]]),
+        # Ids.
+        ("layer id __proto__", [["set", ["layers", text, "id"], "__proto__"]]),
+        ("layer id constructor", [["set", ["layers", triad, "id"], "constructor"]]),
+        ("layer id prototype", [["set", ["layers", sphere, "id"], "prototype"]]),
+        ("buffer id __proto__", [["set", ["buffers", 0, "id"], "__proto__"]]),
+        ("layer id with trailing newline", [["set", ["layers", text, "id"], "caption\n"]]),
+        ("layer id toString is fine", [["set", ["layers", text, "id"], "toString"]]),
+        # Numbers, booleans and nulls of the manifest.
+        ("accessor count integral float", [["set", ["accessors", 0, "count"],
+                                            float(manifest["accessors"][0]["count"])]]),
+        ("accessor count 2**53", [["set", ["accessors", 0, "count"], 2 ** 53]]),
+        ("byteLength integral float", [["set", ["buffers", 0, "byteLength"],
+                                        float(manifest["buffers"][0]["byteLength"])]]),
+        ("byteLength boolean", [["set", ["buffers", 0, "byteLength"], True]]),
+        ("encoding null is raw", [["set", ["buffers", 0, "encoding"], None]]),
+        ("normalized not a boolean", [["set", ["accessors", domain_acc, "normalized"], "yes"]]),
+        ("normalized null is absent", [["set", ["accessors", domain_acc, "normalized"], None]]),
+        ("normalized on an integer accessor", [["set", ["accessors", domain_acc, "normalized"], True]]),
+        ("view null is absent", [["set", ["view"], None]]),
+        ("bounds null is absent", [["set", ["bounds"], None]]),
+    ]
+    for name, patches in reconcile_cases:
+        example_case(name, patches, extra_cases)
+
     # Data-level cases (small builder payloads with their blobs).
     def triangles(builder, positions, indices, **extra):
         builder.add_accessor("pos", np.asarray(positions, dtype=np.float32))
@@ -305,6 +463,49 @@ def payload_cases():
 
     cases.append(builder_case("u16 indices", u16_indices))
 
+    def slice_image_attrs(builder, attributes, size=(3, 2)):
+        builder.add_accessor("v", np.arange(6, dtype=np.float32))
+        builder.add_accessor("c", np.arange(6, dtype=np.float32))
+        builder.add_layer({"id": "s", "type": "slice_image", "plane": {"origin": [0, 0, 0], "u": [1, 0, 0],
+                                                                       "v": [0, 1, 0]},
+                           "size": list(size), "attributes": attributes})
+
+    extra_cases.append(builder_case("slice image without attributes", lambda b: slice_image_attrs(b, {})))
+    extra_cases.append(builder_case("slice image null attributes", lambda b: slice_image_attrs(b, None)))
+    extra_cases.append(builder_case("slice image cell attribute", lambda b: slice_image_attrs(
+        b, {"v": {"accessor": "v", "association": "cell"}})))
+    extra_cases.append(builder_case("slice image integral float size", lambda b: slice_image_attrs(
+        b, {"v": {"accessor": "v"}}, (3.0, 2.0))))
+
+    def lods(builder, lod_positions, lod_normals=None):
+        builder.add_accessor("pos", np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32))
+        builder.add_accessor("idx", np.array([0, 1, 2], dtype=np.uint32))
+        builder.add_accessor("lpos", np.asarray(lod_positions, dtype=np.float32))
+        lod = {"level": 1, "positions": "lpos", "indices": "idx"}
+        if lod_normals is not None:
+            builder.add_accessor("lnrm", np.asarray(lod_normals, dtype=np.float32))
+            lod["normals"] = "lnrm"
+        builder.add_layer({"id": "t", "type": "triangles", "positions": "pos", "indices": "idx", "lods": [lod]})
+
+    extra_cases.append(builder_case("lod ok", lambda b: lods(b, [[0, 0, 0], [2, 0, 0], [0, 2, 0]])))
+    extra_cases.append(builder_case("lod positions not finite",
+                                    lambda b: lods(b, [[0, 0, 0], [np.inf, 0, 0], [0, 2, 0]])))
+    extra_cases.append(builder_case("lod normals count", lambda b: lods(b, [[0, 0, 0], [2, 0, 0], [0, 2, 0]],
+                                                                 [[0, 0, 1], [0, 0, 1]])))
+
+    def instances(builder, directions, factor=1.0):
+        builder.add_accessor("pos", np.zeros((2, 3), dtype=np.float32))
+        builder.add_accessor("dir", np.asarray(directions, dtype=np.float32))
+        builder.add_layer({"id": "g", "type": "instances", "positions": "pos", "directions": "dir",
+                           "glyph": {"shape": "sphere", "resolution": 6},
+                           "appearance": {"scale": {"by": "magnitude", "factor": factor}}})
+
+    extra_cases.append(builder_case("instances non-finite direction is drawn as nothing",
+                              lambda b: instances(b, [[1, 0, 0], [np.nan, 0, 0]])))
+    extra_cases.append(builder_case("instances zero direction", lambda b: instances(b, [[1, 0, 0], [0, 0, 0]])))
+    extra_cases.append(builder_case("instances scale factor tiny",
+                                    lambda b: instances(b, [[1, 0, 0], [0, 1, 0]], 1e-300)))
+
     # .stkp framing: corruptions of example.stkp as byte patches [offset, hex] or a truncation.
     data = (EXAMPLE / "example.stkp").read_bytes()
     offset, chunks = 16, []
@@ -313,7 +514,7 @@ def payload_cases():
         chunks.append((offset, length, kind))
         offset += 16 + length + (-length % 8)
 
-    def stkp_case(name, edits=(), truncate=None, append=b""):
+    def stkp_case(name, edits=(), truncate=None, append=b"", into=cases):
         bad = bytearray(data)
         for at, hexbytes in edits:
             raw = bytes.fromhex(hexbytes)
@@ -321,8 +522,8 @@ def payload_cases():
         if truncate is not None:
             bad = bad[:truncate]
         bad += append
-        cases.append({"name": name, "kind": "stkp", "edits": [list(e) for e in edits], "truncate": truncate,
-                      "append": append.hex(), "python": verdict(lambda: P.read_stkp(bytes(bad)))})
+        into.append({"name": name, "kind": "stkp", "edits": [list(e) for e in edits], "truncate": truncate,
+                     "append": append.hex(), "python": verdict(lambda: P.read_stkp(bytes(bad)))})
 
     stkp_case("stkp valid")
     stkp_case("stkp bad magic", [(0, b"XXXX".hex())])
@@ -337,6 +538,47 @@ def payload_cases():
     stkp_case("stkp chunk length huge", [(chunks[2][0], struct.pack("<Q", 2 ** 40).hex())])
     stkp_case("stkp manifest not json", [(chunks[0][0] + 16, b"#".hex())])
     stkp_case("stkp trailing bytes", [(8, struct.pack("<Q", len(data) + 8).hex())], append=b"\0" * 8)
+    stkp_case("stkp length field smaller than the file", [(8, struct.pack("<Q", len(data) - 8).hex())],
+              into=extra_cases)
+    stkp_case("stkp unchecked trailing bytes", append=b"\0" * 8, into=extra_cases)
+    stkp_case("stkp manifest invalid UTF-8", [(chunks[0][0] + 16 + 12, "ff")], into=extra_cases)
+    stkp_case("stkp manifest overlong UTF-8", [(chunks[0][0] + 16 + 12, "c0af")], into=extra_cases)
+    stkp_case("stkp manifest UTF-8 surrogate", [(chunks[0][0] + 16 + 12, "eda080")], into=extra_cases)
+    stkp_case("stkp BIN reserved", [(chunks[-1][0] + 12, "00000080")], into=extra_cases)
+
+    # Whole .stkp files built from manifest texts (JSON parsing rules, spec §9, §10).
+    packed = json.loads(json.dumps(manifest))
+    chunk_data = []
+    for index, buffer in enumerate(packed["buffers"], start=1):
+        buffer["uri"] = f"#{index}"
+        chunk_data.append(bytes(blobs[buffer["sha256"]]))
+
+    def text_case(name, text):
+        raw = stkp_from_text(text, chunk_data)
+        extra_cases.append({"name": name, "kind": "stkp_bytes", "data": b64(raw),
+                      "python": verdict(lambda: P.read_stkp(raw))})
+
+    compact = json.dumps(packed, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    text_case("stkp text valid", compact)
+    text_case("stkp text with a byte-order mark", b"\xef\xbb\xbf" + compact)
+    text_case("stkp text with surrounding whitespace", b" \n\t" + compact + b"\r\n ")
+    text_case("stkp text NaN literal", compact[:-1] + b',"x-note":NaN}')
+    text_case("stkp text Infinity literal", compact[:-1] + b',"x-note":-Infinity}')
+    text_case("stkp text number overflow", compact[:-1] + b',"x-note":1e400}')
+    text_case("stkp text integer overflow", compact[:-1] + b',"x-note":1' + b"0" * 400 + b'}')
+    text_case("stkp text big finite integer", compact[:-1] + b',"x-note":123456789012345678901234567890}')
+    text_case("stkp text trailing comma", compact[:-1] + b',}')
+    text_case("stkp text duplicate key keeps the last", compact[:-1] + b',"length_unit":""}')
+    text_case("stkp text single quotes", compact.replace(b'"schema"', b"'schema'", 1))
+    text_case("stkp text control character", compact.replace(b'"stk.payload/2"', b'"stk.pay\tload/2"', 1))
+    text_case("stkp text escaped slash", compact.replace(b'"stk.payload/2"', b'"stk.payload\\/2"', 1))
+    text_case("stkp text not an object", b"[]")
+    sha_uri = json.loads(compact)
+    sha_uri["buffers"][0]["uri"] = "sha256:" + sha_uri["buffers"][0]["sha256"]
+    text_case("stkp sha256 URI inside a .stkp", json.dumps(sha_uri, separators=(",", ":")).encode())
+    chunk0 = json.loads(compact)
+    chunk0["buffers"][0]["uri"] = "#01"
+    text_case("stkp chunk URI with a leading zero", json.dumps(chunk0, separators=(",", ":")).encode())
 
     # Seeded mutation corpus of the example manifest: the Python verdict is the expected result.
     rng = random.Random(20260925)
@@ -365,6 +607,8 @@ def payload_cases():
                 at = rng.randrange(c[0], c[0] + 16)
             edits.append((at, "%02x" % rng.randrange(256)))
         stkp_case(f"stkp mutation {k}", edits)
+    # The reconciled cases are appended after the seeded corpus, whose case list and order stay unchanged.
+    cases.extend(extra_cases)
     crashes = [c["name"] for c in cases if c["python"].get("crash")]
     if crashes:
         print("warning: the Python decoder crashed on", crashes)
@@ -614,26 +858,23 @@ FORMATS = [".3g", ".2f", ".1e", ".0%", "d", "", ".3", ".1", ".0f", ".2e", ".4g",
 VALUES = [0.0, -0.0, 1.0, -1.0, 0.5, 1.5, 2.5, -2.5, 0.125, 0.375, 1234.5678, -1234.5678, 1e-5, 1.5e-5, 0.0001,
           0.00012345, 123456.0, 1234567.0, 1e16, 1e15, 9.995, 0.995, 99.95, 999.5, 1e21, 1e22, 1e-300, 5e-324,
           1.7976931348623157e308, 0.1, 0.2, 0.3, 1 / 3, 2 / 3, 12345678.9, 100.0, 1e3, 0.05, 0.015, 0.025, 1.005,
-          2.675, 1e100, 123.456, -0.0001, 7.0, 10.0, 0.9999, 99999.5, 3.14159265358979]
-
-
-def offscreen_label(value, fmt):
-    from suan.render.offscreen import _label  # the label function of the offscreen renderer
-    return _label(value, fmt)
+          2.675, 1e100, 123.456, -0.0001, 7.0, 10.0, 0.9999, 99999.5, 3.14159265358979,
+          # ties (round half to even on the exact binary value) and labels that round to zero (never "-0")
+          0.125, 0.375, 0.625, 2.5e-5, 1.25, -1.25, 0.0625, 1234.5, 1235.5, -0.5, -0.4, -0.004, -1e-7, -1e-300,
+          -0.0049, 1e16 + 2, 9007199254740993.0, 0.30000000000000004, 1e-4, 9.999999e-5, 999999.5, 1e15 + 0.5]
+# Outside the subset: labels fall back to ".3g" (validators reject these formats).
+INVALID_FORMATS = [" .2f ", ".123g", "x", "{}", ".3d", "999999", ".2f\n", "~s"]
 
 
 def format_cases():
+    """payload.format_label (spec §6.7) for every format of the subset and a few invalid ones."""
     cases = []
-    for fmt in FORMATS:
-        assert P.LABEL_FORMAT.match(fmt), fmt
+    for fmt in FORMATS + INVALID_FORMATS:
+        assert bool(P.LABEL_FORMAT.fullmatch(fmt)) == (fmt in FORMATS), fmt
         for value in VALUES + [math.inf, -math.inf, math.nan]:
-            try:
-                text = offscreen_label(value, fmt)
-            except (ValueError, OverflowError) as error:
-                text = None
-                if not (fmt.endswith("d") and not math.isfinite(value)):
-                    raise error
-            cases.append({"format": fmt, "value": value if math.isfinite(value) else str(value), "text": text})
+            cases.append({"format": fmt, "value": value if math.isfinite(value) else str(value),
+                          "negative_zero": value == 0 and math.copysign(1.0, value) < 0,
+                          "text": P.format_label(value, fmt)})
     return cases
 
 
@@ -659,7 +900,8 @@ def colormap_cases():
         orientation.append({"p": p, "M": M, "l": list(l), "rgb": list(colormaps.orientation_rgb(p, M, l))})
     hsl = [{"hsl": [h, s, l], "rgb": list(colormaps.hsl_to_rgb(h, s, l))} for h in (-30.0, 0.0, 59.9, 60.0, 180.0, 359.9, 720.5)
            for s in (0.0, 0.65, 1.0) for l in (0.0, 0.38, 0.5, 1.0)]
-    categorical = [{"v": v, "rgb": list(colormaps.stk_categorical_color(v))} for v in range(-3, 40)]
+    categorical = [{"v": v, "rgb": list(colormaps.stk_categorical_color(v))}
+                   for v in list(range(-3, 40)) + [2.5, -0.5, -1.5, 0.999999, 7.0, 1e-9, 19.000001]]
     copacity = [{"range": list(r), "points": colormaps.categorical_opacity(r)} for r in ((-1, 26), (0, 5), (-3, -1), (2, 2))]
     opacity = []
     points = [[0.0, 0.0], [0.5, 1.0], [0.5, 0.2], [1.0, 0.8]]
@@ -667,8 +909,20 @@ def colormap_cases():
         opacity.append({"points": points, "v": v, "alpha": float(colormaps.opacity_at([v], points)[0])})
     rgba8 = [{"c": c, "rgba": list(colormaps.rgba8(c))} for c in ([0.5, 0.5, 0.5], [0.0, 1.0, 0.999], [0.001961, 0.998039, 0.5, 0.25],
                                                                     [-0.1, 1.1, 0.5019607843137255])]
+    # Volume colour transfer points (spec §6.6): LUTs over normal, degenerate and reversed ranges, and a palette.
+    viridis = colormaps.lut_rgba8("viridis")
+    lut_entry = {"id": "cm", "name": "viridis", "categorical": False}
+    palette = {"id": "pal", "name": "p", "categorical": True,
+               "entries": [{"value": -1, "name": "a", "color": [1.0, 1.0, 1.0]},
+                           {"value": 3, "name": "b", "color": [0.3333, 0.6667, 0.001]},
+                           {"value": 7, "name": "c", "color": [0.2, 0.4, 0.6, 0.5]}]}
+    volume_points = [{"colormap": "viridis", "range": list(r),
+                      "points": colormaps.volume_color_points(lut_entry, viridis, r)}
+                     for r in ((0.0, 1.0), (-2.0, 3.5), (2.0, 2.0), (3.0, 1.0))]
+    volume_points.append({"colormap": "palette", "palette": palette, "range": [-1.0, 7.0],
+                          "points": colormaps.volume_color_points(palette, None, (-1.0, 7.0))})
     return {"lut_index": lut, "orientation": orientation, "hsl": hsl, "categorical": categorical,
-            "categorical_opacity": copacity, "opacity": opacity, "rgba8": rgba8}
+            "categorical_opacity": copacity, "opacity": opacity, "rgba8": rgba8, "volume_points": volume_points}
 
 
 def camera_cases():
@@ -682,8 +936,52 @@ def camera_cases():
                              "view_up": fit["view_up"], "parallel_scale": fit["parallel_scale"]})
     ups = [{"position": p, "focal": f, "up": layers.default_view_up(p, f)} for p, f in
            (([0, 0, 10], [0, 0, 0]), ([0.01, 0, 10], [0, 0, 0]), ([1, 0, 10], [0, 0, 0]), ([5, 5, 5], [0, 0, 0]),
-            ([0, 0, 0], [0, 0, 0]), ([0, 0, -3], [0, 0, 1]))]
-    return {"fit": fits, "default_view_up": ups}
+            ([0, 0, 0], [0, 0, 0]), ([0, 0, -3], [0, 0, 1]), ([0, 1e-7, 10], [0, 0, 0]), ([0, 1e-5, 10], [0, 0, 0]),
+            ([0, 0.001, 10], [0, 0, 0]), ([1e-6, 1e-6, -10], [0, 0, 0]))]
+    # camera_pose (spec §2.1) of the synthetic views of make_web_vectors.mjs: the same rules as web cameraPose.
+    poses = []
+    for view in CAMERA_VIEWS:
+        for bounds in CAMERA_BOUNDS:
+            for origin in CAMERA_ORIGINS:
+                b = [[bounds[0], bounds[2], bounds[4]], [bounds[1], bounds[3], bounds[5]]]
+                poses.append({"view": view, "bounds": bounds, "origin": origin,
+                              "pose": layers.camera_pose(view, origin, b), "preset": layers.view_preset(view)})
+    return {"fit": fits, "default_view_up": ups, "poses": poses}
+
+
+# The synthetic views of make_web_vectors.mjs (keep both lists identical).
+CAMERA_VIEWS = [
+    None,
+    {"schema": "stk.view/1"},
+    {"schema": "stk.view/1", "camera": {"preset": "+x"}},
+    {"schema": "stk.view/1", "camera": {"preset": "-z", "zoom": 2}},
+    {"schema": "stk.view/1", "preset": "+y", "camera": {}},
+    {"schema": "stk.view/1", "camera": {"preset": "bogus"}},
+    {"schema": "stk.view/1", "camera": {"preset": "", "position": [1e6 + 10, -3, 7], "focal_point": [1e6, -3, 7]}},
+    {"schema": "stk.view/1", "camera": {"position": [1e6 + 10, -3, 7], "focal_point": [1e6, -3, 7], "zoom": 2}},
+    {"schema": "stk.view/1", "camera": {"position": [1e6 + 10, -3, 7], "focal_point": [1e6, -3, 7], "zoom": 2,
+                                        "projection": "parallel"}},
+    {"schema": "stk.view/1", "camera": {"position": [0, 0, 10], "focal_point": [0, 0, 0]}},
+    {"schema": "stk.view/1", "camera": {"position": [0, 0.001, 10], "focal_point": [0, 0, 0]}},
+    {"schema": "stk.view/1", "camera": {"position": [0, 0, 10], "focal_point": [0, 0, 0], "view_up": [0, 0, 1]}},
+    {"schema": "stk.view/1", "camera": {"position": [1, 2, 3], "focal_point": [1, 2, 3]}},
+    {"schema": "stk.view/1", "camera": {"preset": "iso", "view_up": [0, 1, 0], "view_angle_deg": 45}},
+    {"schema": "stk.view/1", "camera": {"preset": "+z", "view_up": [0, 0, 5]}},
+    {"schema": "stk.view/1", "camera": {"preset": "iso", "view_angle_deg": 200, "zoom": -1, "parallel_scale": 0}},
+    {"schema": "stk.view/1", "camera": {"preset": "iso", "projection": "parallel", "parallel_scale": 7.5}},
+    {"schema": "stk.view/1", "camera": {"preset": "+x", "position": [5, 0, 0], "focal_point": [0, 0, 0]}},
+    {"schema": "stk.view/1", "camera": {"position": [5, 5, 5], "focal_point": [0, 0, 0], "view_up": [1, 1, 1]}},
+    {"schema": "stk.view/1", "camera": {"position": [5, True, 5], "focal_point": [0, 0, 0]}},
+    {"schema": "stk.view/1", "camera": {"preset": "iso", "view_angle_deg": 180}},
+    {"schema": "stk.view/1", "camera": {"preset": "iso", "view_angle_deg": 179.9, "zoom": 0.5}},
+    {"schema": "stk.view/1", "camera": {"position": [0, 1e-7, 10], "focal_point": [0, 0, 0]}},
+    {"schema": "stk.view/1", "camera": {"position": [0, 0, 10], "focal_point": [0, 0, 0], "view_up": [0, 0, 0]}},
+    {"schema": "stk.view/1", "camera": {"preset": "-y", "view_up": [0, -1, 0]}},
+    {"schema": "stk.view/1", "camera": {"preset": None, "position": [3, 0, 0], "focal_point": [0, 0, 0],
+                                        "view_angle_deg": 60, "zoom": 3}},
+]
+CAMERA_BOUNDS = [[-1, 1, -1, 1, -1, 1], [0, 10, 0, 2, 0, 1], [-2, 2, -2, 2, -2, 2], [3, 3, 3, 3, 3, 3]]
+CAMERA_ORIGINS = [[0, 0, 0], [1e6, -3, 7]]
 
 
 def glyph_cases():

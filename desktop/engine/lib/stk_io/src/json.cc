@@ -301,6 +301,23 @@ bool is_integer_token(const Json &value)
   return value.is_number_integer();
 }
 
+bool is_safe_integer(const Json &value)
+{
+  constexpr double kMax = 9007199254740991.0; /* 2^53 - 1 */
+  if (value.is_number_unsigned()) {
+    return value.get<uint64_t>() <= uint64_t(kMax);
+  }
+  if (value.is_number_integer()) {
+    const int64_t v = value.get<int64_t>();
+    return v >= -int64_t(kMax) && v <= int64_t(kMax);
+  }
+  if (value.is_number_float()) {
+    const double v = value.get<double>();
+    return std::isfinite(v) && std::floor(v) == v && std::fabs(v) <= kMax;
+  }
+  return false;
+}
+
 std::string_view json_type_name(const Json &value)
 {
   switch (value.type()) {

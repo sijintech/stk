@@ -146,6 +146,53 @@ TEST(ColormapParity, LayerColoursMatchTheWebViewer)
   EXPECT_GE(layers, 10);
 }
 
+TEST(ColormapParity, VolumeColourPointsMatchPython)
+{
+  /* colormaps.volume_color_points (the offscreen renderer): bin centres, degenerate and reversed ranges (one
+   * point, LUT entry 128) and palettes quantized to RGBA8 (spec §6.6). */
+  const Json py = test::fixture_json("colormap_cases.json");
+  const Json viridis_lut = py["volume_points"][0];
+  ContinuousColormap viridis;
+  {
+    /* The LUT of the fixture: rebuild it from the points of the [0, 1] case (bin k -> point k). */
+    const Json &points = viridis_lut["points"];
+    ASSERT_EQ(points.size(), 256u);
+    for (size_t k = 0; k < 256; k++) {
+      for (size_t c = 0; c < 3; c++) {
+        viridis.lut[k][c] = uint8_t(std::lround(points[k][c + 1].get<double>() * 255.0));
+      }
+      viridis.lut[k][3] = 255;
+    }
+  }
+  int count = 0;
+  for (const Json &c : py["volume_points"]) {
+    Colormap cm;
+    if (c["colormap"] == "palette") {
+      CategoricalColormap palette;
+      for (const Json &entry : c["palette"]["entries"]) {
+        std::vector<double> colour;
+        for (const Json &v : entry["color"]) {
+          colour.push_back(v.get<double>());
+        }
+        palette.entries.push_back({entry["value"].get<int64_t>(), entry["name"].get<std::string>(), rgba8(colour)});
+      }
+      cm.categorical = palette;
+    }
+    else {
+      cm.continuous = viridis;
+    }
+    const auto points = volume_color_points(&cm, {c["range"][0].get<double>(), c["range"][1].get<double>()});
+    ASSERT_EQ(points.size(), c["points"].size()) << c["range"].dump();
+    for (size_t i = 0; i < points.size(); i++) {
+      for (size_t k = 0; k < 4; k++) {
+        EXPECT_EQ(points[i][k], c["points"][i][k].get<double>()) << c["range"].dump() << " point " << i;
+      }
+    }
+    count++;
+  }
+  EXPECT_EQ(count, 5);
+}
+
 TEST(Colormap, GpuTextureBinsExactly)
 {
   const ContinuousColormap grey = grey_colormap();

@@ -78,7 +78,7 @@ CameraPose fit_camera(const Bounds &bounds,
                       double zoom = 1.0,
                       bool parallel = false);
 
-/** suan.render.layers.default_view_up: +z, or +y when the view direction is within 0.999 of z. */
+/** suan.render.layers.default_view_up: +z, or +y when the view direction is within 1e-6 of z (spec §2.1). */
 dvec3 default_view_up(const dvec3 &position, const dvec3 &focal_point);
 
 /** The stk.view/1 camera object of a view document ({} when absent or malformed). */

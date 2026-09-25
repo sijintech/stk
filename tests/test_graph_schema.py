@@ -368,3 +368,65 @@ def test_validation_without_numpy():
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
+
+
+# -- JSON-Schema `pattern` / `patternProperties`: `$` matches only at the very end (spec §4.2) ----------------
+
+
+def _catalog_patterns():
+    patterns = set()
+
+    def walk(schema):
+        if isinstance(schema, dict):
+            if isinstance(schema.get("pattern"), str):
+                patterns.add(schema["pattern"])
+            patterns.update(key for key in schema.get("patternProperties") or {})
+            for value in schema.values():
+                walk(value)
+        elif isinstance(schema, list):
+            for value in schema:
+                walk(value)
+
+    walk(json.loads(CATALOG.read_text(encoding="utf-8")))
+    return sorted(patterns)
+
+
+def test_dollar_does_not_match_before_a_trailing_newline():
+    from suan.graph.schema import pattern_search, schema_pattern
+    schema = {"type": "string", "pattern": "^[a-z]+$"}
+    assert check_value("abc", schema) == []
+    assert check_value("abc\n", schema) == [("", "does not match pattern ^[a-z]+$")]
+    keyed = {"type": "object", "patternProperties": {"^[a-z]+$": {"type": "integer"}}, "additionalProperties": False}
+    assert check_value({"ab": 1}, keyed) == []
+    assert [path for path, _ in check_value({"ab\n": 1}, keyed)] == ["/ab\n"]
+    # "$" escaped or inside a class stays a literal; alternatives and groups are anchored too
+    assert schema_pattern(r"^[$]\$x$") == r"^[$]\$x\Z" and schema_pattern(r"[]$]|[^]$]$") == r"[]$]|[^]$]\Z"
+    assert pattern_search(r"^a$|^b$", "b") and not pattern_search(r"^a$|^b$", "b\n")
+    assert pattern_search(r"(/|$)", "x") and pattern_search(r"[$]", "$") and pattern_search(r"\$", "a$")
+    with pytest.raises(Exception):
+        pattern_search("(ab", "ab")
+
+
+def test_catalog_patterns_keep_their_meaning():
+    import re
+    from suan.graph.schema import pattern_search
+    patterns = _catalog_patterns()
+    assert len(patterns) >= 7
+    texts = ["", "a", "abc", "Polar", "a/b", "a.b", "../x", "x/../y", "x/..", "..", "/abs", "\\x", "C:x", "run:1",
+             "stk:cubic", "a_b-c", "A9", "12", ".3g", "+.1e", "08,.2f", "d", "{}", "999999", "中文", "x" * 128,
+             "x" * 129, "ab cd", "tab\there", "Polar.00000000.dat", "sub/dir/file.h5"]
+    for pattern in patterns:
+        accepted = [t for t in texts if pattern_search(pattern, t)]
+        assert accepted, pattern
+        for text in texts:      # without a trailing newline nothing changes
+            assert pattern_search(pattern, text) == (re.search(pattern, text) is not None), (pattern, text)
+        if "[^" not in pattern:  # identifiers, formats: a trailing newline is never accepted any more
+            for text in accepted:
+                assert not pattern_search(pattern, text + "\n"), (pattern, text)
+                assert re.search(pattern, text + "\n"), (pattern, text)    # Python's own "$" accepted it
+    # Classes such as [^/.] admit "\n" (in JavaScript too): the newline is then an ordinary character.
+    field = next(p for p in patterns if p.startswith("^[^/.]"))
+    assert pattern_search(field, "a\n") and not pattern_search(field, "a.b\n")
+    path = next(p for p in patterns if "(?!" in p)
+    assert pattern_search(path, "a/b\n") and not pattern_search(path, "/abs\n")
+    assert not pattern_search(path, "x/../y") and not pattern_search(path, "a/..") and not pattern_search(path, "C:x")

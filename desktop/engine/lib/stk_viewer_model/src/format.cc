@@ -49,47 +49,7 @@ Decimal exact_decimal(double value)
   return d;
 }
 
-/* Shortest round-trip digits (JavaScript Number::toString, Python repr). */
-Decimal shortest_decimal(double value)
-{
-  Decimal d;
-  d.negative = std::signbit(value);
-  value = std::fabs(value);
-  if (value == 0.0 || !std::isfinite(value)) {
-    d.digits = "0";
-    return d;
-  }
-  char buffer[64];
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-  const auto result = std::to_chars(buffer, buffer + sizeof(buffer) - 1, value, std::chars_format::scientific);
-  *result.ptr = '\0';
-#else
-  for (int precision = 0; precision < 17; precision++) {
-    std::snprintf(buffer, sizeof(buffer), "%.*e", precision, value);
-    for (char *c = buffer; *c; c++) {
-      if (*c == ',') {
-        *c = '.';
-      }
-    }
-    if (std::strtod(buffer, nullptr) == value) {
-      break;
-    }
-  }
-#endif
-  const char *e = std::strchr(buffer, 'e');
-  for (const char *c = buffer; c < e; c++) {
-    if (*c >= '0' && *c <= '9') {
-      d.digits.push_back(*c);
-    }
-  }
-  while (d.digits.size() > 1 && d.digits.back() == '0') {
-    d.digits.pop_back();
-  }
-  d.point = std::atoi(e + 1) + 1;
-  return d;
-}
-
-enum class Tie { Even, Up };
+enum class Tie { Even };
 
 /* Keep the first `keep` digits (keep may be <= 0), rounding the rest; returns the new digits (exactly
  * `max(keep, 0)` of them, or keep + 1 on carry, adjusting point). */
@@ -115,13 +75,9 @@ Decimal round_digits(const Decimal &in, int keep, Tie tie)
       up = true;
     }
     else if (first == '5') {
-      if (tie == Tie::Up) {
-        up = true;
-      }
-      else {
-        const int last = keep > 0 ? in.digits[size_t(keep) - 1] - '0' : 0;
-        up = last % 2 == 1;
-      }
+      (void)tie; /* ties to even (Python format) */
+      const int last = keep > 0 ? in.digits[size_t(keep) - 1] - '0' : 0;
+      up = last % 2 == 1;
     }
   }
   out.digits = keep > 0 ? in.digits.substr(0, size_t(keep)) : std::string();
@@ -277,6 +233,8 @@ bool is_upper(char type)
   return type == 'E' || type == 'F' || type == 'G';
 }
 
+std::string format_python(double value, const LabelFormat &f);
+
 }  // namespace
 
 std::optional<LabelFormat> parse_label_format(std::string_view s)
@@ -317,13 +275,11 @@ std::optional<LabelFormat> parse_label_format(std::string_view s)
   return f;
 }
 
-std::string format_python(double value, std::string_view spec)
+namespace {
+
+/* Python format(value, spec) of a spec of the subset (an integral value for `d`). */
+std::string format_python(double value, const LabelFormat &f)
 {
-  const auto parsed = parse_label_format(spec);
-  if (!parsed) {
-    throw std::invalid_argument("unsupported label format '" + std::string(spec) + "'");
-  }
-  const LabelFormat &f = *parsed;
   const bool negative = std::signbit(value) && !std::isnan(value);
   if (!std::isfinite(value)) {
     std::string text = std::isnan(value) ? "nan" : "inf";
@@ -420,201 +376,39 @@ std::string format_python(double value, std::string_view spec)
   return finish(f, negative, text.substr(0, end), text.substr(end), true);
 }
 
-std::string format_label(double value, std::string_view spec)
+std::string format_rounded(double value, const LabelFormat &f)
 {
-  const auto parsed = parse_label_format(spec);
-  if (parsed && parsed->type == 'd' && std::isfinite(value)) {
+  if (f.type == 'd' && std::isfinite(value)) {
     /* Python round(): half to even, exact. */
     const double r = std::nearbyint(value); /* default rounding mode: to nearest, ties to even */
-    return format_python(r == 0.0 ? 0.0 : r, spec);
+    return format_python(r == 0.0 ? 0.0 : r, f);
   }
-  return format_python(value, spec);
-}
-
-/* ---------------------------------------------------------------------------------------- */
-/* JavaScript number formatting (web/src/colormaps.ts formatNumber). */
-
-namespace {
-
-std::string js_to_string(double v)
-{
-  if (std::isnan(v)) {
-    return "NaN";
-  }
-  if (std::isinf(v)) {
-    return v < 0 ? "-Infinity" : "Infinity";
-  }
-  if (v == 0.0) {
-    return "0";
-  }
-  const Decimal d = shortest_decimal(v);
-  const int k = int(d.digits.size()), n = d.point;
-  std::string out = d.negative ? "-" : "";
-  if (k <= n && n <= 21) {
-    out += d.digits + std::string(size_t(n - k), '0');
-  }
-  else if (0 < n && n <= 21) {
-    out += d.digits.substr(0, size_t(n)) + "." + d.digits.substr(size_t(n));
-  }
-  else if (-6 < n && n <= 0) {
-    out += "0." + std::string(size_t(-n), '0') + d.digits;
-  }
-  else {
-    out += d.digits.substr(0, 1);
-    if (k > 1) {
-      out += "." + d.digits.substr(1);
-    }
-    out += "e" + std::string(n - 1 < 0 ? "-" : "+") + std::to_string(std::abs(n - 1));
-  }
-  return out;
-}
-
-std::string js_to_fixed(double v, int digits)
-{
-  if (!std::isfinite(v) || std::fabs(v) >= 1e21) {
-    return js_to_string(v);
-  }
-  const bool negative = v < 0;
-  const std::string body = fixed(exact_decimal(std::fabs(v)), digits, Tie::Up);
-  return (negative ? "-" : "") + body;
-}
-
-std::string js_to_exponential(double v, int digits)
-{
-  if (!std::isfinite(v)) {
-    return js_to_string(v);
-  }
-  const bool negative = v < 0;
-  std::string mantissa;
-  int exponent;
-  scientific(exact_decimal(std::fabs(v)), digits, Tie::Up, mantissa, exponent);
-  return (negative ? "-" : "") + mantissa + "e" + (exponent < 0 ? "-" : "+") + std::to_string(std::abs(exponent));
-}
-
-/* /e([+-])(\d)$/ -> e$10$2 */
-std::string pad_exponent(const std::string &text)
-{
-  const size_t e = text.rfind('e');
-  if (e != std::string::npos && e + 3 == text.size() && (text[e + 1] == '+' || text[e + 1] == '-')) {
-    return text.substr(0, e + 2) + "0" + text.substr(e + 2);
-  }
-  return text;
-}
-
-std::string trim(std::string_view s)
-{
-  const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; };
-  size_t a = 0, b = s.size();
-  while (a < b && space(s[a])) {
-    a++;
-  }
-  while (b > a && space(s[b - 1])) {
-    b--;
-  }
-  return std::string(s.substr(a, b - a));
+  return format_python(value, f);
 }
 
 }  // namespace
 
-std::string format_number_web(double v, std::string_view spec)
+std::string format_label(double value, std::string_view spec)
 {
-  if (!std::isfinite(v)) {
-    return js_to_string(v);
+  auto parsed = parse_label_format(spec);
+  if (!parsed) {
+    parsed = parse_label_format(".3g");
   }
-  /* /^(?:\.(\d+))?([efgd%])?$/ */
-  const std::string f = trim(spec);
-  int precision = 3;
-  char kind = 'g';
-  {
-    size_t i = 0;
-    bool ok = true;
-    std::string digits;
-    if (i < f.size() && f[i] == '.') {
-      i++;
-      while (i < f.size() && f[i] >= '0' && f[i] <= '9') {
-        digits.push_back(f[i++]);
-      }
-      ok = !digits.empty();
-    }
-    char type = 0;
-    if (ok && i < f.size() && std::string_view("efgd%").find(f[i]) != std::string_view::npos) {
-      type = f[i++];
-    }
-    ok = ok && i == f.size();
-    if (ok) {
-      if (!digits.empty()) {
-        precision = digits.size() > 6 ? 1000000 : std::atoi(digits.c_str());
-      }
-      if (type) {
-        kind = type;
-      }
-    }
+  const std::string text = format_rounded(value, *parsed);
+  /* A label that shows zero never carries a minus sign (Python's `z` option). */
+  if (std::isfinite(value) && std::signbit(value) && text.find_first_of("123456789") == std::string::npos) {
+    return format_rounded(-value, *parsed);
   }
-  if (kind == 'f') {
-    return js_to_fixed(v, std::min(precision, 20));
-  }
-  if (kind == 'e') {
-    return pad_exponent(js_to_exponential(v, std::min(precision, 20)));
-  }
-  if (kind == 'd') {
-    /* Math.round: the nearest integer, ties towards +infinity (-0.5 -> -0, printed "0"). */
-    const double floor = std::floor(v);
-    const double rounded = (v - floor) >= 0.5 ? floor + 1.0 : floor;
-    return js_to_string(rounded == 0.0 ? 0.0 : rounded);
-  }
-  if (kind == '%') {
-    return js_to_fixed(v * 100.0, std::min(precision, 20)) + "%";
-  }
-  if (v == 0.0) {
-    return "0";
-  }
-  const int p = std::max(1, std::min(precision, 21));
-  /* Math.floor(Math.log10(|Number(v.toPrecision(p))|)): the exponent of v rounded to p digits. */
-  std::string mantissa;
-  int exponent;
-  scientific(exact_decimal(std::fabs(v)), p - 1, Tie::Up, mantissa, exponent);
-  if (exponent < -4 || exponent >= p) {
-    std::string text = js_to_exponential(v, p - 1);
-    /* .replace(/\.?0+e/, 'e') */
-    const size_t e = text.find('e');
-    size_t start = e;
-    while (start > 0 && text[start - 1] == '0') {
-      start--;
-    }
-    if (start < e) {
-      if (start > 0 && text[start - 1] == '.') {
-        start--;
-      }
-      text.erase(start, e - start);
-    }
-    return pad_exponent(text);
-  }
-  const std::string text = js_to_fixed(v, std::max(0, p - 1 - exponent));
-  if (text.find('.') == std::string::npos) {
-    return text;
-  }
-  /* .replace(/\.?0+$/, '') */
-  size_t end = text.size();
-  while (end > 0 && text[end - 1] == '0') {
-    end--;
-  }
-  if (end == text.size()) {
-    return text;
-  }
-  if (end > 0 && text[end - 1] == '.') {
-    end--;
-  }
-  return text.substr(0, end);
+  return text;
 }
 
-std::vector<ScalarBarTick> scalar_bar_ticks(double lo, double hi, int count, std::string_view spec, bool web_format)
+std::vector<ScalarBarTick> scalar_bar_ticks(double lo, double hi, int count, std::string_view spec)
 {
   count = std::max(2, std::min(20, count));
   std::vector<ScalarBarTick> ticks;
   for (int k = 0; k < count; k++) {
     const double value = lo + ((hi - lo) * k) / (count - 1);
-    ticks.push_back({double(k) / (count - 1), value,
-                     web_format ? format_number_web(value, spec) : format_label(value, spec)});
+    ticks.push_back({double(k) / (count - 1), value, format_label(value, spec)});
   }
   return ticks;
 }

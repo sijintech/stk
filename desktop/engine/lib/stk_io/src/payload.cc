@@ -103,7 +103,7 @@ bool component_is_signed(ComponentType type)
 
 bool is_payload_id(std::string_view id)
 {
-  if (id.empty() || id.size() > 128) {
+  if (id.empty() || id.size() > 128 || id == "__proto__" || id == "constructor" || id == "prototype") {
     return false;
   }
   const auto word = [](char c) {
@@ -308,6 +308,11 @@ std::array<double, 3> Payload::layer_origin(const Json &layer) const
   return render_origin;
 }
 
+bool Payload::skipped(std::string_view layer_id) const
+{
+  return std::any_of(warnings.begin(), warnings.end(), [&](const PayloadWarning &w) { return w.layer == layer_id; });
+}
+
 uint64_t Payload::total_bytes() const
 {
   uint64_t total = 0;
@@ -334,11 +339,6 @@ const Json *get(const Json &object, std::string_view key)
   return it == object.end() ? nullptr : &*it;
 }
 
-[[noreturn]] void malformed(const std::string &detail)
-{
-  throw PayloadError("malformed manifest (" + detail + ")");
-}
-
 std::string repr(const Json *value)
 {
   if (!value) {
@@ -348,15 +348,6 @@ std::string repr(const Json *value)
     return "'" + value->get<std::string>() + "'";
   }
   return python_json_dumps(*value);
-}
-
-/* Python `dict.get(key)` on a JSON value that must be an object (AttributeError otherwise). */
-const Json *member(const Json &object, std::string_view key, const char *what)
-{
-  if (!object.is_object()) {
-    malformed(std::string(what) + " is not an object");
-  }
-  return get(object, key);
 }
 
 /** sha256 of each blob not yet verified, computed in parallel when a pool is given. */
@@ -398,9 +389,7 @@ void check_blob(const Json &buffer,
     throw PayloadError("sha256 must be 64 lower-case hex digits", path + "/sha256");
   }
   const Json *length = get(buffer, "byteLength");
-  if (!length || !length->is_number_integer() || length->get<uint64_t>() != bytes.size() ||
-      (length->is_number_integer() && !length->is_number_unsigned() && length->get<int64_t>() < 0))
-  {
+  if (!length || !is_safe_integer(*length) || length->get<double>() != double(bytes.size())) {
     throw PayloadError("byteLength " + repr(length) + " differs from the data size " + std::to_string(bytes.size()),
                        path + "/byteLength");
   }
@@ -436,7 +425,90 @@ const Json &buffer_entries(const Json &manifest)
 }  // namespace
 
 /* ------------------------------------------------------------------------------------------ */
-/* Validator: suan/render/payload.py _Validator, check for check. */
+/* Validator: suan/render/payload.py _Validator, check for check (same order, same JSON-pointer paths). */
+
+namespace {
+
+/* A string member, or absent/null (Python `value is None or isinstance(value, str)`). */
+bool optional_string(const Json *value)
+{
+  return !value || value->is_null() || value->is_string();
+}
+
+bool present(const Json *value)
+{
+  return value && !value->is_null();
+}
+
+bool finite_pair(const Json &value)
+{
+  return value.is_array() && value.size() == 2 && is_finite_number(value[0]) && is_finite_number(value[1]);
+}
+
+}  // namespace
+
+std::vector<std::string> overlay_problems(const Json &layer)
+{
+  std::vector<std::string> problems;
+  const auto check = [&](bool ok, const char *key, const char *text) {
+    if (!ok) {
+      problems.push_back(std::string(key) + " " + text);
+    }
+  };
+  const auto optional = [&](const char *key, auto ok) {
+    const Json *value = get(layer, key);
+    return !present(value) || ok(*value);
+  };
+  const auto size = [](const Json &v) {
+    return (is_finite_number(v) && v.get<double>() > 0) ||
+           (finite_pair(v) && v[0].get<double>() > 0 && v[1].get<double>() > 0);
+  };
+  check(optional_string(get(layer, "title")), "title", "must be a string");
+  check(optional_string(get(layer, "anchor")), "anchor", "must be a string");
+  check(optional_string(get(layer, "source_layer")), "source_layer", "must be a string");
+  check(optional("offset_px", finite_pair), "offset_px", "must be 2 finite numbers");
+  check(optional("size_px", size), "size_px", "must be a positive number or 2 positive numbers");
+  const Json *kind = get(layer, "kind");
+  const std::string k = kind && kind->is_string() ? kind->get<std::string>() : std::string();
+  if (k == "scalar_bar") {
+    check(optional_string(get(layer, "unit")), "unit", "must be a string");
+    check(optional_string(get(layer, "orientation")), "orientation", "must be a string");
+  }
+  else if (k == "legend") {
+    check(optional("values",
+                   [](const Json &v) {
+                     return v.is_array() && std::all_of(v.begin(), v.end(), [](const Json &x) { return is_safe_integer(x); });
+                   }),
+          "values",
+          "must be a list of integers");
+    check(optional("columns", [](const Json &v) { return is_safe_integer(v); }), "columns", "must be an integer");
+  }
+  else if (k == "orientation_legend") {
+    check(optional("lightness_range", finite_pair), "lightness_range", "must be 2 finite numbers");
+  }
+  else if (k == "text") {
+    check(optional("font_size_px", [](const Json &v) { return is_finite_number(v) && v.get<double>() > 0; }),
+          "font_size_px",
+          "must be a positive number");
+    check(optional("color",
+                   [](const Json &v) {
+                     return v.is_array() && (v.size() == 3 || v.size() == 4) &&
+                            std::all_of(v.begin(), v.end(), [](const Json &x) { return is_finite_number(x); });
+                   }),
+          "color",
+          "must be 3 or 4 finite numbers");
+  }
+  else if (k == "axes_triad") {
+    check(optional("labels",
+                   [](const Json &v) {
+                     return v.is_array() && v.size() == 3 &&
+                            std::all_of(v.begin(), v.end(), [](const Json &x) { return x.is_string(); });
+                   }),
+          "labels",
+          "must be 3 strings");
+  }
+  return problems;
+}
 
 class PayloadValidator {
  public:
@@ -448,17 +520,17 @@ class PayloadValidator {
   void run();
 
  private:
-  struct AccessorRef {
-    const Json *json;
-    size_t index;
-  };
-
   [[noreturn]] void fail(const std::string &message, const std::string &path)
   {
     throw PayloadError(message, path);
   }
+  void warn(const Json &layer, const std::string &path, const std::string &message)
+  {
+    p_.warnings.push_back({path, get_string(layer, "id"), message});
+  }
 
   const Json &list(const Json *value, const std::string &path);
+  const Json &object(const Json *value, const std::string &path, const char *what);
   void unique_id(const Json &item, const std::set<std::string, std::less<>> &seen, const std::string &path);
   void vec3(const Json *value, const std::string &path);
   void interval(const Json *value, const std::string &path);
@@ -468,15 +540,16 @@ class PayloadValidator {
                                 std::optional<uint32_t> components,
                                 std::optional<double> count,
                                 const std::string &path);
-  uint64_t positions(const Json &layer, const std::string &path);
+  uint64_t positions(const Json &owner, const std::string &path);
   const Json *attributes(const Json &layer,
                          const std::string &path,
-                         std::optional<uint64_t> points,
-                         std::optional<uint64_t> cells);
+                         std::optional<double> points,
+                         std::optional<double> cells);
+  const Json &appearance(const Json &layer, const std::string &path);
   void color(const Json *spec, const Json *attributes, const std::string &path);
   uint64_t indices(const Json *accessor_id, uint64_t n_points, uint64_t multiple, const std::string &path);
-  const Json *appearance(const Json &layer, const std::string &path);
-  bool attribute_exists(const Json *attributes, const Json *name);
+  bool has_attribute(const Json *attributes, const Json *name);
+  bool categorical_colormap(const Json *id);
 
   void layer_triangles(const Json &layer, const std::string &path);
   void layer_slice_image(const Json &layer, const std::string &path);
@@ -486,16 +559,9 @@ class PayloadValidator {
   void layer_volume(const Json &layer, const std::string &path);
   void layer_overlay(const Json &layer, const std::string &path);
 
-  /* Python dict lookup by a JSON key: unhashable keys (list/object) raise TypeError. */
   template<typename Map> auto lookup(const Map &map, const Json *key) -> decltype(&map.begin()->second)
   {
-    if (!key) {
-      return nullptr;
-    }
-    if (key->is_array() || key->is_object()) {
-      malformed("unhashable id " + python_json_dumps(*key));
-    }
-    if (!key->is_string()) {
+    if (!key || !key->is_string()) {
       return nullptr;
     }
     const auto it = map.find(key->get_ref<const std::string &>());
@@ -524,6 +590,14 @@ const Json &PayloadValidator::list(const Json *value, const std::string &path)
   return *value;
 }
 
+const Json &PayloadValidator::object(const Json *value, const std::string &path, const char *what)
+{
+  if (!value || !value->is_object()) {
+    fail(std::string(what) + " must be an object", path);
+  }
+  return *value;
+}
+
 void PayloadValidator::unique_id(const Json &item, const std::set<std::string, std::less<>> &seen, const std::string &path)
 {
   const Json *id = get(item, "id");
@@ -546,9 +620,7 @@ void PayloadValidator::vec3(const Json *value, const std::string &path)
 
 void PayloadValidator::interval(const Json *value, const std::string &path)
 {
-  if (!value || !value->is_array() || value->size() != 2 ||
-      !std::all_of(value->begin(), value->end(), [](const Json &v) { return is_finite_number(v); }))
-  {
+  if (!value || !finite_pair(*value)) {
     fail("must be [lo, hi] (two finite numbers)", path);
   }
 }
@@ -557,7 +629,7 @@ void PayloadValidator::rgb(const Json *value, const std::string &path)
 {
   if (!value || !value->is_array() || (value->size() != 3 && value->size() != 4) ||
       !std::all_of(value->begin(), value->end(), [](const Json &v) {
-        return v.is_number() && v.get<double>() >= 0.0 && v.get<double>() <= 1.0;
+        return is_finite_number(v) && v.get<double>() >= 0.0 && v.get<double>() <= 1.0;
       }))
   {
     fail("colour must be 3 or 4 numbers in [0, 1]", path);
@@ -593,9 +665,9 @@ const PayloadAccessor &PayloadValidator::expect(const Json *accessor_id,
   return a;
 }
 
-uint64_t PayloadValidator::positions(const Json &layer, const std::string &path)
+uint64_t PayloadValidator::positions(const Json &owner, const std::string &path)
 {
-  const PayloadAccessor &a = expect(get(layer, "positions"), {ComponentType::F32}, 3, std::nullopt, path + "/positions");
+  const PayloadAccessor &a = expect(get(owner, "positions"), {ComponentType::F32}, 3, std::nullopt, path + "/positions");
   const std::span<const uint8_t> bytes = p_.accessor_bytes(a);
   for (uint64_t i = 0; i < a.value_count(); i++) {
     if (!std::isfinite(load<float>(bytes.data() + 4 * i))) {
@@ -607,24 +679,22 @@ uint64_t PayloadValidator::positions(const Json &layer, const std::string &path)
 
 const Json *PayloadValidator::attributes(const Json &layer,
                                          const std::string &path,
-                                         std::optional<uint64_t> points,
-                                         std::optional<uint64_t> cells)
+                                         std::optional<double> points,
+                                         std::optional<double> cells)
 {
   static const Json empty = Json::object();
-  const Json *attrs = member(layer, "attributes", "layer");
-  if (!attrs) {
+  const Json *attrs = get(layer, "attributes");
+  if (!present(attrs)) {
     return &empty;
   }
-  if (!attrs->is_object()) {
-    fail("attributes must be an object", path + "/attributes");
-  }
+  object(attrs, path + "/attributes", "attributes");
   for (auto it = attrs->begin(); it != attrs->end(); ++it) {
     const std::string apath = path + "/attributes/" + it.key();
-    const Json &attribute = it.value();
-    const Json *association = member(attribute, "association", "attribute");
-    std::optional<uint64_t> count;
+    const Json &attribute = object(&it.value(), apath, "an attribute");
+    const Json *association = get(attribute, "association");
+    std::optional<double> count;
     bool valid = false;
-    if (!association || (association->is_string() && *association == "point")) {
+    if (!present(association) || (association->is_string() && *association == "point")) {
       valid = points.has_value();
       count = points;
     }
@@ -632,57 +702,74 @@ const Json *PayloadValidator::attributes(const Json &layer,
       valid = cells.has_value();
       count = cells;
     }
-    else if (association->is_array() || association->is_object()) {
-      malformed("unhashable association");
-    }
     if (!valid) {
-      fail("association " + repr(association ? association : nullptr) + " is not valid here",
+      fail("association " + (present(association) ? repr(association) : std::string("'point'")) +
+               " is not valid here",
            apath + "/association");
     }
-    expect(get(attribute, "accessor"), {}, std::nullopt, double(*count), apath + "/accessor");
+    expect(get(attribute, "accessor"), {}, std::nullopt, *count, apath + "/accessor");
     const Json *palette = get(attribute, "palette");
-    if (palette && !palette->is_null()) {
-      const Json *const *colormap = lookup(colormaps_, palette);
-      bool categorical = false;
-      if (colormap) {
-        const Json *flag = get(**colormap, "categorical");
-        categorical = flag && py_truthy(*flag);
-      }
-      if (!categorical) {
-        fail("palette " + repr(palette) + " is not a categorical colormap", apath + "/palette");
-      }
+    if (present(palette) && !categorical_colormap(palette)) {
+      fail("palette " + repr(palette) + " is not a categorical colormap", apath + "/palette");
     }
   }
   return attrs;
 }
 
-bool PayloadValidator::attribute_exists(const Json *attributes, const Json *name)
+bool PayloadValidator::categorical_colormap(const Json *id)
 {
-  if (name && (name->is_array() || name->is_object())) {
-    malformed("unhashable attribute name");
+  const Json *const *colormap = lookup(colormaps_, id);
+  if (!colormap) {
+    return false;
   }
+  const Json *flag = get(**colormap, "categorical");
+  return flag && flag->is_boolean() && flag->get<bool>();
+}
+
+bool PayloadValidator::has_attribute(const Json *attributes, const Json *name)
+{
   return name && name->is_string() && attributes->contains(name->get_ref<const std::string &>());
+}
+
+const Json &PayloadValidator::appearance(const Json &layer, const std::string &path)
+{
+  static const Json empty = Json::object();
+  const Json *value = get(layer, "appearance");
+  return present(value) ? object(value, path + "/appearance", "appearance") : empty;
 }
 
 void PayloadValidator::color(const Json *spec, const Json *attributes, const std::string &path)
 {
-  if (!spec || spec->is_null()) {
+  if (!present(spec)) {
     return;
   }
-  const Json *by = member(*spec, "by", "colour spec");
-  const bool known = by && by->is_string() &&
-                     (*by == "solid" || *by == "attribute" || *by == "direction");
-  if (!known) {
-    fail("unknown colour mode " + repr(by), path + "/by");
+  object(spec, path, "a colour spec");
+  const Json *by_json = get(*spec, "by");
+  std::string by = "solid"; /* spec §5: the default mode */
+  if (present(by_json)) {
+    const bool known = by_json->is_string() &&
+                       (*by_json == "solid" || *by_json == "attribute" || *by_json == "direction");
+    if (!known) {
+      fail("unknown colour mode " + repr(by_json), path + "/by");
+    }
+    by = by_json->get<std::string>();
   }
-  if (*by == "attribute" && !attribute_exists(attributes, get(*spec, "attribute"))) {
-    fail("unknown attribute " + repr(get(*spec, "attribute")), path + "/attribute");
+  const Json *attribute = get(*spec, "attribute");
+  if ((by == "attribute" || (by == "direction" && present(attribute))) && !has_attribute(attributes, attribute)) {
+    fail("unknown attribute " + repr(attribute), path + "/attribute");
   }
   const Json *colormap = get(*spec, "colormap");
-  if (colormap && !colormap->is_null() && !(colormap->is_string() && *colormap == "stk:orientation-hsl") &&
-      !lookup(colormaps_, colormap))
-  {
-    fail("unknown colormap " + repr(colormap), path + "/colormap");
+  if (present(colormap)) {
+    const bool orientation = colormap->is_string() && *colormap == "stk:orientation-hsl";
+    if (by == "direction" && !orientation) {
+      fail("direction colouring uses 'stk:orientation-hsl', not " + repr(colormap), path + "/colormap");
+    }
+    if (!orientation && !lookup(colormaps_, colormap)) {
+      fail("unknown colormap " + repr(colormap), path + "/colormap");
+    }
+  }
+  if (const Json *range = get(*spec, "range"); present(range)) {
+    interval(range, path + "/range");
   }
 }
 
@@ -710,46 +797,27 @@ uint64_t PayloadValidator::indices(const Json *accessor_id, uint64_t n_points, u
   return a.count / multiple;
 }
 
-const Json *PayloadValidator::appearance(const Json &layer, const std::string & /*path*/)
-{
-  static const Json empty = Json::object();
-  const Json *value = get(layer, "appearance");
-  if (!value || !py_truthy(*value)) {
-    return &empty; /* layer.get("appearance") or {} */
-  }
-  if (!value->is_object()) {
-    malformed("appearance is not an object");
-  }
-  return value;
-}
-
 void PayloadValidator::layer_triangles(const Json &layer, const std::string &path)
 {
   const uint64_t n = positions(layer, path);
   const uint64_t n_tri = indices(get(layer, "indices"), n, 3, path + "/indices");
-  if (const Json *normals = get(layer, "normals")) {
+  if (const Json *normals = get(layer, "normals"); present(normals)) {
     expect(normals, {ComponentType::F32}, 3, double(n), path + "/normals");
   }
-  const Json *attrs = attributes(layer, path, n, n_tri);
-  color(get(*appearance(layer, path), "color"), attrs, path + "/appearance/color");
+  const Json *attrs = attributes(layer, path, double(n), double(n_tri));
+  color(get(appearance(layer, path), "color"), attrs, path + "/appearance/color");
+  static const Json no_lods = Json::array();
   const Json *lods = get(layer, "lods");
-  if (!lods) {
-    return;
-  }
-  if (lods->is_array()) {
-    for (size_t j = 0; j < lods->size(); j++) {
-      const Json &lod = (*lods)[j];
-      const std::string lpath = path + "/lods/" + std::to_string(j);
-      if (!lod.is_object()) {
-        malformed("lod is not an object");
-      }
-      const uint64_t count = expect(get(lod, "positions"), {ComponentType::F32}, 3, std::nullopt, lpath + "/positions").count;
-      const uint64_t cells = indices(get(lod, "indices"), count, 3, lpath + "/indices");
-      attributes(lod, lpath, count, cells);
+  const Json &lod_list = list(present(lods) ? lods : &no_lods, path + "/lods");
+  for (size_t j = 0; j < lod_list.size(); j++) {
+    const Json &lod = lod_list[j];
+    const std::string lpath = path + "/lods/" + std::to_string(j);
+    const uint64_t count = positions(lod, lpath);
+    const uint64_t cells = indices(get(lod, "indices"), count, 3, lpath + "/indices");
+    if (const Json *normals = get(lod, "normals"); present(normals)) {
+      expect(normals, {ComponentType::F32}, 3, double(count), lpath + "/normals");
     }
-  }
-  else if (py_truthy(*lods) || !(lods->is_object() || lods->is_string())) {
-    malformed("lods is not a list"); /* iterating a non-list fails in Python unless it is empty */
+    attributes(lod, lpath, double(count), double(cells));
   }
 }
 
@@ -761,15 +829,17 @@ void PayloadValidator::layer_slice_image(const Json &layer, const std::string &p
   }
   const Json &size = layer["size"];
   if (!size.is_array() || size.size() != 2 || !std::all_of(size.begin(), size.end(), [](const Json &v) {
-        return v.is_number_integer() && v.get<int64_t>() >= 1;
+        return is_safe_integer(v) && v.get<double>() >= 1;
       }))
   {
     fail("size must be [w, h] positive integers", path + "/size");
   }
   const double samples = size[0].get<double>() * size[1].get<double>();
-  const uint64_t count = samples < 1.8e19 ? uint64_t(samples) : std::numeric_limits<uint64_t>::max();
-  const Json *attrs = attributes(layer, path, count, std::nullopt);
-  color(get(*appearance(layer, path), "color"), attrs, path + "/appearance/color");
+  const Json *attrs = attributes(layer, path, samples, std::nullopt);
+  if (attrs->empty()) {
+    fail("slice_image layers need at least one attribute", path + "/attributes");
+  }
+  color(get(appearance(layer, path), "color"), attrs, path + "/appearance/color");
 }
 
 void PayloadValidator::layer_lines(const Json &layer, const std::string &path)
@@ -783,7 +853,7 @@ void PayloadValidator::layer_lines(const Json &layer, const std::string &path)
   else if (mode.is_string() && mode == "polylines") {
     const uint64_t count = indices(get(layer, "indices"), n, 1, path + "/indices");
     const Json *offsets_id = get(layer, "offsets");
-    if (!offsets_id) {
+    if (!present(offsets_id)) {
       fail("polylines need offsets", path);
     }
     const PayloadAccessor &offsets = expect(offsets_id, {ComponentType::U32}, 1, std::nullopt, path + "/offsets");
@@ -795,7 +865,7 @@ void PayloadValidator::layer_lines(const Json &layer, const std::string &path)
         ok = false;
       }
       else if (at(i) - at(i - 1) > 1) {
-        segments += at(i) - at(i - 1) - 1;
+        segments += at(i) - at(i - 1) - 1; /* cell attributes are per segment */
       }
     }
     if (!ok) {
@@ -805,59 +875,66 @@ void PayloadValidator::layer_lines(const Json &layer, const std::string &path)
   else {
     fail("unknown lines mode " + repr(&mode), path + "/mode");
   }
-  const Json *attrs = attributes(layer, path, n, segments);
-  color(get(*appearance(layer, path), "color"), attrs, path + "/appearance/color");
+  const Json *attrs = attributes(layer, path, double(n), double(segments));
+  color(get(appearance(layer, path), "color"), attrs, path + "/appearance/color");
 }
 
 void PayloadValidator::layer_points(const Json &layer, const std::string &path)
 {
   const uint64_t n = positions(layer, path);
-  if (const Json *radii = get(layer, "radii")) {
+  if (const Json *radii = get(layer, "radii"); present(radii)) {
     expect(radii, {ComponentType::F32}, 1, double(n), path + "/radii");
   }
-  const Json *attrs = attributes(layer, path, n, std::nullopt);
-  color(get(*appearance(layer, path), "color"), attrs, path + "/appearance/color");
+  const Json *attrs = attributes(layer, path, double(n), std::nullopt);
+  color(get(appearance(layer, path), "color"), attrs, path + "/appearance/color");
 }
 
 void PayloadValidator::layer_instances(const Json &layer, const std::string &path)
 {
   const uint64_t n = positions(layer, path);
   expect(get(layer, "directions"), {ComponentType::F32}, 3, double(n), path + "/directions");
-  if (const Json *scales = get(layer, "scales")) {
+  if (const Json *scales = get(layer, "scales"); present(scales)) {
     expect(scales, {ComponentType::F32}, 1, double(n), path + "/scales");
   }
-  const Json *shape = member(layer["glyph"], "shape", "glyph");
+  const Json &glyph = object(&layer["glyph"], path + "/glyph", "glyph");
+  const Json *shape = get(glyph, "shape");
   static const char *shapes[] = {"arrow", "cone", "sphere", "line", "cube"};
   if (!shape || !shape->is_string() ||
       std::none_of(std::begin(shapes), std::end(shapes), [&](const char *s) { return *shape == s; }))
   {
     fail("unknown glyph shape " + repr(shape), path + "/glyph/shape");
   }
-  const Json *attrs = attributes(layer, path, n, std::nullopt);
-  const Json *app = appearance(layer, path);
-  color(get(*app, "color"), attrs, path + "/appearance/color");
-  const Json *scale = get(*app, "scale");
-  if (scale && !scale->is_null()) {
-    const Json *by = member(*scale, "by", "scale");
-    if (by && by->is_string() && *by == "attribute" && !attribute_exists(attrs, get(*scale, "attribute"))) {
-      fail("unknown scale attribute " + repr(get(*scale, "attribute")), path + "/appearance/scale");
+  const Json *attrs = attributes(layer, path, double(n), std::nullopt);
+  const Json &app = appearance(layer, path);
+  color(get(app, "color"), attrs, path + "/appearance/color");
+  const Json *scale = get(app, "scale");
+  if (present(scale)) {
+    object(scale, path + "/appearance/scale", "scale");
+    const Json *by = get(*scale, "by");
+    const Json *attribute = get(*scale, "attribute");
+    if (by && by->is_string() && *by == "attribute" && !has_attribute(attrs, attribute)) {
+      fail("unknown scale attribute " + repr(attribute), path + "/appearance/scale");
+    }
+    const Json *factor = get(*scale, "factor");
+    if (present(factor) && !(is_finite_number(*factor) && factor->get<double>() > 0)) {
+      fail("scale factor must be a finite number > 0", path + "/appearance/scale/factor");
     }
   }
 }
 
 namespace {
 
-/* math.prod of a JSON list of numbers (nullopt: not a list of numbers; Python would fail or mismatch). */
-std::optional<double> product(const Json *values)
+bool positive_dimensions(const Json *dims)
 {
-  if (!values || !values->is_array()) {
-    return std::nullopt;
-  }
+  return dims && dims->is_array() && dims->size() == 3 && std::all_of(dims->begin(), dims->end(), [](const Json &v) {
+           return is_safe_integer(v) && v.get<double>() >= 1;
+         });
+}
+
+double product(const Json &dims)
+{
   double result = 1.0;
-  for (const Json &v : *values) {
-    if (!v.is_number()) {
-      return std::nullopt;
-    }
+  for (const Json &v : dims) {
     result *= v.get<double>();
   }
   return result;
@@ -869,10 +946,7 @@ void PayloadValidator::layer_volume(const Json &layer, const std::string &path)
 {
   const Json &grid = layer["grid"];
   const Json *dims = grid.is_object() ? get(grid, "dimensions") : nullptr;
-  if (!dims || !dims->is_array() || dims->size() != 3 || !std::all_of(dims->begin(), dims->end(), [](const Json &v) {
-        return v.is_number_integer() && v.get<int64_t>() >= 1;
-      }))
-  {
+  if (!positive_dimensions(dims)) {
     fail("dimensions must be 3 positive integers", path + "/grid/dimensions");
   }
   vec3(get(grid, "origin"), path + "/grid/origin");
@@ -881,59 +955,61 @@ void PayloadValidator::layer_volume(const Json &layer, const std::string &path)
   if (std::min({spacing[0].get<double>(), spacing[1].get<double>(), spacing[2].get<double>()}) <= 0) {
     fail("spacing must be positive", path + "/grid/spacing");
   }
-  expect(get(layer, "data"),
-         {ComponentType::U8, ComponentType::U16, ComponentType::F32},
-         1,
-         *product(dims),
-         path + "/data");
-  const Json &tf = layer["transfer_function"];
-  const std::string tpath = path + "/transfer_function";
-  if (!tf.is_object()) {
-    fail("transfer_function must be an object", tpath);
+  if (const Json *direction = get(grid, "direction"); present(direction)) {
+    if (!direction->is_array() || direction->size() != 9 ||
+        !std::all_of(direction->begin(), direction->end(), [](const Json &v) { return is_finite_number(v); }))
+    {
+      fail("direction must be 9 finite numbers (row-major 3x3)", path + "/grid/direction");
+    }
   }
-  if (!lookup(colormaps_, get(tf, "colormap"))) {
+  expect(get(layer, "data"), {ComponentType::U8, ComponentType::U16, ComponentType::F32}, 1, product(*dims),
+         path + "/data");
+  interval(get(layer, "value_range"), path + "/value_range");
+  for (const char *key : {"value_scale", "value_offset"}) {
+    if (const Json *value = get(layer, key); present(value) && !is_finite_number(*value)) {
+      fail(std::string(key) + " must be a finite number", path + "/" + key);
+    }
+  }
+  const std::string tpath = path + "/transfer_function";
+  const Json &tf = object(&layer["transfer_function"], tpath, "transfer_function");
+  if (!lookup(colormaps_, get(tf, "colormap"))) { /* continuous LUT, or a categorical palette (values +- 0.499) */
     fail("unknown colormap " + repr(get(tf, "colormap")), tpath + "/colormap");
   }
   interval(get(tf, "range"), tpath + "/range");
   const Json *opacity = get(tf, "opacity");
-  if (!opacity || !opacity->is_array() || opacity->empty()) {
-    fail("opacity must be a non-empty list of [value, alpha]", tpath + "/opacity");
+  if (!opacity || !opacity->is_array() || opacity->size() < 2) {
+    fail("opacity must be a list of at least two [value, alpha] points", tpath + "/opacity");
   }
   for (size_t j = 0; j < opacity->size(); j++) {
     const Json &point = (*opacity)[j];
-    if (!point.is_array() || point.size() != 2 || !is_finite_number(point[0]) || !is_finite_number(point[1]) ||
-        point[1].get<double>() < 0 || point[1].get<double>() > 1)
-    {
+    if (!finite_pair(point) || point[1].get<double>() < 0 || point[1].get<double>() > 1) {
       fail("opacity points are [finite value, alpha in [0, 1]]", tpath + "/opacity/" + std::to_string(j));
     }
   }
   static const Json no_lods = Json::array();
   const Json *lods = get(layer, "lods");
-  const Json &lod_list = list(lods ? lods : &no_lods, path + "/lods");
+  const Json &lod_list = list(present(lods) ? lods : &no_lods, path + "/lods");
   for (size_t j = 0; j < lod_list.size(); j++) {
-    const Json &lod = lod_list[j];
-    const Json *lod_dims = get(lod, "dimensions");
-    std::optional<double> count = (lod_dims && py_truthy(*lod_dims)) ? product(lod_dims) : std::optional<double>(0.0);
-    if (!count) {
-      malformed("lod dimensions are not numbers");
+    const std::string lpath = path + "/lods/" + std::to_string(j);
+    const Json *lod_dims = get(lod_list[j], "dimensions");
+    if (!positive_dimensions(lod_dims)) {
+      fail("dimensions must be 3 positive integers", lpath + "/dimensions");
     }
-    expect(get(lod, "data"),
-           {ComponentType::U8, ComponentType::U16, ComponentType::F32},
-           1,
-           *count,
-           path + "/lods/" + std::to_string(j) + "/data");
+    expect(get(lod_list[j], "data"), {ComponentType::U8, ComponentType::U16, ComponentType::F32}, 1,
+           product(*lod_dims), lpath + "/data");
   }
 }
 
 void PayloadValidator::layer_overlay(const Json &layer, const std::string &path)
 {
   const Json &kind = layer["kind"];
+  if (!kind.is_string()) {
+    fail("kind must be a string", path + "/kind");
+  }
   static const char *kinds[] = {"scalar_bar", "legend", "orientation_legend", "text", "axes_triad"};
-  if (!kind.is_string() || std::none_of(std::begin(kinds), std::end(kinds), [&](const char *k) { return kind == k; })) {
-    if (kind.is_array() || kind.is_object()) {
-      malformed("unhashable overlay kind");
-    }
-    fail("unknown overlay kind " + repr(&kind), path + "/kind");
+  if (std::none_of(std::begin(kinds), std::end(kinds), [&](const char *k) { return kind == k; })) {
+    warn(layer, path, "unknown overlay kind " + repr(&kind) + " (skipped)");
+    return; /* clients skip overlays of unknown kind (spec §1) */
   }
   const Json *colormap_id = get(layer, "colormap");
   const Json *colormap = nullptr;
@@ -944,32 +1020,36 @@ void PayloadValidator::layer_overlay(const Json &layer, const std::string &path)
     }
     colormap = *found;
   }
-  const auto categorical = [](const Json *c) {
-    const Json *flag = get(*c, "categorical");
-    return flag && py_truthy(*flag);
-  };
   if (kind == "scalar_bar") {
-    if (categorical(colormap)) {
+    if (categorical_colormap(colormap_id)) {
       fail("a scalar bar needs a continuous colormap", path + "/colormap");
     }
     interval(get(layer, "range"), path + "/range");
     const Json *count = get(layer, "label_count");
-    if (count && (!count->is_number_integer() || count->get<int64_t>() < 2 || count->get<int64_t>() > 20)) {
+    if (present(count) && (!is_safe_integer(*count) || count->get<double>() < 2 || count->get<double>() > 20)) {
       fail("label_count must be an integer from 2 to 20", path + "/label_count");
     }
     const Json *format = get(layer, "format");
-    if (format && (!format->is_string() || !is_label_format(format->get_ref<const std::string &>()))) {
+    if (present(format) && (!format->is_string() || !is_label_format(format->get_ref<const std::string &>()))) {
       fail("unsupported label format " + repr(format) + " (e.g. '.3g', '.2f', '.1e', '+.0%', 'd')", path + "/format");
     }
   }
-  if (kind == "legend" && !categorical(colormap)) {
+  if (kind == "legend" && !categorical_colormap(colormap_id)) {
     fail("a legend needs a categorical colormap", path + "/colormap");
   }
+  (void)colormap;
   if (kind == "text") {
     const Json *text = get(layer, "text");
     if (!text || !text->is_string()) {
       fail("text overlays need 'text'", path + "/text");
     }
+  }
+  if (const std::vector<std::string> problems = overlay_problems(layer); !problems.empty()) {
+    std::string joined;
+    for (const std::string &problem : problems) {
+      joined += (joined.empty() ? "" : "; ") + problem;
+    }
+    warn(layer, path, "overlay skipped: " + joined);
   }
 }
 
@@ -996,6 +1076,7 @@ void PayloadValidator::run()
     p_.render_origin[i] = m_["render_origin"][i].get<double>();
   }
   p_.length_unit = unit.get<std::string>();
+  p_.warnings.clear();
 
   /* Buffers (hashes computed up front, in parallel when a pool is given; checked in order). */
   const auto digests = hash_blobs(blobs_, pool_);
@@ -1013,7 +1094,7 @@ void PayloadValidator::run()
       fail("in-memory buffers are referenced as 'sha256:<hex>'", path + "/uri");
     }
     const Json *encoding = get(buffer, "encoding");
-    if (encoding && !(encoding->is_string() && *encoding == "raw")) {
+    if (present(encoding) && !(encoding->is_string() && *encoding == "raw")) {
       fail("encoding must be 'raw'", path + "/encoding");
     }
     const std::string &sha = digest->get_ref<const std::string &>();
@@ -1043,9 +1124,6 @@ void PayloadValidator::run()
       fail("unknown buffer " + repr(buffer_id), path + "/buffer");
     }
     const Json *type_name = get(accessor, "type");
-    if (type_name && (type_name->is_array() || type_name->is_object())) {
-      malformed("unhashable accessor type");
-    }
     const auto type = type_name && type_name->is_string() ? parse_component_type(type_name->get_ref<const std::string &>())
                                                           : std::nullopt;
     if (!type) {
@@ -1053,15 +1131,13 @@ void PayloadValidator::run()
     }
     uint64_t values[3];
     const char *keys[3] = {"count", "components", "byteOffset"};
-    const int64_t lows[3] = {0, 1, 0};
+    const double lows[3] = {0, 1, 0};
     for (int k = 0; k < 3; k++) {
       const Json *v = get(accessor, keys[k]);
-      if (!v || !v->is_number_integer() || (!v->is_number_unsigned() && v->get<int64_t>() < lows[k]) ||
-          (v->is_number_unsigned() && v->get<uint64_t>() < uint64_t(lows[k])))
-      {
-        fail(std::string(keys[k]) + " must be an integer >= " + std::to_string(lows[k]), path + "/" + keys[k]);
+      if (!v || !is_safe_integer(*v) || v->get<double>() < lows[k]) {
+        fail(std::string(keys[k]) + " must be an integer >= " + std::to_string(int(lows[k])), path + "/" + keys[k]);
       }
-      values[k] = v->get<uint64_t>();
+      values[k] = uint64_t(v->get<double>());
     }
     const uint64_t count = values[0], components = values[1], offset = values[2];
     if (components > 16) {
@@ -1078,7 +1154,10 @@ void PayloadValidator::run()
       fail("accessor runs past the end of its buffer", path);
     }
     const Json *normalized = get(accessor, "normalized");
-    const bool is_normalized = normalized && py_truthy(*normalized);
+    if (present(normalized) && !normalized->is_boolean()) {
+      fail("normalized must be a boolean", path + "/normalized");
+    }
+    const bool is_normalized = present(normalized) && normalized->get<bool>();
     if (is_normalized && component_is_float(*type)) {
       fail("normalized applies to integer types only", path + "/normalized");
     }
@@ -1093,19 +1172,27 @@ void PayloadValidator::run()
   seen.clear();
   static const Json no_colormaps = Json::array();
   const Json *colormaps_json = get(m_, "colormaps");
-  const Json &colormaps = list(colormaps_json ? colormaps_json : &no_colormaps, "/colormaps");
+  const Json &colormaps = list(present(colormaps_json) ? colormaps_json : &no_colormaps, "/colormaps");
   for (size_t i = 0; i < colormaps.size(); i++) {
     const std::string path = "/colormaps/" + std::to_string(i);
     const Json &colormap = colormaps[i];
     unique_id(colormap, seen, path);
     const Json *categorical = get(colormap, "categorical");
-    if (categorical && py_truthy(*categorical)) {
+    if (present(categorical) && !categorical->is_boolean()) {
+      fail("categorical must be a boolean", path + "/categorical");
+    }
+    std::vector<const char *> colour_keys = {"nan_color", "below_color", "above_color"};
+    if (present(categorical) && categorical->get<bool>()) {
       const Json &entries = list(get(colormap, "entries"), path + "/entries");
       for (size_t j = 0; j < entries.size(); j++) {
         const std::string epath = path + "/entries/" + std::to_string(j);
         const Json *value = get(entries[j], "value");
-        if (!value || !value->is_number_integer()) {
+        if (!value || !is_safe_integer(*value)) {
           fail("category value must be an integer", epath + "/value");
+        }
+        const Json *name = get(entries[j], "name");
+        if (!name || !name->is_string()) {
+          fail("category name must be a string", epath + "/name");
         }
         rgb(get(entries[j], "color"), epath + "/color");
       }
@@ -1113,17 +1200,23 @@ void PayloadValidator::run()
       std::set<int64_t> unique;
       bool duplicate = false;
       for (const Json &entry : entries) {
-        duplicate |= !unique.insert(entry["value"].get<int64_t>()).second;
+        duplicate |= !unique.insert(int64_t(entry["value"].get<double>())).second;
       }
       if (duplicate) {
         fail("category values must be unique", path + "/entries");
       }
+      colour_keys = {"unknown_color"};
     }
     else {
       expect(get(colormap, "lut"), {ComponentType::U8}, 4, 256.0, path + "/lut");
       const Json *size = get(colormap, "size");
-      if (!size || !size->is_number() || size->get<double>() != 256.0) {
+      if (!size || !is_safe_integer(*size) || size->get<double>() != 256.0) {
         fail("size must be 256", path + "/size");
+      }
+    }
+    for (const char *key : colour_keys) {
+      if (const Json *colour = get(colormap, key); present(colour)) {
+        rgb(colour, path + "/" + key);
       }
     }
     const std::string &id = colormap["id"].get_ref<const std::string &>();
@@ -1151,10 +1244,17 @@ void PayloadValidator::run()
     const std::string &id = layer["id"].get_ref<const std::string &>();
     seen.insert(id);
     p_.layer_index_.emplace(id, i);
+    if (!optional_string(get(layer, "name"))) {
+      fail("name must be a string", path + "/name");
+    }
     const Json *kind = get(layer, "type");
+    if (!kind || !kind->is_string()) {
+      fail("type must be a string", path + "/type");
+    }
     const auto *keys = lookup(required, kind);
     if (!keys) {
-      continue; /* clients skip layers of unknown type */
+      warn(layer, path, "unknown layer type " + repr(kind) + " (skipped)");
+      continue; /* clients skip layers of unknown type (spec §1) */
     }
     const std::string &type = kind->get_ref<const std::string &>();
     for (const char *key : *keys) {
@@ -1162,8 +1262,8 @@ void PayloadValidator::run()
         fail(type + " layer needs '" + key + "'", path);
       }
     }
-    if (layer.contains("origin")) {
-      vec3(get(layer, "origin"), path + "/origin");
+    if (const Json *origin = get(layer, "origin"); present(origin)) {
+      vec3(origin, path + "/origin");
     }
     if (type == "triangles") {
       layer_triangles(layer, path);
@@ -1187,35 +1287,17 @@ void PayloadValidator::run()
       layer_overlay(layer, path);
     }
   }
-  if (const Json *bounds = get(m_, "bounds")) {
+  if (const Json *bounds = get(m_, "bounds"); present(bounds)) {
     if (!bounds->is_array() || bounds->size() != 2) {
       fail("bounds must be [[min], [max]]", "/bounds");
     }
     vec3(&(*bounds)[0], "/bounds/0");
     vec3(&(*bounds)[1], "/bounds/1");
   }
-  if (const Json *view = get(m_, "view")) {
+  if (const Json *view = get(m_, "view"); present(view)) {
     const Json *view_schema = view->is_object() ? get(*view, "schema") : nullptr;
     if (!view_schema || *view_schema != "stk.view/1") {
       fail("view must be an stk.view/1 document", "/view");
-    }
-  }
-  /* Stricter than payload.py, after all of its checks so the first error stays Python's: spec §6.6
-   * value_range (physical [min, max]) and grid.direction (row-major 3x3), which web payload.ts checks. */
-  for (size_t i = 0; i < layers.size(); i++) {
-    const Json &layer = layers[i];
-    const Json *kind = get(layer, "type");
-    if (!kind || !kind->is_string() || *kind != "volume") {
-      continue;
-    }
-    const std::string path = "/layers/" + std::to_string(i);
-    interval(get(layer, "value_range"), path + "/value_range");
-    if (const Json *direction = get(layer["grid"], "direction"); direction && !direction->is_null()) {
-      if (!direction->is_array() || direction->size() != 9 ||
-          !std::all_of(direction->begin(), direction->end(), [](const Json &v) { return is_finite_number(v); }))
-      {
-        fail("direction must be 9 finite numbers (row-major 3x3)", path + "/grid/direction");
-      }
     }
   }
 }
@@ -1300,6 +1382,9 @@ std::pair<Json, BlobMap> unpack(const core::SharedBytes &data, core::ThreadPool 
   const std::string_view text(reinterpret_cast<const char *>(chunks[0].data.data()), chunks[0].data.size());
   if (!core::utf8::is_valid(text)) {
     throw PayloadError(".stkp manifest is not valid JSON: not UTF-8");
+  }
+  if (text.starts_with("\xEF\xBB\xBF")) {
+    throw PayloadError(".stkp manifest is not valid JSON: a byte-order mark"); /* as Python's json.loads */
   }
   Json manifest;
   try {
@@ -1394,6 +1479,9 @@ Payload read_directory(const std::filesystem::path &path, const DecodeOptions &o
     const std::string text = core::read_text_file(manifest_path);
     if (!core::utf8::is_valid(text)) {
       throw PayloadError(core::path_to_utf8(manifest_path.filename()) + " is not valid JSON: not UTF-8");
+    }
+    if (std::string_view(text).starts_with("\xEF\xBB\xBF")) {
+      throw PayloadError(core::path_to_utf8(manifest_path.filename()) + " is not valid JSON: a byte-order mark");
     }
     manifest = parse_json(text);
   }

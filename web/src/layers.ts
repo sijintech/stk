@@ -173,7 +173,8 @@ function buildLines(p: LoadedPayload, layer: LayerSpec, trash: Trash, warnings: 
   if (layer.mode === 'polylines') {
     const offsets = p.accessor(layer.offsets);
     const lines = offsets.length - 1;
-    const perSegment = association === 'cell' && app.color?.by === 'attribute' && attr && p.accessorSpec(attr.accessor).count !== lines;
+    // Cell attributes of polylines are per segment (spec §6.3): draw each segment as its own cell.
+    const perSegment = association === 'cell' && app.color?.by === 'attribute' && !!attr;
     const out: number[] = [];
     for (let l = 0; l < lines; l++) {
       const a = offsets[l], b = offsets[l + 1];
@@ -237,7 +238,8 @@ function buildPoints(p: LoadedPayload, layer: LayerSpec, trash: Trash, warnings:
 function glyphSource(trash: Trash, shape: string, resolution: number, center: boolean): any {
   let source: any;
   if (shape === 'cone') source = vtkConeSource.newInstance({height: 1, radius: 0.25, resolution, direction: [1, 0, 0]});
-  else if (shape === 'sphere') source = vtkSphereSource.newInstance({radius: 0.5, thetaResolution: resolution, phiResolution: Math.max(4, resolution)});
+  // `resolution` longitudes and max(3, ⌊resolution / 2⌋ + 1) latitude rows (spec §6.5, as offscreen and desktop).
+  else if (shape === 'sphere') source = vtkSphereSource.newInstance({radius: 0.5, thetaResolution: resolution, phiResolution: Math.max(3, Math.floor(resolution / 2) + 1)});
   else if (shape === 'cube') source = vtkCubeSource.newInstance({xLength: 1, yLength: 1, zLength: 1});
   else if (shape === 'line') source = vtkLineSource.newInstance({point1: [0, 0, 0], point2: [1, 0, 0]});
   else source = vtkArrowSource.newInstance({tipResolution: resolution, shaftResolution: resolution, tipRadius: 0.1, tipLength: 0.35, shaftRadius: 0.03});
@@ -271,16 +273,18 @@ function buildInstances(p: LoadedPayload, layer: LayerSpec, trash: Trash, warnin
   }
   const color = layerColors(p, layer, app.color, n, 'point', {values: dir, components: 3});
   warnings.push(...color.warnings);
-  // Instances with a zero (or non-finite) direction are not drawn (spec §6.5).
-  const keep: number[] = [];
-  for (let i = 0; i < n; i++) { const m = Math.hypot(dir[i * 3], dir[i * 3 + 1], dir[i * 3 + 2]); if (m > 0 && Number.isFinite(m)) keep.push(i); }
-  const kPos = new Float32Array(keep.length * 3), kDir = new Float32Array(keep.length * 3), kScale = new Float32Array(keep.length);
+  // Instances with a zero or non-finite direction, or a non-finite scale, are not drawn (spec §6.5); |s| is drawn.
+  const keep: number[] = [], sizes: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const magnitude = Math.hypot(dir[i * 3], dir[i * 3 + 1], dir[i * 3 + 2]);
+    const s = scales ? scales[i] : scale.by === 'magnitude' ? factor * magnitude : scale.by === 'attribute' && attribute ? factor * attribute[i] : factor;
+    if (magnitude > 0 && Number.isFinite(magnitude) && Number.isFinite(s)) { keep.push(i); sizes.push(Math.abs(s)); }
+  }
+  const kPos = new Float32Array(keep.length * 3), kDir = new Float32Array(keep.length * 3), kScale = Float32Array.from(sizes);
   const kColor = color.colors ? new Uint8Array(keep.length * 4) : null;
   keep.forEach((i, j) => {
     kPos.set(pos.subarray(i * 3, i * 3 + 3), j * 3);
     kDir.set(dir.subarray(i * 3, i * 3 + 3), j * 3);
-    const magnitude = Math.hypot(dir[i * 3], dir[i * 3 + 1], dir[i * 3 + 2]);
-    kScale[j] = scales ? scales[i] : scale.by === 'magnitude' ? factor * magnitude : scale.by === 'attribute' && attribute ? factor * attribute[i] : factor;
     if (kColor && color.colors) kColor.set(color.colors.subarray(i * 4, i * 4 + 4), j * 4);
   });
   const poly = trash.add(vtkPolyData.newInstance()) as any;

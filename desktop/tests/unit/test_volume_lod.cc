@@ -30,8 +30,19 @@ TEST(VolumeParity, OpacityFunctionsMatchPython)
     for (const Json &p : c["points"]) {
       points.push_back({p[0].get<double>(), p[1].get<double>()});
     }
-    /* colormaps.opacity_at sorts (value, alpha) pairs; the renderers (VTK/vtk.js AddPoint) keep the last
-     * point of a duplicated value instead, as volume_transfer() does. */
+    /* A duplicated value keeps its last point (spec §6.6: VTK/vtk.js AddPoint, colormaps.opacity_at and
+     * volume_transfer() alike). */
+    std::vector<std::array<double, 2>> last;
+    for (const auto &p : points) {
+      const auto same = std::find_if(last.begin(), last.end(), [&](const auto &q) { return q[0] == p[0]; });
+      if (same != last.end()) {
+        (*same)[1] = p[1];
+      }
+      else {
+        last.push_back(p);
+      }
+    }
+    points = last;
     std::sort(points.begin(), points.end());
     EXPECT_DOUBLE_EQ(evaluate_opacity(points, c["v"].get<double>()), c["alpha"].get<double>()) << c.dump();
   }
