@@ -427,6 +427,8 @@ def hello(self, params, context):
     sys.stdout.write("stray sys.stdout write\n")
     os.write(1, b"raw write to file descriptor 1\n")
     subprocess.run([sys.executable, "-c", "print('child process output')"], check=True)
+    # a child process must not see (or steal) protocol input: its stdin is the null device
+    subprocess.run([sys.executable, "-c", "import sys; assert sys.stdin.buffer.read() == b''"], check=True)
     logging.getLogger("noisy").warning("a warning through logging")
     return original(self, params, context)
 server.Bridge.hello = hello

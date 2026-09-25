@@ -3,7 +3,9 @@
 stdout carries only protocol lines: before anything else runs, the protocol stream is moved to a
 private duplicate of file descriptor 1, and descriptor 1 itself (plus ``sys.stdout`` and logging)
 is pointed at stderr, so stray ``print`` calls, library output and child processes can never
-corrupt the NDJSON stream. The process exits when stdin reaches EOF (or on ``shutdown``).
+corrupt the NDJSON stream. Likewise requests are read from a private duplicate of descriptor 0,
+which is pointed at the null device, so child processes never see the protocol input. The process
+exits when stdin reaches EOF (or on ``shutdown``).
 """
 import argparse
 import logging
@@ -31,6 +33,30 @@ def _protocol_stdout():
     return os.fdopen(fd, "wb", buffering=0)
 
 
+def _protocol_stdin():
+    """A binary reader on a duplicate of fd 0; fd 0 and sys.stdin then read from the null device.
+
+    Child processes must not inherit the protocol pipe: they could consume requests, and on Windows
+    a child touching a synchronous pipe that the bridge is blocked reading hangs at startup.
+    """
+    fd = os.dup(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.setmode(fd, os.O_BINARY)
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)
+    os.close(null)
+    if os.name == "nt":
+        try:
+            import ctypes
+            import msvcrt
+            ctypes.windll.kernel32.SetStdHandle(-10, msvcrt.get_osfhandle(0))  # STD_INPUT_HANDLE
+        except (OSError, AttributeError, ImportError):
+            pass
+    sys.stdin = open(os.devnull, encoding="utf-8")
+    return os.fdopen(fd, "rb")
+
+
 def _exit():
     for stream in (sys.stderr, sys.__stderr__):
         try:
@@ -51,13 +77,14 @@ def main(argv=None):
                         help="Validate every outgoing message against the protocol schema")
     args = parser.parse_args(argv)
     writer = _protocol_stdout()
+    reader = _protocol_stdin()
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING,
                         format="stk-desktop-bridge %(levelname)s %(name)s: %(message)s")
     from .server import Bridge
     bridge = Bridge(args.state_dir, args.cache_dir, writer=writer, strict=args.strict,
                     on_exit=_exit)
     try:
-        bridge.serve(sys.stdin.buffer)
+        bridge.serve(reader)
     except KeyboardInterrupt:
         bridge.shutdown()
     try:
