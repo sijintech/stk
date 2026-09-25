@@ -40,6 +40,5 @@ foreach(_t stk_app_sample stk-desktop)
     target_compile_options(${_t} PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
   endif()
 endforeach()
-# Windows: console subsystem for now so --help / --headless print; packaging (WP12) decides.
-
-install(TARGETS stk-desktop RUNTIME DESTINATION bin)
+# Windows: console subsystem for now so --help / --headless print; Windows packaging is M-D2.
+# install(): packaging/packaging.cmake.

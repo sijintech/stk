@@ -50,6 +50,6 @@ endforeach()
 add_custom_target(stk_gfx_datafiles DEPENDS ${_staged})
 add_dependencies(stk_gfx stk_gfx_datafiles)
 
-install(DIRECTORY "${STK_BLENDER_DATAFILES}/fonts" DESTINATION share/stk-desktop/datafiles)
-# Upstream license texts (fonts: OFL-1.1 / Bitstream-Vera; engine: GPL-2.0-or-later).
-install(DIRECTORY "${STK_BLENDER_DATAFILES}/../license" DESTINATION share/stk-desktop)
+install(DIRECTORY "${STK_BLENDER_DATAFILES}/fonts" DESTINATION "${STK_INSTALL_DATADIR}/datafiles")
+# Upstream license texts (fonts: OFL-1.1 / Bitstream-Vera; Blender: GPL, bundled libraries).
+install(DIRECTORY "${STK_BLENDER_DATAFILES}/../license/" DESTINATION "${STK_INSTALL_DOCDIR}/blender")

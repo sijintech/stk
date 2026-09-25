@@ -29,6 +29,35 @@ option(STK_DESKTOP_BUILD_SPIKE "Build the Phase 0 GPU extraction spike" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Install layout and packaging (packaging/packaging.cmake; desktop/README.md "Packaging"). Set
+# before the targets exist: CMAKE_INSTALL_RPATH is read when a target is created.
+option(STK_DESKTOP_RELOCATABLE
+  "Package builds: compile no source-tree fallbacks (fonts, catalogs, the suan package) into the binaries" OFF)
+if(STK_DESKTOP_RELOCATABLE)
+  foreach(_opt STK_GFX_SOURCE_DATAFILES_FALLBACK STK_APP_SOURCE_I18N_FALLBACK STK_DESKTOP_SOURCE_PYTHON_FALLBACK)
+    set(${_opt} OFF CACHE BOOL "Forced off by STK_DESKTOP_RELOCATABLE" FORCE)
+  endforeach()
+endif()
+if(APPLE)
+  # STK.app: the executables in Contents/MacOS, data in Contents/Resources (the exe-relative
+  # lookups of stk_gfx and stk_app try ../Resources/datafiles and ../Resources/i18n).
+  set(STK_INSTALL_BINDIR "STK.app/Contents/MacOS")
+  set(STK_INSTALL_DATADIR "STK.app/Contents/Resources")
+  set(STK_INSTALL_DOCDIR "STK.app/Contents/Resources/licenses")
+  # No install RPATH: the vcpkg dependencies are static, nothing is bundled (and rewriting load
+  # commands would invalidate the linker's ad-hoc signature).
+  set(STK_INSTALL_LIBDIR "STK.app/Contents/Frameworks")
+else()
+  set(STK_INSTALL_BINDIR "bin")
+  set(STK_INSTALL_DATADIR "share/stk-desktop")
+  set(STK_INSTALL_DOCDIR "share/doc/stk-desktop")
+  set(STK_INSTALL_LIBDIR "lib/stk-desktop")
+  if(UNIX)
+    # Bundled non-system libraries (packaging/bundle_linux_libs.py) sit in lib/stk-desktop.
+    set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib/stk-desktop")
+  endif()
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sysroot/stk-sysroot.cmake")
   if(STK_SYSROOT_FOUND)
@@ -73,4 +102,9 @@ endif()
 # viewer.cmake WP10, jobs.cmake WP9).
 if(TARGET stk_app AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/app/CMakeLists.txt")
   add_subdirectory(tests/app)
+endif()
+
+# install() of the executables, licences and bundle metadata; CPack (TGZ on Linux, ZIP on macOS).
+if(TARGET stk-desktop)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/packaging/packaging.cmake")
 endif()

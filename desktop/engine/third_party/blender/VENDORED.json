@@ -6,7 +6,12 @@
   "source_archive": "https://download.blender.org/source/blender-5.2.1.tar.xz",
   "source_sha256": "14ca60236b029f575c2a8b6042554c956736206adef5ecb396445a394c0c9213"
  },
- "patches": [],
+ "patches": [
+  {
+   "file": "0001-vk-shader-compiler-optional-max-id-bound.patch",
+   "sha256": "d23e12be408be79ac32442f6cec3e1532365c56e2d96e7efa8eaf704abed6bbf"
+  }
+ ],
  "shims_used": [
   "IMB_colormanagement.hh",
   "IMB_imbuf.hh",
@@ -1256,7 +1261,7 @@
   "source/blender/gpu/vulkan/vk_samplers.hh": "4af25c760676fa46507cd3a4defda775de058f34730244be09bb36b9c99ebc3c",
   "source/blender/gpu/vulkan/vk_shader.cc": "c793274db5720e693f58643fb50caab7ef17d74d6b9e90fbcd02233cff7b3852",
   "source/blender/gpu/vulkan/vk_shader.hh": "6a3d42427c3a5e14bb271b152fb68fb482313ae8afda2de8ca603da3939ce2ef",
-  "source/blender/gpu/vulkan/vk_shader_compiler.cc": "00a9903b7f1722a451e21060d3ef71ec52756325ab83e8c9a9cf217449a91ad6",
+  "source/blender/gpu/vulkan/vk_shader_compiler.cc": "8d2dbbd7af4549814347d4e191255b3de2827fe8571f69d7bdf588f902fd8526",
   "source/blender/gpu/vulkan/vk_shader_compiler.hh": "76d891bb80ead5a1c3e199a68b713cd55cfdb22ae940b76f4100114ab8d963fa",
   "source/blender/gpu/vulkan/vk_shader_interface.cc": "fc14ac5f62ebd87a0b4f778207a9164637822d130ed2f4a5fb23dc7fcb9af81f",
   "source/blender/gpu/vulkan/vk_shader_interface.hh": "0d9f4eb4009dc48763d413c646316412e4f05423028ce50ed4d4186302e58a3a",

@@ -689,8 +689,8 @@ int run_headless(const Args &a, const stk::gfx::Backend backend)
       return kFailure;
     }
     if (a.verbose) {
-      printf("backend: %s | %s\nfonts: %s\n", gpu->backend_name(), gpu->device_info().c_str(),
-             gpu->fonts().fonts_dir.c_str());
+      printf("backend: %s | %s\nfonts: %s\ni18n: %s\n", gpu->backend_name(), gpu->device_info().c_str(),
+             gpu->fonts().fonts_dir.c_str(), stk::app::locate_i18n_dir(a.i18n_dir).c_str());
     }
     gfx::set_ui_scale(a.scale);
     rc = a.sample     ? run_sample_headless(a, *gpu, w, h) :

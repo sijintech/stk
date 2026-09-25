@@ -235,7 +235,9 @@ static bool compile_ex(shaderc::Compiler &compiler,
    *
    * https://registry.khronos.org/SPIR-V/specs/1.0/SPIRV.html#_a_id_limits_a_universal_limits
    */
+#ifndef STK_SHADERC_NO_MAX_ID_BOUND /* STK: shaderc < 2024.1 (Ubuntu 24.04) has no SetMaxIdBound. */
   options.SetMaxIdBound(0xffffff);
+#endif
 
   /* Should always be called after setting the optimization level. Setting optimization level
    * resets all previous passes. */
