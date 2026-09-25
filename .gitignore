@@ -28,3 +28,6 @@ build/
 /web/test-results/
 .env.local
 .env
+
+# desktop engine build trees
+/desktop/build*/
