@@ -16,13 +16,16 @@ Python packages stay MIT.
 | `engine/lib/stk_gfx` | GPU bootstrap: process runtime (guardedalloc leak detection), backend selection, main GPU context, font stack, UI scale, offscreen render to PNG. |
 | `engine/lib/stk_wm` | GHOST glue: window manager, windows, on-demand event loop, events (keys, mouse, wheel, IME preedit, drag and drop), DPI, clipboard, cursors; screen / area / region layout; `WindowManager::post` / `executor()` (thread-safe work for the main loop, wakes an idle wait). |
 | `engine/lib/stk_bridge` | Client of the Python bridge (`python -m suan.desktop_bridge --stdio`, `docs/specs/stk-desktop-bridge-v1.md`): spawn (posix_spawn + process group; CreateProcessW + job object), strict NDJSON framing, futures with timeout / cancel, typed wrappers, RAII subscriptions, restart with replay, stderr ring for the "Bridge log". CPU only. |
+| `engine/lib/stk_viewer_gpu` | Payload-v2 viewer on the GPU module: lit LUT-coloured triangles, slices, instanced glyphs, lines, points and sphere impostors, ray-marched volumes; overlays through BLF (scalar bar, legend, orientation sphere, triad, text); GPU id-pass picking refined in float64; tiled PNG export x1-x8; GPU budget, LOD and timestep prefetch. |
 | `engine/lib/stk_ui` | Blender-style UI toolkit. `stk_ui_core` (no GPU/GHOST headers): blocks rebuilt per frame, layouts in UI units, widgets bound by getter/setter closures, Blender dark theme, CJK line breaking, text editing with IME preedit, i18n catalogs, JSON Schema forms, draw lists. `stk_ui_gpu`: painter on the GPU module's widget shader + BLF. Also adds `tests/ui` and `tools/widget_gallery`. |
 | `app/` | `stk-desktop` (GUI and `--headless` export) and the WP1 sample screen. `app/i18n/`: `zh_CN.json` (default) / `en.json` message catalogs and `check_i18n.py` (fails on missing keys). |
 | `tests/ui` | stk_ui tests (label `ui`): events, text/IME, numbers, forms against the catalog and presets, layout goldens (en/zh at 1x/1.5x/2x; `STK_UPDATE_GOLDENS=1` rewrites them), i18n checker. |
+| `tools/stk_render/` | `stk-render --payload <dir\|manifest.json\|.stkp> --export out.png [--size WxH] [--scale N] [--camera preset] [--pick x,y] [--bench N]`: headless payload renderer. |
 | `tools/widget_gallery/` | `widget_gallery`: every widget rendered headless (`--headless --export out.png --lang zh\|en --scale S`, label `gpu` goldens) or in a window for the manual IME matrix. |
 | `tests/unit` | gtest suites of the CPU libraries (label `unit`). |
 | `tests/wm` | Engine tests: headless goldens and CJK crispness (label `gpu`), CLI and leak self-test (`wm`), live windows on Xvfb / weston (`window`). |
 | `tests/bridge` | stk_bridge tests (label `bridge`): protocol units, `ChildProcess`, the client against a scripted fake bridge and against the real Python bridge, and `WindowManager::post` under Xvfb / weston. |
+| `tests/viewer` | stk_viewer_gpu tests: render goldens on Vulkan and GL, exact categorical colours, tiled vs single-pass export, picking accuracy at `render_origin` ~1e6, VTK offscreen cross-check (mask IoU), budget/LOD/prefetch, 1M-triangle perf smoke (`STK_VIEWER_PERF_BUDGET_MS`). Fixtures: `fixtures/make_fixtures.py [--vtk]`. |
 | `spike/` | Phase 0 spike `stk-gpu-spike` and its golden image. |
 
 ## Build (Linux)
