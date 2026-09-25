@@ -1,6 +1,6 @@
 """Only registered exact command templates can bypass review."""
 import re
-from suan.runtime.models import TaskSpec, relative_path
+from suan.runtime.models import TaskSpec, layout, relative_path
 
 KINDS = {"workspace.create", "task.submit", "task.cancel", "task.logs", "task.artifacts",
          "file.read", "view.build", "view.probe"}
@@ -33,10 +33,16 @@ def validate_action(body, templates):
     spec = TaskSpec(**p.get("spec", {})).to_dict()
     template = templates.get(p.get("template"))
     r = spec["resources"]
-    high = (r.get("cpus", 1) > 8 or r.get("nodes", 1) > 1 or r.get("gpus", 0) > 0
-            or r.get("memory_mb", 0) > 16384 or r.get("walltime_seconds", 0) > 3600)
+    shape = layout(r)
+    # MPI layouts count ranks x threads; legacy layouts count cpus (ranks is 1).
+    cores = shape["ranks"] * shape["threads_per_rank"]
+    # A cluster job without a time limit runs to the partition default, which may be unlimited.
+    high = (cores > 8 or r.get("nodes", 1) > 1 or r.get("gpus", 0) > 0
+            or r.get("memory_mb", 0) > 16384 or r.get("walltime_seconds", 0) > 3600
+            or (spec["backend"] != "local" and "walltime_seconds" not in r))
     if high:
         return "资源请求超过自动执行额度，请检查 CPU、内存、时长与 GPU。"
-    if not template or spec["argv"] != template["argv"] or spec["outputs"] != template["outputs"] or spec["env"]:
+    # Only an exact template run bypasses review: every field but the workspace and name must match.
+    if not template or TaskSpec(**{**template, "workspace_id": spec["workspace_id"], "name": spec["name"]}).to_dict() != spec:
         return "新命令或模板变更：请检查完整参数后批准执行。"
     return ""

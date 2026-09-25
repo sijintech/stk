@@ -8,7 +8,8 @@ HTTP. Submitted computations outlive the MCP client connection.
 
 ## Install and connect
 
-From the repository root:
+The runtime runs on Linux only. The local steps below apply only when the runtime
+and the MCP adapter share one Linux host. From the repository root:
 
 ```bash
 python -m pip install '.[server,science,mcp]'
@@ -18,10 +19,15 @@ python -m suan.mcp
 ```
 
 Configure your MCP client to launch the installed environment's absolute Python
-path with arguments `["-m", "suan.mcp"]`. Set `STK_STATE_DIR` to the local runtime
-state directory. For a remote runtime, establish an SSH tunnel and set
+path with arguments `["-m", "suan.mcp"]`. On that Linux host, set `STK_STATE_DIR`
+to the local runtime state directory. For a remote runtime, establish an SSH tunnel and set
 `STK_RUNTIME_URL` to its local forwarded endpoint and `STK_RUNTIME_TOKEN` to the
 server token. Keep the token in private user configuration.
+
+Windows and macOS are clients only: they must use the remote setup above to reach a
+runtime on a Linux server, and `suan server init/start` exits there with a
+Linux-only message. See the remote connection section (远程连接) of repository
+`docs/runtime.md` for the SSH tunnel and token.
 
 MCP does not serve HTTP on port 8000. The separate runtime defaults to loopback
 port 8765 and authenticates every API request with a bearer token.

@@ -112,7 +112,10 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None)
     async def revoke(device_id: str):
         store.revoke(device_id)
         if device_id in connections:
-            await connections[device_id].close(code=1008)
+            try:
+                await connections[device_id].close(code=1008)
+            except Exception:  # the socket may already be gone
+                pass
         return {"revoked": device_id}
 
     @app.get("/api/v1/templates", dependencies=[Depends(client)])
@@ -233,9 +236,13 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None)
             return
         node_id = who["id"]
         await ws.accept()
-        if node_id in connections:
-            await connections[node_id].close(code=1012)
-        connections[node_id] = ws
+        # Register first: closing a replaced socket that is already gone must not end this one.
+        previous, connections[node_id] = connections.get(node_id), ws
+        if previous is not None:
+            try:
+                await previous.close(code=1012)
+            except Exception:
+                pass
 
         async def dispatch():
             sent = set()
@@ -262,12 +269,13 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None)
             pass
         finally:
             sender.cancel()
-            await asyncio.gather(sender, return_exceptions=True)
+            # Deregister before any await, so a cancelled handler cannot leave a stale socket.
             if connections.get(node_id) is ws:
                 connections.pop(node_id)
                 with store.db() as db:
                     # Keep the last known task snapshot and its timestamp.
                     store.event(db, "devices.changed", {"device_id": node_id})
+            await asyncio.wait([sender])
 
     if web_dir and Path(web_dir).is_dir():
         app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")

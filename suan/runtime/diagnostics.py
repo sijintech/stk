@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -13,9 +14,12 @@ import time
 import psutil
 
 from . import API_VERSION
+from .backends import validate_scheduler_profile
 from .client import RuntimeClient
 from .common import alive, atomic_json, instance_lock, load_config, now, read_json
 from .models import BACKENDS
+
+SCHEDULER_NAME = re.compile(r"[A-Za-z0-9_.@/-]+")
 
 
 def check(check_id, status, message, **details):
@@ -65,7 +69,7 @@ def connection_checks(client):
     ]
 
 
-def validate_config(config, state):
+def validate_config(config, state, kind=None):
     if not isinstance(config, dict):
         raise ValueError("config.json must contain an object")
     for key in ("state_dir", "workspace_root", "python"):
@@ -100,6 +104,8 @@ def validate_config(config, state):
             or (key == "poll_interval" and value == 0)
         ):
             raise ValueError(f"Invalid {key}")
+    profile = config.get("scheduler")
+    validate_scheduler_profile({} if profile is None else profile, kind)
 
 
 def directory_check(check_id, path):
@@ -260,11 +266,204 @@ def python_check(config, science, timeout):
         )
 
 
-def diagnose_server(state_dir, backend="local", science=False, timeout=5):
+def probe(argv, timeout):
+    env = os.environ.copy()
+    env.update(LC_ALL="C")
+    return subprocess.run(
+        argv,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        # Site tools and preambles may print non-UTF-8 text, such as GBK.
+        errors="replace",
+        timeout=timeout,
+        env=env,
+    )
+
+
+def excerpt(result):
+    return result.stderr.strip()[:500] or f"exit code {result.returncode}"
+
+
+def partition_check(partition, result):
+    if result.returncode:
+        return check("slurm_partition", "fail", "sinfo failed: " + excerpt(result))
+    rows = [line.strip().split("|") for line in result.stdout.splitlines()]
+    # sinfo marks the default partition with a trailing '*'.
+    rows = [r for r in rows if len(r) == 6 and r[0].rstrip("*") == partition]
+    up = [r for r in rows if r[1] == "up"]
+    if not up:
+        return check(
+            "slurm_partition",
+            "fail",
+            f"Partition {partition} is {rows[0][1]}, not up."
+            if rows
+            else f"Partition {partition} was not found by sinfo.",
+        )
+
+    # Nodes of different shapes print separate rows. Report the smallest, so a
+    # layout that fits these values fits any node of the partition.
+    def smallest(column):
+        values = [r[column].rstrip("+") for r in up]
+        return min((int(v) for v in values if v.isdigit()), default=None)
+
+    return check(
+        "slurm_partition",
+        "pass",
+        f"Partition {partition} is up.",
+        time_limit=up[0][2],
+        nodes=sum(int(r[3]) for r in up if r[3].isdigit()),
+        cpus_per_node=smallest(4),
+        memory_mb=smallest(5),
+    )
+
+
+def slurm_checks(site, probe_preamble, timeout):
+    """Probe a Slurm site without submitting: sbatch only runs with --version or
+    --test-only, and the preamble runs on this host only when requested."""
+    checks = []
+
+    def run(check_id, argv):
+        try:
+            return probe(argv, timeout)
+        except subprocess.TimeoutExpired:
+            message = f"{check_id} timed out after {timeout:g} s."
+        except OSError:
+            message = f"{check_id} unavailable: cannot run {argv[0]}."
+        checks.append(check(check_id, "fail", message))
+        return None
+
+    result = run("slurm_version", ["sbatch", "--version"])
+    if result is not None:
+        version = result.stdout.strip()
+        checks.append(
+            check("slurm_version", "pass", "Slurm client: " + version, version=version)
+            if result.returncode == 0 and version
+            else check(
+                "slurm_version", "fail", "sbatch --version failed: " + excerpt(result)
+            )
+        )
+
+    partition = site["queue"]
+    if not partition:
+        checks.append(
+            check(
+                "slurm_partition",
+                "warn",
+                "No partition: pass --partition or set scheduler.queue",
+            )
+        )
+    else:
+        result = run(
+            "slurm_partition",
+            ["sinfo", "-h", "-p", partition, "-o", "%P|%a|%l|%D|%c|%m"],
+        )
+        if result is not None:
+            checks.append(partition_check(partition, result))
+
+    argv = ["sbatch", "--test-only", "--job-name=stk-doctor", "--nodes=1"]
+    argv += ["--ntasks=1", "--time=1"]
+    for key, flag in (
+        ("queue", "--partition"),
+        ("account", "--account"),
+        ("qos", "--qos"),
+    ):
+        if site[key]:
+            argv.append(f"{flag}={site[key]}")
+    result = run("slurm_submit_test", argv + site["submit_args"] + ["--wrap=true"])
+    if result is not None:
+        first_line = (result.stderr.strip().splitlines() or [""])[0]
+        checks.append(
+            check(
+                "slurm_submit_test",
+                "pass",
+                f"sbatch --test-only accepted the request; nothing was submitted. {first_line}".rstrip(),
+            )
+            if result.returncode == 0
+            else check("slurm_submit_test", "fail", excerpt(result))
+        )
+
+    result = run(
+        "slurm_accounting",
+        ["sacct", "-X", "-n", "-P", "-S", "now-1days", "-o", "JobIDRaw"],
+    )
+    if result is not None:
+        checks.append(
+            check("slurm_accounting", "pass", "Slurm accounting history is available.")
+            if result.returncode == 0
+            else check(
+                "slurm_accounting",
+                "warn",
+                "Slurm accounting history unavailable; reconciliation after supervisor restarts is degraded.",
+            )
+        )
+
+    shell, preamble = site["job_shell"], site["preamble"]
+    if not preamble:
+        return checks
+    # job_shell is a '#!' line: the kernel passes everything after the interpreter as one argument.
+    interpreter, *argument = shell.split(None, 1)
+    name = Path(argument[0] if argument and Path(interpreter).name == "env" else interpreter).name
+    if name in {"sh", "dash"} and any(
+        line.lstrip().startswith("source ") for line in preamble
+    ):
+        checks.append(
+            check(
+                "scheduler_preamble",
+                "warn",
+                f"Preamble uses 'source', which {shell} may not support; use '.' or set scheduler.job_shell to /bin/bash.",
+            )
+        )
+    elif not probe_preamble:
+        checks.append(
+            check(
+                "scheduler_preamble",
+                "warn",
+                "Preamble was not run; pass --probe-preamble to dry-run it on this host.",
+            )
+        )
+    else:
+        result = run(
+            "scheduler_preamble",
+            [interpreter, *argument, "-c", "set -e\n" + "\n".join(preamble)],
+        )
+        if result is not None:
+            checks.append(
+                check(
+                    "scheduler_preamble",
+                    "pass",
+                    f"Preamble ran under {shell} on this host; compute nodes may differ.",
+                )
+                if result.returncode == 0
+                else check(
+                    "scheduler_preamble",
+                    "fail",
+                    f"Preamble failed under {shell}: " + excerpt(result),
+                )
+            )
+    return checks
+
+
+def diagnose_server(
+    state_dir,
+    backend="local",
+    science=False,
+    timeout=5,
+    *,
+    partition=None,
+    account=None,
+    qos=None,
+    probe_preamble=False,
+):
     if backend not in BACKENDS:
         raise ValueError("backend must be local, pbs or slurm")
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be positive and finite")
+    for key, value in (("partition", partition), ("account", account), ("qos", qos)):
+        if value is not None and not (
+            isinstance(value, str) and SCHEDULER_NAME.fullmatch(value)
+        ):
+            raise ValueError(f"{key} must match {SCHEDULER_NAME.pattern}")
     state = Path(state_dir).expanduser().resolve()
     report = {
         "schema_version": 1,
@@ -277,7 +476,7 @@ def diagnose_server(state_dir, backend="local", science=False, timeout=5):
     checks = report["checks"]
     try:
         config = load_config(state)
-        validate_config(config, state)
+        validate_config(config, state, None if backend == "local" else backend)
     except (ValueError, OSError) as exc:
         checks.append(check("config", "fail", str(exc)))
         report["ok"] = False
@@ -291,6 +490,26 @@ def diagnose_server(state_dir, backend="local", science=False, timeout=5):
     checks.append(database_check(state, timeout))
     checks.append(python_check(config, science, timeout))
     if backend != "local":
+        profile = config.get("scheduler") or {}
+        # Command-line options override the profile defaults, as task resources do.
+        site = {
+            "queue": partition or profile.get("queue"),
+            "account": account or profile.get("account"),
+            "qos": qos or profile.get("qos"),
+            "job_shell": profile.get("job_shell", "/bin/sh"),
+            "preamble": profile.get("preamble", []),
+            "submit_args": profile.get("submit_args", []),
+        }
+        checks.append(
+            check(
+                "scheduler_profile",
+                "pass",
+                "Scheduler site profile is valid."
+                if profile
+                else "No scheduler site profile; the scheduler's defaults apply.",
+                **site,
+            )
+        )
         commands = (
             ("qsub", "qstat", "qdel")
             if backend == "pbs"
@@ -305,9 +524,14 @@ def diagnose_server(state_dir, backend="local", science=False, timeout=5):
                 if os.name == "nt"
                 else "Missing scheduler commands: " + ", ".join(missing)
                 if missing
+                # The Slurm probes below test connectivity.
+                else "Required scheduler commands are on PATH."
+                if backend == "slurm"
                 else "Required scheduler commands are on PATH; scheduler connectivity has not been tested.",
             )
         )
+        if backend == "slurm" and not missing and os.name != "nt":
+            checks.extend(slurm_checks(site, probe_preamble, timeout))
         checks.append(
             check(
                 "compute_nodes",

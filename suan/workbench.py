@@ -1,4 +1,8 @@
-"""STK customization is a Synorder plugin; this launcher contains no GUI code."""
+"""Optional, deferred Synorder host launcher.
+
+Not a console script of the base package; Synorder users run `python -m suan.workbench`
+(equivalent to `synorder-native --workbench stk.workbench`).
+"""
 import sys
 
 

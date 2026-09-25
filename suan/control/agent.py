@@ -3,12 +3,16 @@ import asyncio
 import base64
 import json
 from pathlib import Path
+import re
 import sys
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from suan.runtime.client import RuntimeClient
 from suan.runtime.common import atomic_json, read_json
 from suan.runtime.models import relative_path
+
+# muFerro writes field frames as <Stem>.<kt:08d>.dat with stems of at most 8 characters.
+MUPRO_FRAME = re.compile(r"(?:^|/)([A-Za-z][A-Za-z0-9_]{0,7})\.(\d{8})\.dat$")
 
 
 def endpoint(url, websocket=False):
@@ -20,6 +24,11 @@ def endpoint(url, websocket=False):
         raise ValueError("Remote control connections require HTTPS/WSS")
     return urlunsplit((("wss" if p.scheme == "https" else "ws") if websocket else p.scheme,
                        p.netloc, "/api/v1/nodes/connect" if websocket else "", "", ""))
+
+
+def frame_metadata(path):
+    match = MUPRO_FRAME.search(path)
+    return {"field": match[1], "timestep": int(match[2])} if match else None
 
 
 class NodeAgent:
@@ -78,6 +87,14 @@ class NodeAgent:
             metadata = p.get("metadata", {})
             if set(metadata) - {"origin", "spacing", "units", "coordinate_units", "field"}:
                 raise ValueError("Unknown scientific metadata")
+            metadata = dict(metadata)
+            # The cached copy is named by content hash, so identity comes from the artifact path.
+            frame = frame_metadata(p["path"])
+            if frame:
+                metadata.setdefault("field", frame["field"])
+                metadata["timestep"] = frame["timestep"]
+                if "coordinate_units" not in metadata and "spacing" not in metadata:
+                    metadata["coordinate_units"] = "grid index"
             grid = load_grid(path, **metadata)
             if kind == "view.probe":
                 result = probe(grid, p["position"])

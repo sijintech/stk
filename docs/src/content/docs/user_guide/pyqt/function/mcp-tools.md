@@ -8,7 +8,8 @@ STK 0.1.0a1 的 MCP 适配器通过 **stdio** 与 AI 客户端通信，再通过
 
 ## 安装和连接
 
-在仓库根目录运行：
+runtime 只在 Linux 运行。以下本机步骤仅适用于 runtime 与 MCP 适配器位于同一台 Linux
+主机的情况，在仓库根目录运行：
 
 ```bash
 python -m pip install '.[server,science,mcp]'
@@ -18,9 +19,13 @@ python -m suan.mcp
 ```
 
 在 MCP 客户端中配置启动命令为所安装环境的 Python 绝对路径，参数为
-`["-m", "suan.mcp"]`，环境变量 `STK_STATE_DIR` 指向本机 runtime 状态目录。
+`["-m", "suan.mcp"]`；Linux 本机使用时，环境变量 `STK_STATE_DIR` 指向本机 runtime 状态目录。
 远程使用时先建立 SSH 隧道，再设置 `STK_RUNTIME_URL` 为本机转发地址，
 `STK_RUNTIME_TOKEN` 为服务器令牌。令牌应置于用户私有配置中。
+
+Windows / macOS 只作客户端，必须按上述远程方式连接 Linux 服务器上的 runtime；在这些系统上
+`suan server init/start` 会提示只支持 Linux 并退出。SSH 隧道与令牌的设置见仓库
+`docs/runtime.md` 的“远程连接”一节。
 
 MCP 不在 8000 端口提供 HTTP 服务。runtime 默认使用回环地址的 8765 端口，
 仅通过带令牌的 API 接受请求。

@@ -40,8 +40,10 @@ def status(state_dir):
     config = load_config(state_dir)
     state = Path(config["state_dir"])
     api = read_json(state / "api.pid")
+    port = api["port"] if api and alive(api) else config["port"]
+    # With port 0 the API picks its port at start, so a stopped API has no address.
     return {"api_running": alive(api), "supervisor_running": alive(read_json(state / "supervisor.pid")),
-            "url": f"http://127.0.0.1:{api['port'] if api and alive(api) else config['port']}"}
+            "url": f"http://127.0.0.1:{port}" if port else None}
 
 
 def stop(state_dir, supervisor=False):

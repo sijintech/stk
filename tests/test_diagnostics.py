@@ -12,6 +12,7 @@ from suan.runtime.cli import connect, server
 from suan.runtime.common import atomic_json, init_config
 
 
+@pytest.mark.server
 def test_uninitialized_doctor_is_machine_readable_and_does_not_initialize(tmp_path):
     state = tmp_path / "missing"
     result = CliRunner().invoke(server, ["--state-dir", str(state), "doctor", "--json"])
@@ -23,6 +24,7 @@ def test_uninitialized_doctor_is_machine_readable_and_does_not_initialize(tmp_pa
     assert not state.exists()
 
 
+@pytest.mark.server
 @pytest.mark.parametrize(
     "patch",
     [
@@ -48,6 +50,7 @@ def test_invalid_configuration_is_reported_without_starting_services(tmp_path, p
     assert not (tmp_path / "runtime.sqlite3").exists()
 
 
+@pytest.mark.server
 @pytest.mark.parametrize("contents", ["{broken", "[]"])
 def test_broken_config_is_a_json_failure(tmp_path, contents):
     (tmp_path / "config.json").write_text(contents)
@@ -58,6 +61,7 @@ def test_broken_config_is_a_json_failure(tmp_path, contents):
     assert json.loads(result.output)["checks"][0]["status"] == "fail"
 
 
+@pytest.mark.server
 def test_network_state_detection_uses_most_specific_mount(tmp_path, monkeypatch):
     mounts = [SimpleNamespace(mountpoint=str(tmp_path), fstype="nfs4")]
     monkeypatch.setattr(diagnostics.psutil, "disk_partitions", lambda **_: mounts)
@@ -67,6 +71,7 @@ def test_network_state_detection_uses_most_specific_mount(tmp_path, monkeypatch)
     assert diagnostics.state_filesystem_check(state)["status"] == "pass"
 
 
+@pytest.mark.server
 def test_directory_probes_are_removed_and_missing_paths_are_not_created(tmp_path):
     assert diagnostics.directory_check("workspace", tmp_path)["status"] == "pass"
     assert list(tmp_path.iterdir()) == []
@@ -75,6 +80,7 @@ def test_directory_probes_are_removed_and_missing_paths_are_not_created(tmp_path
     assert not missing.exists()
 
 
+@pytest.mark.server
 def test_database_checks_do_not_create_or_replace_database(tmp_path):
     assert diagnostics.database_check(tmp_path, 1)["status"] == "warn"
     path = tmp_path / "runtime.sqlite3"
@@ -84,6 +90,7 @@ def test_database_checks_do_not_create_or_replace_database(tmp_path):
     assert path.read_bytes() == b"not a database"
 
 
+@pytest.mark.server
 def test_configured_worker_interpreter_failure_and_timeout(tmp_path, monkeypatch):
     config = init_config(tmp_path)
     config["python"] = str(tmp_path / "missing-python")
@@ -100,6 +107,7 @@ def test_configured_worker_interpreter_failure_and_timeout(tmp_path, monkeypatch
     assert "timed out" in result["message"]
 
 
+@pytest.mark.server
 @pytest.mark.parametrize(
     "backend,commands",
     [

@@ -1,7 +1,10 @@
 # STK 的 Synorder 插件
 
-新工作台使用 **Synorder Blender 宿主 + `synorder-stk` 插件**。
-STK 不再为新功能实现窗口、控件、面板或三维绘制代码；桌面与网页分别消费同一份 `ViewSpec v1`。
+> 状态：暂缓。STK 独立发展，桌面主线为 [STK Blender 原生工作台](../../blender/README.md)；
+> STK 的基础安装、工作台与 Runtime 均不需要本插件或 Synorder。本插件与 `suan-synorder-node` 作为今后的可选集成保留。
+
+本插件是可选集成：在 **Synorder Blender 宿主** 中加载 `synorder-stk` 插件。
+在该集成中，插件不实现窗口、控件、面板或三维绘制代码；桌面与网页分别消费同一份 `ViewSpec v1`。
 独立 Runtime 继续提供 Local / PBS / Slurm，关闭任何 GUI 不影响任务。
 
 ## 安装与启动
@@ -34,10 +37,12 @@ synorder hub serve --workspace /path/to/workspace --origin https://YOUR_HUB
 `suan server status` 为准。桌面安装 Synorder 原生客户端及其定制 Blender 后启动：
 
 ```bash
-suan-workbench --server https://YOUR_HUB --state-dir /path/to/private-client-cache \
+python -m suan.workbench --server https://YOUR_HUB --state-dir /path/to/private-client-cache \
   --blender /path/to/synorder-blender
 # 等价：synorder-native --workbench stk.workbench ...
 ```
+
+`suan-workbench` 现在启动 STK 自有的 Blender 工作台，不再启动 Synorder 宿主。
 
 用网页生成的一次性配对码连接桌面。网页和手机 PWA 在导航中选择“STK 科学工作台”。
 客户端缓存必须是独立目录；不接管旧客户端缓存、不复制旧服务令牌。
@@ -72,7 +77,8 @@ suan-synorder-node --server https://YOUR_HUB --node-id compute-01 \
 - `stk.workbench`：任务列表、参数、标量切片、等值面、向量显示入口；手机减少行数和显示网格预算。
 
 当前内置模板是 `f(x,y,z)=A(x+2y+3z)` 的确定性 I/O 验证，**不是物理求解器**。
-真实专业求解器仍使用 STK 既有工具与 Runtime；新增 GUI 工作流应添加插件 Action/Query/ViewSpec。
+真实专业求解器（如 MuPRO）由 STK Runtime 运行；STK 的新 GUI 工作流在自有 Blender 工作台中开发，
+本插件在恢复 Synorder 集成时再补充对应的 Action/Query/ViewSpec。
 结果文件逐个版本引用；VTI 的单位、坐标、时间步取原始元数据。源文件缺少这些元数据时保持未标注，
 不通过改变标签制造时间序列。首版经 Hub 下载的单个源文件预算为 16 MiB；更大场先在执行节点缩减。
 
@@ -89,8 +95,9 @@ synorder pack enable --workspace /path/to/workspace synorder.stk
 包升级和移除检查正在执行的版本引用。不要用包管理器强删尚有任务的版本。
 既有 Synorder `research` 示例与历史资源保留；新插件使用独立 Action、View 和 Method ID，可并行运行。
 
-旧 `suan-blender`、Qt、STK 控制服务暂作迁移兼容入口；旧数据不会自动导入或重放。
-验证新入口和平台兼容性后再删除旧界面源码。Rust/egui 原型不再扩展。
+STK 自有 Blender 工作台（`suan-workbench`，兼容名 `suan-blender`）、控制服务与节点代理是
+STK 的桌面主线，不是待删除的迁移遗留；Qt 界面保留为旧客户端。两条路径的数据不会自动导入或重放。
+Rust/egui 原型不再扩展。
 
 ## 验证
 

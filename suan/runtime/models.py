@@ -7,6 +7,30 @@ import re
 
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 BACKENDS = frozenset({"local", "pbs", "slurm"})
+RESOURCES = frozenset({"cpus", "nodes", "memory_mb", "walltime_seconds", "gpus", "queue", "account",
+                       "ranks", "threads_per_rank"})
+MPI_RESOURCES = frozenset({"ranks", "threads_per_rank"})
+# Scheduler allocation markers and the operator's local-MPI opt-in come only from the
+# Runtime service or scheduler environment (docs/runtime-mupro.md).
+RESERVED_ENV = ("SLURM_JOB_ID", "PBS_JOBID", "STK_MUPRO_ALLOW_LOCAL_MPI")
+
+
+def layout(resources):
+    """Process layout implied by validated resources.
+
+    Legacy specs (no ranks/threads_per_rank) run one process per node with
+    `cpus` threads. MPI specs run `ranks` processes spread evenly over `nodes`,
+    each with `threads_per_rank` threads (default 1).
+    """
+    nodes = resources.get("nodes", 1)
+    if MPI_RESOURCES & set(resources):
+        ranks = resources.get("ranks", 1)
+        threads = resources.get("threads_per_rank", 1)
+        return {"mpi": True, "nodes": nodes, "ranks": ranks, "ranks_per_node": ranks // nodes,
+                "threads_per_rank": threads, "cpus_per_node": ranks // nodes * threads}
+    cpus = resources.get("cpus", 1)
+    return {"mpi": False, "nodes": nodes, "ranks": 1, "ranks_per_node": 1,
+            "threads_per_rank": cpus, "cpus_per_node": cpus}
 
 
 def relative_path(value: str) -> str:
@@ -59,8 +83,10 @@ class TaskSpec:
             or not isinstance(v, str) or "\x00" in v for k, v in self.env.items()
         ):
             raise ValueError("env must map environment variable names to strings")
-        allowed = {"cpus", "nodes", "memory_mb", "walltime_seconds", "gpus", "queue", "account"}
-        if not isinstance(self.resources, dict) or set(self.resources) - allowed:
+        if set(RESERVED_ENV) & set(self.env):
+            raise ValueError("env must not set " + ", ".join(k for k in RESERVED_ENV if k in self.env)
+                             + "; they come from the Runtime service or scheduler environment")
+        if not isinstance(self.resources, dict) or set(self.resources) - RESOURCES:
             raise ValueError("Unknown resource option")
         for key, value in self.resources.items():
             if key in {"queue", "account"}:
@@ -68,6 +94,12 @@ class TaskSpec:
                     raise ValueError(f"Invalid {key}")
             elif isinstance(value, bool) or not isinstance(value, int) or not (0 if key == "gpus" else 1) <= value <= 2147483647:
                 raise ValueError(f"{key} must be a positive integer")
+        # Never write defaults into resources: to_dict() feeds the idempotency hash.
+        if MPI_RESOURCES & set(self.resources):
+            if "cpus" in self.resources:
+                raise ValueError("Use cpus for one process per node, or ranks/threads_per_rank for MPI, not both")
+            if self.resources.get("ranks", 1) % self.resources.get("nodes", 1):
+                raise ValueError("ranks must be a multiple of nodes (equal ranks per node)")
         if self.backend == "local" and (self.resources.get("nodes", 1) != 1 or self.resources.get("gpus", 0) or "queue" in self.resources or "account" in self.resources):
             raise ValueError("Local tasks do not allocate nodes, GPUs, queues or accounts")
 

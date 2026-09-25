@@ -84,15 +84,34 @@ def run(task_dir):
         write_json(root / "worker.json", {"pid": me.pid, "create_time": me.create_time(), "host": platform.node()})
         launch = json.loads((root / "launch.json").read_text(encoding="utf-8"))
         spec = launch["spec"]
+        res = spec["resources"]
+        # Mirrors suan.runtime.models.layout(); this file must not import STK.
+        mpi = "ranks" in res or "threads_per_rank" in res
+        threads = res.get("threads_per_rank", 1) if mpi else res.get("cpus", 1)
         env = os.environ.copy()
         env.pop("STK_RUNTIME_TOKEN", None)
+        if mpi:
+            # Replace whole-node counts inherited from a login shell or PBS.
+            env["OMP_NUM_THREADS"] = env["MKL_NUM_THREADS"] = str(threads)
         env.update(spec["env"])
+        # Mirrors models.RESERVED_ENV as defense in depth for tasks run by this copy; the
+        # supervisor fails older queued specs that set these before dispatch.
+        for key in ("SLURM_JOB_ID", "PBS_JOBID", "STK_MUPRO_ALLOW_LOCAL_MPI"):
+            if key in os.environ:
+                env[key] = os.environ[key]
+            else:
+                env.pop(key, None)
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("PYTHONIOENCODING", "utf-8")
-        env.setdefault("OMP_NUM_THREADS", str(spec["resources"].get("cpus", 1)))
-        argv = [launch["python"] if a == "{python}" else a for a in spec["argv"]]
+        env.setdefault("OMP_NUM_THREADS", str(threads))
+        # Only whole arguments are replaced; user arguments are never formatted.
+        tokens = {"{python}": launch["python"], "{ranks}": str(res.get("ranks", 1)),
+                  "{threads_per_rank}": str(threads), "{nodes}": str(res.get("nodes", 1))}
+        argv = [tokens.get(a, a) for a in spec["argv"]]
         write_json(root / "environment.json", {"python": sys.version, "interpreter": sys.executable,
-                   "platform": platform.platform(), "argv": argv, "env_overrides": spec["env"]})
+                   "platform": platform.platform(), "argv": argv, "env_overrides": spec["env"],
+                   "layout": {"nodes": res.get("nodes", 1), "ranks": res.get("ranks", 1), "threads_per_rank": threads},
+                   "threads": {k: env.get(k) for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS")}})
         if (root / "cancel").exists():
             result.update(state="cancelled", reason="Cancelled before execution")
         else:

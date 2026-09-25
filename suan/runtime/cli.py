@@ -4,6 +4,7 @@ from pathlib import Path
 import codecs
 import json
 import os
+import re
 import time
 import uuid
 
@@ -39,7 +40,22 @@ def get_client(profile=None, state_dir=None):
     from .daemon import status
 
     config = load_config(state_dir or default_state())
-    return RuntimeClient(status(state_dir or default_state())["url"], config["token"])
+    url = status(state_dir or default_state())["url"]
+    if url is None:
+        raise click.ClickException("The Runtime API is not running and has no fixed port; run suan server start")
+    return RuntimeClient(url, config["token"])
+
+
+class LazyClient:
+    """Connects on first use, so a subcommand's --help needs no Runtime."""
+
+    def __init__(self, profile, state_dir):
+        self._options, self._client = (profile, state_dir), None
+
+    def __getattr__(self, name):
+        if self._client is None:
+            self._client = get_client(*self._options)
+        return getattr(self._client, name)
 
 
 def dump(value):
@@ -101,6 +117,12 @@ def show_diagnostics(report, json_output):
         raise click.exceptions.Exit(1)
 
 
+def scheduler_name(ctx, param, value):
+    if value is not None and not re.fullmatch(r"[A-Za-z0-9_.@/-]+", value):
+        raise click.BadParameter("use only letters, digits and _ . @ / -")
+    return value
+
+
 @server.command("doctor")
 @click.option(
     "--backend",
@@ -117,14 +139,57 @@ def show_diagnostics(report, json_output):
     "--timeout", default=5.0, type=click.FloatRange(0.1, 120), show_default=True
 )
 @click.option(
+    "--partition",
+    callback=scheduler_name,
+    help="Partition or queue to check; overrides scheduler.queue.",
+)
+@click.option(
+    "--account",
+    callback=scheduler_name,
+    help="Account to check; overrides scheduler.account.",
+)
+@click.option(
+    "--qos",
+    callback=scheduler_name,
+    help="Slurm QOS to check; overrides scheduler.qos.",
+)
+@click.option(
+    "--probe-preamble",
+    is_flag=True,
+    help="Run scheduler.preamble with the job shell on this host (nothing is submitted).",
+)
+@click.option(
     "--json", "json_output", is_flag=True, help="Print a token-free JSON report."
 )
 @click.pass_obj
-def doctor_server(state_dir, backend, science, timeout, json_output):
-    """Check deployment on this host; temporary filesystem probes are removed."""
+def doctor_server(
+    state_dir,
+    backend,
+    science,
+    timeout,
+    partition,
+    account,
+    qos,
+    probe_preamble,
+    json_output,
+):
+    """Check deployment on this host; temporary filesystem probes are removed.
+
+    Slurm probes run sbatch only with --version or --test-only; no job is submitted.
+    """
     from .diagnostics import diagnose_server
 
-    show_diagnostics(diagnose_server(state_dir, backend, science, timeout), json_output)
+    report = diagnose_server(
+        state_dir,
+        backend,
+        science,
+        timeout,
+        partition=partition,
+        account=account,
+        qos=qos,
+        probe_preamble=probe_preamble,
+    )
+    show_diagnostics(report, json_output)
 
 
 @server.command("stop")
@@ -232,7 +297,7 @@ def client_options(function):
 @click.pass_context
 def workspaces(ctx, profile, state_dir):
     """Create workspaces and transfer immutable task inputs."""
-    ctx.obj = get_client(profile, state_dir)
+    ctx.obj = LazyClient(profile, state_dir)
 
 
 @workspaces.command("create")
@@ -282,7 +347,7 @@ def upload(client, workspace_id, source, remote_path):
 @click.pass_context
 def jobs(ctx, profile, state_dir):
     """Submit, reconnect to, inspect and cancel persistent tasks."""
-    ctx.obj = get_client(profile, state_dir)
+    ctx.obj = LazyClient(profile, state_dir)
 
 
 @jobs.command("submit", context_settings={"ignore_unknown_options": True})
