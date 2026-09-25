@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <set>
 
+#include "stk/app/jobs_state.hh"
 #include "stk/bridge/client.hh"
 #include "stk/core/paths.hh"
 #include "stk/io/blob_cache.hh"
@@ -917,6 +918,13 @@ struct ViewerState::Impl {
       if (source.hub()) {
         ep.mode = "hub";
         ep.target.node = source.node;
+        /* Desktop auto-run (bridge spec §7.1): the hub runs a desktop device's evaluation without
+         * review only when the expected transfer, budget.max_output_bytes, is within its cap. */
+        const JobsState &jobs = store.jobs();
+        const auto &policy = jobs.policy();
+        if (jobs.active_id() == source.connection && policy && policy->desktop_auto && policy->desktop_auto_bytes > 0) {
+          request["budget"] = Json::object({{"max_output_bytes", policy->desktop_auto_bytes}});
+        }
       }
     }
     ep.request = std::move(request);
