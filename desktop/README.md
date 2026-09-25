@@ -172,20 +172,24 @@ To run binaries by hand against sysroot-only libraries, `source ~/opt/stk-sysroo
 
 `.github/workflows/desktop.yml` (GitHub-hosted runners, read-only token, actions pinned by SHA):
 
-- **Linux**: `ubuntu-24.04` runner with an `ubuntu:26.04` job container (pinned by digest) so the
-  packages match the sysroot; vendoring and Phase 0 go-criteria checks, full build, all tests
-  including live windows.
-- **macOS**: `macos-14` arm64, Xcode 16, dependencies from vcpkg (Homebrew's FreeType has no brotli,
-  which the WOFF2 fonts need); full build, `unit` + `wm` tests, and the headless Metal goldens as a
-  non-blocking smoke step.
+- **Linux**: `ubuntu-24.04` runner with an `ubuntu:26.04` job container (pinned by digest, `--init`
+  so orphaned processes are reaped) so the packages match the sysroot; vendoring and Phase 0
+  go-criteria checks, full build, all tests including live windows.
+- **macOS**: `macos-15` arm64, Xcode 16, dependencies from vcpkg built for macOS 13.3 (overlay
+  triplet; Homebrew's FreeType has no brotli, which the WOFF2 fonts need); full build, `unit`, `wm`,
+  `ui` and `bridge` tests, then every `gpu` test on the runner's "Apple Paravirtual device" (Metal
+  goldens, UI gallery, viewer) and an `stk-render` smoke export. macOS 14 runners have no Metal
+  device. `viewer_metal_Lut` runs as a non-blocking step: a NaN vertex value reaches the fragment
+  shader as a value above the range on Metal.
 - **Windows**: `windows-2022`, MSVC (Visual Studio generator), vcpkg dependencies (libepoxy,
-  pthreads4w, …), OpenGL + Win32 GHOST, Vulkan off; builds every target, runs nothing.
+  pthreads4w, …), OpenGL + Win32 GHOST, Vulkan off; builds every target and runs the `unit`, `wm`,
+  `ui` and `bridge` tests (no GPU tests: the runner has no OpenGL 4.3 driver).
 
 macOS and Windows are not built on the development host; their CMake paths follow upstream's
 `intern/ghost`, `source/blender/gpu`, `source/blender/blenlib` and `build_files/cmake/platform`
 files (OBJCXX enabled at the top level, deployment target 13.3 for `std::format`, frameworks,
-`comctl32`/`dxgi`, pthreads4w, `WIN32_LEAN_AND_MEAN`, `winstuff_registration.cc`). The first CI runs
-are the real check.
+`comctl32`/`dxgi`, pthreads4w, `WIN32_LEAN_AND_MEAN`, `winstuff_registration.cc`, the
+`cmake/windows/stk-desktop.manifest` application manifest after upstream's `blender.exe.manifest`).
 
 ## Re-vendoring
 

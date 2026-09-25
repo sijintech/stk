@@ -6,9 +6,10 @@
 #             build, vendoring / Phase 0 go-criteria checks, all ctests: headless GPU goldens on
 #             Mesa lavapipe (Vulkan) and llvmpipe (OpenGL/EGL), live windows on Xvfb and a
 #             headless weston (unix sockets only, inside the job container).
-#   macos   : arm64, Cocoa + Metal, full build; CLI tests; headless Metal export as a smoke
-#             test that may fail on runners whose paravirtual GPU lacks Metal features.
-#   windows : MSVC build of every target (OpenGL backend, Win32 GHOST); no tests.
+#   macos   : arm64, Cocoa + Metal, full build; CPU, CLI, UI and bridge tests; headless Metal
+#             goldens and viewer tests on the runner's paravirtual Metal device; stk-render smoke.
+#   windows : MSVC build of every target (OpenGL backend, Win32 GHOST); CPU, CLI, UI and bridge
+#             tests (no GPU on the runner).
 #
 # No secrets are used; the token is read-only.
 
@@ -23,6 +24,7 @@ on:
     branches:
       - main
       - feature/desktop-engine
+      - "ci/desktop-*"
     paths:
       - "desktop/**"
       - ".github/workflows/desktop.yml"
@@ -42,6 +44,9 @@ jobs:
     container:
       # ubuntu:26.04, pinned by digest (multi-arch index).
       image: ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
+      # An init as PID 1 reaps orphans: the default `tail -f /dev/null` does not, and the bridge
+      # tests' killed process groups would then stay alive as zombies.
+      options: --init
     defaults:
       run:
         shell: bash
@@ -107,10 +112,11 @@ jobs:
 
   macos:
     name: macOS arm64 (Cocoa + Metal)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+      VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}/.vcpkg-triplets
       # FreeType must decode WOFF2 (brotli): Homebrew's freetype is built without it, vcpkg's is not.
       VCPKG_PACKAGES: freetype[core,brotli,zlib] fmt eigen3 zstd zlib
     steps:
@@ -119,7 +125,7 @@ jobs:
           persist-credentials: false
 
       - name: Select Xcode 16
-        # Blender 5.2 requires Xcode >= 16; macos-14 defaults to an older one.
+        # Blender 5.2 requires Xcode >= 16; pin the newest Xcode 16 on the image.
         run: |
           set -euo pipefail
           xcode=$(find /Applications -maxdepth 1 -name 'Xcode_16*.app' | sort -V | tail -n1)
@@ -127,9 +133,17 @@ jobs:
           sudo xcode-select -s "$xcode"
           clang++ --version
 
-      - name: vcpkg cache key
+      - name: vcpkg triplet (deployment target 13.3) and cache key
         id: vcpkg-key
-        run: echo "commit=$(git -C "$VCPKG_INSTALLATION_ROOT" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        # The stock arm64-osx triplet builds for the runner's macOS; pin the dependencies to the
+        # engine's deployment target (desktop/CMakeLists.txt). The triplet is part of vcpkg's ABI
+        # hash, so cached binaries built for another target are not reused.
+        run: |
+          set -euo pipefail
+          mkdir -p "$VCPKG_OVERLAY_TRIPLETS"
+          cp "$VCPKG_INSTALLATION_ROOT/triplets/arm64-osx.cmake" "$VCPKG_OVERLAY_TRIPLETS/"
+          echo 'set(VCPKG_OSX_DEPLOYMENT_TARGET 13.3)' >> "$VCPKG_OVERLAY_TRIPLETS/arm64-osx.cmake"
+          echo "commit=$(git -C "$VCPKG_INSTALLATION_ROOT" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -155,26 +169,37 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Test (CPU unit tests, CLI, leak self-test)
-        run: ctest --test-dir build --output-on-failure -L "unit|wm"
+      - name: Test (CPU unit tests, CLI, leak self-test, UI core, bridge)
+        run: ctest --test-dir build --output-on-failure -L "unit|wm|ui|bridge" -LE "gpu|window"
 
-      - name: Headless Metal smoke (export + golden / crispness check)
-        # The macos-14 runners expose an Apple paravirtual Metal device; if it lacks features the
-        # GPU module needs, this step fails without failing the job (see desktop/README.md).
+      - name: Test on Metal (headless goldens, viewer)
+        # macos-15 runners expose the "Apple Paravirtual device" (argument buffers tier 2,
+        # barycentrics, MTLGPUFamilyMac2); macos-14 runners have no Metal device at all.
+        run: ctest --test-dir build --output-on-failure -L gpu -LE window -E "^viewer_metal_Lut$"
+
+      - name: Known Metal gap (non-blocking) - NaN colormap bin
+        # A NaN value interpolated as a vertex output reaches the fragment shader as a value above
+        # the range (the "above" colour instead of nan_color); the Vulkan and OpenGL runs pass.
         continue-on-error: true
-        run: ctest --test-dir build --output-on-failure -L gpu
+        run: ctest --test-dir build --output-on-failure -R "^viewer_metal_Lut$"
+
+      - name: stk-render smoke (Metal, spec example payload)
+        run: build/bin/stk-render --payload docs/specs/examples/payload-v2 --export build/stk-render-metal.png
 
       - name: Upload rendered frames
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: desktop-macos-frames
-          path: build/tests/wm/out/*.png
+          path: |
+            build/tests/wm/out/*.png
+            build/tests/viewer/out/*.png
+            build/stk-render-metal.png
           if-no-files-found: ignore
           retention-days: 14
 
   windows:
-    name: Windows (MSVC, compile only)
+    name: Windows (MSVC, CPU tests)
     runs-on: windows-2022
     timeout-minutes: 90
     env:
@@ -214,7 +239,12 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-windows -DSTK_GPU_VULKAN=OFF
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build (compile and link, no tests)
+      - name: Build (every target)
         run: |
           cmake --build build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test (CPU unit tests, CLI, UI core, bridge; no GPU on the runner)
+        run: |
+          ctest --test-dir build -C Release --output-on-failure -L "unit|wm|ui|bridge" -LE "gpu|window" --timeout 600
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
