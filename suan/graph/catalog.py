@@ -33,7 +33,7 @@ __all__ = [
 
 NAMESPACES = {"stk": 1}
 ENTRY_POINT_GROUP = "stk.nodes"
-PRESET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+PRESET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}\Z")
 
 _default = None
 _default_lock = threading.Lock()

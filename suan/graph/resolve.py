@@ -39,7 +39,7 @@ __all__ = [
     "PathNotAllowed", "RuntimeResolver", "RuntimeTaskSource", "check_relative_path",
 ]
 
-TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
 
 class PathNotAllowed(GraphError, _files.PathNotAllowed):

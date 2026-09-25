@@ -430,3 +430,10 @@ def test_catalog_patterns_keep_their_meaning():
     path = next(p for p in patterns if "(?!" in p)
     assert pattern_search(path, "a/b\n") and not pattern_search(path, "/abs\n")
     assert not pattern_search(path, "x/../y") and not pattern_search(path, "a/..") and not pattern_search(path, "C:x")
+
+
+def test_preset_and_task_ids_reject_a_trailing_newline():
+    from suan.graph.catalog import PRESET_ID_RE
+    from suan.graph.resolve import TASK_ID_RE
+    assert PRESET_ID_RE.match("muferro-domains") and not PRESET_ID_RE.match("muferro-domains\n")
+    assert TASK_ID_RE.match("task-1.a") and not TASK_ID_RE.match("task-1.a\n")
