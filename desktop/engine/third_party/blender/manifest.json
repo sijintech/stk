@@ -93,7 +93,8 @@
   "source/blender/blenlib/intern/time.cc",
   "source/blender/blenlib/intern/vector.cc",
   "source/blender/blenlib/intern/winstuff.cc",
-  "source/blender/blenlib/intern/winstuff_dir.cc"
+  "source/blender/blenlib/intern/winstuff_dir.cc",
+  "source/blender/blenlib/intern/winstuff_registration.cc"
  ],
  "header_pools": [
   "source/blender/blenlib",

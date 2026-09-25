@@ -22,7 +22,7 @@ if(NOT EXISTS "${BF_GPU}/GPU_context.hh")
 endif()
 
 if(APPLE)
-  enable_language(OBJCXX)
+  # OBJCXX itself is enabled in desktop/CMakeLists.txt (the directory that links these libs).
   set(_gl_default OFF)
   set(_vk_default OFF)
   set(_mtl_default ON)
@@ -52,10 +52,15 @@ find_package(Threads REQUIRED)
 find_package(Freetype REQUIRED)
 find_package(ZLIB REQUIRED)
 find_path(ZSTD_INCLUDE_DIR zstd.h REQUIRED)
-find_library(ZSTD_LIBRARY zstd REQUIRED)
+find_library(ZSTD_LIBRARY NAMES zstd zstd_static libzstd REQUIRED)
 find_path(FMT_INCLUDE_DIR fmt/format.h REQUIRED)
 find_path(EIGEN3_INCLUDE_DIR Eigen/Core PATH_SUFFIXES eigen3 REQUIRED)
-if(STK_GPU_OPENGL)
+if(WIN32)
+  # BLI_threads.h and the GPU module include <pthread.h> unconditionally (upstream: pthreads4w).
+  find_package(PThreads4W REQUIRED)
+endif()
+if(STK_GPU_OPENGL OR WIN32)
+  # Win32 GHOST includes <epoxy/wgl.h> even without the OpenGL backend.
   find_path(EPOXY_INCLUDE_DIR epoxy/gl.h REQUIRED)
   find_library(EPOXY_LIBRARY NAMES epoxy epoxy-0 REQUIRED)
 endif()
@@ -108,23 +113,29 @@ target_compile_definitions(bf_common INTERFACE
   $<$<CONFIG:Debug>:WITH_ASSERT_ABORT>
 )
 if(MSVC)
-  target_compile_options(bf_common INTERFACE /J /bigobj /Zc:__cplusplus /Zc:preprocessor /utf-8)
+  target_compile_options(bf_common INTERFACE /J /bigobj /Zc:preprocessor /utf-8
+    $<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>)
   target_compile_definitions(bf_common INTERFACE
+    WIN32 WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0603
     NOMINMAX _USE_MATH_DEFINES _CRT_SECURE_NO_DEPRECATE _CRT_NONSTDC_NO_DEPRECATE
     BLENDER_WIN_APPID="stk.desktop" BLENDER_WIN_APPID_FRIENDLY_NAME="STK Desktop")
 else()
   target_compile_options(bf_common INTERFACE
-    -funsigned-char -fno-strict-aliasing -ffp-contract=off
-    # Upstream code is not ours to fix; keep the build log readable.
-    -w)
+    -funsigned-char -fno-strict-aliasing -ffp-contract=off)
   target_compile_definitions(bf_common INTERFACE
     _LARGEFILE_SOURCE _FILE_OFFSET_BITS=64 _LARGEFILE64_SOURCE)
 endif()
 target_link_libraries(bf_common INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
+if(WIN32)
+  target_link_libraries(bf_common INTERFACE PThreads4W::PThreads4W)
+endif()
 
 function(bf_add_lib name)
   add_library(${name} STATIC ${ARGN})
   target_link_libraries(${name} PUBLIC bf_common)
+  # Upstream code is not ours to fix: no warnings for the vendored libraries themselves (PRIVATE,
+  # so the engine's own targets that include these headers keep their warnings).
+  target_compile_options(${name} PRIVATE $<IF:$<BOOL:${MSVC}>,/w,-w>)
 endfunction()
 
 # --------------------------------------------------------------------------------------------
@@ -175,7 +186,8 @@ set(BLI "${BF}/source/blender/blenlib/intern")
 file(GLOB BLENLIB_SRC CONFIGURE_DEPENDS "${BLI}/*.cc")
 list(FILTER BLENLIB_SRC EXCLUDE REGEX "/(winstuff|winstuff_dir|system_win32)\\.cc$")
 if(WIN32)
-  list(APPEND BLENLIB_SRC ${BLI}/winstuff.cc ${BLI}/winstuff_dir.cc ${BLI}/system_win32.cc)
+  list(APPEND BLENLIB_SRC ${BLI}/winstuff.cc ${BLI}/winstuff_dir.cc ${BLI}/winstuff_registration.cc
+    ${BLI}/system_win32.cc)
 endif()
 if(APPLE)
   list(APPEND BLENLIB_SRC ${BLI}/fileops_apple.mm ${BLI}/storage_apple.mm)
@@ -186,7 +198,10 @@ target_link_libraries(bf_blenlib PUBLIC bf_intern_guardedalloc bf_intern_clog bf
   extern_xxhash extern_wcwidth
   ZLIB::ZLIB ${ZSTD_LIBRARY})
 if(WIN32)
-  target_link_libraries(bf_blenlib PUBLIC bf_intern_utfconv bf_intern_uriconvert dbghelp shlwapi)
+  target_link_libraries(bf_blenlib PUBLIC bf_intern_utfconv bf_intern_uriconvert dbghelp shlwapi
+    comctl32 dxgi)
+elseif(APPLE)
+  target_link_libraries(bf_blenlib PUBLIC "-framework Foundation")
 endif()
 
 # --------------------------------------------------------------------------------------------
@@ -203,12 +218,19 @@ target_link_libraries(stk_blender_shims PUBLIC bf_blenlib)
 
 add_executable(datatoc ${BF}/source/blender/datatoc/datatoc.cc)
 target_compile_features(datatoc PRIVATE cxx_std_20)
+if(MSVC)
+  # Upstream applies these globally; the host tools do not link bf_common.
+  set(_bf_host_msvc_flags /utf-8 /bigobj /Zc:__cplusplus /Zc:preprocessor)
+  target_compile_options(datatoc PRIVATE ${_bf_host_msvc_flags})
+endif()
 
 file(GLOB SHADER_TOOL_SRC CONFIGURE_DEPENDS "${BF_GPU}/shader_tool/*.cc")
 list(APPEND SHADER_TOOL_SRC ${BF_GPU}/shader_tool/lexit/lexit.cc)
 add_executable(shader_tool ${SHADER_TOOL_SRC})
 target_compile_features(shader_tool PRIVATE cxx_std_20)
-if(NOT MSVC)
+if(MSVC)
+  target_compile_options(shader_tool PRIVATE ${_bf_host_msvc_flags} /w)
+else()
   target_compile_options(shader_tool PRIVATE -w)
 endif()
 list(FILTER SHADER_TOOL_SRC EXCLUDE REGEX "/shader_tool\\.cc$")  # Library part for bf_gpu.
@@ -333,7 +355,7 @@ set(GHOST_SRC
   intern/GHOST_ISystemPaths.cc intern/GHOST_ModifierKeys.cc intern/GHOST_PathUtils.cc
   intern/GHOST_Rect.cc intern/GHOST_System.cc intern/GHOST_TimerManager.cc intern/GHOST_Window.cc
   intern/GHOST_WindowManager.cc)
-set(GHOST_DEFS WITH_INPUT_IME)
+set(GHOST_DEFS "")
 set(GHOST_LIBS "")
 if(STK_GPU_VULKAN)
   list(APPEND GHOST_SRC intern/GHOST_ContextVK.cc)
@@ -355,7 +377,8 @@ elseif(WIN32)
     intern/GHOST_SystemWin32.cc intern/GHOST_TrackpadWin32.cc intern/GHOST_WindowWin32.cc
     intern/GHOST_Wintab.cc intern/GHOST_ContextWGL.cc intern/GHOST_ImeWin32.cc
     intern/GHOST_SystemPathsWin32.cc)
-  list(APPEND GHOST_LIBS bf_intern_utfconv dwmapi imm32 shcore dxgi d3d11 opengl32 version)
+  list(APPEND GHOST_LIBS bf_intern_utfconv dwmapi imm32 shcore dxgi d3d11 opengl32 version comctl32
+    ${EPOXY_LIBRARY})
   set(GHOST_EXTRA_INC ${BF}/extern/wintab/include)
 else()
   list(APPEND GHOST_SRC intern/GHOST_SystemPathsUnix.cc)
@@ -415,8 +438,10 @@ list(TRANSFORM GHOST_SRC PREPEND "${BF_GHOST}/")
 bf_add_lib(bf_intern_ghost ${GHOST_SRC} ${GHOST_GEN_SRC})
 target_include_directories(bf_intern_ghost PUBLIC ${BF_GHOST} PRIVATE ${BF_GPU} ${GHOST_EXTRA_INC})
 target_compile_definitions(bf_intern_ghost PRIVATE ${GHOST_DEFS})
+# Public: it changes the GHOST_IWindow interface (beginIME / endIME) that stk_wm calls.
+target_compile_definitions(bf_intern_ghost PUBLIC WITH_INPUT_IME)
 target_link_libraries(bf_intern_ghost PUBLIC bf_blenlib stk_blender_shims ${GHOST_LIBS})
-if(STK_GPU_OPENGL)
+if(STK_GPU_OPENGL OR WIN32)
   target_include_directories(bf_intern_ghost SYSTEM PRIVATE ${EPOXY_INCLUDE_DIR})
 endif()
 if(STK_GHOST_WAYLAND)

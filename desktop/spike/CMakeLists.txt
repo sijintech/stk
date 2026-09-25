@@ -2,10 +2,9 @@
 #
 # Phase 0 extraction spike: headless GHOST + GPU + BLF render to PNG with a golden check.
 
-find_package(ZLIB REQUIRED)
-
-add_executable(stk-gpu-spike gpu_spike.cc png_min.cc)
-target_link_libraries(stk-gpu-spike PRIVATE stk_blender ZLIB::ZLIB)
+add_executable(stk-gpu-spike gpu_spike.cc)
+# stk_gfx provides the PNG codec (moved there from the spike's png_min).
+target_link_libraries(stk-gpu-spike PRIVATE stk_blender stk_gfx)
 target_compile_features(stk-gpu-spike PRIVATE cxx_std_20)
 target_compile_definitions(stk-gpu-spike PRIVATE STK_BLENDER_DATAFILES_DIR="${STK_BLENDER_DATAFILES}")
 

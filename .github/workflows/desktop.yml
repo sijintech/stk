@@ -1,0 +1,220 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# STK desktop engine (desktop/, GPL-2.0-or-later): build and test on GitHub-hosted runners.
+#
+#   linux   : Ubuntu 26.04 container (the package set the engine is developed against), full
+#             build, vendoring / Phase 0 go-criteria checks, all ctests: headless GPU goldens on
+#             Mesa lavapipe (Vulkan) and llvmpipe (OpenGL/EGL), live windows on Xvfb and a
+#             headless weston (unix sockets only, inside the job container).
+#   macos   : arm64, Cocoa + Metal, full build; CLI tests; headless Metal export as a smoke
+#             test that may fail on runners whose paravirtual GPU lacks Metal features.
+#   windows : MSVC build of every target (OpenGL backend, Win32 GHOST); no tests.
+#
+# No secrets are used; the token is read-only.
+
+name: desktop
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+  push:
+    branches:
+      - main
+      - feature/desktop-engine
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (Ubuntu 26.04, GL + Vulkan, X11 + Wayland)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container:
+      # ubuntu:26.04, pinned by digest (multi-arch index).
+      image: ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies and software GPU drivers
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates g++ cmake ninja-build python3 \
+            libx11-dev libxi-dev libxfixes-dev libxrender-dev libxxf86vm-dev libxext-dev \
+            libxkbcommon-dev libwayland-dev libwayland-bin wayland-protocols libdecor-0-dev libdbus-1-dev \
+            libepoxy-dev libegl-dev libgl-dev libgles-dev libglx-dev libopengl-dev \
+            libfreetype-dev libbrotli-dev libpng-dev zlib1g-dev libzstd-dev libeigen3-dev libfmt-dev \
+            libvulkan-dev libshaderc-dev glslang-dev spirv-headers \
+            mesa-vulkan-drivers libegl-mesa0 libgl1-mesa-dri libglx-mesa0 \
+            xvfb weston
+
+      - name: Vendoring and Phase 0 go criteria
+        run: |
+          set -euo pipefail
+          bl=desktop/engine/third_party/blender
+          python3 "$bl/vendor.py" --check
+          patches=$(find "$bl/patches" -name '*.patch' | wc -l)
+          shim_lines=$(cat "$bl"/shims/* | wc -l)
+          forbidden=0
+          for module in draw imbuf blenkernel nodes; do
+            if [ -d "$bl/src/source/blender/$module" ]; then
+              n=$(find "$bl/src/source/blender/$module" \( -name '*.cc' -o -name '*.c' -o -name '*.mm' \) | wc -l)
+              forbidden=$((forbidden + n))
+            fi
+          done
+          echo "patches=$patches (max 3), shim lines=$shim_lines (max ~800), draw/imbuf/blenkernel/nodes .cc=$forbidden (max 0)"
+          test "$patches" -le 3
+          test "$shim_lines" -le 800
+          test "$forbidden" -eq 0
+
+      - name: Configure
+        # No user sysroot on CI: system packages are used (STK_SYSROOT does not exist).
+        run: cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTK_SYSROOT=/nonexistent
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test (headless GPU goldens, live windows on Xvfb and weston)
+        run: ctest --test-dir build --output-on-failure --parallel 4 --timeout 600
+
+      - name: Upload rendered frames
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-linux-frames
+          path: |
+            build/tests/wm/out/*.png
+            build/spike/*.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+  macos:
+    name: macOS arm64 (Cocoa + Metal)
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+      # FreeType must decode WOFF2 (brotli): Homebrew's freetype is built without it, vcpkg's is not.
+      VCPKG_PACKAGES: freetype[core,brotli,zlib] fmt eigen3 zstd zlib
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 16
+        # Blender 5.2 requires Xcode >= 16; macos-14 defaults to an older one.
+        run: |
+          set -euo pipefail
+          xcode=$(find /Applications -maxdepth 1 -name 'Xcode_16*.app' | sort -V | tail -n1)
+          echo "Using $xcode"
+          sudo xcode-select -s "$xcode"
+          clang++ --version
+
+      - name: vcpkg cache key
+        id: vcpkg-key
+        run: echo "commit=$(git -C "$VCPKG_INSTALLATION_ROOT" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-arm64-osx-${{ steps.vcpkg-key.outputs.commit }}-${{ hashFiles('.github/workflows/desktop.yml') }}
+          restore-keys: vcpkg-arm64-osx-${{ steps.vcpkg-key.outputs.commit }}-
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          brew install ninja
+          # shellcheck disable=SC2086
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install --triplet arm64-osx $VCPKG_PACKAGES
+
+      - name: Configure
+        run: |
+          cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-osx
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test (CPU unit tests, CLI, leak self-test)
+        run: ctest --test-dir build --output-on-failure -L "unit|wm"
+
+      - name: Headless Metal smoke (export + golden / crispness check)
+        # The macos-14 runners expose an Apple paravirtual Metal device; if it lacks features the
+        # GPU module needs, this step fails without failing the job (see desktop/README.md).
+        continue-on-error: true
+        run: ctest --test-dir build --output-on-failure -L gpu
+
+      - name: Upload rendered frames
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-macos-frames
+          path: build/tests/wm/out/*.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+  windows:
+    name: Windows (MSVC, compile only)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-cache
+      VCPKG_PACKAGES: libepoxy freetype[core,brotli,zlib] fmt eigen3 zstd zlib pthreads
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: vcpkg cache key
+        id: vcpkg-key
+        run: |
+          $commit = git -C "$env:VCPKG_INSTALLATION_ROOT" rev-parse HEAD
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-x64-windows-${{ steps.vcpkg-key.outputs.commit }}-${{ hashFiles('.github/workflows/desktop.yml') }}
+          restore-keys: vcpkg-x64-windows-${{ steps.vcpkg-key.outputs.commit }}-
+
+      - name: Install dependencies
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install --triplet x64-windows $env:VCPKG_PACKAGES.Split(' ')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Configure
+        # Vulkan is off: it needs the LunarG SDK (shaderc); OpenGL + Win32 GHOST are built.
+        run: |
+          cmake -S desktop -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows -DSTK_GPU_VULKAN=OFF
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build (compile and link, no tests)
+        run: |
+          cmake --build build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

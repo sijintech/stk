@@ -5,7 +5,7 @@
  * `BLF_draw("STK 你好")` (default font + CJK fallback stack, and Noto Sans CJK directly),
  * reads the pixels back, writes a PNG and optionally compares with a golden image.
  *
- *   stk-gpu-spike --backend vulkan|opengl --out out.png [--golden golden.png] [--update-golden]
+ *   stk-gpu-spike --backend vulkan|opengl|metal --out out.png [--golden golden.png] [--update-golden]
  *   stk-gpu-spike --leak-selftest   (must fail: verifies the guardedalloc leak check)
  *
  * Exit codes: 0 ok, 1 check/golden mismatch, 2 setup failure; a guardedalloc leak aborts
@@ -40,10 +40,10 @@
 
 #include "BLF_api.hh"
 
-#include "png_min.hh"
+#include "stk/gfx/image.hh"
 
 using namespace blender;
-using stk::spike::Image;
+using stk::gfx::Image;
 
 static constexpr int W = 320, H = 160;
 static const char *TEXT = "STK \xe4\xbd\xa0\xe5\xa5\xbd"; /* "STK 你好" */
@@ -181,7 +181,7 @@ static bool check_structure(const Image &img, std::string &why)
 static bool compare_golden(const Image &img, const std::string &golden_path, std::string &why)
 {
   Image golden;
-  if (!stk::spike::png_read(golden_path, golden, why)) {
+  if (!stk::gfx::png_read(golden_path, golden, why)) {
     return false;
   }
   if (golden.width != img.width || golden.height != img.height) {
@@ -235,7 +235,7 @@ int main(int argc, char **argv)
       return 0;
     }
     else {
-      fprintf(stderr, "usage: %s --backend vulkan|opengl --out PNG [--golden PNG] [--update-golden]\n", argv[0]);
+      fprintf(stderr, "usage: %s --backend vulkan|opengl|metal --out PNG [--golden PNG] [--update-golden]\n", argv[0]);
       return 2;
     }
   }
@@ -249,16 +249,28 @@ int main(int argc, char **argv)
 
   GPUBackendType type;
   GHOST_TDrawingContextType ctx_type;
-  if (backend == "vulkan") {
+  if (false) {
+  }
+#ifdef WITH_VULKAN_BACKEND
+  else if (backend == "vulkan") {
     type = GPU_BACKEND_VULKAN;
     ctx_type = GHOST_kDrawingContextTypeVulkan;
   }
+#endif
+#ifdef WITH_OPENGL_BACKEND
   else if (backend == "opengl") {
     type = GPU_BACKEND_OPENGL;
     ctx_type = GHOST_kDrawingContextTypeOpenGL;
   }
+#endif
+#if defined(__APPLE__) && defined(WITH_METAL_BACKEND)
+  else if (backend == "metal") {
+    type = GPU_BACKEND_METAL;
+    ctx_type = GHOST_kDrawingContextTypeMetal;
+  }
+#endif
   else {
-    return fail("unknown backend");
+    return fail("unknown or uncompiled backend");
   }
 
   if (GHOST_ISystem::createSystemBackground() != GHOST_kSuccess) {
@@ -331,7 +343,7 @@ int main(int argc, char **argv)
   CLG_exit();
 
   int rc = 0;
-  if (!stk::spike::png_write(out, img)) {
+  if (!stk::gfx::png_write(out, img)) {
     return fail("PNG write failed");
   }
   printf("wrote %s\n", out.c_str());
@@ -342,7 +354,7 @@ int main(int argc, char **argv)
   }
   if (!golden.empty()) {
     if (update_golden) {
-      if (!stk::spike::png_write(golden, img)) {
+      if (!stk::gfx::png_write(golden, img)) {
         return fail("golden write failed");
       }
       printf("updated golden %s\n", golden.c_str());

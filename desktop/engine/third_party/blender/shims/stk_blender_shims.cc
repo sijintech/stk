@@ -83,7 +83,11 @@ std::optional<std::string> BKE_appdir_folder_id(const int folder_id, const char 
 void BKE_appdir_folder_caches(char *path, const size_t path_maxncpy)
 {
   const char *xdg = getenv("XDG_CACHE_HOME");
+#ifdef _WIN32
+  const char *home = getenv("LOCALAPPDATA"); /* -> %LOCALAPPDATA%\.cache\stk-desktop */
+#else
   const char *home = getenv("HOME");
+#endif
   if (xdg && xdg[0]) {
     BLI_path_join(path, path_maxncpy, xdg, "stk-desktop", SEP_STR);
   }
@@ -97,8 +101,13 @@ void BKE_appdir_folder_caches(char *path, const size_t path_maxncpy)
 
 const char *BKE_tempdir_session()
 {
+#ifdef _WIN32
+  const char *tmp = getenv("TEMP");
+  return (tmp && tmp[0]) ? tmp : "C:\\Windows\\Temp\\";
+#else
   const char *tmp = getenv("TMPDIR");
   return (tmp && tmp[0]) ? tmp : "/tmp/";
+#endif
 }
 
 /** \} */

@@ -25,6 +25,7 @@
   "Eigen/Eigenvalues",
   "Eigen/SVD",
   "Eigen/Sparse",
+  "KnownFolders.h",
   "Metal/Metal.h",
   "QuartzCore/QuartzCore.h",
   "ShObjIdl.h",
@@ -145,6 +146,7 @@
   "shellapi.h",
   "shellscalingapi.h",
   "shlobj.h",
+  "shlobj_core.h",
   "shlwapi.h",
   "shobjidl.h",
   "span",
@@ -213,11 +215,11 @@
   "zstd.h"
  ],
  "counts": {
-  "files": 1092,
+  "files": 1094,
   "by_reason": {
    "tree": 853,
-   "file": 65,
-   "closure": 174
+   "file": 66,
+   "closure": 175
   }
  },
  "files": {
@@ -564,6 +566,7 @@
   "source/blender/blenlib/BLI_virtual_array.hh": "230583d80bc94a4730f048353c064725f5ea93aea9d2eeaf40cdbda3ac91bb1d",
   "source/blender/blenlib/BLI_virtual_array_fwd.hh": "d485842be68b013f4b3dd610f71a76f4babe00a4aef4c0fe8432834255361cc5",
   "source/blender/blenlib/BLI_winstuff.h": "f6e3c0c90e08d2351f8cf4629cfab1a565da85365567dc9952588baa04909eec",
+  "source/blender/blenlib/BLI_winstuff_com.hh": "36413bb702d8ccde2e72ea613a58d1056d3355fbc0e82a327dccacff63d45d53",
   "source/blender/blenlib/intern/BLI_assert.cc": "f5a625ae9467fa9f999e9666d21c6d15bdd0ac10635e4d49f46902ce388adaca",
   "source/blender/blenlib/intern/BLI_color.cc": "842cc8f1ff4616d002df1aa8a1964a951f32a0cd5ed73f8938cd565d639e547e",
   "source/blender/blenlib/intern/BLI_colorspace.cc": "5c19a7e4e9ce940e3e8a472dd79840358543839dbd0bc7924cfa12d38063ac59",
@@ -626,6 +629,7 @@
   "source/blender/blenlib/intern/vector.cc": "7a746b0f788a12a8e4340def5e43cb3cfd1ee1a1d7ad0bf06e78339550ec60ac",
   "source/blender/blenlib/intern/winstuff.cc": "1f124f0c36e5ec1bb02cab0fbb6b026fabd52a6c074b1fe28eaae4014f927ba5",
   "source/blender/blenlib/intern/winstuff_dir.cc": "fbdcca7b2783470ab68b0b28bd4636424cae708c0949870e41d7462ee0b14d45",
+  "source/blender/blenlib/intern/winstuff_registration.cc": "03d9a1f8f2372a95c61df3c36afc9928f77ad4a96ee66321c40d95e3405da886",
   "source/blender/datatoc/datatoc.cc": "3881106472b5b000eeb306d1a611971a002f942f9f55ad48bc0a6baf133bbd14",
   "source/blender/editors/include/UI_icons.hh": "725b54742969bafda0a50f725eb919aa92bef5094405aa1614fca7e448813d4c",
   "source/blender/editors/include/UI_resources.hh": "1e6b4f141053afc30a549a2a25a4c7ca10ad0a89f22f97911e6a8ceae740b9ca",

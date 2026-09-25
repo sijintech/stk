@@ -7,7 +7,12 @@
 # system-wide. The script is idempotent: packages already unpacked (same
 # version) are skipped.
 #
-# Usage: desktop/cmake/sysroot/fetch-sysroot.sh [SYSROOT]   (default ~/opt/stk-sysroot)
+# Usage: desktop/cmake/sysroot/fetch-sysroot.sh [--with-test-servers] [SYSROOT]
+#        (default SYSROOT: ~/opt/stk-sysroot)
+#
+# --with-test-servers also unpacks Xvfb and weston (plus their runtime libraries) for the
+# optional live-window tests (desktop/tests/wm/run_with_display.py). They are only ever
+# started on private unix sockets (Xvfb -nolisten tcp; weston headless backend).
 #
 # The list is pinned for Ubuntu 26.04 (resolute) amd64. Runtime packages are
 # listed next to their -dev package so that the `libfoo.so` link symlinks
@@ -15,6 +20,11 @@
 # system-wide are still unpacked (same version) for that reason.
 set -euo pipefail
 
+WITH_TEST_SERVERS=0
+if [[ "${1:-}" == "--with-test-servers" ]]; then
+  WITH_TEST_SERVERS=1
+  shift
+fi
 SYSROOT="${1:-${STK_SYSROOT:-$HOME/opt/stk-sysroot}}"
 DEBS="$SYSROOT/.debs"
 STAMPS="$SYSROOT/.stamps"
@@ -64,6 +74,19 @@ PACKAGES=(
   # Unit tests (static libgtest.a / libgmock.a + CMake config).
   "libgtest-dev=1.17.0-1build1" "libgmock-dev=1.17.0-1build1"
 )
+
+if ((WITH_TEST_SERVERS)); then
+  PACKAGES+=(
+    # Xvfb (X11 live-window tests) + keymap compiler and data.
+    "xvfb=2:21.1.22-1ubuntu1.2" "xserver-common=2:21.1.22-1ubuntu1.2"
+    "libxfont2=1:2.0.6-2ubuntu0.2" "libfontenc1=1:1.1.8-1build2"
+    "x11-xkb-utils=7.7+9build1" "libxkbfile1=1:1.1.0-1build5" "xkb-data=2.46-2"
+    # weston headless (Wayland live-window tests).
+    "weston=14.0.2-5" "libweston-14-0=14.0.2-5"
+    "libinput10=1.31.1-1ubuntu1.2" "libmtdev1t64=1.1.7-1build1"
+    "libwacom9=2.18.0-1" "libwacom-common=2.18.0-1"
+  )
+fi
 
 need=()
 for spec in "${PACKAGES[@]}"; do
