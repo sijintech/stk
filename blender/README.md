@@ -2,7 +2,7 @@
 
 本目录是 STK 桌面主线：**Blender 5.2.1 源码定制版**，独立于 Synorder 工作台开发（[Synorder 插件](../plugins/synorder/README.md) 暂缓，作为可选集成保留）。`SPACE_STK` 是新增的 C++ 编辑器，界面分区、控件编排、绘制、三维交互均由 STK 控制。Blender 提供窗口、输入、字体、基础文本控件和 GPU 后端；应用模板只负责启动编辑器和写入操作队列。
 
-固定版本、源码 SHA256 和依赖提交见 [upstream.json](upstream.json)。这与已有 `native/` Rust/egui 技术原型分开；后者暂停扩展。Qt 界面与 Runtime 回归测试继续保留。
+固定版本、源码 SHA256 和依赖提交见 [upstream.json](upstream.json)。早期 `native/` Rust/egui 原型已归档（标签 `archive/native-egui-2026-09`）；本目录将由 `desktop/` 自有引擎取代。Qt 界面与 Runtime 回归测试继续保留。
 
 ## 源码与构建
 

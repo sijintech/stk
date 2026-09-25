@@ -62,7 +62,6 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 - docs：runtime、MuPRO、可视化、控制服务与站点验收文档。
 - docs/specs：数据格式、节点图、渲染数据包、监控事件与畴分类的英文规范，附节点目录与示例。
 - plugins/synorder：Synorder 插件（暂缓，可选集成）。
-- native：早期 Rust/egui 原型（暂停）。
 - examples/runtime：确定性参数扫描与 PNG／VTK 结果验收示例。
 - tests：任务生命周期、协议、文件传输和科学数据格式的回归测试。
 
@@ -71,7 +70,9 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 
 桌面开发主线为 **STK 自有的 Blender 原生工作台**：`blender/` 定制版 + `suan/blender_client` + `suan-control` + `suan-node` + STK Runtime，不依赖 Synorder 工作台。
 
-构建、服务启动、配对和计算闭环见 [工作台指南](blender/README.md)，使用 `suan-workbench`（兼容名 `suan-blender`）启动。`plugins/synorder` 与 `suan-synorder-node` 暂缓，作为可选集成保留，见 [插件指南](plugins/synorder/README.md)。Qt 界面保留为旧客户端；此前 `native/` Rust/egui 原型暂停扩展。
+构建、服务启动、配对和计算闭环见 [工作台指南](blender/README.md)，使用 `suan-workbench`（兼容名 `suan-blender`）启动。`plugins/synorder` 与 `suan-synorder-node` 暂缓，作为可选集成保留，见 [插件指南](plugins/synorder/README.md)。Qt 界面保留为旧客户端。早期 `native/` Rust/egui 原型已归档（标签 `archive/native-egui-2026-09`）。
+
+**下一步（进行中）**：STK 自有 C++ 桌面引擎，复用 Blender 的 GHOST、GPU 与 BLF 模块（`desktop/`，GPL），将逐步取代 `blender/` 定制版、PyQt 界面与 SimViz。
 
 ## File format
 
