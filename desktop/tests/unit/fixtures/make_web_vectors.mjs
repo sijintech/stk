@@ -1,6 +1,8 @@
 // Parity vectors from the web viewer (web/src/payload.ts, colormaps.ts, camera.ts) for the desktop
 // C++ viewer model. Node >= 23.6 runs the TypeScript sources directly (type stripping); the three
-// modules are copied to a temporary directory with explicit ".ts" import specifiers.
+// modules are copied to a temporary directory with explicit ".ts" import specifiers. The inputs (payload
+// cases, label formats, camera views, category values) come from the Python fixtures, so every vector
+// can be compared three ways: Python, web and C++.
 //
 //   node desktop/tests/unit/fixtures/make_web_vectors.mjs      (run make_fixtures.py first)
 //
@@ -78,35 +80,12 @@ for (const file of readdirSync(join(HERE, 'payload', 'scenes')).filter(f => f.en
 }
 
 // -------------------------------------------------------------------------------------------------
-// Cameras of synthetic views (the numeric/preset rules of camera.ts).
-const views = [
-  undefined,
-  {schema: 'stk.view/1'},
-  {schema: 'stk.view/1', camera: {preset: '+x'}},
-  {schema: 'stk.view/1', camera: {preset: '-z', zoom: 2}},
-  {schema: 'stk.view/1', preset: '+y', camera: {}},
-  {schema: 'stk.view/1', camera: {preset: 'bogus'}},
-  {schema: 'stk.view/1', camera: {preset: '', position: [1e6 + 10, -3, 7], focal_point: [1e6, -3, 7]}},
-  {schema: 'stk.view/1', camera: {position: [1e6 + 10, -3, 7], focal_point: [1e6, -3, 7], zoom: 2}},
-  {schema: 'stk.view/1', camera: {position: [1e6 + 10, -3, 7], focal_point: [1e6, -3, 7], zoom: 2, projection: 'parallel'}},
-  {schema: 'stk.view/1', camera: {position: [0, 0, 10], focal_point: [0, 0, 0]}},
-  {schema: 'stk.view/1', camera: {position: [0, 0.001, 10], focal_point: [0, 0, 0]}},
-  {schema: 'stk.view/1', camera: {position: [0, 0, 10], focal_point: [0, 0, 0], view_up: [0, 0, 1]}},
-  {schema: 'stk.view/1', camera: {position: [1, 2, 3], focal_point: [1, 2, 3]}},
-  {schema: 'stk.view/1', camera: {preset: 'iso', view_up: [0, 1, 0], view_angle_deg: 45}},
-  {schema: 'stk.view/1', camera: {preset: '+z', view_up: [0, 0, 5]}},
-  {schema: 'stk.view/1', camera: {preset: 'iso', view_angle_deg: 200, zoom: -1, parallel_scale: 0}},
-  {schema: 'stk.view/1', camera: {preset: 'iso', projection: 'parallel', parallel_scale: 7.5}},
-  {schema: 'stk.view/1', camera: {preset: '+x', position: [5, 0, 0], focal_point: [0, 0, 0]}},
-  {schema: 'stk.view/1', camera: {position: [5, 5, 5], focal_point: [0, 0, 0], view_up: [1, 1, 1]}},
-  {schema: 'stk.view/1', camera: {position: [5, true, 5], focal_point: [0, 0, 0]}},
-];
-const boundsList = [[-1, 1, -1, 1, -1, 1], [0, 10, 0, 2, 0, 1], [-2, 2, -2, 2, -2, 2], [3, 3, 3, 3, 3, 3]];
-const origins = [[0, 0, 0], [1e6, -3, 7]];
+// Cameras of the synthetic views of camera_cases.json (make_fixtures.py CAMERA_VIEWS), in the same order.
+const readFixture = name => JSON.parse(readFileSync(join(HERE, name), 'utf8'));
 const cameras = [];
-for (const view of views) for (const bounds of boundsList) for (const origin of origins) {
-  const p = {manifest: {render_origin: origin, view}};
-  cameras.push({view: view ?? null, bounds, origin, pose: cameraPose(p, bounds), preset: presetOf(p), signature: cameraSignature(p)});
+for (const c of readFixture('camera_cases.json').poses) {
+  const p = {manifest: {render_origin: c.origin, view: c.view ?? undefined}};
+  cameras.push({view: c.view, bounds: c.bounds, origin: c.origin, pose: cameraPose(p, c.bounds), preset: presetOf(p), signature: cameraSignature(p)});
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -117,13 +96,13 @@ for (const [lo, hi] of [[0, 1], [-1, 1], [2, 2], [1, 0], [0, 1e-300], [-1e6, 1e6
     lut.push({v: num(v), lo, hi, index: lutIndex(v, lo, hi)});
   }
 }
-const formats = ['.3g', '.2f', '.1e', '.0%', 'd', '', '.3', '.0f', '.2e', '.4g', '.0g', 'g', 'e', 'f', '%', '+.3g', '08.3f', ',d', ' .2f ', '.21g', '.25f', '.30e', 'x'];
-const values = [0, -0, 1, -1, 0.5, 1.5, 2.5, -2.5, 0.125, 0.375, 1234.5678, -1234.5678, 1e-5, 1.5e-5, 0.0001, 0.00012345, 123456, 1234567,
-  1e16, 1e15, 9.995, 0.995, 99.95, 999.5, 1e21, 1e22, 1e-300, 5e-324, 1.7976931348623157e308, 0.1, 0.2, 0.3, 1 / 3, 2 / 3, 12345678.9, 100, 1e3,
-  0.05, 0.015, 0.025, 1.005, 2.675, 1e100, 123.456, -0.0001, 7, 10, 0.9999, 99999.5, 3.14159265358979, -0.4, -0.5, 0.49999999999999994,
-  Infinity, -Infinity, NaN];
+// Scalar-bar labels of every (format, value) of format_cases.json (Python payload.format_label).
+const fromFixture = v => (typeof v === 'string' ? {inf: Infinity, '-inf': -Infinity, nan: NaN}[v] : v);
 const format = [];
-for (const f of formats) for (const v of values) format.push({format: f, value: num(v), negative_zero: Object.is(v, -0), text: formatNumber(v, f)});
+for (const c of readFixture('format_cases.json')) {
+  const v = c.negative_zero ? -0 : fromFixture(c.value);
+  format.push({format: c.format, value: c.value, negative_zero: c.negative_zero, text: formatNumber(v, c.format), python: c.text});
+}
 const orientation = [];
 let seed = 12345;
 const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
@@ -136,9 +115,7 @@ for (let k = 0; k < 200; k++) {
 }
 const hsl = [];
 for (const h of [-30, 0, 59.9, 60, 180, 359.9, 720.5]) for (const s of [0, 0.65, 1]) for (const l of [0, 0.38, 0.5, 1]) hsl.push({hsl: [h, s, l], rgb: hslToRgb(h, s, l)});
-const categorical = [];
-for (let v = -3; v < 40; v++) categorical.push({v, rgb: genericCategoryColor(v)});
-categorical.push({v: 2.5, rgb: genericCategoryColor(2.5)});
+const categorical = readFixture('colormap_cases.json').categorical.map(c => ({v: c.v, rgb: genericCategoryColor(c.v)}));
 
 // -------------------------------------------------------------------------------------------------
 // The web decoder's verdict on the payload cases of make_fixtures.py.
@@ -158,28 +135,35 @@ const exampleStkp = readFileSync(join(EXAMPLE, 'example.stkp'));
 const cases = JSON.parse(readFileSync(join(HERE, 'payload', 'cases.json'), 'utf8'));
 const verdicts = [];
 for (const c of cases) {
-  let ok = true, message = '';
+  let ok = true, message = '', loaded = null;
   try {
     if (c.kind === 'example') {
       let m = structuredClone(exampleManifest);
       for (const patch of c.patches) m = applyPatch(m, patch);
-      await loadPayload(m, {fetchBlob: exampleFetch});
+      loaded = await loadPayload(m, {fetchBlob: exampleFetch});
     } else if (c.kind === 'blobs') {
-      await loadPayload(c.manifest, {fetchBlob: async sha => toArrayBuffer(Buffer.from(c.blobs[sha] ?? '', 'base64'))});
+      loaded = await loadPayload(c.manifest, {fetchBlob: async sha => toArrayBuffer(Buffer.from(c.blobs[sha] ?? '', 'base64'))});
+    } else if (c.kind === 'stkp_bytes') {
+      loaded = await loadStkp(toArrayBuffer(Buffer.from(c.data, 'base64')));
     } else {
       let bytes = Buffer.from(exampleStkp);
       for (const [at, h] of c.edits) Buffer.from(h, 'hex').copy(bytes, at);
       if (c.truncate !== null && c.truncate !== undefined) bytes = bytes.subarray(0, c.truncate);
       if (c.append) bytes = Buffer.concat([bytes, Buffer.from(c.append, 'hex')]);
-      await loadStkp(toArrayBuffer(bytes));
+      loaded = await loadStkp(toArrayBuffer(bytes));
     }
   } catch (error) {
     ok = false;
     message = error instanceof payloadMod.PayloadError ? error.problems.slice(0, 2).join('; ') : `CRASH ${error?.name}: ${error?.message}`;
   }
-  verdicts.push({name: c.name, ok, message});
+  verdicts.push({name: c.name, ok, message, warnings: loaded ? loaded.skipped.map(w => w.path) : []});
 }
 
 writeFileSync(join(HERE, 'web_vectors.json'), JSON.stringify({node: process.version, payloads, cameras, lut, format, orientation, hsl,
   categorical, presets: PRESETS, verdicts}) + '\n');
+const differ = verdicts.filter((v, i) => v.ok !== cases[i].python.ok).map(v => v.name);
+const warned = verdicts.filter((v, i) => v.ok && cases[i].python.ok && JSON.stringify(v.warnings) !== JSON.stringify(cases[i].python.warnings)).map(v => v.name);
+const labels = format.filter(f => f.text !== f.python).length;
 console.log(`wrote web_vectors.json (${cameras.length} cameras, ${format.length} formats, ${verdicts.length} payload verdicts)`);
+console.log(`web vs Python: ${differ.length} verdicts differ${differ.length ? ` (${differ.slice(0, 20).join(', ')})` : ''}, ` +
+  `${warned.length} warning lists differ${warned.length ? ` (${warned.slice(0, 20).join(', ')})` : ''}, ${labels} labels differ`);

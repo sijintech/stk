@@ -5,7 +5,8 @@
  * manifests whose buffers come from the content-addressed blob cache. Buffers are verified against
  * their sha256 and exposed as zero-copy views (memory-mapped where possible). Validation follows
  * spec §10 exactly as suan/render/payload.py's _Validator does, raising PayloadError with an
- * RFC 6901 JSON-pointer path on the first problem. */
+ * RFC 6901 JSON-pointer path on the first problem; layers that clients skip (unknown type or overlay
+ * kind, overlays with malformed presentation members) are reported in Payload::warnings instead. */
 
 #include "stk/core/mmap.hh"
 #include "stk/io/json.hh"
@@ -119,6 +120,13 @@ struct PayloadAccessor {
   }
 };
 
+/** A layer skipped by validation (spec §10 warnings; payload.py Payload.warnings). */
+struct PayloadWarning {
+  std::string path;  /* "/layers/<i>" */
+  std::string layer; /* the layer id */
+  std::string message;
+};
+
 /** A decoded, validated payload. Views stay valid as long as the Payload (or a copy) lives. */
 class Payload {
  public:
@@ -127,6 +135,11 @@ class Payload {
   std::vector<PayloadAccessor> accessors;
   std::array<double, 3> render_origin{};
   std::string length_unit;
+  /** Layers clients skip (unknown type or overlay kind, malformed overlay presentation), not errors. */
+  std::vector<PayloadWarning> warnings;
+
+  /** Whether the layer with this id is skipped (see `warnings`). */
+  bool skipped(std::string_view layer_id) const;
 
   bool has_accessor(std::string_view id) const;
   const PayloadAccessor &accessor(std::string_view id) const;
@@ -199,10 +212,15 @@ std::vector<uint8_t> pack_stkp(const Json &manifest, const std::map<std::string,
 void validate_payload(const Payload &payload);
 
 /** Scalar-bar label format subset (Python/d3): `[sign][#][0][width<=2][,][.precision<=2][eEfFgG%]` or
- * `[sign][#][0][width][,]d`, as payload.py's LABEL_FORMAT (without Python's trailing-newline `$`). */
+ * `[sign][#][0][width][,]d`, as payload.py's LABEL_FORMAT (the whole string; no trailing newline). */
 bool is_label_format(std::string_view format);
 
-/** An id as payload.py's _ID: ^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$. */
+/** An id as payload.py's _ID (the whole string ^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}), except the reserved
+ * "__proto__", "constructor" and "prototype" (spec §10). */
 bool is_payload_id(std::string_view id);
+
+/** Presentation members of an overlay with a wrong JSON type (payload.py overlay_problems); overlays with
+ * problems are skipped with a warning. */
+std::vector<std::string> overlay_problems(const Json &layer);
 
 }  // namespace stk::io

@@ -311,7 +311,7 @@ std::vector<std::array<double, 4>> volume_color_points(const Colormap *colormap,
     cm = grey_colormap();
   }
   const auto [lo, hi] = range;
-  if (hi == lo) {
+  if (!(hi > lo)) { /* a degenerate range (hi <= lo): one colour, the LUT centre (spec §6.6) */
     points.push_back({lo, cm.lut[128][0] / 255.0, cm.lut[128][1] / 255.0, cm.lut[128][2] / 255.0});
   }
   else {

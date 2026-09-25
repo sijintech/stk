@@ -154,14 +154,32 @@ CameraPose fit_camera(const Bounds &bounds, CameraPreset preset, double view_ang
   return pose;
 }
 
+namespace {
+
+/* web camera.ts unit(): a / (|a| || 1). */
+dvec3 unit_or_zero(const dvec3 &a)
+{
+  double l = std::hypot(a.x, a.y, a.z);
+  if (!(l != 0.0) || std::isnan(l)) {
+    l = 1.0;
+  }
+  return a * (1.0 / l);
+}
+
+/* `up`, unless within 1e-6 of the view direction: then +z, or +y when looking along z (spec §2.1). */
+dvec3 up_for(const dvec3 &up, const dvec3 &direction)
+{
+  if (length(cross(unit_or_zero(up), direction)) < 1e-6) {
+    return std::abs(direction.z) > 0.99 ? dvec3{0, 1, 0} : dvec3{0, 0, 1};
+  }
+  return up;
+}
+
+}  // namespace
+
 dvec3 default_view_up(const dvec3 &position, const dvec3 &focal_point)
 {
-  const dvec3 d = position - focal_point;
-  double norm = std::sqrt(dot(d, d));
-  if (norm == 0.0) {
-    norm = 1.0;
-  }
-  return std::abs(d.z / norm) > 0.999 ? dvec3{0, 1, 0} : dvec3{0, 0, 1};
+  return up_for({0, 0, 1}, unit_or_zero(focal_point - position));
 }
 
 Json view_camera(const Json &view)
@@ -231,12 +249,8 @@ CameraPose camera_pose(const Json &view, const dvec3 &o, const Bounds &b)
   if (position && focal && *position != *focal) {
     pose.position = *position - o;
     pose.focal_point = *focal - o;
-    const dvec3 dop = normalize(pose.focal_point - pose.position);
-    dvec3 up = requested_up ? *requested_up : dvec3{0, 0, 1};
-    if (length(cross(normalize(up), dop)) < 1e-6) {
-      up = std::abs(dop.z) > 0.99 ? dvec3{0, 1, 0} : dvec3{0, 0, 1};
-    }
-    pose.view_up = up;
+    const dvec3 dop = unit_or_zero(pose.focal_point - pose.position);
+    pose.view_up = up_for(requested_up ? *requested_up : dvec3{0, 0, 1}, dop);
     pose.view_angle_deg = !parallel && !preset ? angle / zoom : angle;
     return pose;
   }
@@ -244,7 +258,7 @@ CameraPose camera_pose(const Json &view, const dvec3 &o, const Bounds &b)
   const PresetFrame f = preset_frame(fitted);
   const double distance = radius / std::sin(angle * std::numbers::pi / 360.0) / zoom;
   pose.view_up = f.view_up;
-  if (requested_up && length(cross(normalize(*requested_up), f.direction)) > 1e-6) {
+  if (requested_up && length(cross(unit_or_zero(*requested_up), f.direction)) > 1e-6) {
     pose.view_up = *requested_up;
   }
   pose.position = center + f.direction * distance;

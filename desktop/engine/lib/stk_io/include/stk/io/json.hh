@@ -52,6 +52,9 @@ bool py_truthy(const Json &value);
 bool is_finite_number(const Json &value);
 /** A JSON integer (integer token, not a float such as 3.0) that is not a boolean. */
 bool is_integer_token(const Json &value);
+/** An integer of the payload spec (§10): a JSON number with an integral value (5 and 5.0 alike, as
+ * JavaScript reads them) within +-(2^53 - 1); booleans are not numbers. */
+bool is_safe_integer(const Json &value);
 
 /** Short JSON type name for messages: null, boolean, number, string, array, object. */
 std::string_view json_type_name(const Json &value);

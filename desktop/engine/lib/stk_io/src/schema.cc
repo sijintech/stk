@@ -31,6 +31,53 @@ std::string pointer_token(std::string_view key)
   return out;
 }
 
+std::string schema_pattern(std::string_view pattern)
+{
+  std::string out;
+  out.reserve(pattern.size() + 4);
+  bool in_class = false;
+  for (size_t i = 0; i < pattern.size();) {
+    const char c = pattern[i];
+    if (c == '\\') {
+      out.append(pattern.substr(i, 2));
+      i += 2;
+      continue;
+    }
+    if (in_class) {
+      if (c == ']') {
+        in_class = false;
+      }
+    }
+    else if (c == '[') {
+      in_class = true;
+      out.push_back(c);
+      i++;
+      if (i < pattern.size() && pattern[i] == '^') { /* "[^]...]" and "[]...]" start with a literal "]" */
+        out.push_back('^');
+        i++;
+      }
+      if (i < pattern.size() && pattern[i] == ']') {
+        out.push_back(']');
+        i++;
+      }
+      continue;
+    }
+    else if (c == '$') {
+      out += "\\Z";
+      i++;
+      continue;
+    }
+    out.push_back(c);
+    i++;
+  }
+  return out;
+}
+
+bool schema_pattern_search(std::string_view pattern, std::string_view text)
+{
+  return py_regex_search(schema_pattern(pattern), text);
+}
+
 std::string pointer_join(const std::string &path, std::string_view key)
 {
   return path + "/" + pointer_token(key);
@@ -328,7 +375,7 @@ void check(const Json &value, const Json &schema, const std::string &path, std::
       }
       bool matched;
       try {
-        matched = py_regex_search(pattern->get_ref<const std::string &>(), text);
+        matched = schema_pattern_search(pattern->get_ref<const std::string &>(), text);
       }
       catch (const RegexError &error) {
         throw SchemaError("unsupported pattern " + pattern->get<std::string>() + ": " + error.what());
@@ -403,7 +450,7 @@ void check(const Json &value, const Json &schema, const std::string &path, std::
         for (auto p = patterns->begin(); p != patterns->end(); ++p) {
           bool hit;
           try {
-            hit = py_regex_search(p.key(), key);
+            hit = schema_pattern_search(p.key(), key);
           }
           catch (const RegexError &error) {
             throw SchemaError("unsupported pattern " + p.key() + ": " + error.what());

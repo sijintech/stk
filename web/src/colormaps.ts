@@ -1,7 +1,7 @@
 // Colour mapping for stk.payload/2 (spec §5) and the orientation colours of docs/specs/domain-classifiers.md §6.
 // Colormaps travel in the payload as 256-entry RGBA8 LUTs or categorical palettes; nothing is hard-coded here
 // except the function colormap stk:orientation-hsl and the generic stk:categorical fallback.
-import {own, type AttributeSpec, type ColorSpec, type LayerSpec, type LoadedPayload, type TypedArray} from './payload';
+import {LABEL_FORMAT, own, type AttributeSpec, type ColorSpec, type LayerSpec, type LoadedPayload, type TypedArray} from './payload';
 
 export const ORIENTATION_HSL = 'stk:orientation-hsl';
 export type RGB = [number, number, number];
@@ -85,7 +85,8 @@ export function volumeColorPoints(cm: Colormap | null, range: [number, number], 
   if (!cm || cm.kind !== 'continuous') { warnings.push(`体图层 ${layerId} 的颜色表无效，使用灰度`); cm = greyColormap(); }
   const [lo, hi] = range;
   const lut = cm.lut;
-  if (hi === lo) points.push([lo, lut[512] / 255, lut[513] / 255, lut[514] / 255]);
+  // A degenerate range (hi <= lo) is one colour, LUT entry 128 (spec §6.6).
+  if (!(hi > lo)) points.push([lo, lut[512] / 255, lut[513] / 255, lut[514] / 255]);
   else for (let i = 0; i < 256; i++) points.push([lo + ((i + 0.5) / 256) * (hi - lo), lut[i * 4] / 255, lut[i * 4 + 1] / 255, lut[i * 4 + 2] / 255]);
   return points;
 }
@@ -191,22 +192,193 @@ export function layerColors(p: LoadedPayload, layer: LayerSpec, spec: ColorSpec 
   return {colors, solid, categorical: false, nearest: spec.interpolate === 'nearest', range, warnings};
 }
 
-/** d3/Python-style number formatting for legend labels: ".3g" (default), ".2f", ".1e", ".0%", "d". */
+// ---------------------------------------------------------------------------------------------
+// Scalar-bar labels (spec §6.7): the Python format-spec subset [sign][#][0][width][,][.precision][type], written by
+// hand from the exact decimal expansion of the double, so ties round half to even exactly as Python's format()
+// (and suan.render.payload.format_label, the desktop format_label) do; toFixed/toPrecision round ties away from
+// zero instead.
+
+interface LabelFormat {sign: string, alternate: boolean, zeroPad: boolean, width: number, grouping: boolean, precision: number, type: string}
+/** |v| = 0.d1 d2 d3 … × 10^point; digits without trailing zeros ("0" for zero). */
+interface Decimal {digits: string, point: number}
+
+function parseLabelFormat(spec: string): LabelFormat | null {
+  if (!LABEL_FORMAT.test(spec)) return null;
+  const m = /^([+\- ]?)(#?)(0?)([0-9]*)(,?)(?:\.([0-9]+))?([eEfFgG%d]?)$/.exec(spec)!;
+  return {sign: m[1] || '-', alternate: m[2] === '#', zeroPad: m[3] === '0', width: m[4] ? Number(m[4]) : 0,
+    grouping: m[5] === ',', precision: m[6] !== undefined ? Number(m[6]) : -1, type: m[7]};
+}
+
+/** The exact decimal expansion of a finite double (its magnitude). */
+function exactDecimal(value: number): Decimal {
+  const v = Math.abs(value);
+  if (v === 0) return {digits: '0', point: 1};
+  const bits = new DataView(new ArrayBuffer(8));
+  bits.setFloat64(0, v);
+  const hi = bits.getUint32(0), lo = bits.getUint32(4);
+  const biased = (hi >>> 20) & 0x7ff;
+  let mantissa = (BigInt(hi & 0xfffff) << 32n) | BigInt(lo);
+  let exponent = -1074;
+  if (biased !== 0) { mantissa |= 1n << 52n; exponent = biased - 1075; }
+  // v = mantissa · 2^exponent = mantissa · 5^−exponent / 10^−exponent for negative exponents.
+  const text = exponent >= 0 ? (mantissa << BigInt(exponent)).toString() : (mantissa * 5n ** BigInt(-exponent)).toString();
+  const point = text.length - (exponent >= 0 ? 0 : -exponent);
+  return {digits: text.replace(/0+$/, '') || '0', point};
+}
+
+/** Keep the first `keep` digits (keep may be ≤ 0), rounding half to even; a carry adds a digit and moves the point. */
+function roundDigits(d: Decimal, keep: number): Decimal {
+  if (d.digits === '0') return {digits: '0'.repeat(Math.max(keep, 0)), point: d.point};
+  if (keep >= d.digits.length) return {digits: d.digits + '0'.repeat(keep - d.digits.length), point: d.point};
+  let up = false;
+  if (keep >= 0) {
+    const first = d.digits[keep];
+    const rest = /[1-9]/.test(d.digits.slice(keep + 1));
+    if (first > '5' || (first === '5' && rest)) up = true;
+    else if (first === '5') up = (keep > 0 ? d.digits.charCodeAt(keep - 1) - 48 : 0) % 2 === 1;
+  }
+  const digits = keep > 0 ? d.digits.slice(0, keep).split('') : [];
+  let point = d.point;
+  if (up) {
+    let i = digits.length - 1;
+    while (i >= 0 && digits[i] === '9') digits[i--] = '0';
+    if (i >= 0) digits[i] = String.fromCharCode(digits[i].charCodeAt(0) + 1);
+    else { digits.unshift('1'); point++; }
+  }
+  return {digits: digits.join(''), point};
+}
+
+/** Fixed notation with `frac` fraction digits (no sign). */
+function fixedText(d: Decimal, frac: number): string {
+  const r = roundDigits(d, d.point + frac);
+  let digits = r.digits, point = r.point;
+  if (d.digits === '0') { point = 1; digits = '0'.repeat(frac + 1); }
+  let integer: string, fraction: string;
+  if (point <= 0) { integer = '0'; fraction = '0'.repeat(-point) + digits; }
+  else {
+    if (digits.length < point) digits += '0'.repeat(point - digits.length);
+    integer = digits.slice(0, point);
+    fraction = digits.slice(point);
+  }
+  fraction = (fraction + '0'.repeat(Math.max(0, frac - fraction.length))).slice(0, frac);
+  integer = integer.replace(/^0+/, '') || '0';
+  return frac > 0 ? `${integer}.${fraction}` : integer;
+}
+
+/** Scientific notation with `frac` mantissa fraction digits: [mantissa, exponent]. */
+function scientificText(d: Decimal, frac: number): [string, number] {
+  if (d.digits === '0') return [frac > 0 ? `0.${'0'.repeat(frac)}` : '0', 0];
+  const r = roundDigits(d, frac + 1);
+  return [r.digits.slice(0, 1) + (frac > 0 ? `.${r.digits.slice(1, 1 + frac)}` : ''), r.point - 1];
+}
+
+const exponentText = (e: number) => `${e < 0 ? '-' : '+'}${String(Math.abs(e)).padStart(2, '0')}`;
+const stripZeros = (text: string) => (text.includes('.') ? text.replace(/0+$/, '').replace(/\.$/, '') : text);
+
+/** Python repr() of a finite double's magnitude: shortest round-trip digits, fixed for 1e-4 ≤ |v| < 1e16. */
+function pythonRepr(v: number): string {
+  if (v === 0) return '0.0';
+  const [m, e] = Math.abs(v).toExponential().split('e');
+  const digits = m.replace('.', '');
+  const exponent = Number(e);
+  if (exponent < -4 || exponent >= 16) return `${digits[0]}${digits.length > 1 ? `.${digits.slice(1)}` : ''}e${exponentText(exponent)}`;
+  const point = exponent + 1;
+  if (point <= 0) return `0.${'0'.repeat(-point)}${digits}`;
+  if (digits.length <= point) return `${digits}${'0'.repeat(point - digits.length)}.0`;
+  return `${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+function groupThousands(integer: string, minWidth: number): string {
+  const out: string[] = [];
+  let count = 0;
+  for (let i = integer.length - 1; i >= 0; i--) {
+    if (count && count % 3 === 0) out.push(',');
+    out.push(integer[i]);
+    count++;
+  }
+  while (out.length < minWidth) { // zero padding is grouped too; never start with a separator
+    if (count % 3 === 0) out.push(',');
+    out.push('0');
+    count++;
+  }
+  return out.reverse().join('');
+}
+
+/** Sign, zero padding, grouping and width of a formatted magnitude (integer digits + the rest). */
+function finish(f: LabelFormat, negative: boolean, integer: string, rest: string, numeric: boolean): string {
+  const sign = negative ? '-' : f.sign === '+' ? '+' : f.sign === ' ' ? ' ' : '';
+  if (f.zeroPad && numeric) {
+    const minWidth = Math.max(0, f.width - sign.length - rest.length);
+    return sign + (f.grouping ? groupThousands(integer, minWidth) : integer.padStart(minWidth, '0')) + rest;
+  }
+  const body = f.grouping && numeric ? groupThousands(integer, 0) : integer;
+  if (f.zeroPad) return sign + '0'.repeat(Math.max(0, f.width - sign.length - body.length - rest.length)) + body + rest;
+  return (sign + body + rest).padStart(f.width, ' ');
+}
+
+/** Python format(value, spec) for a spec of the subset (an integral value for 'd'). */
+function formatPython(value: number, f: LabelFormat): string {
+  const negative = value < 0 || Object.is(value, -0);
+  const upper = f.type === 'E' || f.type === 'F' || f.type === 'G';
+  if (!Number.isFinite(value)) {
+    const text = Number.isNaN(value) ? 'nan' : 'inf';
+    return finish(f, negative && !Number.isNaN(value), upper ? text.toUpperCase() : text, f.type === '%' ? '%' : '', false);
+  }
+  if (f.type === 'd') return finish(f, negative && value !== 0, fixedText(exactDecimal(value), 0), '', true);
+  const v = f.type === '%' ? value * 100 : value;
+  if (!Number.isFinite(v)) return finish(f, negative, 'inf', '%', false); // format(1e308, '%') == 'inf%'
+  const d = exactDecimal(v);
+  let text: string;
+  if (f.type === 'f' || f.type === 'F' || f.type === '%') {
+    const p = f.precision < 0 ? 6 : f.precision;
+    text = fixedText(d, p) + (f.alternate && p === 0 ? '.' : '') + (f.type === '%' ? '%' : '');
+  } else if (f.type === 'e' || f.type === 'E') {
+    const p = f.precision < 0 ? 6 : f.precision;
+    const [mantissa, exponent] = scientificText(d, p);
+    text = mantissa + (f.alternate && p === 0 ? '.' : '') + (f.type === 'E' ? 'E' : 'e') + exponentText(exponent);
+  } else if (f.type === 'g' || f.type === 'G' || f.precision >= 0) {
+    // Round to p significant digits; fixed if -4 <= exp < p (no type: exp < p - 1, with a fraction digit).
+    const p = Math.max(1, f.precision < 0 ? 6 : f.precision);
+    let [mantissa, exponent] = scientificText(d, p - 1);
+    if (d.digits === '0') exponent = 0;
+    const none = f.type === '';
+    if (exponent >= -4 && exponent < (none ? p - 1 : p)) {
+      text = fixedText(d, Math.max(0, p - 1 - exponent));
+      if (!f.alternate) text = stripZeros(text);
+      else if (!text.includes('.')) text += '.';
+      if (none && !text.includes('.')) text += '.0';
+    } else {
+      if (!f.alternate) mantissa = stripZeros(mantissa);
+      else if (!mantissa.includes('.')) mantissa += '.';
+      text = mantissa + (f.type === 'G' ? 'E' : 'e') + exponentText(exponent);
+    }
+  } else {
+    text = pythonRepr(v); // no type, no precision: repr
+    if (f.alternate && !text.includes('.') && text.includes('e')) text = text.replace('e', '.e');
+  }
+  const end = /^[0-9]*/.exec(text)![0].length;
+  return finish(f, negative, text.slice(0, end), text.slice(end), true);
+}
+
+/** Python round(): to the nearest integer, ties to even. */
+function roundHalfEven(v: number): number {
+  const floor = Math.floor(v);
+  const diff = v - floor;
+  const r = diff > 0.5 || (diff === 0.5 && floor % 2 !== 0) ? floor + 1 : floor;
+  return r === 0 ? 0 : r;
+}
+
+/**
+ * A scalar-bar label (spec §6.7): Python format-spec semantics for the subset [sign][#][0][width][,][.precision][type].
+ * Ties round half to even; 'd' formats the value rounded to the nearest integer (ties to even); a label that shows
+ * zero never carries a minus sign; non-finite values print as inf/-inf/nan; other formats fall back to '.3g'.
+ */
 export function formatNumber(v: number, format = '.3g'): string {
-  if (!Number.isFinite(v)) return String(v);
-  const match = /^(?:\.(\d+))?([efgd%])?$/.exec(format.trim());
-  const precision = match?.[1] !== undefined ? Number(match[1]) : 3;
-  const kind = match?.[2] ?? 'g';
-  if (kind === 'f') return v.toFixed(Math.min(precision, 20));
-  if (kind === 'e') return v.toExponential(Math.min(precision, 20)).replace(/e([+-])(\d)$/, 'e$10$2');
-  if (kind === 'd') return String(Math.round(v));
-  if (kind === '%') return `${(v * 100).toFixed(Math.min(precision, 20))}%`;
-  if (v === 0) return '0';
-  const p = Math.max(1, Math.min(precision, 21));
-  const exponent = Math.floor(Math.log10(Math.abs(Number(v.toPrecision(p)))));
-  if (exponent < -4 || exponent >= p) return v.toExponential(p - 1).replace(/\.?0+e/, 'e').replace(/e([+-])(\d)$/, 'e$10$2');
-  const fixed = v.toFixed(Math.max(0, p - 1 - exponent));
-  return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
+  const f = (typeof format === 'string' ? parseLabelFormat(format) : null) ?? parseLabelFormat('.3g')!;
+  const rounded = (x: number) => formatPython(f.type === 'd' && Number.isFinite(x) ? roundHalfEven(x) : x, f);
+  const text = rounded(v);
+  if (Number.isFinite(v) && (v < 0 || Object.is(v, -0)) && !/[1-9]/.test(text)) return rounded(-v);
+  return text;
 }
 
 /** CSS colour of an RGBA8 tuple. */

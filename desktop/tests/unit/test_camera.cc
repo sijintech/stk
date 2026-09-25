@@ -64,8 +64,34 @@ TEST(CameraParity, FitCameraMatchesPython)
     EXPECT_NEAR(pose.parallel_scale, c["parallel_scale"].get<double>(), 1e-15 * pose.parallel_scale);
   }
   for (const Json &c : cases["default_view_up"]) {
-    EXPECT_EQ(default_view_up(vec(c["position"]), vec(c["focal"])), vec(c["up"]));
+    EXPECT_EQ(default_view_up(vec(c["position"]), vec(c["focal"])), vec(c["up"])) << c.dump();
   }
+}
+
+TEST(CameraParity, CameraPoseMatchesPython)
+{
+  /* suan.render.layers.camera_pose (the offscreen renderer, spec §2.1) on the synthetic views. */
+  int count = 0;
+  const Json cases = test::fixture_json("camera_cases.json");
+  for (const Json &c : cases["poses"]) {
+    const Json view = c["view"].is_null() ? Json() : c["view"];
+    const CameraPose pose = camera_pose(view, vec(c["origin"]), web_bounds(c["bounds"]));
+    const Json &py = c["pose"];
+    const std::string what = view.dump();
+    expect_near(pose.position, vec(py["position"]), 1e-12, what + " position");
+    expect_near(pose.focal_point, vec(py["focal_point"]), 1e-12, what + " focal");
+    expect_near(pose.view_up, vec(py["view_up"]), 1e-12, what + " up");
+    EXPECT_NEAR(pose.view_angle_deg, py["view_angle_deg"].get<double>(), 1e-12) << what;
+    EXPECT_EQ(pose.parallel, py["parallel"].get<bool>()) << what;
+    EXPECT_NEAR(pose.parallel_scale, py["parallel_scale"].get<double>(), 1e-12 * std::max(1.0, pose.parallel_scale))
+        << what;
+    const auto preset = view_preset(view);
+    EXPECT_EQ(preset.value_or("<numeric>"), c["preset"].is_null() ? "<numeric>" : c["preset"].get<std::string>())
+        << what;
+    count++;
+  }
+  std::printf("[camera parity] %d poses identical to Python camera_pose (<= 1e-12)\n", count);
+  EXPECT_GT(count, 200);
 }
 
 TEST(CameraParity, CameraPoseMatchesTheWebViewer)

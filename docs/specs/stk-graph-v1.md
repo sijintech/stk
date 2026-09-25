@@ -187,12 +187,18 @@ Graph outputs may name ports of type `dataset` (delivered as its descriptor), `t
 ### 4.2 Parameter schemas
 
 Each param is a JSON Schema fragment using this subset (implemented by
-`suan.graph.schema.check_value`): `type` (incl. lists such as `["number", "null"]`), `enum`, `const`,
-`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `pattern`
-(Python `re.search`), `items`, `prefixItems`, `minItems`, `maxItems`, `uniqueItems`, `properties`,
-`required`, `additionalProperties`, `propertyNames`, `minProperties`, `maxProperties`, `anyOf`,
-`oneOf`, `allOf`, `not`, `if`/`then`/`else`. JSON semantics: booleans are not numbers; `1.0` is an
-integer; NaN/Infinity are rejected. Annotations: `title`, `description`, `default`,
+`suan.graph.schema.check_value`, and by the desktop's `stk_io` `check_value` with the same results):
+`type` (incl. lists such as `["number", "null"]`), `enum`, `const`, `minimum`, `maximum`,
+`exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength` (code points), `pattern`, `items`,
+`prefixItems`, `minItems`, `maxItems`, `uniqueItems`, `properties`, `patternProperties`, `required`,
+`additionalProperties` (keys matched by neither `properties` nor a `patternProperties` pattern),
+`propertyNames`, `minProperties`, `maxProperties`, `anyOf`, `oneOf`, `allOf`, `not`,
+`if`/`then`/`else`. JSON semantics: booleans are not numbers; `1.0` is an integer; NaN/Infinity are
+rejected. `pattern` and the `patternProperties` keys are searched anywhere in the string (Python
+`re.search` syntax) with the JSON-Schema (ECMA-262) meaning of `$`: it matches only at the very end,
+never before a trailing newline, so `^[a-z]+$` rejects `"abc\n"` (`suan.graph.schema.pattern_search`
+rewrites every `$` outside a character class as `\Z`; an escaped `\$` or a `$` inside `[...]` stays a
+literal). A newline is otherwise an ordinary character: a class such as `[^/.]` admits it. Annotations: `title`, `description`, `default`,
 `x-stk-stage` (required), `x-stk-widget` (`field`, `field_list`, `step`, `binding`, `path`, `color`,
 `colormap`, `palette`, `vector3`, `int3`, `range`, `transfer_function`, `camera`, `json`),
 `x-stk-field-of` (input port whose fields populate a field picker), `x-stk-unit`, `x-stk-quantity`,
