@@ -146,6 +146,93 @@ Python 3.12.14。STK 为 `feature/independent-runtime-mupro` 分支上基于 217
 
 未覆盖：Blender 端显示与节点编辑器、真实集群、多 rank、GPU、Windows 客户端实机、控制服务 blob 保留与回收。
 
+## 2026-09-25 桌面里程碑 D1：自有引擎桌面端
+
+内容：自有 C++ 桌面程序（`desktop/`，Blender GHOST + GPU + BLF）的任务、传输、日志编辑器（WP9）与
+查看器、属性、探针编辑器（WP10），经 Python 桥（`suan.desktop_bridge`）连接控制服务与 Runtime，见
+[桌面程序说明](../desktop/README.md) 与对照清单 `desktop/docs/parity-*.md`。
+
+真实验收：2026-09-25 21:11–21:32（UTC+8），r730xd 测试主机（`mnemora-test`）。分支
+`feature/desktop-engine` 提交 dedae97；验收中发现的查看器问题已修复为 19f94ec（见下文问题 1），
+任务部分在 dedae97 的构建上运行，查看器部分在含 19f94ec 的构建上运行。STK 以非可编辑方式安装到临时
+venv（Python 3.12.14，pip 74 秒），桥使用该安装而不是源码树；桌面程序在 `~/opt/stk-build/d1acc`
+以 RelWithDebInfo 构建（约 3.6 分钟，用户 sysroot）。Runtime（并发 1）、控制服务
+（`suan-control serve --review-policy not-self --template muferro-example`）与节点代理都只监听
+127.0.0.1；桌面程序用 `suan-control pair --role client --profile desktop` 的配对码，经“配对控制服务”
+（`connections.pair_hub`）配对，配对码只存于 0600 文件，未打印。
+
+驱动方式：临时驱动程序（草稿目录，不入库）按 `stk-desktop` 的 `run_gui` 装配应用外壳、默认布局、
+任务状态钩子与真实 Python 桥，像 `desktop/tests/app/*_live.cc` 一样合成鼠标、键盘与输入法事件
+（点击“提交任务”“在查看器中打开”、任务名输入框，在视图中点击拾取）；显示服务器为
+`desktop/tests/wm/run_with_display.py` 启动的私有 weston（headless，pixman，自带 `XDG_RUNTIME_DIR`）
+与 Xvfb（`-nolisten tcp`），只用 unix 套接字。weston 上用 Vulkan（lavapipe），Xvfb 上用 OpenGL（llvmpipe）。
+结果：**通过**（问题 1 修复后）。
+
+- 连接：配对后 `hub.policy` 报告设备类型 `desktop`、审核策略 `not-self`、桌面自动执行上限 256 MiB；
+  节点在线，模板列表含 `muferro-example`。
+- 任务（weston，Wayland）：点击“提交任务”提交 `muferro-example` 模板，自动执行，0.46 秒登记任务；
+  任务表依次显示运行中、成功（2 秒一次的快照共 4 个）；日志视图收到 93 行，第一行比任务结束的快照早
+  7.3 秒到达（运行期间）；监控事件 142 条（帧 30、指标 5），校验 `passed`。从登记到完成 4.3 秒
+  （Runtime 记录），其中 muFerro 约 3.2 秒。
+- 下载：制品 36 个，共 15.9 MB。“另存为” `energy_out.dat`（11220 字节）0.05 秒完成，桥的 sha256 与磁盘
+  复核都通过，文件 sha256 与 Runtime 运行目录中的原文件、制品列表中的值三者一致（`1d8c3586…`），101 行，
+  末行总能量 −727.9144455。整个运行目录（36 个文件）下载到本地目录用时 1.8 秒，逐个与 Runtime 的
+  `work` 目录逐字节一致，供下面的本地求值使用。
+- 校验：两次模板运行的 `suan mupro result` 均为 `stk-mupro-1` `passed`，总能量 −727.9144455（step 101），
+  与 2026-09-24 与 M1 的记录一致；16³、101 步、30 个场帧，1 rank、1 线程、`launcher` 为 `none`；
+  muFerro 程序 SHA-256 仍为 `c0c1f345…`（muprosdk 已更新到 0d6e021，Release 安装未变）。
+- 自定义命令与复核：在任务名输入框中用输入法事件输入“铁电畴 验收 D1”（两段拼音预编辑，内联显示后提交，
+  再用按键输入“ D1”），提交自定义命令后进入复核（“新命令或模板变更：请检查完整参数后批准执行。”）。
+  本机检查请求后自行批准被控制服务拒绝（403），界面按 `review_policy` 显示“控制服务的审核策略（not-self）
+  不允许本设备批准该操作，请由控制服务所有者批准。”；所有者令牌批准后，桌面程序以同一幂等键重发，
+  0.52 秒得到任务并成功运行。Runtime 任务记录的 `spec.name` 为“铁电畴 验收 D1”。
+- 关闭不停止任务：第二次模板运行处于运行中时关闭窗口，桥收到 EOF；该任务在窗口关闭后 0.55 秒完成，
+  `succeeded`，`cancel_requested` 为 false，校验通过、能量相同。本例求解只有约 3 秒，所以关闭距完成很近。
+  每次退出都没有 guardedalloc 泄漏，外壳已丢弃关闭窗口的屏幕。
+- 查看器（weston，冷缓存：清空节点图缓存与桥的 blob、图缓存，关闭相邻步预取）：点击“在查看器中打开”，
+  `muferro-domains` 经控制服务**自动执行、无复核**，求值 1.63 秒（10 个节点，数据节点 4 个），打开到画面
+  1.78 秒，3068 个三角形、78 KiB。导出 PNG（1600×1200，彩色畴占 40%）0.30 秒。
+- 探针：视图中心落在外框上，第二个候选点拾取到畴表面（`surface_layer`，单元 2143），经 `view.probe`
+  0.31 秒返回：位置 (14.970, 0.0591, 12.428)，值 (0.6020874395, 0.0020565348, 0.0094302832)，与独立解析原始
+  `Polar.00000100.dat` 的三线性插值完全一致（差 0.0）；探针编辑器显示 0.602087。
+- 客户端阶段参数：`view` 由 iso 改为 +x，只重算 `camera`、`scene`，**数据节点 0 个**，0.16 秒，视图 65% 的
+  像素改变。
+- 换步（共 0、100 两步）：未缓存的 100→0 经控制服务求值 589 毫秒（重算 7 个节点，3 个命中）；回到 100
+  和再到 0 用查看器缓存，0.4 与 1.7 毫秒（到下一帧约 40 毫秒）。开启预取的另一轮中，三次换步都已预取，
+  0.3–0.5 毫秒。
+- 本地求值：打开下载到本地的运行目录（本地模式），`muferro-domains` 0.76 秒（10 个节点）；在同一位置
+  拾取畴表面，本地探针值与经控制服务的值及原始 DAT 三线性插值都一致（差 0.0）。
+- X11（Xvfb，OpenGL）：查看器全流程同样通过（两处探针差 0.0，PNG 1600×1200）；输入法事件输入
+  “畴壁 Xvfb 验收”（拼音、按键、拼音混合）的自定义命令经所有者批准后运行，Runtime 记录中名称一致。
+- 回归：修复后 `ctest -L "app|jobs"` 72 项全部通过（`STK_BRIDGE_TEST_PYTHON` 指向验收 venv，无跳过）。
+- 网络与清理：本次只有 Runtime 127.0.0.1:28686 和控制服务 127.0.0.1:22883 两个服务监听，0.5 秒采样
+  （1899 次）中本次进程的监听另有回归测试临时 Runtime 的 127.0.0.1:38425；显示服务器不监听 TCP。结束后
+  没有残留进程或监听，两个端口关闭；仓库工作树、muprosdk 工作树与 HEAD、Release 可执行文件和许可文件的
+  元数据前后一致。`/dev/shm` 新增 770 个 `__KMP_REGISTERED_LIB_*`，没有一个属于本次运行的进程 PID，是本机
+  同时运行的其他 Intel OpenMP 作业（期间还看到其他用户的 muPREDICT／hydra 监听 0.0.0.0:40915）。
+
+发现的问题：
+
+1. **已修复（19f94ec）**：查看器经控制服务求值时没有设置 `budget.max_output_bytes`，控制服务按 desktop
+   配置默认的 2 GiB 估计传输量，桌面自动执行不生效：`graph.evaluate` 进入复核（“预计传输超过桌面自动执行
+   上限 256 MiB（请设置 budget.max_output_bytes）”），查看器显示“计算超过自动执行额度，正在等待复核；
+   批准后请重新计算”。桥规范 §7.1 要求应用按 `hub.policy` 设置；现在 `ViewerState` 对控制服务来源按
+   任务编辑器当前连接的策略设置该上限。
+2. **未修复**：经控制服务新建工作区后，新工作区不会出现或被选中。`JobsState::create_workspace` 的回调只
+   调用一次 `refresh_workspaces()`，而经控制服务的 `workspace.list` 读取节点心跳快照（每 3 秒一次），此时还
+   没有新工作区；`apply_workspaces` 在首选工作区不在列表中时改选列表中的第一个。第一次尝试（此前没有
+   工作区）60 秒内都没有可选的工作区；正式运行中新建的同名 “d1-accept” 没有被选中，界面改选了上一次
+   尝试建立的工作区，之后的任务都提交到了旧工作区，没有提示。需要手动“刷新”。
+3. **次要**：任务表“提交时间”直接截取 Runtime 的 UTC 时间字符串（`short_time`），显示 13:19 而本地为
+   21:19，也没有时区标记；探针编辑器的插值说明显示为“原始点数据的trilinear插值”（方法名未本地化）。
+4. **环境**：weston headless（pixman）上 OpenGL 后端无法启动（`EGL_BAD_MATCH` 后 Wayland 连接断开），
+   与 ctest 在 weston 上用 Vulkan 一致；窗口请求 1440×900 而 kiosk 输出为 1280×800 时，程序按请求尺寸
+   提交缓冲区而不是按全屏 configure 的尺寸，weston 断开连接，改用 1280×800 后正常。
+
+未覆盖：交互式输入法（weston 不实现 text-input-v3，以上是合成的预编辑／提交事件；GNOME + ibus、
+KDE + fcitx5 需人工验收）、macOS 交互（Metal、拼音输入法、Retina）、Windows 客户端实机运行、
+真实集群（并行云）、多 rank MPI、真实 GNOME 会话的客户端装饰，以及经 HTTPS 入口访问控制服务。
+
 ## 覆盖范围
 
 | 验收项 | 证据 |
