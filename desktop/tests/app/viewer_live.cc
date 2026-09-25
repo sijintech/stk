@@ -99,7 +99,7 @@ size_t colored_pixels(const gfx::Image &img, const wm::Rect &r)
 }
 
 struct Options {
-  std::string backend, python, repo, workdir, screenshot;
+  std::string backend, python, repo, workdir, screenshot, lang = "en";
 };
 
 int run(const gfx::Backend backend, const Options &opt)
@@ -120,7 +120,7 @@ int run(const gfx::Backend backend, const Options &opt)
   }
 
   app::ShellOptions so;
-  so.language = "en";
+  so.language = opt.lang;
   app::AppShell shell(so);
   check(shell.catalogs_loaded(), "catalogs", shell.options().i18n_dir);
   wm::WmOptions wo;
@@ -360,11 +360,14 @@ int main(int argc, char **argv)
     else if (!std::strcmp(argv[i], "--workdir")) {
       val(opt.workdir);
     }
+    else if (!std::strcmp(argv[i], "--lang")) {
+      val(opt.lang);
+    }
     else if (!std::strcmp(argv[i], "--screenshot")) {
       val(opt.screenshot);
     }
     else {
-      fprintf(stderr, "usage: %s --python PY --repo DIR --workdir DIR [--gpu-backend B] [--screenshot PNG]\n", argv[0]);
+      fprintf(stderr, "usage: %s --python PY --repo DIR --workdir DIR [--gpu-backend B] [--lang en|zh] [--screenshot PNG]\n", argv[0]);
       return 2;
     }
   }

@@ -11,7 +11,7 @@ Python packages stay MIT.
 |---|---|
 | `CMakeLists.txt` | Top level. `STK_DESKTOP_WITH_BLENDER` (default ON) builds the vendored engine; `engine/lib/*` and `tests/unit` are added when present, so the pure-CPU libraries also build with it OFF. `app/` and `tests/wm` need the engine. |
 | `cmake/sysroot/` | `fetch-sysroot.sh` (no-sudo user sysroot, pinned Ubuntu 26.04 packages; `--with-test-servers` adds Xvfb and weston) and `stk-sysroot.cmake` (prefix hints, auto-included on Linux when the sysroot exists). |
-| `engine/third_party/blender/` | `vendor.py`, `manifest.json`, `UPSTREAM.json` (pin), `VENDORED.json` (per-file sha256), `shims/`, `patches/` (none needed), `src/` (vendored upstream files in upstream layout, including `release/datafiles/fonts` and `release/license`), and our `CMakeLists.txt`. |
+| `engine/third_party/blender/` | `vendor.py`, `manifest.json`, `UPSTREAM.json` (pin), `VENDORED.json` (per-file sha256), `shims/`, `patches/` (one: `0001` skips `SetMaxIdBound` with shaderc < 2024.1, for the Ubuntu 24.04 package build), `src/` (vendored upstream files in upstream layout, including `release/datafiles/fonts` and `release/license`), and our `CMakeLists.txt`. |
 | `engine/lib/stk_core`, `stk_io`, `stk_viewer_model` | CPU-only libraries (no GHOST/GPU headers): UTF-8, paths, logging, payload/JSON/schema models, PNG I/O, viewer maths. |
 | `engine/lib/stk_gfx` | GPU bootstrap: process runtime (guardedalloc leak detection), backend selection, main GPU context, font stack, UI scale, offscreen render to PNG. |
 | `engine/lib/stk_wm` | GHOST glue: window manager, windows, on-demand event loop, events (keys, mouse, wheel, IME preedit, drag and drop), DPI, clipboard, cursors; `WindowManager::post` / `executor()` (thread-safe work for the main loop, wakes an idle wait). Screen model (`screen.hh`): a tree of areas with draggable splitters and minimum sizes, split / join / maximize, docked regions (header, toolbar, sidebar, main) and global bars; one `stk_ui` context per window (a block per region, overlays on top, IME placement, wake-up timers); `ui_bridge.hh` (event adapter, clipboard, `UiRegion`); `layout_store.hh` (versioned layout JSON); `csd.hh` (GNOME client-side decorations). |
@@ -31,6 +31,8 @@ Python packages stay MIT.
 | `docs/parity-jobs.md`, `docs/parity-viewer.md` | Parity checklists with status: the legacy PyQt Tasks tab (Jobs) and SimViz / the web viewer (Viewer). |
 | `tests/viewer` | stk_viewer_gpu tests: render goldens on Vulkan and GL, exact categorical colours, tiled vs single-pass export, picking accuracy at `render_origin` ~1e6, VTK offscreen cross-check (mask IoU), budget/LOD/prefetch, 1M-triangle perf smoke (`STK_VIEWER_PERF_BUDGET_MS`). Fixtures: `fixtures/make_fixtures.py [--vtk]`. |
 | `spike/` | Phase 0 spike `stk-gpu-spike` and its golden image. |
+| `packaging/` | WP12: `packaging.cmake` (install layout, CPack, the `package_install*` tests), `bundle_linux_libs.py` (non-system shared libraries of a Linux install, from `ldd`), `check_install.py` (smoke test of an install / unpacked package), `THIRD-PARTY-NOTICES.md`, `macos/Info.plist.in`, `icons/` (after `web/public/icon.svg`). See "Packaging". |
+| `tests/check_required_tests.py` | CI: fails when tests matching the given patterns were skipped or did not run (`ctest --output-junit`). |
 
 ## Build (Linux)
 
@@ -45,8 +47,10 @@ Keep build trees out of git (`~/opt/stk-build/…` or `desktop/build*`). Use a d
 with `-DSTK_SYSROOT=/path` or `STK_SYSROOT=/path`. Without a sysroot (CI), CMake uses system packages;
 `.github/workflows/desktop.yml` lists them for Ubuntu 26.04.
 
-Executables land in `<build>/bin`, with the fonts staged in `<build>/bin/datafiles/fonts` (the
-same relative layout as an install: `<prefix>/bin` + `<prefix>/share/stk-desktop/datafiles`).
+Executables land in `<build>/bin`, with the fonts staged in `<build>/bin/datafiles/fonts` and the
+catalogs in `<build>/bin/i18n` (found relative to the executable, as in an install; see "Packaging").
+
+User documentation (Chinese, then English): [`docs/desktop.md`](../docs/desktop.md).
 
 ## Running
 
@@ -173,7 +177,7 @@ All three show `AppStore::viewer()` (`stk/app/viewer_state.hh`), the result on s
   task binding (local mode) or a hub (hub mode). Only the preset's payload outputs are requested.
 - **Viewer** (`draws_gpu`: `stk_viewer_gpu` under a transparent main block): Blender navigation by default
   (middle drag orbit, Shift pan, Ctrl zoom, wheel; the left button uses the toolbar tool orbit / pan /
-  zoom / pick), ParaView optional; a click picks (GPU id pass + float64) and the Probe editor shows it;
+  zoom / pick, shown as the glyphs ↻ ✚ ± ⊙ with the name in the tooltip), ParaView optional; a click picks (GPU id pass + float64) and the Probe editor shows it;
   numpad 1 / 3 / 7 / 0 / 9, Home, Space (play), ← / →. Sidebar: layers (visibility, opacity), camera
   (7 presets, reset, numeric camera in physical coordinates), time steps (scrubber, play / pause, fps,
   loop, prefetch, latest), display (overlays, lighting, navigation). Payload warnings and stats sit at
@@ -254,7 +258,8 @@ To run binaries by hand against sysroot-only libraries, `source ~/opt/stk-sysroo
   presets, local `graph.evaluate` of a fake muFerro run decoded with `stk::io`, logs from a loopback
   Runtime, and the acceptance case: `kill -9` of the bridge mid-subscription resumes from the last
   offset with no gap or duplicate). The Python is `STK_BRIDGE_TEST_PYTHON` (environment or CMake
-  cache), else `python3`; parts it cannot run (no numpy/VTK, no Runtime) are skipped with the reason.
+  cache; the viewer tests take `STK_APP_TEST_PYTHON` first), else `python3`; parts it cannot run (no
+  numpy/VTK, no Runtime) are skipped with the reason (CI requires them to run on Linux).
   Runtimes bind 127.0.0.1 only and are stopped afterwards; every test checks that no bridge process
   or helper of it is left.
 
@@ -273,22 +278,88 @@ To run binaries by hand against sysroot-only libraries, `source ~/opt/stk-sysroo
   application window, orbit with a synthesized drag, pick, and the Probe editor shows the value;
   `app_viewer_gui_open_*`: `stk-desktop --open` draws a payload and quits without leaks.
 
+## Packaging
+
+`packaging/packaging.cmake` defines the install layout (the directories and `CMAKE_INSTALL_RPATH`
+are set in the top-level `CMakeLists.txt`, before the targets exist):
+
+| Linux / Windows prefix | macOS | Contents |
+|---|---|---|
+| `bin/` | `STK.app/Contents/MacOS/` | `stk-desktop`, `stk-render` |
+| `lib/stk-desktop/` | (none) | bundled shared libraries (Linux, `STK_DESKTOP_BUNDLE_LIBS`) |
+| `share/stk-desktop/datafiles/fonts` | `STK.app/Contents/Resources/datafiles/fonts` | Inter, Noto Sans CJK, DejaVu Sans Mono |
+| `share/stk-desktop/i18n` | `STK.app/Contents/Resources/i18n` | `zh_CN.json`, `en.json` |
+| `share/doc/stk-desktop/` | `STK.app/Contents/Resources/licenses/` | `LICENSE`, `THIRD-PARTY-NOTICES.md`, `blender/` (upstream COPYING, `license.md`, SPDX texts incl. OFL-1.1 and Bitstream Vera), `third-party/` (nlohmann/json, libspng, miniz; Linux: `BUNDLED.txt` and the Debian copyright file of each bundled library) |
+| | `STK.app/Contents/Info.plist`, `Resources/stk-desktop.icns` | bundle id `ai.sijin.stk.desktop` (`STK_BUNDLE_ID`), minimum macOS = `CMAKE_OSX_DEPLOYMENT_TARGET` |
+
+The executables find fonts and catalogs relative to themselves (`../share/stk-desktop/…`,
+`../Resources/…`), so an install or unpacked package can live anywhere.
+
+- `STK_DESKTOP_RELOCATABLE=ON` (package builds) forces `STK_GFX_SOURCE_DATAFILES_FALLBACK`,
+  `STK_APP_SOURCE_I18N_FALLBACK` and `STK_DESKTOP_SOURCE_PYTHON_FALLBACK` off: nothing from the build
+  host's source tree is compiled in, and the bridge's interpreter must have STK installed.
+- `STK_DESKTOP_BUNDLE_LIBS=ON` (Linux): at install time `bundle_linux_libs.py` runs `ldd` on the
+  installed executables and copies every library outside the system set (glibc, libstdc++, the GL /
+  EGL / Vulkan loaders, X11 / xcb / Wayland / xkbcommon / D-Bus, zlib, zstd, bzip2, brotli, libpng,
+  FreeType, …) into `lib/stk-desktop`, with its Debian copyright file; on Ubuntu 24.04 that is
+  shaderc and libepoxy. The executables are linked with `--disable-new-dtags` so their RPATH
+  `$ORIGIN/../lib/stk-desktop` also serves the dependencies of bundled libraries.
+- The macOS vcpkg dependencies are static, so `STK.app` links only system libraries and frameworks;
+  CI checks this with `otool -L`. No install RPATH is set on macOS.
+
+```sh
+# Linux tarball (CI builds it on Ubuntu 24.04: glibc >= 2.39)
+cmake -S desktop -B build-pkg -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DSTK_DESKTOP_RELOCATABLE=ON -DSTK_DESKTOP_BUNDLE_LIBS=ON
+cmake --build build-pkg --target stk-desktop stk-render
+(cd build-pkg && cpack)                        # stk-desktop-<version>-linux-x86_64.tar.gz
+# macOS app
+cmake --install build-pkg --prefix stage --strip && codesign --force --sign - stage/STK.app
+ditto -c -k --keepParent stage/STK.app stk-desktop-<version>-macos-arm64.zip
+# smoke test of an install / unpacked package (see the script's docstring)
+python3 desktop/packaging/check_install.py --prefix DIR --workdir /tmp/check --payload docs/specs/examples/payload-v2 \
+  [--python VENV/bin/python --repo . --golden desktop/tests/app/golden/e2e_muferro_domains.png]
+```
+
+On Ubuntu 24.04, the build needs newer Vulkan headers (1.4) and wayland-protocols XML than the
+distribution has; CI passes `-DVulkan_INCLUDE_DIR=` and `-DWAYLAND_PROTOCOLS_DIR=` of pinned
+Vulkan-Headers 1.4.341 and wayland-protocols 1.47 (build-time only; the binaries use 24.04's
+`libvulkan` and `libwayland`). The Python side is not bundled (D1); users install STK into a venv and
+point the app at it (`--python`, `STK_PYTHON`, PATH). An AppImage, a Windows installer and a bundled
+Python are follow-ups (M-D2).
+
+`ctest -L package`: `package_install` installs the build into `<build>/install-check`, and
+`package_install_check` runs `check_install.py` on it (layout, `ldd`, the installed `stk-desktop`
+headless from an unrelated directory reporting fonts and catalogs from the prefix, `stk-render`).
+
 ## CI
 
-`.github/workflows/desktop.yml` (GitHub-hosted runners, read-only token, actions pinned by SHA):
+`.github/workflows/desktop.yml` (GitHub-hosted runners, read-only token, actions pinned by SHA, no
+secrets):
 
 - **Linux**: `ubuntu-24.04` runner with an `ubuntu:26.04` job container (pinned by digest, `--init`
   so orphaned processes are reaped) so the packages match the sysroot; vendoring and Phase 0
-  go-criteria checks, full build, all tests including live windows.
+  go-criteria checks, full build, all tests including live windows. A venv with
+  `.[science,visualization,control,test]` is `STK_BRIDGE_TEST_PYTHON` / `STK_APP_TEST_PYTHON`, so the
+  real-bridge tests (`PythonBridge.*`, `JobsPython.*`, `app_viewer_python_*`, the e2e golden
+  `app_viewer_e2e_*`, `app_viewer_window_*`) run; `tests/check_required_tests.py` fails the job if any
+  of them (or `package_install_check`) skipped. Rendered frames and the e2e PNGs are uploaded.
+- **Linux package**: `ubuntu:24.04` container: Release, relocatable, bundled libraries, CPack TGZ
+  (artifact `desktop-linux-package`). **Linux package smoke**: a fresh `ubuntu:24.04` container with only
+  runtime libraries (no shaderc, no libepoxy) unpacks the tarball and runs `check_install.py` on OpenGL
+  (llvmpipe) and Vulkan (lavapipe), including the e2e preset command against a venv with
+  `pip install .[science,visualization,control]` and the golden.
 - **macOS**: `macos-15` arm64, Xcode 16, dependencies from vcpkg built for macOS 13.3 (overlay
-  triplet; Homebrew's FreeType has no brotli, which the WOFF2 fonts need); full build, `unit`, `wm`,
-  `ui` and `bridge` tests, then every `gpu` test on the runner's "Apple Paravirtual device" (Metal
-  goldens, UI gallery, viewer) and an `stk-render` smoke export. macOS 14 runners have no Metal
-  device. `viewer_metal_Lut` runs as a non-blocking step: a NaN vertex value reaches the fragment
-  shader as a value above the range on Metal.
+  triplet; Homebrew's FreeType has no brotli, which the WOFF2 fonts need), Python 3.12 venv as above;
+  full build, `unit`, `wm`, `ui` and `bridge` tests, then every `gpu` test on the runner's "Apple
+  Paravirtual device" (Metal goldens, UI gallery, viewer, `app_viewer_python_metal`,
+  `app_viewer_e2e_metal`, `package_install_check`) and an `stk-render` smoke export. Then the
+  relocatable `STK.app` (ad-hoc signed, `otool -L` system libraries only), zipped (artifact
+  `desktop-macos-app`), unzipped into a fresh directory and run headless on Metal with the e2e preset
+  command. macOS 14 runners have no Metal device.
 - **Windows**: `windows-2022`, MSVC (Visual Studio generator), vcpkg dependencies (libepoxy,
   pthreads4w, …), OpenGL + Win32 GHOST, Vulkan off; builds every target and runs the `unit`, `wm`,
-  `ui` and `bridge` tests (no GPU tests: the runner has no OpenGL 4.3 driver).
+  `ui` and `bridge` tests (no GPU tests: the runner has no OpenGL 4.3 driver). Packaging is M-D2.
 
 macOS and Windows are not built on the development host; their CMake paths follow upstream's
 `intern/ghost`, `source/blender/gpu`, `source/blender/blenlib` and `build_files/cmake/platform`
