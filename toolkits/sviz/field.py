@@ -15,7 +15,7 @@ def read_field(filename):
         if data.ndim == 3:
             data = data[..., None]
     elif path.suffix.lower() == ".vtk":
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         if len(lines) < 10 or lines[2].strip() != "ASCII" or lines[3].strip() != "DATASET STRUCTURED_POINTS":
             raise ValueError("Preview supports ASCII STRUCTURED_POINTS VTK; convert other VTK types first")
         tokens = " ".join(lines[4:]).split()
@@ -35,35 +35,10 @@ def read_field(filename):
         values = np.array(tokens[index:], dtype=float)
         data = values.reshape((shape[2], shape[1], shape[0], components)).transpose(2, 1, 0, 3)
     else:
-        with open(path, encoding="utf-8") as stream:
-            first = stream.readline()
-            try:
-                # MuPRO's library writer appends a Fortran comment: 'nx ny nz ! comment: nx ny nz'.
-                dimensions = tuple(map(int, first.split("!", 1)[0].split()))
-            except ValueError:
-                raise ValueError("Not a regular-grid field DAT: the first line must hold 3–5 integer dimensions "
-                                 "(tables such as energy_out.dat are time series)") from None
-            if not 3 <= len(dimensions) <= 5 or any(n < 1 for n in dimensions):
-                raise ValueError("DAT header must contain 3–5 positive dimensions")
-            rows = np.loadtxt(stream, ndmin=2)
-        coordinates = len(dimensions)
-        shape = dimensions[:3]
-        if rows.shape[0] != int(np.prod(dimensions)) or rows.shape[1] <= coordinates:
-            raise ValueError("DAT point count or component count does not match the header")
-        coords = rows[:, :coordinates].astype(int) - 1
-        if not np.array_equal(coords + 1, rows[:, :coordinates]) or (coords < 0).any() or (coords >= np.array(dimensions)).any():
-            raise ValueError("DAT indices must be integral, one-based and inside dimensions")
-        if len(np.unique(coords, axis=0)) != len(coords):
-            raise ValueError("DAT contains duplicate or missing grid points")
-        if coordinates == 3:
-            data = np.empty(shape + (rows.shape[1] - 3,))
-            data[coords[:, 0], coords[:, 1], coords[:, 2]] = rows[:, 3:]
-        else:
-            if rows.shape[1] != coordinates + 1:
-                raise ValueError("Indexed component DAT requires one value per index tuple")
-            tensor = np.empty(dimensions)
-            tensor[tuple(coords[:, i] for i in range(coordinates))] = rows[:, -1]
-            data = tensor.reshape(shape + (int(np.prod(dimensions[3:])),))
+        # Header 'nx ny nz [n4 [n5]] [! comment]', then one-based index rows (suan/data/dat.py: a
+        # fixed-width fast path plus the general parser, same checks and messages as before).
+        from suan.data.dat import read_dat
+        data = read_dat(path, layout="xyzc")
     if data.ndim != 4 or any(n < 1 for n in data.shape) or not np.issubdtype(data.dtype, np.number) or not np.isfinite(data).all():
         raise ValueError("Expected a finite numeric (x,y,z[,component]) field")
     return data

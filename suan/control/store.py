@@ -1,4 +1,10 @@
-"""Durable actions and replayable event cursors. Tokens are stored as hashes."""
+"""Durable actions and replayable event cursors. Tokens are stored as hashes.
+
+Action results larger than :data:`RESULT_INLINE_LIMIT` bytes of JSON live in the
+content-addressed blob store (``result_ref``); :meth:`ControlStore.action`
+returns them exactly as if they were inline, and :meth:`ControlStore.actions`
+never reads or decodes results.
+"""
 from contextlib import contextmanager
 import hashlib
 import json
@@ -8,9 +14,28 @@ import sqlite3
 import time
 import uuid
 
+from .blobs import BlobStore
+
+RESULT_INLINE_LIMIT = 64 * 1024
+ACTION_COLUMNS = ("id", "request", "node_id", "state", "result", "error", "created", "updated", "review_reason",
+                  "result_ref")
+# Everything a listing needs; results are loaded one action at a time.
+LISTING_COLUMNS = ("id", "request", "node_id", "state", "error", "created", "updated", "review_reason")
+
 
 def encode(value):
+    """Canonical JSON (sorted keys): requests and snapshots are compared as text."""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def encode_result(value):
+    """JSON of an action result in its own key order (table columns keep the order the node gave them)."""
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
+def decode_result(text):
+    """Decode a stored action result (the only place results are parsed)."""
+    return json.loads(text)
 
 
 def digest(value):
@@ -18,10 +43,12 @@ def digest(value):
 
 
 class ControlStore:
-    def __init__(self, directory):
+    def __init__(self, directory, blob_max_bytes=None):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.directory / "control.sqlite3"
+        self.blobs = BlobStore(self.directory / "blobs", **({} if blob_max_bytes is None else
+                                                            {"max_bytes": blob_max_bytes}))
         with self.db() as db:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -36,6 +63,12 @@ class ControlStore:
                 CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, session_id TEXT,
                     role TEXT, content TEXT, created REAL);
             """)
+            # Additive migration of databases created before result offloading.
+            if "result_ref" not in {row["name"] for row in db.execute("PRAGMA table_info(actions)")}:
+                db.execute("ALTER TABLE actions ADD COLUMN result_ref TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS actions_node_state ON actions(node_id, state, created)")
+            db.execute("CREATE INDEX IF NOT EXISTS actions_state ON actions(state, created)")
+            db.execute("CREATE INDEX IF NOT EXISTS actions_created ON actions(created)")
         self.path.chmod(0o600)
 
     @contextmanager
@@ -105,26 +138,49 @@ class ControlStore:
             if old and old[0] != body:
                 raise ValueError("Action ID already used for a different request")
             if not old:
-                db.execute("INSERT INTO actions VALUES(?,?,?,?,NULL,'',?,?,?)", (
-                    identity, body, request["node_id"], "review" if review_reason else "queued",
-                    time.time(), time.time(), review_reason))
+                db.execute("INSERT INTO actions(id,request,node_id,state,result,error,created,updated,review_reason) "
+                           "VALUES(?,?,?,?,NULL,'',?,?,?)", (
+                               identity, body, request["node_id"], "review" if review_reason else "queued",
+                               time.time(), time.time(), review_reason))
                 self.event(db, "actions.changed", {"action_id": identity})
         return self.action(identity)
 
     def action(self, identity):
+        """One action with its full result (inline or from the blob store)."""
         with self.db() as db:
-            row = db.execute("SELECT * FROM actions WHERE id=?", (identity,)).fetchone()
+            row = db.execute(f"SELECT {','.join(ACTION_COLUMNS)} FROM actions WHERE id=?", (identity,)).fetchone()
         if row is None:
             raise KeyError("Action not found")
-        return {**dict(row), "request": json.loads(row["request"]),
-                "result": json.loads(row["result"]) if row["result"] is not None else None}
+        record = {key: row[key] for key in ACTION_COLUMNS if key != "result_ref"}
+        record["request"] = json.loads(row["request"])
+        if row["result_ref"]:
+            try:
+                text = self.blobs.read(row["result_ref"]).decode("utf-8")
+            except (OSError, ValueError):
+                text = None  # the stored result is gone; the action record is still valid
+            record["result"] = decode_result(text) if text is not None else None
+        else:
+            record["result"] = decode_result(row["result"]) if row["result"] is not None else None
+        return record
 
     def actions(self, node_id=None, pending=False):
+        """Newest 200 actions without results (listing and node dispatch never decode results).
+
+        A listing also keeps every action still awaiting review, so frequent
+        reads (``task.events`` polls) cannot push a review out of view.
+        """
+        columns = ",".join(LISTING_COLUMNS)
         with self.db() as db:
-            rows = db.execute("SELECT id FROM actions WHERE (? IS NULL OR node_id=?) "
+            rows = db.execute(f"SELECT {columns} FROM actions WHERE (? IS NULL OR node_id=?) "
                               "AND (?=0 OR state='queued') ORDER BY created DESC LIMIT 200",
                               (node_id, node_id, pending)).fetchall()
-        return [self.action(r[0]) for r in rows]
+            if not pending:
+                seen = {r["id"] for r in rows}
+                reviews = db.execute(f"SELECT {columns} FROM actions WHERE state='review' AND (? IS NULL OR node_id=?) "
+                                     "ORDER BY created DESC LIMIT 200", (node_id, node_id)).fetchall()
+                rows = sorted([*rows, *(r for r in reviews if r["id"] not in seen)], key=lambda r: r["created"],
+                              reverse=True)
+        return [{**{key: r[key] for key in LISTING_COLUMNS}, "request": json.loads(r["request"])} for r in rows]
 
     def approve(self, identity, approved):
         with self.db() as db:
@@ -134,12 +190,18 @@ class ControlStore:
         return self.action(identity)
 
     def complete(self, identity, node_id, result=None, error=""):
+        body = encode_result(result)
         with self.db() as db:
             row = db.execute("SELECT state,node_id FROM actions WHERE id=?", (identity,)).fetchone()
             if not row or row["node_id"] != node_id or row["state"] != "queued":
                 return
-            db.execute("UPDATE actions SET state=?,result=?,error=?,updated=? WHERE id=?",
-                       ("failed" if error else "succeeded", encode(result), error[:2000], time.time(), identity))
+            data = body.encode("utf-8")
+            reference = None
+            if len(data) > RESULT_INLINE_LIMIT:
+                # Large results (views, catalogs) move out of the row; listings stay cheap.
+                reference, body = self.blobs.put(data), None
+            db.execute("UPDATE actions SET state=?,result=?,result_ref=?,error=?,updated=? WHERE id=?",
+                       ("failed" if error else "succeeded", body, reference, error[:2000], time.time(), identity))
             self.event(db, "actions.changed", {"action_id": identity})
 
     def events(self, after=0):
@@ -179,8 +241,9 @@ class ControlStore:
                     raise ValueError("Action ID already used for a different request")
                 state = "review" if reason else "queued"
                 if not old:
-                    db.execute("INSERT INTO actions VALUES(?,?,?,?,NULL,'',?,?,?)", (
-                        request["id"], body, request["node_id"], state, time.time(), time.time(), reason))
+                    db.execute("INSERT INTO actions(id,request,node_id,state,result,error,created,updated,"
+                               "review_reason) VALUES(?,?,?,?,NULL,'',?,?,?)", (
+                                   request["id"], body, request["node_id"], state, time.time(), time.time(), reason))
                     self.event(db, "actions.changed", {"action_id": request["id"]})
                 states.append(f"操作 {request['id']}：{state}")
             if states:

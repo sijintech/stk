@@ -1,14 +1,18 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {action,api,events,hasToken,Json,setToken,uid} from './api';
+import ErrorBoundary from './ErrorBoundary';
 import './style.css';
 const Viewer=React.lazy(()=>import('./Viewer'));
+const GraphPanel=React.lazy(()=>import('./GraphPanel'));
+// Development only: `?example=1` renders the payload v2 example without a hub (not part of production builds).
+const ExampleView=import.meta.env.DEV&&new URLSearchParams(location.search).has('example')?React.lazy(()=>import('./ExampleView')):null;
 
 function App(){
   const [connected,setConnected]=useState(hasToken()),[pairCode,setPairCode]=useState(''),[token,setCredential]=useState('');
   const [devices,setDevices]=useState<Json[]>([]),[actions,setActions]=useState<Json[]>([]),[node,setNode]=useState(''),[workspace,setWorkspace]=useState('');
   const [task,setTask]=useState(''),[artifacts,setArtifacts]=useState<Json[]>([]),[path,setPath]=useState(''),[scene,setScene]=useState<Json|null>(null);
-  const [mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
+  const [analysis,setAnalysis]=useState<'file'|'graph'>('file'),[mode,setMode]=useState('slice'),[axis,setAxis]=useState(2),[index,setIndex]=useState(0),[level,setLevel]=useState(0),[probe,setProbe]=useState<number[]>([0,0,0]);
   const [session,setSession]=useState(()=>sessionStorage.getItem('stk-session')||uid()),[sessions,setSessions]=useState<Json[]>([]),[messages,setMessages]=useState<Json[]>([]),[chat,setChat]=useState('');
   const [name,setName]=useState('科学项目'),[logs,setLogs]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState('tasks'),[online,setOnline]=useState(navigator.onLine);
   const generation=useRef(0),refreshing=useRef(false);
@@ -42,17 +46,19 @@ function App(){
       <div className="task-list">{tasks.filter(t=>!workspace||t.workspace_id===workspace).map(t=><button className={`task ${task===t.id?'selected':''}`} key={t.id} onClick={()=>selectTask(t.id)}><span>{t.name||t.id.slice(0,8)}</span><small className={`state ${t.state}`}>{t.state}</small></button>)}{!tasks.length&&<p className="muted">该节点尚无任务。</p>}</div>
       {task&&<div className="inline"><button disabled={busy} onClick={()=>void run(readLogs)}>读取日志</button><button disabled={busy} onClick={()=>void run(()=>files(task))}>结果</button><button disabled={busy} onClick={()=>void run(async()=>{await invoke('task.cancel',{task_id:task});})}>取消</button></div>}
       {actions.filter(a=>a.state==='review').map(a=><article className="review" key={a.id}><strong>等待执行复核</strong><p>{a.review_reason}</p><pre>{JSON.stringify(a.request.payload,null,2)}</pre>{[true,false].map(approved=><button key={String(approved)} disabled={busy} onClick={()=>void run(async()=>{await api(`actions/${a.id}/review`,'POST',{approved});})}>{approved?'批准执行':'拒绝'}</button>)}</article>)}
-      <details><summary>最近操作与重试</summary>{actions.slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
+      <details><summary>最近操作与重试</summary>{actions.filter(a=>a.request.kind!=='task.events').slice(0,20).map(a=><p key={a.id}><small>{a.request.kind} · {a.state}<br/>{a.error}</small></p>)}<button onClick={()=>void run(async()=>{const saved=sessionStorage.getItem('stk-last-action');if(saved)await api('actions','POST',JSON.parse(saved));})}>以相同 ID 重试上次操作</button></details>
     </aside>
-    <section className={`analysis mobile-${tab==='view'?'show':'hide'}`}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{scene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
+    <section className={`analysis mobile-${tab==='view'?'show':'hide'}`}><div className="view-title"><div><span className="eyebrow">RESULT EXPLORER</span><h1>{analysis==='graph'?'图谱视图':scene?.manifest.field||'科学结果'}</h1></div><span className="muted">拖动旋转 · 滚轮缩放 · 点击探针</span></div>
+      <div className="mode-switch" role="tablist" aria-label="分析方式">{([['file','结果文件'],['graph','图谱']] as const).map(([key,label])=><button key={key} role="tab" aria-selected={analysis===key} className={analysis===key?'active':''} onClick={()=>setAnalysis(key)}>{label}</button>)}</div>
+      {analysis==='graph'?<React.Suspense fallback={<div className="viewport empty">正在加载图谱模块…</div>}><GraphPanel node={node} task={task} tasks={tasks} artifacts={artifacts} onError={setError} onLog={setLogs}/></React.Suspense>:<>
       <div className="view-controls"><label>结果 / 时间步<select aria-label="结果文件" value={path} onChange={e=>{setPath(e.target.value);generation.current++;}}><option value="">选择数据文件</option>{artifacts.filter(a=>/\.(vti|vtk|npy|dat)$/.test(a.path)).map(a=><option key={a.path} value={a.path}>{a.path}</option>)}</select></label>
       <label>视图<select value={mode} onChange={e=>setMode(e.target.value)}><option value="slice">切片</option><option value="iso">等值面</option><option value="vectors">向量箭头</option></select></label>
       {mode==='slice'&&<><label>方向<select value={axis} onChange={e=>setAxis(Number(e.target.value))}>{['X','Y','Z'].map((v,i)=><option key={v} value={i}>{v}</option>)}</select></label><label>索引<input type="number" min="0" value={index} onChange={e=>setIndex(Number(e.target.value))}/></label></>}
       {mode==='iso'&&<label>等值<input type="number" value={level} onChange={e=>setLevel(Number(e.target.value))}/></label>}
       <button disabled={busy||!path} onClick={()=>void run(loadView)}>加载视图</button></div>
-      <React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={scene} onPick={setProbe}/></React.Suspense>
+      <ErrorBoundary resetKey={scene}><React.Suspense fallback={<div className="viewport empty">正在加载三维模块…</div>}><Viewer scene={scene} onPick={setProbe}/></React.Suspense></ErrorBoundary>
       {scene&&<div className="legend"><span>{scene.manifest.value_range[0].toPrecision(5)}</span><i/><span>{scene.manifest.value_range[1].toPrecision(5)} {scene.manifest.units}</span><small>{scene.manifest.display_reduced?'显示网格已简化':'完整显示网格'} · 数值查询使用原始数据</small></div>}
-      <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!scene} onClick={()=>void run(async()=>{const a=await invoke('view.probe',{task_id:task,path,position:probe});setLogs(JSON.stringify(a.result,null,2));})}>查询原始值</button></div>
+      <div className="probe"><strong>物理坐标探针</strong>{probe.map((v,i)=><input aria-label={`探针${'XYZ'[i]}`} key={i} type="number" value={v} onChange={e=>setProbe(probe.map((n,j)=>i===j?Number(e.target.value):n))}/>)}<button disabled={busy||!scene} onClick={()=>void run(async()=>{const a=await invoke('view.probe',{task_id:task,path,position:probe});setLogs(JSON.stringify(a.result,null,2));})}>查询原始值</button></div></>}
       <details className="logs" open><summary>日志 / 探针结果</summary><pre>{logs||'选择任务读取日志，或在三维视图中选取一个位置。'}</pre></details>
     </section>
     <aside className={`chat panel mobile-${tab==='chat'?'show':'hide'}`}><div className="section-title"><h2>AI 对话</h2><button className="quiet" onClick={()=>{setSession(uid());setMessages([]);}}>新会话</button></div><select aria-label="恢复会话" value={session} onChange={e=>setSession(e.target.value)}><option value={session}>当前会话</option>{sessions.filter(s=>s.id!==session).map(s=><option key={s.id} value={s.id}>{s.name} · {s.id.slice(0,6)}</option>)}</select>
@@ -61,5 +67,5 @@ function App(){
     </div><footer>{busy?'正在处理请求…':'就绪'}<span>STK · 计算持续运行，视图随处可达</span></footer>
   </div>;
 }
-createRoot(document.getElementById('root')!).render(<App/>);
+createRoot(document.getElementById('root')!).render(ExampleView?<React.Suspense fallback={null}><ExampleView/></React.Suspense>:<App/>);
 if('serviceWorker' in navigator)void navigator.serviceWorker.register('/sw.js');

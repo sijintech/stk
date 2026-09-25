@@ -246,6 +246,56 @@ Runtime 取消任务时会终止启动器，`stk-mupro.json` 可能停留在 `ru
 - `energy_out.dat` 是能量时间序列，不是场；在工作台中选择它会报 `Not a regular-grid field DAT`。
   工作台中查看 MuPRO 帧的方法见 [Blender 工作台指南](../blender/README.md)。
 
+## 运行中的进度与结果查看
+
+在 STK Runtime 下（worker 设置了 `STK_MONITOR_PATH`），`python -m suan.mupro run` 是事件文件唯一的
+写入者（[监控事件 v1](specs/stk-events-v1.md) §6 的适配模式）：它从 muFerro 的环境中去掉该变量，
+启动求解器前写 `run.started {app: "muFerro", total_steps, ranks, host, pid}`，运行期间由一个线程每
+2 秒检查一次案例目录：
+
+| muFerro 原生输出 | 事件 |
+|---|---|
+| `mupro_progress.jsonl` 新增的完整行 | `progress {step, completed_steps, total_steps, fraction}`：每次检查取最新一行，最多每秒写一次，最后一次总会写出 |
+| `energy_out.dat` 表头 | `metric.declare` 五个：`elastic_energy`、`electric_energy`、`landau_energy`、`gradient_energy`、`total_energy`，单位 `normalized`，标签取自表头 |
+| `energy_out.dat` 的 `kt: N energy: …` 行 | `metrics {step: N, values}`；非有限值写成 `"NaN"`／`"Inf"`／`"-Inf"`，另写 `message {warning, code: "nonfinite_energy"}` |
+| `<Stem>.<8位步号>.dat` | 大小与修改时间在连续两次检查中不变且进度已到该步，或求解器以 0 退出后：`frame {dataset, step, path, reader: "mupro.dat@1", components, size}`，`path` 相对 `work`；求解器非零退出时只发布不晚于最后进度步的帧 |
+| `mupro_completion.json` 出现 | `message {info, code: "native_completion"}` |
+| 求解器退出、`stk-mupro-1` 校验后 | `verification {verifier, status, failed_checks}`（`stk-mupro.json` 中校验为 `not_run` 时写 `skipped`；求解器未启动时不写）与 `run.completed {status, classification, reason}` |
+
+格式不对的进度或能量行记为 `message {warning}`（`malformed_progress`、`malformed_energy_row`），每种
+最多 5 条，之后只提示一次已省略。适配器的错误只写到 stderr：有无监控，`run` 的退出码和
+`stk-mupro.json` 都相同；不在 Runtime 下运行时不写事件。
+
+查看运行中的任务：
+
+- `suan jobs --profile cluster show TASK_ID`：任务记录中的 `monitor.last_progress` 为最近的进度。
+- `GET /v1/tasks/{id}/events`、`RuntimeClient.events`、MCP `get_task_events`、控制服务操作
+  `task.events`：逐条读取进度、能量指标和帧事件，见 [runtime 使用指南](runtime.md#监控事件)。
+- 网页“图谱”模式在绑定的任务运行时显示进度行，并在有比已算结果更新的帧时提示。
+- 进度不等于成功：以 Runtime 任务状态和 `stk-mupro.json` 的 `verification.status` 为准。
+
+任务结束后用节点图查看结果（[可视化指南](visualization.md)）。Runtime 在任务结束后才列出结果文件，
+所以任务绑定只能用于已结束的任务。`muferro-domains` 预设把 Polar 分为 26 个立方取向变体，画出
+各变体的平滑曲面、图例、外框与坐标轴，并给出变体分数与能量曲线；`energy-plot` 只画五项能量。
+
+```bash
+# 经已保存的连接直接绑定任务（--example 与 --input 提交的任务都可以）
+suan graph run muferro-domains --connection cluster --bind run=task:TASK_ID --out ./domains
+# 或在 Runtime 主机上绑定任务的 work 目录
+R=/shared/user/stk-workspaces/WORKSPACE_ID/runs/TASK_ID
+suan graph run muferro-domains --bind run="$R/work" --out ./domains --param step=all
+suan graph run energy-plot --bind run="$R/work" --out ./energy
+```
+
+- `stk.source.muferro_run@1` 的 `case_dir` 默认为 `auto`：读取绑定根目录下 `stk-mupro.json` 记录的
+  案例目录（`--input case16` 时为 `case16`），没有记录或路径不安全时为 `.`。因此预设与网页“图谱”
+  模式对 `--example` 与 `--input` 提交的任务都适用；需要其他目录时在图中显式设置 `case_dir`。
+- `step=all` 包含初始帧 `Polar.00000000.dat`，它是极化乘以 p0，与后续归一化帧的幅值尺度不同，
+  同一个 `min_magnitude` 对它的分类结果不能与后续帧直接比较。
+- 报告时写明 `min_magnitude`（默认 0.1，单位与场相同，即 `unspecified`）、`max_angle_deg`、是否启用
+  薄膜检测和实际步号；分数的分母只含已分类点（排除 −1 未分类／无数据与 0 衬底），`fractions.json`
+  的 `attrs` 给出分母与排除点数。能量单位为 `normalized`，长度为网格索引。
+
 ## 本机验收流程
 
 在 Linux 开发机上用真实 muFerro 验收一次：只绑定回环地址、只用临时目录，共两次单 rank 运行，

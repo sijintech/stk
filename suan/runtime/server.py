@@ -71,6 +71,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .models import RESOURCES
                 self.respond({"api_version": 1, "status": "ok", "backends": ["local", "pbs", "slurm"],
                               "resources": sorted(RESOURCES), "argv_tokens": ["{python}", "{ranks}", "{threads_per_rank}", "{nodes}"],
+                              "features": ["events"],
                               "supervisor_running": alive(read_json(Path(self.server.config["state_dir"]) / "supervisor.pid"))})
             elif parts == ["v1", "workspaces"] and method in {"GET", "POST"}:
                 self.respond(service.store.workspaces() if method == "GET" else service.create_workspace(data["name"], data.get("idempotency_key")))
@@ -83,11 +84,13 @@ class Handler(BaseHTTPRequestHandler):
                 task_id = parts[2]
                 action = parts[3] if len(parts) == 4 else ""
                 if len(parts) == 3 and method == "GET":
-                    self.respond(service.store.task(task_id))
+                    self.respond(service.task(task_id))
                 elif action == "cancel" and method == "POST":
                     self.respond(service.cancel(task_id))
                 elif action == "logs" and method == "GET":
                     self.respond(service.logs(task_id, value("stream", "stdout"), int(value("offset", "0")), int(value("limit", str(CHUNK_SIZE)))))
+                elif action == "events" and method == "GET":
+                    self.respond(service.events(task_id, int(value("offset", "0")), int(value("limit", str(CHUNK_SIZE)))))
                 elif action == "artifacts" and method == "GET":
                     self.respond(service.artifacts(task_id))
                 elif action == "file" and method == "GET":

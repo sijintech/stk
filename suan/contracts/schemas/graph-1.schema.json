@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:graph-1",
+  "title": "STK graph document v1 (stk.graph/1)",
+  "description": "A JSON DAG of typed, versioned nodes. Links are written on the input side as {\"from\": \"<node>.<port>\"}; multi-input ports take a list. Node params may reference graph parameters with {\"$param\": \"<name>\"}. 'ui', 'label' and 'description' never affect evaluation or cache keys. Graphs never contain filesystem paths: sources name a binding plus a relative path. Structural schema only; semantic validation (node types, params, port types, cycles) is suan.graph.schema.validate_graph. See docs/specs/stk-graph-v1.md.",
+  "type": "object",
+  "required": ["schema", "nodes", "outputs"],
+  "properties": {
+    "schema": {"const": "stk.graph/1"},
+    "id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "name": {"type": "string", "maxLength": 256},
+    "description": {"type": "string"},
+    "catalog": {
+      "type": "object",
+      "description": "Minimum catalog version per node-type namespace, e.g. {\"stk\": 1}. null means any.",
+      "additionalProperties": {"type": ["integer", "null"], "minimum": 1}
+    },
+    "parameters": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/parameter"},
+      "maxItems": 64
+    },
+    "time": {"$ref": "#/$defs/time"},
+    "nodes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/node"},
+      "minItems": 1,
+      "maxItems": 200
+    },
+    "outputs": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,63}$"},
+      "additionalProperties": {"$ref": "#/$defs/port_ref"}
+    },
+    "ui": {"type": "object"},
+    "extensions": {"type": "object"}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+    "port_ref": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}\\.[a-z][a-z0-9_]{0,63}$"},
+    "node_type_ref": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*@[1-9][0-9]*$",
+      "description": "namespace.family.name@major, e.g. stk.filter.contour@1"
+    },
+    "link": {
+      "type": "object",
+      "required": ["from"],
+      "properties": {
+        "from": {"$ref": "#/$defs/port_ref"},
+        "as": {"$ref": "#/$defs/identifier"}
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "type": {"$ref": "#/$defs/node_type_ref"},
+        "params": {"type": "object"},
+        "inputs": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,63}$"},
+          "additionalProperties": {
+            "oneOf": [
+              {"$ref": "#/$defs/link"},
+              {"type": "array", "items": {"$ref": "#/$defs/link"}}
+            ]
+          }
+        },
+        "label": {"type": "string"},
+        "description": {"type": "string"},
+        "ui": {"type": "object"}
+      },
+      "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    },
+    "parameter": {
+      "type": "object",
+      "required": ["name", "type", "default"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "type": {"enum": ["number", "integer", "boolean", "string", "step", "vector3", "int3", "range", "enum", "json"]},
+        "default": true,
+        "choices": {"type": "array", "minItems": 1},
+        "minimum": {"type": "number"},
+        "maximum": {"type": "number"},
+        "unit": {"type": "string"},
+        "label": {"type": "string"},
+        "description": {"type": "string"},
+        "ui": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "param_ref": {
+      "type": "object",
+      "required": ["$param"],
+      "properties": {"$param": {"$ref": "#/$defs/identifier"}},
+      "additionalProperties": false
+    },
+    "time": {
+      "type": "object",
+      "properties": {
+        "domain": {"enum": ["step", "time"]},
+        "current": {"type": ["number", "null"]},
+        "range": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2},
+        "stride": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "policy": {"enum": ["latest_at_or_before", "exact"]},
+        "fps": {"type": ["number", "null"], "exclusiveMinimum": 0}
+      },
+      "additionalProperties": false
+    }
+  }
+}

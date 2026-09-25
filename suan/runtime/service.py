@@ -11,6 +11,8 @@ import shutil
 import threading
 import uuid
 
+from ..monitor.events import EVENTS_FILE
+from ..monitor.reader import monitor_summary, read_events
 from .common import atomic_json, inside, now, read_json, sha256
 from .models import Artifact, TaskSpec, Workspace, TERMINAL, relative_path
 from .store import Store
@@ -213,6 +215,28 @@ class RuntimeService:
         # Byte offsets + base64 preserve UTF-8 characters split across chunks.
         return {"data": base64.b64encode(data).decode("ascii"), "offset": offset,
                 "next_offset": offset + len(data), "terminal": self.store.task(task_id)["state"] in TERMINAL}
+
+    def events(self, task_id, offset=0, limit=CHUNK_SIZE):
+        """Monitoring events from whole lines of <task_dir>/events.jsonl (docs/specs/stk-events-v1.md §5)."""
+        if isinstance(offset, bool) or isinstance(limit, bool) or offset < 0 or not 1 <= limit <= CHUNK_SIZE:
+            raise ValueError("Invalid events range")
+        # State first: when it is terminal the worker has finished writing, so the read is complete.
+        terminal = self.store.task(task_id)["state"] in TERMINAL
+        result = read_events(inside(self.task_dir(task_id), EVENTS_FILE), offset, limit)
+        result["terminal"] = terminal
+        return result
+
+    def task(self, task_id):
+        """The task record plus ``monitor`` {events_size, last_progress, last_ts} once events exist."""
+        record = self.store.task(task_id)
+        try:
+            root = inside(self.workspace_dir(record["spec"]["workspace_id"]) / "runs", task_id)
+            summary = monitor_summary(inside(root, EVENTS_FILE))
+        except (KeyError, OSError, ValueError):
+            summary = None  # the record alone is still a complete answer
+        if summary is not None:
+            record["monitor"] = summary
+        return record
 
     def artifacts(self, task_id):
         record = self.store.task(task_id)

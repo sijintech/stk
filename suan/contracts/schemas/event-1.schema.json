@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:event-1",
+  "title": "STK monitoring event v1",
+  "description": "One line of the JSONL file at $STK_MONITOR_PATH (<task_dir>/events.jsonl). One JSON object per '\\n'-terminated line, at most 16 KiB, UTF-8. Non-finite numbers are written as the strings \"NaN\", \"Inf\", \"-Inf\". Consumers ignore unknown event types and unknown data keys; custom types use the 'x.' prefix. See docs/specs/stk-events-v1.md.",
+  "type": "object",
+  "required": ["v", "seq", "ts", "type", "src", "data"],
+  "properties": {
+    "v": {"const": 1},
+    "seq": {"type": "integer", "minimum": 0, "description": "Strictly increasing per file."},
+    "ts": {"type": "number", "minimum": 0, "description": "Unix seconds (UTC) as a float; advisory, ordering is by file offset."},
+    "type": {
+      "anyOf": [
+        {"enum": ["run.started", "run.phase", "progress", "metric.declare", "metrics", "frame", "checkpoint", "artifact", "message", "usage", "verification", "run.completed"]},
+        {"type": "string", "pattern": "^x\\.[a-z0-9_.-]{1,64}$"}
+      ]
+    },
+    "src": {"type": "string", "pattern": "^[a-z][a-z0-9_.:-]{0,63}$", "description": "'program' (the solver via the SDK), 'adapter' (a legacy adapter such as the muFerro tail), 'launcher' or 'runtime'."},
+    "data": {"type": "object"}
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {"if": {"properties": {"type": {"const": "run.started"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/run_started"}}}},
+    {"if": {"properties": {"type": {"const": "run.phase"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/run_phase"}}}},
+    {"if": {"properties": {"type": {"const": "progress"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/progress"}}}},
+    {"if": {"properties": {"type": {"const": "metric.declare"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/metric_declare"}}}},
+    {"if": {"properties": {"type": {"const": "metrics"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/metrics"}}}},
+    {"if": {"properties": {"type": {"const": "frame"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/frame"}}}},
+    {"if": {"properties": {"type": {"const": "checkpoint"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/checkpoint"}}}},
+    {"if": {"properties": {"type": {"const": "artifact"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/artifact"}}}},
+    {"if": {"properties": {"type": {"const": "message"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/message"}}}},
+    {"if": {"properties": {"type": {"const": "usage"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/usage"}}}},
+    {"if": {"properties": {"type": {"const": "verification"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/verification"}}}},
+    {"if": {"properties": {"type": {"const": "run.completed"}}}, "then": {"properties": {"data": {"$ref": "#/$defs/run_completed"}}}}
+  ],
+  "$defs": {
+    "num": {"oneOf": [{"type": "number"}, {"enum": ["NaN", "Inf", "-Inf"]}]},
+    "opt_num": {"oneOf": [{"type": "number"}, {"enum": ["NaN", "Inf", "-Inf"]}, {"type": "null"}]},
+    "step": {"type": ["integer", "null"], "minimum": 0},
+    "relative_path": {"$ref": "urn:stk:schema:dataset-1#/$defs/relative_path"},
+    "run_started": {
+      "type": "object",
+      "required": ["app"],
+      "properties": {
+        "app": {"type": "string"},
+        "version": {"type": ["string", "null"]},
+        "total_steps": {"type": ["integer", "null"], "minimum": 0},
+        "ranks": {"type": ["integer", "null"], "minimum": 1},
+        "host": {"type": ["string", "null"]},
+        "pid": {"type": ["integer", "null"]}
+      }
+    },
+    "run_phase": {
+      "type": "object",
+      "required": ["name", "state"],
+      "properties": {
+        "name": {"type": "string"},
+        "state": {"enum": ["begin", "end"]},
+        "elapsed_s": {"$ref": "#/$defs/opt_num"}
+      }
+    },
+    "progress": {
+      "type": "object",
+      "properties": {
+        "step": {"$ref": "#/$defs/step"},
+        "completed_steps": {"type": ["integer", "null"], "minimum": 0},
+        "total_steps": {"type": ["integer", "null"], "minimum": 0},
+        "fraction": {"oneOf": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "null"}]},
+        "time": {"$ref": "#/$defs/opt_num"},
+        "time_end": {"$ref": "#/$defs/opt_num"},
+        "time_unit": {"type": ["string", "null"]},
+        "phase": {"type": ["string", "null"]},
+        "eta_s": {"$ref": "#/$defs/opt_num"},
+        "indeterminate": {"type": "boolean"}
+      }
+    },
+    "metric_declare": {
+      "type": "object",
+      "required": ["name", "unit"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$"},
+        "unit": {"type": "string"},
+        "quantity": {"type": ["string", "null"]},
+        "label": {"type": ["string", "null"]},
+        "group": {"type": ["string", "null"]}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["values"],
+      "properties": {
+        "step": {"$ref": "#/$defs/step"},
+        "time": {"$ref": "#/$defs/opt_num"},
+        "values": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/num"}}
+      }
+    },
+    "frame": {
+      "type": "object",
+      "required": ["dataset", "step", "path"],
+      "properties": {
+        "dataset": {"type": "string"},
+        "step": {"type": "integer", "minimum": 0},
+        "time": {"$ref": "#/$defs/opt_num"},
+        "path": {"$ref": "#/$defs/relative_path"},
+        "selector": {"type": ["string", "object", "null"]},
+        "fields": {"type": "array", "items": {"type": "string"}},
+        "reader": {"type": ["string", "null"]},
+        "components": {"type": ["integer", "null"], "minimum": 1},
+        "size": {"type": ["integer", "null"], "minimum": 0},
+        "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": ["step", "path"],
+      "properties": {
+        "step": {"type": "integer", "minimum": 0},
+        "path": {"$ref": "#/$defs/relative_path"},
+        "restartable": {"type": "boolean"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["path", "role"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "role": {"type": "string"},
+        "media_type": {"type": ["string", "null"]}
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": ["level", "text"],
+      "properties": {
+        "level": {"enum": ["debug", "info", "warning", "error"]},
+        "text": {"type": "string", "maxLength": 8192},
+        "code": {"type": ["string", "null"]}
+      }
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "cpu_s": {"$ref": "#/$defs/opt_num"},
+        "rss_peak_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "gpu": {"type": ["object", "null"]}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["verifier", "status"],
+      "properties": {
+        "verifier": {"type": "string"},
+        "status": {"enum": ["passed", "failed", "pending", "skipped", "unknown"]},
+        "failed_checks": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "run_completed": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["succeeded", "failed", "cancelled"]},
+        "classification": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

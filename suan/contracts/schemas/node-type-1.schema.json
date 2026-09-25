@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:node-type-1",
+  "title": "STK node type v1 (catalog entry)",
+  "description": "One node type of the graph catalog, exported by `suan graph catalog --json` so Blender, the web client and LLM tools can build UIs and validate graphs without importing Python. '$defs/catalog' describes the whole exported catalog document (stk.catalog/1). See docs/specs/stk-graph-v1.md.",
+  "type": "object",
+  "required": ["id", "type", "version", "impl_version", "stage", "category", "title", "inputs", "outputs", "params"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*@[1-9][0-9]*$"},
+    "type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"},
+    "version": {"type": "integer", "minimum": 1},
+    "impl_version": {"type": "integer", "minimum": 1},
+    "stage": {"enum": ["source", "data", "analysis", "representation", "view", "output", "plot"]},
+    "category": {"enum": ["source", "filter", "analysis", "render", "view", "output", "plot"]},
+    "title": {"$ref": "#/$defs/text"},
+    "description": {"$ref": "#/$defs/text"},
+    "inputs": {"type": "array", "items": {"$ref": "#/$defs/input_port"}},
+    "outputs": {"type": "array", "items": {"$ref": "#/$defs/output_port"}, "minItems": 1},
+    "params": {"$ref": "#/$defs/params"},
+    "time_dependent": {"type": "boolean"},
+    "deterministic": {"type": "boolean"},
+    "cache": {"enum": ["memory", "disk", "none"]},
+    "impl": {"type": "string", "description": "Informational 'module:function'."},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "stretch": {"type": "boolean", "description": "True for node types that are specified but may be absent from an installation."}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "text": {
+      "type": "object",
+      "required": ["en"],
+      "properties": {"en": {"type": "string"}, "zh": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "port_name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+    "port_type": {"enum": ["any", "dataset", "table", "value", "field", "colormap", "palette", "transfer_function", "layer", "camera", "scene", "plot", "image", "payload", "file"]},
+    "kind": {"enum": ["image", "labels", "rectilinear", "structured", "unstructured", "polydata", "points", "particles", "table", "frames", "collection"]},
+    "value_type": {"enum": ["json", "number", "integer", "boolean", "string", "vector3", "range"]},
+    "input_port": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/port_name"},
+        "type": {
+          "oneOf": [
+            {"$ref": "#/$defs/port_type"},
+            {"type": "array", "items": {"$ref": "#/$defs/port_type"}, "minItems": 2, "uniqueItems": true}
+          ],
+          "description": "A list means a union of accepted port types."
+        },
+        "accepts": {"type": "array", "items": {"$ref": "#/$defs/kind"}, "minItems": 1, "uniqueItems": true, "description": "Dataset kinds accepted (dataset/table ports). Absent means any kind."},
+        "value_type": {"$ref": "#/$defs/value_type"},
+        "required": {"type": "boolean", "default": true},
+        "multi": {"type": "boolean", "default": false},
+        "title": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"}
+      },
+      "additionalProperties": false
+    },
+    "output_port": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/port_name"},
+        "type": {"$ref": "#/$defs/port_type"},
+        "kind": {
+          "oneOf": [
+            {"$ref": "#/$defs/kind"},
+            {"type": "array", "items": {"$ref": "#/$defs/kind"}, "minItems": 2, "uniqueItems": true}
+          ],
+          "description": "Kind (or possible kinds, decided at run time) of a dataset/table output."
+        },
+        "kind_from": {"$ref": "#/$defs/port_name", "description": "The output has the kind of whatever is linked to this input port."},
+        "value_type": {"$ref": "#/$defs/value_type"},
+        "title": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"}
+      },
+      "additionalProperties": false
+    },
+    "params": {
+      "type": "object",
+      "required": ["type", "properties"],
+      "properties": {
+        "type": {"const": "object"},
+        "properties": {"type": "object", "additionalProperties": {"$ref": "#/$defs/param"}},
+        "required": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "additionalProperties": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "param": {
+      "type": "object",
+      "description": "A JSON Schema fragment (subset documented in stk-graph-v1.md) plus STK annotations.",
+      "required": ["x-stk-stage"],
+      "properties": {
+        "x-stk-stage": {"enum": ["data", "client"]},
+        "x-stk-widget": {"enum": ["field", "field_list", "step", "binding", "path", "color", "colormap", "palette", "vector3", "int3", "range", "transfer_function", "camera", "json"]},
+        "x-stk-field-of": {"$ref": "#/$defs/port_name"},
+        "x-stk-unit": {"type": "string"},
+        "x-stk-quantity": {"type": "string"},
+        "x-stk-group": {"type": "string"},
+        "x-stk-advanced": {"type": "boolean"},
+        "x-stk-choices-from": {"type": "string", "description": "The evaluator reports run-time choices for this param (ctx.report_choices)."}
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "required": ["schema", "port_types", "kinds", "nodes"],
+      "properties": {
+        "schema": {"const": "stk.catalog/1"},
+        "generated_by": {"type": "string"},
+        "namespaces": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+        "port_types": {"type": "object", "additionalProperties": {"$ref": "#/$defs/lattice_entry"}},
+        "kinds": {"type": "object", "additionalProperties": {"$ref": "#/$defs/lattice_entry"}},
+        "value_types": {"type": "object", "additionalProperties": {"$ref": "#/$defs/lattice_entry"}},
+        "client_types": {"type": "array", "items": {"$ref": "#/$defs/port_type"}},
+        "nodes": {"type": "array", "items": {"$ref": "#"}}
+      },
+      "additionalProperties": false
+    },
+    "lattice_entry": {
+      "type": "object",
+      "required": ["parent"],
+      "properties": {
+        "parent": {"type": ["string", "null"]},
+        "description": {"type": "string"},
+        "implemented": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

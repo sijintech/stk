@@ -7,12 +7,18 @@ import re
 import uuid
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .blobs import BlobError, BlobMismatch, BlobTooLarge
 from .policy import validate_action
 from .store import ControlStore, encode
+
+# Advertised in GET /api/v1/health so agents and clients can detect additive hub features.
+FEATURES = ["blobs", "graph", "task.events"]
+BLOB_HEADERS = {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; sandbox"}
 
 
 class Pairing(BaseModel):
@@ -33,12 +39,14 @@ class Chat(BaseModel):
     content: str = Field(min_length=1, max_length=12000)
 
 
-def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None):
+def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None, blob_max_bytes=None):
     if not owner_token or len(owner_token) < 24:
         raise ValueError("Control owner token must contain at least 24 characters")
     app = FastAPI(title="STK Control", version="1.0", docs_url=None, redoc_url=None)
-    store = ControlStore(state_dir)
+    store = ControlStore(state_dir, blob_max_bytes=blob_max_bytes)
+    blobs = store.blobs
     app.state.store = store
+    graph_documents = {}
     templates = templates or {}
     connections = {}
     chat_locks = {}
@@ -64,6 +72,29 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None)
         if who["role"] != "owner":
             raise HTTPException(403, "Owner credential required")
 
+    def node_device(authorization: str = Header(default="")):
+        who = identity(authorization)
+        if who["role"] != "node":
+            raise HTTPException(403, "Node credential required")
+        return who
+
+    def any_device(authorization: str = Header(default="")):
+        return identity(authorization)
+
+    def blob_path(sha256):
+        try:
+            return blobs.path(sha256)
+        except BlobError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    def blob_file(sha256):
+        path = blob_path(sha256)
+        if not path.is_file():
+            raise HTTPException(404, "Blob not found")
+        # Served as opaque bytes: clients know each blob's media type from the result that references it.
+        return FileResponse(path, media_type="application/octet-stream",
+                            headers={**BLOB_HEADERS, "ETag": '"' + sha256 + '"'})
+
     def prepare_action(body):
         try:
             if body.get("kind") == "task.submit" and "spec" not in body.get("payload", {}):
@@ -77,6 +108,9 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None)
             if not any(d["id"] == body["node_id"] and d["role"] == "node" and not d["revoked"] for d in store.devices()):
                 raise ValueError("Execution node not found")
             return body, reason
+        except RecursionError:
+            # A request nested too deeply for the validators (JSON, graphs): a client error, never a 500.
+            raise HTTPException(400, "The request is nested too deeply") from None
         except (ValueError, TypeError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -89,7 +123,7 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None)
 
     @app.get("/api/v1/health")
     def health():
-        return {"api_version": 1, "status": "ok"}
+        return {"api_version": 1, "status": "ok", "features": FEATURES}
 
     @app.post("/api/v1/pairings", dependencies=[Depends(owner)])
     def pairing(body: Pairing):
@@ -144,6 +178,59 @@ def create_app(state_dir, owner_token, templates=None, model=None, web_dir=None)
             return store.approve(action_id, body.approved)
         except KeyError as exc:
             raise HTTPException(404, "Action not found") from exc
+
+    @app.put("/api/v1/blobs/{sha256}", dependencies=[Depends(node_device)])
+    async def put_blob(sha256: str, request: Request):
+        """Node agents upload content-addressed bytes; they become visible only after the sha256 matched."""
+        blob_path(sha256)
+        size = blobs.size(sha256)
+        if size is not None:
+            return {"sha256": sha256, "size": size, "created": False}
+        try:
+            declared = int(request.headers.get("content-length", "-1"))
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid Content-Length") from exc
+        try:
+            upload = blobs.begin(sha256, declared if declared >= 0 else None)
+        except BlobTooLarge as exc:
+            raise HTTPException(413, str(exc)) from exc
+        try:
+            async for chunk in request.stream():
+                upload.write(chunk)
+            created = await asyncio.to_thread(upload.commit)
+        except BlobTooLarge as exc:
+            raise HTTPException(413, str(exc)) from exc
+        except BlobMismatch as exc:
+            raise HTTPException(400, str(exc)) from exc
+        finally:
+            upload.abort()
+        return JSONResponse({"sha256": sha256, "size": upload.size, "created": created},
+                            status_code=201 if created else 200)
+
+    @app.head("/api/v1/blobs/{sha256}", dependencies=[Depends(any_device)])
+    def head_blob(sha256: str):
+        """Existence and size; node agents check before uploading."""
+        return blob_file(sha256)
+
+    @app.get("/api/v1/blobs/{sha256}", dependencies=[Depends(client)])
+    def get_blob(sha256: str):
+        """Immutable bytes (payload buffers, images, plots, offloaded results) for clients."""
+        return blob_file(sha256)
+
+    def graph_document(name):
+        # Built once per process: the catalog and presets ship with the installed package.
+        if name not in graph_documents:
+            from suan.graph.catalog import catalog_document, list_presets
+            graph_documents[name] = catalog_document() if name == "catalog" else list_presets()
+        return graph_documents[name]
+
+    @app.get("/api/v1/graphs/catalog", dependencies=[Depends(client)])
+    def graph_catalog():
+        return graph_document("catalog")
+
+    @app.get("/api/v1/graphs/presets", dependencies=[Depends(client)])
+    def graph_presets():
+        return graph_document("presets")
 
     @app.get("/api/v1/events", dependencies=[Depends(client)])
     async def events(request: Request, after: int = 0, last_event_id: str = Header(default="")):

@@ -1,0 +1,47 @@
+{
+ "id": "iso",
+ "name": "Isosurfaces of |v|",
+ "description": "Isosurfaces of the magnitude of a field file (|v| of a vector, |s| of a scalar) at one or more values, coloured by the isovalue with a scalar bar, plus an outline and axes. Reproduces view.build's 'iso' mode with component 'magnitude' (levels null = one surface at the middle of the data range).",
+ "bindings": [{"name": "data", "description": "The directory (or Runtime task) holding the field file."}],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "iso",
+  "name": "Isosurfaces of |v|",
+  "description": "stk.filter.calculator (magnitude) -> stk.filter.contour (several values) -> surface coloured by iso_value.",
+  "catalog": {"stk": 1},
+  "parameters": [
+   {"name": "path", "type": "string", "default": "Polar.00000000.dat", "label": "Field file",
+    "description": "Path inside the binding: DAT, NPY, VTI, legacy VTK or VTKHDF."},
+   {"name": "levels", "type": "json", "default": null, "label": "Isovalues",
+    "description": "A list of 1-32 values of |v|, or null for the middle of the data range."},
+   {"name": "colormap", "type": "enum", "choices": ["viridis", "cividis", "coolwarm", "turbo", "gray"],
+    "default": "viridis", "label": "Colormap"},
+   {"name": "opacity", "type": "number", "default": 1.0, "minimum": 0, "maximum": 1, "label": "Opacity"},
+   {"name": "view", "type": "enum", "choices": ["iso", "+x", "-x", "+y", "-y", "+z", "-z"], "default": "iso",
+    "label": "View"}
+  ],
+  "nodes": [
+   {"id": "src", "type": "stk.source.file@1", "params": {"binding": "data", "path": {"$param": "path"}}},
+   {"id": "magnitude", "type": "stk.filter.calculator@1", "inputs": {"in": {"from": "src.out"}},
+    "params": {"operation": "magnitude", "field": null, "result": "magnitude"}},
+   {"id": "contour", "type": "stk.filter.contour@1", "inputs": {"in": {"from": "magnitude.out"}},
+    "params": {"field": {"name": "magnitude", "component": null}, "values": {"$param": "levels"},
+               "compute_normals": true}},
+   {"id": "surface", "type": "stk.render.surface@1", "inputs": {"in": {"from": "contour.out"}},
+    "params": {"attributes": ["iso_value"],
+               "color": {"by": "field", "field": "iso_value", "colormap": {"$param": "colormap"}},
+               "opacity": {"$param": "opacity"}, "name": "Isosurfaces"}},
+   {"id": "bar", "type": "stk.render.scalar_bar@1", "inputs": {"source": {"from": "surface.layer"}},
+    "params": {"title": "|v|"}},
+   {"id": "box", "type": "stk.render.outline@1", "inputs": {"in": {"from": "src.out"}}},
+   {"id": "axes", "type": "stk.render.axes@1"},
+   {"id": "camera", "type": "stk.view.camera@1", "params": {"preset": {"$param": "view"}}},
+   {"id": "scene", "type": "stk.view.scene@1",
+    "inputs": {"layers": [{"from": "surface.layer"}, {"from": "box.layer"}, {"from": "bar.layer"},
+                          {"from": "axes.layer"}],
+               "camera": {"from": "camera.camera"}}},
+   {"id": "png", "type": "stk.output.image@1", "inputs": {"source": {"from": "scene.scene"}}}
+  ],
+  "outputs": {"view": "scene.scene", "image": "png.image"}
+ }
+}

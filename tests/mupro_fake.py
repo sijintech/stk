@@ -41,7 +41,10 @@ def _e18(value):
     if value == 0:
         return "0.0000000000E+00".rjust(18)
     mantissa, exponent = f"{abs(value):.9E}".split("E")
-    return f"{'-' if value < 0 else ''}0.{mantissa.replace('.', '')}E{int(exponent) + 1:+03d}".rjust(18)
+    exponent = int(exponent) + 1
+    # Ew.d drops the exponent letter when |exponent| > 99: 0.1500000000+102.
+    suffix = f"{exponent:+04d}" if abs(exponent) > 99 else f"E{exponent:+03d}"
+    return f"{'-' if value < 0 else ''}0.{mantissa.replace('.', '')}{suffix}".rjust(18)
 
 
 def _frame(path, grid, components, step, scalar=False):
@@ -57,7 +60,7 @@ def _frame(path, grid, components, step, scalar=False):
                     rows.extend(f"{i:6d}{j:6d}{k:6d}{c:6d} {_es(i + 10*j + 100*k + 1000*c + step)} "
                                 for c in range(1, components + 1))
     header = "".join(f"{n:6d}" for n in (grid if scalar else (*grid, components)))
-    path.write_text("\n".join([header.ljust(len(rows[0])), *rows]) + "\n")
+    path.write_text("\n".join([header.ljust(len(rows[0])), *rows]) + "\n", newline="\n")
 
 
 def write_outputs(case_dir, *, grid=(4, 3, 2), steps=3, interval=2, start=0, mode="ok"):
@@ -91,9 +94,9 @@ def write_outputs(case_dir, *, grid=(4, 3, 2), steps=3, interval=2, start=0, mod
             break  # muFerro stops on a NaN total before that step's progress record (output.f90:187-192).
         progress.append(json.dumps({"step": step, "completed_steps": step - start, "total_steps": steps},
                                    separators=(",", ":")))
-    with open(case_dir / "energy_out.dat", "a") as stream:
+    with open(case_dir / "energy_out.dat", "a", newline="\n") as stream:
         stream.write("".join(line + "\n" for line in energy[0 if header else 1:]))
-    with open(case_dir / "mupro_progress.jsonl", "a") as stream:
+    with open(case_dir / "mupro_progress.jsonl", "a", newline="\n") as stream:
         stream.write("".join(line + "\n" for line in progress))
     if mode in {"ok", "missing_frame"}:
         (case_dir / "mupro_completion.json").write_text(
@@ -116,7 +119,7 @@ def read_toml(path, depth=0):
             elif isinstance(destination[key], dict) and isinstance(value, dict):
                 merge(destination[key], value)
 
-    data = tomllib.loads(Path(path).read_text())
+    data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     includes = data.pop("include", [])
     if includes and depth >= 16:
         raise ValueError("include nested more than 16 deep")
@@ -159,6 +162,67 @@ def make_fake_sdk(root, *, grid=(4, 3, 2), steps=3, interval=2, mode="ok"):
             f"import sys\nsys.path.insert(0, {str(Path(__file__).parent)!r})\n"
             f"from mupro_fake import fake_muferro\nsys.exit(fake_muferro({mode!r}))\n")
     return root
+
+
+DOMAIN_VARIANTS = ((1, 1, 1), (-1, 0, 0), (1, -1, 0), (0, 0, -1))  # R[111], T[-100], O[1-10], T[00-1]
+
+
+def domain_polarization(grid, *, step=0, film=True, magnitude=0.6):
+    """A (nx, ny, nz, 3) polarization with four domains for the domain-view tests (NumPy).
+
+    The x-y plane is split into quadrants holding the directions of ``DOMAIN_VARIANTS``
+    (the x boundary moves by one grid point per step), each tilted by a smooth
+    deterministic perturbation of at most ~10 degrees. With ``film``, the two lowest
+    z-layers (substrate) and the two highest (air) are zero; one column at x = y = 0 has
+    |P| = 0.02 (unclassified). Values are multiples of 1/256, so a DAT round trip is exact.
+    """
+    import numpy as np
+    nx, ny, nz = grid
+    i, j, k = np.meshgrid(np.arange(nx), np.arange(ny), np.arange(nz), indexing="ij")
+    split = max(1, min(nx - 1, nx // 2 + step % 3 - 1))
+    directions = np.array(DOMAIN_VARIANTS, dtype=np.float64)
+    directions /= np.linalg.norm(directions, axis=1)[:, None]
+    quadrant = (i >= split).astype(int) + 2 * (j >= ny // 2).astype(int)
+    tilt = 0.06 * np.stack([np.sin(0.7 * i + 1.3 * j), np.cos(0.9 * j + 0.5 * k), np.sin(0.4 * k + 1.1 * i)], -1)
+    polar = np.round((magnitude * directions[quadrant] + tilt) * 256) / 256
+    if film and nz >= 6:
+        polar[:, :, :2] = 0.0
+        polar[:, :, -2:] = 0.0
+        polar[0, 0, 2:-2] = [0.02734375, 0.0, 0.0]  # 7/256: below the usual 0.1 threshold
+    return polar
+
+
+def write_domain_run(case_dir, *, grid=(16, 12, 10), steps=2, interval=1, start=0, film=True, complete=True):
+    """A fake muFerro run whose Polar frames hold :func:`domain_polarization` (``{step: array}`` returned).
+
+    ``complete`` writes every output of :func:`write_outputs` first (small grids); otherwise only
+    the Polar frames, ``energy_out.dat``, ``mupro_progress.jsonl`` and ``mupro_completion.json``
+    (fast for large grids; the auxiliary stems are then missing).
+    """
+    import numpy as np
+    from suan.data.dat import write_dat
+    case_dir = Path(case_dir)
+    write_case(case_dir, grid=grid, steps=steps, interval=interval, start=start)
+    if complete:
+        write_outputs(case_dir, grid=grid, steps=steps, interval=interval, start=start)
+    else:
+        headers = ["Elastic Energy", "Electric Energy", "Landau Energy", "Gradient P Energy", "Total Energy"]
+        energy = ["    " + "step".rjust(6) + " " * 9 + "".join(h.rjust(18) for h in headers)]
+        progress = []
+        for step in range(start + 1, start + steps + 1):
+            values = [1.5 * step, 0.25, -3.0 * step, 0.125, -1.125 * step]
+            energy.append(f"kt: {step:6d} energy: " + "".join(_e18(v) for v in values))
+            progress.append(json.dumps({"step": step, "completed_steps": step - start, "total_steps": steps},
+                                       separators=(",", ":")))
+        (case_dir / "energy_out.dat").write_text("".join(line + "\n" for line in energy), newline="\n")
+        (case_dir / "mupro_progress.jsonl").write_text("".join(line + "\n" for line in progress), newline="\n")
+        (case_dir / "mupro_completion.json").write_text(
+            f'{{"app":"muFerro","completed_steps":{steps},"final_step":{start + steps}}}\n')
+    frames = {}
+    for step in [0] + [s for s in range(start + 1, start + steps + 1) if (s - start) % interval == 0]:
+        frames[step] = domain_polarization(grid, step=step, film=film)
+        write_dat(case_dir / f"Polar.{step:08d}.dat", frames[step], component_shape=(3,))
+    return {step: np.asarray(values) for step, values in frames.items()}
 
 
 def make_fake_mpiexec(bin_dir):

@@ -101,6 +101,10 @@ def run(task_dir):
                 env[key] = os.environ[key]
             else:
                 env.pop(key, None)
+        # Monitoring events (docs/specs/stk-events-v1.md), set after the spec's env so a
+        # TaskSpec cannot redirect them; the file sits outside work/, next to stdout.log.
+        env["STK_MONITOR_PATH"] = str(root / "events.jsonl")
+        env["STK_TASK_ID"] = str(launch.get("task_id") or root.name)
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("PYTHONIOENCODING", "utf-8")
         env.setdefault("OMP_NUM_THREADS", str(threads))

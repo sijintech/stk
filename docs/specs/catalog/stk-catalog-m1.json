@@ -1,0 +1,4585 @@
+{
+ "schema": "stk.catalog/1",
+ "generated_by": "suan.graph.registry",
+ "namespaces": {
+  "stk": 1
+ },
+ "port_types": {
+  "any": {
+   "parent": null,
+   "description": "Any value; only for generic utility ports."
+  },
+  "dataset": {
+   "parent": "any",
+   "description": "In-memory STK dataset (suan.data.model.Dataset); qualified by kind. Never leaves the evaluator."
+  },
+  "table": {
+   "parent": "dataset",
+   "description": "Table dataset (kind 'table' or a refinement such as 'frames')."
+  },
+  "value": {
+   "parent": "any",
+   "description": "Small JSON value; qualified by value_type."
+  },
+  "field": {
+   "parent": "any",
+   "description": "Field selection {name, component}."
+  },
+  "colormap": {
+   "parent": "any",
+   "description": "Continuous colormap spec (client stage)."
+  },
+  "palette": {
+   "parent": "any",
+   "description": "Categorical palette spec (client stage)."
+  },
+  "transfer_function": {
+   "parent": "any",
+   "description": "Volume colour/opacity transfer function (client stage)."
+  },
+  "layer": {
+   "parent": "any",
+   "description": "Render layer: geometry reference + appearance (output of render nodes)."
+  },
+  "camera": {
+   "parent": "any",
+   "description": "Camera of an stk.view/1 document."
+  },
+  "scene": {
+   "parent": "any",
+   "description": "Ordered layers + stk.view/1 view; delivered as an stk.payload/2 payload."
+  },
+  "plot": {
+   "parent": "any",
+   "description": "stk.plot/1 spec with bound tables."
+  },
+  "image": {
+   "parent": "any",
+   "description": "Rendered raster (PNG/SVG/PDF blob reference). Unrelated to the dataset kind 'image'."
+  },
+  "payload": {
+   "parent": "any",
+   "description": "Encoded stk.payload/2 manifest + buffers."
+  },
+  "file": {
+   "parent": "any",
+   "description": "Exported file (name, media type, sha256, size)."
+  }
+ },
+ "kinds": {
+  "image": {
+   "parent": null,
+   "description": "Uniform grid (dims, origin, spacing, direction).",
+   "implemented": true
+  },
+  "labels": {
+   "parent": "image",
+   "description": "Image with at least one categorical label field (tensor 'label').",
+   "implemented": true
+  },
+  "rectilinear": {
+   "parent": null,
+   "description": "One coordinate array per axis.",
+   "implemented": false
+  },
+  "structured": {
+   "parent": null,
+   "description": "Curvilinear grid.",
+   "implemented": false
+  },
+  "unstructured": {
+   "parent": null,
+   "description": "Points + typed VTK cells (FEM).",
+   "implemented": false
+  },
+  "polydata": {
+   "parent": null,
+   "description": "Vertices, lines, polygons.",
+   "implemented": true
+  },
+  "points": {
+   "parent": "polydata",
+   "description": "Polydata with vertices only (glyph sources, samples).",
+   "implemented": true
+  },
+  "particles": {
+   "parent": null,
+   "description": "Atoms/particles with optional bonds and periodic cell.",
+   "implemented": false
+  },
+  "table": {
+   "parent": null,
+   "description": "Named typed columns.",
+   "implemented": true
+  },
+  "frames": {
+   "parent": "table",
+   "description": "Frame index table: dataset, step, time, path, size, sha256, reader, components.",
+   "implemented": true
+  },
+  "collection": {
+   "parent": null,
+   "description": "Named tree of datasets.",
+   "implemented": false
+  }
+ },
+ "value_types": {
+  "json": {
+   "parent": null,
+   "description": "Any JSON value."
+  },
+  "number": {
+   "parent": "json",
+   "description": "Finite number."
+  },
+  "integer": {
+   "parent": "number",
+   "description": "Integer."
+  },
+  "boolean": {
+   "parent": "json",
+   "description": "true/false."
+  },
+  "string": {
+   "parent": "json",
+   "description": "String."
+  },
+  "vector3": {
+   "parent": "json",
+   "description": "[x, y, z] numbers."
+  },
+  "range": {
+   "parent": "json",
+   "description": "[min|null, max|null]."
+  }
+ },
+ "client_types": [
+  "camera",
+  "colormap",
+  "image",
+  "layer",
+  "palette",
+  "payload",
+  "plot",
+  "scene",
+  "transfer_function"
+ ],
+ "nodes": [
+  {
+   "id": "stk.analysis.film_detect@1",
+   "type": "stk.analysis.film_detect",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "analysis",
+   "category": "analysis",
+   "title": {
+    "en": "Film detection",
+    "zh": "薄膜检测"
+   },
+   "description": {
+    "en": "Find substrate, film and air layers along z from where the vector field is nonzero. Adds int8 label field (-1 air, 0 substrate, 1 film); 'info' reports the layer indices."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "labels"
+    },
+    {
+     "name": "info",
+     "type": "value",
+     "value_type": "json"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "component_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4093,
+      "default": 0,
+      "x-stk-stage": "data"
+     },
+     "epsilon": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1e-06,
+      "x-stk-stage": "data"
+     },
+     "output": {
+      "type": "string",
+      "pattern": "^[^/.]{1,128}$",
+      "default": "film",
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.analysis.label_fractions@1",
+   "type": "stk.analysis.label_fractions",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "analysis",
+   "category": "analysis",
+   "title": {
+    "en": "Label fractions",
+    "zh": "畴体积分数"
+   },
+   "description": {
+    "en": "Point (or cell) counts and fractions per category; the denominator excludes 'exclude'. 'families' aggregates by category family (e.g. R/O/T)."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "labels"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "table"
+    },
+    {
+     "name": "families",
+     "type": "table"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[^/.]{1,128}$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "exclude": {
+      "type": "array",
+      "items": {
+       "type": "integer"
+      },
+      "maxItems": 256,
+      "default": [
+       -1,
+       0
+      ],
+      "x-stk-stage": "data"
+     },
+     "include_empty": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.analysis.orientation_classify@1",
+   "type": "stk.analysis.orientation_classify",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "analysis",
+   "category": "analysis",
+   "title": {
+    "en": "Orientation classify",
+    "zh": "畴取向分类"
+   },
+   "description": {
+    "en": "Label each point with the nearest reference direction (docs/specs/domain-classifiers.md): -1 unclassified/no data, 0 substrate (film detection), 1..N variants."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "labels"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vector field",
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "component_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4093,
+      "default": 0,
+      "x-stk-stage": "data"
+     },
+     "direction_set": {
+      "enum": [
+       "stk:cubic-26",
+       "stk:cubic-100",
+       "stk:cubic-110",
+       "stk:cubic-111",
+       "custom"
+      ],
+      "default": "stk:cubic-26",
+      "x-stk-stage": "data"
+     },
+     "directions": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "array",
+         "items": {
+          "type": "number"
+         },
+         "minItems": 3,
+         "maxItems": 3
+        },
+        "minItems": 1,
+        "maxItems": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "custom: directions",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "numbering": {
+      "enum": [
+       "stk",
+       "stk-legacy"
+      ],
+      "default": "stk",
+      "x-stk-stage": "data"
+     },
+     "min_magnitude": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.1,
+      "x-stk-stage": "data"
+     },
+     "max_angle_deg": {
+      "type": "number",
+      "maximum": 180,
+      "exclusiveMinimum": 0,
+      "default": 180.0,
+      "x-stk-stage": "data"
+     },
+     "film_detection": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "data"
+     },
+     "film_epsilon": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1e-06,
+      "x-stk-stage": "data"
+     },
+     "output": {
+      "type": "string",
+      "pattern": "^[^/.]{1,128}$",
+      "default": "domain",
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "disk"
+  },
+  {
+   "id": "stk.analysis.statistics@1",
+   "type": "stk.analysis.statistics",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "analysis",
+   "category": "analysis",
+   "title": {
+    "en": "Statistics",
+    "zh": "统计"
+   },
+   "description": {
+    "en": "Per field and component: count, nan_count, min, max, mean, std (and magnitude)."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image",
+      "polydata",
+      "table"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "table"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "fields": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "maxItems": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "components": {
+      "enum": [
+       "each",
+       "magnitude",
+       "both"
+      ],
+      "default": "both",
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.filter.calculator@1",
+   "type": "stk.filter.calculator",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Calculator",
+    "zh": "计算器"
+   },
+   "description": {
+    "en": "Fixed operations that add one field: magnitude, component, scale, normalize, compose. No expression language in M1."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind_from": "in"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "operation": {
+      "enum": [
+       "magnitude",
+       "component",
+       "scale",
+       "normalize",
+       "compose"
+      ],
+      "x-stk-stage": "data"
+     },
+     "field": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Input field",
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "fields": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "minItems": 2,
+        "maxItems": 16
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "compose: input fields",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "component": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "x-stk-stage": "data"
+     },
+     "factor": {
+      "type": "number",
+      "default": 1.0,
+      "x-stk-stage": "data"
+     },
+     "compose_as": {
+      "enum": [
+       "array",
+       "vector"
+      ],
+      "default": "array",
+      "x-stk-stage": "data"
+     },
+     "result": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[^/.]{1,128}$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Result field name",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "unit": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Result unit",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "keep_input": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "operation"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.filter.contour@1",
+   "type": "stk.filter.contour",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Contour",
+    "zh": "等值面"
+   },
+   "description": {
+    "en": "Isosurfaces at one or more values (marching cubes / flying edges). Output point field 'iso_value' plus interpolated probe_fields."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "polydata"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[^/.]{1,128}$"
+       },
+       {
+        "type": "object",
+        "required": [
+         "name"
+        ],
+        "properties": {
+         "name": {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         "component": {
+          "anyOf": [
+           {
+            "type": "integer",
+            "minimum": 0
+           },
+           {
+            "const": "magnitude"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         }
+        },
+        "additionalProperties": false
+       }
+      ],
+      "title": "Field",
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "x-stk-stage": "data"
+     },
+     "values": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 1,
+        "maxItems": 32
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Isovalues (null = range midpoint)",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "compute_normals": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "data"
+     },
+     "probe_fields": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "maxItems": 16
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "field"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "disk"
+  },
+  {
+   "id": "stk.filter.crop@1",
+   "type": "stk.filter.crop",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Crop (VOI)",
+    "zh": "裁剪"
+   },
+   "description": {
+    "en": "Extract a volume of interest by inclusive point-index ranges. Origin moves to the first kept point; spacing, fields and categories are kept."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind_from": "in"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "extent": {
+      "type": "array",
+      "items": {
+       "type": [
+        "integer",
+        "null"
+       ],
+       "minimum": 0
+      },
+      "minItems": 6,
+      "maxItems": 6,
+      "title": "[i0, i1, j0, j1, k0, k1]",
+      "description": "Inclusive point indices; null = axis start/end. Clipped to the grid.",
+      "default": [
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ],
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.filter.glyph_source@1",
+   "type": "stk.filter.glyph_source",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Glyph source",
+    "zh": "箭头采样"
+   },
+   "description": {
+    "en": "Sample points of a vector field for glyphs: stride or seeded random sampling, magnitude range and label mask, capped at max_points. Point fields: the vector field, 'magnitude' and the listed attributes."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "points"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Vector field",
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "sampling": {
+      "enum": [
+       "stride",
+       "random"
+      ],
+      "default": "stride",
+      "x-stk-stage": "data"
+     },
+     "stride": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "x-stk-widget": "int3",
+      "default": [
+       1,
+       1,
+       1
+      ],
+      "x-stk-stage": "data"
+     },
+     "max_points": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5000000,
+      "default": 5000,
+      "x-stk-stage": "data"
+     },
+     "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "x-stk-stage": "data"
+     },
+     "magnitude_range": {
+      "type": "array",
+      "prefixItems": [
+       {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       {
+        "type": [
+         "number",
+         "null"
+        ]
+       }
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "x-stk-widget": "range",
+      "default": [
+       null,
+       null
+      ],
+      "x-stk-stage": "data"
+     },
+     "mask_field": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[^/.]{1,128}$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "mask_labels": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "integer"
+        },
+        "minItems": 1,
+        "maxItems": 256
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "attributes": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "maxItems": 16
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.filter.label_surfaces@1",
+   "type": "stk.filter.label_surfaces",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Label surfaces",
+    "zh": "畴界面"
+   },
+   "description": {
+    "en": "One closed, smoothed surface per label: indicator (label == v) -> contour at 0.5 -> smoothing -> normals. Cell field 'label' (int32) carries the categories."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "labels"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "polydata"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[^/.]{1,128}$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Label field (null = first)",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "labels": {
+      "anyOf": [
+       {
+        "const": "present"
+       },
+       {
+        "type": "array",
+        "items": {
+         "type": "integer"
+        },
+        "minItems": 1,
+        "maxItems": 256
+       }
+      ],
+      "x-stk-widget": "json",
+      "default": "present",
+      "x-stk-stage": "data"
+     },
+     "exclude": {
+      "type": "array",
+      "items": {
+       "type": "integer"
+      },
+      "maxItems": 256,
+      "default": [
+       -1,
+       0
+      ],
+      "x-stk-stage": "data"
+     },
+     "smoothing": {
+      "enum": [
+       "windowed_sinc",
+       "laplacian",
+       "none"
+      ],
+      "default": "windowed_sinc",
+      "x-stk-stage": "data"
+     },
+     "smooth_iterations": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 500,
+      "default": 30,
+      "x-stk-stage": "data"
+     },
+     "smooth_factor": {
+      "type": "number",
+      "maximum": 2,
+      "exclusiveMinimum": 0,
+      "default": 0.1,
+      "x-stk-stage": "data"
+     },
+     "compute_normals": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "data"
+     },
+     "close_boundaries": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "disk"
+  },
+  {
+   "id": "stk.filter.sample@1",
+   "type": "stk.filter.sample",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Sample (stride)",
+    "zh": "抽样"
+   },
+   "description": {
+    "en": "Keep every n-th point along each axis (spacing multiplied by the stride). With max_points the stride grows uniformly until the point count fits."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind_from": "in"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "stride": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "x-stk-widget": "int3",
+      "default": [
+       1,
+       1,
+       1
+      ],
+      "x-stk-stage": "data"
+     },
+     "max_points": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.filter.slice@1",
+   "type": "stk.filter.slice",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Slice",
+    "zh": "切片"
+   },
+   "description": {
+    "en": "axis mode: the grid plane at an index (exact samples, a 2D image with that axis of size 1; label fields kept). plane mode: an arbitrary plane cut (triangulated polydata, trilinear point data, nearest for label fields)."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": [
+      "image",
+      "labels",
+      "polydata"
+     ]
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "mode": {
+      "enum": [
+       "axis",
+       "plane"
+      ],
+      "default": "axis",
+      "x-stk-stage": "data"
+     },
+     "axis": {
+      "enum": [
+       "x",
+       "y",
+       "z"
+      ],
+      "default": "z",
+      "x-stk-stage": "data"
+     },
+     "index": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Index (null = middle)",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "origin": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plane origin (null = centre)",
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "normal": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "title": "Plane normal",
+      "x-stk-widget": "vector3",
+      "default": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "x-stk-stage": "data"
+     },
+     "fields": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "maxItems": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.filter.streamlines@1",
+   "type": "stk.filter.streamlines",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Streamlines",
+    "zh": "流线"
+   },
+   "description": {
+    "en": "Stretch goal. Integrate streamlines of a vector field from seed points on a sphere."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "polydata"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "seed_center": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "seed_radius": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "seed_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000,
+      "default": 100,
+      "x-stk-stage": "data"
+     },
+     "direction": {
+      "enum": [
+       "forward",
+       "backward",
+       "both"
+      ],
+      "default": "forward",
+      "x-stk-stage": "data"
+     },
+     "max_length": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory",
+   "stretch": true
+  },
+  {
+   "id": "stk.filter.threshold@1",
+   "type": "stk.filter.threshold",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "data",
+   "category": "filter",
+   "title": {
+    "en": "Threshold",
+    "zh": "阈值"
+   },
+   "description": {
+    "en": "Add a uint8 label field (1 inside, 0 outside) selecting lower <= value <= upper (null = unbounded; component null on a vector = magnitude), or a set of labels."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "labels"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[^/.]{1,128}$"
+       },
+       {
+        "type": "object",
+        "required": [
+         "name"
+        ],
+        "properties": {
+         "name": {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         "component": {
+          "anyOf": [
+           {
+            "type": "integer",
+            "minimum": 0
+           },
+           {
+            "const": "magnitude"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         }
+        },
+        "additionalProperties": false
+       }
+      ],
+      "title": "Field",
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "x-stk-stage": "data"
+     },
+     "lower": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "upper": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "labels": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "integer"
+        },
+        "minItems": 1,
+        "maxItems": 256
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "invert": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "data"
+     },
+     "output": {
+      "type": "string",
+      "pattern": "^[^/.]{1,128}$",
+      "default": "mask",
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "field"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.output.dataset@1",
+   "type": "stk.output.dataset",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "output",
+   "category": "output",
+   "title": {
+    "en": "Dataset export",
+    "zh": "数据导出"
+   },
+   "description": {
+    "en": "Write a dataset to VTKHDF (STK profile), VTI or NPY, or a table to CSV/JSON."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "file",
+     "type": "file"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "format": {
+      "enum": [
+       "vtkhdf",
+       "vti",
+       "npy",
+       "csv",
+       "json"
+      ],
+      "default": "vtkhdf",
+      "x-stk-stage": "data"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "File stem (null = node id)",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "fields": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "maxItems": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "precision": {
+      "enum": [
+       "float64",
+       "float32"
+      ],
+      "default": "float64",
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.output.image@1",
+   "type": "stk.output.image",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "output",
+   "category": "output",
+   "title": {
+    "en": "Image",
+    "zh": "图片"
+   },
+   "description": {
+    "en": "Render a scene (offscreen VTK in a subprocess) or a plot (matplotlib) to PNG; plots also to SVG/PDF."
+   },
+   "inputs": [
+    {
+     "name": "source",
+     "type": [
+      "scene",
+      "plot"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "image"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "width": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 16,
+        "maximum": 16384
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "height": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 16,
+        "maximum": 16384
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "magnification": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8,
+      "default": 1,
+      "x-stk-stage": "client"
+     },
+     "transparent": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "client"
+     },
+     "format": {
+      "enum": [
+       "png",
+       "svg",
+       "pdf"
+      ],
+      "default": "png",
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.output.payload@1",
+   "type": "stk.output.payload",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "output",
+   "category": "output",
+   "title": {
+    "en": "Render payload",
+    "zh": "渲染数据包"
+   },
+   "description": {
+    "en": "Encode a scene as stk.payload/2 within the profile budget (optionally with a scene v1 downgrade)."
+   },
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "scene",
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "payload",
+     "type": "payload"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "profile": {
+      "enum": [
+       "auto",
+       "phone",
+       "web",
+       "desktop"
+      ],
+      "description": "Payload budget profile; auto = the request profile (Budget.profile)",
+      "default": "auto",
+      "x-stk-stage": "client"
+     },
+     "budget": {
+      "anyOf": [
+       {
+        "type": "null"
+       },
+       {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "triangles": {
+          "type": "integer",
+          "minimum": 0
+         },
+         "instances": {
+          "type": "integer",
+          "minimum": 0
+         },
+         "points": {
+          "type": "integer",
+          "minimum": 0
+         },
+         "voxels": {
+          "type": "integer",
+          "minimum": 0
+         },
+         "bytes": {
+          "type": "integer",
+          "minimum": 0
+         }
+        }
+       }
+      ],
+      "x-stk-widget": "json",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "v1_fallback": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.plot.bar@1",
+   "type": "stk.plot.bar",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "plot",
+   "category": "plot",
+   "title": {
+    "en": "Bar chart",
+    "zh": "柱状图"
+   },
+   "description": {
+    "en": "Bars of value columns per category row (e.g. label fractions)."
+   },
+   "inputs": [
+    {
+     "name": "table",
+     "type": "table",
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plot",
+     "type": "plot"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "x": {
+      "type": "string",
+      "minLength": 1,
+      "title": "Category column",
+      "x-stk-stage": "data"
+     },
+     "y": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1
+      },
+      "minItems": 1,
+      "maxItems": 8,
+      "x-stk-stage": "data"
+     },
+     "color_column": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Column of '#rrggbb' colours",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "orientation": {
+      "enum": [
+       "vertical",
+       "horizontal"
+      ],
+      "default": "vertical",
+      "x-stk-stage": "client"
+     },
+     "log": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "client"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "size_in": {
+      "type": "array",
+      "items": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "maximum": 100
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "title": "Figure size (inches)",
+      "x-stk-widget": "json",
+      "default": [
+       6.0,
+       4.0
+      ],
+      "x-stk-stage": "client"
+     },
+     "dpi": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 1200,
+      "default": 200,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [
+     "x",
+     "y"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.plot.heatmap@1",
+   "type": "stk.plot.heatmap",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "plot",
+   "category": "plot",
+   "title": {
+    "en": "Heatmap",
+    "zh": "热图"
+   },
+   "description": {
+    "en": "2D slice of an image field as a heatmap (label fields use their categorical palette)."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plot",
+     "type": "plot"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           },
+           "component": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 0
+             },
+             {
+              "const": "magnitude"
+             },
+             {
+              "type": "null"
+             }
+            ]
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "axis": {
+      "enum": [
+       "x",
+       "y",
+       "z"
+      ],
+      "default": "z",
+      "x-stk-stage": "data"
+     },
+     "index": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "colormap": {
+      "type": "string",
+      "minLength": 1,
+      "x-stk-widget": "colormap",
+      "default": "viridis",
+      "x-stk-stage": "client"
+     },
+     "range": {
+      "type": "array",
+      "prefixItems": [
+       {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       {
+        "type": [
+         "number",
+         "null"
+        ]
+       }
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "x-stk-widget": "range",
+      "default": [
+       null,
+       null
+      ],
+      "x-stk-stage": "client"
+     },
+     "aspect": {
+      "enum": [
+       "equal",
+       "auto"
+      ],
+      "default": "equal",
+      "x-stk-stage": "client"
+     },
+     "colorbar": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "client"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "size_in": {
+      "type": "array",
+      "items": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "maximum": 100
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "title": "Figure size (inches)",
+      "x-stk-widget": "json",
+      "default": [
+       6.0,
+       4.0
+      ],
+      "x-stk-stage": "client"
+     },
+     "dpi": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 1200,
+      "default": 200,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.plot.histogram@1",
+   "type": "stk.plot.histogram",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "plot",
+   "category": "plot",
+   "title": {
+    "en": "Histogram",
+    "zh": "直方图"
+   },
+   "description": {
+    "en": "Histogram of a field (image/polydata) or a column (table)."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image",
+      "polydata",
+      "table"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plot",
+     "type": "plot"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           },
+           "component": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 0
+             },
+             {
+              "const": "magnitude"
+             },
+             {
+              "type": "null"
+             }
+            ]
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "bins": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000,
+      "default": 64,
+      "x-stk-stage": "data"
+     },
+     "range": {
+      "type": "array",
+      "prefixItems": [
+       {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       {
+        "type": [
+         "number",
+         "null"
+        ]
+       }
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "x-stk-widget": "range",
+      "default": [
+       null,
+       null
+      ],
+      "x-stk-stage": "data"
+     },
+     "density": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "data"
+     },
+     "log": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "client"
+     },
+     "color": {
+      "type": "string",
+      "minLength": 1,
+      "default": "C0",
+      "x-stk-stage": "client"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "size_in": {
+      "type": "array",
+      "items": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "maximum": 100
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "title": "Figure size (inches)",
+      "x-stk-widget": "json",
+      "default": [
+       6.0,
+       4.0
+      ],
+      "x-stk-stage": "client"
+     },
+     "dpi": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 1200,
+      "default": 200,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.plot.line@1",
+   "type": "stk.plot.line",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "plot",
+   "category": "plot",
+   "title": {
+    "en": "Line plot",
+    "zh": "曲线图"
+   },
+   "description": {
+    "en": "Columns against x with an optional second y axis (from 'table2' when linked), row filters and per-column styles (SimViz 1D page)."
+   },
+   "inputs": [
+    {
+     "name": "table",
+     "type": "table",
+     "required": true,
+     "multi": false
+    },
+    {
+     "name": "table2",
+     "type": "table",
+     "required": false,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plot",
+     "type": "plot"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "x": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "x column (null = index column)",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "y": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1
+      },
+      "minItems": 1,
+      "maxItems": 16,
+      "x-stk-stage": "data"
+     },
+     "y2": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1
+      },
+      "maxItems": 16,
+      "default": [],
+      "x-stk-stage": "data"
+     },
+     "filters": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "column",
+        "op",
+        "value"
+       ],
+       "properties": {
+        "column": {
+         "type": "string"
+        },
+        "op": {
+         "enum": [
+          "==",
+          "!=",
+          ">",
+          ">=",
+          "<",
+          "<="
+         ]
+        },
+        "value": {
+         "type": [
+          "number",
+          "string"
+         ]
+        }
+       },
+       "additionalProperties": false
+      },
+      "maxItems": 16,
+      "default": [],
+      "x-stk-stage": "data"
+     },
+     "stride": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "x-stk-stage": "data"
+     },
+     "last_n": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "x_label": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "y_label": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "y2_label": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "x_scale": {
+      "enum": [
+       "linear",
+       "log",
+       "symlog"
+      ],
+      "default": "linear",
+      "x-stk-stage": "client"
+     },
+     "y_scale": {
+      "enum": [
+       "linear",
+       "log",
+       "symlog"
+      ],
+      "default": "linear",
+      "x-stk-stage": "client"
+     },
+     "y2_scale": {
+      "enum": [
+       "linear",
+       "log",
+       "symlog"
+      ],
+      "default": "linear",
+      "x-stk-stage": "client"
+     },
+     "styles": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "object",
+       "properties": {
+        "color": {
+         "type": "string"
+        },
+        "linestyle": {
+         "enum": [
+          "-",
+          "--",
+          "-.",
+          ":",
+          "none"
+         ]
+        },
+        "linewidth": {
+         "type": "number",
+         "minimum": 0
+        },
+        "marker": {
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "markersize": {
+         "type": "number",
+         "minimum": 0
+        },
+        "alpha": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "label": {
+         "type": [
+          "string",
+          "null"
+         ]
+        }
+       },
+       "additionalProperties": false
+      },
+      "x-stk-widget": "json",
+      "default": {},
+      "x-stk-stage": "client"
+     },
+     "legend": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "client"
+     },
+     "grid": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "client"
+     },
+     "stats": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "client"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "size_in": {
+      "type": "array",
+      "items": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "maximum": 100
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "title": "Figure size (inches)",
+      "x-stk-widget": "json",
+      "default": [
+       6.0,
+       4.0
+      ],
+      "x-stk-stage": "client"
+     },
+     "dpi": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 1200,
+      "default": 200,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [
+     "y"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.axes@1",
+   "type": "stk.render.axes",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Axes triad",
+    "zh": "坐标轴"
+   },
+   "description": {
+    "en": "Orientation triad overlay (axes_triad)."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "labels": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "default": [
+       "x",
+       "y",
+       "z"
+      ],
+      "x-stk-stage": "client"
+     },
+     "anchor": {
+      "enum": [
+       "top_left",
+       "top",
+       "top_right",
+       "left",
+       "center",
+       "right",
+       "bottom_left",
+       "bottom",
+       "bottom_right"
+      ],
+      "default": "bottom_left",
+      "x-stk-stage": "client"
+     },
+     "size_px": {
+      "type": "integer",
+      "minimum": 16,
+      "maximum": 512,
+      "default": 80,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.categorical_legend@1",
+   "type": "stk.render.categorical_legend",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Categorical legend",
+    "zh": "分类图例"
+   },
+   "description": {
+    "en": "Legend of category names and colours, from a categorical layer or a labels dataset."
+   },
+   "inputs": [
+    {
+     "name": "source",
+     "type": [
+      "layer",
+      "dataset"
+     ],
+     "accepts": [
+      "labels"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[^/.]{1,128}$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "only_present": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "data"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "anchor": {
+      "enum": [
+       "top_left",
+       "top",
+       "top_right",
+       "left",
+       "center",
+       "right",
+       "bottom_left",
+       "bottom",
+       "bottom_right"
+      ],
+      "default": "right",
+      "x-stk-stage": "client"
+     },
+     "columns": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8,
+      "default": 1,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.glyphs@1",
+   "type": "stk.render.glyphs",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Glyphs",
+    "zh": "箭头"
+   },
+   "description": {
+    "en": "Instanced glyphs (arrow/cone/sphere/line/cube) at the input points, oriented by a vector field; scale and colour are client-side."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "polydata"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "vectors": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Direction field",
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "attributes": {
+      "anyOf": [
+       {
+        "const": "all"
+       },
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "pattern": "^[^/.]{1,128}$"
+        },
+        "maxItems": 64
+       }
+      ],
+      "x-stk-widget": "json",
+      "default": "all",
+      "x-stk-stage": "data"
+     },
+     "shape": {
+      "enum": [
+       "arrow",
+       "cone",
+       "sphere",
+       "line",
+       "cube"
+      ],
+      "default": "arrow",
+      "x-stk-stage": "client"
+     },
+     "resolution": {
+      "type": "integer",
+      "minimum": 3,
+      "maximum": 64,
+      "default": 8,
+      "x-stk-stage": "client"
+     },
+     "center": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "client"
+     },
+     "scale": {
+      "type": "object",
+      "required": [
+       "by",
+       "factor"
+      ],
+      "properties": {
+       "by": {
+        "enum": [
+         "uniform",
+         "magnitude",
+         "field"
+        ]
+       },
+       "field": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "factor": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0
+         },
+         {
+          "const": "auto"
+         }
+        ]
+       }
+      },
+      "additionalProperties": false,
+      "x-stk-widget": "json",
+      "default": {
+       "by": "magnitude",
+       "factor": "auto"
+      },
+      "x-stk-stage": "client"
+     },
+     "color": {
+      "type": "object",
+      "required": [
+       "by"
+      ],
+      "properties": {
+       "by": {
+        "enum": [
+         "solid",
+         "field",
+         "orientation"
+        ]
+       },
+       "solid": {
+        "type": "array",
+        "items": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "minItems": 3,
+        "maxItems": 4
+       },
+       "field": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "component": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 0
+         },
+         {
+          "const": "magnitude"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "colormap": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "palette": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "range": {
+        "type": "array",
+        "prefixItems": [
+         {
+          "type": [
+           "number",
+           "null"
+          ]
+         },
+         {
+          "type": [
+           "number",
+           "null"
+          ]
+         }
+        ],
+        "minItems": 2,
+        "maxItems": 2
+       },
+       "range_mode": {
+        "enum": [
+         "data",
+         "symmetric",
+         "fixed",
+         "global"
+        ]
+       },
+       "lightness_range": {
+        "type": "array",
+        "items": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "minItems": 2,
+        "maxItems": 2
+       }
+      },
+      "additionalProperties": false,
+      "x-stk-widget": "json",
+      "default": {
+       "by": "orientation"
+      },
+      "x-stk-stage": "client"
+     },
+     "opacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 1.0,
+      "x-stk-stage": "client"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.orientation_legend@1",
+   "type": "stk.render.orientation_legend",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Orientation legend",
+    "zh": "取向色球"
+   },
+   "description": {
+    "en": "The stk:orientation-hsl colour sphere overlay (SimViz orientation legend)."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "anchor": {
+      "enum": [
+       "top_left",
+       "top",
+       "top_right",
+       "left",
+       "center",
+       "right",
+       "bottom_left",
+       "bottom",
+       "bottom_right"
+      ],
+      "default": "bottom_right",
+      "x-stk-stage": "client"
+     },
+     "size_px": {
+      "type": "integer",
+      "minimum": 32,
+      "maximum": 512,
+      "default": 120,
+      "x-stk-stage": "client"
+     },
+     "lightness_range": {
+      "type": "array",
+      "items": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "x-stk-widget": "json",
+      "default": [
+       0.0,
+       1.0
+      ],
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.outline@1",
+   "type": "stk.render.outline",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Outline",
+    "zh": "外框"
+   },
+   "description": {
+    "en": "Bounding-box edges of the input as a lines layer."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image",
+      "polydata"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "color": {
+      "type": "array",
+      "items": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "x-stk-widget": "color",
+      "default": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x-stk-stage": "client"
+     },
+     "width_px": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 32,
+      "default": 1.0,
+      "x-stk-stage": "client"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.scalar_bar@1",
+   "type": "stk.render.scalar_bar",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Scalar bar",
+    "zh": "色标"
+   },
+   "description": {
+    "en": "Scalar bar overlay explaining the continuous colouring of the linked layer."
+   },
+   "inputs": [
+    {
+     "name": "source",
+     "type": "layer",
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title (null = field and unit)",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "anchor": {
+      "enum": [
+       "top_left",
+       "top",
+       "top_right",
+       "left",
+       "center",
+       "right",
+       "bottom_left",
+       "bottom",
+       "bottom_right"
+      ],
+      "default": "right",
+      "x-stk-stage": "client"
+     },
+     "orientation": {
+      "enum": [
+       "vertical",
+       "horizontal"
+      ],
+      "default": "vertical",
+      "x-stk-stage": "client"
+     },
+     "label_count": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 20,
+      "default": 5,
+      "x-stk-stage": "client"
+     },
+     "format": {
+      "type": "string",
+      "pattern": "^[+\\- ]?#?0?(?:[1-9][0-9]?)?,?(?:(?:\\.[0-9]{1,2})?[eEfFgG%]?|d)$",
+      "minLength": 1,
+      "maxLength": 16,
+      "default": ".3g",
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.surface@1",
+   "type": "stk.render.surface",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Surface",
+    "zh": "表面"
+   },
+   "description": {
+    "en": "Polydata -> triangles (or lines/points) layer; a planar image (one axis of size 1) -> slice_image layer. Attributes travel raw; colouring is client-side."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "polydata",
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "attributes": {
+      "anyOf": [
+       {
+        "const": "all"
+       },
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "pattern": "^[^/.]{1,128}$"
+        },
+        "maxItems": 64
+       }
+      ],
+      "title": "Attributes to send",
+      "x-stk-widget": "json",
+      "default": "all",
+      "x-stk-stage": "data"
+     },
+     "color": {
+      "type": "object",
+      "required": [
+       "by"
+      ],
+      "properties": {
+       "by": {
+        "enum": [
+         "solid",
+         "field",
+         "orientation"
+        ]
+       },
+       "solid": {
+        "type": "array",
+        "items": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "minItems": 3,
+        "maxItems": 4
+       },
+       "field": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "component": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 0
+         },
+         {
+          "const": "magnitude"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "colormap": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "palette": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "range": {
+        "type": "array",
+        "prefixItems": [
+         {
+          "type": [
+           "number",
+           "null"
+          ]
+         },
+         {
+          "type": [
+           "number",
+           "null"
+          ]
+         }
+        ],
+        "minItems": 2,
+        "maxItems": 2
+       },
+       "range_mode": {
+        "enum": [
+         "data",
+         "symmetric",
+         "fixed",
+         "global"
+        ]
+       },
+       "lightness_range": {
+        "type": "array",
+        "items": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "minItems": 2,
+        "maxItems": 2
+       }
+      },
+      "additionalProperties": false,
+      "x-stk-widget": "json",
+      "default": {
+       "by": "solid",
+       "solid": [
+        0.8,
+        0.8,
+        0.8
+       ]
+      },
+      "x-stk-stage": "client"
+     },
+     "opacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 1.0,
+      "x-stk-stage": "client"
+     },
+     "shading": {
+      "enum": [
+       "smooth",
+       "flat"
+      ],
+      "default": "smooth",
+      "x-stk-stage": "client"
+     },
+     "edges": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "client"
+     },
+     "lighting": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "client"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.volume@1",
+   "type": "stk.render.volume",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Volume",
+    "zh": "体渲染"
+   },
+   "description": {
+    "en": "Dense volume texture with colour and opacity transfer functions (client-side)."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "image"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "field": {
+      "anyOf": [
+       {
+        "anyOf": [
+         {
+          "type": "string",
+          "pattern": "^[^/.]{1,128}$"
+         },
+         {
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "pattern": "^[^/.]{1,128}$"
+           },
+           "component": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 0
+             },
+             {
+              "const": "magnitude"
+             },
+             {
+              "type": "null"
+             }
+            ]
+           }
+          },
+          "additionalProperties": false
+         }
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "field",
+      "x-stk-field-of": "in",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "encoding": {
+      "enum": [
+       "auto",
+       "u8",
+       "u16",
+       "f32"
+      ],
+      "default": "auto",
+      "x-stk-stage": "data"
+     },
+     "colormap": {
+      "type": "string",
+      "minLength": 1,
+      "x-stk-widget": "colormap",
+      "default": "viridis",
+      "x-stk-stage": "client"
+     },
+     "range": {
+      "type": "array",
+      "prefixItems": [
+       {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       {
+        "type": [
+         "number",
+         "null"
+        ]
+       }
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "x-stk-widget": "range",
+      "default": [
+       null,
+       null
+      ],
+      "x-stk-stage": "client"
+     },
+     "opacity": {
+      "anyOf": [
+       {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 64,
+        "items": {
+         "type": "array",
+         "prefixItems": [
+          {
+           "type": "number",
+           "minimum": 0,
+           "maximum": 1
+          },
+          {
+           "type": "number",
+           "minimum": 0,
+           "maximum": 1
+          }
+         ],
+         "minItems": 2,
+         "maxItems": 2
+        }
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Opacity points [x, alpha], x normalized over range",
+      "description": "null = automatic: a ramp [[0, 0], [1, 0.8]] for scalars; 0.8 for every label of a categorical field (0 for -1)",
+      "x-stk-widget": "transfer_function",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "sampling": {
+      "enum": [
+       "linear",
+       "nearest"
+      ],
+      "default": "linear",
+      "x-stk-stage": "client"
+     },
+     "shade": {
+      "type": "boolean",
+      "default": false,
+      "x-stk-stage": "client"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.source.file@1",
+   "type": "stk.source.file",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "Field file",
+    "zh": "场文件"
+   },
+   "description": {
+    "en": "Read a field file inside a binding: MuPRO DAT, NPY, VTI, legacy VTK STRUCTURED_POINTS or VTKHDF (image or polydata)."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": [
+      "image",
+      "polydata"
+     ]
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "binding": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "x-stk-widget": "binding",
+      "x-stk-stage": "data"
+     },
+     "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$",
+      "title": "Relative path",
+      "x-stk-widget": "path",
+      "x-stk-stage": "data"
+     },
+     "format": {
+      "enum": [
+       "auto",
+       "dat",
+       "npy",
+       "vti",
+       "vtk",
+       "vtkhdf"
+      ],
+      "default": "auto",
+      "x-stk-stage": "data"
+     },
+     "fields": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "maxItems": 64
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Arrays to load (default all)",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "association": {
+      "enum": [
+       "auto",
+       "point",
+       "cell"
+      ],
+      "default": "auto",
+      "x-stk-stage": "data"
+     },
+     "spacing": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "origin": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "length_unit": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "unit": {
+      "anyOf": [
+       {
+        "type": "string",
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "quantity": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^([a-z0-9_]+:)?[a-z0-9_]+$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "step": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Time step metadata",
+      "default": null,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "binding",
+     "path"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "disk"
+  },
+  {
+   "id": "stk.source.muferro_frame@1",
+   "type": "stk.source.muferro_frame",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "muFerro frame",
+    "zh": "muFerro 帧"
+   },
+   "description": {
+    "en": "Read one published field frame '<dataset>.<step:08d>.dat' of a muFerro run as an image dataset (VTK order (z,y,x,c)). Reports the available steps as choices."
+   },
+   "inputs": [
+    {
+     "name": "frames",
+     "type": "table",
+     "accepts": [
+      "frames"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "dataset",
+     "kind": "image"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "dataset": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]{0,7}$",
+      "title": "Field stem",
+      "default": "Polar",
+      "x-stk-stage": "data"
+     },
+     "step": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0
+       },
+       {
+        "enum": [
+         "latest",
+         "first"
+        ]
+       }
+      ],
+      "title": "Step",
+      "x-stk-widget": "step",
+      "x-stk-choices-from": "evaluator",
+      "default": "latest",
+      "x-stk-stage": "data"
+     },
+     "policy": {
+      "enum": [
+       "latest_at_or_before",
+       "exact"
+      ],
+      "title": "Step policy",
+      "default": "latest_at_or_before",
+      "x-stk-stage": "data"
+     },
+     "spacing": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Spacing override",
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "origin": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Origin override",
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "length_unit": {
+      "type": "string",
+      "minLength": 1,
+      "title": "Length unit",
+      "default": "grid_index",
+      "x-stk-stage": "data"
+     },
+     "unit": {
+      "type": "string",
+      "minLength": 1,
+      "title": "Field unit",
+      "default": "unspecified",
+      "x-stk-stage": "data"
+     },
+     "quantity": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^([a-z0-9_]+:)?[a-z0-9_]+$"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Quantity override",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "precision": {
+      "enum": [
+       "float64",
+       "float32"
+      ],
+      "default": "float64",
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": true,
+   "deterministic": true,
+   "cache": "disk"
+  },
+  {
+   "id": "stk.source.muferro_run@1",
+   "type": "stk.source.muferro_run",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "muFerro run",
+    "zh": "muFerro 计算"
+   },
+   "description": {
+    "en": "Index of a muFerro run directory: published field frames, the energy trace, the progress log and the derived stk.result/1 manifest."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "frames",
+     "type": "table",
+     "kind": "frames"
+    },
+    {
+     "name": "energy",
+     "type": "table"
+    },
+    {
+     "name": "progress",
+     "type": "table"
+    },
+    {
+     "name": "result",
+     "type": "value",
+     "value_type": "json"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "binding": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "title": "Run binding",
+      "description": "Binding name resolved by the caller to {task_id} or a local directory.",
+      "x-stk-widget": "binding",
+      "x-stk-stage": "data"
+     },
+     "case_dir": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$",
+      "title": "Case directory",
+      "description": "Directory inside the binding holding input.toml and the outputs; \"auto\" = the case_dir recorded by the STK launcher in stk-mupro.json (runs submitted with --input DIR), else the binding root.",
+      "x-stk-widget": "path",
+      "default": "auto",
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "binding"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": true,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.source.table@1",
+   "type": "stk.source.table",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "Table file",
+    "zh": "表格文件"
+   },
+   "description": {
+    "en": "Read a table file inside a binding: muFerro energy_out.dat, whitespace columns (optional header), CSV or a progress JSONL log."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "table"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "binding": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "x-stk-widget": "binding",
+      "x-stk-stage": "data"
+     },
+     "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$",
+      "x-stk-widget": "path",
+      "x-stk-stage": "data"
+     },
+     "format": {
+      "enum": [
+       "auto",
+       "muferro_energy",
+       "columns",
+       "csv",
+       "progress_jsonl"
+      ],
+      "default": "auto",
+      "x-stk-stage": "data"
+     },
+     "columns": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "minLength": 1
+        },
+        "maxItems": 256
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Columns to keep (default all)",
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "units": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "string",
+       "minLength": 1
+      },
+      "title": "Column units",
+      "x-stk-widget": "json",
+      "default": {},
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "binding",
+     "path"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.view.camera@1",
+   "type": "stk.view.camera",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "view",
+   "category": "view",
+   "title": {
+    "en": "Camera",
+    "zh": "相机"
+   },
+   "description": {
+    "en": "A preset (fit to the scene bounds) or a numeric camera in physical coordinates."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "camera",
+     "type": "camera"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "preset": {
+      "enum": [
+       "iso",
+       "+x",
+       "-x",
+       "+y",
+       "-y",
+       "+z",
+       "-z",
+       null
+      ],
+      "default": "iso",
+      "x-stk-stage": "client"
+     },
+     "position": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "focal_point": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "view_up": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "x-stk-widget": "vector3",
+      "default": null,
+      "x-stk-stage": "client"
+     },
+     "projection": {
+      "enum": [
+       "perspective",
+       "parallel"
+      ],
+      "default": "perspective",
+      "x-stk-stage": "client"
+     },
+     "view_angle_deg": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 180,
+      "default": 30.0,
+      "x-stk-stage": "client"
+     },
+     "zoom": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "default": 1.0,
+      "x-stk-stage": "client"
+     },
+     "parallel_scale": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.view.scene@1",
+   "type": "stk.view.scene",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "view",
+   "category": "view",
+   "title": {
+    "en": "Scene",
+    "zh": "场景"
+   },
+   "description": {
+    "en": "Ordered layers plus the view (camera, viewport, background, lighting)."
+   },
+   "inputs": [
+    {
+     "name": "layers",
+     "type": "layer",
+     "required": true,
+     "multi": true
+    },
+    {
+     "name": "camera",
+     "type": "camera",
+     "required": false,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "scene",
+     "type": "scene"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "background": {
+      "type": "array",
+      "items": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "x-stk-widget": "color",
+      "default": [
+       1.0,
+       1.0,
+       1.0
+      ],
+      "x-stk-stage": "client"
+     },
+     "lighting": {
+      "enum": [
+       "three_point",
+       "headlight",
+       "none"
+      ],
+      "default": "three_point",
+      "x-stk-stage": "client"
+     },
+     "width": {
+      "type": "integer",
+      "minimum": 16,
+      "maximum": 16384,
+      "default": 1600,
+      "x-stk-stage": "client"
+     },
+     "height": {
+      "type": "integer",
+      "minimum": 16,
+      "maximum": 16384,
+      "default": 1200,
+      "x-stk-stage": "client"
+     },
+     "render_origin": {
+      "anyOf": [
+       {
+        "const": "auto"
+       },
+       {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3
+       }
+      ],
+      "x-stk-widget": "json",
+      "default": "auto",
+      "x-stk-stage": "client"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  }
+ ]
+}

@@ -1,0 +1,36 @@
+{
+ "schema": "stk.graph/1",
+ "id": "muferro-polarization-glyphs",
+ "name": "muFerro polarization arrows",
+ "description": "Arrows along the Polar vectors on a sampled subset of grid points, coloured by direction (HSL orientation map) with the orientation-sphere legend. Arrow length follows |P|; the magnitude unit is whatever the run reports (usually 'unspecified').",
+ "catalog": {"stk": 1},
+ "parameters": [
+  {"name": "step", "type": "step", "default": "latest", "label": "Step"},
+  {"name": "stride", "type": "int3", "default": [2, 2, 2], "label": "Sampling stride (x, y, z)"},
+  {"name": "max_points", "type": "integer", "default": 5000, "minimum": 1, "label": "Maximum arrows"},
+  {"name": "view", "type": "enum", "choices": ["iso", "+x", "-x", "+y", "-y", "+z", "-z"], "default": "iso"}
+ ],
+ "nodes": [
+  {"id": "run", "type": "stk.source.muferro_run@1", "params": {"binding": "run"}},
+  {"id": "polar", "type": "stk.source.muferro_frame@1", "inputs": {"frames": {"from": "run.frames"}},
+   "params": {"dataset": "Polar", "step": {"$param": "step"}}},
+  {"id": "seeds", "type": "stk.filter.glyph_source@1", "inputs": {"in": {"from": "polar.out"}},
+   "params": {"field": "Polar", "sampling": "stride", "stride": {"$param": "stride"},
+              "max_points": {"$param": "max_points"}}},
+  {"id": "arrows", "type": "stk.render.glyphs@1", "inputs": {"in": {"from": "seeds.out"}},
+   "params": {"vectors": "Polar", "shape": "arrow", "scale": {"by": "magnitude", "factor": "auto"},
+              "color": {"by": "orientation"}, "name": "Polarization"}},
+  {"id": "sphere", "type": "stk.render.orientation_legend@1", "params": {"title": "P direction"}},
+  {"id": "box", "type": "stk.render.outline@1", "inputs": {"in": {"from": "polar.out"}}},
+  {"id": "axes", "type": "stk.render.axes@1"},
+  {"id": "camera", "type": "stk.view.camera@1", "params": {"preset": {"$param": "view"}}},
+  {"id": "scene", "type": "stk.view.scene@1",
+   "inputs": {"layers": [{"from": "arrows.layer"}, {"from": "box.layer"}, {"from": "sphere.layer"},
+                         {"from": "axes.layer"}],
+              "camera": {"from": "camera.camera"}}},
+  {"id": "payload", "type": "stk.output.payload@1", "inputs": {"scene": {"from": "scene.scene"}}},
+  {"id": "png", "type": "stk.output.image@1", "inputs": {"source": {"from": "scene.scene"}},
+   "params": {"width": 1600, "height": 1200}}
+ ],
+ "outputs": {"payload": "payload.payload", "image": "png.image"}
+}

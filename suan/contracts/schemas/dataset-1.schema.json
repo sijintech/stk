@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:stk:schema:dataset-1",
+  "title": "STK dataset descriptor v1 (stk.dataset/1)",
+  "description": "Describes one dataset (kind, geometry, fields, time frames, provenance) without field values. Used inside stk.result/1, in the VTKHDF '/STK' group and for in-memory datasets. See docs/specs/stk-data-format-v1.md.",
+  "type": "object",
+  "required": ["id", "kind"],
+  "properties": {
+    "schema": {"const": "stk.dataset/1"},
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$"},
+    "label": {"type": "string"},
+    "kind": {"enum": ["image", "rectilinear", "structured", "unstructured", "polydata", "particles", "table", "collection"]},
+    "geometry": {"type": "object"},
+    "fields": {"type": "array", "items": {"$ref": "urn:stk:schema:field-1"}},
+    "columns": {"type": "array", "items": {"$ref": "urn:stk:schema:field-1"}},
+    "time": {
+      "type": "object",
+      "properties": {
+        "index": {"enum": ["step", "time", null]},
+        "step": {"type": ["integer", "null"], "minimum": 0},
+        "value": {"type": ["number", "null"]},
+        "physical": {
+          "type": "object",
+          "properties": {"unit": {"type": "string"}, "known": {"type": "boolean"}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "frames": {"type": "array", "items": {"$ref": "#/$defs/frame"}},
+    "provenance": {"$ref": "#/$defs/provenance"},
+    "attrs": {"type": "object"},
+    "extensions": {"type": "object"}
+  },
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "image"}}, "required": ["kind"]},
+     "then": {"required": ["geometry"], "properties": {"geometry": {"$ref": "#/$defs/image_geometry"}}}},
+    {"if": {"properties": {"kind": {"const": "polydata"}}, "required": ["kind"]},
+     "then": {"properties": {"geometry": {"$ref": "#/$defs/polydata_geometry"}}}},
+    {"if": {"properties": {"kind": {"const": "table"}}, "required": ["kind"]},
+     "then": {"properties": {"geometry": {"$ref": "#/$defs/table_geometry"}, "fields": {"maxItems": 0}}}},
+    {"if": {"properties": {"kind": {"const": "rectilinear"}}, "required": ["kind"]},
+     "then": {"properties": {"geometry": {"$ref": "#/$defs/rectilinear_geometry"}}}},
+    {"if": {"properties": {"kind": {"const": "structured"}}, "required": ["kind"]},
+     "then": {"properties": {"geometry": {"$ref": "#/$defs/structured_geometry"}}}},
+    {"if": {"properties": {"kind": {"const": "unstructured"}}, "required": ["kind"]},
+     "then": {"properties": {"geometry": {"$ref": "#/$defs/unstructured_geometry"}}}},
+    {"if": {"properties": {"kind": {"const": "particles"}}, "required": ["kind"]},
+     "then": {"properties": {"geometry": {"$ref": "#/$defs/particles_geometry"}}}},
+    {"if": {"properties": {"kind": {"const": "collection"}}, "required": ["kind"]},
+     "then": {"properties": {"geometry": {"$ref": "#/$defs/collection_geometry"}}}}
+  ],
+  "$defs": {
+    "vec3": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+    "sha256_hex": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$"
+    },
+    "spatial": {
+      "type": "object",
+      "properties": {
+        "frame": {"type": "string", "default": "grid"},
+        "length_unit": {"type": "string", "default": "unspecified"}
+      }
+    },
+    "image_geometry": {
+      "allOf": [{"$ref": "#/$defs/spatial"}],
+      "type": "object",
+      "required": ["dimensions", "origin", "spacing"],
+      "properties": {
+        "frame": true,
+        "length_unit": true,
+        "dimensions": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 3, "maxItems": 3, "description": "Point counts [nx, ny, nz]."},
+        "origin": {"$ref": "#/$defs/vec3"},
+        "spacing": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 3, "maxItems": 3},
+        "direction": {"type": "array", "items": {"type": "number"}, "minItems": 9, "maxItems": 9, "description": "Row-major 3x3; columns are the unit axis directions (VTK convention). Default identity."}
+      },
+      "additionalProperties": false
+    },
+    "polydata_geometry": {
+      "allOf": [{"$ref": "#/$defs/spatial"}],
+      "type": "object",
+      "properties": {
+        "frame": true,
+        "length_unit": true,
+        "points": {"type": "integer", "minimum": 0},
+        "verts": {"type": "integer", "minimum": 0},
+        "lines": {"type": "integer", "minimum": 0},
+        "polys": {"type": "integer", "minimum": 0},
+        "bounds": {"type": "array", "prefixItems": [{"$ref": "#/$defs/vec3"}, {"$ref": "#/$defs/vec3"}], "minItems": 2, "maxItems": 2}
+      },
+      "additionalProperties": false
+    },
+    "table_geometry": {
+      "type": "object",
+      "properties": {"rows": {"type": ["integer", "null"], "minimum": 0}},
+      "additionalProperties": false
+    },
+    "rectilinear_geometry": {
+      "allOf": [{"$ref": "#/$defs/spatial"}],
+      "type": "object",
+      "required": ["dimensions"],
+      "properties": {
+        "dimensions": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 3, "maxItems": 3}
+      }
+    },
+    "structured_geometry": {
+      "allOf": [{"$ref": "#/$defs/spatial"}],
+      "type": "object",
+      "required": ["dimensions"],
+      "properties": {
+        "dimensions": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 3, "maxItems": 3}
+      }
+    },
+    "unstructured_geometry": {
+      "allOf": [{"$ref": "#/$defs/spatial"}],
+      "type": "object",
+      "properties": {
+        "points": {"type": "integer", "minimum": 0},
+        "cells": {"type": "integer", "minimum": 0},
+        "cell_types": {"type": "array", "items": {"type": "integer", "minimum": 0}}
+      }
+    },
+    "particles_geometry": {
+      "allOf": [{"$ref": "#/$defs/spatial"}],
+      "type": "object",
+      "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "cell": {
+          "type": "object",
+          "properties": {
+            "vectors": {"type": "array", "items": {"$ref": "#/$defs/vec3"}, "minItems": 3, "maxItems": 3},
+            "origin": {"$ref": "#/$defs/vec3"},
+            "pbc": {"type": "array", "items": {"type": "boolean"}, "minItems": 3, "maxItems": 3}
+          }
+        },
+        "bonds": {
+          "type": "object",
+          "properties": {"present": {"type": "boolean"}, "source": {"enum": ["file", "computed"]}}
+        },
+        "profile": {"enum": ["crystal", null]},
+        "fractional": {"const": false}
+      }
+    },
+    "collection_geometry": {
+      "type": "object",
+      "properties": {
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "dataset"],
+            "properties": {"name": {"type": "string"}, "dataset": {"$ref": "#"}}
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "reader": {"type": "string", "pattern": "^[a-z0-9_.-]+@[0-9]+$"},
+        "selector": {"type": ["string", "object", "null"]},
+        "size": {"type": ["integer", "null"], "minimum": 0},
+        "sha256": {"oneOf": [{"$ref": "#/$defs/sha256_hex"}, {"type": "null"}]},
+        "media_type": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "frame": {
+      "type": "object",
+      "required": ["sources"],
+      "properties": {
+        "step": {"type": ["integer", "null"], "minimum": 0},
+        "time": {"type": ["number", "null"]},
+        "index": {"type": "integer", "minimum": 0},
+        "sources": {"type": "object", "additionalProperties": {"$ref": "#/$defs/source"}}
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "activity": {
+          "type": "object",
+          "properties": {"kind": {"enum": ["run", "graph", "import", "convert"]}, "id": {"type": ["string", "null"]}},
+          "additionalProperties": false
+        },
+        "agent": {
+          "type": "object",
+          "properties": {
+            "connector": {"type": ["string", "null"]},
+            "reader": {"type": ["string", "null"]},
+            "node": {"type": ["string", "null"]},
+            "stk": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "used": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {"path": {"type": "string"}, "sha256": {"oneOf": [{"$ref": "#/$defs/sha256_hex"}, {"type": "null"}]}, "role": {"type": "string"}},
+            "additionalProperties": false
+          }
+        },
+        "derived_from": {"type": "array", "items": {"type": "string"}},
+        "generated_at": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

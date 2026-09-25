@@ -110,6 +110,42 @@ Python 3.12.14。STK 为 `feature/independent-runtime-mupro` 分支上基于 217
 
 本次没有覆盖多 rank MPI、真实集群（含并行云）以及 GPU／Blender C++ 界面构建。
 
+## 2026-09-25 里程碑 1：节点图可视化
+
+内容：数据格式、图、渲染载荷与监控事件规范（`docs/specs/`），无界面图求值器与缓存，muFerro／SimViz
+节点集与预设，离屏渲染与二维图，控制服务 blob 存储与图操作，网页“图谱”模式，MCP 工具与技能，见
+[可视化工作流](visualization.md) 与 [控制服务指南](hub.md)。
+
+自动测试：Linux，Python 3.12.14 与 3.10.21，`python -m pytest -p no:cacheprovider -m "not desktop"`，
+离屏渲染子进程指向 Kitware `vtk-osmesa` 环境（`STK_RENDER_PYTHON`）：**889 passed，12 skipped**；
+不设渲染子进程时渲染测试跳过。网页 `npm ci && npm run build` 通过，另有无头 Chromium 渲染与交互检查。
+128³ 假 muFerro 帧上 `muferro-domains` 冷启动约 3.7 秒，仅改相机约 0.3 秒（不含 PNG）。
+
+真实验收：2026-09-25 03:45–03:49（UTC+8，全程 204 秒），r730xd 测试主机，分支 `feature/m1-graph-viz`
+提交 445e885 以非可编辑方式安装到临时 venv；Runtime、控制服务（含构建后的网页）与节点代理都只监听
+127.0.0.1，单 rank。
+
+- 经控制服务模板提交真实 Release muFerro（SDK 示例，16³，101 步），自动执行；校验 `stk-mupro-1`
+  通过，总能量 −727.9144455（step 101），与 2026-09-24 的直接运行一致。
+- 监控事件：经控制服务 `task.events` 读取 142 条（`metric.declare` 5、`metrics` 101、`progress` 2、
+  `frame` 30 等），全部在 Runtime 标记任务结束之前到达。本例求解只有约 2.5 秒，帧事件在求解器退出时发布。
+- `graph.evaluate`（`muferro-domains`，profile `web`）自动执行，所有 blob 经 sha256 校验，载荷通过
+  `suan.render.payload.decode`；标签与对原始 DAT 的独立分类逐点一致，分数和为 1，能量图数据与
+  `energy_out.dat` 101 行相同，离屏 PNG 1600×1200。耗时与缓存：首次 3.42 秒（13 个节点全部计算）；
+  仅改视角 1.06 秒（只重算 camera、scene、png）；换步 1.48 秒；相同请求 0.34 秒（全部命中）；
+  改阈值 1.38 秒（帧读取命中）。本例为单一 T[100] 畴；提高阈值后为 −1：2885、1：1211。
+- 网页（无头 Chromium，127.0.0.1）：“图谱”模式运行 `muferro-domains` 约 1.0 秒显示，含图层、图例、
+  分数表与能量图；手机宽度 390 px 无横向溢出；`muferro-polarization-glyphs` 显示箭头与取向图例。
+  在畴表面上点击探针，返回值与原始 `Polar.00000100.dat` 的三线性插值完全一致（差 0.0）。
+- MCP `graph_render` 返回的 PNG 与控制服务首次求值的 PNG 字节一致。
+- 清理：各服务与进程退出，端口关闭；仓库与 muprosdk 工作树、许可文件元数据前后一致。脚本的
+  `/dev/shm` 检查报出新条目，经核对属于本机同时运行的 GitHub Actions（muprosdk CI）进程，不属于本次运行。
+- 第一次验收（2026-09-25 02:50，提交 626bcd1）发现两个问题并已修复后重验：畴表面平滑后超出网格
+  约 0.66 格，点击表面时探针被拒且遮住外框（现已把表面顶点限制在网格内）；控制服务按字母顺序重排
+  表格列（现有序列名 `column_names`，且保存结果时保持键顺序）。
+
+未覆盖：Blender 端显示与节点编辑器、真实集群、多 rank、GPU、Windows 客户端实机、控制服务 blob 保留与回收。
+
 ## 覆盖范围
 
 | 验收项 | 证据 |

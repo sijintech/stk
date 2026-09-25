@@ -18,9 +18,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # Mesa EGL/OSMesa for offscreen VTK rendering (tests marked `render`, e.g. golden images on llvmpipe).
+      - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6
       # Every non-desktop test runs here, including control, workbench and MuPRO end-to-end tests.
       - run: python -m pip install ".[server,science,control,visualization,test]" build
-      - run: python -m pytest -m "not desktop" -rs
+      - run: python -m pytest -m "not desktop and not perf" -rs
+      # Informational: lists missing optional pieces; fails only on a broken node catalog.
+      - run: suan graph doctor
       - run: python -m build
       - uses: actions/upload-artifact@v4
         with:
@@ -48,6 +52,8 @@ jobs:
           suan --help > help.txt
           grep -q jobs help.txt
           grep -q mupro help.txt
+          grep -q graph help.txt
+          suan graph catalog --json > catalog.json
           suan mupro submit --help
           suan jobs submit --help
           suan workspaces upload --help
@@ -73,6 +79,18 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0
       - run: python -m pip install ".[desktop,test,mcp]"
       - run: python -m pytest tests/test_desktop.py tests/test_mcp.py
+  # The web viewer (vtk.js) must type-check and build.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm ci && npm run build
   control-and-blender-protocol:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -1,0 +1,230 @@
+{
+  "schema": "stk.quantities/1",
+  "version": 1,
+  "description": "Controlled vocabulary for field 'quantity' tags. Each entry gives the physical dimension (SI base exponents: L length, M mass, T time, I current, Theta temperature, N amount), the SI unit as a UCUM code, the default tensor type and display hints (default representation, colormap, range mode) and the default graph preset. The hints let STK show any dataset sensibly; they never change data and never imply a unit: a field's own 'unit' always wins, and 'unspecified' blocks conversion. Namespaced extensions ('<ns>:<name>', e.g. 'mupro:landau_force') are allowed and fall back to 'defaults'.",
+  "unit_tokens": {
+    "unspecified": "Unit unknown. Displayed as such; blocks unit conversion. Never the same as '1'.",
+    "1": "Dimensionless (UCUM unity).",
+    "normalized": "Solver-native normalized value; an optional field 'normalization' block explains the reference.",
+    "grid_index": "Lengths only: coordinates are grid indices (origin + index * spacing with no physical scale)."
+  },
+  "representations": ["glyphs", "slice", "iso", "volume", "label_surfaces", "line_plot"],
+  "colormaps": ["viridis", "cividis", "coolwarm", "turbo", "gray", "stk:orientation-hsl"],
+  "palettes": ["stk:categorical", "stk:cubic-26-orientation", "stk-legacy:ferro27"],
+  "range_modes": {
+    "data": "Colour range = data min..max.",
+    "symmetric": "Colour range = [-a, a] with a = max |value| (diverging colormaps).",
+    "nonnegative": "Colour range = [0, max].",
+    "unit": "Colour range = [0, 1]."
+  },
+  "defaults": {
+    "label": {"en": "Value", "zh": "数值"},
+    "dimension": null,
+    "si_unit": null,
+    "tensor": null,
+    "components": null,
+    "representation": {"scalar": "slice", "vector": "glyphs", "symmetric_tensor": "slice", "tensor": "slice", "array": "slice", "label": "label_surfaces", "quaternion": "slice"},
+    "colormap": "viridis",
+    "range": "data",
+    "categorical": false,
+    "default_graph": {"scalar": "slice", "vector": "vectors", "symmetric_tensor": "slice", "tensor": "slice", "array": "slice", "label": "slice", "quaternion": "slice"}
+  },
+  "quantities": {
+    "polarization": {
+      "label": {"en": "Polarization", "zh": "极化"},
+      "dimension": {"I": 1, "T": 1, "L": -2}, "si_unit": "C/m2",
+      "tensor": "vector", "components": 3, "component_names": ["x", "y", "z"],
+      "representation": "glyphs", "colormap": "stk:orientation-hsl", "range": "symmetric", "categorical": false,
+      "default_graph": "vectors"
+    },
+    "magnetization": {
+      "label": {"en": "Magnetization", "zh": "磁化强度"},
+      "dimension": {"I": 1, "L": -1}, "si_unit": "A/m",
+      "tensor": "vector", "components": 3, "component_names": ["x", "y", "z"],
+      "representation": "glyphs", "colormap": "stk:orientation-hsl", "range": "symmetric", "categorical": false,
+      "default_graph": "vectors"
+    },
+    "electric_field": {
+      "label": {"en": "Electric field", "zh": "电场"},
+      "dimension": {"M": 1, "L": 1, "T": -3, "I": -1}, "si_unit": "V/m",
+      "tensor": "vector", "components": 3, "component_names": ["x", "y", "z"],
+      "representation": "glyphs", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "vectors"
+    },
+    "electric_potential": {
+      "label": {"en": "Electric potential", "zh": "电势"},
+      "dimension": {"M": 1, "L": 2, "T": -3, "I": -1}, "si_unit": "V",
+      "tensor": "scalar", "components": 1,
+      "representation": "slice", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "slice"
+    },
+    "electric_displacement": {
+      "label": {"en": "Electric displacement", "zh": "电位移"},
+      "dimension": {"I": 1, "T": 1, "L": -2}, "si_unit": "C/m2",
+      "tensor": "vector", "components": 3, "component_names": ["x", "y", "z"],
+      "representation": "glyphs", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "vectors"
+    },
+    "charge_density": {
+      "label": {"en": "Charge density", "zh": "电荷密度"},
+      "dimension": {"I": 1, "T": 1, "L": -3}, "si_unit": "C/m3",
+      "tensor": "scalar", "components": 1,
+      "representation": "slice", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "slice"
+    },
+    "electron_density": {
+      "label": {"en": "Electron density", "zh": "电子密度"},
+      "dimension": {"L": -3}, "si_unit": "/m3",
+      "tensor": "scalar", "components": 1,
+      "representation": "volume", "colormap": "viridis", "range": "nonnegative", "categorical": false,
+      "default_graph": "volume"
+    },
+    "strain": {
+      "label": {"en": "Strain", "zh": "应变"},
+      "dimension": {}, "si_unit": "1",
+      "tensor": "symmetric_tensor", "components": 6, "component_names": ["xx", "yy", "zz", "yz", "xz", "xy"],
+      "representation": "slice", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "slice"
+    },
+    "eigenstrain": {
+      "label": {"en": "Eigenstrain", "zh": "本征应变"},
+      "dimension": {}, "si_unit": "1",
+      "tensor": "symmetric_tensor", "components": 6, "component_names": ["xx", "yy", "zz", "yz", "xz", "xy"],
+      "representation": "slice", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "slice"
+    },
+    "stress": {
+      "label": {"en": "Stress", "zh": "应力"},
+      "dimension": {"M": 1, "L": -1, "T": -2}, "si_unit": "Pa",
+      "tensor": "symmetric_tensor", "components": 6, "component_names": ["xx", "yy", "zz", "yz", "xz", "xy"],
+      "representation": "slice", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "slice"
+    },
+    "pressure": {
+      "label": {"en": "Pressure", "zh": "压强"},
+      "dimension": {"M": 1, "L": -1, "T": -2}, "si_unit": "Pa",
+      "tensor": "scalar", "components": 1,
+      "representation": "slice", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "slice"
+    },
+    "displacement": {
+      "label": {"en": "Displacement", "zh": "位移"},
+      "dimension": {"L": 1}, "si_unit": "m",
+      "tensor": "vector", "components": 3, "component_names": ["x", "y", "z"],
+      "representation": "glyphs", "colormap": "viridis", "range": "nonnegative", "categorical": false,
+      "default_graph": "vectors"
+    },
+    "velocity": {
+      "label": {"en": "Velocity", "zh": "速度"},
+      "dimension": {"L": 1, "T": -1}, "si_unit": "m/s",
+      "tensor": "vector", "components": 3, "component_names": ["x", "y", "z"],
+      "representation": "glyphs", "colormap": "viridis", "range": "nonnegative", "categorical": false,
+      "default_graph": "vectors"
+    },
+    "force": {
+      "label": {"en": "Force", "zh": "力"},
+      "dimension": {"M": 1, "L": 1, "T": -2}, "si_unit": "N",
+      "tensor": "vector", "components": 3, "component_names": ["x", "y", "z"],
+      "representation": "glyphs", "colormap": "viridis", "range": "nonnegative", "categorical": false,
+      "default_graph": "vectors"
+    },
+    "force_density": {
+      "label": {"en": "Force density", "zh": "体力密度"},
+      "dimension": {"M": 1, "L": -2, "T": -2}, "si_unit": "N/m3",
+      "tensor": "vector", "components": 3, "component_names": ["x", "y", "z"],
+      "representation": "glyphs", "colormap": "viridis", "range": "nonnegative", "categorical": false,
+      "default_graph": "vectors"
+    },
+    "energy": {
+      "label": {"en": "Energy", "zh": "能量"},
+      "dimension": {"M": 1, "L": 2, "T": -2}, "si_unit": "J",
+      "tensor": "scalar", "components": 1,
+      "representation": "line_plot", "colormap": "viridis", "range": "data", "categorical": false,
+      "default_graph": "energy-plot"
+    },
+    "energy_density": {
+      "label": {"en": "Energy density", "zh": "能量密度"},
+      "dimension": {"M": 1, "L": -1, "T": -2}, "si_unit": "J/m3",
+      "tensor": "scalar", "components": 1,
+      "representation": "slice", "colormap": "viridis", "range": "data", "categorical": false,
+      "default_graph": "slice"
+    },
+    "temperature": {
+      "label": {"en": "Temperature", "zh": "温度"},
+      "dimension": {"Theta": 1}, "si_unit": "K",
+      "tensor": "scalar", "components": 1,
+      "representation": "slice", "colormap": "turbo", "range": "data", "categorical": false,
+      "default_graph": "slice"
+    },
+    "concentration": {
+      "label": {"en": "Concentration", "zh": "浓度"},
+      "dimension": {"N": 1, "L": -3}, "si_unit": "mol/m3",
+      "tensor": "scalar", "components": 1,
+      "representation": "slice", "colormap": "viridis", "range": "nonnegative", "categorical": false,
+      "default_graph": "slice"
+    },
+    "composition": {
+      "label": {"en": "Composition (mole fraction)", "zh": "成分（摩尔分数）"},
+      "dimension": {}, "si_unit": "1",
+      "tensor": "scalar", "components": 1,
+      "representation": "slice", "colormap": "viridis", "range": "unit", "categorical": false,
+      "default_graph": "slice"
+    },
+    "order_parameter": {
+      "label": {"en": "Order parameter", "zh": "序参量"},
+      "dimension": {}, "si_unit": "1",
+      "tensor": "scalar", "components": 1,
+      "representation": "iso", "colormap": "coolwarm", "range": "symmetric", "categorical": false,
+      "default_graph": "iso"
+    },
+    "density": {
+      "label": {"en": "Mass density", "zh": "质量密度"},
+      "dimension": {"M": 1, "L": -3}, "si_unit": "kg/m3",
+      "tensor": "scalar", "components": 1,
+      "representation": "volume", "colormap": "viridis", "range": "nonnegative", "categorical": false,
+      "default_graph": "volume"
+    },
+    "label": {
+      "label": {"en": "Label", "zh": "标签"},
+      "dimension": {}, "si_unit": "1",
+      "tensor": "label", "components": 1,
+      "representation": "label_surfaces", "colormap": "stk:categorical", "range": "data", "categorical": true,
+      "default_graph": "slice"
+    },
+    "domain_variant": {
+      "label": {"en": "Domain variant", "zh": "畴变体"},
+      "dimension": {}, "si_unit": "1",
+      "tensor": "label", "components": 1,
+      "representation": "label_surfaces", "colormap": "stk:cubic-26-orientation", "range": "data", "categorical": true,
+      "default_graph": "slice"
+    },
+    "crystal_orientation": {
+      "label": {"en": "Crystal orientation", "zh": "晶体取向"},
+      "dimension": {}, "si_unit": "1",
+      "tensor": "quaternion", "components": 4, "component_names": ["w", "x", "y", "z"],
+      "representation": "slice", "colormap": "viridis", "range": "symmetric", "categorical": false,
+      "default_graph": "slice"
+    },
+    "time": {
+      "label": {"en": "Time", "zh": "时间"},
+      "dimension": {"T": 1}, "si_unit": "s",
+      "tensor": "scalar", "components": 1,
+      "representation": "line_plot", "colormap": "viridis", "range": "data", "categorical": false,
+      "default_graph": null
+    },
+    "step": {
+      "label": {"en": "Step", "zh": "步数"},
+      "dimension": {}, "si_unit": "1",
+      "tensor": "scalar", "components": 1,
+      "representation": "line_plot", "colormap": "viridis", "range": "data", "categorical": false,
+      "default_graph": null
+    },
+    "length": {
+      "label": {"en": "Length", "zh": "长度"},
+      "dimension": {"L": 1}, "si_unit": "m",
+      "tensor": "scalar", "components": 1,
+      "representation": "slice", "colormap": "viridis", "range": "data", "categorical": false,
+      "default_graph": "slice"
+    }
+  }
+}

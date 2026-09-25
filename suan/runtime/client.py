@@ -7,12 +7,26 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 import base64
 import json
 import os
+import threading
 import time
 import uuid
 
 from .common import atomic_json, read_json, sha256
 from .models import TaskSpec, TERMINAL
 from .service import CHUNK_SIZE
+
+
+# One download at a time per destination file in this process: the resumable ``<name>.part`` file is shared
+# by design (a later call resumes it), so concurrent calls for the same destination (the agent's fast lane,
+# graph evaluations) must not append to it together.
+_DOWNLOAD_LOCKS = {}
+_DOWNLOAD_GUARD = threading.Lock()
+
+
+def _download_lock(path):
+    key = os.path.abspath(path)
+    with _DOWNLOAD_GUARD:
+        return _DOWNLOAD_LOCKS.setdefault(key, threading.Lock())
 
 
 class RuntimeErrorResponse(RuntimeError):
@@ -84,6 +98,13 @@ class RuntimeClient:
         response["bytes"] = base64.b64decode(response["data"])
         return response
 
+    def events(self, task_id, offset=0, limit=CHUNK_SIZE):
+        """Monitoring events from byte ``offset``: {events, offset, next_offset, size, terminal, invalid}.
+
+        Needs a Runtime whose health lists the "events" feature.
+        """
+        return self.request("GET", f"tasks/{task_id}/events?" + urlencode({"offset": offset, "limit": limit}))
+
     def artifacts(self, task_id):
         return self.request("GET", f"tasks/{task_id}/artifacts")
 
@@ -102,12 +123,17 @@ class RuntimeClient:
             meta = self.request("POST", f"{prefix}/{meta['id']}/finish", {})
         return meta
 
-    def download(self, task_id, remote_path, destination):
+    def download(self, task_id, remote_path, destination, *, check=None):
+        """Download a task artifact (resumable, size and sha256 verified).
+
+        ``check`` (optional) is called before each chunk; an exception it raises (e.g. a graph
+        evaluation's ``Cancelled``) stops the download and keeps the partial file for a later resume.
+        """
         items = self.artifacts(task_id)
         item = next((a for a in items if a["path"] == remote_path), None)
         if item is None:
             raise ValueError("Artifact not found; wait for the task to finish")
-        return self._download(f"tasks/{task_id}/file", item, destination)
+        return self._download(f"tasks/{task_id}/file", item, destination, check=check)
 
     def download_input(self, workspace_id, remote_path, destination):
         item = next((a for a in self.files(workspace_id) if a["path"] == remote_path), None)
@@ -115,8 +141,12 @@ class RuntimeClient:
             raise ValueError("Workspace file not found")
         return self._download(f"workspaces/{workspace_id}/file", item, destination)
 
-    def _download(self, route, item, destination):
+    def _download(self, route, item, destination, check=None):
         path = Path(destination)
+        with _download_lock(path):
+            return self._download_locked(route, item, path, check)
+
+    def _download_locked(self, route, item, path, check):
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.is_file() and sha256(path) == item["sha256"]:
             return path
@@ -128,6 +158,8 @@ class RuntimeClient:
         offset = part.stat().st_size if part.exists() else 0
         with open(part, "ab") as stream:
             while offset < item["size"]:
+                if check is not None:
+                    check()
                 query = urlencode({"path": item["path"], "offset": offset, "limit": CHUNK_SIZE})
                 chunk = self.request("GET", route + "?" + query, binary=True)
                 if not chunk:
@@ -141,7 +173,7 @@ class RuntimeClient:
             meta.unlink(missing_ok=True)
             raise RuntimeError("Downloaded file checksum mismatch; retry the download")
         os.replace(part, path)
-        meta.unlink()
+        meta.unlink(missing_ok=True)
         return path
 
     def wait(self, task_id, timeout=300, interval=0.5):

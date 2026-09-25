@@ -19,6 +19,9 @@ packages = [
 exclude = ["toolkits/cpp/**", "toolkits/**/tests/**", "toolkits/**/test/**", "**/__pycache__/**", "**/*.pyc"]
 include = [
     { path = "docs/runtime*.md", format = "sdist" },
+    { path = "docs/visualization.md", format = "sdist" },
+    { path = "docs/hub.md", format = "sdist" },
+    { path = "docs/specs", format = "sdist" },
     { path = "examples/runtime", format = "sdist" },
     { path = "deploy/systemd", format = "sdist" },
     { path = "tests", format = "sdist" },
@@ -52,6 +55,7 @@ markdown = { version = ">=3,<4", optional = true }
 packaging = { version = ">=23,<27", optional = true }
 mcp = { version = ">=1,<2", optional = true }
 pytest = { version = ">=8,<10", optional = true }
+jsonschema = { version = ">=4.18,<5", optional = true }
 fastapi = { version = "==0.141.1", optional = true }
 uvicorn = { version = ">=0.34,<1", optional = true }
 httpx = { version = ">=0.28,<1", optional = true }
@@ -64,9 +68,9 @@ desktop = ["numpy", "matplotlib", "pandas", "h5py", "PySide6", "vtk", "requests"
 ai = ["ollama", "sentence-transformers", "PyPDF2", "requests"]
 mcp = ["mcp", "numpy", "matplotlib"]
 build = ["pyinstaller", "pyinstaller-hooks-contrib"]
-test = ["pytest"]
+test = ["pytest", "jsonschema"]
 control = ["fastapi", "uvicorn", "httpx", "websockets"]
-visualization = ["numpy", "vtk"]
+visualization = ["numpy", "vtk", "h5py"]
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]
@@ -107,6 +111,8 @@ testpaths = ["tests"]
 markers = [
     "desktop: requires PySide6/VTK and an offscreen Qt platform",
     "server: exercises the Linux-only STK server Runtime (API, supervisor, workers, schedulers)",
+    "render: needs offscreen OpenGL (EGL or OSMesa); skipped unless `python -m suan.render.offscreen --probe` succeeds in a subprocess",
+    "perf: performance targets measured on the reference host; excluded from default CI",
 ]
 
 # PyInstaller配置

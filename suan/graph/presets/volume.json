@@ -1,0 +1,44 @@
+{
+ "id": "volume",
+ "name": "Volume of |v|",
+ "description": "Volume rendering of the magnitude of a field file with a colour transfer function (colormap over the data range) and an opacity ramp, a scalar bar, an outline and axes (SimViz scalar volume view).",
+ "bindings": [{"name": "data", "description": "The directory (or Runtime task) holding the field file."}],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "volume",
+  "name": "Volume of |v|",
+  "description": "stk.filter.calculator (magnitude) -> stk.render.volume with colour and opacity transfer functions.",
+  "catalog": {"stk": 1},
+  "parameters": [
+   {"name": "path", "type": "string", "default": "Polar.00000000.dat", "label": "Field file",
+    "description": "Path inside the binding: DAT, NPY, VTI, legacy VTK or VTKHDF."},
+   {"name": "colormap", "type": "enum", "choices": ["viridis", "cividis", "coolwarm", "turbo", "gray"],
+    "default": "viridis", "label": "Colormap"},
+   {"name": "range", "type": "range", "default": [null, null], "label": "Value range",
+    "description": "[min, max] of the transfer functions (null = the data range)."},
+   {"name": "opacity", "type": "json", "default": [[0.0, 0.0], [1.0, 0.8]], "label": "Opacity points",
+    "description": "[x, alpha] pairs, x normalized over the value range."},
+   {"name": "view", "type": "enum", "choices": ["iso", "+x", "-x", "+y", "-y", "+z", "-z"], "default": "iso",
+    "label": "View"}
+  ],
+  "nodes": [
+   {"id": "src", "type": "stk.source.file@1", "params": {"binding": "data", "path": {"$param": "path"}}},
+   {"id": "magnitude", "type": "stk.filter.calculator@1", "inputs": {"in": {"from": "src.out"}},
+    "params": {"operation": "magnitude", "field": null, "result": "magnitude", "keep_input": false}},
+   {"id": "volume", "type": "stk.render.volume@1", "inputs": {"in": {"from": "magnitude.out"}},
+    "params": {"field": {"name": "magnitude", "component": null}, "colormap": {"$param": "colormap"},
+               "range": {"$param": "range"}, "opacity": {"$param": "opacity"}, "name": "|v|"}},
+   {"id": "bar", "type": "stk.render.scalar_bar@1", "inputs": {"source": {"from": "volume.layer"}},
+    "params": {"title": "|v|"}},
+   {"id": "box", "type": "stk.render.outline@1", "inputs": {"in": {"from": "src.out"}}},
+   {"id": "axes", "type": "stk.render.axes@1"},
+   {"id": "camera", "type": "stk.view.camera@1", "params": {"preset": {"$param": "view"}}},
+   {"id": "scene", "type": "stk.view.scene@1",
+    "inputs": {"layers": [{"from": "volume.layer"}, {"from": "box.layer"}, {"from": "bar.layer"},
+                          {"from": "axes.layer"}],
+               "camera": {"from": "camera.camera"}}},
+   {"id": "png", "type": "stk.output.image@1", "inputs": {"source": {"from": "scene.scene"}}}
+  ],
+  "outputs": {"view": "scene.scene", "image": "png.image"}
+ }
+}

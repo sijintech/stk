@@ -1,0 +1,27 @@
+{
+ "id": "energy-plot",
+ "name": "muFerro energy trace",
+ "description": "The five muFerro energies of energy_out.dat against the step (solver-normalized units), with the parsed table (SimViz 1D page).",
+ "bindings": [{"name": "run", "description": "The muFerro run: a Runtime task or a local run directory."}],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "energy-plot",
+  "name": "muFerro energy trace",
+  "description": "Elastic, electric, Landau, gradient and total energy against the step.",
+  "catalog": {"stk": 1},
+  "parameters": [
+   {"name": "last_n", "type": "json", "default": null, "label": "Last rows",
+    "description": "Plot only the last N rows (null = all)."},
+   {"name": "stats", "type": "boolean", "default": false, "label": "Min/max/mean box"}
+  ],
+  "nodes": [
+   {"id": "run", "type": "stk.source.muferro_run@1", "params": {"binding": "run"}},
+   {"id": "energy_plot", "type": "stk.plot.line@1", "inputs": {"table": {"from": "run.energy"}},
+    "params": {"x": "step", "y": ["Elastic Energy", "Electric Energy", "Landau Energy", "Gradient P Energy",
+                                  "Total Energy"],
+               "last_n": {"$param": "last_n"}, "stats": {"$param": "stats"}, "y_label": "Energy (normalized)",
+               "title": "muFerro energies"}}
+  ],
+  "outputs": {"energy": "energy_plot.plot", "table": "run.energy"}
+ }
+}

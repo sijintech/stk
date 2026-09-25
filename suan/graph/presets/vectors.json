@@ -1,0 +1,41 @@
+{
+ "id": "vectors",
+ "name": "Vector arrows",
+ "description": "Arrows of a 3-component field file on a stride lattice (the stride grows until at most max_points arrows remain), starting at the grid points, scaled by |v| (0.8 x the sample spacing for the largest arrow) and coloured by direction (stk:orientation-hsl) with the orientation legend, plus an outline and axes. Reproduces view.build's 'vectors' mode geometry for the same stride.",
+ "bindings": [{"name": "data", "description": "The directory (or Runtime task) holding the field file."}],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "vectors",
+  "name": "Vector arrows",
+  "description": "stk.filter.glyph_source (stride lattice) -> instanced arrows coloured by orientation.",
+  "catalog": {"stk": 1},
+  "parameters": [
+   {"name": "path", "type": "string", "default": "Polar.00000000.dat", "label": "Field file",
+    "description": "Path inside the binding: DAT, NPY, VTI, legacy VTK or VTKHDF (a 3-component field)."},
+   {"name": "stride", "type": "int3", "default": [1, 1, 1], "label": "Stride"},
+   {"name": "max_points", "type": "integer", "default": 5000, "minimum": 1, "maximum": 5000000,
+    "label": "Max arrows"},
+   {"name": "view", "type": "enum", "choices": ["iso", "+x", "-x", "+y", "-y", "+z", "-z"], "default": "iso",
+    "label": "View"}
+  ],
+  "nodes": [
+   {"id": "src", "type": "stk.source.file@1", "params": {"binding": "data", "path": {"$param": "path"}}},
+   {"id": "samples", "type": "stk.filter.glyph_source@1", "inputs": {"in": {"from": "src.out"}},
+    "params": {"field": null, "sampling": "stride", "stride": {"$param": "stride"},
+               "max_points": {"$param": "max_points"}}},
+   {"id": "arrows", "type": "stk.render.glyphs@1", "inputs": {"in": {"from": "samples.out"}},
+    "params": {"shape": "arrow", "center": false, "scale": {"by": "magnitude", "factor": "auto"},
+               "color": {"by": "orientation"}, "name": "Vectors"}},
+   {"id": "legend", "type": "stk.render.orientation_legend@1"},
+   {"id": "box", "type": "stk.render.outline@1", "inputs": {"in": {"from": "src.out"}}},
+   {"id": "axes", "type": "stk.render.axes@1"},
+   {"id": "camera", "type": "stk.view.camera@1", "params": {"preset": {"$param": "view"}}},
+   {"id": "scene", "type": "stk.view.scene@1",
+    "inputs": {"layers": [{"from": "arrows.layer"}, {"from": "box.layer"}, {"from": "legend.layer"},
+                          {"from": "axes.layer"}],
+               "camera": {"from": "camera.camera"}}},
+   {"id": "png", "type": "stk.output.image@1", "inputs": {"source": {"from": "scene.scene"}}}
+  ],
+  "outputs": {"view": "scene.scene", "image": "png.image"}
+ }
+}
