@@ -184,6 +184,7 @@ include(GoogleTest)
 add_executable(stk_wm_tests
   support.cc
   test_app.cc
+  test_app_store_open.cc
   test_layout_golden.cc
   test_layout_math.cc
   test_persistence.cc

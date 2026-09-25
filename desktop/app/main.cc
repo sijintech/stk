@@ -507,6 +507,7 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
     }
 #endif
     bridge_client = bridge::Client::create(std::move(bo));
+    shell.store().set_bridge(bridge_client.get());
     bridge_status = std::make_unique<app::BridgeStatus>(shell.store(), *bridge_client, wm.get());
     std::string berr;
     if (!bridge_client->start(&berr)) {
@@ -543,6 +544,7 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
   }
   /* Reverse order: status mirror, bridge (EOF, grace period, terminate), then the windows. */
   bridge_status.reset();
+  shell.store().set_bridge(nullptr);
   bridge_client.reset();
   if (a.verbose) {
     printf("csd: %s, %llu layout callback(s)\n", wm->csd_active() ? "on" : "off",

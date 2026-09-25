@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,7 +19,26 @@
 #include "stk/ui/log_buffer.hh"
 #include "stk/ui/ui.hh"
 
+namespace stk::bridge {
+class Client;
+}
+
 namespace stk::app {
+
+/**
+ * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
+ * by the Viewer editor, which also brings a Viewer area to the front). Either a task on a
+ * connection or local paths (a result directory, a payload directory / .stkp, or a run directory
+ * for local graph evaluation).
+ */
+struct OpenResultRequest {
+  std::string connection;   /**< Bridge connection id ("local", "runtime:<name>", "hub:<name>"). */
+  std::string node;         /**< Hub node, empty for Runtime / local connections. */
+  std::string workspace_id; /**< Optional. */
+  std::string task_id;      /**< Empty when opening local paths. */
+  std::string preset;       /**< Graph preset to evaluate; empty = let the Viewer choose. */
+  std::vector<std::string> local_paths;
+};
 
 /** State of the Python bridge child process (driven by stk_bridge from WP8 on). */
 enum class BridgeState : uint8_t { NotStarted, Starting, Ready, Restarting, Failed, Stopping };
@@ -72,6 +92,25 @@ class AppStore {
   }
   void set_connection(std::string connection);
 
+  /** The bridge client, or null (headless renders, --no-bridge). Not owned. */
+  bridge::Client *bridge() const
+  {
+    return bridge_client_;
+  }
+  void set_bridge(bridge::Client *client)
+  {
+    bridge_client_ = client;
+  }
+
+  /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
+  void request_open_result(OpenResultRequest request);
+  /** Takes the pending request, if any (the Viewer editor calls this while building its UI). */
+  std::optional<OpenResultRequest> take_open_result();
+  bool has_open_result() const
+  {
+    return pending_open_.has_value();
+  }
+
   /** Application log (Logs editor) and bridge stderr / protocol log (Bridge log editor). */
   ui::LogBuffer &app_log()
   {
@@ -102,6 +141,8 @@ class AppStore {
   BridgeState bridge_ = BridgeState::NotStarted;
   std::string bridge_error_;
   std::string connection_;
+  bridge::Client *bridge_client_ = nullptr;
+  std::optional<OpenResultRequest> pending_open_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

@@ -83,4 +83,17 @@ void AppStore::changed()
   }
 }
 
+void AppStore::request_open_result(OpenResultRequest request)
+{
+  pending_open_ = std::move(request);
+  changed();
+}
+
+std::optional<OpenResultRequest> AppStore::take_open_result()
+{
+  std::optional<OpenResultRequest> request = std::move(pending_open_);
+  pending_open_.reset();
+  return request;
+}
+
 }  // namespace stk::app
