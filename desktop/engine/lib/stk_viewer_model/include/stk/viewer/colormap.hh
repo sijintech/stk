@@ -81,6 +81,22 @@ std::vector<double> scalar_values(std::span<const double> values, int components
 /** [min, max] of the finite values ([0, 1] when there is none). */
 std::array<double, 2> finite_range(std::span<const double> values);
 
+/** Scalar data used for attribute colouring. Continuous values respect accessor normalization;
+ * categorical values keep raw integer labels (component zero unless explicitly selected). */
+struct LayerScalars {
+  std::vector<double> values;
+  std::string association = "point";
+  bool categorical = false;
+  std::optional<std::array<double, 2>> range; /* continuous: spec / attribute / hint / finite data */
+  std::optional<std::string> colormap;
+};
+
+/** Resolve an attribute colour spec once for CPU colours or GPU LUT coordinates. Solid/direction
+ * specs and absent attributes return nullopt. Continuous range hints follow web layerColors. */
+std::optional<LayerScalars> layer_scalars(const io::Payload &payload,
+                                         const io::Json &layer,
+                                         const io::Json &color_spec);
+
 /**
  * Colour transfer points [physical value, r, g, b] of a volume (spec §6.6): a continuous LUT spread
  * over `range` at bin centres ((i + 0.5) / 256) (one point, LUT entry 128, when hi <= lo), or each

@@ -192,6 +192,13 @@ All three show `AppStore::viewer()` (`stk/app/viewer_state.hh`), the result on s
   bridge call and keeps the camera.
 - **Probe**: layer, element and physical position (`format_label`) of the last pick, the original value
   from the bridge `probe` (trilinear sample of the source field), and a typed position to query.
+- Hub evaluation reads the policy of the result's source connection, independently of the connection
+  selected in Jobs. Its desktop auto-run byte cap applies to both requested and prefetched steps;
+  switching sources or cancelling also cancels a pending policy lookup.
+- Local graph evaluation uses a reusable Python worker process and a serial lane, leaving bridge
+  requests responsive while retaining the node cache. Cancellation first cooperates with the evaluator;
+  after 0.5 seconds, unresponsive work is terminated with its worker and render subprocesses. A worker
+  crash fails that request; the next evaluation starts a fresh worker with the existing disk cache.
 - **Export dialog**: size, magnification ×1–×8 (tiled), transparent background, overlays, and "all time
   steps" (`<stem>.%08d.png` + an `stk.series/1` manifest `<stem>.series.json`).
 - **Headless** (the WP12 e2e golden): `stk-desktop --headless --preset muferro-domains --run DIR
@@ -204,6 +211,11 @@ To run binaries by hand against sysroot-only libraries, `source ~/opt/stk-sysroo
 
 ## Tests
 
+- `ctest -L unit`: viewer helpers include candidate-only picking, screen-space line hits with
+  perspective and clipping, shared scalar/range resolution, and area-weighted smooth normals.
+  `tests/unit/fixtures/make_viewer_helpers.py` regenerates Python scalar and independent NumPy
+  normal references. The normal references follow the web viewer's area weighting; the Python
+  offscreen renderer still uses VTK's normal filter and may differ for unequal face areas or winding.
 - `ctest -L gpu`: headless exports of the sample frame at 1×, 1.5× and 2× for each backend (Vulkan on
   Mesa lavapipe, `-DSTK_TEST_VK_ICD=…` picks another ICD; OpenGL 4.5 on llvmpipe through surfaceless
   EGL; Metal on macOS). `stk-wm-image-check` compares with `tests/wm/golden/` (at most 1% of the

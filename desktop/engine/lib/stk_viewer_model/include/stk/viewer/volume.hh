@@ -50,6 +50,13 @@ struct VolumeTransfer {
 /** The transfer function of a validated volume layer. */
 VolumeTransfer volume_transfer(const io::Payload &payload, const io::Json &layer);
 
+/** Finite stored-value domain for a volume texture's transfer LUT, before value_scale/offset.
+ * Normalized u8/u16 values divide by 255/65535. Empty/all-nonfinite input gives [0,1]; a constant
+ * range expands by 0.5 (or the adjacent doubles when 0.5 cannot change a large value). */
+std::array<double, 2> stored_range(std::span<const float> values);
+std::array<double, 2> stored_range(std::span<const uint8_t> values, bool normalized = false);
+std::array<double, 2> stored_range(std::span<const uint16_t> values, bool normalized = false);
+
 /** vtkColorTransferFunction evaluation: piecewise linear in RGB between sorted points, clamped at the ends. */
 RGB evaluate_color(const std::vector<std::array<double, 4>> &points, double value);
 /** Piecewise-linear opacity, constant beyond the end points (colormaps.py opacity_at). */

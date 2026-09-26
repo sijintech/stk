@@ -161,6 +161,7 @@ stk-desktop --help
    ```
 
    桌面配置的设备在额度内（预计传输 ≤ `--desktop-auto-mib`，默认 256 MiB）免复核运行图求值与只读操作；
+   Viewer 求值和相邻时间步预取使用结果来源 hub 的额度，不受 Jobs 当前选择的连接影响。
    新命令、改动的模板和写入工作区（上传导入）仍需复核。见[控制服务指南](hub.md#桌面配置的自动执行wp11)。
 
 **`review_policy` 建议**：默认 `any` 时，桌面程序可以确认自己提交的复核（防误操作）；从互联网可达的
@@ -190,11 +191,12 @@ hub 建议 `suan-control serve --review-policy not-self`，此时本设备的批
 
 - **打开**：文件 > 打开数据包 / 结果…，或查看器标题栏、属性“结果”面板的“打开…”（输入路径），拖放到查看器、`--open PATH`，或任务页的“在查看器中打开”。
   `.stkp`／渲染数据包目录直接显示；`suan graph run` 的结果目录（`result.json`，或带 `series.json`
-  的逐步结果）从磁盘读取；运行目录（如 muFerro）在桥中按预设求值（本地模式）；Runtime 任务与控制服务
-  任务在数据所在处求值，只传回渲染数据包。
+  的逐步结果）从磁盘读取；运行目录（如 muFerro）在桥管理的独立进程中按预设求值（本地模式）。Runtime
+  任务的文件经校验下载后在本机求值；控制服务任务在节点上求值，只传回渲染数据包。
 - **属性**：选择预设（`muferro-domains` 等 7 个），参数表单由 JSON Schema 生成，分为“数据阶段”（修改后
   重新计算数据）和“客户端阶段”（颜色表、不透明度、相机等，只重算外观节点）。修改自动求值（可关闭），
-  较新的求值会取消正在进行的求值；摘要显示本次计算的节点数与数据节点数。
+  较新的求值会取消正在进行的求值；摘要显示本次计算的节点数与数据节点数。本地求值卡住时可取消，
+  不影响任务管理；求值进程崩溃后再次点击“求值”可重新启动。
 - **查看器**：左侧工具栏为旋转（↻）、平移（✚）、缩放（±）、拾取（⊙），鼠标悬停显示名称。侧栏：图层可见性与
   不透明度，相机（7 个预设、复位、物理坐标下的数值相机），时间步（滑块、播放、每秒帧数、循环、预取相邻步、
   最新），显示（叠加层、光照、导航方式 Blender／ParaView）。已缓存的时间步切换不经过桥，保持相机。
@@ -344,8 +346,10 @@ connection list has **this computer** (local Runtime, Linux only; Start initiali
 **Runtime profiles** shared with `suan connect` (`~/.stk/connections.json`, `STK_PROFILES_FILE`; remote
 Runtimes through an SSH tunnel) and **hubs** paired with a one-time code from
 `suan-control pair --role client --profile desktop`. Desktop-profile devices run graph evaluations and
-read-only operations without review up to the hub's `--desktop-auto-mib` estimate (256 MiB by default);
-new commands, changed templates and workspace imports are still reviewed. **`review_policy`:** with the
+read-only operations without review up to the hub's `--desktop-auto-mib` estimate (256 MiB by default).
+Viewer evaluations and neighbouring-step prefetch use the result's source hub cap independently of the
+connection selected in Jobs. New commands, changed templates and workspace imports are still reviewed.
+**`review_policy`:** with the
 default `any` the desktop confirms its own reviews (a guard against mistakes); an internet-reachable hub
 should run `--review-policy not-self`, in which case the app explains the refusal and resubmits with the same
 idempotency key after another device or the owner token approves. Reach hubs through the HTTPS ingress or an
@@ -363,7 +367,9 @@ SSH tunnel, never by binding them to a LAN or public address.
 - **Viewer**: tools orbit (↻), pan (✚), zoom (±) and pick (⊙); sidebar layers, camera presets and numeric
   camera, time steps with playback and prefetch, display options. Cached steps switch without a bridge call.
 - **Properties**: preset picker and JSON-Schema forms split into data-stage and client-stage parameters;
-  client-stage edits re-run no data node.
+  client-stage edits re-run no data node. Local runs and downloaded Runtime task files are evaluated in
+  a separate worker, so stalled calculations can be cancelled while Jobs stays available. If the worker
+  crashes, Evaluate starts it again. Hub evaluations continue to run on the execution node.
 - **Probe**: a click picks on the GPU (refined in float64); the bridge samples the original field
   (trilinear) at that position, or at a typed one.
 - **Export**: size, ×1–×8 tiled magnification, transparency, overlays, all time steps (`stk.series/1`).

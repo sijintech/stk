@@ -68,24 +68,6 @@ class FrameScope {
   GPUContext *ctx_ = nullptr;
 };
 
-/** Closest approach of a ray and a segment [a, b] (all relative to render_origin). */
-std::optional<std::pair<double, double>> ray_segment(const viewer::Ray &ray, const dvec3 &a, const dvec3 &b)
-{
-  const dvec3 u = ray.direction, v = b - a, w0 = ray.origin - a;
-  const double A = viewer::dot(u, u), B = viewer::dot(u, v), C = viewer::dot(v, v), D = viewer::dot(u, w0),
-               E = viewer::dot(v, w0);
-  const double den = A * C - B * B;
-  double s = 0, t = 0;
-  if (den > 1e-300) {
-    s = std::clamp((A * E - B * D) / den, 0.0, 1.0);
-  }
-  t = (B * s - D) / A;
-  if (t < 0) {
-    return std::nullopt;
-  }
-  return std::make_pair(t, s);
-}
-
 }  // namespace
 
 struct Viewer::Impl {
@@ -461,13 +443,14 @@ PickResult Viewer::pick(const double x, const double y, const int width, const i
   std::stable_sort(cands.begin(), cands.end(), [](const Cand &a, const Cand &b) { return a.d2 < b.d2; });
   const viewer::Viewport viewport{double(width), double(height)};
   const viewer::Ray ray = viewer::pixel_ray(m.camera, viewport, x, y);
+  const viewer::ClipRange clip = viewer::clip_range(m.camera, m.current->render_bounds);
   const dvec3 origin = dvec3::from(m.payload->render_origin);
   std::set<std::pair<uint32_t, uint32_t>> tried;
-  /* Layers whose exhaustive search (the model's fallback when a candidate misses) found nothing:
-   * the pixel ray misses the whole layer, so its other candidates need no search. */
-  std::set<uint32_t> missed;
+  /* Refine only visible candidates in this tile. A miss must not trigger an exhaustive search of
+   * a potentially huge layer, nor prevent testing its other candidates near the cursor. */
+  constexpr viewer::PickMode mode = viewer::PickMode::CandidateOnly;
   for (const Cand &c : cands) {
-    if (!tried.insert({c.tag, c.element}).second || missed.count(c.tag)) {
+    if (!tried.insert({c.tag, c.element}).second) {
       continue;
     }
     const int index = int(c.tag) - 1;
@@ -485,17 +468,17 @@ PickResult Viewer::pick(const double x, const double y, const int width, const i
         }
         const MeshLevel &lv = L.mesh[finest];
         viewer::LayerGeometry g{lv.positions, lv.indices, origin, L.layer_origin};
-        hit = viewer::pick_triangles(ray, g, c.element);
+        hit = viewer::pick_triangles(ray, g, c.element, mode);
         break;
       }
       case LayerKind::Points: {
         const PointData &d = L.points;
         viewer::LayerGeometry g{d.positions, std::span<const uint32_t>(), origin, L.layer_origin};
         if (d.world_spheres) {
-          hit = viewer::pick_spheres(ray, g, d.radius, d.radii_cpu);
+          hit = viewer::pick_spheres(ray, g, d.radius, d.radii_cpu, c.element, mode);
         }
         else {
-          hit = viewer::pick_points(m.camera, viewport, x, y, g, d.size_px * m.last_scale, c.element);
+          hit = viewer::pick_points(m.camera, viewport, x, y, g, d.size_px * m.last_scale, c.element, mode);
         }
         break;
       }
@@ -506,22 +489,16 @@ PickResult Viewer::pick(const double x, const double y, const int width, const i
         }
         element = gd.kept[c.element];
         if (gd.line_shape) {
-          const auto &q = gd.lines.positions;
-          const dvec3 shift = L.layer_origin - origin;
-          const dvec3 a = dvec3{q[c.element * 6], q[c.element * 6 + 1], q[c.element * 6 + 2]} + shift;
-          const dvec3 b = dvec3{q[c.element * 6 + 3], q[c.element * 6 + 4], q[c.element * 6 + 5]} + shift;
-          if (const auto ts = ray_segment(ray, a, b)) {
-            viewer::PickHit h;
-            h.element = element;
-            h.t = ts->first;
-            h.local = a + (b - a) * ts->second;
-            h.physical = (origin + h.local).to_array();
-            hit = h;
+          viewer::LayerGeometry g{gd.lines.positions, std::span<const uint32_t>(), origin, L.layer_origin};
+          hit = viewer::pick_segments(m.camera, viewport, x, y, g, gd.lines.width_px * m.last_scale,
+                                      c.element, mode, clip);
+          if (hit) {
+            hit->element = element;
           }
           break;
         }
         viewer::LayerGeometry g{gd.positions, std::span<const uint32_t>(), origin, L.layer_origin};
-        hit = viewer::pick_glyphs(ray, g, gd.directions, gd.scales, gd.glyph, element);
+        hit = viewer::pick_glyphs(ray, g, gd.directions, gd.scales, gd.glyph, element, mode);
         break;
       }
       case LayerKind::SliceImage: {
@@ -531,34 +508,15 @@ PickResult Viewer::pick(const double x, const double y, const int width, const i
       }
       case LayerKind::Lines: {
         const LineData &d = L.lines;
-        if (size_t(c.element) * 2 + 1 >= d.pairs.size()) {
-          break;
-        }
-        const dvec3 shift = L.layer_origin - origin;
-        auto point = [&](uint32_t i) {
-          return dvec3{d.positions[size_t(i) * 3], d.positions[size_t(i) * 3 + 1], d.positions[size_t(i) * 3 + 2]} +
-                 shift;
-        };
-        const dvec3 a = point(d.pairs[size_t(c.element) * 2]), b = point(d.pairs[size_t(c.element) * 2 + 1]);
-        if (const auto ts = ray_segment(ray, a, b)) {
-          viewer::PickHit h;
-          h.element = c.element;
-          h.t = ts->first;
-          h.local = a + (b - a) * ts->second;
-          h.physical = (origin + h.local).to_array();
-          hit = h;
-        }
+        viewer::LayerGeometry g{d.positions, std::span<const uint32_t>(d.pairs), origin, L.layer_origin};
+        hit = viewer::pick_segments(m.camera, viewport, x, y, g, d.width_px * m.last_scale,
+                                    c.element, mode, clip);
         break;
       }
       default:
         break;
     }
     if (!hit) {
-      if (L.kind == LayerKind::Triangles || (L.kind == LayerKind::Instances && !L.glyphs.line_shape) ||
-          L.kind == LayerKind::SliceImage || (L.kind == LayerKind::Points && L.points.world_spheres))
-      {
-        missed.insert(c.tag);
-      }
       continue;
     }
     result.hit = true;

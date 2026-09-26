@@ -95,6 +95,7 @@ add_executable(stk_unit_tests
   test_format.cc
   test_glyph.cc
   test_volume_lod.cc
+  test_viewer_helpers.cc
   test_payload_fuzz.cc
   support.cc
   fuzz/payload_fuzz_lib.cc

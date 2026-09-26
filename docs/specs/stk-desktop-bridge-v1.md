@@ -395,12 +395,21 @@ on every state change and at most every 250 ms while bytes move.
 
 - `request` is the `graph.evaluate` payload of stk-graph-v1 §9 (`graph | preset, bindings,
   parameters, outputs, profile, budget, plot_format`); request bindings only name Runtime tasks.
-- **Local mode** evaluates in the bridge process: `local_bindings: {name: absolute directory}`
+- **Local mode** evaluates in a reusable worker child process: `local_bindings: {name: absolute directory}`
   (`LocalDirResolver`, confined to each directory) and, with a Runtime `connection`, task bindings
   (`RuntimeResolver`: sha256-verified downloads into the graph cache). Progress arrives as
   `graph.progress {eval_id, event}` (the evaluator's `node.started`, `node.cached`,
   `node.finished`, `node.failed`, `progress`, `warning` events). Blobs go straight into the blob
-  cache. `graph.cancel` stops the evaluation (`cancelled` error).
+  cache. Local requests share a serial evaluation lane and a warm in-memory node cache; the bridge
+  continues serving Jobs, subscriptions and cancellation while the worker computes. Runtime
+  credentials cross only the private pipe, never command-line arguments or temporary request files.
+  Worker stdout/native output and its subprocesses are isolated from the bridge protocol streams.
+  `graph.cancel` stops the evaluation (`cancelled` error): queued requests leave active work alone;
+  active requests get cooperative cancellation, followed after 0.5 seconds by terminating the worker
+  and its subprocesses if needed. Cooperative cancellation preserves the warm cache. A forced stop
+  discards in-memory cache entries; disk cache and blobs remain available to the next worker.
+  Worker crashes answer `unavailable`; requests are not automatically replayed, and the next request
+  starts a fresh worker. Bridge shutdown stops the worker; loss of the parent's pipe also ends it.
 - **Hub mode** sends a `graph.evaluate` action to `node` with id
   `sha256("graph.evaluate\0<node>\0<eval_id>")[:32]` and waits up to `wait` seconds (default 600).
   Requests over the automatic budget return with `action.state: "review"` and `result: null`;

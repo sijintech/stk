@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace stk::viewer {
 
@@ -25,6 +26,34 @@ double VolumeGrid::unit_distance() const
 
 namespace {
 
+template<typename T>
+std::array<double, 2> stored_range_impl(std::span<const T> values, double denominator)
+{
+  double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+  for (const T value : values) {
+    const double v = double(value);
+    if (std::isfinite(v)) {
+      lo = std::min(lo, v);
+      hi = std::max(hi, v);
+    }
+  }
+  if (!(hi >= lo)) {
+    return {0, 1};
+  }
+  lo /= denominator;
+  hi /= denominator;
+  if (lo == hi) {
+    const double value = lo;
+    lo = value - 0.5;
+    hi = value + 0.5;
+    if (lo == hi) {
+      lo = std::nextafter(value, -std::numeric_limits<double>::infinity());
+      hi = std::nextafter(value, std::numeric_limits<double>::infinity());
+    }
+  }
+  return {lo, hi};
+}
+
 double number_or(const Json &object, const char *key, double fallback)
 {
   const auto it = object.find(key);
@@ -37,6 +66,21 @@ dvec3 vec3_of(const Json &value)
 }
 
 }  // namespace
+
+std::array<double, 2> stored_range(std::span<const float> values)
+{
+  return stored_range_impl(values, 1.0);
+}
+
+std::array<double, 2> stored_range(std::span<const uint8_t> values, bool normalized)
+{
+  return stored_range_impl(values, normalized ? 255.0 : 1.0);
+}
+
+std::array<double, 2> stored_range(std::span<const uint16_t> values, bool normalized)
+{
+  return stored_range_impl(values, normalized ? 65535.0 : 1.0);
+}
 
 /* GCC folds the two identical sort comparators below (array<double, 4> and array<double, 2>) and then
  * reports a false -Warray-bounds in sanitizer builds. */

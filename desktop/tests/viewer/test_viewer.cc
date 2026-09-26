@@ -445,6 +445,40 @@ TEST(Lut, ExactBinsUnlit)
   EXPECT_EQ(checked, int(n) * 4);
 }
 
+TEST(Lut, FilteredGlyphsRetainNormalizedAttributeColors)
+{
+  PayloadBuilder b({0, 0, 0});
+  b.accessor("pos", std::vector<float>{-2, 0, 0, 0, 0, 0}, "f32", 3);
+  b.accessor("dir", std::vector<float>{0, 0, 1, 0, 0, 1}, "f32", 3);
+  b.accessor("scale", std::vector<float>{std::numeric_limits<float>::infinity(), 1}, "f32", 1);
+  b.accessor("val", std::vector<uint8_t>{255, 64}, "u8", 1);
+  b.manifest()["accessors"].back()["normalized"] = true;
+  std::vector<uint8_t> lut;
+  for (int i = 0; i < 256; i++) {
+    lut.insert(lut.end(), {uint8_t(i), uint8_t(255 - i), 0, 255});
+  }
+  b.accessor("lut", lut, "u8", 4);
+  b.manifest()["colormaps"] = {{{"id", "cm"}, {"categorical", false}, {"lut", "lut"}, {"size", 256}}};
+  b.layer({{"id", "glyph"}, {"type", "instances"},
+           {"positions", "pos"}, {"directions", "dir"}, {"scales", "scale"},
+           {"glyph", {{"shape", "cube"}}},
+           {"attributes", {{"v", {{"accessor", "val"}, {"association", "point"}, {"range", {0, 1}}}}}},
+           {"appearance", {{"lighting", false},
+                           {"color", {{"by", "attribute"}, {"attribute", "v"}, {"colormap", "cm"}}}}}});
+  Viewer v(gpu().fonts());
+  auto payload = b.build();
+  v.set_payload(payload);
+  viewer::CameraPose pose;
+  pose.position = {0, 0, 5};
+  pose.parallel = true;
+  pose.parallel_scale = 1;
+  v.set_camera(pose);
+  const gfx::Image img = render(v, "normalized_filtered_glyph", size(200, 200));
+  const uint8_t *pixel = img.px(100, 100);
+  EXPECT_EQ((std::array<uint8_t, 3>{pixel[0], pixel[1], pixel[2]}),
+            (std::array<uint8_t, 3>{64, 191, 0}));
+}
+
 /* -------------------------------------------------------------------- */
 /* Tiled export equals a single pass. */
 
@@ -687,6 +721,62 @@ TEST(Picking, EveryPickableLayerType)
   /* Background. */
   const PickResult none = v.pick(2.5, 300.5, W, H);
   EXPECT_FALSE(none.hit);
+}
+
+TEST(Picking, NearbyLinesRequirePixelWidthHit)
+{
+  const std::array<double, 3> origin{1e6 + 0.25, -1e6 + 0.5, 1e6};
+  PayloadBuilder b(origin);
+  b.accessor("pos", std::vector<float>{-1, 0, 0, 1, 0, 0}, "f32", 3);
+  b.accessor("idx", std::vector<uint16_t>{0, 1}, "u16", 1);
+  b.layer({{"id", "line"}, {"type", "lines"}, {"mode", "segments"},
+           {"positions", "pos"}, {"indices", "idx"},
+           {"appearance", {{"width_px", 2.0}}}});
+  Viewer v(gpu().fonts());
+  v.set_payload(b.build());
+  viewer::CameraPose pose;
+  pose.position = {0, 0, 5};
+  pose.parallel = true;
+  pose.parallel_scale = 2;
+  v.set_camera(pose);
+  constexpr int W = 400, H = 300;
+  const PickResult hit = v.pick(200.5, 150.5, W, H);
+  ASSERT_TRUE(hit.hit);
+  EXPECT_EQ(hit.layer_id, "line");
+  EXPECT_NEAR(hit.physical[1], origin[1], 1e-10);
+  /* Both pixels have the line in the 9x9 id tile, but lie beyond its half-width. */
+  EXPECT_FALSE(v.pick(200.5, 153.0, W, H).hit);
+  EXPECT_FALSE(v.pick(200.5, 147.0, W, H).hit);
+}
+
+TEST(Picking, LineGlyphKeepsPayloadIndexAfterFiltering)
+{
+  const std::array<double, 3> origin{1e6 + 0.25, -1e6 + 0.5, 1e6};
+  PayloadBuilder b(origin);
+  b.accessor("pos", std::vector<float>{0, 0, 0, -1, 0, 0}, "f32", 3);
+  b.accessor("dir", std::vector<float>{1, 0, 1, 1, 0, 1}, "f32", 3);
+  b.accessor("scale", std::vector<float>{std::numeric_limits<float>::infinity(), float(std::sqrt(8.0))},
+             "f32", 1);
+  b.layer({{"id", "glyph"}, {"type", "instances"},
+           {"positions", "pos"}, {"directions", "dir"}, {"scales", "scale"},
+           {"glyph", {{"shape", "line"}}}});
+  Viewer v(gpu().fonts());
+  v.set_payload(b.build());
+  viewer::CameraPose pose;
+  pose.position = {0, 0, 5};
+  pose.parallel = true;
+  pose.parallel_scale = 2;
+  v.set_camera(pose);
+  constexpr int W = 400, H = 300;
+  const PickResult hit = v.pick(200.5, 150.0, W, H);
+  ASSERT_TRUE(hit.hit);
+  EXPECT_EQ(hit.layer_id, "glyph");
+  EXPECT_EQ(hit.element, 1u);
+  EXPECT_EQ(hit.gpu_candidate, 1u);
+  EXPECT_NEAR(hit.physical[1], origin[1], 1e-10);
+  /* The hit is beyond the source points' z bounds, but inside the rendered glyph's bounds. */
+  EXPECT_GT(hit.physical[2], origin[2] + 0.5);
+  EXPECT_FALSE(v.pick(200.5, 153.0, W, H).hit);
 }
 
 /* -------------------------------------------------------------------- */

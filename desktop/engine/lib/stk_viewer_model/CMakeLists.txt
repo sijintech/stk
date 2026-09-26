@@ -17,6 +17,7 @@ add_library(stk_viewer_model STATIC
   src/volume.cc
   src/lod.cc
   src/scene.cc
+  src/geometry.cc
 )
 target_include_directories(stk_viewer_model PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_compile_features(stk_viewer_model PUBLIC cxx_std_20)

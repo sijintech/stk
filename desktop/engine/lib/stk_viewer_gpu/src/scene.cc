@@ -13,6 +13,8 @@
 #include "GPU_capabilities.hh"
 #include "GPU_texture.hh"
 
+#include "stk/viewer/geometry.hh"
+
 namespace stk::viewer_gpu {
 
 using namespace blender;
@@ -230,39 +232,6 @@ size_t index_count(const viewer::IndexSpan &span)
   return std::visit([](auto s) { return s.size(); }, span);
 }
 
-/** Area-weighted smooth normals (web/src/layers.ts smoothNormals). */
-std::vector<float> smooth_normals(std::span<const float> pos, const viewer::IndexSpan &idx)
-{
-  std::vector<float> n(pos.size(), 0.0f);
-  const size_t count = index_count(idx);
-  const size_t points = pos.size() / 3;
-  for (size_t t = 0; t + 2 < count; t += 3) {
-    const uint32_t ia = index_at(idx, t), ib = index_at(idx, t + 1), ic = index_at(idx, t + 2);
-    if (ia >= points || ib >= points || ic >= points) {
-      continue;
-    }
-    const size_t a = size_t(ia) * 3, b = size_t(ib) * 3, c = size_t(ic) * 3;
-    const float ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
-    const float vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
-    const float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    for (const size_t q : {a, b, c}) {
-      n[q] += nx;
-      n[q + 1] += ny;
-      n[q + 2] += nz;
-    }
-  }
-  for (size_t i = 0; i + 2 < n.size(); i += 3) {
-    float l = std::hypot(n[i], n[i + 1], n[i + 2]);
-    if (!(l > 0)) {
-      l = 1;
-    }
-    n[i] /= l;
-    n[i + 1] /= l;
-    n[i + 2] /= l;
-  }
-  return n;
-}
-
 /* -------------------------------------------------------------------- */
 /* Colours */
 
@@ -393,22 +362,10 @@ ColorBinding build_color(ResourceCache &cache,
   out.cell = association == "cell";
   const bool continuous = io::get_string(spec, "by") == "attribute" && !r.categorical && r.range;
   if (continuous) {
-    /* Values -> exact LUT coordinates (the same scalar and range rules as layer_colors). */
-    const Json *attr = own_attribute(layer, member(spec, "attribute"));
-    const std::string accessor_id = io::get_string(*attr, "accessor");
-    const io::PayloadAccessor &a = p.accessor(accessor_id);
-    std::vector<double> raw;
-    if (a.normalized) {
-      const std::vector<float> f = p.floats(accessor_id);
-      raw.assign(f.begin(), f.end());
-    }
-    else {
-      raw = p.doubles(accessor_id);
-    }
-    const Json *component = member(spec, "component");
-    const Json null_component;
-    const std::vector<double> values =
-        viewer::scalar_values(raw, int(a.components), component ? *component : null_component);
+    /* A continuous attribute result guarantees resolved scalars, using the shared normalization,
+     * component and range rules of layer_colors. */
+    const auto scalars = viewer::layer_scalars(p, layer, spec);
+    const std::vector<double> &values = scalars->values;
     const double lo = (*r.range)[0], hi = (*r.range)[1];
     std::vector<float> t(count);
     for (size_t i = 0; i < count; i++) {
@@ -599,7 +556,7 @@ struct Builder {
         }
         span = std::span<const uint32_t>(seq);
       }
-      const std::vector<float> n = smooth_normals(m.positions, span);
+      const std::vector<float> n = viewer::smooth_normals(m.positions, span);
       m.nrm = upload(cache, "nrm", std::span<const float>(n));
       m.has_normals = true;
     }
@@ -838,12 +795,8 @@ struct Builder {
         color.values = upload(cache, "cval", std::span<const uint32_t>(rgba));
       }
       else {
-        const Json *attr = own_attribute(layer, member(spec, "attribute"));
-        const std::string acc = io::get_string(*attr, "accessor");
-        const Json *component = member(spec, "component");
-        const Json null_component;
-        const std::vector<double> values = viewer::scalar_values(
-            p.doubles(acc), int(p.accessor(acc).components), component ? *component : null_component);
+        const auto scalars = viewer::layer_scalars(p, layer, spec);
+        const std::vector<double> &values = scalars->values;
         for (const uint32_t i : g.kept) {
           t.push_back(exact_t(i < values.size() ? values[i] : NAN, (*r.range)[0], (*r.range)[1]));
         }
@@ -970,39 +923,20 @@ struct Builder {
     const bool u16 = a.type == io::ComponentType::U16;
     /* Texture value -> stored value (normalized accessors store x / 255 or x / 65535, web floats()). */
     lv.tex_scale = a.normalized ? 1.0 : u8 ? 255.0 : u16 ? 65535.0 : 1.0;
-    const double denominator = (a.normalized && (u8 || u16)) ? (u8 ? 255.0 : 65535.0) : 1.0;
     /* Stored-value domain of the transfer-function LUT: the data range. */
-    double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+    std::array<double, 2> range;
     std::vector<float> floats;
-    auto scan = [&](auto view) {
-      for (const auto x : view) {
-        const double d = double(x);
-        if (std::isfinite(d)) {
-          lo = std::min(lo, d);
-          hi = std::max(hi, d);
-        }
-      }
-    };
     if (u8) {
-      scan(p.view<uint8_t>(data_id));
+      range = viewer::stored_range(p.view<uint8_t>(data_id), a.normalized);
     }
     else if (u16) {
-      scan(p.view<uint16_t>(data_id));
+      range = viewer::stored_range(p.view<uint16_t>(data_id), a.normalized);
     }
     else {
       floats = p.floats(data_id);
-      scan(std::span<const float>(floats));
+      range = viewer::stored_range(std::span<const float>(floats));
     }
-    lo /= denominator;
-    hi /= denominator;
-    if (!(hi >= lo)) {
-      lo = 0;
-      hi = 1;
-    }
-    if (hi == lo) {
-      lo -= 0.5;
-      hi += 0.5;
-    }
+    const double lo = range[0], hi = range[1];
     lv.stored_lo = lo;
     lv.stored_hi = hi;
     /* Non-finite f32 voxels (no NaN/Inf on the GPU) become a finite value far below the data, which

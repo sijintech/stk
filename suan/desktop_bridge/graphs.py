@@ -1,6 +1,6 @@
 """Graph methods, the local blob cache, probes and colormaps (spec §9-§10).
 
-Evaluations run in the bridge process (``local`` mode: :func:`suan.graph.service.evaluate_request`
+Evaluations run in a reusable child process (``local`` mode: :func:`suan.graph.service.evaluate_request`
 with local directories and/or Runtime task bindings) or on an execution node through the hub
 (``hub`` mode: a ``graph.evaluate`` action). Either way every blob the result references ends up
 in the bridge's content-addressed cache ``<cache>/blobs/<sha[:2]>/<sha>`` (the layout of the hub
@@ -14,6 +14,7 @@ import re
 import threading
 
 from .backends import HubBackend, action_id, summary
+from .graph_worker import GraphWorker
 from .protocol import BridgeError
 
 __all__ = ["BlobCache", "GraphService"]
@@ -108,6 +109,7 @@ class GraphService:
         self.running = {}     # eval_id -> {"token": CancelToken | None, "cancelled": Event}
         self.grids = OrderedDict()
         self._registry = None
+        self.worker = GraphWorker(self.cache_dir)
 
     # -- catalog ------------------------------------------------------------------------------
 
@@ -146,7 +148,7 @@ class GraphService:
             self.running.pop(eval_id, None)
 
     def cancel(self, eval_id, connection=None, node=None):
-        """Cancel an evaluation: a local one in this process, a hub one on its node.
+        """Cancel an evaluation: a local worker request, or a hub evaluation on its node.
 
         A hub evaluation this bridge is waiting for stops waiting at once; the hub then fails it if
         it is still in review, or the node cancels it (running, or pending in its graph lane). With
@@ -185,6 +187,7 @@ class GraphService:
         for entry in entries:
             entry["cancelled"].set()
             entry["token"].cancel("The desktop bridge is shutting down")
+        self.worker.close()
 
     def evaluate(self, params):
         eval_id = params["eval_id"]
@@ -197,37 +200,28 @@ class GraphService:
             self._end(eval_id)
 
     def _evaluate_local(self, params, entry):
-        from suan.graph.registry import GraphError
-        from suan.graph.resolve import BindingResolver, LocalDirResolver, RuntimeResolver
-        from suan.graph.service import evaluate_request
         request = params["request"]
         local = params.get("local_bindings") or {}
         for name, root in local.items():
             if not Path(root).is_absolute() or not Path(root).is_dir():
                 raise BridgeError("invalid_params", f"Local binding '{name}' must name an existing absolute directory")
-        resolvers = []
-        try:
-            if local:
-                resolvers.append(LocalDirResolver(local))
-            if params.get("connection"):
-                backend = self.connections.backend(params["connection"], params.get("node"))
-                if backend.kind != "runtime":
-                    raise BridgeError("invalid_params", "Local evaluation reads task files from a Runtime "
-                                      "connection; use mode 'hub' for hub connections")
-                resolvers.append(RuntimeResolver(backend.client, self.cache_dir / "graph" / "downloads"))
-            elif request.get("bindings"):
-                raise BridgeError("invalid_params", "Task bindings need a Runtime 'connection'")
-            resolver = BindingResolver(*resolvers) if resolvers else None
-            eval_id = params["eval_id"]
+        work = {"request": request, "local_bindings": local}
+        if params.get("connection"):
+            backend = self.connections.backend(params["connection"], params.get("node"))
+            if backend.kind != "runtime":
+                raise BridgeError("invalid_params", "Local evaluation reads task files from a Runtime "
+                                  "connection; use mode 'hub' for hub connections")
+            # Credentials travel only over the private pipe, never argv, environment or a job file.
+            work["runtime"] = {"url": backend.client.url, "token": backend.client.token,
+                               "timeout": backend.client.timeout}
+        elif request.get("bindings"):
+            raise BridgeError("invalid_params", "Task bindings need a Runtime 'connection'")
+        eval_id = params["eval_id"]
 
-            def progress(event):
-                self.emit("graph.progress", {"eval_id": eval_id, "event": _plain_event(event)})
+        def progress(event):
+            self.emit("graph.progress", {"eval_id": eval_id, "event": event})
 
-            document = evaluate_request(request, resolver=resolver, cache_dir=self.cache_dir / "graph" / "cache",
-                                        blob_sink=self.blobs.sink, registry=self.registry(), cancel=entry["token"],
-                                        on_event=progress)
-        except GraphError as exc:
-            raise _graph_error(exc) from None
+        document = self.worker.evaluate(eval_id, work, entry["cancelled"], progress)
         return {"result": document, "blob_dir": str(self.blobs.root)}
 
     def _evaluate_hub(self, params, entry):

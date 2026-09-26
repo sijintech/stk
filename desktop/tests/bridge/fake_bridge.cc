@@ -35,6 +35,8 @@
  *   --client-params A,B   parameters of the client stage (default "view"): changing only these
  *                         re-runs the view nodes; others re-run the data nodes; a (params, step)
  *                         seen before evaluates nothing (the bridge's node cache)
+ *   --hub-policies JSON  map of connection ids to hub.policy documents (null returns an error)
+ *   --policy-delay-ms MS delay hub.policy responses, for cancellation and source-switch tests
  * graph.progress events (node.started / node.finished) precede each answer; `stats` also counts
  * evaluations, cancels and probes. colormaps.list returns two 256-entry ramps; probe answers a
  * fixed sample at the requested position.
@@ -87,6 +89,9 @@ bool g_ignore_eof = false;
 std::string g_log_text;
 int g_log_interval = 15;
 std::string g_jobs_dir;
+Json g_hub_policies;
+int g_policy_delay_ms = 0;
+Json g_policy_requests = Json::array(), g_evaluate_requests = Json::array();
 std::atomic<int> g_unsubscribes{0};
 std::atomic<bool> g_stop{false};
 
@@ -476,6 +481,12 @@ int main(int argc, char **argv)
     else if (a == "--eval-delay-ms") {
       g_eval_delay_ms = std::atoi(next().c_str());
     }
+    else if (a == "--hub-policies") {
+      g_hub_policies = stk::io::parse_json(next());
+    }
+    else if (a == "--policy-delay-ms") {
+      g_policy_delay_ms = std::atoi(next().c_str());
+    }
     else if (a == "--client-params") {
       g_client_params.clear();
       std::stringstream ss(next());
@@ -530,12 +541,39 @@ int main(int argc, char **argv)
     if (!g_die_once_on.empty() && method == g_die_once_on && once("die:" + method)) {
       _exit(1);
     }
+    if (method == "hub.policy" && g_hub_policies.is_object()) {
+      const std::string connection = params.value("connection", "");
+      g_policy_requests.push_back(connection);
+      const Json policy = g_hub_policies.value(connection, Json());
+      auto reply = [id, policy] {
+        if (policy.is_object()) {
+          respond(id, Json{{"policy", policy}});
+        }
+        else {
+          respond_error(id, "unavailable", "Policy unavailable");
+        }
+      };
+      if (g_policy_delay_ms > 0) {
+        threads.emplace_back([reply] {
+          std::this_thread::sleep_for(std::chrono::milliseconds(g_policy_delay_ms));
+          reply();
+        });
+      }
+      else {
+        reply();
+      }
+      continue;
+    }
     if (!g_jobs_dir.empty() && fake_jobs::handle(id, method, params)) {
       continue;
     }
     if (method == "hello") {
       if (g_hello_delay_once > 0 && once("hello-delay")) {
         std::this_thread::sleep_for(std::chrono::milliseconds(g_hello_delay_once));
+      }
+      Json methods = Json::array({"hello", "echo", "logs.subscribe", "unsubscribe"});
+      if (g_hub_policies.is_object()) {
+        methods.push_back("hub.policy");
       }
       respond(id, Json{{"protocol", 1},
                        {"server",
@@ -544,7 +582,7 @@ int main(int argc, char **argv)
                          {"python", "none"},
                          {"platform", "test"},
                          {"pid", int64_t(getpid())}}},
-                       {"methods", Json::array({"hello", "echo", "logs.subscribe", "unsubscribe"})},
+                       {"methods", methods},
                        {"events", Json::array({"logs.chunk", "logs.end"})},
                        {"limits",
                         {{"max_line_bytes", g_max_line},
@@ -663,7 +701,9 @@ int main(int argc, char **argv)
       respond(id, Json{{"unsubscribes", g_unsubscribes.load()},
                        {"evaluations", g_evaluations.load()},
                        {"cancels", g_cancels.load()},
-                       {"probes", g_probes.load()}});
+                       {"probes", g_probes.load()},
+                       {"policy_requests", g_policy_requests},
+                       {"evaluate_requests", g_evaluate_requests}});
     }
     else if (method == "graph.presets" && !g_presets_dir.empty()) {
       respond(id, graph_presets());
@@ -676,6 +716,7 @@ int main(int argc, char **argv)
     }
     else if (method == "graph.evaluate" && !g_payload_dir.empty()) {
       g_evaluations++;
+      g_evaluate_requests.push_back(params);
       const std::string eval_id = params.value("eval_id", "");
       Json result;
       try {

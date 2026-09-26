@@ -10,7 +10,6 @@
 #include <filesystem>
 #include <set>
 
-#include "stk/app/jobs_state.hh"
 #include "stk/bridge/client.hh"
 #include "stk/core/paths.hh"
 #include "stk/io/blob_cache.hh"
@@ -314,6 +313,7 @@ struct ViewerState::Impl {
     std::string eval_id, key, reason;
     Json params;
     double t0 = 0.0;
+    bridge::Future<bridge::HubPolicy> policy_future;
     bridge::Future<bridge::EvaluateResult> future;
   };
   std::optional<Running> main, prefetch;
@@ -756,16 +756,20 @@ struct ViewerState::Impl {
   void cancel_prefetch()
   {
     if (prefetch) {
-      prefetch->future.cancel();
+      Running run = std::move(*prefetch);
       prefetch.reset();
+      run.policy_future.cancel();
+      run.future.cancel();
     }
   }
 
   void cancel_main()
   {
     if (main) {
-      main->future.cancel();
+      Running run = std::move(*main);
       main.reset();
+      run.policy_future.cancel();
+      run.future.cancel();
       cancelled++;
       progress.running = false;
     }
@@ -839,6 +843,42 @@ struct ViewerState::Impl {
     char buf[64];
     std::snprintf(buf, sizeof(buf), "desktop-%06llx-%llu", session, (unsigned long long)++seq);
     return buf;
+  }
+
+  Running *running(const std::string &eval_id)
+  {
+    if (main && main->eval_id == eval_id) {
+      return &*main;
+    }
+    return prefetch && prefetch->eval_id == eval_id ? &*prefetch : nullptr;
+  }
+
+  void submit_eval(const bridge::EvaluateParams &ep)
+  {
+    Running *run = running(ep.eval_id);
+    if (!run) {
+      return; /* cancelled or superseded while looking up the source hub's policy */
+    }
+    bridge::Client *c = client();
+    if (!c) {
+      on_done(ep.eval_id, bridge::Error::make(bridge::ErrorCode::Unavailable,
+                                            std::string(store.tr("viewer.error.no_bridge"))));
+      return;
+    }
+    std::weak_ptr<int> weak = alive;
+    const std::string eval_id = ep.eval_id;
+    bridge::CallOptions call;
+    call.timeout_s = 3600.0;
+    run->future = c->graph_evaluate(ep, [this, weak, eval_id](const bridge::GraphProgress &p) {
+      if (!weak.expired()) {
+        on_graph_progress(eval_id, p);
+      }
+    }, call);
+    run->future.then([this, weak, eval_id](bridge::Result<bridge::EvaluateResult> r) {
+      if (!weak.expired()) {
+        on_done(eval_id, std::move(r));
+      }
+    });
   }
 
   /**
@@ -918,13 +958,6 @@ struct ViewerState::Impl {
       if (source.hub()) {
         ep.mode = "hub";
         ep.target.node = source.node;
-        /* Desktop auto-run (bridge spec §7.1): the hub runs a desktop device's evaluation without
-         * review only when the expected transfer, budget.max_output_bytes, is within its cap. */
-        const JobsState &jobs = store.jobs();
-        const auto &policy = jobs.policy();
-        if (jobs.active_id() == source.connection && policy && policy->desktop_auto && policy->desktop_auto_bytes > 0) {
-          request["budget"] = Json::object({{"max_output_bytes", policy->desktop_auto_bytes}});
-        }
       }
     }
     ep.request = std::move(request);
@@ -934,45 +967,50 @@ struct ViewerState::Impl {
     run.reason = reason;
     run.params = params;
     run.t0 = now();
-    std::weak_ptr<int> weak = alive;
     const std::string eval_id = ep.eval_id;
-    std::function<void(const bridge::GraphProgress &)> on_progress;
-    if (!is_prefetch) {
-      on_progress = [this, weak, eval_id](const bridge::GraphProgress &p) {
-        if (!weak.expired()) {
-          on_graph_progress(eval_id, p);
-        }
-      };
-    }
-    bridge::CallOptions call;
-    call.timeout_s = 3600.0;
-    run.future = c->graph_evaluate(ep, std::move(on_progress), call);
     started++;
     if (is_prefetch) {
       cancel_prefetch();
       prefetch = std::move(run);
-      prefetch->future.then([this, weak, eval_id](bridge::Result<bridge::EvaluateResult> r) {
-        if (!weak.expired()) {
-          on_done(eval_id, std::move(r));
-        }
-      });
-      return;
     }
-    cancel_main();
-    main = std::move(run);
-    progress = EvalProgress{};
-    progress.running = true;
-    progress.eval_id = eval_id;
-    progress.reason = reason;
-    progress.expected = expected_nodes();
-    progress.started_at = main->t0;
-    eval_error.clear();
-    main->future.then([this, weak, eval_id](bridge::Result<bridge::EvaluateResult> r) {
-      if (!weak.expired()) {
-        on_done(eval_id, std::move(r));
-      }
-    });
-    changed();
+    else {
+      cancel_main();
+      main = std::move(run);
+      progress = EvalProgress{};
+      progress.running = true;
+      progress.eval_id = eval_id;
+      progress.reason = reason;
+      progress.expected = expected_nodes();
+      progress.started_at = main->t0;
+      eval_error.clear();
+    }
+    if (ep.mode == "hub" && c->hello_info() && c->hello_info()->has_method("hub.policy")) {
+      /* Desktop auto-run (bridge spec §7.1) needs the viewed result's hub cap, independently of
+       * the Jobs selection. Query before submission, including when that hub was never active. */
+      std::weak_ptr<int> weak = alive;
+      Running *pending = running(eval_id);
+      pending->policy_future = c->hub_policy(ep.target.connection);
+      pending->policy_future.then([this, weak, c, ep = std::move(ep)](bridge::Result<bridge::HubPolicy> r) mutable {
+        if (weak.expired() || !running(ep.eval_id)) {
+          return;
+        }
+        if (client() != c || (!r && r.error().code == bridge::ErrorCode::Cancelled)) {
+          on_done(ep.eval_id, bridge::Error::make(bridge::ErrorCode::Cancelled, "Evaluation cancelled"));
+          return;
+        }
+        if (r && r.value().desktop_auto && r.value().desktop_auto_bytes > 0) {
+          ep.request["budget"] = Json::object({{"max_output_bytes", r.value().desktop_auto_bytes}});
+        }
+        /* An unavailable/unsupported policy keeps the ordinary unbudgeted review path. */
+        submit_eval(ep);
+      });
+    }
+    else {
+      submit_eval(ep);
+    }
+    if (!is_prefetch) {
+      changed();
+    }
   }
 
   void on_graph_progress(const std::string &eval_id, const bridge::GraphProgress &p)
@@ -1404,6 +1442,7 @@ ViewerState::~ViewerState()
     impl_->alive.reset();
     impl_->cancel_prefetch();
     if (impl_->main) {
+      impl_->main->policy_future.cancel();
       impl_->main->future.cancel();
     }
     impl_->probe_future.cancel();

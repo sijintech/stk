@@ -323,6 +323,79 @@ std::vector<std::array<double, 4>> volume_color_points(const Colormap *colormap,
   return points;
 }
 
+std::optional<LayerScalars> layer_scalars(const io::Payload &payload,
+                                         const Json &layer,
+                                         const Json &spec)
+{
+  if (io::get_string(spec, "by") != "attribute") {
+    return std::nullopt;
+  }
+  const Json *attr = own_attribute(layer, get(spec, "attribute"));
+  if (!attr) {
+    return std::nullopt;
+  }
+  LayerScalars result;
+  result.association = io::get_string(*attr, "association", "point");
+  const std::string accessor_id = io::get_string(*attr, "accessor");
+  const io::PayloadAccessor &accessor = payload.accessor(accessor_id);
+  const Json *colormap_id = get(spec, "colormap");
+  if (!colormap_id || colormap_id->is_null()) {
+    colormap_id = get(*attr, "palette");
+  }
+  if (colormap_id && colormap_id->is_string()) {
+    result.colormap = colormap_id->get<std::string>();
+  }
+  const Json *cm = result.colormap ? payload.colormap(*result.colormap) : nullptr;
+  const Json *categorical = cm ? get(*cm, "categorical") : nullptr;
+  result.categorical = io::get_bool(*attr, "categorical", false) ||
+                       (categorical && io::py_truthy(*categorical));
+  const Json *component = get(spec, "component");
+  const Json null_component;
+  std::vector<double> raw;
+  if (accessor.normalized && !result.categorical) {
+    const std::vector<float> floats = payload.floats(accessor_id);
+    raw.assign(floats.begin(), floats.end());
+  }
+  else {
+    raw = payload.doubles(accessor_id);
+  }
+  if (result.categorical) {
+    const Json first = (component && component->is_number()) ? *component : Json(0);
+    result.values = scalar_values(raw, int(accessor.components), first);
+    return result;
+  }
+  result.values = scalar_values(raw, int(accessor.components), component ? *component : null_component);
+  result.range = finite_pair(get(spec, "range"));
+  if (!result.range) {
+    result.range = finite_pair(get(*attr, "range"));
+  }
+  if (!result.range) {
+    /* The accessor min/max hint of the chosen component (scalar use only). */
+    const bool scalar_component = accessor.components == 1 || (component && component->is_number());
+    const Json *accessor_json = nullptr;
+    for (const Json &a : payload.manifest["accessors"]) {
+      if (io::get_string(a, "id") == accessor_id) {
+        accessor_json = &a;
+      }
+    }
+    const double wanted = component && component->is_number() ? component->get<double>() : 0.0;
+    const int c = wanted >= 0 && wanted < 1e6 ? int(wanted) : -1;
+    if (scalar_component && accessor_json) {
+      const std::vector<double> min = json_numbers(get(*accessor_json, "min"));
+      const std::vector<double> max = json_numbers(get(*accessor_json, "max"));
+      if (c >= 0 && size_t(c) < min.size() && size_t(c) < max.size() && std::isfinite(min[size_t(c)]) &&
+          std::isfinite(max[size_t(c)]))
+      {
+        result.range = std::array<double, 2>{min[size_t(c)], max[size_t(c)]};
+      }
+    }
+  }
+  if (!result.range) {
+    result.range = finite_range(result.values);
+  }
+  return result;
+}
+
 ColorResult layer_colors(const io::Payload &payload,
                          const Json &layer,
                          const Json &spec,
@@ -387,35 +460,21 @@ ColorResult layer_colors(const io::Payload &payload,
     }
     return result;
   }
-  const Json *name = get(spec, "attribute");
-  const Json *attr = own_attribute(layer, name);
-  if (!attr) {
+  const auto scalars = layer_scalars(payload, layer, spec);
+  if (!scalars) {
     result.warnings.push_back("layer " + layer_id + " has no colour attribute");
     return result;
   }
-  if (io::get_string(*attr, "association", "point") != association) {
+  if (scalars->association != association) {
     result.warnings.push_back("layer " + layer_id + ": the colour attribute association differs from the layer's");
   }
-  const std::string accessor_id = io::get_string(*attr, "accessor");
-  const io::PayloadAccessor &accessor = payload.accessor(accessor_id);
   std::optional<Colormap> cm;
-  const Json *colormap_id = get(spec, "colormap");
-  if (!colormap_id || colormap_id->is_null()) {
-    colormap_id = get(*attr, "palette");
+  result.colormap = scalars->colormap;
+  if (scalars->colormap) {
+    cm = resolve_colormap(payload, *scalars->colormap);
   }
-  if (colormap_id && colormap_id->is_string()) {
-    cm = resolve_colormap(payload, colormap_id->get_ref<const std::string &>());
-    result.colormap = colormap_id->get<std::string>();
-  }
-  const Json *attr_categorical = get(*attr, "categorical");
-  const bool categorical = (attr_categorical && attr_categorical->is_boolean() && attr_categorical->get<bool>()) ||
-                           (cm && cm->categorical);
-  const Json *component = get(spec, "component");
-  const Json null_component;
-  if (categorical) {
-    const std::vector<double> raw = payload.doubles(accessor_id);
-    const Json first = (component && component->is_number()) ? *component : Json(0);
-    const std::vector<double> values = scalar_values(raw, int(accessor.components), first);
+  const std::vector<double> &values = scalars->values;
+  if (scalars->categorical) {
     const CategoricalColormap *palette = cm && cm->categorical ? &*cm->categorical : nullptr;
     if (!palette) {
       result.warnings.push_back("layer " + layer_id + ": categorical attribute without a palette; using stk:categorical");
@@ -443,44 +502,7 @@ ColorResult layer_colors(const io::Payload &payload,
     result.warnings.push_back("layer " + layer_id + " names no continuous colormap; using grey");
     lut = grey_colormap();
   }
-  std::vector<double> raw;
-  if (accessor.normalized) {
-    const std::vector<float> floats = payload.floats(accessor_id);
-    raw.assign(floats.begin(), floats.end());
-  }
-  else {
-    raw = payload.doubles(accessor_id);
-  }
-  const std::vector<double> values =
-      scalar_values(raw, int(accessor.components), component ? *component : null_component);
-  std::optional<std::array<double, 2>> range = finite_pair(get(spec, "range"));
-  if (!range) {
-    range = finite_pair(get(*attr, "range"));
-  }
-  if (!range) {
-    /* The accessor min/max hint of the chosen component (scalar use only). */
-    const bool scalar_component = accessor.components == 1 || (component && component->is_number());
-    const Json *accessor_json = nullptr;
-    for (const Json &a : payload.manifest["accessors"]) {
-      if (io::get_string(a, "id") == accessor_id) {
-        accessor_json = &a;
-      }
-    }
-    const double wanted = component && component->is_number() ? component->get<double>() : 0.0;
-    const int c = wanted >= 0 && wanted < 1e6 ? int(wanted) : -1;
-    if (scalar_component && accessor_json) {
-      const std::vector<double> min = json_numbers(get(*accessor_json, "min"));
-      const std::vector<double> max = json_numbers(get(*accessor_json, "max"));
-      if (c >= 0 && size_t(c) < min.size() && size_t(c) < max.size() && std::isfinite(min[size_t(c)]) &&
-          std::isfinite(max[size_t(c)]))
-      {
-        range = std::array<double, 2>{min[size_t(c)], max[size_t(c)]};
-      }
-    }
-  }
-  if (!range) {
-    range = finite_range(values);
-  }
+  const auto &range = scalars->range;
   result.colors.resize(count);
   for (size_t i = 0; i < count; i++) {
     result.colors[i] = lut.map(i < values.size() ? values[i] : std::numeric_limits<double>::quiet_NaN(),

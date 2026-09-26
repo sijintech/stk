@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include "stk/app/jobs_state.hh"
 #include "stk/io/payload.hh"
 #include "stk/viewer/camera.hh"
 #include "viewer_support.hh"
@@ -37,7 +38,133 @@ void open_run(FakeViewer &f)
       << f.vs->eval_error();
 }
 
+app::OpenResultRequest task_source(const std::string &connection)
+{
+  app::OpenResultRequest request;
+  request.connection = connection;
+  request.node = "node1";
+  request.task_id = "task1";
+  request.preset = "muferro-domains";
+  return request;
+}
+
+void open_task(FakeViewer &f, const std::string &connection)
+{
+  f.vs->prefetch_neighbours = false;
+  f.vs->set_metadata(repo_presets(), repo_catalog());
+  ASSERT_TRUE(f.vs->open(task_source(connection)));
+  ASSERT_TRUE(f.pump_until([&] { return f.vs->payload() && !f.vs->evaluating(); })) << f.vs->eval_error();
+}
+
 }  // namespace
+
+TEST(ViewerFake, HubBudgetUsesTheSourceConnectionWithoutAJobsSelection)
+{
+  const Json policies = {{"hub:source", {{"desktop_auto", true}, {"desktop_auto_bytes", 12345678}}}};
+  FakeViewer f({"--hub-policies", policies.dump()});
+  EXPECT_TRUE(f.store.jobs().active_id().empty());
+  open_task(f, "hub:source");
+  const Json stats = f.stats();
+  EXPECT_EQ(stats["policy_requests"], Json::array({"hub:source"}));
+  ASSERT_EQ(stats["evaluate_requests"].size(), 1u);
+  const Json &evaluation = stats["evaluate_requests"][0];
+  EXPECT_EQ(evaluation["connection"], "hub:source");
+  EXPECT_EQ(evaluation["node"], "node1");
+  EXPECT_EQ(evaluation["request"]["budget"]["max_output_bytes"], 12345678);
+}
+
+TEST(ViewerFake, HubBudgetDoesNotUseAnotherJobsConnectionsPolicy)
+{
+  const Json policies = {{"hub:source", {{"desktop_auto", true}, {"desktop_auto_bytes", 12345678}}},
+                         {"hub:other", {{"desktop_auto", true}, {"desktop_auto_bytes", 98765432}}}};
+  FakeViewer f({"--hub-policies", policies.dump()});
+  app::JobsState &jobs = f.store.jobs();
+  jobs.sync();
+  f.stats(); /* Drain the initial connections.list before selecting our scripted hub. */
+  jobs.select_connection("hub:other");
+  ASSERT_TRUE(f.pump_until([&] { return jobs.policy().has_value(); }));
+  EXPECT_EQ(jobs.policy()->desktop_auto_bytes, 98765432);
+  open_task(f, "hub:source");
+  const Json stats = f.stats();
+  ASSERT_EQ(stats["evaluate_requests"].size(), 1u);
+  EXPECT_EQ(stats["evaluate_requests"][0]["request"]["budget"]["max_output_bytes"], 12345678);
+  EXPECT_EQ(jobs.active_id(), "hub:other");
+  jobs.attach(nullptr);
+}
+
+TEST(ViewerFake, HubBudgetIsOmittedWhenAutoRunIsDisabledOrPolicyUnavailable)
+{
+  const std::vector<Json> policies = {
+      {{"desktop_auto", false}, {"desktop_auto_bytes", 12345678}},
+      {{"desktop_auto", true}, {"desktop_auto_bytes", 0}},
+      {{"desktop_auto", true}, {"desktop_auto_bytes", -1}},
+      Json()};
+  for (const Json &policy : policies) {
+    SCOPED_TRACE(policy.dump());
+    FakeViewer f({"--hub-policies", Json{{"hub:source", policy}}.dump()});
+    open_task(f, "hub:source");
+    const Json stats = f.stats();
+    EXPECT_EQ(stats["policy_requests"], Json::array({"hub:source"}));
+    ASSERT_EQ(stats["evaluate_requests"].size(), 1u);
+    EXPECT_FALSE(stats["evaluate_requests"][0]["request"].contains("budget"));
+  }
+}
+
+TEST(ViewerFake, HubWithoutPolicySupportKeepsTheUnbudgetedEvaluation)
+{
+  FakeViewer f;
+  open_task(f, "hub:source");
+  const Json stats = f.stats();
+  EXPECT_TRUE(stats["policy_requests"].empty());
+  ASSERT_EQ(stats["evaluate_requests"].size(), 1u);
+  EXPECT_FALSE(stats["evaluate_requests"][0]["request"].contains("budget"));
+}
+
+TEST(ViewerFake, RuntimeEvaluationDoesNotRequestAHubPolicy)
+{
+  FakeViewer f({"--hub-policies", "{}"});
+  open_task(f, "runtime:source");
+  const Json stats = f.stats();
+  EXPECT_TRUE(stats["policy_requests"].empty());
+  ASSERT_EQ(stats["evaluate_requests"].size(), 1u);
+  EXPECT_FALSE(stats["evaluate_requests"][0]["request"].contains("budget"));
+}
+
+TEST(ViewerFake, SwitchingSourcesCancelsThePendingHubPolicyEvaluation)
+{
+  const Json policies = {{"hub:first", {{"desktop_auto", true}, {"desktop_auto_bytes", 1111}}},
+                         {"hub:second", {{"desktop_auto", true}, {"desktop_auto_bytes", 2222}}}};
+  FakeViewer f({"--hub-policies", policies.dump(), "--policy-delay-ms", "150"});
+  f.vs->prefetch_neighbours = false;
+  f.vs->set_metadata(repo_presets(), repo_catalog());
+  ASSERT_TRUE(f.vs->open(task_source("hub:first")));
+  ASSERT_TRUE(f.vs->evaluating());
+  const Json pending = f.stats();
+  EXPECT_EQ(pending["policy_requests"], Json::array({"hub:first"}));
+  EXPECT_TRUE(pending["evaluate_requests"].empty());
+  ASSERT_TRUE(f.vs->open(task_source("hub:second")));
+  ASSERT_TRUE(f.pump_until([&] { return f.vs->payload() && !f.vs->evaluating(); }));
+  const Json stats = f.stats();
+  EXPECT_EQ(stats["policy_requests"], Json::array({"hub:first", "hub:second"}));
+  ASSERT_EQ(stats["evaluate_requests"].size(), 1u);
+  EXPECT_EQ(stats["evaluate_requests"][0]["connection"], "hub:second");
+  EXPECT_EQ(stats["evaluate_requests"][0]["request"]["budget"]["max_output_bytes"], 2222);
+}
+
+TEST(ViewerFake, HubPrefetchUsesTheSourceConnectionsBudget)
+{
+  const Json policies = {{"hub:source", {{"desktop_auto", true}, {"desktop_auto_bytes", 12345678}}}};
+  FakeViewer f({"--hub-policies", policies.dump()});
+  f.vs->set_metadata(repo_presets(), repo_catalog());
+  ASSERT_TRUE(f.vs->open(task_source("hub:source")));
+  ASSERT_TRUE(f.pump_until([&] { return f.vs->prefetched_count() >= 1; }));
+  const Json stats = f.stats();
+  ASSERT_EQ(stats["evaluate_requests"].size(), 2u);
+  EXPECT_EQ(stats["policy_requests"], Json::array({"hub:source", "hub:source"}));
+  for (const Json &evaluation : stats["evaluate_requests"]) {
+    EXPECT_EQ(evaluation["request"]["budget"]["max_output_bytes"], 12345678);
+  }
+}
 
 TEST(ViewerFake, MetadataAndOpeningARunFolderEvaluates)
 {

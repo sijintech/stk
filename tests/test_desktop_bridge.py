@@ -614,6 +614,8 @@ def test_local_graph_evaluate_on_a_fake_domain_run(inproc, tmp_path):
     params = {"eval_id": "eval-1", "mode": "local", "request": request,
               "local_bindings": {"run": str(tmp_path / "run")}}
     evaluated = harness.call("graph.evaluate", params, timeout=180)
+    worker = harness.bridge.graphs.worker._child.process
+    assert worker.pid != os.getpid() and worker.poll() is None
     result = evaluated["result"]
     assert result["schema"] == "stk.graph-result/1" and result["parameters"]["step"]["value"] == 2
     blob_dir = Path(evaluated["blob_dir"])
@@ -634,6 +636,7 @@ def test_local_graph_evaluate_on_a_fake_domain_run(inproc, tmp_path):
     again = harness.call("graph.evaluate", {**params, "eval_id": "eval-2",
                                             "request": {**request, "parameters": {"step": "latest", "view": "+x"}}})
     assert "polar" not in again["result"]["evaluated"] and "domains" not in again["result"]["evaluated"]
+    assert harness.bridge.graphs.worker._child.process is worker
     # Probe the picked surface: the original Polar values at a grid point (grid-index coordinates).
     layer = next(item for item in manifest["layers"] if item["id"] == "surface_layer")
     probe = harness.call("probe", {"preset": "muferro-domains", "pick": layer["pick"]["probe"],
@@ -650,6 +653,7 @@ def test_local_graph_evaluate_on_a_fake_domain_run(inproc, tmp_path):
                                              "local_bindings": {}})
     assert error["code"] == "invalid_params"
     harness.close()
+    assert worker.poll() is not None
 
 
 def test_local_start_can_initialize_the_local_runtime(inproc, bridge_env, monkeypatch):
