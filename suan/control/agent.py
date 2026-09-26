@@ -5,8 +5,16 @@ lane (1-2 evaluations at a time) for ``graph.evaluate``. An action that is
 still running when the hub dispatches it again (for example after a
 reconnect) is not started twice; its result goes out on whichever connection
 is open when it finishes. Graph outputs (payload buffers, images, plots)
-travel to the hub's blob store over outbound HTTPS (``HEAD`` before ``PUT``);
-the hub-agent WebSocket carries no new message types.
+travel to the hub's blob store over outbound HTTPS (``HEAD`` before ``PUT``).
+
+Since WP11 the hub may also send ``{"type": "read", "id", "kind", "payload"}``: a
+review-free read (logs, events, artifacts, file chunks, workspace inputs) that
+the agent answers with ``{"type": "read_result", "id", "result" | "error"}``
+without an action row; the agent advertises it as the ``read`` feature, so a hub
+only sends it to agents that understand it. ``workspace.import`` fetches client
+uploads from the hub (``GET /api/v1/actions/<id>/blobs/<sha256>``, only blobs of
+that queued action), verifies their sha256 on the node and uploads them into the
+Runtime workspace. ``graph.cancel`` cancels a running or pending ``graph.evaluate``.
 """
 import asyncio
 import base64
@@ -14,6 +22,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import sys
 import threading
 import time
@@ -25,15 +34,22 @@ from suan.runtime.client import RuntimeClient
 from suan.runtime.common import atomic_json, read_json
 from suan.runtime.models import relative_path
 
+from .limits import FRAME_LIMIT, READ_QUEUE, READ_TIMEOUT
+
 # muFerro writes field frames as <Stem>.<kt:08d>.dat with stems of at most 8 characters.
 MUPRO_FRAME = re.compile(r"(?:^|/)([A-Za-z][A-Za-z0-9_]{0,7})\.(\d{8})\.dat$")
 # Operations this agent implements beyond the first release (advertised in the snapshot).
-FEATURES = ["graph.evaluate", "graph.meta", "task.events"]
+FEATURES = ["graph.evaluate", "graph.meta", "task.events", "graph.cancel", "read", "workspace.files",
+            "workspace.import"]
 # Pure reads: re-running them is harmless, so their results are not kept in the action cache.
-UNCACHED = {"task.events", "graph.meta"}
+UNCACHED = {"task.events", "graph.meta", "graph.cancel", "workspace.files"}
 GRAPH_KINDS = {"graph.evaluate"}
+# Kinds the hub may send as reads (no action row); the hub checks them with the action policy first.
+READ_KINDS = {"task.logs", "task.events", "task.artifacts", "file.read", "workspace.files"}
 RESULT_LIMIT = 12 * 1024 * 1024
 FAST_LANE = 4
+READ_LANE = 4
+CANCELLED_BY_CLIENT = "Cancelled by a client (graph.cancel)"
 
 
 def endpoint(url, websocket=False):
@@ -153,6 +169,36 @@ class BlobUploader:
         return digest
 
 
+class HubBlobSource:
+    """``blob_source`` of :class:`NodeAgent`: streams a ``workspace.import`` blob from the hub into a file.
+
+    Only blobs listed by a queued import action addressed to this node are served. At most ``size``
+    bytes are accepted; the agent verifies the sha256 of the staged file itself.
+    """
+
+    def __init__(self, control_url, token, *, timeout=300):
+        self.origin = endpoint(control_url)
+        self.token = token
+        self.timeout = timeout
+
+    def __call__(self, action_id, digest, target, size):
+        request = Request(f"{self.origin}/api/v1/actions/{action_id}/blobs/{digest}", method="GET",
+                          headers={"Authorization": "Bearer " + self.token})
+        opener = build_opener(ProxyHandler({}), _NoRedirect())
+        try:
+            response = opener.open(request, timeout=self.timeout)
+        except HTTPError as exc:
+            with exc:
+                raise BlobUploadError(f"The control hub refused the import blob (HTTP {exc.code})") from None
+        received = 0
+        with response, open(target, "wb") as stream:
+            for block in iter(lambda: response.read(1024 * 1024), b""):
+                received += len(block)
+                if received > size:
+                    raise ValueError("The hub sent more bytes than the import declares")
+                stream.write(block)
+
+
 def _graph_error(exc):
     """A readable, bounded message for a GraphError (issues first, then hints)."""
     text = exc.message
@@ -168,8 +214,12 @@ def _graph_error(exc):
 
 
 class NodeAgent:
-    def __init__(self, runtime, cache_dir, *, blob_sink=None, graph_workers=1):
+    def __init__(self, runtime, cache_dir, *, blob_sink=None, blob_source=None, graph_workers=1):
         self.runtime = runtime
+        self.blob_source = blob_source  # workspace.import: blob_source(action_id, sha256, target, size)
+        self._graph_tokens = {}         # graph.evaluate action id -> CancelToken while it evaluates
+        self._cancel_lock = threading.Lock()
+        self._reads = {}  # read id -> {"task", "arrived", "started"}
         self.cache = Path(cache_dir)
         self.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
         from suan.plot import ensure_mplconfigdir
@@ -204,6 +254,20 @@ class NodeAgent:
                 if cached["request"] != action:
                     raise ValueError("Action ID reused with a different request")
                 return cached["result"]
+        result = self._operation(identity, kind, p)
+        if cacheable:
+            atomic_json(self.cache / (identity + ".json"), {"request": action, "result": result})
+        return result
+
+    def read(self, kind, payload):
+        """A review-free read the hub forwards without an action row (never cached)."""
+        if kind not in READ_KINDS or not isinstance(payload, dict):
+            raise ValueError("Unknown read")
+        from .policy import validate_action
+        validate_action({"id": "0" * 32, "node_id": "0" * 32, "kind": kind, "payload": payload}, {})  # as the hub did
+        return self._operation(None, kind, payload)
+
+    def _operation(self, identity, kind, p):
         if kind == "workspace.create":
             result = self.runtime.create_workspace(p["name"], identity)
         elif kind == "task.submit":
@@ -222,8 +286,15 @@ class NodeAgent:
             result = self.task_events(p)
         elif kind == "file.read":
             query = urlencode({"path": relative_path(p["path"]), "offset": int(p.get("offset", 0)), "limit": 1024*1024})
-            data = self.runtime.request("GET", f"tasks/{p['task_id']}/file?{query}", binary=True)
+            route = f"tasks/{p['task_id']}/file" if "task_id" in p else f"workspaces/{p['workspace_id']}/file"
+            data = self.runtime.request("GET", f"{route}?{query}", binary=True)
             result = {"data": base64.b64encode(data).decode(), "offset": int(p.get("offset", 0))+len(data)}
+        elif kind == "workspace.files":
+            result = self.runtime.files(p["workspace_id"])
+        elif kind == "workspace.import":
+            result = self.workspace_import(identity, p)
+        elif kind == "graph.cancel":
+            result = self.graph_cancel(p)
         elif kind in {"view.build", "view.probe"}:
             from suan.visualization.scene import build_scene, load_grid, probe
             relative_path(p["path"])
@@ -255,16 +326,43 @@ class NodeAgent:
                 result = build_scene(grid, dataset_id=artifact["sha256"], **options)
                 result["manifest"]["source"] = {"task_id": p["task_id"], "path": p["path"]}
         elif kind == "graph.evaluate":
-            result = self.graph_evaluate(p)
+            result = self.graph_evaluate(p, identity)
         elif kind == "graph.meta":
             result = self.graph_meta(p)
         else:
             raise ValueError("Unknown node operation")
         if len(json.dumps(result)) > RESULT_LIMIT:
             raise ValueError("Result exceeds 12 MiB preview budget; reduce view resolution")
-        if cacheable:
-            atomic_json(self.cache / (identity + ".json"), {"request": action, "result": result})
         return result
+
+    # -- uploads ---------------------------------------------------------------------------------
+
+    def workspace_import(self, identity, p):
+        """Fetch each blob from the hub, verify it here, and upload it into the Runtime workspace.
+
+        Staged files are named by their index, never by the client's path; the path is checked
+        again here and by the Runtime, which keeps it inside the workspace inputs.
+        """
+        from .policy import validate_workspace_import
+        validate_workspace_import(p)
+        if self.blob_source is None:
+            raise ValueError("This agent has no blob channel to the control hub")
+        staging = self.cache / "imports" / identity
+        staging.mkdir(parents=True, exist_ok=True, mode=0o700)
+        imported = []
+        try:
+            for index, item in enumerate(p["files"]):
+                staged = staging / f"{index:05d}.part"
+                self.blob_source(identity, item["sha256"], staged, item["size"])
+                if _digest(staged) != (item["sha256"], item["size"]):
+                    raise ValueError(f"The bytes of {item['path']} do not match their sha256; nothing more was "
+                                     "imported")
+                meta = self.runtime.upload(p["workspace_id"], staged, item["path"])
+                imported.append({"path": meta["path"], "size": meta["size"], "sha256": meta["sha256"]})
+                staged.unlink()
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return {"workspace_id": p["workspace_id"], "files": imported}
 
     # -- graph and monitoring operations ---------------------------------------------------
 
@@ -280,8 +378,11 @@ class NodeAgent:
                 raise ValueError("This Runtime does not publish monitoring events; upgrade the node's STK Runtime") from None
             raise
 
-    def graph_evaluate(self, p):
-        from suan.graph.registry import GraphError
+    def _cancel_marker(self, identity):
+        return self.cache / "cancelled" / identity
+
+    def graph_evaluate(self, p, identity=None):
+        from suan.graph.registry import CancelToken, GraphError
         from suan.graph.resolve import RuntimeResolver
         from suan.graph.service import evaluate_request
         sink = self.blob_sink
@@ -291,10 +392,38 @@ class NodeAgent:
             raise ValueError("The control hub does not accept result blobs; upgrade the STK control service")
         root = self.cache / "graph"
         resolver = RuntimeResolver(self.runtime, root / "downloads")
+        token = CancelToken()
+        if identity is not None:
+            with self._cancel_lock:
+                self._graph_tokens[identity] = token
+                if self._cancel_marker(identity).exists():  # cancelled before it started (also across restarts)
+                    token.cancel(CANCELLED_BY_CLIENT)
         try:
-            return evaluate_request(p, resolver=resolver, cache_dir=root / "cache", blob_sink=sink)
+            return evaluate_request(p, resolver=resolver, cache_dir=root / "cache", blob_sink=sink, cancel=token)
         except GraphError as exc:
             raise ValueError(_graph_error(exc)) from None
+        finally:
+            if identity is not None:
+                with self._cancel_lock:
+                    if self._graph_tokens.get(identity) is token:
+                        self._graph_tokens.pop(identity)
+
+    def graph_cancel(self, p):
+        """Cancel a ``graph.evaluate`` action: running now, waiting for the graph lane, or not yet received."""
+        target = p["action_id"]
+        if len(target) != 32 or any(c not in "0123456789abcdef" for c in target):
+            raise ValueError("Invalid action ID")
+        with self._cancel_lock:
+            token = self._graph_tokens.get(target)
+            if token is not None:
+                token.cancel(CANCELLED_BY_CLIENT)
+                return {"cancelled": True, "running": True}
+            if (self.cache / (target + ".json")).exists():
+                return {"cancelled": False, "finished": True}
+            marker = self._cancel_marker(target)
+            marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            marker.touch()
+        return {"cancelled": True, "running": False}
 
     def graph_meta(self, p):
         from suan.graph.catalog import catalog_document, default_registry, list_presets
@@ -319,15 +448,18 @@ class NodeAgent:
 
     # -- connection --------------------------------------------------------------------------
 
-    def dispatch(self, action):
-        """Start one action unless it is already running (a re-dispatch after a reconnect)."""
-        identity = action.get("id") if isinstance(action, dict) else None
+    def _ensure_lanes(self):
         loop = asyncio.get_running_loop()
         if self._lanes is None or self._lanes["loop"] is not loop:
             # Lanes and in-flight tasks belong to one event loop (a new asyncio.run starts afresh).
             self._lanes = {"loop": loop, "fast": asyncio.Semaphore(FAST_LANE),
-                           "graph": asyncio.Semaphore(self.graph_workers)}
+                           "graph": asyncio.Semaphore(self.graph_workers), "read": asyncio.Semaphore(READ_LANE)}
             self._inflight = {}
+
+    def dispatch(self, action):
+        """Start one action unless it is already running (a re-dispatch after a reconnect)."""
+        identity = action.get("id") if isinstance(action, dict) else None
+        self._ensure_lanes()
         running = self._inflight.get(identity) if isinstance(identity, str) else None
         if not isinstance(identity, str) or (running is not None and not running.done()):
             return None
@@ -357,6 +489,52 @@ class NodeAgent:
         for root in sorted(roots, key=len, reverse=True):
             text = text.replace(root, "<agent cache>")
         return text[:2000]
+
+    def _accept_read(self, message, send):
+        """Queue one hub read, or answer at once when :data:`READ_QUEUE` reads are already held."""
+        self._ensure_lanes()
+        if len(self._reads) >= READ_QUEUE:
+            reply = {"type": "read_result", "id": message["id"], "error": "The node is busy with reads; retry"}
+            task = asyncio.create_task(self._reply(send, reply))
+        else:
+            entry = {"arrived": time.monotonic(), "started": False}
+            task = asyncio.create_task(self._read(message, send, entry))
+            entry["task"] = task
+            self._reads[message["id"]] = entry
+            task.add_done_callback(lambda _, key=message["id"], item=entry: self._reads.pop(key, None)
+                                   if self._reads.get(key) is item else None)
+        return task
+
+    def _cancel_read(self, read_id):
+        """The hub gave up on a read (``read_cancel``): drop it unless it already started."""
+        entry = self._reads.get(read_id) if isinstance(read_id, str) else None
+        if entry is not None and not entry["started"]:
+            entry["task"].cancel()
+
+    @staticmethod
+    async def _reply(send, reply):
+        try:
+            await send(reply)
+        except Exception:
+            pass
+
+    async def _read(self, message, send, entry):
+        """Answer one hub read (``type: read``) on the read lane; reads the hub gave up on are skipped."""
+        async with self._lanes["read"]:
+            if time.monotonic() - entry["arrived"] > READ_TIMEOUT:
+                return  # the hub answered 504 already; a slow Runtime must not build a backlog
+            entry["started"] = True
+            try:
+                result = await asyncio.to_thread(self.read, message.get("kind"), message.get("payload"))
+                if len(json.dumps(result)) > RESULT_LIMIT:
+                    raise ValueError("Result exceeds 12 MiB; read less at a time")
+                reply = {"type": "read_result", "id": message["id"], "result": result}
+            except Exception as exc:
+                reply = {"type": "read_result", "id": message["id"], "error": self.public_error(exc)}
+        try:
+            await send(reply)
+        except Exception:
+            pass  # the connection is closing; the client retries the read
 
     async def _perform(self, action, lane):
         async with lane:
@@ -398,6 +576,10 @@ class NodeAgent:
                 data = json.loads(raw)
                 if data.get("type") == "action" and isinstance(data.get("action"), dict):
                     self.dispatch(data["action"])
+                elif data.get("type") == "read" and isinstance(data.get("id"), str):
+                    self._accept_read(data, send)
+                elif data.get("type") == "read_cancel":
+                    self._cancel_read(data.get("id"))
         finally:
             if self._send is send:
                 self._send = None
@@ -409,6 +591,8 @@ class NodeAgent:
         url = endpoint(control_url, websocket=True)
         if self.blob_sink is None:
             self.blob_sink = BlobUploader(control_url, token)
+        if self.blob_source is None:
+            self.blob_source = HubBlobSource(control_url, token)
         delay = 1
         while True:
             try:
@@ -418,7 +602,7 @@ class NodeAgent:
                     if self.hub_features is None:
                         self.hub_features = set()  # unknown hub: no blob uploads until a health check succeeds
                 async with connect(url, additional_headers={"Authorization": "Bearer " + token},
-                                   max_size=16*1024*1024, proxy=None) as ws:
+                                   max_size=FRAME_LIMIT, proxy=None) as ws:
                     delay = 1
                     await self.serve(ws)
             except Exception as exc:

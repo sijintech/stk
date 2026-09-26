@@ -16,7 +16,7 @@ packages = [
     { include = "stk_data", from = "toolkits/smesh/src" },
     { include = "toolkits" },
 ]
-exclude = ["toolkits/cpp/**", "toolkits/**/tests/**", "toolkits/**/test/**", "**/__pycache__/**", "**/*.pyc"]
+exclude = ["desktop/**", "toolkits/cpp/**", "toolkits/**/tests/**", "toolkits/**/test/**", "**/__pycache__/**", "**/*.pyc"]
 include = [
     { path = "docs/runtime*.md", format = "sdist" },
     { path = "docs/visualization.md", format = "sdist" },
@@ -25,7 +25,6 @@ include = [
     { path = "examples/runtime", format = "sdist" },
     { path = "deploy/systemd", format = "sdist" },
     { path = "tests", format = "sdist" },
-    { path = "blender", format = "sdist" },
 ]
 
 [tool.poetry.dependencies]
@@ -99,8 +98,6 @@ suan = "suan.cli.main:main"
 suan-gui = "suan.gui.launcher:main"
 suan-control = "suan.control.cli:control"
 suan-node = "suan.control.cli:node"
-suan-blender = "suan.blender_client.launcher:main"
-suan-workbench = "suan.blender_client.launcher:main"
 suan-synorder-node = "suan.runtime.synorder_node:main"
 build-app = "suan.gui.pkg_tools.builder:main"
 extract-deps = "suan.gui.pkg_tools.dependencies:main"

@@ -1,6 +1,11 @@
 // stk.payload/2 decoder: manifest validation, buffer resolution (hub blobs by sha256 or .stkp chunks),
 // hash verification, typed-array accessor views. See docs/specs/stk-render-payload-v2.md (§3, §9, §10).
 // Pure TypeScript without DOM or vtk.js imports so it can be unit-tested with Node.
+//
+// Validation is a port of suan/render/payload.py _Validator (the reference): the same checks, so the web,
+// Python and the desktop decoder (desktop/engine/lib/stk_io) accept and reject the same payloads. Checks that
+// need buffer data (finite positions, index ranges, polyline offsets) run once the buffers are loaded, so an
+// invalid manifest is rejected before anything is downloaded.
 
 export const PAYLOAD_SCHEMA = 'stk.payload/2';
 export type Vec3 = [number, number, number];
@@ -45,22 +50,36 @@ export interface PayloadManifest {schema: string, source?: any, render_origin: V
 
 export const LAYER_TYPES = new Set(['triangles', 'slice_image', 'lines', 'points', 'instances', 'volume', 'overlay']);
 export const OVERLAY_KINDS = new Set(['scalar_bar', 'legend', 'orientation_legend', 'text', 'axes_triad']);
+export const GLYPH_SHAPES = new Set(['arrow', 'cone', 'sphere', 'line', 'cube']);
 export const ORIENTATION_HSL = 'stk:orientation-hsl';
+/** Ids that would address the prototype chain when used as object keys (spec §10). */
+export const RESERVED_IDS = new Set(['__proto__', 'constructor', 'prototype']);
+/** Scalar-bar label formats (spec §6.7); JavaScript's `$` matches only at the very end. */
+export const LABEL_FORMAT = /^[+\- ]?#?0?(?:[1-9][0-9]?)?,?(?:(?:\.[0-9]{1,2})?[eEfFgG%]?|d)$/;
 
 export class PayloadError extends Error {
   problems: string[];
-  constructor(problems: string[]) {
+  /** JSON pointer of the first problem ('' for the file or the whole manifest). */
+  path: string;
+  constructor(problems: string[], path = '') {
     super(`渲染数据包无效：${problems.slice(0, 4).join('；')}${problems.length > 4 ? `（另有 ${problems.length - 4} 项）` : ''}`);
     this.name = 'PayloadError';
     this.problems = problems;
+    this.path = path;
   }
 }
 
+/** A layer that clients skip (spec §10): an unknown type or overlay kind, or overlay presentation members of a wrong type. */
+export interface PayloadWarning {path: string, layer: string, message: string}
+
 export interface LoadedPayload {
   manifest: PayloadManifest,
-  /** Layers of known types in draw order (unknown types are skipped per spec §1). */
+  /** Drawn layers in draw order (skipped layers left out, spec §1, §10). */
   layers: LayerSpec[],
+  /** Human-readable warnings (skipped layers, unverified hashes). */
   warnings: string[],
+  /** Skipped layers with their JSON pointers (the same list as Python's Payload.warnings). */
+  skipped: PayloadWarning[],
   bytes: number,
   accessorSpec(id: string): AccessorSpec,
   /** Zero-copy typed view of an accessor (count × components values). */
@@ -72,225 +91,33 @@ export interface LoadedPayload {
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const ID = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$/;
-/** Ids are used as object keys by the viewer; "__proto__" would address the prototype. */
-const validId = (v: unknown): v is string => typeof v === 'string' && ID.test(v) && v !== '__proto__';
+const CHUNK_URI = /^#[1-9][0-9]*$/;
 const isObj = (v: unknown): v is Record<string, any> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
+/** A JSON integer (spec §10): an integral number within ±(2^53 − 1). JavaScript cannot tell 5 from 5.0. */
+const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-const isVec = (v: unknown, n: number) => Array.isArray(v) && v.length === n && v.every(finite);
+/** Optional members that are null count as absent (spec §10). */
+const present = (v: unknown) => v !== undefined && v !== null;
+const isStr = (v: unknown) => !present(v) || typeof v === 'string';
+const isVec = (v: unknown, n: number): v is number[] => Array.isArray(v) && v.length === n && v.every(finite);
+const hasOwn = (o: object, key: string) => Object.prototype.hasOwnProperty.call(o, key);
+const quote = (v: unknown) => (v === undefined ? 'None' : JSON.stringify(v));
 
-/** Structural validation of a manifest (no buffer data needed). Throws PayloadError. */
-export function validateManifest(input: unknown): PayloadManifest {
-  const problems: string[] = [];
-  const bad = (text: string) => { if (problems.length < 200) problems.push(text); };
-  if (!isObj(input)) throw new PayloadError(['清单不是 JSON 对象']);
-  const m = input as PayloadManifest;
-  if (m.schema !== PAYLOAD_SCHEMA) throw new PayloadError([`schema 应为 ${PAYLOAD_SCHEMA}，实际为 ${JSON.stringify(m.schema)}`]);
-  if (!isVec(m.render_origin, 3)) bad('render_origin 必须是 3 个有限数');
-  if (typeof m.length_unit !== 'string' || !m.length_unit) bad('缺少 length_unit');
-  for (const key of ['buffers', 'accessors', 'layers'] as const) if (!Array.isArray(m[key])) bad(`${key} 必须是数组`);
-  if (problems.length) throw new PayloadError(problems);
-  if (m.bounds !== undefined && !(Array.isArray(m.bounds) && m.bounds.length === 2 && isVec(m.bounds[0], 3) && isVec(m.bounds[1], 3))) bad('bounds 格式错误');
-
-  const buffers = new Map<string, BufferSpec>();
-  for (const b of m.buffers) {
-    if (!isObj(b) || !validId(b.id)) { bad('缓冲区 id 无效'); continue; }
-    if (buffers.has(b.id)) bad(`缓冲区 ${b.id} 重复`);
-    if (typeof b.sha256 !== 'string' || !HEX64.test(b.sha256)) bad(`缓冲区 ${b.id} 的 sha256 无效`);
-    if (!isInt(b.byteLength) || b.byteLength < 0) bad(`缓冲区 ${b.id} 的 byteLength 无效`);
-    if (typeof b.uri !== 'string' || !/^(sha256:[0-9a-f]{64}|#[1-9][0-9]*)$/.test(b.uri)) bad(`缓冲区 ${b.id} 的 uri 无效`);
-    else if (b.uri.startsWith('sha256:') && b.uri.slice(7) !== b.sha256) bad(`缓冲区 ${b.id} 的 uri 与 sha256 不一致`);
-    if (b.encoding !== undefined && b.encoding !== 'raw') bad(`缓冲区 ${b.id} 的编码 ${b.encoding} 不受支持`);
-    buffers.set(b.id, b);
-  }
-  const accessors = new Map<string, AccessorSpec>();
-  for (const a of m.accessors) {
-    if (!isObj(a) || !validId(a.id)) { bad('访问器 id 无效'); continue; }
-    if (accessors.has(a.id)) bad(`访问器 ${a.id} 重复`);
-    accessors.set(a.id, a);
-    const info = accessorInfo(a.type);
-    const buffer = buffers.get(a.buffer);
-    if (!info) { bad(`访问器 ${a.id} 的类型 ${String(a.type)} 无效`); continue; }
-    if (!isInt(a.components) || a.components < 1 || a.components > 16) { bad(`访问器 ${a.id} 的分量数无效`); continue; }
-    if (!isInt(a.count) || a.count < 0) { bad(`访问器 ${a.id} 的 count 无效`); continue; }
-    if (!isInt(a.byteOffset) || a.byteOffset < 0 || a.byteOffset % 8 !== 0) { bad(`访问器 ${a.id} 的 byteOffset 未按 8 字节对齐`); continue; }
-    if (a.normalized && !info.integer) bad(`访问器 ${a.id}：normalized 仅适用于整数类型`);
-    if (!buffer) { bad(`访问器 ${a.id} 引用了不存在的缓冲区 ${a.buffer}`); continue; }
-    const end = a.byteOffset + a.count * a.components * info.ctor.BYTES_PER_ELEMENT;
-    if (isInt(buffer.byteLength) && end > buffer.byteLength) bad(`访问器 ${a.id} 超出缓冲区 ${buffer.id} 范围（${end} > ${buffer.byteLength}）`);
-  }
-  const colormaps = new Map<string, ColormapSpec>();
-  for (const c of m.colormaps ?? []) {
-    if (!isObj(c) || typeof c.id !== 'string') { bad('颜色表 id 无效'); continue; }
-    if (colormaps.has(c.id)) bad(`颜色表 ${c.id} 重复`);
-    colormaps.set(c.id, c);
-    if (c.categorical) {
-      if (!Array.isArray(c.entries)) bad(`分类颜色表 ${c.id} 缺少 entries`);
-      else for (const e of c.entries) if (!isObj(e) || !isInt(e.value) || typeof e.name !== 'string' || !Array.isArray(e.color) || e.color.length < 3 || !e.color.every(finite)) { bad(`分类颜色表 ${c.id} 含无效条目`); break; }
-      if (c.unknown_color !== undefined && !(Array.isArray(c.unknown_color) && c.unknown_color.length >= 3 && c.unknown_color.every(finite))) bad(`分类颜色表 ${c.id} 的 unknown_color 无效`);
-    } else {
-      const lut = c.lut === undefined ? undefined : accessors.get(c.lut);
-      if (!lut) bad(`颜色表 ${c.id} 引用了不存在的查找表访问器 ${c.lut}`);
-      else if (lut.type !== 'u8' || lut.components !== 4 || lut.count !== 256) bad(`颜色表 ${c.id} 的查找表必须是 256 × 4 u8`);
-    }
-  }
-
-  const needAcc = (layer: string, key: string, id: unknown, opts: {components?: number, count?: number, integer?: boolean, multipleOf?: number, optional?: boolean} = {}) => {
-    if (id === undefined || id === null) { if (!opts.optional) bad(`图层 ${layer} 缺少 ${key}`); return undefined; }
-    const a = typeof id === 'string' ? accessors.get(id) : undefined;
-    if (!a) { bad(`图层 ${layer} 的 ${key} 引用了不存在的访问器 ${String(id)}`); return undefined; }
-    const info = accessorInfo(a.type);
-    if (!info) return undefined;
-    if (opts.components !== undefined && a.components !== opts.components) bad(`图层 ${layer} 的 ${key} 应为 ${opts.components} 分量（${a.id} 为 ${a.components}）`);
-    if (opts.integer && !info.integer) bad(`图层 ${layer} 的 ${key} 必须是整数类型`);
-    if (opts.count !== undefined && a.count !== opts.count) bad(`图层 ${layer} 的 ${key} 数量应为 ${opts.count}（${a.id} 为 ${a.count}）`);
-    if (opts.multipleOf && (a.count * a.components) % opts.multipleOf !== 0) bad(`图层 ${layer} 的 ${key} 数量必须是 ${opts.multipleOf} 的倍数`);
-    return a;
-  };
-  const needMap = (layer: string, id: unknown, kind?: 'continuous' | 'categorical') => {
-    if (id === undefined || id === ORIENTATION_HSL) return;
-    const c = typeof id === 'string' ? colormaps.get(id) : undefined;
-    if (!c) { bad(`图层 ${layer} 引用了不存在的颜色表 ${String(id)}`); return; }
-    if (kind === 'continuous' && c.categorical) bad(`图层 ${layer} 需要连续颜色表（${c.id} 为分类颜色表）`);
-    if (kind === 'categorical' && !c.categorical) bad(`图层 ${layer} 需要分类颜色表（${c.id} 为连续颜色表）`);
-  };
-  const checkAttributes = (layer: LayerSpec, points: number | undefined, cells: number | undefined) => {
-    if (layer.attributes === undefined) return;
-    if (!isObj(layer.attributes)) { bad(`图层 ${layer.id} 的 attributes 格式错误`); return; }
-    for (const [name, attr] of Object.entries(layer.attributes)) {
-      if (!isObj(attr)) { bad(`图层 ${layer.id} 的属性 ${name} 格式错误`); continue; }
-      const cell = attr.association === 'cell';
-      const count = cell ? cells : points;
-      const a = needAcc(layer.id, `属性 ${name}`, attr.accessor);
-      if (a && count !== undefined && a.count !== count) bad(`图层 ${layer.id} 的属性 ${name} 应有 ${count} 个${cell ? '单元' : '点'}值（实际 ${a.count}）`);
-      if (attr.palette !== undefined) needMap(layer.id, attr.palette, 'categorical');
-    }
-  };
-  const checkColor = (layer: LayerSpec, color: any) => {
-    if (color === undefined) return;
-    if (!isObj(color)) { bad(`图层 ${layer.id} 的颜色设置格式错误`); return; }
-    if (color.by === 'attribute') {
-      if (!own(layer.attributes, color.attribute)) bad(`图层 ${layer.id} 的着色属性 ${String(color.attribute)} 不存在`);
-      needMap(layer.id, color.colormap);
-    } else if (color.by === 'direction') {
-      if (color.colormap !== undefined && color.colormap !== ORIENTATION_HSL) bad(`图层 ${layer.id}：方向着色仅支持 ${ORIENTATION_HSL}`);
-      if (color.attribute !== undefined && !own(layer.attributes, color.attribute)) bad(`图层 ${layer.id} 的方向属性 ${String(color.attribute)} 不存在`);
-    }
-    if (color.range !== undefined && !isVec(color.range, 2)) bad(`图层 ${layer.id} 的颜色范围无效`);
-  };
-
-  const layerIds = new Set<string>();
-  for (const layer of m.layers) {
-    if (!isObj(layer) || !validId(layer.id)) { bad('图层 id 无效'); continue; }
-    if (layerIds.has(layer.id)) bad(`图层 ${layer.id} 重复`);
-    layerIds.add(layer.id);
-    // Shown as text by the viewer (layer list, legends): wrong types would break rendering.
-    if (layer.name !== undefined && layer.name !== null && typeof layer.name !== 'string') bad(`图层 ${layer.id} 的 name 必须是字符串`);
-    if (!LAYER_TYPES.has(layer.type)) continue; // unknown types are skipped by clients (spec §1)
-    if (layer.origin !== undefined && !isVec(layer.origin, 3)) bad(`图层 ${layer.id} 的 origin 必须是 3 个有限数`);
-    const id = layer.id;
-    const app = isObj(layer.appearance) ? layer.appearance : {};
-    switch (layer.type) {
-      case 'triangles': {
-        const pos = needAcc(id, 'positions', layer.positions, {components: 3});
-        const idx = needAcc(id, 'indices', layer.indices, {integer: true, multipleOf: 3});
-        needAcc(id, 'normals', layer.normals, {components: 3, count: pos?.count, optional: true});
-        checkAttributes(layer, pos?.count, idx ? idx.count * idx.components / 3 : undefined);
-        checkColor(layer, app.color);
-        for (const lod of Array.isArray(layer.lods) ? layer.lods : []) {
-          const lp = needAcc(id, 'lod positions', lod?.positions, {components: 3});
-          needAcc(id, 'lod indices', lod?.indices, {integer: true, multipleOf: 3});
-          needAcc(id, 'lod normals', lod?.normals, {components: 3, count: lp?.count, optional: true});
-        }
-        break;
-      }
-      case 'slice_image': {
-        const plane = layer.plane;
-        if (!isObj(plane) || !isVec(plane.origin, 3) || !isVec(plane.u, 3) || !isVec(plane.v, 3)) bad(`图层 ${id} 的 plane 必须含有限的 origin/u/v`);
-        const size = layer.size;
-        if (!(Array.isArray(size) && size.length === 2 && size.every(n => isInt(n) && n >= 1))) { bad(`图层 ${id} 的 size 无效`); break; }
-        if (!isObj(layer.attributes) || !Object.keys(layer.attributes).length) bad(`图层 ${id} 缺少采样属性`);
-        checkAttributes(layer, size[0] * size[1], size[0] * size[1]);
-        checkColor(layer, app.color);
-        break;
-      }
-      case 'lines': {
-        const pos = needAcc(id, 'positions', layer.positions, {components: 3});
-        if (layer.mode !== 'segments' && layer.mode !== 'polylines') bad(`图层 ${id} 的 mode 无效`);
-        const idx = needAcc(id, 'indices', layer.indices, {integer: true, multipleOf: layer.mode === 'segments' ? 2 : undefined});
-        let cells: number | undefined;
-        if (layer.mode === 'polylines') {
-          const off = needAcc(id, 'offsets', layer.offsets, {integer: true, components: 1});
-          if (off && off.count < 1) bad(`图层 ${id} 的 offsets 至少需要 1 项`);
-          cells = off ? off.count - 1 : undefined;
-          // Cell attributes may be per polyline or per segment; checked after loading.
-          checkAttributes({...layer, attributes: Object.fromEntries(Object.entries(layer.attributes ?? {}).filter(([, a]) => (a as AttributeSpec)?.association !== 'cell'))}, pos?.count, cells);
-        } else {
-          cells = idx ? idx.count * idx.components / 2 : undefined;
-          checkAttributes(layer, pos?.count, cells);
-        }
-        checkColor(layer, app.color);
-        break;
-      }
-      case 'points': {
-        const pos = needAcc(id, 'positions', layer.positions, {components: 3});
-        needAcc(id, 'radii', layer.radii, {components: 1, count: pos?.count, optional: true});
-        checkAttributes(layer, pos?.count, pos?.count);
-        checkColor(layer, app.color);
-        break;
-      }
-      case 'instances': {
-        const pos = needAcc(id, 'positions', layer.positions, {components: 3});
-        needAcc(id, 'directions', layer.directions, {components: 3, count: pos?.count});
-        needAcc(id, 'scales', layer.scales, {components: 1, count: pos?.count, optional: true});
-        if (!isObj(layer.glyph) || typeof layer.glyph.shape !== 'string') bad(`图层 ${id} 缺少 glyph.shape`);
-        checkAttributes(layer, pos?.count, pos?.count);
-        checkColor(layer, app.color);
-        const scale = app.scale;
-        if (scale !== undefined && (!isObj(scale) || !finite(scale.factor) || scale.factor <= 0)) bad(`图层 ${id} 的缩放设置无效`);
-        if (scale?.by === 'attribute' && !own(layer.attributes, scale.attribute)) bad(`图层 ${id} 的缩放属性 ${String(scale.attribute)} 不存在`);
-        break;
-      }
-      case 'volume': {
-        const g = layer.grid;
-        const dimsOk = isObj(g) && Array.isArray(g.dimensions) && g.dimensions.length === 3 && g.dimensions.every((n: unknown) => isInt(n) && n >= 1);
-        if (!dimsOk) { bad(`图层 ${id} 的 grid.dimensions 无效`); break; }
-        if (!isVec(g.origin, 3)) bad(`图层 ${id} 的 grid.origin 必须是 3 个有限数`);
-        if (!isVec(g.spacing, 3) || g.spacing.some((s: number) => s <= 0)) bad(`图层 ${id} 的 grid.spacing 必须为正`);
-        if (g.direction !== undefined && !isVec(g.direction, 9)) bad(`图层 ${id} 的 grid.direction 必须是 9 个有限数`);
-        const [nx, ny, nz] = g.dimensions;
-        needAcc(id, 'data', layer.data, {components: 1, count: nx * ny * nz});
-        if (!isVec(layer.value_range, 2)) bad(`图层 ${id} 的 value_range 无效`);
-        const tf = layer.transfer_function;
-        if (!isObj(tf) || !isVec(tf.range, 2) || !Array.isArray(tf.opacity) || tf.opacity.length < 2 || !tf.opacity.every((p: unknown) => isVec(p, 2))) bad(`图层 ${id} 的 transfer_function 无效`);
-        else needMap(id, tf.colormap); // a continuous LUT, or a categorical palette for label volumes (value ± 0.499)
-        break;
-      }
-      case 'overlay': {
-        if (!OVERLAY_KINDS.has(layer.kind)) break; // unknown overlay kinds are skipped
-        if (layer.kind === 'scalar_bar') { needMap(id, layer.colormap ?? '', 'continuous'); if (!isVec(layer.range, 2)) bad(`图层 ${id} 的色标范围无效`); }
-        if (layer.kind === 'legend') needMap(id, layer.colormap ?? '', 'categorical');
-        if (layer.kind === 'text' && typeof layer.text !== 'string') bad(`图层 ${id} 缺少文本`);
-        break;
-      }
-    }
-  }
-  if (problems.length) throw new PayloadError(problems);
-  return m;
-}
-
-const isStr = (v: unknown) => v === undefined || v === null || typeof v === 'string';
-/** Optional field: absent/null, or passing `ok` (the overlay code falls back to its defaults for absent fields). */
-const opt = (v: unknown, ok: (v: any) => boolean) => v === undefined || v === null || ok(v);
-const isColor = (v: unknown) => Array.isArray(v) && (v.length === 3 || v.length === 4) && v.every(finite);
+const LAYER_REQUIRED: Record<string, string[]> = {
+  triangles: ['positions', 'indices'], slice_image: ['plane', 'size', 'attributes'],
+  lines: ['positions', 'mode', 'indices'], points: ['positions'],
+  instances: ['positions', 'directions', 'glyph'],
+  volume: ['grid', 'data', 'value_range', 'transfer_function'], overlay: ['kind'],
+};
 
 /**
- * Presentation fields of an overlay (spec §6.7) with a wrong type. Such overlays are skipped with a warning
- * (overlays only explain the view); drawing them would break the HTML overlay layer.
+ * Presentation members of an overlay (spec §6.7) with a wrong type. Such overlays are skipped with a warning
+ * (overlays only explain the view); drawing them would break the HTML overlay layer. (payload.py overlay_problems)
  */
 export function overlayProblems(layer: LayerSpec): string[] {
   const problems: string[] = [];
   const check = (ok: boolean, key: string, text: string) => { if (!ok) problems.push(`${key} ${text}`); };
+  const opt = (v: unknown, ok: (v: any) => boolean) => !present(v) || ok(v);
   check(isStr(layer.title), 'title', '必须是字符串');
   check(isStr(layer.anchor), 'anchor', '必须是字符串');
   check(isStr(layer.source_layer), 'source_layer', '必须是字符串');
@@ -299,9 +126,7 @@ export function overlayProblems(layer: LayerSpec): string[] {
   switch (layer.kind) {
     case 'scalar_bar':
       check(isStr(layer.unit), 'unit', '必须是字符串');
-      check(isStr(layer.format), 'format', '必须是字符串');
       check(isStr(layer.orientation), 'orientation', '必须是字符串');
-      check(opt(layer.label_count, isInt), 'label_count', '必须是整数');
       break;
     case 'legend':
       check(opt(layer.values, v => Array.isArray(v) && v.every(isInt)), 'values', '必须是整数数组');
@@ -312,13 +137,324 @@ export function overlayProblems(layer: LayerSpec): string[] {
       break;
     case 'text':
       check(opt(layer.font_size_px, v => finite(v) && v > 0), 'font_size_px', '必须是正数');
-      check(opt(layer.color, isColor), 'color', '必须是 3 或 4 个有限数');
+      check(opt(layer.color, v => Array.isArray(v) && (v.length === 3 || v.length === 4) && v.every(finite)), 'color', '必须是 3 或 4 个有限数');
       break;
     case 'axes_triad':
       check(opt(layer.labels, v => Array.isArray(v) && v.length === 3 && v.every((x: unknown) => typeof x === 'string')), 'labels', '必须是 3 个字符串');
       break;
   }
   return problems;
+}
+
+/** A check of spec §10 that needs buffer data: runs with a typed view of each accessor. */
+type DataCheck = (view: (id: string) => TypedArray) => void;
+
+interface Validated {manifest: PayloadManifest, skipped: PayloadWarning[], dataChecks: DataCheck[]}
+
+const fail = (message: string, path = ''): never => { throw new PayloadError([path ? `${path}: ${message}` : message], path); };
+
+/**
+ * Structural validation (spec §10) of a manifest, in the order of suan/render/payload.py. `chunks` is the chunk
+ * count of a .stkp file (buffers are then '#k' chunk references), else buffers are 'sha256:<hex>' blobs.
+ */
+function validate(input: unknown, chunks?: number): Validated {
+  if (!isObj(input)) fail('清单必须是 JSON 对象');
+  const m = input as PayloadManifest;
+  if (chunks !== undefined) {
+    // unpack_stkp: every buffer names a chunk of the file.
+    if (present(m.buffers) && !(Array.isArray(m.buffers) && m.buffers.every(isObj))) fail('buffers 必须是对象数组', '/buffers');
+    (m.buffers ?? []).forEach((b: any, i: number) => {
+      if (typeof b.uri !== 'string' || !CHUNK_URI.test(b.uri) || Number(b.uri.slice(1)) >= chunks) fail(`缓冲区 URI ${quote(b.uri)} 不是本文件的分块`, `/buffers/${i}/uri`);
+    });
+  }
+  if (m.schema !== PAYLOAD_SCHEMA) fail(`schema 应为 ${PAYLOAD_SCHEMA}，实际为 ${quote(m.schema)}`, '/schema');
+  for (const key of ['render_origin', 'length_unit', 'buffers', 'accessors', 'layers']) if (!hasOwn(m, key)) fail(`缺少必需的键 ${key}`);
+  const skipped: PayloadWarning[] = [];
+  const dataChecks: DataCheck[] = [];
+
+  const list = (value: unknown, path: string): Record<string, any>[] => {
+    if (!Array.isArray(value)) fail('必须是数组', path);
+    (value as unknown[]).forEach((item, i) => { if (!isObj(item)) fail('必须是对象', `${path}/${i}`); });
+    return value as Record<string, any>[];
+  };
+  const object = (value: unknown, path: string, what: string): Record<string, any> => {
+    if (!isObj(value)) fail(`${what} 必须是对象`, path);
+    return value as Record<string, any>;
+  };
+  const uniqueId = (item: Record<string, any>, seen: {has(id: string): boolean}, path: string) => {
+    const id = item.id;
+    if (typeof id !== 'string' || !ID.test(id) || RESERVED_IDS.has(id)) fail(`id ${quote(id)} 无效`, `${path}/id`);
+    if (seen.has(id)) fail(`id ${id} 重复`, `${path}/id`);
+  };
+  const vec3 = (value: unknown, path: string) => { if (!isVec(value, 3)) fail('必须是 3 个有限数', path); };
+  const interval = (value: unknown, path: string) => { if (!isVec(value, 2)) fail('必须是 [lo, hi]（两个有限数）', path); };
+  const rgb = (value: unknown, path: string) => {
+    if (!(Array.isArray(value) && (value.length === 3 || value.length === 4) && value.every(v => finite(v) && v >= 0 && v <= 1))) fail('颜色必须是 [0, 1] 内的 3 或 4 个数', path);
+  };
+
+  vec3(m.render_origin, '/render_origin');
+  if (typeof m.length_unit !== 'string' || !m.length_unit) fail('length_unit 必须是非空字符串', '/length_unit');
+
+  const buffers = new Map<string, BufferSpec>();
+  list(m.buffers, '/buffers').forEach((b, i) => {
+    const path = `/buffers/${i}`;
+    uniqueId(b, buffers, path);
+    if (chunks === undefined && (typeof b.sha256 !== 'string' || b.uri !== `sha256:${b.sha256}`)) fail('缓冲区须以 sha256:<hex> 引用', `${path}/uri`);
+    if (present(b.encoding) && b.encoding !== 'raw') fail(`编码 ${quote(b.encoding)} 不受支持`, `${path}/encoding`);
+    if (typeof b.sha256 !== 'string' || !HEX64.test(b.sha256)) fail('sha256 必须是 64 位小写十六进制', `${path}/sha256`);
+    if (!isInt(b.byteLength) || b.byteLength < 0) fail(`byteLength ${quote(b.byteLength)} 无效`, `${path}/byteLength`);
+    buffers.set(b.id, b as BufferSpec);
+  });
+
+  const accessors = new Map<string, AccessorSpec>();
+  list(m.accessors, '/accessors').forEach((a, i) => {
+    const path = `/accessors/${i}`;
+    uniqueId(a, accessors, path);
+    const buffer = typeof a.buffer === 'string' ? buffers.get(a.buffer) : undefined;
+    if (!buffer) return fail(`缓冲区 ${quote(a.buffer)} 不存在`, `${path}/buffer`);
+    const info = accessorInfo(a.type);
+    if (!info) return fail(`类型 ${quote(a.type)} 无效`, `${path}/type`);
+    for (const [key, low] of [['count', 0], ['components', 1], ['byteOffset', 0]] as const) {
+      if (!isInt(a[key]) || a[key] < low) fail(`${key} 必须是 ≥ ${low} 的整数`, `${path}/${key}`);
+    }
+    if (a.components > 16) fail('components 不能超过 16', `${path}/components`);
+    if (a.byteOffset % 8 !== 0) fail('byteOffset 必须是 8 的倍数', `${path}/byteOffset`);
+    if (a.byteOffset + a.count * a.components * info.ctor.BYTES_PER_ELEMENT > buffer.byteLength) fail('访问器超出其缓冲区', path);
+    if (present(a.normalized) && typeof a.normalized !== 'boolean') fail('normalized 必须是布尔值', `${path}/normalized`);
+    if (a.normalized === true && !info.integer) fail('normalized 仅适用于整数类型', `${path}/normalized`);
+    accessors.set(a.id, a as AccessorSpec);
+  });
+
+  const expect = (id: unknown, types: string[] | null, components: number | null, count: number | null, path: string): AccessorSpec => {
+    const a = typeof id === 'string' ? accessors.get(id) : undefined;
+    if (!a) return fail(`访问器 ${quote(id)} 不存在`, path);
+    if (types && !types.includes(a.type)) fail(`访问器 ${a.id} 的类型应为 ${types.join('/')}，实际为 ${a.type}`, path);
+    if (components !== null && a.components !== components) fail(`访问器 ${a.id} 应有 ${components} 个分量`, path);
+    if (count !== null && a.count !== count) fail(`访问器 ${a.id} 有 ${a.count} 项，应为 ${count}`, path);
+    return a;
+  };
+
+  const colormaps = new Map<string, ColormapSpec>();
+  list(present(m.colormaps) ? m.colormaps : [], '/colormaps').forEach((c, i) => {
+    const path = `/colormaps/${i}`;
+    uniqueId(c, colormaps, path);
+    if (present(c.categorical) && typeof c.categorical !== 'boolean') fail('categorical 必须是布尔值', `${path}/categorical`);
+    let keys: string[];
+    if (c.categorical === true) {
+      const values = new Set<number>();
+      let count = 0;
+      list(c.entries, `${path}/entries`).forEach((e, j) => {
+        const epath = `${path}/entries/${j}`;
+        if (!isInt(e.value)) fail('分类值必须是整数', `${epath}/value`);
+        if (typeof e.name !== 'string') fail('分类名称必须是字符串', `${epath}/name`);
+        rgb(e.color, `${epath}/color`);
+        values.add(e.value);
+        count++;
+      });
+      if (values.size !== count) fail('分类值必须互不相同', `${path}/entries`);
+      keys = ['unknown_color'];
+    } else {
+      expect(c.lut, ['u8'], 4, 256, `${path}/lut`);
+      if (!isInt(c.size) || c.size !== 256) fail('size 必须是 256', `${path}/size`);
+      keys = ['nan_color', 'below_color', 'above_color'];
+    }
+    for (const key of keys) if (present(c[key])) rgb(c[key], `${path}/${key}`);
+    colormaps.set(c.id, c as ColormapSpec);
+  });
+  const categorical = (id: unknown) => typeof id === 'string' && colormaps.get(id)?.categorical === true;
+
+  // Data-level checks (spec §10), run after the buffers are loaded.
+  const finiteData = (id: string, path: string) => dataChecks.push(view => {
+    const values = view(id);
+    for (let i = 0; i < values.length; i++) if (!Number.isFinite(values[i])) fail('坐标必须是有限数', path);
+  });
+  const positions = (owner: Record<string, any>, path: string): number => {
+    const a = expect(owner.positions, ['f32'], 3, null, `${path}/positions`);
+    finiteData(a.id, `${path}/positions`);
+    return a.count;
+  };
+  const indices = (id: unknown, points: number, multiple: number, path: string): number => {
+    const a = expect(id, ['u32', 'u16'], 1, null, path);
+    if (a.count % multiple !== 0) fail(`索引数必须是 ${multiple} 的倍数`, path);
+    dataChecks.push(view => {
+      const values = view(a.id);
+      for (let i = 0; i < values.length; i++) if (values[i] >= points) fail('索引指向不存在的点', path);
+    });
+    return a.count / multiple;
+  };
+  /** Checks attributes; a cell count of 'segments' (polylines) is checked with the offsets data. */
+  const attributes = (layer: Record<string, any>, path: string, points: number, cells?: number | {segments: {accessor: string, path: string}[]}): Record<string, any> => {
+    if (!present(layer.attributes)) return {};
+    const attrs = object(layer.attributes, `${path}/attributes`, 'attributes');
+    for (const [name, attr] of Object.entries(attrs)) {
+      const apath = `${path}/attributes/${name}`;
+      object(attr, apath, '属性');
+      const association = present(attr.association) ? attr.association : 'point';
+      if (association !== 'point' && !(association === 'cell' && cells !== undefined)) fail(`关联方式 ${quote(association)} 在此无效`, `${apath}/association`);
+      if (association === 'point') expect(attr.accessor, null, null, points, `${apath}/accessor`);
+      else if (typeof cells === 'number') expect(attr.accessor, null, null, cells, `${apath}/accessor`);
+      else cells!.segments.push({accessor: expect(attr.accessor, null, null, null, `${apath}/accessor`).id, path: `${apath}/accessor`});
+      if (present(attr.palette) && !categorical(attr.palette)) fail(`调色板 ${quote(attr.palette)} 不是分类颜色表`, `${apath}/palette`);
+    }
+    return attrs;
+  };
+  const appearance = (layer: Record<string, any>, path: string): Record<string, any> =>
+    present(layer.appearance) ? object(layer.appearance, `${path}/appearance`, 'appearance') : {};
+  const color = (spec: unknown, attrs: Record<string, any>, path: string) => {
+    if (!present(spec)) return;
+    const s = object(spec, path, '颜色设置');
+    const by = present(s.by) ? s.by : 'solid'; // spec §5: the default mode
+    if (by !== 'solid' && by !== 'attribute' && by !== 'direction') fail(`未知着色方式 ${quote(s.by)}`, `${path}/by`);
+    if ((by === 'attribute' || (by === 'direction' && present(s.attribute))) && !(typeof s.attribute === 'string' && hasOwn(attrs, s.attribute))) fail(`属性 ${quote(s.attribute)} 不存在`, `${path}/attribute`);
+    if (present(s.colormap)) {
+      if (by === 'direction' && s.colormap !== ORIENTATION_HSL) fail(`方向着色仅支持 ${ORIENTATION_HSL}`, `${path}/colormap`);
+      if (s.colormap !== ORIENTATION_HSL && !(typeof s.colormap === 'string' && colormaps.has(s.colormap))) fail(`颜色表 ${quote(s.colormap)} 不存在`, `${path}/colormap`);
+    }
+    if (present(s.range)) interval(s.range, `${path}/range`);
+  };
+  const dims3 = (v: unknown): v is number[] => Array.isArray(v) && v.length === 3 && v.every(n => isInt(n) && n >= 1);
+
+  const layerChecks: Record<string, (layer: Record<string, any>, path: string) => void> = {
+    triangles(layer, path) {
+      const n = positions(layer, path);
+      const cells = indices(layer.indices, n, 3, `${path}/indices`);
+      if (present(layer.normals)) expect(layer.normals, ['f32'], 3, n, `${path}/normals`);
+      const attrs = attributes(layer, path, n, cells);
+      color(appearance(layer, path).color, attrs, `${path}/appearance/color`);
+      list(present(layer.lods) ? layer.lods : [], `${path}/lods`).forEach((lod, j) => {
+        const lpath = `${path}/lods/${j}`;
+        const count = positions(lod, lpath);
+        const lodCells = indices(lod.indices, count, 3, `${lpath}/indices`);
+        if (present(lod.normals)) expect(lod.normals, ['f32'], 3, count, `${lpath}/normals`);
+        attributes(lod, lpath, count, lodCells);
+      });
+    },
+    slice_image(layer, path) {
+      const plane = layer.plane;
+      for (const key of ['origin', 'u', 'v']) vec3(isObj(plane) ? plane[key] : undefined, `${path}/plane/${key}`);
+      const size = layer.size;
+      if (!(Array.isArray(size) && size.length === 2 && size.every(v => isInt(v) && v >= 1))) fail('size 必须是两个正整数 [w, h]', `${path}/size`);
+      const attrs = attributes(layer, path, size[0] * size[1]);
+      if (!Object.keys(attrs).length) fail('slice_image 图层至少需要一个属性', `${path}/attributes`);
+      color(appearance(layer, path).color, attrs, `${path}/appearance/color`);
+    },
+    lines(layer, path) {
+      const n = positions(layer, path);
+      let cells: number | {segments: {accessor: string, path: string}[]};
+      if (layer.mode === 'segments') cells = indices(layer.indices, n, 2, `${path}/indices`);
+      else if (layer.mode === 'polylines') {
+        const count = indices(layer.indices, n, 1, `${path}/indices`);
+        if (!present(layer.offsets)) fail('polylines 需要 offsets', path);
+        const offsets = expect(layer.offsets, ['u32'], 1, null, `${path}/offsets`);
+        const segmentAttributes: {accessor: string, path: string}[] = [];
+        cells = {segments: segmentAttributes};
+        dataChecks.push(view => {
+          const o = view(offsets.id);
+          let segments = 0, ok = o.length >= 1 && o[0] === 0 && o[o.length - 1] === count;
+          for (let i = 1; ok && i < o.length; i++) {
+            if (o[i] < o[i - 1]) ok = false;
+            else segments += Math.max(o[i] - o[i - 1] - 1, 0); // cell attributes are per segment
+          }
+          if (!ok) fail('offsets 必须从 0 递增到索引数', `${path}/offsets`);
+          for (const attr of segmentAttributes) {
+            const got = accessors.get(attr.accessor)!.count;
+            if (got !== segments) fail(`应有 ${segments} 个线段值（实际 ${got}）`, attr.path);
+          }
+        });
+      } else return fail(`未知的线模式 ${quote(layer.mode)}`, `${path}/mode`);
+      const attrs = attributes(layer, path, n, cells);
+      color(appearance(layer, path).color, attrs, `${path}/appearance/color`);
+    },
+    points(layer, path) {
+      const n = positions(layer, path);
+      if (present(layer.radii)) expect(layer.radii, ['f32'], 1, n, `${path}/radii`);
+      const attrs = attributes(layer, path, n);
+      color(appearance(layer, path).color, attrs, `${path}/appearance/color`);
+    },
+    instances(layer, path) {
+      const n = positions(layer, path);
+      expect(layer.directions, ['f32'], 3, n, `${path}/directions`);
+      if (present(layer.scales)) expect(layer.scales, ['f32'], 1, n, `${path}/scales`);
+      const glyph = object(layer.glyph, `${path}/glyph`, 'glyph');
+      if (typeof glyph.shape !== 'string' || !GLYPH_SHAPES.has(glyph.shape)) fail(`未知的箭头形状 ${quote(glyph.shape)}`, `${path}/glyph/shape`);
+      const attrs = attributes(layer, path, n);
+      const app = appearance(layer, path);
+      color(app.color, attrs, `${path}/appearance/color`);
+      if (present(app.scale)) {
+        const scale = object(app.scale, `${path}/appearance/scale`, 'scale');
+        if (scale.by === 'attribute' && !(typeof scale.attribute === 'string' && hasOwn(attrs, scale.attribute))) fail(`缩放属性 ${quote(scale.attribute)} 不存在`, `${path}/appearance/scale`);
+        if (present(scale.factor) && !(finite(scale.factor) && scale.factor > 0)) fail('缩放系数必须是大于 0 的有限数', `${path}/appearance/scale/factor`);
+      }
+    },
+    volume(layer, path) {
+      const grid = layer.grid;
+      const dims = isObj(grid) ? grid.dimensions : undefined;
+      if (!dims3(dims)) return fail('dimensions 必须是 3 个正整数', `${path}/grid/dimensions`);
+      vec3(grid.origin, `${path}/grid/origin`);
+      vec3(grid.spacing, `${path}/grid/spacing`);
+      if (Math.min(...grid.spacing) <= 0) fail('spacing 必须为正', `${path}/grid/spacing`);
+      if (present(grid.direction) && !isVec(grid.direction, 9)) fail('direction 必须是 9 个有限数（行优先 3×3）', `${path}/grid/direction`);
+      expect(layer.data, ['u8', 'u16', 'f32'], 1, dims[0] * dims[1] * dims[2], `${path}/data`);
+      interval(layer.value_range, `${path}/value_range`);
+      for (const key of ['value_scale', 'value_offset']) if (present(layer[key]) && !finite(layer[key])) fail(`${key} 必须是有限数`, `${path}/${key}`);
+      const tpath = `${path}/transfer_function`;
+      const tf = object(layer.transfer_function, tpath, 'transfer_function');
+      // A continuous LUT, or a categorical palette for label volumes (value ± 0.499).
+      if (!(typeof tf.colormap === 'string' && colormaps.has(tf.colormap))) fail(`颜色表 ${quote(tf.colormap)} 不存在`, `${tpath}/colormap`);
+      interval(tf.range, `${tpath}/range`);
+      if (!Array.isArray(tf.opacity) || tf.opacity.length < 2) fail('opacity 至少需要两个 [value, alpha] 点', `${tpath}/opacity`);
+      (tf.opacity as unknown[]).forEach((p, j) => {
+        if (!isVec(p, 2) || p[1] < 0 || p[1] > 1) fail('不透明度点应为 [有限值, [0, 1] 内的 alpha]', `${tpath}/opacity/${j}`);
+      });
+      list(present(layer.lods) ? layer.lods : [], `${path}/lods`).forEach((lod, j) => {
+        const lpath = `${path}/lods/${j}`;
+        if (!dims3(lod.dimensions)) fail('dimensions 必须是 3 个正整数', `${lpath}/dimensions`);
+        expect(lod.data, ['u8', 'u16', 'f32'], 1, lod.dimensions[0] * lod.dimensions[1] * lod.dimensions[2], `${lpath}/data`);
+      });
+    },
+    overlay(layer, path) {
+      const kind = layer.kind;
+      if (typeof kind !== 'string') return fail('kind 必须是字符串', `${path}/kind`);
+      if (!OVERLAY_KINDS.has(kind)) { skipped.push({path, layer: layer.id, message: `跳过未知叠加层 ${kind}（${layer.id}）`}); return; }
+      if ((kind === 'scalar_bar' || kind === 'legend') && !(typeof layer.colormap === 'string' && colormaps.has(layer.colormap))) fail(`颜色表 ${quote(layer.colormap)} 不存在`, `${path}/colormap`);
+      if (kind === 'scalar_bar') {
+        if (categorical(layer.colormap)) fail('色标需要连续颜色表', `${path}/colormap`);
+        interval(layer.range, `${path}/range`);
+        if (present(layer.label_count) && !(isInt(layer.label_count) && layer.label_count >= 2 && layer.label_count <= 20)) fail('label_count 必须是 2 到 20 的整数', `${path}/label_count`);
+        if (present(layer.format) && !(typeof layer.format === 'string' && LABEL_FORMAT.test(layer.format))) fail(`不支持的标签格式 ${quote(layer.format)}（如 .3g、.2f、.1e、+.0%、d）`, `${path}/format`);
+      }
+      if (kind === 'legend' && !categorical(layer.colormap)) fail('图例需要分类颜色表', `${path}/colormap`);
+      if (kind === 'text' && typeof layer.text !== 'string') fail('文本叠加层需要 text', `${path}/text`);
+      const problems = overlayProblems(layer as LayerSpec);
+      if (problems.length) skipped.push({path, layer: layer.id, message: `跳过叠加层 ${layer.id}：${problems.join('；')}`});
+    },
+  };
+
+  const layerIds = new Set<string>();
+  list(m.layers, '/layers').forEach((layer, i) => {
+    const path = `/layers/${i}`;
+    uniqueId(layer, layerIds, path);
+    layerIds.add(layer.id);
+    if (!isStr(layer.name)) fail('name 必须是字符串', `${path}/name`);
+    if (typeof layer.type !== 'string') fail('type 必须是字符串', `${path}/type`);
+    const required = own(LAYER_REQUIRED, layer.type);
+    if (!required) { skipped.push({path, layer: layer.id, message: `跳过未知图层类型 ${layer.type}（${layer.id}）`}); return; } // spec §1
+    for (const key of required) if (!hasOwn(layer, key)) fail(`${layer.type} 图层缺少 ${key}`, path);
+    if (present(layer.origin)) vec3(layer.origin, `${path}/origin`);
+    layerChecks[layer.type](layer, path);
+  });
+  if (present(m.bounds)) {
+    if (!Array.isArray(m.bounds) || m.bounds.length !== 2) fail('bounds 必须是 [[min], [max]]', '/bounds');
+    vec3(m.bounds[0], '/bounds/0');
+    vec3(m.bounds[1], '/bounds/1');
+  }
+  if (present(m.view) && !(isObj(m.view) && m.view.schema === 'stk.view/1')) fail('view 必须是 stk.view/1 文档', '/view');
+  return {manifest: m, skipped, dataChecks};
+}
+
+/** Structural validation of a manifest (no buffer data needed). Throws PayloadError. */
+export function validateManifest(input: unknown): PayloadManifest {
+  return validate(input).manifest;
 }
 
 /**
@@ -337,32 +473,48 @@ export function probeOf(layer: LayerSpec): ProbeRef | undefined {
 
 export interface StkpFile {manifest: unknown, chunks: Uint8Array[]}
 
+/** RFC 8259 JSON as every client reads it: numbers must be finite doubles (1e400 is rejected). */
+export function parseJson(text: string): unknown {
+  return JSON.parse(text, (_key, value) => {
+    if (typeof value === 'number' && !Number.isFinite(value)) throw new SyntaxError('number overflows a double');
+    return value;
+  });
+}
+
 export function parseStkp(file: ArrayBuffer): StkpFile {
   const view = new DataView(file);
-  const fail = (text: string): never => { throw new PayloadError([`.stkp 文件无效：${text}`]); };
-  if (file.byteLength < 16) fail('文件过短');
+  const size = file.byteLength;
+  const bad = (text: string): never => fail(`.stkp 文件无效：${text}`);
+  if (size < 16) bad('文件过短');
   const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-  if (magic !== 'STKP') fail('缺少 STKP 标记');
-  if (view.getUint32(4, true) !== 2) fail(`版本 ${view.getUint32(4, true)} 不受支持`);
-  const total = Number(view.getBigUint64(8, true));
-  if (total > file.byteLength) fail(`文件被截断（${file.byteLength} < ${total}）`);
+  if (magic !== 'STKP') bad('缺少 STKP 标记');
+  if (view.getUint32(4, true) !== 2) bad(`版本 ${view.getUint32(4, true)} 不受支持`);
+  const total = view.getBigUint64(8, true);
+  if (total !== BigInt(size)) bad(`长度字段 ${total} 与文件大小 ${size} 不符`);
   const chunks: Uint8Array[] = [];
   const types: string[] = [];
   let offset = 16;
-  while (offset < total) {
-    if (offset + 16 > total) fail('分块头不完整');
-    const length = Number(view.getBigUint64(offset, true));
+  while (offset < size) {
+    if (offset + 16 > size) bad('分块头不完整');
+    const length = view.getBigUint64(offset, true);
     const type = String.fromCharCode(view.getUint8(offset + 8), view.getUint8(offset + 9), view.getUint8(offset + 10), view.getUint8(offset + 11));
-    const start = offset + 16;
-    if (start + length > total) fail(`分块 ${chunks.length} 超出文件长度`);
-    chunks.push(new Uint8Array(file, start, length));
+    const reserved = view.getUint32(offset + 12, true);
+    offset += 16;
+    if (reserved !== 0) bad('分块保留字段必须为 0');
+    if (length > BigInt(size - offset)) bad(`分块 ${chunks.length} 超出文件长度`);
+    const n = Number(length);
+    chunks.push(new Uint8Array(file, offset, n));
     types.push(type);
-    offset = start + Math.ceil(length / 8) * 8;
+    offset += n + ((8 - (n % 8)) % 8);
   }
-  if (!chunks.length || types[0] !== 'JSON') fail('第一个分块必须是 JSON 清单');
-  types.slice(1).forEach((t, i) => { if (t !== 'BIN ') fail(`分块 ${i + 1} 类型 ${JSON.stringify(t)} 无效`); });
+  if (offset !== size) bad('填充超出文件末尾');
+  if (!chunks.length || types[0] !== 'JSON') bad('第一个分块必须是 JSON 清单');
+  types.slice(1).forEach((t, i) => { if (t !== 'BIN ') bad(`分块 ${i + 1} 类型 ${JSON.stringify(t)} 无效`); });
   let manifest: unknown;
-  try { manifest = JSON.parse(new TextDecoder().decode(chunks[0])); } catch { fail('清单不是有效 JSON'); }
+  try {
+    // Strict UTF-8, and a byte-order mark is kept so that it is rejected like any other stray character.
+    manifest = parseJson(new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(chunks[0]));
+  } catch { bad('清单不是有效的 UTF-8 JSON'); }
   return {manifest, chunks};
 }
 
@@ -420,7 +572,7 @@ export function clearBlobCache() { blobCache.clear(); blobSizes.clear(); cachedB
 export interface LoadOptions {
   /** Fetches `sha256:` buffers (hub blob store or a directory of <sha>.bin files). */
   fetchBlob?: BlobFetcher,
-  /** Chunks of a .stkp file for `#k` buffers. */
+  /** Chunks of a .stkp file: every buffer is then a `#k` chunk reference. */
   chunks?: Uint8Array[],
   signal?: AbortSignal,
 }
@@ -431,31 +583,30 @@ export async function loadStkp(file: ArrayBuffer, options: Omit<LoadOptions, 'ch
 }
 
 export async function loadPayload(input: unknown, options: LoadOptions = {}): Promise<LoadedPayload> {
-  const manifest = validateManifest(input);
-  const warnings: string[] = [];
+  const {manifest, skipped, dataChecks} = validate(input, options.chunks?.length);
+  const warnings: string[] = skipped.map(w => w.message);
   const problems: string[] = [];
   const buffers = new Map<string, Uint8Array>();
   let hashSkipped = false;
-  await Promise.all(manifest.buffers.map(async b => {
+  await Promise.all(manifest.buffers.map(async (b, i) => {
     let bytes: Uint8Array;
-    if (b.uri.startsWith('#')) {
-      const k = Number(b.uri.slice(1));
-      const chunk = options.chunks?.[k];
-      if (!chunk || k < 1) { problems.push(`缓冲区 ${b.id} 引用的分块 ${b.uri} 不存在`); return; }
-      bytes = chunk;
-      const actual = await sha256Hex(chunk);
+    if (options.chunks) {
+      bytes = options.chunks[Number(b.uri.slice(1))];
+      const actual = await sha256Hex(bytes);
       if (actual === null) hashSkipped = true;
-      else if (actual !== b.sha256) { problems.push(`缓冲区 ${b.id} 的内容与 sha256 不符`); return; }
+      else if (actual !== b.sha256) { problems.push(`/buffers/${i}/sha256: 缓冲区 ${b.id} 的内容与 sha256 不符`); return; }
     } else {
-      if (!options.fetchBlob) { problems.push(`缓冲区 ${b.id} 需要从控制服务读取，但未提供读取方式`); return; }
-      const data = await cachedBlob(b.sha256, options.fetchBlob, options.signal);
-      bytes = new Uint8Array(data);
+      if (!options.fetchBlob) { problems.push(`/buffers/${i}: 缓冲区 ${b.id} 需要从控制服务读取，但未提供读取方式`); return; }
+      try { bytes = new Uint8Array(await cachedBlob(b.sha256, options.fetchBlob, options.signal)); } catch (error) {
+        if (error instanceof PayloadError) { problems.push(`/buffers/${i}/sha256: ${error.problems[0]}`); return; }
+        throw error;
+      }
       if ((globalThis as any).crypto?.subtle === undefined) hashSkipped = true;
     }
-    if (bytes.byteLength !== b.byteLength) { problems.push(`缓冲区 ${b.id} 长度为 ${bytes.byteLength}，清单声明 ${b.byteLength}`); return; }
+    if (bytes.byteLength !== b.byteLength) { problems.push(`/buffers/${i}/byteLength: 缓冲区 ${b.id} 长度为 ${bytes.byteLength}，清单声明 ${b.byteLength}`); return; }
     buffers.set(b.id, bytes);
   }));
-  if (problems.length) throw new PayloadError(problems);
+  if (problems.length) throw new PayloadError(problems, problems[0].slice(0, problems[0].indexOf(':')));
   if (hashSkipped) warnings.push('当前页面不是安全上下文，未能校验数据块 sha256');
 
   const specs = new Map(manifest.accessors.map(a => [a.id, a]));
@@ -497,77 +648,16 @@ export async function loadPayload(input: unknown, options: LoadOptions = {}): Pr
     floatViews.set(id, out);
     return out;
   };
+  for (const check of dataChecks) check(accessor); // finite positions, index ranges, polyline offsets (spec §10)
 
-  const layers: LayerSpec[] = [];
-  for (const layer of manifest.layers) {
-    if (!LAYER_TYPES.has(layer.type)) { warnings.push(`跳过未知图层类型 ${String(layer.type)}（${layer.id}）`); continue; }
-    if (layer.type === 'overlay' && !OVERLAY_KINDS.has(layer.kind)) { warnings.push(`跳过未知叠加层 ${String(layer.kind)}（${layer.id}）`); continue; }
-    if (layer.type === 'overlay') {
-      const issues = overlayProblems(layer);
-      if (issues.length) { warnings.push(`跳过叠加层 ${layer.id}：${issues.join('；')}`); continue; }
-    }
-    layers.push(layer);
-  }
+  const skippedIds = new Set(skipped.map(w => w.layer));
   const loaded: LoadedPayload = {
-    manifest, layers, warnings,
+    manifest, layers: manifest.layers.filter(layer => !skippedIds.has(layer.id)), warnings, skipped,
     bytes: [...buffers.values()].reduce((n, b) => n + b.byteLength, 0),
     accessorSpec, accessor, floats,
     colormap: id => (id === undefined ? undefined : colormaps.get(id)),
   };
-  validateData(loaded);
   return loaded;
-}
-
-/** Data-level checks of spec §10 that need the buffers: finite positions, index bounds, offsets. */
-export function validateData(p: LoadedPayload) {
-  const problems: string[] = [];
-  const checkFinite = (layer: string, key: string, id: string | undefined) => {
-    if (!id) return;
-    const values = p.accessor(id);
-    for (let i = 0; i < values.length; i++) if (!Number.isFinite(values[i])) { problems.push(`图层 ${layer} 的 ${key} 含非有限值（第 ${Math.floor(i / 3)} 项）`); return; }
-  };
-  const checkIndices = (layer: string, id: string | undefined, points: number) => {
-    if (!id) return;
-    const values = p.accessor(id);
-    for (let i = 0; i < values.length; i++) if (values[i] < 0 || values[i] >= points) { problems.push(`图层 ${layer} 的索引 ${values[i]} 超出点数 ${points}`); return; }
-  };
-  for (const layer of p.layers) {
-    const points = layer.positions ? p.accessorSpec(layer.positions).count : 0;
-    switch (layer.type) {
-      case 'triangles':
-        checkFinite(layer.id, 'positions', layer.positions);
-        checkIndices(layer.id, layer.indices, points);
-        for (const lod of Array.isArray(layer.lods) ? layer.lods : []) {
-          checkFinite(layer.id, 'lod positions', lod.positions);
-          checkIndices(layer.id, lod.indices, p.accessorSpec(lod.positions).count);
-        }
-        break;
-      case 'lines': {
-        checkFinite(layer.id, 'positions', layer.positions);
-        checkIndices(layer.id, layer.indices, points);
-        if (layer.mode === 'polylines') {
-          const offsets = p.accessor(layer.offsets);
-          const total = p.accessor(layer.indices).length;
-          for (let i = 0; i < offsets.length; i++) {
-            if (offsets[i] > total || (i > 0 && offsets[i] < offsets[i - 1]) || offsets[i] < 0) { problems.push(`图层 ${layer.id} 的 offsets 无效`); break; }
-          }
-          const lines = offsets.length - 1;
-          const segments = lines > 0 ? offsets[lines] - offsets[0] - lines : 0;
-          for (const [name, attr] of Object.entries(layer.attributes ?? {})) {
-            if (attr.association !== 'cell') continue;
-            const count = p.accessorSpec(attr.accessor).count;
-            if (count !== lines && count !== segments) problems.push(`图层 ${layer.id} 的属性 ${name} 应有 ${lines}（折线）或 ${segments}（线段）个单元值`);
-          }
-        }
-        break;
-      }
-      case 'points': case 'instances':
-        checkFinite(layer.id, 'positions', layer.positions);
-        if (layer.type === 'instances') checkFinite(layer.id, 'directions', layer.directions);
-        break;
-    }
-  }
-  if (problems.length) throw new PayloadError(problems);
 }
 
 /** Physical origin of a layer's coordinates (spec §4). */

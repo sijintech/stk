@@ -1,4 +1,4 @@
-"""Scene v1 downgrade of stk.payload/2: every result passes suan.blender_client.scene.validate_scene."""
+"""Scene v1 downgrade of stk.payload/2 and the scene v1 check: every result passes suan.render.v1.validate_scene."""
 import copy
 from pathlib import Path
 
@@ -7,10 +7,9 @@ import pytest
 np = pytest.importorskip("numpy")
 
 from render_scenes import glyph_scene, grid_mesh, mixed_scene  # noqa: E402
-from suan.blender_client.scene import validate_scene  # noqa: E402
 from suan.render.layers import Attribute, Layer, Scene  # noqa: E402
 from suan.render.payload import Payload, encode_scene, read_directory  # noqa: E402
-from suan.render.v1 import MAX_INDICES, MAX_VERTICES, glyph_mesh, to_scene_v1  # noqa: E402
+from suan.render.v1 import MAX_INDICES, MAX_VERTICES, glyph_mesh, to_scene_v1, validate_scene  # noqa: E402
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "docs" / "specs" / "examples" / "payload-v2"
 
@@ -95,3 +94,34 @@ def test_canonical_glyph_meshes(shape):
         assert lo == pytest.approx([-0.5] * 3) and hi == pytest.approx([0.5] * 3)
     with pytest.raises(ValueError):
         glyph_mesh("torus")
+
+
+def small_scene():
+    """A 2 x 2 point scene v1 with two triangles."""
+    return {"manifest": {"version": 1, "association": "point", "dataset_id": "check", "field": "t",
+                         "dimensions": [2, 2, 1], "origin": [0, 0, 0], "render_origin": [0, 0, 0],
+                         "spacing": [1, 1, 1], "value_range": [0.0, 3.0], "units": "1", "coordinate_units": "m",
+                         "timestep": 0, "resources": [{"kind": "triangle_mesh", "key": "mesh"}]},
+            "mesh": {"positions": [[0.0, 0, 0], [1.0, 0, 0], [0.0, 1, 0], [1.0, 1, 0]],
+                     "values": [0.0, 1.0, 2.0, 3.0], "indices": [0, 1, 2, 1, 3, 2]}}
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda s: s["mesh"]["indices"].append(999999),
+    lambda s: s["mesh"]["indices"].extend([0, 1, 999999]),
+    lambda s: s["mesh"]["indices"].__setitem__(0, True),
+    lambda s: s["mesh"]["positions"][0].__setitem__(0, float("nan")),
+    lambda s: s["mesh"]["values"].__setitem__(0, float("inf")),
+    lambda s: s["mesh"]["values"].pop(),
+    lambda s: s["manifest"].__setitem__("spacing", [0, 1, 1]),
+    lambda s: s["manifest"].__setitem__("dimensions", [2, 2.5, 1]),
+    lambda s: s["manifest"].__setitem__("value_range", [5, -5]),
+    lambda s: s["manifest"].__setitem__("version", 2),
+    lambda s: s["manifest"].__setitem__("association", "cell"),
+])
+def test_validate_scene_rejects_invalid_scene(mutation):
+    scene = small_scene()
+    assert validate_scene(scene) is scene
+    mutation(scene)
+    with pytest.raises(ValueError):
+        validate_scene(scene)

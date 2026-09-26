@@ -16,7 +16,7 @@ flowchart LR
   Flt --> Plot
   Out --> Web[网页“图谱”模式]
   Out --> PNG[离屏 PNG]
-  Out -.->|后续里程碑| Blender[Blender 工作台]
+  Out --> Desk[桌面程序 stk-desktop]
   Plot --> Img[PNG / SVG + 绘图数据]
 ```
 
@@ -236,8 +236,8 @@ source 节点只写绑定名（如 `run`、`data`）和绑定内的相对路径�
   渲染尺寸取 `width` × `height`（默认为场景视口 1600 × 1200）乘以 `magnification`；放大时字号、线宽
   和叠加层一起放大，得到同一画面的高分辨率版本。
 - **Blender**：数据包转为 Blender 真实对象属于后续里程碑（M2 构建流水线、M3 数据包 → Blender 对象，
-  节点编辑器与图 JSON 互转为 M6）。现有 C++ `SPACE_STK` 编辑器、scene v1 和 `view.build`／`view.probe`
-  保持不变；`stk.output.payload@1` 设 `v1_fallback: true` 时同时给出 scene v1 降级版本。
+  节点编辑器与图 JSON 互转为 M6）。scene v1 和 `view.build`／`view.probe` 保持不变（C++ `SPACE_STK` 编辑器已归档于标签
+  `archive/blender-workbench-2026-09`，由桌面程序取代）；`stk.output.payload@1` 设 `v1_fallback: true` 时同时给出 scene v1 降级版本。
 
 ## 二维图 `stk.plot/1`
 

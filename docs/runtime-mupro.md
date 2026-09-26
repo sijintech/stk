@@ -241,10 +241,10 @@ Runtime 取消任务时会终止启动器，`stk-mupro.json` 可能停留在 `ru
 - `Polar.00000000.dat` 是极化乘以 p0，后续 Polar 帧是归一化极化，二者不能直接比较。
 - 案例启用噪声时，每个 rank 用相同种子为自己的 x 分块生成噪声，因此初始场和最终结果随 rank
   数变化。只在相同 rank 数下比较结果。
-- 能量与场值单位未标注；场文件不带几何信息，工作台以从 0 开始的网格索引（`grid index`）
+- 能量与场值单位未标注；场文件不带几何信息，查看器以从 0 开始的网格索引（`grid index`）
   作坐标：坐标 x 对应 DAT 行中的 i = x + 1（y、z 同理），切片索引同样从 0 开始。
-- `energy_out.dat` 是能量时间序列，不是场；在工作台中选择它会报 `Not a regular-grid field DAT`。
-  工作台中查看 MuPRO 帧的方法见 [Blender 工作台指南](../blender/README.md)。
+- `energy_out.dat` 是能量时间序列，不是场；把它当作场查看会报 `Not a regular-grid field DAT`。
+  桌面程序中查看 MuPRO 帧的方法见 [桌面程序指南](desktop.md)。
 
 ## 运行中的进度与结果查看
 
@@ -379,7 +379,9 @@ suan graph run energy-plot --bind run="$R/work" --out ./energy
    - `view.probe` 在 [3,4,5] 的结果等于从 `$R/work/case16/Polar.00000100.dat` 直接解析的
      `4 5 6 c v` 各行；
    - `case16/energy_out.dat` 报 `Not a regular-grid field DAT`。
-9. Blender 原生模板链路，无界面、在进程内完成，不开新端口。在 `$A/template_check.py` 中：
+9. Blender 原生模板链路，无界面、在进程内完成，不开新端口（下列 `Bridge` 已随 Blender 工作台归档于标签
+   `archive/blender-workbench-2026-09`；现行代码由桌面配置的客户端直接提交 `{template: "muferro-example", workspace_id: WS}`，
+   见 `tests/test_integration_mupro.py`）。在 `$A/template_check.py` 中：
    - 用 `create_app("$A/control", <仅保存在内存中的随机 40 字符 owner token>,
      load_templates(["muferro-example"]))` 建立应用，经 fastapi TestClient 访问，并配对一个节点；
    - 建立 `Bridge("$A/desktop", connection)`，`$A/desktop/client.json` 为

@@ -12,13 +12,17 @@ in ``docs/specs/stk-graph-v1.md``.
 ``check_value(value, schema)`` implements the JSON Schema subset used by node
 parameter declarations (documented in the spec): ``type``, ``enum``, ``const``,
 numeric bounds, string length/``pattern``, ``items``/``prefixItems``,
-``minItems``/``maxItems``/``uniqueItems``, ``properties``/``required``/
+``minItems``/``maxItems``/``uniqueItems``, ``properties``/``patternProperties``/``required``/
 ``additionalProperties``/``propertyNames``/``min|maxProperties``, ``anyOf``/
 ``oneOf``/``allOf``/``not`` and ``if``/``then``/``else``. Annotations
-(``title``, ``description``, ``default``, ``x-stk-*``) are ignored.
+(``title``, ``description``, ``default``, ``x-stk-*``) are ignored. Patterns are
+searched with Python ``re`` except that ``$`` matches only at the very end of the
+string, as in JSON Schema (ECMA-262) and every other client: never before a
+trailing newline (:func:`schema_pattern`).
 """
 from dataclasses import dataclass
 import difflib
+import functools
 import hashlib
 import json
 import math
@@ -28,8 +32,8 @@ __all__ = [
     "GRAPH_SCHEMA", "ISSUE_CODES", "MAX_GRAPH_BYTES", "MAX_NODES", "MAX_PARAMETERS", "MAX_PARAMS_BYTES",
     "PARAMETER_TYPES", "GraphError", "GraphIssue", "GraphValidationError",
     "canonical_json", "check_graph", "check_value", "find_param_refs", "graph_hash", "normalize_value",
-    "parameter_schema", "parameter_values", "parse_port_ref", "parse_type", "pointer", "sha256_hex",
-    "substitute_params", "topological_order", "validate_graph",
+    "parameter_schema", "parameter_values", "parse_port_ref", "parse_type", "pattern_search", "pointer",
+    "schema_pattern", "sha256_hex", "substitute_params", "topological_order", "validate_graph",
 ]
 
 GRAPH_SCHEMA = "stk.graph/1"
@@ -38,9 +42,10 @@ MAX_GRAPH_BYTES = 256 * 1024
 MAX_PARAMS_BYTES = 64 * 1024
 MAX_PARAMETERS = 64
 
-ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-TYPE_RE = re.compile(r"^([a-z][a-z0-9_]*)\.([a-z][a-z0-9_]*)\.([a-z][a-z0-9_]*)@([1-9][0-9]*)$")
-PORT_REF_RE = re.compile(r"^([a-z][a-z0-9_]{0,63})\.([a-z][a-z0-9_]{0,63})$")
+# \Z, not $: "$" would also accept a trailing newline ("abc\n").
+ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
+TYPE_RE = re.compile(r"^([a-z][a-z0-9_]*)\.([a-z][a-z0-9_]*)\.([a-z][a-z0-9_]*)@([1-9][0-9]*)\Z")
+PORT_REF_RE = re.compile(r"^([a-z][a-z0-9_]{0,63})\.([a-z][a-z0-9_]{0,63})\Z")
 
 GRAPH_KEYS = frozenset({"schema", "id", "name", "description", "catalog", "parameters", "time", "nodes",
                         "outputs", "ui", "extensions"})
@@ -210,6 +215,53 @@ def _short(value, limit=60):
     return text if len(text) <= limit else text[:limit - 3] + "..."
 
 
+def schema_pattern(pattern):
+    """A JSON-Schema ``pattern`` as a Python regex: every ``$`` outside a character class becomes ``\\Z``.
+
+    Python's ``$`` also matches before a final newline, so ``^[a-z]+$`` would accept ``"abc\\n"``; in JSON
+    Schema (ECMA-262 regular expressions, the web and desktop clients) ``$`` matches only at the end.
+    Escapes (``\\$``) and ``$`` inside ``[...]`` are literal and kept as they are.
+    """
+    out, i, n, in_class = [], 0, len(pattern), False
+    while i < n:
+        c = pattern[i]
+        if c == "\\":
+            out.append(pattern[i:i + 2])
+            i += 2
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+        elif c == "[":
+            in_class = True
+            out.append(c)
+            i += 1
+            if i < n and pattern[i] == "^":     # "[^]...]" and "[]...]" start with a literal "]"
+                out.append("^")
+                i += 1
+            if i < n and pattern[i] == "]":
+                out.append("]")
+                i += 1
+            continue
+        elif c == "$":
+            out.append("\\Z")
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+@functools.lru_cache(maxsize=256)
+def _compiled_pattern(pattern):
+    return re.compile(schema_pattern(pattern))
+
+
+def pattern_search(pattern, text):
+    """JSON-Schema ``pattern`` semantics: :func:`re.search` with ``$`` anchored at the very end."""
+    return _compiled_pattern(pattern).search(text) is not None
+
+
 def check_value(value, schema, path=""):
     """Validate ``value`` against a JSON Schema subset; return ``[(pointer, message), ...]``."""
     errors = []
@@ -248,7 +300,7 @@ def _check(value, schema, path, errors):
             errors.append((path, f"must have at least {schema['minLength']} characters"))
         if "maxLength" in schema and len(value) > schema["maxLength"]:
             errors.append((path, f"must have at most {schema['maxLength']} characters"))
-        if "pattern" in schema and not re.search(schema["pattern"], value):
+        if "pattern" in schema and not pattern_search(schema["pattern"], value):
             errors.append((path, f"does not match pattern {schema['pattern']}"))
     if isinstance(value, (list, tuple)):
         if "minItems" in schema and len(value) < schema["minItems"]:
@@ -288,7 +340,7 @@ def _check(value, schema, path, errors):
                 matched = True
                 _check(item, properties[key], pointer_join(path, key), errors)
             for pattern, sub in patterns.items():
-                if re.search(pattern, key):
+                if pattern_search(pattern, key):
                     matched = True
                     _check(item, sub, pointer_join(path, key), errors)
             if not matched and "additionalProperties" in schema:

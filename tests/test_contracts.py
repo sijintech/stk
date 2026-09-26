@@ -38,7 +38,7 @@ def test_schema_files_are_valid_json_with_unique_ids():
         assert schema["$id"] == URN_PREFIX + path.name[:-len(".schema.json")]
         assert schema.get("title") and schema.get("description")
         ids.append(schema["$id"])
-    assert len(ids) == len(set(ids)) == 11
+    assert len(ids) == len(set(ids)) == 12
     assert set(DOCUMENT_SCHEMAS.values()) <= set(SCHEMA_IDS)
     for path in paths:  # every cross-file reference names a shipped schema
         for ref in _refs(strict_load(path)):

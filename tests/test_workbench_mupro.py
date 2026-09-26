@@ -1,4 +1,5 @@
-"""Blender-native MuPRO path: control templates, workbench template selection and DAT frame identity."""
+"""MuPRO through the control service: templates, template submission by id, the Linux-only server guard,
+DAT frame identity and node-agent views (scene v1)."""
 import json
 import sys
 import uuid
@@ -6,12 +7,10 @@ import uuid
 from click.testing import CliRunner
 import pytest
 
-from suan.blender_client.bridge import Bridge
-from suan.control.agent import NodeAgent, endpoint, frame_metadata
+from suan.control.agent import NodeAgent, frame_metadata
 from suan.control.policy import DEMO_TEMPLATE, validate_action
 from suan.control.templates import BUILTIN_TEMPLATES, MUFERRO_EXAMPLE_TEMPLATE, load_templates
 from suan.mupro import muferro_spec
-from suan.runtime.common import atomic_json, read_json
 from suan.runtime.models import TaskSpec
 from conftest import finish
 
@@ -37,20 +36,6 @@ rows = [f"{4:5d}{3:5d}{2:5d}"]
 rows += [f"{i:5d}{j:5d}{k:5d}{-(i + 10*j + 100*k):22.12E}" for k in (1, 2) for j in (1, 2, 3) for i in (1, 2, 3, 4)]
 Path("Elec_Phi.00000101.dat").write_text("\n".join(rows) + "\n")
 '''
-
-
-def command(kind, payload, **extra):
-    return {"id": uuid.uuid4().hex, "kind": kind, "payload": payload, **extra}
-
-
-class Recorder:
-    def __init__(self):
-        self.posts = []
-
-    def request(self, method, path, body=None):
-        assert (method, path) == ("POST", "actions")
-        self.posts.append(body)
-        return {"id": body["id"], "state": "queued"}
 
 
 def test_builtin_and_file_templates_load_and_validate(tmp_path):
@@ -126,94 +111,35 @@ def test_read_field_rejects_time_series_table(tmp_path):
     assert data.shape == (4, 3, 2, 1) and data[3, 2, 1, 0] == 4 + 30 + 200
 
 
-def test_bridge_runs_configured_template_for_native_button(tmp_path):
-    atomic_json(tmp_path / "client.json", {"template": "muferro-example"})
-    connection = Recorder()
-    bridge = Bridge(tmp_path, connection)
-    assert bridge.config == {"url": "http://127.0.0.1:8790", "token": "", "template": "muferro-example"}
-    bridge.execute(command("select", {"node_id": NODE}))
-    # Exactly the payload of the unchanged C++ button (space_stk.cc:528-533).
-    native = command("task.submit", {"template": "demo-field", "workspace_id": WORKSPACE})
-    bridge.execute(native)
-    assert connection.posts[-1] == {"id": native["id"], "node_id": NODE, "kind": "task.submit",
-                                    "payload": {"template": "muferro-example", "workspace_id": WORKSPACE}}
-    assert read_json(tmp_path / "receipts" / (native["id"] + ".json")) == {"command": native}
-    bridge.execute(native)
-    assert len(connection.posts) == 1
-    explicit = command("task.submit", {"template": "demo-field", "spec": {"workspace_id": WORKSPACE, **DEMO_TEMPLATE}})
-    bridge.execute(explicit)
-    assert connection.posts[-1]["payload"] == explicit["payload"]
-    plain = Recorder()
-    bridge = Bridge(tmp_path / "unconfigured", plain)
-    bridge.execute(command("task.submit", {"template": "demo-field", "workspace_id": WORKSPACE}, node_id=NODE))
-    assert plain.posts[-1]["payload"] == {"template": "demo-field", "workspace_id": WORKSPACE}
+class Hub:
+    """Stands in for the HubClient that HubBackend.submit posts to; every action finishes at once."""
 
-
-def test_pairing_keeps_workbench_template(tmp_path, monkeypatch):
-    code = "one-time-pairing-code-" + "z"*16
-
-    class Claim:
-        def __init__(self, url, token=""):
-            self.url, self.token = endpoint(url), token
-
-        def request(self, method, path, body=None):
-            assert (method, path, body["code"]) == ("POST", "pairings/claim", code)
-            return {"role": "client", "device_id": "e"*32, "token": "paired-device-token"}
-
-    monkeypatch.setattr("suan.blender_client.bridge.ControlConnection", Claim)
-    # Launched with --template alone: the bridge uses the default service.
-    atomic_json(tmp_path / "client.json", {"template": "muferro-example"})
-    bridge = Bridge(tmp_path)
-    bridge.execute(command("pair", {"url": "http://127.0.0.1:8790", "code": code}))
-    assert read_json(tmp_path / "client.json") == {"template": "muferro-example", "url": "http://127.0.0.1:8790",
-                                                  "token": "paired-device-token"}
-    assert bridge.connection.token == "paired-device-token"
-    # Only the old service registered the template, as with a new launcher --url.
-    bridge.execute(command("pair", {"url": "http://localhost:8791", "code": code}))
-    assert read_json(tmp_path / "client.json") == {"url": "http://localhost:8791", "token": "paired-device-token"}
-    assert not any(code.encode() in p.read_bytes() for p in tmp_path.rglob("*") if p.is_file())
-
-
-def test_launcher_writes_template_without_credentials(tmp_path, monkeypatch):
-    from suan.blender_client.launcher import main
-
-    class Process:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def terminate(self):
-            pass
-
-        def wait(self, timeout=None):
-            return 0
-
-    monkeypatch.setattr("suan.blender_client.launcher.shutil.which", lambda name: sys.executable)
-    monkeypatch.setattr("suan.blender_client.launcher.subprocess.Popen", Process)
-    monkeypatch.setattr("suan.blender_client.launcher.subprocess.call", lambda *args, **kwargs: 0)
-    alone = tmp_path / "alone"
-    assert main(["--state-dir", str(alone), "--template", "muferro-example"]) == 0
-    assert read_json(alone / "client.json") == {"template": "muferro-example"}
-    # The bridge already used the default service, so naming it is no URL change.
-    assert main(["--state-dir", str(alone), "--url", "http://127.0.0.1:8790"]) == 0
-    assert read_json(alone / "client.json") == {"url": "http://127.0.0.1:8790", "token": "", "template": "muferro-example"}
-    atomic_json(alone / "client.json", {"template": "muferro-example"})
-    assert main(["--state-dir", str(alone), "--url", "http://localhost:8791"]) == 0
-    assert read_json(alone / "client.json") == {"url": "http://localhost:8791", "token": ""}
-    root = tmp_path / "workbench"
     url = "http://127.0.0.1:8790"
-    assert main(["--state-dir", str(root), "--url", url, "--template", "muferro-example"]) == 0
-    assert read_json(root / "client.json") == {"url": url, "token": "", "template": "muferro-example"}
-    atomic_json(root / "client.json", {**read_json(root / "client.json"), "token": "paired-device-token"})
-    assert main(["--state-dir", str(root), "--url", url]) == 0
-    assert read_json(root / "client.json") == {"url": url, "token": "paired-device-token", "template": "muferro-example"}
-    # A new service never receives the old credential or the old template.
-    assert main(["--state-dir", str(root), "--url", "http://localhost:8791"]) == 0
-    assert read_json(root / "client.json") == {"url": "http://localhost:8791", "token": ""}
-    for invalid in ["Muferro", "-x", "a b", "x"*65, ""]:
-        with pytest.raises(SystemExit) as raised:
-            main(["--state-dir", str(tmp_path / "invalid"), "--template", invalid])
-        assert raised.value.code == 2
-    assert not (tmp_path / "invalid").exists()
+
+    def __init__(self):
+        self.posts = []
+
+    def post_action(self, body):
+        self.posts.append(body)
+        return {"id": body["id"], "node_id": body["node_id"], "state": "succeeded", "request": body,
+                "result": {"id": "t"*32, "workspace_id": WORKSPACE}}
+
+
+def test_desktop_submits_hub_template_by_id():
+    from suan.desktop_bridge.backends import HubBackend, action_id
+    from suan.desktop_bridge.protocol import BridgeError
+    hub = Hub()
+    backend = HubBackend("hub:lab", hub, NODE)
+    out = backend.submit(None, "run-1", template="muferro-example", workspace_id=WORKSPACE)
+    assert out["action"]["state"] == "succeeded" and out["task"]["id"] == "t"*32
+    # A template-only payload: the control service expands it into the registered spec (policy check above).
+    assert hub.posts == [{"id": action_id("task.submit", NODE, "run-1"), "node_id": NODE, "kind": "task.submit",
+                          "payload": {"template": "muferro-example", "workspace_id": WORKSPACE}}]
+    # The same idempotency key is the same hub action, so a retry never queues a second run.
+    backend.submit(None, "run-1", template="muferro-example", workspace_id=WORKSPACE)
+    assert hub.posts[1]["id"] == hub.posts[0]["id"]
+    with pytest.raises(BridgeError, match="workspace_id"):
+        backend.submit(None, "run-2", template="muferro-example")
 
 
 @pytest.mark.server
@@ -276,9 +202,10 @@ def test_control_and_node_services_refuse_off_linux(tmp_path, monkeypatch):
     ]:
         result = runner.invoke(group, args)
         assert result.exit_code == 1, (args, result.output)
-        # The workbench connects to control through a tunnel; a suan CLI --profile would not help.
-        assert "Linux only" in result.output and "suan-workbench --url" in result.output
-        assert "--profile" not in result.output
+        # Other computers are hub clients: stk-desktop paired with a desktop-profile code through a
+        # tunnel, not a suan CLI connection profile (suan connect ... --profile NAME).
+        assert "Linux only" in result.output and "stk-desktop" in result.output
+        assert "--profile desktop" in result.output and "suan connect" not in result.output
     assert not state.exists()
     assert list(runtime_state.iterdir()) == list(paired.iterdir()) == []
     assert runner.invoke(control, ["init", "--help"]).exit_code == 0
@@ -286,7 +213,7 @@ def test_control_and_node_services_refuse_off_linux(tmp_path, monkeypatch):
 
 def test_agent_views_mupro_frames_with_step_identity(runtime, tmp_path):
     pytest.importorskip("vtk")
-    from suan.blender_client.scene import validate_scene
+    from suan.render.v1 import validate_scene
     client, supervisor, _, _ = runtime
     workspace = client.create_workspace("MuPRO frames")
     task = client.submit({"workspace_id": workspace["id"], "argv": [sys.executable, "-c", FRAMES, ENERGY_OUT],
@@ -300,7 +227,7 @@ def test_agent_views_mupro_frames_with_step_identity(runtime, tmp_path):
         return agent.execute({"id": uuid.uuid4().hex, "node_id": NODE, "kind": kind,
                               "payload": {"task_id": task["id"], "path": path, **payload}})
 
-    # The same option shapes the C++ workbench sends (space_stk.cc:389-414), level included.
+    # The option shapes of a view.build request (as the web viewer sends them), level included.
     slice_view = run("view.build", "Polar.00000100.dat",
                      options={"mode": "slice", "axis": 2, "index": 1, "component": "magnitude", "level": 0.0})
     manifest = validate_scene(slice_view)["manifest"]

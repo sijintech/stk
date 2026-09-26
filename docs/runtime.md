@@ -1,6 +1,6 @@
 # STK 本地与服务器 runtime
 
-STK 0.1.0a1 提供个人使用的持久任务服务。Blender 工作台（经节点代理）、旧桌面 Tasks、
+STK 0.1.0a1 提供个人使用的持久任务服务。桌面程序 `stk-desktop`（直连或经节点代理）、旧桌面 Tasks、
 CLI 和 MCP 共用 `RuntimeClient`。本机进程、OpenPBS/PBS Professional、Slurm 使用同一任务合同；
 MuPRO 作业的排队也由 STK Runtime 负责，见 [MuPRO 指南](runtime-mupro.md)。
 服务器仅支持 Linux，Windows / macOS 只作客户端。
@@ -11,7 +11,9 @@ flowchart LR
   Desktop[旧桌面 Tasks] --> API[HTTP API v1]
   CLI[CLI] --> API
   MCP[MCP stdio] --> API
-  Workbench[Blender 工作台] --> Control[控制服务]
+  StkDesktop[桌面程序 stk-desktop] --> API
+  StkDesktop --> Control[控制服务]
+  Web[网页／手机 PWA] --> Control
   Node[节点代理] -->|主动 WSS| Control
   Node --> API
   API <--> DB[(本机 SQLite)]
@@ -34,7 +36,7 @@ flowchart LR
 ```bash
 # 服务器：不安装 Qt、VTK、AI 模型
 python -m pip install '.[server,science]'
-# 客户端：CLI 与 Blender 工作台桥接，任意系统
+# 客户端：CLI 与桌面程序的 Python 桥，任意系统
 python -m pip install .
 # 旧 Qt 桌面客户端
 python -m pip install '.[desktop]'
@@ -46,7 +48,7 @@ suan server --state-dir /local-disk/stk-state init \
 suan server --state-dir /local-disk/stk-state start
 suan server --state-dir /local-disk/stk-state status
 suan server --state-dir /local-disk/stk-state doctor --science
-# 客户端：suan-workbench（Blender 工作台）或旧 Qt 客户端 suan-gui
+# 客户端：桌面程序 stk-desktop（见 docs/desktop.md）或旧 Qt 客户端 suan-gui
 ```
 
 `state-dir` 中的 SQLite 必须放在本机磁盘；不要放在 NFS 等网络文件系统。
@@ -189,7 +191,8 @@ Windows / macOS 只作客户端：按上面的方式建立 SSH 隧道并用 `sua
 `STK_RUNTIME_URL` 与 `STK_RUNTIME_TOKEN`。在这些系统上运行 `suan server init/start` 会退出
 并提示 `The STK server Runtime runs on Linux only. …`；`suan-control init/serve/pair` 与
 `suan-node pair/run` 提示 `The STK control service and node agent run on Linux only, …`，
-并说明工作台经 SSH 隧道用 `suan-workbench --url http://127.0.0.1:8790` 连接控制服务。
+并说明客户端电脑作为 hub 客户端连接：服务器上用 `suan-control pair --role client --profile desktop`
+签发配对码，经 SSH 隧道把 `stk-desktop` 与 `http://127.0.0.1:8790` 配对。
 两者都不创建任何文件。
 
 桌面配置可通过 `STK_CONFIG_DIR` 移至其他目录。Linux 桌面需可用的 Qt 系统库
@@ -430,7 +433,7 @@ v1 的使用方包括节点代理（`suan/control/agent.py`）、可选的 Synor
 ## 验收与限制
 
 ```bash
-# Linux：服务器、控制服务与工作台协议测试
+# Linux：服务器、控制服务与节点代理协议测试
 python -m pip install '.[server,science,control,visualization,test]'
 python -m pytest -m 'not desktop'
 # Windows / macOS 客户端：安装 '.[science,test]'，只运行客户端测试
@@ -476,4 +479,4 @@ MuPRO 本机验收流程见 [MuPRO 指南](runtime-mupro.md)。
 tomli），安装以 `pyproject.toml` 为准。
 
 交互式 Python 内核、远程实时三维渲染和团队权限留在后续版本。网页／手机 PWA 由控制服务
-提供，见 [Blender 工作台指南](../blender/README.md)。
+提供，见 [控制服务指南](hub.md)。

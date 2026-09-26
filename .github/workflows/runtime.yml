@@ -57,7 +57,7 @@ jobs:
           suan mupro submit --help
           suan jobs submit --help
           suan workspaces upload --help
-          suan-workbench --help
+          python -m suan.desktop_bridge --help
           suan connect list
           # The server Runtime and control service must refuse to initialize and create nothing.
           out=$(suan server --state-dir "$RUNNER_TEMP/stk-state" init 2>&1) && exit 1
@@ -100,4 +100,4 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install ".[control,visualization,test]"
-      - run: python -m pytest tests/test_control.py tests/test_control_model.py tests/test_visualization.py tests/test_blender_client.py tests/test_workbench_mupro.py tests/test_integration_mupro.py
+      - run: python -m pytest tests/test_control.py tests/test_control_model.py tests/test_visualization.py tests/test_workbench_mupro.py tests/test_integration_mupro.py

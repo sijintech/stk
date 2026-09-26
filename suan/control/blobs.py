@@ -76,6 +76,25 @@ class BlobStore:
                 upload.abort()
         return digest
 
+    def adopt(self, source, digest):
+        """Move a finished file (on the store's file system) into place after it hashed to ``digest``.
+
+        Returns ``True`` when this call created the blob; raises :class:`BlobMismatch` (the file is
+        left where it is) when the bytes do not match.
+        """
+        self.check(digest)
+        result = hashlib.sha256()
+        with open(source, "rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                result.update(block)
+        if result.hexdigest() != digest:
+            raise BlobMismatch("Uploaded bytes do not match the blob's sha256")
+        target = self.path(digest)
+        created = not target.exists()
+        target.parent.mkdir(exist_ok=True, mode=0o700)
+        os.replace(source, target)
+        return created
+
     def begin(self, digest, expected_size=None):
         """An :class:`Upload` (capped at ``max_bytes``) that streams into a private temporary file."""
         self.check(digest)

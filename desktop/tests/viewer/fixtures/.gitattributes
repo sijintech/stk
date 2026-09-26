@@ -1,0 +1,3 @@
+# Content-addressed payload buffers: never convert line endings (their names are their sha256).
+*.bin binary
+*.stkp binary

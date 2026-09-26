@@ -204,7 +204,7 @@ def test_old_database_migrates_in_place(tmp_path):
     store = ControlStore(tmp_path)
     with store.db() as db:
         columns = [r["name"] for r in db.execute("PRAGMA table_info(actions)")]
-    assert columns[-1] == "result_ref"
+    assert columns[-2:] == ["result_ref", "submitted_by"]  # additive migrations, in order
     assert store.action(old["id"])["result"] == {"data": "old"}
     assert store.actions()[0]["id"] == old["id"]
     new = {**old, "id": "4" * 32}

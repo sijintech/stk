@@ -1,0 +1,12 @@
+# gitleaks configuration: the default rules plus a narrow allowlist of generated files whose
+# identifiers trip the generic-api-key rule. Nothing here may hold credentials.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated/vendored data: UI layout goldens (widget keys like \"a1/main/conn\"), the vendored-file sha256 manifest, and xxhash's SIMD variable names"
+paths = [
+  '''^desktop/tests/[^/]+/golden/[^/]+\.json$''',
+  '''^desktop/engine/third_party/blender/VENDORED\.json$''',
+  '''^desktop/engine/third_party/blender/src/extern/xxhash/xxhash\.h$''',
+]

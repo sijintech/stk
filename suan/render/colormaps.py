@@ -27,7 +27,7 @@ __all__ = [
     "colormap_names", "hsl_to_rgb", "is_builtin", "lut_colors", "lut_index", "lut_rgba8", "lut_rgba8_bytes",
     "map_categories", "map_scalars", "opacity_at", "opacity_lut", "opacity_points", "orientation_hsl",
     "orientation_rgb", "palette_entries", "rgba8", "stk_categorical_color", "to_hex", "transfer_function",
-    "transfer_function_rgba8",
+    "transfer_function_rgba8", "volume_color_points",
 ]
 
 BUILTIN = ("viridis", "cividis", "coolwarm", "turbo", "gray")
@@ -309,7 +309,14 @@ def orientation_hsl(vectors, max_magnitude=None, lightness_range=(0.0, 1.0)):
 
 
 def stk_categorical_color(value):
-    """``stk:categorical`` colour of a label value (domain-classifiers.md §6.5)."""
+    """``stk:categorical`` colour of a label value (domain-classifiers.md §6.5).
+
+    Labels are integers: a non-integer (or non-finite) value gets the unknown grey, as in every client
+    (render payload spec §5); it is never truncated to a neighbouring label.
+    """
+    value = float(value)
+    if not (math.isfinite(value) and value.is_integer()):
+        return DEFAULT_UNKNOWN_COLOR
     value = int(value)
     if value in RESERVED_COLORS:
         return RESERVED_COLORS[value]
@@ -397,10 +404,39 @@ def categorical_opacity(value_range, alpha=CATEGORICAL_OPACITY):
     return [[lo, 0.0], [-0.5, 0.0], [-0.499, alpha], [hi, alpha]]
 
 
+def volume_color_points(colormap, lut, value_range):
+    """Colour transfer points ``[[physical value, r, g, b], ...]`` of a volume (render payload spec §6.6).
+
+    ``colormap`` is the payload ``colormaps[]`` entry and ``lut`` its ``(256, 4)`` uint8 table (``None`` for a
+    categorical palette). A continuous LUT is spread over ``value_range`` at the bin centres
+    ``lo + (k + 0.5) / 256 * (hi - lo)``; a degenerate range (``hi <= lo``) is one point, LUT entry 128, at
+    ``lo``. A categorical palette holds each entry's colour, quantized to RGBA8 like every payload colour,
+    over ``value - 0.499 .. value + 0.499``.
+    """
+    lo, hi = float(value_range[0]), float(value_range[1])
+    if colormap.get("categorical"):
+        points = []
+        for entry in colormap.get("entries") or ():
+            r, g, b = (c / 255 for c in rgba8(entry["color"])[:3])
+            points += [[entry["value"] - 0.499, r, g, b], [entry["value"] + 0.499, r, g, b]]
+        return points
+    table = [[int(v) for v in row] for row in lut]
+    if not hi > lo:
+        return [[lo] + [c / 255 for c in table[128][:3]]]
+    return [[lo + ((k + 0.5) / 256) * (hi - lo)] + [c / 255 for c in table[k][:3]] for k in range(256)]
+
+
 def opacity_at(values, points):
-    """Piecewise-linear opacity at physical ``values``; constant beyond the end points."""
+    """Piecewise-linear opacity at physical ``values``; constant beyond the end points.
+
+    Of points with the same value the last one wins, as VTK/vtk.js ``AddPoint`` replace a point
+    (render payload spec §6.6).
+    """
     np = _np()
-    points = sorted((float(v), float(a)) for v, a in points)
+    last = {}
+    for v, a in points:
+        last[float(v)] = float(a)
+    points = sorted(last.items())
     xs, alphas = [p[0] for p in points], [p[1] for p in points]
     return np.interp(np.asarray(values, dtype=np.float64), xs, alphas)
 

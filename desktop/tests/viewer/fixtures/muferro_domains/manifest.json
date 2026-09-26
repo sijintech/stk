@@ -1,0 +1,870 @@
+{
+ "schema": "stk.payload/2",
+ "source": {
+  "time": {
+   "step": 2,
+   "time": null
+  },
+  "profile": "web",
+  "reduced": false,
+  "generator": "suan.render.payload"
+ },
+ "render_origin": [
+  7.5,
+  5.5,
+  4.5
+ ],
+ "length_unit": "grid_index",
+ "bounds": [
+  [
+   -7.5,
+   -5.5,
+   -4.5
+  ],
+  [
+   7.5,
+   5.5,
+   4.5
+  ]
+ ],
+ "buffers": [
+  {
+   "id": "b0",
+   "uri": "sha256:a1070ac6090676cbef557328379c7cc5abbb1bd6c328855f742b14d6c0fa1578",
+   "sha256": "a1070ac6090676cbef557328379c7cc5abbb1bd6c328855f742b14d6c0fa1578",
+   "byteLength": 12648,
+   "encoding": "raw"
+  },
+  {
+   "id": "b1",
+   "uri": "sha256:d8996fc4aa8debd1b17fd25a5e78d8d9710888d0f5b882743927b7a1b09e1035",
+   "sha256": "d8996fc4aa8debd1b17fd25a5e78d8d9710888d0f5b882743927b7a1b09e1035",
+   "byteLength": 12648,
+   "encoding": "raw"
+  },
+  {
+   "id": "b2",
+   "uri": "sha256:3d17f546c243081728c0f3953baf48566fbd7a9a81a76abe866d8b6efb90c47d",
+   "sha256": "3d17f546c243081728c0f3953baf48566fbd7a9a81a76abe866d8b6efb90c47d",
+   "byteLength": 25104,
+   "encoding": "raw"
+  },
+  {
+   "id": "b3",
+   "uri": "sha256:a1b8f42ce76045815cd9bb3e58b16b2d7e64a245584916eb50642a6913d357e0",
+   "sha256": "a1b8f42ce76045815cd9bb3e58b16b2d7e64a245584916eb50642a6913d357e0",
+   "byteLength": 4184,
+   "encoding": "raw"
+  },
+  {
+   "id": "b4",
+   "uri": "sha256:5c72994feb42ae63b489c916252e64283042870943963ed5d7b288b01fa8d417",
+   "sha256": "5c72994feb42ae63b489c916252e64283042870943963ed5d7b288b01fa8d417",
+   "byteLength": 96,
+   "encoding": "raw"
+  },
+  {
+   "id": "b5",
+   "uri": "sha256:3f47f86f4eb21c5912a026b53d267202b905ea3eadafd944239ec96d37e9e42d",
+   "sha256": "3f47f86f4eb21c5912a026b53d267202b905ea3eadafd944239ec96d37e9e42d",
+   "byteLength": 96,
+   "encoding": "raw"
+  }
+ ],
+ "accessors": [
+  {
+   "id": "surface_layer.positions",
+   "buffer": "b0",
+   "byteOffset": 0,
+   "count": 1054,
+   "type": "f32",
+   "components": 3,
+   "min": [
+    -7.5,
+    -5.5,
+    -3.158719539642334
+   ],
+   "max": [
+    7.5,
+    5.5,
+    3.153489112854004
+   ]
+  },
+  {
+   "id": "surface_layer.normals",
+   "buffer": "b1",
+   "byteOffset": 0,
+   "count": 1054,
+   "type": "f32",
+   "components": 3,
+   "min": [
+    -1.0,
+    -1.0,
+    -0.9999740719795227
+   ],
+   "max": [
+    1.0,
+    1.0,
+    0.9999800324440002
+   ]
+  },
+  {
+   "id": "surface_layer.indices",
+   "buffer": "b2",
+   "byteOffset": 0,
+   "count": 6276,
+   "type": "u32",
+   "components": 1,
+   "min": [
+    0
+   ],
+   "max": [
+    1053
+   ]
+  },
+  {
+   "id": "surface_layer.a0",
+   "buffer": "b3",
+   "byteOffset": 0,
+   "count": 2092,
+   "type": "i16",
+   "components": 1,
+   "min": [
+    2
+   ],
+   "max": [
+    19
+   ]
+  },
+  {
+   "id": "box.positions",
+   "buffer": "b4",
+   "byteOffset": 0,
+   "count": 8,
+   "type": "f32",
+   "components": 3,
+   "min": [
+    -7.5,
+    -5.5,
+    -4.5
+   ],
+   "max": [
+    7.5,
+    5.5,
+    4.5
+   ]
+  },
+  {
+   "id": "box.indices",
+   "buffer": "b5",
+   "byteOffset": 0,
+   "count": 24,
+   "type": "u32",
+   "components": 1,
+   "min": [
+    0
+   ],
+   "max": [
+    7
+   ]
+  }
+ ],
+ "colormaps": [
+  {
+   "id": "pal0",
+   "name": "stk:cubic-26-orientation",
+   "categorical": true,
+   "entries": [
+    {
+     "value": -1,
+     "name": "unclassified",
+     "color": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    {
+     "value": 0,
+     "name": "substrate",
+     "color": [
+      0.75,
+      0.75,
+      0.75
+     ]
+    },
+    {
+     "value": 1,
+     "name": "T[100]",
+     "color": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "family": "T",
+     "direction": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "aliases": [
+      "T1+(+,0,0)",
+      "T1+",
+      "a1+"
+     ]
+    },
+    {
+     "value": 2,
+     "name": "T[-100]",
+     "color": [
+      0.0,
+      1.0,
+      1.0
+     ],
+     "family": "T",
+     "direction": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "aliases": [
+      "T1-(-,0,0)",
+      "T1-",
+      "a1-"
+     ]
+    },
+    {
+     "value": 3,
+     "name": "T[010]",
+     "color": [
+      0.5,
+      1.0,
+      0.0
+     ],
+     "family": "T",
+     "direction": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "aliases": [
+      "T2+(0,+,0)",
+      "T2+",
+      "a2+"
+     ]
+    },
+    {
+     "value": 4,
+     "name": "T[0-10]",
+     "color": [
+      0.5,
+      0.0,
+      1.0
+     ],
+     "family": "T",
+     "direction": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "aliases": [
+      "T2-(0,-,0)",
+      "T2-",
+      "a2-"
+     ]
+    },
+    {
+     "value": 5,
+     "name": "T[001]",
+     "color": [
+      0.8,
+      0.8,
+      0.8
+     ],
+     "family": "T",
+     "direction": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "aliases": [
+      "T3+(0,0,+)",
+      "T3+",
+      "c+"
+     ]
+    },
+    {
+     "value": 6,
+     "name": "T[00-1]",
+     "color": [
+      0.2,
+      0.2,
+      0.2
+     ],
+     "family": "T",
+     "direction": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "aliases": [
+      "T3-(0,0,-)",
+      "T3-",
+      "c-"
+     ]
+    },
+    {
+     "value": 7,
+     "name": "O[110]",
+     "color": [
+      1.0,
+      0.75,
+      0.0
+     ],
+     "family": "O",
+     "direction": [
+      0.707106781187,
+      0.707106781187,
+      0.0
+     ],
+     "aliases": [
+      "O1+(+,+,0)",
+      "O1+"
+     ]
+    },
+    {
+     "value": 8,
+     "name": "O[-1-10]",
+     "color": [
+      0.0,
+      0.25,
+      1.0
+     ],
+     "family": "O",
+     "direction": [
+      -0.707106781187,
+      -0.707106781187,
+      0.0
+     ],
+     "aliases": [
+      "O1-(-,-,0)",
+      "O1-"
+     ]
+    },
+    {
+     "value": 9,
+     "name": "O[101]",
+     "color": [
+      1.0,
+      0.424264,
+      0.424264
+     ],
+     "family": "O",
+     "direction": [
+      0.707106781187,
+      0.0,
+      0.707106781187
+     ],
+     "aliases": [
+      "O3+(+,0,+)",
+      "O3+"
+     ]
+    },
+    {
+     "value": 10,
+     "name": "O[-10-1]",
+     "color": [
+      0.0,
+      0.575736,
+      0.575736
+     ],
+     "family": "O",
+     "direction": [
+      -0.707106781187,
+      0.0,
+      -0.707106781187
+     ],
+     "aliases": [
+      "O3-(-,0,-)",
+      "O3-"
+     ]
+    },
+    {
+     "value": 11,
+     "name": "O[10-1]",
+     "color": [
+      0.575736,
+      0.0,
+      0.0
+     ],
+     "family": "O",
+     "direction": [
+      0.707106781187,
+      0.0,
+      -0.707106781187
+     ],
+     "aliases": [
+      "O4+(+,0,-)",
+      "O4+"
+     ]
+    },
+    {
+     "value": 12,
+     "name": "O[-101]",
+     "color": [
+      0.424264,
+      1.0,
+      1.0
+     ],
+     "family": "O",
+     "direction": [
+      -0.707106781187,
+      0.0,
+      0.707106781187
+     ],
+     "aliases": [
+      "O4-(-,0,+)",
+      "O4-"
+     ]
+    },
+    {
+     "value": 13,
+     "name": "O[1-10]",
+     "color": [
+      1.0,
+      0.0,
+      0.75
+     ],
+     "family": "O",
+     "direction": [
+      0.707106781187,
+      -0.707106781187,
+      0.0
+     ],
+     "aliases": [
+      "O2+(+,-,0)",
+      "O2+"
+     ]
+    },
+    {
+     "value": 14,
+     "name": "O[-110]",
+     "color": [
+      0.0,
+      1.0,
+      0.25
+     ],
+     "family": "O",
+     "direction": [
+      -0.707106781187,
+      0.707106781187,
+      0.0
+     ],
+     "aliases": [
+      "O2-(-,+,0)",
+      "O2-"
+     ]
+    },
+    {
+     "value": 15,
+     "name": "O[011]",
+     "color": [
+      0.712132,
+      1.0,
+      0.424264
+     ],
+     "family": "O",
+     "direction": [
+      0.0,
+      0.707106781187,
+      0.707106781187
+     ],
+     "aliases": [
+      "O5+(0,+,+)",
+      "O5+"
+     ]
+    },
+    {
+     "value": 16,
+     "name": "O[0-1-1]",
+     "color": [
+      0.287868,
+      0.0,
+      0.575736
+     ],
+     "family": "O",
+     "direction": [
+      0.0,
+      -0.707106781187,
+      -0.707106781187
+     ],
+     "aliases": [
+      "O5-(0,-,-)",
+      "O5-"
+     ]
+    },
+    {
+     "value": 17,
+     "name": "O[01-1]",
+     "color": [
+      0.287868,
+      0.575736,
+      0.0
+     ],
+     "family": "O",
+     "direction": [
+      0.0,
+      0.707106781187,
+      -0.707106781187
+     ],
+     "aliases": [
+      "O6+(0,+,-)",
+      "O6+"
+     ]
+    },
+    {
+     "value": 18,
+     "name": "O[0-11]",
+     "color": [
+      0.712132,
+      0.424264,
+      1.0
+     ],
+     "family": "O",
+     "direction": [
+      0.0,
+      -0.707106781187,
+      0.707106781187
+     ],
+     "aliases": [
+      "O6-(0,-,+)",
+      "O6-"
+     ]
+    },
+    {
+     "value": 19,
+     "name": "R[111]",
+     "color": [
+      1.0,
+      0.836603,
+      0.34641
+     ],
+     "family": "R",
+     "direction": [
+      0.57735026919,
+      0.57735026919,
+      0.57735026919
+     ],
+     "aliases": [
+      "R1+(+,+,+)",
+      "R1+"
+     ]
+    },
+    {
+     "value": 20,
+     "name": "R[-1-1-1]",
+     "color": [
+      0.0,
+      0.163397,
+      0.65359
+     ],
+     "family": "R",
+     "direction": [
+      -0.57735026919,
+      -0.57735026919,
+      -0.57735026919
+     ],
+     "aliases": [
+      "R1-(-,-,-)",
+      "R1-"
+     ]
+    },
+    {
+     "value": 21,
+     "name": "R[11-1]",
+     "color": [
+      0.65359,
+      0.490192,
+      0.0
+     ],
+     "family": "R",
+     "direction": [
+      0.57735026919,
+      0.57735026919,
+      -0.57735026919
+     ],
+     "aliases": [
+      "R3-(+,+,-)",
+      "R3-"
+     ]
+    },
+    {
+     "value": 22,
+     "name": "R[-1-11]",
+     "color": [
+      0.34641,
+      0.509808,
+      1.0
+     ],
+     "family": "R",
+     "direction": [
+      -0.57735026919,
+      -0.57735026919,
+      0.57735026919
+     ],
+     "aliases": [
+      "R3+(-,-,+)",
+      "R3+"
+     ]
+    },
+    {
+     "value": 23,
+     "name": "R[1-11]",
+     "color": [
+      1.0,
+      0.34641,
+      0.836603
+     ],
+     "family": "R",
+     "direction": [
+      0.57735026919,
+      -0.57735026919,
+      0.57735026919
+     ],
+     "aliases": [
+      "R4+(+,-,+)",
+      "R4+"
+     ]
+    },
+    {
+     "value": 24,
+     "name": "R[-11-1]",
+     "color": [
+      0.0,
+      0.65359,
+      0.163397
+     ],
+     "family": "R",
+     "direction": [
+      -0.57735026919,
+      0.57735026919,
+      -0.57735026919
+     ],
+     "aliases": [
+      "R4-(-,+,-)",
+      "R4-"
+     ]
+    },
+    {
+     "value": 25,
+     "name": "R[1-1-1]",
+     "color": [
+      0.65359,
+      0.0,
+      0.490192
+     ],
+     "family": "R",
+     "direction": [
+      0.57735026919,
+      -0.57735026919,
+      -0.57735026919
+     ],
+     "aliases": [
+      "R2-(+,-,-)",
+      "R2-"
+     ]
+    },
+    {
+     "value": 26,
+     "name": "R[-111]",
+     "color": [
+      0.34641,
+      1.0,
+      0.509808
+     ],
+     "family": "R",
+     "direction": [
+      -0.57735026919,
+      0.57735026919,
+      0.57735026919
+     ],
+     "aliases": [
+      "R2+(-,+,+)",
+      "R2+"
+     ]
+    }
+   ],
+   "unknown_color": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ ],
+ "layers": [
+  {
+   "id": "surface_layer",
+   "type": "triangles",
+   "node": "surface_layer",
+   "name": "Domains",
+   "pick": {
+    "probe": {
+     "node": "polar",
+     "dataset": "Polar"
+    }
+   },
+   "positions": "surface_layer.positions",
+   "normals": "surface_layer.normals",
+   "indices": "surface_layer.indices",
+   "attributes": {
+    "label": {
+     "accessor": "surface_layer.a0",
+     "association": "cell",
+     "categorical": true,
+     "palette": "pal0",
+     "unit": "1",
+     "quantity": "domain_variant"
+    }
+   },
+   "appearance": {
+    "color": {
+     "by": "attribute",
+     "attribute": "label",
+     "colormap": "pal0",
+     "interpolate": "nearest"
+    },
+    "opacity": 1.0,
+    "shading": "smooth",
+    "lighting": true
+   }
+  },
+  {
+   "id": "box",
+   "type": "lines",
+   "node": "box",
+   "name": "Outline",
+   "positions": "box.positions",
+   "mode": "segments",
+   "indices": "box.indices",
+   "appearance": {
+    "color": {
+     "by": "solid",
+     "solid": [
+      0.0,
+      0.0,
+      0.0
+     ]
+    },
+    "opacity": 1.0,
+    "width_px": 1.0,
+    "lighting": false
+   }
+  },
+  {
+   "id": "legend",
+   "type": "overlay",
+   "node": "legend",
+   "kind": "legend",
+   "anchor": "right",
+   "title": "Domain variant",
+   "source_layer": "surface_layer",
+   "colormap": "pal0",
+   "values": [
+    2,
+    6,
+    13,
+    19
+   ],
+   "columns": 1
+  },
+  {
+   "id": "axes",
+   "type": "overlay",
+   "node": "axes",
+   "kind": "axes_triad",
+   "anchor": "bottom_left",
+   "size_px": [
+    80.0,
+    80.0
+   ],
+   "labels": [
+    "x",
+    "y",
+    "z"
+   ]
+  }
+ ],
+ "view": {
+  "schema": "stk.view/1",
+  "camera": {
+   "projection": "perspective",
+   "preset": "iso",
+   "position": [
+    30.547673019431638,
+    -17.547673019431638,
+    27.547673019431638
+   ],
+   "focal_point": [
+    7.5,
+    5.5,
+    4.5
+   ],
+   "view_up": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "view_angle_deg": 30.0,
+   "parallel_scale": 10.331989159885913,
+   "frame": "grid"
+  },
+  "viewport": {
+   "width": 1600,
+   "height": 1200,
+   "magnification": 1,
+   "lock_aspect": true
+  },
+  "background": {
+   "type": "solid",
+   "color": [
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  "lighting": {
+   "preset": "three_point",
+   "intensity": 1.0
+  },
+  "visibility": {
+   "surface_layer": true,
+   "box": true,
+   "legend": true,
+   "axes": true
+  },
+  "time": {
+   "step": 2,
+   "time": null
+  }
+ },
+ "stats": {
+  "triangles": 2092,
+  "instances": 0,
+  "points": 0,
+  "line_segments": 12,
+  "voxels": 0,
+  "texels": 0,
+  "bytes": 54776
+ },
+ "budget": {
+  "profile": "web",
+  "limits": {
+   "triangles": 2000000,
+   "instances": 500000,
+   "points": 2000000,
+   "voxels": 16777216,
+   "bytes": 134217728
+  },
+  "reductions": []
+ }
+}

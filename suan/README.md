@@ -5,7 +5,7 @@
 
 ## 开发环境
 - Python 3.10–3.14
-- Qt 桌面为旧客户端，兼容 Windows/Linux/MacOS；服务器 Runtime 仅支持 Linux；桌面主线为 [Blender 原生工作台](../blender/README.md)
+- Qt 桌面为旧客户端，兼容 Windows/Linux/MacOS；服务器 Runtime 仅支持 Linux；桌面主线为 [桌面程序 stk-desktop](../docs/desktop.md)（Blender 原生工作台已归档于标签 `archive/blender-workbench-2026-09`）
 
 ## 如何运行
     在仓库根目录执行 python -m pip install '.[desktop]'，然后运行 suan-gui

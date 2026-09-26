@@ -1,7 +1,8 @@
 # Synorder / STK 插件迁移验收
 
 > 历史记录：本页记录 Synorder 集成原型当时的验收。STK 此后独立发展，桌面主线为
-> [STK Blender 原生工作台](../../blender/README.md)，本插件暂缓。
+> [STK 桌面程序 stk-desktop](../../docs/desktop.md)（其前身 Blender 原生工作台已归档于标签
+> `archive/blender-workbench-2026-09`），本插件暂缓。
 
 本轮在 Linux x86_64 合成环境验证原生宿主、网页/手机布局及独立 Runtime。
 代码分别落在 Synorder 产品仓库和 STK 的 `plugins/synorder`；未部署到实际 NAS，未配置云模型密钥。

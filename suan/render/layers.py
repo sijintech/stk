@@ -25,7 +25,8 @@ from .colormaps import ORIENTATION_HSL, canonical_name, palette_entries
 
 __all__ = [
     "ANCHORS", "LAYER_TYPES", "ORIENTATION_HSL", "OVERLAY_KINDS", "PRESETS",
-    "Attribute", "Layer", "Scene", "default_view_up", "fit_camera", "grid_corners", "resolve_range", "union_bounds",
+    "Attribute", "Layer", "Scene", "camera_pose", "default_view_up", "fit_camera", "grid_corners", "resolve_range",
+    "union_bounds", "view_preset",
 ]
 
 LAYER_TYPES = ("triangles", "slice_image", "lines", "points", "instances", "volume", "overlay")
@@ -329,11 +330,90 @@ def fit_camera(bounds, preset="iso", *, view_angle_deg=30.0, zoom=1.0, projectio
             "parallel_scale": radius / zoom}
 
 
+def _unit(a):
+    length = math.hypot(*a) or 1.0
+    return [v / length for v in a]
+
+
+def _cross(a, b):
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+
+def _is_vec3(value):
+    return (isinstance(value, (list, tuple)) and len(value) == 3
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in value))
+
+
+def _positive(value, fallback):
+    ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+    return float(value) if ok else fallback
+
+
+def _up_for(up, direction):
+    """``up``, unless it is within 1e-6 of the view direction: then +z, or +y when looking along z."""
+    if math.hypot(*_cross(_unit(up), direction)) < 1e-6:
+        return [0.0, 1.0, 0.0] if abs(direction[2]) > 0.99 else [0.0, 0.0, 1.0]
+    return [float(v) for v in up]
+
+
 def default_view_up(position, focal_point):
-    """``+z``, or ``+y`` when the view direction is (nearly) parallel to z."""
-    d = [p - f for p, f in zip(position, focal_point)]
-    norm = math.sqrt(sum(v * v for v in d)) or 1.0
-    return [0.0, 1.0, 0.0] if abs(d[2] / norm) > 0.999 else [0.0, 0.0, 1.0]
+    """``+z``, or ``+y`` when the view direction is within 1e-6 of the z axis (render payload spec §2.1)."""
+    return _up_for([0.0, 0.0, 1.0], _unit([f - p for p, f in zip(position, focal_point)]))
+
+
+def view_preset(view):
+    """Camera preset of an ``stk.view/1`` view: ``camera.preset``, else ``preset``; ``None`` for a numeric
+    camera (``position`` and ``focal_point``) without one; ``"iso"`` otherwise (render payload spec §2.1)."""
+    view = view if isinstance(view, dict) else {}
+    camera = view.get("camera") if isinstance(view.get("camera"), dict) else {}
+    preset = camera.get("preset")
+    if preset is None:
+        preset = view.get("preset")
+    if isinstance(preset, str) and preset:
+        return preset
+    return None if _is_vec3(camera.get("position")) and _is_vec3(camera.get("focal_point")) else "iso"
+
+
+def camera_pose(view, render_origin, bounds):
+    """The camera of an ``stk.view/1`` view as every client shows it (render payload spec §2.1).
+
+    ``bounds`` ``[[min], [max]]`` are relative to ``render_origin`` (``None``: the unit cube); so is the
+    returned pose ``{position, focal_point, view_up, view_angle_deg, parallel, parallel_scale}``. A numeric
+    camera (``position`` != ``focal_point``) wins over a preset; its ``zoom`` narrows the view angle unless a
+    preset is also named (a fitted preset has its zoom built in). Presets fit the bounds. An explicit
+    ``view_up`` is kept unless it is within 1e-6 of the view direction; a view angle of 180 degrees or more
+    is replaced by 30. Mirrors ``web/src/camera.ts`` ``cameraPose``.
+    """
+    view = view if isinstance(view, dict) else {}
+    camera = view.get("camera") if isinstance(view.get("camera"), dict) else {}
+    lo, hi = bounds if bounds is not None else ([-1.0] * 3, [1.0] * 3)
+    centre = [(float(a) + float(b)) / 2 for a, b in zip(lo, hi)]
+    radius = 0.5 * math.hypot(*(float(b) - float(a) for a, b in zip(lo, hi)))
+    if not radius or radius != radius:
+        radius = 1.0
+    requested = _positive(camera.get("view_angle_deg"), 30.0)
+    angle = requested if requested < 180 else 30.0
+    zoom = _positive(camera.get("zoom"), 1.0)
+    parallel = camera.get("projection") == "parallel"
+    preset = view_preset(view)
+    parallel_scale = _positive(camera.get("parallel_scale"), radius / zoom)
+    position, focal = camera.get("position"), camera.get("focal_point")
+    up = camera.get("view_up")
+    if _is_vec3(position) and _is_vec3(focal) and any(p != f for p, f in zip(position, focal)):
+        position = [float(p) - float(o) for p, o in zip(position, render_origin)]
+        focal = [float(f) - float(o) for f, o in zip(focal, render_origin)]
+        direction = _unit([f - p for p, f in zip(position, focal)])
+        return {"position": position, "focal_point": focal,
+                "view_up": _up_for(up if _is_vec3(up) else [0.0, 0.0, 1.0], direction),
+                "view_angle_deg": angle / zoom if not parallel and preset is None else angle,
+                "parallel": parallel, "parallel_scale": parallel_scale}
+    u, preset_up = PRESETS.get(preset or "iso", PRESETS["iso"])
+    distance = radius / math.sin((angle * math.pi) / 360) / zoom
+    view_up = [float(v) for v in preset_up]
+    if _is_vec3(up) and math.hypot(*_cross(_unit(up), u)) > 1e-6:
+        view_up = [float(v) for v in up]
+    return {"position": [c + d * distance for c, d in zip(centre, u)], "focal_point": centre, "view_up": view_up,
+            "view_angle_deg": angle, "parallel": parallel, "parallel_scale": parallel_scale}
 
 
 @dataclass

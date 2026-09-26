@@ -1,7 +1,8 @@
 """End to end: MuPRO jobs queued by the STK Runtime.
 
-Two paths run the fake muFerro from mupro_fake.py: `suan mupro` to the Runtime, and the
-native workbench button through bridge, control, node agent and Runtime to a DAT frame view.
+Two paths run the fake muFerro from mupro_fake.py: `suan mupro` to the Runtime, and a paired
+hub client (the template-by-id submission of stk-desktop's hub backend) through control, node
+agent and Runtime to a DAT frame view.
 No real SDK, licence or MPI launcher is used.
 """
 
@@ -15,11 +16,10 @@ from click.testing import CliRunner
 import pytest
 
 from mupro_fake import make_fake_mpiexec, make_fake_sdk, write_case
-from suan.blender_client.bridge import Bridge
 from suan.cli.main import cli
 from suan.control.agent import NodeAgent, frame_metadata
 from suan.control.templates import MUFERRO_EXAMPLE_TEMPLATE, load_templates
-from suan.runtime.common import atomic_json, read_json
+from suan.runtime.common import read_json
 from conftest import finish
 
 pytestmark = pytest.mark.server
@@ -113,7 +113,7 @@ def test_local_multirank_via_runtime_is_refused_then_allowed(runtime, node, tmp_
 
 
 class Control:
-    """The bridge's ControlConnection, carried by the in-process control app."""
+    """A paired client device's requests, carried by the in-process control app."""
 
     def __init__(self, http, token):
         self.http, self.token = http, token
@@ -126,8 +126,9 @@ class Control:
         return response.json()
 
 
-def paired(http, role):
-    code = http.post("/api/v1/pairings", json={"role": role}, headers=AUTH).json()["code"]
+def paired(http, role, profile=""):
+    body = {"role": role, **({"profile": profile} if profile else {})}
+    code = http.post("/api/v1/pairings", json=body, headers=AUTH).json()["code"]
     return http.post("/api/v1/pairings/claim", json={"code": code, "name": role}).json()
 
 
@@ -137,59 +138,53 @@ def command(kind, payload):
 
 def serve_node(http, ws, agent, action_id):
     """One node-agent round on the open node connection, as the real agent keeps one: run the
-    dispatched action and wait until control records its result."""
+    dispatched action and wait until control records its result; returns the action record."""
     # Control dispatches only queued actions; any other state would block receive_json forever.
     assert http.get("/api/v1/actions/" + action_id, headers=AUTH).json()["state"] == "queued"
     action = ws.receive_json()["action"]
     assert action["id"] == action_id, action
     ws.send_json({"type": "result", "id": action["id"], "result": agent.execute(action)})
     deadline = time.monotonic() + 10
-    while http.get("/api/v1/actions/" + action_id, headers=AUTH).json()["state"] != "succeeded":
-        assert time.monotonic() < deadline, action
+    while True:
+        record = http.get("/api/v1/actions/" + action_id, headers=AUTH).json()
+        if record["state"] == "succeeded":
+            return record
+        assert time.monotonic() < deadline, record
         time.sleep(.05)
 
 
-def run(bridge, http, ws, agent, cmd):
-    """Blender writes a command; the bridge posts it, the agent runs it and the bridge applies the result."""
-    bridge.execute(cmd)
-    serve_node(http, ws, agent, cmd["id"])
-    bridge.refresh()
-    assert bridge.state["pending"] == {}
-
-
-def test_workbench_template_runs_fake_muferro_and_views_frames(runtime, node, tmp_path):
+def test_hub_template_runs_fake_muferro_and_views_frames(runtime, node, tmp_path):
     pytest.importorskip("fastapi")
     pytest.importorskip("vtk")
     from fastapi.testclient import TestClient
-    from suan.blender_client.scene import validate_scene
     from suan.control.app import create_app
+    from suan.render.v1 import validate_scene
     client, supervisor, _, _ = runtime
     app = create_app(tmp_path / "control", OWNER, load_templates(["muferro-example"]))
     agent = NodeAgent(client, tmp_path / "agent")
-    workbench = tmp_path / "workbench"
-    atomic_json(workbench / "client.json", {"template": "muferro-example"})
     with TestClient(app) as http:
         node_device = paired(http, "node")
-        bridge = Bridge(workbench, Control(http, paired(http, "client")["token"]))
+        desktop = Control(http, paired(http, "client", "desktop")["token"])
         with http.websocket_connect("/api/v1/nodes/connect",
                                     headers={"Authorization": "Bearer " + node_device["token"]}) as ws:
 
-            def step(kind, payload):
-                run(bridge, http, ws, agent, command(kind, payload))
+            def post(kind, payload):
+                action = {**command(kind, payload), "node_id": node_device["device_id"]}
+                desktop.request("POST", "actions", action)
+                return action["id"]
 
-            bridge.execute(command("select", {"node_id": node_device["device_id"]}))
-            step("workspace.create", {"name": "muFerro 示例"})
-            workspace = bridge.state["selection"]["workspace_id"]
-            # Exactly the payload of the unchanged C++ run button (space_stk.cc:528-533).
-            native = command("task.submit", {"template": "demo-field", "workspace_id": workspace})
-            bridge.execute(native)
-            stored = http.get("/api/v1/actions/" + native["id"], headers=AUTH).json()
+            def step(kind, payload):
+                """The client posts an action and the node agent runs it; returns the action's result."""
+                return serve_node(http, ws, agent, post(kind, payload))["result"]
+
+            workspace = step("workspace.create", {"name": "muFerro 示例"})["id"]
+            # The payload of stk-desktop's hub backend for a template run (HubBackend.submit).
+            submitted = post("task.submit", {"template": "muferro-example", "workspace_id": workspace})
+            stored = http.get("/api/v1/actions/" + submitted, headers=AUTH).json()
             assert stored["state"] == "queued" and stored["review_reason"] == ""
             assert stored["request"]["payload"] == {"template": "muferro-example", "spec": {
                 **MUFERRO_EXAMPLE_TEMPLATE, "workspace_id": workspace, "name": "muferro-example"}}
-            serve_node(http, ws, agent, native["id"])
-            bridge.refresh()
-            task_id = bridge.state["selection"]["task_id"]
+            task_id = serve_node(http, ws, agent, submitted)["result"]["id"]
             # Control drops a node that sends nothing for 30 s; the real agent sends snapshots.
             ws.send_json({"type": "snapshot", "snapshot": agent.snapshot()})
             assert finish(client, supervisor, task_id, timeout=25)["state"] == "succeeded"
@@ -198,24 +193,22 @@ def test_workbench_template_runs_fake_muferro_and_views_frames(runtime, node, tm
             environment = read_json(supervisor.service.task_dir(task_id) / "environment.json")
             assert environment["threads"] == {"OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
 
-            step("task.artifacts", {"task_id": task_id})
-            frames = [a["path"] for a in bridge.state["artifacts"] if a["path"].startswith("Polar.")]
+            artifacts = step("task.artifacts", {"task_id": task_id})
+            frames = [a["path"] for a in artifacts if a["path"].startswith("Polar.")]
             assert frames == ["Polar.00000000.dat", "Polar.00000002.dat"]
             assert [frame_metadata(path)["timestep"] for path in frames] == [0, 2]
             assert [f["path"] for f in result["frames"] if f["stem"] == "Polar"] == frames
 
-            bridge.execute(command("select", {"path": frames[-1]}))
-            step("view.build", {"task_id": task_id, "path": frames[-1],
-                                "options": {"mode": "slice", "axis": 2, "index": 1, "component": "magnitude",
-                                            "level": 0.0}})
-            manifest = validate_scene(read_json(workbench / "scene.json"))["manifest"]
+            scene = step("view.build", {"task_id": task_id, "path": frames[-1],
+                                        "options": {"mode": "slice", "axis": 2, "index": 1, "component": "magnitude",
+                                                    "level": 0.0}})
+            manifest = validate_scene(scene)["manifest"]
             assert (manifest["field"], manifest["timestep"], manifest["coordinate_units"]) == ("Polar", 2, "grid index")
             assert (manifest["dimensions"], manifest["components"]) == ([4, 3, 2], 3)
-            assert manifest["source"]["path"] == frames[-1] and read_json(workbench / "state.json")["manifest"] == manifest
-            step("view.probe", {"task_id": task_id, "path": frames[-1], "position": [2.0, 1.0, 1.0]})
+            assert manifest["source"]["path"] == frames[-1]
+            probe = step("view.probe", {"task_id": task_id, "path": frames[-1], "position": [2.0, 1.0, 1.0]})
             i, j, k = 3, 2, 2  # One-based indices of the probed grid point.
-            assert json.loads(bridge.state["logs"])["values"] == pytest.approx(
-                [i + 10*j + 100*k + 1000*c + 2 for c in (1, 2, 3)])
+            assert probe["values"] == pytest.approx([i + 10*j + 100*k + 1000*c + 2 for c in (1, 2, 3)])
 
 
 def test_policy_reviews_changed_mupro_template_request(tmp_path):
