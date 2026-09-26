@@ -326,3 +326,33 @@ TEST(FormBuilder, NodeFormNullableVectorsAndExclusiveLimits)
   h.key(Key::Enter);
   EXPECT_GT(cm.get("zoom").num, 0.0);
 }
+
+TEST(FormBuilder, AutomaticRangeEndpointsStayNullOnTheWire)
+{
+  const auto preset = ordered_json::parse(test::read_text(std::string(STK_REPO_ROOT) + "/suan/graph/presets/volume.json"));
+  const SchemaNode all = preset_schema(preset, catalog());
+  SchemaNode schema;
+  schema.type = SchemaType::Object;
+  schema.properties = {*all.property("range")};
+  ASSERT_TRUE(schema.properties[0].nullable_items);
+  Harness h;
+  FormModel model;
+  h.ui = [&](Context &ctx) { build_form(ctx.block("form", {0, 0, 400, 500}).layout(), schema, model); };
+  h.frame();
+  const auto values = [&]() { return form_values_to_json(model, schema)["range"]; };
+  EXPECT_EQ(values(), ordered_json::parse("[null,null]"));
+  EXPECT_EQ(model.get("range").to_string(), "[null, null]");
+  EXPECT_FALSE(h.w("range/0").enabled);
+  EXPECT_FALSE(h.w("range/1").enabled);
+  h.click("range/1/auto");
+  EXPECT_TRUE(h.w("range/1").enabled);
+  h.click("range/1");
+  h.type("3.75");
+  h.key(Key::Enter);
+  EXPECT_EQ(values(), ordered_json::parse("[null,3.75]"));
+  h.click("range/1/auto");
+  EXPECT_EQ(values(), ordered_json::parse("[null,null]"));
+  h.click("range/1/auto");
+  EXPECT_EQ(values(), ordered_json::parse("[null,3.75]")) << "automatic mode retains the edited endpoint";
+  EXPECT_EQ(form_value_from_json(nlohmann::json{1, 2}), FormValue::array({1, 2}));
+}

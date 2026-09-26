@@ -108,6 +108,7 @@ enum class WidgetType : uint8_t {
   Image,
   SplitterBar,
   MenuItem,
+  CurvePreview,
 };
 const char *widget_type_name(WidgetType t);
 
@@ -209,6 +210,7 @@ struct Widget {
   std::shared_ptr<TableSpec> table;
   const LogBuffer *log = nullptr;
   ImageSpec image;
+  std::vector<Vec2> curve; /**< Normalized curve preview points; display only. */
   Binding<float> factor;
   std::vector<TextLine> lines; /**< Paragraph lines (layout output). */
   int menu_index = -1;         /**< MenuItem: index in the popup. */
@@ -269,6 +271,8 @@ class Layout {
   Widget &log_view(std::string_view key, const LogBuffer &log, float height_units = 8.0f);
   Widget &table(std::string_view key, TableSpec spec);
   Widget &image(std::string_view key, ImageSpec spec);
+  /** Piecewise-linear curve in [0, 1], with constant endpoint extension. */
+  Widget &curve_preview(std::string_view key, std::vector<Vec2> points);
 
   Block &block() const { return *block_; }
   Context &ctx() const;

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/ui/form.hh"
+#include "transfer_function.hh"
 
 #include <algorithm>
 #include <cmath>
@@ -59,7 +60,7 @@ std::string FormValue::to_string() const
     case Kind::Array: {
       std::string s = "[";
       for (size_t i = 0; i < arr.size(); i++) {
-        s += (i ? ", " : "") + num_str(arr[i]);
+        s += (i ? ", " : "") + (i < arr_null.size() && arr_null[i] ? "null" : num_str(arr[i]));
       }
       return s + "]";
     }
@@ -77,7 +78,18 @@ bool FormValue::operator==(const FormValue &o) const
     case Kind::Bool: return b == o.b;
     case Kind::Number: return num == o.num;
     case Kind::String: return str == o.str;
-    case Kind::Array: return arr == o.arr;
+    case Kind::Array:
+      if (arr.size() != o.arr.size()) {
+        return false;
+      }
+      for (size_t i = 0; i < arr.size(); i++) {
+        const bool a_null = i < arr_null.size() && arr_null[i];
+        const bool b_null = i < o.arr_null.size() && o.arr_null[i];
+        if (a_null != b_null || (!a_null && arr[i] != o.arr[i])) {
+          return false;
+        }
+      }
+      return true;
   }
   return false;
 }
@@ -267,6 +279,10 @@ struct Builder {
       }
       return;
     }
+    if (n.type == SchemaType::Json && n.widget == "transfer_function") {
+      build_transfer_function(l, n, model, label, tip);
+      return;
+    }
     Layout &v = l.prop(label, tip);
     switch (n.type) {
       case SchemaType::Boolean:
@@ -353,16 +369,16 @@ struct Builder {
       }
       case SchemaType::NumberArray: {
         const int count = std::max(1, n.items);
-        std::vector<double> fallback(size_t(count), 0.0);
+        FormValue fallback = FormValue::array(std::vector<double>(size_t(count), 0.0));
         if (n.default_value && n.default_value->kind == FormValue::Kind::Array &&
             n.default_value->arr.size() == size_t(count))
         {
-          fallback = n.default_value->arr;
+          fallback = *n.default_value;
         }
         if (n.nullable) {
           v.checkbox(name + "/set", tr_or("form.override", "Override"),
                      {[m, name]() { return !m->get(name).is_null(); },
-                      [m, name, fallback](bool on) { m->set(name, on ? FormValue::array(fallback) : FormValue::null()); }})
+                      [m, name, fallback](bool on) { m->set(name, on ? fallback : FormValue::null()); }})
               .tip(tip);
           if (model.get(name).is_null()) {
             break;
@@ -382,22 +398,46 @@ struct Builder {
           else {
             axis = std::to_string(i);
           }
-          col.number(name + "/" + std::to_string(i), axis,
+          Layout &row = col.row(true);
+          const std::string key = name + "/" + std::to_string(i);
+          bool auto_item = false;
+          if (n.nullable_items) {
+            const FormValue current = model.get(name);
+            auto_item = size_t(i) < current.arr_null.size() && current.arr_null[size_t(i)];
+            row.checkbox(key + "/auto", tr_or("form.auto", "auto"),
+                         {[m, name, i]() {
+                            const FormValue value = m->get(name);
+                            return size_t(i) < value.arr_null.size() && value.arr_null[size_t(i)];
+                          },
+                          [m, name, i, fallback](bool on) {
+                            FormValue value = m->get(name);
+                            if (value.kind != FormValue::Kind::Array || value.arr.size() != fallback.arr.size()) {
+                              value = fallback;
+                            }
+                            value.arr_null.resize(value.arr.size(), false);
+                            value.arr_null[size_t(i)] = on;
+                            m->set(name, value);
+                          }}).width(3.0f).tip(tip);
+          }
+          row.number(key, axis,
                      {[m, name, i, fallback]() {
                         const FormValue fv = m->get(name);
                         return fv.kind == FormValue::Kind::Array && size_t(i) < fv.arr.size() ? fv.arr[size_t(i)] :
-                                                                                                fallback[size_t(i)];
+                                                                                                fallback.arr[size_t(i)];
                       },
                       [m, name, i, fallback](double d) {
                         FormValue fv = m->get(name);
-                        if (fv.kind != FormValue::Kind::Array || fv.arr.size() != fallback.size()) {
-                          fv = FormValue::array(fallback);
+                        if (fv.kind != FormValue::Kind::Array || fv.arr.size() != fallback.arr.size()) {
+                          fv = fallback;
                         }
                         fv.arr[size_t(i)] = d;
+                        if (size_t(i) < fv.arr_null.size()) {
+                          fv.arr_null[size_t(i)] = false;
+                        }
                         m->set(name, fv);
                       }},
                      p)
-              .tip(tip);
+              .disable(auto_item).tip(tip);
         }
         break;
       }

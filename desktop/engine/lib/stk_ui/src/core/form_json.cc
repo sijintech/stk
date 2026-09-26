@@ -129,10 +129,12 @@ template<class json> bool number_array(const json &s, SchemaNode &n)
     return false;
   }
   if (s.contains("prefixItems") && s["prefixItems"].is_array()) {
+    n.nullable_items = !s["prefixItems"].empty();
     for (const json &p : s["prefixItems"]) {
       if (!is_type(p, "number") && !is_type(p, "integer")) {
         return false;
       }
+      n.nullable_items &= is_type(p, "null");
     }
     n.items = int(s["prefixItems"].size());
     return n.items > 0 && n.items <= 4;
@@ -229,13 +231,17 @@ template<class json> FormValue value_from_json(const json &v)
   }
   if (v.is_array()) {
     std::vector<double> a;
+    std::vector<bool> nulls;
     for (const json &x : v) {
-      if (!x.is_number()) {
+      if (!x.is_number() && !x.is_null()) {
         return FormValue::string(v.dump());
       }
-      a.push_back(x.template get<double>());
+      a.push_back(x.is_null() ? 0.0 : x.template get<double>());
+      nulls.push_back(x.is_null());
     }
-    return FormValue::array(std::move(a));
+    FormValue value = FormValue::array(std::move(a));
+    value.arr_null = std::move(nulls);
+    return value;
   }
   return FormValue::string(v.dump());
 }
@@ -360,6 +366,7 @@ void inherit(SchemaNode &n, const SchemaNode &src)
     n.enum_values = src.enum_values;
     n.items = src.items;
     n.integer_items = src.integer_items;
+    n.nullable_items = src.nullable_items;
   }
 }
 
@@ -395,6 +402,7 @@ SchemaNode declaration_node(const Json &decl)
     n.type = SchemaType::NumberArray;
     n.items = 2;
     n.widget = "range";
+    n.nullable_items = true;
   }
   else if (kind == "enum") {
     n.type = SchemaType::Enum;
@@ -535,8 +543,12 @@ template<class json> json value_to_json(const FormValue &v, const SchemaNode &no
       return v.str;
     case FormValue::Kind::Array: {
       json a = json::array();
-      for (const double d : v.arr) {
-        if (node.integer_items && std::floor(d) == d) {
+      for (size_t i = 0; i < v.arr.size(); i++) {
+        const double d = v.arr[i];
+        if (i < v.arr_null.size() && v.arr_null[i]) {
+          a.push_back(nullptr);
+        }
+        else if (node.integer_items && std::floor(d) == d) {
           a.push_back(int64_t(d));
         }
         else {

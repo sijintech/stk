@@ -12,6 +12,9 @@
 
 #include "stk/gfx/gpu.hh"
 #include "stk/gfx/image.hh"
+#include "stk/gfx/offscreen.hh"
+#include "stk/app/editor_area.hh"
+#include "stk/app/shell.hh"
 #include "stk/io/payload.hh"
 #include "stk/viewer_gpu/viewer.hh"
 #include "viewer_support.hh"
@@ -65,6 +68,118 @@ bool contains(const std::vector<std::string> &v, const std::string &s)
 }
 
 }  // namespace
+
+TEST(PythonViewer, OpacityFormUpdatesVolumeWithoutRerunningData)
+{
+  std::string reason;
+  const std::string python = graph_python(reason);
+  if (python.empty()) {
+    g_skipped_all = true;
+    GTEST_SKIP() << reason;
+  }
+  ASSERT_NE(g_gpu, nullptr);
+  TempDir dir("volume-opacity");
+  const std::string run = dir.str() + "/run";
+  ASSERT_TRUE(write_fake_run(python, run));
+  ManualLoop loop;
+  auto client = bridge::Client::create(python_bridge_options(python, dir.str(), loop.executor()));
+  std::string err;
+  ASSERT_TRUE(client->start(&err)) << err;
+  ASSERT_TRUE(client->wait_ready(120)) << client->bridge_log().text();
+  {
+    app::AppStore store;
+    store.set_bridge(client.get());
+    auto &vs = store.viewer();
+    auto ready = [&]() {
+      return loop.pump_until([&]() { return (vs.payload() || !vs.eval_error().empty()) && !vs.evaluating(); },
+                             120, [&]() { vs.pump(); });
+    };
+    ASSERT_TRUE(vs.open_path(run, "volume"));
+    ASSERT_TRUE(ready()) << vs.eval_error() << client->bridge_log().text();
+    const auto before = vs.payload();
+    ASSERT_NE(before, nullptr) << vs.eval_error() << client->bridge_log().text();
+    const Json *volume = before->layer("volume");
+    ASSERT_NE(volume, nullptr);
+    viewer_gpu::Viewer viewer(g_gpu->fonts());
+    viewer.set_payload(before);
+    const auto opaque = render(viewer, 400, 300);
+
+    ui::FakeTextMeasurer measurer;
+    ui::ContextConfig cfg;
+    cfg.measurer = &measurer;
+    ui::Context ui(cfg);
+    ui::SchemaNode schema;
+    schema.type = ui::SchemaType::Object;
+    schema.properties = {*vs.schema().property("opacity")};
+    ASSERT_EQ(schema.properties[0].stage, "client");
+    ui.begin_frame({320, 700}, 100);
+    ui::build_form(ui.block("opacity_form", {0, 0, 320, 700}).layout(), schema, vs.form());
+    ui.end_frame();
+    const auto *alpha = ui.find("opacity/1/alpha");
+    ASSERT_NE(alpha, nullptr);
+    const uint64_t serial = vs.payload_serial();
+    alpha->number.assign(0.0);
+    ASSERT_TRUE(loop.pump_until([&]() { return vs.payload_serial() != serial && !vs.evaluating(); },
+                                120, [&]() { vs.pump(); })) << vs.eval_error();
+    ASSERT_TRUE(vs.last_eval());
+    EXPECT_EQ(vs.last_eval()->reason, "client");
+    EXPECT_TRUE(vs.last_eval()->data_nodes.empty());
+    for (const auto &node : vs.last_eval()->evaluated) {
+      EXPECT_FALSE(contains(vs.data_nodes(), node)) << node;
+    }
+    const Json *updated = vs.payload()->layer("volume");
+    ASSERT_NE(updated, nullptr);
+    EXPECT_EQ((*updated)["data"], (*volume)["data"]);
+    for (const auto &point : (*updated)["transfer_function"]["opacity"]) {
+      EXPECT_EQ(point[1], 0);
+    }
+    viewer.set_payload(vs.payload());
+    const auto transparent = render(viewer, 400, 300);
+    EXPECT_GT(differing_fraction(opaque, transparent), 0.005);
+  }
+  client->close();
+}
+
+TEST(ViewerFormsGpu, VolumePropertiesAtNarrowWidth)
+{
+  ASSERT_NE(g_gpu, nullptr);
+  for (const char *lang : {"en", "zh_CN"}) {
+    app::ShellOptions opts;
+    opts.language = lang;
+    opts.interactive = false;
+    app::AppShell shell(opts);
+    shell.layout_path.clear();
+    wm::Screen screen;
+    shell.install(screen, nullptr);
+    shell.build_default_layout(screen);
+    screen.set_maximized(screen.find_area("a3"));
+    auto &vs = shell.store().viewer();
+    vs.set_metadata(repo_presets(), repo_catalog());
+    vs.select_preset("volume");
+    wm::DrawContext dc;
+    dc.ui_scale = 1;
+    dc.fonts = &g_gpu->fonts();
+    dc.rect = {0, 0, 320, 900};
+    dc.now = 100;
+    gfx::Image img;
+    std::string err;
+    ASSERT_TRUE(gfx::render_offscreen(320, 900, [&]() { screen.draw(dc); }, img, err)) << err;
+    const auto *preview = screen.ui()->find("opacity/preview");
+    ASSERT_NE(preview, nullptr);
+    EXPECT_GE(preview->rect.w, 180);
+    EXPECT_FALSE(preview->rect.intersect(preview->clip).empty());
+    const auto *add = screen.ui()->find("opacity/add");
+    ASSERT_NE(add, nullptr);
+    EXPECT_FALSE(add->rect.intersect(add->clip).empty());
+    for (size_t i = 3; i < img.rgba.size(); i += 4) {
+      img.rgba[i] = 255;
+    }
+    const auto path = std::filesystem::path(STK_APP_TEST_SCRATCH) /
+                      (std::string("volume-properties-") + lang + "-" + g_gpu->backend_name() + ".png");
+    std::filesystem::create_directories(path.parent_path());
+    ASSERT_TRUE(gfx::png_write(path.string(), img));
+  }
+}
 
 TEST(PythonViewer, ClientAndDataStagesStepSwitchAndProbe)
 {

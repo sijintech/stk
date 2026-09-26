@@ -37,6 +37,7 @@ add_library(stk_ui_core STATIC
   src/core/number.cc
   src/core/text.cc
   src/core/text_edit.cc
+  src/core/transfer_function.cc
   src/core/theme.cc
   src/core/utf8.cc
 )

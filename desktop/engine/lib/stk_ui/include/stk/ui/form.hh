@@ -23,7 +23,7 @@
 
 namespace stk::ui {
 
-/** A form value: JSON null, boolean, number, string or a fixed-size number array. */
+/** A form value: JSON null, boolean, number, string or a numeric array with optional null slots. */
 struct FormValue {
   enum class Kind : uint8_t { Null, Bool, Number, String, Array };
   Kind kind = Kind::Null;
@@ -31,6 +31,7 @@ struct FormValue {
   double num = 0.0;
   std::string str;
   std::vector<double> arr;
+  std::vector<bool> arr_null; /**< Optional null mask (automatic range endpoints); otherwise numbers. */
 
   static FormValue null() { return {}; }
   static FormValue boolean(bool v);
@@ -72,6 +73,7 @@ struct SchemaNode {
   bool nullable = false;
   int items = 0;              /**< NumberArray size. */
   bool integer_items = false; /**< int3 */
+  bool nullable_items = false; /**< Range endpoints may each use null (automatic). */
   std::string pattern;
   std::string widget;       /**< x-stk-widget */
   std::string stage;        /**< x-stk-stage: "data" | "client" */
