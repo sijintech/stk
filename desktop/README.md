@@ -5,6 +5,9 @@ Our own C++ desktop UI engine on Blender's GHOST (windows, input, IME, GPU conte
 Blender 5.2.1 release. Everything under `desktop/` is **GPL-2.0-or-later** (see `LICENSE`); the STK
 Python packages stay MIT.
 
+**Build and open the main window on macOS or Windows:** [Quick setup / 快速启动](QUICKSTART.md).
+The scripts prepare dependencies and a Python venv, compile the main executable and launch it.
+
 ## Layout
 
 | Path | Contents |
@@ -190,6 +193,12 @@ All three show `AppStore::viewer()` (`stk/app/viewer_state.hh`), the result on s
   (`result.evaluated`). Results are cached per parameters and step; the steps next to the shown one
   are evaluated in the background and uploaded to the GPU ahead, so a cached step switches without a
   bridge call and keeps the camera.
+- **Volume opacity editor**: `x-stk-widget: transfer_function` uses a curve preview and numeric
+  control-point rows (2–64 normalized position/alpha pairs), with Add, Remove, Automatic and Reset
+  ramp. JSON remains the parameter wire format; edits retain double precision and the client stage.
+  Positions stay ordered, duplicate positions use the last alpha, and invalid imported values stay
+  editable until repaired or explicitly reset. `TransferForm` tests exercise events and limits;
+  `PythonViewer.OpacityFormUpdatesVolumeWithoutRerunningData` checks the real worker/cache/GPU path.
 - **Probe**: layer, element and physical position (`format_label`) of the last pick, the original value
   from the bridge `probe` (trilinear sample of the source field), and a typed position to query.
 - Hub evaluation reads the policy of the result's source connection, independently of the connection

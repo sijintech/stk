@@ -2,6 +2,8 @@
 
 [English](#english)
 
+macOS / Windows 真机测试可使用[快速编译与启动脚本](../desktop/QUICKSTART.md)。
+
 STK 桌面程序 `stk-desktop` 是 STK 自有的 C++ 桌面端：窗口、输入、输入法与 GPU 上下文来自 Blender 的
 GHOST，绘制用 Blender 的 GPU 模块（Linux 上 OpenGL 或 Vulkan，macOS 上 Metal），文字用 BLF（FreeType，
 中日韩字形回退）。代码在 `desktop/`，许可为 **GPL-2.0-or-later**；STK 的 Python 包（Runtime、控制服务、
@@ -197,6 +199,11 @@ hub 建议 `suan-control serve --review-policy not-self`，此时本设备的批
   重新计算数据）和“客户端阶段”（颜色表、不透明度、相机等，只重算外观节点）。修改自动求值（可关闭），
   较新的求值会取消正在进行的求值；摘要显示本次计算的节点数与数据节点数。本地求值卡住时可取消，
   不影响任务管理；求值进程崩溃后再次点击“求值”可重新启动。
+- **体渲染透明度**：选择 `volume` 预设，在属性的“透明度”面板中查看曲线、添加或删除控制点，
+  并输入位置与透明度。位置 0–1 对应值域下限到上限；透明度 0 为透明，1 为不透明。支持 2–64 个点，
+  相邻点间线性插值，端点外保持端点透明度；“自动”按场类型生成透明度，“重置斜坡”恢复预设斜坡。
+  修改只更新外观，不重新读取或计算数据。颜色仍通过颜色表下拉框选择。
+  值域的上下限可分别勾选“自动”，或关闭自动后输入具体数值。
 - **查看器**：左侧工具栏为旋转（↻）、平移（✚）、缩放（±）、拾取（⊙），鼠标悬停显示名称。侧栏：图层可见性与
   不透明度，相机（7 个预设、复位、物理坐标下的数值相机），时间步（滑块、播放、每秒帧数、循环、预取相邻步、
   最新），显示（叠加层、光照、导航方式 Blender／ParaView）。已缓存的时间步切换不经过桥，保持相机。
@@ -370,6 +377,12 @@ SSH tunnel, never by binding them to a LAN or public address.
   client-stage edits re-run no data node. Local runs and downloaded Runtime task files are evaluated in
   a separate worker, so stalled calculations can be cancelled while Jobs stays available. If the worker
   crashes, Evaluate starts it again. Hub evaluations continue to run on the execution node.
+- **Volume opacity**: the `volume` preset's Opacity points panel previews the curve and edits 2–64
+  points with Add, Remove and numeric position/opacity fields. Positions 0–1 span the value range;
+  opacity 0 is transparent and 1 opaque. Interpolation is linear, with constant opacity beyond the
+  endpoints. Automatic follows the field type; Reset ramp restores the preset ramp. Edits update
+  appearance without re-reading or recomputing data. Choose colours from the colormap dropdown.
+  Each value-range endpoint can be automatic independently, or set to an explicit number.
 - **Probe**: a click picks on the GPU (refined in float64); the bridge samples the original field
   (trilinear) at that position, or at a typed one.
 - **Export**: size, ×1–×8 tiled magnification, transparency, overlays, all time steps (`stk.series/1`).

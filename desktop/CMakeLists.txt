@@ -68,6 +68,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 enable_testing()
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME desktop_setup_scripts
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_setup.py)
+  set_tests_properties(desktop_setup_scripts PROPERTIES LABELS "unit"
+    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+endif()
 
 if(STK_DESKTOP_WITH_BLENDER)
   add_subdirectory(engine/third_party/blender)

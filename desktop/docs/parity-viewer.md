@@ -19,14 +19,14 @@ Status: **done** (implemented and tested), **partial** (an equivalent exists wit
 |---|---|---|---|
 | S1 | Open DAT / legacy VTK files (scalar, vector, domain modes) | Open a run folder (File > Open, drag and drop, Jobs "Open in viewer"); the `slice`, `iso`, `volume`, `vectors` presets read DAT/NPY/VTI/VTK/VTKHDF through a `data` binding, the muFerro presets through `run` | done |
 | S2 | Refresh (rebuild the whole pipeline) | Parameter edits re-evaluate automatically (debounced; a newer edit cancels the running evaluation with `graph.cancel`); "Evaluate" button; only the affected nodes re-run (node cache) | done |
-| S3 | Scalar volume rendering (ray cast, transfer functions) | `volume` preset, ray-marched volume layer in `stk_viewer_gpu`; colormap and value range in the form | done (transfer-function editor: deferred, M-D2) |
+| S3 | Scalar volume rendering (ray cast, transfer functions) | `volume` preset, ray-marched volume layer in `stk_viewer_gpu`; colormap, value range and opacity curve editor with numeric control points, add/remove, automatic mode and reset | done |
 | S4 | Slice (cutter with origin / normal) | `slice` preset (axis, index, component, colormap) | partial (axis-aligned slices; arbitrary planes: catalog `stk.filter.slice@1`, no preset field yet) |
 | S5 | Isosurfaces, one per value with its colour | `iso` preset (`levels` list, colormap, opacity) | partial (multi-isosurface UI with per-level colours: deferred, M-D2) |
 | S6 | Vector glyphs (mask, magnitude threshold, scale, colour modes) | `vectors` / `muferro-polarization-glyphs` presets (stride, max arrows, `\|P\|` threshold), instanced glyphs, orientation legend | done |
 | S7 | Streamlines | catalog `stk.filter.streamlines@1` (stretch) | deferred (no preset in M1) |
 | S8 | Ferroelectric domains: 26-variant classifier, film detection, smoothed label surfaces, per-variant colours | `muferro-domains` preset (threshold, max angle, film detection, smoothing iterations), categorical legend; e2e golden + VTK cross-check | done |
 | S9 | VO2 M1/M2 classifier | not in the M1 catalog | deferred |
-| S10 | Editable colormap control points / opacity tables | Colormap dropdown fed by `colormaps.list` (gradient swatches) for colormap parameters | partial (control-point editor: deferred, M-D2) |
+| S10 | Editable colormap control points / opacity tables | Colormap dropdown fed by `colormaps.list` (gradient swatches); volume opacity editor for 2–64 control points with preview | partial (opacity tables done; custom colour control points remain deferred, M-D2) |
 | S11 | Per-domain / per-actor opacity | Sidebar "Layers": opacity slider per layer (display override, kept across steps) | done |
 | S12 | Grid rescale (dx, dy, dz) | Source metadata (`origin` / `spacing`) of `stk.source.file@1` | partial (not a form field) |
 | S13 | Region of interest and sample rate | catalog `stk.filter.crop@1`, `stk.filter.sample@1`; vector presets expose `stride` | partial |

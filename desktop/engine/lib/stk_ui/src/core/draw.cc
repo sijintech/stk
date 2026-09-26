@@ -511,6 +511,60 @@ void Context::draw_widget(const Widget &w)
       text_in({r.x + std::round(1.2f * st.unit), r.y, r.w - std::round(1.6f * st.unit), r.h}, w.text, Align::Left, tc);
       break;
     }
+    case WidgetType::CurvePreview: {
+      draw_.round_box(r, 0, CORNER_NONE, th.box.inner, th.box.outline);
+      const Rect plot = r.inset(5 * px, 5 * px);
+      if (plot.empty()) {
+        break;
+      }
+      draw_.clip_push(plot);
+      for (int i = 0; i <= 4; i++) {
+        const float t = float(i) / 4;
+        draw_.rect({plot.x + t * plot.w, plot.y, px, plot.h}, th.box.outline);
+        draw_.rect({plot.x, plot.y + t * plot.h, plot.w, px}, th.box.outline);
+      }
+      std::vector<Vec2> points;
+      for (Vec2 p : w.curve) {
+        if (std::isfinite(p.x) && std::isfinite(p.y)) {
+          points.push_back({std::clamp(p.x, 0.0f, 1.0f), std::clamp(p.y, 0.0f, 1.0f)});
+        }
+      }
+      std::stable_sort(points.begin(), points.end(), [](Vec2 a, Vec2 b) { return a.x < b.x; });
+      /* Duplicate positions follow the payload contract: last point wins. */
+      std::vector<Vec2> unique;
+      for (Vec2 p : points) {
+        if (!unique.empty() && unique.back().x == p.x) {
+          unique.back() = p;
+        }
+        else {
+          unique.push_back(p);
+        }
+      }
+      auto screen = [&](Vec2 p) { return Vec2{plot.x + p.x * plot.w, plot.y1() - p.y * plot.h}; };
+      if (!unique.empty()) {
+        points = unique;
+        points.insert(points.begin(), {0, points.front().y});
+        points.push_back({1, points.back().y});
+        for (size_t i = 1; i < points.size(); i++) {
+          const Vec2 a = screen(points[i - 1]), b = screen(points[i]);
+          const float len = std::hypot(b.x - a.x, b.y - a.y);
+          if (len <= 0) {
+            continue;
+          }
+          const Vec2 d{-(b.y - a.y) * px / len, (b.x - a.x) * px / len};
+          draw_.triangle({a.x + d.x, a.y + d.y}, {a.x - d.x, a.y - d.y},
+                         {b.x + d.x, b.y + d.y}, th.progress.item);
+          draw_.triangle({a.x - d.x, a.y - d.y}, {b.x - d.x, b.y - d.y},
+                         {b.x + d.x, b.y + d.y}, th.progress.item);
+        }
+        for (Vec2 p : unique) {
+          const Vec2 c = screen(p);
+          draw_.rect({c.x - 2 * px, c.y - 2 * px, 4 * px, 4 * px}, th.box.text);
+        }
+      }
+      draw_.clip_pop();
+      break;
+    }
     case WidgetType::Progress: {
       const WidgetColors &c = th.progress;
       const float rad = clamp_radius(c.roundness * st.unit, r);
