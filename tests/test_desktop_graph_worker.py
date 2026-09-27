@@ -296,7 +296,12 @@ def test_worker_exits_when_the_bridge_is_killed(bridge_env):  # noqa: F811
         worker = children[0]
         harness.kill()
         deadline = time.monotonic() + 5
-        while worker.is_running() and worker.status() != psutil.STATUS_ZOMBIE:
+        while worker.is_running():
+            try:
+                if worker.status() == psutil.STATUS_ZOMBIE:
+                    break
+            except psutil.NoSuchProcess:
+                break  # The process may exit between is_running() and status() (Windows).
             assert time.monotonic() < deadline, "worker survived bridge EOF"
             time.sleep(0.02)
     finally:

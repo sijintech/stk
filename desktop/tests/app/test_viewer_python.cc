@@ -203,6 +203,10 @@ TEST(PythonViewer, ClientAndDataStagesStepSwitchAndProbe)
     app::AppStore store;
     store.set_bridge(client.get());
     app::ViewerState &vs = store.viewer();
+    /* Isolate stage-cache assertions from neighbour work: cancelling a prefetch stuck in native
+     * code can restart the worker and legitimately drop memory-only entries (e.g. the run index).
+     * Enable prefetch below for the separate cached-step assertions. */
+    vs.prefetch_neighbours = false;
     auto pump_until = [&](const std::function<bool()> &until, double timeout = 300.0) {
       return loop.pump_until(until, timeout, [&]() { vs.pump(); });
     };
@@ -266,6 +270,7 @@ TEST(PythonViewer, ClientAndDataStagesStepSwitchAndProbe)
 
     /* 4. Cached step switch: the neighbour (step 1) is prefetched in the background, the switch
      *    is served by the viewer cache and uploaded ahead; the camera is kept. */
+    vs.prefetch_neighbours = true;
     v.set_payload(vs.payload());
     render(v, 400, 300);
     viewer::CameraPose orbited = v.camera();
