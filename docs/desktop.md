@@ -301,7 +301,7 @@ Windows 为 `%APPDATA%\stk\desktop\`。内容包括窗口大小与位置、语�
 
 | 时间 | 归档内容 |
 |---|---|
-| 已归档 | `native/`（Rust/egui 原型，标签 `archive/native-egui-2026-09`）；`toolkits/cpp/EffectivePropertiesDesktop/gui`（Electron） |
+| 已归档 | `native/`（Rust/egui 原型，标签 `archive/native-egui-2026-09`）；旧 C/C++ 工具与 EffectiveProperties 工程现保存在 [`archive/legacy/toolkits/cpp/`](../archive/legacy/toolkits/cpp/) |
 | D1 结束（已完成） | `blender/` SPACE_STK 定制版、`suan/blender_client`、`suan-workbench`／`suan-blender`（标签 `archive/blender-workbench-2026-09`）；`validate_scene` 已移入 `suan/render/v1.py` |
 | M-D2 结束 | `suan/gui`（Qt）及其依赖组、`tests/test_desktop.py`、文档站点的 Qt 页面 |
 
@@ -446,7 +446,7 @@ preedit is built in; Pinyin acceptance on a real Mac pending. Windows: M-D2.
 
 | When | What |
 |---|---|
-| Archived | `native/` (tag `archive/native-egui-2026-09`); `toolkits/cpp/EffectivePropertiesDesktop/gui` (Electron) |
+| Archived | `native/` (tag `archive/native-egui-2026-09`); old C/C++ tools and EffectiveProperties projects now live in [`archive/legacy/toolkits/cpp/`](../archive/legacy/toolkits/cpp/) |
 | D1 exit (done) | `blender/` SPACE_STK fork overlay, `suan/blender_client`, `suan-workbench` / `suan-blender` (tag `archive/blender-workbench-2026-09`); `validate_scene` moved into `suan/render/v1.py` |
 | M-D2 exit | `suan/gui` (Qt) and its extras, `tests/test_desktop.py`, the Qt pages of the docs site |
 

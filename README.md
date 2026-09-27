@@ -38,10 +38,10 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 [控制服务指南](docs/hub.md)；运行中任务的监控事件见 [runtime 使用指南](docs/runtime.md#监控事件)；
 英文契约与 JSON Schema 见 [规范索引](docs/specs/README.md)。
 
-文件夹结构：
+文件夹结构（职责与归档依据见[仓库结构说明](docs/repository-structure.md)）：
 
-- suan：提供用户使用的界面，有cli，gui
-- toolkits：提供具体功能的一些函数，有数据、可视化等，其中每个子文件夹是一个subpackage。
+- suan：共享 Python 服务、科学数据处理与 CLI/MCP/桌面桥入口；原生界面在 desktop。
+- toolkits：仍被 CLI、可视化和测试使用的 Python 科学工具；旧 C/C++ 工程已移入 archive。
 - suan/runtime：独立任务服务、进程／调度器适配器及统一客户端，不依赖 Qt。
 - suan/control：跨设备控制服务 `suan-control` 与执行节点代理 `suan-node`。
 - suan/visualization：执行节点上的场数据视图与原始数据探针。
@@ -64,6 +64,7 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 - plugins/synorder：Synorder 插件（暂缓，可选集成）。
 - examples/runtime：确定性参数扫描与 PNG／VTK 结果验收示例。
 - tests：任务生命周期、协议、文件传输和科学数据格式的回归测试。
+- archive：退出当前构建的历史 C/C++ 工具、实验与旧打包文件，见[归档索引](archive/README.md)。
 
 
 ## 桌面程序 `stk-desktop`

@@ -1,0 +1,46 @@
+{
+  "date": "2026-09-28",
+  "source_commit": "403117877b9e3d085ca465baab3c5010d4ea7813",
+  "moves": [
+    {
+      "original": "toolkits/cpp",
+      "archived": "archive/legacy/toolkits/cpp",
+      "tracked_files": 633
+    },
+    {
+      "original": "toolkits/smesh/src/new_package",
+      "archived": "archive/legacy/toolkits/smesh/src/new_package",
+      "tracked_files": 5
+    },
+    {
+      "original": "install.ps1",
+      "archived": "archive/legacy/install.ps1",
+      "tracked_files": 1
+    },
+    {
+      "original": ".github/workflows/release_cli.yml",
+      "archived": "archive/legacy/.github/workflows/release_cli.yml",
+      "tracked_files": 1
+    },
+    {
+      "original": "suan/cli/setup.py",
+      "archived": "archive/legacy/suan/cli/setup.py",
+      "tracked_files": 1
+    },
+    {
+      "original": "suan/cli/main.spec",
+      "archived": "archive/legacy/suan/cli/main.spec",
+      "tracked_files": 1
+    },
+    {
+      "original": "suan/gui/info_bar.py.1.bak.py",
+      "archived": "archive/legacy/suan/gui/info_bar.py.1.bak.py",
+      "tracked_files": 1
+    },
+    {
+      "original": "suan/gui/testpython.py",
+      "archived": "archive/legacy/suan/gui/testpython.py",
+      "tracked_files": 1
+    }
+  ]
+}

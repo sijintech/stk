@@ -12,3 +12,5 @@
   and evaluation rules live in `docs/design/project-model.md`.
 - Distinguish planned capabilities from implemented features. Published contracts in `docs/specs/`
   remain authoritative until explicitly versioned or extended.
+- See `docs/repository-structure.md` for active module boundaries and `archive/manifest.json` for
+  archived paths. Do not import archived code or include it in builds, packages or test discovery.
