@@ -315,7 +315,7 @@ retrying (`final: true` when the subscription ended because of it, e.g. `not_fou
 | `upload.start` | `connection, node?, workspace_id, source` (absolute file or folder), `remote?` (relative path; default the source name; `"."` puts a folder's contents at the workspace root and keeps a file's name), `idempotency_key?` | `{transfer}` |
 | `download.start` | `connection, node?, task_id \| workspace_id, path, dest?` (absolute; default `<download_dir>/<server key>/<task or workspace id>/<path>`), `idempotency_key?` | `{transfer}` |
 | `transfer.list` / `transfer.get {id}` | – / `id` | `{transfers}` / `{transfer}` |
-| `transfer.resume` | `id` | `{transfer}` (continues an `interrupted` or `failed` transfer) |
+| `transfer.resume` | `id` | `{transfer}` (continues an `interrupted`, `failed` or `cancelled` transfer) |
 | `transfer.cancel` | `id` | `{transfer}` in state `cancelled` |
 
 `transfer = {id, kind: upload|download, state: queued|running|interrupted|completed|failed|cancelled,
@@ -332,6 +332,11 @@ on every state change and at most every 250 ms while bytes move.
   task/workspace, path, dest`) is `conflict` with `data.transfer_id`. A failed or cancelled keyed
   transfer is continued with `transfer.resume`, not by repeating `*.start`. Keys are remembered as
   long as the journal (finished journals are kept 7 days).
+- **Retry ordering.** A retry immediately after a terminal event is accepted even if the previous
+  worker is still cleaning up. It returns `queued` and runs after that worker releases the transfer
+  lock and concurrency slot. Repeated resumes while queued/running do not start duplicate attempts;
+  completed transfers remain completed. A queued retry can be cancelled, and closing the bridge
+  leaves it resumable from its journal on the next start.
 - **Journal.** `<state-dir>/transfers/<id>.json` is written atomically before and during the work. A
   transfer found `queued`/`running` at start-up was interrupted: it becomes `interrupted` and
   continues on `transfer.resume` or `hello` (`resume_transfers`, default true). One bridge runs a

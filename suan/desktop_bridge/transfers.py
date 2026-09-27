@@ -72,6 +72,7 @@ class TransferManager:
         self.backend_for = backend_for    # backend_for(connection, node) -> backend
         self.lock = threading.RLock()
         self.threads = {}
+        self.resuming = set()
         self.cancelled = set()
         self.notified = {}
         self.stopping = threading.Event()
@@ -263,17 +264,24 @@ class TransferManager:
         return self.public(record)
 
     def resume(self, transfer_id):
-        record = self.load(transfer_id)
         with self.lock:
+            record = self.load(transfer_id)
             running = self.threads.get(transfer_id)
-            if running is not None and running.is_alive():
-                return self.public(record)
             if record["state"] == "completed":
+                return self.public(record)
+            active = running is not None and running.is_alive()
+            if active and record["state"] in ACTIVE:
                 return self.public(record)
             self.cancelled.discard(transfer_id)
             record.update(state="queued", error=None)
             self.save(record)
-            self._launch(transfer_id)
+            if active:
+                # A terminal event can reach the client before its worker has
+                # released the journal lock. That worker will run the retry
+                # after cleanup; starting another worker now would conflict.
+                self.resuming.add(transfer_id)
+            else:
+                self._launch(transfer_id)
         return self.public(record)
 
     def resume_interrupted(self):
@@ -285,8 +293,8 @@ class TransferManager:
         return resumed
 
     def cancel(self, transfer_id):
-        record = self.load(transfer_id)
         with self.lock:
+            record = self.load(transfer_id)
             thread = self.threads.get(transfer_id)
             if record["state"] in FINAL:
                 return self.public(record)
@@ -351,6 +359,26 @@ class TransferManager:
             raise _Stopped()
 
     def _run(self, transfer_id):
+        try:
+            while True:
+                self._run_once(transfer_id)
+                with self.lock:
+                    if transfer_id in self.resuming and not self.stopping.is_set():
+                        self.resuming.discard(transfer_id)
+                        continue
+                    # Unregister under the same lock used by resume: once the
+                    # worker decides to exit, a retry must launch a new one,
+                    # even while this thread is returning from _run.
+                    self.threads.pop(transfer_id, None)
+                    self.resuming.discard(transfer_id)
+                    return
+        finally:
+            with self.lock:
+                if self.threads.get(transfer_id) is threading.current_thread():
+                    self.threads.pop(transfer_id, None)
+                    self.resuming.discard(transfer_id)
+
+    def _run_once(self, transfer_id):
         acquired = False
         while not acquired:
             if self.stopping.is_set():
