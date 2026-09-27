@@ -28,6 +28,10 @@ class Runner:
         self.dry_run = dry_run
         self.work = work
         self.env = os.environ.copy()
+        # Python tools and bridge output use UTF-8 even when Windows redirects
+        # stdout through a pipe on a non-UTF-8 system locale.
+        self.env["PYTHONUTF8"] = "1"
+        self.env["PYTHONIOENCODING"] = "utf-8"
 
     def mkdir(self, path: Path):
         if not self.dry_run:
@@ -77,6 +81,36 @@ def target(system: str, machine: str):
     raise SetupError("This quick setup supports macOS and x64 Windows. Linux: see desktop/README.md.")
 
 
+def windows_sdk_roots():
+    """Windows 10/11 SDK installations (including a custom installer location)."""
+    import winreg
+    roots = []
+    for view in (winreg.KEY_WOW64_32KEY, winreg.KEY_WOW64_64KEY):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\Microsoft\Windows Kits\Installed Roots",
+                                0, winreg.KEY_READ | view) as key:
+                roots.append(Path(winreg.QueryValueEx(key, "KitsRoot10")[0]))
+        except OSError:
+            pass
+    roots.append(Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Windows Kits/10")
+    return list(dict.fromkeys(roots))
+
+
+def windows_sdk(roots):
+    for root in roots:
+        versions = [p.name for p in (root / "Include").glob("10.*")
+                    if re.fullmatch(r"10\.\d+\.\d+\.\d+", p.name)]
+        for version in sorted(versions, key=lambda s: tuple(map(int, s.split("."))), reverse=True):
+            required = (f"Include/{version}/um/Windows.h", f"Include/{version}/ucrt/stdio.h",
+                        f"Lib/{version}/um/x64/kernel32.lib", f"Lib/{version}/ucrt/x64/ucrt.lib",
+                        f"bin/{version}/x64/rc.exe")
+            if all((root / name).is_file() for name in required):
+                return root, version
+    raise SetupError("Windows SDK headers, x64 libraries or rc.exe are missing. Open Visual Studio Installer > "
+                     "Modify > Desktop development with C++, select a Windows 10/11 SDK, then rerun --check.")
+
+
 def prerequisites(runner: Runner, system: str):
     if runner.dry_run:
         return
@@ -95,10 +129,15 @@ def prerequisites(runner: Runner, system: str):
             "Microsoft Visual Studio/Installer/vswhere.exe"
         if not vswhere.is_file():
             raise SetupError("Install Visual Studio 2022 / Build Tools with Desktop development with C++ and a Windows SDK.")
-        found = runner.run([vswhere, "-version", "[17.0,18.0)", "-products", "*", "-requires",
+        found = runner.run([vswhere, "-latest", "-utf8", "-version", "[17.0,18.0)", "-products", "*", "-requires",
                             "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], capture=True)
         if not found.strip():
             raise SetupError("Visual Studio 2022 C++ tools were not found. Add the Desktop development with C++ workload.")
+        sdk_root, sdk_version = windows_sdk(windows_sdk_roots())
+        visual_studio = found.strip()
+        runner.env["VCPKG_VISUAL_STUDIO_PATH"] = visual_studio
+        print(f"Visual Studio: {visual_studio}\nWindows SDK: {sdk_version} ({sdk_root})", flush=True)
+        return visual_studio
 
 
 def setup(args, *, repo=REPO, system=None, machine=None, runner_factory=Runner):
@@ -112,6 +151,9 @@ def setup(args, *, repo=REPO, system=None, machine=None, runner_factory=Runner):
     elif args.arch:
         raise SetupError("--arch requires --dry-run --platform.")
     kind, arch, triplet, backend = target(system_name, machine_name)
+    if kind == "windows" and not args.dry_run and sys.maxsize <= 2**32:
+        raise SetupError("Use x64 Python; a 32-bit interpreter cannot prepare this Windows x64 build. "
+                         "Install x64 Python 3.12 or set STK_SETUP_PYTHON to its executable.")
     work = Path(args.work_dir).expanduser().resolve() if args.work_dir else repo / "desktop" / f"build-dev-{kind}-{arch}"
     build = work / "build"
     venv = work / "venv"
@@ -133,8 +175,15 @@ def setup(args, *, repo=REPO, system=None, machine=None, runner_factory=Runner):
         paths.append(str(vcpkg / "installed" / triplet / "bin"))
     runner.env["PATH"] = os.pathsep.join(paths + [runner.env.get("PATH", "")])
 
-    if not args.launch_only:
+    if args.check:
+        print(f"Python: {sys.executable}\nTarget: {kind} {arch}", flush=True)
         prerequisites(runner, kind)
+        print("Prerequisite check skipped (--dry-run)." if args.dry_run else
+              "Prerequisites ready. Run setup with --demo to compile and open the main window.", flush=True)
+        return
+
+    if not args.launch_only:
+        visual_studio = prerequisites(runner, kind)
         if not python.is_file():
             runner.run([sys.executable, "-m", "venv", venv], cwd=repo)
         # No global Python/tool install and no legacy Qt extras.
@@ -179,6 +228,8 @@ def setup(args, *, repo=REPO, system=None, machine=None, runner_factory=Runner):
         else:
             packages += ["libepoxy", "pthreads"]
             config += ["-G", "Visual Studio 17 2022", "-A", "x64", "-DSTK_GPU_VULKAN=OFF"]
+            if visual_studio:
+                config += [f"-DCMAKE_GENERATOR_INSTANCE={visual_studio}"]
         runner.run([tool, "install", "--triplet", triplet, *packages], cwd=work)
         runner.run(config, cwd=repo)
         runner.run([cmake, "--build", build, "--config", "Release", "--parallel", str(args.jobs),
@@ -201,6 +252,7 @@ def parser():
     p.add_argument("--work-dir", help="Dependency, venv and build cache directory (default: desktop/build-dev-PLATFORM-ARCH)")
     p.add_argument("--jobs", type=int, default=min(os.cpu_count() or 2, 8), help="Parallel compiler jobs (default: at most 8)")
     mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="Check Python, Git and native build tools only; no install, build or launch")
     mode.add_argument("--no-launch", action="store_true", help="Prepare and compile without opening a window")
     mode.add_argument("--launch-only", action="store_true", help="Open the previously built application without installing or compiling")
     p.add_argument("--demo", action="store_true", help="Open the included domain payload for a quick GPU check")

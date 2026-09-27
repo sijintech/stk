@@ -29,8 +29,18 @@ STK_SETUP_PYTHON=/path/to/python3.12 bash desktop/setup-macos.sh --demo
 重新打开 PowerShell，确认 `git --version` 和 `py -3 --version` 可用。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --demo
+# 先检查工具链：不安装依赖、不编译、不打开窗口
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --check
+
+# 检查通过后，编译并打开自带示例；普通 PowerShell 即可
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --demo
 ```
+
+脚本优先选择 x64 Python 3.12，缺少该版本时使用 `py -3`，然后检查 Python 版本及位数。
+`--check` 会检查 Git、VS2022 C++ 工具、Windows SDK 的头文件、x64 库和资源编译器，
+在默认缓存目录写入检测日志；不会自动安装系统工具或修改系统配置。
+VS2022 的检测使用 [vswhere](https://github.com/microsoft/vswhere)，
+编译和依赖安装使用同一个已检测的 VS 实例。
 
 ExecutionPolicy 仅用于本次 PowerShell 进程，不修改系统策略。也可直接运行：
 
@@ -42,12 +52,29 @@ py -3 desktop/setup.py --demo
 脚本使用 Visual Studio CMake 生成器和 OpenGL，无需 Developer PowerShell 或 Vulkan SDK。
 真机需要支持 OpenGL 4.3 的显卡驱动；暂不支持 Windows ARM64 原生构建。
 
+再次打开已编译程序：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --launch-only --demo
+```
+
+缺少工具时，安装 Git for Windows、x64 Python 3.12，以及 Visual Studio Installer 中的
+“使用 C++ 的桌面开发”（Build Tools 中通常显示为“C++ 生成工具”）。确保同时选中
+MSVC v143 x64/x86 工具和 Windows 10/11 SDK，然后重新打开 PowerShell 并运行 `--check`。
+若 `py` / `python` 打开 Microsoft Store，使用 `STK_SETUP_PYTHON` 指定已安装的解释器。
+若切换过 VS 安装路径，使用新的 `--work-dir C:\stk-build`，避免复用旧 CMake 工具链缓存。
+
+窗口测试建议：先确认示例模型可见，再拖动旋转、滚轮缩放、切换中英文；关闭窗口后用
+`--launch-only --demo` 重开。默认日志在 `desktop\build-dev-windows-x64\setup.log`。
+显卡驱动不足时，环境检查可能通过，但 OpenGL 窗口仍会启动失败；请安装显卡厂商驱动。
+
 ## 常用选项
 
 两个入口接受相同参数。不加 `--demo` 时打开普通主窗口。
 
 | 参数 | 用途 |
 |---|---|
+| `--check` | 只检查当前 Python、Git 和原生编译工具，不安装或编译 |
 | `--demo` | 打开仓库内的畴结构数据包，检查窗口、字体和 GPU |
 | `--launch-only` | 使用已有程序与 Python 环境，跳过安装和编译 |
 | `--no-launch` | 只准备和编译，成功后退出 |
@@ -92,8 +119,13 @@ bash desktop/setup-macos.sh --demo
 
 ```powershell
 # Windows x64 (OpenGL 4.3 driver required)
-py -3 desktop/setup.py --demo
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --check
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --demo
 ```
+
+The Windows wrapper prefers x64 Python 3.12; `STK_SETUP_PYTHON` overrides it. The `--check` mode
+verifies Git, VS2022 C++ tools and the Windows SDK headers/x64 libraries/resource compiler before
+any dependencies are installed. It writes a diagnostic log but does not install system tools.
 
 These scripts create a private venv, install CMake/Ninja and pinned vcpkg dependencies, build only
 `stk-desktop`, then open its main window with the prepared Python bridge. Re-run for an incremental

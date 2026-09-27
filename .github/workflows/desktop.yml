@@ -462,6 +462,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check Windows quick setup prerequisites and wrapper
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python desktop/tests/test_setup.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: vcpkg cache key
         id: vcpkg-key
         run: |
