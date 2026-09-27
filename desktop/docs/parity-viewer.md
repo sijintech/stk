@@ -13,6 +13,10 @@ Status: **done** (implemented and tested), **partial** (an equivalent exists wit
 (milestone named). Tests are under `desktop/tests/app` (`stk_app_viewer_tests`, `stk_app_viewer_gpu_tests`,
 `app_viewer_e2e_*`, `app_viewer_window_*`, `app_viewer_gui_open_*`).
 
+The [development plan](../../docs/development-plan.md) now schedules remaining viewer features under P3.
+The planned [shared table and hierarchical analysis UI](../../docs/design/project-workbench.md) builds on
+these capabilities; its design does not change any implementation status in this checklist.
+
 ## SimViz (Qt + VTK, `SimpleView.cxx`)
 
 | # | SimViz feature | Desktop equivalent | Status |
@@ -21,12 +25,12 @@ Status: **done** (implemented and tested), **partial** (an equivalent exists wit
 | S2 | Refresh (rebuild the whole pipeline) | Parameter edits re-evaluate automatically (debounced; a newer edit cancels the running evaluation with `graph.cancel`); "Evaluate" button; only the affected nodes re-run (node cache) | done |
 | S3 | Scalar volume rendering (ray cast, transfer functions) | `volume` preset, ray-marched volume layer in `stk_viewer_gpu`; colormap, value range and opacity curve editor with numeric control points, add/remove, automatic mode and reset | done |
 | S4 | Slice (cutter with origin / normal) | `slice` preset (axis, index, component, colormap) | partial (axis-aligned slices; arbitrary planes: catalog `stk.filter.slice@1`, no preset field yet) |
-| S5 | Isosurfaces, one per value with its colour | `iso` preset (`levels` list, colormap, opacity) | partial (multi-isosurface UI with per-level colours: deferred, M-D2) |
+| S5 | Isosurfaces, one per value with its colour | `iso` preset (`levels` list, colormap, opacity) | partial (multi-isosurface UI with per-level colours: deferred, P3) |
 | S6 | Vector glyphs (mask, magnitude threshold, scale, colour modes) | `vectors` / `muferro-polarization-glyphs` presets (stride, max arrows, `\|P\|` threshold), instanced glyphs, orientation legend | done |
 | S7 | Streamlines | catalog `stk.filter.streamlines@1` (stretch) | deferred (no preset in M1) |
 | S8 | Ferroelectric domains: 26-variant classifier, film detection, smoothed label surfaces, per-variant colours | `muferro-domains` preset (threshold, max angle, film detection, smoothing iterations), categorical legend; e2e golden + VTK cross-check | done |
 | S9 | VO2 M1/M2 classifier | not in the M1 catalog | deferred |
-| S10 | Editable colormap control points / opacity tables | Colormap dropdown fed by `colormaps.list` (gradient swatches); volume opacity editor for 2–64 control points with preview | partial (opacity tables done; custom colour control points remain deferred, M-D2) |
+| S10 | Editable colormap control points / opacity tables | Colormap dropdown fed by `colormaps.list` (gradient swatches); volume opacity editor for 2–64 control points with preview | partial (opacity tables done; custom colour control points remain deferred, P3) |
 | S11 | Per-domain / per-actor opacity | Sidebar "Layers": opacity slider per layer (display override, kept across steps) | done |
 | S12 | Grid rescale (dx, dy, dz) | Source metadata (`origin` / `spacing`) of `stk.source.file@1` | partial (not a form field) |
 | S13 | Region of interest and sample rate | catalog `stk.filter.crop@1`, `stk.filter.sample@1`; vector presets expose `stride` | partial |
@@ -38,7 +42,7 @@ Status: **done** (implemented and tested), **partial** (an equivalent exists wit
 | S19 | Save / load the view state ("output/load status") | Layout file keeps the Viewer's tool, navigation style and lighting; graph + parameters are the preset document | partial (camera and parameters are not yet saved with the layout) |
 | S20 | Batch 3D: loop over steps, one image each | Export dialog "All time steps": `<stem>.%08d.png` + `stk.series/1` manifest; `--sequence` headless | done |
 | S21 | Decorations: outline box, axes, scalar bars, orientation sphere | Payload overlays drawn by `stk_viewer_gpu`; "Overlays" toggle in the header | done |
-| S22 | 1D plots (QCustomPlot) | presets deliver plots; the desktop requests only payload outputs | deferred (plots panel, M-D2) |
+| S22 | 1D plots (QCustomPlot) | presets deliver plots; the desktop requests only payload outputs | deferred (result views, P3) |
 | S23 | Rotate ±X / ±Y / ±Z actions | Camera presets, orbit tool, numpad 9 (opposite side) | done |
 | S24 | Editable scalar-bar titles | `stk.render.scalar_bar@1` client params (not exposed by the presets) | deferred |
 
@@ -59,7 +63,7 @@ Status: **done** (implemented and tested), **partial** (an equivalent exists wit
 | W11 | Progress / status line | Progress bar from `graph.progress` (node, done / total), cancel button; last evaluation summary (nodes, data nodes, seconds, cache) | done |
 | W12 | Superseded evaluations abandoned | The running evaluation is cancelled (`graph.cancel`) when a newer edit starts one | done |
 | W13 | Overlays: scalar bar, legend, orientation sphere, triad, text | `stk_viewer_gpu` overlays (BLF, CJK) | done |
-| W14 | Plots, tables, images of the result | Only payload outputs are requested | deferred (M-D2 plots panel) |
+| W14 | Plots, tables, images of the result | Only payload outputs are requested | deferred (shared tables and result views, P3) |
 | W15 | Hub review wait ("等待复核") | Hub evaluations in review show a status; evaluate again after approval | partial (no automatic re-wait) |
 
 ## Desktop additions

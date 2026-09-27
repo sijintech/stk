@@ -77,6 +77,11 @@ PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真�
 [桌面程序指南](docs/desktop.md)，验收见 [验收记录](docs/runtime-validation.md)，开发与打包见
 [`desktop/README.md`](desktop/README.md)。
 
+后续方向与阶段验收见[开发计划](docs/development-plan.md)：AI 工作区、分层节点编辑器和通用多维表格
+共用 SQLite 项目模型。产品约定见[项目工作台设计](docs/design/project-workbench.md)，
+技术提案见[项目数据模型](docs/design/project-model.md)；这些是待开发目标。
+用户已反馈 macOS / Windows 均能打开窗口并看到 3D 渲染，范围见[补充验收记录](docs/runtime-validation.md#desktop-mac-windows-smoke)。
+
 远程计算经控制服务：所有者用 `suan-control pair --role client --profile desktop` 签发配对码，在桌面程序
 “配对控制服务…”中输入；见 [控制服务指南](docs/hub.md)。
 

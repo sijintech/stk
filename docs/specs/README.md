@@ -12,6 +12,11 @@ NumPy-free (`suan.graph.schema.validate_graph`); `jsonschema` is not a runtime d
 
 ## Index
 
+Planning documents are separate from these published contracts: the [development plan](../development-plan.md),
+[project workbench design](../design/project-workbench.md) and [SQLite project model proposal](../design/project-model.md)
+(Chinese) describe upcoming work. The project database, hierarchical workflows and cross-table expressions
+are not existing graph-v1 or bridge-v1 capabilities; their schema and protocol extensions are not frozen.
+
 | Spec | Defines | Schemas and machine files |
 |---|---|---|
 | [stk-data-format-v1.md](stk-data-format-v1.md) | Data model (dataset kinds, fields, units and quantities, geometry, frames, provenance), the VTKHDF + STK profile container, the result manifest `stk.result/1`, the case manifest `stk.case/1`, the connector interface and the muFerro mapping | `dataset-1`, `field-1`, `ref-1`, `result-1`, `case-1`; [`quantities.json`](../../suan/contracts/quantities.json) |

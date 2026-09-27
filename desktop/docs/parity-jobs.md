@@ -12,6 +12,10 @@ instead of the Runtime directly.
 Status: **done** = implemented and covered by the test named; **changed** = same purpose, different
 behaviour (explained); **deferred** = not in D1.
 
+The [development plan](../../docs/development-plan.md) schedules a shared project/table model in P1
+and an AI-assisted batch workflow in P2. These planned interfaces will reuse the existing task lifecycle,
+bridge and Runtime; they are not yet implemented and do not change the parity status below.
+
 Tests: `desktop/tests/app` (`stk-jobs-tests`: `JobsSpec.*` form rules, `JobsFake.*` state machines
 on `stk-bridge-fake --jobs`, `JobsLayout.*` UI with synthesized events, `JobsPython.*` the real
 bridge and a loopback Runtime; `jobs_render_*` / `jobs_golden_*` GPU goldens; `jobs_live_*` live

@@ -233,6 +233,17 @@ venv（Python 3.12.14，pip 74 秒），桥使用该安装而不是源码树；�
 KDE + fcitx5 需人工验收）、macOS 交互（Metal、拼音输入法、Retina）、Windows 客户端实机运行、
 真实集群（并行云）、多 rank MPI、真实 GNOME 会话的客户端装饰，以及经 HTTPS 入口访问控制服务。
 
+<a id="desktop-mac-windows-smoke"></a>
+
+## 2026-09-28 补充记录：macOS / Windows 基本启动
+
+来源：所有者在本轮对话反馈“我在 windows 和 mac 上都测试了，能够正常打开界面，看到 3d 渲染”。
+据此记录两个平台的真实窗口启动与基本 3D 显示通过；[快速启动脚本](../desktop/QUICKSTART.md)已在主线提供。
+具体测试提交、系统版本、硬件、操作步骤和日志未随反馈提供，本条属于用户报告的验收证据。
+
+这补充了 D1 记录中的平台启动覆盖；不代表 macOS / Windows 的输入法、Retina/缩放、全部交互、
+大数据、结果导出或安装包已经验收，也不表示此前 CI 失败已修复。后续范围见[开发计划](development-plan.md)。
+
 ## 覆盖范围
 
 | 验收项 | 证据 |
@@ -259,8 +270,8 @@ KDE + fcitx5 需人工验收）、macOS 交互（Metal、拼音输入法、Retin
   不是实际集群性能验证。MuPRO 目前只在本机完成单 rank 验收（见上）。
 - 真实 SSH 网络断线／重连；本次已验证客户端重建和服务端任务寿命独立，
   未对外部服务器执行 SSH 测试。
-- Windows / macOS 客户端运行；服务器端只支持 Linux。CI 在 Linux 运行服务器测试，
-  在 Windows 运行客户端路径，本次仅在 Linux 执行。
+- Windows / macOS 客户端完整交互、输入法与分发验收；基本窗口启动和 3D 显示已有上述用户反馈。
+  服务器端仍只支持 Linux；此前 Linux 自动验收不能替代客户端真机完整验收。
 - PyInstaller 冻结桌面二进制的多进程启动与 Python 解释器分发；当前验收发布物
   为 Python wheel / sdist，未发布到 PyPI 或创建远程 release。
 

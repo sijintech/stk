@@ -4,6 +4,10 @@
 
 macOS / Windows 真机测试可使用[快速编译与启动脚本](../desktop/QUICKSTART.md)。
 
+本文介绍当前可用功能。AI 工作区、分层节点、多维表格与 SQLite 项目的后续安排见
+[开发计划](development-plan.md)和[工作台设计](design/project-workbench.md)。用户已反馈 macOS / Windows
+均能打开窗口并看到 3D 渲染，范围见[补充验收记录](runtime-validation.md#desktop-mac-windows-smoke)。
+
 STK 桌面程序 `stk-desktop` 是 STK 自有的 C++ 桌面端：窗口、输入、输入法与 GPU 上下文来自 Blender 的
 GHOST，绘制用 Blender 的 GPU 模块（Linux 上 OpenGL 或 Vulkan，macOS 上 Metal），文字用 BLF（FreeType，
 中日韩字形回退）。代码在 `desktop/`，许可为 **GPL-2.0-or-later**；STK 的 Python 包（Runtime、控制服务、
@@ -303,9 +307,17 @@ Windows 为 `%APPDATA%\stk\desktop\`。内容包括窗口大小与位置、语�
 
 M-D2 结束前旧 Qt 界面 `suan-gui` 仍可使用。新功能只加在桌面程序中。
 
+M-D2 的剩余项现按[开发计划](development-plan.md)分配到 P0/P3/P5；Qt 归档仍须单独记录替代能力、
+平台输入与分发验收，不因新工作台设计确认而自动执行。
+
 ---
 
 ## English
+
+This guide describes implemented features. See the [development plan](development-plan.md) and
+[workbench design](design/project-workbench.md) (Chinese) for planned AI, hierarchical workflows,
+shared tables and SQLite projects. The owner reports successful window startup and visible 3D rendering on
+both macOS and Windows; see the [scoped acceptance note](runtime-validation.md#desktop-mac-windows-smoke).
 
 `stk-desktop` is STK's own C++ desktop application: Blender's GHOST (windows, input, IME, GPU contexts),
 GPU module (OpenGL or Vulkan on Linux, Metal on macOS) and BLF (FreeType text with CJK fallback), under
@@ -439,3 +451,6 @@ preedit is built in; Pinyin acceptance on a real Mac pending. Windows: M-D2.
 | M-D2 exit | `suan/gui` (Qt) and its extras, `tests/test_desktop.py`, the Qt pages of the docs site |
 
 Until M-D2 exit the Qt `suan-gui` keeps working; new features go into the desktop app only.
+
+Remaining M-D2 work is now scheduled under P0/P3/P5 in the [development plan](development-plan.md).
+Qt archival still needs a recorded parity, platform-input and distribution acceptance decision.
