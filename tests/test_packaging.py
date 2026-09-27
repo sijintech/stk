@@ -13,7 +13,7 @@ import toml
 
 
 def test_public_packages_and_installed_entrypoints(tmp_path):
-    for module in ('suan.runtime', 'toolkits.sjob.core', 'structure_generator', 'stk_data'):
+    for module in ('suan.runtime', 'suan.project', 'toolkits.sjob.core', 'structure_generator', 'stk_data'):
         assert import_module(module) is not None
     assert files('suan.gui').joinpath('resources/styles.qss').is_file()
     assert files('suan.runtime').joinpath('worker.py').is_file()
@@ -22,7 +22,7 @@ def test_public_packages_and_installed_entrypoints(tmp_path):
                             capture_output=True, env={**os.environ, 'PYTHONIOENCODING': 'cp1252'})
     assert result.returncode == 0, result.stderr.decode('utf-8', 'replace')
     output = result.stdout.decode('utf-8')
-    for command in ('server', 'jobs', 'workspaces', 'connect', 'mupro', 'sjob', 'smesh', 'sviz'):
+    for command in ('server', 'jobs', 'workspaces', 'connect', 'mupro', 'sjob', 'smesh', 'sviz', 'project'):
         assert command in output
     assert '网格处理工具' in output and '可视化工具' in output
     # MuPRO help works on a client with no runtime configured.

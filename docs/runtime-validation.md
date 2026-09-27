@@ -244,6 +244,28 @@ KDE + fcitx5 需人工验收）、macOS 交互（Metal、拼音输入法、Retin
 这补充了 D1 记录中的平台启动覆盖；不代表 macOS / Windows 的输入法、Retina/缩放、全部交互、
 大数据、结果导出或安装包已经验收，也不表示此前 CI 失败已修复。后续范围见[开发计划](development-plan.md)。
 
+## 2026-09-28：P0 测试稳定性与 P1 项目存储基础
+
+新增 `suan/project` 和 `suan project create/show/apply/history`，实现独立于 Runtime 的 SQLite 项目存储。
+支持稳定 UUID、类型化字面量表格、批次事务、修订冲突与编辑历史；使用范围见[项目存储指南](project.md)。
+当前尚未接入桌面项目生命周期，也未实现引用/公式、撤销、资源快照或模拟执行。
+
+本机 Linux 验证：
+
+- 项目、打包、图 worker 与实时图缓存相关测试共 **55 passed，1 skipped**；跳过的是未安装的 MCP 可选组件。
+  其中项目测试 28 项，覆盖重开、改名后稳定身份、类型错误整批回滚、并发修订冲突、跨表外键、
+  拒绝覆盖已有数据库，以及拒绝未知/损坏/不支持格式的项目。
+- 快速启动脚本测试 **13 passed，1 skipped**；Windows PowerShell 集成项在 Linux 跳过。
+- 重编译 `stk_app_viewer_gpu_tests`，`app_viewer_python_vulkan` 与 `app_viewer_python_opengl` 均通过。
+- 构建 sdist 并从中构建 wheel；在无 NumPy/VTK/Qt/MCP 的全新虚拟环境安装 wheel，
+  从源码目录外完成中文/空格路径项目创建、编辑、重开、历史查询与陈旧修订拒绝；未初始化 Runtime。
+
+Windows 退出测试现在处理 `is_running()` 与 `status()` 之间进程退出的情况，保留退出超时断言。
+查看器阶段缓存测试先关闭邻帧预取，再分别验证阶段缓存和预取换步：活动预取可能在原生计算中被硬取消，
+导致 worker 重启及内存缓存丢失，不能将这一情况等同于客户端参数使数据失效。
+本次修改没有放宽阶段缓存断言，也没有改变生产取消策略；原有 worker 取消/重启测试继续通过。
+本条是 Linux 本地验证，修改后 macOS Metal 与 Windows 实际结果仍以对应提交 CI/真机记录为准。
+
 ## 覆盖范围
 
 | 验收项 | 证据 |

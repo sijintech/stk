@@ -43,6 +43,7 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 - suan：共享 Python 服务、科学数据处理与 CLI/MCP/桌面桥入口；原生界面在 desktop。
 - toolkits：仍被 CLI、可视化和测试使用的 Python 科学工具；后续按职责整合进 suan，保留过渡兼容。旧 C/C++ 工程已移入 archive。
 - suan/runtime：独立任务服务、进程／调度器适配器及统一客户端，不依赖 Qt。
+- suan/project：实验性 SQLite 项目存储、类型化表格与原子修订命令，见[项目存储指南](docs/project.md)；尚未接入桌面。
 - suan/control：跨设备控制服务 `suan-control` 与执行节点代理 `suan-node`。
 - suan/visualization：执行节点上的场数据视图与原始数据探针。
 - suan/desktop_bridge：桌面程序的 Python 桥（NDJSON，连接 Runtime 与控制服务）。

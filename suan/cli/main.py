@@ -33,8 +33,9 @@ from suan.runtime.cli import server, jobs, workspaces, connect
 from suan.mupro.cli import mupro
 from suan.graph.cli import graph
 from suan.skills.cli import skills
+from suan.project.cli import project
 
-for command in (server, jobs, workspaces, connect, mupro, graph, skills):
+for command in (server, jobs, workspaces, connect, mupro, graph, skills, project):
     cli.add_command(command)
 
 
