@@ -2,9 +2,11 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_state.hh"
+#include "stk/app/jobs_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/app/script_state.hh"
 #include "stk/app/viewer_state.hh"
+#include "stk/io/payload.hh"
 #include "stk/bridge/process.hh"
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
@@ -1351,6 +1353,135 @@ TEST_F(ProjectPython, MuFerroImportButtonUsesTheSharedWorkflowAndBindsProjectIde
   EXPECT_TRUE(state().tables().empty());
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
+
+#ifdef __linux__
+class SimulationPython : public ProjectPython {
+ protected:
+  void TearDown() override
+  {
+    auto &scripts = f.shell->store().scripts();
+    loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy(); }, 30);
+    if (scripts.ready() && !scripts.busy()) {
+      scripts.execute("if '_simulation_runtime' in globals():\n    _simulation_runtime.close()");
+      loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy(); }, 30);
+    }
+    ProjectPython::TearDown();
+  }
+};
+
+TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOffline)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  auto &jobs = f.shell->store().jobs();
+  auto &viewer = f.shell->store().viewer();
+  auto python_done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 60));
+    std::string output;
+    for (size_t i = 0; i < scripts.output().line_count(); ++i) { output += scripts.output().line(i); output += '\n'; }
+    ASSERT_TRUE(scripts.error().empty()) << scripts.error();
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded") << output;
+  };
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  ASSERT_TRUE(scripts.execute("import sys\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom simulation_fixture import SimulationRuntime\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "_simulation_runtime = SimulationRuntime(" + Json(dir.str() + "/simulation-runtime").dump() + ")\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('simulation-test', _simulation_runtime.url, _simulation_runtime.config['token'], check=False)"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  jobs.sync();
+  jobs.refresh_connections();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &item) { return item.info.id == "runtime:simulation-test"; });
+  }, 30));
+  jobs.select_connection("runtime:simulation-test");
+  std::string source;
+  { std::ifstream file(core::path_from_utf8(dir.str() + "/simulation-runtime/source.txt")); std::getline(file, source); }
+  ASSERT_FALSE(source.empty());
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_simulation");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto click = [&](const std::string &id) {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.screen.run_deferred();
+      f.drv->frame();
+      const auto *widget = f.screen.ui()->find("a2/main/" + id);
+      return widget && widget->enabled;
+    }, 30)) << id << " project busy=" << state().busy() << " script=" << scripts.status().dump()
+            << " run=" << state().run().dump();
+    const auto *widget = f.screen.ui()->find("a2/main/" + id);
+    ASSERT_NE(widget, nullptr) << id;
+    ASSERT_TRUE(widget->enabled) << id;
+    widget->on_click();
+  };
+  auto *input = f.screen.ui()->find("a2/main/project_simulation/simulation_source");
+  ASSERT_NE(input, nullptr);
+  input->string.assign(source);
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_import"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  state().select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+  ASSERT_NE(state().table(), nullptr);
+  ASSERT_EQ(state().table()->records.size(), 1u);
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_prepare"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  ASSERT_TRUE(state().load_runs());
+  settled();
+  ASSERT_EQ(state().runs().size(), 1u) << state().error();
+  const auto run = state().run_id();
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_prepare"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  ASSERT_TRUE(scripts.execute("assert _simulation_runtime.client.tasks() == []\nassert len(stk.project.runs.list()['runs']) == 1"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  f.drv->frame();
+  const auto [rx, ry] = f.widget_center("a2/main/project_runs");
+  f.drv->click(rx, ry);
+  ASSERT_NO_FATAL_FAILURE(click("project_runs/submit"));
+  settled();
+  ASSERT_TRUE(loop.pump_until([&] {
+    if (state().busy()) { return false; }
+    const auto status = state().run().value("status", Json::object());
+    const auto task = status.value("task", Json::object());
+    const auto phase = io::get_string(task, "state");
+    if (phase == "succeeded" || phase == "failed" || phase == "cancelled") { return true; }
+    state().refresh_run();
+    return false;
+  }, 90));
+  ASSERT_EQ(state().run().at("status").at("task").at("state"), "succeeded") << state().run().dump();
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_logs"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_collect"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  state().select_table("04d7cc6c-5da5-5c92-a860-f3368f7b376d");
+  ASSERT_NE(state().table(), nullptr);
+  ASSERT_EQ(state().table()->records.size(), 1u);
+  const double energy = state().table()->records[0].values.at("782e3845-2a32-5871-a1d6-d6d5b82451e1");
+  const char *prefix = std::getenv("STK_TEST_MUPRO_PREFIX");
+  EXPECT_NEAR(energy, prefix && *prefix ? -727.9144455 : -3.375, 1e-5);
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_collect"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  ASSERT_TRUE(scripts.execute("assert len(_simulation_runtime.client.tasks()) == 1\n_simulation_runtime.close()"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  // Close and reopen after the Runtime has stopped. The saved result still opens locally.
+  ASSERT_TRUE(state().close());
+  settled();
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  settled();
+  ASSERT_TRUE(state().load_runs());
+  settled();
+  ASSERT_EQ(state().run_id(), run);
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); viewer.pump(); return viewer.presets_loaded() && scripts.desktop_ready(); }, 30));
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_view"));
+  ASSERT_NO_FATAL_FAILURE(python_done());
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); viewer.pump(); return bool(viewer.payload()) || !viewer.eval_error().empty(); }, 60));
+  ASSERT_TRUE(viewer.payload()) << viewer.eval_error();
+  EXPECT_FALSE(viewer.payload()->layers().empty());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+#endif
 
 }  // namespace
 }  // namespace stk::app

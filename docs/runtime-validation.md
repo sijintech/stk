@@ -29,7 +29,20 @@
 原生导入按钮验证了真实 Python 调用和项目切换保护，GL/Vulkan 中英文仿真面板截图通过并检查。
 桌面日志 `/tmp/stk-muferro-full.log`、JUnit `/tmp/stk-muferro-full.xml`，
 Python 日志 `/tmp/stk-muferro-python-final.log`；原生输出显示调整后的相关 **5/5** 通过，
-见 `/tmp/stk-muferro-final-native.log`。本批跨平台 CI 和整条原生按钮操作链路仍待继续验证；
+见 `/tmp/stk-muferro-final-native.log`。
+
+新增 `SimulationPython.NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOffline` 直接驱动原生
+项目面板，经过真实 Python worker 和隔离的 Linux Runtime 执行导入、准备、提交、日志与收集。
+重复准备时服务器任务数仍为零，重复收集后只有一个任务和一行结果；关闭 Runtime、关闭再打开项目后，
+从原生“查看已收集结果”按钮加载非空三维载荷。测试默认使用明确的假 SDK，Linux CI 要求此项执行且通过；
+设置上述真实 SDK 环境后，同一个原生测试也已通过，结果表参考能量 `−727.9144455` 一致。
+日志 `/tmp/stk-muferro-native-real.log`，JUnit `/tmp/stk-muferro-native-real.xml`。
+加入完整原生链路后的本机全量桌面 **526/526、无跳过**，日志 `/tmp/stk-muferro-native-full.log`、
+JUnit `/tmp/stk-muferro-native-full.xml`。
+
+功能提交 `7d96151` 首轮 Runtime CI 发现 Windows 3.12 的 `fstat`/`stat` ctime 语义差异；
+修正提交 `ef25286` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36442800913)
+全部通过，包含 Windows Python 3.10/3.12。桌面跨平台 CI 继续跟踪。
 本节不能作为 Windows GPU、真机输入法或 macOS/Windows 到实际远端 SSH 的验收证据。
 
 ## 2026-09-28 最新跨平台确认

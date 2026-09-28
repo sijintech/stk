@@ -5,7 +5,8 @@
 功能提交 `7d96151` 已推送。其 Runtime CI 的 Windows 3.12 导入测试失败：新增文件复制逻辑
 再次遇到句柄 `fstat` 与路径 `stat` 的 ctime 语义差异；现按 `project.snapshots` 既有规则修正，
 ctime 仅在同一 API 内比较，跨 API 仍检查文件身份、大小与 mtime。新增模拟两种时间语义的回归，
-同时确认真实句柄变化仍被拒绝。本机工作流 **12 通过、1 跳过**；修正后的 Windows CI 待确认。
+同时确认真实句柄变化仍被拒绝。本机工作流 **12 通过、1 跳过**；修正提交 `ef25286` 的
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36442800913) 全部通过，包含 Windows Python 3.10/3.12。
 
 新增 `suan/workflows/muferro.py` 与桌面 Python 的 `stk.muferro`；原生项目面板增加 MuFerro 入口，
 复用同一流程执行案例导入、选行准备、日志、收集校验和三维打开。参数行引用不可变源输入；
@@ -19,8 +20,15 @@ ctime 仅在同一 API 内比较，跨 API 仍检查文件身份、大小与 mti
 本机完整桌面 **525/525** 通过，新增原生导入/项目身份保护及 4 项中英文 GL/Vulkan 截图已检查。
 日志与限制见[验收记录](runtime-validation.md)，操作步骤见[MuFerro 工作流指南](simulation-muferro.md)。
 
-尚需继续：整条原生按钮链路验证、当前提交的 macOS/Windows CI 与真机新增交互复核；
-不把纯 Python 集成或离屏输出称为完整 GUI 真机操作已经验收。目标继续保持进行中。
+原生完整链路补充：`SimulationPython.NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOffline`
+驱动实际项目面板完成导入、重复准备、提交、日志、重复收集；断开测试 Runtime 后关闭重开项目，
+通过原生按钮加载已收集的三维载荷。默认假 SDK 测试通过，同一个测试显式使用实际 Release MuFerro 也通过，
+结果表参考能量一致。Linux CI 增加该项必跑检查；运行器只启动、取消和清理自己创建的测试 Runtime/任务。
+日志 `/tmp/stk-muferro-native-real.log`、JUnit `/tmp/stk-muferro-native-real.xml`。
+
+最终本机完整桌面 **526/526、无跳过**，日志 `/tmp/stk-muferro-native-full.log`、
+JUnit `/tmp/stk-muferro-native-full.xml`。尚需继续：当前提交的 macOS/Windows 桌面 CI 与真机新增交互复核；
+原生自动化测试不等同于全部真机输入设备交互验收。目标继续保持进行中。
 
 ## 2026-09-28：优先贯通完整真实仿真
 

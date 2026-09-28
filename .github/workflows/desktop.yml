@@ -131,7 +131,7 @@ jobs:
         if: success() || failure()
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-junit.xml \
-            'PythonBridge\..*' 'ProjectPython\..*' 'ScriptPython\..*' 'JobsPython\..*' 'app_viewer_python_(vulkan|opengl)' \
+            'PythonBridge\..*' 'ProjectPython\..*' 'SimulationPython\..*' 'ScriptPython\..*' 'JobsPython\..*' 'app_viewer_python_(vulkan|opengl)' \
             'app_viewer_e2e_(vulkan|opengl)' 'app_viewer_window_(xvfb|weston)' 'package_install_check'
           for backend in opengl vulkan; do
             for language in en zh; do
