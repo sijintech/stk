@@ -161,3 +161,35 @@ def verify_snapshot(directory, snapshot_id):
 def resolve_snapshot(directory, snapshot_id, record_id):
     """Verify one frozen file and return its current local object path."""
     _run(lambda: ProjectStore(directory).snapshots.resolve(snapshot_id, record_id))
+
+
+@project.group("csv")
+def csv_group():
+    """Import typed CSV tables or export evaluated values (not full project backups)."""
+
+
+@csv_group.command("import")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("source", type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--name", required=True)
+@click.option("--types", "field_types", default="{}", help="JSON object mapping column names to field types.")
+@click.option("--units", default="{}", help="JSON object mapping numeric column names to units.")
+@click.option("--tsv", is_flag=True, help="Use tabs instead of commas.")
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def import_csv(directory, source, name, field_types, units, tsv, expected_revision):
+    """Create a new table from UTF-8 SOURCE in one atomic edit batch."""
+    _run(lambda: ProjectStore(directory).csv.import_file(source.absolute(), name=name,
+        types=json.loads(field_types), units=json.loads(units), delimiter="\t" if tsv else ",",
+        expected_revision=expected_revision))
+
+
+@csv_group.command("export")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("table_id")
+@click.argument("destination", type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--tsv", is_flag=True, help="Use tabs instead of commas.")
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def export_csv(directory, table_id, destination, tsv, expected_revision):
+    """Write UTF-8 CSV with BOM; refuse to replace an existing destination."""
+    _run(lambda: ProjectStore(directory).csv.export_file(table_id, destination.absolute(),
+        delimiter="\t" if tsv else ",", expected_revision=expected_revision))

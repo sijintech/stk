@@ -297,6 +297,71 @@ TEST_F(ProjectPython, RecentIdentityGuardKeepsTheCurrentlyOpenProject)
   EXPECT_EQ(state().recent().front()["id"], before.id);
 }
 
+TEST_F(ProjectPython, CsvButtonsImportTypedRowsExportAndUndoAsOneEdit)
+{
+  ASSERT_TRUE(state().create(dir.str() + "/project", "CSV"));
+  settled();
+  const auto source = dir.str() + "/输入.csv", output = dir.str() + "/输出.csv";
+  { std::ofstream file(core::path_from_utf8(source)); file << "Temperature,Note\n300,prepared\n350,中文\n"; }
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  auto [x, y] = f.widget_center("a2/main/project_csv");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_csv/" + key); };
+  ASSERT_NE(widget("source"), nullptr);
+  widget("source")->string.assign(source);
+  widget("name")->string.assign("Imported cases");
+  auto [tx, ty] = f.widget_center("a2/main/project_csv/types");
+  f.drv->click(tx, ty);
+  f.drv->frame();
+  ASSERT_NE(widget("types/types"), nullptr);
+  widget("types/types")->string.assign(R"({"Temperature":"number"})");
+  widget("types/units")->string.assign(R"({"Temperature":"K"})");
+  widget("import")->on_click();
+  settled();
+  ASSERT_TRUE(state().error().empty()) << state().error();
+  ASSERT_EQ(state().tables().size(), 1u);
+  ASSERT_EQ(state().table()->records.size(), 2u);
+  const auto identity = state().table_id();
+  EXPECT_EQ(state().table()->fields[0].type, "number");
+  EXPECT_EQ(state().table()->fields[0].unit, "K");
+  EXPECT_EQ(state().table()->text(1, 0), "350");
+  EXPECT_EQ(state().table()->text(1, 1), "中文");
+  EXPECT_EQ(state().project()->revision, 1);
+  f.drv->frame();
+  widget("destination")->string.assign(output);
+  widget("export")->on_click();
+  settled();
+  EXPECT_TRUE(state().error().empty()) << state().error();
+  EXPECT_FALSE(state().notice().empty());
+  EXPECT_TRUE(std::filesystem::is_regular_file(core::path_from_utf8(output)));
+  EXPECT_EQ(state().project()->revision, 1);
+  ASSERT_TRUE(state().undo());
+  settled();
+  EXPECT_TRUE(state().tables().empty());
+  EXPECT_TRUE(std::filesystem::is_regular_file(core::path_from_utf8(output)));
+  ASSERT_TRUE(state().redo());
+  settled();
+  EXPECT_EQ(state().table_id(), identity);
+  EXPECT_EQ(state().table()->text(1, 0), "350");
+  f.drv->frame();
+  widget("export")->on_click();
+  settled();
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_EQ(state().project()->revision, 3);
+  { std::ofstream file(core::path_from_utf8(source)); file << "Temperature,Note\ntrue,bad\n"; }
+  f.drv->frame();
+  widget("import")->on_click();
+  settled();
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_EQ(state().tables().size(), 1u);
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 TEST_F(ProjectPython, TableEditorSavesTypedValuesThroughSharedModel)
 {
   populated();

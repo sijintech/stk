@@ -832,5 +832,18 @@
   "project.recent.title": "Recent projects",
   "project.recent.empty": "No recently opened projects.",
   "project.recent.forget": "Forget location",
-  "project.recent.hint": "Forgetting a location only removes this history entry. Project files and open sessions are kept."
+  "project.recent.hint": "Forgetting a location only removes this history entry. Project files and open sessions are kept.",
+  "project.csv.title": "CSV / TSV tables",
+  "project.csv.source": "Input file (absolute path)",
+  "project.csv.name": "New table name",
+  "project.csv.tsv": "Use tab-separated values (TSV)",
+  "project.csv.types": "Column types (optional)",
+  "project.csv.types_hint": "Map header names to text, integer, number, boolean or json. Example: {\"Temperature\":\"number\"}.",
+  "project.csv.units": "Numeric column units, e.g. {\"Temperature\":\"K\"}",
+  "project.csv.import": "Import new table",
+  "project.csv.import_hint": "Import a UTF-8 file with a header row. Columns are text unless a type is specified.",
+  "project.csv.export_hint": "Export the selected table’s current values. Formulas, IDs and units are not included. Existing files are kept.",
+  "project.csv.destination": "New output file (absolute path)",
+  "project.csv.export": "Export selected table",
+  "project.csv.saved": "Table exported: {path}"
 }

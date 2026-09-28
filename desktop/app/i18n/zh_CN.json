@@ -832,5 +832,18 @@
   "project.recent.title": "最近项目",
   "project.recent.empty": "尚无最近打开的项目。",
   "project.recent.forget": "移除记录",
-  "project.recent.hint": "移除只清除这条历史记录，项目文件和已打开的会话都会保留。"
+  "project.recent.hint": "移除只清除这条历史记录，项目文件和已打开的会话都会保留。",
+  "project.csv.title": "CSV / TSV 表格",
+  "project.csv.source": "输入文件（绝对路径）",
+  "project.csv.name": "新表格名称",
+  "project.csv.tsv": "使用制表符分隔（TSV）",
+  "project.csv.types": "列类型（可选）",
+  "project.csv.types_hint": "按表头名称指定 text、integer、number、boolean 或 json，例如 {\"Temperature\":\"number\"}。",
+  "project.csv.units": "数值列单位，例如 {\"Temperature\":\"K\"}",
+  "project.csv.import": "导入为新表格",
+  "project.csv.import_hint": "导入含表头的 UTF-8 文件；未指定类型的列按文本保存。",
+  "project.csv.export_hint": "导出当前选中表格的值，不包含公式、ID 和单位；已有文件不会被覆盖。",
+  "project.csv.destination": "新输出文件（绝对路径）",
+  "project.csv.export": "导出选中表格",
+  "project.csv.saved": "表格已导出：{path}"
 }

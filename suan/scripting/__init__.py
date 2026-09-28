@@ -56,6 +56,10 @@ class Project:
         return self._call("project.redo", {"handle": self.handle, "expected_revision": expected_revision})
 
     @property
+    def csv(self):
+        return ProjectCSV(self._call, self.handle)
+
+    @property
     def files(self):
         return ProjectFiles(self._call, self.handle)
 
@@ -66,6 +70,25 @@ class Project:
     @property
     def snapshots(self):
         return ProjectSnapshots(self._call, self.handle)
+
+
+class ProjectCSV:
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def import_file(self, source, *, name, expected_revision, types=None, units=None, delimiter=","):
+        params = {"handle": self.handle, "source": str(Path(source).expanduser().absolute()),
+                  "name": name, "expected_revision": expected_revision, "delimiter": delimiter}
+        if types is not None:
+            params["types"] = types
+        if units is not None:
+            params["units"] = units
+        return self._call("project.csv.import", params)
+
+    def export_file(self, table_id, destination, *, expected_revision, delimiter=","):
+        return self._call("project.csv.export", {"handle": self.handle, "table_id": table_id,
+            "destination": str(Path(destination).expanduser().absolute()),
+            "expected_revision": expected_revision, "delimiter": delimiter})
 
 
 class ProjectRuns:
@@ -231,4 +254,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]
+__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectCSV", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]

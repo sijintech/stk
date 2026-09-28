@@ -497,6 +497,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.recent` | `{}` | `{projects: [{id, directory, name, last_opened}], warning}` |
 | `project.forget` | `{directory}` | `{removed: boolean}` |
 | `project.close` | `{handle}` | `{closed: boolean}` |
+| `project.csv.import` | `{handle, source, name, expected_revision, types?, units?, delimiter?}` | `{revision, table_id, field_ids, record_ids, rows, columns, source_sha256}` |
+| `project.csv.export` | `{handle, table_id, destination, expected_revision, delimiter?}` | `{revision, table_id, path, rows, columns, size, sha256}` |
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
 | `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
@@ -600,6 +602,14 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 - Snapshot/history are currently unpaginated and subject to the 16 MiB line limit (§2), returning
   `result_too_large` when necessary. Large scientific arrays and files do not belong in JSON cells.
   No project directory is automatically reopened by a new bridge; the desktop owns recovery intent.
+
+CSV imports create a new table using the ordinary atomic edit batch and publish `project.changed` after
+success. Source/destination paths are absolute on the bridge; delimiter is comma (default) or tab.
+Types map header names to the five existing field types (default text); units apply only to numeric
+columns. Export materializes a consistent revision and rejects evaluation errors; it never overwrites
+an existing destination and does not change project revision. Both files are bounded to 8 MiB and 64
+columns; import also observes the 1000-command transaction limit, export a 10000-row limit. See
+[CSV exchange](../project-csv.md) for null/empty handling and the exclusive file-publication requirement.
 
 Recent locations are bridge preferences (`recent-projects.json`, version 1), at most 20 entries in
 most-recently-opened order. Creating/opening successfully remembers canonical directory, project UUID,

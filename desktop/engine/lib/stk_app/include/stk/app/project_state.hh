@@ -68,6 +68,9 @@ class ProjectState {
   bool close(std::function<void(bridge::Result<bool>)> complete = {});
   void refresh();
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
+  bool import_csv(const std::string &source, const std::string &name, const io::Json &types,
+                  const io::Json &units, const std::string &delimiter);
+  bool export_csv(const std::string &destination, const std::string &delimiter);
   bool backup();
   bool upgrade();
   bool undo();

@@ -225,6 +225,11 @@ class ProjectStore:
             return {**dict(db.execute("SELECT * FROM project").fetchone()), "format_version": _version(db)}
 
     @property
+    def csv(self):
+        from .csv_io import TableCSV
+        return TableCSV(self)
+
+    @property
     def files(self):
         from .files import FileIndex
         return FileIndex(self)

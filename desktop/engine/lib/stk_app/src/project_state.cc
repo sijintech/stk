@@ -535,6 +535,52 @@ bool ProjectState::selected_file() const
 bool ProjectState::index_files(const std::vector<std::string> &paths) { return edit_files(paths, true); }
 bool ProjectState::refresh_file() { return selected_file() && edit_files({record_id_}, false); }
 
+bool ProjectState::import_csv(const std::string &source, const std::string &name, const Json &types,
+                              const Json &units, const std::string &delimiter)
+{
+  if (!ready() || busy() || !loaded()) { return false; }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  on(client_->call("project.csv.import", {{"handle", project_->handle}, {"expected_revision", project_->revision},
+      {"source", source}, {"name", name}, {"types", types}, {"units", units}, {"delimiter", delimiter}}, options),
+      [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result.ok()) { fail(result.error()); }
+    else {
+      table_id_ = io::get_string(result.value(), "table_id");
+      const auto &records = result.value().at("record_ids");
+      record_id_ = records.empty() ? std::string() : records.front().get<std::string>();
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+    }
+    refresh();
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::export_csv(const std::string &destination, const std::string &delimiter)
+{
+  if (!ready() || busy() || !loaded() || !table()) { return false; }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  on(client_->call("project.csv.export", {{"handle", project_->handle}, {"expected_revision", project_->revision},
+      {"table_id", table_id_}, {"destination", destination}, {"delimiter", delimiter}}, options),
+      [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result.ok()) { fail(result.error()); }
+    else { notice_ = store_.catalog().format("project.csv.saved", {{"path", io::get_string(result.value(), "path")}}); changed(); }
+    if (project_ && dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
 bool ProjectState::edit_files(const std::vector<std::string> &items, const bool index)
 {
   if (!ready() || busy() || !loaded() || project_->format_version < 3 || items.empty()) { return false; }

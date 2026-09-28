@@ -142,6 +142,12 @@ int main(int argc, char **argv)
         ok = ok && state.load_runs() && loop.pump_until([&] { return !state.busy(); }, 30);
         ok = ok && state.runs().size() == 4 && !state.run().empty();
       }
+      if (editor == "csv") {
+        const auto source = dir.str() + "/project/parameters.csv";
+        { std::ofstream file(core::path_from_utf8(source)); file << "Temperature,Note\n300,Prepared / 待运行\n350,Comparison / 对比\n"; }
+        ok = ok && state.import_csv(source, "Imported parameters / 导入参数", {{"Temperature", "number"}},
+                                   {{"Temperature", "K"}}, ",") && loop.pump_until([&] { return !state.busy(); }, 30);
+      }
       if (editor == "recent") {
         ok = ok && state.close() && loop.pump_until([&] { return !state.busy() && !state.recent_loading(); }, 30);
         ok = ok && state.create(dir.str() + "/comparison", "Comparison / 对比分析") &&
@@ -170,13 +176,22 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      if (editor == "manage" || editor == "files" || editor == "snapshots" || editor == "runs") {
+      if (editor == "manage" || editor == "files" || editor == "snapshots" || editor == "runs" || editor == "csv") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find(editor == "manage" ? "a2/main/manage_objects" :
-                                                  editor == "files" ? "a2/main/project_files" : editor == "runs" ? "a2/main/project_runs" : "a2/main/input_snapshots")) {
+                                                  editor == "files" ? "a2/main/project_files" : editor == "csv" ? "a2/main/project_csv" : editor == "runs" ? "a2/main/project_runs" : "a2/main/input_snapshots")) {
           const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
           screen.ui()->handle_event(ui::Event::mouse_down(center));
           screen.ui()->handle_event(ui::Event::mouse_up(center));
+        }
+        else { ok = false; }
+      }
+      if (editor == "csv") {
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        if (const auto *widget = screen.ui()->find("a2/main/project_csv/source")) {
+          widget->string.assign(dir.str() + "/project/parameters.csv");
+          screen.ui()->find("a2/main/project_csv/name")->string.assign("Imported parameters / 导入参数");
+          screen.ui()->find("a2/main/project_csv/destination")->string.assign(dir.str() + "/project/results.csv");
         }
         else { ok = false; }
       }

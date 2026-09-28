@@ -84,6 +84,7 @@ class ProjectEditor final : public Editor {
     file_controls(layout, ctx, state, editable);
     snapshot_controls(layout, ctx, state, editable);
     run_controls(layout, ctx, state, editable);
+    csv_controls(layout, ctx, state, editable);
     table_controls(layout, ctx, state, editable);
     const auto *table = state.table();
     if (!table) {
@@ -227,6 +228,44 @@ class ProjectEditor final : public Editor {
 
   std::string run_consent_id_;
   bool allow_stale_run_ = false;
+
+  void csv_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  {
+    if (csv_project_ != state.project()->id) {
+      csv_project_ = state.project()->id;
+      csv_source_.clear(); csv_destination_.clear(); csv_name_.clear(); csv_error_.clear();
+      csv_types_ = csv_units_ = "{}";
+    }
+    auto *panel = layout.panel("project_csv", ctx.tr("project.csv.title"), false);
+    if (!panel) { return; }
+    panel->paragraph(ctx.tr("project.csv.import_hint"));
+    panel->prop(ctx.tr("project.csv.source")).text_field("source", ui::bind(csv_source_));
+    panel->prop(ctx.tr("project.csv.name")).text_field("name", ui::bind(csv_name_));
+    panel->checkbox("tsv", ctx.tr("project.csv.tsv"), ui::bind(csv_tsv_));
+    if (auto *types = panel->panel("types", ctx.tr("project.csv.types"), false)) {
+      types->paragraph(ctx.tr("project.csv.types_hint"));
+      types->text_area("types", ui::bind(csv_types_), {.max_length = 65536, .mono = true, .visible_lines = 2});
+      types->label(ctx.tr("project.csv.units"));
+      types->text_area("units", ui::bind(csv_units_), {.max_length = 65536, .mono = true, .visible_lines = 2});
+    }
+    if (!csv_error_.empty()) { panel->paragraph(csv_error_); }
+    panel->button("import", ctx.tr("project.csv.import"), [this, &state] {
+      csv_error_.clear();
+      try {
+        const auto sources = platform::split_path_list(csv_source_);
+        state.import_csv(sources.size() == 1 ? sources.front() : csv_source_, csv_name_,
+                         io::parse_json(csv_types_), io::parse_json(csv_units_), csv_tsv_ ? "\t" : ",");
+      }
+      catch (const std::exception &error) { csv_error_ = error.what(); }
+    }).disable(!editable || csv_source_.empty() || csv_name_.empty());
+    panel->paragraph(ctx.tr("project.csv.export_hint"));
+    if (state.table()) { panel->label(state.table()->name); }
+    panel->prop(ctx.tr("project.csv.destination")).text_field("destination", ui::bind(csv_destination_));
+    panel->button("export", ctx.tr("project.csv.export"), [this, &state] {
+      const auto paths = platform::split_path_list(csv_destination_);
+      state.export_csv(paths.size() == 1 ? paths.front() : csv_destination_, csv_tsv_ ? "\t" : ",");
+    }).disable(!editable || !state.table() || csv_destination_.empty());
+  }
 
   void recent_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
   {
@@ -843,6 +882,8 @@ class ProjectEditor final : public Editor {
 
   std::string directory_, name_, table_name_, field_name_, unit_, cell_field_, recent_directory_;
   std::string file_project_, file_paths_;
+  std::string csv_project_, csv_source_, csv_destination_, csv_name_, csv_error_, csv_types_ = "{}", csv_units_ = "{}";
+  bool csv_tsv_ = false;
   std::string input_snapshot_;
   std::string cell_text_, draft_identity_, literal_error_;
   std::string expression_, bindings_ = "{}", binding_name_ = "base";

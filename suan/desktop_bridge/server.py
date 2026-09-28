@@ -214,6 +214,8 @@ class Bridge:
             "project.upgrade": self.upgrade_project,
             "project.undo": lambda p, c: self.restore_project(p, c, redo=False),
             "project.redo": lambda p, c: self.restore_project(p, c, redo=True),
+            "project.csv.import": lambda p, c: self.csv_project("import", p, c),
+            "project.csv.export": lambda p, c: self.csv_project("export", p, c),
             "project.files.list": lambda p, c: self.projects.files("list", p),
             "project.files.index": lambda p, c: self.edit_project_files("index", p, c),
             "project.files.refresh": lambda p, c: self.edit_project_files("refresh", p, c),
@@ -409,6 +411,7 @@ class Bridge:
         # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
         names = ("project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot",
                  "project.apply", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
+                 "project.csv.import", "project.csv.export",
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
                  "project.snapshots.verify", "project.snapshots.resolve",
@@ -478,6 +481,12 @@ class Bridge:
                 except BridgeError:
                     pass
         if action == "prepare":
+            context.after(lambda: self.emit("project.changed", {"handle": params["handle"], "revision": result["revision"]}))
+        return result
+
+    def csv_project(self, action, params, context):
+        result = self.projects.csv(action, params)
+        if action == "import":
             context.after(lambda: self.emit("project.changed", {"handle": params["handle"], "revision": result["revision"]}))
         return result
 

@@ -135,6 +135,17 @@ class ProjectSessions:
         with self._operation():
             return self._get(params["handle"]).redo(expected_revision=params["expected_revision"])
 
+    def csv(self, action, params):
+        with self._operation():
+            exchange = self._get(params["handle"]).csv
+            args = {key: value for key, value in params.items() if key != "handle"}
+            try:
+                return exchange.import_file(**args) if action == "import" else exchange.export_file(**args)
+            except FileExistsError:
+                raise BridgeError("conflict", "CSV destination already exists; choose a new file") from None
+            except FileNotFoundError:
+                raise BridgeError("not_found", "CSV source or destination directory does not exist") from None
+
     def files(self, action, params):
         with self._operation():
             index = self._get(params["handle"]).files
