@@ -42,12 +42,46 @@ JUnit `/tmp/stk-muferro-native-full.xml`。
 
 功能提交 `7d96151` 首轮 Runtime CI 发现 Windows 3.12 的 `fstat`/`stat` ctime 语义差异；
 修正提交 `ef25286` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36442800913)
-全部通过，包含 Windows Python 3.10/3.12。桌面跨平台 CI 继续跟踪。
+全部通过，包含 Windows Python 3.10/3.12。最终桌面跨平台 CI 也已通过，见下方最新确认。
 本节不能作为 Windows GPU、真机输入法或 macOS/Windows 到实际远端 SSH 的验收证据。
+
+### 完整仿真目标逐项复核
+
+`763eb0b` 上重新核对“在 STK 中完成一个完整的仿真计算”：
+
+| 必要能力 | 已检查的证据 |
+|---|---|
+| 原生导入、编辑参数、生成并冻结输入 | 原生完整流程驱动导入/准备；`ProjectPython` 验证表格编辑；真实工作流从项目行的 298 K 改到 310 K，保存各自冻结输入 |
+| 明确提交、状态、日志与取消 | 原生完整流程准备后服务器任务数为零，再通过提交按钮执行真实求解器并读取日志；原生运行面板测试单独覆盖取消及请求次数 |
+| 收集、检查与关联输出 | 两次真实运行各校验 36 个文件哈希；项目保存冻结输入、任务 ID、程序哈希及结果关联；重复收集只有一行结果 |
+| 数值及三维结果 | 独立 NumPy 读取两次运行各 30 个 DAT 的全部数值，检查有限值、网格和分量索引；能量分别为 −727.9144455、−691.5580935；原生 Viewer 导出两次结果并检查图片 |
+| 重开、断线恢复与独立重算 | 原生流程停止 Runtime 后重开项目并加载结果；两次真实运行在重开后仍存在，旧参数标记 changed、新参数 current；响应丢失测试重新打开项目后只恢复一个任务 |
+| 自动回归与交付 | 本机桌面 526/526 无跳过，真实原生按钮用例通过；实现及测试已推送 main，`763eb0b` 的跨平台桌面与 Runtime CI 全部成功 |
+
+前述默认 pytest 临时目录已被后续测试自动清理。为保留可复查的项目与数据，本次重新执行真实测试并
+指定独立目录；当前证据为 `/tmp/stk-muferro-audit-763eb0b-I6Zw8m/test_real_muferro_project_work0/real-evidence.json`，
+日志 `/tmp/stk-muferro-audit-real.log`（1 项通过）、`/tmp/stk-muferro-audit-numeric.log`、
+`/tmp/stk-muferro-audit-render.log`，图片 `/tmp/stk-muferro-audit-render-zrl8l2j8/{first,changed_temperature}.png`。
+该目录不会被后续默认 pytest 清理，仍是本机临时验收数据，不属于发行物。
+以上证据证明单次完整仿真功能闭环已实现并验收。后续批量、AI、节点编辑与平台真机交互按主计划继续推进。
 
 ## 2026-09-28 最新跨平台确认
 
-最后功能提交 `c3fa59c` 的[desktop 36416998477](https://github.com/sijintech/stk/actions/runs/36416998477)
+MuFerro 流程最终提交 `763eb0b` 的 [desktop 36444060112](https://github.com/sijintech/stk/actions/runs/36444060112)
+**全部成功**：Linux GL/Vulkan、macOS Metal、Windows 编译/CPU/桥、Linux 安装包和干净环境启动，
+以及 macOS 打包与从解压后的应用启动。
+[Runtime 36444060140](https://github.com/sijintech/stk/actions/runs/36444060140)、
+[文档 36444060188](https://github.com/sijintech/stk/actions/runs/36444060188)和 Secret scan 全部成功。
+下载产物的 Linux JUnit **526 项**、macOS JUnit **322 项 CPU / 59 项 Metal** 均无失败、无跳过；
+Linux 新增完整仿真按钮测试确实执行。macOS 中英文仿真面板与离线三维截图已目视检查，
+产物在 `/tmp/stk-macos-muferro-763eb0b`、`/tmp/stk-linux-muferro-763eb0b`。
+Windows 日志确认 **282/282** CPU 测试通过，MuFerro 原生导入及项目身份保护用例实际执行；
+本机日志 `/tmp/stk-muferro-desktop-763eb0b-ci.log`。
+Runtime 3.12 wheel 中 `suan/workflows` 和脚本入口与当前源码字节一致，确认新增模块实际进入 Python 包。
+前一提交 `ef25286` 的桌面运行被后继推送取消，不作为通过证据；本次成功运行覆盖其 Windows 时间戳修正。
+Windows CI 仍不包含 GPU 真机渲染，实际异机 SSH 和输入法交互仍需相应平台环境验收。
+
+此前表格修正提交 `c3fa59c` 的[desktop 36416998477](https://github.com/sijintech/stk/actions/runs/36416998477)
 **全部成功**，包含 Windows 原生编译/CPU/桥、Linux GL/Vulkan、macOS Metal、两平台打包和干净环境启动。
 本机完整 **504/504、无跳过**；下载最终 macOS 产物的 **313 项 CPU、53 项 Metal** 无跳过全部通过，
 目视确认横向滚动条不再遮挡第三行数据。

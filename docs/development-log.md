@@ -1,5 +1,20 @@
 # 开发交接记录
 
+## 2026-09-28：完整真实仿真验收收尾
+
+`763eb0b` 的 [desktop CI](https://github.com/sijintech/stk/actions/runs/36444060112) 全部成功，
+包括 Linux GL/Vulkan、macOS Metal、Windows 编译/CPU 测试、安装包和干净环境启动；
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36444060140)、文档部署和 Secret scan 全部通过。
+下载产物核对 Linux **526/526**、macOS **322 项 CPU / 59 项 Metal**，均无跳过；
+Linux 完整仿真按钮测试确实执行，中英文 macOS 仿真面板及离线三维截图已检查。
+Python wheel 内的工作流与脚本入口和当前源码逐字节一致。
+
+最终复核重新运行真实 Release MuFerro 两个温度案例，并把数据保存到独立临时目录，避免被后续默认 pytest 清理。
+各次 36 个文件哈希、30 个场文件的全部数值、冻结输入与持久运行状态通过检查，三维输出再次渲染并查看。
+完整目标的逐项证据见[验收记录](runtime-validation.md#完整仿真目标逐项复核)，
+使用步骤见[MuFerro 工作流指南](simulation-muferro.md)。单次完整仿真闭环已验收；下一包为参数表驱动的批量计算。
+Windows GPU、真机输入法和实际 macOS/Windows 到远端的 SSH 链路仍保留为独立平台验收项。
+
 ## 2026-09-28：真实 MuFerro 项目流程首版
 
 功能提交 `7d96151` 已推送。其 Runtime CI 的 Windows 3.12 导入测试失败：新增文件复制逻辑
@@ -27,8 +42,8 @@ ctime 仅在同一 API 内比较，跨 API 仍检查文件身份、大小与 mti
 日志 `/tmp/stk-muferro-native-real.log`、JUnit `/tmp/stk-muferro-native-real.xml`。
 
 最终本机完整桌面 **526/526、无跳过**，日志 `/tmp/stk-muferro-native-full.log`、
-JUnit `/tmp/stk-muferro-native-full.xml`。尚需继续：当前提交的 macOS/Windows 桌面 CI 与真机新增交互复核；
-原生自动化测试不等同于全部真机输入设备交互验收。目标继续保持进行中。
+JUnit `/tmp/stk-muferro-native-full.xml`。最终跨平台 CI 状态见上方收尾记录；
+原生自动化测试不等同于全部真机输入设备交互验收。
 
 ## 2026-09-28：优先贯通完整真实仿真
 
