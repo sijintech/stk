@@ -57,6 +57,14 @@
 
 ### CI 跟踪
 
+输入快照 `9686180` 的 Runtime run **36396871397** 发现两处问题：历史 schema 的升级目标枚举
+遗漏格式 4；Windows Python 3.12 的路径 stat 与 fd fstat 使用不同含义的 ctime，已修改过的文件
+被误判为复制中变化。已补格式 4 / `capture_files` 历史契约；ctime 只在同一 API 内比较，跨 API
+继续比较文件身份、大小、mtime，最终源检查使用路径 stat 基线。增加模拟该差异及桥历史读取回归。
+Python 3.10 Windows 快照用例已通过；3.12 修正仍需新 CI 验证。实现依据见
+[CPython 3.12 路径 stat](https://github.com/python/cpython/blob/3.12/Modules/posixmodule.c) 与
+[fd 元数据转换](https://github.com/python/cpython/blob/3.12/Python/fileutils.c)。
+
 输入快照首版：格式 4 增加只追加的历史清单，选中文件流式复制到按 SHA-256 去重的内部对象库，
 校验源文件变化、总字节预算、对象损坏和最终项目修订。表格撤销保留历史副本；数据库备份仍不含对象。
 CLI/Python/桥及原生输入快照面板已接入。Python 相关 **133/133**、最终脚本子集 **32/32**、

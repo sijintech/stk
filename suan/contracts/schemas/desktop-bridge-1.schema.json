@@ -2704,13 +2704,15 @@
                             "from_version": {
                               "enum": [
                                 1,
-                                2
+                                2,
+                                3
                               ]
                             },
                             "to_version": {
                               "enum": [
                                 2,
-                                3
+                                3,
+                                4
                               ]
                             }
                           },
@@ -2738,6 +2740,27 @@
                           "required": [
                             "op",
                             "target_revision"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "op": {
+                              "const": "capture_files"
+                            },
+                            "snapshot_id": {
+                              "$ref": "#/$defs/projectUuid"
+                            },
+                            "sha256": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          },
+                          "required": [
+                            "op",
+                            "snapshot_id",
+                            "sha256"
                           ],
                           "additionalProperties": false
                         }

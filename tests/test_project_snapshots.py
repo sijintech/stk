@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import threading
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -69,6 +70,20 @@ def test_empty_input_is_a_valid_snapshot_object(indexed):
     file = snapshot["manifest"]["files"][0]
     assert file["size"] == 0 and file["sha256"] == hashlib.sha256(b"").hexdigest()
     assert store.snapshots.verify(snapshot["id"])["ok"]
+
+
+def test_fd_and_path_ctime_may_have_different_meanings(indexed, monkeypatch):
+    store, ids, inside, _ = indexed
+    original = module.os.fstat
+    def fd_stat(fd):
+        info = original(fd)
+        values = {key: getattr(info, key) for key in dir(info) if key.startswith("st_")}
+        values["st_ctime_ns"] += 1000000000  # Windows 3.12: fd change time vs path creation time.
+        return SimpleNamespace(**values)
+    monkeypatch.setattr(module.os, "fstat", fd_stat)
+    snapshot = store.snapshots.capture([ids[0]], expected_revision=1)["snapshot"]
+    assert store.snapshots.verify(snapshot["id"])["ok"]
+    assert Path(store.snapshots.resolve(snapshot["id"], ids[0])["path"]).read_bytes() == inside.read_bytes()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink/FIFO creation needs special Windows privileges")
@@ -259,6 +274,8 @@ def test_console_snapshot_capture_shares_revision_notifications_and_survives_sou
     assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})
     changed = scripts.wait_event(lambda e: e["event"] == "project.changed")["data"]
     assert changed == {"handle": info["handle"], "revision": 2}
+    history = scripts.call("project.history", {"handle": info["handle"]})["history"]
+    assert history[-1]["commands"][0]["op"] == "capture_files"
     inside.unlink()
     code = f"from pathlib import Path\nassert Path(stk.project.snapshots.resolve(frozen['snapshot']['id'], {ids[0]!r})['path']).is_file()"
     assert execute(scripts, session, code, project_handle=info["handle"])["run"]["state"] == "succeeded"

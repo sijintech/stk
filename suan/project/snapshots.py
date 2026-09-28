@@ -112,7 +112,12 @@ class Snapshots:
                     writer.write(chunk)
                     checksum.update(chunk)
                 after = os.fstat(reader.fileno())
-                if _signature(before) != _signature(after) or size != after.st_size or _signature(source.stat()) != _signature(after):
+                path_after = source.stat()
+                # CPython 3.12 on Windows can report change time for fstat but creation time
+                # for path stat. Compare ctime only within one API; cross-API identity, size
+                # and mtime still have to match, and fd-to-fd ctime detects writes during copy.
+                if (_signature(before) != _signature(after) or size != after.st_size
+                        or _signature(path_after)[:4] != _signature(after)[:4]):
                     raise ProjectError("Snapshot source changed while being copied; refresh and capture again")
                 writer.flush()
                 os.fsync(writer.fileno())
@@ -125,7 +130,7 @@ class Snapshots:
                 _sync_directory(target.parent)
             except FileExistsError:
                 self._verify_object(target, digest, size)
-            return digest, size, _signature(after)
+            return digest, size, _signature(path_after)
         finally:
             temporary.unlink(missing_ok=True)
 
