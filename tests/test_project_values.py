@@ -146,6 +146,7 @@ def test_invalid_or_obsolete_derived_cache_is_discarded(model, cache):
 
 def legacy(store):
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE project_snapshots")
         db.execute("DROP TABLE edit_journal")
         db.execute("DROP TABLE evaluations")
         db.execute("DROP TABLE definitions")

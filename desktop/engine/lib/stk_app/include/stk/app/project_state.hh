@@ -73,6 +73,11 @@ class ProjectState {
   bool refresh_file();
   bool open_file(bool vscode);
   bool open_folder(bool vscode);
+  bool capture_file();
+  bool load_input_snapshots();
+  bool verify_input_snapshot(const std::string &id);
+  const io::Json &input_snapshots() const { return input_snapshots_; }
+  const io::Json &input_verification() const { return input_verification_; }
   std::function<bool(const std::string &, std::string *)> open_external, open_vscode;
   const ProjectTable *table() const;
   const std::string &table_id() const { return table_id_; }
@@ -105,6 +110,7 @@ class ProjectState {
   std::optional<bridge::ProjectInfo> project_;
   std::vector<ProjectTable> tables_;
   io::Json file_index_ = io::Json::object();
+  io::Json input_snapshots_ = io::Json::array(), input_verification_ = io::Json::object();
   std::string table_id_, record_id_, error_, notice_;
 };
 

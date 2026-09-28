@@ -157,8 +157,9 @@ assert store.snapshot()["tables"][0]["records"][0]["values"][derived] == 310
 
 ## 数据库备份与显式升级
 
-新建项目使用格式 3；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，不会因为打开而迁移。
+新建项目使用格式 4；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
 引用、公式、清除和删除命令需要至少格式 2，持久撤销/重做需要格式 3；桌面删除入口要求格式 3。
+格式 4 增加只追加的[输入快照](project-snapshots.md)，内容副本按 SHA-256 保存在项目内。
 桌面提供“备份并升级项目”；CLI 使用 `project upgrade`，
 Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(expected_revision=...)`。
 
@@ -168,21 +169,22 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 “数据库备份”按钮、`project backup`、`store.backup()` 和 `stk.project.backup()` 也可独立使用，
 不改变项目修订。要查看旧备份，先关闭项目，将备份复制到另一个目录并命名为 `project.sqlite3` 后打开。
-**这是数据库备份，不包含外部程序、输入、图片或其他资源文件**；完整项目资源快照仍待开发。
+**这是数据库备份，不包含外部程序、输入、图片或 `.stk/objects` 中的资源副本**；统一的项目打包备份仍待开发。
 
 ## 实验格式与事务边界
 
-目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=3`。
+目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=4`。
 原物理表为 `project`、`tables`、`fields`、`records`、`cells`、`changes`；格式 2 新增
-`definitions` 和可重建的 `evaluations`，格式 3 增加 `edit_journal`。字面量与定义分开。每次有效批次在一个
+`definitions` 和可重建的 `evaluations`，格式 3 增加 `edit_journal`，格式 4 增加 `project_snapshots`。
+字面量与定义分开。每次有效编辑批次在一个
 `BEGIN IMMEDIATE` 事务中校验修订、写值/定义、更新受影响缓存、提升一次修订并保存命令历史。
 并发修改同一修订时仅一个批次能成功；读取快照在单一读事务中完成。
-`history` 保留已发生的编辑、升级及撤销/重做事件，不是模拟运行快照。
+`history` 保留已发生的编辑、升级、撤销/重做和输入捕获事件，不是模拟运行快照。
 
 显式创建不会覆盖已有数据库；普通打开不会隐式初始化。打开检查 application ID、格式版本、
 SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报告错误，不自动重建或降级。
-当前提供格式 1/2 → 3 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
-数据库之外的输入、程序与资源仍可存为普通文件，资源索引和一致性项目备份尚待实现。
+当前提供格式 1/2/3 → 4 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
+数据库之外的输入、程序与资源仍可存为普通文件；文件索引与输入副本已实现，一致性项目打包备份尚待实现。
 
 该内部数据库格式未冻结为 `docs/specs/` 的公开协议，不改变 `stk.graph/1`。
 业务修改通过 `ProjectStore.apply/undo/redo`，不要让后续编辑器各自写 SQL。

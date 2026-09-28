@@ -214,6 +214,11 @@ class Bridge:
             "project.files.index": lambda p, c: self.edit_project_files("index", p, c),
             "project.files.refresh": lambda p, c: self.edit_project_files("refresh", p, c),
             "project.files.resolve": lambda p, c: self.projects.files("resolve", p),
+            "project.snapshots.list": lambda p, c: self.projects.snapshots("list", p),
+            "project.snapshots.capture": self.capture_project_files,
+            "project.snapshots.get": lambda p, c: self.projects.snapshots("get", p),
+            "project.snapshots.verify": lambda p, c: self.projects.snapshots("verify", p),
+            "project.snapshots.resolve": lambda p, c: self.projects.snapshots("resolve", p),
             "script.open": lambda p, c: self.scripts.open(p),
             "script.status": lambda p, c: self.scripts.status(p),
             "script.execute": self.scripts.execute,
@@ -395,6 +400,8 @@ class Bridge:
         names = ("project.create", "project.open", "project.list", "project.close", "project.snapshot",
                  "project.apply", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
+                 "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
+                 "project.snapshots.verify", "project.snapshots.resolve",
                  "connections.list", "connections.check", "connections.ssh",
                  "hub.devices", "hub.templates", "hub.actions", "hub.action",
                  "workspace.list", "workspace.create", "workspace.files", "upload.start", "download.start",
@@ -435,6 +442,11 @@ class Bridge:
         data = result["data"][:limit]
         return {"data": base64.b64encode(data).decode("ascii"), "offset": result["offset"],
                 "next_offset": result["offset"] + len(data), "terminal": result["terminal"]}
+
+    def capture_project_files(self, params, context):
+        result = self.projects.snapshots("capture", params)
+        context.after(lambda: self.emit("project.changed", {"handle": params["handle"], "revision": result["revision"]}))
+        return result
 
     def apply_project(self, params, context):
         result = self.projects.apply(params)

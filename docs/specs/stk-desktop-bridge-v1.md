@@ -505,6 +505,11 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.files.index` | `{handle, expected_revision, paths: [string]}` | `{revision, commands, table_id, record_ids}` |
 | `project.files.refresh` | `{handle, expected_revision, record_ids: [uuid]}` | `{revision, commands, table_id, record_ids}` |
 | `project.files.resolve` | `{handle, expected_revision, record_id}` | `{revision, record_id, path, kind}` |
+| `project.snapshots.capture` | `{handle, expected_revision, record_ids, max_bytes?}` | `{revision, snapshot: inputManifest}` |
+| `project.snapshots.list` | `{handle}` | `{revision, snapshots: [inputManifest]}` |
+| `project.snapshots.get` | `{handle, snapshot_id}` | `{snapshot: inputManifest}` |
+| `project.snapshots.verify` | `{handle, snapshot_id}` | `{snapshot_id, ok, files: [{record_id, sha256, state, error}]}` |
+| `project.snapshots.resolve` | `{handle, snapshot_id, record_id}` | `{snapshot_id, record_id, name, path, location, sha256, size}` |
 
 - `directory` is an absolute local directory path; the database is `project.sqlite3` within it.
   Creation is explicit and never overwrites an existing database (`conflict`). Open does not create
@@ -561,6 +566,17 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   it. Project-relative locations cannot escape the project; external locations retain their OS path syntax.
   Missing future output files may be registered. Size/mtime are observations, not content hashes or immutable
   snapshots. See [file index guide](../project-files.md) for field names, state values and restore semantics.
+- `project.snapshots.*` requires format 4 and explicitly manages frozen input bytes, distinct from
+  `project.snapshot` (the current editable model). Capture selects 1–100 indexed files, default total budget
+  256 MiB (`max_bytes` may be 1 byte–1 TiB), and appends a manifest after a final revision check. It emits
+  `project.changed` and is never replayed automatically. Each manifest has a stable UUID, checksum, creation
+  time, saved revision and source revision; files retain index IDs, source metadata, size and content SHA-256.
+  Table undo cannot change historical manifests. Object publication is atomic/no-replace; a conflict may
+  leave reusable unreferenced objects, but no partial manifest. Reads validate manifest identity; verify/resolve
+  additionally hash content. Resolve's `path` is the absolute frozen object path; the original source path
+  remains in the manifest. Source deletion or project relocation does not invalidate existing objects.
+  Database backup excludes object contents. See [input snapshot guide](../project-snapshots.md) for storage
+  layout, source-change checks, filesystem requirements and current non-atomic multi-file capture boundary.
 - **Uncertain responses:** create/apply/backup/upgrade/undo/redo and file index/refresh are never automatically retried. If a response is lost,
   reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
   raise `expected_revision` and repeat an edit: the previous batch may already have committed.

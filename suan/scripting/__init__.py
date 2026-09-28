@@ -57,6 +57,34 @@ class Project:
     def files(self):
         return ProjectFiles(self._call, self.handle)
 
+    @property
+    def snapshots(self):
+        return ProjectSnapshots(self._call, self.handle)
+
+
+class ProjectSnapshots:
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def list(self):
+        return self._call("project.snapshots.list", {"handle": self.handle})
+
+    def capture(self, record_ids, *, expected_revision, max_bytes=256 * 1024 * 1024):
+        """Explicitly copy selected input bytes; immutable manifests are outside table undo."""
+        return self._call("project.snapshots.capture", {"handle": self.handle, "record_ids": record_ids,
+                         "expected_revision": expected_revision, "max_bytes": max_bytes})
+
+    def get(self, snapshot_id):
+        return self._call("project.snapshots.get", {"handle": self.handle, "snapshot_id": snapshot_id})["snapshot"]
+
+    def verify(self, snapshot_id):
+        return self._call("project.snapshots.verify", {"handle": self.handle, "snapshot_id": snapshot_id})
+
+    def resolve(self, snapshot_id, record_id):
+        """Verify frozen bytes and return their path, irrespective of later source/index edits."""
+        return self._call("project.snapshots.resolve", {"handle": self.handle, "snapshot_id": snapshot_id,
+                                                       "record_id": record_id})
+
 
 class ProjectFiles:
     def __init__(self, call, handle):
@@ -154,4 +182,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Project", "ProjectFiles", "Projects", "Runtime", "ScriptError", "Transfers"]
+__all__ = ["API", "Connections", "Desktop", "Project", "ProjectFiles", "ProjectSnapshots", "Projects", "Runtime", "ScriptError", "Transfers"]

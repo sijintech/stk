@@ -109,11 +109,20 @@ int main(int argc, char **argv)
         }, 30);
         ok = ok && scripts.status().at("run").at("state") == "succeeded";
       }
-      if (editor == "files") {
+      if (editor == "files" || editor == "snapshots") {
         const std::string path = dir.str() + "/project/Notes 中文.md";
         { std::ofstream file(core::path_from_utf8(path)); file << "# Simulation notes\n"; }
         ok = ok && state.index_files({path, dir.str() + "/project/results/temperature.vti"}) &&
              loop.pump_until([&] { return !state.busy(); }, 30) && state.selected_file();
+        if (editor == "snapshots") {
+          state.select_record(state.table()->records.front().id);
+          ok = ok && state.capture_file() && loop.pump_until([&] { return !state.busy(); }, 30);
+          if (!state.input_snapshots().empty()) {
+            ok = ok && state.verify_input_snapshot(io::get_string(state.input_snapshots().front(), "id")) &&
+                 loop.pump_until([&] { return !state.busy(); }, 30);
+          }
+          else { ok = false; }
+        }
       }
       screen.set_maximized(area);
       wm::DrawContext ctx;
@@ -129,9 +138,10 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      if (editor == "manage" || editor == "files") {
+      if (editor == "manage" || editor == "files" || editor == "snapshots") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
-        if (const auto *widget = screen.ui()->find(editor == "manage" ? "a2/main/manage_objects" : "a2/main/project_files")) {
+        if (const auto *widget = screen.ui()->find(editor == "manage" ? "a2/main/manage_objects" :
+                                                  editor == "files" ? "a2/main/project_files" : "a2/main/input_snapshots")) {
           const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
           screen.ui()->handle_event(ui::Event::mouse_down(center));
           screen.ui()->handle_event(ui::Event::mouse_up(center));

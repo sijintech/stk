@@ -72,7 +72,7 @@ class ProjectEditor final : public Editor {
       return;
     }
     const bool editable = state.ready() && !state.busy();
-    if (state.project()->format_version < 3) {
+    if (state.project()->format_version < 4) {
       layout.paragraph(ctx.tr("project.upgrade_hint"));
       layout.button("upgrade_project", ctx.tr("project.upgrade"), [&state] { state.upgrade(); }).disable(!editable);
     }
@@ -81,6 +81,7 @@ class ProjectEditor final : public Editor {
       panel->button("backup", ctx.tr("project.backup"), [&state] { state.backup(); }).disable(!editable);
     }
     file_controls(layout, ctx, state, editable);
+    snapshot_controls(layout, ctx, state, editable);
     table_controls(layout, ctx, state, editable);
     const auto *table = state.table();
     if (!table) {
@@ -177,6 +178,48 @@ class ProjectEditor final : public Editor {
       row.button("refresh", ctx.tr("project.files.refresh"), [&state] { state.refresh_file(); }).disable(!editable);
       row.button("open", ctx.tr("project.files.open"), [&state] { state.open_file(false); }).disable(!editable);
       row.button("code", ctx.tr("project.files.code"), [&state] { state.open_file(true); }).disable(!editable);
+    }
+  }
+
+  void snapshot_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  {
+    auto *panel = layout.panel("input_snapshots", ctx.tr("project.snapshots.title"), false);
+    if (!panel) { return; }
+    panel->paragraph(ctx.tr("project.snapshots.hint"));
+    const bool enabled = editable && state.project()->format_version >= 4;
+    auto &actions = panel->row();
+    actions.button("capture", ctx.tr("project.snapshots.capture"), [&state] { state.capture_file(); })
+        .disable(!enabled || !state.selected_file());
+    actions.button("list", ctx.tr("project.snapshots.list"), [&state] { state.load_input_snapshots(); }).disable(!enabled);
+    const auto &snapshots = state.input_snapshots();
+    if (snapshots.empty()) { panel->paragraph(ctx.tr("project.snapshots.empty")); return; }
+    std::vector<std::string> names, ids;
+    for (const auto &snapshot : snapshots) {
+      ids.push_back(io::get_string(snapshot, "id"));
+      names.push_back(std::to_string(io::get_int(snapshot, "revision", 0)) + " · " + ids.back().substr(0, 8));
+    }
+    if (std::find(ids.begin(), ids.end(), input_snapshot_) == ids.end()) { input_snapshot_ = ids.back(); }
+    panel->prop(ctx.tr("project.snapshots.version")).dropdown("version", std::move(names), {
+      [this, ids] { return int(std::find(ids.begin(), ids.end(), input_snapshot_) - ids.begin()); },
+      [this, ids](int i) { if (i >= 0 && size_t(i) < ids.size()) { input_snapshot_ = ids[i]; } }
+    });
+    const size_t index = size_t(std::find(ids.begin(), ids.end(), input_snapshot_) - ids.begin());
+    const auto &snapshot = snapshots.at(index);
+    panel->paragraph(input_snapshot_);
+    panel->paragraph(io::get_string(snapshot, "created_at"));
+    for (const auto &file : snapshot.at("manifest").at("files")) {
+      panel->paragraph(io::get_string(file, "name") + " · " + std::to_string(io::get_int(file, "size", 0)) + " B");
+      panel->paragraph("SHA-256: " + io::get_string(file, "sha256"));
+    }
+    panel->button("verify", ctx.tr("project.snapshots.verify"), [&state, id = input_snapshot_] {
+      state.verify_input_snapshot(id);
+    }).disable(!enabled);
+    const auto &check = state.input_verification();
+    if (io::get_string(check, "snapshot_id") == input_snapshot_) {
+      panel->paragraph(ctx.tr(check.value("ok", false) ? "project.snapshots.valid" : "project.snapshots.invalid"));
+      for (const auto &file : check.at("files")) {
+        if (io::get_string(file, "state") != "ok") { panel->paragraph(io::get_string(file, "error")); }
+      }
     }
   }
 
@@ -654,6 +697,7 @@ class ProjectEditor final : public Editor {
 
   std::string directory_, name_, table_name_, field_name_, unit_, cell_field_;
   std::string file_project_, file_paths_;
+  std::string input_snapshot_;
   std::string cell_text_, draft_identity_, literal_error_;
   std::string expression_, bindings_ = "{}", binding_name_ = "base";
   std::string selected_binding_;

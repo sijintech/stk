@@ -43,8 +43,8 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 - suan：共享 Python 服务、科学数据处理与 CLI/MCP/桌面桥入口；原生界面在 desktop。
 - toolkits：仍被 CLI、可视化和测试使用的 Python 科学工具；后续按职责整合进 suan，保留过渡兼容。旧 C/C++ 工程已移入 archive。
 - suan/runtime：独立任务服务、进程／调度器适配器及统一客户端，不依赖 Qt。
-- suan/project：SQLite 项目存储、类型化表格与原子修订命令，已接入原生项目表格，见[项目存储指南](docs/project.md)。
-- suan/scripting：原生 Python 面板的项目操作与布局控制 API，见[Python 指南](docs/scripting.md)。
+- suan/project：SQLite 项目存储、类型化表格、原子修订命令和输入快照，已接入原生项目表格，见[项目存储指南](docs/project.md)。
+- suan/scripting：原生 Python 面板的项目、Runtime 与布局控制 API，见[Python 指南](docs/scripting.md)。
 - suan/control：跨设备控制服务 `suan-control` 与执行节点代理 `suan-node`。
 - suan/visualization：执行节点上的场数据视图与原始数据探针。
 - suan/desktop_bridge：桌面程序的 Python 桥（NDJSON，连接 Runtime 与控制服务）。
@@ -85,7 +85,8 @@ PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真�
 技术提案见[项目数据模型](docs/design/project-model.md)；这些是待开发目标。
 用户已反馈 macOS / Windows 均能打开窗口并看到 3D 渲染，范围见[补充验收记录](docs/runtime-validation.md#desktop-mac-windows-smoke)。
 现在可从“文件 → 项目表格 / Python”使用项目编辑与脚本面板；源码更新后重跑[启动脚本](desktop/QUICKSTART.md)
-进行增量编译。Python 面板支持多行运行、中断、文件执行以及项目/布局 API；其他功能的统一脚本覆盖仍在推进。
+进行增量编译。Python 面板支持多行运行、中断、文件执行以及项目/Runtime/布局 API；其他功能的统一脚本覆盖仍在推进。
+项目文件可登记、跳转 VSCode，并显式保存和校验[不可变输入副本](docs/project-snapshots.md)。
 
 远程计算经控制服务：所有者用 `suan-control pair --role client --profile desktop` 签发配对码，在桌面程序
 “配对控制服务…”中输入；见 [控制服务指南](docs/hub.md)。

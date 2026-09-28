@@ -735,7 +735,7 @@
   "project.backup_hint": "将一致的数据库副本保存到 backups/。外部文件需另行备份。",
   "project.backup_saved": "数据库备份已保存：{path}",
   "project.upgrade": "备份并升级项目",
-  "project.upgrade_hint": "升级旧项目以使用持久撤销及最新表格功能。升级前会先生成并校验数据库备份。",
+  "project.upgrade_hint": "升级旧项目以使用最新表格及输入快照功能。升级前会先生成并校验数据库备份。",
   "project.definition": "定义方式",
   "project.mode.literal": "字面量",
   "project.mode.reference": "单元格引用",
@@ -782,5 +782,15 @@
   "project.files.path": "路径",
   "project.files.location": "位置",
   "project.files.state": "上次检查状态",
-  "project.files.open_failed": "无法打开此位置。请检查文件关联或已安装的 VSCode URL 处理程序。"
+  "project.files.open_failed": "无法打开此位置。请检查文件关联或已安装的 VSCode URL 处理程序。",
+  "project.snapshots.title": "输入快照",
+  "project.snapshots.hint": "将文件表中选中的文件复制为历史版本（上限 256 MiB）。原文件保持不变，表格撤销不会删除已保存快照。多文件快照可通过 Python 创建。",
+  "project.snapshots.capture": "保存选中文件的快照",
+  "project.snapshots.list": "读取历史快照",
+  "project.snapshots.empty": "读取历史，或先在文件表选择一个文件并保存快照。",
+  "project.snapshots.version": "保存修订",
+  "project.snapshots.verify": "校验快照内容",
+  "project.snapshots.valid": "上次主动校验：全部快照内容与校验和一致。",
+  "project.snapshots.invalid": "上次主动校验：部分快照内容缺失或已改变。",
+  "project.snapshots.saved": "输入快照已保存：{id}"
 }

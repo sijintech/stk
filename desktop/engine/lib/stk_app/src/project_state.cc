@@ -259,6 +259,8 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
        dirty_revision_ = project_->revision;
        if (!same) {
          tables_.clear();
+         input_snapshots_ = Json::array();
+         input_verification_ = Json::object();
          table_id_.clear();
          record_id_.clear();
        }
@@ -275,6 +277,8 @@ void ProjectState::clear()
   project_.reset();
   tables_.clear();
   file_index_ = Json::object();
+  input_snapshots_ = Json::array();
+  input_verification_ = Json::object();
   table_id_.clear();
   record_id_.clear();
   busy_ = fetching_ = snapshot_ready_ = false;
@@ -513,6 +517,65 @@ bool ProjectState::open_folder(const bool vscode)
   if (!result && error_.empty()) { error_ = std::string(store_.tr("project.files.open_failed")); }
   changed();
   return result;
+}
+
+bool ProjectState::capture_file()
+{
+  if (!ready() || busy() || !selected_file() || project_->format_version < 4) { return false; }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  input_verification_ = Json::object();
+  on(client_->project_snapshots_capture(project_->handle, project_->revision, {record_id_}),
+     [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); }
+    else {
+      const Json &snapshot = result.value().at("snapshot");
+      input_snapshots_.push_back(snapshot);
+      notice_ = store_.catalog().format("project.snapshots.saved", {{"id", io::get_string(snapshot, "id")}});
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+    }
+    refresh();
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::load_input_snapshots()
+{
+  if (!ready() || busy() || !loaded() || project_->format_version < 4) { return false; }
+  busy_ = true;
+  error_.clear();
+  input_verification_ = Json::object();
+  on(client_->project_snapshots_list(project_->handle), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); }
+    else {
+      input_snapshots_ = result.value().at("snapshots");
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+      changed();
+    }
+    if (project_ && dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::verify_input_snapshot(const std::string &id)
+{
+  if (!ready() || busy() || !loaded() || project_->format_version < 4 || id.empty()) { return false; }
+  busy_ = true;
+  error_.clear();
+  input_verification_ = Json::object();
+  on(client_->project_snapshots_verify(project_->handle, id), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); }
+    else { input_verification_ = result.value(); changed(); }
+    if (project_ && dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
 }
 
 const ProjectTable *ProjectState::table() const

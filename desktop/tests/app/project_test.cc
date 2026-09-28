@@ -378,7 +378,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   auto &scripts = f.shell->store().scripts();
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   const std::string source = "import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
-      ") as db:\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
+      ") as db:\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
   ASSERT_TRUE(scripts.execute(source));
   ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
@@ -393,7 +393,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   f.screen.ui()->find("a2/main/upgrade_project")->on_click();
   settled();
   f.drv->frame();
-  EXPECT_EQ(state().project()->format_version, 3);
+  EXPECT_EQ(state().project()->format_version, 4);
   EXPECT_EQ(state().project()->revision, 2);
   EXPECT_EQ(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
   EXPECT_FALSE(state().notice().empty());
@@ -593,6 +593,60 @@ TEST_F(ProjectPython, FileIndexButtonsResolveBeforeLaunchingAndRefreshWithoutCha
   EXPECT_FALSE(std::filesystem::exists(core::path_from_utf8(path)));
   state().open_external = platform::open_with_system;
   state().open_vscode = platform::open_with_vscode;
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, InputSnapshotsPersistBeyondSourceRemovalAndTableUndo)
+{
+  populated();
+  const std::string path = dir.str() + "/project/input.dat";
+  { std::ofstream file(core::path_from_utf8(path)); file << "frozen inputs"; }
+  ASSERT_TRUE(state().index_files({path}));
+  settled();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/input_snapshots");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/input_snapshots/" + key); };
+  ASSERT_NE(widget("capture"), nullptr);
+  ASSERT_TRUE(widget("capture")->enabled);
+  widget("capture")->on_click();
+  settled();
+  f.drv->frame();
+  ASSERT_EQ(state().input_snapshots().size(), 1u) << state().error();
+  const Json snapshot = state().input_snapshots().front();
+  const std::string id = io::get_string(snapshot, "id");
+  EXPECT_EQ(state().project()->revision, 3);
+  std::filesystem::remove(core::path_from_utf8(path));
+  widget("verify")->on_click();
+  settled();
+  EXPECT_TRUE(state().input_verification().value("ok", false)) << state().error();
+  ASSERT_TRUE(state().undo());  // Undo the index edit, never the historical input copy.
+  settled();
+  EXPECT_EQ(state().project()->revision, 4);
+  EXPECT_TRUE(state().file_index().empty());
+  ASSERT_TRUE(state().close());
+  settled();
+  EXPECT_TRUE(state().input_snapshots().empty());
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  settled();
+  ASSERT_TRUE(state().load_input_snapshots());
+  settled();
+  ASSERT_EQ(state().input_snapshots().size(), 1u);
+  EXPECT_EQ(state().input_snapshots().front(), snapshot);
+  ASSERT_TRUE(state().verify_input_snapshot(id));
+  settled();
+  EXPECT_TRUE(state().input_verification().value("ok", false));
+  const std::string hash = io::get_string(snapshot.at("manifest").at("files").front(), "sha256");
+  std::filesystem::remove(core::path_from_utf8(dir.str() + "/project/.stk/objects/sha256/" + hash.substr(0, 2) + "/" + hash.substr(2)));
+  ASSERT_TRUE(state().verify_input_snapshot(id));
+  settled();
+  EXPECT_FALSE(state().input_verification().value("ok", true));
+  EXPECT_EQ(state().input_verification().at("files").front().at("state"), "missing");
+  EXPECT_EQ(state().project()->revision, 4);
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 

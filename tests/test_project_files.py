@@ -161,6 +161,7 @@ def test_format_two_keeps_existing_operations_but_requires_explicit_upgrade_for_
     store, inside, _ = files
     with sqlite3.connect(store.path) as db:
         db.execute("DROP TABLE edit_journal")
+        db.execute("DROP TABLE project_snapshots")
         db.execute("PRAGMA user_version=2")
     with pytest.raises(ProjectError, match="Upgrade"):
         store.files.index([str(inside)], expected_revision=0)

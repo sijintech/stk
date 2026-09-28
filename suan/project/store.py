@@ -20,7 +20,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 DATABASE_NAME = "project.sqlite3"
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
 
@@ -58,6 +58,12 @@ _DDL_V3 = (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         revision INTEGER NOT NULL UNIQUE REFERENCES changes(revision),
         delta TEXT NOT NULL, applied INTEGER NOT NULL CHECK(applied IN (0, 1)))""",
+)
+
+_DDL_V4 = (
+    """CREATE TABLE project_snapshots (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, sha256 TEXT NOT NULL, manifest TEXT NOT NULL,
+        created_at TEXT NOT NULL, revision INTEGER NOT NULL REFERENCES changes(revision))""",
 )
 
 
@@ -161,7 +167,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -188,7 +194,7 @@ class ProjectStore:
             if db.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID:
                 raise ProjectError("Not an STK project database")
             version = _version(db)
-            if version not in (1, 2, FORMAT_VERSION):
+            if not 1 <= version <= FORMAT_VERSION:
                 raise UnsupportedProjectFormat(f"Unsupported project format {version}; supported: 1–{FORMAT_VERSION}")
             if self._project_id is not None:
                 row = db.execute("SELECT id FROM project").fetchone()
@@ -211,6 +217,11 @@ class ProjectStore:
     def files(self):
         from .files import FileIndex
         return FileIndex(self)
+
+    @property
+    def snapshots(self):
+        from .snapshots import Snapshots
+        return Snapshots(self)
 
     def _backup(self, db):
         """Online SQLite backup of an already established *read* snapshot, published atomically."""
@@ -276,7 +287,7 @@ class ProjectStore:
                 if tuple(identity) != (project["id"], expected_revision) or _version(source) != version:
                     raise ProjectError("Project changed while preparing the migration backup")
                 backup = self._backup(source)
-            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3)):
+            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)

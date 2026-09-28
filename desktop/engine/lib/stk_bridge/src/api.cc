@@ -164,6 +164,25 @@ Future<Json> Client::project_files_resolve(const std::string &handle, const int6
   return call("project.files.resolve", object({{"handle", handle}, {"expected_revision", expected_revision}, {"record_id", record_id}}));
 }
 
+Future<Json> Client::project_snapshots_list(const std::string &handle)
+{
+  return call("project.snapshots.list", object({{"handle", handle}}));
+}
+
+Future<Json> Client::project_snapshots_capture(const std::string &handle, const int64_t expected_revision,
+                                             const std::vector<std::string> &record_ids, const int64_t max_bytes)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.snapshots.capture", object({{"handle", handle}, {"expected_revision", expected_revision},
+              {"record_ids", record_ids}, {"max_bytes", max_bytes}}), options);
+}
+
+Future<Json> Client::project_snapshots_verify(const std::string &handle, const std::string &snapshot_id)
+{
+  return call("project.snapshots.verify", object({{"handle", handle}, {"snapshot_id", snapshot_id}}));
+}
+
 /* -- Connections -------------------------------------------------------------------------- */
 
 Future<std::vector<ConnectionInfo>> Client::connections_list()

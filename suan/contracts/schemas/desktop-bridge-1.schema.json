@@ -3672,6 +3672,255 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.snapshots.list": {
+        "description": "List immutable input manifests without reading object contents.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "snapshots": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectInputSnapshot"
+              }
+            }
+          },
+          "required": [
+            "revision",
+            "snapshots"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.snapshots.get": {
+        "description": "Read a stored input manifest and validate its identity/checksum.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "snapshot_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "snapshot_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/projectInputSnapshot"
+            }
+          },
+          "required": [
+            "snapshot"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.snapshots.capture": {
+        "description": "Explicitly copy selected indexed files into verified content-addressed storage and append an immutable manifest; requires format 4.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1099511627776
+            }
+          },
+          "required": [
+            "handle",
+            "record_ids",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "snapshot": {
+              "$ref": "#/$defs/projectInputSnapshot"
+            }
+          },
+          "required": [
+            "revision",
+            "snapshot"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.snapshots.verify": {
+        "description": "Hash all frozen input objects and report missing or changed content; no repairs or writes.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "snapshot_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "snapshot_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "snapshot_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "record_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "state": {
+                    "enum": [
+                      "ok",
+                      "missing",
+                      "invalid"
+                    ]
+                  },
+                  "error": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "record_id",
+                  "sha256",
+                  "state",
+                  "error"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "snapshot_id",
+            "ok",
+            "files"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.snapshots.resolve": {
+        "description": "Verify and return one frozen input object path; does not consult the current source file.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "snapshot_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "snapshot_id",
+            "record_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "snapshot_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "record_id",
+            "name",
+            "path",
+            "location",
+            "sha256",
+            "size",
+            "snapshot_id"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -4809,6 +5058,102 @@
           ]
         }
       ]
+    },
+    "projectInputSnapshot": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "kind": {
+          "const": "files"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "manifest": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": 1
+            },
+            "kind": {
+              "const": "files"
+            },
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "source_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "record_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "location": {
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "record_id",
+                  "name",
+                  "path",
+                  "location",
+                  "sha256",
+                  "size"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "format",
+            "kind",
+            "project_id",
+            "source_revision",
+            "files"
+          ],
+          "additionalProperties": false
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "sha256",
+        "manifest",
+        "created_at",
+        "revision"
+      ],
+      "additionalProperties": false
     }
   }
 }

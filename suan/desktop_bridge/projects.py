@@ -127,6 +127,22 @@ class ProjectSessions:
                 return index.refresh(params["record_ids"], expected_revision=revision)
             return index.resolve(params["record_id"], expected_revision=revision)
 
+    def snapshots(self, action, params):
+        with self._operation():
+            snapshots = self._get(params["handle"]).snapshots
+            if action == "list":
+                return snapshots.list()
+            if action == "capture":
+                kwargs = {"expected_revision": params["expected_revision"]}
+                if "max_bytes" in params:
+                    kwargs["max_bytes"] = params["max_bytes"]
+                return snapshots.capture(params["record_ids"], **kwargs)
+            if action == "get":
+                return {"snapshot": snapshots.get(params["snapshot_id"])}
+            if action == "verify":
+                return snapshots.verify(params["snapshot_id"])
+            return snapshots.resolve(params["snapshot_id"], params["record_id"])
+
     def shutdown(self):
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.

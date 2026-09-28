@@ -121,3 +121,43 @@ def refresh_files(directory, record_ids, expected_revision):
 def resolve_file(directory, record_id, expected_revision):
     """Check an indexed location and return its absolute path; do not open it."""
     _run(lambda: ProjectStore(directory).files.resolve(record_id, expected_revision=expected_revision))
+
+
+@project.group("snapshots")
+def snapshots():
+    """Capture and verify immutable input copies; ordinary table undo does not remove them."""
+
+
+@snapshots.command("capture")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("record_ids", nargs=-1, required=True)
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+@click.option("--max-bytes", default=256 * 1024 * 1024, show_default=True, type=click.IntRange(min=1, max=1024 ** 4))
+def capture_inputs(directory, record_ids, expected_revision, max_bytes):
+    """Copy 1–100 indexed files and save a manifest after a final revision check."""
+    _run(lambda: ProjectStore(directory).snapshots.capture(list(record_ids), expected_revision=expected_revision,
+                                                          max_bytes=max_bytes))
+
+
+@snapshots.command("list")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+def list_snapshots(directory):
+    """Read saved manifests without scanning their objects or original sources."""
+    _run(lambda: ProjectStore(directory).snapshots.list())
+
+
+@snapshots.command("verify")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("snapshot_id")
+def verify_snapshot(directory, snapshot_id):
+    """Check all frozen bytes; report missing/corrupt objects without overwriting them."""
+    _run(lambda: ProjectStore(directory).snapshots.verify(snapshot_id))
+
+
+@snapshots.command("resolve")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("snapshot_id")
+@click.argument("record_id")
+def resolve_snapshot(directory, snapshot_id, record_id):
+    """Verify one frozen file and return its current local object path."""
+    _run(lambda: ProjectStore(directory).snapshots.resolve(snapshot_id, record_id))
