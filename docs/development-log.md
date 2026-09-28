@@ -15,7 +15,11 @@
 已检查差异/错误页和原有离线工作台截图。
 中英文字典各 **878 项** 一致。最终日志：`/tmp/stk-review-binding-build.log`、
 `/tmp/stk-review-binding-full.log`、`/tmp/stk-review-binding-full.xml`。
-本批跨平台 CI 待推送后跟踪；以前的 macOS/Windows 通过记录不能代替本批结果。
+功能提交 `1905df7` 已推送 `main`；[desktop CI](https://github.com/sijintech/stk/actions/runs/36431384632)
+的 Linux GL/Vulkan、macOS Metal、Windows 编译/CPU 测试及两项 Linux 打包/干净环境检查全部通过。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36431384638)和文档部署成功。
+下载本次 macOS artifact 确认 **321 项 CPU、57 项 Metal** 无跳过通过，已查看修改检查、公式错误和离线工作台截图；
+保存在 `/tmp/stk-macos-review-1905df7`。Windows CI 只覆盖 CPU/桥，不包含 Windows GPU 真机验收。
 
 使用步骤见[预览指南](project-preview.md#原生修改检查)和[真机验收清单](workbench-acceptance.md)。
 草案仅在当前项目会话共享，尚未接 AI 模型、持久化或 Python → 原生检查页入口。
