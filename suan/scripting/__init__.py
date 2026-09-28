@@ -5,6 +5,8 @@ It holds IDs, never C++ window pointers. See ``docs/scripting.md`` for the suppo
 """
 from pathlib import Path
 
+from .runtime import Connections, Runtime, Transfers
+
 
 class ScriptError(RuntimeError):
     """An operation failed; ``code`` and ``data`` retain its structured bridge error."""
@@ -125,6 +127,12 @@ class API:
         self._project_handle = None
         self.projects = Projects(call)
         self.ui = Desktop(call)
+        self.connections = Connections(call)
+        self.transfers = Transfers(call)
+
+    def runtime(self, connection, *, node=None):
+        """Use a saved Runtime profile, optionally routed through a Hub execution node."""
+        return Runtime(self._call, connection, node=node)
 
     @property
     def project(self):
@@ -146,4 +154,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Desktop", "Project", "ProjectFiles", "Projects", "ScriptError"]
+__all__ = ["API", "Connections", "Desktop", "Project", "ProjectFiles", "Projects", "Runtime", "ScriptError", "Transfers"]

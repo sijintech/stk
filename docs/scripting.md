@@ -1,6 +1,6 @@
 # STK Python 编程
 
-状态：2026-09-28 已实现原生 Python 面板、独立会话、项目操作 API 和本机布局控制首版。
+状态：2026-09-28 已实现原生 Python 面板、独立会话、项目/Runtime 操作 API 和本机布局控制首版。
 完整方向见[设计记录](design/scripting-and-connections.md)，全部操作覆盖与远程控制仍在后续计划中。
 
 ## 在界面中运行
@@ -61,7 +61,7 @@ print(p.backup())
 
 ## 操作覆盖
 
-`stk.operations()` 返回已开放的项目操作参数/结果 schema 和 UI 操作名称；`stk.help()` 打印这份目录。
+`stk.operations()` 返回已开放的项目、连接、Runtime 操作参数/结果 schema 和 UI 操作名称；`stk.help()` 打印这份目录。
 `stk.call("project.snapshot", handle=...)` 是命名参数形式的底层入口。
 操作错误是 `suan.scripting.ScriptError`，可读取 `code`、`data`、`retryable`。
 
@@ -70,7 +70,9 @@ print(p.backup())
 | 项目创建、打开、列表、关闭、快照、事务修改、历史、撤销/重做、数据库备份/升级 | 已实现，与桌面桥共用命令；包括引用与轻量公式 |
 | 文件索引登记、刷新、列表、路径检查 | `stk.project.files` 已实现；不复制、删除、打开或执行文件，见[文件指南](project-files.md) |
 | 布局读取/应用、编辑器列表、可见项目查询/打开/关闭 | 已接入原生 UI 主线程执行器，目标为第一个安装的主窗口 |
-| Jobs、传输、Viewer、图求值、资源与文档 | 现有各自接口仍可用；统一 `stk` facade 待逐步接入 |
+| 已保存连接查询/检查、管理 SSH 状态/连接/断开 | `stk.connections`；配置与凭据继续在 Jobs 或 CLI 管理 |
+| Runtime/Hub 工作区、上传/下载、任务提交/查询/取消、产物、日志 | `stk.runtime(connection, node=...)` 与 `stk.transfers`；复用已有幂等和审核规则 |
+| Viewer、图求值、资源快照与文档 | 现有各自接口仍可用；统一 `stk` facade 待逐步接入 |
 | 自动补全、操作记录成脚本、脚本持久历史 | 待开发 |
 | 远程机器 Python / UI 控制 | 未开放；本机 stdio 扩展不等于 P2P 或 SSH 服务 |
 
@@ -97,6 +99,70 @@ stk.ui.apply_layout(saved)
 布局描述沿用 `stk.desktop.layout/1`，不包含自动执行的 Python 代码。
 执行器必须在 UI 主线程校验并应用；非法布局保持原界面，窗口几何不由这一操作强制改变。
 
+## 运行模拟与取得结果
+
+先在 Jobs 或 CLI 保存 Runtime 连接。Python 使用连接 ID，不把 token 放进脚本或项目：
+
+```python
+print(stk.connections.list())
+r = stk.runtime("runtime:lab")  # 换成自己的连接 ID；本机 Runtime 使用 "local"
+print(stk.connections.check(r.connection))
+# 对已经配置 ssh.host 的连接：
+# stk.connections.ssh(r.connection, "connect")  # 或 "status" / "disconnect"
+```
+
+下面以输入文件 `input.json` 和远端已安装的程序为例。`source` / `dest` 相对当前 Python 工作目录；
+远端路径使用工作区内 POSIX 相对路径。每个独立操作使用自己的幂等键，并在重试时复用该键及原请求：
+
+```python
+created = r.workspaces.create("Temperature scan", idempotency_key="scan-001:workspace")
+w = created["workspace"]["id"]
+upload = r.upload(w, "input.json", idempotency_key="scan-001:input")
+uploaded = stk.transfers.wait(upload["id"], timeout=60)
+assert uploaded["state"] == "completed", uploaded
+
+submitted = r.tasks.submit({
+    "workspace_id": w,
+    "argv": ["/absolute/remote/path/to/solver", "input.json"],
+    "outputs": ["result.csv"],
+}, idempotency_key="scan-001:submit")
+task_id = submitted["task"]["id"]
+task = r.tasks.wait(task_id, timeout=300)
+print(task["state"], r.tasks.artifacts(task_id))
+if task["state"] == "succeeded":
+    download = r.download("result.csv", task_id=task_id, dest="result.csv",
+                          idempotency_key="scan-001:result")
+    print(stk.transfers.wait(download["id"], timeout=60))
+```
+
+这是直接 Runtime 示例。Hub 使用 `stk.runtime("hub:lab", node="32位节点ID")`；
+工作区创建、提交和取消返回完整 `{workspace/task?, action?}` 结果。如果只有 `action.state == "review"`，
+应保留操作 ID，在 Jobs 中检查和审核；批准后用**相同键和请求**获取结果，不能直接读取不存在的 `task`。
+`stk.call("hub.action", connection="hub:lab", action_id=...)` 可查询操作，字段以 `stk.help()` 为准。
+目录还开放 `hub.devices/templates/actions`，未开放从 Python 自动批准审核。
+
+常用读操作还有 `r.workspaces.list()/files(w)`、`r.tasks.list(workspace_id=w)/get(task_id)`。
+`r.tasks.cancel(task_id, idempotency_key=...)` 显式请求取消；`stk.transfers.get/list/resume/cancel` 管理传输。
+下载必须指定 `task_id` 或 `workspace_id` 中的一个；省略 `dest` 使用桥的下载缓存目录。
+
+等待助手只轮询，遇到网络错误直接抛出，不发起额外的重连、恢复传输或取消请求。
+底层读取仍遵守保存连接的 SSH 策略；显式断开的隧道不会被轮询重新打开。任务返回 `succeeded/failed/cancelled/unknown`；
+传输在完成、失败、取消、中断或等待 Hub 审核时返回。调用者必须检查状态。超时抛出 `TimeoutError`，
+已接受的任务/传输仍可继续；单次网络调用有其自身超时，等待总时间可能超过传入的轮询期限。
+这些对象只绑定连接/节点 ID，不持有远端对象；重开桌面后可用保存的任务/传输 ID 再查询。
+目前不会自动把任务 ID 写回项目，完整批次记录和输入快照仍待接入。
+
+日志使用**字节偏移**，`data` 在 Python helper 中为 `bytes`。逐块拼接后解码，或使用增量解码器：
+
+```python
+chunk = r.tasks.logs(task_id, stream="stdout", offset=0, limit=65536)
+print(chunk["data"].decode("utf-8", errors="replace"))  # 单块预览；完整读取应跨块解码
+next_offset = chunk["next_offset"]
+```
+
+`limit` 为 1–1 MiB，默认 64 KiB；支持 stdout、stderr、scheduler.out、scheduler.err、wrapper。
+`terminal` 表示任务已结束，仍可能有未读取的日志；继续读到空块才到达当次日志末尾。
+
 ## 输出、失败与中断
 
 - Python `print`、异常堆栈进入最多 1 Mi 个 Unicode 字符的输出环；`script.read` 使用**字符偏移**，
@@ -105,7 +171,7 @@ stk.ui.apply_layout(saved)
 - worker 中断或崩溃会丢失变量；下一次执行创建新 worker。`script.interrupt` 在空闲时也可用于重置。
   桥重启后整个 Python 会话失效，不重放源码。显式关闭会话也不会关闭项目或取消 Runtime 任务。
 - 中断会停止脚本 worker 及其普通子进程。已经交给桥/UI 的操作可能已完成或仍在收尾，
-  中断不回滚项目事务，也不撤销已接受的 UI 修改；必要时先检查快照/历史，再决定下一步。
+  中断不回滚项目事务、不撤销已接受的 UI 修改，也不取消已提交任务/传输；必要时先查询状态，再决定下一步。
 - `stk` 操作须从执行线程调用；后台 Python 线程可以打印，但不能调用项目/UI RPC。
 - 单段源码最多 262144 个字符、UTF-8 最多 1 MiB；文件最多 1 MiB。暂不支持交互式 `input()`。
 

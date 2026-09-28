@@ -72,10 +72,13 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
     assert ProjectStore(directory).info()["revision"] == 1
     assert execute(scripts, session, "stk.call('shutdown')")["run"]["state"] == "failed"
     assert scripts.call("hello", {"protocol": 1})["protocol"] == 1
-    assert set(scripts.call("script.catalog")["operations"]) == {
+    operations = set(scripts.call("script.catalog")["operations"])
+    assert {name for name in operations if name.startswith("project.")} == {
         "project.create", "project.open", "project.list", "project.close", "project.snapshot", "project.apply", "project.history",
         "project.backup", "project.upgrade", "project.undo", "project.redo",
         "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve"}
+    assert {"workspace.create", "task.submit", "task.logs", "upload.start", "transfer.get", "connections.ssh"} <= operations
+    assert not operations & {"shutdown", "script.execute", "ui.attach", "watch", "logs.subscribe", "hub.review"}
     assert scripts.call("script.close", {"session": session})["closed"]
     assert scripts.call("project.list")["projects"][0]["revision"] == 1
     assert scripts.error("script.status", {"session": session})["code"] == "not_found"

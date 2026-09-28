@@ -186,6 +186,7 @@ class Bridge:
             "task.get": lambda p, c: self._backend(p).task(p["task_id"]),
             "task.cancel": lambda p, c: self._backend(p).cancel(p["task_id"], p.get("idempotency_key")),
             "task.artifacts": lambda p, c: self._backend(p).artifacts(p["task_id"]),
+            "task.logs": self.task_logs,
             "watch": lambda p, c: self._subscribe("watch", p, c),
             "logs.subscribe": lambda p, c: self._subscribe("logs", p, c),
             "events.subscribe": lambda p, c: self._subscribe("events", p, c),
@@ -393,7 +394,12 @@ class Bridge:
         # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
         names = ("project.create", "project.open", "project.list", "project.close", "project.snapshot",
                  "project.apply", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
-                 "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve")
+                 "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
+                 "connections.list", "connections.check", "connections.ssh",
+                 "hub.devices", "hub.templates", "hub.actions", "hub.action",
+                 "workspace.list", "workspace.create", "workspace.files", "upload.start", "download.start",
+                 "transfer.list", "transfer.get", "transfer.resume", "transfer.cancel",
+                 "task.submit", "task.list", "task.get", "task.cancel", "task.artifacts", "task.logs")
         return {"operations": {name: bridge_schema.method_contract(name) for name in names},
                 "ui_operations": list(UI_OPERATIONS)}
 
@@ -418,6 +424,17 @@ class Bridge:
         for callback in context.callbacks:
             callback()
         return result
+
+    def task_logs(self, params, context):
+        import base64
+        limit = params.get("limit", 65536)
+        result = self._backend(params).logs(params["task_id"], params.get("stream", "stdout"),
+                                            params.get("offset", 0), limit)
+        # Older Hub read endpoints may ignore the requested limit. Keep byte offsets consistent
+        # with precisely the chunk returned, including when UTF-8 characters straddle chunks.
+        data = result["data"][:limit]
+        return {"data": base64.b64encode(data).decode("ascii"), "offset": result["offset"],
+                "next_offset": result["offset"] + len(data), "terminal": result["terminal"]}
 
     def apply_project(self, params, context):
         result = self.projects.apply(params)

@@ -1,6 +1,6 @@
 # Python 自动化、布局编程与机器间通信
 
-更新：2026-09-28。状态：原生 Python 控制台、项目 API 与布局执行器已交付首版；完整操作覆盖与远程连接继续推进。
+更新：2026-09-28。状态：原生 Python 控制台、项目/Runtime API 与布局执行器已交付首版；完整操作覆盖与远程连接继续推进。
 目标是在 STK 界面内用 Python 控制全部面向用户的操作、通过编程配置页面布局，
 并让两台安装 STK 的机器既能直接通信，也能经 SSH 通信。
 这些能力纳入[开发计划](../development-plan.md)，不表示当前版本已支持。
@@ -11,7 +11,7 @@
 |---|---|---|
 | 原生桌面调用本机 Python | 已有：C++ 启动桥子进程，通过 stdio NDJSON 请求/响应和事件通信 | [桌面桥 v1](../specs/stk-desktop-bridge-v1.md) |
 | Python 项目操作 | 存储 API、CLI、项目桥接口、原生表格与 Python 面板共用项目命令 | [项目存储指南](../project.md) |
-| 界面内 Python 控制台与完整操作 API | 原生多行输入、独立会话、项目 API、输出/中断与文件运行已实现；其他操作覆盖待接入 | [Python 指南](../scripting.md)、桥 v1 §14 |
+| 界面内 Python 控制台与完整操作 API | 原生多行输入、独立会话、项目/Runtime API、输出/中断与文件运行已实现；Viewer/图等操作覆盖待接入 | [Python 指南](../scripting.md)、桥 v1 §14 |
 | 布局编程 | 已通过 Python facade → 显式反向请求 → UI 主线程实现布局读取、校验应用与编辑器查询 | `stk_app` 的 `scripting_ui.cc`、桥 v1 §14 |
 | 连接另一台 Linux 计算机 | 已有：客户端经已有 SSH 隧道访问 Runtime，或经 hub 访问节点代理 | [Runtime 远程连接](../runtime.md#远程连接)、[控制服务指南](../hub.md) |
 | STK 内管理 SSH 连接 | 已有首版：OpenSSH Host 配置、原生 Jobs/CLI 入口、状态/断开、按需重连与进程清理；真实 macOS/Windows 远程链路待验收 | [SSH 指南](../ssh.md) |

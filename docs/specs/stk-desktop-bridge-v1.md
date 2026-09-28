@@ -640,10 +640,23 @@ Operation shapes: `layout.get {}` → `{layout}` (`stk.desktop.layout/1`),
 return `unsupported`, and an absent desktop returns `unavailable`. Applying a layout validates the whole
 description before changing the current screen; geometry is captured for round trips but not forced on apply.
 
-The first Python facade exposes project methods through the shared command handlers. The native
+The Python facade exposes project methods, saved connection inspection/managed SSH, workspace/task
+operations, transfers and read-only Hub discovery/action queries through the shared command handlers.
+`script.catalog` is authoritative for current coverage; it excludes recursive script lifecycle, unowned
+subscriptions, executor attachment and Hub review approval. Runtime helpers require explicit idempotency
+keys for creation/submission/cancellation/transfers and preserve pending Hub action envelopes. Waiting
+only polls; interruption or timeout does not cancel accepted work. See [Python guide](../scripting.md).
+The native
 desktop binds these six UI operations on its main loop, targeting the first installed screen.
 Stale callbacks from an earlier bridge session cannot apply queued layout changes. A bridge without
 that executor (for example a protocol test harness) must attach its own implementation or return unavailable.
+
+`task.logs {connection, node?, task_id, stream?, offset?, limit?}` is an additive one-shot read for
+automation. Defaults: `stream: "stdout"`, `offset: 0`, `limit: 65536`; limit is 1–1048576 bytes.
+Result is `{data: base64, offset, next_offset, terminal}`. Both offsets count bytes, including partial
+UTF-8 characters. `terminal` describes task state, not whether this chunk exhausted the log; a caller
+continues from `next_offset` until an empty chunk. The bridge clamps older Hub responses to the limit
+and adjusts `next_offset` to bytes actually returned. No subscription or background reader is created.
 
 ## 15. Managed OpenSSH Runtime connections (additive extension)
 

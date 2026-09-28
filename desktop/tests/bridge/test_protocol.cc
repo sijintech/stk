@@ -192,7 +192,7 @@ TEST(Schema, EmbeddedSchemaValidatesMessagesBothWays)
   const ProtocolSchema &schema = ProtocolSchema::embedded();
   const auto methods = schema.method_names();
   EXPECT_GE(methods.size(), 42u);
-  for (const char *method : {"hello", "logs.subscribe", "graph.evaluate", "hub.policy", "colormaps.list"}) {
+  for (const char *method : {"hello", "logs.subscribe", "task.logs", "graph.evaluate", "hub.policy", "colormaps.list"}) {
     EXPECT_TRUE(schema.has_method(method)) << method;
   }
   EXPECT_TRUE(schema.has_event("logs.chunk"));

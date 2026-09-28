@@ -57,6 +57,14 @@
 
 ### CI 跟踪
 
+Python Runtime 操作覆盖：`stk.connections`、`stk.runtime()`、`stk.transfers` 复用已有工作区、
+任务和传输操作，显式幂等键、保留 Hub 待审核结果；新增有界 `task.logs` 字节读取。
+真实 worker + loopback Runtime 完成上传/提交/日志/下载及冲突重试，中断不取消已接受任务。
+Python 脚本/桥/Runtime/Hub/SSH **69/69**，原生 schema/项目/Python **23/23** 通过；本批远端 CI 待跟踪。
+
+文件索引提交 `6056591` 的 Runtime **36393074017**、文档部署 **36393073998** 成功；
+desktop **36393073976** 的 Linux、macOS 与打包成功，Windows 尚在运行。真实应用关联/VSCode 启动仍需真机验收。
+
 `d0fd5f5` 的 desktop run **36390818302 全部成功**（Linux/macOS/Windows/打包/干净环境），
 同时包含前一批 `dfd2c27` 的 procfs 清理修正。Runtime **36390818350**、文档部署 **36390818365** 成功。
 `dfd2c27` 自身的 desktop run 36390225570 被后续推送自动取消，不作为失败或已通过的证据。
@@ -81,7 +89,7 @@ SSH CI 补充：`33c88d6` 的 Runtime run 36384809632 全部成功，包括 Linu
 
 - 跟踪文件索引与系统打开入口的跨平台 CI；不把本地构建通过写成远端已发布。
 - 继续 Python 操作覆盖和通用对等端点；当前 SSH 访问 Linux Runtime，不提供远程 Python/UI 操作。
-- 继续 Python Runtime 操作覆盖、资源版本和通用字段；按可独立验证的开发包交付。
+- 继续参数行与任务 ID 持久关联、资源版本和通用字段；按可独立验证的开发包交付。
 
 ### 当前限制
 

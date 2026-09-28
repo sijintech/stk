@@ -3611,6 +3611,67 @@
           ],
           "additionalProperties": false
         }
+      },
+      "task.logs": {
+        "description": "Read one bounded log chunk as base64 bytes. Offsets count bytes; terminal describes task state, not end of this chunk. No subscription is created.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "task_id": {
+              "$ref": "#/$defs/taskId"
+            },
+            "stream": {
+              "$ref": "#/$defs/logStream"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            }
+          },
+          "required": [
+            "connection",
+            "task_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "string",
+              "maxLength": 1398104
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "next_offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "terminal": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "data",
+            "offset",
+            "next_offset",
+            "terminal"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
