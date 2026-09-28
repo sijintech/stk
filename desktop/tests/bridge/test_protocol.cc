@@ -224,6 +224,28 @@ TEST(Schema, EmbeddedSchemaValidatesMessagesBothWays)
                   .empty());
 }
 
+TEST(Types, LocalProjectExtension)
+{
+  const Json project = {{"handle", std::string(32, 'c')},
+                        {"id", "1a234567-1234-5678-9abc-123456789abc"},
+                        {"name", "参数"}, {"directory", "C:\\Users\\test\\project"},
+                        {"revision", int64_t(5000000000)}, {"format_version", 1}};
+  const auto &schema = ProtocolSchema::embedded();
+  EXPECT_TRUE(schema.check_response({{"id", 1}, {"result", {{"project", project}}}}, "project.open").empty());
+  const auto info = ProjectInfo::from_json(project);
+  EXPECT_EQ(info.revision, int64_t(5000000000));
+  EXPECT_EQ(info.name, "参数");
+  EXPECT_EQ(info.directory, "C:\\Users\\test\\project");
+  Json request = {{"id", 2}, {"method", "project.apply"},
+                  {"params", {{"handle", info.handle}, {"expected_revision", info.revision},
+                              {"commands", Json::array({{{"op", "create_table"}, {"name", "Cases"}}})}}}};
+  EXPECT_TRUE(schema.check_request(request).empty());
+  request["params"]["commands"][0]["typo"] = 1;
+  EXPECT_FALSE(schema.check_request(request).empty());
+  EXPECT_TRUE(schema.check_event({{"event", "project.changed"},
+                                 {"data", {{"handle", info.handle}, {"revision", info.revision}}}}).empty());
+}
+
 TEST(Types, HelloAndColormapsAndBase64)
 {
   const HelloInfo hello = HelloInfo::from_json(

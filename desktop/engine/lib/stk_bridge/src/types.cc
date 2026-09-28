@@ -48,6 +48,19 @@ Json bindings_json(const std::map<std::string, std::string> &bindings)
 
 }  // namespace
 
+ProjectInfo ProjectInfo::from_json(const Json &project)
+{
+  ProjectInfo info;
+  info.raw = project;
+  info.handle = get_string(project, "handle");
+  info.id = get_string(project, "id");
+  info.name = get_string(project, "name");
+  info.directory = get_string(project, "directory");
+  info.revision = get_int(project, "revision", 0);
+  info.format_version = int(get_int(project, "format_version", 0));
+  return info;
+}
+
 HelloInfo HelloInfo::from_json(const Json &result)
 {
   HelloInfo info;

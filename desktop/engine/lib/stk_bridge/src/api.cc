@@ -60,6 +60,60 @@ Future<Json> Client::shutdown_bridge()
   return call("shutdown", Json::object(), options);
 }
 
+/* -- Projects ----------------------------------------------------------------------------- */
+
+Future<ProjectInfo> Client::project_create(const std::string &directory, const std::string &name)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.create", object({{"directory", directory}, {"name", name}}), options).map([](const Json &r) {
+    return ProjectInfo::from_json(field(r, "project"));
+  });
+}
+
+Future<ProjectInfo> Client::project_open(const std::string &directory)
+{
+  return call("project.open", object({{"directory", directory}})).map([](const Json &r) {
+    return ProjectInfo::from_json(field(r, "project"));
+  });
+}
+
+Future<std::vector<ProjectInfo>> Client::project_list()
+{
+  return call("project.list").map([](const Json &r) {
+    return list_of<ProjectInfo>(field(r, "projects"), &ProjectInfo::from_json);
+  });
+}
+
+Future<bool> Client::project_close(const std::string &handle)
+{
+  return call("project.close", object({{"handle", handle}})).map([](const Json &r) {
+    return r.value("closed", false);
+  });
+}
+
+Future<Json> Client::project_snapshot(const std::string &handle)
+{
+  return call("project.snapshot", object({{"handle", handle}})).map([](const Json &r) {
+    return field(r, "snapshot");
+  });
+}
+
+Future<Json> Client::project_apply(const std::string &handle, const int64_t expected_revision, const Json &commands)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.apply", object({{"handle", handle}, {"expected_revision", expected_revision},
+                                        {"commands", commands}}), options);
+}
+
+Future<Json> Client::project_history(const std::string &handle)
+{
+  return call("project.history", object({{"handle", handle}})).map([](const Json &r) {
+    return field(r, "history");
+  });
+}
+
 /* -- Connections -------------------------------------------------------------------------- */
 
 Future<std::vector<ConnectionInfo>> Client::connections_list()

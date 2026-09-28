@@ -24,6 +24,7 @@ from .backends import HubBackend
 from .hub import HubResponseError, hub_error
 from .connections import ConnectionStore
 from .graphs import GraphService
+from .projects import ProjectSessions
 from .protocol import (MAX_LINE_BYTES, PROTOCOL_VERSION, BridgeError, LineReader, check_envelope, decode_line,
                        encode_message, error_object, leading_id)
 from .subscriptions import SubscriptionManager
@@ -145,6 +146,7 @@ class Bridge:
         self.inspected = {}
         self.connections = ConnectionStore(self.state_dir)
         self.graphs = GraphService(self.cache_dir, self.connections, self.emit)
+        self.projects = ProjectSessions()
         self.transfers = TransferManager(self.state_dir, self.emit, self.connections.backend)
         self.subscriptions = SubscriptionManager(self.emit, self.connections.backend, self.connections.hub_client)
         self.methods = {
@@ -191,6 +193,13 @@ class Bridge:
             "blob.ensure": lambda p, c: self.graphs.ensure(p["sha256"], p.get("connection")),
             "probe": lambda p, c: self.graphs.probe(p),
             "colormaps.list": lambda p, c: self.graphs.colormaps(),
+            "project.create": lambda p, c: self.projects.create(p),
+            "project.open": lambda p, c: self.projects.open(p),
+            "project.list": lambda p, c: self.projects.list(p),
+            "project.close": self.close_project,
+            "project.snapshot": lambda p, c: self.projects.snapshot(p),
+            "project.apply": self.apply_project,
+            "project.history": lambda p, c: self.projects.history(p),
         }
         missing = set(self.methods) ^ set(bridge_schema.method_names())
         if missing:
@@ -332,6 +341,7 @@ class Bridge:
                 break
             time.sleep(0.02)
         self.closed.set()
+        self.projects.shutdown()
         self.state_lock.release()
 
     # -- helpers ------------------------------------------------------------------------------
@@ -351,6 +361,18 @@ class Bridge:
         return {"sub": subscription.id}
 
     # -- methods ------------------------------------------------------------------------------
+
+    def apply_project(self, params, context):
+        result = self.projects.apply(params)
+        context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                            "revision": result["revision"]}))
+        return result
+
+    def close_project(self, params, context):
+        result = self.projects.close(params)
+        if result["closed"]:
+            context.after(lambda: self.emit("project.closed", {"handle": params["handle"]}))
+        return result
 
     def hello(self, params, context):
         if params["protocol"] != PROTOCOL_VERSION:

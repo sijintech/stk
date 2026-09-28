@@ -275,6 +275,16 @@ class Client {
   /* -- Session ---------------------------------------------------------------------------- */
   Future<Json> shutdown_bridge();
 
+  /* -- Local projects (§13). Handles expire on bridge restart; reopen by directory. --------- */
+  Future<ProjectInfo> project_create(const std::string &directory, const std::string &name);
+  Future<ProjectInfo> project_open(const std::string &directory);
+  Future<std::vector<ProjectInfo>> project_list();
+  Future<bool> project_close(const std::string &handle);
+  Future<Json> project_snapshot(const std::string &handle);
+  /** Never retried automatically: after an uncertain response inspect snapshot/history. */
+  Future<Json> project_apply(const std::string &handle, int64_t expected_revision, const Json &commands);
+  Future<Json> project_history(const std::string &handle);
+
   /* -- Connections (§6) ------------------------------------------------------------------- */
   Future<std::vector<ConnectionInfo>> connections_list();
   Future<ConnectionInfo> connections_add_runtime(const AddRuntimeParams &params);

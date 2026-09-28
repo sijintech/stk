@@ -19,6 +19,15 @@
 
 namespace stk::bridge {
 
+/** An open local project; handle is valid only for the current bridge process. */
+struct ProjectInfo {
+  std::string handle, id, name, directory;
+  int64_t revision = 0;
+  int format_version = 0;
+  Json raw;
+  static ProjectInfo from_json(const Json &project);
+};
+
 /* -------------------------------------------------------------------------------------------- */
 /* Results */
 

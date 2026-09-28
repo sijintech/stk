@@ -182,6 +182,19 @@ def test_create_does_not_overwrite_existing_project(populated):
     assert store.snapshot() == before
 
 
+def test_open_store_does_not_edit_a_replaced_project(tmp_path):
+    store = ProjectStore.create(tmp_path / "original", "Original")
+    replacement = ProjectStore.create(tmp_path / "replacement", "Replacement")
+    replacement.path.replace(store.path)
+    for operation in (store.info, store.snapshot, store.history,
+                      lambda: store.apply([{"op": "create_table", "name": "Wrong project"}], expected_revision=0)):
+        with pytest.raises(ProjectError, match="was replaced"):
+            operation()
+    reopened = ProjectStore(store.directory)
+    assert reopened.info()["name"] == "Replacement"
+    assert reopened.info()["revision"] == 0
+
+
 def test_cli_create_apply_reopen_conflict_and_invalid_json(tmp_path):
     runner = CliRunner()
     directory = str(tmp_path / "CLI 项目")

@@ -2471,6 +2471,236 @@
             "workspaces"
           ]
         }
+      },
+      "project.create": {
+        "description": "Create a local project directory/database; never replaces an existing database.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "directory",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "project": {
+              "$ref": "#/$defs/projectInfo"
+            }
+          },
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "project.open": {
+        "description": "Open an existing local project and return a bridge-session handle.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "required": [
+            "directory"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "project": {
+              "$ref": "#/$defs/projectInfo"
+            }
+          },
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "project.list": {
+        "description": "List projects open in this bridge session.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "projects": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectInfo"
+              }
+            }
+          },
+          "required": [
+            "projects"
+          ]
+        }
+      },
+      "project.close": {
+        "description": "Close a session handle without deleting the saved project.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "closed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "closed"
+          ]
+        }
+      },
+      "project.snapshot": {
+        "description": "Read a consistent project snapshot by session handle.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/projectSnapshot"
+            }
+          },
+          "required": [
+            "snapshot"
+          ]
+        }
+      },
+      "project.apply": {
+        "description": "Apply an atomic edit batch at the expected revision. Never automatically retry after an uncertain response.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectCommand"
+              },
+              "minItems": 1,
+              "maxItems": 1000
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "commands"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectCommand"
+              }
+            }
+          },
+          "required": [
+            "revision",
+            "commands"
+          ]
+        }
+      },
+      "project.history": {
+        "description": "Read committed edit batches to inspect revisions and recover an uncertain edit response.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "created_at": {
+                    "type": "string"
+                  },
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/projectCommand"
+                    }
+                  }
+                },
+                "required": [
+                  "revision",
+                  "created_at",
+                  "commands"
+                ]
+              }
+            }
+          },
+          "required": [
+            "history"
+          ]
+        }
       }
     },
     "events": {
@@ -2683,7 +2913,343 @@
           "sub",
           "tasks"
         ]
+      },
+      "project.changed": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "$ref": "#/$defs/hex32"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "handle",
+          "revision"
+        ]
+      },
+      "project.closed": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "$ref": "#/$defs/hex32"
+          }
+        },
+        "required": [
+          "handle"
+        ]
       }
+    },
+    "projectUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "projectInfo": {
+      "type": "object",
+      "properties": {
+        "handle": {
+          "$ref": "#/$defs/hex32"
+        },
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "format_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "directory": {
+          "$ref": "#/$defs/absPath"
+        }
+      },
+      "required": [
+        "handle",
+        "id",
+        "name",
+        "revision",
+        "format_version",
+        "directory"
+      ]
+    },
+    "projectCommand": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "create_table"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "op",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "add_field"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "type": {
+              "enum": [
+                "text",
+                "integer",
+                "number",
+                "boolean",
+                "json"
+              ]
+            },
+            "unit": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "table_id",
+            "name",
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "add_record"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "op",
+            "table_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "set_cell"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "field_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "value": {}
+          },
+          "required": [
+            "op",
+            "table_id",
+            "record_id",
+            "field_id",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "rename_table"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "op",
+            "id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "rename_field"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "op",
+            "id",
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "projectSnapshot": {
+      "type": "object",
+      "properties": {
+        "format_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "project": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "revision"
+          ]
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "text",
+                        "integer",
+                        "number",
+                        "boolean",
+                        "json"
+                      ]
+                    },
+                    "unit": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "type",
+                    "unit"
+                  ]
+                }
+              },
+              "records": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "values": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "values"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "fields",
+              "records"
+            ]
+          }
+        }
+      },
+      "required": [
+        "format_version",
+        "project",
+        "tables"
+      ]
     }
   }
 }

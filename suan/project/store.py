@@ -46,6 +46,10 @@ class RevisionConflict(ProjectError):
     """The caller edited an older revision; reload before trying again."""
 
 
+class UnsupportedProjectFormat(ProjectError):
+    """A recognized project uses a format this version cannot open or migrate."""
+
+
 def _text(value, label):
     if not isinstance(value, str) or not value.strip() or len(value) > 1024:
         raise ProjectError(f"{label} must be a nonempty string of at most 1024 characters")
@@ -94,6 +98,7 @@ class ProjectStore:
     def __init__(self, directory):
         self.directory = Path(directory).expanduser().resolve()
         self.path = self.directory / DATABASE_NAME
+        self._project_id = None
         with self._connect() as db:
             if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise ProjectError("Project database integrity check failed")
@@ -101,6 +106,7 @@ class ProjectStore:
                 raise ProjectError("Project database contains invalid references")
             if db.execute("SELECT count(*) FROM project").fetchone()[0] != 1:
                 raise ProjectError("Project database must contain exactly one project")
+            self._project_id = db.execute("SELECT id FROM project").fetchone()[0]
 
     @classmethod
     def create(cls, directory, name):
@@ -123,8 +129,10 @@ class ProjectStore:
                     db.execute("INSERT INTO project VALUES (?, ?, 0)", (str(uuid4()), name))
             finally:
                 db.close()
-        except Exception:
+        except Exception as exc:
             path.unlink(missing_ok=True)
+            if isinstance(exc, sqlite3.Error):
+                raise ProjectError(f"Cannot create project database: {exc}") from None
             raise
         return cls(directory)
 
@@ -142,7 +150,11 @@ class ProjectStore:
                 raise ProjectError("Not an STK project database")
             version = db.execute("PRAGMA user_version").fetchone()[0]
             if version != FORMAT_VERSION:
-                raise ProjectError(f"Unsupported project format {version}; expected {FORMAT_VERSION}")
+                raise UnsupportedProjectFormat(f"Unsupported project format {version}; expected {FORMAT_VERSION}")
+            if self._project_id is not None:
+                row = db.execute("SELECT id FROM project").fetchone()
+                if row is None or row[0] != self._project_id:
+                    raise ProjectError("Project database was replaced; close and reopen it")
             yield db
             db.commit()
         except sqlite3.Error as exc:
@@ -150,6 +162,11 @@ class ProjectStore:
         finally:
             if db is not None:
                 db.close()  # Also rolls back uncommitted mutations on any exception.
+
+    def info(self):
+        """Read project identity/revision without loading all records or values."""
+        with self._connect() as db:
+            return {**dict(db.execute("SELECT * FROM project").fetchone()), "format_version": FORMAT_VERSION}
 
     def snapshot(self):
         """Read all tables at one revision; UUID keys do not depend on names or display order."""

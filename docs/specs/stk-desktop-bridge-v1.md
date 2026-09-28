@@ -7,7 +7,8 @@
 
 Status: **frozen for Milestone D1** (WP7), with the additive hub-mode changes of WP11 (§7.1, §9,
 §10, §1 state-directory lock) and the WP8 follow-ups (`bytes` in offset-based events, transfer
-idempotency keys, ids of undecodable lines, clarifications in §2, §3, §7, §8, §12); still
+idempotency keys, ids of undecodable lines, clarifications in §2, §3, §7, §8, §12), and the local
+project extension (§13, 2026-09-28); still
 `protocol: 1`. Schema: `suan/contracts/schemas/desktop-bridge-1.schema.json`
 (`suan.contracts.load_schema("desktop-bridge-1")`). Implementation: `suan/desktop_bridge/` (standard
 library plus the STK core it drives). Conformance tests: `tests/test_desktop_bridge*.py`. The C++
@@ -44,8 +45,9 @@ archived at D1 exit under the tag `archive/blender-workbench-2026-09`).
   hub actions are never cancelled**: closing the app keeps jobs running.
 - **Crash and restart.** If the bridge dies, the app starts a new one, sends `hello` (which by
   default resumes interrupted transfers) and replays its subscriptions from the offsets it last
-  received (§8). Every operation that creates something takes an idempotency key, so replaying a
-  request whose response was lost never creates a second workspace, task or hub action.
+  received (§8). Workspace/task/hub-action creation takes an idempotency key, so replaying a
+  request whose response was lost never creates a second workspace, task or hub action. Local
+  project creation and edits use a different recovery rule and must not be replayed automatically (§13).
 
 ## 2. Framing
 
@@ -452,6 +454,8 @@ on every state change and at most every 250 ms while bytes move.
 | `hub.event` | `{sub, cursor, kind, payload}` |
 | `subscription.error` | `{sub, error, final?}` |
 | `graph.progress` | `{eval_id, event: {type, …}}` |
+| `project.changed` | `{handle, revision}` (§13) |
+| `project.closed` | `{handle}` (§13) |
 
 ## 12. Schema, conformance and versioning
 
@@ -477,3 +481,55 @@ on every state change and at most every 250 ms while bytes move.
 - **Protocol 2 candidates** (not in protocol 1): request cancellation (`cancel {id}`, freeing the
   in-flight slot of an abandoned call, §3); a distinct error code for the state-directory lock
   instead of the second meaning of `busy` (§4); `bytes` required in offset-based events.
+
+## 13. Local project sessions (additive P1 extension)
+
+These methods access local SQLite project directories through `suan.project.ProjectStore`.
+They are independent of Runtime connections and never start simulations. Check `hello.methods`
+before exposing project operations with an older bridge. This extension adds no network endpoint
+or reverse UI RPC. The experimental storage format is described in [the project guide](../project.md).
+
+| Method | Params | Result |
+|---|---|---|
+| `project.create` | `{directory, name}` | `{project}` |
+| `project.open` | `{directory}` | `{project}` |
+| `project.list` | `{}` | `{projects: [project]}` |
+| `project.close` | `{handle}` | `{closed: boolean}` |
+| `project.snapshot` | `{handle}` | `{snapshot}` |
+| `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
+| `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
+
+- `directory` is an absolute local directory path; the database is `project.sqlite3` within it.
+  Creation is explicit and never overwrites an existing database (`conflict`). Open does not create
+  missing files (`not_found`). An unsupported format returns `unsupported`; malformed data or edits
+  return `invalid_params`. Creating parent directories is permitted.
+- `project = {handle, id, name, directory, revision, format_version}`. `id` is the persistent UUID;
+  `handle` is a 32-character lowercase hexadecimal session token. Concurrent opens of the same
+  canonical path share a handle. Handles expire on close or bridge restart; reopen by directory and
+  reload the snapshot. An expired handle returns `not_found`. Close is idempotent and does not delete
+  files or revert saved edits. Replacing a database with a different project invalidates use of its
+  existing store; close and reopen explicitly.
+- `snapshot = {format_version, project: {id, name, revision}, tables}` is one consistent read.
+  Each table has `id`, `name`, `fields: [{id, name, type, unit}]`, and
+  `records: [{id, values: {field_uuid: value}}]`. Unset cells are absent; explicit nulls remain null.
+  Types are `text`, signed-64-bit `integer`, finite `number`, `boolean`, and `json`. Numeric units
+  are metadata in this first slice, without conversion. IDs are canonical lowercase UUIDs.
+- `commands` contains 1–1000 closed command objects. Supported operations are `create_table`,
+  `add_field`, `add_record`, `set_cell`, `rename_table`, and `rename_field`; the exact required and
+  optional properties are in `$defs/projectCommand` and the project guide. The whole batch commits
+  atomically at `expected_revision`, or returns `conflict` for a stale revision. The response contains
+  the new revision and applied commands, including generated IDs. Edits persist immediately; no
+  separate save request is needed. Close waits for any edit already accepted by that session manager.
+- **Uncertain responses:** create/apply are never automatically retried. If a response is lost,
+  reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
+  raise `expected_revision` and repeat an edit: the previous batch may already have committed.
+  Explicit reapplication at the original revision cannot commit twice. Opening an already created
+  project is safe; repeating create reports `conflict`. These methods use no idempotency key.
+- A successful apply emits `project.changed {handle, revision}` after its response. An effective
+  close emits `project.closed {handle}` after its response. Concurrent request responses/events may
+  interleave: ignore closed handles and revisions at or below the displayed snapshot. Events are
+  refresh hints, not an ordered history stream. External CLI edits have no bridge event; refresh
+  snapshot/list to see them, and rely on revision conflicts before writing.
+- Snapshot/history are currently unpaginated and subject to the 16 MiB line limit (§2), returning
+  `result_too_large` when necessary. Large scientific arrays and files do not belong in JSON cells.
+  No project directory is automatically reopened by a new bridge; the desktop owns recovery intent.

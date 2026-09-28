@@ -84,6 +84,19 @@ SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报�
 目前只有首版实验格式，没有旧项目迁移器；后续格式升级需先提供备份/迁移验证。
 数据库之外的输入、程序与资源仍可存为普通文件，资源索引和一致性项目备份尚待实现。
 
-该内部格式未冻结为 `docs/specs/` 的公开协议，不改变 `stk.graph/1` 或桌面桥 v1。
+该内部数据库格式未冻结为 `docs/specs/` 的公开协议，不改变 `stk.graph/1`。
 业务修改通过 `ProjectStore.apply`，不要让后续编辑器各自写 SQL。
-下一步按[开发计划](development-plan.md)接入项目生命周期与共享表格，并实现参数引用和失效传播。
+打开的 store 会记住项目 UUID；同一路径被另一项目替换后，旧 store 拒绝读写，需要明确重新打开。
+
+## 本机桌面桥接口
+
+[桌面桥 v1 §13](specs/stk-desktop-bridge-v1.md#13-local-project-sessions-additive-p1-extension)
+增加 `project.create/open/list/close/snapshot/apply/history`，并提供 C++ `Client::project_*` 封装。
+项目修改复用上述命令和修订校验，不绕过存储服务。桥中的句柄只在当前进程内有效，
+桥重启后应按绝对目录重新打开；项目 UUID 和已提交内容保持不变。
+
+每次编辑立即保存；关闭项目只释放句柄。编辑响应丢失后先重开并检查快照/历史，不能自动提高修订后重试。
+`project.changed` 通知用于刷新；外部 CLI 修改需主动刷新，写入时仍有修订冲突保护。
+快照/历史暂不分页，受桥的 16 MiB 消息限制。此接口仍是本机 stdio 通道，不是两台 STK 的直接连接。
+
+下一步按[开发计划](development-plan.md)接入原生桌面项目入口与共享表格，并实现参数引用和失效传播。

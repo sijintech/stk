@@ -331,6 +331,56 @@ TEST_F(PythonBridge, HelloListsTheProtocol)
   EXPECT_NE(client->bridge_log().text().find("exit code 0"), std::string::npos);
 }
 
+TEST_F(PythonBridge, ProjectLifecycleAndRevisionedEdits)
+{
+  auto client = started(options());
+  ASSERT_TRUE(client->hello_info()->has_method("project.create"));
+  const auto created = client->project_create(dir_.str() + "/project", "Parameter scan").get();
+  ASSERT_TRUE(created.ok()) << created.error().describe();
+  const ProjectInfo project = created.value();
+  EXPECT_EQ(project.revision, 0);
+  EXPECT_EQ(project.format_version, 1);
+  EXPECT_EQ(project.name, "Parameter scan");
+  const auto opened = client->project_open(project.directory).get();
+  ASSERT_TRUE(opened.ok());
+  EXPECT_EQ(opened.value().handle, project.handle);
+  const auto edited = client->project_apply(
+      project.handle, 0, Json::array({{{"op", "create_table"}, {"name", "Cases"}}})).get();
+  ASSERT_TRUE(edited.ok()) << edited.error().describe();
+  EXPECT_EQ(edited.value()["revision"], 1);
+  const auto conflict = client->project_apply(
+      project.handle, 0, Json::array({{{"op", "create_table"}, {"name", "Stale"}}})).get();
+  ASSERT_FALSE(conflict.ok());
+  EXPECT_EQ(conflict.error().code, ErrorCode::Conflict);
+  const auto snapshot = client->project_snapshot(project.handle).get();
+  ASSERT_TRUE(snapshot.ok()) << snapshot.error().describe();
+  EXPECT_EQ(snapshot.value()["project"]["revision"], 1);
+  ASSERT_EQ(snapshot.value()["tables"].size(), 1u);
+  EXPECT_EQ(snapshot.value()["tables"][0]["id"], edited.value()["commands"][0]["id"]);
+  const auto history = client->project_history(project.handle).get();
+  ASSERT_TRUE(history.ok());
+  ASSERT_EQ(history.value().size(), 1u);
+  /* History JSON is canonicalized by SQLite storage; object member order is immaterial. */
+  EXPECT_EQ(nlohmann::json(history.value()[0]["commands"]), nlohmann::json(edited.value()["commands"]));
+  const auto listed = client->project_list().get();
+  ASSERT_TRUE(listed.ok());
+  ASSERT_EQ(listed.value().size(), 1u);
+  EXPECT_EQ(listed.value()[0].revision, 1);
+  const auto closed = client->project_close(project.handle).get();
+  ASSERT_TRUE(closed.ok());
+  EXPECT_TRUE(closed.value());
+  const auto expired = client->project_snapshot(project.handle).get();
+  ASSERT_FALSE(expired.ok());
+  EXPECT_EQ(expired.error().code, ErrorCode::NotFound);
+  const auto reopened = client->project_open(project.directory).get();
+  ASSERT_TRUE(reopened.ok());
+  EXPECT_NE(reopened.value().handle, project.handle);
+  EXPECT_EQ(reopened.value().id, project.id);
+  EXPECT_EQ(reopened.value().revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+  EXPECT_EQ(client->stats().protocol_errors, 0u);
+}
+
 TEST_F(PythonBridge, ASecondBridgeOnTheSameStateDirFailsWithoutRestarting)
 {
   auto first = started(options());
