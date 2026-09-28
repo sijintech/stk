@@ -580,6 +580,13 @@ class ProjectEditor final : public Editor {
         state.select_record(table->records[row].id);
       }
     }};
+    spec.compare = [&state](int a, int b, int column) {
+      const auto *table = state.table();
+      if (!table) { return 0; }
+      if (column > 0) { return table->compare(a, b, column - 1); }
+      const auto &left = table->records[a].id, &right = table->records[b].id;
+      return int(left > right) - int(left < right);
+    };
     spec.cell_color = [&state](int row, int column) -> ui::Color {
       const auto *table = state.table();
       const Json *result = table && column > 0 ? table->evaluation(row, column - 1) : nullptr;

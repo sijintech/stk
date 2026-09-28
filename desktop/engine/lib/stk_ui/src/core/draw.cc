@@ -595,8 +595,8 @@ void Context::draw_widget(const Widget &w)
       const WidgetColors &bc = log ? th.text : th.box;
       draw_.round_box(r, clamp_radius(bc.roundness * st.unit, r), CORNER_ALL, bc.inner, bc.outline);
       const float row_h = list_row_height(w);
-      const float header = table ? row_h : 0.0f;
-      const Rect body{r.x + px, r.y + px + header, r.w - 2 * px, r.h - 2 * px - header};
+      const float horizontal = table ? table_scroll_x(w) : 0.0f;
+      const Rect body = list_body(w);
       const float ms = max_scroll(w);
       if (log && (!follow_.count(w.id) || follow_[w.id])) {
         follow_[w.id] = true;
@@ -613,7 +613,7 @@ void Context::draw_widget(const Widget &w)
       if (table) {
         /* Header cells with sort indicator and column separators. */
         TableState &ts = table_state(w);
-        float x = r.x + px;
+        float x = r.x + px - horizontal;
         const Rect hdr{r.x + px, r.y + px, r.w - 2 * px, row_h};
         draw_.round_box(hdr, clamp_radius(bc.roundness * st.unit, hdr), CORNER_TOP, th.panel_header, none);
         draw_.clip_push(hdr);
@@ -672,7 +672,7 @@ void Context::draw_widget(const Widget &w)
           text_in(row.inset(st.text_margin, 0), w.list->text ? w.list->text(i) : std::string(), Align::Left, tc);
         }
         else {
-          float x = r.x + px;
+          float x = r.x + px - horizontal;
           for (int c = 0; c < int(w.table->columns.size()); c++) {
             const float cw = table_col_px(w, c);
             const Rect cell{x + st.text_margin, row.y, cw - 2 * st.text_margin, row.h};
@@ -693,6 +693,13 @@ void Context::draw_widget(const Widget &w)
       if (ms > 0.0f) {
         const bool hot = hover && mouse_.x >= body.x1() - st.scrollbar - 2 * px;
         draw_scrollbar(body, ms + body.h, body.h, scroll, hot);
+      }
+      if (table && table_scroll_max(w) > 0) {
+        const Rect track = table_scroll_track(w), thumb = table_scroll_thumb(w);
+        const auto &colors = th.scroll;
+        draw_.rect(track, colors.inner);
+        const Color color = hover && track.contains(mouse_) ? colors.item.mul_hsl(1.0f, 1.0f, 1.35f) : colors.item;
+        draw_.round_box(thumb, clamp_radius(colors.roundness * thumb.h * 2.0f, thumb), CORNER_ALL, color, none);
       }
       if (log && !follow_[w.id]) {
         const std::string_view label = tr("ui.log.follow");

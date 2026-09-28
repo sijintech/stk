@@ -228,6 +228,13 @@ int main(int argc, char **argv)
           ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         }
       }
+      if (editor == "offline") {
+        const auto *table = screen.ui()->find("demo-project/main/" + state.table_id() + "/records");
+        if (table) {
+          screen.ui()->handle_event(ui::Event::wheel({table->rect.cx(), table->rect.cy()}, -1000, 0, ui::MOD_SHIFT));
+        }
+        else { ok = false; }
+      }
       ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
       ok = ok && gfx::png_write(output, image);
     }

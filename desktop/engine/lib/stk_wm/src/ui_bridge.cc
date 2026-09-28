@@ -89,8 +89,11 @@ std::vector<ui::Event> translate_event(const Event &e, const Rect &r)
     case wm::EventType::Wheel: {
       /* Trackpads report pixels; the toolkit scrolls by notches (3 rows each). */
       const float dy = e.precise ? e.wheel_y / 40.0f : e.wheel_y;
-      if (dy != 0.0f) {
-        push(ui::Event::wheel(p, dy));
+      const float dx = e.precise ? e.wheel_x / 40.0f : e.wheel_x;
+      if (dx != 0.0f || dy != 0.0f) {
+        auto translated = ui::Event::wheel(p, dy);
+        translated.wheel_x = dx;
+        push(translated);
       }
       break;
     }

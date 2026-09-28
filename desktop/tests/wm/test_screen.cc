@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "stk/wm/screen.hh"
+#include "stk/wm/ui_bridge.hh"
 
 #include "support.hh"
 
@@ -372,4 +373,31 @@ TEST_F(TreeFixture, RedrawTags)
   EXPECT_TRUE(screen.needs_redraw());
   EXPECT_TRUE(as_rec(&a).main->redraw_tagged());
   EXPECT_EQ(requests, 1);
+}
+
+TEST(UIBridge, HorizontalWheelAndTrackpadAxesReachTheWidget)
+{
+  Event event;
+  event.type = EventType::Wheel;
+  event.x = 25;
+  event.y = 50;
+  event.modifiers = ModShift;
+  event.time_ms = 2500;
+  event.wheel_x = -2;
+  const Rect region{10, 20, 210, 220};
+  auto translated = translate_event(event, region);
+  ASSERT_EQ(translated.size(), 1u);
+  EXPECT_EQ(translated[0].wheel_x, -2);
+  EXPECT_EQ(translated[0].wheel_y, 0);
+  EXPECT_EQ(translated[0].mods, ui::MOD_SHIFT);
+  EXPECT_EQ(translated[0].time, 2.5);
+  event.precise = true;
+  event.wheel_x = 80;
+  event.wheel_y = -40;
+  translated = translate_event(event, region);
+  ASSERT_EQ(translated.size(), 1u);
+  EXPECT_EQ(translated[0].wheel_x, 2);
+  EXPECT_EQ(translated[0].wheel_y, -1);
+  event.wheel_x = event.wheel_y = 0;
+  EXPECT_TRUE(translate_event(event, region).empty());
 }

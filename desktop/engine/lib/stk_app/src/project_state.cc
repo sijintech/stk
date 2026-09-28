@@ -48,6 +48,24 @@ std::string ProjectTable::text(const int row, const int column) const
   return definition(row, column) ? "= " + text : text;
 }
 
+int ProjectTable::compare(const int row_a, const int row_b, const int column) const
+{
+  if (column < 0 || size_t(column) >= fields.size()) { return 0; }
+  if (fields[column].type == "integer" || fields[column].type == "number") {
+    const auto *a = cell(row_a, column), *b = cell(row_b, column);
+    auto valid = [&](const Json *value, int row) {
+      const auto *computed = evaluation(row, column);
+      return value && value->is_number() && !(computed && io::get_string(*computed, "state") == "error");
+    };
+    const bool a_valid = valid(a, row_a), b_valid = valid(b, row_b);
+    if (!a_valid || !b_valid) { return int(b_valid) - int(a_valid); }
+    // JSON compares integer pairs without conversion to double, preserving the full int64 range.
+    return int(*a > *b) - int(*a < *b);
+  }
+  const auto a = text(row_a, column), b = text(row_b, column);
+  return int(a > b) - int(a < b);
+}
+
 const Json *ProjectTable::definition(const int row, const int column) const
 {
   if (row < 0 || column < 0 || size_t(row) >= records.size() || size_t(column) >= fields.size()) {

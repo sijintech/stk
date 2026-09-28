@@ -27,6 +27,7 @@ struct ProjectTable {
   const io::Json *definition(int row, int column) const;
   const io::Json *evaluation(int row, int column) const;
   std::string text(int row, int column) const;
+  int compare(int row_a, int row_b, int column) const;
 };
 
 /** Parse a literal editor value without lossy double conversion of int64 values. Text stays raw;

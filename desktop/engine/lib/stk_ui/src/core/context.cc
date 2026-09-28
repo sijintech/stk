@@ -838,7 +838,7 @@ bool Context::activate_focused(const Event &e)
         return false;
       }
       const float row_h = list_row_height(*w);
-      const float view_h = w->rect.h - (w->table ? row_h : 0.0f) - 2 * style_.pixel;
+      const float view_h = list_body(*w).h;
       const int page = std::max(1, int(view_h / row_h) - 1);
       /* Tables move through the view order (sorted), lists through the model order. */
       const std::vector<int> *perm = w->table ? &table_perm(*w) : nullptr;
@@ -924,7 +924,7 @@ void Context::set_hover(const Widget *w, Vec2 p)
   else if (w && (w->type == WidgetType::VirtualList || w->type == WidgetType::Table)) {
     const float row_h = list_row_height(*w);
     const float body_y = w->rect.y + style_.pixel + (w->table ? row_h : 0.0f);
-    zone = p.y < body_y ? -1 : int((p.y - body_y + scroll_of(w->id)) / row_h);
+    zone = !list_body(*w).contains(p) ? -1 : int((p.y - body_y + scroll_of(w->id)) / row_h);
   }
   else if (w && w->type == WidgetType::Tabs && !w->items.empty()) {
     zone = int((p.x - w->rect.x) / (w->rect.w / float(w->items.size())));
@@ -955,20 +955,64 @@ float Context::list_row_height(const Widget &w) const
 
 float Context::max_scroll(const Widget &w) const
 {
-  const float px = style_.pixel;
   const float row_h = list_row_height(w);
-  float content = 0.0f, view = w.rect.h - 2 * px;
+  float content = 0.0f, view = list_body(w).h;
   if (w.list) {
     content = float(w.list->count) * row_h;
   }
   else if (w.table) {
     content = float(w.table->rows) * row_h;
-    view -= row_h;
   }
   else if (w.log) {
     content = float(w.log->line_count()) * row_h + 2 * std::round(0.2f * style_.unit);
   }
   return std::max(0.0f, content - view);
+}
+
+float Context::table_scroll_max(const Widget &w) const
+{
+  if (!w.table) { return 0.0f; }
+  const auto state = tables_.find(w.id);
+  const bool stored = state != tables_.end() && state->second.widths_u.size() == w.table->columns.size();
+  float total = 0;
+  for (size_t i = 0; i < w.table->columns.size(); ++i) {
+    total += std::round((stored ? state->second.widths_u[i] : w.table->columns[i].width) * style_.unit);
+  }
+  const float view = std::max(0.0f, w.rect.w - 2 * style_.pixel - style_.scrollbar);
+  return std::max(0.0f, total - view);
+}
+
+float Context::table_scroll_x(const Widget &w)
+{
+  auto &state = table_state(w);
+  state.scroll_x = std::clamp(state.scroll_x, 0.0f, table_scroll_max(w));
+  return state.scroll_x;
+}
+
+Rect Context::list_body(const Widget &w) const
+{
+  const float header = w.table ? list_row_height(w) : 0.0f;
+  const float horizontal = table_scroll_max(w) > 0 ? style_.scrollbar + 2 * style_.pixel : 0;
+  return {w.rect.x + style_.pixel, w.rect.y + style_.pixel + header,
+          std::max(0.0f, w.rect.w - 2 * style_.pixel),
+          std::max(0.0f, w.rect.h - 2 * style_.pixel - header - horizontal)};
+}
+
+Rect Context::table_scroll_track(const Widget &w) const
+{
+  if (table_scroll_max(w) <= 0) { return {}; }
+  return {w.rect.x + style_.pixel, w.rect.y1() - style_.pixel - style_.scrollbar,
+          std::max(0.0f, w.rect.w - 2 * style_.pixel - style_.scrollbar), style_.scrollbar};
+}
+
+Rect Context::table_scroll_thumb(const Widget &w)
+{
+  const Rect track = table_scroll_track(w);
+  if (track.empty()) { return {}; }
+  const float maximum = table_scroll_max(w);
+  const float width = std::min(track.w, std::max(style_.unit, track.w * track.w / (track.w + maximum)));
+  return {std::round(track.x + table_scroll_x(w) / maximum * (track.w - width)), track.y,
+          std::round(width), track.h};
 }
 
 Rect Context::scrollbar_rect(const Widget &w, float content, float view, float scroll, Rect area) const
@@ -989,6 +1033,8 @@ Context::TableState &Context::table_state(const Widget &w)
   TableState &s = tables_[w.id];
   if (s.widths_u.size() != w.table->columns.size()) {
     s.widths_u.clear();
+    s.scroll_x = 0;
+    if (s.sort_col >= int(w.table->columns.size())) { s.sort_col = -1; }
     for (const TableColumn &c : w.table->columns) {
       s.widths_u.push_back(c.width);
     }
@@ -1009,7 +1055,13 @@ const std::vector<int> &Context::table_perm(const Widget &w)
     }
     if (s.sort_col >= 0 && size_t(s.sort_col) < t.columns.size() && t.cell) {
       const int c = s.sort_col;
-      if (t.columns[size_t(c)].numeric) {
+      if (t.compare) {
+        std::stable_sort(s.perm.begin(), s.perm.end(), [&](int a, int b) {
+          const int order = t.compare(a, b, c);
+          return s.ascending ? order < 0 : order > 0;
+        });
+      }
+      else if (t.columns[size_t(c)].numeric) {
         std::vector<double> keys(size_t(t.rows));
         for (int i = 0; i < t.rows; i++) {
           NumberProps p;
@@ -1059,7 +1111,7 @@ int Context::table_header_col(const Widget &w, Vec2 p)
   if (p.y >= w.rect.y + style_.pixel + row_h) {
     return -1;
   }
-  float x = w.rect.x + style_.pixel;
+  float x = w.rect.x + style_.pixel - table_scroll_x(w);
   for (int c = 0; c < int(w.table->columns.size()); c++) {
     const float cw = table_col_px(w, c);
     if (p.x >= x && p.x < x + cw) {
@@ -1077,7 +1129,7 @@ int Context::table_resize_hit(const Widget &w, Vec2 p)
     return -1;
   }
   const float tol = std::max(3.0f, std::round(0.2f * style_.unit));
-  float x = w.rect.x + style_.pixel;
+  float x = w.rect.x + style_.pixel - table_scroll_x(w);
   for (int c = 0; c + 1 < int(w.table->columns.size()); c++) {
     x += table_col_px(w, c);
     if (std::fabs(p.x - x) <= tol) {
@@ -1198,7 +1250,7 @@ EventResult Context::mouse_move(const Event &e)
         edit_click(*w, e.pos, true, false);
         break;
       case DragState::Kind::Scroll: {
-        const float view = w->rect.h - 2 * style_.pixel - (w->table ? list_row_height(*w) : 0.0f);
+        const float view = list_body(*w).h;
         const float ms = max_scroll(*w);
         const float content = ms + view;
         const float thumb_h = std::max(style_.unit, (view) * view / std::max(content, 1.0f));
@@ -1211,8 +1263,17 @@ EventResult Context::mouse_move(const Event &e)
         }
         break;
       }
+      case DragState::Kind::TableScroll: {
+        const Rect track = table_scroll_track(*w), thumb = table_scroll_thumb(*w);
+        const float maximum = table_scroll_max(*w), travel = track.w - thumb.w;
+        if (travel > 0) {
+          table_state(*w).scroll_x = std::clamp(drag_.start_scroll + d.x * maximum / travel, 0.0f, maximum);
+        }
+        break;
+      }
       case DragState::Kind::ColumnResize: {
         TableState &s = table_state(*w);
+        if (drag_.column < 0 || size_t(drag_.column) >= s.widths_u.size()) { break; }
         s.widths_u[size_t(drag_.column)] = std::max(1.5f, float(drag_.start_value) + d.x / style_.unit);
         break;
       }
@@ -1378,12 +1439,22 @@ EventResult Context::mouse_down(const Event &e)
     case WidgetType::Table:
     case WidgetType::LogView: {
       const float row_h = list_row_height(*w);
-      const float header = w->table ? row_h : 0.0f;
-      const Rect body{w->rect.x + px, w->rect.y + px + header, w->rect.w - 2 * px, w->rect.h - 2 * px - header};
+      const Rect body = list_body(*w);
+      if (w->table && table_scroll_track(*w).contains(e.pos)) {
+        const Rect track = table_scroll_track(*w), thumb = table_scroll_thumb(*w);
+        auto &state = table_state(*w);
+        if (!thumb.contains(e.pos)) {
+          state.scroll_x = std::clamp(state.scroll_x + (e.pos.x < thumb.x ? -1 : 1) * track.w * 0.9f,
+                                      0.0f, table_scroll_max(*w));
+        }
+        drag_.kind = DragState::Kind::TableScroll;
+        drag_.start_scroll = state.scroll_x;
+        break;
+      }
       const float ms = max_scroll(*w);
       const float scroll = scroll_of(w->id);
       const Rect thumb = scrollbar_rect(*w, ms + body.h, body.h, scroll, body);
-      if (!thumb.empty() && e.pos.x >= thumb.x - px && e.pos.y >= body.y) {
+      if (!thumb.empty() && e.pos.x >= thumb.x - px && e.pos.y >= body.y && e.pos.y < body.y1()) {
         drag_.kind = DragState::Kind::Scroll;
         drag_.start_scroll = scroll;
         if (!thumb.contains(e.pos)) {
@@ -1421,6 +1492,7 @@ EventResult Context::mouse_down(const Event &e)
         set_scroll(w->id, ms, ms);
         break;
       }
+      if (!body.contains(e.pos)) { break; }
       const int view_row = int((e.pos.y - body.y + scroll) / row_h);
       const int count = w->list ? w->list->count : w->table->rows;
       if (view_row >= 0 && view_row < count) {
@@ -1504,7 +1576,8 @@ EventResult Context::mouse_up(const Event &e)
       }
       break;
     case DragState::Kind::Header:
-      if (!d.moved && inside && w->table && d.column >= 0 && w->table->columns[size_t(d.column)].sortable) {
+      if (!d.moved && inside && w->table && d.column >= 0 && size_t(d.column) < w->table->columns.size() &&
+          w->table->columns[size_t(d.column)].sortable) {
         TableState &s = table_state(*w);
         if (s.sort_col == d.column) {
           s.ascending = !s.ascending;
@@ -1546,6 +1619,12 @@ EventResult Context::wheel(const Event &e)
       if (edit_.id == w->id) { edit_.follow_caret = false; }
       return {true, true};
     }
+  }
+  if (w && w->table && ((e.mods & MOD_SHIFT) || e.wheel_x != 0)) {
+    const float amount = e.wheel_x != 0 ? e.wheel_x : e.wheel_y;
+    auto &state = table_state(*w);
+    state.scroll_x = std::clamp(table_scroll_x(*w) - amount * 3 * style_.unit, 0.0f, table_scroll_max(*w));
+    return {true, true};
   }
   if (w && (w->type == WidgetType::VirtualList || w->type == WidgetType::Table || w->type == WidgetType::LogView)) {
     const float ms = max_scroll(*w);

@@ -502,6 +502,135 @@ TEST(Table, SortAndResize)
   EXPECT_EQ(first_row(), 1);
 }
 
+TEST(Table, HorizontalScrollKeepsHeadersSortingSelectionAndResizeAligned)
+{
+  for (const float scale : {1.0f, 1.5f, 2.0f}) {
+    Harness h(scale);
+    int selected = -1, columns = 4;
+    float width = 300 * scale;
+    h.window.x = 1100 * scale;
+    h.ui = [&](Context &ctx) {
+      TableSpec spec;
+      for (int i = 0; i < columns; ++i) { spec.columns.push_back({"Column" + std::to_string(i), 6, true, false}); }
+      spec.columns.back().numeric = true;
+      spec.rows = 8;
+      spec.visible_rows = 3;
+      spec.cell = [](int row, int column) { return column == 3 ? std::to_string(8 - row) : "row" + std::to_string(row); };
+      spec.selected = bind(selected);
+      ctx.block("r", {0, 0, width, 600 * scale}).layout().table("t", std::move(spec));
+    };
+    h.frame();
+    const auto w = h.w("t").rect;
+    const auto id = h.w("t").id;
+    const auto &style = h.ctx->style();
+    auto title_x = [&](const std::string &title) {
+      for (const auto &cmd : h.ctx->draw_list().cmds) {
+        if (cmd.type == CmdType::Text && cmd.text == title) { return cmd.pos.x; }
+      }
+      return -9999.0f;
+    };
+    const float initial = title_x("Column0");
+    const float maximum = 24 * style.unit - (w.w - 2 * style.pixel - style.scrollbar);
+    ASSERT_GT(maximum, 0);
+    h.send(Event::wheel(h.center("t"), -1000, h.t, MOD_SHIFT));
+    EXPECT_NEAR(title_x("Column0"), initial - maximum, 1);
+    EXPECT_EQ(h.ctx->scroll_of(id), 0) << "horizontal gestures do not scroll rows";
+    const float last_x = w.x + style.pixel + 18 * style.unit - maximum;
+    h.click({last_x + 2 * style.unit, w.y + style.pixel + style.unit * 0.5f});
+    h.click({w.x + 2 * style.unit, w.y + style.pixel + style.unit * 1.5f});
+    EXPECT_EQ(selected, 7) << "the visible last header sorts the last model column";
+    h.key(Key::Down);
+    EXPECT_EQ(selected, 6);
+    const float before_resize = title_x("Column3");
+    const Vec2 edge{last_x, w.y + style.pixel + style.unit * 0.5f};
+    h.drag(edge, {edge.x + style.unit, edge.y});
+    EXPECT_NEAR(title_x("Column3") - before_resize, style.unit, 1);
+    const int before_bar = selected;
+    const float bar_y = w.y1() - style.pixel - style.scrollbar * 0.5f;
+    // Clicking the far left track pages left, without selecting a data row.
+    h.click({w.x + 2 * style.pixel, bar_y});
+    EXPECT_EQ(selected, before_bar);
+    EXPECT_GT(title_x("Column0"), initial - maximum);
+    h.send(Event::wheel(h.center("t"), 1000, h.t, MOD_SHIFT));
+    EXPECT_NEAR(title_x("Column0"), initial, 1);
+    Event sideways = Event::wheel(h.center("t"), 0, h.t);
+    sideways.wheel_x = -1;
+    h.send(sideways);
+    EXPECT_NEAR(title_x("Column0"), initial - 3 * style.unit, 1);
+    h.key(Key::End);
+    EXPECT_EQ(selected, 0);
+    EXPECT_GT(h.ctx->scroll_of(id), 0);
+    EXPECT_NEAR(title_x("Column0"), initial - 3 * style.unit, 1);
+    width = 1000 * scale;
+    h.frame();
+    EXPECT_NEAR(title_x("Column0"), initial, 1) << "widening clamps the horizontal offset";
+    columns = 1; // Removing the sorted column must invalidate its sort index as well.
+    h.frame();
+    h.key(Key::Home);
+    EXPECT_EQ(selected, 0);
+  }
+}
+
+TEST(Table, ModelComparatorSortsFormattedCellsAndKeepsEqualRowsStable)
+{
+  Harness h;
+  int selected = -1;
+  const std::vector<int64_t> values = {9007199254740993LL, 2, 9007199254740992LL, 2};
+  h.ui = [&](Context &ctx) {
+    TableSpec spec;
+    spec.columns = {{"Computed", 6, true, true}};
+    spec.rows = int(values.size());
+    spec.cell = [&](int row, int) { return "= " + std::to_string(values[row]); };
+    spec.compare = [&](int a, int b, int) { return int(values[a] > values[b]) - int(values[a] < values[b]); };
+    spec.selected = bind(selected);
+    ctx.block("r", {0, 0, 400, 600}).layout().table("t", std::move(spec));
+  };
+  h.frame();
+  const auto w = h.w("t").rect;
+  const float u = h.ctx->style().unit;
+  const Vec2 header{w.x + u, w.y + 1 + u * 0.5f}, row{w.x + u, w.y + 1 + u * 1.5f};
+  h.click(header);
+  h.click(row);
+  EXPECT_EQ(selected, 1);
+  h.key(Key::Down);
+  EXPECT_EQ(selected, 3);
+  h.key(Key::Down);
+  EXPECT_EQ(selected, 2);
+  h.click(header);
+  h.click(row);
+  EXPECT_EQ(selected, 0) << "full integer precision survives formatted display text";
+}
+
+TEST(Table, HorizontalThumbDragAndEmptyTables)
+{
+  Harness h;
+  int selected = -1, rows = 0;
+  h.ui = [&](Context &ctx) {
+    TableSpec spec;
+    spec.columns = {{"First", 12}, {"Middle", 12}, {"Last", 12}};
+    spec.rows = rows;
+    spec.visible_rows = 3;
+    spec.cell = [](int, int) { return "cell"; };
+    spec.selected = bind(selected);
+    ctx.block("r", {0, 0, 300, 600}).layout().table("t", std::move(spec));
+  };
+  h.frame();
+  const auto w = h.w("t").rect;
+  const auto &style = h.ctx->style();
+  const float y = w.y1() - style.pixel - style.scrollbar * 0.5f;
+  h.drag({w.x + 2 * style.unit, y}, {w.x1() - style.scrollbar - 2 * style.pixel, y});
+  EXPECT_EQ(selected, -1);
+  bool last_visible = false;
+  for (const auto &cmd : h.ctx->draw_list().cmds) {
+    if (cmd.type == CmdType::Text && cmd.text == "Last") { last_visible = cmd.pos.x >= w.x && cmd.pos.x < w.x1(); }
+  }
+  EXPECT_TRUE(last_visible);
+  rows = 10;
+  h.frame();
+  h.click({w.x + style.unit, y});
+  EXPECT_EQ(selected, -1) << "a scrollbar click is never a row selection";
+}
+
 TEST(LogView, FollowsTailUntilScrolledUp)
 {
   Harness h;

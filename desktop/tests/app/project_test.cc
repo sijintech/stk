@@ -65,6 +65,29 @@ TEST(ProjectTable, LiteralTypesPreservePrecisionAndRejectInvalidInput)
   EXPECT_TRUE(error.empty());
 }
 
+TEST(ProjectTable, NumericOrderingUsesEvaluatedValuesAndPreservesInt64Precision)
+{
+  ProjectTable table;
+  table.fields = {{"n", "Value", "number", "K"}};
+  table.records = {{"a", {{"n", 10}}, {{"n", {{"kind", "expression"}}}}},
+                   {"b", {{"n", 2}}, {{"n", {{"kind", "reference"}}}}},
+                   {"c", Json::object()},
+                   {"d", {{"n", 1}}, Json::object(), {{"n", {{"state", "error"}, {"error", {{"code", "cycle"}}}}}}}};
+  EXPECT_EQ(table.text(0, 0), "= 10");
+  EXPECT_GT(table.compare(0, 1, 0), 0);
+  EXPECT_LT(table.compare(1, 0, 0), 0);
+  EXPECT_EQ(table.compare(0, 0, 0), 0);
+  EXPECT_GT(table.compare(2, 1, 0), 0);
+  EXPECT_GT(table.compare(3, 1, 0), 0);
+  EXPECT_EQ(table.compare(2, 3, 0), 0);
+  table.fields[0].type = "integer";
+  table.records[0].values["n"] = int64_t(9223372036854775807LL);
+  table.records[1].values["n"] = int64_t(9223372036854775806LL);
+  EXPECT_GT(table.compare(0, 1, 0), 0);
+  table.records[0].values["n"] = int64_t(-9223372036854775807LL - 1);
+  EXPECT_LT(table.compare(0, 1, 0), 0);
+}
+
 TEST(ProjectFiles, VscodeUrlsEncodePathDataAndRejectAmbiguousLocations)
 {
   EXPECT_EQ(platform::vscode_file_url("/tmp/hello world#?.md"), "vscode://file/tmp/hello%20world%23%3F.md");

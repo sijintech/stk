@@ -157,6 +157,9 @@ struct TableSpec {
   /** Optional text colour of a cell (model row); alpha 0 keeps the list text colour. Selected rows
    * keep the selection text colour. */
   std::function<Color(int row, int col)> cell_color;
+  /** Optional model-value ordering, independent of formatted cell text. Negative/zero/positive
+   * means before/equal/after. Must be a strict weak ordering; ties retain model order. */
+  std::function<int(int row_a, int row_b, int column)> compare;
 };
 
 struct ImageSpec {
@@ -470,7 +473,7 @@ class Context {
   };
   struct DragState {
     enum class Kind : uint8_t {
-      None, Press, Number, Slider, TextSelect, Scroll, ColumnResize, Splitter, ImagePan, Header,
+      None, Press, Number, Slider, TextSelect, Scroll, TableScroll, ColumnResize, Splitter, ImagePan, Header,
     };
     WidgetId id = 0;
     Kind kind = Kind::None;
@@ -492,6 +495,7 @@ class Context {
     bool menu = false;
   };
   struct TableState {
+    float scroll_x = 0.0f;
     std::vector<float> widths_u;
     int sort_col = -1;
     bool ascending = true;
@@ -535,6 +539,11 @@ class Context {
   void drag_number(const Widget &w, const Event &e);
   float list_row_height(const Widget &w) const;
   float max_scroll(const Widget &w) const;
+  Rect list_body(const Widget &w) const;
+  float table_scroll_max(const Widget &w) const;
+  float table_scroll_x(const Widget &w);
+  Rect table_scroll_track(const Widget &w) const;
+  Rect table_scroll_thumb(const Widget &w);
   void set_scroll(WidgetId id, float v, float max);
   TableState &table_state(const Widget &w);
   const std::vector<int> &table_perm(const Widget &w);
