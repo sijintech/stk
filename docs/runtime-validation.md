@@ -4,6 +4,14 @@
 
 ## 2026-09-28 最新跨平台确认
 
+最后功能提交 `c3fa59c` 的[desktop 36416998477](https://github.com/sijintech/stk/actions/runs/36416998477)
+**全部成功**，包含 Windows 原生编译/CPU/桥、Linux GL/Vulkan、macOS Metal、两平台打包和干净环境启动。
+本机完整 **504/504、无跳过**；下载最终 macOS 产物的 **313 项 CPU、53 项 Metal** 无跳过全部通过，
+目视确认横向滚动条不再遮挡第三行数据。
+[Runtime 36416998488](https://github.com/sijintech/stk/actions/runs/36416998488)和
+[文档 36416998657](https://github.com/sijintech/stk/actions/runs/36416998657)成功。
+后续说明文档提交 `d01bf76` 的 Runtime **36417769639**、文档 **36417769613** 成功，未改变上述功能代码。
+
 `a0d7f57` 包含文件 Viewer、表格滚动/精确排序、修改预览及工作台必跑检查：
 [desktop 36414890836](https://github.com/sijintech/stk/actions/runs/36414890836)、
 [Runtime 36414891171](https://github.com/sijintech/stk/actions/runs/36414891171)、
@@ -11,7 +19,7 @@
 桌面包括 Linux、macOS、Windows、打包和干净环境启动；Windows 仍是 CPU/桥测试，无 GPU 验收。
 已下载 macOS frames artifact：JUnit 的 **312 项 CPU、53 项 Metal** 全通过且无跳过；
 归档含 **22 张工作台图片**，已目视检查离线三维/参数表和文件预设入口。
-截图进一步发现横向滚动条减少了实际可见行数，其高度修正及后续提交单独验证。
+截图进一步发现横向滚动条减少了实际可见行数，其高度修正已由上述 `c3fa59c` 验证。
 
 `dbf3cde` 自身的 desktop run 36414605007 被后续 CI 配置提交取消；上述成功的后继运行覆盖其修改预览代码。
 此前文件/表格提交 `f1a0f72` 的 desktop **36413089067**、Runtime **36413089012**、文档 **36413089085** 也全部成功。
