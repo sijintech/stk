@@ -198,6 +198,7 @@ struct Widget {
   bool enabled = true;
   uint8_t corners = CORNER_ALL;
   float height = 0.0f;      /**< Pixels; set at creation (width-dependent types at layout). */
+  float table_base_height = 0.0f; /**< Requested rows + header; excludes a width-dependent horizontal scrollbar. */
   float fixed_width = 0.0f; /**< Pixels; 0 = flexible. */
   bool mono = false;
   Block *block = nullptr;

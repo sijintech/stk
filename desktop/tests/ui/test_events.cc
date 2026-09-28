@@ -601,6 +601,45 @@ TEST(Table, ModelComparatorSortsFormattedCellsAndKeepsEqualRowsStable)
   EXPECT_EQ(selected, 0) << "full integer precision survives formatted display text";
 }
 
+TEST(Table, HorizontalScrollbarPreservesRequestedVisibleRows)
+{
+  for (const float scale : {1.0f, 1.5f, 2.0f}) {
+    Harness h(scale);
+    int selected = -1;
+    float width = 300 * scale;
+    h.ui = [&](Context &ctx) {
+      TableSpec spec;
+      spec.columns = {{"First", 12}, {"Last", 12}};
+      spec.rows = 3;
+      spec.visible_rows = 3;
+      spec.cell = [](int row, int) { return std::to_string(row); };
+      spec.selected = bind(selected);
+      auto &layout = ctx.block("r", {0, 0, width, 160 * scale}).layout();
+      layout.table("t", std::move(spec));
+      // Force the outer scrolling block's second layout pass.
+      for (int i = 0; i < 15; ++i) { layout.label("Below the table"); }
+    };
+    h.frame();
+    const auto &style = h.ctx->style();
+    const float base = 4 * style.unit + 2 * style.pixel;
+    const float narrow_height = base + style.scrollbar + 2 * style.pixel;
+    EXPECT_FLOAT_EQ(h.w("t").rect.h, narrow_height);
+    const auto w = h.w("t").rect;
+    h.click({w.x + style.unit, w.y + style.pixel + 3.9f * style.unit});
+    EXPECT_EQ(selected, 2) << "the entire last requested row is above the horizontal scrollbar";
+    for (int i = 0; i < 3; ++i) {
+      h.frame();
+      EXPECT_FLOAT_EQ(h.w("t").rect.h, narrow_height) << "repeated layout must not accumulate scrollbar height";
+    }
+    width = 1000 * scale;
+    h.frame();
+    EXPECT_FLOAT_EQ(h.w("t").rect.h, base) << "no extra strip when the columns fit";
+    width = 300 * scale;
+    h.frame();
+    EXPECT_FLOAT_EQ(h.w("t").rect.h, narrow_height);
+  }
+}
+
 TEST(Table, HorizontalThumbDragAndEmptyTables)
 {
   Harness h;

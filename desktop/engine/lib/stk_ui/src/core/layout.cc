@@ -366,6 +366,7 @@ Widget &Layout::table(std::string_view key, TableSpec spec)
   Widget &w = add_widget(WidgetType::Table, key);
   const Style &st = ctx().style();
   w.height = std::round((spec.visible_rows + 1.0f) * st.unit * scale_y_) + 2.0f * st.pixel;
+  w.table_base_height = w.height;
   w.table = std::make_shared<TableSpec>(std::move(spec));
   return w;
 }
@@ -656,6 +657,11 @@ void LayoutEngine::place_x(Context &ctx, Layout &l, float x, float w)
 
 float LayoutEngine::widget_height(Context &ctx, Widget &w)
 {
+  if (w.table) {
+    // Layout can resolve the same widget twice (e.g. an outer scrolling block). Always start
+    // from the requested row height so the scrollbar strip is added exactly once.
+    w.height = w.table_base_height + (ctx.table_scroll_max(w) > 0 ? ctx.style().scrollbar + 2 * ctx.style().pixel : 0);
+  }
   if (w.type == WidgetType::Paragraph) {
     const Style &st = ctx.style();
     w.lines = break_lines(w.text, w.rect.w - 2 * st.text_margin, ctx.measurer(), st.font);
