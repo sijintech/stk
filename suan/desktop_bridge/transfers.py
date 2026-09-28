@@ -263,18 +263,31 @@ class TransferManager:
         return self.public(record)
 
     def resume(self, transfer_id):
-        record = self.load(transfer_id)
-        with self.lock:
-            running = self.threads.get(transfer_id)
-            if running is not None and running.is_alive():
-                return self.public(record)
-            if record["state"] == "completed":
-                return self.public(record)
-            self.cancelled.discard(transfer_id)
-            record.update(state="queued", error=None)
-            self.save(record)
-            self._launch(transfer_id)
-        return self.public(record)
+        deadline = time.monotonic() + 5.0
+        while True:
+            with self.lock:
+                if self.stopping.is_set():
+                    raise BridgeError("shutting_down", "Transfers are shutting down")
+                # Read under the same lock as launching: another resume may have queued it.
+                record = self.load(transfer_id)
+                running = self.threads.get(transfer_id)
+                if record["state"] == "completed":
+                    return self.public(record)
+                if running is None or not running.is_alive():
+                    self.cancelled.discard(transfer_id)
+                    record.update(state="queued", error=None)
+                    self.save(record)
+                    self._launch(transfer_id)
+                    return self.public(record)
+                if record["state"] in ACTIVE:
+                    return self.public(record)
+            # A terminal event is observable before its worker releases the file lock and slot.
+            # Do not acknowledge resume as a no-op in that interval, or launch a competing worker.
+            # Waiting outside self.lock lets the old worker finish its cleanup.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or running is threading.current_thread():
+                raise BridgeError("busy", "The previous transfer attempt is still finishing", retryable=True)
+            running.join(timeout=remaining)
 
     def resume_interrupted(self):
         resumed = []

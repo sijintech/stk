@@ -313,6 +313,12 @@ Jobs、Properties 英文布局，真实 Python 桥、Vulkan/OpenGL、X11/Wayland
 
 ## 覆盖范围
 
+2026-09-28 传输恢复补充：Runtime CI run 36378576449 暴露失败通知与 worker 退出之间的窗口。
+`resume` 现在在管理锁外等待终态 worker 收尾，然后在锁内重新读取状态；同时到达的恢复请求
+不会启动两个 worker，活动/已完成的传输仍保持幂等。收尾超过 5 秒返回可重试 `busy`。
+本机 `test_desktop_transfer_lifecycle.py`、`test_hub_desktop_bridge.py` 和
+`test_desktop_bridge_runtime.py` 共 **23 项通过**；新增测试用事件门控制时序，不依赖 sleep。
+
 | 验收项 | 证据 |
 |---|---|
 | API 与 supervisor 分别重启，计算继续 | `test_deployment.py` 实际启动独立进程，检查 worker 身份与日志无重复 |
