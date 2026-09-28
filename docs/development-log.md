@@ -11,8 +11,10 @@
 
 本机完整桌面 **520/520** 通过，无跳过；新增 8 项模型/真实桥/原生交互回归和 8 项 GL/Vulkan 中英文截图。
 测试覆盖稳定 ID 应用/撤销、依赖值、旧错误、级联删除、未设置/null/int64、过期及待返回候选、
-关闭/重启、外部并发，以及文本尚未失焦时直接点击应用。已检查差异/错误页和原有离线工作台截图。
-中英文字典各 **878 项** 一致。日志：`/tmp/stk-review-build.log`、`/tmp/stk-review-full.log`、`/tmp/stk-review-full.xml`。
+关闭/重启、外部并发、旧按钮不能应用后来的新候选，以及文本尚未失焦时直接点击应用。
+已检查差异/错误页和原有离线工作台截图。
+中英文字典各 **878 项** 一致。最终日志：`/tmp/stk-review-binding-build.log`、
+`/tmp/stk-review-binding-full.log`、`/tmp/stk-review-binding-full.xml`。
 本批跨平台 CI 待推送后跟踪；以前的 macOS/Windows 通过记录不能代替本批结果。
 
 使用步骤见[预览指南](project-preview.md#原生修改检查)和[真机验收清单](workbench-acceptance.md)。

@@ -57,7 +57,9 @@ void ProjectReviewView::draw(ui::Layout &layout, EditorContext &ctx, ProjectStat
   const bool stale = state.project()->id != review->project_id || state.project()->revision != review->base_revision;
   if (stale) { layout.paragraph(ctx.tr("project.review.stale")); }
   if (!review->errors.empty()) { layout.paragraph(ctx.tr("project.review.errors_hint")); }
-  layout.button("review_apply", ctx.tr("project.review.apply"), [&state] { state.apply_review(); })
+  layout.button("review_apply", ctx.tr("project.review.apply"), [&state, review] {
+    if (state.review() == review) { state.apply_review(); }
+  })
       .disable(!state.can_apply_review());
   layout.tabs("review_category", {std::string(ctx.tr("project.review.changes")),
                                    std::string(ctx.tr("project.review.errors"))}, {

@@ -460,6 +460,10 @@ TEST_F(ProjectPython, ReviewCellUIShowsDiffInvalidatesEditedDraftAndAppliesExpli
   EXPECT_EQ(widget("review_apply"), nullptr);
   widget("review_preview")->on_click();
   settled();
+  apply(); // A new candidate must not be applied by a callback displaying the previous candidate.
+  EXPECT_FALSE(state().busy());
+  EXPECT_EQ(state().project()->revision, 1);
+  ASSERT_TRUE(state().review());
   f.drv->frame();
   ASSERT_TRUE(widget("review_apply")->enabled);
   widget("review_apply")->on_click();
