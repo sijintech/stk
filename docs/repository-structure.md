@@ -86,6 +86,9 @@ P1 已新增 `suan/project/`，实现独立于 UI 的 Python 项目存储与原�
 
 AI 编排以后通过同一项目服务与 Runtime 操作；通用表格的字段展示/编辑属于 `desktop` UI，
 字段类型和校验语义属于共享模型。分析重活继续复用 `suan/graph`、`suan/data` 与现有 worker。
+新增的 Python 控制台 UI 与布局命令执行属于 `desktop/`；共享操作 API、脚本会话代理与连接逻辑
+在 Python 服务层组织，具体模块在技术验证后确定，见[Python 与连接设计](design/scripting-and-connections.md)。
+本机桥与机器间传输保持不同职责，不能简单把 stdio 桥开放成网络任意执行入口。
 这样可以实现新目标；内部 Python 包路径按上述方向迁移，公开入口提供过渡兼容，
 客户端协议和原生构建入口继续沿用。
 
