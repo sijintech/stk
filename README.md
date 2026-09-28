@@ -65,6 +65,7 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 - docs/specs：数据格式、节点图、渲染数据包、监控事件与畴分类的英文规范，附节点目录与示例。
 - plugins/synorder：Synorder 插件（暂缓，可选集成）。
 - examples/runtime：确定性参数扫描与 PNG／VTK 结果验收示例。
+- [examples/project_scan](examples/project_scan/README.md)：原生 Python 面板准备参数表/输入快照，运行面板明确提交，下载 VTK/图片并汇总到结果表。
 - tests：任务生命周期、协议、文件传输和科学数据格式的回归测试。
 - archive：退出当前构建的历史 C/C++ 工具、实验与旧打包文件，见[归档索引](archive/README.md)。
 
