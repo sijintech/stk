@@ -10,7 +10,7 @@
 | 能力 | 当前状态 | 依据 |
 |---|---|---|
 | 原生桌面调用本机 Python | 已有：C++ 启动桥子进程，通过 stdio NDJSON 请求/响应和事件通信 | [桌面桥 v1](../specs/stk-desktop-bridge-v1.md) |
-| Python 项目操作 | 已有首版存储 API 与 CLI；尚未接入桌面生命周期 | [项目存储指南](../project.md) |
+| Python 项目操作 | 已有存储 API、CLI、项目桥接口和原生表格生命周期；脚本控制台待接入 | [项目存储指南](../project.md) |
 | 界面内 Python 控制台与完整操作 API | 尚无；现有桥不提供 Python 脚本主动调用桌面 UI 的完整通道 | 当前桥由桌面发请求，Python 回响应/事件 |
 | 布局编程 | C++ 已有区域拆分/合并、编辑器切换、布局 JSON 保存恢复；没有公开 Python 布局 API | `desktop/engine/lib/stk_wm` 的 `screen.hh`、`layout_store.hh`，`stk_app` 的 `shell.hh` |
 | 连接另一台 Linux 计算机 | 已有：客户端经已有 SSH 隧道访问 Runtime，或经 hub 访问节点代理 | [Runtime 远程连接](../runtime.md#远程连接)、[控制服务指南](../hub.md) |

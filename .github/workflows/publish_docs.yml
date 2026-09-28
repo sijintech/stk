@@ -21,13 +21,18 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version-file: docs/.node-version
+
+      - name: Install the pinned package manager
+        run: npm install --global pnpm@8.15.9
 
       - name: Build
         run: |
           cd docs
-          npm install
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm run build
+          # Starlight 0.11 does not propagate a failed Pagefind subprocess exit.
+          test -s dist/pagefind/pagefind.js
 
       - name: Publish
         env:
@@ -35,4 +40,4 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           cd docs
-          npm run deploy
+          pnpm run deploy

@@ -18,7 +18,7 @@
 
 </template>
 <script>
-import i18n from "../content/i18n";
+import i18n from "../content/i18n/_index.js";
 
 export default {
   props: {
