@@ -6,6 +6,7 @@ same native button/bridge/HTTP assertions run on Windows and macOS without a ser
 """
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+from socketserver import TCPServer
 import threading
 from uuid import uuid4
 
@@ -54,7 +55,16 @@ class Peer:
                 else:
                     self.reply({"error": "unknown path"}, 404)
 
-        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        class LoopbackServer(HTTPServer):
+            def server_bind(self):
+                # HTTPServer normally performs socket.getfqdn even for 127.0.0.1. This
+                # protocol fixture has no hostname-dependent behavior and must not wait on
+                # the runner's reverse DNS (notably slow/unavailable on some macOS hosts).
+                TCPServer.server_bind(self)
+                self.server_name = "localhost"
+                self.server_port = self.server_address[1]
+
+        self.server = LoopbackServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_port}"
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
         self.thread.start()

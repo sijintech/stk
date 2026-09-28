@@ -748,7 +748,8 @@ TEST_F(ProjectPython, RunButtonsSubmitRefreshAndCancelOneTaskWithoutChangingTabl
       ", 'spec': {'workspace_id': 'a' * 32, 'argv': ['solver']}}], connection='runtime:peer', expected_revision=1)\n"
       "assert peer.submit_count == 0";
   ASSERT_TRUE(scripts.execute(source));
-  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy() && !state().busy(); }, 30));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy() && !state().busy(); }, 30))
+      << scripts.status().dump() << "\n" << client->bridge_log().text();
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
   ASSERT_TRUE(state().load_runs());
   settled();
