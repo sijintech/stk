@@ -99,6 +99,14 @@ class ProjectSessions:
         with self._operation():
             return {"history": self._get(params["handle"]).history()}
 
+    def backup(self, params):
+        with self._operation():
+            return self._get(params["handle"]).backup()
+
+    def upgrade(self, params):
+        with self._operation():
+            return self._get(params["handle"]).upgrade(expected_revision=params["expected_revision"])
+
     def shutdown(self):
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.

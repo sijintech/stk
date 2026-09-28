@@ -205,6 +205,8 @@ class Bridge:
             "project.snapshot": lambda p, c: self.projects.snapshot(p),
             "project.apply": self.apply_project,
             "project.history": lambda p, c: self.projects.history(p),
+            "project.backup": lambda p, c: self.projects.backup(p),
+            "project.upgrade": self.upgrade_project,
             "script.open": lambda p, c: self.scripts.open(p),
             "script.status": lambda p, c: self.scripts.status(p),
             "script.execute": self.scripts.execute,
@@ -384,7 +386,7 @@ class Bridge:
         # Deliberate initial coverage. In particular, scripts cannot recursively dispatch their
         # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
         names = ("project.create", "project.open", "project.list", "project.close", "project.snapshot",
-                 "project.apply", "project.history")
+                 "project.apply", "project.history", "project.backup", "project.upgrade")
         return {"operations": {name: bridge_schema.method_contract(name) for name in names},
                 "ui_operations": list(UI_OPERATIONS)}
 
@@ -414,6 +416,13 @@ class Bridge:
         result = self.projects.apply(params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
+        return result
+
+    def upgrade_project(self, params, context):
+        result = self.projects.upgrade(params)
+        if result["upgraded"]:
+            context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                                "revision": result["revision"]}))
         return result
 
     def close_project(self, params, context):

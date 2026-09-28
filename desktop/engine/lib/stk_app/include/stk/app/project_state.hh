@@ -14,6 +14,8 @@ struct ProjectField {
 struct ProjectRecord {
   std::string id;
   io::Json values;
+  io::Json definitions = io::Json::object();
+  io::Json evaluations = io::Json::object();
 };
 struct ProjectTable {
   std::string id, name;
@@ -22,6 +24,8 @@ struct ProjectTable {
 
   static ProjectTable from_json(const io::Json &value);
   const io::Json *cell(int row, int column) const;
+  const io::Json *definition(int row, int column) const;
+  const io::Json *evaluation(int row, int column) const;
   std::string text(int row, int column) const;
 };
 
@@ -48,6 +52,7 @@ class ProjectState {
   const std::optional<bridge::ProjectInfo> &project() const { return project_; }
   const std::vector<ProjectTable> &tables() const { return tables_; }
   const std::string &error() const { return error_; }
+  const std::string &notice() const { return notice_; }
   uint64_t version() const { return version_; }
 
   bool create(const std::string &directory, const std::string &name);
@@ -56,6 +61,8 @@ class ProjectState {
   bool close(std::function<void(bridge::Result<bool>)> complete = {});
   void refresh();
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
+  bool backup();
+  bool upgrade();
   const ProjectTable *table() const;
   const std::string &table_id() const { return table_id_; }
   const std::string &record_id() const { return record_id_; }
@@ -83,7 +90,7 @@ class ProjectState {
   int64_t dirty_revision_ = -1;
   std::optional<bridge::ProjectInfo> project_;
   std::vector<ProjectTable> tables_;
-  std::string table_id_, record_id_, error_;
+  std::string table_id_, record_id_, error_, notice_;
 };
 
 }  // namespace stk::app

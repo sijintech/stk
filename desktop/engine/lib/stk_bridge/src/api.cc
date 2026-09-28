@@ -114,6 +114,20 @@ Future<Json> Client::project_history(const std::string &handle)
   });
 }
 
+Future<Json> Client::project_backup(const std::string &handle)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.backup", object({{"handle", handle}}), options);
+}
+
+Future<Json> Client::project_upgrade(const std::string &handle, const int64_t expected_revision)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.upgrade", object({{"handle", handle}, {"expected_revision", expected_revision}}), options);
+}
+
 /* -- Connections -------------------------------------------------------------------------- */
 
 Future<std::vector<ConnectionInfo>> Client::connections_list()

@@ -2691,7 +2691,31 @@
                   "commands": {
                     "type": "array",
                     "items": {
-                      "$ref": "#/$defs/projectCommand"
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/projectCommand"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "op": {
+                              "const": "upgrade_format"
+                            },
+                            "from_version": {
+                              "const": 1
+                            },
+                            "to_version": {
+                              "const": 2
+                            }
+                          },
+                          "required": [
+                            "op",
+                            "from_version",
+                            "to_version"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
                     }
                   }
                 },
@@ -3136,6 +3160,76 @@
           "required": [
             "connection",
             "ssh"
+          ]
+        }
+      },
+      "project.backup": {
+        "description": "Create a consistent database backup under the project backups directory. External assets are separate; project revision is unchanged.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectBackup"
+        }
+      },
+      "project.upgrade": {
+        "description": "Explicitly upgrade an older project after a verified database backup, using a revision precondition. Opening never migrates.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "upgraded": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "format_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "backup": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectBackup"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "upgraded",
+            "revision",
+            "format_version",
+            "backup"
           ]
         }
       }
@@ -3615,6 +3709,144 @@
             "name"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "set_reference"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "field_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "source": {
+              "$ref": "#/$defs/projectCellReference"
+            }
+          },
+          "required": [
+            "op",
+            "table_id",
+            "record_id",
+            "field_id",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "set_expression"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "field_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expression": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "bindings": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "$ref": "#/$defs/projectCellReference"
+              }
+            }
+          },
+          "required": [
+            "op",
+            "table_id",
+            "record_id",
+            "field_id",
+            "expression",
+            "bindings"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "unset_cell"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "field_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "op",
+            "table_id",
+            "record_id",
+            "field_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "delete_record"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "op",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "delete_field"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "op",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "delete_table"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "op",
+            "id"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -3705,6 +3937,20 @@
                     },
                     "values": {
                       "type": "object"
+                    },
+                    "definitions": {
+                      "type": "object",
+                      "description": "Field UUID to stable reference/expression definition; absent for literal-only records.",
+                      "additionalProperties": {
+                        "$ref": "#/$defs/projectCellDefinition"
+                      }
+                    },
+                    "evaluations": {
+                      "type": "object",
+                      "description": "Field UUID to state, value/unit or structured error, evaluated_revision and engine_version.",
+                      "additionalProperties": {
+                        "$ref": "#/$defs/projectCellEvaluation"
+                      }
                     }
                   },
                   "required": [
@@ -3876,6 +4122,171 @@
         "state",
         "url",
         "error"
+      ]
+    },
+    "projectCellReference": {
+      "type": "object",
+      "properties": {
+        "record_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "field_id": {
+          "$ref": "#/$defs/projectUuid"
+        }
+      },
+      "required": [
+        "record_id",
+        "field_id"
+      ],
+      "additionalProperties": false
+    },
+    "projectBackup": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/absPath"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "format_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "path",
+        "project_id",
+        "revision",
+        "format_version"
+      ]
+    },
+    "projectCellDefinition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "reference"
+            },
+            "source": {
+              "$ref": "#/$defs/projectCellReference"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "expression"
+            },
+            "expression": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "bindings": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "$ref": "#/$defs/projectCellReference"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "expression",
+            "bindings"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "projectCellEvaluation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "evaluated_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "engine_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "const": "ok"
+            },
+            "value": {},
+            "unit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "value",
+            "unit",
+            "evaluated_revision",
+            "engine_version"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "evaluated_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "engine_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "const": "error"
+            },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "$ref": "#/$defs/projectCellReference"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "error",
+            "evaluated_revision",
+            "engine_version"
+          ]
+        }
       ]
     }
   }

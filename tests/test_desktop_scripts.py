@@ -73,7 +73,8 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
     assert execute(scripts, session, "stk.call('shutdown')")["run"]["state"] == "failed"
     assert scripts.call("hello", {"protocol": 1})["protocol"] == 1
     assert set(scripts.call("script.catalog")["operations"]) == {
-        "project.create", "project.open", "project.list", "project.close", "project.snapshot", "project.apply", "project.history"}
+        "project.create", "project.open", "project.list", "project.close", "project.snapshot", "project.apply", "project.history",
+        "project.backup", "project.upgrade"}
     assert scripts.call("script.close", {"session": session})["closed"]
     assert scripts.call("project.list")["projects"][0]["revision"] == 1
     assert scripts.error("script.status", {"session": session})["code"] == "not_found"

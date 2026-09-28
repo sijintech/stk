@@ -284,6 +284,8 @@ class Client {
   /** Never retried automatically: after an uncertain response inspect snapshot/history. */
   Future<Json> project_apply(const std::string &handle, int64_t expected_revision, const Json &commands);
   Future<Json> project_history(const std::string &handle);
+  Future<Json> project_backup(const std::string &handle);
+  Future<Json> project_upgrade(const std::string &handle, int64_t expected_revision);
 
   /* -- Connections (§6) ------------------------------------------------------------------- */
   Future<std::vector<ConnectionInfo>> connections_list();

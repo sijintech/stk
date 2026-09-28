@@ -7,8 +7,9 @@ import threading
 import pytest
 
 from suan.project import ProjectStore
-from suan.project.store import DATABASE_NAME
+from suan.project.store import DATABASE_NAME, FORMAT_VERSION
 from test_desktop_bridge import bridge_env, inproc, ProcessBridge  # noqa: F401
+from test_project_values import model, legacy, command, reference  # noqa: F401
 
 
 def test_project_lifecycle_edits_events_and_reopen(inproc, tmp_path):  # noqa: F811
@@ -18,7 +19,7 @@ def test_project_lifecycle_edits_events_and_reopen(inproc, tmp_path):  # noqa: F
     directory = tmp_path / "项目 with spaces"
     project = harness.call("project.create", {"directory": str(directory), "name": "批次"})["project"]
     handle = project["handle"]
-    assert project["revision"] == 0 and project["format_version"] == 1
+    assert project["revision"] == 0 and project["format_version"] == FORMAT_VERSION
     assert harness.call("project.open", {"directory": str(directory)})["project"] == project
     assert harness.call("project.list")["projects"] == [project]
     result = harness.call("project.apply", {"handle": handle, "expected_revision": 0,
@@ -38,6 +39,30 @@ def test_project_lifecycle_edits_events_and_reopen(inproc, tmp_path):  # noqa: F
     assert reopened["id"] == project["id"] and reopened["handle"] != handle
     assert reopened["revision"] == 1
     harness.close()
+
+
+def test_bridge_upgrade_backup_and_derived_values_use_the_shared_contract(inproc, model):
+    store, ids = model
+    legacy(store)
+    harness = inproc()
+    info = harness.call("project.open", {"directory": str(store.directory)})["project"]
+    handle = info["handle"]
+    assert info["format_version"] == 1
+    upgraded = harness.call("project.upgrade", {"handle": handle, "expected_revision": 1})
+    assert upgraded["upgraded"] and upgraded["revision"] == 2 and upgraded["backup"]["revision"] == 1
+    assert harness.wait_event(lambda event: event["event"] == "project.changed")["data"] == {"handle": handle, "revision": 2}
+    assert harness.call("project.history", {"handle": handle})["history"][-1]["commands"][0]["op"] == "upgrade_format"
+    assert harness.error("project.upgrade", {"handle": handle, "expected_revision": 1})["code"] == "conflict"
+    edits = [command(ids, "copy", "set_reference", source=reference(ids, "temperature")),
+             command(ids, "derived", "set_expression", expression="base * 2", bindings={"base": reference(ids, "copy")})]
+    assert harness.call("project.apply", {"handle": handle, "expected_revision": 2, "commands": edits})["revision"] == 3
+    snapshot = harness.call("project.snapshot", {"handle": handle})["snapshot"]
+    row = snapshot["tables"][1]["records"][0]
+    assert row["values"][ids["derived"]] == 600
+    assert row["definitions"][ids["derived"]]["bindings"] == {"base": reference(ids, "copy")}
+    assert harness.call("project.backup", {"handle": handle})["revision"] == 3
+    assert harness.call("project.list")["projects"][0]["format_version"] == 2
+    assert not harness.violations
 
 
 def test_revision_conflict_invalid_batch_and_external_edits(inproc, tmp_path):  # noqa: F811

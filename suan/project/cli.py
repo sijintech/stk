@@ -51,3 +51,18 @@ def apply(directory, commands, expected_revision):
 def history(directory):
     """List committed edit batches (this is not execution history or undo)."""
     _run(lambda: ProjectStore(directory).history())
+
+
+@project.command("backup")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+def backup(directory):
+    """Create a consistent database backup in DIRECTORY/backups (external assets are separate)."""
+    _run(lambda: ProjectStore(directory).backup())
+
+
+@project.command("upgrade")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def upgrade(directory, expected_revision):
+    """Back up and explicitly upgrade an older project; opening alone never migrates it."""
+    _run(lambda: ProjectStore(directory).upgrade(expected_revision=expected_revision))

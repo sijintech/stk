@@ -68,16 +68,21 @@ int main(int argc, char **argv)
     const std::string table = "11111111-1111-4111-8111-111111111111";
     const std::string temperature = "22222222-2222-4222-8222-222222222222";
     const std::string label = "33333333-3333-4333-8333-333333333333";
+    const std::string derived = "55555555-5555-4555-8555-555555555555";
     io::Json commands = io::Json::array({
       {{"op", "create_table"}, {"id", table}, {"name", "Cases / 参数表"}},
       {{"op", "add_field"}, {"id", temperature}, {"table_id", table}, {"name", "Temperature"}, {"type", "number"}, {"unit", "K"}},
-      {{"op", "add_field"}, {"id", label}, {"table_id", table}, {"name", "Notes / 记录"}, {"type", "text"}}
+      {{"op", "add_field"}, {"id", label}, {"table_id", table}, {"name", "Notes / 记录"}, {"type", "text"}},
+      {{"op", "add_field"}, {"id", derived}, {"table_id", table}, {"name", "Derived / 派生值"}, {"type", "number"}, {"unit", "K"}}
     });
     for (int i = 0; i < 5; ++i) {
       const std::string id = std::to_string(40000000 + i) + "-4444-4444-8444-444444444444";
       commands.push_back({{"op", "add_record"}, {"id", id}, {"table_id", table}});
       commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", temperature}, {"value", 300 + i * 25}});
       commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", label}, {"value", "Prepared / 待运行"}});
+      commands.push_back({{"op", "set_expression"}, {"table_id", table}, {"record_id", id}, {"field_id", derived},
+                          {"expression", i == 4 ? "base / 0" : "base + quantity(10, \"K\")"},
+                          {"bindings", {{"base", {{"record_id", id}, {"field_id", temperature}}}}}});
     }
     ok = ok && state.apply(commands) && loop.pump_until([&] { return !state.busy(); }, 30);
     ok = ok && state.loaded() && state.project()->revision == 1;
@@ -108,6 +113,13 @@ int main(int argc, char **argv)
       ctx.rect = {0, 0, 1280, 900};
       ctx.now = 100;
       gfx::Image image;
+      if (editor == "expression") {
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        if (const auto *widget = screen.ui()->find("a2/main/cell_field")) {
+          widget->index.assign(2);
+        }
+        else { ok = false; }
+      }
       ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
       ok = ok && gfx::png_write(output, image);
     }

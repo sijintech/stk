@@ -20,7 +20,8 @@ ProjectTable ProjectTable::from_json(const Json &value)
                             io::get_string(field, "type"), io::get_string(field, "unit")});
   }
   for (const auto &record : value.at("records")) {
-    table.records.push_back({io::get_string(record, "id"), record.at("values")});
+    table.records.push_back({io::get_string(record, "id"), record.at("values"),
+                             record.value("definitions", Json::object()), record.value("evaluations", Json::object())});
   }
   return table;
 }
@@ -37,8 +38,30 @@ const Json *ProjectTable::cell(const int row, const int column) const
 
 std::string ProjectTable::text(const int row, const int column) const
 {
+  if (const Json *result = evaluation(row, column); result && io::get_string(*result, "state") == "error") {
+    return "#" + io::get_string(result->at("error"), "code");
+  }
   const Json *value = cell(row, column);
-  return !value ? std::string() : value->is_string() ? value->get<std::string>() : value->dump();
+  const std::string text = !value ? std::string() : value->is_string() ? value->get<std::string>() : value->dump();
+  return definition(row, column) ? "= " + text : text;
+}
+
+const Json *ProjectTable::definition(const int row, const int column) const
+{
+  if (row < 0 || column < 0 || size_t(row) >= records.size() || size_t(column) >= fields.size()) {
+    return nullptr;
+  }
+  const auto it = records[row].definitions.find(fields[column].id);
+  return it == records[row].definitions.end() ? nullptr : &*it;
+}
+
+const Json *ProjectTable::evaluation(const int row, const int column) const
+{
+  if (row < 0 || column < 0 || size_t(row) >= records.size() || size_t(column) >= fields.size()) {
+    return nullptr;
+  }
+  const auto it = records[row].evaluations.find(fields[column].id);
+  return it == records[row].evaluations.end() ? nullptr : &*it;
 }
 
 std::optional<Json> project_literal(const std::string_view type, const std::string_view text, std::string &error_key)
@@ -206,6 +229,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
   ++epoch_;
   busy_ = true;
   error_.clear();
+  notice_.clear();
   on(create ? client_->project_create(directory, name) : client_->project_open(directory),
      [this, expected_id = std::move(expected_id), complete = std::move(complete)](const bridge::Result<bridge::ProjectInfo> &result) {
        busy_ = false;
@@ -242,6 +266,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
 
 void ProjectState::clear()
 {
+  notice_.clear();
   project_.reset();
   tables_.clear();
   table_id_.clear();
@@ -300,6 +325,7 @@ void ProjectState::refresh()
     }
     tables_ = std::move(tables);
     project_->revision = io::get_int(result.value().at("project"), "revision", 0);
+    project_->format_version = int(io::get_int(result.value(), "format_version", 1));
     snapshot_ready_ = true;
     validate_selection();
     changed();
@@ -317,6 +343,7 @@ bool ProjectState::apply(Json commands, const std::optional<int64_t> expected_re
   }
   busy_ = true;
   error_.clear();
+  notice_.clear();
   on(client_->project_apply(project_->handle, expected_revision.value_or(project_->revision), commands), [this](const bridge::Result<Json> &result) {
     busy_ = false;
     if (!result.ok()) {
@@ -326,6 +353,57 @@ bool ProjectState::apply(Json commands, const std::optional<int64_t> expected_re
       return;
     }
     dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+    refresh();
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::backup()
+{
+  if (!ready() || busy() || !loaded() || project_->handle.empty()) {
+    return false;
+  }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  on(client_->project_backup(project_->handle), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) {
+      fail(result.error());
+    }
+    else {
+      notice_ = store_.catalog().format("project.backup_saved", {{"path", io::get_string(result.value(), "path")}});
+      changed();
+    }
+    if (project_ && dirty_revision_ > project_->revision) {
+      refresh();
+    }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::upgrade()
+{
+  if (!ready() || busy() || !loaded() || project_->handle.empty()) {
+    return false;
+  }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  on(client_->project_upgrade(project_->handle, project_->revision), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) {
+      fail(result.error());
+    }
+    else {
+      const Json &backup = result.value().at("backup");
+      if (backup.is_object()) {
+        notice_ = store_.catalog().format("project.backup_saved", {{"path", io::get_string(backup, "path")}});
+      }
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+    }
     refresh();
   });
   changed();

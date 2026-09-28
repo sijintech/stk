@@ -71,4 +71,5 @@ Host 和 token，临时本机端口不写入配置。连接列表和桥响应不
 避免把其他程序抢占的端口误认为自己的隧道；无法识别初始化标记时按启动失败处理。
 该标记对应 OpenSSH 的 [client_loop](https://github.com/openssh/openssh-portable/blob/master/clientloop.c)。
 当前 Linux 已通过临时本机 sshd、真实 Runtime 上传/执行/重连下载测试；Windows 模拟传输测试
-及 macOS/Windows 原生客户端契约已纳入 CI，本批远端结果待跟踪。真实远程主机/跳板链仍需目标环境验收。
+及 macOS/Windows 原生客户端契约已通过 CI（desktop 36386610173、Runtime 36387729994）。
+真实 Windows/macOS OpenSSH、远程主机及跳板链仍需目标环境验收。

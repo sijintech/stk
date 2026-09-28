@@ -2,11 +2,13 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_state.hh"
+#include "stk/app/script_state.hh"
 #include "stk/bridge/process.hh"
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
 
 #include <cstdlib>
+#include <filesystem>
 
 namespace stk::app {
 namespace {
@@ -263,6 +265,131 @@ TEST_F(ProjectPython, ExternalEditPreservesDraftAndRequiresReload)
   f.drv->frame();
   EXPECT_EQ(f.screen.ui()->find("a2/main/cell_value")->string.value(), "500");
   EXPECT_TRUE(f.screen.ui()->find("a2/main/save_cell")->enabled);
+}
+
+TEST_F(ProjectPython, ReferenceAndExpressionEditorsPreserveDefinitionsAndShowErrors)
+{
+  populated();
+  const std::string derived = "55555555-5555-4555-8555-555555555555";
+  ASSERT_TRUE(state().apply(Json::array({{{"op", "add_field"}, {"id", derived}, {"table_id", table_id},
+                                        {"name", "Derived"}, {"type", "number"}, {"unit", "K"}}})));
+  settled();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  widget("cell_field")->index.assign(1);
+  f.drv->frame();
+  widget("cell_mode")->index.assign(1);
+  f.drv->frame();
+  widget("source_table")->index.assign(1);
+  f.drv->frame();
+  widget("source_record")->index.assign(1);
+  widget("source_field")->index.assign(1);
+  widget("save_cell")->on_click();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().table()->text(0, 1), "= 300");
+  ASSERT_NE(state().table()->definition(0, 1), nullptr);
+  EXPECT_EQ(state().table()->definition(0, 1)->at("source").at("field_id"), field_id);
+  EXPECT_EQ(widget("cell_mode")->index.value(), 1);
+  widget("cell_mode")->index.assign(2);
+  f.drv->frame();
+  widget("expression")->string.assign("base + quantity(10, \"K\")");
+  const auto [x, y] = f.widget_center("a2/main/bindings_raw");
+  f.drv->click(x, y);
+  f.drv->frame();
+  ASSERT_NE(widget("bindings_raw/bindings"), nullptr);
+  widget("bindings_raw/bindings")->string.assign(Json{{"base", {{"record_id", record_id}, {"field_id", field_id}}}}.dump());
+  widget("save_cell")->on_click();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().table()->text(0, 1), "= 310");
+  EXPECT_EQ(widget("cell_mode")->index.value(), 2);
+  ASSERT_TRUE(state().apply(set_cell(500)));
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().table()->text(0, 1), "= 510");
+  widget("expression")->string.assign("base / 0");
+  widget("save_cell")->on_click();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().table()->text(0, 1), "#division_by_zero");
+  EXPECT_EQ(widget("expression")->string.value(), "base / 0");
+  widget("unset_cell")->on_click();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().table()->definition(0, 1), nullptr);
+  EXPECT_EQ(state().table()->cell(0, 1), nullptr);
+  EXPECT_EQ(widget("cell_mode")->index.value(), 0);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ExpressionDraftSurvivesExternalDependencyChanges)
+{
+  populated();
+  const std::string derived = "55555555-5555-4555-8555-555555555555";
+  ASSERT_TRUE(state().apply(Json::array({
+    {{"op", "add_field"}, {"id", derived}, {"table_id", table_id}, {"name", "Derived"}, {"type", "number"}, {"unit", "K"}},
+    {{"op", "set_expression"}, {"table_id", table_id}, {"record_id", record_id}, {"field_id", derived},
+     {"expression", "base * 2"}, {"bindings", {{"base", {{"record_id", record_id}, {"field_id", field_id}}}}}}
+  })));
+  settled();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  f.screen.ui()->find("a2/main/cell_field")->index.assign(1);
+  f.drv->frame();
+  f.screen.ui()->find("a2/main/expression")->string.assign("base * 3");
+  std::optional<bridge::Result<Json>> edited;
+  client->project_apply(state().project()->handle, 2, set_cell(500)).then([&](auto result) { edited = result; });
+  ASSERT_TRUE(loop.pump_until([&] { return edited.has_value() && !state().busy() && state().project()->revision == 3; }));
+  f.drv->frame();
+  EXPECT_EQ(f.screen.ui()->find("a2/main/expression")->string.value(), "base * 3");
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/save_cell")->enabled);
+  EXPECT_EQ(state().table()->text(0, 1), "= 1000");
+  f.screen.ui()->find("a2/main/reload_cell")->on_click();
+  f.drv->frame();
+  EXPECT_EQ(f.screen.ui()->find("a2/main/expression")->string.value(), "base * 2");
+}
+
+TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  const std::string source = "import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
+      ") as db:\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
+  ASSERT_TRUE(scripts.execute(source));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  state().refresh();
+  settled();
+  ASSERT_EQ(state().project()->format_version, 1);
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  ASSERT_NE(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
+  f.screen.ui()->find("a2/main/upgrade_project")->on_click();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().project()->format_version, 2);
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
+  EXPECT_FALSE(state().notice().empty());
+  size_t backups = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(dir.str() + "/project/backups")) {
+    if (entry.path().extension() == ".sqlite3") { ++backups; }
+  }
+  EXPECT_EQ(backups, 1u);
+  ASSERT_TRUE(state().backup());
+  settled();
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
 TEST_F(ProjectPython, DestroyingStateDropsQueuedCallbacks)

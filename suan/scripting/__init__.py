@@ -32,6 +32,14 @@ class Project:
     def history(self):
         return self._call("project.history", {"handle": self.handle})["history"]
 
+    def backup(self):
+        """Consistent database backup; does not include external assets or execute code."""
+        return self._call("project.backup", {"handle": self.handle})
+
+    def upgrade(self, *, expected_revision):
+        """Explicit format upgrade after creating a verified pre-migration database backup."""
+        return self._call("project.upgrade", {"handle": self.handle, "expected_revision": expected_revision})
+
     def close(self):
         return self._call("project.close", {"handle": self.handle})["closed"]
 
