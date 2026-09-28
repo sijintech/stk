@@ -2705,14 +2705,16 @@
                               "enum": [
                                 1,
                                 2,
-                                3
+                                3,
+                                4
                               ]
                             },
                             "to_version": {
                               "enum": [
                                 2,
                                 3,
-                                4
+                                4,
+                                5
                               ]
                             }
                           },
@@ -2761,6 +2763,27 @@
                             "op",
                             "snapshot_id",
                             "sha256"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "op": {
+                              "const": "prepare_runs"
+                            },
+                            "run_ids": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/projectUuid"
+                              },
+                              "minItems": 1,
+                              "maxItems": 100
+                            }
+                          },
+                          "required": [
+                            "op",
+                            "run_ids"
                           ],
                           "additionalProperties": false
                         }
@@ -3944,6 +3967,276 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.runs.prepare": {
+        "description": "Freeze 1–100 parameter rows, input bindings and explicit TaskSpecs without contacting a Runtime; requires format 5.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "table_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "record_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "spec": {
+                    "type": "object"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "input_snapshot_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "input_bindings": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/$defs/projectUuid"
+                    }
+                  }
+                },
+                "required": [
+                  "table_id",
+                  "record_id",
+                  "spec"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 100
+            },
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "node": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "handle",
+            "entries",
+            "connection",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "run_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "revision",
+            "run_ids"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.runs.list": {
+        "description": "Read paginated compact run summaries and current parameter freshness, without contacting a Runtime.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "runs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectRunSummary"
+              },
+              "minItems": 0,
+              "maxItems": 100
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "revision",
+            "runs",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.runs.get": {
+        "description": "Read a frozen plan and latest persisted observation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.runs.submit": {
+        "description": "Explicitly submit or recover this immutable attempt using its persistent idempotency key; no automatic retry.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "allow_stale": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.runs.refresh": {
+        "description": "Read remote task/action status; never submit a prepared or uncertain run.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.runs.cancel": {
+        "description": "Explicitly cancel an accepted task; preserves Hub review policy.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -4222,6 +4515,27 @@
           "operation",
           "params",
           "expires_at_ms"
+        ],
+        "additionalProperties": false
+      },
+      "project.runs.changed": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "$ref": "#/$defs/hex32"
+          },
+          "run_id": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "observation_id": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "handle",
+          "run_id",
+          "observation_id"
         ],
         "additionalProperties": false
       }
@@ -5175,6 +5489,229 @@
         "manifest",
         "created_at",
         "revision"
+      ],
+      "additionalProperties": false
+    },
+    "projectRun": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_snapshot_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observation_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parameter_state": {
+          "enum": [
+            "current",
+            "changed",
+            "missing",
+            "error"
+          ]
+        },
+        "plan": {
+          "type": "object"
+        },
+        "status": {
+          "type": "object",
+          "properties": {
+            "submission": {
+              "type": "string"
+            },
+            "task": {
+              "$ref": "#/$defs/task"
+            },
+            "action": {
+              "$ref": "#/$defs/actionSummary"
+            },
+            "last_operation": {
+              "enum": [
+                "submit",
+                "refresh",
+                "cancel"
+              ]
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/error"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "submission"
+          ],
+          "additionalProperties": false
+        },
+        "parameter_revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "sha256",
+        "created_at",
+        "revision",
+        "input_snapshot_id",
+        "observation_id",
+        "observed_at",
+        "parameter_state",
+        "plan",
+        "status",
+        "parameter_revision"
+      ],
+      "additionalProperties": false
+    },
+    "projectRunSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_snapshot_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observation_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parameter_state": {
+          "enum": [
+            "current",
+            "changed",
+            "missing",
+            "error"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "connection": {
+          "$ref": "#/$defs/connectionId"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/hex32"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "record_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "submission": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "action_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "sha256",
+        "created_at",
+        "revision",
+        "input_snapshot_id",
+        "observation_id",
+        "observed_at",
+        "parameter_state",
+        "label",
+        "connection",
+        "node",
+        "source_revision",
+        "table_id",
+        "record_id",
+        "submission",
+        "task_id",
+        "task_state",
+        "action_state",
+        "error"
       ],
       "additionalProperties": false
     }

@@ -184,6 +184,8 @@ def test_format_two_upgrade_preserves_formulas_and_starts_a_new_undo_boundary(mo
     store, ids = derived(model)
     before = tables(store)
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE run_observations")
+        db.execute("DROP TABLE run_plans")
         db.execute("DROP TABLE project_snapshots")
         db.execute("DROP TABLE edit_journal")
         db.execute("PRAGMA user_version=2")

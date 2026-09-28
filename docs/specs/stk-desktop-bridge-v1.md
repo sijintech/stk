@@ -577,6 +577,14 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   remains in the manifest. Source deletion or project relocation does not invalidate existing objects.
   Database backup excludes object contents. See [input snapshot guide](../project-snapshots.md) for storage
   layout, source-change checks, filesystem requirements and current non-atomic multi-file capture boundary.
+- `project.runs.*` requires format 5: prepare freezes 1–100 explicit row/TaskSpec/input snapshot entries at one
+  revision without remote execution; list returns paginated summaries (offset/limit, at most 100), get returns
+  the immutable plan and latest observation. Submit/cancel are explicit and never automatically replayed;
+  submit persists intent before transport and uses the frozen idempotency key for caller-initiated recovery.
+  Refresh only reads task/action status. Profile endpoint identity changes are conflicts; new stale plans need
+  explicit `allow_stale`. Prepared plans emit `project.changed`; remote observations do not edit the project
+  revision and emit independent `project.runs.changed {handle, run_id, observation_id}` hints, possibly before
+  a response or on failure. Hub review policy remains in force. See [run guide](../project-runs.md).
 - **Uncertain responses:** create/apply/backup/upgrade/undo/redo and file index/refresh are never automatically retried. If a response is lost,
   reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
   raise `expected_revision` and repeat an edit: the previous batch may already have committed.

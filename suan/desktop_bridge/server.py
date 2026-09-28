@@ -25,6 +25,7 @@ from .hub import HubResponseError, hub_error
 from .connections import ConnectionStore
 from .graphs import GraphService
 from .projects import ProjectSessions
+from .project_runs import ProjectRuns
 from .scripts import ScriptSessions
 from .ui_requests import UIRequests, UI_OPERATIONS
 from .protocol import (MAX_LINE_BYTES, PROTOCOL_VERSION, BridgeError, LineReader, check_envelope, decode_line,
@@ -149,6 +150,7 @@ class Bridge:
         self.connections = ConnectionStore(self.state_dir)
         self.graphs = GraphService(self.cache_dir, self.connections, self.emit)
         self.projects = ProjectSessions()
+        self.project_runs = ProjectRuns(self.projects, self.connections.backend)
         self.ui = UIRequests(self.emit)
         self.scripts = ScriptSessions(self.emit, self.script_call)
         self.transfers = TransferManager(self.state_dir, self.emit, self.connections.backend)
@@ -219,6 +221,12 @@ class Bridge:
             "project.snapshots.get": lambda p, c: self.projects.snapshots("get", p),
             "project.snapshots.verify": lambda p, c: self.projects.snapshots("verify", p),
             "project.snapshots.resolve": lambda p, c: self.projects.snapshots("resolve", p),
+            "project.runs.prepare": lambda p, c: self.run_project("prepare", p, c),
+            "project.runs.list": lambda p, c: self.run_project("list", p, c),
+            "project.runs.get": lambda p, c: self.run_project("get", p, c),
+            "project.runs.submit": lambda p, c: self.run_project("submit", p, c),
+            "project.runs.refresh": lambda p, c: self.run_project("refresh", p, c),
+            "project.runs.cancel": lambda p, c: self.run_project("cancel", p, c),
             "script.open": lambda p, c: self.scripts.open(p),
             "script.status": lambda p, c: self.scripts.status(p),
             "script.execute": self.scripts.execute,
@@ -402,6 +410,8 @@ class Bridge:
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
                  "project.snapshots.verify", "project.snapshots.resolve",
+                 "project.runs.prepare", "project.runs.list", "project.runs.get",
+                 "project.runs.submit", "project.runs.refresh", "project.runs.cancel",
                  "connections.list", "connections.check", "connections.ssh",
                  "hub.devices", "hub.templates", "hub.actions", "hub.action",
                  "workspace.list", "workspace.create", "workspace.files", "upload.start", "download.start",
@@ -442,6 +452,23 @@ class Bridge:
         data = result["data"][:limit]
         return {"data": base64.b64encode(data).decode("ascii"), "offset": result["offset"],
                 "next_offset": result["offset"] + len(data), "terminal": result["terminal"]}
+
+    def run_project(self, action, params, context):
+        try:
+            result = self.project_runs.call(action, params)
+        finally:
+            if action in ("submit", "refresh", "cancel"):
+                # Publish persisted failure observations too. Error responses may not run
+                # context callbacks, so this independent fact is emitted immediately.
+                try:
+                    run = self.project_runs.call("get", params)["run"]
+                    self.emit("project.runs.changed", {"handle": params["handle"], "run_id": params["run_id"],
+                                                       "observation_id": run["observation_id"]})
+                except BridgeError:
+                    pass
+        if action == "prepare":
+            context.after(lambda: self.emit("project.changed", {"handle": params["handle"], "revision": result["revision"]}))
+        return result
 
     def capture_project_files(self, params, context):
         result = self.projects.snapshots("capture", params)

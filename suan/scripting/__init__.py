@@ -58,8 +58,42 @@ class Project:
         return ProjectFiles(self._call, self.handle)
 
     @property
+    def runs(self):
+        return ProjectRuns(self._call, self.handle)
+
+    @property
     def snapshots(self):
         return ProjectSnapshots(self._call, self.handle)
+
+
+class ProjectRuns:
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def prepare(self, entries, *, connection, expected_revision, node=None):
+        """Freeze explicit per-row TaskSpecs; this does not upload files or start execution."""
+        params = {"handle": self.handle, "entries": entries, "connection": connection,
+                  "expected_revision": expected_revision}
+        if node is not None:
+            params["node"] = node
+        return self._call("project.runs.prepare", params)
+
+    def list(self, *, offset=0, limit=100):
+        return self._call("project.runs.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def get(self, run_id):
+        return self._call("project.runs.get", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def submit(self, run_id, *, allow_stale=False):
+        """Explicit submission/recovery; repeat the same run ID after a lost response."""
+        return self._call("project.runs.submit", {"handle": self.handle, "run_id": run_id,
+                                                "allow_stale": allow_stale})["run"]
+
+    def refresh(self, run_id):
+        return self._call("project.runs.refresh", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def cancel(self, run_id):
+        return self._call("project.runs.cancel", {"handle": self.handle, "run_id": run_id})["run"]
 
 
 class ProjectSnapshots:
@@ -182,4 +216,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Project", "ProjectFiles", "ProjectSnapshots", "Projects", "Runtime", "ScriptError", "Transfers"]
+__all__ = ["API", "Connections", "Desktop", "Project", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers"]

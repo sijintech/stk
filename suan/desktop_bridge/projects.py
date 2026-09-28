@@ -143,6 +143,12 @@ class ProjectSessions:
                 return snapshots.verify(params["snapshot_id"])
             return snapshots.resolve(params["snapshot_id"], params["record_id"])
 
+    @contextmanager
+    def use(self, handle):
+        """Keep a handle alive through an accepted service operation, including its observations."""
+        with self._operation():
+            yield self._get(handle)
+
     def shutdown(self):
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.

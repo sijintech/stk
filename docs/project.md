@@ -4,8 +4,8 @@
 字面量、稳定引用、轻量公式、错误定位、数据库备份/升级、修订冲突检查和持久撤销/重做。
 Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科学/Qt 可选依赖。
 文件登记、元数据检查与外部编辑入口见[项目文件索引](project-files.md)，同样使用普通类型化表格和撤销。
-富内容插件、资源快照与执行计划
-仍待开发；不能把本节理解为整个 P1 已完成。
+不可变文件副本见[输入快照](project-snapshots.md)，参数与远端任务关联见[运行记录](project-runs.md)。
+富内容插件、自动输入生成与 AI 执行规划仍待开发；不能把本节理解为整个 P1 已完成。
 
 ## 在桌面中测试
 
@@ -32,7 +32,7 @@ Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科�
 关闭整个程序后再次启动不会自动打开项目；布局只保存目录输入，点击“打开”恢复数据。
 
 本阶段通过路径字段操作，尚无项目专用的系统文件对话框；表格是可排序列表加选中单元格编辑区，
-还不是完整多维表格。字段/记录/表删除已提供修改命令，尚无对应桌面按钮；批量粘贴、富内容等继续补齐。
+还不是完整多维表格。字段/记录/表删除可在管理面板操作；批量粘贴、富内容等继续补齐。
 
 ## 命令行
 
@@ -157,9 +157,9 @@ assert store.snapshot()["tables"][0]["records"][0]["values"][derived] == 310
 
 ## 数据库备份与显式升级
 
-新建项目使用格式 4；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
+新建项目使用格式 5；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
 引用、公式、清除和删除命令需要至少格式 2，持久撤销/重做需要格式 3；桌面删除入口要求格式 3。
-格式 4 增加只追加的[输入快照](project-snapshots.md)，内容副本按 SHA-256 保存在项目内。
+格式 4 增加只追加的[输入快照](project-snapshots.md)，内容副本按 SHA-256 保存在项目内。格式 5 增加[运行方案与状态](project-runs.md)。
 桌面提供“备份并升级项目”；CLI 使用 `project upgrade`，
 Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(expected_revision=...)`。
 
@@ -175,7 +175,7 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=4`。
 原物理表为 `project`、`tables`、`fields`、`records`、`cells`、`changes`；格式 2 新增
-`definitions` 和可重建的 `evaluations`，格式 3 增加 `edit_journal`，格式 4 增加 `project_snapshots`。
+`definitions` 和可重建的 `evaluations`，格式 3 增加 `edit_journal`，格式 4 增加 `project_snapshots`，格式 5 增加 `run_plans` / `run_observations`。
 字面量与定义分开。每次有效编辑批次在一个
 `BEGIN IMMEDIATE` 事务中校验修订、写值/定义、更新受影响缓存、提升一次修订并保存命令历史。
 并发修改同一修订时仅一个批次能成功；读取快照在单一读事务中完成。
@@ -183,7 +183,7 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 显式创建不会覆盖已有数据库；普通打开不会隐式初始化。打开检查 application ID、格式版本、
 SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报告错误，不自动重建或降级。
-当前提供格式 1/2/3 → 4 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
+当前提供格式 1/2/3/4 → 5 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
 数据库之外的输入、程序与资源仍可存为普通文件；文件索引与输入副本已实现，一致性项目打包备份尚待实现。
 
 该内部数据库格式未冻结为 `docs/specs/` 的公开协议，不改变 `stk.graph/1`。

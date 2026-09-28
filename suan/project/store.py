@@ -20,7 +20,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 4
+FORMAT_VERSION = 5
 DATABASE_NAME = "project.sqlite3"
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
 
@@ -64,6 +64,17 @@ _DDL_V4 = (
     """CREATE TABLE project_snapshots (
         id TEXT PRIMARY KEY, kind TEXT NOT NULL, sha256 TEXT NOT NULL, manifest TEXT NOT NULL,
         created_at TEXT NOT NULL, revision INTEGER NOT NULL REFERENCES changes(revision))""",
+)
+
+_DDL_V5 = (
+    """CREATE TABLE run_plans (
+        id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL,
+        revision INTEGER NOT NULL REFERENCES changes(revision),
+        input_snapshot_id TEXT REFERENCES project_snapshots(id))""",
+    """CREATE TABLE run_observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES run_plans(id),
+        created_at TEXT NOT NULL, payload TEXT NOT NULL)""",
+    "CREATE INDEX run_observations_by_run ON run_observations(run_id, id)",
 )
 
 
@@ -167,7 +178,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -222,6 +233,11 @@ class ProjectStore:
     def snapshots(self):
         from .snapshots import Snapshots
         return Snapshots(self)
+
+    @property
+    def runs(self):
+        from .runs import Runs
+        return Runs(self)
 
     def _backup(self, db):
         """Online SQLite backup of an already established *read* snapshot, published atomically."""
@@ -287,7 +303,7 @@ class ProjectStore:
                 if tuple(identity) != (project["id"], expected_revision) or _version(source) != version:
                     raise ProjectError("Project changed while preparing the migration backup")
                 backup = self._backup(source)
-            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4)):
+            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)
