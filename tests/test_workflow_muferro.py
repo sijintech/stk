@@ -40,7 +40,7 @@ def test_import_freezes_source_and_runs_in_isolated_python(project, scripts, tmp
     result = execute(scripts, session,
         f"imported = stk.muferro.import_case({str(source)!r}, expected_revision=0)\nprint(imported)",
         project_handle=p.handle)
-    assert result['run']['state'] == 'succeeded', scripts.call('script.read', {'session': session})
+    assert result['run']['state'] == 'succeeded', scripts.call('script.read', {'session': session})['text']
     table = next(t for t in p.snapshot()['tables'] if t['id'] == TABLE_ID)
     assert table['records'][0]['values'][FIELD_IDS['temperature']] == 315
     frozen = table['records'][0]['values'][FIELD_IDS['source']]
@@ -277,3 +277,34 @@ def test_generated_inputs_are_checked_again_after_freezing(project, scripts, run
     with pytest.raises(ValueError, match='between generation and freezing'):
         api.muferro.prepare(row, connection, expected_revision=revision(p))
     assert p.runs.list()['runs'] == [] and client.workspaces() == [] and client.tasks() == []
+
+
+def test_copy_allows_windows_path_creation_time_but_rejects_descriptor_changes(tmp_path, monkeypatch):
+    import os
+    from types import SimpleNamespace
+    from suan.workflows.muferro import _copy_input
+    source = tmp_path / 'input.toml'
+    source.write_text('x = 1\n')
+    lstat = Path.lstat
+    fields = ('st_mode', 'st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+
+    def creation_time(path, *args, **kwargs):
+        info = lstat(path, *args, **kwargs)
+        if path == source:
+            return SimpleNamespace(**{key: getattr(info, key) - (100 if key == 'st_ctime_ns' else 0) for key in fields})
+        return info
+
+    monkeypatch.setattr(Path, 'lstat', creation_time)
+    assert _copy_input(source, tmp_path / 'copy.toml', 1024) == source.stat().st_size
+    fstat = os.fstat
+    calls = 0
+
+    def changed_descriptor(fd):
+        nonlocal calls
+        calls += 1
+        info = fstat(fd)
+        return SimpleNamespace(**{key: getattr(info, key) + (calls if key == 'st_ctime_ns' else 0) for key in fields})
+
+    monkeypatch.setattr(os, 'fstat', changed_descriptor)
+    with pytest.raises(ValueError, match='changed while importing'):
+        _copy_input(source, tmp_path / 'changed.toml', 1024)

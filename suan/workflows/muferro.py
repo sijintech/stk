@@ -67,7 +67,11 @@ def _copy_input(source, target, remaining):
                 raise ValueError("Case exceeds the 256 MiB input limit")
             out.write(block)
         signature = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
-        if signature(before) != signature(os.fstat(inp.fileno())) or signature(before) != signature(source.lstat()):
+        after = os.fstat(inp.fileno())
+        # As in project.snapshots: Windows 3.12 can use change time for fstat and
+        # creation time for path stat. Compare ctime only within the same API.
+        if (signature(before) != signature(after) or count != after.st_size
+                or signature(after)[:4] != signature(source.lstat())[:4]):
             raise ValueError("Case input changed while importing; import a stable case directory")
     return count
 
