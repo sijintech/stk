@@ -237,3 +237,23 @@ def test_process_restart_keeps_data_but_invalidates_handles(bridge_env, tmp_path
         assert opened["handle"] != project["handle"]
     finally:
         restarted.close()
+
+
+def test_preview_uses_strict_contract_without_changed_events_until_apply(inproc, tmp_path):
+    harness = inproc()
+    info = harness.call("project.create", {"directory": str(tmp_path / "preview"), "name": "Preview"})["project"]
+    assert "project.preview" in harness.call("hello", {"protocol": 1})["methods"]
+    params = {"handle": info["handle"], "expected_revision": 0, "commands": [{"op": "create_table", "name": "Proposal"}]}
+    preview = harness.call("project.preview", params)
+    assert preview["persisted"] is False and preview["base_revision"] == 0
+    assert preview["snapshot"]["project"]["revision"] == 1
+    assert harness.call("project.snapshot", {"handle": info["handle"]})["snapshot"]["tables"] == []
+    assert harness.events_of("project.changed") == []
+    assert harness.call("project.history", {"handle": info["handle"]})["history"] == []
+    harness.call("project.apply", {**params, "commands": preview["commands"]})
+    assert harness.call("project.snapshot", {"handle": info["handle"]})["snapshot"] == preview["snapshot"]
+    assert harness.wait_event(lambda event: event["event"] == "project.changed")["data"]["revision"] == 1
+    assert harness.error("project.preview", params)["code"] == "conflict"
+    harness.call("project.close", {"handle": info["handle"]})
+    assert harness.error("project.preview", params)["code"] == "not_found"
+    assert not harness.violations

@@ -115,6 +115,10 @@ class ProjectSessions:
             store = self._get(params["handle"])
             return store.apply(params["commands"], expected_revision=params["expected_revision"])
 
+    def preview(self, params):
+        with self._operation():
+            return self._get(params["handle"]).preview(params["commands"], expected_revision=params["expected_revision"])
+
     def history(self, params):
         with self._operation():
             return {"history": self._get(params["handle"]).history()}

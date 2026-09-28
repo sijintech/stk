@@ -501,6 +501,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.csv.export` | `{handle, table_id, destination, expected_revision, delimiter?}` | `{revision, table_id, path, rows, columns, size, sha256}` |
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
+| `project.preview` | `{handle, expected_revision, commands}` | `{persisted: false, base_revision, proposed_revision, commands, snapshot}` |
 | `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
 | `project.backup` | `{handle}` | `{path, project_id, revision, format_version}` |
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
@@ -515,6 +516,12 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.snapshots.verify` | `{handle, snapshot_id}` | `{snapshot_id, ok, files: [{record_id, sha256, state, error}]}` |
 | `project.snapshots.resolve` | `{handle, snapshot_id, record_id}` | `{snapshot_id, record_id, name, path, location, sha256, size}` |
 
+- `project.preview` evaluates ordinary edit commands on an in-memory SQLite copy (source logical size
+  at most 128 MiB). It performs no persisted edit, file operation or task submission, and emits no
+  `project.changed`. Its snapshot, revision and edit-history pointers are hypothetical. Formula
+  errors remain visible in candidate evaluations. Apply its normalized commands (including generated
+  UUIDs) explicitly at `base_revision`; a later project edit makes that submission conflict.
+  It does not persist or approve a proposal, bypass task review, or automatically upgrade old formats.
 - `directory` is an absolute local directory path; the database is `project.sqlite3` within it.
   Creation is explicit and never overwrites an existing database (`conflict`). Open does not create
   missing files (`not_found`). An unsupported format returns `unsupported`; malformed data or edits

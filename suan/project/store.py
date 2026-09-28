@@ -22,6 +22,7 @@ from .journal import Capture, restore
 APPLICATION_ID = 0x53544B50  # STKP
 FORMAT_VERSION = 5
 DATABASE_NAME = "project.sqlite3"
+MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
 
 _DDL = (
@@ -356,34 +357,37 @@ class ProjectStore:
     def snapshot(self):
         """Read all tables at one revision; UUID keys do not depend on names or display order."""
         with self._connect() as db:
-            project = dict(db.execute("SELECT * FROM project").fetchone())
-            definitions, cache, _ = self._evaluate(db, project["revision"]) if _version(db) >= 2 else ({}, {}, set())
-            tables = [dict(row) for row in db.execute("SELECT * FROM tables ORDER BY rowid")]
-            for table in tables:
-                table["fields"] = [dict(row) for row in db.execute(
-                    "SELECT id, name, type, unit FROM fields WHERE table_id=? ORDER BY rowid", (table["id"],))]
-                records = {row["id"]: {"id": row["id"], "values": {}} for row in db.execute(
-                    "SELECT id FROM records WHERE table_id=? ORDER BY rowid", (table["id"],))}
-                for cell in db.execute("SELECT * FROM cells WHERE table_id=?", (table["id"],)):
-                    records[cell["record_id"]]["values"][cell["field_id"]] = json.loads(cell["value"])
-                for (record_id, field_id), definition in definitions.items():
-                    if record_id not in records:
-                        continue
-                    record = records[record_id]
-                    record.setdefault("definitions", {})[field_id] = definition
-                    result = cache[(record_id, field_id)]
-                    record.setdefault("evaluations", {})[field_id] = result
-                    if result["state"] == "ok":
-                        record["values"][field_id] = result["value"]
-                table["records"] = list(records.values())
-            result = {"format_version": _version(db), "project": project, "tables": tables}
-            if _version(db) >= 3:
-                result["edit_history"] = self._edit_history(db)
-            from .files import descriptor
-            file_index = descriptor(result)
-            if file_index is not None:
-                result["file_index"] = file_index
-            return result
+            return self._snapshot(db)
+
+    def _snapshot(self, db):
+        project = dict(db.execute("SELECT * FROM project").fetchone())
+        definitions, cache, _ = self._evaluate(db, project["revision"]) if _version(db) >= 2 else ({}, {}, set())
+        tables = [dict(row) for row in db.execute("SELECT * FROM tables ORDER BY rowid")]
+        for table in tables:
+            table["fields"] = [dict(row) for row in db.execute(
+                "SELECT id, name, type, unit FROM fields WHERE table_id=? ORDER BY rowid", (table["id"],))]
+            records = {row["id"]: {"id": row["id"], "values": {}} for row in db.execute(
+                "SELECT id FROM records WHERE table_id=? ORDER BY rowid", (table["id"],))}
+            for cell in db.execute("SELECT * FROM cells WHERE table_id=?", (table["id"],)):
+                records[cell["record_id"]]["values"][cell["field_id"]] = json.loads(cell["value"])
+            for (record_id, field_id), definition in definitions.items():
+                if record_id not in records:
+                    continue
+                record = records[record_id]
+                record.setdefault("definitions", {})[field_id] = definition
+                result = cache[(record_id, field_id)]
+                record.setdefault("evaluations", {})[field_id] = result
+                if result["state"] == "ok":
+                    record["values"][field_id] = result["value"]
+            table["records"] = list(records.values())
+        result = {"format_version": _version(db), "project": project, "tables": tables}
+        if _version(db) >= 3:
+            result["edit_history"] = self._edit_history(db)
+        from .files import descriptor
+        file_index = descriptor(result)
+        if file_index is not None:
+            result["file_index"] = file_index
+        return result
 
     @staticmethod
     def _edit_history(db):
@@ -428,38 +432,77 @@ class ProjectStore:
                      "commands": json.loads(row["commands"])}
                     for row in db.execute("SELECT * FROM changes ORDER BY revision")]
 
-    def apply(self, commands, *, expected_revision):
-        """Apply a JSON command list atomically, returning assigned IDs and the new revision."""
+    @staticmethod
+    def _prepare_commands(commands, expected_revision):
         _expected_revision(expected_revision)
         if not isinstance(commands, list) or not commands or len(commands) > 1000:
             raise ProjectError("Expected between 1 and 1000 commands")
         # Detach from caller-owned values before validation/transaction/history serialization.
         commands = json.loads(_json(commands))
+        return commands
+
+    def apply(self, commands, *, expected_revision):
+        """Apply a JSON command list atomically, returning assigned IDs and the new revision."""
+        commands = self._prepare_commands(commands, expected_revision)
         with self._connect(write=True) as db:
-            revision = db.execute("SELECT revision FROM project").fetchone()[0]
-            if revision != expected_revision:
-                raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {revision}")
-            changed = set()
-            capture = Capture(db) if _version(db) >= 3 else None
-            applied = []
-            for command in commands:
-                if capture:
-                    capture.command(command)
-                applied.append(self._apply_command(db, command, changed))
-                if capture:
-                    capture.created(command)
-            if _version(db) >= 2:
-                self._evaluate(db, revision + 1, changed, persist=True)
-            db.execute("UPDATE project SET revision=?", (revision + 1,))
-            db.execute("INSERT INTO changes VALUES (?, ?, ?)",
-                       (revision + 1, datetime.now(timezone.utc).isoformat(), _json(applied)))
+            return self._apply(db, commands, expected_revision)
+
+    def preview(self, commands, *, expected_revision):
+        """Evaluate an edit on an in-memory copy; no persisted edit/history/file/task changes.
+
+        Return normalized commands with stable generated IDs for an explicit later apply at the
+        base revision. The proposed snapshot is hypothetical, including its next revision/history.
+        """
+        commands = self._prepare_commands(commands, expected_revision)
+        memory = sqlite3.connect(":memory:", isolation_level=None)
+        memory.row_factory = sqlite3.Row
+        try:
+            with self._connect() as source:
+                revision = source.execute("SELECT revision FROM project").fetchone()[0]
+                if revision != expected_revision:
+                    raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {revision}")
+                size = source.execute("PRAGMA page_count").fetchone()[0] * source.execute("PRAGMA page_size").fetchone()[0]
+                if size > MAX_PREVIEW_BYTES:
+                    raise ProjectError("Project database exceeds the 128 MiB preview copy limit")
+                source.backup(memory)
+            # Release the source read transaction before evaluating the proposal. A concurrent
+            # writer can now advance it; the eventual apply still has to pass the original CAS.
+            memory.execute("PRAGMA foreign_keys=ON")
+            memory.execute("BEGIN")
+            result = self._apply(memory, commands, expected_revision)
+            snapshot = self._snapshot(memory)
+            return {"persisted": False, "base_revision": expected_revision,
+                    "proposed_revision": result["revision"], "commands": result["commands"], "snapshot": snapshot}
+        except sqlite3.Error as exc:
+            raise ProjectError(f"Cannot preview project edits: {exc}") from None
+        finally:
+            memory.close()
+
+    def _apply(self, db, commands, expected_revision):
+        revision = db.execute("SELECT revision FROM project").fetchone()[0]
+        if revision != expected_revision:
+            raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {revision}")
+        changed = set()
+        capture = Capture(db) if _version(db) >= 3 else None
+        applied = []
+        for command in commands:
             if capture:
-                db.execute("DELETE FROM edit_journal WHERE applied=0")
-                delta = capture.delta()
-                if delta:
-                    db.execute("INSERT INTO edit_journal (revision, delta, applied) VALUES (?, ?, 1)",
-                               (revision + 1, _json(delta)))
-            return {"revision": revision + 1, "commands": applied}
+                capture.command(command)
+            applied.append(self._apply_command(db, command, changed))
+            if capture:
+                capture.created(command)
+        if _version(db) >= 2:
+            self._evaluate(db, revision + 1, changed, persist=True)
+        db.execute("UPDATE project SET revision=?", (revision + 1,))
+        db.execute("INSERT INTO changes VALUES (?, ?, ?)",
+                   (revision + 1, datetime.now(timezone.utc).isoformat(), _json(applied)))
+        if capture:
+            db.execute("DELETE FROM edit_journal WHERE applied=0")
+            delta = capture.delta()
+            if delta:
+                db.execute("INSERT INTO edit_journal (revision, delta, applied) VALUES (?, ?, 1)",
+                           (revision + 1, _json(delta)))
+        return {"revision": revision + 1, "commands": applied}
 
     @staticmethod
     def _apply_command(db, command, changed):

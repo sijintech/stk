@@ -371,8 +371,17 @@ TEST_F(PythonBridge, ProjectLifecycleAndRevisionedEdits)
   const auto opened = client->project_open(project.directory).get();
   ASSERT_TRUE(opened.ok());
   EXPECT_EQ(opened.value().handle, project.handle);
-  const auto edited = client->project_apply(
+  ASSERT_TRUE(client->hello_info()->has_method("project.preview"));
+  const auto proposal = client->project_preview(
       project.handle, 0, Json::array({{{"op", "create_table"}, {"name", "Cases"}}})).get();
+  ASSERT_TRUE(proposal.ok()) << proposal.error().describe();
+  EXPECT_EQ(proposal.value()["persisted"], false);
+  EXPECT_EQ(proposal.value()["base_revision"], 0);
+  const auto unchanged = client->project_snapshot(project.handle).get();
+  ASSERT_TRUE(unchanged.ok());
+  EXPECT_TRUE(unchanged.value()["tables"].empty());
+  EXPECT_EQ(unchanged.value()["project"]["revision"], 0);
+  const auto edited = client->project_apply(project.handle, 0, proposal.value()["commands"]).get();
   ASSERT_TRUE(edited.ok()) << edited.error().describe();
   EXPECT_EQ(edited.value()["revision"], 1);
   const auto conflict = client->project_apply(
@@ -384,6 +393,7 @@ TEST_F(PythonBridge, ProjectLifecycleAndRevisionedEdits)
   EXPECT_EQ(snapshot.value()["project"]["revision"], 1);
   ASSERT_EQ(snapshot.value()["tables"].size(), 1u);
   EXPECT_EQ(snapshot.value()["tables"][0]["id"], edited.value()["commands"][0]["id"]);
+  EXPECT_EQ(snapshot.value(), proposal.value()["snapshot"]);
   const auto history = client->project_history(project.handle).get();
   ASSERT_TRUE(history.ok());
   ASSERT_EQ(history.value().size(), 1u);

@@ -75,7 +75,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
     assert execute(scripts, session, "recent = stk.projects.recent()['projects']\nassert len(recent) == 1\nassert stk.projects.open(recent[0]['directory'], expected_id=recent[0]['id']).snapshot()['project']['id'] == recent[0]['id']\nassert stk.projects.forget(recent[0]['directory'])\nassert stk.projects.recent()['projects'] == []")["run"]["state"] == "succeeded"
     operations = set(scripts.call("script.catalog")["operations"])
     assert {name for name in operations if name.startswith("project.") and not name.startswith(("project.snapshots.", "project.runs."))} == {
-        "project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot", "project.apply", "project.history",
+        "project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot", "project.apply", "project.preview", "project.history",
         "project.backup", "project.upgrade", "project.undo", "project.redo", "project.csv.import", "project.csv.export",
         "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve"}
     assert {"workspace.create", "task.submit", "task.logs", "upload.start", "transfer.get", "connections.ssh"} <= operations
@@ -237,3 +237,21 @@ def test_file_main_guard_and_sibling_imports_use_standard_script_context(scripts
     assert output["text"] == "file answer 42\n" # file expressions do not auto-echo
     assert execute(scripts, session, "assert __name__ == '__console__'\nassert '__file__' not in globals()\nhelper.answer")["run"]["state"] == "succeeded"
     assert scripts.call("script.read", {"session": session, "cursor": output["cursor"]})["text"] == "42\n"
+
+
+def test_python_worker_previews_without_writing_then_explicitly_applies(scripts, tmp_path):
+    project = scripts.call("project.create", {"directory": str(tmp_path / "preview"), "name": "Preview"})["project"]
+    session = scripts.call("script.open")["session"]
+    result = execute(scripts, session,
+                     "assert 'project.preview' in stk.operations()['operations']\n"
+                     "proposal = stk.project.preview([{'op': 'create_table', 'name': 'Draft'}], expected_revision=0)\n"
+                     "assert proposal['persisted'] is False\n"
+                     "assert stk.project.snapshot()['tables'] == []\n"
+                     "assert stk.project.history() == []", project_handle=project["handle"])
+    assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})
+    assert scripts.events_of("project.changed") == []
+    result = execute(scripts, session,
+                     "stk.project.apply(proposal['commands'], expected_revision=proposal['base_revision'])\n"
+                     "assert stk.project.snapshot() == proposal['snapshot']", project_handle=project["handle"])
+    assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})
+    assert scripts.wait_event(lambda event: event["event"] == "project.changed")["data"]["revision"] == 1

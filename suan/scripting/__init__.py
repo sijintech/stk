@@ -33,6 +33,11 @@ class Project:
         return self._call("project.apply", {"handle": self.handle, "commands": commands,
                                             "expected_revision": expected_revision})
 
+    def preview(self, commands, *, expected_revision):
+        """Evaluate a hypothetical edit without saving; apply its normalized commands explicitly."""
+        return self._call("project.preview", {"handle": self.handle, "commands": commands,
+                                              "expected_revision": expected_revision})
+
     def history(self):
         return self._call("project.history", {"handle": self.handle})["history"]
 

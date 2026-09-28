@@ -72,6 +72,7 @@ print(p.backup())
 | 范围 | 当前状态 |
 |---|---|
 | 项目创建、打开、列表、关闭、快照、事务修改、历史、撤销/重做、数据库备份/升级 | 已实现，与桌面桥共用命令；包括引用与轻量公式 |
+| 项目修改预览 | `stk.project.preview` 在内存副本计算候选结果；不保存修改，见[预览指南](project-preview.md) |
 | CSV/TSV 表格导入与当前值导出 | `stk.project.csv` 共用类型校验、修订和撤销，见[CSV 交换](project-csv.md) |
 | 文件索引登记、刷新、列表、路径检查 | `stk.project.files` 已实现；不复制、删除、打开或执行文件，见[文件指南](project-files.md) |
 | 不可变输入副本、历史清单和 SHA-256 校验 | `stk.project.snapshots` 已实现，格式 4；显式复制选中文件，表格撤销不删除历史，见[输入快照](project-snapshots.md) |

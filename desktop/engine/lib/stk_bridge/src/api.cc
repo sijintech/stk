@@ -109,6 +109,14 @@ Future<Json> Client::project_apply(const std::string &handle, const int64_t expe
                                         {"commands", commands}}), options);
 }
 
+Future<Json> Client::project_preview(const std::string &handle, const int64_t expected_revision, const Json &commands)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never; // Generated preview IDs should not change invisibly.
+  return call("project.preview", object({{"handle", handle}, {"expected_revision", expected_revision},
+                                          {"commands", commands}}), options);
+}
+
 Future<Json> Client::project_history(const std::string &handle)
 {
   return call("project.history", object({{"handle", handle}})).map([](const Json &r) {

@@ -4500,6 +4500,69 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.preview": {
+        "description": "Preview the same edit commands on an in-memory database copy (128 MiB source limit), with no persisted edits or events. Apply returned commands explicitly at base_revision.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectCommand"
+              },
+              "minItems": 1,
+              "maxItems": 1000
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "commands"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "persisted": {
+              "type": "boolean",
+              "const": false
+            },
+            "base_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "proposed_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectCommand"
+              }
+            },
+            "snapshot": {
+              "$ref": "#/$defs/projectSnapshot"
+            }
+          },
+          "required": [
+            "persisted",
+            "base_revision",
+            "proposed_revision",
+            "commands",
+            "snapshot"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {

@@ -283,6 +283,8 @@ class Client {
   Future<Json> project_snapshot(const std::string &handle);
   /** Never retried automatically: after an uncertain response inspect snapshot/history. */
   Future<Json> project_apply(const std::string &handle, int64_t expected_revision, const Json &commands);
+  /** Hypothetical snapshot/normalized commands; never writes or automatically applies. */
+  Future<Json> project_preview(const std::string &handle, int64_t expected_revision, const Json &commands);
   Future<Json> project_history(const std::string &handle);
   Future<Json> project_backup(const std::string &handle);
   Future<Json> project_upgrade(const std::string &handle, int64_t expected_revision);

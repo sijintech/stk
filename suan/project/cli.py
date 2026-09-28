@@ -46,6 +46,16 @@ def apply(directory, commands, expected_revision):
     _run(lambda: ProjectStore(directory).apply(json.load(commands), expected_revision=expected_revision))
 
 
+@project.command("preview")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--commands", required=True, type=click.File("r", encoding="utf-8"),
+              help="JSON command-list file, or - for stdin.")
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def preview(directory, commands, expected_revision):
+    """Inspect a hypothetical edit and its formulas without saving changes."""
+    _run(lambda: ProjectStore(directory).preview(json.load(commands), expected_revision=expected_revision))
+
+
 @project.command("history")
 @click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
 def history(directory):
