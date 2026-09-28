@@ -256,6 +256,9 @@
             "not_initialized"
           ],
           "description": "Local Runtime only: whether $STK_STATE_DIR holds a Runtime configuration (the local connection is always listed)."
+        },
+        "ssh": {
+          "$ref": "#/$defs/sshStatus"
         }
       },
       "required": [
@@ -762,6 +765,9 @@
             },
             "check": {
               "type": "boolean"
+            },
+            "ssh": {
+              "$ref": "#/$defs/sshConfig"
             }
           },
           "required": [
@@ -3094,6 +3100,44 @@
           ],
           "additionalProperties": false
         }
+      },
+      "connections.ssh": {
+        "description": "Inspect, connect or explicitly disconnect a managed OpenSSH Runtime tunnel. Never starts or cancels Runtime jobs.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "action": {
+              "enum": [
+                "status",
+                "connect",
+                "disconnect"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "$ref": "#/$defs/connectionId"
+            },
+            "ssh": {
+              "$ref": "#/$defs/sshStatus"
+            }
+          },
+          "required": [
+            "connection",
+            "ssh"
+          ]
+        }
       }
     },
     "events": {
@@ -3786,6 +3830,53 @@
         "output_end"
       ],
       "additionalProperties": false
+    },
+    "sshConfig": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "host"
+      ],
+      "additionalProperties": false
+    },
+    "sshStatus": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "stopped",
+            "failed"
+          ]
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "url",
+        "error"
+      ]
     }
   }
 }

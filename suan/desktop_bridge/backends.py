@@ -49,6 +49,9 @@ def runtime_error(exc):
     """A :class:`BridgeError` for a Runtime transport or response failure."""
     if isinstance(exc, BridgeError):
         return exc
+    from suan.runtime.ssh import SSHError
+    if isinstance(exc, SSHError):
+        return BridgeError("unavailable", str(exc))
     if isinstance(exc, RuntimeErrorResponse):
         status, message = exc.status, str(exc)
         if status in (401, 403):
@@ -90,7 +93,8 @@ class RuntimeBackend:
     @property
     def server_key(self):
         """A stable, credential-free key of this Runtime (download cache directories)."""
-        return hashlib.sha256(self.client.url.encode("utf-8")).hexdigest()[:16]
+        identity = getattr(self.client, "connection_identity", None) or self.client.url
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
 
     def call(self, function, *args, **kwargs):
         try:

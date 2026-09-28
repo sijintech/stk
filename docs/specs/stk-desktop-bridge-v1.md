@@ -603,3 +603,39 @@ The first Python facade exposes project methods through the shared command handl
 desktop binds these six UI operations on its main loop, targeting the first installed screen.
 Stale callbacks from an earlier bridge session cannot apply queued layout changes. A bridge without
 that executor (for example a protocol test harness) must attach its own implementation or return unavailable.
+
+## 15. Managed OpenSSH Runtime connections (additive extension)
+
+`connections.add_runtime` accepts optional `ssh: {host: string}`. In that case `url` names the
+**remote** loopback Runtime endpoint and must contain an explicit nonzero port. `host` is an OpenSSH
+Host alias or `user@hostname`, not a command/options string. Token/token_file and `check` retain
+their existing meanings. A failed candidate health check does not replace the previous profile.
+Omitting `ssh` preserves direct/external-tunnel behavior.
+
+Saved SSH connections in `connections.list` and `connections.add_runtime` include
+`ssh: {host?, state, url, error}`. States are `stopped`, `ready`, `failed`; `url` is a temporary
+local loopback endpoint only when ready, otherwise null. It is not the connection's saved remote URL.
+This status describes the tunnel; use `connections.check` to check Runtime authentication/health.
+Listing/status never initiates an SSH connection. Diagnostics are bounded and tokens are not returned.
+
+`connections.ssh {id, action}` returns `{connection: id, ssh}`. Actions:
+
+- `status`: inspect the managed profile without starting it;
+- `connect`: clear an explicit disconnect and establish/reuse its tunnel;
+- `disconnect`: close the owned tunnel and inhibit implicit reconnection for this bridge session.
+
+The method returns `invalid_params` for direct/local/hub profiles and `not_found` for missing profiles.
+Connection failures return `unavailable`. A bridge without this extension omits it from `hello.methods`.
+These explicit control requests are not automatically replayed by the native client.
+
+Runtime operations start tunnels on demand and re-establish an exited SSH process on a later operation,
+unless explicitly disconnected. No HTTP request is replayed by this transport. Transfer/submission
+idempotency remains the responsibility of the existing operation contracts. Profiles share a tunnel;
+removing/replacing a profile closes its old tunnel and invalidates clients holding it. Source/cache identity
+uses the Host and remote endpoint, not the ephemeral local port.
+
+OpenSSH uses user config and existing key/agent authentication, strict known-host verification, loopback
+forwarding and keepalives. No interactive prompt, password persistence, automatic host trust, remote
+service installation or remote Python/UI access is introduced. A private guardian watches parent-pipe EOF
+and cleans up SSH descendants on bridge death; shutdown/removal never cancels Runtime tasks.
+See the [SSH guide](../ssh.md) for setup, restart behavior and current validation limits.

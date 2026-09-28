@@ -241,6 +241,7 @@ struct AddRuntimeParams {
   /** Exactly one of token / token_file. The token goes into the bridge only. */
   std::string token, token_file;
   bool check = true;
+  std::string ssh_host; /* empty: direct/external tunnel; otherwise an OpenSSH Host alias */
   Json to_json() const;
 };
 

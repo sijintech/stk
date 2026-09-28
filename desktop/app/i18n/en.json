@@ -718,5 +718,16 @@
   "script.run_file": "Run file",
   "script.file_hint": "Drop a file to select it, then run explicitly. Reset clears variables; accepted project edits remain saved.",
   "script.session_reset": "Python session ended. Variables were cleared; source was not replayed.",
-  "script.output_truncated": "Earlier output was discarded from the bounded buffer."
+  "script.output_truncated": "Earlier output was discarded from the bounded buffer.",
+  "conn.ssh.title": "SSH tunnel",
+  "conn.ssh.ready": "Connected",
+  "conn.ssh.stopped": "Disconnected",
+  "conn.ssh.failed": "Connection failed",
+  "conn.ssh.connect": "Connect SSH",
+  "conn.ssh.disconnect": "Disconnect SSH",
+  "conn.ssh.managed": "Let STK manage the SSH tunnel",
+  "conn.ssh.host": "SSH Host",
+  "conn.ssh.host.tip": "Host alias from your OpenSSH config, or user@hostname",
+  "conn.ssh.hint": "URL is the remote loopback Runtime address. Set up SSH keys and verify the host in a terminal first.",
+  "conn.ssh.err.host": "Enter an SSH Host alias."
 }

@@ -23,6 +23,7 @@ include = [
     { path = "docs/hub.md", format = "sdist" },
     { path = "docs/project.md", format = "sdist" },
     { path = "docs/scripting.md", format = "sdist" },
+    { path = "docs/ssh.md", format = "sdist" },
     { path = "docs/specs", format = "sdist" },
     { path = "examples/runtime", format = "sdist" },
     { path = "deploy/systemd", format = "sdist" },

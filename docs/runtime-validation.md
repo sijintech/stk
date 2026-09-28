@@ -2,6 +2,24 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-28：原生 Python 与管理 SSH
+
+- `7694ea3` 的 desktop CI [run 36382812292](https://github.com/sijintech/stk/actions/runs/36382812292)
+  全部成功：macOS arm64/Metal、Windows/MSVC CPU、Linux GL/Vulkan、Linux 发布包和干净环境启动。
+  Runtime/science 检查与文档部署也成功。此记录是 CI 验收，不替代用户实际输入法/完整交互验收。
+- SSH 首版在 Linux 上完整重编译后 **442/442 CTest 通过，无跳过**，含 C++ → Python SSH
+  配置契约及合成事件驱动的原生 Jobs 配置/断开/重连按钮测试；既有 GPU goldens 全部通过。
+- `test_runtime_ssh.py` 与 Runtime/桥相关回归 **74 项通过**；补充失败候选、缺失客户端后，
+  最终 SSH 专项 **16 项通过**。临时 sshd 使用测试目录中的独立密钥、配置和 known_hosts，
+  只监听本机高端口，不修改用户 SSH 配置、不访问外部服务器。
+- 真实 OpenSSH 访问 HTTP 与实际 Runtime：上传输入、提交一次、断开隧道后任务完成、
+  重连下载字节一致；未知 host key 拒绝且不发送 token。另测父管道 EOF 进程清理、并发隧道复用、
+  进程退出后重连、手动断开阻止隐式重连、端口被其他进程抢占、请求响应丢失不自动重放。
+- Linux CI 安装 sshd 并要求真实 SSH 测试不可跳过；Windows 运行模拟转发与生命周期测试，
+  macOS/Windows 原生 CI 要求 SSH 配置契约实际执行。本批远端 CI 结果待跟踪。
+
+配置与限制见 [SSH 指南](ssh.md)。真实异机网络、跳板机和 Windows/macOS OpenSSH 仍需站点验收。
+
 ## 初始工程版本验收
 
 在 Linux / Python 3.12.13 中构建 wheel 与 sdist。新建独立虚拟环境，先只安装

@@ -303,6 +303,21 @@ class JobsEditor final : public Editor {
         h += " · " + c->detail;
       }
       p->label(ctx.store.catalog().format("conn.health", {{"state", h}})).tip(c->info.url);
+      if (c->info.raw.contains("ssh") && c->info.raw["ssh"].is_object()) {
+        const Json &ssh = c->info.raw["ssh"];
+        const std::string state = ssh.value("state", "stopped");
+        const char *state_key = state == "ready" ? "conn.ssh.ready" :
+                                state == "failed" ? "conn.ssh.failed" : "conn.ssh.stopped";
+        p->label(std::string(ctx.tr("conn.ssh.title")) + " · " + std::string(ctx.tr(state_key)))
+            .tip(ssh.value("host", "") + " · " + ssh.value("error", ""));
+        ui::Layout &ssh_row = p->row(false);
+        ssh_row.button("ssh_connect", ctx.tr("conn.ssh.connect"), [&jobs]() {
+          jobs.ssh_connection(jobs.active_id(), "connect");
+        }).disable(!ready || c->health == Health::Checking);
+        ssh_row.button("ssh_disconnect", ctx.tr("conn.ssh.disconnect"), [&jobs]() {
+          jobs.ssh_connection(jobs.active_id(), "disconnect");
+        }).disable(!ready || c->health == Health::Checking || state == "stopped");
+      }
     }
     ui::Layout &r2 = p->row(false);
     r2.button("add_runtime", ctx.tr("conn.add_runtime"), [this]() { open_dialog(Dialog::AddRuntime); })
@@ -1103,6 +1118,12 @@ class JobsEditor final : public Editor {
         m.paragraph(ctx.tr("conn.add_runtime.hint"));
         m.prop(ctx.tr("conn.name")).text_field("name", ui::bind(add_name_), {.placeholder = "cluster"});
         m.prop(ctx.tr("conn.url"), ctx.tr("conn.url.tip")).text_field("url", ui::bind(add_url_));
+        m.checkbox("managed_ssh", ctx.tr("conn.ssh.managed"), ui::bind(add_ssh_));
+        if (add_ssh_) {
+          m.prop(ctx.tr("conn.ssh.host"), ctx.tr("conn.ssh.host.tip"))
+              .text_field("ssh_host", ui::bind(add_ssh_host_), {.placeholder = "cluster"});
+          m.paragraph(ctx.tr("conn.ssh.hint"));
+        }
         m.prop(ctx.tr("conn.token"), ctx.tr("conn.token.tip"))
             .text_field("token", ui::bind(add_token_), {.password = true});
         ui::Layout &tf = m.prop(ctx.tr("conn.token_file"), ctx.tr("conn.token_file.tip")).row(true);
@@ -1121,9 +1142,14 @@ class JobsEditor final : public Editor {
             dialog_error_ = std::string(cat.tr("conn.err.token"));
             return;
           }
+          if (add_ssh_ && add_ssh_host_.empty()) {
+            dialog_error_ = std::string(cat.tr("conn.ssh.err.host"));
+            return;
+          }
           bridge::AddRuntimeParams p;
           p.name = add_name_;
           p.url = add_url_;
+          p.ssh_host = add_ssh_ ? add_ssh_host_ : "";
           p.token = add_token_;
           p.token_file = add_token_file_;
           p.check = add_check_;
@@ -1289,6 +1315,8 @@ class JobsEditor final : public Editor {
   bool return_to_add_ = false;
   std::string dialog_error_;
   std::string add_name_, add_url_, add_token_, add_token_file_;
+  std::string add_ssh_host_;
+  bool add_ssh_ = false;
   bool add_check_ = true;
   std::string pair_name_, pair_url_, pair_code_, pair_device_;
   std::string remove_id_, cancel_id_, new_workspace_;

@@ -33,7 +33,8 @@ def get_client(profile=None, state_dir=None):
         if profile not in profiles:
             raise click.ClickException("Connection profile not found")
         config = profiles[profile]
-        return RuntimeClient(config["url"], config["token"])
+        from .ssh import profile_client
+        return profile_client(str(profiles_path().absolute()) + ":" + profile, config)
     url = os.environ.get("STK_RUNTIME_URL")
     if url:
         return RuntimeClient(url, os.environ.get("STK_RUNTIME_TOKEN", ""))
@@ -214,18 +215,27 @@ def connect():
 @connect.command("add")
 @click.argument("name")
 @click.option("--url", required=True)
+@click.option("--ssh-host", help="OpenSSH Host alias; --url is the remote loopback Runtime endpoint")
 @click.option(
     "--token-file", type=click.Path(exists=True, dir_okay=False, path_type=Path)
 )
-def add_connection(name, url, token_file):
+def add_connection(name, url, token_file, ssh_host):
     token = (
         token_file.read_text().strip()
         if token_file
         else click.prompt("Runtime token", hide_input=True)
     )
-    RuntimeClient(url, token).health()
+    from .ssh import TunnelManager
+    config = {"url": url, "token": token}
+    if ssh_host:
+        config["ssh"] = {"host": ssh_host}
+    manager = TunnelManager()
+    try:
+        manager.client(name, config).health()
+    finally:
+        manager.close()
     profiles = read_json(profiles_path(), {})
-    profiles[name] = {"url": url, "token": token}
+    profiles[name] = config
     atomic_json(profiles_path(), profiles)
     click.echo(f"Saved connection {name}")
 
@@ -234,7 +244,7 @@ def add_connection(name, url, token_file):
 def list_connections():
     dump(
         {
-            name: {"url": config["url"]}
+            name: {"url": config["url"], **({"ssh": config["ssh"]} if "ssh" in config else {})}
             for name, config in read_json(profiles_path(), {}).items()
         }
     )

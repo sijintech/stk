@@ -49,6 +49,10 @@ class RuntimeClient:
             raise ValueError("A runtime token is required")
         self.url, self.token, self.timeout = url.rstrip("/"), token, timeout
 
+    @property
+    def connection_identity(self):
+        return self.url
+
     def request(self, method, path, data=None, binary=False):
         body = data if isinstance(data, bytes) else json.dumps(data).encode() if data is not None else None
         request = Request(self.url + "/v1/" + path, data=body, method=method,

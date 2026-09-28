@@ -289,6 +289,7 @@ class Client {
   Future<std::vector<ConnectionInfo>> connections_list();
   Future<ConnectionInfo> connections_add_runtime(const AddRuntimeParams &params);
   Future<Json> connections_remove(const std::string &id);
+  Future<Json> connections_ssh(const std::string &id, const std::string &action);
   Future<ConnectionCheck> connections_check(const std::string &id);
   Future<ConnectionInfo> connections_pair_hub(const PairHubParams &params);
   Future<LocalRuntimeStatus> connections_local();

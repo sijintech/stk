@@ -382,7 +382,7 @@ jobs:
         if: success() || failure()
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-cpu.xml \
-            'PythonBridge\.(HelloListsTheProtocol|ColormapsList|GraphPresets|LocalGraphEvaluateOnAFakeMuferroRun)' 'ProjectPython\..*' 'ScriptPython\..*'
+            'PythonBridge\.(HelloListsTheProtocol|ColormapsList|GraphPresets|LocalGraphEvaluateOnAFakeMuferroRun|ManagedSSHProfileRoundTripDoesNotConnectImplicitly)' 'ProjectPython\..*' 'ScriptPython\..*'
           python3 desktop/tests/check_required_tests.py build/ctest-metal.xml \
             'app_viewer_python_metal' 'app_viewer_e2e_metal' 'package_install_check'
 
@@ -517,5 +517,5 @@ jobs:
 
       - name: Local project tests ran with the real Python bridge
         run: |
-          python desktop/tests/check_required_tests.py build/ctest-cpu.xml 'ProjectPython\..*' 'ScriptPython\..*'
+          python desktop/tests/check_required_tests.py build/ctest-cpu.xml 'ProjectPython\..*' 'ScriptPython\..*' 'PythonBridge\.ManagedSSHProfileRoundTripDoesNotConnectImplicitly'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

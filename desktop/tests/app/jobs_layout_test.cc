@@ -197,6 +197,35 @@ TEST(JobsLayout, AddRuntimeDialogAndThePathFieldFallback)
   EXPECT_EQ(jobs.workspace_files()[0].path, "数据.bin");
 }
 
+TEST(JobsLayout, ManagedSSHConfigurationAndConnectionButtons)
+{
+  if (std::string(STK_BRIDGE_FAKE).empty()) {
+    GTEST_SKIP() << "stk-bridge-fake is not built on this platform";
+  }
+  UiOnFake u;
+  app::JobsState &jobs = u.jobs();
+  ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
+  u.click("a1/main/conn/add_runtime");
+  u.type("jobs_dialog_a1/name", "ssh-cluster");
+  u.type("jobs_dialog_a1/token", "s3cret");
+  u.click("jobs_dialog_a1/managed_ssh");
+  ASSERT_NE(u.find("jobs_dialog_a1/ssh_host"), nullptr);
+  u.click("jobs_dialog_a1/ok");
+  ASSERT_NE(u.find("jobs_dialog_a1/ssh_host"), nullptr); /* missing Host keeps the dialog */
+  u.type("jobs_dialog_a1/ssh_host", "cluster-alias");
+  u.click("jobs_dialog_a1/ok");
+  ASSERT_TRUE(u.pump([&] { return jobs.active_id() == "runtime:ssh-cluster" && jobs.active() &&
+                                jobs.active()->health == app::Health::Online; }));
+  EXPECT_EQ(jobs.active()->info.raw["ssh"]["host"], "cluster-alias");
+  ASSERT_NE(u.find("a1/main/conn/ssh_disconnect"), nullptr);
+  u.click("a1/main/conn/ssh_disconnect");
+  ASSERT_TRUE(u.pump([&] { return jobs.active()->info.raw["ssh"]["state"] == "stopped"; }));
+  EXPECT_EQ(jobs.active()->health, app::Health::Offline);
+  u.click("a1/main/conn/ssh_connect");
+  ASSERT_TRUE(u.pump([&] { return jobs.active()->info.raw["ssh"]["state"] == "ready" &&
+                                jobs.active()->health == app::Health::Online; }));
+}
+
 TEST(JobsLayout, SubmitFromTheFormWithAChineseName)
 {
   if (std::string(STK_BRIDGE_FAKE).empty()) {

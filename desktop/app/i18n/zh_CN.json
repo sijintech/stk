@@ -718,5 +718,16 @@
   "script.run_file": "运行文件",
   "script.file_hint": "拖入文件后点击运行。重置会清除变量，已经接受的项目修改仍然保留。",
   "script.session_reset": "Python 会话已结束，变量已清除，源码未自动重放。",
-  "script.output_truncated": "较早的输出已从容量有限的缓冲区中移除。"
+  "script.output_truncated": "较早的输出已从容量有限的缓冲区中移除。",
+  "conn.ssh.title": "SSH 隧道",
+  "conn.ssh.ready": "已连接",
+  "conn.ssh.stopped": "已断开",
+  "conn.ssh.failed": "连接失败",
+  "conn.ssh.connect": "连接 SSH",
+  "conn.ssh.disconnect": "断开 SSH",
+  "conn.ssh.managed": "由 STK 管理 SSH 隧道",
+  "conn.ssh.host": "SSH 主机",
+  "conn.ssh.host.tip": "OpenSSH 配置中的 Host 别名，或 user@hostname",
+  "conn.ssh.hint": "URL 填远端 Runtime 的回环地址。请先在终端配置 SSH 密钥并验证主机。",
+  "conn.ssh.err.host": "请输入 SSH 主机别名。"
 }

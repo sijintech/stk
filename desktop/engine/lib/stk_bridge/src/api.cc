@@ -135,6 +135,11 @@ Future<Json> Client::connections_remove(const std::string &id)
   return call("connections.remove", object({{"id", id}}));
 }
 
+Future<Json> Client::connections_ssh(const std::string &id, const std::string &action)
+{
+  return call("connections.ssh", object({{"id", id}, {"action", action}}));
+}
+
 Future<ConnectionCheck> Client::connections_check(const std::string &id)
 {
   return call("connections.check", object({{"id", id}})).map([](const Json &r) {

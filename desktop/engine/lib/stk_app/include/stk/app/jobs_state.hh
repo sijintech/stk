@@ -216,6 +216,7 @@ class JobsState {
   /** Connects (health check, nodes / templates / policy for hubs, workspaces); "" disconnects. */
   void select_connection(const std::string &id);
   void check_connection(const std::string &id);
+  void ssh_connection(const std::string &id, const std::string &action);
   /** The connection to pick once the list is known (saved with the layout). */
   void set_preferred(std::string connection, std::string node, std::string workspace);
 

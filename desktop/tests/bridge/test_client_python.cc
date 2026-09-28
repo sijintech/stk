@@ -299,7 +299,7 @@ TEST_F(PythonBridge, HelloListsTheProtocol)
   EXPECT_EQ(hello->protocol, 1);
   EXPECT_EQ(hello->server.name, "stk-desktop-bridge");
   EXPECT_EQ(hello->server.pid, client->bridge_pid());
-  for (const char *method : {"hello", "graph.evaluate", "logs.subscribe", "hub.policy", "colormaps.list"}) {
+  for (const char *method : {"hello", "graph.evaluate", "logs.subscribe", "hub.policy", "colormaps.list", "connections.ssh"}) {
     EXPECT_TRUE(hello->has_method(method)) << method;
   }
   EXPECT_EQ(hello->limits.max_line_bytes, 16 * 1024 * 1024);
@@ -329,6 +329,33 @@ TEST_F(PythonBridge, HelloListsTheProtocol)
   EXPECT_EQ(client->stats().protocol_errors, 0u);
   client->close();
   EXPECT_NE(client->bridge_log().text().find("exit code 0"), std::string::npos);
+}
+
+TEST_F(PythonBridge, ManagedSSHProfileRoundTripDoesNotConnectImplicitly)
+{
+  auto client = started(options());
+  AddRuntimeParams params;
+  params.name = "ssh-cluster";
+  params.url = "http://127.0.0.1:8765";
+  params.token = "private-ssh-profile-test";
+  params.ssh_host = "test-cluster";
+  params.check = false;
+  const auto added = client->connections_add_runtime(params).get();
+  ASSERT_TRUE(added.ok()) << added.error().describe();
+  EXPECT_EQ(added.value().id, "runtime:ssh-cluster");
+  EXPECT_EQ(added.value().raw["ssh"]["state"], "stopped");
+  EXPECT_EQ(added.value().raw["ssh"]["host"], "test-cluster");
+  EXPECT_FALSE(added.value().raw.contains("token"));
+  const auto status = client->connections_ssh(added.value().id, "status").get();
+  ASSERT_TRUE(status.ok()) << status.error().describe();
+  EXPECT_EQ(status.value()["ssh"]["state"], "stopped");
+  const auto stopped = client->connections_ssh(added.value().id, "disconnect").get();
+  ASSERT_TRUE(stopped.ok()) << stopped.error().describe();
+  EXPECT_EQ(stopped.value()["ssh"]["state"], "stopped");
+  EXPECT_TRUE(client->connections_remove(added.value().id).get().ok());
+  const auto missing = client->connections_ssh(added.value().id, "status").get();
+  ASSERT_FALSE(missing.ok());
+  EXPECT_EQ(missing.error().code, ErrorCode::NotFound);
 }
 
 TEST_F(PythonBridge, ProjectLifecycleAndRevisionedEdits)

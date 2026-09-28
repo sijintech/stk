@@ -658,6 +658,54 @@ void JobsState::check_connection(const std::string &id)
       failed.error = r.error();
       apply_check(failed);
     }
+    for (const ConnectionRow &c : connections_) {
+      if (c.info.id == id && c.info.raw.contains("ssh")) {
+        ssh_connection(id, "status");
+        break;
+      }
+    }
+  });
+}
+
+void JobsState::ssh_connection(const std::string &id, const std::string &action)
+{
+  if (!ready() || id.empty()) {
+    return;
+  }
+  if (action != "status") {
+    for (ConnectionRow &c : connections_) {
+      if (c.info.id == id) {
+        c.health = Health::Checking;
+      }
+    }
+    changed();
+  }
+  on(client_->connections_ssh(id, action), [this, id, action](const bridge::Result<Json> &r) {
+    for (ConnectionRow &c : connections_) {
+      if (c.info.id != id) {
+        continue;
+      }
+      if (r) {
+        c.info.raw["ssh"] = r.value().at("ssh");
+        if (action == "disconnect") {
+          c.health = Health::Offline;
+          c.detail = std::string(store_.tr("conn.ssh.stopped"));
+        }
+      }
+      else {
+        c.health = Health::Offline;
+        c.detail = r.error().message;
+      }
+    }
+    if (!r && action != "status") {
+      fail(std::string(store_.tr("conn.ssh.title")), r.error());
+      ssh_connection(id, "status");
+    }
+    if (r && action == "connect") {
+      check_connection(id);
+    }
+    publish_connection();
+    changed();
   });
 }
 

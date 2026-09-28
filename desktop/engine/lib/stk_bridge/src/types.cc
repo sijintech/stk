@@ -301,6 +301,9 @@ Json AddRuntimeParams::to_json() const
   Json p = Json::object();
   p["name"] = name;
   p["url"] = url;
+  if (!ssh_host.empty()) {
+    p["ssh"] = Json{{"host", ssh_host}};
+  }
   if (!token.empty()) {
     p["token"] = token;
   }

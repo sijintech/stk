@@ -17,6 +17,7 @@ import re
 import threading
 
 from suan.runtime.common import atomic_json, read_json
+from suan.runtime.ssh import TunnelManager
 
 from .backends import HubBackend, RuntimeBackend, make_hub_client, make_runtime_client
 from .protocol import BridgeError
@@ -45,6 +46,10 @@ class ConnectionStore:
         self.state_dir = Path(state_dir)
         self.hubs_path = self.state_dir / "hubs.json"
         self.lock = threading.RLock()
+        self.tunnels = TunnelManager()
+
+    def close(self):
+        self.tunnels.close()
 
     # -- listing --------------------------------------------------------------------------------
 
@@ -63,7 +68,13 @@ class ConnectionStore:
                         "state": "initialized" if local["initialized"] else "not_initialized"}]
         for name, config in sorted(self._profiles().items()):
             if isinstance(config, dict) and isinstance(config.get("url"), str):
-                connections.append({"id": "runtime:" + name, "kind": "runtime", "name": name, "url": config["url"]})
+                item = {"id": "runtime:" + name, "kind": "runtime", "name": name, "url": config["url"]}
+                if "ssh" in config:
+                    try:
+                        item["ssh"] = self.tunnels.client("runtime:" + name, config).tunnel.status()
+                    except (ValueError, OSError, KeyError) as exc:
+                        item["ssh"] = {"state": "failed", "error": str(exc), "url": None}
+                connections.append(item)
         for name, config in sorted(self._hubs().items()):
             if isinstance(config, dict) and isinstance(config.get("url"), str):
                 connections.append({"id": "hub:" + name, "kind": "hub", "name": name, "url": config["url"],
@@ -114,16 +125,45 @@ class ConnectionStore:
 
     # -- changes --------------------------------------------------------------------------------
 
-    def add_runtime(self, name, url, token, check=True):
+    def add_runtime(self, name, url, token, check=True, ssh=None):
         _name(name)
         client = make_runtime_client(url, token)
-        if check:
-            RuntimeBackend("runtime:" + name, client).health()
-        with self.lock:
-            profiles = self._profiles()
-            profiles[name] = {"url": client.url, "token": token}
-            atomic_json(profiles_path(), profiles)
+        config = {"url": client.url, "token": token}
+        if ssh is not None:
+            config["ssh"] = ssh
+        # Validate/check a candidate without replacing a currently usable connection on failure.
+        candidate = TunnelManager()
+        try:
+            try:
+                client = candidate.client(name, config)
+            except ValueError as exc:
+                raise BridgeError("invalid_params", str(exc)) from None
+            if check:
+                RuntimeBackend("runtime:" + name, client).health()
+            with self.lock:
+                profiles = self._profiles()
+                profiles[name] = config
+                atomic_json(profiles_path(), profiles)
+                self.tunnels.remove("runtime:" + name)
+        finally:
+            candidate.close()
         return self.describe("runtime:" + name)
+
+    def ssh_control(self, connection_id, action):
+        if not connection_id.startswith("runtime:"):
+            raise BridgeError("invalid_params", "This profile does not use managed SSH")
+        client = self.runtime_client(connection_id)
+        if not hasattr(client, "tunnel"):
+            raise BridgeError("invalid_params", "This profile does not use managed SSH")
+        if action == "connect":
+            try:
+                client.tunnel.endpoint(reconnect=True)
+            except OSError as exc:
+                from .backends import runtime_error
+                raise runtime_error(exc) from None
+        elif action == "disconnect":
+            client.tunnel.disconnect()
+        return {"connection": connection_id, "ssh": client.tunnel.status()}
 
     def pair_hub(self, name, url, code, device_name):
         _name(name)
@@ -148,6 +188,7 @@ class ConnectionStore:
                     raise BridgeError("not_found", f"Unknown connection {connection_id!r}")
                 del profiles[name]
                 atomic_json(profiles_path(), profiles)
+                self.tunnels.remove(connection_id)
             elif kind == "hub":
                 hubs = self._hubs()
                 if name not in hubs:
@@ -180,7 +221,10 @@ class ConnectionStore:
         config = self._profiles().get(name)
         if not isinstance(config, dict):
             raise BridgeError("not_found", f"Unknown connection {connection_id!r}")
-        return make_runtime_client(config["url"], config.get("token", ""))
+        try:
+            return self.tunnels.client(connection_id, config)
+        except (ValueError, KeyError) as exc:
+            raise BridgeError("invalid_params", f"Invalid Runtime profile: {exc}") from None
 
     def hub_client(self, connection_id):
         kind, _, name = connection_id.partition(":")

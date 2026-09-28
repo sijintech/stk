@@ -549,7 +549,7 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     respond(id, Json{{"protocol", 1},
                      {"server", {{"name", "stk-bridge-fake"}, {"version", "0.0.1"}, {"python", "none"}, {"platform", "test"},
                                  {"pid", int64_t(getpid())}}},
-                     {"methods", Json::array({"hello", "connections.list", "connections.check", "connections.add_runtime",
+                     {"methods", Json::array({"hello", "connections.list", "connections.check", "connections.add_runtime", "connections.ssh",
                                               "connections.remove", "connections.pair_hub", "connections.local",
                                               "connections.local_start", "hub.devices", "hub.templates", "hub.actions",
                                               "hub.action", "hub.review", "hub.policy", "hub.subscribe", "workspace.list",
@@ -576,7 +576,7 @@ bool handle(const Json &id, const std::string &method, const Json &p)
     if (c.is_null()) {
       error(id, "not_found", "Unknown connection");
     }
-    else if (cid == "runtime:down") {
+    else if (cid == "runtime:down" || (c.contains("ssh") && c["ssh"]["state"] == "stopped")) {
       respond(id, {{"id", cid}, {"ok", false}, {"error", {{"code", "unavailable"}, {"message", "The Runtime cannot be reached"},
                                                            {"retryable", true}}}});
     }
@@ -599,10 +599,32 @@ bool handle(const Json &id, const std::string &method, const Json &p)
       return true;
     }
     Json c = {{"id", "runtime:" + name}, {"kind", "runtime"}, {"name", name}, {"url", p.value("url", std::string())}};
+    if (p.contains("ssh")) {
+      c["ssh"] = {{"host", p["ssh"]["host"]}, {"state", "ready"}, {"url", "http://127.0.0.1:50000"}, {"error", ""}};
+    }
     g_model["connections"].push_back(c);
     g_model["workspaces"]["runtime:" + name + "|"] = Json::array();
     save_locked();
     respond(id, {{"connection", c}});
+    return true;
+  }
+  if (method == "connections.ssh") {
+    for (Json &c : g_model["connections"]) {
+      if (c["id"] == p["id"] && c.contains("ssh")) {
+        if (p["action"] == "connect") {
+          c["ssh"]["state"] = "ready";
+          c["ssh"]["url"] = "http://127.0.0.1:50000";
+        }
+        if (p["action"] == "disconnect") {
+          c["ssh"]["state"] = "stopped";
+          c["ssh"]["url"] = nullptr;
+        }
+        save_locked();
+        respond(id, {{"connection", p["id"]}, {"ssh", c["ssh"]}});
+        return true;
+      }
+    }
+    error(id, "not_found", "Unknown SSH profile");
     return true;
   }
   if (method == "connections.pair_hub") {

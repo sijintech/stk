@@ -159,6 +159,7 @@ class Bridge:
             "connections.list": lambda p, c: {"connections": self.connections.list()},
             "connections.add_runtime": self.add_runtime,
             "connections.remove": self.remove_connection,
+            "connections.ssh": self.ssh_connection,
             "connections.check": self.check_connection,
             "connections.pair_hub": self.pair_hub,
             "connections.local": lambda p, c: self.connections.local_status(),
@@ -358,6 +359,7 @@ class Bridge:
             time.sleep(0.02)
         self.closed.set()
         self.projects.shutdown()
+        self.connections.close()
         self.state_lock.release()
 
     # -- helpers ------------------------------------------------------------------------------
@@ -459,7 +461,10 @@ class Bridge:
         if not token:
             raise BridgeError("invalid_params", "Give 'token' or 'token_file'")
         return {"connection": self.connections.add_runtime(params["name"], params["url"], token,
-                                                           params.get("check", True))}
+                                                           params.get("check", True), params.get("ssh"))}
+
+    def ssh_connection(self, params, context):
+        return self.connections.ssh_control(params["id"], params["action"])
 
     def remove_connection(self, params, context):
         self.connections.remove(params["id"])

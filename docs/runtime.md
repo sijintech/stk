@@ -161,6 +161,10 @@ suan server --state-dir /local-disk/stk-state doctor --backend slurm \
 
 ## 远程连接
 
+推荐使用 [STK 管理的 SSH 连接](ssh.md)：原生桌面的“添加 Runtime”可填写 SSH Host，
+CLI 使用 `suan connect add cluster --ssh-host my-compute-server --url http://127.0.0.1:8765`。
+STK 按需建立隧道并负责退出清理。以下外部隧道方式仍兼容：
+
 ```bash
 # 使用 SSH 配置中的 Host 别名及现有认证；隧道断开不取消任务
 ssh -N -L 9876:127.0.0.1:8765 my-compute-server
@@ -178,12 +182,12 @@ suan jobs --profile cluster list
 
 桌面 Tasks 页提供相同的连接保存、工作区新建、文件上传、任务提交、取消和结果查看。
 点击“本机 → 连接”只在 Linux 上初始化并启动本机 runtime；Windows / macOS 上会显示
-只支持 Linux 的提示。服务器连接使用先前建立的 SSH 隧道。
+只支持 Linux 的提示。服务器连接可以使用 STK 管理或先前建立的 SSH 隧道。
 连接令牌保存在用户私有的 `~/.stk/connections.json`；不写入共享 `.suan` 工作区。
 可通过 `STK_PROFILES_FILE` 指定连接配置文件位置。
 
 `suan connect check cluster --json` 可在客户端检查已保存连接的 API 版本、认证和
-supervisor 状态。它沿用现有 SSH 隧道，报告范围为 `connection`；若需检查服务器
+supervisor 状态。它按配置建立 SSH 隧道或沿用外部隧道，报告范围为 `connection`；若需检查服务器
 的磁盘和 worker 环境，在服务器上运行 `suan server doctor`。
 
 Windows / macOS 只作客户端：按上面的方式建立 SSH 隧道并用 `suan connect add` 保存连接，
