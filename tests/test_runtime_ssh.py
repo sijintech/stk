@@ -301,7 +301,10 @@ def test_guardian_closes_ssh_when_parent_pipe_disappears(endpoint, fake_ssh):
         assert descendants
         guardian.stdin.close()  # identical EOF when the desktop bridge crashes
         guardian.wait(timeout=5)
-        assert all(not child.is_running() for child in descendants)
+        # Windows can retain descendant PIDs briefly after process termination (including
+        # venv redirectors). Wait for the whole tree instead of sampling is_running once.
+        _, alive = psutil.wait_procs(descendants, timeout=5)
+        assert not alive, [child.pid for child in alive]
     finally:
         manager.close()
 
