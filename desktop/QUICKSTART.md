@@ -107,6 +107,13 @@ CMake、Ninja 和 STK science / visualization / control 依赖安装在专用 ve
 失败时查看终端最后一个错误和 `setup.log`。修复工具链或网络后重跑；若 vcpkg 缓存不完整或被修改，
 使用新的 `--work-dir`。这是源码开发测试流程；Windows 安装包和内置 Python 发布仍属于后续里程碑。
 
+## 测试项目表格
+
+更新源码后重跑脚本进行增量编译（本次不要用 `--launch-only`）。主窗口内选择
+**文件 → 项目表格**，填入一个新的绝对目录和名称创建项目，再添加表格、字段、记录并编辑值。
+每次修改立即保存到该目录的 `project.sqlite3`；关闭后可再次打开同一目录验证数据。
+表格区域可用 `Ctrl+Space` 最大化。详细步骤和当前限制见[项目指南](../docs/project.md)。
+
 ## English quick start
 
 Install Git and Python 3.12, plus full Xcode 16+ on macOS or Visual Studio/Build Tools 2022 with the

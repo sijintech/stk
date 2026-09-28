@@ -12,6 +12,8 @@
 
 namespace stk::app {
 
+std::unique_ptr<Editor> make_project_editor(const EditorType &type);
+
 void register_builtin_editors(EditorRegistry &registry)
 {
   registry.add({kEditorJobs, "editor.jobs.title", make_jobs_editor});
@@ -21,6 +23,7 @@ void register_builtin_editors(EditorRegistry &registry)
   registry.add(probe_editor_type()); /* WP10 (editors/viewer_panels.cc) */
   registry.add({kEditorTransfers, "editor.transfers.title", make_transfers_editor});
   registry.add({kEditorBridgeLog, "editor.bridge_log.title", make_bridge_log_editor});
+  registry.add({kEditorProject, "editor.project.title", make_project_editor});
 }
 
 }  // namespace stk::app

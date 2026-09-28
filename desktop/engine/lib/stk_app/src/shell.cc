@@ -449,6 +449,35 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
 {
   std::vector<ui::MenuEntry> m;
   wm::Screen *s = &screen;
+  m.push_back({std::string(store_.tr("editor.project.title")), [s]() {
+    s->defer([s]() {
+      EditorArea *target = nullptr;
+      for (auto *area : s->areas()) {
+        auto *editor = dynamic_cast<EditorArea *>(area);
+        if (!editor) {
+          continue;
+        }
+        for (int i = 0; i < editor->tab_count(); ++i) {
+          if (editor->tab(i).type().id == kEditorProject) {
+            editor->set_active_tab(i);
+            if (s->maximized()) {
+              s->set_maximized(editor);
+            }
+            return;
+          }
+        }
+        if (!target || editor->editor().type().id == kEditorViewer) {
+          target = editor;
+        }
+      }
+      if (target) {
+        target->add_tab(kEditorProject);
+        if (s->maximized()) {
+          s->set_maximized(target);
+        }
+      }
+    });
+  }});
   /* WP10: open a payload (.stkp / directory), a result directory or a run directory in the Viewer. */
   m.push_back({std::string(store_.tr("viewer.menu.open")), [this]() {
                  store_.viewer().open_dialog = true;
