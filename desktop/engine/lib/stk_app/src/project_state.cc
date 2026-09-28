@@ -184,6 +184,7 @@ void ProjectState::attach(bridge::Client *client)
   closed_listener_.reset();
   runs_listener_.reset();
   ++epoch_;
+  clear_review();
   ++recent_epoch_;
   recent_loaded_ = recent_loading_ = recent_dirty_ = false;
   recent_.clear();
@@ -236,6 +237,7 @@ void ProjectState::on_state(const bridge::BridgeState state)
   bridge_state_ = state;
   if (state != bridge::BridgeState::Ready) {
     ++epoch_;
+    clear_review();
     ++recent_epoch_;
     recent_loaded_ = recent_loading_ = recent_dirty_ = false;
     recent_.clear();
@@ -320,6 +322,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
   }
   ++epoch_;
   busy_ = true;
+  clear_review();
   error_.clear();
   notice_.clear();
   const auto hello = client_->hello_info();
@@ -364,6 +367,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
 
 void ProjectState::clear()
 {
+  clear_review();
   notice_.clear();
   project_.reset();
   clear_runs();
@@ -465,6 +469,95 @@ bool ProjectState::apply(Json commands, const std::optional<int64_t> expected_re
   });
   changed();
   return true;
+}
+
+void ProjectState::clear_review()
+{
+  ++review_generation_;
+  review_.reset();
+  review_source_ = "[]";
+  review_error_.clear();
+}
+
+void ProjectState::discard_review()
+{
+  clear_review();
+  changed();
+}
+
+void ProjectState::set_review_source(std::string source)
+{
+  if (source == review_source_) { return; }
+  ++review_generation_;
+  review_source_ = std::move(source);
+  review_.reset();
+  review_error_.clear();
+  changed();
+}
+
+bool ProjectState::preview_supported() const
+{
+  const auto hello = client_ ? client_->hello_info() : std::nullopt;
+  return ready() && hello && hello->has_method("project.preview");
+}
+
+bool ProjectState::preview()
+{
+  if (!preview_supported() || busy() || !loaded() || project_->handle.empty()) { return false; }
+  ++review_generation_;
+  review_.reset();
+  review_error_.clear();
+  Json commands;
+  try {
+    // Keep the interactive editor bounded; the bridge/store impose their own independent limits.
+    if (review_source_.size() > 256 * 1024) { throw std::invalid_argument("size"); }
+    commands = io::parse_json(review_source_);
+    if (!commands.is_array() || commands.empty() || commands.size() > 1000) {
+      throw std::invalid_argument("commands");
+    }
+  }
+  catch (const std::exception &) {
+    review_error_ = std::string(store_.tr("project.review.invalid"));
+    changed();
+    return false;
+  }
+  busy_ = true;
+  const auto generation = review_generation_;
+  const auto base = project_->revision;
+  const auto id = project_->id;
+  on(client_->project_preview(project_->handle, base, commands),
+     [this, generation, base, id, before = tables_](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (generation == review_generation_) {
+      if (!result.ok()) { review_error_ = result.error().describe(); }
+      else {
+        try { review_ = std::make_shared<ProjectReview>(ProjectReview::from_preview(id, base, before, result.value())); }
+        catch (const std::exception &) { review_error_ = std::string(store_.tr("project.review.invalid_result")); }
+      }
+    }
+    changed();
+    // Read conflicts and queued external edits, without replaying or rebasing this draft.
+    if (!result.ok() || dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::can_apply_review() const
+{
+  return ready() && !busy() && loaded() && review_ && !project_->handle.empty() &&
+         review_->project_id == project_->id && review_->base_revision == project_->revision &&
+         dirty_revision_ <= review_->base_revision;
+}
+
+bool ProjectState::apply_review()
+{
+  if (!can_apply_review()) { return false; }
+  const auto review = review_;
+  // Consume before sending: a failed/uncertain write must never leave a one-click replay behind.
+  ++review_generation_;
+  review_.reset();
+  return apply(review->commands, review->base_revision);
 }
 
 bool ProjectState::backup()

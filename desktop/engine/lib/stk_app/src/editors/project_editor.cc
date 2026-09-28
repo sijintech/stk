@@ -5,6 +5,7 @@
 #include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/platform/file_dialog.hh"
+#include "project_review_view.hh"
 
 #include <algorithm>
 #include <filesystem>
@@ -77,6 +78,12 @@ class ProjectEditor final : public Editor {
     if (state.project()->format_version < 5) {
       layout.paragraph(ctx.tr("project.upgrade_hint"));
       layout.button("upgrade_project", ctx.tr("project.upgrade"), [&state] { state.upgrade(); }).disable(!editable);
+    }
+    layout.tabs("project_view", {std::string(ctx.tr("project.review.data")), std::string(ctx.tr("project.review.title"))},
+                ui::bind(project_view_));
+    if (project_view_ == 1) {
+      review_view_.draw(layout, ctx, state);
+      return;
     }
     if (auto *panel = layout.panel("project_backup", ctx.tr("project.backup_title"), false)) {
       panel->paragraph(ctx.tr("project.backup_hint"));
@@ -862,7 +869,8 @@ class ProjectEditor final : public Editor {
     const Json target = {{"op", "set_cell"}, {"table_id", table.id}, {"record_id", state.record_id()}, {"field_id", field.id}};
     const std::string type = field.type;
     auto &buttons = box.row();
-    buttons.button("save_cell", ctx.tr("project.save_cell"), [this, &state, target, type] {
+    const auto edit = [this, &state, target, type](const bool review) {
+      if (!state.loaded() || state.busy() || draft_revision_ != state.project()->revision) { return; }
       Json command = target;
       if (cell_mode_ == 0) {
         auto value = project_literal(type, cell_text_, literal_error_);
@@ -884,8 +892,15 @@ class ProjectEditor final : public Editor {
         }
         catch (const std::exception &) { literal_error_ = "project.error.bindings"; return; }
       }
-      pending_cell_ = state.apply(Json::array({command}), draft_revision_);
-    }).disable(!editable || draft_revision_ != state.project()->revision);
+      if (review) {
+        state.set_review_source(Json::array({command}).dump(2));
+        project_view_ = 1;
+        state.preview();
+      }
+      else { pending_cell_ = state.apply(Json::array({command}), draft_revision_); }
+    };
+    buttons.button("save_cell", ctx.tr("project.save_cell"), [edit] { edit(false); })
+        .disable(!editable || draft_revision_ != state.project()->revision);
     buttons.button("null_cell", ctx.tr("project.null_cell"), [this, &state, target] {
       Json command = target;
       command["value"] = nullptr;
@@ -902,8 +917,12 @@ class ProjectEditor final : public Editor {
       draft_identity_.clear();
     });
     box.paragraph(ctx.tr(cell_mode_ == 0 ? "project.cell_hint" : "project.expression_hint"));
+    box.button("review_cell", ctx.tr("project.review.cell_action"), [edit] { edit(true); })
+        .disable(!editable || !state.preview_supported() || draft_revision_ != state.project()->revision);
   }
 
+  int project_view_ = 0;
+  ProjectReviewView review_view_;
   std::string directory_, name_, table_name_, field_name_, unit_, cell_field_, recent_directory_;
   std::string file_project_, file_paths_;
   std::string csv_project_, csv_source_, csv_destination_, csv_name_, csv_error_, csv_types_ = "{}", csv_units_ = "{}";

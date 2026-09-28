@@ -135,7 +135,7 @@ jobs:
             'app_viewer_e2e_(vulkan|opengl)' 'app_viewer_window_(xvfb|weston)' 'package_install_check'
           for backend in opengl vulkan; do
             for language in en zh; do
-              for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs; do
+              for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs project_review project_review_errors; do
                 python3 desktop/tests/check_required_tests.py build/ctest-junit.xml "${editor}_render_${backend}_${language}"
               done
             done
@@ -397,7 +397,7 @@ jobs:
           python3 desktop/tests/check_required_tests.py build/ctest-metal.xml \
             'app_viewer_python_metal' 'app_viewer_e2e_metal' 'package_install_check'
           for language in en zh; do
-            for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs; do
+            for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs project_review project_review_errors; do
               python3 desktop/tests/check_required_tests.py build/ctest-metal.xml "${editor}_render_metal_${language}"
             done
           done

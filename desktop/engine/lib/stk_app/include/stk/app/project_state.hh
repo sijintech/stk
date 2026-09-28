@@ -2,6 +2,7 @@
 #pragma once
 
 #include "stk/bridge/client.hh"
+#include "stk/app/project_review.hh"
 
 namespace stk::app {
 
@@ -69,6 +70,15 @@ class ProjectState {
   bool close(std::function<void(bridge::Result<bool>)> complete = {});
   void refresh();
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
+  const std::string &review_source() const { return review_source_; }
+  const std::string &review_error() const { return review_error_; }
+  const std::shared_ptr<const ProjectReview> &review() const { return review_; }
+  void set_review_source(std::string source);
+  bool preview_supported() const;
+  bool preview();
+  bool can_apply_review() const;
+  bool apply_review();
+  void discard_review();
   bool import_csv(const std::string &source, const std::string &name, const io::Json &types,
                   const io::Json &units, const std::string &delimiter);
   bool export_csv(const std::string &destination, const std::string &delimiter);
@@ -117,6 +127,7 @@ class ProjectState {
   void changed();
   void fail(const bridge::Error &error);
   void clear();
+  void clear_review();
   void validate_selection();
   bool restore_edit(bool redo);
   bool run_operation(const std::string &action, const std::string &id, bool allow_stale = false);
@@ -137,6 +148,9 @@ class ProjectState {
   int64_t undo_revision_ = -1, redo_revision_ = -1;
   std::optional<bridge::ProjectInfo> project_;
   std::vector<ProjectTable> tables_;
+  std::shared_ptr<const ProjectReview> review_;
+  std::string review_source_ = "[]", review_error_;
+  uint64_t review_generation_ = 0;
   io::Json file_index_ = io::Json::object();
   io::Json input_snapshots_ = io::Json::array(), input_verification_ = io::Json::object();
   io::Json runs_ = io::Json::array(), run_ = io::Json::object();

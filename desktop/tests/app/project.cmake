@@ -15,6 +15,13 @@ set_target_properties(stk-project-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 # Reuse the software-GPU environment and supported backends established in jobs.cmake.
 foreach(_lang en zh)
   foreach(_be ${_jobs_backends})
+    foreach(_review review review_errors)
+      add_test(NAME project_${_review}_render_${_be}_${_lang} COMMAND stk-project-render --editor ${_review}
+        --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_${_review}_${_be}_${_lang}.png")
+      set_tests_properties(project_${_review}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
+        ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
+        FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
+    endforeach()
     add_test(NAME project_render_${_be}_${_lang} COMMAND stk-project-render
       --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_${_be}_${_lang}.png")
     set_tests_properties(project_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120

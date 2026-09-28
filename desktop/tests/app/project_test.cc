@@ -119,6 +119,36 @@ TEST(ProjectTable, ValuesFollowFieldIdsAndDistinguishUnsetFromNull)
   EXPECT_EQ(table.text(0, 1), "9223372036854775807");
 }
 
+TEST(ProjectReview, StableIdentityDistinguishesUnsetNullInt64AndRejectsWrongBase)
+{
+  Json table = {{"id", table_id}, {"name", "Before"},
+      {"fields", Json::array({{{"id", field_id}, {"name", "Value"}, {"type", "integer"}}})},
+      {"records", Json::array({{{"id", record_id}, {"values", Json::object()}}})}};
+  const std::vector<ProjectTable> before = {ProjectTable::from_json(table)};
+  table["name"] = "Renamed";
+  table["records"][0]["values"][field_id] = nullptr;
+  Json result = {{"persisted", false}, {"base_revision", 3}, {"proposed_revision", 4},
+      {"commands", Json::array({{{"op", "set_cell"}}})},
+      {"snapshot", {{"project", {{"id", "project"}, {"revision", 4}}}, {"tables", Json::array({table})}}}};
+  auto review = ProjectReview::from_preview("project", 3, before, result);
+  ASSERT_EQ(review.differences.size(), 2u);
+  EXPECT_EQ(review.differences[0].kind, "table");
+  const auto &cell = review.differences[1];
+  EXPECT_FALSE(cell.before);
+  ASSERT_TRUE(cell.after);
+  EXPECT_TRUE(cell.after->at("value").is_null());
+  EXPECT_EQ(cell.field_id, field_id);
+  result["snapshot"]["tables"][0]["records"][0]["values"][field_id] = INT64_MAX;
+  review = ProjectReview::from_preview("project", 3, {ProjectTable::from_json(table)}, result);
+  ASSERT_EQ(review.differences.size(), 1u);
+  EXPECT_EQ(review.differences[0].after->at("value").get<int64_t>(), INT64_MAX);
+  EXPECT_TRUE(review.differences[0].before->at("value").is_null());
+  EXPECT_THROW(ProjectReview::from_preview("different", 3, before, result), std::exception);
+  EXPECT_THROW(ProjectReview::from_preview("project", 2, before, result), std::exception);
+  result["persisted"] = true;
+  EXPECT_THROW(ProjectReview::from_preview("project", 3, before, result), std::exception);
+}
+
 TEST(ProjectLayout, EditorAvailableWithoutBridgeAndPersistsLocation)
 {
   wmtest::AppFixture f("zh_CN");
@@ -236,6 +266,241 @@ class ProjectPython : public ::testing::Test {
     ASSERT_EQ(state().project()->revision, 1);
   }
 };
+
+TEST_F(ProjectPython, ReviewAllocatesStableIdsWithoutWritingAndAppliesOnceWithUndo)
+{
+  populated();
+  state().set_review_source(Json::array({{{"op", "create_table"}, {"name", "Draft / 草案"}}}).dump());
+  ASSERT_TRUE(state().preview());
+  EXPECT_FALSE(state().apply_review());
+  settled();
+  ASSERT_TRUE(state().review()) << state().review_error();
+  const auto review = state().review();
+  EXPECT_EQ(review->base_revision, 1);
+  EXPECT_EQ(review->proposed_revision, 2);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().tables().size(), 1u);
+  ASSERT_EQ(review->differences.size(), 1u);
+  const auto &change = review->differences.front();
+  EXPECT_EQ(change.kind, "table");
+  EXPECT_FALSE(change.before);
+  ASSERT_TRUE(change.after);
+  EXPECT_EQ(change.after->at("name"), "Draft / 草案");
+  EXPECT_EQ(change.table_id, io::get_string(review->commands.front(), "id"));
+  ASSERT_TRUE(state().can_apply_review());
+  ASSERT_TRUE(state().apply_review());
+  EXPECT_FALSE(state().apply_review());
+  settled();
+  ASSERT_EQ(state().tables().size(), 2u);
+  EXPECT_EQ(state().tables().back().id, change.table_id);
+  EXPECT_EQ(state().project()->revision, 2);
+  ASSERT_TRUE(state().undo());
+  settled();
+  EXPECT_EQ(state().tables().size(), 1u);
+  EXPECT_EQ(state().project()->revision, 3);
+  ASSERT_TRUE(state().redo());
+  settled();
+  EXPECT_EQ(state().tables().back().id, change.table_id);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ReviewShowsDownstreamValuesAndAllErrorsWithoutRevisionOnlyNoise)
+{
+  populated();
+  const std::string derived = "55555555-5555-4555-8555-555555555555";
+  const std::string failed = "66666666-6666-4666-8666-666666666666";
+  Json commands = Json::array();
+  for (const auto &id : {derived, failed}) {
+    commands.push_back({{"op", "add_field"}, {"id", id}, {"table_id", table_id}, {"name", id}, {"type", "number"}, {"unit", "K"}});
+    commands.push_back({{"op", "set_expression"}, {"table_id", table_id}, {"record_id", record_id}, {"field_id", id},
+      {"expression", id == derived ? "base * 2" : "base / 0"},
+      {"bindings", {{"base", {{"record_id", record_id}, {"field_id", field_id}}}}}});
+  }
+  ASSERT_TRUE(state().apply(commands));
+  settled();
+  state().set_review_source(set_cell(450).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  ASSERT_TRUE(state().review()) << state().review_error();
+  const auto review = state().review();
+  ASSERT_EQ(review->differences.size(), 2u);
+  ASSERT_EQ(review->errors.size(), 1u);
+  EXPECT_EQ(review->errors.front().before, review->errors.front().after);
+  EXPECT_EQ(review->errors.front().field_id, failed);
+  for (const auto &entry : review->differences) {
+    EXPECT_EQ(entry.kind, "cell");
+    EXPECT_EQ(entry.before->at("value"), entry.field_id == derived ? 600 : 300);
+    EXPECT_EQ(entry.after->at("value"), entry.field_id == derived ? 900 : 450);
+  }
+  EXPECT_EQ(state().table()->text(0, 1), "= 600");
+  state().set_review_source(Json::array({{{"op", "delete_table"}, {"id", table_id}}}).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  ASSERT_TRUE(state().review());
+  // One table, three fields, one record and all three populated cells (including the error).
+  ASSERT_EQ(state().review()->differences.size(), 8u);
+  for (const auto &entry : state().review()->differences) {
+    EXPECT_TRUE(entry.before);
+    EXPECT_FALSE(entry.after);
+  }
+  EXPECT_TRUE(state().review()->errors.empty());
+  EXPECT_EQ(state().tables().size(), 1u);
+}
+
+TEST_F(ProjectPython, ReviewDraftChangesDiscardPendingResultsAndRejectInvalidInput)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview());
+  state().set_review_source(set_cell(400).dump());
+  settled();
+  EXPECT_FALSE(state().review());
+  EXPECT_FALSE(state().apply_review());
+  ASSERT_TRUE(state().preview());
+  state().discard_review();
+  settled();
+  EXPECT_FALSE(state().review());
+  EXPECT_EQ(state().review_source(), "[]");
+  for (const auto &source : {std::string("{"), std::string("{}"), std::string("[]"), std::string(256 * 1024 + 1, ' ')}) {
+    state().set_review_source(source);
+    EXPECT_FALSE(state().preview());
+    EXPECT_FALSE(state().review_error().empty());
+    EXPECT_FALSE(state().busy());
+  }
+  state().set_review_source(Json::array({{{"op", "not_an_edit"}}}).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  EXPECT_FALSE(state().review_error().empty());
+  EXPECT_FALSE(state().review());
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+}
+
+TEST_F(ProjectPython, ReviewStaysStaleAfterEditsAndIsClearedOnCloseOrRestart)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  ASSERT_TRUE(state().review());
+  ASSERT_TRUE(state().apply(set_cell(500)));
+  settled();
+  EXPECT_EQ(state().review()->base_revision, 1);
+  EXPECT_FALSE(state().can_apply_review());
+  EXPECT_FALSE(state().apply_review());
+  ASSERT_TRUE(state().preview());
+  settled();
+  EXPECT_EQ(state().review()->base_revision, 2);
+  ASSERT_TRUE(state().can_apply_review());
+  const auto handle = state().project()->handle;
+  client->shutdown_bridge();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return state().loaded() && !state().busy() && state().project()->handle != handle;
+  }, 60));
+  EXPECT_FALSE(state().review());
+  EXPECT_EQ(state().review_source(), "[]");
+  EXPECT_EQ(state().table()->text(0, 0), "500");
+  state().set_review_source(set_cell(600).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  ASSERT_TRUE(state().close());
+  settled();
+  EXPECT_FALSE(state().review());
+  EXPECT_EQ(state().review_source(), "[]");
+}
+
+TEST_F(ProjectPython, ReviewApplyChecksUnobservedExternalRevisionAndNeverRebases)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  const auto source = "from suan.project import ProjectStore\nimport json\nProjectStore(" +
+      Json(dir.str() + "/project").dump() + ").apply(json.loads(" + Json(set_cell(700).dump()).dump() + "), expected_revision=1)";
+  ASSERT_TRUE(scripts.execute(source));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  EXPECT_EQ(state().project()->revision, 1); // Direct store writes send no bridge event.
+  ASSERT_TRUE(state().apply_review());
+  settled();
+  EXPECT_FALSE(state().review());
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "700");
+}
+
+TEST_F(ProjectPython, ReviewCellUIShowsDiffInvalidatesEditedDraftAndAppliesExplicitly)
+{
+  populated();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  widget("cell_value")->string.assign("375");
+  ASSERT_TRUE(widget("review_cell")->enabled);
+  widget("review_cell")->on_click();
+  settled();
+  f.drv->frame();
+  ASSERT_NE(widget("review_rows"), nullptr);
+  EXPECT_EQ(widget("review_rows")->table->rows, 1);
+  EXPECT_EQ(widget("review_rows")->table->cell(0, 2), "300");
+  EXPECT_EQ(widget("review_rows")->table->cell(0, 3), "375");
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  ASSERT_TRUE(widget("review_apply")->enabled);
+  // Even a callback retained from a prior frame must recheck the current draft.
+  const auto apply = widget("review_apply")->on_click;
+  widget("review_source")->string.assign(set_cell(425).dump());
+  apply();
+  EXPECT_FALSE(state().busy());
+  EXPECT_FALSE(state().review());
+  f.drv->frame();
+  EXPECT_EQ(widget("review_apply"), nullptr);
+  widget("review_preview")->on_click();
+  settled();
+  f.drv->frame();
+  ASSERT_TRUE(widget("review_apply")->enabled);
+  widget("review_apply")->on_click();
+  settled();
+  EXPECT_EQ(state().table()->text(0, 0), "425");
+  EXPECT_EQ(state().project()->revision, 2);
+  ASSERT_TRUE(state().undo());
+  settled();
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+}
+
+TEST_F(ProjectPython, ReviewApplyClickCommitsPendingTextAndCannotApplyTheOldCandidate)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  f.screen.ui()->find("a2/main/project_view")->index.assign(1);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/review_source");
+  f.drv->click(x, y);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  f.drv->key(wm::Key::A, primary);
+  f.drv->key(wm::Key::Unknown, wm::ModNone, set_cell(400).dump());
+  EXPECT_EQ(state().review_source(), set_cell(350).dump()); // Input is still being edited.
+  const auto [apply_x, apply_y] = f.widget_center("a2/main/review_apply");
+  f.drv->click(apply_x, apply_y); // Blur commits the text before the button action runs.
+  EXPECT_EQ(state().review_source(), set_cell(400).dump());
+  EXPECT_FALSE(state().review());
+  EXPECT_FALSE(state().busy());
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+}
 
 TEST_F(ProjectPython, SharedSelectionPersistsAcrossRefreshConflictCloseAndReopen)
 {

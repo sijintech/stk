@@ -161,6 +161,18 @@ int main(int argc, char **argv)
         ok = ok && state.load_runs() && loop.pump_until([&] { return !state.busy(); }, 30);
         ok = ok && state.runs().size() == 4 && !state.run().empty();
       }
+      if (editor == "review" || editor == "review_errors") {
+        state.set_review_source(io::Json::array({
+          {{"op", "set_cell"}, {"table_id", table}, {"record_id", "40000000-4444-4444-8444-444444444444"},
+            {"field_id", temperature}, {"value", 350}},
+          {{"op", "set_expression"}, {"table_id", table}, {"record_id", "40000001-4444-4444-8444-444444444444"},
+            {"field_id", derived}, {"expression", "base / 0"},
+            {"bindings", {{"base", {{"record_id", "40000001-4444-4444-8444-444444444444"}, {"field_id", temperature}}}}}}
+        }).dump(2));
+        ok = ok && state.preview() && loop.pump_until([&] { return !state.busy(); }, 30);
+        ok = ok && state.review() && state.review()->differences.size() == 3 && state.review()->errors.size() == 2;
+        ok = ok && state.project()->revision == 1 && state.table()->text(0, 0) == "300";
+      }
       if (editor == "csv") {
         const auto source = dir.str() + "/project/parameters.csv";
         { std::ofstream file(core::path_from_utf8(source)); file << "Temperature,Note\n300,Prepared / 待运行\n350,Comparison / 对比\n"; }
@@ -180,6 +192,18 @@ int main(int argc, char **argv)
       ctx.rect = {0, 0, 1280, 900};
       ctx.now = 100;
       gfx::Image image;
+      if (editor == "review" || editor == "review_errors") {
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        if (const auto *widget = screen.ui()->find("a2/main/project_view")) { widget->index.assign(1); }
+        else { ok = false; }
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        const auto *apply = screen.ui()->find("a2/main/review_apply");
+        ok = ok && apply && apply->enabled;
+        if (editor == "review_errors") {
+          if (const auto *widget = screen.ui()->find("a2/main/review_category")) { widget->index.assign(1); }
+          else { ok = false; }
+        }
+      }
       if (editor == "recent") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         ok = ok && loop.pump_until([&] { return !state.recent_loading(); }, 30);
