@@ -63,7 +63,10 @@ Python Runtime 操作覆盖：`stk.connections`、`stk.runtime()`、`stk.transfe
 Python 脚本/桥/Runtime/Hub/SSH **69/69**，原生 schema/项目/Python **23/23** 通过；本批远端 CI 待跟踪。
 
 文件索引提交 `6056591` 的 Runtime **36393074017**、文档部署 **36393073998** 成功；
-desktop **36393073976** 的 Linux、macOS 与打包成功，Windows 尚在运行。真实应用关联/VSCode 启动仍需真机验收。
+desktop **36393073976** 的 Linux、macOS 与打包成功；Windows 编译成功、255/256 测试通过，
+文件打开测试仅因原生规范化反斜杠路径与混合斜杠预期的字符串比较而失败。改为用 UTF-8 路径解析后
+比较实际文件身份，保留打开目标、缺失文件拒绝及调用次数断言；生产路径未改。修正后的远端 CI 待跟踪。
+真实应用关联/VSCode 启动仍需真机验收。
 
 `d0fd5f5` 的 desktop run **36390818302 全部成功**（Linux/macOS/Windows/打包/干净环境），
 同时包含前一批 `dfd2c27` 的 procfs 清理修正。Runtime **36390818350**、文档部署 **36390818365** 成功。

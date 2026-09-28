@@ -563,10 +563,12 @@ TEST_F(ProjectPython, FileIndexButtonsResolveBeforeLaunchingAndRefreshWithoutCha
   EXPECT_EQ(state().table()->text(0, 1), "笔记 #1.md");
   int system_calls = 0, code_calls = 0;
   state().open_external = [&](const std::string &opened, std::string *) {
-    EXPECT_EQ(opened, path); ++system_calls; return true;
+    EXPECT_TRUE(std::filesystem::equivalent(core::path_from_utf8(opened), core::path_from_utf8(path)));
+    ++system_calls; return true;
   };
   state().open_vscode = [&](const std::string &opened, std::string *) {
-    EXPECT_EQ(opened, path); ++code_calls; return true;
+    EXPECT_TRUE(std::filesystem::equivalent(core::path_from_utf8(opened), core::path_from_utf8(path)));
+    ++code_calls; return true;
   };
   widget("open")->on_click();
   settled();
