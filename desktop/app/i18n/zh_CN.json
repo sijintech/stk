@@ -877,5 +877,19 @@
   "project.review.cell": "单元格",
   "project.review.field": "字段",
   "project.review.record": "记录",
-  "project.review.table": "表格"
+  "project.review.table": "表格",
+  "simulation.busy": "正在执行工作流操作…",
+  "simulation.collect": "收集并校验",
+  "simulation.connection_hint": "在作业面板选择直连或 SSH Runtime。求解器路径和资源选项指向该 Linux 计算主机。",
+  "simulation.directory": "原始案例目录",
+  "simulation.hint": "导入干净的原始案例，然后在 MuFerro 仿真参数表选择并编辑一行。准备只冻结输入，不提交计算。相同参数需要重算时，请增加“尝试次数”。",
+  "simulation.import": "导入并冻结案例",
+  "simulation.logs": "显示日志",
+  "simulation.no_connection": "尚未选择 Runtime",
+  "simulation.options": "执行选项（JSON）",
+  "simulation.output": "Python / 工作流输出",
+  "simulation.prepare": "准备选中案例",
+  "simulation.run_hint": "在下方运行记录中加载并选择方案，检查输入后明确提交。刷新任务状态后收集结果。完整日志与传输恢复可在作业面板查看。",
+  "simulation.title": "MuFerro 仿真",
+  "simulation.view": "查看已收集结果"
 }

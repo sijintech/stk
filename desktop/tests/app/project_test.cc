@@ -1309,5 +1309,48 @@ TEST_F(ProjectPython, RunButtonsSubmitRefreshAndCancelOneTaskWithoutChangingTabl
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
+TEST_F(ProjectPython, MuFerroImportButtonUsesTheSharedWorkflowAndBindsProjectIdentity)
+{
+  populated();
+  const auto source = core::path_from_utf8(dir.str() + "/案例 case");
+  std::filesystem::create_directories(source);
+  { std::ofstream file(source / "input.toml");
+    file << "material = 'material.toml'\n[system]\nsimulation_grid = [4,3,2]\n"
+            "temperature = 298\ntimestep_total = 3\ndt = 0.01\n[output]\ninterval = 2\n"; }
+  { std::ofstream file(source / "material.toml"); file << "[landau]\na1 = '3.8e5*(TEM-479)'\n"; }
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_simulation");
+  f.drv->click(x, y);
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return scripts.ready() && !scripts.busy(); }, 30));
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_simulation/" + key); };
+  ASSERT_NE(widget("simulation_source"), nullptr);
+  widget("simulation_source")->string.assign(core::path_to_utf8(source));
+  f.drv->frame();
+  ASSERT_TRUE(widget("simulation_import")->enabled);
+  const auto import = widget("simulation_import")->on_click;
+  import();
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 30));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  state().select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+  ASSERT_NE(state().table(), nullptr);
+  EXPECT_EQ(state().table()->records.size(), 1u);
+  EXPECT_EQ(state().table()->text(0, 1), "298");
+  EXPECT_TRUE(state().runs().empty());
+  // A callback from a previously displayed project cannot import into a new project.
+  ASSERT_TRUE(state().create(dir.str() + "/other", "Other"));
+  settled();
+  import();
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy(); }, 30));
+  EXPECT_EQ(scripts.status().at("run").at("state"), "failed");
+  EXPECT_EQ(state().project()->revision, 0);
+  EXPECT_TRUE(state().tables().empty());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 }  // namespace
 }  // namespace stk::app

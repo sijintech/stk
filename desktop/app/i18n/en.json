@@ -877,5 +877,19 @@
   "project.review.cell": "Cell",
   "project.review.field": "Field",
   "project.review.record": "Record",
-  "project.review.table": "Table"
+  "project.review.table": "Table",
+  "simulation.busy": "Workflow operation running…",
+  "simulation.collect": "Collect and verify",
+  "simulation.connection_hint": "Select a direct or SSH Runtime connection in Jobs. Solver paths and resource options refer to that Linux compute host.",
+  "simulation.directory": "Native case directory",
+  "simulation.hint": "Import a clean native case, then select and edit its row in MuFerro cases. Preparation freezes those inputs; it never submits a task. Increase Attempt to run identical parameters again.",
+  "simulation.import": "Import and freeze case",
+  "simulation.logs": "Show logs",
+  "simulation.no_connection": "No Runtime selected",
+  "simulation.options": "Execution options (JSON)",
+  "simulation.output": "Python / workflow output",
+  "simulation.prepare": "Prepare selected case",
+  "simulation.run_hint": "Load and select the prepared plan in Runs below, inspect its inputs and submit explicitly. Refresh its state before collecting. Full logs and transfer recovery are available in Jobs.",
+  "simulation.title": "MuFerro simulation",
+  "simulation.view": "View collected result"
 }

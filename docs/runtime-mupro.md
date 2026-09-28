@@ -9,6 +9,9 @@ STK 不导入 muprosdk，也不使用 muprosdk 的运行服务或 `mupro run` �
 Runtime、控制服务与节点代理只在 Linux 运行；客户端命令 `suan mupro submit/result/verify`
 可在任何系统使用，连接方式见 [runtime 使用指南](runtime.md)。
 
+在原生桌面中导入案例、编辑项目参数、提交并收集结果，见[完整 MuFerro 项目流程](simulation-muferro.md)。
+该入口复用本页的求解器适配器和 Runtime，计算主机环境要求相同。
+
 ## 节点环境
 
 以下变量放在 Runtime 服务环境中，由 worker 继承；不要写进 TaskSpec 的 `env`（其中

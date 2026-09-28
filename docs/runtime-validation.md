@@ -2,6 +2,36 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-28 MuFerro 项目流程首版
+
+当前工作流通过真实桌面桥调用项目/Runtime API，连接隔离的本机 Linux Runtime，运行已安装的 Release muFerro。
+程序 SHA-256 为 `c0c1f3454f5ff5384c76e70455b0441bb8ebeeb40b711b2360f2f0f1d099683a`；
+单 rank、单线程、`launcher=none`，不启动 Hydra。许可仅由求解器从原有目录使用，未复制到 STK 项目。
+
+- SDK 原始案例导入后冻结，16×16×16 网格、101 步、输出间隔 100；298 K 最终归一化总能量
+  `−727.9144455` 与已有参考一致；修改项目参数至 310 K 后生成独立方案和任务，总能量 `−691.5580935`。
+- 两次 `stk-mupro-1` 均通过，下载后重验输入、产物哈希、完成记录、进度、能量和帧头。
+  独立 NumPy 文本读取检查每次 30 个 DAT 的所有值有限、点数/分量数、网格范围和索引唯一性；
+  同时覆盖原生按分量索引的 DAT 格式，未把测试模拟器的逐点列格式误当作唯一格式。
+- 同一方案重复提交不增加任务；重开项目后重复收集仍为原结果行，改变温度后保留旧运行及其过期状态。
+- 当前原生 `stk-desktop --headless --preset muferro-domains` 打开两次已收集结果，输出第 100 步铁电畴；
+  OpenGL 图像已目视检查。100 是最后输出的 Polar 帧，最终能量对应第 101 步。
+  软件 EGL 首次上下文候选报告 `EGL_BAD_MATCH`，随后上下文创建和导出成功，进程退出 0。
+
+测试入口为 `tests/test_workflow_muferro.py::test_real_muferro_project_workflow`，需显式配置
+`STK_TEST_MUPRO_PREFIX`、`STK_MUPRO_ENV_SCRIPTS`、`MUPROROOT`；默认 CI 不启动许可求解器。
+输入冻结一致性检查加入后，真实求解器再次全程通过；最终日志 `/tmp/stk-muferro-real-final.log`、
+`/tmp/stk-muferro-real-render-final.log`，
+证据 `/tmp/pytest-of-mnemora/pytest-134/test_real_muferro_project_work0/real-evidence.json`，
+图片 `/tmp/stk-muferro-real-render/{first,changed_temperature}.png`；这些临时路径不属于发行物。
+
+工作流/相关 Python 回归 **32 通过、1 跳过**（上述真实测试另行通过）；本机完整桌面 **525/525**。
+原生导入按钮验证了真实 Python 调用和项目切换保护，GL/Vulkan 中英文仿真面板截图通过并检查。
+桌面日志 `/tmp/stk-muferro-full.log`、JUnit `/tmp/stk-muferro-full.xml`，
+Python 日志 `/tmp/stk-muferro-python-final.log`；原生输出显示调整后的相关 **5/5** 通过，
+见 `/tmp/stk-muferro-final-native.log`。本批跨平台 CI 和整条原生按钮操作链路仍待继续验证；
+本节不能作为 Windows GPU、真机输入法或 macOS/Windows 到实际远端 SSH 的验收证据。
+
 ## 2026-09-28 最新跨平台确认
 
 最后功能提交 `c3fa59c` 的[desktop 36416998477](https://github.com/sijintech/stk/actions/runs/36416998477)

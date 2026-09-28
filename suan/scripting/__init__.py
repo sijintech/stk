@@ -240,6 +240,12 @@ class API:
         return Runtime(self._call, connection, node=node)
 
     @property
+    def muferro(self):
+        """Import native cases, prepare immutable plans, collect results and open their 3D view."""
+        from suan.workflows.muferro import MuFerro
+        return MuFerro(self)
+
+    @property
     def project(self):
         """Project selected when this execution started; close/switch never retargets a held handle."""
         if self._project_handle is None:

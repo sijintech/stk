@@ -3,6 +3,9 @@
 状态：2026-09-28 已实现原生 Python 面板、独立会话、项目/Runtime 操作 API 和本机布局控制首版。
 完整方向见[设计记录](design/scripting-and-connections.md)，全部操作覆盖与远程控制仍在后续计划中。
 
+`stk.muferro` 提供案例导入、选行准备、结果收集和三维打开，复用项目/Runtime/Viewer API，
+与原生 MuFerro 面板使用同一实现。步骤和参数见[完整仿真指南](simulation-muferro.md)。
+
 ## 在界面中运行
 
 更新源码并用[启动脚本](../desktop/QUICKSTART.md)增量编译，选择 **文件 → Python**。

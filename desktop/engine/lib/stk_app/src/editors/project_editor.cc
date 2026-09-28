@@ -6,6 +6,7 @@
 #include "stk/core/paths.hh"
 #include "stk/platform/file_dialog.hh"
 #include "project_review_view.hh"
+#include "project_simulation_view.hh"
 
 #include <algorithm>
 #include <filesystem>
@@ -89,6 +90,7 @@ class ProjectEditor final : public Editor {
       panel->paragraph(ctx.tr("project.backup_hint"));
       panel->button("backup", ctx.tr("project.backup"), [&state] { state.backup(); }).disable(!editable);
     }
+    simulation_view_.draw(layout, ctx, state);
     file_controls(layout, ctx, state, editable);
     snapshot_controls(layout, ctx, state, editable);
     run_controls(layout, ctx, state, editable);
@@ -923,6 +925,7 @@ class ProjectEditor final : public Editor {
 
   int project_view_ = 0;
   ProjectReviewView review_view_;
+  ProjectSimulationView simulation_view_;
   std::string directory_, name_, table_name_, field_name_, unit_, cell_field_, recent_directory_;
   std::string file_project_, file_paths_;
   std::string csv_project_, csv_source_, csv_destination_, csv_name_, csv_error_, csv_types_ = "{}", csv_units_ = "{}";
