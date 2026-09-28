@@ -158,6 +158,7 @@ class RuntimeService:
             if not created:
                 return record
             root = workspace / "runs" / record["id"]
+            manifest = []
             try:
                 for path in (workspace / "uploads").glob("*.json"):
                     meta = read_json(path)
@@ -167,7 +168,6 @@ class RuntimeService:
                 work.mkdir(parents=True, mode=0o700)
                 inputs = workspace / "inputs"
                 names = spec.inputs if spec.inputs is not None else [p.relative_to(inputs).as_posix() for p in sorted(inputs.rglob("*")) if p.is_file() or p.is_symlink()]
-                manifest = []
                 for name in names:
                     source = inside(inputs, name)
                     if not source.is_file():
@@ -175,13 +175,17 @@ class RuntimeService:
                     target = inside(work, name)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, target)
-                    manifest.append(self.describe(work, name))
+                    copied = self.describe(work, name)
+                    manifest.append(copied)
+                    if spec.input_hashes is not None and copied["sha256"] != spec.input_hashes[name]:
+                        raise ValueError(f"Input checksum mismatch: {name}; task was not queued")
                 atomic_json(root / "inputs.json", manifest)
                 atomic_json(root / "launch.json", {"task_id": record["id"], "spec": payload, "python": self.config["python"]})
                 shutil.copyfile(Path(__file__).with_name("worker.py"), root / "worker.py")
                 return self.store.update(record["id"], state="queued", input_manifest=manifest)
             except Exception as exc:
-                self.store.update(record["id"], state="failed", reason=f"Input preparation failed: {exc}")
+                self.store.update(record["id"], state="failed", reason=f"Input preparation failed: {exc}",
+                                  input_manifest=manifest)
                 raise
 
     def cancel(self, task_id):

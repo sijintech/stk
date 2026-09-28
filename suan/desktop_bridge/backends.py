@@ -124,6 +124,8 @@ class RuntimeBackend:
             spec = TaskSpec(**spec).to_dict()
         except (TypeError, ValueError) as exc:
             raise BridgeError("invalid_params", f"Invalid task spec: {exc}") from None
+        if "input_hashes" in spec and "input_checksums" not in (self.health().get("features") or []):
+            raise BridgeError("unsupported", "This Runtime does not advertise input checksum checks; upgrade it before submitting frozen inputs")
         return {"task": self.call(self.client.submit, spec, key)}
 
     def tasks(self, workspace_id=None):
@@ -300,6 +302,8 @@ class HubBackend:
                 TaskSpec(**spec)
             except (TypeError, ValueError) as exc:
                 raise BridgeError("invalid_params", f"Invalid task spec: {exc}") from None
+            if spec.get("input_hashes") is not None and "input_checksums" not in (self.health().get("features") or []):
+                raise BridgeError("unsupported", "This node does not advertise Runtime input checksum checks; upgrade it and refresh its heartbeat")
             payload = {"spec": spec}
         return self._operation("task.submit", payload, action_id("task.submit", self.node_id, key), "task")
 

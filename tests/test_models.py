@@ -28,6 +28,25 @@ def test_legacy_specs_keep_their_idempotency_hash():
     assert TaskSpec(WS, ["muFerro"], resources={"ranks": 2}).to_dict()["resources"] == {"ranks": 2}
 
 
+def test_input_hashes_normalize_paths_and_participate_in_idempotency():
+    checked = TaskSpec(WS, ["{python}", "-c", "pass"], inputs=["./input.json"], input_hashes={"./input.json": "a" * 64})
+    assert checked.to_dict()["inputs"] == ["input.json"]
+    assert checked.to_dict()["input_hashes"] == {"input.json": "a" * 64}
+    assert digest(checked) != digest(TaskSpec(WS, checked.argv, inputs=["input.json"]))
+    assert "input_hashes" not in TaskSpec(WS, checked.argv, input_hashes=None).to_dict()
+    assert TaskSpec(WS, checked.argv, inputs=[], input_hashes={}).to_dict()["input_hashes"] == {}
+
+
+@pytest.mark.parametrize("inputs,hashes", [
+    (None, {}), (["a"], []), (["a"], {}), (["a"], {"a": "a" * 64, "b": "b" * 64}),
+    (["a"], {"a": "A" * 64}), (["a"], {"a": "a" * 63}), (["a"], {"a": True}),
+    (["a"], {"../a": "a" * 64}), (["a"], {"a": "a" * 64, "./a": "a" * 64}),
+])
+def test_input_hashes_require_exact_unambiguous_input_coverage(inputs, hashes):
+    with pytest.raises(ValueError):
+        TaskSpec(WS, ["{python}", "-c", "pass"], inputs=inputs, input_hashes=hashes)
+
+
 @pytest.mark.parametrize("resources,backend,message", [
     ({"ranks": 4, "cpus": 2}, "local", "not both"),
     ({"threads_per_rank": 2, "cpus": 2}, "local", "not both"),

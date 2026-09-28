@@ -60,6 +60,7 @@ class TaskSpec:
     outputs: List[str] = field(default_factory=list)
     env: Dict[str, str] = field(default_factory=dict)
     resources: Dict = field(default_factory=dict)
+    input_hashes: Optional[Dict[str, str]] = None
 
     def __post_init__(self):
         if not isinstance(self.workspace_id, str) or not re.fullmatch(r"[a-f0-9]{32}", self.workspace_id):
@@ -79,6 +80,18 @@ class TaskSpec:
             if not isinstance(paths, list):
                 raise ValueError(f"{key} must be a list of relative file paths")
             setattr(self, key, list(dict.fromkeys(relative_path(p) for p in paths)))
+        if self.input_hashes is not None:
+            if self.inputs is None or not isinstance(self.input_hashes, dict):
+                raise ValueError("input_hashes needs an explicit inputs list and a path-to-SHA256 object")
+            hashes = {}
+            for path, digest in self.input_hashes.items():
+                path = relative_path(path)
+                if path in hashes or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+                    raise ValueError("input_hashes must contain unique relative paths and lowercase SHA-256 digests")
+                hashes[path] = digest
+            if set(hashes) != set(self.inputs):
+                raise ValueError("input_hashes must describe exactly the selected inputs")
+            self.input_hashes = hashes
         if not isinstance(self.env, dict) or any(
             not isinstance(k, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", k)
             or not isinstance(v, str) or "\x00" in v for k, v in self.env.items()
@@ -105,7 +118,11 @@ class TaskSpec:
             raise ValueError("Local tasks do not allocate nodes, GPUs, queues or accounts")
 
     def to_dict(self):
-        return asdict(self)
+        result = asdict(self)
+        # Keep every legacy request hash unchanged when callers have not opted into checks.
+        if self.input_hashes is None:
+            result.pop("input_hashes")
+        return result
 
 
 @dataclass

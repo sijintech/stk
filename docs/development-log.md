@@ -57,6 +57,14 @@
 
 ### CI 跟踪
 
+Runtime 输入哈希检查：TaskSpec 可显式携带 `input_hashes`，要求与 `inputs` 精确对应；
+Runtime 在复制到任务私有目录后检查哈希，通过才排队，不匹配保留失败记录与实际输入清单。
+旧 spec 不增加空字段，既有幂等摘要保持；同键重试返回原任务，不重新核对已改变的工作区。
+直连/Hub 完整 spec 提交检查 `input_checksums` 能力。模型/Runtime/事件/脚本/桥/Hub/control
+相关回归 **80/80** 通过；未修改 C++ 任务 UI，本批远端 CI 待跟踪。
+
+快照兼容修正的本机验证：Python 快照/项目桥/协议 **49/49**，原生 schema/项目生命周期/输入快照 **7/7**。
+
 输入快照 `9686180` 的 Runtime run **36396871397** 发现两处问题：历史 schema 的升级目标枚举
 遗漏格式 4；Windows Python 3.12 的路径 stat 与 fd fstat 使用不同含义的 ctime，已修改过的文件
 被误判为复制中变化。已补格式 4 / `capture_files` 历史契约；ctime 只在同一 API 内比较，跨 API

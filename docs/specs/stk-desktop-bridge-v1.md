@@ -185,7 +185,7 @@ Connection ids are opaque to the app; the bridge resolves them:
 | `hub.review` | `connection, action_id, approved` | `{action}` |
 | `hub.policy` | `connection` | `{policy: {device_profile, desktop_auto, desktop_auto_bytes, graph_auto_seconds, uploads, upload_max_bytes, upload_chunk_bytes, upload_quota_bytes, import_max_files, import_request_bytes, action_request_bytes, read_kinds, review_policy}}` (WP11) |
 
-- `spec` is a Runtime `TaskSpec` (`workspace_id, argv, backend?, name?, inputs?, outputs?, env?,
+- `spec` is a Runtime `TaskSpec` (`workspace_id, argv, backend?, name?, inputs?, input_hashes?, outputs?, env?,
   resources?` including MPI `ranks`/`threads_per_rank`; see docs/runtime.md). It is validated before
   sending (`invalid_params`). `argv` tokens `{python}`, `{ranks}`, `{threads_per_rank}`, `{nodes}`
   are expanded by the Runtime; through a hub, `argv[0] == "@python"` names the node's Python.

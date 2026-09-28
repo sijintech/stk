@@ -269,6 +269,26 @@ mpirun/srun，也不会自动分配本机 GPU。
 但缺少这些文件时任务仍失败。未声明的新增或修改文件也会出现在结果列表中。
 输入 manifest、启动参数和运行环境摘要保留在任务目录中。
 
+需要固定输入版本时，TaskSpec 可增加 `input_hashes`：一个从相对文件路径到小写 SHA-256 的对象。
+必须同时明确提供 `inputs`，哈希键与选中输入逐一对应；例如：
+
+```python
+spec = {
+    "workspace_id": workspace_id,
+    "argv": ["{python}", "simulate.py"],
+    "inputs": ["simulate.py", "input.json"],
+    "input_hashes": {"simulate.py": script_sha256, "input.json": input_sha256},
+    "outputs": ["result.csv"],
+}
+```
+
+Runtime 校验的是**已经复制到任务目录的内容**，通过后才进入 `queued`。不匹配时任务记为 `failed`，
+保留原因及已复制输入的实际清单，不会交给 worker。原幂等键仍属于这次失败尝试；修复输入后明确创建新尝试、使用新键。
+已经接受的任务重试同一键/同一 spec 时直接返回原记录，不受工作区后来改动影响。
+改变哈希也算改变请求，不能复用旧键。省略 `input_hashes` 保持旧行为，序列化与原有幂等哈希不变。
+`GET /health` 的 `features` 包含 `input_checksums` 表示支持此能力；桌面桥在直连和 Hub 完整 spec 提交前
+检查该能力，旧服务或未更新心跳的节点会得到 `unsupported`，不会静默忽略哈希要求。
+
 上传使用 SHA-256、分块和原子提交。未完成的上传不能进入快照。重新执行相同上传
 可续传；API 也提供取消上传接口。下载通过 `.part` 和 `.part.json` 续传并校验。
 任务运行期间请勿从服务器端直接修改其私有目录。

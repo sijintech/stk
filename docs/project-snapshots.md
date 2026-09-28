@@ -33,6 +33,8 @@ print(frozen["path"], frozen["sha256"], frozen["size"])
 # 上传时显式保留原文件名；内部对象的文件名是哈希的一部分。
 # transfer = stk.runtime("runtime:lab").upload(workspace_id, frozen["path"],
 #     remote=frozen["name"], idempotency_key="run-001:input")
+# 上传完成后，在提交 spec 中使用 inputs=[frozen["name"]]，
+# input_hashes={frozen["name"]: frozen["sha256"]}，让 Runtime 校验实际复制的输入。
 ```
 
 `capture` 接受 1–100 个已登记文件 ID，重复 ID 合并；允许空文件，拒绝目录、缺失文件和有求值错误的文件记录。
@@ -50,6 +52,8 @@ suan project snapshots resolve /path/to/project SNAPSHOT_UUID FILE_RECORD_UUID
 `verify` 返回总体 `ok` 及各文件 `ok/missing/invalid` 和原因，不修复或覆盖损坏内容。
 `resolve` 对缺失、损坏或不属于该快照的文件报错；原文件是否仍在原位置不影响历史副本解析。
 读取/校验不增加项目修订，成功保存快照增加一次修订并发出 `project.changed`。
+上传完成后，可将清单中的 SHA-256 放入 TaskSpec 的 `input_hashes`，由支持 `input_checksums` 的 Runtime
+检查实际复制到任务目录的内容，见[Runtime 输入检查](runtime.md)。这项检查不会自动上传文件或提交任务。
 
 ## 保存与一致性边界
 

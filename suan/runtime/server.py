@@ -71,7 +71,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .models import RESOURCES
                 self.respond({"api_version": 1, "status": "ok", "backends": ["local", "pbs", "slurm"],
                               "resources": sorted(RESOURCES), "argv_tokens": ["{python}", "{ranks}", "{threads_per_rank}", "{nodes}"],
-                              "features": ["events"],
+                              "features": ["events", "input_checksums"],
                               "supervisor_running": alive(read_json(Path(self.server.config["state_dir"]) / "supervisor.pid"))})
             elif parts == ["v1", "workspaces"] and method in {"GET", "POST"}:
                 self.respond(service.store.workspaces() if method == "GET" else service.create_workspace(data["name"], data.get("idempotency_key")))

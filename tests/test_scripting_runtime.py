@@ -29,7 +29,7 @@ t = r.upload(w, '输入.txt', remote='input.txt', idempotency_key='script-input'
 assert stk.transfers.wait(t['id'], timeout=20)['state'] == 'completed'
 assert r.upload(w, '输入.txt', remote='input.txt', idempotency_key='script-input')['id'] == t['id']
 assert r.workspaces.files(w)[0]['path'] == 'input.txt'
-spec = {{'workspace_id': w, 'argv': ['{{python}}', '-c', "from pathlib import Path; print('温度结果'); Path('result.txt').write_bytes(Path('input.txt').read_bytes())"], 'outputs': ['result.txt']}}
+spec = {{'workspace_id': w, 'argv': ['{{python}}', '-c', "from pathlib import Path; print('温度结果'); Path('result.txt').write_bytes(Path('input.txt').read_bytes())"], 'outputs': ['result.txt'], 'inputs': ['input.txt'], 'input_hashes': {{'input.txt': r.workspaces.files(w)[0]['sha256']}}}}
 job = r.tasks.submit(spec, idempotency_key='script-task')['task']
 assert r.tasks.submit(spec, idempotency_key='script-task')['task']['id'] == job['id']
 try:

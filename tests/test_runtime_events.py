@@ -44,7 +44,7 @@ def wait_for_events(client, task_id, count, timeout=20):
 
 def test_events_are_visible_while_the_task_runs(runtime):
     client, supervisor, server, _ = runtime
-    assert client.health()["features"] == ["events"]
+    assert "events" in client.health()["features"]
     ws = client.create_workspace("events")["id"]
     task = client.submit(TaskSpec(ws, ["{python}", "-c", PROGRAM]))
     supervisor.tick()
