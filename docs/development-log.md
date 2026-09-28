@@ -243,3 +243,7 @@ macOS 产物与新门槛待本次 CI 验证。未声称 Windows CI 执行了 GPU
 开发计划重排为草案检查/AI 工作区基础、通用批次、共享字段、文档嵌入原型和分析过期传播，
 已完成的存储开发包不再重复列为下一步。新增文档预览技术验证记录，核对 GHOST 句柄层、
 WKWebView/WebView2/Qt 接口与分发条件，引用官方资料并明确原型尚未实施、技术尚未选定。
+
+新增[工作台真机验收清单](workbench-acceptance.md)，覆盖双平台更新启动、离线参数/公式、
+撤销、候选预览、文件 Viewer/VSCode、输入校验、Python 布局及重开；远程 Linux Runtime 检查单独列出。
+明确 Windows CI 未执行 GPU 真机渲染，以及通用对等通信仍待开发。

@@ -113,6 +113,7 @@ CMake、Ninja 和 STK science / visualization / control 依赖安装在专用 ve
 `examples/project_scan/offline.py` 的绝对路径，明确点击“运行文件”。脚本创建新的本机项目，
 展示参数表、跨表公式、结果表、文件索引、输入快照、分析图统计和三维结果，并通过 Python 配置三个区域。
 不需要 Runtime/SSH/Hub；数据是合成演示场。具体检查步骤和布局恢复见[离线工作台演示](../examples/project_scan/OFFLINE.md)。
+新增项目、Python、文件、预览及远程运行的真机检查见[工作台验收清单](../docs/workbench-acceptance.md)。
 
 ## 测试项目表格
 

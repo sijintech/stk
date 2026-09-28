@@ -28,6 +28,7 @@
   见[输入快照](project-snapshots.md)；格式 5 将参数行、输入版本、完整执行规格和任务 ID 持久关联；原生运行表格可查看冻结参数、
   显式提交/恢复、刷新和取消，见[运行记录](project-runs.md)。
   macOS/Windows 可先运行[离线工作台演示](../examples/project_scan/OFFLINE.md)，无需 Runtime，验证项目、公式、Python 布局和三维分析。
+  用户真机复核步骤统一在[工作台验收清单](workbench-acceptance.md)，与 CI 能力范围分开记录。
   自动输入生成、完整程序环境冻结与完整项目打包仍待实现。
   Runtime 已支持可选的 `input_hashes`，校验复制到任务目录的实际内容后才排队，旧请求幂等哈希保持不变。
 - P0 测试稳定性修正：Windows 进程退出测试捕获状态查询期间的 `psutil.NoSuchProcess`；
