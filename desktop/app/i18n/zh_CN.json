@@ -768,5 +768,19 @@
   "project.delete_record": "删除选中记录",
   "project.delete_field": "删除选中字段",
   "project.delete_table": "删除当前表格",
-  "project.delete_hint": "删除会移除对象及其单元格。引用它的其他单元格会显示来源缺失；撤销会恢复原 ID。"
+  "project.delete_hint": "删除会移除对象及其单元格。引用它的其他单元格会显示来源缺失；撤销会恢复原 ID。",
+  "project.files.title": "项目文件",
+  "project.files.hint": "每行输入一个文件路径，一批最多 100 个。相对路径以项目目录为起点。登记只读取文件信息；删除索引记录不会删除文件。",
+  "project.files.index": "登记 / 更新文件",
+  "project.files.show": "显示文件表格",
+  "project.files.folder": "打开项目文件夹",
+  "project.files.code_folder": "在 VSCode 中打开项目",
+  "project.files.incompatible": "文件表格缺少字段或字段类型不兼容。请撤销结构修改或从备份恢复。",
+  "project.files.refresh": "刷新选中文件",
+  "project.files.open": "用默认程序打开",
+  "project.files.code": "在 VSCode 中编辑",
+  "project.files.path": "路径",
+  "project.files.location": "位置",
+  "project.files.state": "上次检查状态",
+  "project.files.open_failed": "无法打开此位置。请检查文件关联或已安装的 VSCode URL 处理程序。"
 }

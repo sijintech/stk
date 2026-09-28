@@ -74,7 +74,8 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
     assert scripts.call("hello", {"protocol": 1})["protocol"] == 1
     assert set(scripts.call("script.catalog")["operations"]) == {
         "project.create", "project.open", "project.list", "project.close", "project.snapshot", "project.apply", "project.history",
-        "project.backup", "project.upgrade", "project.undo", "project.redo"}
+        "project.backup", "project.upgrade", "project.undo", "project.redo",
+        "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve"}
     assert scripts.call("script.close", {"session": session})["closed"]
     assert scripts.call("project.list")["projects"][0]["revision"] == 1
     assert scripts.error("script.status", {"session": session})["code"] == "not_found"
@@ -90,6 +91,20 @@ def test_python_project_facade_undo_redo_uses_shared_persistent_history(scripts,
     assert scripts.call("project.snapshot", {"handle": info["handle"]})["snapshot"]["edit_history"] == {"undo_revision": 1, "redo_revision": None}
     assert execute(scripts, session, "p.undo(expected_revision=2)")["run"]["state"] == "failed"
     assert scripts.call("project.list")["projects"][0]["revision"] == 3
+
+
+def test_python_files_facade_indexes_refreshes_and_resolves_without_launching(scripts, tmp_path):
+    directory = tmp_path / "files"
+    info = scripts.call("project.create", {"directory": str(directory), "name": "Files"})["project"]
+    path = directory / "notes.md"
+    path.write_text("# Notes", encoding="utf-8")
+    session = scripts.call("script.open")["session"]
+    source = ("p = stk.project\nindexed = p.files.index(['notes.md'], expected_revision=0)\n"
+              "record = indexed['record_ids'][0]\nassert p.files.list()['records'][0]['name'] == 'notes.md'\n"
+              "assert p.files.resolve(record, expected_revision=1)['kind'] == 'document'\n"
+              "assert p.files.refresh([record], expected_revision=1)['revision'] == 2")
+    assert execute(scripts, session, source, project_handle=info["handle"])["run"]["state"] == "succeeded"
+    assert path.read_text(encoding="utf-8") == "# Notes"
 
 
 def test_interrupt_stops_worker_tree_resets_namespace_and_keeps_bridge_usable(scripts, tmp_path):

@@ -768,5 +768,19 @@
   "project.delete_record": "Delete selected record",
   "project.delete_field": "Delete selected field",
   "project.delete_table": "Delete this table",
-  "project.delete_hint": "Deletion includes the object’s cells. Incoming references remain and show a missing-source error. Undo restores the original IDs."
+  "project.delete_hint": "Deletion includes the object’s cells. Incoming references remain and show a missing-source error. Undo restores the original IDs.",
+  "project.files.title": "Project files",
+  "project.files.hint": "Enter up to 100 file paths, one per line. Relative paths start at the project folder. Registration reads metadata only; deleting an index row never removes the file.",
+  "project.files.index": "Register / update files",
+  "project.files.show": "Show file table",
+  "project.files.folder": "Open project folder",
+  "project.files.code_folder": "Project in VSCode",
+  "project.files.incompatible": "The file table has missing or incompatible fields. Undo its structural edit or restore a backup.",
+  "project.files.refresh": "Refresh selected file",
+  "project.files.open": "Open with default app",
+  "project.files.code": "Edit in VSCode",
+  "project.files.path": "Path",
+  "project.files.location": "Location",
+  "project.files.state": "Last observed state",
+  "project.files.open_failed": "Could not open this location. Check the file association or the installed VSCode URL handler."
 }

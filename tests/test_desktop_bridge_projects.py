@@ -10,6 +10,7 @@ from suan.project import ProjectStore
 from suan.project.store import DATABASE_NAME, FORMAT_VERSION
 from test_desktop_bridge import bridge_env, inproc, ProcessBridge  # noqa: F401
 from test_project_values import model, legacy, command, reference  # noqa: F401
+from test_project_files import files  # noqa: F401
 
 
 def test_project_lifecycle_edits_events_and_reopen(inproc, tmp_path):  # noqa: F811
@@ -168,6 +169,28 @@ def test_two_projects_keep_edits_separate_and_concurrent_open_deduplicates(inpro
     assert handles == [projects[1]["handle"]] * 2
     assert len(harness.call("project.list")["projects"]) == 2
     harness.close()
+
+
+def test_files_bridge_metadata_edits_resolution_and_undo_follow_shared_contract(inproc, files):
+    store, inside, _ = files
+    harness = inproc()
+    handle = harness.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    result = harness.call("project.files.index", {"handle": handle, "paths": [str(inside)], "expected_revision": 0})
+    identity = result["record_ids"][0]
+    assert result["revision"] == 1
+    assert harness.wait_event(lambda event: event["event"] == "project.changed")["data"] == {"handle": handle, "revision": 1}
+    snapshot = harness.call("project.snapshot", {"handle": handle})["snapshot"]
+    assert snapshot["file_index"]["compatible"]
+    assert harness.call("project.files.list", {"handle": handle})["records"][0]["id"] == identity
+    assert harness.call("project.files.resolve", {"handle": handle, "record_id": identity, "expected_revision": 1})["path"] == str(inside)
+    assert harness.error("project.files.resolve", {"handle": handle, "record_id": identity, "expected_revision": 0})["code"] == "conflict"
+    inside.unlink()
+    assert harness.call("project.files.refresh", {"handle": handle, "record_ids": [identity], "expected_revision": 1})["revision"] == 2
+    assert harness.call("project.files.list", {"handle": handle})["records"][0]["state"] == "missing"
+    harness.call("project.undo", {"handle": handle, "expected_revision": 2})
+    assert harness.call("project.files.list", {"handle": handle})["records"][0]["state"] == "present"
+    assert not inside.exists()
+    assert not harness.violations
 
 
 def test_shutdown_does_not_wait_again_on_an_inflight_database_operation():

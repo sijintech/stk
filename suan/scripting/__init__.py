@@ -51,6 +51,33 @@ class Project:
         """Reapply the next undone batch; new edits discard the redo stack."""
         return self._call("project.redo", {"handle": self.handle, "expected_revision": expected_revision})
 
+    @property
+    def files(self):
+        return ProjectFiles(self._call, self.handle)
+
+
+class ProjectFiles:
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def list(self):
+        return self._call("project.files.list", {"handle": self.handle})
+
+    def index(self, paths, *, expected_revision):
+        if isinstance(paths, (str, bytes)):
+            raise TypeError("paths must be a sequence of paths, not a single string")
+        return self._call("project.files.index", {"handle": self.handle, "paths": [str(path) for path in paths],
+                                                   "expected_revision": expected_revision})
+
+    def refresh(self, record_ids, *, expected_revision):
+        return self._call("project.files.refresh", {"handle": self.handle, "record_ids": record_ids,
+                                                     "expected_revision": expected_revision})
+
+    def resolve(self, record_id, *, expected_revision):
+        """Check and return the current local path; never launches an external application."""
+        return self._call("project.files.resolve", {"handle": self.handle, "record_id": record_id,
+                                                     "expected_revision": expected_revision})
+
 
 class Projects:
     def __init__(self, call):
@@ -119,4 +146,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Desktop", "Project", "Projects", "ScriptError"]
+__all__ = ["API", "Desktop", "Project", "ProjectFiles", "Projects", "ScriptError"]

@@ -3334,6 +3334,283 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.files.index": {
+        "description": "Explicit metadata-only file index as a shared undoable edit batch. No file contents are changed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32768
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "paths"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectCommand"
+              }
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "revision",
+            "commands",
+            "table_id",
+            "record_ids"
+          ]
+        }
+      },
+      "project.files.refresh": {
+        "description": "Explicit metadata-only file refresh as a shared undoable edit batch. No file contents are changed.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "record_ids"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectCommand"
+              }
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "revision",
+            "commands",
+            "table_id",
+            "record_ids"
+          ]
+        }
+      },
+      "project.files.resolve": {
+        "description": "Check a saved file location at an explicit revision and return the current absolute path. Does not launch an application.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "record_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "revision",
+            "record_id",
+            "path",
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.files.list": {
+        "description": "Read saved file observations; does not scan the filesystem.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "records": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "path": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "location": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "modified": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "checked": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "size": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "path",
+                  "location",
+                  "kind",
+                  "modified",
+                  "state",
+                  "checked",
+                  "id",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "revision",
+            "table_id",
+            "records"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -4091,6 +4368,63 @@
           "required": [
             "undo_revision",
             "redo_revision"
+          ],
+          "additionalProperties": false
+        },
+        "file_index": {
+          "type": "object",
+          "properties": {
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "fields": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "path": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "location": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "kind": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "modified": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "state": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "checked": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "size": {
+                  "$ref": "#/$defs/projectUuid"
+                }
+              },
+              "required": [
+                "name",
+                "path",
+                "location",
+                "kind",
+                "modified",
+                "state",
+                "checked",
+                "size"
+              ],
+              "additionalProperties": false
+            },
+            "compatible": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "table_id",
+            "fields",
+            "compatible"
           ],
           "additionalProperties": false
         }

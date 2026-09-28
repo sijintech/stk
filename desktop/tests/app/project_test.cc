@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_state.hh"
+#include "stk/core/paths.hh"
 #include "stk/app/script_state.hh"
 #include "stk/bridge/process.hh"
 #include "../bridge/support.hh"
@@ -9,6 +10,8 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include "stk/platform/file_dialog.hh"
 
 namespace stk::app {
 namespace {
@@ -59,6 +62,20 @@ TEST(ProjectTable, LiteralTypesPreservePrecisionAndRejectInvalidInput)
   EXPECT_TRUE(project_literal("number", "null", error)->is_null());
   EXPECT_EQ(project_literal("json", "{\"a\":[1,true,null]}", error)->at("a").size(), 3u);
   EXPECT_TRUE(error.empty());
+}
+
+TEST(ProjectFiles, VscodeUrlsEncodePathDataAndRejectAmbiguousLocations)
+{
+  EXPECT_EQ(platform::vscode_file_url("/tmp/hello world#?.md"), "vscode://file/tmp/hello%20world%23%3F.md");
+  EXPECT_EQ(platform::vscode_file_url("C:\\Research\\温度.py"), "vscode://file/C:/Research/%E6%B8%A9%E5%BA%A6.py");
+  EXPECT_EQ(platform::vscode_file_url("/tmp/%file"), "vscode://file/tmp/%25file");
+  EXPECT_TRUE(platform::vscode_file_url("relative/file.py").empty());
+  EXPECT_TRUE(platform::vscode_file_url("/tmp/ambiguous:12").empty());
+  EXPECT_TRUE(platform::vscode_file_url("\\\\server\\share\\file.py").empty());
+  EXPECT_TRUE(platform::vscode_file_url(std::string("/tmp/a\0b", 8)).empty());
+  std::string error;
+  EXPECT_FALSE(platform::open_with_system("", &error));
+  EXPECT_FALSE(error.empty());
 }
 
 TEST(ProjectTable, ValuesFollowFieldIdsAndDistinguishUnsetFromNull)
@@ -520,6 +537,80 @@ TEST_F(ProjectPython, RenameDraftRejectsExternalRevisionUntilExplicitReload)
   f.drv->frame();
   EXPECT_EQ(widget("rename_table")->string.value(), "Cases");
   EXPECT_TRUE(widget("save_table_name")->enabled);
+}
+
+TEST_F(ProjectPython, FileIndexButtonsResolveBeforeLaunchingAndRefreshWithoutChangingFiles)
+{
+  populated();
+  const std::string path = dir.str() + "/project/笔记 #1.md";
+  { std::ofstream file(core::path_from_utf8(path)); file << "# Notes\n"; }
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_files");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_files/" + key); };
+  ASSERT_NE(widget("paths"), nullptr);
+  widget("paths")->string.assign("笔记 #1.md");
+  f.drv->frame();
+  widget("index")->on_click();
+  settled();
+  f.drv->frame();
+  ASSERT_TRUE(state().selected_file()) << state().error();
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 1), "笔记 #1.md");
+  int system_calls = 0, code_calls = 0;
+  state().open_external = [&](const std::string &opened, std::string *) {
+    EXPECT_EQ(opened, path); ++system_calls; return true;
+  };
+  state().open_vscode = [&](const std::string &opened, std::string *) {
+    EXPECT_EQ(opened, path); ++code_calls; return true;
+  };
+  widget("open")->on_click();
+  settled();
+  f.drv->frame();
+  widget("code")->on_click();
+  settled();
+  EXPECT_EQ(system_calls, 1);
+  EXPECT_EQ(code_calls, 1);
+  EXPECT_EQ(state().project()->revision, 2);  // Resolving/opening is not an edit.
+  std::filesystem::remove(core::path_from_utf8(path));
+  ASSERT_TRUE(state().open_file(false));
+  settled();
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_EQ(system_calls, 1);  // A stale 'present' observation cannot launch a missing path.
+  f.drv->frame();
+  widget("refresh")->on_click();
+  settled();
+  EXPECT_EQ(state().table()->text(0, 6), "missing");
+  ASSERT_TRUE(state().undo());
+  settled();
+  EXPECT_EQ(state().table()->text(0, 6), "present");
+  EXPECT_FALSE(std::filesystem::exists(core::path_from_utf8(path)));
+  state().open_external = platform::open_with_system;
+  state().open_vscode = platform::open_with_vscode;
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, DroppedFilesRegisterInCurrentProjectAndUndoRemovesOnlyTheIndex)
+{
+  populated();
+  const std::string path = dir.str() + "/project/input.dat";
+  { std::ofstream file(path); file << "1 2 3\n"; }
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  auto context = area.context(nullptr, nullptr);
+  ASSERT_TRUE(area.editor().on_drop({path}, context));
+  settled();
+  EXPECT_TRUE(state().selected_file());
+  ASSERT_TRUE(state().undo());
+  settled();
+  EXPECT_TRUE(std::filesystem::exists(path));
+  EXPECT_EQ(state().tables().size(), 1u);
+  EXPECT_EQ(state().table_id(), table_id);
+  EXPECT_TRUE(state().file_index().empty());
 }
 
 }  // namespace

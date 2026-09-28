@@ -2,9 +2,11 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
+#include "stk/core/paths.hh"
 #include "stk/platform/file_dialog.hh"
 
 #include <algorithm>
+#include <filesystem>
 
 namespace stk::app {
 namespace {
@@ -78,6 +80,7 @@ class ProjectEditor final : public Editor {
       panel->paragraph(ctx.tr("project.backup_hint"));
       panel->button("backup", ctx.tr("project.backup"), [&state] { state.backup(); }).disable(!editable);
     }
+    file_controls(layout, ctx, state, editable);
     table_controls(layout, ctx, state, editable);
     const auto *table = state.table();
     if (!table) {
@@ -91,6 +94,15 @@ class ProjectEditor final : public Editor {
 
   bool on_drop(const std::vector<std::string> &paths, EditorContext &ctx) override
   {
+    auto &state = ctx.store.project();
+    state.sync();
+    std::error_code error;
+    const auto single_path = paths.size() == 1 ? core::path_from_utf8(paths.front()) : std::filesystem::path();
+    const bool directory = paths.size() == 1 && std::filesystem::is_directory(single_path, error);
+    if (state.loaded() && !paths.empty() &&
+        (paths.size() > 1 || (single_path.filename() != "project.sqlite3" && !directory))) {
+      return state.index_files(paths);
+    }
     if (paths.size() != 1) {
       return false;
     }
@@ -126,6 +138,48 @@ class ProjectEditor final : public Editor {
   }
 
  private:
+  void file_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  {
+    if (file_project_ != state.project()->id) {
+      file_project_ = state.project()->id;
+      file_paths_.clear();
+    }
+    auto *panel = layout.panel("project_files", ctx.tr("project.files.title"), false);
+    if (!panel) { return; }
+    panel->paragraph(ctx.tr("project.files.hint"));
+    panel->text_area("paths", ui::bind(file_paths_), {.max_length = 65536, .mono = true, .visible_lines = 3});
+    auto &actions = panel->row();
+    actions.button("index", ctx.tr("project.files.index"), [this, &state] {
+      state.index_files(platform::split_path_list(file_paths_));
+    }).disable(!editable || state.project()->format_version < 3 || file_paths_.empty());
+    const std::string table_id = io::get_string(state.file_index(), "table_id");
+    actions.button("show", ctx.tr("project.files.show"), [&state, table_id] { state.select_table(table_id); })
+        .disable(table_id.empty());
+    auto &folder = panel->row();
+    folder.button("folder", ctx.tr("project.files.folder"), [&state] { state.open_folder(false); }).disable(!editable);
+    folder.button("code_folder", ctx.tr("project.files.code_folder"), [&state] { state.open_folder(true); }).disable(!editable);
+    if (!table_id.empty() && !state.file_index().value("compatible", false)) {
+      panel->paragraph(ctx.tr("project.files.incompatible"));
+    }
+    if (state.selected_file()) {
+      const auto *table = state.table();
+      const auto &fields = state.file_index().at("fields");
+      for (const auto &key : {"path", "location", "state"}) {
+        const std::string id = io::get_string(fields, key);
+        for (size_t column = 0; column < table->fields.size(); ++column) {
+          if (table->fields[column].id == id) {
+            panel->paragraph(std::string(ctx.tr(std::string("project.files.") + key)) + ": " +
+                             table->text(state.selected_record(), int(column)));
+          }
+        }
+      }
+      auto &row = panel->row();
+      row.button("refresh", ctx.tr("project.files.refresh"), [&state] { state.refresh_file(); }).disable(!editable);
+      row.button("open", ctx.tr("project.files.open"), [&state] { state.open_file(false); }).disable(!editable);
+      row.button("code", ctx.tr("project.files.code"), [&state] { state.open_file(true); }).disable(!editable);
+    }
+  }
+
   void manage_objects(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
   {
     const auto *table = state.table();
@@ -257,9 +311,13 @@ class ProjectEditor final : public Editor {
     const auto &table = *state.table();
     ui::TableSpec spec;
     spec.columns.push_back({std::string(ctx.tr("project.record")), 6.0f});
+    const bool file_table = table.id == io::get_string(state.file_index(), "table_id");
+    const Json file_fields = file_table ? state.file_index().value("fields", Json::object()) : Json::object();
     for (const auto &field : table.fields) {
       const bool numeric = field.type == "integer" || field.type == "number";
-      spec.columns.push_back({field.name + (field.unit.empty() ? "" : " (" + field.unit + ")"), 8.0f, true, numeric});
+      const float width = !file_table ? 8.0f : field.id == io::get_string(file_fields, "path") ? 12.0f :
+                          field.id == io::get_string(file_fields, "name") ? 8.0f : 5.0f;
+      spec.columns.push_back({field.name + (field.unit.empty() ? "" : " (" + field.unit + ")"), width, true, numeric});
     }
     spec.rows = int(table.records.size());
     spec.visible_rows = float(std::clamp(int(table.records.size()), 3, 9));
@@ -595,6 +653,7 @@ class ProjectEditor final : public Editor {
   }
 
   std::string directory_, name_, table_name_, field_name_, unit_, cell_field_;
+  std::string file_project_, file_paths_;
   std::string cell_text_, draft_identity_, literal_error_;
   std::string expression_, bindings_ = "{}", binding_name_ = "base";
   std::string selected_binding_;

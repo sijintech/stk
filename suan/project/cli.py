@@ -82,3 +82,42 @@ def undo(directory, expected_revision):
 def redo(directory, expected_revision):
     """Reapply the next undone batch; a new edit discards redo."""
     _run(lambda: ProjectStore(directory).redo(expected_revision=expected_revision))
+
+
+@project.group("files")
+def files():
+    """Index ordinary local files in project tables; never copy or remove their contents."""
+
+
+@files.command("index")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("paths", nargs=-1, required=True)
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def index_files(directory, paths, expected_revision):
+    """Register up to 100 file paths; relative paths are relative to the project directory."""
+    _run(lambda: ProjectStore(directory).files.index(list(paths), expected_revision=expected_revision))
+
+
+@files.command("list")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+def list_files(directory):
+    """Read saved file observations without scanning the filesystem."""
+    _run(lambda: ProjectStore(directory).files.list())
+
+
+@files.command("refresh")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("record_ids", nargs=-1, required=True)
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def refresh_files(directory, record_ids, expected_revision):
+    """Refresh metadata for up to 100 explicit file record IDs."""
+    _run(lambda: ProjectStore(directory).files.refresh(list(record_ids), expected_revision=expected_revision))
+
+
+@files.command("resolve")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.argument("record_id")
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def resolve_file(directory, record_id, expected_revision):
+    """Check an indexed location and return its absolute path; do not open it."""
+    _run(lambda: ProjectStore(directory).files.resolve(record_id, expected_revision=expected_revision))

@@ -288,6 +288,9 @@ class Client {
   Future<Json> project_upgrade(const std::string &handle, int64_t expected_revision);
   Future<Json> project_undo(const std::string &handle, int64_t expected_revision);
   Future<Json> project_redo(const std::string &handle, int64_t expected_revision);
+  Future<Json> project_files_index(const std::string &handle, int64_t expected_revision, const std::vector<std::string> &paths);
+  Future<Json> project_files_refresh(const std::string &handle, int64_t expected_revision, const std::vector<std::string> &record_ids);
+  Future<Json> project_files_resolve(const std::string &handle, int64_t expected_revision, const std::string &record_id);
 
   /* -- Connections (§6) ------------------------------------------------------------------- */
   Future<std::vector<ConnectionInfo>> connections_list();

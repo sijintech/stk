@@ -209,6 +209,10 @@ class Bridge:
             "project.upgrade": self.upgrade_project,
             "project.undo": lambda p, c: self.restore_project(p, c, redo=False),
             "project.redo": lambda p, c: self.restore_project(p, c, redo=True),
+            "project.files.list": lambda p, c: self.projects.files("list", p),
+            "project.files.index": lambda p, c: self.edit_project_files("index", p, c),
+            "project.files.refresh": lambda p, c: self.edit_project_files("refresh", p, c),
+            "project.files.resolve": lambda p, c: self.projects.files("resolve", p),
             "script.open": lambda p, c: self.scripts.open(p),
             "script.status": lambda p, c: self.scripts.status(p),
             "script.execute": self.scripts.execute,
@@ -388,7 +392,8 @@ class Bridge:
         # Deliberate initial coverage. In particular, scripts cannot recursively dispatch their
         # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
         names = ("project.create", "project.open", "project.list", "project.close", "project.snapshot",
-                 "project.apply", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo")
+                 "project.apply", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
+                 "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve")
         return {"operations": {name: bridge_schema.method_contract(name) for name in names},
                 "ui_operations": list(UI_OPERATIONS)}
 
@@ -429,6 +434,12 @@ class Bridge:
 
     def restore_project(self, params, context, *, redo):
         result = self.projects.redo(params) if redo else self.projects.undo(params)
+        context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                            "revision": result["revision"]}))
+        return result
+
+    def edit_project_files(self, action, params, context):
+        result = self.projects.files(action, params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
         return result

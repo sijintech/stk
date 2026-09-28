@@ -35,5 +35,10 @@ foreach(_lang en zh)
     set_tests_properties(project_manage_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
       ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
       FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
+    add_test(NAME project_files_render_${_be}_${_lang} COMMAND stk-project-render --editor files
+      --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_files_${_be}_${_lang}.png")
+    set_tests_properties(project_files_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
+      ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
+      FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
   endforeach()
 endforeach()

@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "stk/app/app_store.hh"
+#include "stk/platform/file_dialog.hh"
 
 namespace stk::app {
 
@@ -96,7 +97,11 @@ std::optional<Json> project_literal(const std::string_view type, const std::stri
   return std::nullopt;
 }
 
-ProjectState::ProjectState(AppStore &store) : store_(store) {}
+ProjectState::ProjectState(AppStore &store) : store_(store)
+{
+  open_external = platform::open_with_system;
+  open_vscode = platform::open_with_vscode;
+}
 
 ProjectState::~ProjectState()
 {
@@ -269,6 +274,7 @@ void ProjectState::clear()
   notice_.clear();
   project_.reset();
   tables_.clear();
+  file_index_ = Json::object();
   table_id_.clear();
   record_id_.clear();
   busy_ = fetching_ = snapshot_ready_ = false;
@@ -325,6 +331,7 @@ void ProjectState::refresh()
       tables.push_back(ProjectTable::from_json(value));
     }
     tables_ = std::move(tables);
+    file_index_ = result.value().value("file_index", Json::object());
     project_->revision = io::get_int(result.value().at("project"), "revision", 0);
     project_->format_version = int(io::get_int(result.value(), "format_version", 1));
     const auto &history = result.value().value("edit_history", Json::object());
@@ -439,6 +446,73 @@ bool ProjectState::restore_edit(const bool redo)
   });
   changed();
   return true;
+}
+
+bool ProjectState::selected_file() const
+{
+  return loaded() && file_index_.value("compatible", false) &&
+         table_id_ == io::get_string(file_index_, "table_id") && selected_record() >= 0;
+}
+
+bool ProjectState::index_files(const std::vector<std::string> &paths) { return edit_files(paths, true); }
+bool ProjectState::refresh_file() { return selected_file() && edit_files({record_id_}, false); }
+
+bool ProjectState::edit_files(const std::vector<std::string> &items, const bool index)
+{
+  if (!ready() || busy() || !loaded() || project_->format_version < 3 || items.empty()) { return false; }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  auto future = index ? client_->project_files_index(project_->handle, project_->revision, items) :
+                        client_->project_files_refresh(project_->handle, project_->revision, items);
+  on(std::move(future), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); }
+    else {
+      table_id_ = io::get_string(result.value(), "table_id");
+      const auto &records = result.value().at("record_ids");
+      if (!records.empty()) { record_id_ = records.front().get<std::string>(); }
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+    }
+    refresh();
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::open_file(const bool vscode)
+{
+  if (!ready() || busy() || !selected_file()) { return false; }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  on(client_->project_files_resolve(project_->handle, project_->revision, record_id_),
+     [this, vscode](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); refresh(); }
+    else {
+      const auto &open = vscode ? open_vscode : open_external;
+      if (!open || !open(io::get_string(result.value(), "path"), &error_)) {
+        if (error_.empty()) { error_ = std::string(store_.tr("project.files.open_failed")); }
+        store_.log(error_);
+      }
+      changed();
+    }
+    if (project_ && dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::open_folder(const bool vscode)
+{
+  if (!loaded() || busy()) { return false; }
+  error_.clear();
+  const auto &open = vscode ? open_vscode : open_external;
+  const bool result = open && open(project_->directory, &error_);
+  if (!result && error_.empty()) { error_ = std::string(store_.tr("project.files.open_failed")); }
+  changed();
+  return result;
 }
 
 const ProjectTable *ProjectState::table() const

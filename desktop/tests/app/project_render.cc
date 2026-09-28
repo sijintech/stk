@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** Real local project bridge -> shared model -> native editor -> offscreen PNG. */
 #include "stk/app/project_state.hh"
+#include "stk/core/paths.hh"
 #include "stk/app/bridge_status.hh"
 #include "stk/app/shell.hh"
 #include "stk/app/editor_area.hh"
@@ -10,6 +11,8 @@
 #include "../bridge/support.hh"
 
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 
 using namespace stk;
 
@@ -106,6 +109,12 @@ int main(int argc, char **argv)
         }, 30);
         ok = ok && scripts.status().at("run").at("state") == "succeeded";
       }
+      if (editor == "files") {
+        const std::string path = dir.str() + "/project/Notes 中文.md";
+        { std::ofstream file(core::path_from_utf8(path)); file << "# Simulation notes\n"; }
+        ok = ok && state.index_files({path, dir.str() + "/project/results/temperature.vti"}) &&
+             loop.pump_until([&] { return !state.busy(); }, 30) && state.selected_file();
+      }
       screen.set_maximized(area);
       wm::DrawContext ctx;
       ctx.ui_scale = 1;
@@ -120,9 +129,9 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      if (editor == "manage") {
+      if (editor == "manage" || editor == "files") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
-        if (const auto *widget = screen.ui()->find("a2/main/manage_objects")) {
+        if (const auto *widget = screen.ui()->find(editor == "manage" ? "a2/main/manage_objects" : "a2/main/project_files")) {
           const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
           screen.ui()->handle_event(ui::Event::mouse_down(center));
           screen.ui()->handle_event(ui::Event::mouse_up(center));

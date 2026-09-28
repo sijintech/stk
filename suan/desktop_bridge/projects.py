@@ -115,6 +115,18 @@ class ProjectSessions:
         with self._operation():
             return self._get(params["handle"]).redo(expected_revision=params["expected_revision"])
 
+    def files(self, action, params):
+        with self._operation():
+            index = self._get(params["handle"]).files
+            if action == "list":
+                return index.list()
+            revision = params["expected_revision"]
+            if action == "index":
+                return index.index(params["paths"], expected_revision=revision)
+            if action == "refresh":
+                return index.refresh(params["record_ids"], expected_revision=revision)
+            return index.resolve(params["record_id"], expected_revision=revision)
+
     def shutdown(self):
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.

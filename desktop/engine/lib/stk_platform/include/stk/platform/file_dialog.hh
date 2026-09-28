@@ -91,4 +91,10 @@ bool is_absolute_path(std::string_view path);
  */
 bool open_with_system(const std::string &path, std::string *error = nullptr);
 
+/** Construct a VS Code file URL from an absolute POSIX or drive-letter Windows path.
+ * Encodes UTF-8, spaces and URL delimiters; returns empty for unsupported/ambiguous paths. */
+std::string vscode_file_url(std::string_view path);
+/** Ask the OS's registered vscode handler to edit a file/folder; no command shell is used. */
+bool open_with_vscode(const std::string &path, std::string *error = nullptr);
+
 }  // namespace stk::platform

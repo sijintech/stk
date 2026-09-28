@@ -67,6 +67,13 @@ class ProjectState {
   bool redo();
   bool can_undo() const { return loaded() && undo_revision_ >= 0; }
   bool can_redo() const { return loaded() && redo_revision_ >= 0; }
+  const io::Json &file_index() const { return file_index_; }
+  bool selected_file() const;
+  bool index_files(const std::vector<std::string> &paths);
+  bool refresh_file();
+  bool open_file(bool vscode);
+  bool open_folder(bool vscode);
+  std::function<bool(const std::string &, std::string *)> open_external, open_vscode;
   const ProjectTable *table() const;
   const std::string &table_id() const { return table_id_; }
   const std::string &record_id() const { return record_id_; }
@@ -84,6 +91,7 @@ class ProjectState {
   void clear();
   void validate_selection();
   bool restore_edit(bool redo);
+  bool edit_files(const std::vector<std::string> &items, bool index);
 
   AppStore &store_;
   bridge::Client *client_ = nullptr;
@@ -96,6 +104,7 @@ class ProjectState {
   int64_t undo_revision_ = -1, redo_revision_ = -1;
   std::optional<bridge::ProjectInfo> project_;
   std::vector<ProjectTable> tables_;
+  io::Json file_index_ = io::Json::object();
   std::string table_id_, record_id_, error_, notice_;
 };
 

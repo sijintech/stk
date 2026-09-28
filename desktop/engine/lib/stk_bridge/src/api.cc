@@ -142,6 +142,28 @@ Future<Json> Client::project_redo(const std::string &handle, const int64_t expec
   return call("project.redo", object({{"handle", handle}, {"expected_revision", expected_revision}}), options);
 }
 
+Future<Json> Client::project_files_index(const std::string &handle, const int64_t expected_revision,
+                                         const std::vector<std::string> &paths)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.files.index", object({{"handle", handle}, {"expected_revision", expected_revision}, {"paths", paths}}), options);
+}
+
+Future<Json> Client::project_files_refresh(const std::string &handle, const int64_t expected_revision,
+                                           const std::vector<std::string> &record_ids)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.files.refresh", object({{"handle", handle}, {"expected_revision", expected_revision}, {"record_ids", record_ids}}), options);
+}
+
+Future<Json> Client::project_files_resolve(const std::string &handle, const int64_t expected_revision,
+                                           const std::string &record_id)
+{
+  return call("project.files.resolve", object({{"handle", handle}, {"expected_revision", expected_revision}, {"record_id", record_id}}));
+}
+
 /* -- Connections -------------------------------------------------------------------------- */
 
 Future<std::vector<ConnectionInfo>> Client::connections_list()

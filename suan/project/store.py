@@ -207,6 +207,11 @@ class ProjectStore:
         with self._connect() as db:
             return {**dict(db.execute("SELECT * FROM project").fetchone()), "format_version": _version(db)}
 
+    @property
+    def files(self):
+        from .files import FileIndex
+        return FileIndex(self)
+
     def _backup(self, db):
         """Online SQLite backup of an already established *read* snapshot, published atomically."""
         project = dict(db.execute("SELECT * FROM project").fetchone())
@@ -342,6 +347,10 @@ class ProjectStore:
             result = {"format_version": _version(db), "project": project, "tables": tables}
             if _version(db) >= 3:
                 result["edit_history"] = self._edit_history(db)
+            from .files import descriptor
+            file_index = descriptor(result)
+            if file_index is not None:
+                result["file_index"] = file_index
             return result
 
     @staticmethod

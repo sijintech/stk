@@ -3,14 +3,23 @@
 #include "stk/platform/file_dialog.hh"
 
 #include <atomic>
+#include <algorithm>
 #include <cstdlib>
 #include <mutex>
 #include <thread>
 
 #include "stk/bridge/process.hh"
 #include "stk/core/paths.hh"
+#include "stk/core/utf8.hh"
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#  include <shellapi.h>
+#  include <objbase.h>
+#else
 #  include <signal.h>
 #  include <spawn.h>
 #  include <sys/wait.h>
@@ -327,12 +336,29 @@ bool is_absolute_path(const std::string_view path)
 
 bool open_with_system(const std::string &path, std::string *error)
 {
-#if defined(_WIN32)
-  if (error) {
-    *error = "opening files with the system is not implemented on Windows yet";
+  if (path.empty() || path.find('\0') != std::string::npos || !core::utf8::is_valid(path)) {
+    if (error) { *error = "the file location must be nonempty valid UTF-8 without NUL"; }
+    return false;
   }
-  (void)path;
-  return false;
+#if defined(_WIN32)
+  const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+  if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) {
+    if (error) { *error = "cannot initialize the Windows application launcher"; }
+    return false;
+  }
+  const std::u16string encoded = core::utf8::to_utf16(path);
+  const std::wstring wide(encoded.begin(), encoded.end());
+  SHELLEXECUTEINFOW request{};
+  request.cbSize = sizeof(request);
+  request.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+  request.lpVerb = L"open";
+  request.lpFile = wide.c_str();
+  request.nShow = SW_SHOWNORMAL;
+  const bool opened = ShellExecuteExW(&request) != FALSE;
+  const DWORD code = opened ? ERROR_SUCCESS : GetLastError();
+  if (SUCCEEDED(initialized)) { CoUninitialize(); }
+  if (!opened && error) { *error = "Windows could not open this location (error " + std::to_string(code) + ")"; }
+  return opened;
 #else
 #  if defined(__APPLE__)
   const char *tool = "open";
@@ -379,6 +405,40 @@ bool open_with_system(const std::string &path, std::string *error)
   }).detach();
   return true;
 #endif
+}
+
+std::string vscode_file_url(const std::string_view path)
+{
+  if (path.empty() || path.find('\0') != std::string_view::npos || !core::utf8::is_valid(path)) { return {}; }
+  const auto letter = [](char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); };
+  const bool drive = path.size() >= 3 && letter(path[0]) && path[1] == ':' && (path[2] == '/' || path[2] == '\\');
+  if ((!drive && path[0] != '/') || path.starts_with("//") || path.starts_with("\\\\")) { return {}; }
+  // VS Code interprets trailing colon numbers as line/column suffixes after URL decoding.
+  // Do not silently open a different file for an ambiguous colon-containing POSIX name.
+  if (path.find(':', drive ? 2 : 0) != std::string_view::npos) { return {}; }
+  std::string normalized(path);
+  if (drive) { std::replace(normalized.begin(), normalized.end(), '\\', '/'); }
+  std::string url = drive ? "vscode://file/" : "vscode://file";
+  constexpr char hex[] = "0123456789ABCDEF";
+  for (const unsigned char c : normalized) {
+    if (letter(char(c)) || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~' || c == '/' || (drive && c == ':')) {
+      url += char(c);
+    }
+    else {
+      url += '%'; url += hex[c >> 4]; url += hex[c & 15];
+    }
+  }
+  return url;
+}
+
+bool open_with_vscode(const std::string &path, std::string *error)
+{
+  const std::string url = vscode_file_url(path);
+  if (url.empty()) {
+    if (error) { *error = "VS Code URLs require an absolute local path without UNC or colon-containing names"; }
+    return false;
+  }
+  return open_with_system(url, error);
 }
 
 }  // namespace stk::platform

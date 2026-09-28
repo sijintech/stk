@@ -501,6 +501,10 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.backup` | `{handle}` | `{path, project_id, revision, format_version}` |
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
 | `project.undo` / `project.redo` | `{handle, expected_revision}` | `{revision, target_revision}` |
+| `project.files.list` | `{handle}` | `{revision, table_id, records}` |
+| `project.files.index` | `{handle, expected_revision, paths: [string]}` | `{revision, commands, table_id, record_ids}` |
+| `project.files.refresh` | `{handle, expected_revision, record_ids: [uuid]}` | `{revision, commands, table_id, record_ids}` |
+| `project.files.resolve` | `{handle, expected_revision, record_id}` | `{revision, record_id, path, kind}` |
 
 - `directory` is an absolute local directory path; the database is `project.sqlite3` within it.
   Creation is explicit and never overwrites an existing database (`conflict`). Open does not create
@@ -525,6 +529,9 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   results remain present. Definitions survive missing sources and evaluation errors.
   Format 3 adds `edit_history: {undo_revision: integer|null, redo_revision: integer|null}` to the snapshot;
   these identify original edit batches, not the current monotonic project revision.
+  An indexed file table adds `file_index: {table_id, fields: {field_name: field_uuid}, compatible: boolean}`.
+  The built-in view is recognized by fixed UUIDs/types, not editable display names. File rows remain ordinary
+  records and may participate in references/expressions/undo. Incompatible fixed fields require explicit repair.
 - `commands` contains 1–1000 closed command objects. Supported operations are `create_table`,
   `add_field`, `add_record`, `set_cell`, `rename_table`, `rename_field`, `set_reference`, `set_expression`,
   `unset_cell`, `delete_record`, `delete_field`, and `delete_table`; the exact required and
@@ -548,7 +555,13 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   conflicts/failures preserve it. Empty stacks return `invalid_params` without mutation. Upgrades and
   edits made before format 3 cannot be undone. External files, Runtime jobs, scripts and UI drafts are
   outside this stack. No implicit side effects or script execution occur during restoration.
-- **Uncertain responses:** create/apply/backup/upgrade/undo/redo are never automatically retried. If a response is lost,
+- `project.files.*` requires format 3. Index/refresh accepts 1–100 explicit paths/record IDs and commits ordinary
+  edit commands atomically, emitting `project.changed`. Indexing observes metadata only and never copies/removes
+  files. List reads saved observations; resolve rechecks a regular file at the requested revision without opening
+  it. Project-relative locations cannot escape the project; external locations retain their OS path syntax.
+  Missing future output files may be registered. Size/mtime are observations, not content hashes or immutable
+  snapshots. See [file index guide](../project-files.md) for field names, state values and restore semantics.
+- **Uncertain responses:** create/apply/backup/upgrade/undo/redo and file index/refresh are never automatically retried. If a response is lost,
   reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
   raise `expected_revision` and repeat an edit: the previous batch may already have committed.
   Explicit reapplication at the original revision cannot commit twice. Opening an already created

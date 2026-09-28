@@ -11,6 +11,9 @@ target_include_directories(stk_platform PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include
 target_compile_features(stk_platform PUBLIC cxx_std_20)
 # stk_bridge is added after this directory; CMake resolves the target at generate time.
 target_link_libraries(stk_platform PUBLIC stk_core PRIVATE stk_bridge)
+if(WIN32)
+  target_link_libraries(stk_platform PRIVATE shell32 ole32)
+endif()
 if(MSVC)
   target_compile_options(stk_platform PRIVATE /W3 /utf-8)
 else()
