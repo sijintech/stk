@@ -127,6 +127,8 @@ int main(int argc, char **argv)
         }
       }
       if (editor == "files" || editor == "snapshots") {
+        auto &viewer = shell.store().viewer();
+        ok = ok && loop.pump_until([&] { viewer.pump(); return viewer.presets_loaded(); }, 30);
         const std::string path = dir.str() + "/project/Notes 中文.md";
         { std::ofstream file(core::path_from_utf8(path)); file << "# Simulation notes\n"; }
         ok = ok && state.index_files({path, dir.str() + "/project/results/temperature.vti"}) &&

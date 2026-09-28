@@ -70,7 +70,7 @@ Json viewer_status(ViewerState &viewer)
                       {"pickable", layer.pickable}});
   }
   Json result = {
-      {"source", {{"key", source.key()}, {"kind", source_kind_name(source.kind)}, {"path", source.path},
+      {"source", {{"key", source.key()}, {"kind", source_kind_name(source.kind)}, {"path", source.path}, {"field_file", source.field_file},
                   {"connection", source.connection}, {"node", source.node}, {"task_id", source.task_id}}},
       {"preset", viewer.preset_id()}, {"parameters", viewer.parameters()}, {"presets_ready", viewer.presets_loaded()},
       {"evaluating", viewer.evaluating()}, {"pending_edit", viewer.pending_edit()},
@@ -89,26 +89,6 @@ Json viewer_status(ViewerState &viewer)
   return result;
 }
 
-void focus_viewer(wm::Screen &screen)
-{
-  EditorArea *target = nullptr;
-  for (auto *area : screen.areas()) {
-    auto *editor = dynamic_cast<EditorArea *>(area);
-    if (!editor) { continue; }
-    for (int i = 0; i < editor->tab_count(); ++i) {
-      if (editor->tab(i).type().id == kEditorViewer) {
-        editor->set_active_tab(i);
-        if (screen.maximized()) { screen.set_maximized(editor); }
-        return;
-      }
-    }
-    if (!target || target->editor().type().id == kEditorPython) { target = editor; }
-  }
-  if (target) {
-    target->add_tab(kEditorViewer);
-    if (screen.maximized()) { screen.set_maximized(target); }
-  }
-}
 }  // namespace
 
 void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &operation, const Json &params,
@@ -180,6 +160,8 @@ void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &ope
   else if (operation == "viewer.preset") {
     const auto id = required_string(params, "id");
     require(viewer.preset(id), "Unknown Viewer preset: " + id);
+    require(viewer.source().field_file.empty() || viewer.preset(id)->accepts_field_file(),
+            "A directly opened field requires a field preset with data/path parameters");
     require(viewer.source().evaluates(), "Choose a run directory or task before changing the preset");
     viewer.select_preset(id);
   }

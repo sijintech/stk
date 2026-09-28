@@ -54,6 +54,8 @@ struct ViewerSource {
   SourceKind kind = SourceKind::None;
   /** Payload file or directory, result directory, or run directory (absolute). */
   std::string path;
+  /** Explicit field filename inside a run directory; empty for ordinary folder sources. */
+  std::string field_file;
   /** Tasks: bridge connection ("runtime:<name>", "hub:<name>"), hub node, workspace, task. */
   std::string connection, node, workspace_id, task_id;
   /** Result directories: series.json (steps) instead of result.json. */
@@ -76,7 +78,8 @@ struct ViewerSource {
 /**
  * What a local path is: a .stkp file, a payload directory (manifest.json with schema
  * stk.payload/2) or that manifest, a result directory (result.json / series.json) or a run
- * directory (any other directory). Kind None with `r_error` when it cannot be opened.
+ * directory (any other directory). Field files (DAT/NPY/VTI/VTK/VTKHDF) bind their parent
+ * directory and carry the exact filename in field_file. Kind None with `r_error` when it cannot be opened.
  */
 ViewerSource classify_path(const std::string &path, std::string *r_error = nullptr);
 /** A preset for a run directory: muFerro frames (Polar.*) -> "muferro-domains"; else "". */
@@ -86,6 +89,7 @@ struct PresetInfo {
   std::string id, name, description;
   std::vector<std::string> bindings;
   io::Json raw; /**< {id, name, description, graph, bindings, parameters} */
+  bool accepts_field_file() const;
 };
 
 struct EvalProgress {

@@ -603,7 +603,7 @@
   "viewer.navigation.blender": "Blender",
   "viewer.navigation.paraview": "ParaView",
   "viewer.navigation.tip": "Blender: middle drag orbits, Shift pans, Ctrl zooms, the left button uses the tool. ParaView: left orbits, middle pans, right zooms. A click picks.",
-  "viewer.open.body": "A .stkp file, a payload folder (manifest.json), a result folder written by “suan graph run” (result.json or series.json), or a muFerro run folder to evaluate locally.",
+  "viewer.open.body": "Open an STK payload/result, a run folder, or a DAT/NPY/VTI/VTK/VTKHDF field file. Field files use the volume preset initially; change the preset and parameters in Properties.",
   "viewer.open.ok": "Open",
   "viewer.open.path": "Path",
   "viewer.open.placeholder": "/path/to/result or file.stkp",
@@ -845,5 +845,10 @@
   "project.csv.export_hint": "Export the selected table’s current values. Formulas, IDs and units are not included. Existing files are kept.",
   "project.csv.destination": "New output file (absolute path)",
   "project.csv.export": "Export selected table",
-  "project.csv.saved": "Table exported: {path}"
+  "project.csv.saved": "Table exported: {path}",
+  "project.files.view": "Open in Viewer",
+  "project.files.viewer_preset": "Field preset",
+  "project.files.viewer_preset_required": "Choose a loaded field preset before opening a scientific field.",
+  "project.files.viewer_hint": "DAT, NPY, VTI, VTK and VTKHDF use the selected field preset. STK payloads/results open directly. Parameters remain adjustable in Properties.",
+  "viewer.error.field_preset": "This file requires a field preset with a data binding and a string path parameter."
 }

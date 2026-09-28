@@ -4,6 +4,7 @@
 #include "stk/app/project_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/app/script_state.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
@@ -127,6 +128,26 @@ TEST(ProjectLayout, FileMenuOpensOneProjectTabAndKeepsViewer)
   it->action();
   f.drv->frame();
   EXPECT_EQ(area.tab_count(), 2);
+}
+
+TEST(ProjectLayout, OpenResultCreatesAViewerTabWhenTheLayoutHasNone)
+{
+  wmtest::AppFixture f;
+  ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&f.area("a1"));
+  OpenResultRequest request;
+  request.local_paths = {std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"};
+  f.shell->store().request_open_result(request);
+  f.drv->frame();
+  f.screen.run_deferred();
+  f.drv->frame();
+  ASSERT_TRUE(f.shell->store().viewer().payload());
+  EXPECT_FALSE(f.shell->store().has_open_result());
+  auto *shown = dynamic_cast<EditorArea *>(f.screen.maximized());
+  ASSERT_NE(shown, nullptr);
+  EXPECT_EQ(shown->editor().type().id, kEditorViewer);
+  EXPECT_EQ(shown->tab_count(), 2);
+  EXPECT_EQ(f.area("a2").editor().type().id, kEditorProject);
 }
 
 class ProjectPython : public ::testing::Test {
@@ -722,6 +743,78 @@ TEST_F(ProjectPython, FileIndexButtonsResolveBeforeLaunchingAndRefreshWithoutCha
   state().open_external = platform::open_with_system;
   state().open_vscode = platform::open_with_vscode;
   EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, IndexedPayloadOpensAHiddenViewerAndMissingFilesDoNotReplaceIt)
+{
+  populated();
+  const auto path = core::path_from_utf8(dir.str() + "/project/结果.stkp");
+  std::filesystem::copy_file(std::filesystem::path(STK_REPO_ROOT) / "desktop/tests/viewer/fixtures/muferro_domains.stkp", path);
+  ASSERT_TRUE(state().index_files({core::path_to_utf8(path)}));
+  settled();
+  auto &area = f.area("a2");
+  area.add_tab(kEditorProject); // Keep the Viewer hidden behind this tab.
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_files");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto *button = f.screen.ui()->find("a2/main/project_files/view");
+  ASSERT_NE(button, nullptr);
+  button->on_click();
+  settled();
+  EXPECT_TRUE(state().error().empty()) << state().error();
+  f.drv->frame();
+  f.screen.run_deferred();
+  f.drv->frame();
+  EXPECT_EQ(area.editor().type().id, kEditorViewer);
+  EXPECT_EQ(area.tab_count(), 2);
+  EXPECT_EQ(f.screen.maximized(), &area);
+  auto &viewer = f.shell->store().viewer();
+  ASSERT_TRUE(viewer.payload());
+  EXPECT_EQ(viewer.source().kind, SourceKind::Payload);
+  EXPECT_EQ(state().project()->revision, 2);
+  const auto key = viewer.source().key();
+  std::filesystem::remove(path);
+  ASSERT_TRUE(state().view_file("volume"));
+  settled();
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_FALSE(f.shell->store().has_open_result());
+  EXPECT_EQ(viewer.source().key(), key);
+}
+
+TEST_F(ProjectPython, IndexedFieldsRequireACompatiblePresetAndPreserveTheExactFilename)
+{
+  populated();
+  const auto path = core::path_from_utf8(dir.str() + "/project/场.vtk");
+  { std::ofstream file(path); file << "field placeholder"; }
+  ASSERT_TRUE(state().index_files({core::path_to_utf8(path)}));
+  settled();
+  auto &viewer = f.shell->store().viewer();
+  viewer.refresh_metadata();
+  ASSERT_TRUE(loop.pump_until([&] { viewer.pump(); return viewer.presets_loaded(); }, 60));
+  ASSERT_TRUE(state().view_file("muferro-domains"));
+  settled();
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_FALSE(f.shell->store().has_open_result());
+  ASSERT_TRUE(state().view_file("slice"));
+  settled();
+  EXPECT_TRUE(state().error().empty()) << state().error();
+  const auto request = f.shell->store().take_open_result();
+  ASSERT_TRUE(request);
+  EXPECT_EQ(request->preset, "slice");
+  ASSERT_EQ(request->local_paths.size(), 1u);
+  EXPECT_TRUE(std::filesystem::equivalent(core::path_from_utf8(request->local_paths[0]), path));
+  EXPECT_EQ(classify_path(request->local_paths[0]).field_file, "场.vtk");
+  EXPECT_EQ(state().project()->revision, 2);
+  const auto text = core::path_from_utf8(dir.str() + "/project/notes.md");
+  { std::ofstream file(text); file << "# notes"; }
+  ASSERT_TRUE(state().index_files({core::path_to_utf8(text)}));
+  settled();
+  ASSERT_TRUE(state().view_file("volume"));
+  settled();
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_FALSE(f.shell->store().has_open_result());
 }
 
 TEST_F(ProjectPython, InputSnapshotsPersistBeyondSourceRemovalAndTableUndo)

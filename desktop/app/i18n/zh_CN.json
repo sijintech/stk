@@ -603,7 +603,7 @@
   "viewer.navigation.blender": "Blender",
   "viewer.navigation.paraview": "ParaView",
   "viewer.navigation.tip": "Blender：中键拖动旋转，Shift 平移，Ctrl 缩放，左键使用当前工具。ParaView：左键旋转，中键平移，右键缩放。单击拾取。",
-  "viewer.open.body": "可以是 .stkp 文件、数据包目录（manifest.json）、“suan graph run”写出的结果目录（result.json 或 series.json），或要在本地计算的 muFerro 运行目录。",
+  "viewer.open.body": "打开 STK 载荷/结果、计算目录或 DAT/NPY/VTI/VTK/VTKHDF 场文件。场文件默认使用体渲染，可在属性区域调整预设和参数。",
   "viewer.open.ok": "打开",
   "viewer.open.path": "路径",
   "viewer.open.placeholder": "/路径/结果目录 或 文件.stkp",
@@ -845,5 +845,10 @@
   "project.csv.export_hint": "导出当前选中表格的值，不包含公式、ID 和单位；已有文件不会被覆盖。",
   "project.csv.destination": "新输出文件（绝对路径）",
   "project.csv.export": "导出选中表格",
-  "project.csv.saved": "表格已导出：{path}"
+  "project.csv.saved": "表格已导出：{path}",
+  "project.files.view": "在查看器中打开",
+  "project.files.viewer_preset": "场数据预设",
+  "project.files.viewer_preset_required": "请先选择已加载的场数据预设。",
+  "project.files.viewer_hint": "DAT、NPY、VTI、VTK、VTKHDF 使用选定预设；STK 载荷/结果直接打开。之后可在属性区域调整参数。",
+  "viewer.error.field_preset": "此文件需要支持 data 绑定和 path 字符串参数的场数据预设。"
 }

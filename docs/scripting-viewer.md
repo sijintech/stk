@@ -17,7 +17,11 @@ print(shown["error"], shown["layers"])
 ```
 
 支持 `.stkp` / payload 目录、`result.json` / `series.json` 结果目录，以及需要预设求值的计算输出目录。
-单个 VTK 文件应通过其所在目录和 `path` 参数打开。可用预设及其参数声明见 `stk.viewer.presets()`；
+也可直接打开 `.dat`、`.npy`、`.vti`、`.vtk`、`.vtkhdf` 科学场文件，默认使用体渲染：
+`stk.viewer.open("/absolute/field.vtk", preset="slice")`。该方式绑定父目录并固定初始 `path` 为所选文件名，
+即使父目录另有 `result.json`，也不会打开另一份结果。切换场预设保留所选文件名；后续仍可明确修改 `path` 参数。
+`source.field_file` 记录打开时的文件名，来源 key 区分同目录不同文件；它不是内容哈希。
+可用预设及其参数声明见 `stk.viewer.presets()`；
 启动期间 `ready=False` 表示元数据仍在加载，等待后再指定预设。载荷/已保存结果不接受图预设参数。
 路径由 Python 按当前工作目录转为绝对路径；打开时默认切换到 Viewer 标签，`focus=False` 保持当前标签。
 

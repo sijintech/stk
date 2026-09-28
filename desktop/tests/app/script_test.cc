@@ -287,6 +287,11 @@ TEST_F(ScriptPython, OfflineWorkbenchDemoBuildsProjectAndConfiguresThreeEditorsW
   ASSERT_TRUE(pump([&] { return project.loaded() && !project.busy(); }));
   EXPECT_EQ(project.tables().size(), 4u);  // parameters, controls, results and the file index
   EXPECT_EQ(project.project()->revision, 5);
+  execute("stk.viewer.open(offline_demo['folders'][0] + '/field.vtk', preset='volume')\n"
+          "shown = stk.viewer.wait(timeout=30)\n"
+          "assert shown['has_payload'] and not shown['error'], shown\n"
+          "assert shown['source']['field_file'] == 'field.vtk'\n"
+          "assert shown['parameters']['path'] == 'field.vtk'");
   execute("stk.ui.apply_layout(offline_demo['previous_layout'])");
   EXPECT_EQ(f.screen.areas().size(), 4u);
 }

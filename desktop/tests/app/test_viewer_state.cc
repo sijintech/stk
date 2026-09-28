@@ -6,10 +6,12 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 
 #include <gtest/gtest.h>
 
 #include "stk/app/jobs_state.hh"
+#include "stk/core/paths.hh"
 #include "stk/io/payload.hh"
 #include "stk/viewer/camera.hh"
 #include "viewer_support.hh"
@@ -517,6 +519,43 @@ TEST(ViewerPaths, ClassifiesPayloadsResultsAndRunFolders)
   EXPECT_NE(err.find("not found"), std::string::npos);
   write_text((d.path() / "notes.txt").string(), "x");
   EXPECT_EQ(app::classify_path((d.path() / "notes.txt").string(), &err).kind, SourceKind::None);
+}
+
+TEST(ViewerPaths, ExplicitFieldsKeepTheirFilenameEvenInsideAResultFolder)
+{
+  TempDir d("viewer-fields");
+  write_result_dir(d.path());
+  for (const auto &name : {"a.DAT", "b.npy", "温度.vti", "c.vtk", "d.vtkhdf"}) {
+    const auto path = d.path() / core::path_from_utf8(name);
+    { std::ofstream file(path); file << "field"; ASSERT_TRUE(file); }
+    const auto source = app::classify_path(core::path_to_utf8(path));
+    EXPECT_EQ(source.kind, SourceKind::RunDir);
+    EXPECT_EQ(source.path, core::path_to_utf8(d.path()));
+    EXPECT_EQ(source.field_file, name);
+    EXPECT_EQ(source.label(), name);
+    EXPECT_NE(source.key(), app::classify_path(d.str()).key());
+  }
+  app::AppStore store;
+  auto &viewer = store.viewer();
+  viewer.set_metadata(repo_presets(), repo_catalog());
+  const std::string file = core::path_to_utf8(d.path() / "c.vtk");
+  ASSERT_TRUE(viewer.open_path(file, "volume", {{"path", "wrong.vtk"}}));
+  EXPECT_EQ(viewer.parameters().at("path"), "c.vtk");
+  viewer.select_preset("slice");
+  EXPECT_EQ(viewer.parameters().at("path"), "c.vtk");
+  const auto previous = viewer.source().key();
+  EXPECT_FALSE(viewer.open_path(file, "muferro-domains"));
+  EXPECT_EQ(viewer.source().key(), previous);
+  EXPECT_FALSE(viewer.open_error().empty());
+  viewer.select_preset("muferro-domains");
+  EXPECT_EQ(viewer.preset_id(), "slice");
+  EXPECT_EQ(viewer.parameters().at("path"), "c.vtk");
+  app::AppStore late_store;
+  auto &late = late_store.viewer();
+  ASSERT_TRUE(late.open_path(file, "muferro-domains"));
+  late.set_metadata(repo_presets(), repo_catalog());
+  EXPECT_FALSE(late.eval_error().empty());
+  EXPECT_FALSE(late.evaluating());
 }
 
 TEST(ViewerPaths, OpensResultAndSeriesFolders)

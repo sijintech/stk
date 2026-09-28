@@ -105,6 +105,7 @@ const char *source_kind_name(const SourceKind kind)
 
 std::string ViewerSource::label() const
 {
+  if (!field_file.empty()) { return field_file; }
   switch (kind) {
     case SourceKind::None: return {};
     case SourceKind::Task: return task_id.empty() ? connection : task_id + (connection.empty() ? "" : " @ " + connection);
@@ -120,7 +121,8 @@ std::string ViewerSource::label() const
 
 std::string ViewerSource::key() const
 {
-  return std::string(source_kind_name(kind)) + "|" + path + "|" + connection + "|" + node + "|" + task_id;
+  return std::string(source_kind_name(kind)) + "|" + path + "|" + connection + "|" + node + "|" + task_id +
+         (field_file.empty() ? "" : "|field:" + field_file);
 }
 
 ViewerSource classify_path(const std::string &path, std::string *r_error)
@@ -167,7 +169,15 @@ ViewerSource classify_path(const std::string &path, std::string *r_error)
         return s;
       }
     }
-    return fail("not a payload (.stkp, manifest.json) or a result (result.json, series.json): " + path);
+    std::string extension = core::path_to_utf8(p.extension());
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    if (extension == ".dat" || extension == ".npy" || extension == ".vti" || extension == ".vtk" || extension == ".vtkhdf") {
+      s.kind = SourceKind::RunDir;
+      s.path = core::path_to_utf8(p.parent_path());
+      s.field_file = core::path_to_utf8(p.filename());
+      return s;
+    }
+    return fail("not a supported field, payload (.stkp, manifest.json) or result (result.json, series.json): " + path);
   }
   if (!fs::is_directory(p, ec)) {
     return fail("not a file or directory: " + path);
@@ -198,6 +208,15 @@ ViewerSource classify_path(const std::string &path, std::string *r_error)
   s.kind = SourceKind::RunDir;
   s.path = abs;
   return s;
+}
+
+bool PresetInfo::accepts_field_file() const
+{
+  if (bindings != std::vector<std::string>{"data"} || !raw.contains("graph")) { return false; }
+  for (const auto &parameter : raw.at("graph").value("parameters", Json::array())) {
+    if (io::get_string(parameter, "name") == "path" && io::get_string(parameter, "type") == "string") { return true; }
+  }
+  return false;
 }
 
 std::string guess_preset(const std::string &run_dir)
@@ -578,6 +597,9 @@ struct ViewerState::Impl {
       }
     }
     form.init_defaults(schema);
+    if (!source.field_file.empty() && schema.property("path")) {
+      form.set("path", ui::FormValue::string(source.field_file));
+    }
     if (initial_params.is_object()) {
       for (auto it = initial_params.begin(); it != initial_params.end(); ++it) {
         if (schema.property(it.key())) {
@@ -893,6 +915,16 @@ struct ViewerState::Impl {
     if (!have_metadata() || preset_id.empty()) {
       waiting_for_metadata = true;
       return;
+    }
+    if (!source.field_file.empty()) {
+      const auto *selected = preset(preset_id);
+      if (!selected || !selected->accepts_field_file()) {
+        pending_reason.clear();
+        pending_at = kInf;
+        eval_error = std::string(store.tr("viewer.error.field_preset"));
+        changed();
+        return;
+      }
     }
     const Json params = params_with_step(step);
     const std::string key = cache_key(params);
@@ -1562,6 +1594,14 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
     m.changed();
     return false;
   }
+  if (!s.field_file.empty() && m.have_metadata()) {
+    const auto *selected = m.preset(preset.empty() ? "volume" : preset);
+    if (!selected || !selected->accepts_field_file()) {
+      m.open_error = std::string(store_.tr("viewer.error.field_preset"));
+      m.changed();
+      return false;
+    }
+  }
   close();
   m.source = s;
   m.label = s.label();
@@ -1622,7 +1662,11 @@ bool ViewerState::open_path(const std::string &path, const std::string &preset, 
     }
     case SourceKind::RunDir: {
       m.initial_params = parameters;
-      m.preset_id = !preset.empty() ? preset : guess_preset(s.path);
+      if (!s.field_file.empty()) {
+        if (!m.initial_params.is_object()) { m.initial_params = Json::object(); }
+        m.initial_params["path"] = s.field_file;
+      }
+      m.preset_id = !preset.empty() ? preset : !s.field_file.empty() ? "volume" : guess_preset(s.path);
       if (!m.have_metadata()) {
         m.waiting_for_metadata = true;
         m.request_metadata(false);
@@ -1712,6 +1756,15 @@ const std::string &ViewerState::preset_id() const
 void ViewerState::select_preset(const std::string &id)
 {
   Impl &m = *impl_;
+  if (!m.source.field_file.empty()) {
+    const auto *selected = m.preset(id);
+    if (!selected || !selected->accepts_field_file()) {
+      m.open_error = std::string(store_.tr("viewer.error.field_preset"));
+      m.changed();
+      return;
+    }
+  }
+  m.open_error.clear();
   if (id == m.preset_id && !m.schema.properties.empty()) {
     return;
   }

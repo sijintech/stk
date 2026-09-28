@@ -26,6 +26,7 @@
 - 在 Python 输入 `stk.viewer.configure(overlays=False)` 隐藏辅助显示，再改回 `True`。
   `stk.viewer.status()["layers"]` 可查看实际图层 ID，再用 `stk.viewer.layer(id, visible=False)` 隐藏指定图层。
 - 打开“项目文件”中的 `README.md`、输入配置或程序，用系统应用/VSCode 查看。应用内 Markdown/PDF 预览仍待开发。
+- 在“项目文件”选中任一 `field.vtk`，选择场数据预设后点击“在查看器中打开”，可切换到另一组结果。
 - 在“输入快照”验证冻结文件。关闭桌面再启动，通过“最近项目”选中该项目重开。
   数据和引用会保留，Python 变量需重新创建；输入脚本不会自动执行。
 

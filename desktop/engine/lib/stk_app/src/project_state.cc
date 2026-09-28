@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "stk/app/app_store.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/platform/file_dialog.hh"
 
 namespace stk::app {
@@ -620,6 +621,40 @@ bool ProjectState::open_file(const bool vscode)
         if (error_.empty()) { error_ = std::string(store_.tr("project.files.open_failed")); }
         store_.log(error_);
       }
+      changed();
+    }
+    if (project_ && dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::view_file(const std::string &preset)
+{
+  if (!ready() || busy() || !selected_file()) { return false; }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  on(client_->project_files_resolve(project_->handle, project_->revision, record_id_),
+     [this, preset](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); refresh(); }
+    else {
+      const auto path = io::get_string(result.value(), "path");
+      const auto source = classify_path(path, &error_);
+      if (source.kind != SourceKind::None) {
+        const auto *info = store_.viewer().preset(preset);
+        if (source.evaluates() && (!info || !info->accepts_field_file())) {
+          error_ = std::string(store_.tr("project.files.viewer_preset_required"));
+        }
+        else {
+          OpenResultRequest request;
+          request.local_paths = {path};
+          if (source.evaluates()) { request.preset = preset; }
+          store_.request_open_result(std::move(request));
+        }
+      }
+      if (!error_.empty()) { store_.log(error_); }
       changed();
     }
     if (project_ && dirty_revision_ > project_->revision) { refresh(); }

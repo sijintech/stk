@@ -2,6 +2,7 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/platform/file_dialog.hh"
 
@@ -181,6 +182,22 @@ class ProjectEditor final : public Editor {
       row.button("refresh", ctx.tr("project.files.refresh"), [&state] { state.refresh_file(); }).disable(!editable);
       row.button("open", ctx.tr("project.files.open"), [&state] { state.open_file(false); }).disable(!editable);
       row.button("code", ctx.tr("project.files.code"), [&state] { state.open_file(true); }).disable(!editable);
+      auto &viewer = ctx.store.viewer();
+      viewer.refresh_metadata();
+      std::vector<std::string> names, ids;
+      for (const auto &preset : viewer.presets()) {
+        if (!preset.accepts_field_file()) { continue; }
+        ids.push_back(preset.id);
+        names.push_back(std::string(ctx.store.catalog().tr_or("props.preset." + preset.id, preset.name)));
+      }
+      if (!viewer.presets_loaded()) { panel->label(ctx.tr("props.preset.loading")); }
+      if (!viewer.metadata_error().empty()) { panel->paragraph(viewer.metadata_error()); }
+      panel->prop(ctx.tr("project.files.viewer_preset")).dropdown("viewer_preset", std::move(names), {
+        [this, ids] { const auto it = std::find(ids.begin(), ids.end(), file_preset_); return it == ids.end() ? -1 : int(it - ids.begin()); },
+        [this, ids](int i) { if (i >= 0 && size_t(i) < ids.size()) { file_preset_ = ids[i]; } }
+      });
+      panel->button("view", ctx.tr("project.files.view"), [this, &state] { state.view_file(file_preset_); }).disable(!editable);
+      panel->paragraph(ctx.tr("project.files.viewer_hint"));
     }
   }
 
@@ -888,6 +905,7 @@ class ProjectEditor final : public Editor {
   std::string cell_text_, draft_identity_, literal_error_;
   std::string expression_, bindings_ = "{}", binding_name_ = "base";
   std::string selected_binding_;
+  std::string file_preset_ = "volume";
   std::string source_table_, source_record_, source_field_;
   int cell_mode_ = 0;
   int field_type_ = 2;

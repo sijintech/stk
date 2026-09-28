@@ -76,9 +76,6 @@ wm::WindowManager *window_manager(const EditorContext &ctx)
 void pump(EditorContext &ctx)
 {
   ViewerState &vs = ctx.store.viewer();
-  if (std::optional<OpenResultRequest> req = ctx.store.take_open_result()) {
-    vs.open(*req);
-  }
   const double wake = vs.pump();
   if (!std::isfinite(wake)) {
     return;

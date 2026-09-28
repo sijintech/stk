@@ -21,7 +21,7 @@ class Viewer:
         return self._operation("presets")
 
     def open(self, path, *, preset=None, parameters=None, focus=True):
-        """Open a payload/result/run directory. Evaluation is asynchronous; use status/wait."""
+        """Open a payload, result/run directory or scientific field file. Evaluation is asynchronous; use status/wait."""
         params = {"path": str(Path(path).expanduser().resolve()), "focus": focus}
         if preset is not None:
             params["preset"] = preset

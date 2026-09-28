@@ -104,6 +104,26 @@ const char *csd_glyph(const wm::CsdButtonKind k, const bool maximized)
 
 }  // namespace
 
+void AppShell::focus_viewer(wm::Screen &screen)
+{
+  EditorArea *target = nullptr;
+  for (auto *area : screen.areas()) {
+    auto *editor = dynamic_cast<EditorArea *>(area);
+    if (!editor) { continue; }
+    for (int i = 0; i < editor->tab_count(); ++i) {
+      if (editor->tab(i).type().id == kEditorViewer) {
+        editor->set_active_tab(i);
+        if (screen.maximized()) { screen.set_maximized(editor); }
+        return;
+      }
+    }
+    if (!target || target->editor().type().id == kEditorPython) { target = editor; }
+  }
+  if (target) {
+    target->add_tab(kEditorViewer);
+    if (screen.maximized()) { screen.set_maximized(target); }
+  }
+}
 class AppShell::TopBar final : public wm::Region {
  public:
   TopBar(AppShell &shell, wm::Screen &screen) : Region("topbar"), shell_(shell), screen_(screen)
@@ -113,6 +133,18 @@ class AppShell::TopBar final : public wm::Region {
 
   void build_ui(ui::Context &ui, const wm::DrawContext &ctx) override
   {
+    if (shell_.store_.has_open_result()) {
+      AppShell *shell = &shell_;
+      wm::Screen *screen = &screen_;
+      std::weak_ptr<bool> weak = shell_.alive_;
+      screen_.defer([shell, screen, weak]() {
+        if (!weak.lock() || std::find(shell->screens_.begin(), shell->screens_.end(), screen) == shell->screens_.end()) { return; }
+        if (auto request = shell->store_.take_open_result()) {
+          shell->store_.viewer().open(*request);
+          shell->focus_viewer(*screen);
+        }
+      });
+    }
     const ui::Rect r = ui_rect();
     const ui::Style &st = ui.style();
     wm::CsdLayout csd;

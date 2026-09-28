@@ -33,7 +33,7 @@ class ScriptState;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
- * by the Viewer editor, which also brings a Viewer area to the front). Either a task on a
+ * by the application shell, which also brings a Viewer area to the front). Either a task on a
  * connection or local paths (a result directory, a payload directory / .stkp, or a run directory
  * for local graph evaluation).
  */
@@ -115,7 +115,7 @@ class AppStore {
 
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
-  /** Takes the pending request, if any (the Viewer editor calls this while building its UI). */
+  /** Takes the pending request, if any (the application shell consumes it after the frame). */
   std::optional<OpenResultRequest> take_open_result();
   bool has_open_result() const
   {

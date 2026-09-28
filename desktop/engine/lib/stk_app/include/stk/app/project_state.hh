@@ -82,6 +82,7 @@ class ProjectState {
   bool index_files(const std::vector<std::string> &paths);
   bool refresh_file();
   bool open_file(bool vscode);
+  bool view_file(const std::string &preset);
   bool open_folder(bool vscode);
   bool capture_file();
   bool load_input_snapshots();
