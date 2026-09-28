@@ -145,6 +145,9 @@ class AppShell {
   void perform_ui_request(wm::Screen &screen, const std::string &operation, const io::Json &params,
                           ScriptState::Completion complete);
 
+  void perform_viewer_request(wm::Screen &screen, const std::string &operation, const io::Json &params,
+                              ScriptState::Completion complete);
+
   ShellOptions options_;
   AppStore store_;
   EditorRegistry registry_;

@@ -33,6 +33,7 @@ add_library(stk_app STATIC
   src/project_state.cc
   src/script_state.cc
   src/scripting_ui.cc
+  src/scripting_viewer.cc
   src/shell.cc
   src/viewer_export.cc
   src/viewer_state.cc

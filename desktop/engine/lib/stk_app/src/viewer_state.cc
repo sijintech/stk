@@ -1750,6 +1750,19 @@ std::string ViewerState::param_stage(const std::string &name) const
   return impl_->param_stage(name);
 }
 
+void ViewerState::set_auto_evaluate(const bool enabled)
+{
+  Impl &m = *impl_;
+  auto_evaluate = enabled;
+  // An explicit step selection keeps its own request; only automatically scheduled
+  // parameter edits are paused. Accepted evaluations still need explicit cancellation.
+  if (m.pending_reason == "data" || m.pending_reason == "client") {
+    m.pending_at = enabled && m.source.evaluates() ?
+        m.now() + (m.pending_reason == "client" ? client_debounce_s : data_debounce_s) : kInf;
+  }
+  m.changed();
+}
+
 void ViewerState::set_parameter(const std::string &name, ui::FormValue value)
 {
   impl_->form.set(name, std::move(value));

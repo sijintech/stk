@@ -62,6 +62,10 @@ void AppShell::handle_ui_request(const std::string &operation, const Json &param
 void AppShell::perform_ui_request(wm::Screen &screen, const std::string &operation, const Json &params,
                                   ScriptState::Completion complete)
 {
+  if (operation.rfind("viewer.", 0) == 0) {
+    perform_viewer_request(screen, operation, params, std::move(complete));
+    return;
+  }
   const bool layout = operation == "layout.apply", open = operation == "project.open";
   if (!params.is_object() || (!layout && !open && !params.empty()) ||
       (layout && (params.size() != 1 || !params.contains("layout") || !params["layout"].is_object())) ||

@@ -256,6 +256,29 @@ TEST(ViewerFake, DataStageChangeRerunsDataNodesAfterTheDebounce)
   EXPECT_EQ(f.vs->result()->evaluated.size(), 10u);
 }
 
+TEST(ViewerFake, DisablingAutomaticEvaluationPausesQueuedEditsUntilEnabled)
+{
+  FakeViewer f;
+  f.vs->prefetch_neighbours = false;
+  open_run(f);
+  const int started = f.vs->evaluations_started();
+  f.vs->set_parameter("min_magnitude", ui::FormValue::number(0.3));
+  f.vs->set_auto_evaluate(false);
+  f.advance(2.0);
+  EXPECT_EQ(f.vs->evaluations_started(), started);
+  EXPECT_EQ(f.vs->pending_edit(), "data");
+  f.vs->set_auto_evaluate(true);
+  f.advance(f.vs->data_debounce_s + 0.01);
+  ASSERT_TRUE(f.pump_until([&] { return !f.vs->evaluating(); }));
+  EXPECT_EQ(f.vs->evaluations_started(), started + 1);
+  EXPECT_TRUE(f.vs->pending_edit().empty());
+  f.vs->set_auto_evaluate(false);
+  f.vs->set_parameter("min_magnitude", ui::FormValue::number(0.5));
+  f.vs->evaluate_now("manual");
+  ASSERT_TRUE(f.pump_until([&] { return !f.vs->evaluating(); }));
+  EXPECT_EQ(f.vs->evaluations_started(), started + 2);
+}
+
 TEST(ViewerFake, SupersededEvaluationIsCancelled)
 {
   FakeViewer f({"--eval-delay-ms", "600"});

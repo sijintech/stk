@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/script_state.hh"
 
+#include <algorithm>
+
 #include "stk/app/app_store.hh"
 #include "stk/app/project_state.hh"
 
@@ -82,7 +84,7 @@ void ScriptState::on_state(const bridge::BridgeState state)
     awaiting_run_.clear();
     status_ = Json::object();
     cursor_ = 0;
-    opening_ = starting_ = reading_ = dirty_ = interrupting_ = false;
+    opening_ = starting_ = reading_ = dirty_ = interrupting_ = ui_attaching_ = false;
   }
   else if (client_ && session_.empty() && !opening_) {
     const auto hello = client_->hello_info();
@@ -271,24 +273,37 @@ void ScriptState::set_ui_handler(UIHandler handler)
 
 void ScriptState::attach_ui()
 {
-  if (!client_ || bridge_state_ != bridge::BridgeState::Ready || !ui_handler_ || !ui_session_.empty()) {
+  if (!client_ || bridge_state_ != bridge::BridgeState::Ready || !ui_handler_ || !ui_session_.empty() || ui_attaching_) {
     return;
   }
   const auto hello = client_->hello_info();
-  if (!hello || !hello->has_method("ui.attach")) {
+  if (!hello || !hello->has_method("ui.attach")) { return; }
+  ui_attaching_ = true;
+  const auto attach = [this](const Json &advertised) {
+    if (!ui_handler_) { ui_attaching_ = false; return; }
+    Json operations = Json::array();
+    for (const auto *name : {"layout.get", "layout.apply", "editors.list", "project.current", "project.open", "project.close",
+                             "viewer.status", "viewer.presets", "viewer.open", "viewer.close", "viewer.configure", "viewer.preset",
+                             "viewer.evaluate", "viewer.cancel", "viewer.layer", "viewer.step", "viewer.play", "viewer.reset_camera"}) {
+      if (std::find(advertised.begin(), advertised.end(), Json(name)) != advertised.end()) { operations.push_back(name); }
+    }
+    on(client_->call("ui.attach", {{"operations", operations}}), [this](const auto &result) {
+      ui_attaching_ = false;
+      if (result.ok()) { ui_session_ = io::get_string(result.value(), "session"); }
+      else { fail(result.error()); }
+      store_.changed();
+    });
+  };
+  if (!hello->has_method("script.catalog")) {
+    attach(Json::array({"layout.get", "layout.apply", "editors.list", "project.current", "project.open", "project.close"}));
     return;
   }
-  on(client_->call("ui.attach", {{"operations", {"layout.get", "layout.apply", "editors.list",
-                                                  "project.current", "project.open", "project.close"}}}),
-     [this](const auto &result) {
-       if (result.ok()) {
-         ui_session_ = io::get_string(result.value(), "session");
-       }
-       else {
-         fail(result.error());
-       }
-       store_.changed();
-     });
+  // Older bridges advertise the original six operations. Do not let a new Viewer capability
+  // make their whole desktop attachment fail validation.
+  on(client_->call("script.catalog"), [this, attach](const auto &result) {
+    if (!result.ok()) { ui_attaching_ = false; fail(result.error()); return; }
+    attach(result.value().at("ui_operations"));
+  });
 }
 
 void ScriptState::ui_request(const Json &data)

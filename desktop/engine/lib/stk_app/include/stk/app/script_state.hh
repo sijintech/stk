@@ -53,7 +53,7 @@ class ScriptState {
   uint64_t epoch_ = 0;
   std::string session_, ui_session_, error_, reported_error_, raw_output_, awaiting_run_;
   int64_t cursor_ = 0;
-  bool opening_ = false, starting_ = false, reading_ = false, dirty_ = false, interrupting_ = false;
+  bool opening_ = false, starting_ = false, reading_ = false, dirty_ = false, interrupting_ = false, ui_attaching_ = false;
   io::Json status_ = io::Json::object();
   ui::LogBuffer output_{10000};
   std::vector<std::string> history_;

@@ -3083,7 +3083,7 @@
                 "$ref": "#/$defs/uiOperation"
               },
               "uniqueItems": true,
-              "maxItems": 6
+              "maxItems": 18
             }
           },
           "required": [
@@ -5089,7 +5089,19 @@
         "editors.list",
         "project.current",
         "project.open",
-        "project.close"
+        "project.close",
+        "viewer.status",
+        "viewer.presets",
+        "viewer.open",
+        "viewer.close",
+        "viewer.configure",
+        "viewer.preset",
+        "viewer.evaluate",
+        "viewer.cancel",
+        "viewer.layer",
+        "viewer.step",
+        "viewer.play",
+        "viewer.reset_camera"
       ]
     },
     "scriptRun": {

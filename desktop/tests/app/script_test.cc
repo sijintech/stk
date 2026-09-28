@@ -3,6 +3,7 @@
 
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
@@ -196,6 +197,107 @@ TEST_F(ScriptPython, ConsoleEditorRunsMultilineDraftAndRestoresWithoutExecuting)
   EXPECT_EQ(state().status()["run"]["id"], run);
   EXPECT_EQ(restored_area.editor().save_state()["path"], dir.str() + "/selected-only.py");
 }
+
+TEST_F(ScriptPython, ViewerPayloadControlsKeepInvalidUpdatesAndStaleSourcesOut)
+{
+  const std::string path = std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp";
+  execute("opened = stk.viewer.open(" + Json(path).dump() + ", focus=False)\n"
+          "assert stk.viewer.wait(timeout=0)['has_payload']\n"
+          "key = opened['source']['key']\n"
+          "assert opened['source']['kind'] == 'payload'\n"
+          "layer = next(layer for layer in opened['layers'] if layer['has_opacity'])\n"
+          "stk.viewer.configure(overlays=False, auto_evaluate=False, prefetch=False, fps=2.5, loop=False)\n"
+          "stk.viewer.layer(layer['id'], visible=False, opacity=0.25, expected_source=key)\n"
+          "saved = stk.viewer.status()\n"
+          "assert not saved['overlays'] and not saved['auto_evaluate'] and saved['fps'] == 2.5\n"
+          "changed = next(item for item in saved['layers'] if item['id'] == layer['id'])\n"
+          "assert not changed['visible'] and changed['opacity'] == 0.25");
+  auto &viewer = f.shell->store().viewer();
+  ASSERT_TRUE(viewer.payload());
+  const auto source = viewer.source().key();
+  execute("stk.viewer.configure(overlays=True, fps=0)", "failed");
+  EXPECT_FALSE(viewer.overlays());
+  execute("stk.viewer.layer(layer['id'], visible=True, opacity=2)", "failed");
+  execute("assert not next(item for item in stk.viewer.status()['layers'] if item['id'] == layer['id'])['visible']");
+  execute("stk.viewer.close(expected_source='different')", "failed");
+  EXPECT_EQ(viewer.source().key(), source);
+  execute("stk.viewer.open('missing.stkp')", "failed");
+  EXPECT_EQ(viewer.source().key(), source);
+  execute("stk.viewer.configure(parameters={'unknown': 3}, overlays=True)", "failed");
+  EXPECT_FALSE(viewer.overlays());
+  execute("stk.viewer.step(True)", "failed");
+  execute("stk.viewer.play(True)", "failed");
+  const auto camera = viewer.camera_serial();
+  execute("stk.viewer.reset_camera(expected_source=key)\nstk.viewer.cancel(expected_source=key)");
+  EXPECT_GT(viewer.camera_serial(), camera);
+  execute("stk.viewer.close(expected_source=key)\nassert stk.viewer.status()['source']['kind'] == 'none'");
+  EXPECT_FALSE(viewer.payload());
+}
+
+TEST_F(ScriptPython, ViewerSeriesStepAndPlaybackUseTheSameSharedTimeline)
+{
+  execute("import json, shutil\nfrom pathlib import Path\n"
+          "folder = Path(" + Json(dir.str() + "/series").dump() + ")\n"
+          "payload = Path(" + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains").dump() + ")\n"
+          "manifest = json.loads((payload / 'manifest.json').read_text())\nframes = []\n"
+          "for step in [1, 5]:\n"
+          "    name = f'view.{step}'\n"
+          "    shutil.copytree(payload, folder / name)\n"
+          "    result = {'schema': 'stk.graph-result/1', 'graph_sha256': '0'*64, 'graph_hash': 'sha256:' + '0'*64,\n"
+          "              'profile': 'desktop', 'outputs': {'view': {'type': 'payload', 'manifest': manifest}},\n"
+          "              'parameters': {'step': {'value': step, 'choices': []}}, 'keys': {}, 'evaluated': [],\n"
+          "              'timings': {}, 'cache': {'hits': 0, 'misses': 0}, 'warnings': [], 'files': {'view': name + '/manifest.json'}}\n"
+          "    result_name = f'result.{step}.json'\n"
+          "    (folder / result_name).write_text(json.dumps(result))\n"
+          "    frames.append({'step': step, 'outputs': {'view': name + '/manifest.json'}, 'result': result_name})\n"
+          "(folder / 'series.json').write_text(json.dumps({'schema': 'stk.series/1', 'parameter': 'step', 'frames': frames}))\n"
+          "opened = stk.viewer.open(folder, focus=False)\n"
+          "assert opened['source']['kind'] == 'result' and opened['steps'] == [1, 5]\n"
+          "assert stk.viewer.step(0)['shown_step'] == 1\n"
+          "stk.viewer.configure(fps=4, loop=True)\n"
+          "assert stk.viewer.play()['playing']\n"
+          "assert not stk.viewer.play(False)['playing']\n"
+          "assert stk.viewer.step(1)['shown_step'] == 5");
+  auto &viewer = f.shell->store().viewer();
+  EXPECT_EQ(viewer.step_index(), 1);
+  EXPECT_EQ(viewer.shown_step(), Json(5));
+  execute("stk.viewer.step(2)", "failed");
+  EXPECT_EQ(viewer.step_index(), 1);
+  execute("stk.viewer.step(0.5)", "failed");
+  EXPECT_EQ(viewer.step_index(), 1);
+}
+
+#ifndef _WIN32  // The Windows bridge test environment intentionally has no NumPy/VTK.
+TEST_F(ScriptPython, ViewerOpensSyntheticResultsAndReevaluatesExplicitParameters)
+{
+  auto &viewer = f.shell->store().viewer();
+  ASSERT_TRUE(pump([&] { viewer.pump(); return viewer.presets_loaded() && !viewer.catalog().is_null(); }, 60));
+  execute("from pathlib import Path\nfrom examples.project_scan.solver import simulate\n"
+          "directory = Path(" + Json(dir.str() + "/field").dump() + ")\n"
+          "simulate({'temperature_K': 300, 'size': 5}, directory)\n"
+          "assert any(p['id'] == 'volume' for p in stk.viewer.presets()['presets'])\n"
+          "from examples.project_scan.show import show_directory\n"
+          "shown = show_directory(stk, directory, focus=False)\n"
+          "assert shown['has_payload'] and not shown['error'], shown\n"
+          "assert shown['preset'] == 'volume' and shown['parameters']['path'] == 'field.vtk'\n"
+          "key = shown['source']['key']\n"
+          "stk.viewer.configure(auto_evaluate=False, parameters={'colormap': 'cividis'}, expected_source=key)\n"
+          "assert stk.viewer.status()['pending_edit'] == 'client'\n"
+          "stk.viewer.evaluate(expected_source=key)\n"
+          "updated = stk.viewer.wait(timeout=25)\n"
+          "assert updated['has_payload'] and not updated['error'], updated\n"
+          "assert updated['parameters']['colormap'] == 'cividis'\n"
+          "assert updated['evaluation']['id'] != shown['evaluation']['id']");
+  EXPECT_TRUE(viewer.payload());
+  EXPECT_EQ(viewer.source().kind, SourceKind::RunDir);
+  const auto old_parameters = viewer.parameters();
+  execute("stk.viewer.configure(parameters={'colormap': 'bad', 'path': 'missing.vtk'}, overlays=False)", "failed");
+  EXPECT_EQ(viewer.parameters(), old_parameters);
+  EXPECT_TRUE(viewer.overlays());
+  execute("stk.viewer.configure(parameters={'path': 'missing.vtk'})\nstk.viewer.evaluate()\n"
+          "failed = stk.viewer.wait(timeout=25)\nassert failed['error']");
+}
+#endif
 
 }  // namespace
 }  // namespace stk::app

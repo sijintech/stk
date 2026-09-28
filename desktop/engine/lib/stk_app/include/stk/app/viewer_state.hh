@@ -223,6 +223,8 @@ class ViewerState {
   void set_parameter(const std::string &name, ui::FormValue value);
   /** Evaluate automatically after edits (else only with #evaluate_now). */
   bool auto_evaluate = true;
+  /** Pause/resume debounced parameter edits without cancelling a running evaluation. */
+  void set_auto_evaluate(bool enabled);
   /** Debounce of data-stage and client-stage edits (seconds). */
   double data_debounce_s = 0.35;
   double client_debounce_s = 0.06;

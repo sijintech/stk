@@ -74,7 +74,8 @@ print(p.backup())
 | 布局读取/应用、编辑器列表、可见项目查询/打开/关闭 | 已接入原生 UI 主线程执行器，目标为第一个安装的主窗口 |
 | 已保存连接查询/检查、管理 SSH 状态/连接/断开 | `stk.connections`；配置与凭据继续在 Jobs 或 CLI 管理 |
 | Runtime/Hub 工作区、上传/下载、任务提交/查询/取消、产物、日志 | `stk.runtime(connection, node=...)` 与 `stk.transfers`；复用已有幂等和审核规则 |
-| Viewer、图求值、完整项目打包与文档 | 现有各自接口仍可用；统一 `stk` facade 待逐步接入 |
+| Viewer 打开/关闭、状态、预设参数、图层、求值、时间步/播放和相机重置 | `stk.viewer` 已接入共享原生状态，见[Viewer Python 指南](scripting-viewer.md) |
+| 任意图求值、相机完整变换、探针/导出、完整项目打包与文档 | 现有各自接口仍可用；统一 facade 待逐步接入 |
 | 自动补全、操作记录成脚本、脚本持久历史 | 待开发 |
 | 远程机器 Python / UI 控制 | 未开放；本机 stdio 扩展不等于 P2P 或 SSH 服务 |
 

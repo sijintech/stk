@@ -6,6 +6,7 @@ It holds IDs, never C++ window pointers. See ``docs/scripting.md`` for the suppo
 from pathlib import Path
 
 from .runtime import Connections, Runtime, Transfers
+from .viewer import Viewer
 
 
 class ScriptError(RuntimeError):
@@ -191,6 +192,7 @@ class API:
         self.ui = Desktop(call)
         self.connections = Connections(call)
         self.transfers = Transfers(call)
+        self.viewer = Viewer(call)
 
     def runtime(self, connection, *, node=None):
         """Use a saved Runtime profile, optionally routed through a Hub execution node."""
@@ -216,4 +218,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Project", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers"]
+__all__ = ["API", "Connections", "Desktop", "Project", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]

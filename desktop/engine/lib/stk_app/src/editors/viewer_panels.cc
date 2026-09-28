@@ -159,7 +159,8 @@ class PropertiesEditor final : public Editor {
     }
     const bool evaluates = vs.source().evaluates();
     ui::Layout &eval = p->row(false);
-    eval.checkbox("auto", ctx.tr("props.auto_evaluate"), ui::bind(vs.auto_evaluate)).tip(ctx.tr("props.auto_evaluate.tip"));
+    eval.checkbox("auto", ctx.tr("props.auto_evaluate"), {[&vs] { return vs.auto_evaluate; },
+        [&vs](bool enabled) { vs.set_auto_evaluate(enabled); }}).tip(ctx.tr("props.auto_evaluate.tip"));
     ui::Widget &go = eval.button("evaluate", ctx.tr("props.evaluate"), [&vs]() { vs.evaluate_now("manual"); });
     go.width(fit_units(ctx, ctx.tr("props.evaluate")));
     if (!evaluates) {

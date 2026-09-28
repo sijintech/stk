@@ -645,7 +645,7 @@ to bridge stderr. EOF/close/shutdown stops the worker; restarting never restores
 
 - `ui.attach {operations}` returns `{session, operations}`. The local client advertises supported
   operation names: `layout.get`, `layout.apply`, `editors.list`, `project.current`, `project.open`,
-  `project.close`. Reattaching the same set is idempotent; changing it requires detach.
+  `project.close`, plus the Viewer operations below. Reattaching the same set is idempotent; changing it requires detach.
 - `ui.request {session, request, operation, params, expires_at_ms}` asks that executor to perform one
   operation. Requests are correlated by both IDs, expire after 30 seconds, and are never replayed.
   `expires_at_ms` is a UTC Unix timestamp in milliseconds on the same machine. The desktop rejects
@@ -660,7 +660,17 @@ to bridge stderr. EOF/close/shutdown stops the worker; restarting never restores
 Operation shapes: `layout.get {}` → `{layout}` (`stk.desktop.layout/1`),
 `layout.apply {layout}` → `{applied: true}`, `editors.list {}` → `{editors: [{id, label}]}`,
 `project.current {}` → `{project: projectInfo|null}`, `project.open {directory}` → `{project: projectInfo}`,
-`project.close {}` → `{closed: boolean}`. Invalid parameters return `invalid_params`; absent capabilities
+`project.close {}` → `{closed: boolean}`. Viewer adds `viewer.status`, `viewer.presets`,
+`viewer.open {path, preset?, parameters?, focus?}`, `viewer.close`, `viewer.configure`, `viewer.preset {id}`,
+`viewer.evaluate`, `viewer.cancel`, `viewer.layer {id, visible?, opacity?}`, `viewer.step {index}`,
+`viewer.play {playing}`, and `viewer.reset_camera`. Mutations except open accept optional `expected_source`,
+checked against the current source key before applying. Configure validates all supplied parameters/display
+settings before changing any; graph semantic/data errors can still occur asynchronously. Open returns acceptance,
+not completion. Status reports current source, parameters, layers, pending/evaluating flags, errors and timeline.
+Presets returns `{ready, presets, error}`; other operations return status. The shared Viewer data model is global
+across windows; open focuses an existing Viewer tab or adds one unless `focus=false`. These are local UI operations,
+not network endpoints. See [Viewer scripting](../scripting-viewer.md) for exact options and wait semantics.
+ Invalid parameters return `invalid_params`; absent capabilities
 return `unsupported`, and an absent desktop returns `unavailable`. Applying a layout validates the whole
 description before changing the current screen; geometry is captured for round trips but not forced on apply.
 
@@ -671,7 +681,7 @@ subscriptions, executor attachment and Hub review approval. Runtime helpers requ
 keys for creation/submission/cancellation/transfers and preserve pending Hub action envelopes. Waiting
 only polls; interruption or timeout does not cancel accepted work. See [Python guide](../scripting.md).
 The native
-desktop binds these six UI operations on its main loop, targeting the first installed screen.
+desktop binds these UI operations on its main loop, targeting the first installed screen.
 Stale callbacks from an earlier bridge session cannot apply queued layout changes. A bridge without
 that executor (for example a protocol test harness) must attach its own implementation or return unavailable.
 
