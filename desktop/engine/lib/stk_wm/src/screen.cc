@@ -470,6 +470,10 @@ void Screen::forget(const Area &area)
 
 void Screen::clear()
 {
+  /* Retained widget bindings and the active text edit may point into editor objects in this
+   * tree. Drop them before destroying those owners, including when a script replaces the
+   * layout while the user is typing. A rejected layout never reaches this commit boundary. */
+  ui_.reset();
   for (Area *a : areas()) {
     forget(*a);
   }

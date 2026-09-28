@@ -114,6 +114,10 @@ CMake、Ninja 和 STK science / visualization / control 依赖安装在专用 ve
 每次修改立即保存到该目录的 `project.sqlite3`；关闭后可再次打开同一目录验证数据。
 表格区域可用 `Ctrl+Space` 最大化。详细步骤和当前限制见[项目指南](../docs/project.md)。
 
+新增 Python 面板：更新后选择 **文件 → Python**，输入多行代码并按 Ctrl+Enter（macOS 为 Cmd+Enter）。
+试运行 `stk.ui.editors()`、`stk.ui.layout()`；打开项目后可用 `stk.project.snapshot()` 检查数据。
+“中断/重置”恢复执行环境，运行文件需显式点击。项目编辑和布局配置示例见 [Python 指南](../docs/scripting.md)。
+
 ## English quick start
 
 Install Git and Python 3.12, plus full Xcode 16+ on macOS or Visual Studio/Build Tools 2022 with the

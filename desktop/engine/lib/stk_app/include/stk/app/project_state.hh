@@ -51,8 +51,9 @@ class ProjectState {
   uint64_t version() const { return version_; }
 
   bool create(const std::string &directory, const std::string &name);
-  bool open(const std::string &directory);
-  bool close();
+  bool open(const std::string &directory,
+            std::function<void(bridge::Result<bridge::ProjectInfo>)> complete = {});
+  bool close(std::function<void(bridge::Result<bool>)> complete = {});
   void refresh();
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
   const ProjectTable *table() const;
@@ -64,7 +65,8 @@ class ProjectState {
 
  private:
   template<class T, class F> void on(bridge::Future<T> future, F fn);
-  bool start_open(const std::string &directory, const std::string &name, bool create, std::string expected_id = {});
+  bool start_open(const std::string &directory, const std::string &name, bool create, std::string expected_id = {},
+                  std::function<void(bridge::Result<bridge::ProjectInfo>)> complete = {});
   void on_state(bridge::BridgeState state);
   void changed();
   void fail(const bridge::Error &error);

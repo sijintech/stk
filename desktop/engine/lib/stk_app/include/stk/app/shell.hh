@@ -21,6 +21,7 @@
 
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
+#include "stk/app/script_state.hh"
 #include "stk/wm/layout_store.hh"
 #include "stk/wm/screen.hh"
 
@@ -139,6 +140,10 @@ class AppShell {
   std::vector<ui::MenuEntry> language_menu();
   std::vector<ui::MenuEntry> scale_menu();
   void reset_layout(wm::Screen &screen);
+  void handle_ui_request(const std::string &operation, const io::Json &params, int64_t expires_at,
+                         std::function<bool()> valid, ScriptState::Completion complete);
+  void perform_ui_request(wm::Screen &screen, const std::string &operation, const io::Json &params,
+                          ScriptState::Completion complete);
 
   ShellOptions options_;
   AppStore store_;

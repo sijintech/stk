@@ -330,6 +330,10 @@ void Context::draw_widget(const Widget &w)
     case WidgetType::TextField: {
       WidgetColors c = state_colors(th.text, editing, (hover || focused) && !editing, disabled);
       box(r, c, w.corners);
+      if (w.text_opts.multiline) {
+        draw_text_area(w, c);
+        break;
+      }
       const Rect area = r.inset(st.text_margin, 0);
       if (editing) {
         draw_editing(area);

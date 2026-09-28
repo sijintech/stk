@@ -190,13 +190,15 @@ bool ProjectState::create(const std::string &directory, const std::string &name)
   return start_open(directory, name, true);
 }
 
-bool ProjectState::open(const std::string &directory)
+bool ProjectState::open(const std::string &directory,
+                         std::function<void(bridge::Result<bridge::ProjectInfo>)> complete)
 {
-  return start_open(directory, {}, false);
+  return start_open(directory, {}, false, {}, std::move(complete));
 }
 
 bool ProjectState::start_open(const std::string &directory, const std::string &name, const bool create,
-                              std::string expected_id)
+                              std::string expected_id,
+                              std::function<void(bridge::Result<bridge::ProjectInfo>)> complete)
 {
   if (!ready() || busy()) {
     return false;
@@ -205,16 +207,18 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
   busy_ = true;
   error_.clear();
   on(create ? client_->project_create(directory, name) : client_->project_open(directory),
-     [this, expected_id = std::move(expected_id)](const bridge::Result<bridge::ProjectInfo> &result) {
+     [this, expected_id = std::move(expected_id), complete = std::move(complete)](const bridge::Result<bridge::ProjectInfo> &result) {
        busy_ = false;
        if (!result.ok()) {
          fail(result.error());
+         if (complete) { complete(result.error()); }
          return;
        }
        if (!expected_id.empty() && result.value().id != expected_id) {
          client_->project_close(result.value().handle);
          error_ = std::string(store_.tr("project.error.replaced"));
          changed();
+         if (complete) { complete(bridge::Error::make(bridge::ErrorCode::Conflict, error_)); }
          return;
        }
        const bool same = project_ && project_->id == result.value().id;
@@ -230,6 +234,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
          record_id_.clear();
        }
        refresh();
+       if (complete) { complete(*project_); }
      });
   changed();
   return true;
@@ -245,7 +250,7 @@ void ProjectState::clear()
   dirty_revision_ = -1;
 }
 
-bool ProjectState::close()
+bool ProjectState::close(std::function<void(bridge::Result<bool>)> complete)
 {
   if (busy() || !project_) {
     return false;
@@ -255,19 +260,22 @@ bool ProjectState::close()
     clear();
     error_.clear();
     changed();
+    if (complete) { complete(true); }
     return true;
   }
   busy_ = true;
-  on(client_->project_close(project_->handle), [this](const bridge::Result<bool> &result) {
+  on(client_->project_close(project_->handle), [this, complete = std::move(complete)](const bridge::Result<bool> &result) {
     busy_ = false;
     if (!result.ok()) {
       fail(result.error());
+      if (complete) { complete(result.error()); }
       return;
     }
     ++epoch_;
     clear();
     error_.clear();
     changed();
+    if (complete) { complete(result.value()); }
   });
   changed();
   return true;

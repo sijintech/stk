@@ -29,6 +29,7 @@ namespace stk::app {
 class ViewerState;
 class JobsState;
 class ProjectState;
+class ScriptState;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -103,15 +104,14 @@ class AppStore {
   {
     return bridge_client_;
   }
-  void set_bridge(bridge::Client *client)
-  {
-    bridge_client_ = client;
-  }
+  void set_bridge(bridge::Client *client);
 
   /** Connections, workspaces, transfers and tasks of the Jobs editors (WP9, jobs_state.hh). */
   JobsState &jobs();
   /** Local project and typed tables, shared by every project editor. */
   ProjectState &project();
+  /** Shared isolated Python session and main-thread desktop control. */
+  ScriptState &scripts();
 
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
@@ -160,6 +160,7 @@ class AppStore {
   std::unique_ptr<ViewerState> viewer_;
   std::unique_ptr<JobsState> jobs_;
   std::unique_ptr<ProjectState> project_;
+  std::unique_ptr<ScriptState> scripts_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

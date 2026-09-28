@@ -20,6 +20,7 @@ void TextEdit::set_text(std::string text, bool select_all)
   undo_.clear();
   redo_.clear();
   last_op_ = Op::None;
+  vertical_column_.reset();
 }
 
 std::pair<size_t, size_t> TextEdit::selection() const
@@ -35,6 +36,7 @@ std::string TextEdit::selected_text() const
 
 void TextEdit::set_cursor(size_t pos, bool select)
 {
+  vertical_column_.reset();
   cursor_ = utf8::floor_boundary(text_, std::min(pos, text_.size()));
   if (!select) {
     anchor_ = cursor_;
@@ -70,8 +72,44 @@ void TextEdit::end(bool select)
   set_cursor(text_.size(), select);
 }
 
+void TextEdit::line_home(const bool select)
+{
+  const size_t found = cursor_ ? text_.rfind('\n', cursor_ - 1) : std::string::npos;
+  set_cursor(found == std::string::npos ? 0 : found + 1, select);
+}
+
+void TextEdit::line_end(const bool select)
+{
+  const size_t found = text_.find('\n', cursor_);
+  set_cursor(found == std::string::npos ? text_.size() : found, select);
+}
+
+void TextEdit::move_vertical(const int direction, const bool select)
+{
+  const size_t previous = cursor_ ? text_.rfind('\n', cursor_ - 1) : std::string::npos;
+  const size_t begin = previous == std::string::npos ? 0 : previous + 1;
+  const size_t column = vertical_column_.value_or(utf8::count(std::string_view(text_).substr(begin, cursor_ - begin)));
+  size_t target = begin;
+  if (direction < 0) {
+    if (!begin) { return; }
+    const size_t before = begin > 1 ? text_.rfind('\n', begin - 2) : std::string::npos;
+    target = before == std::string::npos ? 0 : before + 1;
+  }
+  else {
+    const size_t after = text_.find('\n', cursor_);
+    if (after == std::string::npos) { return; }
+    target = after + 1;
+  }
+  for (size_t i = 0; i < column && target < text_.size() && text_[target] != '\n'; ++i) {
+    target = utf8::next(text_, target);
+  }
+  set_cursor(target, select);
+  vertical_column_ = column;
+}
+
 void TextEdit::select_all()
 {
+  vertical_column_.reset();
   anchor_ = 0;
   cursor_ = text_.size();
   last_op_ = Op::None;
@@ -79,6 +117,7 @@ void TextEdit::select_all()
 
 void TextEdit::select_word_at(size_t pos)
 {
+  vertical_column_.reset();
   size_t b, e;
   word_at(text_, pos, &b, &e);
   anchor_ = b;
@@ -104,6 +143,7 @@ void TextEdit::push_undo(Op op)
 
 void TextEdit::replace_selection(std::string_view s)
 {
+  vertical_column_.reset();
   const auto [b, e] = selection();
   std::string ins = utf8::sanitize(s);
   if (max_len_ > 0) {
@@ -171,15 +211,18 @@ std::string TextEdit::cut()
   return s;
 }
 
-void TextEdit::paste(std::string_view s)
+void TextEdit::paste(std::string_view s, const bool multiline)
 {
   std::string clean;
   clean.reserve(s.size());
-  for (const char c : s) {
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
     if (c == '\r') {
+      if (multiline && (i + 1 == s.size() || s[i + 1] != '\n')) { clean += '\n'; }
       continue;
     }
-    clean += (c == '\n' || c == '\t') ? ' ' : c;
+    if (multiline && c == '\t') { clean += "    "; }
+    else { clean += !multiline && (c == '\n' || c == '\t') ? ' ' : c; }
   }
   push_undo(Op::Other);
   replace_selection(clean);
@@ -188,6 +231,7 @@ void TextEdit::paste(std::string_view s)
 
 bool TextEdit::undo()
 {
+  vertical_column_.reset();
   if (undo_.empty()) {
     return false;
   }
@@ -204,6 +248,7 @@ bool TextEdit::undo()
 
 bool TextEdit::redo()
 {
+  vertical_column_.reset();
   if (redo_.empty()) {
     return false;
   }

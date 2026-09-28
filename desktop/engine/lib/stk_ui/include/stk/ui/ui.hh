@@ -172,6 +172,10 @@ struct TextFieldOptions {
   bool mono = false;
   /** Shows every character as a bullet (secrets); copying and cutting are disabled. */
   bool password = false;
+  /** Enter inserts a newline, Tab four spaces, primary-modifier + Enter commits and submits. */
+  bool multiline = false;
+  int visible_lines = 8;
+  std::function<void()> on_submit;
 };
 
 class Block;
@@ -257,6 +261,7 @@ class Layout {
   Widget &button(std::string_view key, std::string_view text, std::function<void()> on_click);
   Widget &checkbox(std::string_view key, std::string_view text, Binding<bool> value);
   Widget &text_field(std::string_view key, Binding<std::string> value, TextFieldOptions opts = {});
+  Widget &text_area(std::string_view key, Binding<std::string> value, TextFieldOptions opts = {});
   Widget &number(std::string_view key, std::string_view label, Binding<double> value, NumberProps props = {});
   Widget &slider(std::string_view key, std::string_view label, Binding<double> value, NumberProps props = {});
   Widget &dropdown(std::string_view key, std::vector<std::string> items, Binding<int> selected);
@@ -459,6 +464,8 @@ class Context {
     float scroll_x = 0.0f;
     bool numeric = false;
     bool password = false;
+    bool multiline = false;
+    bool follow_caret = true;
     std::function<bool(const std::string &)> commit;
   };
   struct DragState {
@@ -543,6 +550,7 @@ class Context {
   void draw_block(const Block &b);
   void draw_layout(const Layout &l, const Block &b);
   void draw_widget(const Widget &w);
+  void draw_text_area(const Widget &w, const WidgetColors &colors);
   void draw_scrollbar(const Rect &area, float content, float view, float scroll, bool hot);
   void draw_shadow(const Rect &r, float radius);
 

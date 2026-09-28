@@ -18,6 +18,62 @@ using stk::ui::test::Harness;
 static const std::string ZHONG = "\xe4\xb8\xad";
 static const std::string WEN = "\xe6\x96\x87";
 
+TEST(TextArea, MultilinePasteImeNavigationAndExplicitSubmit)
+{
+  Harness h;
+  std::string source;
+  int submitted = 0;
+  h.ui = [&](Context &ctx) {
+    ctx.block("r", {0, 0, 400, 600}).layout().text_area("source", bind(source),
+        {.mono = true, .visible_lines = 4, .on_submit = [&] { ++submitted; }});
+  };
+  h.frame();
+  h.click("source");
+  h.clipboard.text = "for i in range(2):\r\n\tprint(i)";
+  h.key(Key::V, MOD_CTRL);
+  EXPECT_EQ(h.ctx->edit_state()->text(), "for i in range(2):\n    print(i)");
+  h.key(Key::Enter);
+  EXPECT_EQ(h.ctx->edit_state()->text(), "for i in range(2):\n    print(i)\n    ");
+  EXPECT_EQ(submitted, 0);
+  h.send(Event::ime_preedit(ZHONG + WEN, 3));
+  const auto caret = h.ctx->text_input_rect();
+  EXPECT_GT(caret.y, h.w("source").rect.y + h.ctx->style().line_height);
+  h.send(Event::ime_commit(ZHONG + WEN));
+  h.key(Key::Home);
+  h.key(Key::Up);
+  EXPECT_EQ(h.ctx->edit_state()->cursor(), 19u);
+  h.key(Key::End, MOD_CTRL);
+  h.key(Key::Enter, MOD_CTRL);
+  EXPECT_EQ(submitted, 1);
+  EXPECT_EQ(source, "for i in range(2):\n    print(i)\n    " + ZHONG + WEN);
+  EXPECT_EQ(h.ctx->editing(), 0u);
+}
+
+TEST(TextArea, ScrollAndClickAddressPhysicalLinesWithoutLosingTheDraft)
+{
+  Harness h;
+  std::string source;
+  for (int i = 0; i < 30; ++i) { source += std::to_string(i) + " line\n"; }
+  h.ui = [&](Context &ctx) {
+    ctx.block("r", {0, 0, 400, 600}).layout().text_area("source", bind(source), {.mono = true, .visible_lines = 4});
+  };
+  h.frame();
+  const auto id = h.w("source").id;
+  h.send(Event::wheel(h.center("source"), -3));
+  EXPECT_GT(h.ctx->scroll_of(id), 0);
+  const auto rect = h.w("source").rect;
+  const auto &style = h.ctx->style();
+  const float scroll = h.ctx->scroll_of(id);
+  const int row = int(scroll / style.line_height);
+  h.click({rect.x + style.text_margin + 1, rect.y + style.text_margin + 1});
+  const auto lines = hard_lines(source);
+  EXPECT_EQ(h.ctx->edit_state()->cursor(), lines[row].begin);
+  h.type("changed ");
+  h.key(Key::Escape);
+  EXPECT_EQ(source.substr(lines[row].begin, lines[row].end - lines[row].begin), std::to_string(row) + " line");
+  EXPECT_EQ(h.ctx->editing(), 0u);
+}
+
 static bool has_block(Context &ctx, Block::Kind k)
 {
   for (const auto &b : ctx.blocks()) {

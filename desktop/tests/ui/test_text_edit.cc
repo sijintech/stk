@@ -9,6 +9,29 @@ using namespace stk::ui;
 static const std::string ZHONG = "\xe4\xb8\xad"; /* 中 */
 static const std::string WEN = "\xe6\x96\x87";   /* 文 */
 
+TEST(TextEdit, MultilineNavigationClipboardAndUndoPreserveUnicode)
+{
+  TextEdit edit("abcd\nx\n" + ZHONG + WEN + "yz\n");
+  edit.set_cursor(3);
+  edit.move_vertical(1);
+  EXPECT_EQ(edit.cursor(), 6u);
+  edit.move_vertical(1);
+  EXPECT_EQ(edit.cursor(), 14u); // preferred third codepoint, past 中文y
+  edit.move_vertical(1);
+  EXPECT_EQ(edit.cursor(), edit.text().size());
+  edit.move_vertical(-1, true);
+  EXPECT_EQ(edit.selected_text(), "z\n");
+  edit.line_home();
+  EXPECT_EQ(edit.cursor(), 7u);
+  edit.line_end();
+  EXPECT_EQ(edit.cursor(), 15u);
+  edit.select_all();
+  edit.paste("if ready:\r\n\tprint('" + ZHONG + "')\rnext", true);
+  EXPECT_EQ(edit.text(), "if ready:\n    print('" + ZHONG + "')\nnext");
+  EXPECT_TRUE(edit.undo());
+  EXPECT_EQ(edit.text(), "abcd\nx\n" + ZHONG + WEN + "yz\n");
+}
+
 TEST(TextEdit, ImePreeditThenCommit)
 {
   TextEdit e("ab");

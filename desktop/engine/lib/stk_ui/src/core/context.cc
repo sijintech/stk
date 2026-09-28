@@ -532,6 +532,7 @@ void Context::begin_edit(const Widget &w, bool select_all, std::string initial, 
   edit_.id = w.id;
   edit_.numeric = w.type == WidgetType::Number || w.type == WidgetType::Slider;
   edit_.password = !edit_.numeric && w.text_opts.password;
+  edit_.multiline = !edit_.numeric && w.text_opts.multiline;
   std::string text;
   if (use_initial) {
     text = std::move(initial);
@@ -591,10 +592,17 @@ void Context::edit_click(const Widget &w, Vec2 p, bool extend, bool dbl)
 {
   const FontStyle &font = w.mono ? style_.mono : style_.font;
   const float local = p.x - (w.rect.x + style_.text_margin) + edit_.scroll_x;
-  const size_t idx = edit_.password ?
+  size_t idx = edit_.password ?
                          unmask_offset(edit_.edit.text(),
                                        measurer().index_at_x(mask_text(edit_.edit.text()), local, font)) :
                          measurer().index_at_x(edit_.edit.text(), local, font);
+  if (edit_.multiline) {
+    const auto lines = hard_lines(edit_.edit.text());
+    const int row = std::clamp(int(std::floor((p.y - w.rect.y - style_.text_margin + scroll_of(w.id)) /
+                                             style_.line_height)), 0, int(lines.size()) - 1);
+    const auto &line = lines[row];
+    idx = line.begin + measurer().index_at_x(std::string_view(edit_.edit.text()).substr(line.begin, line.end - line.begin), local, font);
+  }
   if (dbl) {
     edit_.edit.select_word_at(idx);
   }
@@ -602,6 +610,7 @@ void Context::edit_click(const Widget &w, Vec2 p, bool extend, bool dbl)
     edit_.edit.set_cursor(idx, extend);
   }
   redraw_ = true;
+  edit_.follow_caret = true;
 }
 
 bool Context::edit_key(const Event &e)
@@ -614,7 +623,14 @@ bool Context::edit_key(const Event &e)
   if (ed.composing()) {
     return true; /* The input method owns navigation keys while composing. */
   }
+  edit_.follow_caret = true;
   switch (e.key) {
+    case Key::Up:
+      if (edit_.multiline) { ed.move_vertical(-1, shift); }
+      break;
+    case Key::Down:
+      if (edit_.multiline) { ed.move_vertical(1, shift); }
+      break;
     case Key::Left:
       ed.move_left(word, shift);
       break;
@@ -622,10 +638,12 @@ bool Context::edit_key(const Event &e)
       ed.move_right(word, shift);
       break;
     case Key::Home:
-      ed.home(shift);
+      if (edit_.multiline && !prim) { ed.line_home(shift); }
+      else { ed.home(shift); }
       break;
     case Key::End:
-      ed.end(shift);
+      if (edit_.multiline && !prim) { ed.line_end(shift); }
+      else { ed.end(shift); }
       break;
     case Key::Backspace:
       ed.backspace(word);
@@ -633,13 +651,31 @@ bool Context::edit_key(const Event &e)
     case Key::Delete:
       ed.delete_forward(word);
       break;
-    case Key::Enter:
+    case Key::Enter: {
+      if (edit_.multiline && !prim) {
+        // Preserve leading spaces when starting the next Python line; indentation remains editable.
+        const auto text = ed.text();
+        const auto previous = ed.cursor() ? text.rfind('\n', ed.cursor() - 1) : std::string::npos;
+        const size_t start = previous == std::string::npos ? 0 : previous + 1;
+        size_t end = start;
+        while (end < ed.cursor() && text[end] == ' ') { ++end; }
+        ed.insert("\n" + text.substr(start, end - start));
+        break;
+      }
+      const Widget *widget = find_id(edit_.id);
+      const auto submit = edit_.multiline && widget ? widget->text_opts.on_submit : std::function<void()>();
       commit_edit();
+      if (submit) { submit(); }
       return true;
+    }
     case Key::Escape:
       cancel_edit();
       return true;
     case Key::Tab: {
+      if (edit_.multiline && !prim && !(e.mods & MOD_CTRL) && !shift) {
+        ed.insert("    ");
+        break;
+      }
       commit_edit();
       focus_next(shift);
       const Widget *n = find_id(focus_);
@@ -665,7 +701,7 @@ bool Context::edit_key(const Event &e)
       break;
     case Key::V:
       if (prim && config_.clipboard) {
-        ed.paste(config_.clipboard->get());
+        ed.paste(config_.clipboard->get(), edit_.multiline);
       }
       break;
     case Key::Z:
@@ -1100,6 +1136,7 @@ EventResult Context::handle_event(const Event &e)
         }
       }
       if (edit_.id) {
+        edit_.follow_caret = true;
         if (e.type == EventType::ImePreedit) {
           edit_.edit.set_preedit(e.text, e.ime_cursor < 0 ? e.text.size() : size_t(e.ime_cursor));
         }
@@ -1500,6 +1537,16 @@ EventResult Context::wheel(const Event &e)
   }
   Block *blk = nullptr;
   const Widget *w = hit(e.pos, &blk);
+  if (w && w->type == WidgetType::TextField && w->text_opts.multiline) {
+    const auto text = edit_.id == w->id ? edit_.edit.display_text() : w->string.value();
+    const float max = std::max(0.0f, float(hard_lines(text).size()) * style_.line_height -
+                                     (w->rect.h - 2 * style_.text_margin));
+    if (max > 0) {
+      set_scroll(w->id, scroll_of(w->id) - e.wheel_y * 3 * style_.line_height, max);
+      if (edit_.id == w->id) { edit_.follow_caret = false; }
+      return {true, true};
+    }
+  }
   if (w && (w->type == WidgetType::VirtualList || w->type == WidgetType::Table || w->type == WidgetType::LogView)) {
     const float ms = max_scroll(*w);
     if (ms > 0.0f) {

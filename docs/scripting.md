@@ -1,8 +1,23 @@
 # STK Python 编程
 
-状态：2026-09-28 已实现独立 Python 会话后端、项目操作 API 和本机桌面反向请求契约。
-原生控制台与 UI 执行器正在接入；这一版不能仅凭以下布局示例就在现有窗口中执行。
-完整方向见[设计记录](design/scripting-and-connections.md)。
+状态：2026-09-28 已实现原生 Python 面板、独立会话、项目操作 API 和本机布局控制首版。
+完整方向见[设计记录](design/scripting-and-connections.md)，全部操作覆盖与远程控制仍在后续计划中。
+
+## 在界面中运行
+
+更新源码并用[启动脚本](../desktop/QUICKSTART.md)增量编译，选择 **文件 → Python**。
+也可以在任一区域的编辑器下拉框中选择 Python；多个区域共用一个执行会话，各自保留输入草稿。
+
+1. 在多行输入框中输入或粘贴代码。Enter 换行并保留行首空格，Tab 插入四个空格，
+   上/下箭头按行移动；支持选区、复制/粘贴、撤销和中文预编辑。
+2. 点击“运行”，或按 Ctrl+Enter（macOS 为 Cmd+Enter）。最后一个表达式会显示结果。
+3. “中断”停止忙碌的 worker；空闲时同一按钮为“重置”，清除变量。“清空输出”只清空可见输出。
+4. “上一条/下一条输入”浏览本次程序中的最近 100 条输入，选择不会自动执行；“API 帮助”打印操作目录。
+5. 展开“运行 Python 文件”，填写绝对路径或拖入文件，再明确点击“运行文件”。拖入、恢复布局和打开项目均不执行源码。
+
+区域较小时可按 Ctrl+Space 最大化。输出与输入高度随区域大小变化，长文本各自滚动。
+草稿和文件路径可随“保存布局”保存；变量、执行历史和输出不跨程序启动保存。
+当前没有语法高亮、自动补全、块缩进或 Notebook；Shift+Tab / Ctrl+Tab 移动输入焦点。
 
 ## 会话与项目
 
@@ -37,6 +52,8 @@ print(p.history())
 相对路径由 worker 根据当前工作目录解析；桥上的项目路径仍是绝对路径。
 `script.open.directory` 指定 worker 的初始目录，默认为桥启动目录；运行文件不会自动切换到文件目录。
 可以在自己的脚本中显式调用 `os.chdir()`。状态里的 `directory` 是初始目录，重置 worker 时恢复它。
+文件执行设置 `__name__ = "__main__"`、`__file__`，并临时设置 `sys.argv = [文件路径]` 及文件目录的导入路径，
+因此常见的 main guard 和同目录辅助模块可直接使用；执行后恢复 `sys.argv` / `sys.path`。
 
 ## 操作覆盖
 
@@ -47,17 +64,28 @@ print(p.history())
 | 范围 | 当前状态 |
 |---|---|
 | 项目创建、打开、列表、关闭、快照、事务修改、历史 | 已实现，与桌面桥共用命令 |
-| 布局读取/应用、编辑器列表、可见项目查询/打开/关闭 | Python facade 与反向请求已实现；需要原生 UI 执行器接入 |
+| 布局读取/应用、编辑器列表、可见项目查询/打开/关闭 | 已接入原生 UI 主线程执行器，目标为第一个安装的主窗口 |
 | Jobs、传输、Viewer、图求值、资源与文档 | 现有各自接口仍可用；统一 `stk` facade 待逐步接入 |
 | 自动补全、操作记录成脚本、脚本持久历史 | 待开发 |
 | 远程机器 Python / UI 控制 | 未开放；本机 stdio 扩展不等于 P2P 或 SSH 服务 |
 
-布局入口在绑定桌面执行器后使用：
+布局入口已随原生桌面绑定，可读取、修改并恢复：
 
 ```python
 saved = stk.ui.layout()
 print(stk.ui.editors())
-# 修改 saved 的 screen 树后，整体校验再应用；区域 ID 与项目 ID 分开。
+# 先保存 saved，再把主窗口切成两个区域。
+import copy
+layout = copy.deepcopy(saved)
+layout["screen"] = {
+    "maximized": None,
+    "root": {"factor": 1, "split": "horizontal", "children": [
+        {"factor": 0.65, "area": {"id": "view", "type": "viewer"}},
+        {"factor": 0.35, "area": {"id": "code", "type": "python"}},
+    ]},
+}
+stk.ui.apply_layout(layout)
+# 在新的 Python 区域中继续输入，变量 saved 仍在同一个会话中。
 stk.ui.apply_layout(saved)
 ```
 

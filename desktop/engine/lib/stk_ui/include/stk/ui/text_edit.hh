@@ -1,12 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** \file
- * Single-line text editing model: UTF-8 buffer, caret and selection (byte offsets on codepoint
+ * Text editing model: UTF-8 buffer, caret and selection (byte offsets on codepoint
  * boundaries), IME preedit (composition) display, word navigation that handles CJK, and
  * undo/redo with typing coalescing. Pure data; the text field widget drives it from events.
  */
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -36,6 +37,10 @@ class TextEdit {
   void move_right(bool word, bool select);
   void home(bool select = false);
   void end(bool select = false);
+  /** Multiline navigation; vertical moves preserve the preferred codepoint column. */
+  void line_home(bool select = false);
+  void line_end(bool select = false);
+  void move_vertical(int direction, bool select = false);
   void select_all();
   void select_word_at(size_t pos);
 
@@ -45,8 +50,8 @@ class TextEdit {
   void delete_forward(bool word);
   /** Removes the selection and returns it (cut). */
   std::string cut();
-  /** Inserts clipboard text: newlines and tabs become spaces. */
-  void paste(std::string_view s);
+  /** Single line: newlines/tabs become spaces. Multiline: normalize CRLF and expand tabs. */
+  void paste(std::string_view s, bool multiline = false);
 
   bool can_undo() const { return !undo_.empty(); }
   bool can_redo() const { return !redo_.empty(); }
@@ -92,6 +97,7 @@ class TextEdit {
   Op last_op_ = Op::None;
   bool last_was_space_ = false;
   size_t max_len_ = 0;
+  std::optional<size_t> vertical_column_;
 };
 
 }  // namespace stk::ui

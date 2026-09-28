@@ -122,6 +122,19 @@ std::vector<size_t> break_opportunities(std::string_view text)
   return out;
 }
 
+std::vector<TextLine> hard_lines(const std::string_view text)
+{
+  std::vector<TextLine> lines;
+  size_t begin = 0;
+  while (true) {
+    const size_t end = text.find('\n', begin);
+    lines.push_back({begin, end == std::string_view::npos ? text.size() : end, 0});
+    if (end == std::string_view::npos) { break; }
+    begin = end + 1;
+  }
+  return lines;
+}
+
 std::vector<TextLine> break_lines(std::string_view text,
                                   float max_width,
                                   const TextMeasurer &measurer,

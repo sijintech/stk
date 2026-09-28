@@ -2,6 +2,7 @@
 import ast
 import io
 import os
+from pathlib import Path
 import queue
 import sys
 import threading
@@ -110,6 +111,11 @@ def main():
             namespace["__file__"] = filename
         else:
             namespace.pop("__file__", None)
+        namespace["__name__"] = "__main__" if filename != "<console>" else "__console__"
+        previous_argv, previous_path = sys.argv, list(sys.path)
+        if filename != "<console>":
+            sys.argv = [filename]
+            sys.path.insert(0, str(Path(filename).parent))
         # Restore capture if a previous script replaced sys.stdout/stderr.
         sys.stdout = sys.stderr = output
         succeeded = False
@@ -126,6 +132,9 @@ def main():
         except BaseException:
             traceback.print_exc(file=output)
         finally:
+            if filename != "<console>":
+                sys.argv = previous_argv
+                sys.path = previous_path
             active["id"] = None
             send({"id": identity, "finished": succeeded})
 

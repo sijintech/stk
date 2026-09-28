@@ -26,10 +26,13 @@ add_library(stk_app STATIC
   src/editors/jobs_logs.cc
   src/editors/jobs_transfers.cc
   src/editors/project_editor.cc
+  src/editors/python_editor.cc
   src/jobs_gpu.cc
   src/jobs_spec.cc
   src/jobs_state.cc
   src/project_state.cc
+  src/script_state.cc
+  src/scripting_ui.cc
   src/shell.cc
   src/viewer_export.cc
   src/viewer_state.cc

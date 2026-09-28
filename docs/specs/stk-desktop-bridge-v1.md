@@ -599,5 +599,7 @@ Operation shapes: `layout.get {}` → `{layout}` (`stk.desktop.layout/1`),
 return `unsupported`, and an absent desktop returns `unavailable`. Applying a layout validates the whole
 description before changing the current screen; geometry is captured for round trips but not forced on apply.
 
-The first Python facade exposes the project methods only through the shared command handlers. Native
-UI execution is a separate implementation step; advertising names does not invent unsupported functionality.
+The first Python facade exposes project methods through the shared command handlers. The native
+desktop binds these six UI operations on its main loop, targeting the first installed screen.
+Stale callbacks from an earlier bridge session cannot apply queued layout changes. A bridge without
+that executor (for example a protocol test harness) must attach its own implementation or return unavailable.

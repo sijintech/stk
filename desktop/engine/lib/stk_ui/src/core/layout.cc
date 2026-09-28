@@ -261,8 +261,18 @@ Widget &Layout::text_field(std::string_view key, Binding<std::string> value, Tex
   Widget &w = add_widget(WidgetType::TextField, key);
   w.string = std::move(value);
   w.mono = opts.mono;
+  if (opts.multiline) {
+    opts.password = false;
+    w.height = std::max(2, opts.visible_lines) * ctx().style().line_height + 2 * ctx().style().text_margin;
+  }
   w.text_opts = std::move(opts);
   return w;
+}
+
+Widget &Layout::text_area(std::string_view key, Binding<std::string> value, TextFieldOptions opts)
+{
+  opts.multiline = true;
+  return text_field(key, std::move(value), std::move(opts));
 }
 
 Widget &Layout::number(std::string_view key, std::string_view label, Binding<double> value, NumberProps props)

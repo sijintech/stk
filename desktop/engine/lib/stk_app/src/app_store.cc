@@ -4,6 +4,7 @@
 
 #include "stk/app/jobs_state.hh"
 #include "stk/app/project_state.hh"
+#include "stk/app/script_state.hh"
 #include "stk/app/viewer_state.hh"
 
 #include <algorithm>
@@ -31,6 +32,7 @@ AppStore::~AppStore()
   /* The editors' states call changed() from their callbacks and refer to this store: drop them
    * (jobs first: its subscriptions may feed the viewer) before the rest of the store. */
   on_change = nullptr;
+  scripts_.reset();
   project_.reset();
   jobs_.reset();
   viewer_.reset();
@@ -42,6 +44,22 @@ ProjectState &AppStore::project()
     project_ = std::make_unique<ProjectState>(*this);
   }
   return *project_;
+}
+
+ScriptState &AppStore::scripts()
+{
+  if (!scripts_) {
+    scripts_ = std::make_unique<ScriptState>(*this);
+  }
+  return *scripts_;
+}
+
+void AppStore::set_bridge(bridge::Client *client)
+{
+  bridge_client_ = client;
+  if (scripts_) {
+    scripts_->sync();
+  }
 }
 
 JobsState &AppStore::jobs()

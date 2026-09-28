@@ -313,6 +313,18 @@ Jobs、Properties 英文布局，真实 Python 桥、Vulkan/OpenGL、X11/Wayland
 
 ## 覆盖范围
 
+2026-09-28 原生 Python 面板：全量重编译后完整桌面 CTest **440/440 通过、无跳过**。
+新增 5 项 `ScriptPython` 使用真实独立 worker 验证布局拆分/恢复、非法布局原子拒绝、当前项目修订共享、
+中断/重启不重放、过期客户端的排队操作不执行、多行按钮/快捷键和恢复/拖入不自动执行。
+4 项 `python_render_*` 通过 Vulkan/OpenGL 生成中英文截图，已目视检查输出、代码缩进和控件位置。
+多行输入覆盖 UTF-8 选区、跨行导航、CRLF 粘贴、撤销、IME caret、滚动和提交；最终 Ctrl+Tab 焦点处理
+变更后相关 TextArea/TextEdit/TextField **11/11 再次通过**。中英文字典各 719 项，检查通过。
+Python 文件语义回归 **8/8 通过**（含 main guard、同目录导入、argv 和 cwd）。
+
+跨平台状态：后端提交 `4d3b762` 的 run 36380377730 在 Linux/macOS/打包通过，Windows **238 项 CPU
+测试通过**，但必跑检查使用相对 JUnit 路径而失败。改为 PowerShell `Join-Path $PWD` 的绝对路径；
+新原生面板的 macOS/Windows CI 与真机交互结论仍待后续验证，不能用 Linux 截图替代。
+
 2026-09-28 Python 后端：`test_desktop_scripts.py`、`test_desktop_graph_worker.py`、
 `test_desktop_bridge_projects.py`、`test_desktop_bridge.py` 共 **52 项通过**；包含真实独立 worker 的
 多行/文件执行、变量保留、输出环截断、协议隔离、项目冲突和通知、中断子进程树、崩溃恢复、
@@ -355,6 +367,6 @@ Jobs、Properties 英文布局，真实 Python 桥、Vulkan/OpenGL、X11/Wayland
 - PyInstaller 冻结桌面二进制的多进程启动与 Python 解释器分发；当前验收发布物
   为 Python wheel / sdist，未发布到 PyPI 或创建远程 release。
 
-交互式 Python 内核、远程实时三维渲染和团队权限属于后续阶段。
+远程 Python 会话、远程实时三维渲染和团队权限属于后续阶段。
 
 安装、API、SSH 与真实集群验收命令见 [runtime 使用指南](runtime.md)。

@@ -186,3 +186,22 @@ def test_worker_crash_and_system_exit_are_recoverable(scripts):
     assert result["run"]["state"] == "failed" and result["run"]["error"]["code"] == "unavailable"
     assert result["kernel"] is None
     assert execute(scripts, session, "print('recovered')")["run"]["state"] == "succeeded"
+
+
+def test_file_main_guard_and_sibling_imports_use_standard_script_context(scripts, tmp_path):
+    directory = tmp_path / "scripts"
+    directory.mkdir()
+    (directory / "helper.py").write_text("answer = 42\n", encoding="utf-8")
+    path = directory / "main.py"
+    path.write_text("import helper, sys\nfrom pathlib import Path\n"
+                    "if __name__ == '__main__':\n"
+                    "    print('file answer', helper.answer)\n"
+                    "    assert sys.argv == [__file__]\n"
+                    f"    assert Path.cwd() == Path({str(tmp_path)!r})\n"
+                    "99\n", encoding="utf-8")
+    session = scripts.call("script.open", {"directory": str(tmp_path)})["session"]
+    assert execute(scripts, session, path=str(path))["run"]["state"] == "succeeded"
+    output = scripts.call("script.read", {"session": session})
+    assert output["text"] == "file answer 42\n" # file expressions do not auto-echo
+    assert execute(scripts, session, "assert __name__ == '__console__'\nassert '__file__' not in globals()\nhelper.answer")["run"]["state"] == "succeeded"
+    assert scripts.call("script.read", {"session": session, "cursor": output["cursor"]})["text"] == "42\n"

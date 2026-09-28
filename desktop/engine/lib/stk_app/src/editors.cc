@@ -13,6 +13,7 @@
 namespace stk::app {
 
 std::unique_ptr<Editor> make_project_editor(const EditorType &type);
+std::unique_ptr<Editor> make_python_editor(const EditorType &type);
 
 void register_builtin_editors(EditorRegistry &registry)
 {
@@ -24,6 +25,7 @@ void register_builtin_editors(EditorRegistry &registry)
   registry.add({kEditorTransfers, "editor.transfers.title", make_transfers_editor});
   registry.add({kEditorBridgeLog, "editor.bridge_log.title", make_bridge_log_editor});
   registry.add({kEditorProject, "editor.project.title", make_project_editor});
+  registry.add({kEditorPython, "editor.python.title", make_python_editor});
 }
 
 }  // namespace stk::app

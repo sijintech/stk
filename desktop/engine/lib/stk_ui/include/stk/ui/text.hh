@@ -61,6 +61,9 @@ struct TextLine {
   float width = 0.0f;
 };
 
+/** Unwrapped physical lines, preserving trailing spaces and an empty final line for a caret. */
+std::vector<TextLine> hard_lines(std::string_view text);
+
 /**
  * Greedy line breaking with CJK rules: break at spaces, between CJK characters and at CJK/Latin
  * boundaries; Latin words stay together (split by character only when longer than a line);

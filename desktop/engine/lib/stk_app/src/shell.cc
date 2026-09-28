@@ -262,6 +262,13 @@ AppShell::AppShell(ShellOptions options) : options_(std::move(options))
       }
     }
   };
+  std::weak_ptr<bool> weak = alive_;
+  store_.scripts().set_ui_handler([this, weak](const auto &operation, const auto &params,
+                                              const int64_t expires_at, auto valid, auto complete) {
+    if (weak.lock()) {
+      handle_ui_request(operation, params, expires_at, std::move(valid), std::move(complete));
+    }
+  });
 }
 
 AppShell::~AppShell()
@@ -449,8 +456,8 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
 {
   std::vector<ui::MenuEntry> m;
   wm::Screen *s = &screen;
-  m.push_back({std::string(store_.tr("editor.project.title")), [s]() {
-    s->defer([s]() {
+  auto show_editor = [s](const std::string &type) {
+    s->defer([s, type]() {
       EditorArea *target = nullptr;
       for (auto *area : s->areas()) {
         auto *editor = dynamic_cast<EditorArea *>(area);
@@ -458,7 +465,7 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
           continue;
         }
         for (int i = 0; i < editor->tab_count(); ++i) {
-          if (editor->tab(i).type().id == kEditorProject) {
+          if (editor->tab(i).type().id == type) {
             editor->set_active_tab(i);
             if (s->maximized()) {
               s->set_maximized(editor);
@@ -471,13 +478,15 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
         }
       }
       if (target) {
-        target->add_tab(kEditorProject);
+        target->add_tab(type);
         if (s->maximized()) {
           s->set_maximized(target);
         }
       }
     });
-  }});
+  };
+  m.push_back({std::string(store_.tr("editor.project.title")), [show_editor] { show_editor(kEditorProject); }});
+  m.push_back({std::string(store_.tr("editor.python.title")), [show_editor] { show_editor(kEditorPython); }});
   /* WP10: open a payload (.stkp / directory), a result directory or a run directory in the Viewer. */
   m.push_back({std::string(store_.tr("viewer.menu.open")), [this]() {
                  store_.viewer().open_dialog = true;
