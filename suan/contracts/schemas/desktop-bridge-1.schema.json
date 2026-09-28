@@ -2701,6 +2701,399 @@
             "history"
           ]
         }
+      },
+      "script.open": {
+        "description": "Open or return the one local Python console session. User code is never auto-run.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/scriptStatus"
+        }
+      },
+      "script.status": {
+        "description": "Read execution state; bridge/project lifetimes are independent of the disposable worker.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/scriptStatus"
+        }
+      },
+      "script.execute": {
+        "description": "Execute explicit source or a UTF-8 file in the persistent worker. Never automatically replay.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            },
+            "source": {
+              "type": "string",
+              "maxLength": 262144
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "project_handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "source"
+              ],
+              "not": {
+                "required": [
+                  "path"
+                ]
+              }
+            },
+            {
+              "required": [
+                "path"
+              ],
+              "not": {
+                "required": [
+                  "source"
+                ]
+              }
+            }
+          ]
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "script.read": {
+        "description": "Read bounded console output; cursors count Unicode characters, not bytes. Reading acknowledges change hints.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            },
+            "cursor": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            },
+            "state": {
+              "enum": [
+                "ready",
+                "running",
+                "stopping"
+              ]
+            },
+            "kernel": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/hex32"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            },
+            "run": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/scriptRun"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "output_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "output_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "text": {
+              "type": "string"
+            },
+            "cursor": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "session",
+            "state",
+            "kernel",
+            "directory",
+            "run",
+            "output_start",
+            "output_end",
+            "text",
+            "cursor",
+            "truncated"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "script.interrupt": {
+        "description": "Stop the worker and reset its namespace (also valid when idle). Accepted operations are not rolled back.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "interrupted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "interrupted"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "script.close": {
+        "description": "Close the local Python session and stop its subprocess tree. Project handles stay open.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "closed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "closed"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "script.catalog": {
+        "description": "Discover currently scriptable bridge operations and local UI control names.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "operations": {
+              "type": "object"
+            },
+            "ui_operations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/uiOperation"
+              }
+            }
+          },
+          "required": [
+            "operations",
+            "ui_operations"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "ui.attach": {
+        "description": "Attach the local desktop executor; only operations advertised by it can be called.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "operations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/uiOperation"
+              },
+              "uniqueItems": true,
+              "maxItems": 6
+            }
+          },
+          "required": [
+            "operations"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/uiOperation"
+              }
+            }
+          },
+          "required": [
+            "session",
+            "operations"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "ui.detach": {
+        "description": "Detach an executor; unblock pending reverse requests with unavailable.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "detached": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "detached"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "ui.reply": {
+        "description": "Reply to a ui.request. Unknown, expired, duplicate or detached requests return accepted=false.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/hex32"
+            },
+            "request": {
+              "$ref": "#/$defs/hex32"
+            },
+            "result": {
+              "type": "object"
+            },
+            "error": {
+              "$ref": "#/$defs/error"
+            }
+          },
+          "required": [
+            "session",
+            "request"
+          ],
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "result"
+              ],
+              "not": {
+                "required": [
+                  "error"
+                ]
+              }
+            },
+            {
+              "required": [
+                "error"
+              ],
+              "not": {
+                "required": [
+                  "result"
+                ]
+              }
+            }
+          ]
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "accepted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "accepted"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -2940,6 +3333,47 @@
         "required": [
           "handle"
         ]
+      },
+      "script.changed": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "$ref": "#/$defs/hex32"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "additionalProperties": false
+      },
+      "ui.request": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "$ref": "#/$defs/hex32"
+          },
+          "request": {
+            "$ref": "#/$defs/hex32"
+          },
+          "operation": {
+            "$ref": "#/$defs/uiOperation"
+          },
+          "params": {
+            "type": "object"
+          },
+          "expires_at_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "session",
+          "request",
+          "operation",
+          "params",
+          "expires_at_ms"
+        ],
+        "additionalProperties": false
       }
     },
     "projectUuid": {
@@ -3250,6 +3684,108 @@
         "project",
         "tables"
       ]
+    },
+    "uiOperation": {
+      "enum": [
+        "layout.get",
+        "layout.apply",
+        "editors.list",
+        "project.current",
+        "project.open",
+        "project.close"
+      ]
+    },
+    "scriptRun": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/hex32"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "filename": {
+          "type": "string"
+        },
+        "error": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "filename",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "scriptStatus": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/hex32"
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "running",
+            "stopping"
+          ]
+        },
+        "kernel": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/hex32"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "directory": {
+          "$ref": "#/$defs/absPath"
+        },
+        "run": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/scriptRun"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_end": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "session",
+        "state",
+        "kernel",
+        "directory",
+        "run",
+        "output_start",
+        "output_end"
+      ],
+      "additionalProperties": false
     }
   }
 }

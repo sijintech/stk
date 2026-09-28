@@ -313,6 +313,13 @@ Jobs、Properties 英文布局，真实 Python 桥、Vulkan/OpenGL、X11/Wayland
 
 ## 覆盖范围
 
+2026-09-28 Python 后端：`test_desktop_scripts.py`、`test_desktop_graph_worker.py`、
+`test_desktop_bridge_projects.py`、`test_desktop_bridge.py` 共 **52 项通过**；包含真实独立 worker 的
+多行/文件执行、变量保留、输出环截断、协议隔离、项目冲突和通知、中断子进程树、崩溃恢复、
+反向请求会话匹配/超时/取消。重新构建 `stk-bridge-tests` 后，相关 Schema/Types/Retry CTest
+**13/13 通过**，验证 C++ 也拒绝双重源码入口、重复能力和同时携带结果/错误的回复。
+这是后端与协议验收；尚不表示原生控制台交互或跨平台真机验收已完成。
+
 2026-09-28 传输恢复补充：Runtime CI run 36378576449 暴露失败通知与 worker 退出之间的窗口。
 `resume` 现在在管理锁外等待终态 worker 收尾，然后在锁内重新读取状态；同时到达的恢复请求
 不会启动两个 worker，活动/已完成的传输仍保持幂等。收尾超过 5 秒返回可重试 `busy`。

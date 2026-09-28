@@ -224,6 +224,37 @@ TEST(Schema, EmbeddedSchemaValidatesMessagesBothWays)
                   .empty());
 }
 
+TEST(Schema, ScriptAndReverseDesktopExtension)
+{
+  const auto &schema = ProtocolSchema::embedded();
+  const std::string session(32, 'a'), request(32, 'b');
+  Json execute = {{"id", 1}, {"method", "script.execute"},
+                  {"params", {{"session", session}, {"source", "print('hello')"}}}};
+  EXPECT_TRUE(schema.check_request(execute).empty());
+  execute["params"]["path"] = "/tmp/script.py";
+  EXPECT_FALSE(schema.check_request(execute).empty());
+  execute["params"].erase("source");
+  EXPECT_TRUE(schema.check_request(execute).empty());
+  Json attach = {{"id", 2}, {"method", "ui.attach"},
+                 {"params", {{"operations", {"layout.get", "layout.apply"}}}}};
+  EXPECT_TRUE(schema.check_request(attach).empty());
+  attach["params"]["operations"].push_back("layout.get");
+  EXPECT_FALSE(schema.check_request(attach).empty());
+  Json reply = {{"id", 3}, {"method", "ui.reply"},
+                {"params", {{"session", session}, {"request", request}, {"result", Json::object()}}}};
+  EXPECT_TRUE(schema.check_request(reply).empty());
+  reply["params"]["error"] = {{"code", "invalid_params"}, {"message", "Bad layout"}, {"retryable", false}};
+  EXPECT_FALSE(schema.check_request(reply).empty());
+  reply["params"].erase("result");
+  EXPECT_TRUE(schema.check_request(reply).empty());
+  EXPECT_TRUE(schema.check_event({{"event", "ui.request"},
+      {"data", {{"session", session}, {"request", request}, {"operation", "layout.get"},
+                {"params", Json::object()}, {"expires_at_ms", 1800000000000LL}}}}).empty());
+  for (const auto *method : {"script.execute", "script.interrupt", "script.close", "ui.reply", "ui.attach"}) {
+    EXPECT_FALSE(method_is_retry_safe(method, Json::object()));
+  }
+}
+
 TEST(Types, LocalProjectExtension)
 {
   const Json project = {{"handle", std::string(32, 'c')},

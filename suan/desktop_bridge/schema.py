@@ -9,7 +9,7 @@ from functools import lru_cache
 from suan.contracts import load_schema
 from suan.graph.schema import check_value
 
-__all__ = ["event_names", "method_names", "validate_incoming", "validate_outgoing", "validate_params"]
+__all__ = ["event_names", "method_names", "method_contract", "validate_incoming", "validate_outgoing", "validate_params"]
 
 SCHEMA_ID = "desktop-bridge-1"
 
@@ -60,6 +60,13 @@ def event_names():
 
 def _method_ref(method, part):
     return f"#/$defs/methods/{method.replace('~', '~0').replace('/', '~1')}/{part}"
+
+
+def method_contract(method):
+    """Resolved parameter/result schemas for operation discovery (treat returned schemas as read-only)."""
+    if method not in method_names():
+        raise KeyError(method)
+    return {part: _resolved(_method_ref(method, part)) for part in ("params", "result")}
 
 
 def validate_params(method, params):

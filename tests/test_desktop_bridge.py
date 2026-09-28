@@ -280,7 +280,8 @@ def test_schema_describes_every_method_and_event():
     # Every keyword the schema uses is in the subset suan.graph.schema.check_value (and stk_io) implement.
     allowed = {"$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "minimum",
                "maximum", "minLength", "maxLength", "pattern", "items", "minItems", "maxItems", "properties",
-               "required", "additionalProperties", "patternProperties", "maxProperties", "anyOf", "oneOf", "allOf"}
+               "required", "additionalProperties", "patternProperties", "maxProperties", "anyOf", "oneOf", "allOf",
+               "not", "uniqueItems"}
 
     def walk(node, where):
         if isinstance(node, dict):

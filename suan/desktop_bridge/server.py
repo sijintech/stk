@@ -25,6 +25,8 @@ from .hub import HubResponseError, hub_error
 from .connections import ConnectionStore
 from .graphs import GraphService
 from .projects import ProjectSessions
+from .scripts import ScriptSessions
+from .ui_requests import UIRequests, UI_OPERATIONS
 from .protocol import (MAX_LINE_BYTES, PROTOCOL_VERSION, BridgeError, LineReader, check_envelope, decode_line,
                        encode_message, error_object, leading_id)
 from .subscriptions import SubscriptionManager
@@ -147,6 +149,8 @@ class Bridge:
         self.connections = ConnectionStore(self.state_dir)
         self.graphs = GraphService(self.cache_dir, self.connections, self.emit)
         self.projects = ProjectSessions()
+        self.ui = UIRequests(self.emit)
+        self.scripts = ScriptSessions(self.emit, self.script_call)
         self.transfers = TransferManager(self.state_dir, self.emit, self.connections.backend)
         self.subscriptions = SubscriptionManager(self.emit, self.connections.backend, self.connections.hub_client)
         self.methods = {
@@ -200,6 +204,16 @@ class Bridge:
             "project.snapshot": lambda p, c: self.projects.snapshot(p),
             "project.apply": self.apply_project,
             "project.history": lambda p, c: self.projects.history(p),
+            "script.open": lambda p, c: self.scripts.open(p),
+            "script.status": lambda p, c: self.scripts.status(p),
+            "script.execute": self.scripts.execute,
+            "script.read": lambda p, c: self.scripts.read(p),
+            "script.interrupt": lambda p, c: self.scripts.interrupt(p),
+            "script.close": lambda p, c: self.scripts.close(p),
+            "script.catalog": lambda p, c: self.script_catalog(),
+            "ui.attach": lambda p, c: self.ui.attach(p),
+            "ui.detach": lambda p, c: self.ui.detach(p),
+            "ui.reply": lambda p, c: self.ui.reply(p),
         }
         missing = set(self.methods) ^ set(bridge_schema.method_names())
         if missing:
@@ -330,6 +344,8 @@ class Bridge:
         if self.closed.is_set():
             return
         self.closing.set()
+        self.ui.close()
+        self.scripts.shutdown()
         self.subscriptions.stop_all()
         self.graphs.cancel_all()
         self.transfers.stop(timeout=grace)
@@ -361,6 +377,36 @@ class Bridge:
         return {"sub": subscription.id}
 
     # -- methods ------------------------------------------------------------------------------
+
+    def script_catalog(self):
+        # Deliberate initial coverage. In particular, scripts cannot recursively dispatch their
+        # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
+        names = ("project.create", "project.open", "project.list", "project.close", "project.snapshot",
+                 "project.apply", "project.history")
+        return {"operations": {name: bridge_schema.method_contract(name) for name in names},
+                "ui_operations": list(UI_OPERATIONS)}
+
+    def script_call(self, operation, params, cancelled):
+        if self.closing.is_set():
+            raise BridgeError("shutting_down", "The bridge is shutting down")
+        if cancelled.is_set():
+            raise BridgeError("cancelled", "Script execution interrupted")
+        if not isinstance(operation, str) or not isinstance(params, dict):
+            raise BridgeError("invalid_params", "An operation needs a string name and object parameters")
+        if operation == "operations":
+            return self.script_catalog()
+        if operation.startswith("ui."):
+            return self.ui.call(operation[3:], params, cancelled)
+        if operation not in self.script_catalog()["operations"]:
+            raise BridgeError("unsupported", f"Operation {operation!r} is not exposed to Python yet")
+        issues = bridge_schema.validate_params(operation, params)
+        if issues:
+            raise BridgeError("invalid_params", f"{issues[0][0]}: {issues[0][1]}")
+        context = _Context()
+        result = self.methods[operation](params, context)
+        for callback in context.callbacks:
+            callback()
+        return result
 
     def apply_project(self, params, context):
         result = self.projects.apply(params)

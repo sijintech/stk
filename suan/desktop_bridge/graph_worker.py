@@ -6,106 +6,15 @@ request leaves the active evaluation alone. Active work first receives cooperati
 native code that does not stop within the grace period is terminated with its worker.
 """
 import queue
-import subprocess
 import sys
 import threading
 import time
 
-import psutil
+from .protocol import BridgeError, ERROR_CODES, MAX_LINE_BYTES, encode_message
 
-from .protocol import BridgeError, ERROR_CODES, MAX_LINE_BYTES, decode_line, encode_message
+from .worker_process import WorkerProcess as _Child
 
 CANCEL_GRACE = 0.5
-
-
-class _Child:
-    def __init__(self, command):
-        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=None, close_fds=True)
-        try:
-            self.tree = psutil.Process(self.process.pid)
-        except psutil.NoSuchProcess:
-            self.tree = None
-        self.incoming = queue.Queue(maxsize=16)
-        self.outgoing = queue.Queue()
-        self.stopped = threading.Event()
-        self.stop_lock = threading.Lock()
-        self.reader = threading.Thread(target=self._read, daemon=True, name="stk-graph-reader")
-        self.writer = threading.Thread(target=self._write, daemon=True, name="stk-graph-writer")
-        self.reader.start()
-        self.writer.start()
-
-    def _deliver(self, message):
-        while not self.stopped.is_set():
-            try:
-                self.incoming.put(message, timeout=0.05)
-                return
-            except queue.Full:
-                pass
-
-    def _read(self):
-        try:
-            while not self.stopped.is_set():
-                line = self.process.stdout.readline(MAX_LINE_BYTES + 1)
-                if not line or len(line) > MAX_LINE_BYTES or not line.endswith(b"\n"):
-                    break
-                self._deliver(decode_line(line))
-        except (OSError, ValueError, BridgeError):
-            pass
-        finally:
-            self._deliver(None)
-
-    def _write(self):
-        try:
-            while not self.stopped.is_set():
-                line = self.outgoing.get()
-                if line is None:
-                    return
-                self.process.stdin.write(line)
-                self.process.stdin.flush()
-        except (OSError, ValueError):
-            self._deliver(None)
-
-    def stop(self):
-        with self.stop_lock:
-            if self.stopped.is_set():
-                return
-            self.stopped.set()
-            self.outgoing.put(None)
-            # Render nodes may have their own subprocess/session. Stop only this worker's tree,
-            # including those descendants, before dropping the worker that owns them.
-            descendants = set()
-            if self.tree is not None:
-                try:
-                    self.tree.suspend()
-                    for _ in range(2):
-                        for process in self.tree.children(recursive=True):
-                            descendants.add(process)
-                            try:
-                                process.suspend()
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            for process in descendants:
-                try:
-                    process.kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            if self.process.poll() is None:
-                try:
-                    self.process.kill()
-                except ProcessLookupError:
-                    pass
-            self.process.wait(timeout=5)
-            psutil.wait_procs(descendants, timeout=1)
-            self.reader.join(timeout=1)
-            self.writer.join(timeout=1)
-            for stream in (self.process.stdin, self.process.stdout):
-                try:
-                    stream.close()
-                except OSError:
-                    pass
 
 
 class GraphWorker:
@@ -138,7 +47,7 @@ class GraphWorker:
                     self._child = None
                 if self._child is None:
                     try:
-                        self._child = _Child(self.command)
+                        self._child = _Child(self.command, max_line=MAX_LINE_BYTES)
                     except OSError:
                         raise BridgeError("unavailable", "The local graph worker could not start") from None
                 child = self._child

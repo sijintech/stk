@@ -533,3 +533,71 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 - Snapshot/history are currently unpaginated and subject to the 16 MiB line limit (§2), returning
   `result_too_large` when necessary. Large scientific arrays and files do not belong in JSON cells.
   No project directory is automatically reopened by a new bridge; the desktop owns recovery intent.
+
+## 14. Local Python sessions and desktop control (additive extension)
+
+Discover the methods/events in `hello`; older v1 bridges may not implement this extension.
+It adds an explicit reverse request direction on the **existing private local stdio connection**,
+not a network service, remote Python permission, or an implicit interpretation of old events.
+The shared schema remains authoritative. The user-facing API and coverage are in [scripting](../scripting.md).
+
+### Python session methods
+
+| Method | Parameters | Result |
+|---|---|---|
+| `script.open` | optional initial absolute `directory` | session status |
+| `script.status` | `session` | session status |
+| `script.execute` | `session`, exactly one of `source` / absolute `path`, optional `project_handle` | `{run}` |
+| `script.read` | `session`, optional `cursor` (0), `limit` (65536, max 65536) | status plus `{text, cursor, truncated}` |
+| `script.interrupt` | `session` | `{interrupted}` (whether execution was running) |
+| `script.close` | `session` | `{closed: true}` |
+| `script.catalog` | none | `{operations: {name: {params, result}}, ui_operations}` |
+
+One bridge owns one shared Python session. Open is idempotent; a different initial directory while
+it is open is a conflict. Tokens and run/kernel IDs are opaque 32-digit lowercase hex strings.
+Status is `{session, state, kernel, directory, run, output_start, output_end}`:
+`state` is `ready`, `running` or `stopping`; `kernel` is null when no worker exists.
+`run` is null or `{id, state, filename, error}` with run states `running`, `succeeded`, `failed`,
+`cancelled`. Python exceptions are printed and produce `failed` with a null structured error;
+worker transport/crash failures include an error object. `directory` is the initial directory,
+not a continuously tracked `os.getcwd()`.
+
+Execute acknowledges a run before starting it, rejects overlapping runs with `busy`, and never
+automatically replays. Source and UTF-8 file limits are in the schema/guide. A disposable worker
+preserves globals between runs. The bridge, project transactions and submitted Runtime tasks keep
+their independent lifetimes. Interrupt kills the worker tree (also resetting an idle namespace);
+an already accepted operation may finish and must not be blindly repeated. A slow in-flight project
+operation can keep the session `stopping` until its outcome is known to the bridge.
+
+`script.changed {session}` is a refresh hint, coalesced until `script.read` acknowledges it; start/end
+transitions also emit a hint. Output is bounded to 1 Mi Unicode characters, read offsets count Unicode
+codepoints, and the returned cursor is the next position. A stale cursor is clamped to `output_start`
+with `truncated=true`; a cursor beyond `output_end` is invalid. Read until cursor reaches the returned
+end, retaining hints that arrive while a read is in flight. Native descriptor/subprocess output goes
+to bridge stderr. EOF/close/shutdown stops the worker; restarting never restores or auto-runs code.
+
+### Explicit reverse desktop requests
+
+- `ui.attach {operations}` returns `{session, operations}`. The local client advertises supported
+  operation names: `layout.get`, `layout.apply`, `editors.list`, `project.current`, `project.open`,
+  `project.close`. Reattaching the same set is idempotent; changing it requires detach.
+- `ui.request {session, request, operation, params, expires_at_ms}` asks that executor to perform one
+  operation. Requests are correlated by both IDs, expire after 30 seconds, and are never replayed.
+  `expires_at_ms` is a UTC Unix timestamp in milliseconds on the same machine. The desktop rejects
+  expired requests before starting them, and always runs window/layout changes on its main thread.
+- `ui.reply {session, request, result}` or `{session, request, error}` returns `{accepted}`.
+  Results are objects, errors use the normal bridge error schema. Both/neither are invalid.
+  Late, duplicate and detached-session replies return false. A reply is not a second execution.
+- `ui.detach {session}` returns `{detached}` and fails outstanding calls with `unavailable`.
+  Shutdown does the same. Cancellation drops a pending request; timeouts/cancellation do not roll
+  back a UI mutation that the desktop already accepted. Inspect state before retrying it.
+
+Operation shapes: `layout.get {}` → `{layout}` (`stk.desktop.layout/1`),
+`layout.apply {layout}` → `{applied: true}`, `editors.list {}` → `{editors: [{id, label}]}`,
+`project.current {}` → `{project: projectInfo|null}`, `project.open {directory}` → `{project: projectInfo}`,
+`project.close {}` → `{closed: boolean}`. Invalid parameters return `invalid_params`; absent capabilities
+return `unsupported`, and an absent desktop returns `unavailable`. Applying a layout validates the whole
+description before changing the current screen; geometry is captured for round trips but not forced on apply.
+
+The first Python facade exposes the project methods only through the shared command handlers. Native
+UI execution is a separate implementation step; advertising names does not invent unsupported functionality.
