@@ -454,16 +454,19 @@ class Bridge:
                 "next_offset": result["offset"] + len(data), "terminal": result["terminal"]}
 
     def run_project(self, action, params, context):
+        observing = action in ("submit", "refresh", "cancel")
+        before = self.project_runs.call("get", params)["run"]["observation_id"] if observing else None
         try:
             result = self.project_runs.call(action, params)
         finally:
-            if action in ("submit", "refresh", "cancel"):
+            if observing:
                 # Publish persisted failure observations too. Error responses may not run
                 # context callbacks, so this independent fact is emitted immediately.
                 try:
                     run = self.project_runs.call("get", params)["run"]
-                    self.emit("project.runs.changed", {"handle": params["handle"], "run_id": params["run_id"],
-                                                       "observation_id": run["observation_id"]})
+                    if run["observation_id"] != before:
+                        self.emit("project.runs.changed", {"handle": params["handle"], "run_id": params["run_id"],
+                                                           "observation_id": run["observation_id"]})
                 except BridgeError:
                     pass
         if action == "prepare":

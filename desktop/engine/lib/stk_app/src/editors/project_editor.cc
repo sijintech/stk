@@ -82,6 +82,7 @@ class ProjectEditor final : public Editor {
     }
     file_controls(layout, ctx, state, editable);
     snapshot_controls(layout, ctx, state, editable);
+    run_controls(layout, ctx, state, editable);
     table_controls(layout, ctx, state, editable);
     const auto *table = state.table();
     if (!table) {
@@ -219,6 +220,110 @@ class ProjectEditor final : public Editor {
       panel->paragraph(ctx.tr(check.value("ok", false) ? "project.snapshots.valid" : "project.snapshots.invalid"));
       for (const auto &file : check.at("files")) {
         if (io::get_string(file, "state") != "ok") { panel->paragraph(io::get_string(file, "error")); }
+      }
+    }
+  }
+
+  std::string run_consent_id_;
+  bool allow_stale_run_ = false;
+
+  void run_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  {
+    auto *panel = layout.panel("project_runs", ctx.tr("project.runs.title"), false);
+    if (!panel) { return; }
+    panel->paragraph(ctx.tr("project.runs.hint"));
+    const bool enabled = editable && state.project()->format_version >= 5;
+    auto &pages = panel->row();
+    pages.button("list", ctx.tr("project.runs.list"), [&state] { state.load_runs(); }).disable(!enabled);
+    pages.button("previous", ctx.tr("project.runs.previous"), [&state] {
+      state.load_runs(std::max<int64_t>(0, state.runs_offset() - 100));
+    }).disable(!enabled || state.runs_offset() == 0);
+    pages.button("next", ctx.tr("project.runs.next"), [&state] { state.load_runs(state.runs_next_offset()); })
+        .disable(!enabled || state.runs_next_offset() < 0);
+    if (state.runs().empty()) { panel->paragraph(ctx.tr("project.runs.empty")); return; }
+    const auto status_text = [&ctx](const Json &run) {
+      const std::string task = io::get_string(run, "task_state");
+      return std::string(ctx.tr(task.empty() ? "project.runs." + io::get_string(run, "submission") : "jobs.state." + task));
+    };
+    std::vector<std::vector<std::string>> cells;
+    for (const auto &run : state.runs()) {
+      cells.push_back({io::get_string(run, "label"), status_text(run),
+                       std::string(ctx.tr("project.runs." + io::get_string(run, "parameter_state"))),
+                       io::get_string(run, "connection")});
+    }
+    ui::TableSpec table;
+    table.columns = {{std::string(ctx.tr("project.runs.label")), 10.0f},
+                     {std::string(ctx.tr("project.runs.status")), 8.0f},
+                     {std::string(ctx.tr("project.runs.parameters")), 8.0f},
+                     {std::string(ctx.tr("project.runs.connection")), 10.0f}};
+    table.rows = int(cells.size());
+    table.visible_rows = float(std::clamp(int(cells.size()), 2, 5));
+    table.data_version = state.version();
+    table.cell = [cells = std::move(cells)](int row, int column) { return cells.at(row).at(column); };
+    table.selected = {[&state] { return state.selected_run(); }, [&state](int row) {
+      if (row >= 0 && size_t(row) < state.runs().size()) { state.select_run(io::get_string(state.runs()[row], "id")); }
+    }};
+    panel->table("runs", std::move(table));
+    const auto &run = state.run();
+    if (run.empty() || io::get_string(run, "id") != state.run_id()) { return; }
+    const auto &plan = run.at("plan"), &status = run.at("status");
+    const auto &parameters = plan.at("parameters");
+    panel->label(io::get_string(plan, "label"));
+    panel->paragraph(io::get_string(plan, "connection") + " · " + io::get_string(plan, "created_at", io::get_string(run, "created_at")));
+    panel->paragraph(ctx.tr("project.runs." + io::get_string(run, "parameter_state")));
+    const Json task = status.value("task", Json::object());
+    if (!task.empty()) {
+      panel->paragraph(std::string(ctx.tr("project.runs.task")) + ": " + io::get_string(task, "id") + " · " +
+                       std::string(ctx.tr("jobs.state." + io::get_string(task, "state"))));
+    }
+    if (status.contains("action")) {
+      panel->paragraph(std::string(ctx.tr("project.runs.action")) + ": " +
+                       std::string(ctx.tr("project.runs." + io::get_string(status.at("action"), "state"))));
+    }
+    if (status.contains("error") && status.at("error").is_object()) {
+      panel->paragraph(io::get_string(status.at("error"), "message"));
+    }
+    panel->paragraph(std::string(ctx.tr("project.runs.command")) + ": " + plan.at("spec").at("argv").dump());
+    if (run_consent_id_ != state.run_id()) { run_consent_id_ = state.run_id(); allow_stale_run_ = false; }
+    const bool first = io::get_string(status, "submission") == "prepared";
+    const bool stale = io::get_string(run, "parameter_state") != "current";
+    if (first && stale) { panel->checkbox("allow_stale", ctx.tr("project.runs.allow_stale"), ui::bind(allow_stale_run_)); }
+    auto &actions = panel->row();
+    actions.button("submit", ctx.tr(first ? "project.runs.submit" : "project.runs.recover"), [this, &state] {
+      state.submit_run(allow_stale_run_);
+    }).disable(!enabled || !task.empty() || (first && stale && !allow_stale_run_));
+    actions.button("refresh", ctx.tr("project.runs.refresh"), [&state] { state.refresh_run(); }).disable(!enabled);
+    const auto task_state = io::get_string(task, "state");
+    const bool terminal = task_state == "succeeded" || task_state == "failed" || task_state == "cancelled";
+    actions.button("cancel", ctx.tr("project.runs.cancel"), [&state] { state.cancel_run(); })
+        .disable(!enabled || task.empty() || terminal);
+    panel->button("source", ctx.tr("project.runs.source"), [&state, parameters] {
+      state.select_table(io::get_string(parameters, "table_id"));
+      state.select_record(io::get_string(parameters, "record_id"));
+    }).disable(io::get_string(run, "parameter_state") == "missing");
+    if (auto *detail = panel->panel("frozen", ctx.tr("project.runs.frozen"), false)) {
+      detail->paragraph(std::string(ctx.tr("project.runs.identity")) + ": " + state.run_id());
+      detail->paragraph("SHA-256: " + io::get_string(run, "sha256"));
+      detail->paragraph(std::string(ctx.tr("project.runs.workspace")) + ": " + io::get_string(plan.at("spec"), "workspace_id"));
+      ui::TableSpec values;
+      values.columns = {{std::string(ctx.tr("project.field")), 9.0f}, {std::string(ctx.tr("project.value")), 14.0f},
+                        {std::string(ctx.tr("project.unit")), 5.0f}};
+      values.rows = int(parameters.at("fields").size());
+      values.visible_rows = float(std::clamp(values.rows, 1, 6));
+      values.data_version = state.version();
+      values.cell = [parameters](int row, int column) {
+        const auto &field = parameters.at("fields").at(row);
+        const std::string id = io::get_string(field, "id");
+        if (column == 0) { return io::get_string(field, "name"); }
+        if (column == 2) { return io::get_string(parameters.at("effective_units"), id); }
+        const auto &data = parameters.at("values");
+        if (!data.contains(id)) { return std::string(); }
+        return data.at(id).is_string() ? data.at(id).get<std::string>() : data.at(id).dump();
+      };
+      detail->table("parameters", std::move(values));
+      for (const auto &file : plan.at("inputs")) {
+        detail->paragraph(io::get_string(file, "path") + " · " + std::to_string(io::get_int(file, "size", 0)) + " B");
+        detail->paragraph("SHA-256: " + io::get_string(file, "sha256"));
       }
     }
   }

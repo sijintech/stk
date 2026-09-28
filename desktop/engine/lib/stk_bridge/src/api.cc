@@ -183,6 +183,35 @@ Future<Json> Client::project_snapshots_verify(const std::string &handle, const s
   return call("project.snapshots.verify", object({{"handle", handle}, {"snapshot_id", snapshot_id}}));
 }
 
+Future<Json> Client::project_runs_list(const std::string &handle, const int64_t offset, const int limit)
+{
+  return call("project.runs.list", object({{"handle", handle}, {"offset", offset}, {"limit", limit}}));
+}
+
+Future<Json> Client::project_runs_get(const std::string &handle, const std::string &run_id)
+{
+  return call("project.runs.get", object({{"handle", handle}, {"run_id", run_id}}));
+}
+
+Future<Json> Client::project_runs_submit(const std::string &handle, const std::string &run_id, const bool allow_stale)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.runs.submit", object({{"handle", handle}, {"run_id", run_id}, {"allow_stale", allow_stale}}), options);
+}
+
+Future<Json> Client::project_runs_refresh(const std::string &handle, const std::string &run_id)
+{
+  return call("project.runs.refresh", object({{"handle", handle}, {"run_id", run_id}}));
+}
+
+Future<Json> Client::project_runs_cancel(const std::string &handle, const std::string &run_id)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.runs.cancel", object({{"handle", handle}, {"run_id", run_id}}), options);
+}
+
 /* -- Connections -------------------------------------------------------------------------- */
 
 Future<std::vector<ConnectionInfo>> Client::connections_list()

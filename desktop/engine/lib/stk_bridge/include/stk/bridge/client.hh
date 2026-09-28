@@ -291,6 +291,11 @@ class Client {
   Future<Json> project_files_index(const std::string &handle, int64_t expected_revision, const std::vector<std::string> &paths);
   Future<Json> project_files_refresh(const std::string &handle, int64_t expected_revision, const std::vector<std::string> &record_ids);
   Future<Json> project_files_resolve(const std::string &handle, int64_t expected_revision, const std::string &record_id);
+  Future<Json> project_runs_list(const std::string &handle, int64_t offset = 0, int limit = 100);
+  Future<Json> project_runs_get(const std::string &handle, const std::string &run_id);
+  Future<Json> project_runs_submit(const std::string &handle, const std::string &run_id, bool allow_stale = false);
+  Future<Json> project_runs_refresh(const std::string &handle, const std::string &run_id);
+  Future<Json> project_runs_cancel(const std::string &handle, const std::string &run_id);
   Future<Json> project_snapshots_list(const std::string &handle);
   Future<Json> project_snapshots_capture(const std::string &handle, int64_t expected_revision,
                                        const std::vector<std::string> &record_ids, int64_t max_bytes = 256 * 1024 * 1024);

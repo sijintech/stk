@@ -109,6 +109,7 @@ ProjectState::~ProjectState()
   state_listener_.reset();
   changed_listener_.reset();
   closed_listener_.reset();
+  runs_listener_.reset();
 }
 
 template<class T, class F> void ProjectState::on(bridge::Future<T> future, F fn)
@@ -149,6 +150,9 @@ void ProjectState::sync()
   if (client_ != store_.bridge()) {
     attach(store_.bridge());
   }
+  if (runs_loaded_ && runs_dirty_ && ready() && loaded() && !busy()) {
+    load_runs(runs_offset_);
+  }
 }
 
 void ProjectState::attach(bridge::Client *client)
@@ -159,6 +163,7 @@ void ProjectState::attach(bridge::Client *client)
   state_listener_.reset();
   changed_listener_.reset();
   closed_listener_.reset();
+  runs_listener_.reset();
   ++epoch_;
   busy_ = fetching_ = snapshot_ready_ = false;
   if (project_) {
@@ -188,6 +193,12 @@ void ProjectState::attach(bridge::Client *client)
     if (weak.lock() && project_ && io::get_string(data, "handle") == project_->handle) {
       ++epoch_;
       clear();
+      changed();
+    }
+  });
+  runs_listener_ = client_->on_event("project.runs.changed", [this, weak](const auto &, const Json &data) {
+    if (weak.lock() && project_ && io::get_string(data, "handle") == project_->handle) {
+      runs_dirty_ = true;
       changed();
     }
   });
@@ -259,6 +270,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
        dirty_revision_ = project_->revision;
        if (!same) {
          tables_.clear();
+         clear_runs();
          input_snapshots_ = Json::array();
          input_verification_ = Json::object();
          table_id_.clear();
@@ -275,6 +287,7 @@ void ProjectState::clear()
 {
   notice_.clear();
   project_.reset();
+  clear_runs();
   tables_.clear();
   file_index_ = Json::object();
   input_snapshots_ = Json::array();
@@ -342,6 +355,7 @@ void ProjectState::refresh()
     undo_revision_ = io::get_int(history, "undo_revision", -1);
     redo_revision_ = io::get_int(history, "redo_revision", -1);
     snapshot_ready_ = true;
+    runs_dirty_ = true;
     validate_selection();
     changed();
     if (dirty_revision_ > project_->revision) {
@@ -572,6 +586,82 @@ bool ProjectState::verify_input_snapshot(const std::string &id)
     busy_ = false;
     if (!result) { fail(result.error()); }
     else { input_verification_ = result.value(); changed(); }
+    if (project_ && dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+void ProjectState::clear_runs()
+{
+  runs_ = Json::array();
+  run_ = Json::object();
+  run_id_.clear();
+  runs_offset_ = 0;
+  runs_next_offset_ = -1;
+  runs_loaded_ = runs_dirty_ = false;
+}
+
+bool ProjectState::load_runs(const int64_t offset)
+{
+  if (!ready() || busy() || !loaded() || project_->format_version < 5 || offset < 0) { return false; }
+  busy_ = true;
+  runs_dirty_ = false;
+  error_.clear();
+  on(client_->project_runs_list(project_->handle, offset), [this, offset](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); return; }
+    runs_ = result.value().at("runs");
+    runs_offset_ = offset;
+    runs_next_offset_ = io::get_int(result.value(), "next_offset", -1);
+    runs_loaded_ = true;
+    dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+    if (selected_run() < 0) {
+      run_id_ = runs_.empty() ? std::string() : io::get_string(runs_.front(), "id");
+      run_ = Json::object();
+    }
+    changed();
+    if (!run_id_.empty()) { select_run(run_id_); }
+    else if (dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+int ProjectState::selected_run() const
+{
+  for (size_t i = 0; i < runs_.size(); ++i) {
+    if (io::get_string(runs_[i], "id") == run_id_) { return int(i); }
+  }
+  return -1;
+}
+
+bool ProjectState::select_run(const std::string &id) { return run_operation("get", id); }
+bool ProjectState::submit_run(const bool allow_stale) { return run_operation("submit", run_id_, allow_stale); }
+bool ProjectState::refresh_run() { return run_operation("refresh", run_id_); }
+bool ProjectState::cancel_run() { return run_operation("cancel", run_id_); }
+
+bool ProjectState::run_operation(const std::string &action, const std::string &id, const bool allow_stale)
+{
+  if (!ready() || busy() || !loaded() || project_->format_version < 5 || id.empty()) { return false; }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  if (run_id_ != id) { run_ = Json::object(); }
+  run_id_ = id;
+  auto future = action == "submit" ? client_->project_runs_submit(project_->handle, id, allow_stale) :
+                action == "cancel" ? client_->project_runs_cancel(project_->handle, id) :
+                action == "refresh" ? client_->project_runs_refresh(project_->handle, id) :
+                client_->project_runs_get(project_->handle, id);
+  on(std::move(future), [this, action](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); }
+    else {
+      run_ = result.value().at("run");
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(run_, "parameter_revision", -1));
+      if (action != "get") { runs_dirty_ = true; }
+      changed();
+    }
     if (project_ && dirty_revision_ > project_->revision) { refresh(); }
   });
   changed();

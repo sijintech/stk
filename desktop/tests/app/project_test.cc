@@ -669,5 +669,131 @@ TEST_F(ProjectPython, DroppedFilesRegisterInCurrentProjectAndUndoRemovesOnlyTheI
   EXPECT_TRUE(state().file_index().empty());
 }
 
+TEST_F(ProjectPython, FrozenRunTableLoadsWithoutExecutionAndTracksParameterChanges)
+{
+  populated();
+  std::optional<bridge::Result<Json>> response;
+  client->call("connections.add_runtime", {{"name", "offline"}, {"url", "http://127.0.0.1:1"},
+                                            {"token", "test-only"}, {"check", false}})
+      .then([&](auto result) { response = result; });
+  ASSERT_TRUE(loop.pump_until([&] { return response.has_value(); }));
+  ASSERT_TRUE(response->ok()) << response->error().message;
+  response.reset();
+  client->call("project.runs.prepare", {{"handle", state().project()->handle}, {"connection", "runtime:offline"},
+      {"expected_revision", 1}, {"entries", Json::array({{
+        {"table_id", table_id}, {"record_id", record_id}, {"label", "300 K"},
+        {"spec", {{"workspace_id", std::string(32, 'a')}, {"argv", Json::array({"solver", "--temperature", "300"})}}}
+      }})}}).then([&](auto result) { response = result; });
+  ASSERT_TRUE(loop.pump_until([&] { return response.has_value() && !state().busy() && state().project()->revision == 2; }));
+  ASSERT_TRUE(response->ok()) << response->error().message;
+  const std::string run_id = response->value().at("run_ids").front();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto *panel = f.screen.ui()->find("a2/main/project_runs");
+  ASSERT_NE(panel, nullptr);
+  const auto [x, y] = f.widget_center("a2/main/project_runs");
+  f.drv->click(x, y);
+  f.drv->frame();
+  ASSERT_NE(f.screen.ui()->find("a2/main/project_runs/list"), nullptr);
+  f.screen.ui()->find("a2/main/project_runs/list")->on_click();
+  settled();
+  f.drv->frame();
+  ASSERT_EQ(state().runs().size(), 1u);
+  EXPECT_EQ(state().run_id(), run_id);
+  EXPECT_EQ(state().run().at("status").at("submission"), "prepared");
+  EXPECT_EQ(state().run().at("parameter_state"), "current");
+  EXPECT_TRUE(f.screen.ui()->find("a2/main/project_runs/submit")->enabled);
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/project_runs/cancel")->enabled);
+  EXPECT_TRUE(state().error().empty());  // The saved endpoint is offline; list/get do not contact it.
+  ASSERT_TRUE(state().apply(set_cell(400)));
+  settled();
+  state().sync();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().run().at("parameter_state"), "changed");
+  EXPECT_EQ(state().run().at("plan").at("parameters").at("values").at(field_id), 300);
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/project_runs/submit")->enabled);
+  ASSERT_NE(f.screen.ui()->find("a2/main/project_runs/allow_stale"), nullptr);
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/project_runs/allow_stale")->boolean.value());
+  // Calling the controller directly still reaches the backend's independent stale-plan guard.
+  ASSERT_TRUE(state().submit_run());
+  settled();
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_EQ(state().run().at("status").at("submission"), "prepared");
+  ASSERT_TRUE(state().close());
+  settled();
+  EXPECT_TRUE(state().runs().empty());
+  EXPECT_TRUE(state().run().empty());
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  settled();
+  ASSERT_TRUE(state().load_runs());
+  settled();
+  EXPECT_EQ(state().run_id(), run_id);
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(state().run().at("status").at("submission"), "prepared");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, RunButtonsSubmitRefreshAndCancelOneTaskWithoutChangingTableRevision)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  const std::string source = "import sys\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom run_peer import Peer\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "peer = Peer()\nConnectionStore(" + Json(dir.str() + "/bridge").dump() + ").add_runtime('peer', peer.url, 'test-only', check=False)\n"
+      "plan = stk.project.runs.prepare([{'table_id': " + Json(table_id).dump() + ", 'record_id': " + Json(record_id).dump() +
+      ", 'spec': {'workspace_id': 'a' * 32, 'argv': ['solver']}}], connection='runtime:peer', expected_revision=1)\n"
+      "assert peer.submit_count == 0";
+  ASSERT_TRUE(scripts.execute(source));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy() && !state().busy(); }, 30));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  ASSERT_TRUE(state().load_runs());
+  settled();
+  ASSERT_EQ(state().runs().size(), 1u) << state().error();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  settled();
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_runs");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_runs/" + key); };
+  ASSERT_NE(widget("submit"), nullptr);
+  ASSERT_TRUE(widget("submit")->enabled);
+  widget("submit")->on_click();
+  settled();
+  state().sync();
+  settled();
+  f.drv->frame();
+  ASSERT_EQ(state().run().at("status").at("submission"), "accepted") << state().error();
+  EXPECT_EQ(state().run().at("status").at("task").at("state"), "queued");
+  EXPECT_FALSE(widget("submit")->enabled);
+  ASSERT_TRUE(widget("refresh")->enabled);
+  widget("refresh")->on_click();
+  settled();
+  state().sync();
+  settled();
+  f.drv->frame();
+  ASSERT_TRUE(widget("cancel")->enabled);
+  widget("cancel")->on_click();
+  settled();
+  state().sync();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().run().at("status").at("task").at("state"), "cancelled");
+  EXPECT_FALSE(widget("cancel")->enabled);
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  ASSERT_TRUE(scripts.execute("assert peer.submit_count == 1\nassert peer.cancel_count == 1\npeer.close()"));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
+  EXPECT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 }  // namespace
 }  // namespace stk::app

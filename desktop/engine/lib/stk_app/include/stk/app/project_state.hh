@@ -78,6 +78,17 @@ class ProjectState {
   bool verify_input_snapshot(const std::string &id);
   const io::Json &input_snapshots() const { return input_snapshots_; }
   const io::Json &input_verification() const { return input_verification_; }
+  bool load_runs(int64_t offset = 0);
+  bool select_run(const std::string &id);
+  bool submit_run(bool allow_stale = false);
+  bool refresh_run();
+  bool cancel_run();
+  const io::Json &runs() const { return runs_; }
+  const io::Json &run() const { return run_; }
+  const std::string &run_id() const { return run_id_; }
+  int64_t runs_offset() const { return runs_offset_; }
+  int64_t runs_next_offset() const { return runs_next_offset_; }
+  int selected_run() const;
   std::function<bool(const std::string &, std::string *)> open_external, open_vscode;
   const ProjectTable *table() const;
   const std::string &table_id() const { return table_id_; }
@@ -96,12 +107,14 @@ class ProjectState {
   void clear();
   void validate_selection();
   bool restore_edit(bool redo);
+  bool run_operation(const std::string &action, const std::string &id, bool allow_stale = false);
+  void clear_runs();
   bool edit_files(const std::vector<std::string> &items, bool index);
 
   AppStore &store_;
   bridge::Client *client_ = nullptr;
   bridge::BridgeState bridge_state_ = bridge::BridgeState::Stopped;
-  bridge::ListenerHandle state_listener_, changed_listener_, closed_listener_;
+  bridge::ListenerHandle state_listener_, changed_listener_, closed_listener_, runs_listener_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   uint64_t epoch_ = 0, version_ = 0;
   bool busy_ = false, fetching_ = false, snapshot_ready_ = false;
@@ -111,6 +124,10 @@ class ProjectState {
   std::vector<ProjectTable> tables_;
   io::Json file_index_ = io::Json::object();
   io::Json input_snapshots_ = io::Json::array(), input_verification_ = io::Json::object();
+  io::Json runs_ = io::Json::array(), run_ = io::Json::object();
+  std::string run_id_;
+  int64_t runs_offset_ = 0, runs_next_offset_ = -1;
+  bool runs_loaded_ = false, runs_dirty_ = false;
   std::string table_id_, record_id_, error_, notice_;
 };
 

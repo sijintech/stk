@@ -124,6 +124,24 @@ int main(int argc, char **argv)
           else { ok = false; }
         }
       }
+      if (editor == "runs") {
+        std::optional<bridge::Result<io::Json>> result;
+        client->call("connections.add_runtime", {{"name", "demo"}, {"url", "http://127.0.0.1:1"},
+          {"token", "render-test-only"}, {"check", false}}).then([&](auto r) { result = r; });
+        ok = ok && loop.pump_until([&] { return result.has_value(); }, 30) && result->ok();
+        io::Json entries = io::Json::array();
+        for (int i = 0; i < 4; ++i) {
+          entries.push_back({{"table_id", table}, {"record_id", std::to_string(40000000 + i) + "-4444-4444-8444-444444444444"},
+            {"label", std::to_string(300 + i * 25) + " K"}, {"spec", {{"workspace_id", std::string(32, 'a')},
+              {"argv", io::Json::array({"solver", "--temperature", std::to_string(300 + i * 25)})}}}});
+        }
+        result.reset();
+        client->call("project.runs.prepare", {{"handle", state.project()->handle}, {"connection", "runtime:demo"},
+          {"expected_revision", state.project()->revision}, {"entries", entries}}).then([&](auto r) { result = r; });
+        ok = ok && loop.pump_until([&] { return result.has_value() && !state.busy(); }, 30) && result->ok();
+        ok = ok && state.load_runs() && loop.pump_until([&] { return !state.busy(); }, 30);
+        ok = ok && state.runs().size() == 4 && !state.run().empty();
+      }
       screen.set_maximized(area);
       wm::DrawContext ctx;
       ctx.ui_scale = 1;
@@ -138,15 +156,23 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      if (editor == "manage" || editor == "files" || editor == "snapshots") {
+      if (editor == "manage" || editor == "files" || editor == "snapshots" || editor == "runs") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find(editor == "manage" ? "a2/main/manage_objects" :
-                                                  editor == "files" ? "a2/main/project_files" : "a2/main/input_snapshots")) {
+                                                  editor == "files" ? "a2/main/project_files" : editor == "runs" ? "a2/main/project_runs" : "a2/main/input_snapshots")) {
           const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
           screen.ui()->handle_event(ui::Event::mouse_down(center));
           screen.ui()->handle_event(ui::Event::mouse_up(center));
         }
         else { ok = false; }
+      }
+      if (editor == "runs") {
+        // Drawing services queued model notifications; wait for resulting list/detail reads
+        // before capturing enabled controls rather than the transient loading frame.
+        for (int i = 0; i < 3; ++i) {
+          ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && loop.pump_until([&] { return !state.busy(); }, 30);
+        }
       }
       ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
       ok = ok && gfx::png_write(output, image);
