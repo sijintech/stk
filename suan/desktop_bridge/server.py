@@ -149,7 +149,7 @@ class Bridge:
         self.inspected = {}
         self.connections = ConnectionStore(self.state_dir)
         self.graphs = GraphService(self.cache_dir, self.connections, self.emit)
-        self.projects = ProjectSessions()
+        self.projects = ProjectSessions(self.state_dir)
         self.project_runs = ProjectRuns(self.projects, self.connections.backend)
         self.ui = UIRequests(self.emit)
         self.scripts = ScriptSessions(self.emit, self.script_call)
@@ -204,6 +204,8 @@ class Bridge:
             "project.create": lambda p, c: self.projects.create(p),
             "project.open": lambda p, c: self.projects.open(p),
             "project.list": lambda p, c: self.projects.list(p),
+            "project.recent": lambda p, c: self.projects.recent(p),
+            "project.forget": lambda p, c: self.projects.forget(p),
             "project.close": self.close_project,
             "project.snapshot": lambda p, c: self.projects.snapshot(p),
             "project.apply": self.apply_project,
@@ -405,7 +407,7 @@ class Bridge:
     def script_catalog(self):
         # Deliberate initial coverage. In particular, scripts cannot recursively dispatch their
         # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
-        names = ("project.create", "project.open", "project.list", "project.close", "project.snapshot",
+        names = ("project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot",
                  "project.apply", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",

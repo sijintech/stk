@@ -277,7 +277,7 @@ class Client {
 
   /* -- Local projects (§13). Handles expire on bridge restart; reopen by directory. --------- */
   Future<ProjectInfo> project_create(const std::string &directory, const std::string &name);
-  Future<ProjectInfo> project_open(const std::string &directory);
+  Future<ProjectInfo> project_open(const std::string &directory, const std::string &expected_id = {});
   Future<std::vector<ProjectInfo>> project_list();
   Future<bool> project_close(const std::string &handle);
   Future<Json> project_snapshot(const std::string &handle);

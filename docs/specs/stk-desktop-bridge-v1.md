@@ -492,8 +492,10 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | Method | Params | Result |
 |---|---|---|
 | `project.create` | `{directory, name}` | `{project}` |
-| `project.open` | `{directory}` | `{project}` |
+| `project.open` | `{directory, expected_id?: project UUID}` | `{project}` |
 | `project.list` | `{}` | `{projects: [project]}` |
+| `project.recent` | `{}` | `{projects: [{id, directory, name, last_opened}], warning}` |
+| `project.forget` | `{directory}` | `{removed: boolean}` |
 | `project.close` | `{handle}` | `{closed: boolean}` |
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
@@ -598,6 +600,15 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 - Snapshot/history are currently unpaginated and subject to the 16 MiB line limit (§2), returning
   `result_too_large` when necessary. Large scientific arrays and files do not belong in JSON cells.
   No project directory is automatically reopened by a new bridge; the desktop owns recovery intent.
+
+Recent locations are bridge preferences (`recent-projects.json`, version 1), at most 20 entries in
+most-recently-opened order. Creating/opening successfully remembers canonical directory, project UUID,
+last known name and UTC ISO timestamp. Listing reads saved metadata only, without opening or stat'ing
+the projects; missing locations remain listed. Forgetting never deletes project files or closes handles.
+An optional `expected_id` on open rejects a replaced project before registering a handle or updating history.
+History persistence failure is a `warning` in `project.recent`, not a failed project create/open; an
+explicit forget that cannot persist fails with `unavailable`. Corrupt/unknown history is preserved and
+reported, never silently replaced. Preferences do not advance project revisions or emit project change events.
 
 ## 14. Local Python sessions and desktop control (additive extension)
 

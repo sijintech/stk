@@ -2517,6 +2517,9 @@
           "properties": {
             "directory": {
               "$ref": "#/$defs/absPath"
+            },
+            "expected_id": {
+              "$ref": "#/$defs/projectUuid"
             }
           },
           "required": [
@@ -4234,6 +4237,87 @@
           },
           "required": [
             "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.recent": {
+        "description": "Read up to 20 saved recent project locations without opening their databases. Names and timestamps are historical metadata. Persistence errors are reported as warning.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "projects": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "directory": {
+                    "$ref": "#/$defs/absPath"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  "last_opened": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "id",
+                  "directory",
+                  "name",
+                  "last_opened"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "warning": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "projects",
+            "warning"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.forget": {
+        "description": "Forget a recent location without closing sessions or deleting project files.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "required": [
+            "directory"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "removed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "removed"
           ],
           "additionalProperties": false
         }

@@ -19,6 +19,10 @@
 草稿和文件路径可随“保存布局”保存；变量、执行历史和输出不跨程序启动保存。
 当前没有语法高亮、自动补全、块缩进或 Notebook；Shift+Tab / Ctrl+Tab 移动输入焦点。
 
+`stk.projects.recent()` 返回最近 20 个项目的历史元数据与持久化警告，`stk.projects.forget(directory)`
+仅移除列表项；`stk.projects.open(directory, expected_id=...)` 可防止误开已被替换的项目。
+它们复用[最近项目列表](project.md)；历史不等同于当前打开的会话列表。
+
 ## 会话与项目
 
 桌面桥的 `script.open` 创建一个共享会话，`script.execute` 显式执行多行源码或 UTF-8 文件。

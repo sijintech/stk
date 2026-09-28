@@ -828,5 +828,9 @@
   "project.runs.running": "运行中",
   "project.runs.succeeded": "已成功",
   "project.runs.failed": "已失败",
-  "project.runs.rejected": "已拒绝"
+  "project.runs.rejected": "已拒绝",
+  "project.recent.title": "最近项目",
+  "project.recent.empty": "尚无最近打开的项目。",
+  "project.recent.forget": "移除记录",
+  "project.recent.hint": "移除只清除这条历史记录，项目文件和已打开的会话都会保留。"
 }

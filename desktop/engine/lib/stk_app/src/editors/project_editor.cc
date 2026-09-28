@@ -61,6 +61,7 @@ class ProjectEditor final : public Editor {
         state.create(path(), name_);
       }).disable(!state.ready() || state.busy() || directory_.empty() || name_.empty());
     }
+    recent_controls(layout, ctx, state);
     if (!state.project()) {
       layout.paragraph(ctx.tr("project.intro"));
       return;
@@ -226,6 +227,46 @@ class ProjectEditor final : public Editor {
 
   std::string run_consent_id_;
   bool allow_stale_run_ = false;
+
+  void recent_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
+  {
+    auto *panel = layout.panel("project_recent", ctx.tr("project.recent.title"), !state.project());
+    if (!panel) { return; }
+    if (!state.recent_loaded() && !state.recent_loading()) { state.load_recent(); }
+    panel->button("reload", ctx.tr("project.refresh"), [&state] { state.load_recent(); })
+        .disable(!state.ready() || state.recent_loading());
+    if (!state.recent_error().empty()) { panel->paragraph(state.recent_error()); }
+    const auto &entries = state.recent();
+    if (entries.empty()) { panel->paragraph(ctx.tr("project.recent.empty")); return; }
+    std::vector<std::vector<std::string>> cells;
+    int selected = -1;
+    for (const auto &entry : entries) {
+      const auto directory = io::get_string(entry, "directory");
+      if (directory == recent_directory_) { selected = int(cells.size()); }
+      cells.push_back({io::get_string(entry, "name"), directory});
+    }
+    ui::TableSpec table;
+    table.columns = {{std::string(ctx.tr("project.name")), 10.0f}, {std::string(ctx.tr("project.directory")), 28.0f}};
+    table.rows = int(cells.size());
+    table.visible_rows = float(std::clamp(int(cells.size()), 2, 5));
+    table.data_version = state.version();
+    table.cell = [cells = std::move(cells)](int row, int column) { return cells.at(row).at(column); };
+    table.selected = {[selected] { return selected; }, [this, &state](int row) {
+      if (row >= 0 && size_t(row) < state.recent().size()) { recent_directory_ = io::get_string(state.recent()[row], "directory"); }
+    }};
+    panel->table("projects", std::move(table));
+    if (selected < 0) { return; }
+    const auto entry = entries[selected];
+    panel->paragraph(io::get_string(entry, "directory"));
+    panel->paragraph(io::get_string(entry, "last_opened"));
+    auto &buttons = panel->row();
+    buttons.button("open", ctx.tr("project.open"), [&state, entry] { state.open_recent(entry); })
+        .disable(!state.ready() || state.busy() || state.recent_loading());
+    buttons.button("forget", ctx.tr("project.recent.forget"), [&state, entry] {
+      state.forget_recent(io::get_string(entry, "directory"));
+    }).disable(!state.ready() || state.recent_loading());
+    panel->paragraph(ctx.tr("project.recent.hint"));
+  }
 
   void run_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
   {
@@ -800,7 +841,7 @@ class ProjectEditor final : public Editor {
     box.paragraph(ctx.tr(cell_mode_ == 0 ? "project.cell_hint" : "project.expression_hint"));
   }
 
-  std::string directory_, name_, table_name_, field_name_, unit_, cell_field_;
+  std::string directory_, name_, table_name_, field_name_, unit_, cell_field_, recent_directory_;
   std::string file_project_, file_paths_;
   std::string input_snapshot_;
   std::string cell_text_, draft_identity_, literal_error_;

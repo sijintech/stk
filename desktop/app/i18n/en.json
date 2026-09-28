@@ -828,5 +828,9 @@
   "project.runs.running": "Running",
   "project.runs.succeeded": "Succeeded",
   "project.runs.failed": "Failed",
-  "project.runs.rejected": "Rejected"
+  "project.runs.rejected": "Rejected",
+  "project.recent.title": "Recent projects",
+  "project.recent.empty": "No recently opened projects.",
+  "project.recent.forget": "Forget location",
+  "project.recent.hint": "Forgetting a location only removes this history entry. Project files and open sessions are kept."
 }

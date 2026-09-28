@@ -148,8 +148,11 @@ class Projects:
     def __init__(self, call):
         self._call = call
 
-    def open(self, directory):
-        info = self._call("project.open", {"directory": str(Path(directory).resolve())})["project"]
+    def open(self, directory, *, expected_id=None):
+        params = {"directory": str(Path(directory).expanduser().resolve())}
+        if expected_id is not None:
+            params["expected_id"] = expected_id
+        info = self._call("project.open", params)["project"]
         return Project(self._call, info["handle"])
 
     def create(self, directory, name):
@@ -158,6 +161,14 @@ class Projects:
 
     def list(self):
         return self._call("project.list", {})["projects"]
+
+    def recent(self):
+        """Return saved metadata and a possible persistence warning; does not open projects."""
+        return self._call("project.recent", {})
+
+    def forget(self, directory):
+        """Remove only a history entry; never closes or deletes the project."""
+        return self._call("project.forget", {"directory": str(Path(directory).expanduser().absolute())})["removed"]
 
 
 class Desktop:

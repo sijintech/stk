@@ -142,6 +142,12 @@ int main(int argc, char **argv)
         ok = ok && state.load_runs() && loop.pump_until([&] { return !state.busy(); }, 30);
         ok = ok && state.runs().size() == 4 && !state.run().empty();
       }
+      if (editor == "recent") {
+        ok = ok && state.close() && loop.pump_until([&] { return !state.busy() && !state.recent_loading(); }, 30);
+        ok = ok && state.create(dir.str() + "/comparison", "Comparison / 对比分析") &&
+             loop.pump_until([&] { return !state.busy() && !state.recent_loading(); }, 30);
+        ok = ok && state.close() && loop.pump_until([&] { return !state.busy(); }, 30);
+      }
       screen.set_maximized(area);
       wm::DrawContext ctx;
       ctx.ui_scale = 1;
@@ -149,6 +155,14 @@ int main(int argc, char **argv)
       ctx.rect = {0, 0, 1280, 900};
       ctx.now = 100;
       gfx::Image image;
+      if (editor == "recent") {
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && loop.pump_until([&] { return !state.recent_loading(); }, 30);
+        if (const auto *widget = screen.ui()->find("a2/main/project_recent/projects"); widget && widget->table) {
+          widget->table->selected.assign(0);
+        }
+        else { ok = false; }
+      }
       if (editor == "expression") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find("a2/main/cell_field")) {

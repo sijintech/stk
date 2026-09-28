@@ -72,9 +72,10 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
     assert ProjectStore(directory).info()["revision"] == 1
     assert execute(scripts, session, "stk.call('shutdown')")["run"]["state"] == "failed"
     assert scripts.call("hello", {"protocol": 1})["protocol"] == 1
+    assert execute(scripts, session, "recent = stk.projects.recent()['projects']\nassert len(recent) == 1\nassert stk.projects.open(recent[0]['directory'], expected_id=recent[0]['id']).snapshot()['project']['id'] == recent[0]['id']\nassert stk.projects.forget(recent[0]['directory'])\nassert stk.projects.recent()['projects'] == []")["run"]["state"] == "succeeded"
     operations = set(scripts.call("script.catalog")["operations"])
     assert {name for name in operations if name.startswith("project.") and not name.startswith(("project.snapshots.", "project.runs."))} == {
-        "project.create", "project.open", "project.list", "project.close", "project.snapshot", "project.apply", "project.history",
+        "project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot", "project.apply", "project.history",
         "project.backup", "project.upgrade", "project.undo", "project.redo",
         "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve"}
     assert {"workspace.create", "task.submit", "task.logs", "upload.start", "transfer.get", "connections.ssh"} <= operations

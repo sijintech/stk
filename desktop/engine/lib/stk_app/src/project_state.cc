@@ -165,6 +165,10 @@ void ProjectState::attach(bridge::Client *client)
   closed_listener_.reset();
   runs_listener_.reset();
   ++epoch_;
+  ++recent_epoch_;
+  recent_loaded_ = recent_loading_ = recent_dirty_ = false;
+  recent_.clear();
+  recent_error_.clear();
   busy_ = fetching_ = snapshot_ready_ = false;
   if (project_) {
     project_->handle.clear();
@@ -213,6 +217,10 @@ void ProjectState::on_state(const bridge::BridgeState state)
   bridge_state_ = state;
   if (state != bridge::BridgeState::Ready) {
     ++epoch_;
+    ++recent_epoch_;
+    recent_loaded_ = recent_loading_ = recent_dirty_ = false;
+    recent_.clear();
+    recent_error_.clear();
     busy_ = fetching_ = snapshot_ready_ = false;
     if (project_) {
       project_->handle.clear();
@@ -222,6 +230,55 @@ void ProjectState::on_state(const bridge::BridgeState state)
     start_open(project_->directory, {}, false, project_->id);
   }
   changed();
+}
+
+void ProjectState::load_recent()
+{
+  if (!ready()) { return; }
+  const auto hello = client_->hello_info();
+  if (!hello || !hello->has_method("project.recent")) { recent_loaded_ = true; return; }
+  if (recent_loading_) { recent_dirty_ = true; return; }
+  recent_loading_ = true;
+  recent_dirty_ = false;
+  const auto generation = recent_epoch_;
+  std::weak_ptr<bool> weak = alive_;
+  client_->call("project.recent").then([this, weak, generation](const bridge::Result<Json> &result) {
+    if (!weak.lock() || generation != recent_epoch_) { return; }
+    recent_loading_ = false;
+    recent_loaded_ = true;
+    if (result.ok()) {
+      recent_ = result.value().at("projects");
+      recent_error_ = io::get_string(result.value(), "warning");
+    }
+    else { recent_error_ = result.error().describe(); }
+    changed();
+    if (recent_dirty_) { load_recent(); }
+  });
+  changed();
+}
+
+bool ProjectState::forget_recent(const std::string &directory)
+{
+  if (!ready() || recent_loading_) { return false; }
+  recent_loading_ = true;
+  const auto generation = recent_epoch_;
+  std::weak_ptr<bool> weak = alive_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  client_->call("project.forget", {{"directory", directory}}, options).then(
+      [this, weak, generation](const bridge::Result<Json> &result) {
+    if (!weak.lock() || generation != recent_epoch_) { return; }
+    recent_loading_ = false;
+    if (!result.ok()) { recent_error_ = result.error().describe(); changed(); return; }
+    load_recent();
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::open_recent(const Json &entry)
+{
+  return start_open(io::get_string(entry, "directory"), {}, false, io::get_string(entry, "id"));
 }
 
 bool ProjectState::create(const std::string &directory, const std::string &name)
@@ -246,7 +303,9 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
   busy_ = true;
   error_.clear();
   notice_.clear();
-  on(create ? client_->project_create(directory, name) : client_->project_open(directory),
+  const auto hello = client_->hello_info();
+  const std::string guard = hello && hello->has_method("project.recent") ? expected_id : std::string();
+  on(create ? client_->project_create(directory, name) : client_->project_open(directory, guard),
      [this, expected_id = std::move(expected_id), complete = std::move(complete)](const bridge::Result<bridge::ProjectInfo> &result) {
        busy_ = false;
        if (!result.ok()) {
@@ -277,6 +336,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
          record_id_.clear();
        }
        refresh();
+       load_recent();
        if (complete) { complete(*project_); }
      });
   changed();

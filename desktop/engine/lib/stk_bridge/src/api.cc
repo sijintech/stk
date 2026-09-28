@@ -71,9 +71,11 @@ Future<ProjectInfo> Client::project_create(const std::string &directory, const s
   });
 }
 
-Future<ProjectInfo> Client::project_open(const std::string &directory)
+Future<ProjectInfo> Client::project_open(const std::string &directory, const std::string &expected_id)
 {
-  return call("project.open", object({{"directory", directory}})).map([](const Json &r) {
+  Json params = {{"directory", directory}};
+  if (!expected_id.empty()) { params["expected_id"] = expected_id; }
+  return call("project.open", std::move(params)).map([](const Json &r) {
     return ProjectInfo::from_json(field(r, "project"));
   });
 }

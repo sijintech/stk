@@ -234,6 +234,69 @@ TEST_F(ProjectPython, BridgeRestartReopensWithoutReplayingEdits)
   EXPECT_EQ(state().table()->text(0, 0), "300");
 }
 
+TEST_F(ProjectPython, RecentProjectsReopenAfterRestartAndForgetOnlyHistoryThroughButtons)
+{
+  populated();
+  const auto before = *state().project();
+  ASSERT_TRUE(state().close());
+  settled();
+  const auto previous_pid = client->bridge_pid();
+  client->shutdown_bridge();
+  ASSERT_TRUE(loop.pump_until([&] { return state().ready() && client->state() == bridge::BridgeState::Ready &&
+      client->bridge_pid() != 0 && client->bridge_pid() != previous_pid; }, 60));
+  EXPECT_FALSE(state().project());
+  state().load_recent();
+  ASSERT_TRUE(loop.pump_until([&] { return state().recent_loaded() && !state().recent_loading(); }, 30));
+  ASSERT_EQ(state().recent().size(), 1u);
+  EXPECT_EQ(state().recent()[0]["id"], before.id);
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  auto *table = f.screen.ui()->find("a2/main/project_recent/projects");
+  ASSERT_NE(table, nullptr);
+  ASSERT_TRUE(table->table);
+  table->table->selected.assign(0);
+  f.drv->frame();
+  auto *open = f.screen.ui()->find("a2/main/project_recent/open");
+  ASSERT_NE(open, nullptr);
+  open->on_click();
+  settled();
+  ASSERT_TRUE(state().loaded()) << state().error();
+  EXPECT_EQ(state().project()->id, before.id);
+  EXPECT_NE(state().project()->handle, before.handle);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  ASSERT_TRUE(loop.pump_until([&] { return !state().recent_loading(); }, 30));
+  f.drv->frame();
+  auto *forget = f.screen.ui()->find("a2/main/project_recent/forget");
+  ASSERT_NE(forget, nullptr);
+  forget->on_click();
+  ASSERT_TRUE(loop.pump_until([&] { return !state().recent_loading(); }, 30));
+  EXPECT_TRUE(state().recent().empty());
+  EXPECT_TRUE(state().loaded());
+  EXPECT_EQ(state().project()->revision, before.revision);
+  EXPECT_TRUE(std::filesystem::is_regular_file(core::path_from_utf8(before.directory) / "project.sqlite3"));
+  state().refresh();
+  settled();
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+}
+
+TEST_F(ProjectPython, RecentIdentityGuardKeepsTheCurrentlyOpenProject)
+{
+  populated();
+  const auto before = *state().project();
+  ASSERT_TRUE(loop.pump_until([&] { return state().recent_loaded() && !state().recent_loading(); }, 30));
+  Json wrong = state().recent().front();
+  wrong["id"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  ASSERT_TRUE(state().open_recent(wrong));
+  settled();
+  EXPECT_FALSE(state().error().empty());
+  ASSERT_TRUE(state().loaded());
+  EXPECT_EQ(state().project()->handle, before.handle);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_EQ(state().recent().front()["id"], before.id);
+}
+
 TEST_F(ProjectPython, TableEditorSavesTypedValuesThroughSharedModel)
 {
   populated();

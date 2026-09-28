@@ -55,6 +55,13 @@ class ProjectState {
   const std::string &notice() const { return notice_; }
   uint64_t version() const { return version_; }
 
+  void load_recent();
+  bool forget_recent(const std::string &directory);
+  bool open_recent(const io::Json &entry);
+  const io::Json &recent() const { return recent_; }
+  const std::string &recent_error() const { return recent_error_; }
+  bool recent_loading() const { return recent_loading_; }
+  bool recent_loaded() const { return recent_loaded_; }
   bool create(const std::string &directory, const std::string &name);
   bool open(const std::string &directory,
             std::function<void(bridge::Result<bridge::ProjectInfo>)> complete = {});
@@ -116,7 +123,10 @@ class ProjectState {
   bridge::BridgeState bridge_state_ = bridge::BridgeState::Stopped;
   bridge::ListenerHandle state_listener_, changed_listener_, closed_listener_, runs_listener_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
-  uint64_t epoch_ = 0, version_ = 0;
+  uint64_t epoch_ = 0, version_ = 0, recent_epoch_ = 0;
+  io::Json recent_ = io::Json::array();
+  std::string recent_error_;
+  bool recent_loaded_ = false, recent_loading_ = false, recent_dirty_ = false;
   bool busy_ = false, fetching_ = false, snapshot_ready_ = false;
   int64_t dirty_revision_ = -1;
   int64_t undo_revision_ = -1, redo_revision_ = -1;

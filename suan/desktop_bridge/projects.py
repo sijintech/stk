@@ -13,10 +13,12 @@ from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 
 from .protocol import BridgeError
+from .recent_projects import RecentProjects
 
 
 class ProjectSessions:
-    def __init__(self):
+    def __init__(self, state_dir=None):
+        self._recent = RecentProjects(state_dir)
         self._lock = threading.RLock()
         self._stores = {}
         self._closed = False
@@ -60,10 +62,13 @@ class ProjectSessions:
     def _register(self, store):
         for handle, existing in self._stores.items():
             if existing.path == store.path:
-                return self._info(handle, existing)
+                result = self._info(handle, existing)
+                self._recent.remember(result)
+                return result
         handle = uuid4().hex
         result = self._info(handle, store)
         self._stores[handle] = store
+        self._recent.remember(result)
         return result
 
     def create(self, params):
@@ -76,7 +81,22 @@ class ProjectSessions:
             directory = self._directory(params["directory"])
             if not (directory / DATABASE_NAME).is_file():
                 raise FileNotFoundError
-            return {"project": self._register(ProjectStore(directory))}
+            store = ProjectStore(directory)
+            if params.get("expected_id") is not None and store.info()["id"] != params["expected_id"]:
+                raise BridgeError("conflict", "The project at this location has been replaced; open its directory explicitly")
+            return {"project": self._register(store)}
+
+    def recent(self, params):
+        with self._operation():
+            return self._recent.list()
+
+    def forget(self, params):
+        with self._operation():
+            # Do not resolve a historical path again: a removed symlink must still be forgettable.
+            directory = Path(params["directory"])
+            if not directory.is_absolute():
+                raise BridgeError("invalid_params", "Project directory must be an absolute path")
+            return self._recent.forget(str(directory))
 
     def list(self, params):
         with self._operation():
