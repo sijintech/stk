@@ -240,6 +240,12 @@ class API:
         return Runtime(self._call, connection, node=node)
 
     @property
+    def batches(self):
+        """Save explicit case selections and prepare/submit/refresh/collect them independently."""
+        from suan.workflows.batches import Batches
+        return Batches(self)
+
+    @property
     def muferro(self):
         """Import native cases, prepare immutable plans, collect results and open their 3D view."""
         from suan.workflows.muferro import MuFerro

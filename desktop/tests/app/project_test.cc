@@ -1481,6 +1481,88 @@ TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOf
   EXPECT_FALSE(viewer.payload()->layers().empty());
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
+TEST_F(SimulationPython, NativeBatchButtonsPersistAndSubmitEachMemberOnce)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  auto &jobs = f.shell->store().jobs();
+  auto done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 90));
+    std::string output;
+    for (size_t i = 0; i < scripts.output().line_count(); ++i) { output += scripts.output().line(i); output += '\n'; }
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded") << output;
+  };
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  ASSERT_TRUE(scripts.execute("import sys, time\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom simulation_fixture import SimulationRuntime\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "_simulation_runtime = SimulationRuntime(" + Json(dir.str() + "/batch-runtime").dump() + ")\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('batch-test', _simulation_runtime.url, _simulation_runtime.config['token'], check=False)\n"
+      "p = stk.project\nfirst = stk.muferro.import_case(_simulation_runtime.source, expected_revision=p.snapshot()['project']['revision'])['record_id']\n"
+      "for _ in range(2):\n    stk.muferro.clone_case(first, expected_revision=p.snapshot()['project']['revision'])"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  jobs.sync();
+  jobs.refresh_connections();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &item) { return item.info.id == "runtime:batch-test"; });
+  }, 30));
+  jobs.select_connection("runtime:batch-test");
+  state().select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_batches");
+  f.drv->click(x, y);
+  auto click = [&](const std::string &id) {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.screen.run_deferred(); f.drv->frame();
+      const auto *widget = f.screen.ui()->find("a2/main/project_batches/" + id);
+      return widget && widget->enabled;
+    }, 30)) << id;
+    f.screen.ui()->find("a2/main/project_batches/" + id)->on_click();
+  };
+  ASSERT_NO_FATAL_FAILURE(click("all"));
+  ASSERT_NO_FATAL_FAILURE(click("create"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("create"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("from suan.workflows.batches import TABLE_ID as BT\nbatches = next(t for t in p.snapshot()['tables'] if t['id']==BT)\n"
+      "assert len(batches['records'])==1\nbatch = batches['records'][0]['id']\nassert len(stk.batches.inspect(batch)['items'])==3"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("all_prepare"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("all_prepare"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("assert len(p.runs.list()['runs'])==3\nassert not _simulation_runtime.client.tasks()"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("all_submit"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("all_submit"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("assert len(_simulation_runtime.client.tasks())==3\ndeadline=time.monotonic()+60\n"
+      "while any(t['state'] not in {'succeeded','failed','cancelled'} for t in _simulation_runtime.client.tasks()) and time.monotonic()<deadline:\n    time.sleep(.05)\n"
+      "assert all(t['state']=='succeeded' for t in _simulation_runtime.client.tasks())"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("all_refresh"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("all_collect"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("assert all(i['last_operation']['ok'] and i['state']=='succeeded' for i in stk.batches.inspect(batch)['items'])\n_simulation_runtime.close()"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(state().close()); settled();
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
+  f.drv->frame();
+  const auto *members = f.screen.ui()->find("a2/main/project_batches/members");
+  ASSERT_NE(members, nullptr);
+  ASSERT_TRUE(members->table);
+  EXPECT_EQ(members->table->rows, 3);
+  state().select_table("04d7cc6c-5da5-5c92-a860-f3368f7b376d");
+  ASSERT_NE(state().table(), nullptr);
+  EXPECT_EQ(state().table()->records.size(), 3u);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 #endif
 
 }  // namespace

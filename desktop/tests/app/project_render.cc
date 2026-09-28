@@ -179,7 +179,7 @@ int main(int argc, char **argv)
         ok = ok && state.import_csv(source, "Imported parameters / 导入参数", {{"Temperature", "number"}},
                                    {{"Temperature", "K"}}, ",") && loop.pump_until([&] { return !state.busy(); }, 30);
       }
-      if (editor == "simulation") {
+      if (editor == "simulation" || editor == "batches") {
         const auto source = core::path_from_utf8(dir.str() + "/case");
         std::filesystem::create_directories(source);
         { std::ofstream file(source / "input.toml");
@@ -227,9 +227,9 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      if (editor == "manage" || editor == "files" || editor == "snapshots" || editor == "runs" || editor == "csv" || editor == "simulation") {
+      if (editor == "manage" || editor == "files" || editor == "snapshots" || editor == "runs" || editor == "csv" || editor == "simulation" || editor == "batches") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
-        if (const auto *widget = screen.ui()->find(editor == "simulation" ? "a2/main/project_simulation" : editor == "manage" ? "a2/main/manage_objects" :
+        if (const auto *widget = screen.ui()->find((editor == "simulation" || editor == "batches") ? "a2/main/project_simulation" : editor == "manage" ? "a2/main/manage_objects" :
                                                   editor == "files" ? "a2/main/project_files" : editor == "csv" ? "a2/main/project_csv" : editor == "runs" ? "a2/main/project_runs" : "a2/main/input_snapshots")) {
           const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
           screen.ui()->handle_event(ui::Event::mouse_down(center));
@@ -237,7 +237,7 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      if (editor == "simulation") {
+      if (editor == "simulation" || editor == "batches") {
         auto &scripts = shell.store().scripts();
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         ok = ok && loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30);
@@ -254,6 +254,25 @@ int main(int argc, char **argv)
         ok = ok && scripts.status().at("run").at("state") == "succeeded";
         state.select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
         ok = ok && state.table() && state.table()->records.size() == 1;
+        if (editor == "batches") {
+          const auto id = state.record_id();
+          ok = ok && scripts.execute("p = stk.project\nrow = stk.muferro.clone_case(" + io::Json(id).dump() +
+              ", expected_revision=p.snapshot()['project']['revision'])['record_id']\n"
+              "stk.batches.create('muferro/1', [" + io::Json(id).dump() +
+              ", row], 'runtime:lab', expected_revision=p.snapshot()['project']['revision']); None");
+          ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
+          ok = ok && scripts.status().at("run").at("state") == "succeeded";
+          ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+          for (const auto *key : {"a2/main/project_simulation", "a2/main/project_batches"}) {
+            if (const auto *widget = screen.ui()->find(key)) {
+              const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
+              screen.ui()->handle_event(ui::Event::mouse_down(center));
+              screen.ui()->handle_event(ui::Event::mouse_up(center));
+            }
+            else { ok = false; }
+            ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+          }
+        }
       }
       if (editor == "csv") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);

@@ -80,6 +80,7 @@ print(p.backup())
 | 文件索引登记、刷新、列表、路径检查 | `stk.project.files` 已实现；不复制、删除、打开或执行文件，见[文件指南](project-files.md) |
 | 不可变输入副本、历史清单和 SHA-256 校验 | `stk.project.snapshots` 已实现，格式 4；显式复制选中文件，表格撤销不删除历史，见[输入快照](project-snapshots.md) |
 | 参数行、输入版本、执行规格和远端任务关联 | `stk.project.runs` 已实现，格式 5；显式准备/提交/刷新/取消，见[运行记录](project-runs.md) |
+| 版本化模板与多行仿真操作 | `stk.batches` 保存明确范围，逐行准备/提交/刷新/取消/收集；首个模板为 MuFerro，见[批次指南](simulation-batches.md) |
 | 布局读取/应用、编辑器列表、可见项目查询/打开/关闭 | 已接入原生 UI 主线程执行器，目标为第一个安装的主窗口 |
 | 已保存连接查询/检查、管理 SSH 状态/连接/断开 | `stk.connections`；配置与凭据继续在 Jobs 或 CLI 管理 |
 | Runtime/Hub 工作区、上传/下载、任务提交/查询/取消、产物、日志 | `stk.runtime(connection, node=...)` 与 `stk.transfers`；复用已有幂等和审核规则 |

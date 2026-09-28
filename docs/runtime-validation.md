@@ -2,6 +2,21 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-29 参数表驱动批次
+
+新增批次协调与原生面板复用项目运行和 MuFerro 模板。相关 Python **29 通过、2 跳过**，
+真实 Release MuFerro 批次显式启用后 **1 项通过**：298 K / 310 K 的两个运行，参考能量分别为
+`−727.9144455` / `−691.5580935`；重复准备/提交/收集不新增对应任务或结果。
+错误/恢复覆盖部分准备失败、进度持久化、关闭重开、过期参数、准备及提交响应丢失、中断、取消后
+仅为指定行生成独立尝试，以及伪造标签不能改变模板命令。参数入口校验最终 **1/1** 复验通过。
+
+完整桌面 **531/531、无跳过**；新的 Linux 原生按钮测试通过真实桥/Runtime 和明确的假 SDK
+执行三行批次，重复保存/准备/提交、收集以及服务器停止后的关闭重开均通过。
+四项中英文 GL/Vulkan 批次渲染通过，已查看中英文截图；中英文字典各 923 项一致。
+日志 `/tmp/stk-batch-python-all.log`、`/tmp/stk-batch-full.log`、JUnit `/tmp/stk-batch-full.xml`，
+真实运行日志 `/tmp/stk-batch-real.log`，证据 `/tmp/stk-batch-real-HRg9Kh/test_real_muferro_temperature_0/batch-evidence.json`。
+本批跨平台 CI 尚待推送后跟踪，不把原生自动化或 Linux 截图称为 macOS/Windows 真机交互验收。
+
 ## 2026-09-28 MuFerro 项目流程首版
 
 当前工作流通过真实桌面桥调用项目/Runtime API，连接隔离的本机 Linux Runtime，运行已安装的 Release muFerro。

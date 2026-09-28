@@ -209,6 +209,28 @@ def _folder(root, *parts):
     return path
 
 
+def describe_case(model, record_id, connection, options):
+    table = _table(model, TABLE_ID, FIELDS, FIELD_IDS)
+    row = next((r for r in table["records"] if r["id"] == record_id), None) if table else None
+    if row is None or any(e.get("state") != "ok" for e in row.get("evaluations", {}).values()):
+        raise ValueError("Select a MuFerro case row without formula errors")
+    values = {key: row["values"].get(field) for key, field in FIELD_IDS.items()}
+    _parameters(values)
+    if connection.startswith("hub:"):
+        raise ValueError("MuFerro preparation currently uses direct/SSH Runtime profiles; Hub preparation is not supported")
+    if set(options) & {"workspace_id", "case_dir", "inputs", "example", "name"}:
+        raise ValueError("The MuFerro workflow owns workspace, input and task names")
+    # Validate execution options before creating files or making network requests.
+    template = muferro_spec("0" * 32, case_dir="case", name="MuFerro", **options)
+    TaskSpec(**template)
+    fingerprint = hashlib.sha256(_canonical({"project": model["project"]["id"], "record": record_id,
+        "values": row["values"], "definitions": row.get("definitions", {}),
+        "fields": {f["id"]: [f["type"], f.get("unit")] for f in table["fields"]},
+        "connection": connection, "spec": template}).encode("utf-8")).hexdigest()
+    label = LABEL + str(values["name"])[:40] + f" · {values['temperature']:g} K / " + fingerprint
+    return values, template, label
+
+
 class MuFerro:
     def __init__(self, stk):
         self.stk = stk
@@ -247,6 +269,18 @@ class MuFerro:
         print("Imported MuFerro case:", row_id, "— edit its parameter row, then prepare", flush=True)
         return {"table_id": TABLE_ID, "record_id": row_id, "revision": result["revision"]}
 
+    def clone_case(self, record_id, *, expected_revision, project=None):
+        """Copy evaluated parameters as literals, sharing the immutable imported source."""
+        p = project or self.stk.project
+        model = _revision(p, expected_revision)
+        values, _, _ = describe_case(model, record_id, "local", {})
+        row_id = str(uuid4())
+        commands = [{"op": "add_record", "id": row_id, "table_id": TABLE_ID}]
+        commands += _cells(TABLE_ID, row_id, values, FIELD_IDS)
+        result = p.apply(commands, expected_revision=expected_revision)
+        print("Copied MuFerro parameters:", row_id, flush=True)
+        return {"record_id": row_id, "revision": result["revision"]}
+
     def prepare(self, record_id, connection, *, expected_revision, project=None, **options):
         """Freeze inputs and prepare one plan. Repeating the same row/options reuses that plan.
 
@@ -255,24 +289,8 @@ class MuFerro:
         """
         p = project or self.stk.project
         model = _revision(p, expected_revision)
-        table = _table(model, TABLE_ID, FIELDS, FIELD_IDS)
-        row = next((r for r in table["records"] if r["id"] == record_id), None) if table else None
-        if row is None or any(e.get("state") != "ok" for e in row.get("evaluations", {}).values()):
-            raise ValueError("Select a MuFerro case row without formula errors")
-        values = {key: row["values"].get(field) for key, field in FIELD_IDS.items()}
-        _parameters(values)
-        if connection.startswith("hub:"):
-            raise ValueError("MuFerro preparation currently uses direct/SSH Runtime profiles; Hub preparation is not supported")
-        if set(options) & {"workspace_id", "case_dir", "inputs", "example", "name"}:
-            raise ValueError("The MuFerro workflow owns workspace, input and task names")
-        # Validate execution options before creating files or making network requests.
-        template = muferro_spec("0" * 32, case_dir="case", name="MuFerro", **options)
-        TaskSpec(**template)
-        fingerprint = hashlib.sha256(_canonical({"project": model["project"]["id"], "record": record_id,
-            "values": row["values"], "definitions": row.get("definitions", {}),
-            "fields": {f["id"]: [f["type"], f.get("unit")] for f in table["fields"]},
-            "connection": connection, "spec": template}).encode("utf-8")).hexdigest()
-        label = LABEL + str(values["name"])[:40] + f" · {values['temperature']:g} K / " + fingerprint
+        values, template, label = describe_case(model, record_id, connection, options)
+        fingerprint = label.rsplit(" / ", 1)[1]
         offset = 0
         while True:
             page = p.runs.list(offset=offset)
@@ -436,6 +454,11 @@ def native_action(stk, action, params):
         raise ValueError("The selected project changed; inspect the current project before continuing")
     if action == "import":
         return stk.muferro.import_case(project=p, **params)
+    if action == "clone":
+        return stk.muferro.clone_case(project=p, **params)
+    if action.startswith("batch_"):
+        from suan.workflows.batches import native_action as batch_action
+        return batch_action(stk, action.removeprefix("batch_"), params, project=p)
     if action == "prepare":
         options = params.pop("options", {})
         return stk.muferro.prepare(project=p, **params, **options)

@@ -91,6 +91,7 @@ class ProjectEditor final : public Editor {
       panel->button("backup", ctx.tr("project.backup"), [&state] { state.backup(); }).disable(!editable);
     }
     simulation_view_.draw(layout, ctx, state);
+    simulation_view_.draw_batches(layout, ctx, state);
     file_controls(layout, ctx, state, editable);
     snapshot_controls(layout, ctx, state, editable);
     run_controls(layout, ctx, state, editable);
