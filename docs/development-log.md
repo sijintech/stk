@@ -41,6 +41,11 @@
 
 ### 紧接着处理
 
+SSH CI 补充：`33c88d6` 的 Runtime run 36384809632 全部成功，包括 Linux 真实 sshd 和 Windows
+模拟传输；文档部署成功。desktop run 36384809472 的 Linux/macOS/打包成功，Windows 现有 CPU
+测试通过，但必跑检查发现 SSH 用例未被旧 CMake Windows 过滤器注册。已将该可移植用例加入过滤器；
+不删除必跑检查，修正后 CI 待跟踪。
+
 - 跟踪 SSH 批次的跨平台 CI；不把本地构建通过写成远端已发布。
 - 继续 Python 操作覆盖和通用对等端点；当前 SSH 访问 Linux Runtime，不提供远程 Python/UI 操作。
 - 继续 P1 的表格操作、引用、轻量求值与撤销；按可独立验证的开发包交付。

@@ -52,9 +52,9 @@ endif()
 
 include(GoogleTest)
 if(WIN32)
-  # The fake bridge and the process-group tests are POSIX; Windows builds everything and runs the
-  # protocol units only (CI builds Windows without running tests).
-  gtest_discover_tests(stk-bridge-tests TEST_FILTER "Framing.*:Decode.*:Encode.*:Classify.*:Errors.*:Retry.*:Schema.*:Types.*:Future.*:LogRing.*"
+  # Keep POSIX fake/process-group scenarios excluded, and explicitly register portable real-Python
+  # profile tests as well as the protocol units. CI requires the SSH case to actually run.
+  gtest_discover_tests(stk-bridge-tests TEST_FILTER "Framing.*:Decode.*:Encode.*:Classify.*:Errors.*:Retry.*:Schema.*:Types.*:Future.*:LogRing.*:PythonBridge.ManagedSSHProfileRoundTripDoesNotConnectImplicitly"
     PROPERTIES LABELS "bridge" DISCOVERY_TIMEOUT 60)
 else()
   gtest_discover_tests(stk-bridge-tests
