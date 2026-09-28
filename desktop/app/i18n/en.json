@@ -657,7 +657,7 @@
   "viewer.tool.pick.tip": "Click a surface, slice, glyph or point to probe its original data",
   "viewer.tool.zoom.tip": "Left drag up / down zooms; a click picks",
   "viewer.warnings": "{count} warning(s)",
-  "editor.project.title": "Project tables",
+  "editor.project.title": "Project",
   "project.add_field": "Add field",
   "project.add_record": "Add record",
   "project.add_table": "Add table",

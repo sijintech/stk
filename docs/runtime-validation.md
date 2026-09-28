@@ -292,7 +292,7 @@ Windows 退出测试现在处理 `is_running()` 与 `status()` 之间进程退�
 - 构建 `stk-desktop`、`stk-project-tests`、`stk-project-render`、`stk_wm_tests` 通过。
 - 最终相关 CTest **31/31 通过**：9 项项目模型/界面/真实 Python 桥测试，
   4 项真实项目桥 → 原生 GPU 截图（中/英文 × Vulkan/OpenGL），18 项应用外壳回归。
-  另一次布局回归中的 25 项通用布局和 2 项 Jobs 布局快照通过。
+  另一次布局回归中的 25 项通用布局通过；最初的 Jobs 布局目标未重新链接，后续 CI 暴露的差异见下条。
 - 目视检查中英文截图，确认字段、单位、行选择、单元格编辑区和保存按钮显示正常；
   截图由 `stk-project-render` 生成在构建目录 `tests/app/out/project_*.png`，不是手工画的设计稿。
 - 中英文字典各 695 项，`check_i18n.py` 通过；本次尚无 macOS/Windows 真机交互结论。
@@ -300,6 +300,16 @@ Windows 退出测试现在处理 `is_running()` 与 `status()` 之间进程退�
 
 本版共享表格支持基础字面量，不包含引用/表达式、删除、批量粘贴、富内容插件、AI 或 Python 控制台。
 完整程序重启后需手动打开项目；编辑器内未保存草稿不写入数据库。测试步骤见[项目指南](project.md)。
+
+## 2026-09-28：英文编辑器标签回归修正
+
+`c537d55` 的 CI 显示，英文 `Project tables` 比原有最长编辑器名更宽，导致所有区域的编辑器下拉框
+变宽，使 5 个 Linux 英文布局快照和 3 个 macOS 英文布局快照失败。项目功能测试通过。
+英文短标签改为 `Project`，中文仍为“项目表格”；不更新旧快照来掩盖其他区域的布局变化。
+
+修正后本机重新构建全部桌面目标，完整 CTest **427/427 通过、无跳过**，包含此前失败的默认外壳、
+Jobs、Properties 英文布局，真实 Python 桥、Vulkan/OpenGL、X11/Wayland 和打包检查。
+中英文字典检查通过。macOS/Windows 修正后的结果继续跟踪对应 CI。
 
 ## 覆盖范围
 
