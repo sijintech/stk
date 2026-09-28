@@ -146,6 +146,7 @@ def test_invalid_or_obsolete_derived_cache_is_discarded(model, cache):
 
 def legacy(store):
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE edit_journal")
         db.execute("DROP TABLE evaluations")
         db.execute("DROP TABLE definitions")
         db.execute("PRAGMA user_version=1")
@@ -163,14 +164,14 @@ def test_explicit_upgrade_backups_and_restore_preserve_old_project(model, tmp_pa
         store.apply([command(ids, "copy", "set_reference", source=reference(ids, "temperature"))], expected_revision=1)
     assert store.snapshot() == before
     upgrade = store.upgrade(expected_revision=1)
-    assert upgrade["upgraded"] and upgrade["revision"] == 2 and upgrade["format_version"] == 2
+    assert upgrade["upgraded"] and upgrade["revision"] == 2 and upgrade["format_version"] == storage.FORMAT_VERSION
     backup = Path(upgrade["backup"]["path"])
     assert backup.is_file() and upgrade["backup"]["revision"] == 1
     restored = tmp_path / "restored"
     restored.mkdir()
     shutil.copy2(backup, restored / storage.DATABASE_NAME)
     assert ProjectStore(restored).snapshot() == before
-    assert store.history()[-1]["commands"] == [{"op": "upgrade_format", "from_version": 1, "to_version": 2}]
+    assert store.history()[-1]["commands"] == [{"op": "upgrade_format", "from_version": 1, "to_version": storage.FORMAT_VERSION}]
     assert not store.upgrade(expected_revision=2)["upgraded"]
     assert len(list((store.directory / "backups").glob("*.sqlite3"))) == 1
     store.apply([command(ids, "copy", "set_reference", source=reference(ids, "temperature"))], expected_revision=2)

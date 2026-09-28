@@ -500,6 +500,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
 | `project.backup` | `{handle}` | `{path, project_id, revision, format_version}` |
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
+| `project.undo` / `project.redo` | `{handle, expected_revision}` | `{revision, target_revision}` |
 
 - `directory` is an absolute local directory path; the database is `project.sqlite3` within it.
   Creation is explicit and never overwrites an existing database (`conflict`). Open does not create
@@ -522,6 +523,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   Evaluations contain `state`, `evaluated_revision`, `engine_version`, and either `value, unit` (`ok`)
   or `error: {code, message, source?}` (`error`). Failed values are absent from `values`; explicit null
   results remain present. Definitions survive missing sources and evaluation errors.
+  Format 3 adds `edit_history: {undo_revision: integer|null, redo_revision: integer|null}` to the snapshot;
+  these identify original edit batches, not the current monotonic project revision.
 - `commands` contains 1–1000 closed command objects. Supported operations are `create_table`,
   `add_field`, `add_record`, `set_cell`, `rename_table`, `rename_field`, `set_reference`, `set_expression`,
   `unset_cell`, `delete_record`, `delete_field`, and `delete_table`; the exact required and
@@ -535,16 +538,22 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   and literal types still reject the batch. See the project guide for the bounded expression grammar/unit policy.
 - `project.backup` writes a consistent, checked SQLite copy under the project's `backups/` directory;
   it does not include external assets or change project revision. `project.upgrade` first creates such a
-  backup, then migrates v1 to v2 atomically, adding one revision and an internal
-  `{op: "upgrade_format", from_version: 1, to_version: 2}` history record. A stale precondition is `conflict`.
+  backup, then migrates v1/v2 to v3 atomically, adding one revision and an internal
+  `{op: "upgrade_format", from_version, to_version}` history record. A stale precondition is `conflict`.
   Already-current format returns `upgraded=false, backup=null` without changing revision. Opening alone
   never migrates. A failed migration rolls back the source; a completed pre-migration backup is kept.
-- **Uncertain responses:** create/apply/backup/upgrade are never automatically retried. If a response is lost,
+- Format 3 `undo`/`redo` operate on the shared persistent edit stack. They restore one whole batch's row
+  values, definitions, identities and display order, recompute affected caches and append a new revision
+  with `{op: "undo"|"redo", target_revision}` in history. New successful edits discard the redo branch;
+  conflicts/failures preserve it. Empty stacks return `invalid_params` without mutation. Upgrades and
+  edits made before format 3 cannot be undone. External files, Runtime jobs, scripts and UI drafts are
+  outside this stack. No implicit side effects or script execution occur during restoration.
+- **Uncertain responses:** create/apply/backup/upgrade/undo/redo are never automatically retried. If a response is lost,
   reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
   raise `expected_revision` and repeat an edit: the previous batch may already have committed.
   Explicit reapplication at the original revision cannot commit twice. Opening an already created
   project is safe; repeating create reports `conflict`. These methods use no idempotency key.
-- A successful apply or effective upgrade emits `project.changed {handle, revision}` after its response. An effective
+- A successful apply, undo/redo or effective upgrade emits `project.changed {handle, revision}` after its response. An effective
   close emits `project.closed {handle}` after its response. Concurrent request responses/events may
   interleave: ignore closed handles and revisions at or below the displayed snapshot. Events are
   refresh hints, not an ordered history stream. External CLI edits have no bridge event; refresh

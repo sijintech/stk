@@ -61,7 +61,7 @@ def test_bridge_upgrade_backup_and_derived_values_use_the_shared_contract(inproc
     assert row["values"][ids["derived"]] == 600
     assert row["definitions"][ids["derived"]]["bindings"] == {"base": reference(ids, "copy")}
     assert harness.call("project.backup", {"handle": handle})["revision"] == 3
-    assert harness.call("project.list")["projects"][0]["format_version"] == 2
+    assert harness.call("project.list")["projects"][0]["format_version"] == FORMAT_VERSION
     assert not harness.violations
 
 
@@ -86,6 +86,23 @@ def test_revision_conflict_invalid_batch_and_external_edits(inproc, tmp_path):  
     assert len(snapshot["tables"]) == 2
     assert harness.call("project.list")["projects"][0]["revision"] == 2
     harness.close()
+
+
+def test_undo_redo_emit_revisions_and_reject_replays_over_the_strict_contract(inproc, model):
+    store, ids = model
+    harness = inproc()
+    handle = harness.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    before = harness.call("project.snapshot", {"handle": handle})["snapshot"]
+    assert before["edit_history"] == {"undo_revision": 1, "redo_revision": None}
+    mark = harness.mark()
+    assert harness.call("project.undo", {"handle": handle, "expected_revision": 1}) == {"revision": 2, "target_revision": 1}
+    assert harness.wait_event(lambda event: event["event"] == "project.changed", start=mark)["data"] == {"handle": handle, "revision": 2}
+    assert harness.error("project.undo", {"handle": handle, "expected_revision": 1})["code"] == "conflict"
+    assert harness.call("project.snapshot", {"handle": handle})["snapshot"]["tables"] == []
+    assert harness.call("project.redo", {"handle": handle, "expected_revision": 2}) == {"revision": 3, "target_revision": 1}
+    assert harness.call("project.snapshot", {"handle": handle})["snapshot"]["tables"] == before["tables"]
+    assert harness.call("project.history", {"handle": handle})["history"][-1]["commands"] == [{"op": "redo", "target_revision": 1}]
+    assert not harness.violations
 
 
 def test_project_error_codes_and_schema_reject_invalid_requests(inproc, tmp_path):  # noqa: F811

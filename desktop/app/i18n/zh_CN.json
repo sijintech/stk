@@ -735,7 +735,7 @@
   "project.backup_hint": "将一致的数据库副本保存到 backups/。外部文件需另行备份。",
   "project.backup_saved": "数据库备份已保存：{path}",
   "project.upgrade": "备份并升级项目",
-  "project.upgrade_hint": "此项目使用格式 1。生成并校验备份后升级，即可使用引用和公式。",
+  "project.upgrade_hint": "升级旧项目以使用持久撤销及最新表格功能。升级前会先生成并校验数据库备份。",
   "project.definition": "定义方式",
   "project.mode.literal": "字面量",
   "project.mode.reference": "单元格引用",
@@ -758,5 +758,15 @@
   "project.expression_hint": "引用使用稳定 ID。公式仅做标量计算；单位需一致，无量纲字段填写 1。编辑不会启动模拟。",
   "project.bindings_advanced": "高级：绑定 JSON",
   "project.binding_missing": "来源缺失",
-  "project.remove_binding": "移除选中绑定"
+  "project.remove_binding": "移除选中绑定",
+  "project.undo": "撤销",
+  "project.redo": "重做",
+  "project.manage": "管理表格、字段与记录",
+  "project.rename_table": "重命名表格",
+  "project.rename_field": "重命名选中字段",
+  "project.reload_names": "重新载入已保存名称",
+  "project.delete_record": "删除选中记录",
+  "project.delete_field": "删除选中字段",
+  "project.delete_table": "删除当前表格",
+  "project.delete_hint": "删除会移除对象及其单元格。引用它的其他单元格会显示来源缺失；撤销会恢复原 ID。"
 }

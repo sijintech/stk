@@ -1,9 +1,9 @@
 # 本地项目存储（P1 实验版）
 
 当前交付包括 SQLite 存储、本机桌面桥和原生项目表格编辑器：创建/打开项目、表、字段、记录、
-字面量、稳定引用、轻量公式、错误定位、数据库备份/升级、修订冲突检查和事务修改历史。
+字面量、稳定引用、轻量公式、错误定位、数据库备份/升级、修订冲突检查和持久撤销/重做。
 Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科学/Qt 可选依赖。
-撤销、富内容插件、资源快照与执行计划
+富内容插件、资源快照与执行计划
 仍待开发；不能把本节理解为整个 P1 已完成。
 
 ## 在桌面中测试
@@ -22,6 +22,8 @@ Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科�
    “设为空值”保存显式 `null`，“清除定义”恢复未赋值，“重新载入已保存值”放弃当前草稿。
 5. 点击“关闭项目”，再打开同一目录，确认数据与类型保留。每次成功修改即时保存；`Ctrl+S`
    仍是保存页面布局，不是提交单元格草稿。
+6. 展开“管理表格、字段与记录”可改名或删除对象。标题栏的“撤销 / 重做”按整个修改批次恢复，
+   删除后撤销会恢复原 ID 与顺序。未保存的单元格/名称草稿仍需明确重新载入。
 
 各项目表格区域共享当前项目、表格和记录选择；排序使用显示顺序，编辑仍以 UUID 定位。
 桥接进程重启会按目录和项目 UUID 重开，不会重放修改。若其他入口修改了项目，修订校验会拒绝旧草稿；
@@ -154,8 +156,9 @@ assert store.snapshot()["tables"][0]["records"][0]["values"][derived] == 310
 
 ## 数据库备份与显式升级
 
-新建项目使用格式 2；格式 1 仍可打开和执行原有字面量命令，不会因为打开而迁移。
-引用、公式、清除和删除操作需要格式 2。桌面提供“备份并升级项目”；CLI 使用 `project upgrade`，
+新建项目使用格式 3；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，不会因为打开而迁移。
+引用、公式、清除和删除命令需要至少格式 2，持久撤销/重做需要格式 3；桌面删除入口要求格式 3。
+桌面提供“备份并升级项目”；CLI 使用 `project upgrade`，
 Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(expected_revision=...)`。
 
 升级先以 SQLite 在线备份 API 保存并检查旧修订，再在一个写事务中创建新表、更新格式和修订。
@@ -168,26 +171,26 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 ## 实验格式与事务边界
 
-目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=2`。
+目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=3`。
 原物理表为 `project`、`tables`、`fields`、`records`、`cells`、`changes`；格式 2 新增
-`definitions` 和可重建的 `evaluations`，字面量与定义分开。每次有效批次在一个
+`definitions` 和可重建的 `evaluations`，格式 3 增加 `edit_journal`。字面量与定义分开。每次有效批次在一个
 `BEGIN IMMEDIATE` 事务中校验修订、写值/定义、更新受影响缓存、提升一次修订并保存命令历史。
 并发修改同一修订时仅一个批次能成功；读取快照在单一读事务中完成。
-`history` 是编辑记录，尚非撤销栈或模拟运行快照。
+`history` 保留已发生的编辑、升级及撤销/重做事件，不是模拟运行快照。
 
 显式创建不会覆盖已有数据库；普通打开不会隐式初始化。打开检查 application ID、格式版本、
 SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报告错误，不自动重建或降级。
-当前提供格式 1 → 2 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
+当前提供格式 1/2 → 3 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
 数据库之外的输入、程序与资源仍可存为普通文件，资源索引和一致性项目备份尚待实现。
 
 该内部数据库格式未冻结为 `docs/specs/` 的公开协议，不改变 `stk.graph/1`。
-业务修改通过 `ProjectStore.apply`，不要让后续编辑器各自写 SQL。
+业务修改通过 `ProjectStore.apply/undo/redo`，不要让后续编辑器各自写 SQL。
 打开的 store 会记住项目 UUID；同一路径被另一项目替换后，旧 store 拒绝读写，需要明确重新打开。
 
 ## 本机桌面桥接口
 
 [桌面桥 v1 §13](specs/stk-desktop-bridge-v1.md#13-local-project-sessions-additive-p1-extension)
-增加 `project.create/open/list/close/snapshot/apply/history/backup/upgrade`，并提供 C++ `Client::project_*` 封装。
+增加 `project.create/open/list/close/snapshot/apply/history/backup/upgrade/undo/redo`，并提供 C++ `Client::project_*` 封装。
 项目修改复用上述命令和修订校验，不绕过存储服务。桥中的句柄只在当前进程内有效，
 桥重启后应按绝对目录重新打开；项目 UUID 和已提交内容保持不变。
 
@@ -195,4 +198,20 @@ SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报�
 `project.changed` 通知用于刷新；外部 CLI 修改需主动刷新，写入时仍有修订冲突保护。
 快照/历史暂不分页，受桥的 16 MiB 消息限制。此接口仍是本机 stdio 通道，不是两台 STK 的直接连接。
 
-原生桌面入口复用此接口；下一步按[开发计划](development-plan.md)继续撤销、资源索引、通用字段与运行快照。
+原生桌面入口复用此接口；下一步按[开发计划](development-plan.md)继续资源索引、通用字段与运行快照。
+
+## 持久撤销与重做
+
+`store.undo(expected_revision=...)` / `redo(...)`、`stk.project.undo(...)` / `redo(...)` 与
+`suan project undo/redo DIRECTORY --expected-revision N` 使用同一项目级栈。
+每次 `apply` 的完整批次是一项，来自 UI、Python 或 CLI 的编辑共用历史；不是每个面板各有一个栈。
+
+- 撤销/重做各自增加一次修订，保留原编辑历史，并记录 `target_revision`；不会把项目修订倒退。
+- 栈保存到数据库，关闭重开或桥重启后仍在。新编辑清空重做分支；失败和冲突不改变栈。
+- 恢复名称、类型、字面量、引用/公式、UUID 和显示顺序，只记录被编辑行的前后状态；公式缓存重新计算。
+- 升级前的历史没有前值，不能事后撤销；升级自身也不能撤销。需要回到旧格式时使用升级前备份。
+- 撤销不取消 Runtime 作业、不还原外部文件、不执行 Python，也不恢复未保存的输入框草稿。
+- 快照的 `edit_history = {undo_revision, redo_revision}` 给出下一项原编辑修订，无对应项时为 `null`。
+  空栈操作报错且不改变项目；响应丢失后检查新修订和历史，不自动重试。
+
+目前没有撤销历史压缩或保留期限，大批删除会记录对应数据；完整资源和执行状态快照仍属后续开发。

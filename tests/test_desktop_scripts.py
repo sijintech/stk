@@ -74,10 +74,22 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
     assert scripts.call("hello", {"protocol": 1})["protocol"] == 1
     assert set(scripts.call("script.catalog")["operations"]) == {
         "project.create", "project.open", "project.list", "project.close", "project.snapshot", "project.apply", "project.history",
-        "project.backup", "project.upgrade"}
+        "project.backup", "project.upgrade", "project.undo", "project.redo"}
     assert scripts.call("script.close", {"session": session})["closed"]
     assert scripts.call("project.list")["projects"][0]["revision"] == 1
     assert scripts.error("script.status", {"session": session})["code"] == "not_found"
+
+
+def test_python_project_facade_undo_redo_uses_shared_persistent_history(scripts, tmp_path):
+    info = scripts.call("project.create", {"directory": str(tmp_path / "undo"), "name": "Undo"})["project"]
+    session = scripts.call("script.open")["session"]
+    source = ("p = stk.project\np.apply([{'op':'create_table','name':'Cases'}], expected_revision=0)\n"
+              "assert p.undo(expected_revision=1)['revision'] == 2\nassert p.snapshot()['tables'] == []\n"
+              "assert p.redo(expected_revision=2)['revision'] == 3\nassert p.snapshot()['tables'][0]['name'] == 'Cases'")
+    assert execute(scripts, session, source, project_handle=info["handle"])["run"]["state"] == "succeeded"
+    assert scripts.call("project.snapshot", {"handle": info["handle"]})["snapshot"]["edit_history"] == {"undo_revision": 1, "redo_revision": None}
+    assert execute(scripts, session, "p.undo(expected_revision=2)")["run"]["state"] == "failed"
+    assert scripts.call("project.list")["projects"][0]["revision"] == 3
 
 
 def test_interrupt_stops_worker_tree_resets_namespace_and_keeps_bridge_usable(scripts, tmp_path):

@@ -128,6 +128,20 @@ Future<Json> Client::project_upgrade(const std::string &handle, const int64_t ex
   return call("project.upgrade", object({{"handle", handle}, {"expected_revision", expected_revision}}), options);
 }
 
+Future<Json> Client::project_undo(const std::string &handle, const int64_t expected_revision)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.undo", object({{"handle", handle}, {"expected_revision", expected_revision}}), options);
+}
+
+Future<Json> Client::project_redo(const std::string &handle, const int64_t expected_revision)
+{
+  CallOptions options;
+  options.retry = CallOptions::Retry::Never;
+  return call("project.redo", object({{"handle", handle}, {"expected_revision", expected_revision}}), options);
+}
+
 /* -- Connections -------------------------------------------------------------------------- */
 
 Future<std::vector<ConnectionInfo>> Client::connections_list()

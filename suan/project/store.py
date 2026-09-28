@@ -16,10 +16,11 @@ from uuid import UUID, uuid4
 
 from .evaluation import dependencies, evaluate
 from .expressions import MAX_BINDINGS, MAX_EXPRESSION
+from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 DATABASE_NAME = "project.sqlite3"
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
 
@@ -50,6 +51,13 @@ _DDL_V2 = (
         record_id TEXT NOT NULL, field_id TEXT NOT NULL, result TEXT NOT NULL,
         PRIMARY KEY(record_id, field_id),
         FOREIGN KEY(record_id, field_id) REFERENCES definitions(record_id, field_id) ON DELETE CASCADE)""",
+)
+
+_DDL_V3 = (
+    """CREATE TABLE edit_journal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        revision INTEGER NOT NULL UNIQUE REFERENCES changes(revision),
+        delta TEXT NOT NULL, applied INTEGER NOT NULL CHECK(applied IN (0, 1)))""",
 )
 
 
@@ -153,7 +161,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -180,7 +188,7 @@ class ProjectStore:
             if db.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID:
                 raise ProjectError("Not an STK project database")
             version = _version(db)
-            if version not in (1, FORMAT_VERSION):
+            if version not in (1, 2, FORMAT_VERSION):
                 raise UnsupportedProjectFormat(f"Unsupported project format {version}; supported: 1–{FORMAT_VERSION}")
             if self._project_id is not None:
                 row = db.execute("SELECT id FROM project").fetchone()
@@ -247,7 +255,7 @@ class ProjectStore:
             return self._backup(db)
 
     def upgrade(self, *, expected_revision):
-        """Explicit v1 -> v2 migration; backup completes before any schema change."""
+        """Explicit versioned migration; backup completes before any schema change."""
         _expected_revision(expected_revision)
         with self._connect(write=True) as db:
             project = dict(db.execute("SELECT * FROM project").fetchone())
@@ -263,8 +271,10 @@ class ProjectStore:
                 if tuple(identity) != (project["id"], expected_revision) or _version(source) != version:
                     raise ProjectError("Project changed while preparing the migration backup")
                 backup = self._backup(source)
-            for statement in _DDL_V2:
-                db.execute(statement)
+            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3)):
+                if version <= source_version:
+                    for statement in statements:
+                        db.execute(statement)
             db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
             revision = expected_revision + 1
             db.execute("UPDATE project SET revision=?", (revision,))
@@ -329,7 +339,47 @@ class ProjectStore:
                     if result["state"] == "ok":
                         record["values"][field_id] = result["value"]
                 table["records"] = list(records.values())
-            return {"format_version": _version(db), "project": project, "tables": tables}
+            result = {"format_version": _version(db), "project": project, "tables": tables}
+            if _version(db) >= 3:
+                result["edit_history"] = self._edit_history(db)
+            return result
+
+    @staticmethod
+    def _edit_history(db):
+        undo = db.execute("SELECT revision FROM edit_journal WHERE applied=1 ORDER BY id DESC LIMIT 1").fetchone()
+        redo = db.execute("SELECT revision FROM edit_journal WHERE applied=0 ORDER BY id LIMIT 1").fetchone()
+        return {"undo_revision": undo[0] if undo else None, "redo_revision": redo[0] if redo else None}
+
+    def undo(self, *, expected_revision):
+        return self._restore_edit(expected_revision, redo=False)
+
+    def redo(self, *, expected_revision):
+        return self._restore_edit(expected_revision, redo=True)
+
+    def _restore_edit(self, expected_revision, *, redo):
+        _expected_revision(expected_revision)
+        with self._connect(write=True) as db:
+            revision = db.execute("SELECT revision FROM project").fetchone()[0]
+            if revision != expected_revision:
+                raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {revision}")
+            if _version(db) < 3:
+                raise UnsupportedProjectFormat("Upgrade this project to format 3 before undo/redo")
+            order = "ASC" if redo else "DESC"
+            entry = db.execute(f"SELECT * FROM edit_journal WHERE applied=? ORDER BY id {order} LIMIT 1",
+                               (0 if redo else 1,)).fetchone()
+            if entry is None:
+                raise ProjectError("Nothing to redo" if redo else "Nothing to undo")
+            try:
+                changed = restore(db, json.loads(entry["delta"]), "after" if redo else "before")
+            except (ValueError, TypeError, RecursionError) as exc:
+                raise ProjectError(f"Cannot restore edit: {exc}") from None
+            self._evaluate(db, revision + 1, changed, persist=True)
+            db.execute("UPDATE edit_journal SET applied=? WHERE id=?", (1 if redo else 0, entry["id"]))
+            db.execute("UPDATE project SET revision=?", (revision + 1,))
+            command = {"op": "redo" if redo else "undo", "target_revision": entry["revision"]}
+            db.execute("INSERT INTO changes VALUES (?, ?, ?)",
+                       (revision + 1, datetime.now(timezone.utc).isoformat(), _json([command])))
+            return {"revision": revision + 1, "target_revision": entry["revision"]}
 
     def history(self):
         with self._connect() as db:
@@ -349,12 +399,25 @@ class ProjectStore:
             if revision != expected_revision:
                 raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {revision}")
             changed = set()
-            applied = [self._apply_command(db, command, changed) for command in commands]
+            capture = Capture(db) if _version(db) >= 3 else None
+            applied = []
+            for command in commands:
+                if capture:
+                    capture.command(command)
+                applied.append(self._apply_command(db, command, changed))
+                if capture:
+                    capture.created(command)
             if _version(db) >= 2:
                 self._evaluate(db, revision + 1, changed, persist=True)
             db.execute("UPDATE project SET revision=?", (revision + 1,))
             db.execute("INSERT INTO changes VALUES (?, ?, ?)",
                        (revision + 1, datetime.now(timezone.utc).isoformat(), _json(applied)))
+            if capture:
+                db.execute("DELETE FROM edit_journal WHERE applied=0")
+                delta = capture.delta()
+                if delta:
+                    db.execute("INSERT INTO edit_journal (revision, delta, applied) VALUES (?, ?, 1)",
+                               (revision + 1, _json(delta)))
             return {"revision": revision + 1, "commands": applied}
 
     @staticmethod

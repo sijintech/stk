@@ -26,6 +26,10 @@ class ProjectEditor final : public Editor {
     row.button("project_close", ctx.tr("project.close"), [&state] { state.close(); })
         .width(9)
         .disable(!state.project() || state.busy());
+    row.button("project_undo", ctx.tr("project.undo"), [&state] { state.undo(); })
+        .width(4).disable(!state.ready() || state.busy() || !state.can_undo());
+    row.button("project_redo", ctx.tr("project.redo"), [&state] { state.redo(); })
+        .width(4).disable(!state.ready() || state.busy() || !state.can_redo());
   }
 
   void draw_main(ui::Layout &layout, EditorContext &ctx) override
@@ -66,7 +70,7 @@ class ProjectEditor final : public Editor {
       return;
     }
     const bool editable = state.ready() && !state.busy();
-    if (state.project()->format_version < 2) {
+    if (state.project()->format_version < 3) {
       layout.paragraph(ctx.tr("project.upgrade_hint"));
       layout.button("upgrade_project", ctx.tr("project.upgrade"), [&state] { state.upgrade(); }).disable(!editable);
     }
@@ -82,6 +86,7 @@ class ProjectEditor final : public Editor {
     field_controls(layout, ctx, state, editable);
     draw_table(layout, ctx, state);
     draw_cell(layout, ctx, state, editable);
+    manage_objects(layout, ctx, state, editable);
   }
 
   bool on_drop(const std::vector<std::string> &paths, EditorContext &ctx) override
@@ -121,6 +126,78 @@ class ProjectEditor final : public Editor {
   }
 
  private:
+  void manage_objects(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  {
+    const auto *table = state.table();
+    if (!table) { return; }
+    if (std::none_of(table->fields.begin(), table->fields.end(), [this](const auto &field) { return field.id == cell_field_; })) {
+      cell_field_ = table->fields.empty() ? std::string() : table->fields.front().id;
+    }
+    // Name/delete drafts have the same revision precondition as cell edits. Switching the
+    // target resets them; a background revision change keeps a dirty draft for review.
+    const std::string identity = state.project()->id + table->id + cell_field_ + state.record_id();
+    if (identity != manage_identity_ || (!manage_dirty_ && manage_revision_ != state.project()->revision)) {
+      manage_identity_ = identity;
+      manage_revision_ = state.project()->revision;
+      rename_table_ = table->name;
+      rename_field_.clear();
+      for (const auto &field : table->fields) {
+        if (field.id == cell_field_) { rename_field_ = field.name; }
+      }
+      manage_dirty_ = false;
+      pending_manage_ = false;
+    }
+    else if (pending_manage_ && !state.busy()) {
+      pending_manage_ = false;
+      if (state.error().empty()) { manage_identity_.clear(); }
+    }
+    auto *panel = layout.panel("manage_objects", ctx.tr("project.manage"), false);
+    if (!panel) { return; }
+    const bool current = editable && manage_revision_ == state.project()->revision;
+    if (manage_revision_ != state.project()->revision) {
+      panel->paragraph(ctx.tr("project.draft_stale"));
+    }
+    panel->prop(ctx.tr("project.table")).text_field("rename_table", {
+      [this] { return rename_table_; },
+      [this](std::string value) { rename_table_ = std::move(value); manage_dirty_ = true; }
+    });
+    const std::string table_id = table->id;
+    panel->button("save_table_name", ctx.tr("project.rename_table"), [this, &state, table_id] {
+      pending_manage_ = state.apply(Json::array({{{"op", "rename_table"}, {"id", table_id}, {"name", rename_table_}}}), manage_revision_);
+    }).disable(!current || rename_table_.empty());
+    if (!table->fields.empty()) {
+      std::vector<std::string> names, ids;
+      for (const auto &field : table->fields) { names.push_back(field.name); ids.push_back(field.id); }
+      panel->prop(ctx.tr("project.field")).dropdown("manage_field", std::move(names), {
+        [this, ids] { return int(std::find(ids.begin(), ids.end(), cell_field_) - ids.begin()); },
+        [this, ids](int index) { if (index >= 0 && size_t(index) < ids.size()) { cell_field_ = ids[index]; } }
+      });
+      panel->prop(ctx.tr("project.field_name")).text_field("rename_field", {
+        [this] { return rename_field_; },
+        [this](std::string value) { rename_field_ = std::move(value); manage_dirty_ = true; }
+      });
+      const std::string field_id = cell_field_;
+      panel->button("save_field_name", ctx.tr("project.rename_field"), [this, &state, field_id] {
+        pending_manage_ = state.apply(Json::array({{{"op", "rename_field"}, {"id", field_id}, {"name", rename_field_}}}), manage_revision_);
+      }).disable(!current || rename_field_.empty());
+    }
+    panel->button("reload_names", ctx.tr("project.reload_names"), [this] { manage_identity_.clear(); });
+    if (state.project()->format_version >= 3) {
+      panel->paragraph(ctx.tr("project.delete_hint"));
+      auto &buttons = panel->row();
+      const std::string record_id = state.record_id(), field_id = cell_field_;
+      buttons.button("delete_record", ctx.tr("project.delete_record"), [this, &state, record_id] {
+        pending_manage_ = state.apply(Json::array({{{"op", "delete_record"}, {"id", record_id}}}), manage_revision_);
+      }).disable(!current || state.selected_record() < 0);
+      buttons.button("delete_field", ctx.tr("project.delete_field"), [this, &state, field_id] {
+        pending_manage_ = state.apply(Json::array({{{"op", "delete_field"}, {"id", field_id}}}), manage_revision_);
+      }).disable(!current || table->fields.empty());
+      buttons.button("delete_table", ctx.tr("project.delete_table"), [this, &state, table_id] {
+        pending_manage_ = state.apply(Json::array({{{"op", "delete_table"}, {"id", table_id}}}), manage_revision_);
+      }).disable(!current);
+    }
+  }
+
   std::string path() const
   {
     const auto paths = platform::split_path_list(directory_);
@@ -527,6 +604,9 @@ class ProjectEditor final : public Editor {
   int64_t draft_revision_ = -1;
   bool draft_dirty_ = false;
   bool pending_cell_ = false;
+  std::string manage_identity_, rename_table_, rename_field_;
+  int64_t manage_revision_ = -1;
+  bool manage_dirty_ = false, pending_manage_ = false;
 };
 
 }  // namespace

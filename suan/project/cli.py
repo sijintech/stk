@@ -49,7 +49,7 @@ def apply(directory, commands, expected_revision):
 @project.command("history")
 @click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
 def history(directory):
-    """List committed edit batches (this is not execution history or undo)."""
+    """List committed edits and undo/redo actions (not simulation execution history)."""
     _run(lambda: ProjectStore(directory).history())
 
 
@@ -66,3 +66,19 @@ def backup(directory):
 def upgrade(directory, expected_revision):
     """Back up and explicitly upgrade an older project; opening alone never migrates it."""
     _run(lambda: ProjectStore(directory).upgrade(expected_revision=expected_revision))
+
+
+@project.command("undo")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def undo(directory, expected_revision):
+    """Undo the latest active edit batch as a new revision."""
+    _run(lambda: ProjectStore(directory).undo(expected_revision=expected_revision))
+
+
+@project.command("redo")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--expected-revision", required=True, type=click.IntRange(min=0))
+def redo(directory, expected_revision):
+    """Reapply the next undone batch; a new edit discards redo."""
+    _run(lambda: ProjectStore(directory).redo(expected_revision=expected_revision))

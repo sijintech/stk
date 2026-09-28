@@ -120,6 +120,15 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
+      if (editor == "manage") {
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        if (const auto *widget = screen.ui()->find("a2/main/manage_objects")) {
+          const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
+          screen.ui()->handle_event(ui::Event::mouse_down(center));
+          screen.ui()->handle_event(ui::Event::mouse_up(center));
+        }
+        else { ok = false; }
+      }
       ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
       ok = ok && gfx::png_write(output, image);
     }

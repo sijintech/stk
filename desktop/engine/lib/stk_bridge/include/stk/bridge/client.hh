@@ -286,6 +286,8 @@ class Client {
   Future<Json> project_history(const std::string &handle);
   Future<Json> project_backup(const std::string &handle);
   Future<Json> project_upgrade(const std::string &handle, int64_t expected_revision);
+  Future<Json> project_undo(const std::string &handle, int64_t expected_revision);
+  Future<Json> project_redo(const std::string &handle, int64_t expected_revision);
 
   /* -- Connections (§6) ------------------------------------------------------------------- */
   Future<std::vector<ConnectionInfo>> connections_list();

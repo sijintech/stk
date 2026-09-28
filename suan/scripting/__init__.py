@@ -43,6 +43,14 @@ class Project:
     def close(self):
         return self._call("project.close", {"handle": self.handle})["closed"]
 
+    def undo(self, *, expected_revision):
+        """Undo the latest active edit batch as a new revision; not an external side-effect rollback."""
+        return self._call("project.undo", {"handle": self.handle, "expected_revision": expected_revision})
+
+    def redo(self, *, expected_revision):
+        """Reapply the next undone batch; new edits discard the redo stack."""
+        return self._call("project.redo", {"handle": self.handle, "expected_revision": expected_revision})
+
 
 class Projects:
     def __init__(self, call):

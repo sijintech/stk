@@ -63,6 +63,10 @@ class ProjectState {
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
   bool backup();
   bool upgrade();
+  bool undo();
+  bool redo();
+  bool can_undo() const { return loaded() && undo_revision_ >= 0; }
+  bool can_redo() const { return loaded() && redo_revision_ >= 0; }
   const ProjectTable *table() const;
   const std::string &table_id() const { return table_id_; }
   const std::string &record_id() const { return record_id_; }
@@ -79,6 +83,7 @@ class ProjectState {
   void fail(const bridge::Error &error);
   void clear();
   void validate_selection();
+  bool restore_edit(bool redo);
 
   AppStore &store_;
   bridge::Client *client_ = nullptr;
@@ -88,6 +93,7 @@ class ProjectState {
   uint64_t epoch_ = 0, version_ = 0;
   bool busy_ = false, fetching_ = false, snapshot_ready_ = false;
   int64_t dirty_revision_ = -1;
+  int64_t undo_revision_ = -1, redo_revision_ = -1;
   std::optional<bridge::ProjectInfo> project_;
   std::vector<ProjectTable> tables_;
   std::string table_id_, record_id_, error_, notice_;

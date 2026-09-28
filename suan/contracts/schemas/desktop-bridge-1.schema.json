@@ -2702,16 +2702,42 @@
                               "const": "upgrade_format"
                             },
                             "from_version": {
-                              "const": 1
+                              "enum": [
+                                1,
+                                2
+                              ]
                             },
                             "to_version": {
-                              "const": 2
+                              "enum": [
+                                2,
+                                3
+                              ]
                             }
                           },
                           "required": [
                             "op",
                             "from_version",
                             "to_version"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "op": {
+                              "enum": [
+                                "undo",
+                                "redo"
+                              ]
+                            },
+                            "target_revision": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          },
+                          "required": [
+                            "op",
+                            "target_revision"
                           ],
                           "additionalProperties": false
                         }
@@ -3231,6 +3257,82 @@
             "format_version",
             "backup"
           ]
+        }
+      },
+      "project.undo": {
+        "description": "Undo a persistent edit batch as a new revision. Format 3 is required. Never replay automatically.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "target_revision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "revision",
+            "target_revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.redo": {
+        "description": "Redo a persistent edit batch as a new revision. Format 3 is required. Never replay automatically.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "target_revision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "revision",
+            "target_revision"
+          ],
+          "additionalProperties": false
         }
       }
     },
@@ -3967,6 +4069,30 @@
               "records"
             ]
           }
+        },
+        "edit_history": {
+          "type": "object",
+          "properties": {
+            "undo_revision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "redo_revision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            }
+          },
+          "required": [
+            "undo_revision",
+            "redo_revision"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

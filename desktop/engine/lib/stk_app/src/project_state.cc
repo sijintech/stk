@@ -273,6 +273,7 @@ void ProjectState::clear()
   record_id_.clear();
   busy_ = fetching_ = snapshot_ready_ = false;
   dirty_revision_ = -1;
+  undo_revision_ = redo_revision_ = -1;
 }
 
 bool ProjectState::close(std::function<void(bridge::Result<bool>)> complete)
@@ -326,6 +327,9 @@ void ProjectState::refresh()
     tables_ = std::move(tables);
     project_->revision = io::get_int(result.value().at("project"), "revision", 0);
     project_->format_version = int(io::get_int(result.value(), "format_version", 1));
+    const auto &history = result.value().value("edit_history", Json::object());
+    undo_revision_ = io::get_int(history, "undo_revision", -1);
+    redo_revision_ = io::get_int(history, "redo_revision", -1);
     snapshot_ready_ = true;
     validate_selection();
     changed();
@@ -402,6 +406,33 @@ bool ProjectState::upgrade()
       if (backup.is_object()) {
         notice_ = store_.catalog().format("project.backup_saved", {{"path", io::get_string(backup, "path")}});
       }
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+    }
+    refresh();
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::undo() { return restore_edit(false); }
+bool ProjectState::redo() { return restore_edit(true); }
+
+bool ProjectState::restore_edit(const bool redo)
+{
+  if (!ready() || busy() || !loaded() || project_->handle.empty() || !(redo ? can_redo() : can_undo())) {
+    return false;
+  }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  auto future = redo ? client_->project_redo(project_->handle, project_->revision) :
+                       client_->project_undo(project_->handle, project_->revision);
+  on(std::move(future), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) {
+      fail(result.error());
+    }
+    else {
       dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
     }
     refresh();

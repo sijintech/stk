@@ -361,7 +361,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   auto &scripts = f.shell->store().scripts();
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   const std::string source = "import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
-      ") as db:\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
+      ") as db:\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
   ASSERT_TRUE(scripts.execute(source));
   ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
@@ -376,7 +376,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   f.screen.ui()->find("a2/main/upgrade_project")->on_click();
   settled();
   f.drv->frame();
-  EXPECT_EQ(state().project()->format_version, 2);
+  EXPECT_EQ(state().project()->format_version, 3);
   EXPECT_EQ(state().project()->revision, 2);
   EXPECT_EQ(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
   EXPECT_FALSE(state().notice().empty());
@@ -403,6 +403,123 @@ TEST_F(ProjectPython, DestroyingStateDropsQueuedCallbacks)
   ASSERT_TRUE(loop.pump_until([&] { return listed.has_value(); }));
   EXPECT_TRUE(listed->ok());
   EXPECT_FALSE(state().project());
+}
+
+TEST_F(ProjectPython, PersistentUndoRedoButtonsAndNewEditsShareTheProjectHistory)
+{
+  populated();
+  ASSERT_TRUE(state().apply(set_cell(450)));
+  settled();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  auto undo = [&] { return f.screen.ui()->find("a2/header/project_undo"); };
+  auto redo = [&] { return f.screen.ui()->find("a2/header/project_redo"); };
+  ASSERT_NE(undo(), nullptr);
+  ASSERT_TRUE(undo()->enabled);
+  EXPECT_FALSE(redo()->enabled);
+  f.screen.ui()->find("a2/main/cell_value")->string.assign("Unsaved draft");
+  undo()->on_click();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(f.screen.ui()->find("a2/main/cell_value")->string.value(), "Unsaved draft");
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/save_cell")->enabled);
+  ASSERT_TRUE(redo()->enabled);
+  ASSERT_TRUE(state().close());
+  settled();
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  settled();
+  f.drv->frame();
+  ASSERT_TRUE(redo()->enabled);
+  redo()->on_click();
+  settled();
+  EXPECT_EQ(state().table()->text(0, 0), "450");
+  EXPECT_EQ(state().project()->revision, 4);
+  ASSERT_TRUE(state().undo());
+  settled();
+  ASSERT_TRUE(state().apply(set_cell(600)));
+  settled();
+  EXPECT_FALSE(state().can_redo());
+  EXPECT_EQ(state().table()->text(0, 0), "600");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ObjectManagementRenamesDeletesAndUndoRestoresStableSelection)
+{
+  populated();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/manage_objects");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/manage_objects/" + key); };
+  ASSERT_NE(widget("rename_table"), nullptr);
+  widget("rename_table")->string.assign("Renamed cases");
+  widget("save_table_name")->on_click();
+  settled();
+  f.drv->frame();
+  f.drv->frame();
+  EXPECT_EQ(state().table()->name, "Renamed cases");
+  EXPECT_EQ(state().table_id(), table_id);
+  widget("rename_field")->string.assign("");
+  f.drv->frame();
+  ASSERT_NE(widget("rename_field"), nullptr);  // Empty text must not hide its own input.
+  widget("rename_field")->string.assign("Temperature renamed");
+  widget("save_field_name")->on_click();
+  settled();
+  f.drv->frame();
+  f.drv->frame();
+  EXPECT_EQ(state().table()->fields[0].name, "Temperature renamed");
+  EXPECT_EQ(state().table()->fields[0].id, field_id);
+  ASSERT_TRUE(widget("delete_record")->enabled);
+  widget("delete_record")->on_click();
+  settled();
+  f.drv->frame();
+  EXPECT_TRUE(state().table()->records.empty());
+  ASSERT_TRUE(state().undo());
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().record_id(), record_id);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  ASSERT_TRUE(widget("delete_table")->enabled);
+  widget("delete_table")->on_click();
+  settled();
+  EXPECT_TRUE(state().tables().empty());
+  ASSERT_TRUE(state().undo());
+  settled();
+  EXPECT_EQ(state().table_id(), table_id);
+  EXPECT_EQ(state().record_id(), record_id);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, RenameDraftRejectsExternalRevisionUntilExplicitReload)
+{
+  populated();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/manage_objects");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/manage_objects/" + key); };
+  widget("rename_table")->string.assign("Draft name");
+  ASSERT_TRUE(state().apply(set_cell(500)));
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(widget("rename_table")->string.value(), "Draft name");
+  EXPECT_FALSE(widget("save_table_name")->enabled);
+  EXPECT_FALSE(widget("delete_table")->enabled);
+  widget("reload_names")->on_click();
+  f.drv->frame();
+  EXPECT_EQ(widget("rename_table")->string.value(), "Cases");
+  EXPECT_TRUE(widget("save_table_name")->enabled);
 }
 
 }  // namespace
