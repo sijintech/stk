@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** Real local project bridge -> shared model -> native editor -> offscreen PNG. */
 #include "stk/app/project_state.hh"
+#include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/app/bridge_status.hh"
 #include "stk/app/shell.hh"
@@ -109,6 +110,22 @@ int main(int argc, char **argv)
         }, 30);
         ok = ok && scripts.status().at("run").at("state") == "succeeded";
       }
+      if (editor == "offline") {
+        auto &scripts = shell.store().scripts();
+        ok = loop.pump_until([&] { return scripts.ready() && scripts.desktop_ready() && !scripts.busy(); }, 30);
+        const std::string source = "from examples.project_scan.offline import create_demo\n"
+            "offline_demo = create_demo(stk, " + io::Json(dir.str() + "/offline").dump() + ")";
+        ok = ok && scripts.execute(source) && loop.pump_until([&] {
+          screen.run_deferred();
+          return !scripts.busy();
+        }, 60);
+        ok = ok && scripts.status().at("run").at("state") == "succeeded" && bool(shell.store().viewer().payload());
+        if (!ok) {
+          for (size_t line = 0; line < scripts.output().line_count(); ++line) {
+            fprintf(stderr, "%s\n", std::string(scripts.output().line(line)).c_str());
+          }
+        }
+      }
       if (editor == "files" || editor == "snapshots") {
         const std::string path = dir.str() + "/project/Notes 中文.md";
         { std::ofstream file(core::path_from_utf8(path)); file << "# Simulation notes\n"; }
@@ -154,7 +171,7 @@ int main(int argc, char **argv)
              loop.pump_until([&] { return !state.busy() && !state.recent_loading(); }, 30);
         ok = ok && state.close() && loop.pump_until([&] { return !state.busy(); }, 30);
       }
-      screen.set_maximized(area);
+      if (editor != "offline") { screen.set_maximized(area); }
       wm::DrawContext ctx;
       ctx.ui_scale = 1;
       ctx.fonts = &gpu->fonts();
@@ -201,6 +218,12 @@ int main(int argc, char **argv)
         for (int i = 0; i < 3; ++i) {
           ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
           ok = ok && loop.pump_until([&] { return !state.busy(); }, 30);
+        }
+      }
+      if (editor == "offline") {
+        // A new editor attaches during its first UI draw; subsequent frames draw its GPU region.
+        for (int frame = 0; frame < 2; ++frame) {
+          ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         }
       }
       ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);

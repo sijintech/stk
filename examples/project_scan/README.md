@@ -1,5 +1,7 @@
 # 温度扫描：项目表格 → 冻结输入 → Runtime → 结果表格
 
+仅想测试本机界面时，先用[无需服务器的离线演示](OFFLINE.md)。
+
 这是工作流演示，计算确定性的合成三维高斯场，**不是物理求解器**。每个任务只需要服务端 Python
 标准库，输出 `metrics.json`、`field.vtk`、`slice.png`。macOS/Windows/Linux 桌面均可作为客户端；
 真实 Runtime 服务仍运行在 Linux，可通过已有直连或 STK 管理的 SSH 连接访问。

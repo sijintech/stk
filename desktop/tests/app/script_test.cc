@@ -268,6 +268,29 @@ TEST_F(ScriptPython, ViewerSeriesStepAndPlaybackUseTheSameSharedTimeline)
 }
 
 #ifndef _WIN32  // The Windows bridge test environment intentionally has no NumPy/VTK.
+TEST_F(ScriptPython, OfflineWorkbenchDemoBuildsProjectAndConfiguresThreeEditorsWithoutRuntime)
+{
+  auto &viewer = f.shell->store().viewer();
+  ASSERT_TRUE(pump([&] { viewer.pump(); return viewer.presets_loaded() && !viewer.catalog().is_null(); }, 60));
+  execute("from examples.project_scan.offline import create_demo\n"
+          "offline_demo = create_demo(stk, " + Json(dir.str() + "/offline").dump() + ")\n"
+          "assert stk.ui.current_project()['id'] == offline_demo['project_id']\n"
+          "assert stk.viewer.status()['has_payload']\n"
+          "assert stk.projects.open(offline_demo['directory']).runs.list()['runs'] == []");
+  EXPECT_EQ(f.screen.areas().size(), 3u);
+  EXPECT_NE(f.screen.find_area("demo-project"), nullptr);
+  EXPECT_NE(f.screen.find_area("demo-view"), nullptr);
+  EXPECT_NE(f.screen.find_area("demo-python"), nullptr);
+  EXPECT_TRUE(viewer.payload());
+  EXPECT_EQ(viewer.source().kind, SourceKind::RunDir);
+  auto &project = f.shell->store().project();
+  ASSERT_TRUE(pump([&] { return project.loaded() && !project.busy(); }));
+  EXPECT_EQ(project.tables().size(), 4u);  // parameters, controls, results and the file index
+  EXPECT_EQ(project.project()->revision, 5);
+  execute("stk.ui.apply_layout(offline_demo['previous_layout'])");
+  EXPECT_EQ(f.screen.areas().size(), 4u);
+}
+
 TEST_F(ScriptPython, ViewerOpensSyntheticResultsAndReevaluatesExplicitParameters)
 {
   auto &viewer = f.shell->store().viewer();

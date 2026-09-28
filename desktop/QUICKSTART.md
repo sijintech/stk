@@ -107,6 +107,13 @@ CMake、Ninja 和 STK science / visualization / control 依赖安装在专用 ve
 失败时查看终端最后一个错误和 `setup.log`。修复工具链或网络后重跑；若 vcpkg 缓存不完整或被修改，
 使用新的 `--work-dir`。这是源码开发测试流程；Windows 安装包和内置 Python 发布仍属于后续里程碑。
 
+## 无需服务器的完整本机演示
+
+更新源码并重新运行启动脚本后，在 **文件 → Python → 运行 Python 文件** 中选择
+`examples/project_scan/offline.py` 的绝对路径，明确点击“运行文件”。脚本创建新的本机项目，
+展示参数表、跨表公式、结果表、文件索引、输入快照、分析图统计和三维结果，并通过 Python 配置三个区域。
+不需要 Runtime/SSH/Hub；数据是合成演示场。具体检查步骤和布局恢复见[离线工作台演示](../examples/project_scan/OFFLINE.md)。
+
 ## 测试项目表格
 
 更新源码后重跑脚本进行增量编译（本次不要用 `--launch-only`）。主窗口内选择
