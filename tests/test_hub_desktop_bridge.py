@@ -438,3 +438,52 @@ def test_a_second_bridge_process_answers_busy_and_exits(bridge_env):  # noqa: F8
     fourth = ProcessBridge(state)
     assert fourth.call("hello", {"protocol": 1})["protocol"] == 1
     assert fourth.close() == 0
+
+
+def test_console_graph_preserves_review_and_explicit_cancel(live, inproc, slow_graphs):
+    from test_desktop_scripts import execute
+    harness = inproc()
+    _, target = pair(harness, live, profile=None)
+    session = harness.call("script.open")["session"]
+    source = f'''
+request = {graph_request(profile='desktop')!r}
+response = stk.graph.evaluate(request, eval_id='console-review', mode='hub', **{target!r})
+assert response['result'] is None and response['action']['state'] == 'review'
+again = stk.graph.evaluate(request, eval_id='console-review', mode='hub', **{target!r})
+assert again['action']['id'] == response['action']['id']
+'''
+    result = execute(harness, session, source)
+    assert result["run"]["state"] == "succeeded", harness.call("script.read", {"session": session})["text"]
+    actions = list(live.actions("graph.evaluate"))
+    assert len(actions) == 1 and actions[0]["state"] == "review"
+    assert not live.actions("graph.cancel")
+    result = execute(harness, session, f"assert stk.graph.cancel('console-review', **{target!r})['cancelled']")
+    assert result["run"]["state"] == "succeeded"
+    assert live.store.action(actions[0]["id"])["state"] == "failed"
+    assert not harness.violations
+
+
+def test_console_interrupt_stops_hub_wait_without_cancelling_remote_analysis(live, inproc, slow_graphs):
+    from test_desktop_scripts import execute, settled
+    started, mode = slow_graphs
+    harness = inproc()
+    _, target = pair(harness, live)
+    session = harness.call("script.open")["session"]
+    source = f"response = stk.graph.evaluate({graph_request()!r}, eval_id='console-detach', mode='hub', **{target!r})"
+    harness.call("script.execute", {"session": session, "source": source})
+    assert started.wait(30)
+    assert harness.call("script.interrupt", {"session": session})["interrupted"]
+    assert settled(harness, session)["run"]["state"] == "cancelled"
+    assert not live.actions("graph.cancel") and live.agent._graph_tokens
+    assert not harness.bridge.graphs.running
+    mode["slow"] = False
+    deadline = time.monotonic() + 30
+    action = list(live.actions("graph.evaluate"))[0]
+    while live.store.action(action["id"])["state"] != "succeeded":
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    # Explicitly recovering the caller-owned ID returns the original completed action.
+    result = execute(harness, session, source + "\nassert response['result']['schema'] == 'stk.graph-result/1'")
+    assert result["run"]["state"] == "succeeded", harness.call("script.read", {"session": session})["text"]
+    assert len(live.actions("graph.evaluate")) == 1 and not live.actions("graph.cancel")
+    assert not harness.violations

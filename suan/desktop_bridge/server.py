@@ -414,6 +414,8 @@ class Bridge:
                  "project.snapshots.verify", "project.snapshots.resolve",
                  "project.runs.prepare", "project.runs.list", "project.runs.get",
                  "project.runs.submit", "project.runs.refresh", "project.runs.cancel",
+                 "graph.catalog", "graph.presets", "graph.validate", "graph.evaluate", "graph.cancel",
+                 "blob.ensure", "probe", "colormaps.list",
                  "connections.list", "connections.check", "connections.ssh",
                  "hub.devices", "hub.templates", "hub.actions", "hub.action",
                  "workspace.list", "workspace.create", "workspace.files", "upload.start", "download.start",
@@ -438,6 +440,10 @@ class Bridge:
         issues = bridge_schema.validate_params(operation, params)
         if issues:
             raise BridgeError("invalid_params", f"{issues[0][0]}: {issues[0][1]}")
+        if operation == "graph.evaluate":
+            # Console interruption cancels only this local evaluation; on a Hub it stops
+            # waiting without issuing a graph.cancel action or cancelling simulation tasks.
+            return self.graphs.evaluate(params, interrupted=cancelled)
         context = _Context()
         result = self.methods[operation](params, context)
         for callback in context.callbacks:

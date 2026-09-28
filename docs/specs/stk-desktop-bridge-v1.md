@@ -644,6 +644,12 @@ preserves globals between runs. The bridge, project transactions and submitted R
 their independent lifetimes. Interrupt kills the worker tree (also resetting an idle namespace);
 an already accepted operation may finish and must not be blindly repeated. A slow in-flight project
 operation can keep the session `stopping` until its outcome is known to the bridge.
+The script operation catalog also exposes graph catalog/presets/validation/evaluation/cancellation,
+blob lookup, probes and colormaps. A console `graph.evaluate` is tied to that execution's cancellation:
+interrupting cancels its local graph work (queued work leaves another active evaluation untouched).
+In Hub mode it only stops waiting, without sending a remote cancel action; accepted node work remains
+recoverable by the caller-owned eval ID. Viewer polling has independent ownership and is not cancelled
+by stopping a console wait. See [graph scripting](../scripting-graphs.md).
 
 `script.changed {session}` is a refresh hint, coalesced until `script.read` acknowledges it; start/end
 transitions also emit a hint. Output is bounded to 1 Mi Unicode characters, read offsets count Unicode

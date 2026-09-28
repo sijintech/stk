@@ -99,6 +99,16 @@ def _graph_error(exc):
     return BridgeError(code, exc.message, data=data)
 
 
+class _EvaluationCancellation(threading.Event):
+    """Own explicit cancellation plus the lifetime of an optional calling console execution."""
+    def __init__(self, interrupted=None):
+        super().__init__()
+        self.interrupted = interrupted
+
+    def is_set(self):
+        return super().is_set() or (self.interrupted is not None and self.interrupted.is_set())
+
+
 class GraphService:
     def __init__(self, cache_dir, connections, emit):
         self.cache_dir = Path(cache_dir)
@@ -134,12 +144,12 @@ class GraphService:
 
     # -- evaluation ---------------------------------------------------------------------------
 
-    def _begin(self, eval_id):
+    def _begin(self, eval_id, interrupted=None):
         from suan.graph.registry import CancelToken
         with self.lock:
             if eval_id in self.running:
                 raise BridgeError("conflict", f"Evaluation {eval_id!r} is already running")
-            entry = {"token": CancelToken(), "cancelled": threading.Event()}
+            entry = {"token": CancelToken(), "cancelled": _EvaluationCancellation(interrupted)}
             self.running[eval_id] = entry
         return entry
 
@@ -189,9 +199,16 @@ class GraphService:
             entry["token"].cancel("The desktop bridge is shutting down")
         self.worker.close()
 
-    def evaluate(self, params):
+    def evaluate(self, params, *, interrupted=None):
+        if params.get("mode", "local") == "hub":
+            if not str(params.get("connection", "")).startswith("hub:") or not params.get("node"):
+                raise BridgeError("invalid_params", "Hub evaluation needs a hub connection and node")
+            if params.get("local_bindings"):
+                raise BridgeError("invalid_params", "Hub evaluation cannot read local directory bindings")
+        if interrupted is not None and interrupted.is_set():
+            raise BridgeError("cancelled", "Script execution interrupted before graph evaluation")
         eval_id = params["eval_id"]
-        entry = self._begin(eval_id)
+        entry = self._begin(eval_id, interrupted)
         try:
             if params.get("mode", "local") == "hub":
                 return self._evaluate_hub(params, entry)

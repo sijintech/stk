@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .runtime import Connections, Runtime, Transfers
 from .viewer import Viewer
+from .graph import Graph
 
 
 class ScriptError(RuntimeError):
@@ -204,6 +205,7 @@ class API:
         self.connections = Connections(call)
         self.transfers = Transfers(call)
         self.viewer = Viewer(call)
+        self.graph = Graph(call)
 
     def runtime(self, connection, *, node=None):
         """Use a saved Runtime profile, optionally routed through a Hub execution node."""
@@ -229,4 +231,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Project", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]
+__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]

@@ -79,7 +79,8 @@ print(p.backup())
 | 已保存连接查询/检查、管理 SSH 状态/连接/断开 | `stk.connections`；配置与凭据继续在 Jobs 或 CLI 管理 |
 | Runtime/Hub 工作区、上传/下载、任务提交/查询/取消、产物、日志 | `stk.runtime(connection, node=...)` 与 `stk.transfers`；复用已有幂等和审核规则 |
 | Viewer 打开/关闭、状态、预设参数、图层、求值、时间步/播放和相机重置 | `stk.viewer` 已接入共享原生状态，见[Viewer Python 指南](scripting-viewer.md) |
-| 任意图求值、相机完整变换、探针/导出、完整项目打包与文档 | 现有各自接口仍可用；统一 facade 待逐步接入 |
+| 分析图目录、连接校验、求值/取消、blob 与原场探针 | `stk.graph` 已接入现有图服务，保留 Hub 审核和结果，见[分析图 Python 指南](scripting-graphs.md) |
+| 相机完整变换、原生图编辑、完整项目打包与文档 | 统一操作与界面仍待逐步接入 |
 | 自动补全、操作记录成脚本、脚本持久历史 | 待开发 |
 | 远程机器 Python / UI 控制 | 未开放；本机 stdio 扩展不等于 P2P 或 SSH 服务 |
 
@@ -157,7 +158,7 @@ if task["state"] == "succeeded":
 传输在完成、失败、取消、中断或等待 Hub 审核时返回。调用者必须检查状态。超时抛出 `TimeoutError`，
 已接受的任务/传输仍可继续；单次网络调用有其自身超时，等待总时间可能超过传入的轮询期限。
 这些对象只绑定连接/节点 ID，不持有远端对象；重开桌面后可用保存的任务/传输 ID 再查询。
-目前不会自动把任务 ID 写回项目，完整批次记录和输入快照仍待接入。
+直接调用 `r.tasks.submit` 不自动写回项目；要持久关联冻结输入、参数和任务，使用 `stk.project.runs`，见[运行记录](project-runs.md)。
 
 日志使用**字节偏移**，`data` 在 Python helper 中为 `bytes`。逐块拼接后解码，或使用增量解码器：
 
@@ -179,6 +180,8 @@ next_offset = chunk["next_offset"]
   桥重启后整个 Python 会话失效，不重放源码。显式关闭会话也不会关闭项目或取消 Runtime 任务。
 - 中断会停止脚本 worker 及其普通子进程。已经交给桥/UI 的操作可能已完成或仍在收尾，
   中断不回滚项目事务、不撤销已接受的 UI 修改，也不取消已提交任务/传输；必要时先查询状态，再决定下一步。
+- `stk.graph.evaluate` 的本机求值随当前脚本中断取消；Hub 求值只停止等待，不发送远端取消。
+  `stk.viewer.wait` 仍只停止轮询，详见[分析图中断边界](scripting-graphs.md)。
 - `stk` 操作须从执行线程调用；后台 Python 线程可以打印，但不能调用项目/UI RPC。
 - 单段源码最多 262144 个字符、UTF-8 最多 1 MiB；文件最多 1 MiB。暂不支持交互式 `input()`。
 
