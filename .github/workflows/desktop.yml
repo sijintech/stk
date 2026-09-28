@@ -131,6 +131,13 @@ jobs:
           python3 desktop/tests/check_required_tests.py build/ctest-junit.xml \
             'PythonBridge\..*' 'ProjectPython\..*' 'ScriptPython\..*' 'JobsPython\..*' 'app_viewer_python_(vulkan|opengl)' \
             'app_viewer_e2e_(vulkan|opengl)' 'app_viewer_window_(xvfb|weston)' 'package_install_check'
+          for backend in opengl vulkan; do
+            for language in en zh; do
+              for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs; do
+                python3 desktop/tests/check_required_tests.py build/ctest-junit.xml "${editor}_render_${backend}_${language}"
+              done
+            done
+          done
 
       - name: Upload rendered frames and e2e images
         if: always()
@@ -140,10 +147,12 @@ jobs:
           path: |
             build/tests/wm/out/*.png
             build/tests/app/out/*.png
+            build/tests/viewer/out/*.png
             build/tests/app/e2e_*/out.png
             build/tests/app/e2e_*/seq/*.png
             build/packaging/check/*.png
             build/spike/*.png
+            build/ctest-junit.xml
           if-no-files-found: ignore
           retention-days: 14
 
@@ -385,6 +394,11 @@ jobs:
             'PythonBridge\.(HelloListsTheProtocol|ColormapsList|GraphPresets|LocalGraphEvaluateOnAFakeMuferroRun|ManagedSSHProfileRoundTripDoesNotConnectImplicitly)' 'ProjectPython\..*' 'ScriptPython\..*'
           python3 desktop/tests/check_required_tests.py build/ctest-metal.xml \
             'app_viewer_python_metal' 'app_viewer_e2e_metal' 'package_install_check'
+          for language in en zh; do
+            for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs; do
+              python3 desktop/tests/check_required_tests.py build/ctest-metal.xml "${editor}_render_metal_${language}"
+            done
+          done
 
       - name: stk-render smoke (Metal, spec example payload)
         run: build/bin/stk-render --payload docs/specs/examples/payload-v2 --export build/stk-render-metal.png
@@ -440,10 +454,13 @@ jobs:
           name: desktop-macos-frames
           path: |
             build/tests/wm/out/*.png
+            build/tests/app/out/*.png
             build/tests/viewer/out/*.png
             build/tests/app/e2e_*/out.png
             build/stage/*.png
             build/stk-render-metal.png
+            build/ctest-cpu.xml
+            build/ctest-metal.xml
           if-no-files-found: ignore
           retention-days: 14
 
