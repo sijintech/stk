@@ -57,7 +57,16 @@ std::vector<long> processes_matching(const std::string &needle)
       continue;
     }
     std::ifstream in(entry.path() / "cmdline", std::ios::binary);
-    std::string cmdline((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    /* A task can exit after open: procfs read then fails with ESRCH. Streambuf iterators
+     * bypass the stream's default exception mask, so use read() and discard failed reads. */
+    std::string cmdline;
+    char buffer[4096];
+    while (in.read(buffer, sizeof(buffer)) || in.gcount()) {
+      cmdline.append(buffer, size_t(in.gcount()));
+    }
+    if (in.bad()) {
+      continue;
+    }
     if (cmdline.find(needle) == std::string::npos) {
       continue;
     }

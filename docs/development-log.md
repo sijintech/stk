@@ -47,6 +47,12 @@
 
 ### CI 跟踪
 
+`d0b6c5c` 的 Runtime run **36388797350**、文档部署、macOS 和打包验收已通过。
+desktop run **36388797238** 的 Linux 449 项中，仅旧有 `HelloTimeoutRestartsTheBridge` 在清理扫描
+`/proc/*/cmdline` 时失败：进程退出引发流缓冲迭代器直接抛出 ESRCH。改用带流状态检查的分块读取，
+忽略已不可读的进程，保留存活进程匹配和清理断言；不改变生产重启逻辑。
+重新构建后的超时重启用例连续 **12 次通过**。Windows 结果继续跟踪。
+
 SSH CI 补充：`33c88d6` 的 Runtime run 36384809632 全部成功，包括 Linux 真实 sshd 和 Windows
 模拟传输；文档部署成功。desktop run 36384809472 的 Linux/macOS/打包成功，Windows 现有 CPU
 测试通过，但必跑检查发现 SSH 用例未被旧 CMake Windows 过滤器注册。已将该可移植用例加入过滤器；
