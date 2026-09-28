@@ -29,6 +29,7 @@ on:
       - "desktop/**"
       - "suan/**"
       - "tests/mupro_fake.py"
+      - "examples/project_scan/**"
       - "pyproject.toml"
       - ".github/workflows/desktop.yml"
   push:
@@ -40,6 +41,7 @@ on:
       - "desktop/**"
       - "suan/**"
       - "tests/mupro_fake.py"
+      - "examples/project_scan/**"
       - "pyproject.toml"
       - ".github/workflows/desktop.yml"
 

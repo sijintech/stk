@@ -39,10 +39,23 @@ assert p.snapshots.verify(demo['snapshot_id'])['ok']
     metrics = [json.loads(path.with_name("metrics.json").read_text()) for path in paths]
     assert [item["max_K"] for item in metrics] == [310, 335, 360]
     assert all(path.with_name("analysis.json").is_file() for path in paths) == analyze
-    # Editing the shared parameter propagates formulas, while the example's saved inputs/results stay frozen.
+    # Preview the shared edit through the real worker before committing it. The candidate includes
+    # recomputed cross-table values, but the original database, input objects and results stay put.
     result = execute(scripts, session, '''
-p.apply([{'op':'set_cell', 'table_id':demo['control_table'], 'record_id':demo['control_record'],
-          'field_id':demo['offset_field'], 'value':20}], expected_revision=p.snapshot()['project']['revision'])
+before = p.snapshot()
+proposal = p.preview([{'op':'set_cell', 'table_id':demo['control_table'], 'record_id':demo['control_record'],
+                       'field_id':demo['offset_field'], 'value':20}], expected_revision=before['project']['revision'])
+assert proposal['persisted'] is False
+assert p.snapshot() == before
+candidate = next(table for table in proposal['snapshot']['tables'] if table['id'] == demo['table_id'])
+assert [row['values'][demo['effective_field']] for row in candidate['records']] == [320, 345, 370]
+assert p.snapshots.verify(demo['snapshot_id'])['ok']
+''')
+    assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})["text"]
+    assert store.snapshot() == model
+    # A separate, explicit operation applies the reviewed commands and checks their base revision.
+    result = execute(scripts, session, '''
+p.apply(proposal['commands'], expected_revision=proposal['base_revision'])
 ''')
     assert result["run"]["state"] == "succeeded"
     cases = next(table for table in store.snapshot()["tables"] if table["id"] == cases["id"])

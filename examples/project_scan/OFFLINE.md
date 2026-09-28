@@ -47,6 +47,31 @@ stk.ui.apply_layout(offline_demo["previous_layout"])
 脚本失败时保留已经创建的项目与文件，错误显示在控制台；可以检查错误和路径，不会自动回滚文件。
 不创建假的 Runtime 任务或运行记录，也不演示远程任务恢复。完整远程流程见 [温度扫描示例](README.md)。
 
+## 检查修改预览
+
+在一次刚完成的演示中，先在 Python 面板执行以下代码。这一步只检查候选修改，界面里的 Offset 仍为 10：
+
+```python
+p = stk.project
+before = p.snapshot()
+proposal = p.preview([
+    {"op": "set_cell", "table_id": offline_demo["control_table"],
+     "record_id": offline_demo["control_record"], "field_id": offline_demo["offset_field"], "value": 20}
+], expected_revision=before["project"]["revision"])
+candidate = next(t for t in proposal["snapshot"]["tables"] if t["id"] == offline_demo["table_id"])
+print([r["values"][offline_demo["effective_field"]] for r in candidate["records"]])  # [320, 345, 370]
+print(p.snapshot() == before)  # True
+```
+
+检查后如需真正修改，**另行执行**：
+
+```python
+p.apply(proposal["commands"], expected_revision=proposal["base_revision"])
+```
+
+此时表格更新，生成文件和三维场仍保持原值；可用项目“撤销”恢复。两步之间发生其他编辑时会拒绝旧草案，
+需重新预览，不能只替换修订号。后端尚未提供 AI 草案页面；更多边界见[修改预览](../../docs/project-preview.md)。
+
 ## 自动化使用
 
 ```python
