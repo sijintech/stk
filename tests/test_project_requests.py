@@ -161,7 +161,9 @@ def test_atomic_completion_failure_rolls_back_message_and_marker(journal, monkey
 
 @pytest.mark.parametrize("text,metadata", [("", None), (" ", None), ("x" * (65536 + 1), None), ("\ud800", None),
     ("valid", {"headers": {"Authorization": "secret"}}), ("valid", {"remote_request_id": "https://host?token=secret"}),
-    ("valid", {"input_tokens": True}), ("valid", {"output_tokens": 2**63})])
+    ("valid", {"input_tokens": True}), ("valid", {"output_tokens": 2**63})],
+    ids=["empty-text", "blank-text", "oversized-text", "invalid-utf8", "credential-header",
+         "credential-url", "boolean-token-count", "oversized-token-count"])
 def test_invalid_output_never_publishes_partial_message(journal, text, metadata):
     store, _, _, _ = journal
     item = create(journal)

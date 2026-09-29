@@ -183,7 +183,8 @@ def test_cancellation_between_claim_and_dispatch_skips_adapter_send(model, execu
     ("\ud800", "failed", "response_invalid"),
     (TextResponse("response", {"authorization": "secret-key-in-server-error"}), "failed", "response_invalid"),
     (TextResponse("response", {"output_tokens": True}), "failed", "response_invalid"),
-])
+], ids=["definitive-failure", "timeout", "unknown-failure", "interrupted-adapter", "missing-response",
+        "empty-response", "oversized-response", "invalid-utf8", "credential-metadata", "boolean-token-count"])
 def test_definite_failure_and_unknown_outcomes_have_safe_diagnostics_and_never_retry(model, executors, outcome, status, code):
     store, _ = model
     saved = request(model)
