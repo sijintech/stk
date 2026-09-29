@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/project_state.hh"
+#include "stk/app/project_discussion.hh"
 
 #include <algorithm>
 #include <limits>
@@ -119,6 +120,7 @@ std::optional<Json> project_literal(const std::string_view type, const std::stri
 
 ProjectState::ProjectState(AppStore &store) : store_(store)
 {
+  discussion_ = std::make_unique<ProjectDiscussion>(store, *this);
   open_external = platform::open_with_system;
   open_vscode = platform::open_with_vscode;
 }
@@ -628,6 +630,7 @@ bool ProjectState::apply_review()
 
 void ProjectState::clear_drafts()
 {
+  discussion_->reset();
   drafts_ = Json::array();
   drafts_error_.clear();
   drafts_loaded_ = false;

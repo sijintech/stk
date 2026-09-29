@@ -6,6 +6,7 @@
 #include "stk/core/paths.hh"
 #include "stk/platform/file_dialog.hh"
 #include "project_review_view.hh"
+#include "project_discussion_view.hh"
 #include "project_simulation_view.hh"
 
 #include <algorithm>
@@ -23,8 +24,8 @@ class ProjectEditor final : public Editor {
 
   bool show_view(const std::string_view view) override
   {
-    if (view != "review" && view != "data") { return false; }
-    project_view_ = view == "review" ? 1 : 0;
+    if (view != "review" && view != "data" && view != "discussion") { return false; }
+    project_view_ = view == "review" ? 1 : view == "discussion" ? 2 : 0;
     return true;
   }
 
@@ -83,14 +84,19 @@ class ProjectEditor final : public Editor {
       return;
     }
     const bool editable = state.ready() && !state.busy();
-    if (state.project()->format_version < 6) {
+    if (state.project()->format_version < 7) {
       layout.paragraph(ctx.tr("project.upgrade_hint"));
       layout.button("upgrade_project", ctx.tr("project.upgrade"), [&state] { state.upgrade(); }).disable(!editable);
     }
-    layout.tabs("project_view", {std::string(ctx.tr("project.review.data")), std::string(ctx.tr("project.review.title"))},
+    layout.tabs("project_view", {std::string(ctx.tr("project.review.data")), std::string(ctx.tr("project.review.title")),
+                               std::string(ctx.tr("discussion.title"))},
                 ui::bind(project_view_));
     if (project_view_ == 1) {
       review_view_.draw(layout, ctx, state);
+      return;
+    }
+    if (project_view_ == 2) {
+      discussion_view_.draw(layout, ctx, state, project_view_);
       return;
     }
     if (auto *panel = layout.panel("project_backup", ctx.tr("project.backup_title"), false)) {
@@ -933,6 +939,7 @@ class ProjectEditor final : public Editor {
 
   int project_view_ = 0;
   ProjectReviewView review_view_;
+  ProjectDiscussionView discussion_view_;
   ProjectSimulationView simulation_view_;
   std::string directory_, name_, table_name_, field_name_, unit_, cell_field_, recent_directory_;
   std::string file_project_, file_paths_;

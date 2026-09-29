@@ -89,6 +89,58 @@ class Project:
     def drafts(self):
         return ProjectDrafts(self._call, self.handle)
 
+    @property
+    def contexts(self):
+        return ProjectContexts(self._call, self.handle)
+
+    @property
+    def discussion(self):
+        return ProjectDiscussion(self._call, self.handle)
+
+
+class ProjectContexts:
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def capture(self, table_id, record_ids, field_ids, *, expected_revision, title, context_id):
+        """Freeze explicit selected cells and their provenance; never expand the selection implicitly."""
+        return self._call("project.contexts.capture", {"handle": self.handle, "table_id": table_id,
+            "record_ids": record_ids, "field_ids": field_ids, "expected_revision": expected_revision,
+            "title": title, "context_id": context_id})["context"]
+
+    def get(self, context_id):
+        return self._call("project.contexts.get", {"handle": self.handle, "context_id": context_id})["context"]
+
+    def list(self, *, offset=0, limit=100):
+        return self._call("project.contexts.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+
+class ProjectDiscussion:
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def add(self, text, *, message_id, context_id, role="user"):
+        """Save plain text bound to a captured context; neither role nor text executes operations."""
+        return self._call("project.discussion.add", {"handle": self.handle, "text": text,
+            "message_id": message_id, "context_id": context_id, "role": role})["message"]
+
+    def get(self, message_id):
+        return self._call("project.discussion.get", {"handle": self.handle, "message_id": message_id})["message"]
+
+    def list(self, *, offset=0, limit=100):
+        return self._call("project.discussion.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def link_draft(self, message_id, draft_id, *, proposal_id):
+        """Record matching-context provenance for a saved draft; never apply or approve it."""
+        return self._call("project.discussion.link_draft", {"handle": self.handle, "message_id": message_id,
+            "draft_id": draft_id, "proposal_id": proposal_id})["proposal"]
+
+    def proposals(self, *, offset=0, limit=100, draft_id=None):
+        params = {"handle": self.handle, "offset": offset, "limit": limit}
+        if draft_id is not None:
+            params["draft_id"] = draft_id
+        return self._call("project.discussion.proposals", params)
+
 
 class ProjectDrafts:
     def __init__(self, call, handle):
@@ -309,4 +361,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectCSV", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]
+__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectContexts", "ProjectCSV", "ProjectDiscussion", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]

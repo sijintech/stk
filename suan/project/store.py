@@ -20,7 +20,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 6
+FORMAT_VERSION = 7
 DATABASE_NAME = "project.sqlite3"
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
@@ -89,6 +89,22 @@ _DDL_V6 = (
            OR (status = 'applied' AND applied_revision IS NOT NULL
                AND applied_revision = base_revision + 1 AND closed_at IS NOT NULL)
            OR (status = 'discarded' AND applied_revision IS NULL AND closed_at IS NOT NULL)))""",
+)
+
+_DDL_V7 = (
+    """CREATE TABLE project_contexts (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id),
+        source_revision INTEGER NOT NULL CHECK(source_revision >= 0), payload TEXT NOT NULL,
+        request_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL)""",
+    """CREATE TABLE project_messages (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id),
+        context_id TEXT NOT NULL REFERENCES project_contexts(id), payload TEXT NOT NULL,
+        request_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL)""",
+    """CREATE TABLE project_proposals (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id),
+        message_id TEXT NOT NULL REFERENCES project_messages(id), context_id TEXT NOT NULL REFERENCES project_contexts(id),
+        draft_id TEXT NOT NULL UNIQUE REFERENCES project_drafts(id), base_revision INTEGER NOT NULL CHECK(base_revision >= 0),
+        payload TEXT NOT NULL, request_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL)""",
 )
 
 
@@ -192,7 +208,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -263,6 +279,16 @@ class ProjectStore:
         from .drafts import Drafts
         return Drafts(self)
 
+    @property
+    def contexts(self):
+        from .contexts import Contexts
+        return Contexts(self)
+
+    @property
+    def discussion(self):
+        from .discussion import Discussion
+        return Discussion(self)
+
     def _backup(self, db):
         """Online SQLite backup of an already established *read* snapshot, published atomically."""
         project = dict(db.execute("SELECT * FROM project").fetchone())
@@ -327,7 +353,8 @@ class ProjectStore:
                 if tuple(identity) != (project["id"], expected_revision) or _version(source) != version:
                     raise ProjectError("Project changed while preparing the migration backup")
                 backup = self._backup(source)
-            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5), (5, _DDL_V6)):
+            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5),
+                                               (5, _DDL_V6), (6, _DDL_V7)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)

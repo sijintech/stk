@@ -88,6 +88,8 @@ PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真�
 现在可从“文件 → 项目表格 / Python”使用项目编辑与脚本面板；源码更新后重跑[启动脚本](desktop/QUICKSTART.md)
 进行增量编译。Python 面板支持多行运行、中断、文件执行以及项目/Runtime/布局 API；其他功能的统一脚本覆盖仍在推进。
 项目文件可登记、跳转 VSCode，并显式保存和校验[不可变输入副本](docs/project-snapshots.md)。
+项目编辑器的[讨论页](docs/project-contexts.md)可保存选定数据的上下文、文字消息及修改草案来源；
+在修改检查页查看差异后明确应用。当前尚未接入模型生成，保存和恢复讨论不会执行代码或提交计算。
 
 远程计算经控制服务：所有者用 `suan-control pair --role client --profile desktop` 签发配对码，在桌面程序
 “配对控制服务…”中输入；见 [控制服务指南](docs/hub.md)。

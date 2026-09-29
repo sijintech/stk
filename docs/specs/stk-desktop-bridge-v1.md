@@ -507,6 +507,14 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.drafts.list` | `{handle, offset?, limit?}` | `{drafts: [draft summary], next_offset: integer|null}` |
 | `project.drafts.apply` | `{handle, draft_id, expected_revision}` | `{draft, revision, replayed: boolean}` |
 | `project.drafts.discard` | `{handle, draft_id}` | `{draft}` |
+| `project.contexts.capture` | `{handle, context_id, expected_revision, title, table_id, record_ids, field_ids}` | `{context}` |
+| `project.contexts.get` | `{handle, context_id}` | `{context}` |
+| `project.contexts.list` | `{handle, offset?, limit?}` | `{contexts: [context summary], next_offset: integer|null}` |
+| `project.discussion.add` | `{handle, message_id, context_id, text, role?}` | `{message}` |
+| `project.discussion.get` | `{handle, message_id}` | `{message}` |
+| `project.discussion.list` | `{handle, offset?, limit?}` | `{messages: [message summary], next_offset: integer|null}` |
+| `project.discussion.link_draft` | `{handle, proposal_id, message_id, draft_id}` | `{proposal}` |
+| `project.discussion.proposals` | `{handle, offset?, limit?, draft_id?}` | `{proposals: [proposal], next_offset: integer|null}` |
 | `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
 | `project.backup` | `{handle}` | `{path, project_id, revision, format_version}` |
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
@@ -566,7 +574,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   and literal types still reject the batch. See the project guide for the bounded expression grammar/unit policy.
 - `project.backup` writes a consistent, checked SQLite copy under the project's `backups/` directory;
   it does not include external assets or change project revision. `project.upgrade` first creates such a
-  backup, then migrates supported older formats (v1–v5) to v6 atomically, adding one revision and an internal
+  backup, then migrates supported older formats (v1–v6) to v7 atomically, adding one revision and an internal
   `{op: "upgrade_format", from_version, to_version}` history record. A stale precondition is `conflict`.
   Already-current format returns `upgraded=false, backup=null` without changing revision. Opening alone
   never migrates. A failed migration rolls back the source; a completed pre-migration backup is kept.
@@ -632,6 +640,47 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   removes it. These methods never automatically retry, open the native review view, or submit tasks.
   For uncertain responses retain the UUID and inspect the saved record before explicitly retrying
   the same save/application request. See [saved draft guide](../project-drafts.md).
+- `project.contexts.*` and `project.discussion.*` are optional format 7 extensions. Check
+  `hello.methods`; older projects require explicit backup/upgrade. These methods never call a model,
+  execute message text, open files, apply drafts or submit work. They do not advance the editable
+  revision, alter its history/undo stack or emit `project.changed`. Refresh lists explicitly across clients.
+  Their records persist across project close/reopen; restoring a record triggers no action.
+  Capture, add and link require separate caller-provided canonical UUIDs. Repeating the same ID and
+  original request returns the same record; changing the request under that ID returns `conflict`.
+  For uncertain responses retain IDs and inspect records before explicitly retrying; do not generate
+  replacement IDs automatically. Records are immutable and have no overwrite/delete endpoint.
+  All lists default to offset 0 and limit 100, accept limit 1–100, and return `next_offset=null` at the end.
+- Context capture binds one project UUID and `source_revision` to exactly one selected table UUID,
+  1–100 distinct record UUIDs and 1–64 distinct field UUIDs; their product is at most 1000.
+  A stale `expected_revision` conflicts. Missing selected objects remain in selection and
+  `diagnostics: {table_missing, record_ids, field_ids}`; selected objects belonging to another table
+  are invalid. Names, types, units and selected literals/definitions/cached evaluations are frozen.
+  Unset literals remain absent and explicit nulls remain present. Capture uses the selected rows and
+  columns directly, without loading a full project snapshot, traversing unselected dependencies,
+  reading referenced files or fetching task logs/credentials.
+  A context has `id, project_id, title, source_revision, created_at, selection, content, diagnostics,
+  limits, omitted_values`; the schema defines the exact closed object shapes. Selection contains
+  `table_id, record_ids, field_ids`. Included content contains one table descriptor or null, selected
+  field descriptors and records with `literals`, `definitions` and `evaluations` keyed by field UUID.
+  Each part is explicitly `included` with its value, or `omitted` with a reason, byte size and SHA-256.
+  Parts over 16 KiB use `value_limit`; unavailable evaluation caches use `evaluation_unavailable` and
+  are not recomputed. A context exceeding the 256 KiB total budget instead retains an omitted content
+  descriptor with `context_limit`, size and checksum. Omission is explicit, not silent truncation.
+  List summaries exclude `content.value`; get returns the saved representation, including omission
+  markers. Later edits or source deletion cannot change it; compare source/current revisions to assess
+  staleness, and explicitly capture a new ID when new data is required.
+- A discussion message is `{id, project_id, context_id, role, text, created_at}`. `context_id` must
+  identify a saved context. `role` is `user` (default) or `assistant`, an informational label with no
+  authentication or authorization meaning. Text must be nonblank and at most 64 KiB UTF-8; Markdown,
+  code blocks and claims of approval remain inert text. List summaries omit text and include
+  `text_bytes`; get returns the complete message. No generation request or active model session is implied.
+  A proposal link is `{id, project_id, message_id, context_id, draft_id, base_revision, created_at}`.
+  Its message/context and saved draft must belong to the same project, and context source revision
+  must equal the draft base revision. Each draft has at most one provenance link; `proposals` accepts
+  an optional exact `draft_id` filter. The link records provenance only and neither applies the draft
+  nor changes its status; context selection is not an authorization scope for draft commands.
+  Draft application retains all format 6 checks and atomic receipt semantics. See
+  [context and discussion guide](../project-contexts.md) for usage and recovery boundaries.
 - **Uncertain responses:** create/apply/backup/upgrade/undo/redo and file index/refresh are never automatically retried. If a response is lost,
   reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
   raise `expected_revision` and repeat an edit: the previous batch may already have committed.

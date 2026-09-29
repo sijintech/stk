@@ -77,6 +77,7 @@ print(p.backup())
 | 项目创建、打开、列表、关闭、快照、事务修改、历史、撤销/重做、数据库备份/升级 | 已实现，与桌面桥共用命令；包括引用与轻量公式 |
 | 项目修改预览与原生检查 | `stk.project.preview` 返回内存候选；`stk.project.review` 将命令送入原生差异页，由用户明确应用，见[预览指南](project-preview.md) |
 | 持久修改草案与应用回执 | `stk.project.drafts.save/get/list/apply/discard`，格式 6；明确保存、检查和应用，撤销不重置应用回执，见[草案指南](project-drafts.md) |
+| 明确选择的上下文、文字讨论与草案来源 | `stk.project.contexts.capture/get/list`、`stk.project.discussion.add/get/list/link_draft/proposals`，格式 7；不调用模型或执行消息内容，见[上下文指南](project-contexts.md) |
 | CSV/TSV 表格导入与当前值导出 | `stk.project.csv` 共用类型校验、修订和撤销，见[CSV 交换](project-csv.md) |
 | 文件索引登记、刷新、列表、路径检查 | `stk.project.files` 已实现；不复制、删除、打开或执行文件，见[文件指南](project-files.md) |
 | 不可变输入副本、历史清单和 SHA-256 校验 | `stk.project.snapshots` 已实现，格式 4；显式复制选中文件，表格撤销不删除历史，见[输入快照](project-snapshots.md) |
@@ -113,6 +114,13 @@ print(p.drafts.list())
 保存不会更改表格或打开原生检查页；在界面的已保存草案列表刷新、载入并重新预览。
 `p.drafts.apply` 是脚本显式提交入口，旧修订必须重新核对并创建新草案。用同一草案 ID 和原基础修订
 重试已应用请求只返回原回执，即使后来撤销了表格修改，也不会再次应用。完整签名、边界与恢复方法见[草案指南](project-drafts.md)。
+
+`p.contexts.capture(table_id, record_ids, field_ids, expected_revision=..., title=..., context_id=...)`
+可保存明确选择的表格范围；`p.discussion.add(text, message_id=..., context_id=..., role="user")`
+记录引用该上下文的文字。`p.discussion.link_draft(message_id, draft_id, proposal_id=...)` 将消息
+关联到同一基础修订的已保存草案，`p.discussion.proposals(draft_id=...)` 可查询该草案的来源。
+上述操作都不应用修改、不运行 Python 或提交任务；调用者保留各自的 UUID 以查询和重试，
+完整示例、大小限制与恢复规则见[上下文与讨论指南](project-contexts.md)。
 
 布局入口已随原生桌面绑定，可读取、修改并恢复：
 

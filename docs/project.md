@@ -10,6 +10,7 @@ Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科�
 
 批量修改前可用[项目修改预览](project-preview.md)检查候选表格和公式结果，预览不保存修改。
 格式 6 可另外显式[保存草案](project-drafts.md)，重开后重新检查；应用回执与编辑在同一事务提交，重复请求不会再次执行。
+格式 7 增加明确选行、选列的[上下文快照与讨论记录](project-contexts.md)，并可记录消息与草案的来源关联；文字不执行操作。
 
 表格超出面板宽度时，可以拖动底部横向滚动条、使用触控板横向滚动，或按住 Shift 滚动鼠标滚轮。
 列标题和数据一起移动；滚动后仍可点击列标题排序或拖动列边界调整宽度。
@@ -185,10 +186,11 @@ assert store.snapshot()["tables"][0]["records"][0]["values"][derived] == 310
 
 ## 数据库备份与显式升级
 
-新建项目使用格式 6；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
+新建项目使用格式 7；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
 引用、公式、清除和删除命令需要至少格式 2，持久撤销/重做需要格式 3；桌面删除入口要求格式 3。
 格式 4 增加只追加的[输入快照](project-snapshots.md)，内容副本按 SHA-256 保存在项目内。格式 5 增加[运行方案与状态](project-runs.md)。
 格式 6 增加[持久修改草案及应用回执](project-drafts.md)，保存和放弃草案不提升编辑修订。
+格式 7 增加[上下文、消息与草案来源关联](project-contexts.md)，这些记录不提升编辑修订，不进入表格撤销栈。
 桌面提供“备份并升级项目”；CLI 使用 `project upgrade`，
 Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(expected_revision=...)`。
 
@@ -202,9 +204,10 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 ## 实验格式与事务边界
 
-目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=6`。
+目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=7`。
 原物理表为 `project`、`tables`、`fields`、`records`、`cells`、`changes`；格式 2 新增
 `definitions` 和可重建的 `evaluations`，格式 3 增加 `edit_journal`，格式 4 增加 `project_snapshots`，格式 5 增加 `run_plans` / `run_observations`，格式 6 增加 `project_drafts`。
+格式 7 增加 `project_contexts`、`project_messages` 和 `project_proposals`；消息关联不可变上下文，提案关联消息与同一基础修订的草案。
 字面量与定义分开。每次有效编辑批次在一个
 `BEGIN IMMEDIATE` 事务中校验修订、写值/定义、更新受影响缓存、提升一次修订并保存命令历史。
 并发修改同一修订时仅一个批次能成功；读取快照在单一读事务中完成。
@@ -212,7 +215,7 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 显式创建不会覆盖已有数据库；普通打开不会隐式初始化。打开检查 application ID、格式版本、
 SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报告错误，不自动重建或降级。
-当前提供格式 1/2/3/4/5 → 6 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
+当前提供格式 1–6 → 7 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
 数据库之外的输入、程序与资源仍可存为普通文件；文件索引与输入副本已实现，一致性项目打包备份尚待实现。
 
 该内部数据库格式未冻结为 `docs/specs/` 的公开协议，不改变 `stk.graph/1`。
@@ -224,6 +227,7 @@ SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报�
 [桌面桥 v1 §13](specs/stk-desktop-bridge-v1.md#13-local-project-sessions-additive-p1-extension)
 增加 `project.create/open/list/close/snapshot/apply/history/backup/upgrade/undo/redo`，并提供 C++ `Client::project_*` 封装。
 持久草案使用可选的 `project.drafts.save/get/list/apply/discard` 扩展，见[草案指南](project-drafts.md)。
+上下文与讨论使用可选的 `project.contexts.*` / `project.discussion.*` 扩展，见[上下文指南](project-contexts.md)。
 项目修改复用上述命令和修订校验，不绕过存储服务。桥中的句柄只在当前进程内有效，
 桥重启后应按绝对目录重新打开；项目 UUID 和已提交内容保持不变。
 

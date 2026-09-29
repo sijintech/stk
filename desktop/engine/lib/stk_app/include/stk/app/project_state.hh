@@ -7,6 +7,7 @@
 namespace stk::app {
 
 class AppStore;
+class ProjectDiscussion;
 
 /** Shared table data. Views select by UUID, never by the sorted display row. */
 struct ProjectField {
@@ -94,6 +95,7 @@ class ProjectState {
   bool load_draft(const std::string &id);
   bool discard_saved_draft(const std::string &id);
   bool copy_saved_review();
+  ProjectDiscussion &discussion() { return *discussion_; }
   bool import_csv(const std::string &source, const std::string &name, const io::Json &types,
                   const io::Json &units, const std::string &delimiter);
   bool export_csv(const std::string &destination, const std::string &delimiter);
@@ -151,6 +153,7 @@ class ProjectState {
   bool edit_files(const std::vector<std::string> &items, bool index);
 
   AppStore &store_;
+  std::unique_ptr<ProjectDiscussion> discussion_;
   bridge::Client *client_ = nullptr;
   bridge::BridgeState bridge_state_ = bridge::BridgeState::Stopped;
   bridge::ListenerHandle state_listener_, changed_listener_, closed_listener_, runs_listener_;

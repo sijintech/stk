@@ -2710,7 +2710,8 @@
                                 2,
                                 3,
                                 4,
-                                5
+                                5,
+                                6
                               ]
                             },
                             "to_version": {
@@ -2719,7 +2720,8 @@
                                 3,
                                 4,
                                 5,
-                                6
+                                6,
+                                7
                               ]
                             }
                           },
@@ -4771,6 +4773,370 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.contexts.capture": {
+        "description": "Capture immutable explicitly selected project cells at one revision (format 7), without evaluating dependencies, editing tables or publishing change events. Keep the caller UUID to recover an identical request.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "context_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true
+            },
+            "field_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "handle",
+            "context_id",
+            "table_id",
+            "record_ids",
+            "field_ids",
+            "expected_revision",
+            "title"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "context": {
+              "$ref": "#/$defs/projectContext"
+            }
+          },
+          "required": [
+            "context"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.contexts.get": {
+        "description": "Read one frozen context, including value omissions and missing-object diagnostics.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "context_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "context_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "context": {
+              "$ref": "#/$defs/projectContext"
+            }
+          },
+          "required": [
+            "context"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.contexts.list": {
+        "description": "Read saved context summaries without captured values; no automatic refresh or recapture.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "contexts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectContextSummary"
+              },
+              "minItems": 0,
+              "maxItems": 100
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "contexts",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.discussion.add": {
+        "description": "Save explicit nonblank UTF-8 text (at most 64 KiB) bound to a captured context. Role and text are metadata and cannot execute operations.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "message_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "context_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "role": {
+              "enum": [
+                "user",
+                "assistant"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "handle",
+            "message_id",
+            "context_id",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/projectDiscussionMessage"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.discussion.get": {
+        "description": "Read a saved plain-text message and its context identity.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "message_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "message_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/projectDiscussionMessage"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.discussion.list": {
+        "description": "Read message summaries without full text.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectDiscussionMessageSummary"
+              },
+              "minItems": 0,
+              "maxItems": 100
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "messages",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.discussion.link_draft": {
+        "description": "Associate a saved draft with a message and matching context revision. This is provenance only and neither applies nor approves the draft.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "message_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "draft_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "proposal_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "message_id",
+            "draft_id",
+            "proposal_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "proposal": {
+              "$ref": "#/$defs/projectDiscussionProposal"
+            }
+          },
+          "required": [
+            "proposal"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.discussion.proposals": {
+        "description": "Read immutable message/context/draft provenance, optionally filtered by exact draft ID.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "draft_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "proposals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectDiscussionProposal"
+              },
+              "minItems": 0,
+              "maxItems": 100
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "proposals",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -6384,6 +6750,620 @@
         "applied_revision",
         "closed_at",
         "commands"
+      ],
+      "additionalProperties": false
+    },
+    "projectContextPart": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "included"
+            },
+            "value": {}
+          },
+          "required": [
+            "state",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "const": "omitted"
+            },
+            "reason": {
+              "enum": [
+                "value_limit",
+                "evaluation_unavailable"
+              ]
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "state",
+            "reason",
+            "size_bytes",
+            "sha256"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "projectContext": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "selection": {
+          "type": "object",
+          "properties": {
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true
+            },
+            "field_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "table_id",
+            "record_ids",
+            "field_ids"
+          ],
+          "additionalProperties": false
+        },
+        "diagnostics": {
+          "type": "object",
+          "properties": {
+            "table_missing": {
+              "type": "boolean"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 0,
+              "maxItems": 100
+            },
+            "field_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            }
+          },
+          "required": [
+            "table_missing",
+            "record_ids",
+            "field_ids"
+          ],
+          "additionalProperties": false
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "max_value_bytes": {
+              "const": 16384
+            },
+            "max_context_bytes": {
+              "const": 262144
+            }
+          },
+          "required": [
+            "max_value_bytes",
+            "max_context_bytes"
+          ],
+          "additionalProperties": false
+        },
+        "omitted_values": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "included"
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "value": {
+                  "type": "object",
+                  "properties": {
+                    "table": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "$ref": "#/$defs/projectUuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "$ref": "#/$defs/projectUuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "enum": [
+                              "text",
+                              "integer",
+                              "number",
+                              "boolean",
+                              "json"
+                            ]
+                          },
+                          "unit": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "type",
+                          "unit"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 0,
+                      "maxItems": 64
+                    },
+                    "records": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "$ref": "#/$defs/projectUuid"
+                          },
+                          "literals": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "$ref": "#/$defs/projectContextPart"
+                            }
+                          },
+                          "definitions": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "$ref": "#/$defs/projectContextPart"
+                            }
+                          },
+                          "evaluations": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "$ref": "#/$defs/projectContextPart"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "literals",
+                          "definitions",
+                          "evaluations"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 0,
+                      "maxItems": 100
+                    }
+                  },
+                  "required": [
+                    "table",
+                    "fields",
+                    "records"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "state",
+                "size_bytes",
+                "sha256",
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "omitted"
+                },
+                "reason": {
+                  "const": "context_limit"
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              },
+              "required": [
+                "state",
+                "reason",
+                "size_bytes",
+                "sha256"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "title",
+        "source_revision",
+        "created_at",
+        "selection",
+        "diagnostics",
+        "limits",
+        "omitted_values",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "projectContextSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "selection": {
+          "type": "object",
+          "properties": {
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true
+            },
+            "field_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "table_id",
+            "record_ids",
+            "field_ids"
+          ],
+          "additionalProperties": false
+        },
+        "diagnostics": {
+          "type": "object",
+          "properties": {
+            "table_missing": {
+              "type": "boolean"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 0,
+              "maxItems": 100
+            },
+            "field_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "minItems": 0,
+              "maxItems": 64
+            }
+          },
+          "required": [
+            "table_missing",
+            "record_ids",
+            "field_ids"
+          ],
+          "additionalProperties": false
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "max_value_bytes": {
+              "const": 16384
+            },
+            "max_context_bytes": {
+              "const": 262144
+            }
+          },
+          "required": [
+            "max_value_bytes",
+            "max_context_bytes"
+          ],
+          "additionalProperties": false
+        },
+        "omitted_values": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "included"
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              },
+              "required": [
+                "state",
+                "size_bytes",
+                "sha256"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "omitted"
+                },
+                "reason": {
+                  "const": "context_limit"
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              },
+              "required": [
+                "state",
+                "reason",
+                "size_bytes",
+                "sha256"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "title",
+        "source_revision",
+        "created_at",
+        "selection",
+        "diagnostics",
+        "limits",
+        "omitted_values",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "projectDiscussionMessage": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "context_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "context_id",
+        "role",
+        "created_at",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "projectDiscussionMessageSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "context_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "text_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "context_id",
+        "role",
+        "created_at",
+        "text_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "projectDiscussionProposal": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "message_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "context_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "draft_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "message_id",
+        "context_id",
+        "draft_id",
+        "base_revision",
+        "created_at"
       ],
       "additionalProperties": false
     }

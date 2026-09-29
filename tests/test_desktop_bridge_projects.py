@@ -347,3 +347,169 @@ def test_saved_drafts_require_explicit_format_upgrade(inproc, model):
     assert store.info()["format_version"] == 1 and store.info()["revision"] == 1
     assert harness.events_of("project.changed") == []
     assert not harness.violations
+
+
+def test_context_discussion_metadata_freezes_selection_and_links_without_applying(inproc, model):
+    store, ids = model
+    harness = inproc()
+    info = harness.call("project.open", {"directory": str(store.directory)})["project"]
+    handle = info["handle"]
+    baseline, history = store.snapshot(), store.history()
+    params = {"handle": handle, "context_id": str(uuid4()), "title": "选定温度",
+              "table_id": ids["inputs"], "record_ids": [ids["input_row"]], "field_ids": [ids["temperature"]],
+              "expected_revision": 1}
+    captured = harness.call("project.contexts.capture", params)["context"]
+    assert captured["project_id"] == info["id"] and captured["source_revision"] == 1
+    assert captured["selection"] == {key: params[key] for key in ("table_id", "record_ids", "field_ids")}
+    record = captured["content"]["value"]["records"][0]
+    assert record["literals"] == {ids["temperature"]: {"state": "included", "value": 300}}
+    assert harness.call("project.contexts.capture", params)["context"] == captured
+    summary = harness.call("project.contexts.list", {"handle": handle})
+    assert len(summary["contexts"]) == 1 and summary["next_offset"] is None
+    assert "value" not in summary["contexts"][0]["content"]
+    message_params = {"handle": handle, "message_id": str(uuid4()), "context_id": captured["id"],
+                      "text": "请检查温度；`stk.project.apply(...)` 只是讨论文本。"}
+    message = harness.call("project.discussion.add", message_params)["message"]
+    assert message["role"] == "user" and message["text"] == message_params["text"]
+    assert harness.call("project.discussion.add", message_params)["message"] == message
+    second = harness.call("project.discussion.add", {**message_params, "message_id": str(uuid4()),
+        "role": "assistant", "text": "建议先核对参数，再明确应用。"})["message"]
+    page = harness.call("project.discussion.list", {"handle": handle, "limit": 1})
+    assert page["next_offset"] == 1 and page["messages"][0]["id"] == message["id"]
+    assert "text" not in page["messages"][0]
+    assert page["messages"][0]["text_bytes"] == len(message["text"].encode("utf-8"))
+    assert harness.call("project.discussion.list", {"handle": handle, "offset": 1})["messages"][0]["id"] == second["id"]
+    draft = harness.call("project.drafts.save", {"handle": handle, "draft_id": str(uuid4()), "title": "Temperature change",
+        "commands": [command(ids, "temperature", "set_cell", value=350)], "expected_revision": 1})["draft"]
+    link_params = {"handle": handle, "proposal_id": str(uuid4()), "message_id": second["id"], "draft_id": draft["id"]}
+    proposal = harness.call("project.discussion.link_draft", link_params)["proposal"]
+    assert proposal["context_id"] == captured["id"] and proposal["base_revision"] == 1
+    assert harness.call("project.discussion.link_draft", link_params)["proposal"] == proposal
+    assert harness.call("project.discussion.proposals", {"handle": handle, "draft_id": draft["id"]}) == {
+        "proposals": [proposal], "next_offset": None}
+    assert harness.call("project.discussion.proposals", {"handle": handle, "draft_id": str(uuid4())})["proposals"] == []
+    assert store.snapshot() == baseline and store.history() == history
+    assert harness.events_of("project.changed") == []
+
+    store.apply([command(ids, "temperature", "set_cell", value=500)], expected_revision=1)
+    assert harness.call("project.contexts.get", {"handle": handle, "context_id": captured["id"]})["context"] == captured
+    assert harness.call("project.contexts.capture", params)["context"] == captured
+    assert harness.error("project.contexts.capture", {**params, "context_id": str(uuid4())})["code"] == "conflict"
+    newer = harness.call("project.drafts.save", {"handle": handle, "draft_id": str(uuid4()), "title": "Current",
+        "commands": [command(ids, "temperature", "set_cell", value=550)], "expected_revision": 2})["draft"]
+    assert harness.error("project.discussion.link_draft", {**link_params, "proposal_id": str(uuid4()),
+        "draft_id": newer["id"]})["code"] == "conflict"
+    harness.call("project.close", {"handle": handle})
+    assert harness.error("project.contexts.get", {"handle": handle, "context_id": captured["id"]})["code"] == "not_found"
+    opened = harness.call("project.open", {"directory": str(store.directory)})["project"]
+    assert harness.call("project.discussion.get", {"handle": opened["handle"], "message_id": message["id"]})["message"] == message
+    assert harness.call("project.discussion.proposals", {"handle": opened["handle"]})["proposals"] == [proposal]
+    assert store.drafts.get(draft["id"])["status"] == "pending"
+    assert harness.events_of("project.changed") == []
+    assert not harness.violations
+
+
+def test_context_discussion_rejects_ambiguous_ranges_and_excessive_text(inproc, model):
+    store, ids = model
+    harness = inproc()
+    handle = harness.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    params = {"handle": handle, "context_id": str(uuid4()), "title": "Selected",
+              "table_id": ids["inputs"], "record_ids": [ids["input_row"]], "field_ids": [ids["temperature"]],
+              "expected_revision": 1}
+    for invalid in ({"record_ids": []}, {"field_ids": []}, {"record_ids": [ids["input_row"]] * 2},
+                    {"field_ids": [ids["temperature"]] * 2}, {"title": ""}, {"expected_revision": True},
+                    {"record_ids": [str(uuid4()) for _ in range(100)], "field_ids": [str(uuid4()) for _ in range(11)]}):
+        assert harness.error("project.contexts.capture", {**params, **invalid})["code"] == "invalid_params"
+    context = harness.call("project.contexts.capture", params)["context"]
+    assert harness.error("project.contexts.capture", {**params, "title": "Different"})["code"] == "conflict"
+    message = {"handle": handle, "context_id": context["id"], "message_id": str(uuid4()), "text": "hello"}
+    for invalid in ({"text": ""}, {"text": "中" * 22000}, {"role": "tool"}, {"execute": True}):
+        assert harness.error("project.discussion.add", {**message, **invalid})["code"] == "invalid_params"
+    saved = harness.call("project.discussion.add", message)["message"]
+    assert harness.error("project.discussion.add", {**message, "text": "Different"})["code"] == "conflict"
+    assert harness.call("project.discussion.get", {"handle": handle, "message_id": saved["id"]})["message"] == saved
+    for method in ("project.contexts.list", "project.discussion.list", "project.discussion.proposals"):
+        assert harness.error(method, {"handle": handle, "limit": 101})["code"] == "invalid_params"
+        assert harness.error(method, {"handle": handle, "offset": -1})["code"] == "invalid_params"
+    assert store.info()["revision"] == 1 and harness.events_of("project.changed") == []
+    assert not harness.violations
+
+
+def test_context_discussion_requires_explicit_upgrade_from_format_six(inproc, tmp_path):
+    from suan.project import store as storage
+
+    directory = tmp_path / "format-six"
+    directory.mkdir()
+    with sqlite3.connect(directory / DATABASE_NAME) as db:
+        for statement in (*storage._DDL, *storage._DDL_V2, *storage._DDL_V3, *storage._DDL_V4,
+                          *storage._DDL_V5, *storage._DDL_V6):
+            db.execute(statement)
+        db.execute(f"PRAGMA application_id={storage.APPLICATION_ID}")
+        db.execute("PRAGMA user_version=6")
+        db.execute("INSERT INTO project VALUES (?, 'Format six', 0)", (str(uuid4()),))
+    harness = inproc()
+    project = harness.call("project.open", {"directory": str(directory)})["project"]
+    assert project["format_version"] == 6
+    handle = project["handle"]
+    context, message, draft, proposal = (str(uuid4()) for _ in range(4))
+    requests = {
+        "project.contexts.capture": {"context_id": context, "title": "Selected", "expected_revision": 0,
+            "table_id": str(uuid4()), "record_ids": [str(uuid4())], "field_ids": [str(uuid4())]},
+        "project.contexts.get": {"context_id": context}, "project.contexts.list": {},
+        "project.discussion.add": {"context_id": context, "message_id": message, "text": "Notes"},
+        "project.discussion.get": {"message_id": message}, "project.discussion.list": {},
+        "project.discussion.link_draft": {"message_id": message, "draft_id": draft, "proposal_id": proposal},
+        "project.discussion.proposals": {},
+    }
+    for method, params in requests.items():
+        assert harness.error(method, {"handle": handle, **params})["code"] == "unsupported"
+    assert ProjectStore(directory).info()["revision"] == 0
+    assert harness.events_of("project.changed") == []
+    upgraded = harness.call("project.upgrade", {"handle": handle, "expected_revision": 0})
+    assert upgraded["format_version"] == 7 and upgraded["revision"] == 1 and upgraded["backup"]
+    assert harness.call("project.contexts.list", {"handle": handle}) == {"contexts": [], "next_offset": None}
+    assert harness.call("project.discussion.list", {"handle": handle}) == {"messages": [], "next_offset": None}
+    assert harness.call("project.discussion.proposals", {"handle": handle}) == {"proposals": [], "next_offset": None}
+    assert not harness.violations
+
+
+def test_context_schema_preserves_omissions_missing_ids_and_unavailable_evaluations(inproc, model):
+    store, ids = model
+    oversized, derived = str(uuid4()), str(uuid4())
+    bulk = [str(uuid4()) for _ in range(21)]
+    commands = []
+    for identity in [oversized, *bulk]:
+        commands.extend([
+            {"op": "add_field", "id": identity, "table_id": ids["inputs"], "name": identity, "type": "text"},
+            {"op": "set_cell", "table_id": ids["inputs"], "record_id": ids["input_row"], "field_id": identity,
+             "value": "x" * (17000 if identity == oversized else 13000)},
+        ])
+    commands.extend([
+        {"op": "add_field", "id": derived, "table_id": ids["inputs"], "name": "Derived", "type": "number", "unit": "K"},
+        {"op": "set_expression", "table_id": ids["inputs"], "record_id": ids["input_row"], "field_id": derived,
+         "expression": "base * 2", "bindings": {"base": reference(ids, "temperature")}},
+    ])
+    store.apply(commands, expected_revision=1)
+    with sqlite3.connect(store.path) as db:
+        db.execute("DELETE FROM evaluations WHERE field_id=?", (derived,))
+    harness = inproc()
+    handle = harness.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
+    missing_record, missing_field = str(uuid4()), str(uuid4())
+    base = {"handle": handle, "table_id": ids["inputs"], "title": "Omissions", "expected_revision": 2}
+    context = harness.call("project.contexts.capture", {**base, "context_id": str(uuid4()),
+        "record_ids": [ids["input_row"], missing_record], "field_ids": [oversized, derived, missing_field]})["context"]
+    assert context["content"]["state"] == "included"
+    assert context["diagnostics"] == {"table_missing": False, "record_ids": [missing_record], "field_ids": [missing_field]}
+    record = context["content"]["value"]["records"][0]
+    assert record["literals"][oversized]["reason"] == "value_limit"
+    assert record["evaluations"][derived]["reason"] == "evaluation_unavailable"
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT COUNT(*) FROM evaluations WHERE field_id=?", (derived,)).fetchone()[0] == 0
+    omitted = harness.call("project.contexts.capture", {**base, "context_id": str(uuid4()),
+        "record_ids": [ids["input_row"]], "field_ids": bulk})["context"]
+    assert omitted["content"]["state"] == "omitted" and omitted["content"]["reason"] == "context_limit"
+    assert "value" not in omitted["content"] and omitted["content"]["size_bytes"] > 262144
+    summaries = harness.call("project.contexts.list", {"handle": handle})["contexts"]
+    assert len(summaries) == 2 and all("value" not in item["content"] for item in summaries)
+    assert harness.events_of("project.changed") == []
+    assert not harness.violations

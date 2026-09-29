@@ -265,6 +265,9 @@ def test_missing_draft_is_reported_without_creating_any_metadata(store):
 
 def legacy_five(store):
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE project_proposals")
+        db.execute("DROP TABLE project_messages")
+        db.execute("DROP TABLE project_contexts")
         db.execute("DROP TABLE project_drafts")
         db.execute("PRAGMA user_version=5")
 
@@ -278,7 +281,7 @@ def test_format_five_upgrade_backs_up_and_preserves_existing_state(store, tmp_pa
     with pytest.raises(UnsupportedProjectFormat, match="format 6"):
         store.drafts.list()
     result = store.upgrade(expected_revision=1)
-    assert result["format_version"] == FORMAT_VERSION == 6 and result["revision"] == 2
+    assert result["format_version"] == FORMAT_VERSION and result["revision"] == 2
     assert store.snapshot()["tables"] == before["tables"] and store.history()[:-1] == history
     assert store.snapshot()["edit_history"] == before["edit_history"]
     restored = tmp_path / "old-project"

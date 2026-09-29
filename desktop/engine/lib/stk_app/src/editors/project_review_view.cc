@@ -3,6 +3,7 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
+#include "stk/app/project_discussion.hh"
 #include <algorithm>
 #include <limits>
 
@@ -30,6 +31,22 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
   }
   const auto &saved = state.saved_review();
   if (!saved.empty()) {
+    auto &discussion = state.discussion();
+    const auto saved_id = io::get_string(saved, "id");
+    if (discussion.supported() && discussion.origin_draft() != saved_id && !discussion.busy() && !state.busy()) {
+      discussion.load_origin(saved_id, true);
+    }
+    if (discussion.origin_draft() == saved_id && !discussion.origin().empty()) {
+      layout.paragraph(ctx.store.catalog().format("discussion.review_origin", {
+        {"message", io::get_string(discussion.origin(), "message_id")},
+        {"context", io::get_string(discussion.origin(), "context_id")}}));
+    }
+    if (discussion.supported()) {
+      if (!discussion.error().empty()) { layout.paragraph(discussion.error()); }
+      layout.button("refresh_review_origin", ctx.tr("discussion.refresh_origin"), [&discussion, &state, saved_id] {
+        if (io::get_string(state.saved_review(), "id") == saved_id) { discussion.load_origin(saved_id); }
+      }).disable(discussion.busy() || state.busy());
+    }
     const auto status = io::get_string(saved, "status");
     layout.paragraph(ctx.store.catalog().format("project.drafts.loaded", {
       {"title", io::get_string(saved, "title")}, {"base", std::to_string(io::get_int(saved, "base_revision", -1))},

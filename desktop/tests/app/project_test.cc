@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_state.hh"
+#include "stk/app/project_discussion.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/app/script_state.hh"
@@ -254,7 +255,7 @@ class ProjectPython : public ::testing::Test {
 
   void settled()
   {
-    ASSERT_TRUE(loop.pump_until([&] { return !state().busy(); }, 30)) << client->bridge_log().text();
+    ASSERT_TRUE(loop.pump_until([&] { return !state().busy() && !state().discussion().busy(); }, 30)) << client->bridge_log().text();
   }
 
   void populated()
@@ -268,6 +269,182 @@ class ProjectPython : public ::testing::Test {
     ASSERT_EQ(state().project()->revision, 1);
   }
 };
+
+TEST_F(ProjectPython, DiscussionCaptureKeepsOriginalValuesAndRestoresWithoutExecuting)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.supported());
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Initial / 初始"));
+  settled();
+  ASSERT_FALSE(discussion.context().empty()) << discussion.error();
+  const auto context = discussion.context();
+  const auto context_id = io::get_string(context, "id");
+  EXPECT_EQ(context.at("source_revision"), Json(1));
+  EXPECT_EQ(context.at("content").at("value").at("records")[0].at("literals").at(field_id).at("value"), Json(300));
+  ASSERT_TRUE(discussion.add_message("Please compare this parameter.\n```python\nraise Exception('never run')\n```"));
+  settled();
+  const auto message = discussion.message();
+  ASSERT_FALSE(message.empty()) << discussion.error();
+  ASSERT_TRUE(discussion.add_message(io::get_string(message, "text")));
+  settled();
+  EXPECT_EQ(io::canonical_json(discussion.message()), io::canonical_json(message)); // Repeated click is the same retained request.
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Initial / 初始"));
+  settled();
+  EXPECT_EQ(io::canonical_json(discussion.context()), io::canonical_json(context));
+  ASSERT_TRUE(state().apply(set_cell(350)));
+  settled();
+  EXPECT_EQ(io::canonical_json(discussion.context()), io::canonical_json(context));
+  state().select_record("");
+  EXPECT_EQ(io::canonical_json(discussion.context()), io::canonical_json(context));
+  ASSERT_TRUE(state().close()); settled();
+  EXPECT_TRUE(discussion.context().empty()); EXPECT_TRUE(discussion.message().empty());
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
+  ASSERT_TRUE(discussion.load_page("contexts")); settled();
+  ASSERT_EQ(discussion.page("contexts").items.size(), 1u);
+  EXPECT_EQ(discussion.page("contexts").items[0].at("id"), Json(context_id));
+  EXPECT_FALSE(discussion.page("contexts").items[0].at("content").contains("value"));
+  EXPECT_TRUE(discussion.context().empty());
+  ASSERT_TRUE(discussion.load_context(context_id)); settled();
+  EXPECT_EQ(io::canonical_json(discussion.context()), io::canonical_json(context));
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  ASSERT_EQ(discussion.page("messages").items.size(), 1u);
+  ASSERT_TRUE(discussion.load_message(io::get_string(message, "id"))); settled();
+  EXPECT_EQ(io::canonical_json(discussion.message()), io::canonical_json(message));
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "350");
+  EXPECT_FALSE(state().review());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, DiscussionLinksSavedDraftAtCapturedBaseAndKeepsOriginAfterUndo)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Source")); settled();
+  ASSERT_TRUE(discussion.add_message("Raise this value to 350 K.")); settled();
+  const auto message = discussion.message();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview()); settled();
+  ASSERT_TRUE(state().save_review("350 K")); settled();
+  const auto draft = state().saved_review();
+  ASSERT_TRUE(discussion.link_review()); settled();
+  ASSERT_FALSE(discussion.origin().empty()) << discussion.error();
+  const auto origin = discussion.origin();
+  EXPECT_EQ(origin.at("message_id"), message.at("id"));
+  EXPECT_EQ(origin.at("context_id"), discussion.context().at("id"));
+  EXPECT_EQ(origin.at("draft_id"), draft.at("id"));
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  ASSERT_TRUE(discussion.link_review()); settled();
+  EXPECT_EQ(io::canonical_json(discussion.origin()), io::canonical_json(origin));
+  ASSERT_TRUE(state().apply_review()); settled();
+  ASSERT_TRUE(state().undo()); settled();
+  ASSERT_TRUE(discussion.load_origin(io::get_string(draft, "id"))); settled();
+  EXPECT_EQ(io::canonical_json(discussion.origin()), io::canonical_json(origin));
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  state().discard_review();
+  state().set_review_source(set_cell(400).dump());
+  ASSERT_TRUE(state().preview()); settled();
+  ASSERT_TRUE(state().save_review("Different base")); settled();
+  ASSERT_TRUE(discussion.link_review()); settled();
+  EXPECT_FALSE(discussion.error().empty());
+  EXPECT_EQ(io::canonical_json(discussion.origin()), io::canonical_json(origin));
+  ASSERT_TRUE(discussion.load_page("proposals", 0, true)); settled();
+  EXPECT_FALSE(discussion.error().empty());
+  ASSERT_EQ(discussion.page("proposals").items.size(), 1u);
+  EXPECT_EQ(io::canonical_json(discussion.page("proposals").items[0]), io::canonical_json(origin));
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, DiscussionPendingResponsesCannotCrossProjectOrBridgeRestart)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Old project"));
+  ASSERT_TRUE(state().create(dir.str() + "/other", "Other"));
+  settled();
+  EXPECT_EQ(state().project()->name, "Other");
+  EXPECT_TRUE(discussion.context().empty());
+  ASSERT_TRUE(discussion.load_page("contexts")); settled();
+  EXPECT_TRUE(discussion.page("contexts").items.empty());
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
+  ASSERT_TRUE(discussion.load_page("contexts")); settled();
+  ASSERT_EQ(discussion.page("contexts").items.size(), 1u);
+  const auto id = io::get_string(discussion.page("contexts").items[0], "id");
+  ASSERT_TRUE(discussion.load_context(id)); settled();
+  ASSERT_TRUE(discussion.add_message("Saved before restart")); settled();
+  const auto old_handle = state().project()->handle;
+  client->shutdown_bridge();
+  ASSERT_TRUE(loop.pump_until([&] { return state().ready() && state().loaded() && !state().busy() && state().project()->handle != old_handle; }, 60));
+  EXPECT_TRUE(discussion.context().empty());
+  EXPECT_TRUE(discussion.message().empty());
+  EXPECT_FALSE(state().review());
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  ASSERT_EQ(discussion.page("messages").items.size(), 1u);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+}
+
+TEST_F(ProjectPython, DiscussionNativeControlsCaptureAndSaveWithoutOverwritingNewInput)
+{
+  populated();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("discussion"));
+  f.screen.set_maximized(&area);
+  auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  auto widget = [&](const char *name) -> const ui::Widget * { return f.screen.ui()->find(std::string("a2/main/") + name); };
+  frame();
+  ASSERT_NE(widget("context_capture/title"), nullptr);
+  widget("context_capture/title")->string.assign("Native capture");
+  ASSERT_NE(widget("context_capture/use_selection"), nullptr);
+  ASSERT_TRUE(widget("context_capture/use_selection")->enabled);
+  widget("context_capture/use_selection")->on_click();
+  frame();
+  ASSERT_TRUE(widget("context_capture/capture")->enabled);
+  widget("context_capture/capture")->on_click();
+  frame();
+  auto &discussion = state().discussion();
+  ASSERT_FALSE(discussion.context().empty()) << discussion.error();
+  EXPECT_EQ(discussion.context().at("selection").at("record_ids"), Json::array({record_id}));
+  EXPECT_EQ(discussion.context().at("selection").at("field_ids"), Json::array({field_id}));
+  ASSERT_NE(widget("message_composer/text"), nullptr);
+  widget("message_composer/text")->string.assign("Original text");
+  frame();
+  ASSERT_TRUE(widget("message_composer/save_message")->enabled);
+  widget("message_composer/save_message")->on_click();
+  widget("message_composer/text")->string.assign("New text while save is pending");
+  frame();
+  ASSERT_FALSE(discussion.message().empty()) << discussion.error();
+  EXPECT_EQ(discussion.message().at("text"), Json("Original text"));
+  EXPECT_EQ(widget("message_composer/text")->string.value(), "New text while save is pending");
+  const auto save_for_old_context = widget("message_composer/save_message")->on_click;
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Different context")); settled();
+  save_for_old_context(); // A retained button cannot silently retarget its message to another context.
+  EXPECT_FALSE(discussion.busy());
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  EXPECT_EQ(discussion.page("messages").items.size(), 1u);
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview()); settled();
+  ASSERT_TRUE(state().save_review("UI proposal")); settled();
+  frame();
+  ASSERT_TRUE(widget("link_review")->enabled);
+  widget("link_review")->on_click();
+  frame();
+  ASSERT_FALSE(discussion.origin().empty()) << discussion.error();
+  widget("discussion_category")->index.assign(2);
+  frame();
+  ASSERT_TRUE(widget("open_discussion_item")->enabled);
+  widget("open_discussion_item")->on_click();
+  frame();
+  EXPECT_EQ(widget("project_view")->index.value(), 1); // The same saved draft needs no destructive reload.
+  ASSERT_NE(widget("review_apply"), nullptr);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
 
 TEST_F(ProjectPython, SavedDraftReopensWithStableIdsAndRequiresFreshReviewBeforeAtomicApply)
 {
@@ -1060,7 +1237,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   auto &scripts = f.shell->store().scripts();
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   const std::string source = "import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
-      ") as db:\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
+      ") as db:\n    db.execute('DROP TABLE project_proposals')\n    db.execute('DROP TABLE project_messages')\n    db.execute('DROP TABLE project_contexts')\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
   ASSERT_TRUE(scripts.execute(source));
   ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
@@ -1075,7 +1252,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   f.screen.ui()->find("a2/main/upgrade_project")->on_click();
   settled();
   f.drv->frame();
-  EXPECT_EQ(state().project()->format_version, 6);
+  EXPECT_EQ(state().project()->format_version, 7);
   EXPECT_EQ(state().project()->revision, 2);
   EXPECT_EQ(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
   EXPECT_FALSE(state().notice().empty());

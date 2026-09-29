@@ -133,6 +133,32 @@ class ProjectSessions:
                 return {"draft": drafts.discard(params["draft_id"])}
             return {"draft": drafts.get(params["draft_id"])}
 
+    def contexts(self, action, params):
+        with self._operation():
+            contexts = self._get(params["handle"]).contexts
+            if action == "capture":
+                return {"context": contexts.capture(params["table_id"], params["record_ids"], params["field_ids"],
+                    expected_revision=params["expected_revision"], title=params["title"], context_id=params["context_id"])}
+            if action == "list":
+                return contexts.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+            return {"context": contexts.get(params["context_id"])}
+
+    def discussion(self, action, params):
+        with self._operation():
+            discussion = self._get(params["handle"]).discussion
+            if action == "add":
+                return {"message": discussion.add(params["text"], message_id=params["message_id"],
+                    context_id=params["context_id"], role=params.get("role", "user"))}
+            if action == "get":
+                return {"message": discussion.get(params["message_id"])}
+            if action == "link_draft":
+                return {"proposal": discussion.link_draft(params["message_id"], params["draft_id"],
+                                                           proposal_id=params["proposal_id"])}
+            if action == "proposals":
+                return discussion.proposals(offset=params.get("offset", 0), limit=params.get("limit", 100),
+                                            draft_id=params.get("draft_id"))
+            return discussion.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+
     def history(self, params):
         with self._operation():
             return {"history": self._get(params["handle"]).history()}

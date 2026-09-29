@@ -2,6 +2,22 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-29 显式上下文与讨论来源
+
+格式 7 的上下文捕获、手工消息、草案来源已接入 SQLite、桥、Python 与原生讨论页。
+保存和恢复均不应用参数、不调用模型或执行消息中的代码。用法见[上下文与讨论指南](project-contexts.md)。
+
+本机项目/桥/脚本/工作流 Python 回归 **300 通过、2 跳过**（两个真实许可求解器测试未显式启用）；
+草案/上下文/讨论存储重点 **86/86**，桥及真实脚本 worker **32/32**。
+原生专项与新增截图 **9/9**；完整桌面 **554/554、无跳过**。
+覆盖原子写入、并发幂等、来源损坏、格式 6 迁移备份、旧上下文不变、消息代码不执行、
+项目切换/桥重启、来源关联与撤销、旧回调不能改绑、原生按钮和未保存输入保护。
+中英文 GL/Vulkan 讨论页四项通过，中文 Vulkan 和英文 GL 图像已查看；字典各 **988 项**一致。
+本轮修改文档的 **174 个本地链接**有效，Linux/macOS CI 已增加讨论页截图必跑检查；本批远端 CI 待推送后跟踪。
+
+日志 `/tmp/stk-contexts-python-all.log`、`/tmp/stk-contexts-native.log`、`/tmp/stk-contexts-full.log`，
+JUnit `/tmp/stk-contexts-full.xml`。
+
 ## 2026-09-29 持久草案与恢复
 
 格式 6 的保存、分页、读取、丢弃和原子应用已接入存储、桥、Python facade 与原生检查页。
@@ -12,7 +28,9 @@
 原生重点和新增截图 **11/11**，完整桌面 **546/546、无跳过**；验证了真实桥的保存/重开/重启、
 重新预览后明确应用、过期草案另起副本、输入/异步保护、保留错误提示和冲突刷新。
 中英文 GL/Vulkan 草案面板四项通过，中文 Vulkan 和英文 GL 图像已查看；字典各 **947 项**一致。
-Linux/macOS CI 新增 `project_drafts` 截图门槛，本轮跨平台 CI 待推送后跟踪。
+`f1001cf` 的 [desktop CI](https://github.com/sijintech/stk/actions/runs/36565773604) 与
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36565773668) 全部通过，包含 Linux GL/Vulkan、
+macOS Metal、Windows 编译/CPU、安装包和干净环境启动；草案截图已纳入跨平台必跑检查。
 
 日志 `/tmp/stk-saved-drafts-python-all.log`、`/tmp/stk-saved-drafts-native.log`、`/tmp/stk-saved-drafts-full.log`，
 JUnit `/tmp/stk-saved-drafts-full.xml`。操作与兼容边界见[草案指南](project-drafts.md)。

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** Real local project bridge -> shared model -> native editor -> offscreen PNG. */
 #include "stk/app/project_state.hh"
+#include "stk/app/project_discussion.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/app/bridge_status.hh"
@@ -201,6 +202,27 @@ int main(int argc, char **argv)
         ok = ok && state.preview() && loop.pump_until([&] { return !state.busy(); }, 30);
         ok = ok && state.review() && state.review()->differences.size() == 2 && state.review()->errors.size() == 1;
         ok = ok && state.project()->revision == 1 && state.table()->text(0, 0) == "300";
+      }
+      if (editor == "discussion") {
+        auto &discussion = state.discussion();
+        const std::string record = "40000000-4444-4444-8444-444444444444";
+        const auto wait = [&] { return loop.pump_until([&] { return !state.busy() && !discussion.busy(); }, 30); };
+        ok = ok && discussion.capture(table, {record, "40000001-4444-4444-8444-444444444444"}, {temperature, derived},
+            lang == "zh" ? "前两个温度案例" : "First two temperature cases") && wait() && !discussion.context().empty();
+        const auto context_id = io::get_string(discussion.context(), "id");
+        ok = ok && discussion.add_message(lang == "zh" ? "请比较这两个温度案例。\n先检查参数变化，再决定是否启动计算。" :
+            "Compare these two temperature cases.\nReview the parameter change before deciding whether to run.") && wait();
+        state.set_review_source(io::Json::array({{{"op", "set_cell"}, {"table_id", table}, {"record_id", record},
+            {"field_id", temperature}, {"value", 350}}}).dump());
+        ok = ok && state.preview() && wait() && state.save_review("350 K") && wait();
+        ok = ok && discussion.link_review() && wait();
+        state.discard_review();
+        ok = ok && state.apply(io::Json::array({{{"op", "set_cell"}, {"table_id", table}, {"record_id", record},
+            {"field_id", temperature}, {"value", 310}}})) && wait();
+        ok = ok && discussion.capture(table, {record}, {temperature},
+            lang == "zh" ? "编辑后的新上下文" : "New context after editing") && wait();
+        ok = ok && discussion.load_context(context_id) && wait() && discussion.load_page("contexts") && wait();
+        ok = ok && area->editor().show_view("discussion") && discussion.error().empty();
       }
       if (editor == "csv") {
         const auto source = dir.str() + "/project/parameters.csv";
