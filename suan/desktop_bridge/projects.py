@@ -11,6 +11,8 @@ from uuid import uuid4
 
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
+from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, provider_info
+from suan.project.request_executor import RequestBusy, RequestExecutor
 
 from .protocol import BridgeError
 from .recent_projects import RecentProjects
@@ -22,6 +24,7 @@ class ProjectSessions:
         self._lock = threading.RLock()
         self._stores = {}
         self._closed = False
+        self._executor = RequestExecutor({ALIYUN_ADAPTER: AliyunTokenPlanAdapter()})
 
     @contextmanager
     def _operation(self):
@@ -32,6 +35,8 @@ class ProjectSessions:
                 yield
             except RevisionConflict as exc:
                 raise BridgeError("conflict", str(exc)) from None
+            except RequestBusy:
+                raise BridgeError("busy", "A live executor still owns this request") from None
             except UnsupportedProjectFormat as exc:
                 raise BridgeError("unsupported", str(exc)) from None
             except FileExistsError:
@@ -165,13 +170,20 @@ class ProjectSessions:
 
     def requests(self, action, params):
         with self._operation():
-            requests = self._get(params["handle"]).requests
+            store = self._get(params["handle"])
+            requests = store.requests
+            if action == "provider":
+                if store.info()["format_version"] < 8:
+                    raise UnsupportedProjectFormat("Upgrade this project before using model requests")
+                return {"provider": provider_info()}
+            if action in {"start", "cancel", "recover"}:
+                return {"request": getattr(self._executor, action)(store, params["request_id"])}
             if action == "create":
                 return {"request": requests.create(params["message_id"], request_id=params["request_id"],
                                                     configuration=params["configuration"])}
             if action == "list":
                 return requests.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
-            return {"request": (requests.cancel if action == "cancel" else requests.get)(params["request_id"])}
+            return {"request": requests.get(params["request_id"])}
 
     def backup(self, params):
         with self._operation():
@@ -238,6 +250,7 @@ class ProjectSessions:
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.
         self._closed = True
+        self._executor.shutdown(wait=False)
         if self._lock.acquire(blocking=False):
             try:
                 self._stores.clear()

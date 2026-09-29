@@ -34,6 +34,10 @@ class ConfirmedCancellation(Exception):
     """An adapter has evidence that remote cancellation reached a terminal state."""
 
 
+class InvalidResponse(Exception):
+    """A received response is incomplete or cannot be published as valid text."""
+
+
 @dataclass(frozen=True)
 class TextResponse:
     text: str
@@ -120,13 +124,14 @@ class RequestExecutor:
         self._lock = threading.RLock()
         self._active = {}
         self._closed = False
+        self._closing = threading.Event()
 
     @staticmethod
     def _key(store, request_id):
         return str(store.path), store._project_id, request_id
 
     def _check_open(self):
-        if self._closed:
+        if self._closing.is_set():
             raise ProjectError("Request executor is closed")
 
     def start(self, store, request_id):
@@ -149,6 +154,12 @@ class RequestExecutor:
                 raise
             try:
                 frozen_input = deepcopy(store.requests.input(request_id))
+                prepare = getattr(adapter, "prepare", None)
+                if callable(prepare):
+                    adapter = prepare(deepcopy(frozen_input))
+                    if not callable(getattr(adapter, "send", None)):
+                        raise ProjectError("Adapter preparation did not produce a text sender")
+                self._check_open()
                 record, claimed = store.requests._claim(request_id, executor_id=self.executor_id)
                 if not claimed:
                     lease.release()
@@ -179,7 +190,7 @@ class RequestExecutor:
     def _run(self, job, adapter, frozen_input):
         try:
             with self._lock:
-                if self._closed:
+                if self._closing.is_set():
                     return
                 # An explicit cancellation can race the claim before send has begun.
                 if job.cancel.is_set() or job.store.requests.get(job.request_id)["cancel_requested"]:
@@ -191,6 +202,8 @@ class RequestExecutor:
                 status, code = "cancelled", "cancel_confirmed"
             except DefinitiveFailure:
                 status, code = "failed", "adapter_failed"
+            except InvalidResponse:
+                status, code = "failed", "response_invalid"
             except BaseException:
                 status, code = "uncertain", "transport_uncertain"
             else:
@@ -205,7 +218,7 @@ class RequestExecutor:
                     status, code = "failed", "response_invalid"
                 else:
                     with self._lock:
-                        if not self._closed:
+                        if not self._closing.is_set():
                             try:
                                 job.store.requests._complete(job.request_id, executor_id=self.executor_id,
                                                              text=text, metadata=metadata)
@@ -213,19 +226,26 @@ class RequestExecutor:
                                 self._settle(job, "uncertain", "local_save_failed")
                     return
             with self._lock:
-                if not self._closed:
+                if not self._closing.is_set():
                     self._settle(job, status, code)
         except BaseException:
             # A removed/replaced/temporarily unavailable original database cannot be
             # redirected to the current project. Its claim remains recoverable locally.
             with self._lock:
-                if not self._closed:
+                if not self._closing.is_set():
                     try:
                         self._settle(job, "uncertain", "local_save_failed")
                     except BaseException:
                         pass
         finally:
             with self._lock:
+                if self._closing.is_set() and not self._closed:
+                    # The worker can finish before asynchronous shutdown acquires
+                    # this lock. Preserve its observation before removing the job.
+                    try:
+                        self._settle(job, "uncertain", "executor_lost")
+                    except (ProjectError, OSError):
+                        pass
                 self._active.pop(self._key(job.store, job.request_id), None)
                 job.lock.release()
 
@@ -256,8 +276,13 @@ class RequestExecutor:
             finally:
                 lease.release()
 
-    def shutdown(self):
+    def shutdown(self, *, wait=True):
         """Fence late responses, retain live-worker locks, and never replay a send."""
+        self._closing.set()
+        if not wait:
+            # Bridge exit must not wait on a locked/unavailable project database.
+            threading.Thread(target=self.shutdown, name="stk-request-shutdown", daemon=True).start()
+            return
         with self._lock:
             if self._closed:
                 return

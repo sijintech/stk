@@ -139,6 +139,18 @@ class ProjectRequests:
         """Record cancellation intent; this alone cannot prove a running remote call stopped."""
         return self._call("project.requests.cancel", {"handle": self.handle, "request_id": request_id})["request"]
 
+    def provider(self):
+        """Read local provider configuration status without sending or exposing credentials."""
+        return self._call("project.requests.provider", {"handle": self.handle})["provider"]
+
+    def start(self, request_id):
+        """Explicitly send a pending request once; inspect its saved state after lost replies."""
+        return self._call("project.requests.start", {"handle": self.handle, "request_id": request_id})["request"]
+
+    def recover(self, request_id):
+        """Check a lost local executor; never retry or query the remote model."""
+        return self._call("project.requests.recover", {"handle": self.handle, "request_id": request_id})["request"]
+
 
 class ProjectContexts:
     def __init__(self, call, handle):

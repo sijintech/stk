@@ -234,6 +234,8 @@ class ProjectPython : public ::testing::Test {
     options.env["PYTHONPATH"] = STK_REPO_ROOT;
     options.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
     options.env["STK_STATE_DIR"] = dir.str() + "/runtime";
+    options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+    options.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
     options.executor = loop.executor();
     options.strict = options.validate = true;
     client = bridge::Client::create(options);
@@ -296,7 +298,7 @@ TEST_F(ProjectPython, RequestRecordsCancelAndReopenWithoutExecuting)
   ASSERT_TRUE(discussion.requests_supported());
   auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
   ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
-  const auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  const auto frame = [&] { for (int i = 0; i < 3; ++i) { f.drv->frame(); settled(); } f.drv->frame(); };
   const auto widget = [&](const char *key) { return f.screen.ui()->find(std::string("a2/main/") + key); };
   frame();
   widget("message_composer/text")->string.assign("Unsubmitted note");
@@ -304,7 +306,7 @@ TEST_F(ProjectPython, RequestRecordsCancelAndReopenWithoutExecuting)
   ASSERT_EQ(discussion.page("requests").items.size(), 1u);
   ASSERT_TRUE(widget("open_discussion_item")->enabled); widget("open_discussion_item")->on_click(); frame();
   ASSERT_EQ(io::get_string(discussion.generation_request(), "id"), id);
-  ASSERT_NE(widget("request_details/value"), nullptr);
+  ASSERT_NE(widget("request_details"), nullptr);
   ASSERT_TRUE(widget("request_cancel")->enabled);
   const auto cancel = widget("request_cancel")->on_click;
   cancel(); frame();
@@ -340,7 +342,7 @@ TEST_F(ProjectPython, RequestButtonsAndRepliesStayBoundToTheirOriginalTarget)
   auto &discussion = state().discussion();
   auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
   ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
-  const auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  const auto frame = [&] { for (int i = 0; i < 3; ++i) { f.drv->frame(); settled(); } f.drv->frame(); };
   frame(); f.screen.ui()->find("a2/main/discussion_category")->index.assign(3); frame();
   ASSERT_TRUE(discussion.load_request(first)); frame();
   const auto old_cancel = f.screen.ui()->find("a2/main/request_cancel")->on_click;
@@ -369,7 +371,7 @@ TEST_F(ProjectPython, RequestCompletionRefreshOpensOnlyItsSavedResponse)
   const auto context_id = discussion.context().at("id");
   auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
   ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
-  const auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  const auto frame = [&] { for (int i = 0; i < 3; ++i) { f.drv->frame(); settled(); } f.drv->frame(); };
   const auto widget = [&](const char *key) { return f.screen.ui()->find(std::string("a2/main/") + key); };
   frame(); widget("discussion_category")->index.assign(3); frame();
   ASSERT_TRUE(discussion.load_request(id)); frame();
@@ -399,6 +401,85 @@ TEST_F(ProjectPython, RequestCompletionRefreshOpensOnlyItsSavedResponse)
   EXPECT_EQ(state().project()->revision, 2);
   EXPECT_EQ(state().table()->text(0, 0), "350");
   EXPECT_FALSE(state().review());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, RequestPreparationUsesSavedMessageAndMissingKeyNeverClaims)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Explicit model scope")); settled();
+  ASSERT_TRUE(discussion.add_message("Explain the saved parameter")); settled();
+  const auto message = discussion.message().at("id");
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
+  const auto frame = [&] { for (int i = 0; i < 3; ++i) { f.drv->frame(); settled(); } f.drv->frame(); };
+  const auto widget = [&](const char *key) { return f.screen.ui()->find(std::string("a2/main/") + key); };
+  frame(); widget("message_composer/text")->string.assign("Unsubmitted draft is not model input");
+  widget("discussion_category")->index.assign(3); frame();
+  ASSERT_TRUE(discussion.generation_supported());
+  EXPECT_FALSE(discussion.provider().at("configured").get<bool>());
+  ASSERT_NE(widget("request_prepare/model"), nullptr);
+  EXPECT_EQ(widget("request_prepare/model")->string.value(), "fixture-model");
+  ASSERT_TRUE(widget("request_prepare/prepare")->enabled);
+  const auto prepare = widget("request_prepare/prepare")->on_click;
+  prepare(); frame();
+  ASSERT_FALSE(discussion.generation_request().empty());
+  const auto request = discussion.generation_request();
+  EXPECT_EQ(request.at("message_id"), message);
+  EXPECT_EQ(request.at("configuration").at("model"), "fixture-model");
+  EXPECT_EQ(request.at("status"), "pending");
+  prepare(); frame();
+  EXPECT_EQ(discussion.generation_request().at("id"), request.at("id"));
+  EXPECT_FALSE(widget("request_start")->enabled);
+  // The service also enforces preflight if a client bypasses the disabled native button.
+  ASSERT_TRUE(discussion.start_request(request.at("id").get<std::string>())); settled();
+  EXPECT_FALSE(discussion.error().empty());
+  ASSERT_TRUE(discussion.load_request(request.at("id").get<std::string>())); settled();
+  EXPECT_EQ(discussion.generation_request().at("status"), "pending");
+  EXPECT_TRUE(discussion.generation_request().at("executor_id").is_null());
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  EXPECT_EQ(discussion.page("messages").items.size(), 1u);
+  frame(); widget("request_message")->on_click(); frame();
+  EXPECT_EQ(widget("message_composer/text")->string.value(), "Unsubmitted draft is not model input");
+  ASSERT_TRUE(discussion.add_message("A different saved question")); settled();
+  const auto original = discussion.generation_request().at("id");
+  prepare(); settled();  // A button built for the old message cannot prepare from the new one.
+  EXPECT_EQ(discussion.generation_request().at("id"), original);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, RequestRecoveryExplicitlyChecksAbandonedExecutionWithoutSending)
+{
+  populated();
+  const std::string id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  ASSERT_NO_FATAL_FAILURE(saved_request(id));
+  auto &discussion = state().discussion();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }));
+  ASSERT_TRUE(scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+      "s = ProjectStore(" + Json(dir.str() + "/project").dump() + ")\n"
+      "s.requests._claim('" + id + "', executor_id=str(uuid4()))"));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
+  const auto frame = [&] { for (int i = 0; i < 3; ++i) { f.drv->frame(); settled(); } f.drv->frame(); };
+  const auto widget = [&](const char *key) { return f.screen.ui()->find(std::string("a2/main/") + key); };
+  frame(); widget("discussion_category")->index.assign(3); frame();
+  ASSERT_TRUE(discussion.load_request(id)); frame();
+  EXPECT_EQ(discussion.generation_request().at("status"), "running");
+  ASSERT_TRUE(widget("request_recover")->enabled);
+  widget("request_recover")->on_click(); frame();
+  EXPECT_EQ(discussion.generation_request().at("status"), "uncertain");
+  EXPECT_EQ(discussion.generation_request().at("error_code"), "executor_lost");
+  EXPECT_FALSE(widget("request_recover")->enabled);
+  EXPECT_FALSE(widget("request_start")->enabled);
+  EXPECT_FALSE(widget("request_result")->enabled);
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  EXPECT_EQ(discussion.page("messages").items.size(), 1u);
+  EXPECT_EQ(state().project()->revision, 1);
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 

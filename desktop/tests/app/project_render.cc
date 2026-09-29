@@ -39,6 +39,8 @@ int main(int argc, char **argv)
   bo.env["PYTHONPATH"] = STK_REPO_ROOT;
   bo.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
   bo.env["STK_STATE_DIR"] = dir.str() + "/runtime";
+  bo.env["STK_TOKEN_PLAN_API_KEY"] = "";
+  bo.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
   bo.executor = loop.executor();
   bo.strict = bo.validate = true;
   auto client = bridge::Client::create(bo);
@@ -239,6 +241,7 @@ int main(int argc, char **argv)
         const auto wait = [&] { return loop.pump_until([&] { return !discussion.busy(); }, 30); };
         ok = ok && discussion.cancel_request(cancelled) && wait() && discussion.load_request(pending) && wait();
         ok = ok && discussion.load_page("requests") && wait() && discussion.page("requests").items.size() == 2;
+        ok = ok && discussion.load_provider() && wait();
       }
       if (editor == "csv") {
         const auto source = dir.str() + "/project/parameters.csv";

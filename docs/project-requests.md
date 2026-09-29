@@ -1,97 +1,169 @@
-# 请求记录与本地执行生命周期
+# 模型请求、阿里 Token Plan 与恢复
 
-格式 8 增加独立的 `project_requests`，保存请求意图、固定输入来源及执行观察。
-创建、查询、取消和重开均不发送网络请求，不改变参数修订、撤销历史、草案或任务。
-旧项目先明确 **备份并升级项目**；打开不会迁移，升级前备份和原子迁移沿用[项目规则](project.md#数据库备份与显式升级)。
+格式 8 的 `project_requests` 保存请求意图、固定输入及执行观察。当前已接入阿里 Token Plan 的
+OpenAI 兼容文字接口，使用指定地址 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`。
+普通创建、查询、重开和取消不会发出新的模型请求；只有明确 **发送给模型** 或 `p.requests.start(...)` 才发送。
+所有请求状态与文字回复均不修改参数修订、撤销历史、草案或仿真任务。
 
-本阶段交付请求记录、原生查看/取消和可注入适配器的本地执行器。**没有内置模型提供方、模型生成按钮或自动工具调用**。
-可控适配器只存在于测试中；测试回复不是模型输出。真实提供方、凭据配置、流式显示和远端结果查询仍待接入。
+旧项目先明确 **备份并升级项目**，最低需要格式 8；本轮没有新增 SQLite 格式。普通打开不迁移，
+规则见[项目指南](project.md#数据库备份与显式升级)。流式显示、远端查询、工具提案及自动执行尚未实现。
 
-## 保存明确的请求意图
+## 配置本机凭据和模型
 
-先按[上下文与讨论指南](project-contexts.md)保存上下文和一条 `user` 消息。
-下面的 `message` 是刚才明确保存的消息；请求只引用它及其上下文，不自动增加其他历史、文件或实时表格。
+适配器名为 `aliyun-token-plan/1`，固定上述 HTTPS 地址、Chat Completions 协议和文字提示规则。
+它只读取启动 STK 时继承的环境变量，不读取 `OPENAI_API_KEY`、通用 `DASHSCOPE_API_KEY` 或项目内的 env 文件。
+
+| 环境变量 | 内容 |
+|---|---|
+| `STK_TOKEN_PLAN_API_KEY` | 你自己的 Token Plan 专属 API Key；仅保存在进程内存，不写入项目 |
+| `STK_TOKEN_PLAN_MODEL` | 可选的默认模型 ID，须是你的套餐支持的文字模型；也可在原生请求页填写 |
+
+地址与专属密钥要求见[阿里云接入说明](https://help.aliyun.com/zh/model-studio/more-tools)。
+该说明也限制 Token Plan 的工具用途，列出自动化平台及自定义应用后端等不支持的场景。
+**STK 的协议适配不代表阿里已确认本应用适用该套餐**；实际启用前需核对你的套餐允许范围。
+这里没有使用密钥完成真实账户调用；自动化测试使用受控 HTTP 响应，不消耗套餐额度。
+
+在仓库目录中打开终端，使用不回显的输入提示设置密钥，随后从同一个终端启动 STK。
+不要把密钥写进 Python 面板、聊天、项目表格或提交到 Git。以下设置只影响当前终端及其子进程。
+
+macOS（Bash）：
+
+```bash
+read -r -s -p 'Token Plan API key: ' STK_TOKEN_PLAN_API_KEY
+printf '\n'
+export STK_TOKEN_PLAN_API_KEY
+read -r -p 'Model ID: ' STK_TOKEN_PLAN_MODEL
+export STK_TOKEN_PLAN_MODEL
+bash desktop/setup-macos.sh
+```
+
+Windows（PowerShell）：
+
+```powershell
+$stkModelCredential = Read-Host 'Token Plan API key' -AsSecureString
+$env:STK_TOKEN_PLAN_API_KEY = [System.Net.NetworkCredential]::new('', $stkModelCredential).Password
+Remove-Variable stkModelCredential
+$env:STK_TOKEN_PLAN_MODEL = Read-Host 'Model ID'
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1
+```
+
+已有窗口不会继承另一个终端后来修改的环境变量；配置变更后重新启动 STK。
+**刷新本机配置** 和 `p.requests.provider()` 只检查桥进程的环境，不联系服务，也不能证明密钥有效、
+模型可用或套餐仍有额度。模型列表不硬编码，避免把账户没有的模型当成可用模型。
+此版本不自动使用系统 HTTP 代理，不支持自定义端点、证书或连接转发。
+
+## 在原生界面中发送
+
+1. 按[上下文指南](project-contexts.md)明确捕获行和字段，保存一条用户消息，核对所引用的上下文。
+   若从列表选择历史消息，先点击 **查看选定记录**。只会发送已经保存的消息及其上下文。
+2. 进入 **项目表格 → 讨论 → 请求**，在 **准备模型请求** 核对服务地址、凭据状态和模型 ID。
+   面板显示当前载入的用户消息及其上下文 ID；未保存的输入、其他消息和实时表格不会自动带入。
+3. 点击 **准备请求（不发送）**。这一步保存请求 ID、模型配置与固定来源，状态为 **尚未发送**。
+   同一打开会话中重复准备相同消息/模型复用原请求，改变输入会形成新请求。
+4. 核对请求详情中的模型、来源修订及上下文，再点击 **发送给模型**。只有尚未发送且已有本机凭据的
+   已注册适配器请求可发送。发送前检查失败仍为尚未发送，不占用执行权。
+5. 点击 **刷新请求记录** 读取结果；本版本不会轮询或显示流式片段。成功后显示 **回复已保存**，
+   点击 **查看保存的回复** 打开完整文字。代码块是普通文字，不会执行。
+
+**请求取消** 保存取消意图，并通知本桥的执行器。若尚未发出，直接取消；发出后没有远端取消协议，
+不能宣称阿里已停止计费或生成。等待期间若收到完整有效回复，仍可能保存为完成，并保留取消意图。
+**核对遗留执行** 只检查本机执行锁：执行器仍活跃时报忙；执行器已丢失则将已启动请求记为不确定，
+不重新发送、查询阿里或变回尚未发送。普通刷新只读取数据库。
+
+关闭项目只释放界面句柄，已经明确开始的请求继续写回原项目，不能改投当前打开的另一个项目。
+退出应用或桥关闭会隔离迟到回复，并尽力把活动请求记为不确定；如果数据库不可写或进程直接被结束，
+重开后可用 **核对遗留执行** 检查旧的已启动记录。重开不自动发送、恢复或应用任何操作。
+
+## Python 接口
+
+先按[上下文指南](project-contexts.md)保存上下文及 `user` 消息。以下 `message` 是明确保存的那条消息：
 
 ```python
 from uuid import uuid4
 
 p = stk.project
+provider = p.requests.provider()
+print(provider)  # 只有配置状态与环境变量名称，不含密钥。
+assert provider['model'], '先设置 STK_TOKEN_PLAN_MODEL，或在代码中明确填写模型 ID'
+
 request = p.requests.create(
-    message["id"], request_id=str(uuid4()),
-    configuration={"adapter": "configured-adapter", "model": "configured-model",
-                   "max_output_tokens": 4096},
+    message['id'], request_id=str(uuid4()),
+    configuration={'adapter': provider['adapter'], 'model': provider['model'],
+                   'max_output_tokens': 4096},
 )
-print(request["status"])  # pending：只保存意图；这些名字不会加载或启动适配器。
-print(p.requests.get(request["id"]))
-print(p.requests.list(limit=20))
-cancelled = p.requests.cancel(request["id"])
-print(cancelled["status"])  # 尚未开始的请求变为 cancelled。
+print(request['status'])  # pending，尚未发送。
 ```
 
-这些桥方法通过 `hello.methods` / `stk.operations()` 发现；`p` 固定在原项目句柄上。
-没有公开的 `project.requests.start` 桥方法。保存配置名称不会导入模块、启动程序或寻找凭据。
+检查保存的请求及模型后，另行明确运行：
+
+```python
+started = p.requests.start(request['id'])  # 返回已持久保存的领取记录，不等待网络完成。
+```
+
+之后按需查询或取消：
+
+```python
+current = p.requests.get(request['id'])
+print(current['status'], current['error_code'])
+if current['status'] == 'completed':
+    print(p.discussion.get(current['result']['message_id'])['text'])
+
+# 只在确实要取消时执行：p.requests.cancel(request['id'])
+# 只在需核对遗留执行时执行：p.requests.recover(request['id'])
+print(p.requests.list(limit=20))
+```
+
+这些可选桥方法通过 `hello.methods` / `stk.operations()` 发现；`p` 固定原打开句柄。
+响应丢失时先按原 ID 查询，不自动重发。对已开始或终态请求再次调用 `start` 只返回记录，不发送第二次。
+若明确需要一次新的请求，使用新的 UUID；它是新调用，不保证替代或取消先前远端工作。
+
+## 固定输入与响应规则
 
 `configuration` 只接受必填 `adapter`、`model`，以及可选 `temperature`、`max_output_tokens`。
-前两者是 1–128 字符的 ASCII 标识，允许字母、数字、`.`、`_`、`:`、`/`、`-`，首字符为字母或数字，
-禁止 `//`；不接受 URL、认证字段或任意扩展参数。温度为 0–2 的有限数；输出 token 上限为 1–32768 的整数，
-默认 4096。它是适配器必须遵守的配置，当前存储层不计算模型 token 数。
-接口不读取密钥；不要把认证材料写进项目消息或配置标识。
+名称为 1–128 字符的 ASCII 标识，以字母或数字开头，其余允许 `.`、`_`、`:`、`/`、`-`，禁止 `//`。
+输出 token 上限为 1–32768 的整数，默认 4096；通用存储接受 0–2 温度，阿里适配器要求 `< 2`。
+配置名称不会动态导入模块，接口不接受 URL、认证字段或任意扩展参数。
 
-同一请求 UUID 和相同消息/规范化配置返回原记录；改变输入必须使用新 UUID。
-记录固定项目、上下文、用户消息、来源修订、配置、`stk.text/1` 输入组装版本和规范化输入 SHA-256。
-助手消息 UUID 从项目与请求身份派生并保留，手工消息不能占用该 ID。
-上下文和消息仍使用各自不可变存储；每次读取验证来源链，表格后续变化不会改变请求依据。
+请求保存项目、消息、上下文、来源修订、规范化配置、`stk.text/1` 输入版本与完整输入摘要。
+每次读取验证来源链；后续表格、选择或字段变化不会改变请求依据。助手消息 UUID 从项目与请求身份派生，
+手工消息不能占用它。相同请求 UUID 和相同内容返回原记录，改变内容复用 UUID 会冲突。
 
-`get` 与 `list` 都返回元数据，不返回上下文值或消息全文。列表有 `offset`、`limit`（1–100）和 `next_offset`。
-记录包含 `status`、`cancel_requested`、`executor_id`、更新时间、受限 `error_code` 和可空的 `result`。
-完成结果只含助手消息 ID、文字 SHA-256 与有限观察字段；完整文字继续通过 `p.discussion.get(...)` 读取。
-消息和请求完成标记在同一事务中保存，不会发布一半结果。
+阿里适配器在领取执行权前验证输入并将凭据、请求体绑定到本次调用。它以普通 HTTPS 发出一次
+`POST /compatible-mode/v1/chat/completions`，使用 `stream=false`、`enable_thinking=false` 和 `max_tokens`；
+不发送工具、不跟随重定向、不自动重试。请求体只包含固定系统说明、保存的上下文及用户文字，
+不会读其他文件、查询当前表格或附带完整讨论历史。参数依据见[阿里 Chat Completions 文档](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)。
 
-## 在桌面检查
+保存输入限 1 MiB，重新编码的请求体限 2 MiB，HTTP 回复限 1 MiB，最终文字限 64 KiB UTF-8。
+不会静默裁剪超限内容；目前没有本地模型 token 计数器，实际上下文长度和输出预算仍由服务校验。
+网络步骤使用 60 秒超时预算；取消不强制中止已发出的 HTTP 读取，也没有流式显示。
+仅接受一条 `finish_reason=stop` 的完整助手文字；截断、工具调用、无效 JSON、超限或仅推理内容不能冒充完整回复。
 
-进入 **项目表格 → 讨论 → 请求**，刷新列表并点击 **查看选定记录**。
-列表显示配置的模型名、短 ID 和保存的状态；详情保留完整来源和结果身份。
+HTTP 明确拒绝保存为 `failed/adapter_failed`；不完整或非法完整响应为 `failed/response_invalid`。
+连接中断、超时、重定向或不确定服务器状态保留 `uncertain/transport_uncertain`。
+错误响应正文、异常原文、认证头和密钥不写入项目。`result` 仅含助手消息 ID、文字摘要及受限观察：
+模型、远端请求 ID、非负 64 位输入/输出 token 数。完整消息和完成标记原子保存，失败全部回滚。
 
-- **刷新请求记录** 只读取项目数据库，不查询提供方，不重新发送。
-- **请求取消** 对尚未发送的请求直接取消；对已启动的请求记录取消意图并标记不确定，不保证远端停止。
-- **查看原消息** 打开该请求明确引用的用户消息。
-- **查看保存的回复** 只在完整结果已保存时可用，打开对应助手消息，不运行其文字中的代码。
-
-切换项目、重开或桥重启后按需重新查询。旧按钮和迟到回复绑定原句柄和请求 ID，不会改变另一个项目或覆盖消息输入。
-“已启动，需核实”表示一条保存的执行观察，不表示桌面已经确认后台仍在运行。
-
-## 状态及本地执行器
+## 状态与执行器
 
 | 状态 | 含义 |
 |---|---|
-| `pending` | 尚未领取发送权，未发送；重开不自动开始 |
-| `running` | 领取已持久保存，可能已发送，结果尚未保存 |
-| `completed` | 完整有效文字与助手消息关联已原子保存 |
-| `failed` | 已知失败，如派发线程失败、确定拒绝或完整响应校验失败 |
-| `cancelled` | 发送前取消，或执行器有明确的取消完成证据 |
-| `uncertain` | 可能已发送，但没有完整确定结果；超时、丢失执行器或保存失败不能当作未发送 |
+| `pending` | 尚未领取发送权；预检失败或重开不自动开始 |
+| `running` | 领取已保存，可能已经发送；不证明执行器仍活跃 |
+| `completed` | 完整文字和助手消息关联已原子保存 |
+| `failed` | 确定失败，如明确拒绝或回复校验失败 |
+| `cancelled` | 发送前取消，或已获得明确的取消完成证据 |
+| `uncertain` | 可能已发送，缺少完整确定结果；不能自动重发 |
 
-`suan.project.request_executor.RequestExecutor` 是服务层接口，供后续提供方集成使用，不依赖桌面。
-构造时显式注入可信适配器对象的映射；默认映射为空。适配器实现 `send(frozen_input, cancel_event)`，
-返回完整文字或 `TextResponse`。执行器提供 `start(store, request_id)`、`cancel(...)`、`recover(...)`、`shutdown()`。
-适配器的 `send` 不得自行重试提交。保存的名称只匹配这份映射，不转为动态导入路径。
+`suan.project.request_executor.RequestExecutor` 默认不注册适配器，桥显式注册 `aliyun-token-plan/1`。
+可选 `prepare(frozen_input)` 只做本机检查，返回绑定配置的发送对象；随后才领取一次发送权。
+适配器提供 `send(frozen_input, cancel_event)`，返回文字或 `TextResponse`。
+`DefinitiveFailure` 表示确定拒绝，`InvalidResponse` 表示回复无效，`ConfirmedCancellation` 只用于确定取消。
 
-开始前取得 `.stk/request-locks/<请求 UUID>.lock` 的非阻塞系统锁，再原子领取一次发送权；
-重复调用、两个执行器和两个进程不会为同一请求再次发送。锁文件保留，不按运行结果删除；
-真实执行权由打开的系统锁决定。当前只支持本机、正确提供文件锁语义的项目文件系统；不提供跨机器分布式协调。
-发送期间不持有 SQLite 事务。输入从保存的上下文和消息验证后组装，总量限 1 MiB；不会遍历项目其他数据。
+执行前取得 `.stk/request-locks/<请求 UUID>.lock` 的非阻塞系统锁，再在 SQLite 事务内领取执行权；
+发送期间不持有 SQLite 事务。锁文件保留，实际所有权由打开的系统锁决定，持有到 worker 退出。
+保证限于本机提供正确文件锁语义的项目文件系统，不是跨机器协调。
 
-取消先保存意图，再通知同一执行器的取消事件。其他进程/桌面写入取消意图不能直接触发这个进程的事件，
-也不能证明远端已取消。适配器只有收到确定证据才抛出 `ConfirmedCancellation`；确定拒绝使用 `DefinitiveFailure`。
-未知异常记为 `transport_uncertain`，不把异常原文存入项目或输出。
-若取消尚未确认，迟到的完整结果仍可核对后保存为完成，保留取消意图；已确认取消则不再发布回复。
-
-`shutdown` 隔离迟到响应并把活动请求记为不确定，守护线程不会阻塞进程退出；
-仍未返回的线程继续持有系统锁。`recover` 必须显式调用，先取得空闲锁，才将遗留的 `running` 转为 `uncertain`。
-有活跃执行器持锁时拒绝恢复；恢复不发送、重试或查询提供方，也不将请求改回 `pending`。
-关闭或切换桌面项目不等于调用外部创建的执行器的 `shutdown`，执行器所有者负责其寿命。
-
-完整响应须满足现有 64 KiB UTF-8 消息限制。响应观察仅允许 `model`、`remote_request_id`、
-`input_tokens`、`output_tokens`；不接受任意头部、原始响应或异常文本。
-本地原子保存失败后保留 `uncertain`，当前没有响应暂存或远端结果查询，不能自动恢复丢失的文字，更不能自动重发。
-后续集成步骤见[请求设计](design/review-drafts-and-conversations.md#后续模型集成)。
+`shutdown(wait=False)` 立即设置关闭标记，后台尽力保存不确定状态，避免应用退出等待数据库锁。
+工作线程先退出时也会尽力补记观察；不能因此提前释放仍在执行的 worker 的锁。
+完成前发生本地保存失败时保留 `uncertain/local_save_failed`；当前没有输出暂存或远端查询，
+已丢失的文字不能自动恢复。更多阶段见[后续模型集成](design/review-drafts-and-conversations.md#后续模型集成)。

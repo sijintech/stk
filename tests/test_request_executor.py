@@ -16,7 +16,7 @@ import pytest
 
 from suan.project import ProjectError, ProjectStore
 from suan.project.request_executor import (ConfirmedCancellation, DefinitiveFailure, RequestBusy,
-                                          RequestExecutor, TextResponse, _RequestLock)
+                                          RequestExecutor, TextResponse, InvalidResponse, _RequestLock)
 from test_project_contexts import model, capture, cell  # noqa: F401
 
 
@@ -375,3 +375,110 @@ threading.Event().wait()
     assert recovered["status"] == "uncertain" and recovered["error_code"] == "executor_lost"
     assert executor.start(reopened, saved["id"]) == recovered
     assert len(reopened.discussion.list()["messages"]) == 1
+
+
+def test_preflight_failure_keeps_pending_and_prepared_sender_captures_configuration(model, executors):
+    saved = request(model)
+    store, _ = model
+    sender = ControlledAdapter()
+    class Preparing:
+        ready = False
+        def send(self, value, cancel):
+            raise AssertionError("unprepared sender called")
+        def prepare(self, value):
+            assert store.requests.get(saved["id"])["status"] == "pending"
+            if not self.ready:
+                raise ProjectError("Local configuration missing")
+            return sender
+    preparing = Preparing()
+    executor = executors()
+    executor._adapters["controlled"] = preparing
+    with pytest.raises(ProjectError, match="configuration"):
+        executor.start(store, saved["id"])
+    assert store.requests.get(saved["id"])["status"] == "pending"
+    assert store.requests.get(saved["id"])["executor_id"] is None
+    preparing.ready = True
+    try:
+        assert executor.start(store, saved["id"])["status"] == "running"
+        assert sender.started.wait(5)
+    finally:
+        sender.release.set()
+    eventually(lambda: idle(executor))
+    assert store.requests.get(saved["id"])["status"] == "completed"
+
+
+def test_invalid_provider_response_is_known_failure_without_storing_raw_details(model, executors):
+    store, _ = model
+    saved = request(model)
+    adapter = ControlledAdapter(InvalidResponse("sensitive response body"))
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.started.wait(5)
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    result = store.requests.get(saved["id"])
+    assert result["status"] == "failed" and result["error_code"] == "response_invalid"
+    assert "sensitive" not in json.dumps(result) and result["result"] is None
+
+
+def test_nonblocking_shutdown_fences_sends_before_waiting_for_database(model, executors, monkeypatch):
+    store, _ = model
+    saved = request(model)
+    adapter = ControlledAdapter()
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.started.wait(5)
+    entered, release = threading.Event(), threading.Event()
+    original = executor._settle
+    def delayed(*args):
+        entered.set()
+        assert release.wait(5)
+        return original(*args)
+    monkeypatch.setattr(executor, "_settle", delayed)
+    try:
+        executor.shutdown(wait=False)
+        assert executor._closing.is_set() and entered.wait(5)
+        adapter.release.set()
+    finally:
+        release.set()
+    eventually(lambda: idle(executor))
+    result = store.requests.get(saved["id"])
+    assert result["status"] == "uncertain" and result["result"] is None
+    with pytest.raises(ProjectError, match="closed"):
+        executor.start(store, saved["id"])
+
+
+def test_worker_finishing_before_shutdown_thread_still_saves_uncertain(model, executors, monkeypatch):
+    store, _ = model
+    saved = request(model)
+    adapter = ControlledAdapter('Must not publish after fence')
+    executor = executors(adapter)
+    executor.start(store, saved['id'])
+    assert adapter.started.wait(5)
+    entered, resume = threading.Event(), threading.Event()
+    original = threading.Thread
+    shutdown_threads = []
+    def delayed_thread(*args, **kwargs):
+        if kwargs.get('name') == 'stk-request-shutdown':
+            target = kwargs['target']
+            def delayed():
+                entered.set()
+                assert resume.wait(5)
+                target()
+            kwargs['target'] = delayed
+        thread = original(*args, **kwargs)
+        shutdown_threads.append(thread)
+        return thread
+    monkeypatch.setattr(threading, 'Thread', delayed_thread)
+    try:
+        executor.shutdown(wait=False)
+        assert entered.wait(5)
+        adapter.release.set()
+        eventually(lambda: idle(executor))
+        result = store.requests.get(saved['id'])
+        assert result['status'] == 'uncertain' and result['result'] is None
+        assert result['error_code'] == 'executor_lost'
+    finally:
+        resume.set()
+        for thread in shutdown_threads:
+            thread.join(5)

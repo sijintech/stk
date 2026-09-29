@@ -11,7 +11,7 @@ Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科�
 批量修改前可用[项目修改预览](project-preview.md)检查候选表格和公式结果，预览不保存修改。
 格式 6 可另外显式[保存草案](project-drafts.md)，重开后重新检查；应用回执与编辑在同一事务提交，重复请求不会再次执行。
 格式 7 增加明确选行、选列的[上下文快照与讨论记录](project-contexts.md)，并可记录消息与草案的来源关联；文字不执行操作。
-格式 8 增加[请求记录](project-requests.md)，固定输入来源并保存执行观察；当前没有内置模型提供方。
+格式 8 增加[请求记录](project-requests.md)，固定输入来源并保存执行观察；阿里 Token Plan 可由用户明确发起文字请求。
 
 表格超出面板宽度时，可以拖动底部横向滚动条、使用触控板横向滚动，或按住 Shift 滚动鼠标滚轮。
 列标题和数据一起移动；滚动后仍可点击列标题排序或拖动列边界调整宽度。
@@ -242,7 +242,8 @@ SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报�
 增加 `project.create/open/list/close/snapshot/apply/history/backup/upgrade/undo/redo`，并提供 C++ `Client::project_*` 封装。
 持久草案使用可选的 `project.drafts.save/get/list/apply/discard` 扩展，见[草案指南](project-drafts.md)。
 上下文与讨论使用可选的 `project.contexts.*` / `project.discussion.*` 扩展，见[上下文指南](project-contexts.md)。
-请求记录使用可选的 `project.requests.create/get/list/cancel` 扩展，见[请求指南](project-requests.md)；这些方法不启动执行器。
+请求记录使用可选的 `project.requests.create/get/list/cancel` 扩展；`provider` 查询本机配置，`start` 明确开始，
+`recover` 只核对本机执行锁，见[请求指南](project-requests.md)。普通读取不启动执行器。
 项目修改复用上述命令和修订校验，不绕过存储服务。桥中的句柄只在当前进程内有效，
 桥重启后应按绝对目录重新打开；项目 UUID 和已提交内容保持不变。
 

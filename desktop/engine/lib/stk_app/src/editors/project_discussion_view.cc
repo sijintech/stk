@@ -144,6 +144,7 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
     rows_.clear(); fields_.clear(); shown_context_.clear(); shown_message_.clear();
     context_details_.clear(); message_text_.clear(); shown_request_.clear(); request_details_.clear();
     captured_.reset(); captured_error_.clear();
+    model_.clear(); model_initialized_ = false;
   }
   layout.paragraph(ctx.tr("discussion.hint"));
   if (!discussion.supported()) { layout.paragraph(ctx.tr("discussion.unsupported")); return; }
@@ -156,7 +157,10 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
       {[this] { return category_; }, [this](int value) { category_ = value; selected_.clear(); }});
   if (category_ == 3 && !discussion.requests_supported()) { layout.paragraph(ctx.tr("discussion.requests.unsupported")); return; }
   const std::string kind = category_ == 0 ? "contexts" : category_ == 1 ? "messages" : category_ == 2 ? "proposals" : "requests";
-  if (category_ == 3) { layout.paragraph(ctx.tr("discussion.requests.hint")); }
+  if (category_ == 3) {
+    layout.paragraph(ctx.tr("discussion.requests.hint"));
+    request_controls(layout, ctx, state);
+  }
   const auto &page = discussion.page(kind);
   if (!page.loaded && enabled) { discussion.load_page(kind, page.offset, true); }
   const auto items = page.items;
@@ -281,6 +285,10 @@ void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &c
   if (request.empty()) { return; }
   const auto id = io::get_string(request, "id"), status = io::get_string(request, "status");
   layout.paragraph(id + " · " + std::string(ctx.tr("discussion.requests." + status)));
+  layout.paragraph(ctx.store.catalog().format("discussion.requests.summary", {
+      {"model", io::get_string(request.at("configuration"), "model")},
+      {"revision", std::to_string(io::get_int(request, "source_revision", -1))},
+      {"context", io::get_string(request, "context_id")}}));
   if (request.value("cancel_requested", false)) { layout.paragraph(ctx.tr("discussion.requests.cancel_requested")); }
   if (status == "running" || status == "uncertain") { layout.paragraph(ctx.tr("discussion.requests.verify")); }
   const auto serialized = request.dump(2);
@@ -289,7 +297,7 @@ void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &c
     request_details_ = ui::LogBuffer(std::numeric_limits<size_t>::max());
     request_details_.append(serialized);
   }
-  if (auto *details = layout.panel("request_details", ctx.tr("discussion.requests.details"), true)) {
+  if (auto *details = layout.panel("request_details", ctx.tr("discussion.requests.details"), false)) {
     details->log_view("value", request_details_, 8);
   }
   const bool enabled = !state.busy() && !discussion.busy();
@@ -297,20 +305,60 @@ void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &c
     return state.project() && state.project()->handle == handle && io::get_string(discussion.generation_request(), "id") == id;
   };
   auto &actions = layout.row();
+  actions.button("request_start", ctx.tr("discussion.requests.start"), [&discussion, current, id] {
+    if (current()) { discussion.start_request(id); }
+  }).disable(!enabled || status != "pending" || !discussion.generation_supported() ||
+      !discussion.provider().value("configured", false) ||
+      io::get_string(request.at("configuration"), "adapter") != io::get_string(discussion.provider(), "adapter"));
   actions.button("request_reload", ctx.tr("discussion.requests.refresh"), [&discussion, current, id] {
     if (current()) { discussion.load_request(id); }
   }).disable(!enabled);
   actions.button("request_cancel", ctx.tr("discussion.requests.cancel"), [&discussion, current, id] {
     if (current()) { discussion.cancel_request(id); }
   }).disable(!enabled || status == "completed" || status == "failed" || status == "cancelled");
-  actions.button("request_message", ctx.tr("discussion.requests.message"),
+  actions.button("request_recover", ctx.tr("discussion.requests.recover"), [&discussion, current, id] {
+    if (current()) { discussion.recover_request(id); }
+  }).disable(!enabled || status != "running" || !discussion.generation_supported());
+  auto &links = layout.row();
+  links.button("request_message", ctx.tr("discussion.requests.message"),
       [this, &discussion, current, message = io::get_string(request, "message_id")] {
     if (current() && discussion.load_message(message)) { category_ = 1; }
   }).disable(!enabled);
   const bool completed = status == "completed" && request.contains("result") && request.at("result").is_object();
-  actions.button("request_result", ctx.tr("discussion.requests.result"),
+  links.button("request_result", ctx.tr("discussion.requests.result"),
       [this, &discussion, current, message = completed ? io::get_string(request.at("result"), "message_id") : std::string()] {
     if (current() && !message.empty() && discussion.load_message(message)) { category_ = 1; }
   }).disable(!enabled || !completed);
+}
+
+void ProjectDiscussionView::request_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
+{
+  auto &discussion = state.discussion();
+  if (!discussion.generation_supported()) { return; }
+  if (!discussion.provider_loaded() && !state.busy() && !discussion.busy()) { discussion.load_provider(); }
+  auto *panel = layout.panel("request_prepare", ctx.tr("discussion.requests.prepare_title"), true);
+  if (!panel) { return; }
+  const auto &provider = discussion.provider();
+  if (!provider.empty()) {
+    panel->paragraph("Alibaba Token Plan · " + io::get_string(provider, "base_url"));
+    panel->paragraph(ctx.tr(provider.value("configured", false) ? "discussion.requests.key_ready" : "discussion.requests.key_missing"));
+    if (!model_initialized_) { model_ = io::get_string(provider, "model"); model_initialized_ = true; }
+  }
+  panel->button("provider_refresh", ctx.tr("discussion.requests.provider_refresh"),
+      [&discussion, &state, handle = state.project()->handle] {
+    if (state.project() && state.project()->handle == handle) { discussion.load_provider(); }
+  }).disable(state.busy() || discussion.busy());
+  panel->prop(ctx.tr("discussion.requests.model")).text_field("model", ui::bind(model_), {.max_length = 128});
+  const auto &message = discussion.message();
+  const bool user_message = !message.empty() && io::get_string(message, "role") == "user";
+  panel->paragraph(user_message ? ctx.store.catalog().format("discussion.requests.input", {
+      {"message", io::get_string(message, "id")}, {"context", io::get_string(message, "context_id")}}) :
+      std::string(ctx.tr("discussion.requests.select_message")));
+  panel->button("prepare", ctx.tr("discussion.requests.prepare"),
+      [this, &discussion, &state, handle = state.project()->handle, id = io::get_string(message, "id")] {
+    if (state.project() && state.project()->handle == handle && io::get_string(discussion.message(), "id") == id) {
+      discussion.create_request(model_);
+    }
+  }).disable(state.busy() || discussion.busy() || provider.empty() || !user_message || model_.empty());
 }
 }  // namespace stk::app

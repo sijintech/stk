@@ -31,8 +31,8 @@ def test_request_catalog_schema_and_closed_handles(inproc, model):
     assert harness.error("project.requests.create", {**params, "configuration": {"adapter": "test-controlled", "model": "changed"}})["code"] == "conflict"
     catalog = harness.call("script.catalog")
     assert {"project.requests.create", "project.requests.get", "project.requests.list", "project.requests.cancel"} <= catalog["operations"].keys()
-    assert "project.requests.start" not in catalog["operations"]
-    assert harness.error("project.requests.start", {"handle": info["handle"], "request_id": saved["id"]})["code"] == "unknown_method"
+    assert "project.requests.start" in catalog["operations"]
+    assert harness.error("project.requests.start", {"handle": info["handle"], "request_id": saved["id"]})["code"] == "invalid_params"
     assert store.snapshot() == before and store.history() == history and harness.events_of("project.changed") == []
     assert harness.call("project.close", {"handle": info["handle"]})["closed"]
     assert harness.error("project.requests.get", {"handle": info["handle"], "request_id": saved["id"]})["code"] == "not_found"

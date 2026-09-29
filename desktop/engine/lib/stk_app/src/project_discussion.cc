@@ -16,6 +16,7 @@ void ProjectDiscussion::reset()
   origin_draft_.clear();
   contexts_ = messages_ = proposals_ = request_page_ = {};
   context_ = message_ = origin_ = requests_ = generation_request_ = Json::object();
+  provider_ = Json::object(); provider_loaded_ = false;
 }
 
 bool ProjectDiscussion::supported() const
@@ -77,6 +78,53 @@ bool ProjectDiscussion::call(const std::string &method, Json params,
   });
   store_.changed();
   return true;
+}
+
+bool ProjectDiscussion::generation_supported() const
+{
+  if (!requests_supported()) { return false; }
+  const auto hello = store_.bridge()->hello_info();
+  for (const auto *method : {"project.requests.provider", "project.requests.start", "project.requests.recover"}) {
+    if (!hello || !hello->has_method(method)) { return false; }
+  }
+  return true;
+}
+
+bool ProjectDiscussion::load_provider()
+{
+  if (!generation_supported()) { return false; }
+  const bool accepted = call("project.requests.provider", Json::object(), [this](const Json &result) {
+    provider_ = result.at("provider");
+  }, true);
+  if (accepted) { provider_loaded_ = true; }
+  return accepted;
+}
+
+bool ProjectDiscussion::create_request(const std::string &model)
+{
+  if (!generation_supported() || busy_ || project_.busy() || provider_.empty() || message_.empty() ||
+      message_.at("role") != "user") { return false; }
+  auto params = request("generation", {{"message_id", message_.at("id")}, {"configuration",
+      {{"adapter", provider_.at("adapter")}, {"model", model}, {"max_output_tokens", 4096}}}}, "request_id");
+  return call("project.requests.create", std::move(params), [this](const Json &result) {
+    generation_request_ = result.at("request"); request_page_.loaded = false;
+  });
+}
+
+bool ProjectDiscussion::start_request(const std::string &id)
+{
+  if (!generation_supported()) { return false; }
+  return call("project.requests.start", {{"request_id", id}}, [this](const Json &result) {
+    generation_request_ = result.at("request"); request_page_.loaded = false;
+  });
+}
+
+bool ProjectDiscussion::recover_request(const std::string &id)
+{
+  if (!generation_supported()) { return false; }
+  return call("project.requests.recover", {{"request_id", id}}, [this](const Json &result) {
+    generation_request_ = result.at("request"); request_page_.loaded = false;
+  });
 }
 
 Json ProjectDiscussion::request(const std::string &kind, Json params, const std::string &id_key)

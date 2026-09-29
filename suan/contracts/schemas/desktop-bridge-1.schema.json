@@ -5289,6 +5289,124 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.requests.start": {
+        "description": "Explicitly start a saved pending request once. Preflight failures leave it pending; lost replies never justify automatic replay.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "request_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/projectRequest"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.requests.recover": {
+        "description": "Explicitly verify the local execution lock and mark abandoned running work uncertain. Never send or query a provider.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "request_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/projectRequest"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.requests.provider": {
+        "description": "Read local Alibaba Token Plan settings without contacting the provider or returning credential values.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "object",
+              "properties": {
+                "adapter": {
+                  "type": "string"
+                },
+                "base_url": {
+                  "type": "string"
+                },
+                "key_env": {
+                  "type": "string"
+                },
+                "model_env": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "configured": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "adapter",
+                "base_url",
+                "key_env",
+                "model_env",
+                "model",
+                "configured"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {

@@ -42,7 +42,9 @@ archived at D1 exit under the tag `archive/blender-workbench-2026-09`).
 - **Lifetime.** The bridge exits when stdin reaches EOF or after answering `shutdown`: it stops
   subscriptions, cancels local graph evaluations, pauses transfers at the next chunk boundary
   (their journals stay resumable) and waits up to 5 s for in-flight requests. **Runtime tasks and
-  hub actions are never cancelled**: closing the app keeps jobs running.
+  hub actions are never cancelled**: closing the app keeps jobs running. Owned model requests have
+  a separate lifetime: project-session shutdown fences late results and schedules best-effort
+  persistence of uncertain outcomes without waiting on a locked project database (§13).
 - **Crash and restart.** If the bridge dies, the app starts a new one, sends `hello` (which by
   default resumes interrupted transfers) and replays its subscriptions from the offsets it last
   received (§8). Workspace/task/hub-action creation takes an idempotency key, so replaying a
@@ -122,7 +124,7 @@ request (same idempotency key) may succeed.
 | `graph_error` | no | Graph validation or evaluation failed: `data.graph_code` (stk-graph-v1 codes), `issues`, `node`, `errors` |
 | `cancelled` | no | The operation was cancelled |
 | `timeout` | yes | A hub action has not finished within the wait; repeat the request to keep waiting |
-| `busy` | yes / no | Two meanings: too many requests in flight (`retryable: true`: repeat later), or another bridge holds the state directory (§1; `data.state_dir`, `retryable: false`: the bridge will not serve anything and exits with status 3) |
+| `busy` | yes / no | Too many requests in flight (`retryable: true`); another bridge holds the state directory (§1; `data.state_dir`, `retryable: false`, exits with status 3); or a live model executor owns the requested execution lock (§13; `retryable: false`) |
 | `result_too_large` | no | The response would exceed `max_line_bytes` |
 | `shutting_down` | no | The bridge is exiting |
 | `internal_error` | no | A bridge bug (details on stderr) |
@@ -152,6 +154,8 @@ Connection ids are opaque to the app; the bridge resolves them:
   `connections.pair_hub` one-time `code`). No result, event or error carries a token; files holding
   them are written atomically with mode 0600. Runtime URLs must be loopback HTTP (tunnels); hub URLs
   must be HTTPS (or HTTP on loopback); requests use no proxies and follow no redirects.
+- Model requests use the separate environment-only `STK_TOKEN_PLAN_API_KEY` credential (§13),
+  not a Runtime/hub connection ID. There is no bridge method to set or return that credential.
 - Names: `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
 - Operations on a hub connection need `node`: the device id of an execution node (from
   `hub.devices`).
@@ -519,6 +523,9 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.requests.get` | `{handle, request_id}` | `{request}` |
 | `project.requests.list` | `{handle, offset?, limit?}` | `{requests: [request], next_offset: integer|null}` |
 | `project.requests.cancel` | `{handle, request_id}` | `{request}` |
+| `project.requests.provider` | `{handle}` | `{provider}` (local configuration presence only) |
+| `project.requests.start` | `{handle, request_id}` | `{request}` (durable claim or existing state) |
+| `project.requests.recover` | `{handle, request_id}` | `{request}` (local abandoned-owner reconciliation only) |
 | `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
 | `project.backup` | `{handle}` | `{path, project_id, revision, format_version}` |
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
@@ -687,12 +694,23 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   [context and discussion guide](../project-contexts.md) for usage and recovery boundaries.
 - `project.requests.*` is an optional format 8 extension for durable text-request records. Check
   `hello.methods`; earlier formats return `unsupported` and require explicit backup/upgrade.
-  The bridge exposes only create/get/list/cancel: there is no request start, recovery, provider query,
-  streaming or adapter configuration method. Creating a record saves intent without sending it.
-  None of these methods calls a model, loads an adapter, looks up credentials, applies a draft or
-  submits a task. They do not change project revision/history/undo and emit no event, including no
-  `project.changed`. Refresh explicitly to observe changes by another client or local executor.
-  The Python facade exposes the same operations as `p.requests.create/get/list/cancel` on its pinned handle.
+  The bridge exposes create/get/list/cancel/provider/start/recover. Creating a record saves intent;
+  only explicit start can send the saved input. Get/list, opening a project and restoring a view
+  never send or poll a provider. These methods do not change project revision/history/undo, apply
+  a draft or submit a Runtime task, and emit no event, including no `project.changed`. Refresh
+  explicitly to read changes from SQLite. The Python facade exposes the same seven operations as
+  `p.requests.*` on its pinned handle; older bridges may expose only the first four methods.
+- Provider returns exactly `{adapter, base_url, key_env, model_env, configured, model}` inside
+  `{provider}`. The built-in adapter is `aliyun-token-plan/1`, with fixed base URL
+  `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`, key environment variable
+  `STK_TOKEN_PLAN_API_KEY` and optional model environment variable `STK_TOKEN_PLAN_MODEL`.
+  `configured` reports plausible local credential presence, not authentication, account entitlement
+  or network health. Model is an explicit bounded identifier, or the empty string if absent/invalid;
+  there is no guessed default. A request always uses its saved configuration, not a later model
+  environment change. Provider reads local configuration only and returns no credential value.
+  Credentials, endpoint overrides and arbitrary adapter configuration are not accepted by any
+  request method. Real account operation has not been validated; API compatibility does not establish
+  STK's eligibility under the provider's current Token Plan tool/use terms.
 - A request is the closed, flat object
   `{id, project_id, context_id, message_id, assistant_message_id, source_revision, configuration,
   prompt_version, input_sha256, created_at, status, cancel_requested, executor_id, updated_at,
@@ -724,8 +742,11 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   Cancel changes pending to cancelled with `cancel_requested=true` and
   `error_code="cancelled_before_start"`; running or previously uncancelled uncertain requests become
   uncertain with cancellation intent and `error_code="cancel_unconfirmed"`. Already-requested
-  cancellation and completed/failed/cancelled records are returned unchanged. The bridge only
-  persists this intent: it cannot signal a separately created executor or confirm remote cancellation.
+  cancellation and completed/failed/cancelled records are returned unchanged. After persisting
+  intent, this bridge signals its own worker's cancellation event if present. It cannot signal a
+  worker owned by a different executor/process or confirm remote cancellation. The Token Plan
+  adapter can prove cancellation only before submission; once submitted, it waits for the bounded
+  complete response and a valid result may still be saved with the cancellation intent retained.
 - `result` is null until completed, then exactly `{message_id, text_sha256, metadata}`; `message_id`
   equals the reserved assistant ID. Its full nonblank response is an ordinary immutable assistant
   message, at most 64 KiB UTF-8, read through `project.discussion.get`. Metadata accepts only optional
@@ -736,17 +757,36 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   rejected. Confirmed cancellation/known failure cannot publish a late message; a complete result
   after unconfirmed cancellation may be saved while retaining `cancel_requested=true`. Completion
   does not create/apply a draft, interpret code blocks or submit work.
-- The provider-free `suan.project.request_executor.RequestExecutor` is a local library service,
-  not a bridge operation. Explicit `start` obtains a per-request OS lock and commits a single
-  execution claim before calling an injected trusted adapter; no adapters are installed by default.
-  Duplicate starts never resend. `shutdown` fences late results and preserves a live worker's lock
-  until it exits. Explicit `recover` must acquire that lock before marking an abandoned running
-  request uncertain; it does not send, query a provider or revert to pending. The fixed journal
-  error codes are `adapter_unavailable`, `adapter_failed`, `response_invalid`, `dispatch_failed`
+- The local `suan.project.request_executor.RequestExecutor` defaults to an empty trusted adapter
+  registry; the bridge explicitly registers `AliyunTokenPlanAdapter`. Start first reads the saved
+  request. A non-pending record is returned unchanged and never resubmitted. For pending work,
+  start obtains its nonblocking OS lock, validates immutable input and runs optional adapter
+  preparation before committing a single claim. Token Plan preparation validates the payload and
+  credential locally and captures both in memory; failure returns `invalid_params` with the request
+  still pending. Missing adapters likewise leave it pending. The prepared sender is invoked only
+  after `running` and `executor_id` are committed. Start acknowledges that claim without waiting
+  for the network response. It holds no SQLite transaction during network I/O and never retries.
+  A live execution lock prevents another sender or local recovery (`busy`).
+- Explicit recover only acts on `running`: it must acquire the request's free OS lock before marking
+  it `uncertain/executor_lost`; other states are returned unchanged. It does not send, query a provider
+  or revert to pending. Closing a project handle or switching projects leaves accepted work bound
+  to the original project UUID and database. Bridge shutdown fences late responses and asynchronously
+  attempts to mark active work uncertain; a live worker retains its lock until it exits. If persistence
+  is unavailable or process exit interrupts cleanup, later explicit recover can reconcile a saved
+  running claim. Neither shutdown nor recovery proves remote cancellation.
+  The fixed journal error codes are `adapter_unavailable`, `adapter_failed`, `response_invalid`, `dispatch_failed`
   (failed), `executor_lost`, `cancel_unconfirmed`, `transport_uncertain`, `local_save_failed`
   (uncertain), and `cancelled_before_start`, `cancel_confirmed` (cancelled). Pending/running/completed
-  have null `error_code`. No provider, credential lookup, remote cancellation/query, stream or tool
-  execution is included. See [request guide](../project-requests.md) for lock scope and save-failure limits.
+  have null `error_code`. The fixed Token Plan adapter uses one verified HTTPS Chat Completions
+  POST with `stream=false` and `enable_thinking=false`; it sends no tools. It accepts only one complete
+  assistant text with `finish_reason=stop`, rejects tool/function output and truncation, bounds the
+  HTTP body to 1 MiB and the saved text to 64 KiB, and uses a 60-second socket timeout with elapsed
+  deadline checks between operations. It follows no redirects, uses no proxy and makes no retry.
+  This adapter requires temperature below 2, within the generic configuration range above. Known
+  rejection responses are failed; transport errors, ambiguous statuses and timeouts remain uncertain.
+  No remote cancellation/query, streaming, token counting or tool execution is implemented. See
+  [request guide](../project-requests.md) for configuration, exact transport scope, lock guarantees
+  and save-failure limits.
 - **Uncertain responses:** create/apply/backup/upgrade/undo/redo and file index/refresh are never automatically retried. If a response is lost,
   reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
   raise `expected_revision` and repeat an edit: the previous batch may already have committed.
