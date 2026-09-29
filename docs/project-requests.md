@@ -21,7 +21,13 @@ OpenAI 兼容文字接口，使用指定地址 `https://token-plan.cn-beijing.ma
 地址与专属密钥要求见[阿里云接入说明](https://help.aliyun.com/zh/model-studio/more-tools)。
 该说明也限制 Token Plan 的工具用途，列出自动化平台及自定义应用后端等不支持的场景。
 **STK 的协议适配不代表阿里已确认本应用适用该套餐**；实际启用前需核对你的套餐允许范围。
-这里没有使用密钥完成真实账户调用；自动化测试使用受控 HTTP 响应，不消耗套餐额度。
+2026-09-30 已用 `qwen3.7-plus` 完成一次 Linux 桌面桥的真实账户调用及 SQLite 回复保存/重开验证，
+输入仅为人工构造的 `temperature = 300 K`。这不代表全部模型、科研回答质量或双平台原生按钮已验收。
+自动化回归仍使用受控 HTTP 响应，不消耗套餐额度；详见[验收记录](runtime-validation.md)。
+
+当前建议以 `qwen3.7-plus` 作为讨论和代码辅助的起点：它在[Token Plan 支持列表](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview)中，
+官方[文本模型指南](https://help.aliyun.com/zh/model-studio/text-generation-model)将其列为能力与成本均衡的选项。
+这是截至 2026-09-30 的配置建议，程序不硬编码默认模型或自动替换已保存请求中的型号。
 
 在仓库目录中打开终端，使用不回显的输入提示设置密钥，随后从同一个终端启动 STK。
 不要把密钥写进 Python 面板、聊天、项目表格或提交到 Git。以下设置只影响当前终端及其子进程。
@@ -32,8 +38,7 @@ macOS（Bash）：
 read -r -s -p 'Token Plan API key: ' STK_TOKEN_PLAN_API_KEY
 printf '\n'
 export STK_TOKEN_PLAN_API_KEY
-read -r -p 'Model ID: ' STK_TOKEN_PLAN_MODEL
-export STK_TOKEN_PLAN_MODEL
+export STK_TOKEN_PLAN_MODEL=qwen3.7-plus
 bash desktop/setup-macos.sh
 ```
 
@@ -43,9 +48,15 @@ Windows（PowerShell）：
 $stkModelCredential = Read-Host 'Token Plan API key' -AsSecureString
 $env:STK_TOKEN_PLAN_API_KEY = [System.Net.NetworkCredential]::new('', $stkModelCredential).Password
 Remove-Variable stkModelCredential
-$env:STK_TOKEN_PLAN_MODEL = Read-Host 'Model ID'
+$env:STK_TOKEN_PLAN_MODEL = 'qwen3.7-plus'
 powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1
 ```
+
+已经在 Bash 的 `~/.bashrc` 中 `export` 密钥时，无需重复输入；可在同一文件中添加
+`export STK_TOKEN_PLAN_MODEL=qwen3.7-plus`。打开新的交互式 Bash，或在当前交互式 Bash 中运行
+`source ~/.bashrc`，再从该终端启动 STK。部分 `.bashrc` 会提前跳过非交互式 shell，
+所以后台进程、桌面图标或已运行的应用不一定读到该配置；STK 本身不会执行 shell 启动文件。
+macOS 使用 zsh 时应在对应 shell 中导出，Windows 则按上面的 PowerShell 设置。
 
 已有窗口不会继承另一个终端后来修改的环境变量；配置变更后重新启动 STK。
 **刷新本机配置** 和 `p.requests.provider()` 只检查桥进程的环境，不联系服务，也不能证明密钥有效、
