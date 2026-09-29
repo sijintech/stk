@@ -141,6 +141,7 @@ class AppShell {
   std::vector<ui::MenuEntry> scale_menu();
   void reset_layout(wm::Screen &screen);
   static void focus_viewer(wm::Screen &screen);
+  static Editor *focus_editor(wm::Screen &screen, const std::string &type);
   void handle_ui_request(const std::string &operation, const io::Json &params, int64_t expires_at,
                          std::function<bool()> valid, ScriptState::Completion complete);
   void perform_ui_request(wm::Screen &screen, const std::string &operation, const io::Json &params,

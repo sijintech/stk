@@ -550,6 +550,34 @@ bool ProjectState::can_apply_review() const
          dirty_revision_ <= review_->base_revision;
 }
 
+bridge::Result<Json> ProjectState::request_review(const std::string &handle, const int64_t expected_revision,
+                                                 const Json &commands)
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  if (!ready()) { return Error::make(ErrorCode::Unavailable, "The project bridge is not ready"); }
+  if (!preview_supported()) { return Error::make(ErrorCode::Unsupported, "Project preview is unavailable"); }
+  if (!project_ || project_->handle != handle || project_->revision != expected_revision ||
+      dirty_revision_ > expected_revision) {
+    return Error::make(ErrorCode::Conflict, "The visible project or its revision changed; inspect the project again");
+  }
+  if (busy() || !loaded()) { return Error::make(ErrorCode::Busy, "The project controller is busy"); }
+  if (review_ || review_source_ != "[]" || !review_error_.empty()) {
+    return Error::make(ErrorCode::Conflict, "A review draft already exists; inspect and clear it in the desktop first");
+  }
+  if (!commands.is_array() || commands.empty() || commands.size() > 1000) {
+    return Error::make(ErrorCode::InvalidParams, "commands must contain 1 to 1000 project edit commands");
+  }
+  const auto source = commands.dump();
+  if (source.size() > 256 * 1024) {
+    return Error::make(ErrorCode::InvalidParams, "Review commands exceed 256 KiB");
+  }
+  set_review_source(source);
+  // Validation above makes this the same bounded read-only preview as the native editor.
+  if (!preview()) { return Error::make(ErrorCode::Busy, "The project preview could not start"); }
+  return Json{{"accepted", true}, {"project_id", project_->id}, {"base_revision", expected_revision}};
+}
+
 bool ProjectState::apply_review()
 {
   if (!can_apply_review()) { return false; }

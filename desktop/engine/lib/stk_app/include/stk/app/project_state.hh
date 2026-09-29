@@ -76,6 +76,9 @@ class ProjectState {
   void set_review_source(std::string source);
   bool preview_supported() const;
   bool preview();
+  /** Accept an external draft only for the current handle/revision and an empty review. */
+  bridge::Result<io::Json> request_review(const std::string &handle, int64_t expected_revision,
+                                        const io::Json &commands);
   bool can_apply_review() const;
   bool apply_review();
   void discard_review();

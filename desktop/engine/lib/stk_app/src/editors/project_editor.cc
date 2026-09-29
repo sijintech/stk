@@ -21,6 +21,13 @@ class ProjectEditor final : public Editor {
  public:
   explicit ProjectEditor(const EditorType &type) : Editor(type) {}
 
+  bool show_view(const std::string_view view) override
+  {
+    if (view != "review" && view != "data") { return false; }
+    project_view_ = view == "review" ? 1 : 0;
+    return true;
+  }
+
   void draw_header(ui::Layout &row, EditorContext &ctx) override
   {
     auto &state = ctx.store.project();

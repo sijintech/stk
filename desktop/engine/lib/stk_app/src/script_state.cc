@@ -282,7 +282,7 @@ void ScriptState::attach_ui()
   const auto attach = [this](const Json &advertised) {
     if (!ui_handler_) { ui_attaching_ = false; return; }
     Json operations = Json::array();
-    for (const auto *name : {"layout.get", "layout.apply", "editors.list", "project.current", "project.open", "project.close",
+    for (const auto *name : {"layout.get", "layout.apply", "editors.list", "project.current", "project.open", "project.close", "project.review",
                              "viewer.status", "viewer.presets", "viewer.open", "viewer.close", "viewer.configure", "viewer.preset",
                              "viewer.evaluate", "viewer.cancel", "viewer.layer", "viewer.step", "viewer.play", "viewer.reset_camera"}) {
       if (std::find(advertised.begin(), advertised.end(), Json(name)) != advertised.end()) { operations.push_back(name); }
@@ -298,7 +298,7 @@ void ScriptState::attach_ui()
     attach(Json::array({"layout.get", "layout.apply", "editors.list", "project.current", "project.open", "project.close"}));
     return;
   }
-  // Older bridges advertise the original six operations. Do not let a new Viewer capability
+  // Older bridges advertise the original six operations. Do not let a new UI capability
   // make their whole desktop attachment fail validation.
   on(client_->call("script.catalog"), [this, attach](const auto &result) {
     if (!result.ok()) { ui_attaching_ = false; fail(result.error()); return; }

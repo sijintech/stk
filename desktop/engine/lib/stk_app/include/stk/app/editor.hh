@@ -113,6 +113,9 @@ class Editor {
     return false;
   }
 
+  /** Reveal a named subview on the UI thread; false means this editor has no such view. */
+  virtual bool show_view(std::string_view view) { return false; }
+
   /* ---- Persistence ---- */
 
   /** Per-area editor state saved with the layout (JSON object). */

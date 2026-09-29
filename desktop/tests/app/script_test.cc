@@ -71,7 +71,220 @@ class ScriptPython : public ::testing::Test {
     ASSERT_TRUE(state().error().empty()) << state().error();
     EXPECT_EQ(state().status().at("run").at("state"), expected) << output();
   }
+  void open_project()
+  {
+    auto &project = f.shell->store().project();
+    project.sync();
+    ASSERT_TRUE(project.create(dir.str() + "/project", "Review project"));
+    ASSERT_TRUE(pump([&] { return project.loaded() && !project.busy(); }));
+    execute("p = stk.project\ncommands = [{'op': 'create_table', 'name': 'Proposed cases'}]\n"
+            "from suan.scripting import ScriptError\n"
+            "def rejected(params, code):\n"
+            "    try:\n"
+            "        stk.call('ui.project.review', **params)\n"
+            "    except ScriptError as error:\n"
+            "        assert error.code == code, str(error)\n"
+            "    else:\n"
+            "        raise AssertionError('unexpected acceptance')\n"
+            "request = {'handle': p.handle, 'commands': commands, 'expected_revision': 0}");
+  }
 };
+
+TEST_F(ScriptPython, ProjectReviewOpensNativeDifferencesAndOnlyTheApplyButtonWrites)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  auto &project = f.shell->store().project();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.add_tab(kEditorPython));
+  f.screen.set_maximized(&f.area("a1"));
+  execute("before = p.snapshot()\naccepted = p.review(commands, expected_revision=0)\n"
+          "assert accepted == {'accepted': True, 'project_id': before['project']['id'], 'base_revision': 0}\n"
+          "assert p.snapshot() == before\nassert len(p.history()) == 0");
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  ASSERT_TRUE(project.review()) << project.review_error();
+  EXPECT_EQ(project.project()->revision, 0);
+  EXPECT_TRUE(project.tables().empty());
+  EXPECT_EQ(area.editor().type().id, kEditorProject);
+  EXPECT_EQ(f.screen.maximized(), &area);
+  f.drv->frame();
+  ASSERT_NE(f.screen.ui()->find("a2/main/review_rows"), nullptr);
+  const auto *apply = f.screen.ui()->find("a2/main/review_apply");
+  ASSERT_NE(apply, nullptr);
+  ASSERT_TRUE(apply->enabled);
+  const auto normalized = project.review()->commands;
+  ASSERT_TRUE(normalized[0].contains("id"));
+  apply->on_click();
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  ASSERT_EQ(project.tables().size(), 1u);
+  EXPECT_EQ(project.tables()[0].id, normalized[0]["id"].get<std::string>());
+  EXPECT_EQ(project.tables()[0].name, "Proposed cases");
+  EXPECT_EQ(project.project()->revision, 1);
+  EXPECT_FALSE(project.review());
+  ASSERT_TRUE(project.undo());
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  EXPECT_TRUE(project.tables().empty());
+  EXPECT_EQ(project.project()->revision, 2);
+}
+
+TEST_F(ScriptPython, ProjectReviewRejectsStaleMalformedAndExistingDraftRequests)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  auto &project = f.shell->store().project();
+  const auto screen_before = f.screen.to_json();
+  execute("for changes in [{'expected_revision': -1}, {'expected_revision': True},\n"
+          "                {'expected_revision': 0.5}, {'expected_revision': 2**64-1},\n"
+          "                {'handle': ''}, {'handle': None}, {'unknown': 1},\n"
+          "                {'commands': []}, {'commands': {}}, {'commands': commands * 1001},\n"
+          "                {'commands': [{'op': 'create_table', 'name': '温' * 90000}]}]:\n"
+          "    rejected({**request, **changes}, 'invalid_params')\n"
+          "rejected({**request, 'handle': 'different'}, 'conflict')\n"
+          "rejected({**request, 'expected_revision': 1}, 'conflict')");
+  EXPECT_EQ(f.screen.to_json(), screen_before);
+  EXPECT_EQ(project.review_source(), "[]");
+  project.set_review_source("my unfinished JSON draft");
+  execute("rejected(request, 'conflict')");
+  EXPECT_EQ(project.review_source(), "my unfinished JSON draft");
+  project.discard_review();
+  execute("p.review(commands, expected_revision=0)");
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  ASSERT_TRUE(project.review());
+  const auto candidate = project.review();
+  execute("rejected(request, 'conflict')");
+  EXPECT_EQ(project.review(), candidate);
+  // An intervening edit invalidates Apply but does not replace the inspected candidate.
+  execute("p.apply([{'op': 'create_table', 'name': 'Other edit'}], expected_revision=0)");
+  ASSERT_TRUE(pump([&] { return !project.busy() && project.project()->revision == 1; }));
+  EXPECT_EQ(project.review(), candidate);
+  EXPECT_FALSE(project.can_apply_review());
+  project.discard_review();
+  execute("rejected(request, 'conflict')\np.review(commands, expected_revision=1)");
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  ASSERT_TRUE(project.review());
+  EXPECT_EQ(project.review()->base_revision, 1);
+  EXPECT_EQ(project.project()->revision, 1);
+  // Semantic command errors appear in the review page, after acceptance, without changing data.
+  project.discard_review();
+  execute("assert p.review([{'op': 'unknown_operation'}], expected_revision=1)['accepted']");
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  EXPECT_FALSE(project.review());
+  EXPECT_FALSE(project.review_error().empty());
+  EXPECT_EQ(project.project()->revision, 1);
+}
+
+TEST_F(ScriptPython, ProjectReviewChecksIdentityAfterQueueingAndNeverRetargets)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  auto &project = f.shell->store().project();
+  execute("other = stk.projects.create(" + Json(dir.str() + "/other").dump() + ", 'Other')");
+  bool requested = false;
+  auto listener = client->on_event("ui.request", [&](const auto &, const auto &data) {
+    if (io::get_string(data, "operation") == "project.review") { requested = true; }
+  });
+  ASSERT_TRUE(state().execute("rejected(request, 'conflict')"));
+  ASSERT_TRUE(loop.pump_until([&] { return requested; }, 30));
+  // Leave Screen::defer queued until the visible project has switched.
+  ASSERT_TRUE(project.open(dir.str() + "/other"));
+  ASSERT_TRUE(loop.pump_until([&] { return project.loaded() && !project.busy(); }));
+  const auto before = f.screen.to_json();
+  ASSERT_TRUE(pump([&] { return !state().busy(); }));
+  EXPECT_EQ(state().status().at("run").at("state"), "succeeded") << output();
+  EXPECT_EQ(f.screen.to_json(), before);
+  EXPECT_EQ(project.review_source(), "[]");
+  EXPECT_FALSE(project.review());
+  EXPECT_EQ(project.project()->name, "Other");
+  EXPECT_EQ(project.project()->revision, 0);
+  EXPECT_TRUE(project.tables().empty());
+}
+
+TEST_F(ScriptPython, ProjectReviewPreservesTextStillBeingEdited)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  auto &project = f.shell->store().project();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("review"));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/review_source");
+  f.drv->click(x, y);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  f.drv->key(wm::Key::A, primary);
+  f.drv->key(wm::Key::Unknown, wm::ModNone, "unfinished native draft");
+  EXPECT_EQ(project.review_source(), "[]"); // The text widget has not committed its binding.
+  execute("rejected(request, 'busy')");
+  ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "unfinished native draft");
+  EXPECT_EQ(project.review_source(), "[]");
+  EXPECT_FALSE(project.review());
+  f.drv->key(wm::Key::Enter, primary);
+  EXPECT_EQ(project.review_source(), "unfinished native draft");
+  execute("rejected(request, 'conflict')");
+}
+
+TEST_F(ScriptPython, ProjectReviewRunsFromConsoleShortcutAndAddsAProjectTab)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  auto &project = f.shell->store().project();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  f.screen.ui()->find("a2/main/python_source")->string.assign("p.review(commands, expected_revision=0)");
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/python_source");
+  f.drv->click(x, y);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  f.drv->key(wm::Key::Enter, primary);
+  ASSERT_TRUE(pump([&] { return !state().busy() && !project.busy(); }));
+  EXPECT_EQ(state().status().at("run").at("state"), "succeeded") << output();
+  ASSERT_TRUE(project.review()) << project.review_error();
+  EXPECT_EQ(area.editor().type().id, kEditorPython);
+  auto *target = dynamic_cast<EditorArea *>(f.screen.maximized());
+  ASSERT_NE(target, nullptr);
+  EXPECT_NE(target, &area);
+  EXPECT_EQ(target->editor().type().id, kEditorProject);
+  EXPECT_GT(target->tab_count(), 1);
+  f.drv->frame();
+  EXPECT_NE(f.screen.ui()->find(target->id() + "/main/review_rows"), nullptr);
+  EXPECT_EQ(project.project()->revision, 0);
+}
+
+TEST_F(ScriptPython, ProjectReviewDiscardDropsPendingPreviewAndDetachedRequestsDoNothing)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  auto &project = f.shell->store().project();
+  bool requested = false;
+  auto listener = client->on_event("ui.request", [&](const auto &, const auto &data) {
+    if (io::get_string(data, "operation") == "project.review") { requested = true; }
+  });
+  ASSERT_TRUE(state().execute("p.review(commands, expected_revision=0)"));
+  ASSERT_TRUE(loop.pump_until([&] { return requested; }, 30));
+  f.screen.run_deferred(); // Accept, then discard before the preview callback can run.
+  EXPECT_TRUE(project.busy());
+  project.discard_review();
+  ASSERT_TRUE(pump([&] { return !project.busy() && !state().busy(); }));
+  EXPECT_FALSE(project.review());
+  EXPECT_EQ(project.review_source(), "[]");
+  EXPECT_EQ(project.project()->revision, 0);
+  requested = false;
+  ASSERT_TRUE(state().execute("p.review(commands, expected_revision=0)"));
+  ASSERT_TRUE(loop.pump_until([&] { return requested; }, 30));
+  f.shell->store().set_bridge(nullptr);
+  const auto before = f.screen.to_json();
+  f.screen.run_deferred();
+  EXPECT_EQ(f.screen.to_json(), before);
+  EXPECT_FALSE(project.review());
+  EXPECT_EQ(project.review_source(), "[]");
+}
 
 TEST_F(ScriptPython, LayoutRoundTripAndInvalidLayoutKeepTheCurrentScreen)
 {

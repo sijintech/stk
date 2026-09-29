@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 
 #include "stk/app/project_state.hh"
 
@@ -64,6 +65,33 @@ void AppShell::perform_ui_request(wm::Screen &screen, const std::string &operati
 {
   if (operation.rfind("viewer.", 0) == 0) {
     perform_viewer_request(screen, operation, params, std::move(complete));
+    return;
+  }
+  if (operation == "project.review") {
+    if (!params.is_object() || params.size() != 3 || !params.contains("handle") ||
+        !params["handle"].is_string() || params["handle"].get_ref<const std::string &>().empty() ||
+        !params.contains("expected_revision") || !params["expected_revision"].is_number_integer() ||
+        params["expected_revision"] < 0 || params["expected_revision"] > std::numeric_limits<int64_t>::max() ||
+        !params.contains("commands")) {
+      complete(Error::make(ErrorCode::InvalidParams, "Review requires handle, expected_revision and commands"));
+      return;
+    }
+    // A text widget can still own uncommitted text not yet visible in ProjectState. Moving
+    // focus could overwrite that draft when its old binding commits on the next frame.
+    for (auto *target : screens_) {
+      if (target->ui() && target->ui()->text_input_active()) {
+        complete(Error::make(ErrorCode::Busy, "Finish the current desktop text edit before opening a review"));
+        return;
+      }
+    }
+    auto &project = store_.project();
+    project.sync();
+    auto result = project.request_review(params["handle"].get<std::string>(),
+                                         params["expected_revision"].get<int64_t>(), params["commands"]);
+    if (result.ok()) {
+      if (auto *editor = focus_editor(screen, kEditorProject)) { editor->show_view("review"); }
+    }
+    complete(std::move(result));
     return;
   }
   const bool layout = operation == "layout.apply", open = operation == "project.open";

@@ -679,7 +679,7 @@ to bridge stderr. EOF/close/shutdown stops the worker; restarting never restores
 
 - `ui.attach {operations}` returns `{session, operations}`. The local client advertises supported
   operation names: `layout.get`, `layout.apply`, `editors.list`, `project.current`, `project.open`,
-  `project.close`, plus the Viewer operations below. Reattaching the same set is idempotent; changing it requires detach.
+  `project.close`, optional `project.review`, plus the Viewer operations below. Reattaching the same set is idempotent; changing it requires detach.
 - `ui.request {session, request, operation, params, expires_at_ms}` asks that executor to perform one
   operation. Requests are correlated by both IDs, expire after 30 seconds, and are never replayed.
   `expires_at_ms` is a UTC Unix timestamp in milliseconds on the same machine. The desktop rejects
@@ -707,6 +707,25 @@ not network endpoints. See [Viewer scripting](../scripting-viewer.md) for exact 
  Invalid parameters return `invalid_params`; absent capabilities
 return `unsupported`, and an absent desktop returns `unavailable`. Applying a layout validates the whole
 description before changing the current screen; geometry is captured for round trips but not forced on apply.
+
+The additive `project.review {handle, expected_revision, commands}` operation returns
+`{accepted: true, project_id, base_revision}`. The handle must be the visible project's current bridge
+handle, with a matching nonnegative int64 revision, checked when the queued request executes.
+`commands` is a nonempty array of up to 1000 ordinary project edit commands; its compact JSON encoding
+must fit 256 KiB. No extra parameters or caller-supplied preview snapshots are accepted. The native
+client starts `project.preview` and focuses the first window's Project review view, adding a tab if
+needed. Acceptance precedes evaluation; semantic command errors appear in that view. No database
+write or external execution occurs. Only explicit native Apply submits the normalized preview commands
+at their original revision; ordinary edit history and undo apply.
+
+A mismatched/closed project or changed revision returns `conflict`. Existing draft text, a candidate
+or a preview error also returns `conflict`; scripts cannot replace/clear reviews. The user must inspect
+and clear the draft first. A busy/unloaded project or active text edit in any attached window returns
+`busy`, preserving uncommitted text. Discard/input changes invalidate pending candidates; project
+switch/close and bridge restart clear reviews. Timeout/cancellation does not undo accepted previews.
+Capability discovery/attachment includes `project.review` only when both bridge and client support it;
+the original six-operation fallback is unchanged. The Python facade exposes this as
+`stk.project.review(commands, expected_revision=...)`. See [project preview](../project-preview.md).
 
 The Python facade exposes project methods, saved connection inspection/managed SSH, workspace/task
 operations, transfers and read-only Hub discovery/action queries through the shared command handlers.

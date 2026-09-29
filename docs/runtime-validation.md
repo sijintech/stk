@@ -2,6 +2,18 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-29 Python 发起原生修改检查
+
+`stk.project.review` 经真实隔离 Python worker 和本地 UI 请求通道启动只读预览，并自动显示原生差异页。
+新增 6 项原生集成测试，覆盖明确点击应用后才写入/可撤销、控制台快捷键与新增页签、正在输入的文本保护、
+无效参数/Unicode 字节限制、旧修订与草案冲突、请求排队期间切换项目、清除迟到候选及分离桥的请求失效。
+相关原生 **13/13**、Python **69/69**、完整桌面 **537/537、无跳过**；能力协商和共享 schema 校验通过。
+中英文字典各 **923 项**，中文 Vulkan 检查页截图已查看，文档 80 个本地链接有效。
+
+日志 `/tmp/stk-python-review-python-all.log`、`/tmp/stk-python-review-native.log`、
+`/tmp/stk-python-review-full.log`；JUnit `/tmp/stk-python-review-full.xml`。
+本批跨平台 CI 待推送后跟踪；此入口不包含模型生成、持久草案或新的外部任务执行。
+
 ## 2026-09-29 参数表驱动批次
 
 新增批次协调与原生面板复用项目运行和 MuFerro 模板。相关 Python **29 通过、2 跳过**，
@@ -15,7 +27,10 @@
 四项中英文 GL/Vulkan 批次渲染通过，已查看中英文截图；中英文字典各 923 项一致。
 日志 `/tmp/stk-batch-python-all.log`、`/tmp/stk-batch-full.log`、JUnit `/tmp/stk-batch-full.xml`，
 真实运行日志 `/tmp/stk-batch-real.log`，证据 `/tmp/stk-batch-real-HRg9Kh/test_real_muferro_temperature_0/batch-evidence.json`。
-本批跨平台 CI 尚待推送后跟踪，不把原生自动化或 Linux 截图称为 macOS/Windows 真机交互验收。
+`a598c2c` 的 [desktop CI](https://github.com/sijintech/stk/actions/runs/36450940425) 和
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36450940464) 全部成功，包含 Linux GL/Vulkan、
+macOS Metal、Windows 编译/CPU 测试、打包/干净环境启动，以及 Windows Python 3.10/3.12；文档部署成功。
+原生自动化和离屏渲染仍不等同于 macOS/Windows 真机输入设备交互验收。
 
 ## 2026-09-28 MuFerro 项目流程首版
 

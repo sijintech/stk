@@ -255,3 +255,36 @@ def test_python_worker_previews_without_writing_then_explicitly_applies(scripts,
                      "assert stk.project.snapshot() == proposal['snapshot']", project_handle=project["handle"])
     assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})
     assert scripts.wait_event(lambda event: event["event"] == "project.changed")["data"]["revision"] == 1
+
+
+def test_python_review_requires_capability_and_sends_only_pinned_commands(scripts, tmp_path):
+    info = scripts.call("project.create", {"directory": str(tmp_path / "review"), "name": "Review"})["project"]
+    session = scripts.call("script.open")["session"]
+    assert "project.review" in scripts.call("script.catalog")["ui_operations"]
+    setup = ("p = stk.project\ncommands = [{'op': 'create_table', 'name': 'Proposed cases'}]\n"
+             "from suan.scripting import ScriptError\n"
+             "def rejected(code):\n"
+             "    try:\n"
+             "        p.review(commands, expected_revision=0)\n"
+             "    except ScriptError as error:\n"
+             "        assert error.code == code, str(error)\n"
+             "    else:\n"
+             "        raise AssertionError('unexpected acceptance')\n"
+             "rejected('unavailable')")
+    assert execute(scripts, session, setup, project_handle=info["handle"])["run"]["state"] == "succeeded"
+    old_ui = scripts.call("ui.attach", {"operations": ["project.current"]})["session"]
+    assert execute(scripts, session, "rejected('unsupported')")["run"]["state"] == "succeeded"
+    assert scripts.call("ui.detach", {"session": old_ui})["detached"]
+    ui = scripts.call("ui.attach", {"operations": ["project.review"]})["session"]
+    mark = scripts.mark()
+    scripts.call("script.execute", {"session": session, "source": "accepted = p.review(commands, expected_revision=0)"})
+    request = scripts.wait_event(lambda event: event["event"] == "ui.request", start=mark)["data"]
+    assert request["session"] == ui and request["operation"] == "project.review"
+    assert request["params"] == {"handle": info["handle"], "expected_revision": 0,
+                                 "commands": [{"op": "create_table", "name": "Proposed cases"}]}
+    accepted = {"accepted": True, "project_id": info["id"], "base_revision": 0}
+    assert scripts.call("ui.reply", {"session": ui, "request": request["request"], "result": accepted})["accepted"]
+    assert settled(scripts, session)["run"]["state"] == "succeeded"
+    assert execute(scripts, session, "assert accepted['accepted']\nassert p.snapshot()['tables'] == []\n"
+                   "assert p.history() == []")["run"]["state"] == "succeeded"
+    assert scripts.events_of("project.changed") == []

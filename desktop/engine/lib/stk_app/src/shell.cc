@@ -106,23 +106,30 @@ const char *csd_glyph(const wm::CsdButtonKind k, const bool maximized)
 
 void AppShell::focus_viewer(wm::Screen &screen)
 {
+  focus_editor(screen, kEditorViewer);
+}
+
+Editor *AppShell::focus_editor(wm::Screen &screen, const std::string &type)
+{
   EditorArea *target = nullptr;
   for (auto *area : screen.areas()) {
     auto *editor = dynamic_cast<EditorArea *>(area);
     if (!editor) { continue; }
     for (int i = 0; i < editor->tab_count(); ++i) {
-      if (editor->tab(i).type().id == kEditorViewer) {
+      if (editor->tab(i).type().id == type) {
         editor->set_active_tab(i);
         if (screen.maximized()) { screen.set_maximized(editor); }
-        return;
+        return &editor->tab(i);
       }
     }
     if (!target || target->editor().type().id == kEditorPython) { target = editor; }
   }
   if (target) {
-    target->add_tab(kEditorViewer);
+    if (!target->add_tab(type)) { return nullptr; }
     if (screen.maximized()) { screen.set_maximized(target); }
+    return &target->editor();
   }
+  return nullptr;
 }
 class AppShell::TopBar final : public wm::Region {
  public:

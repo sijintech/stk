@@ -1,5 +1,23 @@
 # 开发交接记录
 
+## 2026-09-29：Python 发起原生修改检查
+
+新增 `stk.project.review(commands, expected_revision=...)` 和可协商的本地 `project.review` UI 操作。
+脚本绑定项目句柄及基础修订，原生主线程重新计算候选并打开“修改检查”；返回接受状态，
+计算结果或语义错误随后在界面显示。用户点击应用后才保存，复用稳定命令、普通事务与撤销。
+已有草案、错误、候选和未结束的文本输入均受保护，不会被脚本覆盖；排队后的项目切换、过期修订、
+清除草案和桥断开保留现有失效规则。没有自动应用、任务准备/提交或持久草案。
+
+本机相关 Python **69/69**；原生重点测试 **13/13**；完整桌面 **537/537、无跳过**。
+新增 6 项真实 worker → UI 集成测试，覆盖差异/应用/撤销、快捷键发起并添加页签、未提交输入保护、
+范围/类型/UTF-8 大小限制、旧修订与已有草案拒绝、排队期间切换项目、丢弃迟到预览及桥分离。
+共享能力 schema 上限同步为 19；旧能力缺失与未附加桌面返回明确错误。中英文字典各 **923 项**一致，
+检查了本轮生成的中文 Vulkan 检查页截图，80 个文档本地链接有效。
+
+日志 `/tmp/stk-python-review-python-all.log`、`/tmp/stk-python-review-native.log`、
+`/tmp/stk-python-review-full.log`；JUnit `/tmp/stk-python-review-full.xml`。本批跨平台 CI 待推送后跟踪。
+用法见[预览指南](project-preview.md)。下一步设计对话上下文、持久草案和重开恢复记录，再接模型生成。
+
 ## 2026-09-29：参数表驱动的仿真批次
 
 新增版本化模板注册和 `stk.batches`；首个模板为 `muferro/1`。普通项目表格保存内容确定的批次 ID、
@@ -13,7 +31,9 @@
 测试覆盖部分准备失败、重开、重复操作、取消后单行重算、准备/提交/进度写入响应丢失、中断恢复、
 过期修订、批次范围篡改与伪造运行标签不能改变执行命令。最终参数校验补充 **1/1** 通过。
 最终本机桌面 **531/531、无跳过**，含原生三行完整批次和四张中英文 GL/Vulkan 批次截图；截图已检查。
-字典各 **923 项**一致。跨平台 CI 待本次推送后跟踪。
+字典各 **923 项**一致。`a598c2c` 的 [desktop CI](https://github.com/sijintech/stk/actions/runs/36450940425)
+和 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36450940464) 均全部通过，
+包含 Linux GL/Vulkan、macOS Metal、Windows 编译/CPU 测试、安装包/干净环境启动及双版本 Windows Python；文档部署也通过。
 
 日志 `/tmp/stk-batch-python-all.log`、`/tmp/stk-batch-full.log`、JUnit `/tmp/stk-batch-full.xml`；
 真实批次 `/tmp/stk-batch-real.log`，证据 `/tmp/stk-batch-real-HRg9Kh/test_real_muferro_temperature_0/batch-evidence.json`。

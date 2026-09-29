@@ -38,6 +38,15 @@ class Project:
         return self._call("project.preview", {"handle": self.handle, "commands": commands,
                                               "expected_revision": expected_revision})
 
+    def review(self, commands, *, expected_revision):
+        """Ask the visible desktop to preview this edit for explicit user application.
+
+        Returns acceptance, not preview completion or a saved edit. The desktop must already
+        show this project at the supplied revision and have no pending review draft.
+        """
+        return self._call("ui.project.review", {"handle": self.handle, "commands": commands,
+                                               "expected_revision": expected_revision})
+
     def history(self):
         return self._call("project.history", {"handle": self.handle})["history"]
 
