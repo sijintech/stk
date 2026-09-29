@@ -203,7 +203,7 @@ int main(int argc, char **argv)
         ok = ok && state.review() && state.review()->differences.size() == 2 && state.review()->errors.size() == 1;
         ok = ok && state.project()->revision == 1 && state.table()->text(0, 0) == "300";
       }
-      if (editor == "discussion") {
+      if (editor == "discussion" || editor == "requests") {
         auto &discussion = state.discussion();
         const std::string record = "40000000-4444-4444-8444-444444444444";
         const auto wait = [&] { return loop.pump_until([&] { return !state.busy() && !discussion.busy(); }, 30); };
@@ -223,6 +223,22 @@ int main(int argc, char **argv)
             lang == "zh" ? "编辑后的新上下文" : "New context after editing") && wait();
         ok = ok && discussion.load_context(context_id) && wait() && discussion.load_page("contexts") && wait();
         ok = ok && area->editor().show_view("discussion") && discussion.error().empty();
+      }
+      if (editor == "requests") {
+        auto &discussion = state.discussion();
+        const std::string pending = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const std::string cancelled = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        for (const auto &id : {pending, cancelled}) {
+          std::optional<bridge::Result<io::Json>> result;
+          client->call("project.requests.create", {{"handle", state.project()->handle}, {"request_id", id},
+              {"message_id", discussion.message().at("id")},
+              {"configuration", {{"adapter", "test-controlled"}, {"model", "fixture-v1"}}}})
+              .then([&](auto value) { result = value; });
+          ok = ok && loop.pump_until([&] { return result.has_value(); }, 30) && result->ok();
+        }
+        const auto wait = [&] { return loop.pump_until([&] { return !discussion.busy(); }, 30); };
+        ok = ok && discussion.cancel_request(cancelled) && wait() && discussion.load_request(pending) && wait();
+        ok = ok && discussion.load_page("requests") && wait() && discussion.page("requests").items.size() == 2;
       }
       if (editor == "csv") {
         const auto source = dir.str() + "/project/parameters.csv";
@@ -296,6 +312,14 @@ int main(int argc, char **argv)
           widget->table->selected.assign(0);
         }
         else { ok = false; }
+      }
+      if (editor == "requests") {
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        if (const auto *tabs = screen.ui()->find("a2/main/discussion_category")) { tabs->index.assign(3); }
+        else { ok = false; }
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        const auto *cancel = screen.ui()->find("a2/main/request_cancel");
+        ok = ok && cancel && cancel->enabled && state.project()->revision == 2;
       }
       if (editor == "discussion") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);

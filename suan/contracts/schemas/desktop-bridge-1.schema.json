@@ -2711,7 +2711,8 @@
                                 3,
                                 4,
                                 5,
-                                6
+                                6,
+                                7
                               ]
                             },
                             "to_version": {
@@ -2721,7 +2722,8 @@
                                 4,
                                 5,
                                 6,
-                                7
+                                7,
+                                8
                               ]
                             }
                           },
@@ -5137,6 +5139,156 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.requests.create": {
+        "description": "Save immutable model-request intent (format 8) for a saved user message and its context. No adapter is invoked; keep the caller UUID for retries.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "request_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "message_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "configuration": {
+              "$ref": "#/$defs/projectRequestConfiguration"
+            }
+          },
+          "required": [
+            "handle",
+            "request_id",
+            "message_id",
+            "configuration"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/projectRequest"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.requests.get": {
+        "description": "Read saved request identity and observations. Never start or replay generation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "request_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/projectRequest"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.requests.list": {
+        "description": "Read paged request metadata without message text or captured cells.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "requests": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectRequest"
+              },
+              "maxItems": 100
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "requests",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.requests.cancel": {
+        "description": "Record cancellation intent. Pending requests become cancelled; running requests become uncertain until an executor can prove their outcome. Never send or retry.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "request_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/projectRequest"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -7368,6 +7520,176 @@
         "created_at"
       ],
       "additionalProperties": false
+    },
+    "projectRequestConfiguration": {
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/projectRequestIdentifier"
+        },
+        "model": {
+          "$ref": "#/$defs/projectRequestIdentifier"
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        }
+      },
+      "required": [
+        "adapter",
+        "model"
+      ],
+      "additionalProperties": false
+    },
+    "projectRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "context_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "message_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "assistant_message_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "configuration": {
+          "$ref": "#/$defs/projectRequestConfiguration"
+        },
+        "prompt_version": {
+          "const": "stk.text/1"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "uncertain"
+          ]
+        },
+        "cancel_requested": {
+          "type": "boolean"
+        },
+        "executor_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "message_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "text_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "$ref": "#/$defs/projectRequestIdentifier"
+                    },
+                    "remote_request_id": {
+                      "$ref": "#/$defs/projectRequestIdentifier"
+                    },
+                    "input_tokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9223372036854775807
+                    },
+                    "output_tokens": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9223372036854775807
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "message_id",
+                "text_sha256",
+                "metadata"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "context_id",
+        "message_id",
+        "assistant_message_id",
+        "source_revision",
+        "configuration",
+        "prompt_version",
+        "input_sha256",
+        "created_at",
+        "status",
+        "cancel_requested",
+        "executor_id",
+        "updated_at",
+        "error_code",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "projectRequestIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+      "not": {
+        "pattern": "//"
+      }
     }
   }
 }

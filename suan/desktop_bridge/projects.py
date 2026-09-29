@@ -163,6 +163,16 @@ class ProjectSessions:
         with self._operation():
             return {"history": self._get(params["handle"]).history()}
 
+    def requests(self, action, params):
+        with self._operation():
+            requests = self._get(params["handle"]).requests
+            if action == "create":
+                return {"request": requests.create(params["message_id"], request_id=params["request_id"],
+                                                    configuration=params["configuration"])}
+            if action == "list":
+                return requests.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+            return {"request": (requests.cancel if action == "cancel" else requests.get)(params["request_id"])}
+
     def backup(self, params):
         with self._operation():
             return self._get(params["handle"]).backup()

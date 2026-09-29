@@ -268,7 +268,139 @@ class ProjectPython : public ::testing::Test {
     ASSERT_EQ(state().tables().size(), 1u);
     ASSERT_EQ(state().project()->revision, 1);
   }
+
+  void saved_request(const std::string &id)
+  {
+    auto &discussion = state().discussion();
+    if (discussion.context().empty()) {
+      ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Request scope")); settled();
+      ASSERT_TRUE(discussion.add_message("Explain these saved values; do not execute code.")); settled();
+    }
+    std::optional<bridge::Result<Json>> result;
+    client->call("project.requests.create", {{"handle", state().project()->handle}, {"request_id", id},
+        {"message_id", discussion.message().at("id")},
+        {"configuration", {{"adapter", "test-controlled"}, {"model", "fixture-v1"}}}})
+        .then([&](auto r) { result = r; });
+    ASSERT_TRUE(loop.pump_until([&] { return result.has_value(); }));
+    ASSERT_TRUE(result->ok()) << result->error().describe();
+    ASSERT_EQ(result->value().at("request").at("status"), Json("pending"));
+  }
 };
+
+TEST_F(ProjectPython, RequestRecordsCancelAndReopenWithoutExecuting)
+{
+  populated();
+  const std::string id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  ASSERT_NO_FATAL_FAILURE(saved_request(id));
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.requests_supported());
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
+  const auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  const auto widget = [&](const char *key) { return f.screen.ui()->find(std::string("a2/main/") + key); };
+  frame();
+  widget("message_composer/text")->string.assign("Unsubmitted note");
+  widget("discussion_category")->index.assign(3); frame();
+  ASSERT_EQ(discussion.page("requests").items.size(), 1u);
+  ASSERT_TRUE(widget("open_discussion_item")->enabled); widget("open_discussion_item")->on_click(); frame();
+  ASSERT_EQ(io::get_string(discussion.generation_request(), "id"), id);
+  ASSERT_NE(widget("request_details/value"), nullptr);
+  ASSERT_TRUE(widget("request_cancel")->enabled);
+  const auto cancel = widget("request_cancel")->on_click;
+  cancel(); frame();
+  EXPECT_EQ(discussion.generation_request().at("status"), Json("cancelled"));
+  const auto cancelled = io::canonical_json(discussion.generation_request());
+  EXPECT_FALSE(widget("request_cancel")->enabled);
+  cancel(); frame();
+  EXPECT_EQ(io::canonical_json(discussion.generation_request()), cancelled);
+  widget("request_message")->on_click(); frame();
+  ASSERT_NE(widget("message_composer/text"), nullptr);
+  EXPECT_EQ(widget("message_composer/text")->string.value(), "Unsubmitted note");
+  EXPECT_EQ(state().project()->revision, 1);
+  ASSERT_TRUE(state().close()); settled();
+  EXPECT_TRUE(discussion.generation_request().empty());
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
+  ASSERT_TRUE(discussion.load_page("requests")); settled();
+  EXPECT_TRUE(discussion.generation_request().empty());
+  ASSERT_TRUE(discussion.load_request(id)); settled();
+  EXPECT_EQ(io::canonical_json(discussion.generation_request()), cancelled);
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  EXPECT_EQ(discussion.page("messages").items.size(), 1u);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, RequestButtonsAndRepliesStayBoundToTheirOriginalTarget)
+{
+  populated();
+  const std::string first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  ASSERT_NO_FATAL_FAILURE(saved_request(first));
+  ASSERT_NO_FATAL_FAILURE(saved_request(second));
+  auto &discussion = state().discussion();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
+  const auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  frame(); f.screen.ui()->find("a2/main/discussion_category")->index.assign(3); frame();
+  ASSERT_TRUE(discussion.load_request(first)); frame();
+  const auto old_cancel = f.screen.ui()->find("a2/main/request_cancel")->on_click;
+  ASSERT_TRUE(discussion.load_request(second)); frame();
+  old_cancel(); settled();
+  EXPECT_EQ(io::get_string(discussion.generation_request(), "id"), second);
+  EXPECT_EQ(io::get_string(discussion.generation_request(), "status"), "pending");
+  ASSERT_TRUE(discussion.load_request(first)); settled();
+  EXPECT_EQ(io::get_string(discussion.generation_request(), "status"), "pending");
+  ASSERT_TRUE(discussion.load_request(first));
+  ASSERT_TRUE(state().create(dir.str() + "/other", "Other project")); settled();
+  old_cancel(); settled();
+  EXPECT_TRUE(discussion.generation_request().empty());
+  ASSERT_TRUE(discussion.load_page("requests")); settled();
+  EXPECT_TRUE(discussion.page("requests").items.empty());
+  EXPECT_EQ(state().project()->revision, 0);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, RequestCompletionRefreshOpensOnlyItsSavedResponse)
+{
+  populated();
+  const std::string id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  ASSERT_NO_FATAL_FAILURE(saved_request(id));
+  auto &discussion = state().discussion();
+  const auto context_id = discussion.context().at("id");
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
+  const auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  const auto widget = [&](const char *key) { return f.screen.ui()->find(std::string("a2/main/") + key); };
+  frame(); widget("discussion_category")->index.assign(3); frame();
+  ASSERT_TRUE(discussion.load_request(id)); frame();
+  EXPECT_FALSE(widget("request_result")->enabled);
+  ASSERT_TRUE(state().apply(set_cell(350))); settled();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }));
+  // A controlled local completion fixture, not a model provider or UI-generated response.
+  const std::string source = "from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+      "s = ProjectStore(" + Json(dir.str() + "/project").dump() + ")\nowner = str(uuid4())\n"
+      "s.requests._claim('" + id + "', executor_id=owner)\n"
+      "s.requests._complete('" + id + "', executor_id=owner, text='Saved fixture response; no code is executed')";
+  ASSERT_TRUE(scripts.execute(source));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  EXPECT_EQ(io::get_string(discussion.generation_request(), "status"), "pending");
+  frame(); widget("request_reload")->on_click(); frame();
+  EXPECT_EQ(io::get_string(discussion.generation_request(), "status"), "completed");
+  ASSERT_EQ(discussion.page("requests").items.size(), 1u);
+  EXPECT_EQ(discussion.page("requests").items.front().at("status"), "completed");
+  ASSERT_TRUE(widget("request_result")->enabled);
+  EXPECT_FALSE(widget("request_cancel")->enabled);
+  widget("request_result")->on_click(); frame();
+  EXPECT_EQ(discussion.message().at("context_id"), context_id);
+  EXPECT_EQ(discussion.message().at("role"), Json("assistant"));
+  EXPECT_EQ(discussion.message().at("text"), Json("Saved fixture response; no code is executed"));
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "350");
+  EXPECT_FALSE(state().review());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
 
 Json filtered_commands()
 {
@@ -1371,7 +1503,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   auto &scripts = f.shell->store().scripts();
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   const std::string source = "import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
-      ") as db:\n    db.execute('DROP TABLE project_proposals')\n    db.execute('DROP TABLE project_messages')\n    db.execute('DROP TABLE project_contexts')\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
+      ") as db:\n    db.execute('DROP TABLE project_requests')\n    db.execute('DROP TABLE project_proposals')\n    db.execute('DROP TABLE project_messages')\n    db.execute('DROP TABLE project_contexts')\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
   ASSERT_TRUE(scripts.execute(source));
   ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
@@ -1386,7 +1518,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   f.screen.ui()->find("a2/main/upgrade_project")->on_click();
   settled();
   f.drv->frame();
-  EXPECT_EQ(state().project()->format_version, 7);
+  EXPECT_EQ(state().project()->format_version, 8);
   EXPECT_EQ(state().project()->revision, 2);
   EXPECT_EQ(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
   EXPECT_FALSE(state().notice().empty());

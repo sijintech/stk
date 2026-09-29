@@ -20,6 +20,7 @@ class ProjectDiscussion {
   ~ProjectDiscussion() { alive_.reset(); }
   void reset();
   bool supported() const;
+  bool requests_supported() const;
   bool busy() const { return busy_; }
   uint64_t version() const { return version_; }
   const std::string &error() const { return error_; }
@@ -27,10 +28,13 @@ class ProjectDiscussion {
   const io::Json &context() const { return context_; }
   const io::Json &message() const { return message_; }
   const io::Json &origin() const { return origin_; }
+  const io::Json &generation_request() const { return generation_request_; }
   const std::string &origin_draft() const { return origin_draft_; }
   bool load_page(const std::string &kind, int64_t offset = 0, bool preserve_error = false);
   bool load_context(const std::string &id);
   bool load_message(const std::string &id);
+  bool load_request(const std::string &id);
+  bool cancel_request(const std::string &id);
   bool load_origin(const std::string &draft_id, bool preserve_error = false);
   bool capture(const std::string &table_id, const std::vector<std::string> &records,
                const std::vector<std::string> &fields, const std::string &title);
@@ -47,8 +51,9 @@ class ProjectDiscussion {
   uint64_t epoch_ = 0, version_ = 0;
   bool busy_ = false;
   std::string error_, origin_draft_;
-  ProjectDiscussionPage contexts_, messages_, proposals_;
+  ProjectDiscussionPage contexts_, messages_, proposals_, request_page_;
   io::Json context_ = io::Json::object(), message_ = io::Json::object(), origin_ = io::Json::object();
   io::Json requests_ = io::Json::object();
+  io::Json generation_request_ = io::Json::object();
 };
 }  // namespace stk::app

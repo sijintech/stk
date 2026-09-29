@@ -114,6 +114,31 @@ class Project:
     def discussion(self):
         return ProjectDiscussion(self._call, self.handle)
 
+    @property
+    def requests(self):
+        return ProjectRequests(self._call, self.handle)
+
+
+class ProjectRequests:
+    """Saved request intent and observations. Creating or reading never sends to a model."""
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def create(self, message_id, *, request_id, configuration):
+        return self._call("project.requests.create", {"handle": self.handle, "message_id": message_id,
+            "request_id": request_id, "configuration": configuration})["request"]
+
+    def get(self, request_id):
+        return self._call("project.requests.get", {"handle": self.handle, "request_id": request_id})["request"]
+
+    def list(self, *, offset=0, limit=100):
+        return self._call("project.requests.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def cancel(self, request_id):
+        """Record cancellation intent; this alone cannot prove a running remote call stopped."""
+        return self._call("project.requests.cancel", {"handle": self.handle, "request_id": request_id})["request"]
+
 
 class ProjectContexts:
     def __init__(self, call, handle):
@@ -387,4 +412,4 @@ class API:
         print(json.dumps(catalog, ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectContexts", "ProjectCSV", "ProjectDiscussion", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]
+__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectContexts", "ProjectCSV", "ProjectDiscussion", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "ProjectRequests", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]

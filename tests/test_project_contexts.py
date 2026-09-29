@@ -234,13 +234,13 @@ def test_format_six_explicit_upgrade_preserves_drafts_and_verified_backup(model,
     draft = store.drafts.save([cell(ids, "temperature", 350)], expected_revision=1, title="Keep draft", draft_id=str(uuid4()))
     before, history = store.snapshot(), store.history()
     with sqlite3.connect(store.path) as db:
-        for name in ("project_proposals", "project_messages", "project_contexts"):
+        for name in ("project_requests", "project_proposals", "project_messages", "project_contexts"):
             db.execute(f"DROP TABLE {name}")
         db.execute("PRAGMA user_version=6")
     with pytest.raises(UnsupportedProjectFormat, match="format 7"):
         capture(model)
     result = store.upgrade(expected_revision=1)
-    assert result["format_version"] == FORMAT_VERSION == 7 and result["revision"] == 2
+    assert result["format_version"] == FORMAT_VERSION == 8 and result["revision"] == 2
     assert store.drafts.get(draft["id"]) == draft and store.snapshot()["tables"] == before["tables"]
     assert store.snapshot()["edit_history"] == before["edit_history"] and store.history()[:-1] == history
     restored = tmp_path / "old"
@@ -268,7 +268,7 @@ def test_failed_format_seven_upgrade_rolls_back_all_metadata_tables(model, monke
     import suan.project.store as storage
     store, _ = model
     with sqlite3.connect(store.path) as db:
-        for name in ("project_proposals", "project_messages", "project_contexts"):
+        for name in ("project_requests", "project_proposals", "project_messages", "project_contexts"):
             db.execute(f"DROP TABLE {name}")
         db.execute("PRAGMA user_version=6")
     before, history = store.snapshot(), store.history()

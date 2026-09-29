@@ -81,6 +81,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.contexts.capture", "project.contexts.get", "project.contexts.list",
         "project.discussion.add", "project.discussion.get", "project.discussion.list",
         "project.discussion.link_draft", "project.discussion.proposals",
+        "project.requests.create", "project.requests.get", "project.requests.list", "project.requests.cancel",
         "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve"}
     assert {"workspace.create", "task.submit", "task.logs", "upload.start", "transfer.get", "connections.ssh"} <= operations
     assert not operations & {"shutdown", "script.execute", "ui.attach", "watch", "logs.subscribe", "hub.review"}

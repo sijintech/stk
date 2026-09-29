@@ -14,8 +14,8 @@ void ProjectDiscussion::reset()
   busy_ = false;
   error_.clear();
   origin_draft_.clear();
-  contexts_ = messages_ = proposals_ = {};
-  context_ = message_ = origin_ = requests_ = Json::object();
+  contexts_ = messages_ = proposals_ = request_page_ = {};
+  context_ = message_ = origin_ = requests_ = generation_request_ = Json::object();
 }
 
 bool ProjectDiscussion::supported() const
@@ -32,13 +32,24 @@ bool ProjectDiscussion::supported() const
 
 const ProjectDiscussionPage &ProjectDiscussion::page(const std::string &kind) const
 {
-  return kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : proposals_;
+  return kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : kind == "requests" ? request_page_ : proposals_;
+}
+
+bool ProjectDiscussion::requests_supported() const
+{
+  if (!supported() || project_.project()->format_version < 8) { return false; }
+  const auto hello = store_.bridge()->hello_info();
+  for (const auto *method : {"project.requests.create", "project.requests.get", "project.requests.list", "project.requests.cancel"}) {
+    if (!hello || !hello->has_method(method)) { return false; }
+  }
+  return true;
 }
 
 bool ProjectDiscussion::call(const std::string &method, Json params,
                             std::function<void(const Json &)> done, const bool preserve_error)
 {
   if (!supported() || busy_ || project_.busy()) { return false; }
+  if (method.rfind("project.requests.", 0) == 0 && !requests_supported()) { return false; }
   const auto handle = project_.project()->handle;
   params["handle"] = handle;
   busy_ = true;
@@ -85,18 +96,18 @@ Json ProjectDiscussion::request(const std::string &kind, Json params, const std:
 
 bool ProjectDiscussion::load_page(const std::string &kind, const int64_t offset, const bool preserve_error)
 {
-  if ((kind != "contexts" && kind != "messages" && kind != "proposals") || offset < 0) { return false; }
+  if ((kind != "contexts" && kind != "messages" && kind != "proposals" && kind != "requests") || offset < 0) { return false; }
   const auto method = kind == "contexts" ? "project.contexts.list" :
-                      kind == "messages" ? "project.discussion.list" : "project.discussion.proposals";
+                      kind == "messages" ? "project.discussion.list" : kind == "requests" ? "project.requests.list" : "project.discussion.proposals";
   const bool accepted = call(method, {{"offset", offset}, {"limit", 100}}, [this, kind, offset](const Json &result) {
-    auto &page = kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : proposals_;
+    auto &page = kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : kind == "requests" ? request_page_ : proposals_;
     page.items = result.at(kind);
     page.offset = offset;
     page.next = result.at("next_offset").is_null() ? -1 : result.at("next_offset").get<int64_t>();
     page.loaded = true;
   }, preserve_error);
   // A failed read remains inspectable until explicit refresh, instead of retrying every frame.
-  if (accepted) { (kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : proposals_).loaded = true; }
+  if (accepted) { (kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : kind == "requests" ? request_page_ : proposals_).loaded = true; }
   return accepted;
 }
 
@@ -111,6 +122,24 @@ bool ProjectDiscussion::load_message(const std::string &id)
 {
   return call("project.discussion.get", {{"message_id", id}}, [this](const Json &result) {
     message_ = result.at("message");
+  });
+}
+
+bool ProjectDiscussion::load_request(const std::string &id)
+{
+  return call("project.requests.get", {{"request_id", id}}, [this](const Json &result) {
+    generation_request_ = result.at("request");
+    for (auto &item : request_page_.items) {
+      if (item.at("id") == generation_request_.at("id")) { item = generation_request_; }
+    }
+  });
+}
+
+bool ProjectDiscussion::cancel_request(const std::string &id)
+{
+  return call("project.requests.cancel", {{"request_id", id}}, [this](const Json &result) {
+    generation_request_ = result.at("request");
+    request_page_.loaded = false;
   });
 }
 

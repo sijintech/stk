@@ -86,7 +86,7 @@ class ProjectEditor final : public Editor {
       return;
     }
     const bool editable = state.ready() && !state.busy();
-    if (state.project()->format_version < 7) {
+    if (state.project()->format_version < 8) {
       layout.paragraph(ctx.tr("project.upgrade_hint"));
       layout.button("upgrade_project", ctx.tr("project.upgrade"), [&state] { state.upgrade(); }).disable(!editable);
     }

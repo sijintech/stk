@@ -7,7 +7,7 @@ never execute code, edit parameters, prepare runs, or submit tasks.
 from datetime import datetime, timezone
 
 from .contexts import _decode_record, _digest, _encode, _pagination, _require
-from .store import ProjectError, RevisionConflict, _id, _expected_revision
+from .store import ProjectError, RevisionConflict, _id, _expected_revision, _version
 
 
 MAX_TEXT_BYTES = 64 * 1024
@@ -45,27 +45,39 @@ class Discussion:
         return self._decode_message(db.execute("SELECT * FROM project_messages WHERE id=?", (message_id,)).fetchone())
 
     def add(self, text, *, message_id, context_id, role="user"):
+        with self.store._connect(write=True) as db:
+            _require(db)
+            return self._add(db, text, message_id=message_id, context_id=context_id, role=role)
+
+    def _add(self, db, text, *, message_id, context_id, role="user", request_id=None):
+        """Insert a message within the caller's project transaction.
+
+        Request completion uses the same transaction for the immutable assistant
+        message and its terminal marker, so neither can be published alone.
+        """
         _id(message_id)
         _id(context_id)
         text = _message_text(text)
         if role not in ("user", "assistant"):
             raise ProjectError("Message role must be user or assistant")
+        if _version(db) >= 8:
+            reserved = db.execute("SELECT id FROM project_requests WHERE assistant_message_id=?", (message_id,)).fetchone()
+            if reserved is not None and reserved["id"] != request_id:
+                raise RevisionConflict("Message ID is reserved for a project request result")
         request = _digest({"text": text, "context_id": context_id, "role": role})
-        with self.store._connect(write=True) as db:
-            _require(db)
-            existing = db.execute("SELECT * FROM project_messages WHERE id=?", (message_id,)).fetchone()
-            if existing is not None:
-                message = self._decode_message(existing)
-                if existing["request_sha256"] != request:
-                    raise RevisionConflict("Message ID already belongs to a different request")
-                return message
-            self.store.contexts._get(db, context_id)
-            message = {"id": message_id, "project_id": self.store._project_id, "context_id": context_id, "role": role,
-                       "text": text, "created_at": datetime.now(timezone.utc).isoformat()}
-            db.execute("INSERT INTO project_messages VALUES (?, ?, ?, ?, ?, ?)",
-                       (message_id, self.store._project_id, context_id, _encode(message).decode("utf-8"), request,
-                        _digest({"payload": message, "request_sha256": request})))
+        existing = db.execute("SELECT * FROM project_messages WHERE id=?", (message_id,)).fetchone()
+        if existing is not None:
+            message = self._decode_message(existing)
+            if existing["request_sha256"] != request:
+                raise RevisionConflict("Message ID already belongs to a different request")
             return message
+        self.store.contexts._get(db, context_id)
+        message = {"id": message_id, "project_id": self.store._project_id, "context_id": context_id, "role": role,
+                   "text": text, "created_at": datetime.now(timezone.utc).isoformat()}
+        db.execute("INSERT INTO project_messages VALUES (?, ?, ?, ?, ?, ?)",
+                   (message_id, self.store._project_id, context_id, _encode(message).decode("utf-8"), request,
+                    _digest({"payload": message, "request_sha256": request})))
+        return message
 
     def get(self, message_id):
         _id(message_id)

@@ -17,6 +17,7 @@ class ProjectDiscussionView {
  private:
   void capture_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void captured_cells(ui::Layout &layout, EditorContext &ctx);
+  void request_details(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   std::string project_, title_, text_, table_, row_, field_, selected_, shown_context_, shown_message_;
   std::vector<std::string> rows_, fields_;
   int category_ = 0;
@@ -25,5 +26,7 @@ class ProjectDiscussionView {
   std::string captured_error_;
   int captured_selected_ = 0, captured_detail_ = -1;
   ui::LogBuffer cell_details_;
+  std::string shown_request_;
+  ui::LogBuffer request_details_;
 };
 }  // namespace stk::app

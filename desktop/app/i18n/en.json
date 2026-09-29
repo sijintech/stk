@@ -1010,5 +1010,22 @@
   "discussion.cells.evaluation_unavailable": "Evaluation unavailable",
   "discussion.cells.missing_record": "Record missing",
   "discussion.cells.missing_field": "Field missing",
-  "discussion.cells.missing_table": "Table missing"
+  "discussion.cells.missing_table": "Table missing",
+  "discussion.requests": "Requests",
+  "discussion.requests.status": "Status",
+  "discussion.requests.unsupported": "Upgrade the project to inspect saved requests.",
+  "discussion.requests.hint": "Inspect saved request intent and outcomes. No model provider is connected; saving or reopening never sends a request.",
+  "discussion.requests.pending": "Not sent",
+  "discussion.requests.running": "Started; verify status",
+  "discussion.requests.completed": "Response saved",
+  "discussion.requests.failed": "Failed",
+  "discussion.requests.cancelled": "Cancelled",
+  "discussion.requests.uncertain": "Outcome uncertain",
+  "discussion.requests.cancel_requested": "Cancellation was requested. This does not by itself prove remote execution stopped.",
+  "discussion.requests.verify": "This is a saved observation. Refreshing reads local records and does not contact a provider or resend.",
+  "discussion.requests.details": "Request identity and outcome",
+  "discussion.requests.refresh": "Refresh request record",
+  "discussion.requests.cancel": "Request cancellation",
+  "discussion.requests.message": "View original message",
+  "discussion.requests.result": "View saved response"
 }

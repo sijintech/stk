@@ -515,6 +515,10 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.discussion.list` | `{handle, offset?, limit?}` | `{messages: [message summary], next_offset: integer|null}` |
 | `project.discussion.link_draft` | `{handle, proposal_id, message_id, draft_id}` | `{proposal}` |
 | `project.discussion.proposals` | `{handle, offset?, limit?, draft_id?}` | `{proposals: [proposal], next_offset: integer|null}` |
+| `project.requests.create` | `{handle, request_id, message_id, configuration}` | `{request}` |
+| `project.requests.get` | `{handle, request_id}` | `{request}` |
+| `project.requests.list` | `{handle, offset?, limit?}` | `{requests: [request], next_offset: integer|null}` |
+| `project.requests.cancel` | `{handle, request_id}` | `{request}` |
 | `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
 | `project.backup` | `{handle}` | `{path, project_id, revision, format_version}` |
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
@@ -574,7 +578,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   and literal types still reject the batch. See the project guide for the bounded expression grammar/unit policy.
 - `project.backup` writes a consistent, checked SQLite copy under the project's `backups/` directory;
   it does not include external assets or change project revision. `project.upgrade` first creates such a
-  backup, then migrates supported older formats (v1–v6) to v7 atomically, adding one revision and an internal
+  backup, then migrates supported older formats (v1–v7) to v8 atomically, adding one revision and an internal
   `{op: "upgrade_format", from_version, to_version}` history record. A stale precondition is `conflict`.
   Already-current format returns `upgraded=false, backup=null` without changing revision. Opening alone
   never migrates. A failed migration rolls back the source; a completed pre-migration backup is kept.
@@ -681,6 +685,68 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   nor changes its status; context selection is not an authorization scope for draft commands.
   Draft application retains all format 6 checks and atomic receipt semantics. See
   [context and discussion guide](../project-contexts.md) for usage and recovery boundaries.
+- `project.requests.*` is an optional format 8 extension for durable text-request records. Check
+  `hello.methods`; earlier formats return `unsupported` and require explicit backup/upgrade.
+  The bridge exposes only create/get/list/cancel: there is no request start, recovery, provider query,
+  streaming or adapter configuration method. Creating a record saves intent without sending it.
+  None of these methods calls a model, loads an adapter, looks up credentials, applies a draft or
+  submits a task. They do not change project revision/history/undo and emit no event, including no
+  `project.changed`. Refresh explicitly to observe changes by another client or local executor.
+  The Python facade exposes the same operations as `p.requests.create/get/list/cancel` on its pinned handle.
+- A request is the closed, flat object
+  `{id, project_id, context_id, message_id, assistant_message_id, source_revision, configuration,
+  prompt_version, input_sha256, created_at, status, cancel_requested, executor_id, updated_at,
+  error_code, result}`. IDs are canonical lowercase UUIDs; `executor_id` is nullable.
+  Create requires a caller-retained `request_id` and an existing `user` message in this project.
+  It binds that message's saved context and source revision; it does not select the current table,
+  add other conversation history or reread live data. `assistant_message_id` is derived from the
+  project/request UUIDs and reserved against manual message insertion. `prompt_version` is `stk.text/1`;
+  `input_sha256` covers canonical UTF-8 JSON containing exactly the saved context, user message,
+  normalized configuration and prompt version. Complete input is limited to 1 MiB. Get/list return
+  the same metadata shape without input values or message text. Each read verifies record checksums,
+  the complete saved input lineage and, when completed, the linked assistant message and text digest.
+- `configuration` requires `adapter` and `model`; its only optional fields are `temperature` and
+  `max_output_tokens`. Identifiers are 1–128 ASCII characters matching
+  `[A-Za-z0-9][A-Za-z0-9._:/-]*`; both schema and backend validation reject `//`. Temperature is a
+  finite number in [0, 2]; output tokens are an integer in [1, 32768], default 4096. Returned
+  configurations always contain this output limit; a supplied temperature is normalized to a number.
+  URLs, credential fields and arbitrary provider parameters are not accepted. These names do not
+  resolve to dynamic imports or network endpoints. Repeating a request UUID with the same message
+  and normalized configuration returns its saved record, including its current terminal state;
+  different input under that UUID is `conflict`. A changed input requires a new UUID. List defaults
+  to offset 0 and limit 100, accepts a nonnegative signed-64-bit offset and limit 1–100, preserves
+  creation order, includes terminal records and ends with `next_offset=null`.
+- Saved request states are `pending` (intent saved, not claimed), `running` (claim persisted before
+  a possible send), `completed` (full response and assistant message atomically saved), `failed`
+  (known failure), `cancelled` (before dispatch or with confirmed cancellation evidence), and
+  `uncertain` (a send may have occurred without a definitive result). Reading or reopening a project
+  preserves the recorded state; `running` alone does not prove a live executor still exists.
+  Cancel changes pending to cancelled with `cancel_requested=true` and
+  `error_code="cancelled_before_start"`; running or previously uncancelled uncertain requests become
+  uncertain with cancellation intent and `error_code="cancel_unconfirmed"`. Already-requested
+  cancellation and completed/failed/cancelled records are returned unchanged. The bridge only
+  persists this intent: it cannot signal a separately created executor or confirm remote cancellation.
+- `result` is null until completed, then exactly `{message_id, text_sha256, metadata}`; `message_id`
+  equals the reserved assistant ID. Its full nonblank response is an ordinary immutable assistant
+  message, at most 64 KiB UTF-8, read through `project.discussion.get`. Metadata accepts only optional
+  `model`, `remote_request_id` (the same bounded identifier rules), and `input_tokens`, `output_tokens`
+  (nonnegative signed-64-bit integers). It never contains raw response headers or exception text.
+  The trusted local execution service inserts this message and marks completion in one SQLite
+  transaction. A same-owner identical completion is idempotent; conflicting complete results are
+  rejected. Confirmed cancellation/known failure cannot publish a late message; a complete result
+  after unconfirmed cancellation may be saved while retaining `cancel_requested=true`. Completion
+  does not create/apply a draft, interpret code blocks or submit work.
+- The provider-free `suan.project.request_executor.RequestExecutor` is a local library service,
+  not a bridge operation. Explicit `start` obtains a per-request OS lock and commits a single
+  execution claim before calling an injected trusted adapter; no adapters are installed by default.
+  Duplicate starts never resend. `shutdown` fences late results and preserves a live worker's lock
+  until it exits. Explicit `recover` must acquire that lock before marking an abandoned running
+  request uncertain; it does not send, query a provider or revert to pending. The fixed journal
+  error codes are `adapter_unavailable`, `adapter_failed`, `response_invalid`, `dispatch_failed`
+  (failed), `executor_lost`, `cancel_unconfirmed`, `transport_uncertain`, `local_save_failed`
+  (uncertain), and `cancelled_before_start`, `cancel_confirmed` (cancelled). Pending/running/completed
+  have null `error_code`. No provider, credential lookup, remote cancellation/query, stream or tool
+  execution is included. See [request guide](../project-requests.md) for lock scope and save-failure limits.
 - **Uncertain responses:** create/apply/backup/upgrade/undo/redo and file index/refresh are never automatically retried. If a response is lost,
   reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
   raise `expected_revision` and repeat an edit: the previous batch may already have committed.

@@ -142,7 +142,7 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
     project_ = state.project()->id;
     title_.clear(); text_.clear(); table_.clear(); row_.clear(); field_.clear(); selected_.clear();
     rows_.clear(); fields_.clear(); shown_context_.clear(); shown_message_.clear();
-    context_details_.clear(); message_text_.clear();
+    context_details_.clear(); message_text_.clear(); shown_request_.clear(); request_details_.clear();
     captured_.reset(); captured_error_.clear();
   }
   layout.paragraph(ctx.tr("discussion.hint"));
@@ -150,10 +150,13 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
   const bool enabled = !state.busy() && !discussion.busy();
   if (!discussion.error().empty()) { layout.paragraph(discussion.error()); }
   if (!state.drafts_error().empty()) { layout.paragraph(state.drafts_error()); }
-  capture_controls(layout, ctx, state);
+  if (category_ != 3) { capture_controls(layout, ctx, state); }
   layout.tabs("discussion_category", {std::string(ctx.tr("discussion.contexts")), std::string(ctx.tr("discussion.messages")),
-      std::string(ctx.tr("discussion.proposals"))}, {[this] { return category_; }, [this](int value) { category_ = value; selected_.clear(); }});
-  const std::string kind = category_ == 0 ? "contexts" : category_ == 1 ? "messages" : "proposals";
+      std::string(ctx.tr("discussion.proposals")), std::string(ctx.tr("discussion.requests"))},
+      {[this] { return category_; }, [this](int value) { category_ = value; selected_.clear(); }});
+  if (category_ == 3 && !discussion.requests_supported()) { layout.paragraph(ctx.tr("discussion.requests.unsupported")); return; }
+  const std::string kind = category_ == 0 ? "contexts" : category_ == 1 ? "messages" : category_ == 2 ? "proposals" : "requests";
+  if (category_ == 3) { layout.paragraph(ctx.tr("discussion.requests.hint")); }
   const auto &page = discussion.page(kind);
   if (!page.loaded && enabled) { discussion.load_page(kind, page.offset, true); }
   const auto items = page.items;
@@ -162,15 +165,20 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
       selected_ = io::get_string(items.front(), "id");
     }
     ui::TableSpec spec;
-    spec.columns = {{std::string(ctx.tr("discussion.name")), 18}, {std::string(ctx.tr("discussion.source")), 13}};
+    spec.columns = {{std::string(ctx.tr("discussion.name")), 18},
+                    {std::string(ctx.tr(kind == "requests" ? "discussion.requests.status" : "discussion.source")), 13}};
     spec.rows = int(items.size()); spec.visible_rows = float(std::min(spec.rows, 3));
-    spec.data_version = discussion.version() * 3 + uint64_t(category_);
+    spec.data_version = discussion.version() * 4 + uint64_t(category_);
     spec.selected = {[this, items] {
       for (size_t i = 0; i < items.size(); ++i) { if (items[i].at("id") == selected_) { return int(i); } }
       return -1;
     }, [this, items](int value) { if (value >= 0 && size_t(value) < items.size()) { selected_ = io::get_string(items[size_t(value)], "id"); } }};
     spec.cell = [items, kind, store = &ctx.store](int row, int col) {
       const auto &item = items[size_t(row)];
+      if (kind == "requests") {
+        return col == 0 ? io::get_string(item.at("configuration"), "model") + " / " + io::get_string(item, "id").substr(0, 8) :
+                         std::string(store->tr("discussion.requests." + io::get_string(item, "status")));
+      }
       if (col == 0) { return (kind == "contexts" ? io::get_string(item, "title") : kind == "messages" ?
           std::string(store->tr("discussion.role." + io::get_string(item, "role"))) : io::get_string(item, "draft_id").substr(0, 8)) +
           " / " + io::get_string(item, "id").substr(0, 8); }
@@ -186,6 +194,7 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
     if (!state.project() || state.project()->handle != handle) { return; }
     if (kind == "contexts") { discussion.load_context(id); }
     else if (kind == "messages") { discussion.load_message(id); }
+    else if (kind == "requests") { discussion.load_request(id); }
     else {
       const auto chosen = std::find_if(items.begin(), items.end(), [&](const auto &item) { return item.at("id") == id; });
       if (chosen != items.end()) {
@@ -203,6 +212,8 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
   actions.button("discussion_next", ctx.tr("project.drafts.next"), [&discussion, kind, offset = page.next] {
     discussion.load_page(kind, offset);
   }).disable(!enabled || page.next < 0);
+
+  if (category_ == 3) { request_details(layout, ctx, state); return; }
 
   const auto &context = discussion.context();
   if (!context.empty()) {
@@ -261,5 +272,45 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
         .disable(!enabled || state.saved_review().empty());
     layout.paragraph(ctx.tr("discussion.link_hint"));
   }
+}
+
+void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
+{
+  auto &discussion = state.discussion();
+  const auto &request = discussion.generation_request();
+  if (request.empty()) { return; }
+  const auto id = io::get_string(request, "id"), status = io::get_string(request, "status");
+  layout.paragraph(id + " · " + std::string(ctx.tr("discussion.requests." + status)));
+  if (request.value("cancel_requested", false)) { layout.paragraph(ctx.tr("discussion.requests.cancel_requested")); }
+  if (status == "running" || status == "uncertain") { layout.paragraph(ctx.tr("discussion.requests.verify")); }
+  const auto serialized = request.dump(2);
+  if (shown_request_ != serialized) {
+    shown_request_ = serialized;
+    request_details_ = ui::LogBuffer(std::numeric_limits<size_t>::max());
+    request_details_.append(serialized);
+  }
+  if (auto *details = layout.panel("request_details", ctx.tr("discussion.requests.details"), true)) {
+    details->log_view("value", request_details_, 8);
+  }
+  const bool enabled = !state.busy() && !discussion.busy();
+  const auto current = [&discussion, &state, handle = state.project()->handle, id] {
+    return state.project() && state.project()->handle == handle && io::get_string(discussion.generation_request(), "id") == id;
+  };
+  auto &actions = layout.row();
+  actions.button("request_reload", ctx.tr("discussion.requests.refresh"), [&discussion, current, id] {
+    if (current()) { discussion.load_request(id); }
+  }).disable(!enabled);
+  actions.button("request_cancel", ctx.tr("discussion.requests.cancel"), [&discussion, current, id] {
+    if (current()) { discussion.cancel_request(id); }
+  }).disable(!enabled || status == "completed" || status == "failed" || status == "cancelled");
+  actions.button("request_message", ctx.tr("discussion.requests.message"),
+      [this, &discussion, current, message = io::get_string(request, "message_id")] {
+    if (current() && discussion.load_message(message)) { category_ = 1; }
+  }).disable(!enabled);
+  const bool completed = status == "completed" && request.contains("result") && request.at("result").is_object();
+  actions.button("request_result", ctx.tr("discussion.requests.result"),
+      [this, &discussion, current, message = completed ? io::get_string(request.at("result"), "message_id") : std::string()] {
+    if (current() && !message.empty() && discussion.load_message(message)) { category_ = 1; }
+  }).disable(!enabled || !completed);
 }
 }  // namespace stk::app

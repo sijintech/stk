@@ -227,6 +227,7 @@ def test_corrupt_manifest_fails_before_using_paths(indexed):
 def test_format_three_requires_explicit_backup_upgrade_and_retains_undo(indexed):
     store, ids, _, _ = indexed
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE IF EXISTS project_requests")
         db.execute("DROP TABLE IF EXISTS project_proposals")
         db.execute("DROP TABLE IF EXISTS project_messages")
         db.execute("DROP TABLE IF EXISTS project_contexts")

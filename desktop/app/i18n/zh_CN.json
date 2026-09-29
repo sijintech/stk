@@ -1010,5 +1010,22 @@
   "discussion.cells.evaluation_unavailable": "求值不可用",
   "discussion.cells.missing_record": "记录缺失",
   "discussion.cells.missing_field": "字段缺失",
-  "discussion.cells.missing_table": "表格缺失"
+  "discussion.cells.missing_table": "表格缺失",
+  "discussion.requests": "请求",
+  "discussion.requests.status": "状态",
+  "discussion.requests.unsupported": "请备份并升级项目后查看保存的请求。",
+  "discussion.requests.hint": "查看保存的请求意图及结果。模型提供方尚未接入；保存或重开不会发送请求。",
+  "discussion.requests.pending": "尚未发送",
+  "discussion.requests.running": "已启动，需核实",
+  "discussion.requests.completed": "回复已保存",
+  "discussion.requests.failed": "失败",
+  "discussion.requests.cancelled": "已取消",
+  "discussion.requests.uncertain": "结果不确定",
+  "discussion.requests.cancel_requested": "已记录取消意图；这本身不能证明远端执行已停止。",
+  "discussion.requests.verify": "这里显示保存的观察记录。刷新只读取本地记录，不查询提供方或重新发送。",
+  "discussion.requests.details": "请求身份与结果",
+  "discussion.requests.refresh": "刷新请求记录",
+  "discussion.requests.cancel": "请求取消",
+  "discussion.requests.message": "查看原消息",
+  "discussion.requests.result": "查看保存的回复"
 }
