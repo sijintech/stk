@@ -2709,7 +2709,8 @@
                                 1,
                                 2,
                                 3,
-                                4
+                                4,
+                                5
                               ]
                             },
                             "to_version": {
@@ -2717,7 +2718,8 @@
                                 2,
                                 3,
                                 4,
-                                5
+                                5,
+                                6
                               ]
                             }
                           },
@@ -4563,6 +4565,212 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.drafts.save": {
+        "description": "Save a validated immutable project proposal (format 6) without applying edits or changing revision/history. Reusing an ID with the same original request recovers the saved draft.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "draft_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1,
+              "maxItems": 1000
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "handle",
+            "draft_id",
+            "commands",
+            "title",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "draft": {
+              "$ref": "#/$defs/projectDraft"
+            }
+          },
+          "required": [
+            "draft"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.drafts.get": {
+        "description": "Read a saved proposal and its durable application/discard status.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "draft_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "draft_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "draft": {
+              "$ref": "#/$defs/projectDraft"
+            }
+          },
+          "required": [
+            "draft"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.drafts.list": {
+        "description": "Read paginated saved-draft summaries, including closed drafts, without full commands.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "drafts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectDraftSummary"
+              },
+              "maxItems": 100
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "drafts",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.drafts.apply": {
+        "description": "Explicitly apply a saved pending draft atomically at its original revision, recording its receipt. Applied drafts return a replay receipt without applying again, including after ordinary undo.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "draft_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "handle",
+            "draft_id",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "draft": {
+              "$ref": "#/$defs/projectDraft"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "draft",
+            "revision",
+            "replayed"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.drafts.discard": {
+        "description": "Close a pending draft without modifying project tables, revision or history.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "draft_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "draft_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "draft": {
+              "$ref": "#/$defs/projectDraft"
+            }
+          },
+          "required": [
+            "draft"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -6051,6 +6259,131 @@
         "task_state",
         "action_state",
         "error"
+      ],
+      "additionalProperties": false
+    },
+    "projectDraftSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "applied",
+            "discarded"
+          ]
+        },
+        "applied_revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "closed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "title",
+        "base_revision",
+        "created_at",
+        "status",
+        "applied_revision",
+        "closed_at"
+      ],
+      "additionalProperties": false
+    },
+    "projectDraft": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "base_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "applied",
+            "discarded"
+          ]
+        },
+        "applied_revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "closed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "title",
+        "base_revision",
+        "created_at",
+        "status",
+        "applied_revision",
+        "closed_at",
+        "commands"
       ],
       "additionalProperties": false
     }

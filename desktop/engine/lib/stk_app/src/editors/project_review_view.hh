@@ -14,7 +14,9 @@ class ProjectReviewView {
  public:
   void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
  private:
+  void saved_drafts(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   std::shared_ptr<const ProjectReview> shown_;
+  std::string draft_title_, selected_draft_, draft_project_;
   int selected_ = 0, category_ = 0, details_row_ = -1, details_category_ = -1;
   ui::LogBuffer details_, commands_;
 };

@@ -173,6 +173,35 @@ int main(int argc, char **argv)
         ok = ok && state.review() && state.review()->differences.size() == 3 && state.review()->errors.size() == 2;
         ok = ok && state.project()->revision == 1 && state.table()->text(0, 0) == "300";
       }
+      if (editor == "drafts") {
+        // Persist both lifecycle states through the real project service. The saved
+        // proposal is then cleared and explicitly restored before its fresh preview.
+        state.set_review_source(io::Json::array({
+          {{"op", "set_cell"}, {"table_id", table}, {"record_id", "40000000-4444-4444-8444-444444444444"},
+            {"field_id", temperature}, {"value", 325}}
+        }).dump());
+        ok = ok && state.preview() && loop.pump_until([&] { return !state.busy(); }, 30);
+        ok = ok && state.save_review(lang == "zh" ? "较早的温度草案" : "Earlier temperature proposal") &&
+             loop.pump_until([&] { return !state.busy(); }, 30) && !state.saved_review().empty();
+        const auto discarded_id = io::get_string(state.saved_review(), "id");
+        ok = ok && state.discard_saved_draft(discarded_id) && loop.pump_until([&] { return !state.busy(); }, 30);
+        ok = ok && io::get_string(state.saved_review(), "status") == "discarded";
+        state.discard_review();
+        state.set_review_source(io::Json::array({
+          {{"op", "set_cell"}, {"table_id", table}, {"record_id", "40000000-4444-4444-8444-444444444444"},
+            {"field_id", temperature}, {"value", 350}}
+        }).dump());
+        ok = ok && state.preview() && loop.pump_until([&] { return !state.busy(); }, 30);
+        ok = ok && state.save_review(lang == "zh" ? "首个案例升至 350 K" : "Raise first case to 350 K") &&
+             loop.pump_until([&] { return !state.busy(); }, 30) && !state.saved_review().empty();
+        const auto pending_id = io::get_string(state.saved_review(), "id");
+        state.discard_review();
+        ok = ok && state.load_draft(pending_id) && loop.pump_until([&] { return !state.busy(); }, 30);
+        ok = ok && !state.review() && io::get_string(state.saved_review(), "status") == "pending";
+        ok = ok && state.preview() && loop.pump_until([&] { return !state.busy(); }, 30);
+        ok = ok && state.review() && state.review()->differences.size() == 2 && state.review()->errors.size() == 1;
+        ok = ok && state.project()->revision == 1 && state.table()->text(0, 0) == "300";
+      }
       if (editor == "csv") {
         const auto source = dir.str() + "/project/parameters.csv";
         { std::ofstream file(core::path_from_utf8(source)); file << "Temperature,Note\n300,Prepared / 待运行\n350,Comparison / 对比\n"; }
@@ -200,7 +229,7 @@ int main(int argc, char **argv)
       ctx.rect = {0, 0, 1280, 900};
       ctx.now = 100;
       gfx::Image image;
-      if (editor == "review" || editor == "review_errors") {
+      if (editor == "review" || editor == "review_errors" || editor == "drafts") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find("a2/main/project_view")) { widget->index.assign(1); }
         else { ok = false; }
@@ -210,6 +239,32 @@ int main(int argc, char **argv)
         if (editor == "review_errors") {
           if (const auto *widget = screen.ui()->find("a2/main/review_category")) { widget->index.assign(1); }
           else { ok = false; }
+        }
+        if (editor == "drafts") {
+          // Use normal panel hit targets so the capture includes the real saved
+          // list and controls, while keeping the candidate table on the same page.
+          for (const auto *key : {"a2/main/review_details", "a2/main/saved_reviews"}) {
+            if (const auto *widget = screen.ui()->find(key)) {
+              const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
+              screen.ui()->handle_event(ui::Event::mouse_down(center));
+              screen.ui()->handle_event(ui::Event::mouse_up(center));
+            }
+            else { ok = false; }
+            ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+            ok = ok && loop.pump_until([&] { return !state.busy(); }, 30);
+          }
+          ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && state.drafts_loaded() && state.drafts().size() == 2 && state.drafts_error().empty();
+          if (const auto *widget = screen.ui()->find("a2/main/saved_reviews/draft_rows"); widget && widget->table) {
+            widget->table->selected.assign(1);
+          }
+          else { ok = false; }
+          if (const auto *widget = screen.ui()->find("a2/main/saved_reviews/draft_title")) {
+            widget->string.assign(lang == "zh" ? "首个案例升至 350 K" : "Raise first case to 350 K");
+          }
+          else { ok = false; }
+          const auto *restored_apply = screen.ui()->find("a2/main/review_apply");
+          ok = ok && restored_apply && restored_apply->enabled;
         }
       }
       if (editor == "recent") {

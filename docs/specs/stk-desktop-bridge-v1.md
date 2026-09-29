@@ -502,6 +502,11 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
 | `project.preview` | `{handle, expected_revision, commands}` | `{persisted: false, base_revision, proposed_revision, commands, snapshot}` |
+| `project.drafts.save` | `{handle, draft_id, expected_revision, title, commands}` | `{draft}` |
+| `project.drafts.get` | `{handle, draft_id}` | `{draft}` |
+| `project.drafts.list` | `{handle, offset?, limit?}` | `{drafts: [draft summary], next_offset: integer|null}` |
+| `project.drafts.apply` | `{handle, draft_id, expected_revision}` | `{draft, revision, replayed: boolean}` |
+| `project.drafts.discard` | `{handle, draft_id}` | `{draft}` |
 | `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
 | `project.backup` | `{handle}` | `{path, project_id, revision, format_version}` |
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
@@ -561,7 +566,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   and literal types still reject the batch. See the project guide for the bounded expression grammar/unit policy.
 - `project.backup` writes a consistent, checked SQLite copy under the project's `backups/` directory;
   it does not include external assets or change project revision. `project.upgrade` first creates such a
-  backup, then migrates v1/v2 to v3 atomically, adding one revision and an internal
+  backup, then migrates supported older formats (v1–v5) to v6 atomically, adding one revision and an internal
   `{op: "upgrade_format", from_version, to_version}` history record. A stale precondition is `conflict`.
   Already-current format returns `upgraded=false, backup=null` without changing revision. Opening alone
   never migrates. A failed migration rolls back the source; a completed pre-migration backup is kept.
@@ -596,6 +601,37 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   explicit `allow_stale`. Prepared plans emit `project.changed`; remote observations do not edit the project
   revision and emit independent `project.runs.changed {handle, run_id, observation_id}` hints, possibly before
   a response or on failure. Hub review policy remains in force. See [run guide](../project-runs.md).
+- `project.drafts.*` is an optional format 6 extension. Check `hello.methods`; older project formats
+  return `unsupported` without implicit migration. A full draft has exactly
+  `{id, project_id, title, base_revision, commands, created_at, status, applied_revision, closed_at}`.
+  IDs are canonical lowercase UUIDs. `status` is `pending`, `applied` or `discarded`; pending drafts
+  have null `applied_revision` and `closed_at`, applied drafts retain their original committed revision
+  and closure time, discarded drafts have a closure time and null `applied_revision`. Staleness is
+  derived from the current project revision, not another stored status. These are command records
+  and resolution receipts, not saved preview snapshots, conversation context or approval records.
+  Save validates through the ordinary preview engine at `expected_revision`, then stores normalized
+  commands with generated object UUIDs. It takes 1–1000 ordinary edit commands (at most 256 KiB of
+  canonical UTF-8 JSON, checked before and after normalization), a nonblank title of at most 1024
+  characters and an explicit caller-provided `draft_id`. It retains the preview's 128 MiB source
+  database limit. Formula errors follow ordinary edit semantics; successful save is not proof of
+  error-free evaluation. The draft command schema accepts objects; backend command validation is
+  authoritative and rejects non-edit operations. Repeating the same ID and original request
+  (commands, title, base revision) returns the same draft, even after the project advances or the
+  draft resolves. A changed request with the same ID returns `conflict`.
+  List defaults to `offset=0, limit=100`, accepts a nonnegative offset and limit 1–100, and returns
+  creation-order summaries containing every draft field except commands. It includes terminal records;
+  `next_offset=null` ends pagination. Get returns the complete saved record. Save/list/get/discard
+  never change table revision/history or emit `project.changed`; refresh explicitly across clients.
+  Apply requires `expected_revision` equal to the saved base; a pending draft also checks the current
+  project revision. Its ordinary edit and applied marker commit in one SQLite transaction, increase
+  revision once, enter the usual edit/undo history and emit `project.changed`. Repeating an applied
+  request with its original base returns `replayed=true` and the original application revision with
+  no further edit or event, including after that edit has been undone. It never retargets to a later
+  revision. Discard is idempotent for a discarded record; applied records cannot be discarded and
+  discarded records cannot be applied. No API reopens a resolved record, overwrites its commands or
+  removes it. These methods never automatically retry, open the native review view, or submit tasks.
+  For uncertain responses retain the UUID and inspect the saved record before explicitly retrying
+  the same save/application request. See [saved draft guide](../project-drafts.md).
 - **Uncertain responses:** create/apply/backup/upgrade/undo/redo and file index/refresh are never automatically retried. If a response is lost,
   reopen the directory and inspect snapshot/history before deciding what to do next. Do not merely
   raise `expected_revision` and repeat an edit: the previous batch may already have committed.
@@ -723,6 +759,11 @@ or a preview error also returns `conflict`; scripts cannot replace/clear reviews
 and clear the draft first. A busy/unloaded project or active text edit in any attached window returns
 `busy`, preserving uncommitted text. Discard/input changes invalidate pending candidates; project
 switch/close and bridge restart clear reviews. Timeout/cancellation does not undo accepted previews.
+These lifecycle rules concern the current review editor and candidate. A separate explicit native
+save through `project.drafts.save` can persist the checked commands; restarting does not load or apply
+that record automatically. Loading a pending record requires an empty review and another explicit
+preview. A stale saved record must be copied into a new draft for review at the current revision;
+its original record is retained. Clearing the review editor never discards a saved database record.
 Capability discovery/attachment includes `project.review` only when both bridge and client support it;
 the original six-operation fallback is unchanged. The Python facade exposes this as
 `stk.project.review(commands, expected_revision=...)`. See [project preview](../project-preview.md).

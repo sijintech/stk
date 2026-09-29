@@ -269,6 +269,245 @@ class ProjectPython : public ::testing::Test {
   }
 };
 
+TEST_F(ProjectPython, SavedDraftReopensWithStableIdsAndRequiresFreshReviewBeforeAtomicApply)
+{
+  populated();
+  state().set_review_source(Json::array({{{"op", "create_table"}, {"name", "Saved proposal"}}}).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  ASSERT_TRUE(state().review());
+  const auto commands = state().review()->commands;
+  ASSERT_TRUE(state().save_review("Saved / 草案"));
+  settled();
+  const auto saved = state().saved_review();
+  ASSERT_FALSE(saved.empty()) << state().drafts_error();
+  const auto id = io::get_string(saved, "id");
+  EXPECT_EQ(io::canonical_json(saved.at("commands")), io::canonical_json(commands));
+  EXPECT_TRUE(state().can_apply_review()); // Canonical storage may reorder object keys, never commands.
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().tables().size(), 1u);
+  ASSERT_TRUE(state().close());
+  settled();
+  ASSERT_TRUE(state().open(dir.str() + "/project"));
+  settled();
+  EXPECT_FALSE(state().review());
+  EXPECT_TRUE(state().saved_review().empty());
+  ASSERT_TRUE(state().load_drafts());
+  settled();
+  ASSERT_EQ(state().drafts().size(), 1u);
+  EXPECT_EQ(state().drafts()[0].at("id"), Json(id));
+  ASSERT_TRUE(state().load_draft(id));
+  settled();
+  EXPECT_FALSE(state().review());
+  EXPECT_FALSE(state().apply_review());
+  EXPECT_EQ(io::canonical_json(io::parse_json(state().review_source())), io::canonical_json(commands));
+  ASSERT_TRUE(state().preview());
+  settled();
+  ASSERT_TRUE(state().review());
+  EXPECT_EQ(io::canonical_json(state().review()->commands), io::canonical_json(commands));
+  ASSERT_TRUE(state().apply_review());
+  settled();
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().saved_review().at("status"), Json("applied"));
+  ASSERT_EQ(state().tables().size(), 2u);
+  EXPECT_EQ(state().tables()[1].id, commands[0].at("id").get<std::string>());
+  ASSERT_TRUE(state().undo());
+  settled();
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(state().tables().size(), 1u);
+  std::optional<bridge::Result<Json>> replay;
+  client->call("project.drafts.apply", {{"handle", state().project()->handle}, {"draft_id", id},
+                                       {"expected_revision", 1}}).then([&](auto result) { replay = result; });
+  ASSERT_TRUE(loop.pump_until([&] { return replay.has_value(); }));
+  ASSERT_TRUE(replay->ok()) << replay->error().describe();
+  EXPECT_EQ(replay->value().at("revision"), Json(2));
+  EXPECT_EQ(replay->value().at("replayed"), Json(true));
+  state().refresh();
+  settled();
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(state().tables().size(), 1u);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, SavedDraftStaysAtItsBaseUntilExplicitCopyAndDiscardKeepsAudit)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  ASSERT_TRUE(state().save_review("Original"));
+  settled();
+  const auto original = io::get_string(state().saved_review(), "id");
+  ASSERT_FALSE(original.empty()) << state().drafts_error();
+  state().discard_review();
+  ASSERT_TRUE(state().apply(set_cell(500)));
+  settled();
+  ASSERT_TRUE(state().load_draft(original));
+  settled();
+  EXPECT_FALSE(state().preview());
+  EXPECT_FALSE(state().can_apply_review());
+  EXPECT_FALSE(state().review_error().empty());
+  EXPECT_EQ(io::get_int(state().saved_review(), "base_revision", -1), 1);
+  EXPECT_EQ(state().table()->text(0, 0), "500");
+  ASSERT_TRUE(state().copy_saved_review());
+  settled();
+  ASSERT_TRUE(state().review());
+  EXPECT_EQ(state().review()->base_revision, 2);
+  EXPECT_TRUE(state().saved_review().empty());
+  ASSERT_TRUE(state().save_review("New proposal"));
+  settled();
+  const auto replacement = io::get_string(state().saved_review(), "id");
+  EXPECT_NE(replacement, original);
+  ASSERT_TRUE(state().discard_saved_draft(original));
+  settled();
+  EXPECT_EQ(state().saved_review().at("id"), Json(replacement));
+  EXPECT_TRUE(state().can_apply_review());
+  ASSERT_TRUE(state().load_drafts());
+  settled();
+  ASSERT_EQ(state().drafts().size(), 2u);
+  EXPECT_EQ(state().drafts()[0].at("status"), Json("discarded"));
+  EXPECT_EQ(state().drafts()[1].at("status"), Json("pending"));
+  EXPECT_EQ(state().project()->revision, 2);
+  ASSERT_TRUE(state().discard_saved_draft(replacement));
+  settled();
+  EXPECT_FALSE(state().review());
+  EXPECT_FALSE(state().preview());
+  EXPECT_FALSE(state().can_apply_review());
+  EXPECT_EQ(state().project()->revision, 2);
+}
+
+TEST_F(ProjectPython, SavedDraftCallbacksPreserveNewInputAndRestartOnlyReloadsMetadata)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  ASSERT_TRUE(state().save_review("Finishing save"));
+  state().set_review_source("new unsaved input");
+  settled();
+  EXPECT_TRUE(state().saved_review().empty());
+  EXPECT_EQ(state().review_source(), "new unsaved input");
+  ASSERT_TRUE(state().load_drafts());
+  settled();
+  ASSERT_EQ(state().drafts().size(), 1u);
+  const auto id = io::get_string(state().drafts()[0], "id");
+  EXPECT_FALSE(state().load_draft(id));
+  state().discard_review();
+  ASSERT_TRUE(state().load_draft(id));
+  state().set_review_source("typed during load");
+  settled();
+  EXPECT_TRUE(state().saved_review().empty());
+  EXPECT_EQ(state().review_source(), "typed during load");
+  state().discard_review();
+  ASSERT_TRUE(state().load_draft(id));
+  settled();
+  ASSERT_TRUE(state().preview());
+  settled();
+  const auto old_handle = state().project()->handle;
+  client->shutdown_bridge();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return state().loaded() && !state().busy() && state().project()->handle != old_handle;
+  }, 60));
+  EXPECT_FALSE(state().review());
+  EXPECT_EQ(state().review_source(), "[]");
+  EXPECT_TRUE(state().saved_review().empty());
+  ASSERT_TRUE(state().load_drafts());
+  settled();
+  ASSERT_EQ(state().drafts().size(), 1u);
+  EXPECT_EQ(state().drafts()[0].at("id"), Json(id));
+  EXPECT_EQ(state().project()->revision, 1);
+}
+
+TEST_F(ProjectPython, SavedDraftNativePanelSavesLoadsReviewsAndAppliesThroughSharedState)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("review"));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/saved_reviews");
+  f.drv->click(x, y);
+  f.drv->frame();
+  settled();
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  ASSERT_NE(widget("saved_reviews/draft_title"), nullptr);
+  widget("saved_reviews/draft_title")->string.assign("Native saved proposal");
+  f.drv->frame();
+  ASSERT_TRUE(widget("saved_reviews/save_review")->enabled);
+  widget("saved_reviews/save_review")->on_click();
+  settled();
+  EXPECT_FALSE(state().saved_review().empty()) << state().drafts_error();
+  EXPECT_EQ(state().project()->revision, 1);
+  f.drv->frame();
+  settled();
+  f.drv->frame();
+  ASSERT_NE(widget("saved_reviews/draft_rows"), nullptr);
+  widget("review_discard")->on_click();
+  f.drv->frame();
+  ASSERT_TRUE(widget("saved_reviews/load_draft")->enabled);
+  widget("saved_reviews/load_draft")->on_click();
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(widget("review_apply"), nullptr);
+  widget("review_preview")->on_click();
+  settled();
+  f.drv->frame();
+  ASSERT_NE(widget("review_apply"), nullptr);
+  ASSERT_TRUE(widget("review_apply")->enabled);
+  widget("review_apply")->on_click();
+  settled();
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "350");
+  EXPECT_EQ(state().saved_review().at("status"), Json("applied"));
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, SavedDraftErrorsSurviveAutomaticListRefreshAndConflictsRefreshTheProject)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview());
+  settled();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("review"));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/saved_reviews");
+  f.drv->click(x, y);
+  f.drv->frame();
+  settled();
+  ASSERT_TRUE(state().save_review("   "));
+  settled();
+  ASSERT_FALSE(state().drafts_error().empty());
+  const auto error = state().drafts_error();
+  f.drv->frame(); // An automatic list refresh must not hide the failed operation.
+  settled();
+  f.drv->frame();
+  EXPECT_EQ(state().drafts_error(), error);
+  EXPECT_EQ(state().project()->revision, 1);
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  const auto source = "from suan.project import ProjectStore\nimport json\nProjectStore(" +
+      Json(dir.str() + "/project").dump() + ").apply(json.loads(" + Json(set_cell(700).dump()).dump() + "), expected_revision=1)";
+  ASSERT_TRUE(scripts.execute(source));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  EXPECT_EQ(state().project()->revision, 1);
+  ASSERT_TRUE(state().save_review("Conflict"));
+  settled();
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "700");
+  EXPECT_FALSE(state().can_apply_review());
+  EXPECT_FALSE(state().drafts_error().empty());
+  EXPECT_TRUE(state().drafts().empty());
+}
+
 TEST_F(ProjectPython, ReviewAllocatesStableIdsWithoutWritingAndAppliesOnceWithUndo)
 {
   populated();
@@ -821,7 +1060,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   auto &scripts = f.shell->store().scripts();
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   const std::string source = "import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
-      ") as db:\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
+      ") as db:\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
   ASSERT_TRUE(scripts.execute(source));
   ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
@@ -836,7 +1075,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   f.screen.ui()->find("a2/main/upgrade_project")->on_click();
   settled();
   f.drv->frame();
-  EXPECT_EQ(state().project()->format_version, 5);
+  EXPECT_EQ(state().project()->format_version, 6);
   EXPECT_EQ(state().project()->revision, 2);
   EXPECT_EQ(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
   EXPECT_FALSE(state().notice().empty());

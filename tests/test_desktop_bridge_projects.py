@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import sqlite3
 import threading
+from uuid import uuid4
 
 import pytest
 
@@ -256,4 +257,93 @@ def test_preview_uses_strict_contract_without_changed_events_until_apply(inproc,
     assert harness.error("project.preview", params)["code"] == "conflict"
     harness.call("project.close", {"handle": info["handle"]})
     assert harness.error("project.preview", params)["code"] == "not_found"
+    assert not harness.violations
+
+
+def test_saved_drafts_keep_revision_and_ids_across_reopen_and_apply_only_once(inproc, tmp_path):
+    harness = inproc()
+    directory = tmp_path / "drafts"
+    project = harness.call("project.create", {"directory": str(directory), "name": "Drafts"})["project"]
+    handle = project["handle"]
+    assert {f"project.drafts.{action}" for action in ("save", "get", "list", "apply", "discard")} <= set(
+        harness.call("hello", {"protocol": 1})["methods"])
+    before = harness.call("project.snapshot", {"handle": handle})["snapshot"]
+    params = {"handle": handle, "draft_id": str(uuid4()), "title": "参数表草案", "expected_revision": 0,
+              "commands": [{"op": "create_table", "name": "Cases"}]}
+    draft = harness.call("project.drafts.save", params)["draft"]
+    assert draft["project_id"] == project["id"] and draft["base_revision"] == 0
+    assert draft["status"] == "pending" and draft["applied_revision"] is None and draft["closed_at"] is None
+    table_id = draft["commands"][0]["id"]
+    assert harness.call("project.drafts.save", params)["draft"] == draft
+    assert harness.call("project.snapshot", {"handle": handle})["snapshot"] == before
+    assert harness.call("project.history", {"handle": handle})["history"] == []
+    assert harness.events_of("project.changed") == []
+    summary = {key: value for key, value in draft.items() if key != "commands"}
+    assert harness.call("project.drafts.list", {"handle": handle}) == {"drafts": [summary], "next_offset": None}
+    assert harness.error("project.drafts.save", {**params, "title": "Different intent"})["code"] == "conflict"
+
+    harness.call("project.close", {"handle": handle})
+    assert harness.error("project.drafts.get", {"handle": handle, "draft_id": draft["id"]})["code"] == "not_found"
+    reopened = harness.call("project.open", {"directory": str(directory)})["project"]
+    identity = {"handle": reopened["handle"], "draft_id": draft["id"]}
+    assert harness.call("project.drafts.get", identity)["draft"] == draft
+    applied = harness.call("project.drafts.apply", {**identity, "expected_revision": 0})
+    assert applied["revision"] == 1 and applied["replayed"] is False
+    assert applied["draft"]["status"] == "applied" and applied["draft"]["applied_revision"] == 1
+    assert applied["draft"]["closed_at"]
+    harness.wait_event(lambda event: event["event"] == "project.changed")
+    assert ProjectStore(directory).snapshot()["tables"][0]["id"] == table_id
+    harness.call("project.undo", {"handle": reopened["handle"], "expected_revision": 1})
+    harness.wait_event(lambda event: event["event"] == "project.changed" and event["data"]["revision"] == 2)
+    changed = harness.events_of("project.changed")
+    replay = harness.call("project.drafts.apply", {**identity, "expected_revision": 0})
+    assert replay["replayed"] is True and replay["draft"] == applied["draft"]
+    assert harness.call("project.snapshot", {"handle": reopened["handle"]})["snapshot"]["tables"] == []
+    assert ProjectStore(directory).info()["revision"] == 2
+    assert harness.events_of("project.changed") == changed
+    assert not harness.violations
+
+
+def test_saved_draft_pagination_discard_and_invalid_requests(inproc, tmp_path):
+    harness = inproc()
+    info = harness.call("project.create", {"directory": str(tmp_path / "drafts"), "name": "Drafts"})["project"]
+    handle = info["handle"]
+    params = {"handle": handle, "draft_id": str(uuid4()), "title": "Pending", "expected_revision": 0,
+              "commands": [{"op": "create_table", "name": "Cases"}]}
+    first = harness.call("project.drafts.save", params)["draft"]
+    second = harness.call("project.drafts.save", {**params, "draft_id": str(uuid4()), "title": "Other"})["draft"]
+    page = harness.call("project.drafts.list", {"handle": handle, "limit": 1})
+    assert len(page["drafts"]) == 1 and page["next_offset"] == 1
+    rest = harness.call("project.drafts.list", {"handle": handle, "offset": page["next_offset"], "limit": 1})
+    assert rest["next_offset"] is None
+    assert {draft["id"] for draft in page["drafts"] + rest["drafts"]} == {first["id"], second["id"]}
+    identity = {"handle": handle, "draft_id": first["id"]}
+    discarded = harness.call("project.drafts.discard", identity)["draft"]
+    assert discarded["status"] == "discarded" and discarded["closed_at"] and discarded["applied_revision"] is None
+    assert harness.call("project.drafts.discard", identity)["draft"] == discarded
+    assert harness.error("project.drafts.apply", {**identity, "expected_revision": 0})["code"] == "conflict"
+    assert harness.call("project.snapshot", {"handle": handle})["snapshot"]["project"]["revision"] == 0
+    assert harness.call("project.history", {"handle": handle})["history"] == []
+    assert harness.events_of("project.changed") == []
+    for invalid in ({"commands": []}, {"commands": [{"op": "submit_job"}]}, {"draft_id": "invalid"},
+                    {"title": ""}, {"title": "x" * 1025}, {"expected_revision": True}):
+        assert harness.error("project.drafts.save", {**params, "draft_id": str(uuid4()), **invalid})["code"] == "invalid_params"
+    assert harness.error("project.drafts.list", {"handle": handle, "limit": 101})["code"] == "invalid_params"
+    assert harness.error("project.drafts.list", {"handle": handle, "offset": -1})["code"] == "invalid_params"
+
+
+def test_saved_drafts_require_explicit_format_upgrade(inproc, model):
+    store, _ = model
+    legacy(store)
+    harness = inproc()
+    info = harness.call("project.open", {"directory": str(store.directory)})["project"]
+    identity = {"handle": info["handle"], "draft_id": str(uuid4())}
+    requests = {"list": {"handle": info["handle"]}, "get": identity, "discard": identity,
+                "apply": {**identity, "expected_revision": 1},
+                "save": {**identity, "commands": [{"op": "create_table", "name": "Cases"}],
+                         "expected_revision": 1, "title": "Upgrade first"}}
+    for action, params in requests.items():
+        assert harness.error(f"project.drafts.{action}", params)["code"] == "unsupported"
+    assert store.info()["format_version"] == 1 and store.info()["revision"] == 1
+    assert harness.events_of("project.changed") == []
     assert not harness.violations

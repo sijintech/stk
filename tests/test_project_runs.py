@@ -9,6 +9,7 @@ import pytest
 
 from conftest import finish
 from suan.project import ProjectStore, ProjectError, RevisionConflict
+from suan.project.store import FORMAT_VERSION
 from suan.desktop_bridge.backends import RuntimeBackend
 from suan.desktop_bridge.project_runs import ProjectRuns
 from suan.desktop_bridge.projects import ProjectSessions
@@ -123,6 +124,7 @@ def test_format_four_upgrade_keeps_snapshots_and_preupgrade_backup(model):
     file_id = store.files.index([str(path)], expected_revision=1)["record_ids"][0]
     snapshot = store.snapshots.capture([file_id], expected_revision=2)["snapshot"]
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE project_drafts")
         db.execute("DROP TABLE run_observations")
         db.execute("DROP TABLE run_plans")
         db.execute("PRAGMA user_version=4")
@@ -130,7 +132,7 @@ def test_format_four_upgrade_keeps_snapshots_and_preupgrade_backup(model):
     with pytest.raises(ProjectError, match="format 5"):
         prepare(store, [entry(ids)])
     result = store.upgrade(expected_revision=3)
-    assert result["upgraded"] and store.snapshot()["format_version"] == 5
+    assert result["upgraded"] and store.snapshot()["format_version"] == FORMAT_VERSION
     assert store.snapshots.verify(snapshot["id"])["ok"]
     assert store.runs.list()["runs"] == []
     assert store.snapshot()["edit_history"]["undo_revision"] == 2

@@ -2,6 +2,21 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-29 持久草案与恢复
+
+格式 6 的保存、分页、读取、丢弃和原子应用已接入存储、桥、Python facade 与原生检查页。
+项目/桥/工作流 Python **248 通过、2 跳过**，两个真实许可求解器测试按默认配置跳过；
+本批只修改项目草案管理，未重新运行许可求解器。草案存储新增 **34** 项测试，包括迁移备份/回滚、
+并发保存/应用、规范化 ID、响应恢复、校验损坏和撤销后终态保留。
+
+原生重点和新增截图 **11/11**，完整桌面 **546/546、无跳过**；验证了真实桥的保存/重开/重启、
+重新预览后明确应用、过期草案另起副本、输入/异步保护、保留错误提示和冲突刷新。
+中英文 GL/Vulkan 草案面板四项通过，中文 Vulkan 和英文 GL 图像已查看；字典各 **947 项**一致。
+Linux/macOS CI 新增 `project_drafts` 截图门槛，本轮跨平台 CI 待推送后跟踪。
+
+日志 `/tmp/stk-saved-drafts-python-all.log`、`/tmp/stk-saved-drafts-native.log`、`/tmp/stk-saved-drafts-full.log`，
+JUnit `/tmp/stk-saved-drafts-full.xml`。操作与兼容边界见[草案指南](project-drafts.md)。
+
 ## 2026-09-29 Python 发起原生修改检查
 
 `stk.project.review` 经真实隔离 Python worker 和本地 UI 请求通道启动只读预览，并自动显示原生差异页。
@@ -12,7 +27,10 @@
 
 日志 `/tmp/stk-python-review-python-all.log`、`/tmp/stk-python-review-native.log`、
 `/tmp/stk-python-review-full.log`；JUnit `/tmp/stk-python-review-full.xml`。
-本批跨平台 CI 待推送后跟踪；此入口不包含模型生成、持久草案或新的外部任务执行。
+`fa324d6` 的 [desktop CI](https://github.com/sijintech/stk/actions/runs/36562716767) 与
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36562716768) 全部成功，包含 Linux GL/Vulkan、macOS Metal、
+Windows 编译/CPU 测试、安装包/干净环境启动与双版本 Windows Python。
+该提交的入口不包含模型生成、持久草案或新的外部任务执行；草案持久化见后续新增记录。
 
 ## 2026-09-29 参数表驱动批次
 

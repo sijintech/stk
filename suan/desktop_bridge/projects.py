@@ -119,6 +119,20 @@ class ProjectSessions:
         with self._operation():
             return self._get(params["handle"]).preview(params["commands"], expected_revision=params["expected_revision"])
 
+    def drafts(self, action, params):
+        with self._operation():
+            drafts = self._get(params["handle"]).drafts
+            if action == "save":
+                return {"draft": drafts.save(params["commands"], expected_revision=params["expected_revision"],
+                                             title=params["title"], draft_id=params["draft_id"])}
+            if action == "list":
+                return drafts.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+            if action == "apply":
+                return drafts.apply(params["draft_id"], expected_revision=params["expected_revision"])
+            if action == "discard":
+                return {"draft": drafts.discard(params["draft_id"])}
+            return {"draft": drafts.get(params["draft_id"])}
+
     def history(self, params):
         with self._operation():
             return {"history": self._get(params["handle"]).history()}

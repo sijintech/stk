@@ -21,9 +21,96 @@ std::string summary(const std::optional<io::Json> &value)
 }
 }  // namespace
 
+void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
+{
+  if (draft_project_ != state.project()->id) {
+    draft_project_ = state.project()->id;
+    draft_title_.clear();
+    selected_draft_.clear();
+  }
+  const auto &saved = state.saved_review();
+  if (!saved.empty()) {
+    const auto status = io::get_string(saved, "status");
+    layout.paragraph(ctx.store.catalog().format("project.drafts.loaded", {
+      {"title", io::get_string(saved, "title")}, {"base", std::to_string(io::get_int(saved, "base_revision", -1))},
+      {"status", std::string(ctx.tr("project.drafts." + status))}}));
+    if (status == "applied") {
+      layout.label(ctx.store.catalog().format("project.drafts.applied_at", {
+        {"revision", std::to_string(io::get_int(saved, "applied_revision", -1))}}));
+    }
+    if (status != "pending" || io::get_int(saved, "base_revision", -1) != state.project()->revision) {
+      layout.paragraph(ctx.tr("project.drafts.stale"));
+      layout.button("review_copy_saved", ctx.tr("project.drafts.copy"), [&state, id = saved.at("id")] {
+        if (!state.saved_review().empty() && state.saved_review().at("id") == id) { state.copy_saved_review(); }
+      }).disable(state.busy());
+    }
+  }
+  auto *panel = layout.panel("saved_reviews", ctx.tr("project.drafts.title"), false);
+  if (!panel) { return; }
+  if (!state.drafts_supported()) { panel->paragraph(ctx.tr("project.drafts.unsupported")); return; }
+  if (!state.drafts_loaded() && !state.busy()) { state.load_drafts(0, true); }
+  panel->paragraph(ctx.tr("project.drafts.hint"));
+  panel->prop(ctx.tr("project.drafts.name")).text_field("draft_title", ui::bind(draft_title_), {.max_length = 1024});
+  auto &save = panel->row();
+  save.button("save_review", ctx.tr("project.drafts.save"), [this, &state, review = state.review()] {
+    if (state.review() == review) { state.save_review(draft_title_); }
+  }).disable(!state.can_apply_review() || !state.saved_review().empty() || draft_title_.empty());
+  save.button("refresh_drafts", ctx.tr("project.drafts.refresh"), [&state] { state.load_drafts(); }).disable(state.busy());
+  if (!state.drafts_error().empty()) { panel->paragraph(state.drafts_error()); }
+  const auto drafts = state.drafts();
+  if (drafts.empty()) { panel->label(ctx.tr("project.drafts.empty")); }
+  else {
+    if (std::none_of(drafts.begin(), drafts.end(), [&](const auto &draft) { return draft.at("id") == selected_draft_; })) {
+      selected_draft_ = io::get_string(drafts.front(), "id");
+    }
+    ui::TableSpec spec;
+    spec.columns = {{std::string(ctx.tr("project.drafts.name")), 16}, {std::string(ctx.tr("project.drafts.base")), 5},
+                    {std::string(ctx.tr("project.drafts.status")), 8}, {std::string(ctx.tr("project.drafts.applied_revision")), 7}};
+    spec.rows = int(drafts.size());
+    spec.visible_rows = float(std::min(spec.rows, 4));
+    spec.data_version = state.version();
+    spec.selected = {[this, drafts] {
+      for (size_t i = 0; i < drafts.size(); ++i) { if (drafts[i].at("id") == selected_draft_) { return int(i); } }
+      return -1;
+    }, [this, drafts](int row) {
+      if (row >= 0 && size_t(row) < drafts.size()) { selected_draft_ = io::get_string(drafts[size_t(row)], "id"); }
+    }};
+    spec.cell = [drafts, store = &ctx.store, revision = state.project()->revision](int row, int col) {
+      const auto &draft = drafts[size_t(row)];
+      if (col == 0) { return io::get_string(draft, "title") + " / " + io::get_string(draft, "id").substr(0, 8); }
+      if (col == 1) { return std::to_string(io::get_int(draft, "base_revision", -1)); }
+      if (col == 2) {
+        const auto status = io::get_string(draft, "status");
+        return std::string(store->tr("project.drafts." +
+            (status == "pending" && io::get_int(draft, "base_revision", -1) != revision ? "outdated" : status)));
+      }
+      return draft.at("applied_revision").is_null() ? std::string("—") : draft.at("applied_revision").dump();
+    };
+    panel->table("draft_rows", std::move(spec));
+    const auto chosen = std::find_if(drafts.begin(), drafts.end(), [&](const auto &draft) { return draft.at("id") == selected_draft_; });
+    const bool pending = chosen != drafts.end() && io::get_string(*chosen, "status") == "pending";
+    auto &actions = panel->row();
+    const auto handle = state.project()->handle;
+    actions.button("load_draft", ctx.tr("project.drafts.load"), [&state, handle, id = selected_draft_] {
+      if (state.project() && state.project()->handle == handle) { state.load_draft(id); }
+    }).disable(state.busy() || !pending);
+    actions.button("discard_saved_draft", ctx.tr("project.drafts.discard"), [&state, handle, id = selected_draft_] {
+      if (state.project() && state.project()->handle == handle) { state.discard_saved_draft(id); }
+    }).disable(state.busy() || !pending);
+  }
+  auto &pages = panel->row();
+  pages.button("drafts_previous", ctx.tr("project.drafts.previous"), [&state] {
+    state.load_drafts(std::max(int64_t(0), state.drafts_offset() - 100));
+  }).disable(state.busy() || state.drafts_offset() == 0);
+  pages.button("drafts_next", ctx.tr("project.drafts.next"), [&state] {
+    state.load_drafts(state.drafts_next_offset());
+  }).disable(state.busy() || state.drafts_next_offset() < 0);
+}
+
 void ProjectReviewView::draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
 {
   layout.paragraph(ctx.tr("project.review.hint"));
+  saved_drafts(layout, ctx, state);
   if (!state.preview_supported()) { layout.paragraph(ctx.tr("project.review.unsupported")); }
   layout.text_area("review_source", {
     [&state] { return state.review_source(); },

@@ -210,6 +210,11 @@ class Bridge:
             "project.snapshot": lambda p, c: self.projects.snapshot(p),
             "project.apply": self.apply_project,
             "project.preview": lambda p, c: self.projects.preview(p),
+            "project.drafts.save": lambda p, c: self.projects.drafts("save", p),
+            "project.drafts.get": lambda p, c: self.projects.drafts("get", p),
+            "project.drafts.list": lambda p, c: self.projects.drafts("list", p),
+            "project.drafts.apply": self.apply_project_draft,
+            "project.drafts.discard": lambda p, c: self.projects.drafts("discard", p),
             "project.history": lambda p, c: self.projects.history(p),
             "project.backup": lambda p, c: self.projects.backup(p),
             "project.upgrade": self.upgrade_project,
@@ -412,6 +417,7 @@ class Bridge:
         # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
         names = ("project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot",
                  "project.apply", "project.preview", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
+                 "project.drafts.save", "project.drafts.get", "project.drafts.list", "project.drafts.apply", "project.drafts.discard",
                  "project.csv.import", "project.csv.export",
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
@@ -500,6 +506,13 @@ class Bridge:
         result = self.projects.apply(params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
+        return result
+
+    def apply_project_draft(self, params, context):
+        result = self.projects.drafts("apply", params)
+        if not result["replayed"]:
+            context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                                "revision": result["revision"]}))
         return result
 
     def upgrade_project(self, params, context):

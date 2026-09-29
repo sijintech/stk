@@ -77,6 +77,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
     assert {name for name in operations if name.startswith("project.") and not name.startswith(("project.snapshots.", "project.runs."))} == {
         "project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot", "project.apply", "project.preview", "project.history",
         "project.backup", "project.upgrade", "project.undo", "project.redo", "project.csv.import", "project.csv.export",
+        "project.drafts.save", "project.drafts.get", "project.drafts.list", "project.drafts.apply", "project.drafts.discard",
         "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve"}
     assert {"workspace.create", "task.submit", "task.logs", "upload.start", "transfer.get", "connections.ssh"} <= operations
     assert not operations & {"shutdown", "script.execute", "ui.attach", "watch", "logs.subscribe", "hub.review"}
@@ -255,6 +256,51 @@ def test_python_worker_previews_without_writing_then_explicitly_applies(scripts,
                      "assert stk.project.snapshot() == proposal['snapshot']", project_handle=project["handle"])
     assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})
     assert scripts.wait_event(lambda event: event["event"] == "project.changed")["data"]["revision"] == 1
+
+
+def test_python_saved_drafts_survive_reopen_and_return_receipts_without_reapplying(scripts, tmp_path):
+    directory = tmp_path / "drafts"
+    info = scripts.call("project.create", {"directory": str(directory), "name": "Drafts"})["project"]
+    session = scripts.call("script.open")["session"]
+    source = ("from uuid import uuid4\nfrom suan.scripting import ScriptError\n"
+              "p = stk.project\nbefore = p.snapshot()\n"
+              "draft_id = str(uuid4())\ncommands = [{'op': 'create_table', 'name': 'Cases'}]\n"
+              "draft = p.drafts.save(commands, expected_revision=0, title='参数草案', draft_id=draft_id)\n"
+              "assert draft['status'] == 'pending' and draft['base_revision'] == 0\n"
+              "assert p.drafts.save(commands, expected_revision=0, title='参数草案', draft_id=draft_id) == draft\n"
+              "assert p.drafts.get(draft_id) == draft\n"
+              "summary = p.drafts.list(limit=1)\n"
+              "assert summary['drafts'][0]['id'] == draft_id and summary['next_offset'] is None\n"
+              "assert 'commands' not in summary['drafts'][0]\n"
+              "other = p.drafts.save(commands, expected_revision=0, title='Discard me', draft_id=str(uuid4()))\n"
+              "assert p.drafts.discard(other['id'])['status'] == 'discarded'\n"
+              "assert p.snapshot() == before and p.history() == []\n"
+              "p.close()\n"
+              "try:\n    p.drafts.get(draft_id)\n"
+              "except ScriptError as error:\n    assert error.code == 'not_found'\n"
+              "else:\n    raise AssertionError('closed handle was accepted')\n"
+              f"p = stk.projects.open({str(directory)!r})\n"
+              "assert p.drafts.get(draft_id) == draft\n")
+    result = execute(scripts, session, source, project_handle=info["handle"])
+    assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})
+    assert scripts.events_of("project.changed") == []
+    result = execute(scripts, session,
+                     "receipt = p.drafts.apply(draft_id, expected_revision=0)\n"
+                     "assert receipt['revision'] == 1 and not receipt['replayed']\n"
+                     "assert receipt['draft']['status'] == 'applied'\n"
+                     "assert p.snapshot()['tables'][0]['id'] == draft['commands'][0]['id']\n"
+                     "p.undo(expected_revision=1)\n"
+                     "assert p.snapshot()['tables'] == []\n")
+    assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})
+    scripts.wait_event(lambda event: event["event"] == "project.changed" and event["data"]["revision"] == 2)
+    changed = scripts.events_of("project.changed")
+    result = execute(scripts, session,
+                     "replay = p.drafts.apply(draft_id, expected_revision=0)\n"
+                     "assert replay['replayed'] and replay['draft'] == receipt['draft']\n"
+                     "assert p.snapshot()['tables'] == [] and p.snapshot()['project']['revision'] == 2\n"
+                     "assert p.drafts.get(draft_id)['applied_revision'] == 1\n")
+    assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})
+    assert scripts.events_of("project.changed") == changed
 
 
 def test_python_review_requires_capability_and_sends_only_pinned_commands(scripts, tmp_path):

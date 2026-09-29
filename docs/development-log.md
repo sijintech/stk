@@ -1,5 +1,28 @@
 # 开发交接记录
 
+## 2026-09-29：持久草案、重开恢复与原子应用回执
+
+项目格式 6 增加独立 `project_drafts`：显式保存已校验的稳定命令、原始修订、名称和终态回执。
+保存/丢弃不改变参数修订或撤销栈；应用命令与已应用状态在一个 SQLite 事务中提交。
+同一草案 ID 的保存可恢复相同原始请求，重复应用返回原回执；撤销参数不会使旧草案再次执行。
+旧格式须明确升级，迁移前备份并校验；打开项目不自动升级。
+
+原生“修改检查”增加“已保存草案”面板，支持保存、分页、载入、丢弃与应用状态查询。
+载入只恢复命令，需重新计算并检查；过期草案须明确另起新草案，保留原记录。
+新输入、清除、项目切换和桥重启使旧回调失效；失败消息保留到用户后续操作，外部修订冲突会刷新项目。
+Python `p.drafts` 和五个可发现桥方法共用这一存储，不准备或提交任务。
+
+本机项目/桥/工作流 Python 回归 **248 通过、2 跳过**（两个许可求解器测试未显式启用）；
+含新增 **34** 项存储草案测试。原生重点与新增截图 **11/11**；完整桌面 **546/546、无跳过**。
+覆盖迁移备份、原子回滚、并发/不确定响应恢复、关闭重开、重启、稳定 UUID、过期草案、撤销后不重放、
+迟到回调和原生按钮。中英文 GL/Vulkan 草案面板通过，中文 Vulkan/英文 GL 截图已查看；字典各 **947 项**一致。
+Linux/macOS CI 已增加草案截图必跑检查，本批远端 CI 待推送后跟踪。
+
+日志 `/tmp/stk-saved-drafts-python-all.log`、`/tmp/stk-saved-drafts-native.log`、`/tmp/stk-saved-drafts-full.log`，
+JUnit `/tmp/stk-saved-drafts-full.xml`。用法见[草案指南](project-drafts.md)。
+下一包按[对话上下文设计](design/review-drafts-and-conversations.md)接显式上下文捕获、消息与提案关联；
+当前没有模型接入、聊天页面或持久对话，不把这些设计提案描述为已实现能力。
+
 ## 2026-09-29：Python 发起原生修改检查
 
 新增 `stk.project.review(commands, expected_revision=...)` 和可协商的本地 `project.review` UI 操作。
@@ -15,7 +38,10 @@
 检查了本轮生成的中文 Vulkan 检查页截图，80 个文档本地链接有效。
 
 日志 `/tmp/stk-python-review-python-all.log`、`/tmp/stk-python-review-native.log`、
-`/tmp/stk-python-review-full.log`；JUnit `/tmp/stk-python-review-full.xml`。本批跨平台 CI 待推送后跟踪。
+`/tmp/stk-python-review-full.log`；JUnit `/tmp/stk-python-review-full.xml`。
+`fa324d6` 的 [desktop CI](https://github.com/sijintech/stk/actions/runs/36562716767) 与
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36562716768) 全部成功，包含 Linux GL/Vulkan、macOS Metal、
+Windows 编译/CPU 测试、安装包/干净环境启动与双版本 Windows Python。
 用法见[预览指南](project-preview.md)。下一步设计对话上下文、持久草案和重开恢复记录，再接模型生成。
 
 ## 2026-09-29：参数表驱动的仿真批次

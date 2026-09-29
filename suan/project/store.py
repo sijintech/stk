@@ -20,7 +20,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 5
+FORMAT_VERSION = 6
 DATABASE_NAME = "project.sqlite3"
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
@@ -76,6 +76,19 @@ _DDL_V5 = (
         id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES run_plans(id),
         created_at TEXT NOT NULL, payload TEXT NOT NULL)""",
     "CREATE INDEX run_observations_by_run ON run_observations(run_id, id)",
+)
+
+_DDL_V6 = (
+    """CREATE TABLE project_drafts (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id), title TEXT NOT NULL,
+        base_revision INTEGER NOT NULL CHECK(base_revision >= 0), commands TEXT NOT NULL,
+        request_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending', 'applied', 'discarded')),
+        applied_revision INTEGER REFERENCES changes(revision), closed_at TEXT,
+        CHECK((status = 'pending' AND applied_revision IS NULL AND closed_at IS NULL)
+           OR (status = 'applied' AND applied_revision IS NOT NULL
+               AND applied_revision = base_revision + 1 AND closed_at IS NOT NULL)
+           OR (status = 'discarded' AND applied_revision IS NULL AND closed_at IS NOT NULL)))""",
 )
 
 
@@ -179,7 +192,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -245,6 +258,11 @@ class ProjectStore:
         from .runs import Runs
         return Runs(self)
 
+    @property
+    def drafts(self):
+        from .drafts import Drafts
+        return Drafts(self)
+
     def _backup(self, db):
         """Online SQLite backup of an already established *read* snapshot, published atomically."""
         project = dict(db.execute("SELECT * FROM project").fetchone())
@@ -309,7 +327,7 @@ class ProjectStore:
                 if tuple(identity) != (project["id"], expected_revision) or _version(source) != version:
                     raise ProjectError("Project changed while preparing the migration backup")
                 backup = self._backup(source)
-            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5)):
+            for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5), (5, _DDL_V6)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)

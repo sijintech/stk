@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "stk/app/app_store.hh"
+#include "stk/app/jobs_spec.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/platform/file_dialog.hh"
 
@@ -185,6 +186,7 @@ void ProjectState::attach(bridge::Client *client)
   runs_listener_.reset();
   ++epoch_;
   clear_review();
+  clear_drafts();
   ++recent_epoch_;
   recent_loaded_ = recent_loading_ = recent_dirty_ = false;
   recent_.clear();
@@ -238,6 +240,7 @@ void ProjectState::on_state(const bridge::BridgeState state)
   if (state != bridge::BridgeState::Ready) {
     ++epoch_;
     clear_review();
+    clear_drafts();
     ++recent_epoch_;
     recent_loaded_ = recent_loading_ = recent_dirty_ = false;
     recent_.clear();
@@ -323,6 +326,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
   ++epoch_;
   busy_ = true;
   clear_review();
+  clear_drafts();
   error_.clear();
   notice_.clear();
   const auto hello = client_->hello_info();
@@ -368,6 +372,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
 void ProjectState::clear()
 {
   clear_review();
+  clear_drafts();
   notice_.clear();
   project_.reset();
   clear_runs();
@@ -477,6 +482,7 @@ void ProjectState::clear_review()
   review_.reset();
   review_source_ = "[]";
   review_error_.clear();
+  saved_review_ = save_request_ = Json::object();
 }
 
 void ProjectState::discard_review()
@@ -492,6 +498,7 @@ void ProjectState::set_review_source(std::string source)
   review_source_ = std::move(source);
   review_.reset();
   review_error_.clear();
+  saved_review_ = save_request_ = Json::object();
   changed();
 }
 
@@ -507,6 +514,13 @@ bool ProjectState::preview()
   ++review_generation_;
   review_.reset();
   review_error_.clear();
+  save_request_ = Json::object();
+  if (!saved_review_.empty() && (io::get_string(saved_review_, "status") != "pending" ||
+      io::get_int(saved_review_, "base_revision", -1) != project_->revision)) {
+    review_error_ = std::string(store_.tr("project.drafts.stale"));
+    changed();
+    return false;
+  }
   Json commands;
   try {
     // Keep the interactive editor bounded; the bridge/store impose their own independent limits.
@@ -547,7 +561,11 @@ bool ProjectState::can_apply_review() const
 {
   return ready() && !busy() && loaded() && review_ && !project_->handle.empty() &&
          review_->project_id == project_->id && review_->base_revision == project_->revision &&
-         dirty_revision_ <= review_->base_revision;
+         dirty_revision_ <= review_->base_revision &&
+         (saved_review_.empty() || (io::get_string(saved_review_, "status") == "pending" &&
+          io::get_int(saved_review_, "base_revision", -1) == review_->base_revision &&
+          io::python_json_dumps(saved_review_.at("commands"), true, true) ==
+              io::python_json_dumps(review_->commands, true, true)));
 }
 
 bridge::Result<Json> ProjectState::request_review(const std::string &handle, const int64_t expected_revision,
@@ -585,7 +603,179 @@ bool ProjectState::apply_review()
   // Consume before sending: a failed/uncertain write must never leave a one-click replay behind.
   ++review_generation_;
   review_.reset();
+  if (!saved_review_.empty()) {
+    busy_ = true;
+    const auto generation = review_generation_;
+    bridge::CallOptions options;
+    options.retry = bridge::CallOptions::Retry::Never;
+    on(client_->call("project.drafts.apply", {{"handle", project_->handle},
+        {"draft_id", saved_review_.at("id")}, {"expected_revision", review->base_revision}}, options),
+       [this, generation](const bridge::Result<Json> &result) {
+      busy_ = false;
+      drafts_loaded_ = false;
+      if (!result.ok()) { fail(result.error()); }
+      else {
+        if (generation == review_generation_) { saved_review_ = result.value().at("draft"); }
+        dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+      }
+      refresh();
+    });
+    changed();
+    return true;
+  }
   return apply(review->commands, review->base_revision);
+}
+
+void ProjectState::clear_drafts()
+{
+  drafts_ = Json::array();
+  drafts_error_.clear();
+  drafts_loaded_ = false;
+  drafts_offset_ = 0;
+  drafts_next_offset_ = -1;
+}
+
+bool ProjectState::drafts_supported() const
+{
+  const auto hello = client_ ? client_->hello_info() : std::nullopt;
+  if (!ready() || !loaded() || project_->format_version < 6 || !hello) { return false; }
+  for (const auto *operation : {"save", "get", "list", "apply", "discard"}) {
+    if (!hello->has_method(std::string("project.drafts.") + operation)) { return false; }
+  }
+  return true;
+}
+
+bool ProjectState::load_drafts(const int64_t offset, const bool preserve_error)
+{
+  if (!drafts_supported() || busy() || offset < 0) { return false; }
+  busy_ = true;
+  if (!preserve_error) { drafts_error_.clear(); }
+  on(client_->call("project.drafts.list", {{"handle", project_->handle}, {"offset", offset}, {"limit", 100}}),
+     [this, offset](const bridge::Result<Json> &result) {
+    busy_ = false;
+    drafts_loaded_ = true;
+    if (!result.ok()) { drafts_error_ = result.error().describe(); }
+    else {
+      drafts_ = result.value().at("drafts");
+      drafts_offset_ = offset;
+      drafts_next_offset_ = io::get_int(result.value(), "next_offset", -1);
+      for (const auto &draft : drafts_) {
+        if (!saved_review_.empty() && draft.at("id") == saved_review_.at("id")) {
+          for (const char *key : {"status", "applied_revision", "closed_at"}) { saved_review_[key] = draft.at(key); }
+          if (io::get_string(saved_review_, "status") != "pending") { ++review_generation_; review_.reset(); }
+        }
+      }
+    }
+    changed();
+    if (dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::save_review(const std::string &title)
+{
+  if (!drafts_supported() || !can_apply_review() || !saved_review_.empty() || title.empty()) { return false; }
+  const auto review = review_;
+  Json request = {{"handle", project_->handle}, {"commands", review->commands},
+                  {"expected_revision", review->base_revision}, {"title", title}};
+  auto previous = save_request_;
+  previous.erase("draft_id");
+  if (previous != request) {
+    const auto hex = new_idempotency_key();
+    request["draft_id"] = hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) +
+                          "-" + hex.substr(16, 4) + "-" + hex.substr(20);
+    save_request_ = request;
+  }
+  busy_ = true;
+  drafts_error_.clear();
+  const auto generation = review_generation_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  on(client_->call("project.drafts.save", save_request_, options), [this, generation](const bridge::Result<Json> &result) {
+    busy_ = false;
+    drafts_loaded_ = false;
+    if (!result.ok()) { drafts_error_ = result.error().describe(); }
+    else if (generation == review_generation_) {
+      saved_review_ = result.value().at("draft");
+      review_source_ = saved_review_.at("commands").dump();
+    }
+    changed();
+    if (!result.ok() || dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::load_draft(const std::string &id)
+{
+  if (!drafts_supported() || busy() || id.empty()) { return false; }
+  if (review_ || review_source_ != "[]" || !review_error_.empty() || !saved_review_.empty()) {
+    drafts_error_ = std::string(store_.tr("project.drafts.clear_first"));
+    changed();
+    return false;
+  }
+  busy_ = true;
+  drafts_error_.clear();
+  const auto generation = review_generation_;
+  on(client_->call("project.drafts.get", {{"handle", project_->handle}, {"draft_id", id}}),
+     [this, generation](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result.ok()) { drafts_error_ = result.error().describe(); }
+    else if (generation == review_generation_) {
+      const auto &draft = result.value().at("draft");
+      if (io::get_string(draft, "project_id") != project_->id || io::get_string(draft, "status") != "pending") {
+        drafts_error_ = std::string(store_.tr("project.drafts.resolved"));
+        drafts_loaded_ = false;
+      }
+      else {
+        ++review_generation_;
+        saved_review_ = draft;
+        review_source_ = draft.at("commands").dump();
+        review_.reset();
+        review_error_.clear();
+      }
+    }
+    changed();
+    if (dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::discard_saved_draft(const std::string &id)
+{
+  if (!drafts_supported() || busy() || id.empty()) { return false; }
+  busy_ = true;
+  drafts_error_.clear();
+  const auto generation = review_generation_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  on(client_->call("project.drafts.discard", {{"handle", project_->handle}, {"draft_id", id}}, options),
+     [this, generation, id](const bridge::Result<Json> &result) {
+    busy_ = false;
+    drafts_loaded_ = false;
+    if (!result.ok()) { drafts_error_ = result.error().describe(); }
+    else if (generation == review_generation_ && io::get_string(saved_review_, "id") == id) {
+      ++review_generation_;
+      review_.reset();
+      saved_review_ = result.value().at("draft");
+    }
+    changed();
+    if (dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::copy_saved_review()
+{
+  if (busy() || saved_review_.empty()) { return false; }
+  ++review_generation_;
+  saved_review_ = save_request_ = Json::object();
+  review_.reset();
+  review_error_.clear();
+  return preview(); // Explicitly start a new proposal at the currently displayed revision.
 }
 
 bool ProjectState::backup()

@@ -85,6 +85,35 @@ class Project:
     def snapshots(self):
         return ProjectSnapshots(self._call, self.handle)
 
+    @property
+    def drafts(self):
+        return ProjectDrafts(self._call, self.handle)
+
+
+class ProjectDrafts:
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def save(self, commands, *, expected_revision, title, draft_id):
+        """Save a validated proposal without applying it; retain the UUID to recover a lost response."""
+        return self._call("project.drafts.save", {"handle": self.handle, "commands": commands,
+            "expected_revision": expected_revision, "title": title, "draft_id": draft_id})["draft"]
+
+    def get(self, draft_id):
+        return self._call("project.drafts.get", {"handle": self.handle, "draft_id": draft_id})["draft"]
+
+    def list(self, *, offset=0, limit=100):
+        return self._call("project.drafts.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def apply(self, draft_id, *, expected_revision):
+        """Explicitly apply once at the saved revision; later retries return the durable receipt."""
+        return self._call("project.drafts.apply", {"handle": self.handle, "draft_id": draft_id,
+                                                  "expected_revision": expected_revision})
+
+    def discard(self, draft_id):
+        """Close a pending saved draft without changing project tables or undo history."""
+        return self._call("project.drafts.discard", {"handle": self.handle, "draft_id": draft_id})["draft"]
+
 
 class ProjectCSV:
     def __init__(self, call, handle):
@@ -280,4 +309,4 @@ class API:
         print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectCSV", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]
+__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectCSV", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]

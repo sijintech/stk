@@ -37,7 +37,7 @@ struct ProjectTable {
 std::optional<io::Json> project_literal(std::string_view type, std::string_view text, std::string &error_key);
 
 /** Main-thread project controller shared by editors. Bridge callbacks must use the UI executor.
- * All edits use project.apply; snapshots are replaced together. Stale callbacks are discarded after
+ * All edits use revisioned project commands; snapshots are replaced together. Stale callbacks are discarded after
  * a switch, close or bridge restart. Restart reopens by path/UUID but never replays a mutation. */
 class ProjectState {
  public:
@@ -82,6 +82,18 @@ class ProjectState {
   bool can_apply_review() const;
   bool apply_review();
   void discard_review();
+  bool drafts_supported() const;
+  bool load_drafts(int64_t offset = 0, bool preserve_error = false);
+  bool drafts_loaded() const { return drafts_loaded_; }
+  const io::Json &drafts() const { return drafts_; }
+  const io::Json &saved_review() const { return saved_review_; }
+  const std::string &drafts_error() const { return drafts_error_; }
+  int64_t drafts_offset() const { return drafts_offset_; }
+  int64_t drafts_next_offset() const { return drafts_next_offset_; }
+  bool save_review(const std::string &title);
+  bool load_draft(const std::string &id);
+  bool discard_saved_draft(const std::string &id);
+  bool copy_saved_review();
   bool import_csv(const std::string &source, const std::string &name, const io::Json &types,
                   const io::Json &units, const std::string &delimiter);
   bool export_csv(const std::string &destination, const std::string &delimiter);
@@ -131,6 +143,7 @@ class ProjectState {
   void fail(const bridge::Error &error);
   void clear();
   void clear_review();
+  void clear_drafts();
   void validate_selection();
   bool restore_edit(bool redo);
   bool run_operation(const std::string &action, const std::string &id, bool allow_stale = false);
@@ -154,6 +167,10 @@ class ProjectState {
   std::shared_ptr<const ProjectReview> review_;
   std::string review_source_ = "[]", review_error_;
   uint64_t review_generation_ = 0;
+  io::Json drafts_ = io::Json::array(), saved_review_ = io::Json::object(), save_request_ = io::Json::object();
+  std::string drafts_error_;
+  bool drafts_loaded_ = false;
+  int64_t drafts_offset_ = 0, drafts_next_offset_ = -1;
   io::Json file_index_ = io::Json::object();
   io::Json input_snapshots_ = io::Json::array(), input_verification_ = io::Json::object();
   io::Json runs_ = io::Json::array(), run_ = io::Json::object();
