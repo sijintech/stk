@@ -589,9 +589,12 @@ class ProjectEditor final : public Editor {
   {
     const auto &table = *state.table();
     const auto identity = state.project()->handle + table.id;
+    if (query_handle_ != state.project()->handle) {
+      query_handle_ = state.project()->handle;
+      query_ = {};
+    }
     if (query_identity_ != identity) {
       query_identity_ = identity;
-      query_ = {};
       query_revision_ = -1;
     }
     auto &search = layout.row();
@@ -1007,7 +1010,7 @@ class ProjectEditor final : public Editor {
   }
 
   ProjectTableQuery query_;
-  std::string query_identity_, query_cached_text_, query_error_;
+  std::string query_handle_, query_identity_, query_cached_text_, query_error_;
   bool query_cached_errors_ = false;
   int64_t query_revision_ = -1;
   uint64_t query_version_ = 0;

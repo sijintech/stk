@@ -66,15 +66,48 @@ print(p.backup())
 文件执行设置 `__name__ = "__main__"`、`__file__`，并临时设置 `sys.argv = [文件路径]` 及文件目录的导入路径，
 因此常见的 main guard 和同目录辅助模块可直接使用；执行后恢复 `sys.argv` / `sys.path`。
 
+## 查询和改变原生共享选择
+
+`p.selection()` 读取桌面当前已载入项目的共享选择，返回
+`{project_id, revision, table_id, record_id}`；没有表格或记录选择时，对应 ID 为 `None`。
+这里的 `p` 固定在创建 facade 时的项目句柄上，不能借查询自动打开或切换另一个项目。
+
+`p.select(table_id, record_id, expected_revision=...)` 在 UI 主线程核对当前句柄、修订、规范 UUID
+及记录所属表格后，一次更新共享选择，返回同样的结构。失败不会只切换表格而留下错误记录。
+例如，先从项目快照取得明确对象，再选择并检查：
+
+```python
+p = stk.project
+snapshot = p.snapshot()
+table = snapshot["tables"][0]  # 使用已核对且含记录的表格。
+record_id = table["records"][0]["id"]
+selected = p.select(table["id"], record_id,
+                    expected_revision=snapshot["project"]["revision"])
+print(selected)
+print(p.selection())
+```
+
+选择只改变当前共享选择，不打开区域、移动焦点、切换页签、清除筛选或替换已有修改检查草案，
+也不写数据库、提升修订、捕获上下文或提交任务。各区域的筛选仍独立，选中的记录可能在某个区域被隐藏。
+返回值不包含筛选后的行集合或区域内的字段选择；需要保存上下文时，继续明确选择字段并调用
+`p.contexts.capture(...)`，示例见[上下文指南](project-contexts.md#从原生共享选择明确捕获)。
+
+这两个入口需要原生桌面协商支持 `project.selection` / `project.select`。项目须已载入、就绪、空闲，
+且没有待刷新的已知修订；句柄或修订不符会拒绝操作。任何窗口仍在输入文字时，`select` 返回 `busy`，
+保留输入；满足项目条件的只读 `selection` 仍可使用。外部 CLI 写入可能尚未反映到桌面，
+选择中的修订只描述已载入快照，后续捕获或修改仍须通过数据库的修订校验。失败后先查看状态，不自动重放选择。
+
 ## 操作覆盖
 
-`stk.operations()` 返回已开放的项目、连接、Runtime 操作参数/结果 schema 和 UI 操作名称；`stk.help()` 打印这份目录。
+`stk.operations()` 返回已开放的项目、连接、Runtime 操作参数/结果 schema 和 UI 操作名称；
+`stk.help()` 打印这份目录，并在支持时附带共享选择的使用示例。
 `stk.call("project.snapshot", handle=...)` 是命名参数形式的底层入口。
 操作错误是 `suan.scripting.ScriptError`，可读取 `code`、`data`、`retryable`。
 
 | 范围 | 当前状态 |
 |---|---|
 | 项目创建、打开、列表、关闭、快照、事务修改、历史、撤销/重做、数据库备份/升级 | 已实现，与桌面桥共用命令；包括引用与轻量公式 |
+| 原生项目共享表格/记录选择 | `stk.project.selection()` / `select(..., expected_revision=...)`；固定项目句柄与修订，不改变区域筛选、布局或数据库 |
 | 项目修改预览与原生检查 | `stk.project.preview` 返回内存候选；`stk.project.review` 将命令送入原生差异页，由用户明确应用，见[预览指南](project-preview.md) |
 | 持久修改草案与应用回执 | `stk.project.drafts.save/get/list/apply/discard`，格式 6；明确保存、检查和应用，撤销不重置应用回执，见[草案指南](project-drafts.md) |
 | 明确选择的上下文、文字讨论与草案来源 | `stk.project.contexts.capture/get/list`、`stk.project.discussion.add/get/list/link_draft/proposals`，格式 7；不调用模型或执行消息内容，见[上下文指南](project-contexts.md) |

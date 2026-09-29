@@ -764,7 +764,9 @@ to bridge stderr. EOF/close/shutdown stops the worker; restarting never restores
 
 - `ui.attach {operations}` returns `{session, operations}`. The local client advertises supported
   operation names: `layout.get`, `layout.apply`, `editors.list`, `project.current`, `project.open`,
-  `project.close`, optional `project.review`, plus the Viewer operations below. Reattaching the same set is idempotent; changing it requires detach.
+  `project.close`, optional `project.review`, `project.selection`, `project.select`, plus the Viewer
+  operations below. The current supported set contains 21 operation names; discover and negotiate
+  names rather than assuming support from that count. Reattaching the same set is idempotent; changing it requires detach.
 - `ui.request {session, request, operation, params, expires_at_ms}` asks that executor to perform one
   operation. Requests are correlated by both IDs, expire after 30 seconds, and are never replayed.
   `expires_at_ms` is a UTC Unix timestamp in milliseconds on the same machine. The desktop rejects
@@ -816,6 +818,36 @@ its original record is retained. Clearing the review editor never discards a sav
 Capability discovery/attachment includes `project.review` only when both bridge and client support it;
 the original six-operation fallback is unchanged. The Python facade exposes this as
 `stk.project.review(commands, expected_revision=...)`. See [project preview](../project-preview.md).
+
+The optional reverse UI operation `project.selection {handle}` returns the flat object
+`{project_id, revision, table_id: uuid|null, record_id: uuid|null}` for the currently loaded shared
+project selection. It performs no database read or implicit refresh. The facade's handle must match
+the current native project. The project controller must be ready, loaded and idle, without a known
+newer revision awaiting refresh. Active text input alone does not prevent this read. Null table or
+record IDs indicate no corresponding shared selection; the result contains no editor-local field
+selection, search query or filtered row set.
+
+`project.select {handle, expected_revision, table_id, record_id}` validates the same native project
+handle, a matching nonnegative int64 revision, canonical non-null UUIDs, and an existing record
+belonging to the requested table. It validates both targets before atomically changing the shared
+table/record selection, and returns the same flat selection object. Invalid UUIDs/parameter shapes
+are `invalid_params`; a current project/handle/revision mismatch is `conflict`, and a missing table or
+record outside the requested table is `not_found`. Rejection leaves the selection unchanged.
+Any active text edit in any attached window makes this write `busy`, preserving uncommitted input.
+Neither operation opens a project/editor, moves focus, changes tabs, clears view-local filters or
+replaces an existing review. A selected row may be hidden by an editor's local filter. Selection
+does not modify the database, advance revision, emit `project.changed`, capture context or submit work.
+
+These are explicitly negotiated local UI operations, not new ordinary project bridge methods or
+remote endpoints. `script.catalog.ui_operations` and `ui.attach` advertise them when supported;
+the original six-operation fallback remains unchanged. Python exposes `p.selection()` and
+`p.select(table_id, record_id, expected_revision=...)`, passing the facade's pinned project handle.
+The executor checks preconditions when the queued request runs and follows the session/expiry rules
+above; neither request is automatically replayed. An external writer may have advanced SQLite
+without a desktop event: returned revisions describe the loaded snapshot, and subsequent
+`project.contexts.capture` or edits must still pass their database revision check. See
+[selection scripting](../scripting.md#查询和改变原生共享选择) and
+[explicit capture from selection](../project-contexts.md#从原生共享选择明确捕获).
 
 The Python facade exposes project methods, saved connection inspection/managed SSH, workspace/task
 operations, transfers and read-only Hub discovery/action queries through the shared command handlers.

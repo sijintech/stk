@@ -67,6 +67,31 @@ void AppShell::perform_ui_request(wm::Screen &screen, const std::string &operati
     perform_viewer_request(screen, operation, params, std::move(complete));
     return;
   }
+  if (operation == "project.selection" || operation == "project.select") {
+    const bool select = operation == "project.select";
+    if (!params.is_object() || params.size() != (select ? 4 : 1) || !params.contains("handle") ||
+        !params["handle"].is_string() || params["handle"].get_ref<const std::string &>().empty() ||
+        (select && (!params.contains("expected_revision") || !params["expected_revision"].is_number_integer() ||
+          params["expected_revision"] < 0 || params["expected_revision"] > std::numeric_limits<int64_t>::max() ||
+          !params.contains("table_id") || !params["table_id"].is_string() ||
+          !params.contains("record_id") || !params["record_id"].is_string()))) {
+      complete(Error::make(ErrorCode::InvalidParams, "Invalid parameters for " + operation));
+      return;
+    }
+    if (select) {
+      for (auto *target : screens_) {
+        if (target->ui() && target->ui()->text_input_active()) {
+          complete(Error::make(ErrorCode::Busy, "Finish the current desktop text edit before changing the project selection"));
+          return;
+        }
+      }
+    }
+    auto &project = store_.project();
+    complete(select ? project.request_select(params["handle"].get<std::string>(), params["expected_revision"].get<int64_t>(),
+                                             params["table_id"].get<std::string>(), params["record_id"].get<std::string>()) :
+                      project.request_selection(params["handle"].get<std::string>()));
+    return;
+  }
   if (operation == "project.review") {
     if (!params.is_object() || params.size() != 3 || !params.contains("handle") ||
         !params["handle"].is_string() || params["handle"].get_ref<const std::string &>().empty() ||

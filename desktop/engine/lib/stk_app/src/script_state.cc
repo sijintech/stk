@@ -283,6 +283,7 @@ void ScriptState::attach_ui()
     if (!ui_handler_) { ui_attaching_ = false; return; }
     Json operations = Json::array();
     for (const auto *name : {"layout.get", "layout.apply", "editors.list", "project.current", "project.open", "project.close", "project.review",
+                             "project.selection", "project.select",
                              "viewer.status", "viewer.presets", "viewer.open", "viewer.close", "viewer.configure", "viewer.preset",
                              "viewer.evaluate", "viewer.cancel", "viewer.layer", "viewer.step", "viewer.play", "viewer.reset_camera"}) {
       if (std::find(advertised.begin(), advertised.end(), Json(name)) != advertised.end()) { operations.push_back(name); }

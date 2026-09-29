@@ -3090,7 +3090,7 @@
                 "$ref": "#/$defs/uiOperation"
               },
               "uniqueItems": true,
-              "maxItems": 19
+              "maxItems": 21
             }
           },
           "required": [
@@ -6002,7 +6002,9 @@
         "viewer.step",
         "viewer.play",
         "viewer.reset_camera",
-        "project.review"
+        "project.review",
+        "project.selection",
+        "project.select"
       ]
     },
     "scriptRun": {

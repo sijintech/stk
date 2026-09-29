@@ -28,6 +28,23 @@ class Project:
     def snapshot(self):
         return self._call("project.snapshot", {"handle": self.handle})["snapshot"]
 
+    def selection(self):
+        """Read shared table/record UUIDs and the desktop's observed revision.
+
+        This handle must still identify the visible project. The result describes
+        shared selection, not a particular editor's filtered rows or active column.
+        """
+        return self._call("ui.project.selection", {"handle": self.handle})
+
+    def select(self, table_id, record_id, *, expected_revision):
+        """Select one explicit existing row without editing data or moving focus.
+
+        Both IDs must belong to the visible project at the supplied revision. This
+        never opens a project, replaces a review, or supplies a view-specific filter.
+        """
+        return self._call("ui.project.select", {"handle": self.handle, "expected_revision": expected_revision,
+                                               "table_id": table_id, "record_id": record_id})
+
     def apply(self, commands, *, expected_revision):
         """One atomic edit, with an explicit base revision; never retried automatically."""
         return self._call("project.apply", {"handle": self.handle, "commands": commands,
@@ -356,9 +373,18 @@ class API:
         return self._call("operations", {})
 
     def help(self):
-        """Print the currently supported operation names and parameter schemas."""
+        """Print the current operation catalog and supported usage examples as JSON."""
         import json
-        print(json.dumps(self.operations(), ensure_ascii=False, indent=2))
+        catalog = dict(self.operations())
+        if {"project.selection", "project.select"} <= set(catalog.get("ui_operations", [])):
+            catalog["examples"] = {"project_selection": [
+                "p = stk.project",
+                "selected = p.selection()",
+                "print(selected)",
+                "# Supply explicit table/record UUIDs from the observed project revision:",
+                "# p.select(table_id, record_id, expected_revision=selected['revision'])",
+            ]}
+        print(json.dumps(catalog, ensure_ascii=False, indent=2))
 
 
 __all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectContexts", "ProjectCSV", "ProjectDiscussion", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "Projects", "Runtime", "ScriptError", "Transfers", "Viewer"]

@@ -89,6 +89,38 @@ print(p.contexts.list())
 大小和校验和描述该项原存储 JSON 的 UTF-8 字节。缺失缓存使用空字节的大小和校验和。
 这些标记用于识别省略内容，不能凭校验和恢复其值。
 
+### 从原生共享选择明确捕获
+
+桌面 Python 可使用 `p.selection()` 取得当前已载入的表格、记录 UUID 和修订，或先通过
+`p.select(...)` 明确选择一行。选择不会自动捕获上下文；字段范围仍由调用者提供。
+下面选取快照中核对过的一行和一个字段，再单独保存上下文：
+
+```python
+from uuid import uuid4
+
+p = stk.project
+snapshot = p.snapshot()
+table = snapshot["tables"][0]
+record_id = table["records"][0]["id"]
+field_ids = [table["fields"][0]["id"]]  # 明确选择字段，不读取区域内的字段焦点。
+p.select(table["id"], record_id, expected_revision=snapshot["project"]["revision"])
+selection = p.selection()
+if (selection["table_id"] != table["id"] or selection["record_id"] != record_id
+        or selection["revision"] != snapshot["project"]["revision"]):
+    raise RuntimeError("选择或项目已变化，请重新核对")
+context_id = str(uuid4())
+context = p.contexts.capture(
+    selection["table_id"], [selection["record_id"]], field_ids,
+    expected_revision=selection["revision"], title="选中行的讨论依据", context_id=context_id,
+)
+```
+
+共享选择可能被某个区域的筛选隐藏，查询不会返回该区域可见行集合，也不会调整筛选。
+没有选中表格或记录时，`selection` 中相应 ID 为 `None`，应先明确选择。
+选择接口只针对桌面已载入的项目，不打开项目或切换页签；写入选择会保护正在输入的文字，
+具体前提见[Python 指南](scripting.md#查询和改变原生共享选择)。外部修改即使尚未显示在桌面，
+捕获仍在数据库中校验 `expected_revision`，不会把过期选择静默当作新修订。
+
 ## 记录文字与草案来源
 
 ```python

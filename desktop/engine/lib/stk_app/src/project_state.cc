@@ -570,6 +570,56 @@ bool ProjectState::can_apply_review() const
               io::python_json_dumps(review_->commands, true, true)));
 }
 
+bridge::Result<Json> ProjectState::request_selection(const std::string &handle) const
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  if (client_ != store_.bridge() || !ready()) { return Error::make(ErrorCode::Unavailable, "The project bridge is not ready"); }
+  if (!project_ || project_->handle != handle || dirty_revision_ > project_->revision) {
+    return Error::make(ErrorCode::Conflict, "The visible project or its observed revision changed; inspect the project again");
+  }
+  if (busy() || !loaded()) { return Error::make(ErrorCode::Busy, "The project controller is busy"); }
+  return Json{{"project_id", project_->id}, {"revision", project_->revision},
+              {"table_id", table_id_.empty() ? Json(nullptr) : Json(table_id_)},
+              {"record_id", record_id_.empty() ? Json(nullptr) : Json(record_id_)}};
+}
+
+bridge::Result<Json> ProjectState::request_select(const std::string &handle, const int64_t expected_revision,
+                                                 const std::string &table_id, const std::string &record_id)
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  const auto canonical_id = [](const std::string &id) {
+    if (id.size() != 36) { return false; }
+    for (size_t i = 0; i < id.size(); ++i) {
+      if (i == 8 || i == 13 || i == 18 || i == 23) { if (id[i] != '-') { return false; } }
+      else if (!((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f'))) { return false; }
+    }
+    return true;
+  };
+  if (expected_revision < 0 || !canonical_id(table_id) || !canonical_id(record_id)) {
+    return Error::make(ErrorCode::InvalidParams, "Selection requires canonical table/record UUIDs and a nonnegative revision");
+  }
+  const auto current = request_selection(handle);
+  if (!current.ok()) { return current.error(); }
+  if (project_->revision != expected_revision) {
+    return Error::make(ErrorCode::Conflict, "The visible project revision changed; inspect the project again");
+  }
+  const auto table = std::find_if(tables_.begin(), tables_.end(), [&](const auto &value) { return value.id == table_id; });
+  if (table == tables_.end() || std::none_of(table->records.begin(), table->records.end(),
+                                           [&](const auto &value) { return value.id == record_id; })) {
+    return Error::make(ErrorCode::NotFound, "The requested record does not belong to the requested project table");
+  }
+  // Validate both identities first. The interactive setters may fall back to the first row;
+  // an explicit Python request must instead either select its exact target or change nothing.
+  if (table_id_ != table_id || record_id_ != record_id) {
+    table_id_ = table_id;
+    record_id_ = record_id;
+    changed();
+  }
+  return request_selection(handle);
+}
+
 bridge::Result<Json> ProjectState::request_review(const std::string &handle, const int64_t expected_revision,
                                                  const Json &commands)
 {
@@ -1182,9 +1232,10 @@ void ProjectState::validate_selection()
   if (!table()) {
     table_id_ = tables_.empty() ? std::string() : tables_.front().id;
   }
-  if (const auto *t = table(); t && selected_record() < 0) {
-    record_id_ = t->records.empty() ? std::string() : t->records.front().id;
+  if (const auto *t = table()) {
+    if (selected_record() < 0) { record_id_ = t->records.empty() ? std::string() : t->records.front().id; }
   }
+  else { record_id_.clear(); }
 }
 
 }  // namespace stk::app

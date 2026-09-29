@@ -88,7 +88,184 @@ class ScriptPython : public ::testing::Test {
             "        raise AssertionError('unexpected acceptance')\n"
             "request = {'handle': p.handle, 'commands': commands, 'expected_revision': 0}");
   }
+  void selection_project(const bool already_open = false)
+  {
+    if (!already_open) { ASSERT_NO_FATAL_FAILURE(open_project()); }
+    execute(R"PY(
+from uuid import uuid4
+t1, t2, r1, r2, r3, f1 = (str(uuid4()) for _ in range(6))
+p.apply([
+    {'op': 'create_table', 'id': t1, 'name': 'First'},
+    {'op': 'add_field', 'id': f1, 'table_id': t1, 'name': 'Label', 'type': 'text'},
+    {'op': 'add_record', 'id': r1, 'table_id': t1},
+    {'op': 'add_record', 'id': r2, 'table_id': t1},
+    {'op': 'set_cell', 'table_id': t1, 'record_id': r1, 'field_id': f1, 'value': 'Red'},
+    {'op': 'set_cell', 'table_id': t1, 'record_id': r2, 'field_id': f1, 'value': 'Blue'},
+    {'op': 'create_table', 'id': t2, 'name': 'Second'},
+    {'op': 'add_record', 'id': r3, 'table_id': t2},
+], expected_revision=0)
+def selection_rejected(params, code, operation='project.select'):
+    try:
+        stk.call('ui.' + operation, **params)
+    except ScriptError as error:
+        assert error.code == code, str(error)
+    else:
+        raise AssertionError('unexpected selection acceptance')
+select_request = {'handle': p.handle, 'expected_revision': 1, 'table_id': t1, 'record_id': r2}
+)PY");
+    auto &project = f.shell->store().project();
+    ASSERT_TRUE(pump([&] { return project.loaded() && !project.busy() && project.project()->revision == 1; }));
+  }
+
 };
+
+TEST_F(ScriptPython, ProjectSelectionReadsEmptyProjectsAndCapturesExactSelectedRows)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  execute("assert p.selection() == {'project_id': p.snapshot()['project']['id'], 'revision': 0, 'table_id': None, 'record_id': None}");
+  auto &project = f.shell->store().project();
+  ASSERT_NO_FATAL_FAILURE(selection_project(true));
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.add_tab(kEditorPython));
+  const auto layout = f.screen.to_json();
+  project.set_review_source(Json::array({{{"op", "create_table"}, {"name", "Preserved review"}}}).dump());
+  ASSERT_TRUE(project.preview()); ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  ASSERT_TRUE(project.save_review("Preserved source")); ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  const auto review = project.review();
+  const auto saved = project.saved_review();
+  execute(R"PY(
+before = p.snapshot()
+assert p.selection()['record_id'] == r1
+result = p.select(t2, r3, expected_revision=1)
+assert result == {'project_id': before['project']['id'], 'revision': 1, 'table_id': t2, 'record_id': r3}
+assert p.selection() == result
+selected = p.select(t1, r2, expected_revision=result['revision'])
+context = p.contexts.capture(selected['table_id'], [selected['record_id']], [f1],
+    expected_revision=selected['revision'], title='Selected row', context_id=str(uuid4()))
+assert context['content']['value']['records'][0]['literals'][f1]['value'] == 'Blue'
+assert p.snapshot() == before and len(p.history()) == 1
+)PY");
+  EXPECT_EQ(f.screen.to_json(), layout);
+  EXPECT_EQ(area.editor().type().id, kEditorPython);
+  EXPECT_EQ(project.review(), review);
+  EXPECT_EQ(project.saved_review(), saved);
+  EXPECT_TRUE(project.can_apply_review());
+  EXPECT_EQ(project.project()->revision, 1);
+}
+
+TEST_F(ScriptPython, ProjectSelectionClearsDeletedRecordsAndTables)
+{
+  ASSERT_NO_FATAL_FAILURE(selection_project());
+  auto &project = f.shell->store().project();
+  execute("p.select(t2, r3, expected_revision=1)\np.apply([{'op': 'delete_record', 'id': r3}], expected_revision=1)");
+  ASSERT_TRUE(pump([&] { return project.loaded() && !project.busy() && project.project()->revision == 2; }));
+  execute("assert p.selection()['table_id'] == t2 and p.selection()['record_id'] is None\n"
+          "p.apply([{'op': 'delete_table', 'id': t2}], expected_revision=2)");
+  ASSERT_TRUE(pump([&] { return project.loaded() && !project.busy() && project.project()->revision == 3; }));
+  execute("assert p.selection()['table_id'] == t1 and p.selection()['record_id'] == r1\n"
+          "p.apply([{'op': 'delete_table', 'id': t1}], expected_revision=3)");
+  ASSERT_TRUE(pump([&] { return project.loaded() && !project.busy() && project.project()->revision == 4; }));
+  execute("assert p.selection() == {'project_id': p.snapshot()['project']['id'], 'revision': 4, 'table_id': None, 'record_id': None}");
+}
+
+TEST_F(ScriptPython, ProjectSelectionRejectsMalformedOrMismatchedTargetsWithoutPartialChanges)
+{
+  ASSERT_NO_FATAL_FAILURE(selection_project());
+  execute(R"PY(
+before = p.selection()
+for revision in (True, -1, 1.0, '1', 2**63):
+    selection_rejected(dict(select_request, expected_revision=revision), 'invalid_params')
+for key in ('table_id', 'record_id'):
+    for value in (None, '', 'AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA', '1234', 5):
+        selection_rejected(dict(select_request, **{key: value}), 'invalid_params')
+selection_rejected(dict(select_request, extra=True), 'invalid_params')
+selection_rejected(dict(select_request, expected_revision=0), 'conflict')
+selection_rejected(dict(select_request, table_id=t2, record_id=r1), 'not_found')
+selection_rejected(dict(select_request, record_id=str(uuid4())), 'not_found')
+selection_rejected(dict(select_request, handle='another-opening'), 'conflict')
+selection_rejected({'handle': p.handle, 'unexpected': True}, 'invalid_params', 'project.selection')
+assert p.selection() == before and len(p.history()) == 1
+)PY");
+}
+
+TEST_F(ScriptPython, ProjectSelectionReadKeepsActiveTextAndWritePreservesIndependentFilters)
+{
+  ASSERT_NO_FATAL_FAILURE(selection_project());
+  auto &project = f.shell->store().project();
+  const auto table = project.table_id();
+  const auto first = project.record_id();
+  const auto second = project.table()->records[1].id;
+  ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(f.area("a3").set_tab_type(0, kEditorProject));
+  f.drv->frame();
+  f.screen.ui()->find("a2/main/table_search")->string.assign("red");
+  f.screen.ui()->find("a3/main/table_search")->string.assign("blue");
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/table_search");
+  f.drv->click(x, y);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  f.drv->key(wm::Key::A, primary);
+  f.drv->key(wm::Key::Unknown, wm::ModNone, "unfinished search");
+  ASSERT_TRUE(f.screen.ui()->text_input_active());
+  execute("assert p.selection()['record_id'] == r1\nselection_rejected(select_request, 'busy')");
+  ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "unfinished search");
+  EXPECT_EQ(project.record_id(), first);
+  f.drv->key(wm::Key::Enter);
+  f.drv->frame();
+  const auto layout = f.screen.to_json();
+  execute("assert p.select(t1, r2, expected_revision=1)['record_id'] == r2");
+  f.drv->frame();
+  EXPECT_EQ(f.screen.to_json(), layout);
+  EXPECT_EQ(project.record_id(), second);
+  EXPECT_EQ(f.screen.ui()->find("a2/main/table_search")->string.value(), "unfinished search");
+  EXPECT_EQ(f.screen.ui()->find("a3/main/table_search")->string.value(), "blue");
+  EXPECT_EQ(f.screen.ui()->find("a2/main/" + table + "/records")->table->selected.value(), -1);
+  EXPECT_EQ(f.screen.ui()->find("a3/main/" + table + "/records")->table->selected.value(), 0);
+  EXPECT_EQ(project.project()->revision, 1);
+  execute("assert p.select(t2, r3, expected_revision=1)['record_id'] == r3");
+  f.drv->frame();
+  EXPECT_EQ(f.screen.ui()->find("a2/main/table_search")->string.value(), "unfinished search");
+  EXPECT_EQ(f.screen.ui()->find("a3/main/table_search")->string.value(), "blue");
+  EXPECT_EQ(f.screen.ui()->find("a2/main/" + project.table_id() + "/records")->table->rows, 0);
+  execute("assert p.select(t1, r2, expected_revision=1)['record_id'] == r2");
+  f.drv->frame();
+  EXPECT_EQ(f.screen.ui()->find("a2/main/" + table + "/records")->table->selected.value(), -1);
+  EXPECT_EQ(f.screen.ui()->find("a3/main/" + table + "/records")->table->selected.value(), 0);
+}
+
+TEST_F(ScriptPython, ProjectSelectionQueuedRequestsRejectNewRevisionAndDifferentOpening)
+{
+  ASSERT_NO_FATAL_FAILURE(selection_project());
+  auto &project = f.shell->store().project();
+  const auto table = project.table_id(), record = project.record_id();
+  bool queued = false;
+  auto listener = client->on_event("ui.request", [&](const auto &, const auto &data) {
+    if (io::get_string(data, "operation").rfind("project.select", 0) == 0) { queued = true; }
+  });
+  ASSERT_TRUE(state().execute("selection_rejected(dict(select_request, table_id=t2, record_id=r3), 'conflict')"));
+  ASSERT_TRUE(loop.pump_until([&] { return queued; })); // Deliberately leave UI dispatch queued.
+  ASSERT_TRUE(project.apply(Json::array({{{"op", "rename_table"}, {"id", table}, {"name", "New revision"}}})));
+  ASSERT_TRUE(loop.pump_until([&] { return !project.busy(); }));
+  ASSERT_TRUE(pump([&] { return !state().busy(); }));
+  EXPECT_EQ(state().status().at("run").at("state"), "succeeded") << output();
+  EXPECT_EQ(project.table_id(), table); EXPECT_EQ(project.record_id(), record);
+  queued = false;
+  ASSERT_TRUE(state().execute("selection_rejected({'handle': p.handle}, 'conflict', 'project.selection')"));
+  ASSERT_TRUE(loop.pump_until([&] { return queued; }));
+  ASSERT_TRUE(project.create(dir.str() + "/other", "Other opening"));
+  ASSERT_TRUE(loop.pump_until([&] { return !project.busy(); }));
+  const auto other = project.project()->id;
+  ASSERT_TRUE(pump([&] { return !state().busy(); }));
+  EXPECT_EQ(state().status().at("run").at("state"), "succeeded") << output();
+  EXPECT_EQ(project.project()->id, other);
+  EXPECT_TRUE(project.table_id().empty()); EXPECT_TRUE(project.record_id().empty());
+  EXPECT_EQ(project.project()->revision, 0);
+}
 
 TEST_F(ScriptPython, ProjectReviewOpensNativeDifferencesAndOnlyTheApplyButtonWrites)
 {
