@@ -92,6 +92,49 @@ void ProjectDiscussionView::capture_controls(ui::Layout &layout, EditorContext &
   }).disable(!enabled || table_.empty() || title_.empty() || rows_.empty() || fields_.empty() || rows_.size() * fields_.size() > 1000);
 }
 
+void ProjectDiscussionView::captured_cells(ui::Layout &layout, EditorContext &ctx)
+{
+  if (!captured_error_.empty()) { layout.paragraph(captured_error_); }
+  if (!captured_) { return; }
+  if (!captured_->omission_reason.empty()) { layout.paragraph(ctx.tr("discussion.cells.omitted")); return; }
+  auto *panel = layout.panel("captured_cells", ctx.tr("discussion.cells.title"), true);
+  if (!panel || captured_->cells.empty()) { return; }
+  const auto captured = captured_;
+  captured_selected_ = std::clamp(captured_selected_, 0, int(captured->cells.size()) - 1);
+  ui::TableSpec spec;
+  spec.columns = {{std::string(ctx.tr("discussion.cells.record")), 8}, {std::string(ctx.tr("discussion.cells.field")), 12},
+      {std::string(ctx.tr("discussion.cells.value")), 13, false}, {std::string(ctx.tr("discussion.cells.status")), 11}};
+  spec.rows = int(captured->cells.size());
+  spec.visible_rows = float(std::min(spec.rows, 5));
+  spec.data_version = uint64_t(std::hash<std::string>{}(shown_context_));
+  spec.selected = {[this, captured] { return captured_ == captured ? captured_selected_ : -1; },
+      [this, captured](int row) { if (captured_ == captured && row >= 0 && size_t(row) < captured->cells.size()) { captured_selected_ = row; } }};
+  spec.cell = [captured, store = &ctx.store](int row, int col) {
+    const auto &cell = captured->cells[size_t(row)];
+    if (col == 0) { return cell.record_id.substr(0, 8); }
+    if (col == 1) { return (cell.field_name.empty() ? cell.field_id.substr(0, 8) : cell.field_name) +
+                          (cell.unit.empty() ? "" : " / " + cell.unit); }
+    if (col == 2) { return cell.value_text; }
+    return std::string(store->tr("discussion.cells." + (cell.status == "omitted" ? std::string("omitted_value") : cell.status)));
+  };
+  spec.cell_color = [captured](int row, int) {
+    const auto &cell = captured->cells[size_t(row)];
+    return cell.status == "formula_error" ? ui::Color::rgb(0xff6e6e) : cell.incomplete ?
+           ui::Color::rgb(0xffba66) : ui::Color{0, 0, 0, 0};
+  };
+  panel->table("rows", std::move(spec));
+  const auto &cell = captured->cells[size_t(captured_selected_)];
+  if (cell.incomplete) { panel->paragraph(ctx.tr("discussion.cells.incomplete")); }
+  if (captured_detail_ != captured_selected_) {
+    captured_detail_ = captured_selected_;
+    cell_details_ = ui::LogBuffer(std::numeric_limits<size_t>::max());
+    cell_details_.append(cell.details.dump(2));
+  }
+  if (auto *detail = panel->panel("cell_details", ctx.tr("discussion.cells.details"), false)) {
+    detail->log_view("value", cell_details_, 6);
+  }
+}
+
 void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state, int &project_view)
 {
   auto &discussion = state.discussion();
@@ -100,6 +143,7 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
     title_.clear(); text_.clear(); table_.clear(); row_.clear(); field_.clear(); selected_.clear();
     rows_.clear(); fields_.clear(); shown_context_.clear(); shown_message_.clear();
     context_details_.clear(); message_text_.clear();
+    captured_.reset(); captured_error_.clear();
   }
   layout.paragraph(ctx.tr("discussion.hint"));
   if (!discussion.supported()) { layout.paragraph(ctx.tr("discussion.unsupported")); return; }
@@ -172,7 +216,12 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
       shown_context_ = io::get_string(context, "id");
       context_details_ = ui::LogBuffer(std::numeric_limits<size_t>::max());
       context_details_.append(context.dump(2));
+      captured_.reset(); captured_error_.clear();
+      captured_selected_ = 0; captured_detail_ = -1;
+      try { captured_ = std::make_shared<CapturedProjectTable>(project_context_table(context)); }
+      catch (const std::exception &error) { captured_error_ = error.what(); }
     }
+    captured_cells(layout, ctx);
     if (auto *details = layout.panel("context_details", ctx.tr("discussion.details"), false)) {
       details->log_view("value", context_details_, 8);
     }

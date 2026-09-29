@@ -2,6 +2,7 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
+#include "stk/app/project_table_view.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/platform/file_dialog.hh"
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <unordered_map>
 
 namespace stk::app {
 namespace {
@@ -116,7 +118,8 @@ class ProjectEditor final : public Editor {
     }
     field_controls(layout, ctx, state, editable);
     draw_table(layout, ctx, state);
-    draw_cell(layout, ctx, state, editable);
+    if (selected_visible(state)) { draw_cell(layout, ctx, state, editable); }
+    else if (!state.record_id().empty()) { layout.paragraph(ctx.tr("project.filter.hidden_selection")); }
     manage_objects(layout, ctx, state, editable);
   }
 
@@ -508,9 +511,11 @@ class ProjectEditor final : public Editor {
       panel->paragraph(ctx.tr("project.delete_hint"));
       auto &buttons = panel->row();
       const std::string record_id = state.record_id(), field_id = cell_field_;
-      buttons.button("delete_record", ctx.tr("project.delete_record"), [this, &state, record_id] {
+      buttons.button("delete_record", ctx.tr("project.delete_record"), [this, &state, record_id, table_id, handle = state.project()->handle, query_version = query_version_] {
+        if (!state.project() || state.project()->handle != handle || state.table_id() != table_id || state.record_id() != record_id ||
+            query_version != query_version_ || !selected_visible(state)) { return; }
         pending_manage_ = state.apply(Json::array({{{"op", "delete_record"}, {"id", record_id}}}), manage_revision_);
-      }).disable(!current || state.selected_record() < 0);
+      }).disable(!current || state.selected_record() < 0 || !selected_visible(state));
       buttons.button("delete_field", ctx.tr("project.delete_field"), [this, &state, field_id] {
         pending_manage_ = state.apply(Json::array({{{"op", "delete_field"}, {"id", field_id}}}), manage_revision_);
       }).disable(!current || table->fields.empty());
@@ -574,9 +579,52 @@ class ProjectEditor final : public Editor {
     }).disable(!editable || field_name_.empty());
   }
 
+  bool selected_visible(const ProjectState &state) const
+  {
+    return query_.text == query_cached_text_ && query_.errors_only == query_cached_errors_ &&
+           std::find(visible_ids_->begin(), visible_ids_->end(), state.record_id()) != visible_ids_->end();
+  }
+
   void draw_table(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
   {
     const auto &table = *state.table();
+    const auto identity = state.project()->handle + table.id;
+    if (query_identity_ != identity) {
+      query_identity_ = identity;
+      query_ = {};
+      query_revision_ = -1;
+    }
+    auto &search = layout.row();
+    search.text_field("table_search", ui::bind(query_.text), {
+        .placeholder = std::string(ctx.tr("project.filter.search")), .max_length = 256});
+    search.checkbox("table_errors_only", ctx.tr("project.filter.errors"), ui::bind(query_.errors_only));
+    search.button("table_clear_search", ctx.tr("project.filter.clear"), [this] { query_ = {}; })
+        .disable(query_.text.empty() && !query_.errors_only);
+    if (query_revision_ != state.project()->revision || query_cached_text_ != query_.text || query_cached_errors_ != query_.errors_only) {
+      query_revision_ = state.project()->revision;
+      query_cached_text_ = query_.text;
+      query_cached_errors_ = query_.errors_only;
+      ++query_version_;
+      query_error_.clear();
+      auto rows = std::make_shared<std::vector<int>>();
+      auto ids = std::make_shared<std::vector<std::string>>();
+      auto cells = std::make_shared<std::unordered_map<uint64_t, std::string>>();
+      try { *rows = project_table_rows(table, query_); }
+      catch (const std::exception &error) { query_error_ = error.what(); }
+      for (const auto row : *rows) { ids->push_back(table.records[size_t(row)].id); }
+      visible_rows_ = std::move(rows);
+      visible_ids_ = std::move(ids);
+      visible_cells_ = std::move(cells);
+    }
+    if (!query_error_.empty()) { layout.paragraph(query_error_); }
+    layout.label(ctx.store.catalog().format("project.filter.count", {
+      {"shown", std::to_string(visible_rows_->size())}, {"total", std::to_string(table.records.size())}}));
+    const auto rows = visible_rows_;
+    const auto ids = visible_ids_;
+    const auto cells = visible_cells_;
+    const auto matches = [this, &state, handle = state.project()->handle, id = table.id, revision = state.project()->revision, query_version = query_version_] {
+      return query_version_ == query_version && query_.text == query_cached_text_ && query_.errors_only == query_cached_errors_ && state.project() && state.project()->handle == handle && state.table_id() == id && state.project()->revision == revision;
+    };
     ui::TableSpec spec;
     spec.columns.push_back({std::string(ctx.tr("project.record")), 6.0f});
     const bool file_table = table.id == io::get_string(state.file_index(), "table_id");
@@ -587,39 +635,53 @@ class ProjectEditor final : public Editor {
                           field.id == io::get_string(file_fields, "name") ? 8.0f : 5.0f;
       spec.columns.push_back({field.name + (field.unit.empty() ? "" : " (" + field.unit + ")"), width, true, numeric});
     }
-    spec.rows = int(table.records.size());
-    spec.visible_rows = float(std::clamp(int(table.records.size()), 3, 9));
-    spec.data_version = state.version();
-    spec.cell = [&state](int row, int col) {
-      const auto *table = state.table();
-      if (!table || row < 0 || size_t(row) >= table->records.size()) {
-        return std::string();
+    spec.rows = int(rows->size());
+    spec.visible_rows = float(std::clamp(spec.rows, 3, 9));
+    spec.data_version = query_version_;
+    spec.cell = [&state, rows, ids, cells, matches](int row, int col) {
+      if (!matches() || row < 0 || col < 0 || size_t(row) >= rows->size() || size_t(col) > state.table()->fields.size()) { return std::string(); }
+      if (col == 0) { return (*ids)[size_t(row)].substr(0, 8); }
+      const uint64_t key = (uint64_t(uint32_t(row)) << 32) | uint32_t(col);
+      if (const auto found = cells->find(key); found != cells->end()) { return found->second; }
+      const auto &table = *state.table();
+      const int original = (*rows)[size_t(row)], column = col - 1;
+      const auto *evaluation = table.evaluation(original, column);
+      std::string summary;
+      if (evaluation && io::get_string(*evaluation, "state") == "error") {
+        summary = "#" + io::get_string(evaluation->at("error"), "code");
       }
-      return col == 0 ? table->records[row].id.substr(0, 8) : table->text(row, col - 1);
+      else {
+        const auto *value = table.cell(original, column);
+        summary = (table.definition(original, column) ? "= " : "") + (value ? project_value_summary(*value) : std::string());
+      }
+      // Cache only cells actually requested by the virtual table; never summarize an entire
+      // large project just to draw its first screen. Each displayed value is bounded as well.
+      if (cells->size() >= 4096) { cells->clear(); }
+      cells->emplace(key, summary);
+      return summary;
     };
-    spec.selected = {[&state] { return state.selected_record(); }, [&state](int row) {
-      const auto *table = state.table();
-      if (table && row >= 0 && size_t(row) < table->records.size()) {
-        state.select_record(table->records[row].id);
-      }
+    spec.selected = {[&state, ids, matches] {
+      if (!matches()) { return -1; }
+      const auto found = std::find(ids->begin(), ids->end(), state.record_id());
+      return found == ids->end() ? -1 : int(found - ids->begin());
+    }, [&state, ids, matches](int row) {
+      if (matches() && row >= 0 && size_t(row) < ids->size()) { state.select_record((*ids)[size_t(row)]); }
     }};
-    spec.compare = [&state](int a, int b, int column) {
-      const auto *table = state.table();
-      if (!table) { return 0; }
-      if (column > 0) { return table->compare(a, b, column - 1); }
-      const auto &left = table->records[a].id, &right = table->records[b].id;
+    spec.compare = [&state, rows, ids, matches](int a, int b, int column) {
+      if (!matches() || a < 0 || b < 0 || size_t(a) >= rows->size() || size_t(b) >= rows->size()) { return 0; }
+      if (column > 0) { return state.table()->compare((*rows)[size_t(a)], (*rows)[size_t(b)], column - 1); }
+      const auto &left = (*ids)[size_t(a)], &right = (*ids)[size_t(b)];
       return int(left > right) - int(left < right);
     };
-    spec.cell_color = [&state](int row, int column) -> ui::Color {
-      const auto *table = state.table();
-      const Json *result = table && column > 0 ? table->evaluation(row, column - 1) : nullptr;
-      // Match Jobs' failure text colour; theme.state.error is a dark background tint.
+    spec.cell_color = [&state, rows, matches](int row, int column) -> ui::Color {
+      const Json *result = matches() && row >= 0 && size_t(row) < rows->size() && column > 0 ?
+                           state.table()->evaluation((*rows)[size_t(row)], column - 1) : nullptr;
       return result && io::get_string(*result, "state") == "error" ? ui::Color::rgb(0xff6e6e) : ui::Color{0, 0, 0, 0};
     };
     layout.scope(table.id).table("records", std::move(spec));
     const std::string id = table.id;
-    layout.button("add_record", ctx.tr("project.add_record"), [&state, id] {
-      state.apply(Json::array({{{"op", "add_record"}, {"table_id", id}}}));
+    layout.button("add_record", ctx.tr("project.add_record"), [&state, id, matches] {
+      if (matches()) { state.apply(Json::array({{{"op", "add_record"}, {"table_id", id}}})); }
     }).disable(!state.ready() || state.busy());
   }
 
@@ -884,9 +946,14 @@ class ProjectEditor final : public Editor {
     }
     const Json target = {{"op", "set_cell"}, {"table_id", table.id}, {"record_id", state.record_id()}, {"field_id", field.id}};
     const std::string type = field.type;
+    const auto target_current = [this, &state, target, handle = state.project()->handle, query_version = query_version_] {
+      return state.loaded() && state.project()->handle == handle && query_version_ == query_version && selected_visible(state) &&
+             state.table_id() == io::get_string(target, "table_id") && state.record_id() == io::get_string(target, "record_id") &&
+             cell_field_ == io::get_string(target, "field_id");
+    };
     auto &buttons = box.row();
-    const auto edit = [this, &state, target, type](const bool review) {
-      if (!state.loaded() || state.busy() || draft_revision_ != state.project()->revision) { return; }
+    const auto edit = [this, &state, target, type, target_current](const bool review) {
+      if (!target_current() || state.busy() || draft_revision_ != state.project()->revision) { return; }
       Json command = target;
       if (cell_mode_ == 0) {
         auto value = project_literal(type, cell_text_, literal_error_);
@@ -917,13 +984,15 @@ class ProjectEditor final : public Editor {
     };
     buttons.button("save_cell", ctx.tr("project.save_cell"), [edit] { edit(false); })
         .disable(!editable || draft_revision_ != state.project()->revision);
-    buttons.button("null_cell", ctx.tr("project.null_cell"), [this, &state, target] {
+    buttons.button("null_cell", ctx.tr("project.null_cell"), [this, &state, target, target_current] {
+      if (!target_current()) { return; }
       Json command = target;
       command["value"] = nullptr;
       pending_cell_ = state.apply(Json::array({command}), draft_revision_);
     }).disable(!editable || draft_revision_ != state.project()->revision);
     if (version2) {
-      buttons.button("unset_cell", ctx.tr("project.unset_cell"), [this, &state, target] {
+      buttons.button("unset_cell", ctx.tr("project.unset_cell"), [this, &state, target, target_current] {
+        if (!target_current()) { return; }
         Json command = target;
         command["op"] = "unset_cell";
         pending_cell_ = state.apply(Json::array({command}), draft_revision_);
@@ -937,6 +1006,14 @@ class ProjectEditor final : public Editor {
         .disable(!editable || !state.preview_supported() || draft_revision_ != state.project()->revision);
   }
 
+  ProjectTableQuery query_;
+  std::string query_identity_, query_cached_text_, query_error_;
+  bool query_cached_errors_ = false;
+  int64_t query_revision_ = -1;
+  uint64_t query_version_ = 0;
+  std::shared_ptr<const std::vector<int>> visible_rows_ = std::make_shared<std::vector<int>>();
+  std::shared_ptr<const std::vector<std::string>> visible_ids_ = std::make_shared<std::vector<std::string>>();
+  std::shared_ptr<std::unordered_map<uint64_t, std::string>> visible_cells_ = std::make_shared<std::unordered_map<uint64_t, std::string>>();
   int project_view_ = 0;
   ProjectReviewView review_view_;
   ProjectDiscussionView discussion_view_;

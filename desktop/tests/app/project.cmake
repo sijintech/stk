@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-add_executable(stk-project-tests project_test.cc script_test.cc)
+add_executable(stk-project-tests project_test.cc script_test.cc project_table_view_test.cc)
 target_link_libraries(stk-project-tests PRIVATE stk_jobs_test_support GTest::gtest_main)
 if(MSVC)
   target_compile_options(stk-project-tests PRIVATE /W3 /utf-8 /bigobj)
@@ -15,7 +15,7 @@ set_target_properties(stk-project-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 # Reuse the software-GPU environment and supported backends established in jobs.cmake.
 foreach(_lang en zh)
   foreach(_be ${_jobs_backends})
-    foreach(_review review review_errors drafts discussion simulation batches)
+    foreach(_review review review_errors drafts discussion filter simulation batches)
       add_test(NAME project_${_review}_render_${_be}_${_lang} COMMAND stk-project-render --editor ${_review}
         --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_${_review}_${_be}_${_lang}.png")
       set_tests_properties(project_${_review}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120

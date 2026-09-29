@@ -297,6 +297,30 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
+      if (editor == "discussion") {
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        if (const auto *panel = screen.ui()->find("a2/main/message_composer")) {
+          const ui::Vec2 point{panel->rect.cx(), panel->rect.cy()};
+          screen.ui()->handle_event(ui::Event::mouse_down(point));
+          screen.ui()->handle_event(ui::Event::mouse_up(point));
+        }
+        else { ok = false; }
+      }
+      if (editor == "filter") {
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        if (const auto *search = screen.ui()->find("a2/main/table_search")) { search->string.assign("prepared"); }
+        else { ok = false; }
+        if (const auto *errors = screen.ui()->find("a2/main/table_errors_only")) { errors->boolean.assign(true); }
+        else { ok = false; }
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        if (const auto *rows = screen.ui()->find("a2/main/" + table + "/records"); rows && rows->table) {
+          ok = ok && rows->table->rows == 1;
+          rows->table->selected.assign(0);
+        }
+        else { ok = false; }
+        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && state.record_id() == "40000004-4444-4444-8444-444444444444" && state.project()->revision == 1;
+      }
       if (editor == "expression") {
         ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find("a2/main/cell_field")) {

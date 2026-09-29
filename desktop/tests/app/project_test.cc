@@ -270,6 +270,140 @@ class ProjectPython : public ::testing::Test {
   }
 };
 
+Json filtered_commands()
+{
+  const std::string group = "55555555-5555-4555-8555-555555555555";
+  Json commands = Json::array({{{"op", "add_field"}, {"table_id", table_id}, {"id", group}, {"name", "Group"}, {"type", "text"}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", record_id}, {"field_id", group}, {"value", "Hidden"}}});
+  const int values[] = {20, 3, 1, 9};
+  for (int i = 0; i < 4; ++i) {
+    const auto id = std::to_string(40000001 + i) + "-4444-4444-8444-444444444444";
+    commands.push_back({{"op", "add_record"}, {"table_id", table_id}, {"id", id}});
+    commands.push_back({{"op", "set_cell"}, {"table_id", table_id}, {"record_id", id}, {"field_id", field_id}, {"value", values[i]}});
+    commands.push_back({{"op", "set_cell"}, {"table_id", table_id}, {"record_id", id}, {"field_id", group}, {"value", i < 2 ? "Red" : "Blue"}});
+  }
+  return commands;
+}
+
+TEST_F(ProjectPython, TableFilterSortAndEditKeepRecordIdentityAcrossEqualSizeQueries)
+{
+  populated();
+  ASSERT_TRUE(state().apply(filtered_commands())); settled();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject)); f.screen.set_maximized(&area);
+  auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  const auto records = table_id + "/records";
+  frame();
+  widget("table_search")->string.assign("RED"); frame();
+  ASSERT_NE(widget(records), nullptr);
+  ASSERT_EQ(widget(records)->table->rows, 2);
+  EXPECT_EQ(widget(records)->table->selected.value(), -1);
+  EXPECT_EQ(state().record_id(), record_id); // Hiding the selection does not choose another record.
+  EXPECT_EQ(widget("save_cell"), nullptr);
+  const auto click = [&](bool header) {
+    const auto rect = widget(records)->rect;
+    const auto style = f.screen.ui()->style();
+    const float y = rect.y + style.pixel + style.unit * (header ? 0.5f : 1.5f);
+    f.drv->click(int(rect.x + style.pixel + style.unit * 8), f.screen.rect().ymax - 1 - int(y));
+    frame();
+  };
+  click(true); click(false);
+  EXPECT_EQ(state().record_id(), "40000002-4444-4444-8444-444444444444");
+  ASSERT_NE(widget("cell_value"), nullptr);
+  widget("cell_value")->string.assign("4"); frame();
+  widget("save_cell")->on_click(); frame();
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_EQ(state().table()->text(1, 0), "20");
+  EXPECT_EQ(state().table()->text(2, 0), "4");
+  const auto old_save = widget("save_cell")->on_click;
+  const auto old_selection = widget(records)->table->selected;
+  widget("table_search")->string.assign("blue");
+  old_save(); old_selection.assign(0); // Blur can update search before a new frame is drawn.
+  settled();
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(state().record_id(), "40000002-4444-4444-8444-444444444444");
+  frame();
+  ASSERT_EQ(widget(records)->table->rows, 2);
+  EXPECT_EQ(widget(records)->table->selected.value(), -1);
+  old_save(); settled();
+  EXPECT_EQ(state().project()->revision, 3);
+  click(false);
+  EXPECT_EQ(state().record_id(), "40000003-4444-4444-8444-444444444444");
+  const auto chosen = state().record_id();
+  widget("table_clear_search")->on_click(); frame();
+  EXPECT_EQ(widget(records)->table->rows, 5);
+  EXPECT_EQ(state().record_id(), chosen);
+  ASSERT_TRUE(state().undo()); frame();
+  EXPECT_EQ(state().table()->text(2, 0), "3");
+  widget("table_search")->string.assign("missing text"); frame();
+  EXPECT_EQ(widget(records)->table->rows, 0);
+  EXPECT_EQ(state().record_id(), chosen);
+  EXPECT_EQ(widget("save_cell"), nullptr);
+}
+
+TEST_F(ProjectPython, TableFiltersBelongToEachAreaWhileSelectionRemainsShared)
+{
+  populated();
+  ASSERT_TRUE(state().apply(filtered_commands())); settled();
+  ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(f.area("a3").set_tab_type(0, kEditorProject));
+  const auto widget = [&](const std::string &area, const std::string &key) { return f.screen.ui()->find(area + "/main/" + key); };
+  const auto records = table_id + "/records";
+  f.drv->frame();
+  ASSERT_NE(widget("a2", "table_search"), nullptr); ASSERT_NE(widget("a3", "table_search"), nullptr);
+  widget("a2", "table_search")->string.assign("red");
+  widget("a3", "table_search")->string.assign("blue");
+  f.drv->frame();
+  ASSERT_EQ(widget("a2", records)->table->rows, 2);
+  ASSERT_EQ(widget("a3", records)->table->rows, 2);
+  widget("a2", records)->table->selected.assign(0); f.drv->frame();
+  EXPECT_EQ(state().record_id(), "40000001-4444-4444-8444-444444444444");
+  EXPECT_EQ(widget("a3", records)->table->selected.value(), -1);
+  EXPECT_EQ(widget("a3", "table_search")->string.value(), "blue");
+  widget("a3", records)->table->selected.assign(1); f.drv->frame();
+  EXPECT_EQ(state().record_id(), "40000004-4444-4444-8444-444444444444");
+  EXPECT_EQ(widget("a2", records)->table->selected.value(), -1);
+  EXPECT_EQ(widget("a2", "table_search")->string.value(), "red");
+  widget("a2", "table_errors_only")->boolean.assign(true); f.drv->frame();
+  EXPECT_EQ(widget("a2", records)->table->rows, 0);
+  EXPECT_EQ(widget("a3", records)->table->rows, 2);
+  EXPECT_EQ(state().project()->revision, 2);
+}
+
+TEST_F(ProjectPython, DiscussionCellGridReadsOnlyCapturedValuesAfterLiveEditsAndDeletion)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Frozen values")); settled();
+  const auto original = io::canonical_json(discussion.context());
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
+  auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  frame();
+  ASSERT_NE(widget("captured_cells/rows"), nullptr);
+  EXPECT_EQ(widget("captured_cells/rows")->table->rows, 1);
+  EXPECT_EQ(widget("captured_cells/rows")->table->cell(0, 1), "Temperature / K");
+  EXPECT_EQ(widget("captured_cells/rows")->table->cell(0, 2), "300");
+  ASSERT_TRUE(state().apply(set_cell(350))); frame();
+  EXPECT_EQ(widget("captured_cells/rows")->table->cell(0, 2), "300");
+  ASSERT_TRUE(state().apply(Json::array({{{"op", "delete_field"}, {"id", field_id}}}))); frame();
+  EXPECT_EQ(widget("captured_cells/rows")->table->cell(0, 1), "Temperature / K");
+  EXPECT_EQ(widget("captured_cells/rows")->table->cell(0, 2), "300");
+  EXPECT_EQ(io::canonical_json(discussion.context()), original);
+  const auto *detail = widget("captured_cells/cell_details"); ASSERT_NE(detail, nullptr);
+  const ui::Vec2 point{detail->rect.x + detail->rect.w / 2, detail->rect.y + detail->rect.h / 2};
+  f.screen.ui()->handle_event(ui::Event::mouse_down(point));
+  f.screen.ui()->handle_event(ui::Event::mouse_up(point)); frame();
+  ASSERT_NE(widget("captured_cells/cell_details/value"), nullptr);
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Missing field now")); frame();
+  ASSERT_NE(widget("captured_cells/rows"), nullptr);
+  EXPECT_EQ(widget("captured_cells/rows")->table->cell(0, 2), "—");
+  EXPECT_EQ(widget("captured_cells/rows")->table->cell(0, 3), "Field missing");
+  EXPECT_EQ(state().project()->revision, 3);
+}
+
 TEST_F(ProjectPython, DiscussionCaptureKeepsOriginalValuesAndRestoresWithoutExecuting)
 {
   populated();
