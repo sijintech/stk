@@ -16,7 +16,16 @@
 随后补充真实注册适配器从 HTTP 编解码经桥到 SQLite 的 **4 项**集成，所在文件 **10/10** 通过。
 适配器 **74 项**覆盖固定端点/认证隔离、完整/非法/截断回复、状态分类、超时与取消；使用内存 socket，
 没有外部网络或套餐调用。字典各 **1039 项**一致，中文 Vulkan 请求页已查看，修改文档 **134 个本地链接**有效。
-本次跨平台 CI 待对应提交完成后补记；没有使用真实账户进行模型验收。
+代码提交 `2ba950b` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36613518011) **7/7 任务通过**：
+Windows Python 3.10/3.12 各 **1254 passed、59 skipped、260 deselected**；
+Linux Python 3.10/3.12 各 **1665 passed、7 skipped、4 deselected**，打包及 graph doctor 均通过。
+四组 Python 环境都完整运行 **74 项适配器、27 项执行器、10 项桥模型请求**测试，相关用例无跳过。
+Windows 跳过平台/可选依赖/性能/许可场景；Linux 跳过 2 项性能、2 项可选 MCP 和 3 项许可求解器场景。
+
+对应[桌面 CI](https://github.com/sijintech/stk/actions/runs/36613517994) **5/5 任务通过**：
+Linux **584/584**、macOS arm64 CPU **359/359** 与 Metal **69/69**、Windows MSVC CPU **319/319**，均无跳过。
+Linux/macOS 可搬移安装包及干净环境启动检查通过；中文 Metal 请求页截图已下载查看，布局和文字显示正常。
+Windows GPU、真实账户模型调用和套餐适用性不在本次自动化验收范围内；没有使用真实账户进行模型验收。
 
 使用及双平台环境设置见[请求指南](project-requests.md)，真机步骤见[工作台验收](workbench-acceptance.md)。
 阿里官方对 Token Plan 工具用途有限制；技术协议适配不等于服务方已确认 STK 的套餐适用性。
