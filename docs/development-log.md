@@ -18,7 +18,17 @@
 两个跳过项需要显式启用真实许可求解器，本轮没有改变求解器或重新进行物理结果验收。
 存储/讨论/执行器重点 **100/100**；最终完整桌面 **582/582、无跳过**，包含三项新增原生集成与
 四项中英文 GL/Vulkan 请求页渲染。中文 Vulkan 请求页已查看，字典各 **1028 项**一致。
-Linux/macOS CI 已将请求页列入十八类工作台截图必跑检查；本次远端 CI 结果待对应提交完成后补记。
+Linux/macOS CI 已将请求页列入十八类工作台截图必跑检查。
+`f493224` 的 [desktop CI](https://github.com/sijintech/stk/actions/runs/36595784259) **5/5 jobs 全通过**，覆盖 macOS Metal、
+Linux GL/Vulkan、Windows 编译/CPU/真实桥、Linux 打包与干净环境启动；Windows CI 不包含 GPU 真机渲染。
+macOS artifact 确认 **357 项 CPU、69 项 Metal 全通过且无跳过**，
+三项请求原生测试及中英文请求截图全部实际执行，中文 Metal 图像已查看。
+
+首轮 Windows Python 测试暴露 pytest 自动生成的超长用例 ID 超过 Windows 环境变量限制。
+`bc3edf8` 只为两组参数化用例指定简短名称，保留全部超长输入及断言，聚焦 **18/18** 通过。
+其 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36596541216) **7/7 jobs 全通过**；Windows Python 3.10/3.12 各
+**1166 通过、59 按环境跳过、260 按标记排除**，两版均实际执行全部 **23 项请求执行器测试**，包含跨进程锁与进程退出恢复。
+该测试命名修正不触发桌面工作流，桌面生产代码验证继续对应 `f493224`。
 
 日志 `/tmp/stk-requests-python-final.log`、`/tmp/stk-requests-python-remaining.log`、
 `/tmp/stk-request-storage-executor.log`、`/tmp/stk-requests-full.log`，JUnit `/tmp/stk-requests-full.xml`。
