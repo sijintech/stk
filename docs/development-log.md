@@ -12,7 +12,10 @@
 错误参数/归属/修订、输入保护、跨表筛选、删除对象，以及排队期间修改修订或切换项目。
 相关原生 **13/13**、Python **65/65**，最终完整桌面 **575/575、无跳过**；字典各 **1011 项**一致。
 旧六项 UI 能力继续可用；取消/超时后丢弃迟到回复，不重放请求。此包不新增 SQLite 格式。
-本批 macOS/Windows/Linux CI 待推送后跟踪。
+`00c991c` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36574786525) 全部通过，包含 Windows Python 3.10/3.12。
+[desktop CI](https://github.com/sijintech/stk/actions/runs/36574786487) 全部通过，包括 macOS Metal、Linux GL/Vulkan、
+Windows 编译/CPU/真实桥、安装包与干净环境启动。Windows CI 不包含 GPU 真机渲染。
+macOS artifact 确认 **354 项 CPU、67 项 Metal 全通过且无跳过**，新增五项共享选择测试全部实际执行。
 
 日志 `/tmp/stk-selection-native.log`、`/tmp/stk-selection-python.log`、`/tmp/stk-selection-full.log`，
 JUnit `/tmp/stk-selection-full.xml`。用法见[Python 指南](scripting.md#查询和改变原生共享选择)，
@@ -36,7 +39,11 @@ JSON 摘要按 UTF-8 字节和深度限量生成，不序列化看不到的数�
 本机新增纯辅助测试 **9 项**、原生集成 **3 项**；重点与讨论/筛选渲染 **15/15**，
 完整桌面 **570/570、无跳过**。覆盖筛选后排序/编辑、等行数查询切换、隐藏选择与迟到按钮、
 两个区域独立查询及冻结值在实时编辑/删除后不变；中文 Vulkan 筛选和英文 GL 捕获表截图已查看。
-字典各 **1011 项**一致。此包没有 Python、存储格式或桥协议变更；本批远端 CI 待推送后跟踪。
+字典各 **1011 项**一致。此包没有 Python、存储格式或桥协议变更。
+`8bc4016` 的 [desktop CI](https://github.com/sijintech/stk/actions/runs/36573460344) 已完成 macOS Metal、
+Linux 打包和干净环境启动；Linux/Windows 编译被后继 `00c991c` 推送取消，其代码已由后继提交的完整 CI 覆盖。
+已下载 macOS artifact，确认 **349 项 CPU、67 项 Metal 全通过且无跳过**，中文筛选及英文捕获单元格截图已查看。
+该提交的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36573460403) 全部通过。
 
 日志 `/tmp/stk-table-views-native.log`、`/tmp/stk-table-views-full.log`，JUnit `/tmp/stk-table-views-full.xml`。
 使用见[项目指南](project.md)与[上下文指南](project-contexts.md)。下一步补 Python 的共享选择读写接口。
