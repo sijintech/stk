@@ -9,6 +9,7 @@
 #include "stk/gfx/image.hh"
 #include "stk/gfx/offscreen.hh"
 #include "stk/io/payload.hh"
+#include "stk/viewer/camera.hh"
 #include "../bridge/support.hh"
 #include "scalar_volume_support.hh"
 
@@ -16,6 +17,54 @@
 #include <cstdio>
 
 using namespace stk;
+
+namespace {
+
+// Copy the actual numeric sidebar bindings before collapsing it. They continue to read the
+// same editor, allowing the test to inspect its camera without changing the viewport later.
+struct CameraControls {
+  std::array<ui::Binding<double>, 3> position, focal, up;
+  ui::Binding<double> angle, scale;
+  ui::Binding<bool> parallel;
+
+  viewer::CameraPose pose() const
+  {
+    viewer::CameraPose camera;
+    for (size_t i = 0; i < 3; ++i) {
+      camera.position[i] = position[i].value();
+      camera.focal_point[i] = focal[i].value();
+      camera.view_up[i] = up[i].value();
+    }
+    camera.view_angle_deg = angle.value();
+    camera.parallel = parallel.value();
+    camera.parallel_scale = scale.value();
+    return camera;
+  }
+};
+
+bool encloses_grid(const viewer::CameraPose &camera, const viewer::Viewport &viewport)
+{
+  for (const double x : {0.0, 11.0}) {
+    for (const double y : {0.0, 11.0}) {
+      for (const double z : {0.0, 11.0}) {
+        const auto projected = viewer::project(camera, viewport, {x, y, z});
+        if (!projected || !viewer::is_finite(*projected) || !(projected->z > 0) ||
+            projected->x < 0 || projected->x > viewport.width ||
+            projected->y < 0 || projected->y > viewport.height) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool same_camera(const viewer::CameraPose &a, const viewer::CameraPose &b)
+{
+  return viewer::numeric_camera_json(a, {}) == viewer::numeric_camera_json(b, {});
+}
+
+}  // namespace
 
 int main(int argc, char **argv)
 {
@@ -102,10 +151,95 @@ int main(int argc, char **argv)
     wm::DrawContext context;
     context.ui_scale = 1; context.fonts = &gpu->fonts(); context.rect = {0, 0, width, height}; context.now = 100;
     gfx::Image image, hidden;
-    auto frame = [&](gfx::Image &target) { return gfx::render_offscreen(width, height, [&] { screen.draw(context); }, target, error); };
+    int frame_width = width;
+    auto frame = [&](gfx::Image &target) {
+      context.rect = {0, 0, frame_width, height};
+      return gfx::render_offscreen(frame_width, height, [&] { screen.draw(context); }, target, error);
+    };
     // Viewer GPU attachment occurs on the first draw; the next frame has the actual volume.
     ok = ok && frame(image) && frame(image);
+    CameraControls camera;
     if (ok) {
+      view_area->set_sidebar_open(true);
+      ok = frame(image);
+      const auto *panel = screen.ui()->find("scalar-view/sidebar/camera/numeric");
+      if (!panel) { ok = false; }
+      else {
+        const ui::Vec2 center{panel->rect.x + panel->rect.w / 2, panel->rect.y + panel->rect.h / 2};
+        screen.ui()->handle_event(ui::Event::mouse_down(center));
+        screen.ui()->handle_event(ui::Event::mouse_up(center));
+        ok = ok && frame(image);
+      }
+      auto number = [&](const std::string &key, ui::Binding<double> &binding) {
+        const auto *widget = screen.ui()->find("scalar-view/sidebar/camera/numeric/" + key);
+        if (!widget || !widget->number) { ok = false; }
+        else { binding = widget->number; }
+      };
+      for (size_t i = 0; i < 3; ++i) {
+        number("position/" + std::to_string(i), camera.position[i]);
+        number("focal/" + std::to_string(i), camera.focal[i]);
+        number("up/" + std::to_string(i), camera.up[i]);
+      }
+      number("angle", camera.angle);
+      const auto *parallel = screen.ui()->find("scalar-view/sidebar/camera/numeric/parallel");
+      if (!parallel || !parallel->boolean || parallel->boolean.value()) { ok = false; }
+      else { camera.parallel = parallel->boolean; }
+      if (ok) {
+        camera.parallel.assign(true);
+        ok = frame(image);
+        number("parallel_scale", camera.scale);
+        camera.parallel.assign(false);
+        view_area->set_sidebar_open(false);
+        ok = ok && frame(image);
+      }
+    }
+    if (ok) {
+      const viewer::CameraPose imported = camera.pose();
+      // Ordinary drawing and layout changes retain the imported numeric camera.
+      frame_width = width + 600;
+      ok = frame(image) && same_camera(imported, camera.pose());
+      const auto *fit = screen.ui()->find("view_all");
+      if (!fit || !fit->on_click) { ok = false; }
+      else {
+        const auto action = fit->on_click;
+        frame_width = width;
+        context.rect = {0, 0, frame_width, height};
+        screen.layout(context.rect, context);
+        const auto *main = view_area->find_region(app::EditorArea::kMain);
+        const viewer::Viewport viewport{double(main->rect().width()), double(main->rect().height())};
+        // Fit after layout but before a GPU draw: using the previous drawn width is incorrect.
+        action();
+        ok = ok && encloses_grid(camera.pose(), viewport) && frame(image);
+        const viewer::CameraPose fitted = camera.pose();
+        frame_width = width + 200;
+        ok = ok && frame(image) && same_camera(fitted, camera.pose());
+        frame_width = width;
+        ok = ok && frame(image) && same_camera(fitted, camera.pose());
+        // A native direction shortcut and Home must also fit the current main region.
+        wm::Event key;
+        key.type = wm::EventType::KeyDown; key.key = wm::Key::Numpad3;
+        auto editor_context = view_area->context(screen.ui(), &context);
+        ok = ok && view_area->editor().on_key(key, editor_context) && encloses_grid(camera.pose(), viewport);
+        camera.parallel.assign(true);
+        key.key = wm::Key::Home;
+        ok = ok && view_area->editor().on_key(key, editor_context) && encloses_grid(camera.pose(), viewport);
+        camera.parallel.assign(false);
+        key.key = wm::Key::Numpad0;
+        ok = ok && view_area->editor().on_key(key, editor_context) && encloses_grid(camera.pose(), viewport) && frame(image);
+      }
+    }
+    if (ok) {
+      size_t backed_captions = 0;
+      for (const auto &block : screen.ui()->blocks()) {
+        if (block->name() != "scalar-view/main") { continue; }
+        for (const auto &widget : block->widgets()) {
+          if (widget.type == ui::WidgetType::Label && !widget.text.empty()) {
+            ok = ok && widget.label_backdrop;
+            ++backed_captions;
+          }
+        }
+      }
+      ok = ok && backed_captions >= 2;
       for (const char *key : {"field", "component", "unit", "colormap", "evaluate"}) {
         const auto *widget = screen.ui()->find(key);
         ok = ok && widget && !widget->rect.intersect(widget->clip).empty();

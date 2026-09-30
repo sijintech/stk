@@ -44,6 +44,7 @@ add_executable(stk_ui_tests
   test_layout_golden.cc
   test_form.cc
   test_transfer_function.cc
+  test_label_backdrop.cc
   test_i18n.cc
   support.cc
 )
@@ -58,6 +59,43 @@ else()
   target_compile_options(stk_ui_tests PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
 gtest_discover_tests(stk_ui_tests DISCOVERY_TIMEOUT 60 NO_PRETTY_VALUES PROPERTIES LABELS "ui")
+
+# Contrast proof for opt-in captions drawn over arbitrary GPU content. The existing gallery
+# remains unchanged, and CPU-only builds keep their full label/layout tests above.
+if(TARGET stk_ui_gpu)
+  add_executable(stk-ui-label-backdrop label_backdrop_render.cc)
+  target_link_libraries(stk-ui-label-backdrop PRIVATE stk_ui_gpu stk_gfx)
+  if(DEFINED STK_DESKTOP_BIN_DIR)
+    set_target_properties(stk-ui-label-backdrop PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${STK_DESKTOP_BIN_DIR}")
+  endif()
+  if(MSVC)
+    target_compile_options(stk-ui-label-backdrop PRIVATE /W4 /utf-8)
+  endif()
+  set(_label_backdrop_backends "")
+  if(STK_GPU_OPENGL AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND _label_backdrop_backends opengl)
+  endif()
+  if(STK_GPU_VULKAN)
+    list(APPEND _label_backdrop_backends vulkan)
+  endif()
+  if(STK_GPU_METAL)
+    list(APPEND _label_backdrop_backends metal)
+  endif()
+  set(_label_backdrop_env "DISPLAY=" "WAYLAND_DISPLAY=" "EGL_PLATFORM=surfaceless" "LIBGL_ALWAYS_SOFTWARE=1"
+      "XDG_CACHE_HOME=${CMAKE_CURRENT_BINARY_DIR}/cache")
+  if(STK_UI_GALLERY_VK_ICD AND EXISTS "${STK_UI_GALLERY_VK_ICD}")
+    list(APPEND _label_backdrop_env "VK_DRIVER_FILES=${STK_UI_GALLERY_VK_ICD}" "VK_ICD_FILENAMES=${STK_UI_GALLERY_VK_ICD}")
+  endif()
+  if(STK_SYSROOT_FOUND)
+    list(APPEND _label_backdrop_env "LD_LIBRARY_PATH=${STK_SYSROOT_LIBDIR}" "__EGL_VENDOR_LIBRARY_DIRS=${STK_SYSROOT_EGL_VENDOR_DIR}")
+  endif()
+  foreach(_backend ${_label_backdrop_backends})
+    add_test(NAME ui_label_backdrop_${_backend} COMMAND stk-ui-label-backdrop --gpu-backend ${_backend})
+    set_tests_properties(ui_label_backdrop_${_backend} PROPERTIES LABELS "ui;gpu" TIMEOUT 120
+      ENVIRONMENT "${_label_backdrop_env}" PASS_REGULAR_EXPRESSION "Label backdrops passed"
+      FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
+  endforeach()
+endif()
 
 add_test(NAME ui_core_include_rule
          COMMAND ${CMAKE_COMMAND} -DUI_DIR=${_stk_desktop_dir}/engine/lib/stk_ui

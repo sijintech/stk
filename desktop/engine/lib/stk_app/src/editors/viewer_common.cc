@@ -111,11 +111,11 @@ void draw_eval_status(ui::Layout &l, EditorContext &ctx, const bool compact)
     return;
   }
   if (!vs.pending_edit().empty() && vs.source().evaluates()) {
-    l.label(ctx.tr(vs.auto_evaluate ? "viewer.status.pending" : "viewer.status.pending_manual"));
+    l.label(ctx.tr(vs.auto_evaluate ? "viewer.status.pending" : "viewer.status.pending_manual")).backdrop(compact);
     return;
   }
   if (!vs.eval_error().empty()) {
-    l.label(ctx.store.catalog().format("viewer.status.error", {{"error", vs.eval_error()}})).tip(vs.eval_error());
+    l.label(ctx.store.catalog().format("viewer.status.error", {{"error", vs.eval_error()}})).backdrop(compact).tip(vs.eval_error());
     return;
   }
   const std::optional<EvalRecord> &rec = vs.last_eval();
@@ -143,11 +143,10 @@ void draw_eval_status(ui::Layout &l, EditorContext &ctx, const bool compact)
                                              {{"hits", std::to_string(rec->cache_hits)},
                                               {"misses", std::to_string(rec->cache_misses)}});
   }
-  ui::Widget &w = l.label(text);
+  ui::Widget &w = l.label(text).backdrop(compact);
   if (!tip.empty()) {
     w.tip(tip);
   }
-  (void)compact;
 }
 
 namespace {

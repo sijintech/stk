@@ -132,6 +132,9 @@ class Viewer {
   const viewer::CameraPose &camera() const;
   void set_camera(const viewer::CameraPose &pose);
   void set_camera_preset(viewer::CameraPreset preset);
+  /** Explicit preset action fitted to this viewport. Returns false without changing the camera
+   * when there is no payload or the viewport/bounds cannot yield a finite fit. */
+  bool set_camera_preset(viewer::CameraPreset preset, const viewer::Viewport &viewport);
   /** The payload's own camera (view.camera fitted to the bounds). */
   void reset_camera();
   viewer::Bounds bounds() const;

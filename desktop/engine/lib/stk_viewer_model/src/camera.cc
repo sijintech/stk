@@ -384,6 +384,89 @@ void view_all(CameraPose &pose, const Bounds &bounds)
   pose.parallel_scale = r;
 }
 
+bool view_all(CameraPose &pose, const Bounds &bounds, const Viewport &viewport)
+{
+  if (!bounds.valid() || !is_finite(pose.position) || !is_finite(pose.focal_point) ||
+      !is_finite(pose.view_up) || !std::isfinite(pose.parallel_scale) ||
+      !std::isfinite(pose.view_angle_deg) || !(pose.view_angle_deg > 0 && pose.view_angle_deg < 180) ||
+      !std::isfinite(viewport.width) || !std::isfinite(viewport.height) ||
+      !(viewport.width > 0 && viewport.height > 0))
+  {
+    return false;
+  }
+  const double aspect = viewport.width / viewport.height;
+  const dvec3 direction = pose.focal_point - pose.position;
+  const double distance_before = length(direction), up_length = length(pose.view_up);
+  if (!std::isfinite(aspect) || !(aspect > 0) || !std::isfinite(distance_before) ||
+      !(distance_before > 0) || !std::isfinite(up_length) || !(up_length > 0))
+  {
+    return false;
+  }
+  const dvec3 dop = direction / distance_before;
+  if (!(length(cross(dop, pose.view_up / up_length)) > 0)) {
+    return false;
+  }
+  /* Half before adding/subtracting so large finite bounds do not overflow unnecessarily. */
+  const dvec3 center = bounds.lo * 0.5 + bounds.hi * 0.5;
+  double radius = length(bounds.hi * 0.5 - bounds.lo * 0.5);
+  if (!std::isfinite(radius)) {
+    return false;
+  }
+  if (radius == 0) {
+    radius = 1.0;
+  }
+  const double limiting_aspect = std::min(1.0, aspect);
+  const double half_angle = std::atan(std::tan(pose.view_angle_deg * kDeg / 2.0) * limiting_aspect);
+  const double infinity = std::numeric_limits<double>::infinity();
+  const double distance = std::nextafter(radius / std::sin(half_angle), infinity);
+  const double scale = std::nextafter(radius / limiting_aspect, infinity);
+  if (!std::isfinite(distance) || !(distance > 0) || !std::isfinite(scale) || !(scale > 0)) {
+    return false;
+  }
+  CameraPose candidate = pose;
+  candidate.focal_point = center;
+  candidate.position = center - dop * distance;
+  candidate.parallel_scale = scale;
+  if (!is_finite(candidate.position) || !(candidate.distance() > 0) || !std::isfinite(candidate.distance())) {
+    return false;
+  }
+  /* Rounding at an extreme translation can collapse a basis or an otherwise finite fit.
+   * Check the actual pose before publishing it; explicit actions must not corrupt navigation. */
+  dvec3 right, up, back;
+  candidate.frame(right, up, back);
+  if (!is_finite(right) || !is_finite(up) || !(length(right) > 0) || !(length(up) > 0)) {
+    return false;
+  }
+  const ClipRange clip = clip_range(candidate, bounds);
+  if (!std::isfinite(clip.near_z) || !std::isfinite(clip.far_z) || !(clip.near_z < clip.far_z) ||
+      (candidate.parallel && !std::isfinite(scale * aspect)))
+  {
+    return false;
+  }
+  const dmat4 projection = camera_matrices(candidate, aspect, clip).projection;
+  for (const auto &column : projection.m) {
+    for (const double value : column) {
+      if (!std::isfinite(value)) {
+        return false;
+      }
+    }
+  }
+  for (int corner = 0; corner < 8; ++corner) {
+    const dvec3 point{corner & 1 ? bounds.hi.x : bounds.lo.x,
+                     corner & 2 ? bounds.hi.y : bounds.lo.y,
+                     corner & 4 ? bounds.hi.z : bounds.lo.z};
+    const auto p = project(candidate, viewport, point);
+    if (!p || !is_finite(*p) || !(p->z > 0) ||
+        p->x < -1e-9 * viewport.width || p->x > (1 + 1e-9) * viewport.width ||
+        p->y < -1e-9 * viewport.height || p->y > (1 + 1e-9) * viewport.height)
+    {
+      return false;
+    }
+  }
+  pose = candidate;
+  return true;
+}
+
 ClipRange clip_range(const CameraPose &pose, const Bounds &bounds)
 {
   const dvec3 dop = pose.direction();

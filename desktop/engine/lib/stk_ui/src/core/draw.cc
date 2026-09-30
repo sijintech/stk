@@ -274,7 +274,14 @@ void Context::draw_widget(const Widget &w)
 
   switch (w.type) {
     case WidgetType::Label: {
-      const Color c = th.space_text.scaled_alpha(disabled ? 0.5f : 1.0f);
+      if (w.label_backdrop) {
+        /* A translucent box still inherits the scene's contrast. Keep the theme's paired RGB
+         * colours but make this explicit caption background opaque, including disabled labels. */
+        draw_.round_box(r, clamp_radius(th.tooltip.roundness * st.unit, r), w.corners,
+                         th.tooltip.inner.with_alpha(255), none);
+      }
+      const Color c = (w.label_backdrop ? th.tooltip.text.with_alpha(255) : th.space_text)
+                          .scaled_alpha(disabled ? 0.5f : 1.0f);
       text_in(r.inset(st.text_margin, 0), w.text, w.align, c);
       break;
     }

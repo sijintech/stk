@@ -86,6 +86,12 @@ Widget &Widget::width(float units)
   return *this;
 }
 
+Widget &Widget::backdrop(bool enabled)
+{
+  label_backdrop = enabled;
+  return *this;
+}
+
 /* -------------------------------------------------------------------- */
 /* Building */
 

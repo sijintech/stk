@@ -245,6 +245,25 @@ void Viewer::set_camera_preset(const viewer::CameraPreset preset)
   m.has_camera = true;
 }
 
+bool Viewer::set_camera_preset(const viewer::CameraPreset preset, const viewer::Viewport &viewport)
+{
+  Impl &m = *impl_;
+  if (!m.current) {
+    return false;
+  }
+  const viewer::PresetFrame frame = viewer::preset_frame(preset);
+  viewer::CameraPose candidate = m.camera;
+  candidate.position = frame.direction;
+  candidate.focal_point = {0, 0, 0};
+  candidate.view_up = frame.view_up;
+  if (!viewer::view_all(candidate, bounds(), viewport)) {
+    return false;
+  }
+  m.camera = candidate;
+  m.has_camera = true;
+  return true;
+}
+
 void Viewer::reset_camera()
 {
   impl_->reset_camera();

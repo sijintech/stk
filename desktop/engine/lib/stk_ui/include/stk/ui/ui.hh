@@ -196,6 +196,7 @@ struct Widget {
   std::string tooltip;
   Align align = Align::Left;
   bool enabled = true;
+  bool label_backdrop = false; /**< Label only: opaque tooltip-theme background, paired text. */
   uint8_t corners = CORNER_ALL;
   float height = 0.0f;      /**< Pixels; set at creation (width-dependent types at layout). */
   float table_base_height = 0.0f; /**< Requested rows + header; excludes a width-dependent horizontal scrollbar. */
@@ -229,6 +230,9 @@ struct Widget {
   Widget &tip(std::string_view text);
   Widget &disable(bool disabled = true);
   Widget &width(float units);
+  /** Label only: an opaque tooltip-theme backdrop without changing layout or hit testing.
+   * Theme RGB colours are retained; disabled text remains muted over the opaque background. */
+  Widget &backdrop(bool enabled = true);
 };
 
 /** Layout container (Blender uiLayout). Owned by its Block; valid until the next begin_frame. */

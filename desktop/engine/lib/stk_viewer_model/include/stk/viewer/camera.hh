@@ -123,6 +123,10 @@ void dolly_to(CameraPose &pose, double factor, double x, double y, const Viewpor
 void roll(CameraPose &pose, double degrees);
 /** Keep the view direction and up; fit the distance (and parallel scale) to `bounds`. */
 void view_all(CameraPose &pose, const Bounds &bounds);
+/** Explicit viewport-aware fit, enclosing bounds horizontally and vertically. Keeps direction,
+ * up, projection and field of view. Point bounds use a unit radius. Returns false without changing
+ * the pose for invalid inputs or a fit that cannot be represented by a finite camera. */
+bool view_all(CameraPose &pose, const Bounds &bounds, const Viewport &viewport);
 /** Re-orthogonalize view_up against the view direction (vtkCamera::OrthogonalizeViewUp). */
 void orthogonalize_view_up(CameraPose &pose);
 

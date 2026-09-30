@@ -192,7 +192,7 @@ class ViewerEditor final : public Editor {
       }
       ui::Layout &row = l.row(false);
       row.alignment(ui::LayoutAlign::Left);
-      row.label(src).width(fit_units(ctx, src)).tip(vs.source().path.empty() ? vs.source_label() : vs.source().path);
+      row.label(src).backdrop().width(fit_units(ctx, src)).tip(vs.source().path.empty() ? vs.source_label() : vs.source().path);
     }
     if (vs.progress().running || !vs.eval_error().empty()) {
       draw_eval_status(l, ctx, true);
@@ -226,13 +226,13 @@ class ViewerEditor final : public Editor {
           "\xe2\x9a\xa0 " + ctx.store.catalog().format("viewer.warnings", {{"count", std::to_string(warnings.size())}});
       ui::Layout &row = l.row(false);
       row.alignment(ui::LayoutAlign::Center);
-      row.label(text).width(fit_units(ctx, text)).tip(tip);
+      row.label(text).backdrop().width(fit_units(ctx, text)).tip(tip);
     }
     const std::string stats = vs.stats_text();
     if (!stats.empty()) {
       ui::Layout &row = l.row(false);
       row.alignment(ui::LayoutAlign::Center);
-      row.label(stats, ui::Align::Center).width(fit_units(ctx, stats));
+      row.label(stats, ui::Align::Center).backdrop().width(fit_units(ctx, stats));
     }
   }
 
@@ -460,11 +460,22 @@ class ViewerEditor final : public Editor {
 
   /* ---- Camera operations (CPU only; the GPU viewer applies them at the next draw) ---- */
 
+  std::optional<viewer::Viewport> main_viewport() const
+  {
+    const wm::Region *main = area_ ? area_->find_region(EditorArea::kMain) : nullptr;
+    if (!main || main->rect().empty()) {
+      return std::nullopt;
+    }
+    // The current layout may already have changed since the last GPU draw.
+    return viewer::Viewport{double(main->rect().width()), double(main->rect().height())};
+  }
+
   void set_preset(const viewer::CameraPreset preset)
   {
     if (gpu_ && has_payload_) {
-      gpu_->set_camera_preset(preset);
-      cam_ = gpu_->camera();
+      if (const auto viewport = main_viewport(); viewport && gpu_->set_camera_preset(preset, *viewport)) {
+        cam_ = gpu_->camera();
+      }
     }
     else {
       pending_preset_ = preset;
@@ -476,9 +487,10 @@ class ViewerEditor final : public Editor {
   {
     if (gpu_ && has_payload_) {
       viewer::CameraPose pose = gpu_->camera();
-      viewer::view_all(pose, gpu_->bounds());
-      gpu_->set_camera(pose);
-      cam_ = pose;
+      if (const auto viewport = main_viewport(); viewport && viewer::view_all(pose, gpu_->bounds(), *viewport)) {
+        gpu_->set_camera(pose);
+        cam_ = pose;
+      }
     }
     redraw();
   }
@@ -563,8 +575,10 @@ class ViewerEditor final : public Editor {
       }
     }
     if (pending_preset_ && vs.payload()) {
-      gpu_->set_camera_preset(*pending_preset_);
-      pending_preset_.reset();
+      if (const auto viewport = main_viewport()) {
+        gpu_->set_camera_preset(*pending_preset_, *viewport);
+        pending_preset_.reset();
+      }
     }
     for (const auto &p : vs.take_prefetched()) {
       gpu_->prefetch(p);
