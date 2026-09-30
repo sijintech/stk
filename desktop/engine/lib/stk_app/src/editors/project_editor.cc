@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
+#include "stk/app/editor_area.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/project_table_view.hh"
 #include "stk/app/viewer_state.hh"
@@ -35,6 +36,14 @@ class ProjectEditor final : public Editor {
   {
     auto &state = ctx.store.project();
     state.sync();
+    row.button("project_ai", ctx.tr("editor.ai.title"), [ctx] {
+      ctx.defer([area = &ctx.area] {
+        for (int i = 0; i < area->tab_count(); ++i) {
+          if (area->tab(i).type().id == kEditorAI) { area->set_active_tab(i); return; }
+        }
+        area->add_tab(kEditorAI);
+      });
+    }).width(7);
     row.button("project_refresh", ctx.tr("project.refresh"), [&state] { state.refresh(); })
         .width(5)
         .disable(!state.ready() || !state.project() || state.busy());

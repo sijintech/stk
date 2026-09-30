@@ -30,6 +30,7 @@ add_library(stk_app STATIC
   src/editors/project_discussion_view.cc
   src/editors/project_simulation_view.cc
   src/editors/python_editor.cc
+  src/editors/ai_editor.cc
   src/jobs_gpu.cc
   src/jobs_spec.cc
   src/jobs_state.cc

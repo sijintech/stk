@@ -42,6 +42,21 @@ class ProjectDiscussion {
   bool create_request(const std::string &model);
   bool start_request(const std::string &id);
   bool recover_request(const std::string &id);
+  /** Prepare a question against the currently inspected saved context. Never sends. */
+  bool prepare_question(const std::string &context_id, const std::string &text, const std::string &model);
+  /** Read one immutable exchange, independently of the legacy discussion browsing selection. */
+  bool load_exchange(const std::string &request_id);
+  bool refresh_exchange();
+  /** Main-thread, local-only follow-up reads; caller schedules a redraw at the returned time. */
+  double pump(double now_seconds);
+  const io::Json &exchange_request() const { return exchange_request_; }
+  const io::Json &exchange_context() const { return exchange_context_; }
+  const io::Json &exchange_question() const { return exchange_question_; }
+  const io::Json &exchange_reply() const { return exchange_reply_; }
+  bool exchange_busy() const { return exchange_preparing_ || exchange_reading_ || exchange_pending_; }
+  const std::string &exchange_error() const { return exchange_error_; }
+  bool following() const { return exchange_following_; }
+  double exchange_wake_scheduled = 0;
   bool load_origin(const std::string &draft_id, bool preserve_error = false);
   bool capture(const std::string &table_id, const std::vector<std::string> &records,
                const std::vector<std::string> &fields, const std::string &title);
@@ -50,8 +65,16 @@ class ProjectDiscussion {
 
  private:
   bool call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done,
-            bool preserve_error = false);
+            bool preserve_error = false, std::function<void(const std::string &)> failed = {});
   io::Json request(const std::string &kind, io::Json params, const std::string &id_key);
+  bool mutate_request(const std::string &method, const std::string &id);
+  void exchange_changed();
+  void exchange_failed(const std::string &error);
+  bool begin_exchange_read();
+  void exchange_read(const std::string &method, io::Json params, uint64_t generation, uint64_t flight,
+                     std::function<void(const io::Json &)> done);
+  void read_exchange_parts(std::shared_ptr<io::Json> bundle, uint64_t generation, uint64_t flight);
+  void publish_exchange(const io::Json &bundle);
   AppStore &store_;
   ProjectState &project_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
@@ -64,5 +87,12 @@ class ProjectDiscussion {
   io::Json generation_request_ = io::Json::object();
   io::Json provider_ = io::Json::object();
   bool provider_loaded_ = false;
+  io::Json exchange_request_ = io::Json::object(), exchange_context_ = io::Json::object();
+  io::Json exchange_question_ = io::Json::object(), exchange_reply_ = io::Json::object();
+  std::string exchange_id_, exchange_error_;
+  uint64_t exchange_generation_ = 0, exchange_flight_ = 0;
+  bool exchange_preparing_ = false, exchange_reading_ = false, exchange_pending_ = false;
+  bool exchange_following_ = false, exchange_clock_seen_ = false;
+  double exchange_now_ = 0, exchange_due_ = 0, exchange_deadline_ = -1;
 };
 }  // namespace stk::app

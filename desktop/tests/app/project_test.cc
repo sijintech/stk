@@ -13,6 +13,8 @@
 #include "../wm/support.hh"
 
 #include <cstdlib>
+#include <cmath>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include "stk/platform/file_dialog.hh"
@@ -287,7 +289,179 @@ class ProjectPython : public ::testing::Test {
     ASSERT_TRUE(result->ok()) << result->error().describe();
     ASSERT_EQ(result->value().at("request").at("status"), Json("pending"));
   }
+
+  void ai_frame()
+  {
+    // Provider/history reads are queued by drawing; local exchange reads remain
+    // independent of the legacy discussion busy flag.
+    for (int i = 0; i < 4; ++i) {
+      f.drv->frame();
+      ASSERT_TRUE(loop.pump_until([&] {
+        state().discussion().pump(std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+        return !state().busy() && !state().discussion().busy() && !state().discussion().exchange_busy();
+      }, 30)) << client->bridge_log().text();
+    }
+    f.drv->frame();
+  }
 };
+
+TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
+{
+  populated();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area); f.drv->frame();
+  const auto [open_x, open_y] = f.widget_center("a2/header/project_ai");
+  f.drv->click(open_x, open_y); f.screen.run_deferred();
+  ASSERT_EQ(area.editor().type().id, kEditorAI);
+  ai_frame();
+  auto &discussion = state().discussion();
+  const auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  ASSERT_TRUE(widget("ai_capture")->enabled);
+  const auto [capture_x, capture_y] = f.widget_center("a2/main/ai_capture");
+  f.drv->click(capture_x, capture_y); ai_frame();
+  ASSERT_FALSE(discussion.context().empty());
+  EXPECT_EQ(discussion.context().at("source_revision"), 1);
+  EXPECT_FALSE(widget("ai_prepare")->enabled);
+  const auto input_key = "a2/main/ai_question/" + state().project()->handle;
+  const auto [x, y] = f.widget_center(input_key);
+  f.drv->click(x, y);
+  const std::string question = "Explain this temperature. 请保留原始参数。";
+  f.drv->key(wm::Key::Unknown, wm::ModNone, question); f.drv->frame();
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), question);
+  EXPECT_TRUE(f.screen.ui()->find(input_key)->string.value().empty()); // Not yet blurred.
+  ASSERT_TRUE(widget("ai_prepare")->enabled);
+  const auto [prepare_x, prepare_y] = f.widget_center("a2/main/ai_prepare");
+  f.drv->click(prepare_x, prepare_y); ai_frame();
+  ASSERT_FALSE(discussion.exchange_request().empty()) << discussion.exchange_error();
+  const auto request = discussion.exchange_request();
+  EXPECT_EQ(discussion.exchange_question().at("text"), question);
+  EXPECT_EQ(request.at("status"), "pending");
+  EXPECT_TRUE(request.at("executor_id").is_null());
+  EXPECT_FALSE(widget("ai_send_saved")->enabled); // Empty fixture key; never call a real model.
+  const auto [again_x, again_y] = f.widget_center("a2/main/ai_prepare");
+  f.drv->click(again_x, again_y); ai_frame();
+  EXPECT_EQ(discussion.exchange_request().at("id"), request.at("id"));
+  ASSERT_EQ(discussion.page("requests").items.size(), 1u);
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  EXPECT_EQ(discussion.page("messages").items.size(), 1u);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+}
+
+TEST_F(ProjectPython, AIWorkspaceActiveDraftAndStaleButtonsStayWithTheirProject)
+{
+  populated();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area); ai_frame();
+  auto *capture = f.screen.ui()->find("a2/main/ai_capture");
+  ASSERT_NE(capture, nullptr);
+  const auto old_capture = capture->on_click;
+  const auto first_handle = state().project()->handle;
+  const auto first_input = "a2/main/ai_question/" + first_handle;
+  const auto [x, y] = f.widget_center(first_input);
+  f.drv->click(x, y); f.drv->key(wm::Key::Unknown, wm::ModNone, "Draft for the first project");
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "Draft for the first project");
+  ASSERT_TRUE(state().create(dir.str() + "/second", "Second")); settled();
+  ASSERT_TRUE(state().apply(sample_commands())); settled();
+  // No intermediate empty frame: active toolkit editing must not bind to B.
+  ai_frame();
+  EXPECT_EQ(f.screen.ui()->find(first_input), nullptr);
+  auto *second_input = f.screen.ui()->find("a2/main/ai_question/" + state().project()->handle);
+  ASSERT_NE(second_input, nullptr);
+  EXPECT_TRUE(second_input->string.value().empty());
+  EXPECT_FALSE(f.screen.ui()->text_input_active());
+  old_capture();
+  EXPECT_FALSE(state().discussion().busy());
+  EXPECT_TRUE(state().discussion().context().empty());
+  const auto [bx, by] = f.widget_center("a2/main/ai_question/" + state().project()->handle);
+  f.drv->click(bx, by); f.drv->key(wm::Key::Unknown, wm::ModNone, "Second project draft");
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled(); ai_frame();
+  EXPECT_NE(state().project()->handle, first_handle);
+  EXPECT_EQ(f.screen.ui()->find("a2/main/ai_question/" + state().project()->handle)->string.value(),
+            "Draft for the first project");
+  EXPECT_TRUE(state().discussion().page("requests").items.empty());
+  ASSERT_TRUE(state().open(dir.str() + "/second")); settled(); ai_frame();
+  EXPECT_EQ(f.screen.ui()->find("a2/main/ai_question/" + state().project()->handle)->string.value(),
+            "Second project draft");
+  EXPECT_TRUE(state().discussion().page("requests").items.empty());
+}
+
+TEST_F(ProjectPython, AIWorkspaceLongBilingualReplyWrapsWhenResizedAndRemainsSavedVerbatim)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Saved scope")); settled();
+  ASSERT_TRUE(discussion.load_provider()); settled();
+  ASSERT_TRUE(discussion.prepare_question(discussion.context().at("id"), "Explain the saved values", "fixture-model")); settled();
+  const std::string id = discussion.exchange_request().at("id");
+  std::string answer;
+  for (int i = 0; i < 50; ++i) { answer += "The saved temperature is 300 K.\t\t\t\t这是受控显示样例，未调用模型。"; }
+  answer += " END_OF_SAVED_REPLY";
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }));
+  ASSERT_TRUE(scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+      "s = ProjectStore(" + Json(dir.str() + "/project").dump() + ")\nowner = str(uuid4())\n"
+      "s.requests._claim('" + id + "', executor_id=owner)\n"
+      "s.requests._complete('" + id + "', executor_id=owner, text=" + Json(answer).dump() + ")"));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  ASSERT_TRUE(discussion.refresh_exchange());
+  ASSERT_TRUE(loop.pump_until([&] { return !discussion.exchange_busy(); }));
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area); ai_frame();
+  size_t wide_lines = 0;
+  const auto check = [&] {
+    const auto *view = f.screen.ui()->find("a2/main/ai_transcript");
+    ASSERT_NE(view, nullptr); ASSERT_NE(view->log, nullptr);
+    EXPECT_GT(view->log->line_count(), 20u);
+    std::string shown;
+    for (size_t i = 0; i < view->log->line_count(); ++i) {
+      EXPECT_LE(f.measurer.width(view->log->line(i), f.screen.ui()->style().mono),
+                view->rect.w - 2 * f.screen.ui()->style().unit);
+      shown += view->log->line(i);
+    }
+    EXPECT_NE(shown.find("END_OF_SAVED_REPLY"), std::string::npos);
+    EXPECT_NE(shown.find("这是受控显示样例"), std::string::npos);
+    EXPECT_EQ(discussion.exchange_reply().at("text"), answer);
+  };
+  check(); wide_lines = f.screen.ui()->find("a2/main/ai_transcript")->log->line_count();
+  f.drv->ctx.rect = {0, 0, 760, 1000}; ai_frame(); check();
+  EXPECT_GT(f.screen.ui()->find("a2/main/ai_transcript")->log->line_count(), wide_lines);
+  EXPECT_EQ(discussion.page("requests").items.front().at("status"), "completed");
+  EXPECT_EQ(state().project()->revision, 1);
+}
+
+TEST_F(ProjectPython, AIWorkspaceMultipleAreasShareTheDisplayedRequestIdentity)
+{
+  populated();
+  const std::string first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const std::string second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  ASSERT_NO_FATAL_FAILURE(saved_request(first));
+  ASSERT_NO_FATAL_FAILURE(saved_request(second));
+  ASSERT_TRUE(f.area("a1").set_tab_type(0, kEditorAI));
+  ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorAI));
+  ai_frame();
+  auto &discussion = state().discussion();
+  const auto check = [&](const std::string &id) {
+    for (const auto *area : {"a1", "a2"}) {
+      const auto *history = f.screen.ui()->find(std::string(area) + "/main/ai_history");
+      ASSERT_NE(history, nullptr);
+      const int index = history->index.value();
+      ASSERT_GE(index, 0);
+      ASSERT_LT(size_t(index), discussion.page("requests").items.size());
+      EXPECT_EQ(discussion.page("requests").items[size_t(index)].at("id"), id);
+    }
+    EXPECT_EQ(discussion.exchange_request().at("id"), id);
+  };
+  ASSERT_TRUE(discussion.load_exchange(first)); ai_frame(); check(first);
+  const auto &items = discussion.page("requests").items;
+  const int index = items.front().at("id") == second ? 0 : 1;
+  f.screen.ui()->find("a1/main/ai_history")->index.assign(index); ai_frame(); check(second);
+  ASSERT_TRUE(discussion.cancel_request(second)); ai_frame(); check(second);
+  EXPECT_EQ(discussion.exchange_request().at("status"), "cancelled");
+  EXPECT_TRUE(discussion.exchange_reply().empty());
+}
 
 TEST_F(ProjectPython, RequestRecordsCancelAndReopenWithoutExecuting)
 {
@@ -480,6 +654,246 @@ TEST_F(ProjectPython, RequestRecoveryExplicitlyChecksAbandonedExecutionWithoutSe
   ASSERT_TRUE(discussion.load_page("messages")); settled();
   EXPECT_EQ(discussion.page("messages").items.size(), 1u);
   EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ExchangePreparationFreezesContextAndReusesSavedQuestionWithoutSending)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Prepared scope")); settled();
+  const auto context = discussion.context();
+  const auto context_id = context.at("id").get<std::string>();
+  ASSERT_TRUE(discussion.load_provider()); settled();
+  ASSERT_TRUE(state().apply(set_cell(350))); settled();
+  ASSERT_TRUE(discussion.prepare_question(context_id, "Explain the saved temperature", "fixture-model")); settled();
+  ASSERT_FALSE(discussion.exchange_request().empty()) << discussion.exchange_error();
+  const auto request = discussion.exchange_request(), question = discussion.exchange_question();
+  EXPECT_EQ(io::canonical_json(discussion.exchange_context()), io::canonical_json(context));
+  EXPECT_EQ(request.at("source_revision"), 1);
+  EXPECT_EQ(request.at("message_id"), question.at("id"));
+  EXPECT_EQ(question.at("text"), "Explain the saved temperature");
+  EXPECT_EQ(request.at("status"), "pending");
+  EXPECT_TRUE(request.at("executor_id").is_null());
+  EXPECT_TRUE(discussion.exchange_reply().empty());
+  EXPECT_TRUE(discussion.message().empty());
+  EXPECT_FALSE(discussion.following());
+  EXPECT_TRUE(std::isinf(discussion.pump(100)));
+  ASSERT_TRUE(discussion.prepare_question(context_id, "Explain the saved temperature", "fixture-model")); settled();
+  ASSERT_TRUE(discussion.exchange_error().empty()) << discussion.exchange_error();
+  EXPECT_EQ(io::canonical_json(discussion.exchange_request()), io::canonical_json(request));
+  EXPECT_EQ(io::canonical_json(discussion.exchange_question()), io::canonical_json(question));
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  EXPECT_EQ(discussion.page("messages").items.size(), 1u);
+  ASSERT_TRUE(discussion.load_page("requests")); settled();
+  EXPECT_EQ(discussion.page("requests").items.size(), 1u);
+  ASSERT_TRUE(discussion.prepare_question(context_id, "A second saved question", "fixture-model")); settled();
+  EXPECT_NE(discussion.exchange_request().at("id"), request.at("id"));
+  EXPECT_NE(discussion.exchange_question().at("id"), question.at("id"));
+  EXPECT_EQ(discussion.exchange_request().at("status"), "pending");
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "350");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ExchangePreparationFailureKeepsOneQuestionAndPublishesNoPartialBundle)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Saved scope")); settled();
+  const auto context_id = discussion.context().at("id").get<std::string>();
+  ASSERT_TRUE(discussion.load_provider()); settled();
+  // The question save succeeds before request configuration validation rejects the model.
+  ASSERT_TRUE(discussion.prepare_question(context_id, "Retain my saved question", "invalid//model")); settled();
+  EXPECT_FALSE(discussion.exchange_error().empty());
+  EXPECT_FALSE(discussion.exchange_busy());
+  EXPECT_TRUE(discussion.exchange_request().empty());
+  EXPECT_TRUE(discussion.exchange_context().empty());
+  EXPECT_TRUE(discussion.exchange_question().empty());
+  EXPECT_TRUE(discussion.exchange_reply().empty());
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  ASSERT_EQ(discussion.page("messages").items.size(), 1u);
+  const auto question_id = discussion.page("messages").items.front().at("id");
+  ASSERT_TRUE(discussion.prepare_question(context_id, "Retain my saved question", "invalid//model")); settled();
+  EXPECT_FALSE(discussion.exchange_error().empty());
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  ASSERT_EQ(discussion.page("messages").items.size(), 1u);
+  EXPECT_EQ(discussion.page("messages").items.front().at("id"), question_id);
+  ASSERT_TRUE(discussion.prepare_question(context_id, "Retain my saved question", "fixture-model")); settled();
+  ASSERT_FALSE(discussion.exchange_question().empty()) << discussion.exchange_error();
+  EXPECT_EQ(discussion.exchange_question().at("id"), question_id);
+  EXPECT_EQ(discussion.exchange_request().at("status"), "pending");
+  EXPECT_TRUE(discussion.exchange_error().empty());
+  ASSERT_TRUE(discussion.load_page("requests")); settled();
+  EXPECT_EQ(discussion.page("requests").items.size(), 1u);
+}
+
+TEST_F(ProjectPython, ExchangeFollowingReadsSavedCompletionWithoutChangingLegacySelection)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Original scope")); settled();
+  const auto context = discussion.context();
+  const auto context_id = context.at("id").get<std::string>();
+  ASSERT_TRUE(discussion.load_provider()); settled();
+  ASSERT_TRUE(discussion.prepare_question(context_id, "Explain my saved input", "fixture-model")); settled();
+  const auto id = discussion.exchange_request().at("id").get<std::string>();
+  const auto question = discussion.exchange_question();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }));
+  const auto fixture = [&](const std::string &operation) {
+    EXPECT_TRUE(scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+        "s = ProjectStore(" + Json(dir.str() + "/project").dump() + ")\n" + operation));
+    EXPECT_TRUE(loop.pump_until([&] { return !scripts.busy(); }));
+    EXPECT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  };
+  fixture("s.requests._claim('" + id + "', executor_id=str(uuid4()))");
+  ASSERT_TRUE(discussion.refresh_exchange());
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(100); return !discussion.exchange_busy(); }));
+  ASSERT_TRUE(discussion.following());
+  EXPECT_EQ(discussion.exchange_request().at("status"), "running");
+  ASSERT_TRUE(discussion.load_page("requests")); settled();
+  ASSERT_EQ(discussion.page("requests").items.size(), 1u);
+  EXPECT_EQ(discussion.page("requests").items.front().at("status"), "running");
+  EXPECT_DOUBLE_EQ(discussion.pump(100), 101);
+  ASSERT_TRUE(state().apply(set_cell(350))); settled();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Later browsing scope")); settled();
+  ASSERT_TRUE(discussion.add_message("Unrelated saved note")); settled();
+  const auto legacy_context = discussion.context(), legacy_message = discussion.message();
+  fixture("r = s.requests.get('" + id + "')\n"
+      "s.requests._complete('" + id + "', executor_id=r['executor_id'], text='Saved local answer: 300 K')");
+  EXPECT_TRUE(std::isinf(discussion.pump(101)));
+  EXPECT_TRUE(discussion.exchange_busy());
+  EXPECT_FALSE(discussion.busy());
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(101); return !discussion.exchange_busy(); }));
+  EXPECT_EQ(discussion.exchange_request().at("status"), "completed");
+  EXPECT_EQ(discussion.page("requests").items.front().at("status"), "completed");
+  EXPECT_EQ(io::canonical_json(discussion.exchange_context()), io::canonical_json(context));
+  EXPECT_EQ(io::canonical_json(discussion.exchange_question()), io::canonical_json(question));
+  EXPECT_EQ(discussion.exchange_reply().at("text"), "Saved local answer: 300 K");
+  EXPECT_EQ(discussion.exchange_reply().at("id"), discussion.exchange_request().at("assistant_message_id"));
+  EXPECT_EQ(discussion.context(), legacy_context);
+  EXPECT_EQ(discussion.message(), legacy_message);
+  EXPECT_FALSE(discussion.following());
+  EXPECT_TRUE(std::isinf(discussion.pump(102)));
+  // A retained Prepare identity must reopen its existing answer, never erase or resend it.
+  ASSERT_TRUE(discussion.load_context(context_id)); settled();
+  ASSERT_TRUE(discussion.prepare_question(context_id, "Explain my saved input", "fixture-model")); settled();
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(103); return !discussion.exchange_busy(); }));
+  ASSERT_TRUE(discussion.exchange_error().empty()) << discussion.exchange_error();
+  EXPECT_EQ(discussion.exchange_request().at("id"), id);
+  EXPECT_EQ(discussion.exchange_request().at("status"), "completed");
+  EXPECT_EQ(io::canonical_json(discussion.exchange_question()), io::canonical_json(question));
+  EXPECT_EQ(discussion.exchange_reply().at("text"), "Saved local answer: 300 K");
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(state().table()->text(0, 0), "350");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ExchangeFollowingIsBoundedAndExplicitRefreshResumesWithoutRecovery)
+{
+  populated();
+  const std::string id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  ASSERT_NO_FATAL_FAILURE(saved_request(id));
+  auto &discussion = state().discussion();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }));
+  ASSERT_TRUE(scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+      "s = ProjectStore(" + Json(dir.str() + "/project").dump() + ")\n"
+      "s.requests._claim('" + id + "', executor_id=str(uuid4()))"));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  ASSERT_TRUE(discussion.load_exchange(id));
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(100); return !discussion.exchange_busy(); }));
+  EXPECT_TRUE(discussion.following());
+  EXPECT_DOUBLE_EQ(discussion.pump(100), 101);
+  const auto before = client->stats().calls_sent;
+  EXPECT_TRUE(std::isinf(discussion.pump(190)));
+  EXPECT_FALSE(discussion.following());
+  EXPECT_TRUE(std::isinf(discussion.pump(1000)));
+  loop.run_ready();
+  EXPECT_EQ(client->stats().calls_sent, before);
+  EXPECT_EQ(discussion.exchange_request().at("status"), "running");
+  ASSERT_TRUE(discussion.refresh_exchange());
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(1000); return !discussion.exchange_busy(); }));
+  EXPECT_TRUE(discussion.following());
+  EXPECT_DOUBLE_EQ(discussion.pump(1000), 1001);
+  EXPECT_EQ(discussion.exchange_request().at("status"), "running");
+  // Recovery remains an explicit action and the refreshed observation follows uncertain results too.
+  ASSERT_TRUE(discussion.recover_request(id)); settled();
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(1000); return !discussion.exchange_busy(); }));
+  EXPECT_EQ(discussion.exchange_request().at("status"), "uncertain");
+  EXPECT_TRUE(discussion.following());
+  EXPECT_TRUE(discussion.exchange_reply().empty());
+}
+
+TEST_F(ProjectPython, ExchangeReadsDoNotBlockCancelOrPublishAnOlderSnapshot)
+{
+  populated();
+  const std::string id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  ASSERT_NO_FATAL_FAILURE(saved_request(id));
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.load_exchange(id));
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(100); return !discussion.exchange_busy(); }));
+  ASSERT_EQ(discussion.exchange_request().at("status"), "pending");
+  ASSERT_TRUE(discussion.refresh_exchange());
+  ASSERT_TRUE(discussion.exchange_busy());
+  EXPECT_FALSE(discussion.busy());
+  // The older get response is queued while cancellation changes this request.
+  ASSERT_TRUE(discussion.cancel_request(id));
+  ASSERT_TRUE(loop.pump_until([&] {
+    discussion.pump(100);
+    return !discussion.exchange_busy() && !discussion.busy() && !state().busy();
+  }));
+  ASSERT_FALSE(discussion.exchange_request().empty()) << discussion.exchange_error();
+  EXPECT_EQ(discussion.exchange_request().at("status"), "cancelled");
+  EXPECT_EQ(discussion.generation_request().at("status"), "cancelled");
+  EXPECT_FALSE(discussion.following());
+  EXPECT_TRUE(discussion.exchange_reply().empty());
+  EXPECT_EQ(discussion.exchange_question().at("id"), discussion.exchange_request().at("message_id"));
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ExchangeSelectionReadErrorsAndProjectCloseFenceIncompleteBundles)
+{
+  populated();
+  const std::string first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const std::string second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const std::string missing = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  ASSERT_NO_FATAL_FAILURE(saved_request(first));
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(state().apply(set_cell(350))); settled();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Another scope")); settled();
+  ASSERT_TRUE(discussion.add_message("Another question")); settled();
+  ASSERT_NO_FATAL_FAILURE(saved_request(second));
+  const auto second_context = discussion.context(), second_question = discussion.message();
+  ASSERT_TRUE(discussion.load_exchange(first));
+  ASSERT_TRUE(discussion.load_exchange(second));
+  EXPECT_TRUE(discussion.exchange_request().empty());
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(100); return !discussion.exchange_busy(); }));
+  ASSERT_EQ(discussion.exchange_request().at("id"), second);
+  EXPECT_EQ(io::canonical_json(discussion.exchange_context()), io::canonical_json(second_context));
+  EXPECT_EQ(io::canonical_json(discussion.exchange_question()), io::canonical_json(second_question));
+  ASSERT_TRUE(discussion.load_exchange(missing));
+  ASSERT_TRUE(loop.pump_until([&] { discussion.pump(100); return !discussion.exchange_busy(); }));
+  EXPECT_FALSE(discussion.exchange_error().empty());
+  EXPECT_TRUE(discussion.exchange_request().empty());
+  EXPECT_TRUE(discussion.exchange_context().empty());
+  EXPECT_TRUE(discussion.exchange_question().empty());
+  EXPECT_TRUE(discussion.exchange_reply().empty());
+  EXPECT_FALSE(discussion.following());
+  const auto before = client->stats().calls_sent;
+  EXPECT_TRUE(std::isinf(discussion.pump(1000)));
+  loop.run_ready();
+  EXPECT_EQ(client->stats().calls_sent, before);
+  ASSERT_TRUE(discussion.load_exchange(first));
+  ASSERT_TRUE(state().close()); settled();
+  EXPECT_TRUE(discussion.exchange_request().empty());
+  EXPECT_FALSE(discussion.exchange_busy());
+  EXPECT_FALSE(discussion.following());
+  EXPECT_TRUE(std::isinf(discussion.pump(2000)));
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
+  EXPECT_TRUE(discussion.exchange_request().empty());
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 

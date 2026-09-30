@@ -4,7 +4,7 @@
 
 macOS / Windows 真机测试可使用[快速编译与启动脚本](../desktop/QUICKSTART.md)。
 
-本文介绍当前可用功能。AI 工作区、分层节点、多维表格与 SQLite 项目的后续安排见
+本文介绍当前可用功能。AI 工作区的进一步集成、分层节点与共享多维表格安排见
 [开发计划](development-plan.md)和[工作台设计](design/project-workbench.md)。用户已反馈 macOS / Windows
 均能打开窗口并看到 3D 渲染，范围见[补充验收记录](runtime-validation.md#desktop-mac-windows-smoke)。
 
@@ -21,6 +21,8 @@ GHOST，绘制用 Blender 的 GPU 模块（Linux 上 OpenGL 或 Vulkan，macOS �
 - **查看器（Viewer）、属性（Properties）、探针（Probe）**：打开渲染数据包、结果目录或运行目录，用节点图
   预设（如 `muferro-domains`）在数据旁求值，GPU 显示、拾取并查询原始值，导出 PNG 与逐步序列。
 - **传输、日志、桥日志**：上传下载进度与续传、程序日志、桥的 stderr 与重启。
+- **AI 工作区**：在同一页检查捕获数据、准备和明确发送保存的问题、查看请求状态与普通文字回复；
+  首版 Linux 完整回归已通过，跨平台 CI 待记录，不改变默认启动布局。
 
 ![STK 桌面程序：左为任务，中为查看器（muFerro 畴结构），右为属性，下方为探针](images/desktop/overview-zh.png)
 
@@ -29,6 +31,28 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 [`desktop/README.md`](../desktop/README.md)，与旧界面的功能对照见
 [`desktop/docs/parity-jobs.md`](../desktop/docs/parity-jobs.md) 与
 [`desktop/docs/parity-viewer.md`](../desktop/docs/parity-viewer.md)。
+
+## AI 准备工作区
+
+打开格式 8 的项目，从项目页头或 **文件 → AI 工作区** 进入；旧项目先明确备份升级。
+用 **项目表格** 返回数据页选择一条记录，再在 AI 工作区点击 **捕获选中记录**，保存该记录全部字段
+（首版最多 64 个）的当前值与定义。检查捕获值及修订；后续参数变化不会更新这份上下文。
+
+填写模型 ID 和问题，点击 **准备问题（不发送）**。该操作只保存问题和请求意图，核对上方的已保存文字、
+模型和来源后，再点 **发送这条已保存的问题**。环境配置见[请求指南](project-requests.md)；未配置凭据也能准备和查看。
+正在编辑的新文字不会改变已保存请求；选择历史问答也不会覆盖输入框。数据捕获范围与历史问答的来源分别显示。
+准备分为消息保存和请求创建；第二步失败可能留下已保存消息。同次会话对当前相同输入重试会复用身份，
+关闭重开后需先检查历史，不承诺跨重启的准备事务恢复。
+
+工作区显示时，运行中/不确定状态会按约 1 秒间隔读取**本地保存记录**，最多跟踪 90 秒。
+完整回复保存后显示可换行的普通文字；出错或到期暂停，可明确点 **刷新回复** 继续读取，
+**刷新记录** 更新历史列表。刷新不向模型查询、不重发；取消及遗留执行核对仍须明确点击。
+保存问答随项目保留，未准备的问题及模型选择仅在本编辑器内按项目保留，退出程序或关闭编辑器后不保证恢复。
+
+首版是单条问题与选定上下文的文字请求，不自动附带其他问答、文件或未保存输入；没有流式输出、
+工具调用、自动修改/模拟、Markdown 渲染或默认 AI 主页切换。本轮重点回归 41/41、Linux 完整回归 602/602 通过，
+均无跳过，跨平台 CI 待记录；
+双平台真实模型和输入设备验收见[工作台清单](workbench-acceptance.md#ai-准备工作区)。
 
 ## 安装
 
@@ -315,8 +339,8 @@ M-D2 的剩余项现按[开发计划](development-plan.md)分配到 P0/P3/P5；Q
 ## English
 
 This guide describes implemented features. See the [development plan](development-plan.md) and
-[workbench design](design/project-workbench.md) (Chinese) for planned AI, hierarchical workflows,
-shared tables and SQLite projects. The owner reports successful window startup and visible 3D rendering on
+[workbench design](design/project-workbench.md) (Chinese) for further AI integration, hierarchical workflows
+and shared tables. The owner reports successful window startup and visible 3D rendering on
 both macOS and Windows; see the [scoped acceptance note](runtime-validation.md#desktop-mac-windows-smoke).
 
 `stk-desktop` is STK's own C++ desktop application: Blender's GHOST (windows, input, IME, GPU contexts),
@@ -331,6 +355,20 @@ sequence export) and **Transfers / Logs / Bridge log**. The D1 acceptance run is
 [runtime-validation.md](runtime-validation.md#2026-09-25-桌面里程碑-d1自有引擎桌面端).
 
 ![STK desktop: Jobs, Viewer (muFerro domains), Properties, Probe](images/desktop/overview-en.png)
+
+### AI preparation workspace
+
+Open a format-8 project, then use the Project header or **File → AI Workspace**. Select a record in Project,
+explicitly capture it, and review its saved values. **Prepare question (no send)** saves the question and request;
+**Send this saved question** is the separate provider action. See [provider setup](project-requests.md).
+Saved questions and wrapped plain-text replies share the page. While the workspace is visible, running/uncertain
+records are read locally about once per second for up to 90 seconds; errors pause this follow-up. Explicit refresh resumes local reads,
+without provider queries, sends or recovery. Unprepared text stays in this editor's per-project memory only.
+Preparation saves a message before creating its request: failure can leave that message, and identity reuse
+covers the same current input within the session, not a transaction resumed across restarts.
+No streaming, tools, automatic workflow execution or default-homepage change is included. Focused checks
+pass 41/41 and full Linux CTest passes 602/602, without skips. Cross-platform CI is pending;
+macOS/Windows real-account acceptance remains separate.
 
 ### Install
 

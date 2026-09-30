@@ -30,6 +30,8 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (output.empty()) { return 2; }
+  const bool ai = editor == "ai" || editor == "ai_narrow";
+  const int canvas_width = editor == "ai_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions bo;
@@ -95,7 +97,7 @@ int main(int argc, char **argv)
     ok = ok && state.loaded() && state.project()->revision == 1;
     if (ok) {
       auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
-      area->set_tab_type(0, editor == "python" ? app::kEditorPython : app::kEditorProject);
+      area->set_tab_type(0, editor == "python" ? app::kEditorPython : ai ? app::kEditorAI : app::kEditorProject);
       if (editor == "python") {
         auto &scripts = shell.store().scripts();
         const std::string source =
@@ -205,7 +207,7 @@ int main(int argc, char **argv)
         ok = ok && state.review() && state.review()->differences.size() == 2 && state.review()->errors.size() == 1;
         ok = ok && state.project()->revision == 1 && state.table()->text(0, 0) == "300";
       }
-      if (editor == "discussion" || editor == "requests") {
+      if (editor == "discussion" || editor == "requests" || ai) {
         auto &discussion = state.discussion();
         const std::string record = "40000000-4444-4444-8444-444444444444";
         const auto wait = [&] { return loop.pump_until([&] { return !state.busy() && !discussion.busy(); }, 30); };
@@ -224,9 +226,9 @@ int main(int argc, char **argv)
         ok = ok && discussion.capture(table, {record}, {temperature},
             lang == "zh" ? "编辑后的新上下文" : "New context after editing") && wait();
         ok = ok && discussion.load_context(context_id) && wait() && discussion.load_page("contexts") && wait();
-        ok = ok && area->editor().show_view("discussion") && discussion.error().empty();
+        ok = ok && (ai || area->editor().show_view("discussion")) && discussion.error().empty();
       }
-      if (editor == "requests") {
+      if (editor == "requests" || ai) {
         auto &discussion = state.discussion();
         const std::string pending = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
         const std::string cancelled = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -242,6 +244,29 @@ int main(int argc, char **argv)
         ok = ok && discussion.cancel_request(cancelled) && wait() && discussion.load_request(pending) && wait();
         ok = ok && discussion.load_page("requests") && wait() && discussion.page("requests").items.size() == 2;
         ok = ok && discussion.load_provider() && wait();
+        if (ai) {
+          // Controlled completion for rendering only; fixture credentials are empty.
+          auto &scripts = shell.store().scripts();
+          ok = ok && loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30);
+          const std::string answer = lang == "zh" ?
+              "受控显示样例\n\n两个案例的保存温度分别是 300 K 和 325 K，相差 25 K。\n"
+              "派生温度分别是 310 K 和 335 K。\n\n这份上下文不包含模拟输出，无法判断结果差异。"
+              "可以先检查参数的单位和来源，再选择需要运行的案例。保存的回答与捕获时的输入版本关联，"
+              "后续修改表格不会改写这份记录；准备问题也不会自动修改参数或提交模拟。" :
+              "Controlled display fixture\n\nThe saved temperatures are 300 K and 325 K, a difference of 25 K.\n"
+              "Derived temperatures are 310 K and 335 K.\n\nNo simulation outputs were included; result differences cannot be assessed. "
+              "Review units and sources before choosing which cases to run. This saved answer is linked to the captured input version; "
+              "later table edits do not rewrite that record. Preparing a question does not change parameters or submit simulations.";
+          ok = ok && scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+              "s=ProjectStore(" + io::Json(dir.str() + "/project").dump() + ")\nowner=str(uuid4())\n"
+              "s.requests._claim('" + pending + "', executor_id=owner)\n"
+              "s.requests._complete('" + pending + "', executor_id=owner, text=" + io::Json(answer).dump() + ")");
+          ok = ok && loop.pump_until([&] { return !scripts.busy(); }, 30) &&
+              scripts.status().at("run").at("state") == "succeeded";
+          ok = ok && discussion.load_exchange(pending) &&
+              loop.pump_until([&] { return !discussion.exchange_busy(); }, 30) && !discussion.exchange_reply().empty();
+          ok = ok && discussion.load_page("requests") && wait();
+        }
       }
       if (editor == "csv") {
         const auto source = dir.str() + "/project/parameters.csv";
@@ -267,14 +292,14 @@ int main(int argc, char **argv)
       wm::DrawContext ctx;
       ctx.ui_scale = 1;
       ctx.fonts = &gpu->fonts();
-      ctx.rect = {0, 0, 1280, 900};
+      ctx.rect = {0, 0, canvas_width, 900};
       ctx.now = 100;
       gfx::Image image;
       if (editor == "review" || editor == "review_errors" || editor == "drafts") {
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find("a2/main/project_view")) { widget->index.assign(1); }
         else { ok = false; }
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         const auto *apply = screen.ui()->find("a2/main/review_apply");
         ok = ok && apply && apply->enabled;
         if (editor == "review_errors") {
@@ -291,10 +316,10 @@ int main(int argc, char **argv)
               screen.ui()->handle_event(ui::Event::mouse_up(center));
             }
             else { ok = false; }
-            ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+            ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
             ok = ok && loop.pump_until([&] { return !state.busy(); }, 30);
           }
-          ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
           ok = ok && state.drafts_loaded() && state.drafts().size() == 2 && state.drafts_error().empty();
           if (const auto *widget = screen.ui()->find("a2/main/saved_reviews/draft_rows"); widget && widget->table) {
             widget->table->selected.assign(1);
@@ -309,7 +334,7 @@ int main(int argc, char **argv)
         }
       }
       if (editor == "recent") {
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         ok = ok && loop.pump_until([&] { return !state.recent_loading(); }, 30);
         if (const auto *widget = screen.ui()->find("a2/main/project_recent/projects"); widget && widget->table) {
           widget->table->selected.assign(0);
@@ -317,15 +342,15 @@ int main(int argc, char **argv)
         else { ok = false; }
       }
       if (editor == "requests") {
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *tabs = screen.ui()->find("a2/main/discussion_category")) { tabs->index.assign(3); }
         else { ok = false; }
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         const auto *cancel = screen.ui()->find("a2/main/request_cancel");
         ok = ok && cancel && cancel->enabled && state.project()->revision == 2;
       }
       if (editor == "discussion") {
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *panel = screen.ui()->find("a2/main/message_composer")) {
           const ui::Vec2 point{panel->rect.cx(), panel->rect.cy()};
           screen.ui()->handle_event(ui::Event::mouse_down(point));
@@ -334,29 +359,29 @@ int main(int argc, char **argv)
         else { ok = false; }
       }
       if (editor == "filter") {
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *search = screen.ui()->find("a2/main/table_search")) { search->string.assign("prepared"); }
         else { ok = false; }
         if (const auto *errors = screen.ui()->find("a2/main/table_errors_only")) { errors->boolean.assign(true); }
         else { ok = false; }
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *rows = screen.ui()->find("a2/main/" + table + "/records"); rows && rows->table) {
           ok = ok && rows->table->rows == 1;
           rows->table->selected.assign(0);
         }
         else { ok = false; }
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         ok = ok && state.record_id() == "40000004-4444-4444-8444-444444444444" && state.project()->revision == 1;
       }
       if (editor == "expression") {
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find("a2/main/cell_field")) {
           widget->index.assign(2);
         }
         else { ok = false; }
       }
       if (editor == "manage" || editor == "files" || editor == "snapshots" || editor == "runs" || editor == "csv" || editor == "simulation" || editor == "batches") {
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find((editor == "simulation" || editor == "batches") ? "a2/main/project_simulation" : editor == "manage" ? "a2/main/manage_objects" :
                                                   editor == "files" ? "a2/main/project_files" : editor == "csv" ? "a2/main/project_csv" : editor == "runs" ? "a2/main/project_runs" : "a2/main/input_snapshots")) {
           const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
@@ -367,13 +392,13 @@ int main(int argc, char **argv)
       }
       if (editor == "simulation" || editor == "batches") {
         auto &scripts = shell.store().scripts();
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         ok = ok && loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30);
         if (const auto *widget = screen.ui()->find("a2/main/project_simulation/simulation_source")) {
           widget->string.assign(dir.str() + "/case");
         }
         else { ok = false; }
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find("a2/main/project_simulation/simulation_import"); widget && widget->enabled) {
           widget->on_click();
         }
@@ -390,7 +415,7 @@ int main(int argc, char **argv)
               ", row], 'runtime:lab', expected_revision=p.snapshot()['project']['revision']); None");
           ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
           ok = ok && scripts.status().at("run").at("state") == "succeeded";
-          ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
           for (const auto *key : {"a2/main/project_simulation", "a2/main/project_batches"}) {
             if (const auto *widget = screen.ui()->find(key)) {
               const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
@@ -398,12 +423,12 @@ int main(int argc, char **argv)
               screen.ui()->handle_event(ui::Event::mouse_up(center));
             }
             else { ok = false; }
-            ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+            ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
           }
         }
       }
       if (editor == "csv") {
-        ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find("a2/main/project_csv/source")) {
           widget->string.assign(dir.str() + "/project/parameters.csv");
           screen.ui()->find("a2/main/project_csv/name")->string.assign("Imported parameters / 导入参数");
@@ -415,14 +440,14 @@ int main(int argc, char **argv)
         // Drawing services queued model notifications; wait for resulting list/detail reads
         // before capturing enabled controls rather than the transient loading frame.
         for (int i = 0; i < 3; ++i) {
-          ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
           ok = ok && loop.pump_until([&] { return !state.busy(); }, 30);
         }
       }
       if (editor == "offline") {
         // A new editor attaches during its first UI draw; subsequent frames draw its GPU region.
         for (int frame = 0; frame < 2; ++frame) {
-          ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         }
       }
       if (editor == "offline") {
@@ -432,7 +457,7 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      ok = ok && gfx::render_offscreen(1280, 900, [&] { screen.draw(ctx); }, image, error);
+      ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
       ok = ok && gfx::png_write(output, image);
     }
     if (!ok) { fprintf(stderr, "FAIL: %s %s\n%s", state.error().c_str(), error.c_str(), client->bridge_log().text().c_str()); rc = 1; }

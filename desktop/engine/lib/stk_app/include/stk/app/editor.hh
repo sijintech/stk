@@ -159,6 +159,7 @@ inline constexpr const char *kEditorTransfers = "transfers";
 inline constexpr const char *kEditorBridgeLog = "bridge_log";
 inline constexpr const char *kEditorProject = "project";
 inline constexpr const char *kEditorPython = "python";
+inline constexpr const char *kEditorAI = "ai";
 
 /** Registers the D1 editors for all seven ids. */
 void register_builtin_editors(EditorRegistry &registry);

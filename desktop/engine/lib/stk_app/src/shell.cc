@@ -524,6 +524,7 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
       }
     });
   };
+  m.push_back({std::string(store_.tr("editor.ai.title")), [show_editor] { show_editor(kEditorAI); }});
   m.push_back({std::string(store_.tr("editor.project.title")), [show_editor] { show_editor(kEditorProject); }});
   m.push_back({std::string(store_.tr("editor.python.title")), [show_editor] { show_editor(kEditorPython); }});
   /* WP10: open a payload (.stkp / directory), a result directory or a run directory in the Viewer. */
