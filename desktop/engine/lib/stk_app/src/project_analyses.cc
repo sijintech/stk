@@ -217,6 +217,17 @@ bool ProjectAnalyses::rename(const std::string &name)
                selected_.at("document"), selected_revision_);
 }
 
+bool ProjectAnalyses::replace_parameters(const Json &parameters, const uint64_t expected_selected_version)
+{
+  sync();
+  if (!parameters.is_object() || selected_version_ != expected_selected_version || selected_.is_null() ||
+      io::get_string(selected_, "state") != "readable" || stale()) { return false; }
+  auto document = selected_.at("document");
+  document["parameters"] = parameters;
+  return write("project.analyses.update", selected_.at("id").get<std::string>(),
+               selected_.at("name").get<std::string>(), document, selected_revision_);
+}
+
 bool ProjectAnalyses::check_pending()
 {
   sync();

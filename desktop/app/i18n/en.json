@@ -1266,5 +1266,20 @@
   "analysis_runs.canvas_hint": "The canvas shows the loaded saved definition. Each run keeps its own frozen graph and inputs.",
   "analysis_runs.budget": "Budget: 300 seconds including queue time. Input files and result archive each have a 256 MiB limit.",
   "analysis_graph.catalog_loading": "Reading node descriptions…",
-  "analysis_graph.catalog_unavailable": "Node descriptions could not be loaded. The saved graph remains unchanged."
+  "analysis_graph.catalog_unavailable": "Node descriptions could not be loaded. The saved graph remains unchanged.",
+  "analysis_parameters.title": "Submitted parameters",
+  "analysis_parameters.hint": "Edit a local parameter draft. The graph and validation below still show the saved definition; saving does not execute it.",
+  "analysis_parameters.dirty": "Unsaved parameter changes. Apply pending text, then Save, or explicitly discard the draft.",
+  "analysis_parameters.stale": "This draft no longer matches the current project revision or session. Its text is preserved; discard it and reload the definition before editing again.",
+  "analysis_parameters.save": "Save parameters",
+  "analysis_parameters.discard": "Discard local edits",
+  "analysis_parameters.submitted": "Submitted",
+  "analysis_parameters.default": "Graph default",
+  "analysis_parameters.absent": "Absent",
+  "analysis_parameters.literal_hint": "Literal text: empty input is an empty string; null is the word “null”. Press Enter to finish typing, then Apply value.",
+  "analysis_parameters.json_hint": "Exact JSON value. Press Enter to finish typing, then Apply value. Removing an override is separate from setting null.",
+  "analysis_parameters.apply_value": "Apply value",
+  "analysis_parameters.set_null": "Set null",
+  "analysis_parameters.remove": "Remove override",
+  "analysis_parameters.run_guard": "Unsaved parameter input is not part of this saved definition. Return to Definition and Save or discard it before preparing a run."
 }

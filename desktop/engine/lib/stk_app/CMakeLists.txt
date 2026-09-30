@@ -16,6 +16,7 @@ get_filename_component(_stk_desktop_dir ${_stk_desktop_dir} ABSOLUTE)
 add_library(stk_app STATIC
   src/analysis_graph_view.cc
   src/analysis_graph_canvas.cc
+  src/analysis_parameter_draft.cc
   src/app_store.cc
   src/bridge_status.cc
   src/editor.cc

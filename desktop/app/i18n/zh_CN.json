@@ -1266,5 +1266,20 @@
   "analysis_runs.canvas_hint": "画布显示已载入的保存定义。每次运行独立保留自己的冻结图与输入。",
   "analysis_runs.budget": "执行预算为 300 秒，包含排队时间。输入文件和结果归档各限 256 MiB。",
   "analysis_graph.catalog_loading": "正在读取节点说明…",
-  "analysis_graph.catalog_unavailable": "无法载入节点说明，保存的图定义保持不变。"
+  "analysis_graph.catalog_unavailable": "无法载入节点说明，保存的图定义保持不变。",
+  "analysis_parameters.title": "提交参数",
+  "analysis_parameters.hint": "在本地草稿中编辑参数。下方节点图与校验仍对应保存的定义；保存不会执行节点。",
+  "analysis_parameters.dirty": "参数修改尚未保存。先应用正在编辑的文本，再保存，或明确放弃本地草稿。",
+  "analysis_parameters.stale": "此草稿已不对应当前项目修订或会话。已保留输入文本；请放弃草稿并重新载入定义后再编辑。",
+  "analysis_parameters.save": "保存参数",
+  "analysis_parameters.discard": "放弃本地修改",
+  "analysis_parameters.submitted": "提交值",
+  "analysis_parameters.default": "图默认值",
+  "analysis_parameters.absent": "未设置",
+  "analysis_parameters.literal_hint": "按文本原样保存：空输入是空字符串，null 是文本“null”。按回车结束输入，再应用值。",
+  "analysis_parameters.json_hint": "输入精确 JSON 值。按回车结束输入，再应用值。移除覆盖与设为 null 是两个独立操作。",
+  "analysis_parameters.apply_value": "应用值",
+  "analysis_parameters.set_null": "设为 null",
+  "analysis_parameters.remove": "移除覆盖",
+  "analysis_parameters.run_guard": "尚未保存的参数输入不属于当前保存定义。请返回“分析定义”，保存或放弃后再准备运行。"
 }

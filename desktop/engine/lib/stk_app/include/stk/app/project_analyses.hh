@@ -39,6 +39,8 @@ class ProjectAnalyses {
   bool save_new(const std::string &name, const io::Json &document);
   /** Replace only the display name of the selected, fully read definition at its read revision. */
   bool rename(const std::string &name);
+  /** Replace submitted overrides only, preserving the selected graph, outputs and name. */
+  bool replace_parameters(const io::Json &parameters, uint64_t expected_selected_version);
   /** Observe the existing identity after an ambiguous reply; never sends the mutation again. */
   bool check_pending();
 

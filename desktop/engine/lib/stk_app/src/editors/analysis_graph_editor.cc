@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/analysis_graph_canvas.hh"
 #include "stk/app/analysis_graph_state.hh"
+#include "stk/app/analysis_parameter_draft.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_table_view.hh"
 #include "stk/app/project_analyses.hh"
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <set>
 
 namespace stk::app {
 namespace {
@@ -120,6 +122,7 @@ class AnalysisGraphEditor final : public Editor {
       }});
       if (saved_section_ == 1) { runs_panel(layout, ctx); return; }
     }
+    if (state_->saved() || parameter_edits()) { parameter_panel(layout, ctx); }
     documents_panel(layout, ctx);
     source_panel(layout, ctx);
     if (!state_->view()) { return; }
@@ -234,6 +237,13 @@ class AnalysisGraphEditor final : public Editor {
   uint64_t document_epoch_ = 0, document_version_ = 0;
   uint64_t navigation_generation_ = 0, document_navigation_ = 0;
   std::string document_name_;
+  AnalysisParameterDraft parameter_draft_;
+  std::optional<std::string> parameter_key_;
+  std::string parameter_buffer_, parameter_original_, parameter_error_;
+  bool parameter_buffer_changed_ = false, parameter_detached_ = false, parameter_saving_ = false;
+  uint64_t parameter_epoch_ = 0, parameter_selection_ = 0, parameter_save_generation_ = 0, parameter_save_version_ = 0;
+  ui::Context *parameter_ui_ = nullptr;
+  ui::WidgetId parameter_input_id_ = 0;
   int saved_section_ = 0, snapshot_index_ = -1, file_index_ = -1, output_index_ = -1, mapping_index_ = -1;
   uint64_t runs_epoch_ = 0, run_selection_ = 0, bindings_generation_ = 0;
   std::string binding_name_ = "data", binding_path_, binding_error_;
@@ -248,6 +258,204 @@ class AnalysisGraphEditor final : public Editor {
   float canvas_top_ = 60;
 
   void redraw() { if (store_) { store_->changed(); } }
+  bool parameter_text_active() const
+  {
+    return parameter_ui_ && parameter_input_id_ && parameter_ui_->editing() == parameter_input_id_;
+  }
+  bool parameter_edits() const
+  {
+    return parameter_draft_.dirty() || parameter_buffer_changed_ || parameter_text_active();
+  }
+  bool parameter_current() const
+  {
+    const auto &project = store_->project().project();
+    return parameter_draft_.pinned() && !parameter_detached_ && project &&
+        parameter_epoch_ == documents_->epoch() && parameter_selection_ == documents_->selected_version() &&
+        parameter_draft_.current(project->handle, project->revision) &&
+        parameter_draft_.analysis_id() == io::get_string(documents_->selected(), "id");
+  }
+  void clear_parameter_draft()
+  {
+    parameter_draft_.reset(); parameter_key_.reset(); parameter_buffer_.clear(); parameter_original_.clear();
+    parameter_error_.clear(); parameter_buffer_changed_ = parameter_detached_ = parameter_saving_ = false;
+    parameter_input_id_ = 0;
+  }
+  Json parameter_declaration(const std::string &name) const
+  {
+    if (!parameter_draft_.pinned()) { return nullptr; }
+    const auto &graph = parameter_draft_.baseline_document().at("graph");
+    const auto declarations = graph.find("parameters");
+    if (declarations != graph.end() && declarations->is_array()) {
+      for (const auto &declaration : *declarations) {
+        if (io::get_string(declaration, "name") == name) { return declaration; }
+      }
+    }
+    return nullptr;
+  }
+  bool parameter_literal() const
+  {
+    if (!parameter_key_) { return false; }
+    const auto declaration = parameter_declaration(*parameter_key_);
+    if (io::get_string(declaration, "type") != "string") { return false; }
+    auto value = parameter_draft_.override_value(*parameter_key_);
+    if (!value && declaration.contains("default")) { value = declaration.at("default"); }
+    // Stored editable definitions may contain a non-string under a string declaration.
+    // Show its exact JSON until the user explicitly replaces it with a string.
+    return !value || value->is_string();
+  }
+  void parameter_buffer_from_value()
+  {
+    parameter_buffer_.clear(); parameter_error_.clear(); parameter_buffer_changed_ = false;
+    if (parameter_key_) {
+      auto value = parameter_draft_.override_value(*parameter_key_);
+      const auto declaration = parameter_declaration(*parameter_key_);
+      if (!value && declaration.is_object() && declaration.contains("default")) { value = declaration.at("default"); }
+      if (value) {
+        parameter_buffer_ = parameter_literal() && value->is_string() ? value->get<std::string>() :
+            io::python_json_dumps(*value, false, true);
+      }
+    }
+    parameter_original_ = parameter_buffer_;
+    parameter_input_id_ = 0;
+  }
+  void pin_parameters()
+  {
+    const auto &selected = documents_->selected();
+    try {
+      if (!parameter_draft_.pinned() || parameter_draft_.analysis_id() != io::get_string(selected, "id")) {
+        parameter_key_.reset();
+      }
+      parameter_draft_.pin(documents_->handle(), io::get_string(selected, "id"), documents_->selected_revision(),
+                          io::get_string(selected, "name"), selected.at("document"));
+      if (parameter_key_ && !parameter_draft_.has_override(*parameter_key_) && parameter_declaration(*parameter_key_).is_null()) {
+        parameter_key_.reset();
+      }
+      parameter_epoch_ = documents_->epoch(); parameter_selection_ = documents_->selected_version();
+      parameter_detached_ = parameter_saving_ = false;
+      parameter_buffer_from_value();
+    }
+    catch (const std::exception &error) { parameter_error_ = error.what(); parameter_detached_ = true; }
+  }
+  void parameter_panel(ui::Layout &layout, EditorContext &ctx)
+  {
+    if (!parameter_draft_.pinned()) { return; }
+    auto *panel = layout.panel("analysis_parameter_panel", ctx.tr("analysis_parameters.title"), true);
+    if (!panel) { return; }
+    const std::weak_ptr<bool> weak = alive_;
+    const auto generation = parameter_draft_.generation(), version = parameter_draft_.version();
+    const auto valid = [this, weak, generation] {
+      const auto live = weak.lock();
+      if (!live || !*live || parameter_draft_.generation() != generation) { return false; }
+      documents_->sync();
+      return true;
+    };
+    const bool unavailable = !parameter_current();
+    const bool busy = documents_->busy() || documents_->uncertain() || ctx.store.project().busy();
+    const bool blocked = busy || unavailable;
+    panel->paragraph(ctx.tr("analysis_parameters.hint"));
+    if (parameter_edits()) { panel->paragraph(ctx.tr("analysis_parameters.dirty")); }
+    if (unavailable) {
+      panel->paragraph(ctx.tr("analysis_parameters.stale"));
+      panel->paragraph(text(parameter_draft_.analysis_id()));
+    }
+    if (!parameter_error_.empty()) { panel->paragraph(text(parameter_error_)); }
+    auto &actions = panel->row();
+    const auto selection = parameter_selection_;
+    actions.button("analysis_parameters_save", ctx.tr("analysis_parameters.save"), [this, valid, version, selection] {
+      if (!valid() || !parameter_current() || (parameter_ui_ && parameter_ui_->text_input_active()) || parameter_buffer_changed_ ||
+          parameter_draft_.version() != version || !parameter_draft_.dirty() ||
+          documents_->selected_version() != selection) { return; }
+      if (documents_->replace_parameters(parameter_draft_.parameters(), selection)) {
+        parameter_saving_ = true; parameter_save_generation_ = parameter_draft_.generation();
+        parameter_save_version_ = parameter_draft_.version(); document_navigation_ = navigation_generation_;
+      }
+    }).disable(blocked || !parameter_draft_.dirty() || parameter_buffer_changed_ || (parameter_ui_ && parameter_ui_->text_input_active()));
+    actions.button("analysis_parameters_discard", ctx.tr("analysis_parameters.discard"), [this, valid] {
+      if (!valid() || documents_->busy() || documents_->uncertain() || parameter_text_active()) { return; }
+      clear_parameter_draft();
+      if (!documents_->selected().is_null() && io::get_string(documents_->selected(), "state") == "readable") {
+        pin_parameters();
+      }
+      redraw();
+    }).disable(busy || parameter_text_active() || (!parameter_edits() && !unavailable));
+
+    std::vector<std::string> names;
+    std::set<std::string> seen;
+    const auto &graph = parameter_draft_.baseline_document().at("graph");
+    if (const auto declarations = graph.find("parameters"); declarations != graph.end() && declarations->is_array()) {
+      for (const auto &declaration : *declarations) {
+        const auto name = io::get_string(declaration, "name");
+        if (seen.insert(name).second) { names.push_back(name); }
+      }
+    }
+    const auto parameters = parameter_draft_.parameters();
+    // Retain a removed unknown row until save/discard, so removal can be inspected or reversed.
+    for (const auto *values : {&parameter_draft_.baseline_document().at("parameters"), &parameters}) {
+      for (const auto &[name, unused] : values->items()) { if (seen.insert(name).second) { names.push_back(name); } }
+    }
+    Rows rows; int selected = -1;
+    for (size_t i = 0; i < names.size(); ++i) {
+      const auto &name = names[i]; const auto declaration = parameter_declaration(name);
+      const auto value = parameter_draft_.override_value(name);
+      const bool has_default = declaration.is_object() && declaration.contains("default");
+      rows.push_back({name.empty() ? "\"\"" : text(name),
+          value ? text(io::python_json_dumps(*value, false, true)) :
+              has_default ? text(io::python_json_dumps(declaration.at("default"), false, true)) : std::string(),
+          io::get_string(declaration, "type", "JSON"),
+          std::string(ctx.tr(value ? "analysis_parameters.submitted" : has_default ? "analysis_parameters.default" : "analysis_parameters.absent"))});
+      if (parameter_key_ && *parameter_key_ == name) { selected = int(i); }
+    }
+    ui::TableSpec spec;
+    spec.columns = {{std::string(ctx.tr("analysis_graph.parameter")), 6}, {std::string(ctx.tr("analysis_graph.value")), 10},
+        {std::string(ctx.tr("analysis_graph.type")), 5}, {std::string(ctx.tr("analysis_graph.origin")), 6}};
+    spec.rows = int(rows.size()); spec.visible_rows = float(std::min(5, std::max(1, spec.rows)));
+    spec.data_version = version;
+    spec.cell = [rows](const int row, const int col) { return rows.at(size_t(row)).at(size_t(col)); };
+    spec.selected = {[selected] { return selected; }, [this, valid, version, names](const int index) {
+      if (!valid() || !parameter_current() || documents_->busy() || documents_->uncertain() ||
+          parameter_text_active() || parameter_buffer_changed_ || parameter_draft_.version() != version ||
+          index < 0 || size_t(index) >= names.size()) { return; }
+      parameter_key_ = names[size_t(index)]; parameter_buffer_from_value(); redraw();
+    }};
+    panel->table("analysis_parameters", std::move(spec)).disable(blocked || parameter_buffer_changed_ || parameter_text_active());
+    if (!parameter_key_) { return; }
+    const auto key = *parameter_key_;
+    panel->label(key.empty() ? "\"\"" : text(key));
+    panel->paragraph(ctx.tr(parameter_literal() ? "analysis_parameters.literal_hint" : "analysis_parameters.json_hint"));
+    auto &scope = panel->scope("parameter/" + std::to_string(generation) + "/" + std::to_string(selected));
+    auto &input = scope.text_field("analysis_parameter_value", {[value = parameter_buffer_] { return value; },
+        [this, valid, key](const std::string &value) {
+      // Keep the typed buffer even if a project/bridge change detached this draft while typing.
+      if (valid() && parameter_key_ && *parameter_key_ == key) {
+        parameter_buffer_ = value; parameter_buffer_changed_ = value != parameter_original_; parameter_error_.clear(); redraw();
+      }
+    }}, {.max_length = AnalysisParameterDraft::max_text_bytes, .mono = true});
+    parameter_input_id_ = input.id; input.disable(blocked);
+    auto &values = panel->row();
+    values.button("analysis_parameter_apply", ctx.tr("analysis_parameters.apply_value"), [this, valid, key] {
+      if (!valid() || !parameter_current() || documents_->busy() || documents_->uncertain() || parameter_text_active() ||
+          !parameter_key_ || *parameter_key_ != key) { return; }
+      const auto result = parameter_draft_.set_text(key, parameter_buffer_, parameter_literal() ?
+          AnalysisParameterDraft::TextMode::LiteralString : AnalysisParameterDraft::TextMode::Json, parameter_draft_.generation());
+      if (result.accepted) { parameter_buffer_from_value(); }
+      else { parameter_error_ = result.error; parameter_buffer_changed_ = true; }
+      redraw();
+    }).disable(blocked || parameter_text_active());
+    values.button("analysis_parameter_null", ctx.tr("analysis_parameters.set_null"), [this, valid, key] {
+      if (!valid() || !parameter_current() || documents_->busy() || documents_->uncertain() || parameter_text_active() ||
+          parameter_buffer_changed_ || !parameter_key_ || *parameter_key_ != key) { return; }
+      const auto result = parameter_draft_.set(key, nullptr, parameter_draft_.generation());
+      if (result.accepted) { parameter_buffer_from_value(); } else { parameter_error_ = result.error; }
+      redraw();
+    }).disable(blocked || parameter_text_active() || parameter_buffer_changed_);
+    panel->button("analysis_parameter_remove", ctx.tr("analysis_parameters.remove"), [this, valid, key] {
+      if (!valid() || !parameter_current() || documents_->busy() || documents_->uncertain() || parameter_text_active() ||
+          parameter_buffer_changed_ || !parameter_key_ || *parameter_key_ != key) { return; }
+      const auto result = parameter_draft_.remove(key, parameter_draft_.generation());
+      if (result.accepted) { parameter_buffer_from_value(); } else { parameter_error_ = result.error; }
+      redraw();
+    }).disable(blocked || parameter_text_active() || parameter_buffer_changed_ || !parameter_draft_.has_override(key));
+  }
   void place_canvas(const double width, const double height)
   {
     if (!fit_ && !focus_selected_) { return; }
@@ -264,6 +472,7 @@ class AnalysisGraphEditor final : public Editor {
   void attach(EditorContext &ctx)
   {
     store_ = &ctx.store;
+    parameter_ui_ = ctx.ui;
     if (!state_) {
       state_ = std::make_unique<AnalysisGraphState>(ctx.store.viewer());
       state_->show_displayed(initial_displayed_);
@@ -273,6 +482,13 @@ class AnalysisGraphEditor final : public Editor {
     }
     documents_->sync();
     if (document_epoch_ != documents_->epoch()) {
+      if (parameter_edits()) {
+        if (parameter_text_active() && parameter_ui_->edit_state()) {
+          parameter_buffer_ = parameter_ui_->edit_state()->text(); parameter_buffer_changed_ = true;
+        }
+        parameter_detached_ = true; parameter_saving_ = false;
+      }
+      else { clear_parameter_draft(); }
       document_epoch_ = documents_->epoch(); document_name_.clear();
       state_->clear_document();
     }
@@ -280,7 +496,16 @@ class AnalysisGraphEditor final : public Editor {
       document_version_ = documents_->selected_version();
       const auto &selected = documents_->selected();
       if (!selected.is_null()) {
-        document_name_ = io::get_string(selected, "name");
+        bool preserve_name = false;
+        if (selected.at("state") == "readable") {
+          const bool recovered = parameter_saving_ && !parameter_detached_ && parameter_epoch_ == documents_->epoch() &&
+              parameter_draft_.generation() == parameter_save_generation_ && parameter_draft_.version() == parameter_save_version_ &&
+              parameter_draft_.matches(io::get_string(selected, "id"), io::get_string(selected, "name"), selected.at("document"));
+          preserve_name = recovered && document_name_ != parameter_draft_.name();
+          if (!parameter_edits() || recovered) { pin_parameters(); }
+          else if (parameter_draft_.pinned()) { parameter_detached_ = true; parameter_saving_ = false; }
+        }
+        if (!preserve_name) { document_name_ = io::get_string(selected, "name"); }
         const bool activate = document_navigation_ == navigation_generation_;
         state_->clear_document();
         if (activate) { state_->show_saved(); }
@@ -289,6 +514,9 @@ class AnalysisGraphEditor final : public Editor {
               documents_->selected_revision(), selected.at("document"), activate);
         }
       }
+    }
+    if (parameter_saving_ && !documents_->busy() && !documents_->uncertain() && !documents_->error().empty()) {
+      parameter_saving_ = false;
     }
     state_->sync();
     state_->ensure_catalog();
@@ -341,6 +569,7 @@ class AnalysisGraphEditor final : public Editor {
       return;
     }
     layout.paragraph(ctx.tr("analysis_runs.canvas_hint"));
+    if (parameter_edits()) { layout.paragraph(ctx.tr("analysis_parameters.run_guard")); }
     if (!state_->document_id().empty()) { layout.label(text(state_->document_id())); }
     const std::weak_ptr<bool> weak = alive_;
     const auto epoch = runs_->epoch();
@@ -373,13 +602,13 @@ class AnalysisGraphEditor final : public Editor {
       }
       prepare->button("analysis_run_prepare", ctx.tr("analysis_runs.prepare"),
           [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
-        if (!valid()) { return; }
+        if (!valid() || parameter_edits()) { return; }
         state_->sync();
         if (state_->saved() && state_->generation() == generation && bindings_generation_ == bindings_generation &&
             state_->document_id() == id && !state_->document_stale()) {
           runs_->prepare(id, revision, snapshot, bindings);
         }
-      }).disable(blocked || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() || bindings.empty());
+      }).disable(blocked || parameter_edits() || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() || bindings.empty());
     }
     if (auto *history = layout.panel("analysis_run_history", ctx.tr("analysis_runs.history"), runs_->run().is_null())) {
       history->button("analysis_run_list", ctx.tr("analysis_runs.refresh"), [this, valid] {
@@ -648,30 +877,30 @@ class AnalysisGraphEditor final : public Editor {
         "analysis_name/" + std::to_string(epoch) + "/" + std::to_string(selection_version),
         {[name = document_name_] { return name; }, [this, valid, selection_version](const std::string &value) {
           if (valid() && documents_->selected_version() == selection_version) { document_name_ = value; }
-        }}, {.max_length = 256}).disable(blocked);
+        }}, {.max_length = 256}).disable(blocked || parameter_edits());
     const auto generation = state_->generation();
     const auto *definition = state_->definition();
     const Json candidate = definition ? Json{{"format", "stk.analysis-document/1"}, {"graph", definition->graph},
         {"parameters", definition->parameters}, {"outputs", definition->requested_outputs}} : Json();
     panel->button("analysis_save", ctx.tr("analysis_documents.save_new"), [this, valid, generation, candidate] {
-      if (!valid()) { return; }
+      if (!valid() || parameter_edits()) { return; }
       state_->sync();
       if (state_->generation() == generation && !candidate.is_null() && documents_->save_new(document_name_, candidate)) {
         document_navigation_ = navigation_generation_;
       }
-    }).disable(blocked || documents_->uncertain() || candidate.is_null());
+    }).disable(blocked || parameter_edits() || documents_->uncertain() || candidate.is_null());
     if (!documents_->selected().is_null() && state_->saved()) {
       const auto selected_id = io::get_string(documents_->selected(), "id");
       panel->button("analysis_reload", ctx.tr("analysis_documents.reload"), [this, valid, selected_id] {
-        if (valid() && io::get_string(documents_->selected(), "id") == selected_id && documents_->load(selected_id)) {
+        if (valid() && !parameter_edits() && io::get_string(documents_->selected(), "id") == selected_id && documents_->load(selected_id)) {
           document_navigation_ = navigation_generation_;
         }
-      }).disable(blocked);
+      }).disable(blocked || parameter_edits());
       panel->button("analysis_rename", ctx.tr("analysis_documents.rename"), [this, valid, selection_version] {
-        if (valid() && documents_->selected_version() == selection_version && documents_->rename(document_name_)) {
+        if (valid() && !parameter_edits() && documents_->selected_version() == selection_version && documents_->rename(document_name_)) {
           document_navigation_ = navigation_generation_;
         }
-      }).disable(blocked || documents_->uncertain() || documents_->stale() ||
+      }).disable(blocked || parameter_edits() || documents_->uncertain() || documents_->stale() ||
           io::get_string(documents_->selected(), "state") != "readable");
       if (!io::get_string(documents_->selected(), "error").empty()) {
         panel->paragraph(text(io::get_string(documents_->selected(), "error")));
@@ -705,13 +934,13 @@ class AnalysisGraphEditor final : public Editor {
       spec.cell = [cells](const int row, const int column) { return cells.at(size_t(row)).at(size_t(column)); };
       const auto revision = io::get_int(page, "revision", -1);
       spec.selected = {[selected_row] { return selected_row; }, [this, valid, rows, revision, offset](const int row) {
-        if (valid() && row >= 0 && size_t(row) < rows.size() &&
+        if (valid() && !parameter_edits() && row >= 0 && size_t(row) < rows.size() &&
             io::get_int(documents_->page(), "revision", -1) == revision &&
             io::get_int(documents_->page(), "offset", -1) == offset && documents_->load(io::get_string(rows[size_t(row)], "id"))) {
           document_navigation_ = navigation_generation_;
         }
       }};
-      panel->table("analysis_documents", std::move(spec)).disable(blocked);
+      panel->table("analysis_documents", std::move(spec)).disable(blocked || parameter_edits());
     }
     auto &buttons = panel->row();
     buttons.button("analysis_previous", ctx.tr("analysis_documents.previous"), [this, valid, offset] {
