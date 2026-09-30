@@ -32,9 +32,10 @@ int main(int argc, char **argv)
   if (output.empty()) { return 2; }
   const bool ai_stream = editor == "ai_stream";
   const bool ai_proposal = editor == "ai_proposal" || editor == "ai_proposal_narrow";
+  const bool ai_focus = editor == "ai_focus";
   const bool ai_scope = editor == "ai_scope" || editor == "ai_scope_narrow";
-  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope;
-  const int canvas_width = editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" ? 760 : 1280;
+  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope || ai_focus;
+  const int canvas_width = editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions bo;
@@ -597,6 +598,15 @@ int main(int argc, char **argv)
              state.saved_review().empty() && !state.review() &&
              io::get_string(state.discussion().exchange_edit_proposal().at("draft"), "status") == "pending" &&
              client->stats().schema_violations == 0;
+      }
+      if (ai_focus) {
+        const auto *view = screen.ui()->find("view");
+        ok = ok && view && view->menu.size() >= 3 &&
+            view->menu[0].text == shell.store().tr("app.menu.view.focus_preparation") &&
+            view->menu[1].text == shell.store().tr("app.menu.view.focus_analysis") &&
+            view->menu[2].text == shell.store().tr("app.menu.view.restore_split_layout") &&
+            screen.ui()->open_popup("view");
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
       }
       ok = ok && gfx::png_write(output, image);
     }

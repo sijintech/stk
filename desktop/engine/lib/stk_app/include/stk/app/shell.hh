@@ -118,6 +118,13 @@ class AppShell {
   /** User UI scale (applied to the window manager in GUI mode). */
   void set_ui_scale(float scale);
 
+  /** Activate a live editor on an installed screen without rebuilding its layout. Reuses an
+   * existing tab or creates one only if capacity permits. `maximize=false` shows the split layout.
+   * Both navigation operations run on the UI thread and refuse an active edit in the target
+   * screen. Other windows and their input are unaffected. */
+  bridge::Result<io::Json> activate_editor(wm::Screen *screen, const std::string &editor_id, bool maximize);
+  bridge::Result<io::Json> restore_split_layout(wm::Screen *screen);
+
   /** Defer saved-draft adoption and Review navigation into the originating screen.
    * `valid` must fence the caller's lifetime and selected request. Expired callers
    * receive no callback; live conflicts preserve all review and text input state. */

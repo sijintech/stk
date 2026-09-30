@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_state.hh"
+#include "stk/app/project_discussion.hh"
 #include "stk/app/script_state.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
@@ -49,6 +50,8 @@ class ScriptPython : public ::testing::Test {
     options.env["PYTHONPATH"] = STK_REPO_ROOT;
     options.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
     options.env["STK_STATE_DIR"] = dir.str() + "/runtime";
+    options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+    options.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
     options.executor = loop.executor();
     options.strict = options.validate = true;
     client = bridge::Client::create(options);
@@ -118,6 +121,152 @@ select_request = {'handle': p.handle, 'expected_revision': 1, 'table_id': t1, 'r
   }
 
 };
+
+TEST_F(ScriptPython, FocusNavigationPreservesLiveAiAndPythonDraftsAndProject)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  auto &project = f.shell->store().project();
+  auto &area = f.area("a2"), &viewer = f.area("a1");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  ASSERT_TRUE(area.add_tab(kEditorPython, false));
+  ASSERT_TRUE(viewer.set_tab_type(0, kEditorViewer));
+  Editor *ai = &area.tab(0), *python = &area.tab(1), *view = &viewer.tab(0);
+  const auto handle = project.project()->handle;
+  const auto frame = [&] {
+    for (int i = 0; i < 3; ++i) {
+      f.drv->frame();
+      ASSERT_TRUE(pump([&] { return !project.busy() && !project.discussion().busy(); }));
+    }
+  };
+  f.screen.set_maximized(&area); frame();
+  const auto question_key = "a2/main/ai_question/" + handle;
+  ASSERT_NE(f.screen.ui()->find(question_key), nullptr);
+  f.screen.ui()->find(question_key)->string.assign("Unsent research question / 未发送的问题");
+  execute("r = stk.ui.activate_editor('python', maximize=True)\nassert r == {'area_id': 'a2', 'editor_id': 'python', 'tab_index': 1, 'maximized': True}");
+  f.drv->frame(); ASSERT_NE(f.screen.ui()->find("a2/main/python_source"), nullptr);
+  f.screen.ui()->find("a2/main/python_source")->string.assign("print('keep this unexecuted draft')");
+  execute("assert stk.ui.activate_editor('viewer', maximize=True)['area_id'] == 'a1'");
+  EXPECT_EQ(f.screen.maximized(), &viewer);
+  execute("assert stk.ui.activate_editor('ai', maximize=True)['tab_index'] == 0"); frame();
+  EXPECT_EQ(f.screen.ui()->find(question_key)->string.value(), "Unsent research question / 未发送的问题");
+  execute("stk.ui.activate_editor('python')"); f.drv->frame();
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(f.screen.ui()->find("a2/main/python_source")->string.value(), "print('keep this unexecuted draft')");
+  execute("assert stk.ui.restore_split_layout() is False\nstk.ui.activate_editor('ai', maximize=True)\n"
+          "assert stk.ui.restore_split_layout() is True\nassert stk.ui.restore_split_layout() is False");
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(&area.tab(0), ai); EXPECT_EQ(&area.tab(1), python); EXPECT_EQ(&viewer.tab(0), view);
+  EXPECT_EQ(area.tab_count(), 2); EXPECT_EQ(project.project()->handle, handle);
+  EXPECT_EQ(project.project()->revision, 0); EXPECT_TRUE(project.discussion().exchange_request().empty());
+}
+
+TEST_F(ScriptPython, FocusNavigationRunsFromSubmittedConsoleInput)
+{
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
+  f.screen.set_maximized(&area); f.drv->frame();
+  Editor *original = &area.editor();
+  const auto [x, y] = f.widget_center("a2/main/python_source"); f.drv->click(x, y);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  f.drv->key(wm::Key::A, primary);
+  const std::string source = "print(stk.ui.activate_editor('ai', maximize=True)['editor_id'])";
+  f.drv->key(wm::Key::Unknown, wm::ModNone, source);
+  ASSERT_TRUE(f.screen.ui()->text_input_active());
+  f.drv->key(wm::Key::Enter, primary);
+  ASSERT_TRUE(pump([&] { return !state().busy(); }));
+  ASSERT_EQ(state().status().at("run").at("state"), "succeeded") << output();
+  auto *focused = dynamic_cast<EditorArea *>(f.screen.maximized()); ASSERT_NE(focused, nullptr);
+  EXPECT_EQ(focused->editor().type().id, kEditorAI);
+  EXPECT_NE(output().find("ai"), std::string::npos);
+  execute("stk.ui.activate_editor('python', maximize=True)"); f.drv->frame();
+  EXPECT_EQ(&area.editor(), original);
+  EXPECT_EQ(f.screen.ui()->find("a2/main/python_source")->string.value(), source);
+}
+
+TEST_F(ScriptPython, FocusNavigationRejectsInvalidArgumentsAndActiveTextWithoutPartialChanges)
+{
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
+  f.screen.set_maximized(&area); f.drv->frame();
+  execute(R"PY(
+from suan.scripting import ScriptError
+def focus_rejected(operation, params, code):
+    try:
+        stk.call('ui.' + operation, **params)
+    except ScriptError as error:
+        assert error.code == code, str(error)
+    else:
+        raise AssertionError('unexpected focus acceptance')
+for params in ({}, {'editor_id':'ai'}, {'editor_id':'ai', 'maximize':1},
+               {'editor_id':42, 'maximize':True}, {'editor_id':'', 'maximize':False},
+               {'editor_id':'ai', 'maximize':True, 'extra':1}, {'editor_id':'x'*129, 'maximize':True},
+               {'editor_id':'unknown-editor', 'maximize':False}):
+    focus_rejected('editors.activate', params, 'invalid_params')
+focus_rejected('layout.unmaximize', {'extra':True}, 'invalid_params')
+)PY");
+  const auto before = f.screen.to_json();
+  const auto [x, y] = f.widget_center("a2/main/python_source"); f.drv->click(x, y);
+#ifdef __APPLE__
+  f.drv->key(wm::Key::A, wm::ModOS);
+#else
+  f.drv->key(wm::Key::A, wm::ModCtrl);
+#endif
+  f.drv->key(wm::Key::Unknown, wm::ModNone, "unfinished text");
+  ASSERT_TRUE(f.screen.ui()->text_input_active());
+  execute("focus_rejected('editors.activate', {'editor_id':'ai', 'maximize':True}, 'busy')\n"
+          "focus_rejected('layout.unmaximize', {}, 'busy')");
+  EXPECT_EQ(f.screen.to_json(), before);
+  ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "unfinished text");
+}
+
+TEST_F(ScriptPython, FocusNavigationTargetsFirstWindowAndPreservesOtherWindowInput)
+{
+  struct ExtraScreen {
+    AppShell &shell;
+    wm::Screen screen;
+    wmtest::ScreenDriver driver;
+    explicit ExtraScreen(AppShell &owner) : shell(owner), driver(screen, 1280, 800, 1)
+    { shell.install(screen, nullptr); shell.build_default_layout(screen); }
+    ~ExtraScreen() { shell.forget(screen); }
+  } extra(*f.shell);
+  auto &other = extra.screen;
+  auto &driver = extra.driver;
+  auto *area = dynamic_cast<EditorArea *>(other.find_area("a2")); ASSERT_NE(area, nullptr);
+  ASSERT_TRUE(area->set_tab_type(0, kEditorPython)); other.set_maximized(area);
+  driver.frame();
+  const auto *source = other.ui()->find("a2/main/python_source"); ASSERT_NE(source, nullptr);
+  const auto center = source->rect;
+  driver.click(int(center.cx()), other.rect().ymax - 1 - int(center.cy()));
+#ifdef __APPLE__
+  driver.key(wm::Key::A, wm::ModOS);
+#else
+  driver.key(wm::Key::A, wm::ModCtrl);
+#endif
+  driver.key(wm::Key::Unknown, wm::ModNone, "other window draft");
+  ASSERT_TRUE(other.ui()->text_input_active());
+  const auto saved = other.to_json();
+  execute("assert stk.ui.activate_editor('ai', maximize=True)['editor_id'] == 'ai'");
+  EXPECT_EQ(other.to_json(), saved); EXPECT_EQ(other.ui()->edit_state()->text(), "other window draft");
+  EXPECT_NE(f.screen.maximized(), nullptr);
+  execute("assert stk.ui.restore_split_layout() is True");
+  EXPECT_EQ(other.to_json(), saved); EXPECT_EQ(f.screen.maximized(), nullptr);
+}
+
+TEST_F(ScriptPython, DetachedBridgeDropsQueuedFocusWithoutCreatingTabs)
+{
+  bool queued = false;
+  auto listener = client->on_event("ui.request", [&](const auto &, const auto &data) {
+    if (io::get_string(data, "operation") == "editors.activate") { queued = true; }
+  });
+  ASSERT_TRUE(state().execute("stk.ui.activate_editor('ai', maximize=True)"));
+  ASSERT_TRUE(loop.pump_until([&] { return queued; }, 30));
+  const auto before = f.screen.to_json();
+  f.shell->store().set_bridge(nullptr); f.screen.run_deferred();
+  EXPECT_EQ(f.screen.to_json(), before); EXPECT_FALSE(state().ready());
+}
 
 TEST_F(ScriptPython, ProjectSelectionReadsEmptyProjectsAndCapturesExactSelectedRows)
 {

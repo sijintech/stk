@@ -3092,7 +3092,7 @@
                 "$ref": "#/$defs/uiOperation"
               },
               "uniqueItems": true,
-              "maxItems": 21
+              "maxItems": 23
             }
           },
           "required": [
@@ -6413,7 +6413,9 @@
       "enum": [
         "layout.get",
         "layout.apply",
+        "layout.unmaximize",
         "editors.list",
+        "editors.activate",
         "project.current",
         "project.open",
         "project.close",
@@ -8000,6 +8002,74 @@
         "stk.text/1",
         "stk.parameter-edits/1"
       ]
+    },
+    "uiEditorActivationParams": {
+      "description": "Exact editors.activate reverse request parameters. Native validation limits editor_id to 128 UTF-8 bytes; IDs must name a registered editor.",
+      "type": "object",
+      "properties": {
+        "editor_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "maximize": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "editor_id",
+        "maximize"
+      ],
+      "additionalProperties": false
+    },
+    "uiEditorActivationResult": {
+      "description": "Exact editors.activate result; preserves existing editor instances and split geometry.",
+      "type": "object",
+      "properties": {
+        "area_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "editor_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "tab_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "maximized": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "area_id",
+        "editor_id",
+        "tab_index",
+        "maximized"
+      ],
+      "additionalProperties": false
+    },
+    "uiLayoutUnmaximizeParams": {
+      "description": "Exact layout.unmaximize reverse request parameters.",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "uiLayoutUnmaximizeResult": {
+      "description": "Exact layout.unmaximize result; restored is true only if the target window was maximized.",
+      "type": "object",
+      "properties": {
+        "restored": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "restored"
+      ],
+      "additionalProperties": false
     }
   }
 }

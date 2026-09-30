@@ -67,6 +67,20 @@ void AppShell::perform_ui_request(wm::Screen &screen, const std::string &operati
     perform_viewer_request(screen, operation, params, std::move(complete));
     return;
   }
+  if (operation == "editors.activate" || operation == "layout.unmaximize") {
+    const bool activate = operation == "editors.activate";
+    if (!params.is_object() || (!activate && !params.empty()) ||
+        (activate && (params.size() != 2 || !params.contains("editor_id") || !params["editor_id"].is_string() ||
+          params["editor_id"].get_ref<const std::string &>().empty() ||
+          params["editor_id"].get_ref<const std::string &>().size() > 128 ||
+          !params.contains("maximize") || !params["maximize"].is_boolean()))) {
+      complete(Error::make(ErrorCode::InvalidParams, "Invalid parameters for " + operation));
+      return;
+    }
+    complete(activate ? activate_editor(&screen, params["editor_id"].get<std::string>(), params["maximize"].get<bool>()) :
+                        restore_split_layout(&screen));
+    return;
+  }
   if (operation == "project.selection" || operation == "project.select") {
     const bool select = operation == "project.select";
     if (!params.is_object() || params.size() != (select ? 4 : 1) || !params.contains("handle") ||

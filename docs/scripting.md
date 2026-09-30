@@ -117,7 +117,7 @@ print(p.selection())
 | 不可变输入副本、历史清单和 SHA-256 校验 | `stk.project.snapshots` 已实现，格式 4；显式复制选中文件，表格撤销不删除历史，见[输入快照](project-snapshots.md) |
 | 参数行、输入版本、执行规格和远端任务关联 | `stk.project.runs` 已实现，格式 5；显式准备/提交/刷新/取消，见[运行记录](project-runs.md) |
 | 版本化模板与多行仿真操作 | `stk.batches` 保存明确范围，逐行准备/提交/刷新/取消/收集；首个模板为 MuFerro，见[批次指南](simulation-batches.md) |
-| 布局读取/应用、编辑器列表、可见项目查询/打开/关闭 | 已接入原生 UI 主线程执行器，目标为第一个安装的主窗口 |
+| 布局读取/应用、编辑器列表/激活、恢复分栏、可见项目查询/打开/关闭 | 已接入原生 UI 主线程执行器，目标为第一个安装的主窗口 |
 | 已保存连接查询/检查、管理 SSH 状态/连接/断开 | `stk.connections`；配置与凭据继续在 Jobs 或 CLI 管理 |
 | Runtime/Hub 工作区、上传/下载、任务提交/查询/取消、产物、日志 | `stk.runtime(connection, node=...)` 与 `stk.transfers`；复用已有幂等和审核规则 |
 | Viewer 打开/关闭、状态、预设参数、图层、求值、时间步/播放和相机重置 | `stk.viewer` 已接入共享原生状态，见[Viewer Python 指南](scripting-viewer.md) |
@@ -156,7 +156,28 @@ print(p.drafts.list())
 上述操作都不应用修改、不运行 Python 或提交任务；调用者保留各自的 UUID 以查询和重试，
 完整示例、大小限制与恢复规则见[上下文与讨论指南](project-contexts.md)。
 
-布局入口已随原生桌面绑定，可读取、修改并恢复：
+只想聚焦某个面板时，可保留现有编辑器和输入内容进行导航：
+
+```python
+print(stk.ui.editors())  # 查询可用 editor_id。
+print(stk.ui.activate_editor("ai", maximize=True))
+# {'area_id': 'a2', 'editor_id': 'ai', 'tab_index': 1, 'maximized': True}
+stk.ui.activate_editor("viewer", maximize=True)
+stk.ui.activate_editor("python")  # 默认 maximize=False，同时显示原分栏。
+print(stk.ui.restore_split_layout())  # 仅本次取消最大化时为 True；原本分栏时为 False。
+```
+
+返回的区域和标签索引由实际布局决定，示例中的 `a2`、`1` 不是固定目标。
+复用顺序为最大化区域中当前活动的同类标签、其他活动的同类标签、其他已有标签；最后才在有空位的区域新增。
+所有区域已满或类型不支持时原布局保持不变。激活不会重建分割树、替换已有编辑器、提交参数或执行代码。
+恢复分栏保留当前活动标签，不能用它撤销标签选择。
+
+两项入口分别要求协商 `editors.activate` 和 `layout.unmaximize`，操作只针对首个已安装窗口。
+该窗口有尚未提交的文字输入时返回 `busy`；其他窗口的输入不受影响，也不阻止本窗口导航。
+延迟执行前检查原窗口、桥会话及请求期限，断开或超时不会自动重试；已经完成的导航不因后续超时而撤销。
+焦点与活动标签可随现有布局 v1 保存；这不是独立的命名工作区存储。
+
+需要明确替换整套区域时，布局入口可读取、修改并恢复：
 
 ```python
 saved = stk.ui.layout()

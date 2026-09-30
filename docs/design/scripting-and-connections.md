@@ -1,6 +1,6 @@
 # Python 自动化、布局编程与机器间通信
 
-更新：2026-09-28。状态：原生 Python 控制台、项目/Runtime API 与布局执行器已交付首版；完整操作覆盖与远程连接继续推进。
+更新：2026-09-30。状态：原生 Python 控制台、项目/Runtime API、布局执行器与编辑器聚焦已交付首版；完整操作覆盖与远程连接继续推进。
 目标是在 STK 界面内用 Python 控制全部面向用户的操作、通过编程配置页面布局，
 并让两台安装 STK 的机器既能直接通信，也能经 SSH 通信。
 这些能力纳入[开发计划](../development-plan.md)，不表示当前版本已支持。
@@ -13,7 +13,7 @@
 | Python 项目操作 | 存储 API、CLI、项目桥接口、原生表格与 Python 面板共用项目命令 | [项目存储指南](../project.md) |
 | 原生共享选择 | `stk.project.selection/select` 通过反向 UI 请求读取或原子更新表格/记录选择；固定项目句柄与修订，区域筛选保持独立 | [Python 选择接口](../scripting.md#查询和改变原生共享选择)、桥 v1 §14 |
 | 界面内 Python 控制台与完整操作 API | 原生多行输入、独立会话、项目/Runtime/Viewer/分析图 API、输出/中断与文件运行已实现；完整相机、导出等操作继续补齐 | [Python 指南](../scripting.md)、桥 v1 §14 |
-| 布局编程 | 已通过 Python facade → 显式反向请求 → UI 主线程实现布局读取、校验应用与编辑器查询 | `stk_app` 的 `scripting_ui.cc`、桥 v1 §14 |
+| 布局编程 | 已通过 Python facade → 显式反向请求 → UI 主线程实现布局读取、校验应用与编辑器查询；`activate_editor` / `restore_split_layout` 保留现有编辑器和分割树进行聚焦导航 | `stk_app` 的 `scripting_ui.cc`、桥 v1 §14 |
 | 连接另一台 Linux 计算机 | 已有：客户端经已有 SSH 隧道访问 Runtime，或经 hub 访问节点代理 | [Runtime 远程连接](../runtime.md#远程连接)、[控制服务指南](../hub.md) |
 | STK 内管理 SSH 连接 | 已有首版：OpenSSH Host 配置、原生 Jobs/CLI 入口、状态/断开、按需重连与进程清理；真实 macOS/Windows 远程链路待验收 | [SSH 指南](../ssh.md) |
 | 任意两台 STK 直接互通 | 尚无通用对等连接、配对与能力协商；当前 Runtime、hub 和节点代理服务端只支持 Linux | Mac/Windows 目前是客户端，不能把安装桌面等同于启动通信服务 |

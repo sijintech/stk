@@ -375,6 +375,16 @@ class Desktop:
     def editors(self):
         return self._call("ui.editors.list", {})["editors"]
 
+    def activate_editor(self, editor_id, *, maximize=False):
+        """Activate an editor in the first desktop window, preserving existing tabs and splits."""
+        if type(maximize) is not bool:
+            raise TypeError("maximize must be a boolean")
+        return self._call("ui.editors.activate", {"editor_id": editor_id, "maximize": maximize})
+
+    def restore_split_layout(self):
+        """Restore the first window's split layout; return whether it was maximized."""
+        return self._call("ui.layout.unmaximize", {})["restored"]
+
     def current_project(self):
         return self._call("ui.project.current", {})["project"]
 

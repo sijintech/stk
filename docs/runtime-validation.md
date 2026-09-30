@@ -2,6 +2,34 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-30：准备、分析与分栏聚焦导航
+
+视图菜单增加聚焦准备（AI）、聚焦分析（Viewer）和恢复分栏布局。
+导航复用现有编辑器实例，优先当前最大化区域中活动的同类标签、其他活动同类标签、其他已有标签，
+最后才检查全部区域的空位并新增。已有分割树、面板、AI 未发送问题和 Python 未执行源码保留。
+恢复分栏保留活动标签；默认启动布局与独立工作区存储没有改变。
+
+Python 新增 `stk.ui.activate_editor(editor_id, *, maximize=False)` 和 `restore_split_layout()`，
+分别协商可选 `editors.activate` / `layout.unmaximize`。默认 `maximize=False` 显示分栏，返回实际区域、标签及模式；
+恢复接口返回此次是否取消了最大化。原生菜单作用于当前窗口，Python 延续首个安装窗口规则。
+目标窗口仍在输入文字时拒绝导航，另一窗口的输入不阻止本窗口操作。关闭窗口、会话失效和到期请求在主线程执行前被检查。
+沿用现有布局 v1；导航不发送模型请求、不求值或修改数据库，已完成导航不因后续超时而回滚。
+
+critical review 覆盖失败原子性、容量查找、编辑器复用、多窗口、延迟回调及 Python 契约。
+同步修正旧内部导航只看首个候选区域而忽略其他空位的问题；最大化时删除重复的旧“恢复区域”菜单项，
+保留分栏中的“最大化区域”和原 Ctrl+Space 快捷键。界面核查确认新菜单中英文窄窗口文字完整。
+首次构建修正测试使用了错误的 Esc 枚举；审查修正两项输入测试未先选中默认 Python 源码的问题。
+
+Python 聚焦/能力协商/现有脚本及契约组合 **38 项通过**；原生重点 **51/51**，
+随后追加并通过 **1 项**从 Python 输入框 Ctrl/Cmd+Enter 提交导航代码的真实操作回归。
+完整 Linux CTest **678/678，失败/错误/跳过均为 0**；新导航 CPU 11 项、真实 Python 5 项及菜单渲染 4 项全部实际执行。
+四张 GL/Vulkan 中英文菜单图片通过，两个 GL 视图已逐项查看，对应 Vulkan RGB 像素完全一致。
+字典各 **1109 项**一致且无重复。本提交跨平台 CI 及 macOS/Windows 真机操作另行验收。
+
+日志 `/tmp/stk-navigation-python.log`、`/tmp/stk-focus-native-focused.log`、`/tmp/stk-focus-console.log`、
+`/tmp/stk-focus-full.log`；JUnit `/tmp/stk-focus-full.xml`。
+使用见[桌面指南](desktop.md#ai-准备工作区)、[Python 指南](scripting.md)，人工步骤见[工作台验收](workbench-acceptance.md)。
+
 ## 2026-09-30：AI 多行、多字段上下文选择
 
 AI 工作区新增独立的范围选择器，复用已有上下文捕获接口，不扩展 SQLite 或桥格式。
@@ -27,7 +55,16 @@ critical review 分别覆盖纯选择模型、界面异步生命周期、上下�
 
 日志 `/tmp/stk-scope-focused2.log`、`/tmp/stk-scope-full.log`，JUnit `/tmp/stk-scope-full.xml`。
 最后列名修正后八项渲染再次通过，英文宽图已复看，四组 GL/Vulkan RGB 仍一致；
-日志 `/tmp/stk-scope-renders-final.log`。对应提交跨平台 CI 及 macOS/Windows 真机输入仍待验收。
+日志 `/tmp/stk-scope-renders-final.log`。
+提交 `56367bfd422d3426fe0360169b0e1c0f549dc34f` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36679780190)
+五个任务全部通过：Linux **658/658**、macOS CPU **405/405** 与 Metal **83/83**、Windows CPU **365/365**，
+均无失败或跳过。Linux/macOS 核对 JUnit，Windows 按 CTest 日志逐项计数；新增 `ProjectContextSelection`
+**10 项**及 `ProjectScope` **7 项**在三个桌面平台均实际执行，GL/Vulkan/Metal 的中英文宽窄范围选择截图
+共 **12 张**已逐张复核，Linux/macOS 打包与独立目录启动检查通过。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36679780231) 七个任务全部通过：Linux Python 3.10/3.12
+各 **1853 passed / 7 skipped / 4 deselected**，Windows Python 3.10/3.12 各 **1442 passed / 59 skipped / 260 deselected**；
+control **24 项**、desktop/MCP **3 项**及 web 构建通过。跳过项仍为可选依赖、平台限定、性能及真实求解器场景，
+不计为已验证。证据存于 `/tmp/stk-scope-ci-36679780190/audit-summary.json`；macOS/Windows 真机输入仍待验收。
 用法见[桌面指南](desktop.md#ai-准备工作区)、[上下文指南](project-contexts.md)；人工步骤见
 [工作台验收](workbench-acceptance.md#ai-多行上下文选择)。
 

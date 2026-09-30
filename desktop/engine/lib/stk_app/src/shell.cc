@@ -123,7 +123,7 @@ Editor *AppShell::focus_editor(wm::Screen &screen, const std::string &type)
         return &editor->tab(i);
       }
     }
-    if (!target || target->editor().type().id == kEditorPython) { target = editor; }
+    if (editor->tab_count() < 16 && (!target || target->editor().type().id == kEditorPython)) { target = editor; }
   }
   if (target) {
     if (!target->add_tab(type)) { return nullptr; }
@@ -131,6 +131,97 @@ Editor *AppShell::focus_editor(wm::Screen &screen, const std::string &type)
     return &target->editor();
   }
   return nullptr;
+}
+
+bridge::Result<io::Json> AppShell::activate_editor(wm::Screen *screen, const std::string &editor_id,
+                                                const bool maximize)
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  if (!screen || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) {
+    return Error::make(ErrorCode::Unavailable, std::string(store_.tr("app.focus.closed")));
+  }
+  if (!registry_.find(editor_id)) {
+    return Error::make(ErrorCode::InvalidParams,
+        store_.catalog().format("app.focus.unknown_editor", {{"editor", editor_id}}));
+  }
+  if (screen->ui() && screen->ui()->text_input_active()) {
+    return Error::make(ErrorCode::Busy, std::string(store_.tr("app.focus.busy")));
+  }
+
+  EditorArea *destination = dynamic_cast<EditorArea *>(screen->maximized());
+  int tab_index = -1;
+  if (destination && destination->editor().type().id == editor_id) {
+    tab_index = destination->active_tab();
+  }
+  else {
+    destination = nullptr;
+    // Active matching tabs take precedence over hidden tabs. Distinct AI editors
+    // keep distinct unsent drafts, so repeated focus must preserve the visible one.
+    for (auto *area : screen->areas()) {
+      auto *editor = dynamic_cast<EditorArea *>(area);
+      if (editor && editor->editor().type().id == editor_id) {
+        destination = editor;
+        tab_index = editor->active_tab();
+        break;
+      }
+    }
+  }
+  if (!destination) {
+    for (auto *area : screen->areas()) {
+      auto *editor = dynamic_cast<EditorArea *>(area);
+      if (!editor) { continue; }
+      for (int i = 0; i < editor->tab_count(); ++i) {
+        if (editor->tab(i).type().id == editor_id) {
+          destination = editor;
+          tab_index = i;
+          break;
+        }
+      }
+      if (destination) { break; }
+    }
+  }
+  if (!destination) {
+    for (auto *area : screen->areas()) {
+      auto *editor = dynamic_cast<EditorArea *>(area);
+      if (editor && editor->tab_count() < 16) { destination = editor; break; }
+    }
+  }
+  if (!destination) {
+    return Error::make(ErrorCode::Busy, std::string(store_.tr("app.focus.no_capacity")));
+  }
+  if (tab_index < 0) {
+    // No existing tab changes until the new editor has been constructed successfully.
+    try {
+      if (!destination->add_tab(editor_id, false)) {
+        return Error::make(ErrorCode::Unavailable, std::string(store_.tr("app.focus.open_failed")));
+      }
+    }
+    catch (const std::exception &) {
+      return Error::make(ErrorCode::Unavailable, std::string(store_.tr("app.focus.open_failed")));
+    }
+    tab_index = destination->tab_count() - 1;
+  }
+  destination->set_active_tab(tab_index);
+  screen->set_maximized(maximize ? destination : nullptr);
+  store_.changed();
+  return io::Json{{"area_id", destination->id()}, {"editor_id", editor_id},
+                  {"tab_index", tab_index}, {"maximized", maximize}};
+}
+
+bridge::Result<io::Json> AppShell::restore_split_layout(wm::Screen *screen)
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  if (!screen || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) {
+    return Error::make(ErrorCode::Unavailable, std::string(store_.tr("app.focus.closed")));
+  }
+  if (screen->ui() && screen->ui()->text_input_active()) {
+    return Error::make(ErrorCode::Busy, std::string(store_.tr("app.focus.busy")));
+  }
+  const bool restored = screen->maximized() != nullptr;
+  if (restored) { screen->set_maximized(nullptr); store_.changed(); }
+  return io::Json{{"restored", restored}};
 }
 
 void AppShell::open_saved_review(wm::Screen *screen, std::string handle, const int64_t expected_revision,
@@ -628,12 +719,27 @@ std::vector<ui::MenuEntry> AppShell::view_menu(wm::Screen &screen)
 {
   std::vector<ui::MenuEntry> m;
   wm::Screen *s = &screen;
+  std::weak_ptr<bool> weak = alive_;
+  const auto focus = [this, weak, s](const std::string &editor_id) {
+    if (!weak.lock() || std::find(screens_.begin(), screens_.end(), s) == screens_.end()) { return; }
+    s->defer([this, weak, s, editor_id] {
+      if (!weak.lock() || std::find(screens_.begin(), screens_.end(), s) == screens_.end()) { return; }
+      const auto result = editor_id.empty() ? restore_split_layout(s) : activate_editor(s, editor_id, true);
+      if (!result.ok() && s->ui()) { s->ui()->toast(result.error().message, ui::ToastKind::Warning); }
+    });
+  };
+  m.push_back({std::string(store_.tr("app.menu.view.focus_preparation")), [focus] { focus(kEditorAI); }});
+  m.push_back({std::string(store_.tr("app.menu.view.focus_analysis")), [focus] { focus(kEditorViewer); }});
+  m.push_back({std::string(store_.tr("app.menu.view.restore_split_layout")), [focus] { focus(""); },
+               screen.maximized() != nullptr});
   wm::Area *active = screen.maximized() ? screen.maximized() : screen.active_area();
   auto *ea = dynamic_cast<EditorArea *>(active);
   const bool maxed = screen.maximized() != nullptr;
-  m.push_back({std::string(store_.tr(maxed ? "app.menu.view.restore" : "app.menu.view.maximize")),
-               [s, active]() { s->defer([s, active]() { s->toggle_maximized(active); }); },
-               maxed || active != nullptr});
+  if (!maxed) {
+    m.push_back({std::string(store_.tr("app.menu.view.maximize")),
+                 [s, active]() { s->defer([s, active]() { s->toggle_maximized(active); }); },
+                 active != nullptr});
+  }
   m.push_back({std::string(store_.tr("app.menu.view.split_h")),
                [s, active]() { s->defer([s, active]() { s->split(*active, wm::SplitDir::Horizontal); }); },
                active != nullptr && !maxed});

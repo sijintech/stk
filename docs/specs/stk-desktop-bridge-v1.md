@@ -951,8 +951,8 @@ to bridge stderr. EOF/close/shutdown stops the worker; restarting never restores
 
 - `ui.attach {operations}` returns `{session, operations}`. The local client advertises supported
   operation names: `layout.get`, `layout.apply`, `editors.list`, `project.current`, `project.open`,
-  `project.close`, optional `project.review`, `project.selection`, `project.select`, plus the Viewer
-  operations below. The current supported set contains 21 operation names; discover and negotiate
+  `project.close`, optional `project.review`, `project.selection`, `project.select`, `editors.activate`,
+  `layout.unmaximize`, plus the Viewer operations below. The current supported set contains 23 operation names; discover and negotiate
   names rather than assuming support from that count. Reattaching the same set is idempotent; changing it requires detach.
 - `ui.request {session, request, operation, params, expires_at_ms}` asks that executor to perform one
   operation. Requests are correlated by both IDs, expire after 30 seconds, and are never replayed.
@@ -981,6 +981,32 @@ not network endpoints. See [Viewer scripting](../scripting-viewer.md) for exact 
  Invalid parameters return `invalid_params`; absent capabilities
 return `unsupported`, and an absent desktop returns `unavailable`. Applying a layout validates the whole
 description before changing the current screen; geometry is captured for round trips but not forced on apply.
+
+The optional `editors.activate {editor_id, maximize}` operation returns the flat object
+`{area_id, editor_id, tab_index, maximized}`. Both parameters are required and no extra parameters
+are accepted. `editor_id` is a registered editor ID, nonempty and at most 128 UTF-8 bytes;
+`maximize` must be a boolean. The result's `area_id` is a nonempty string and `tab_index` is the
+zero-based tab position (0–15). The executor targets the first installed desktop window, activates
+an existing tab of that editor type when available, or adds a tab in an area with capacity.
+Existing editor instances and split geometry are retained. `maximize=true` maximizes the destination;
+`maximize=false` explicitly restores the split layout while activating the destination.
+
+`layout.unmaximize {}` accepts no parameters and returns `{restored: boolean}`. It targets the same
+first installed window and clears its maximization without replacing tabs or split geometry;
+`restored` is true only when that window was maximized. Unknown editor IDs return `invalid_params`,
+and all areas being full without an existing matching tab returns `busy`, before mutation.
+Active text input in the target window also returns `busy`, preserving the edit; text input in
+another window does not prevent these two operations. An absent or no longer installed target
+returns `unavailable`. The deferred executor checks the original window and request/session lifetime
+before acting; closing it does not redirect the pending operation to another window.
+
+These operations do not modify project data, invoke a model, or automatically select a workspace
+on startup. Each capability is negotiated separately; older desktops remain usable without either.
+The Python facade exposes `stk.ui.activate_editor(editor_id, *, maximize=False)`, returning the flat
+activation result, and `stk.ui.restore_split_layout()`, returning only the `restored` boolean.
+The schema definitions `uiEditorActivationParams`, `uiEditorActivationResult`,
+`uiLayoutUnmaximizeParams` and `uiLayoutUnmaximizeResult` describe these payloads; as with other
+reverse operations, native dispatch performs the operation-specific validation.
 
 The additive `project.review {handle, expected_revision, commands}` operation returns
 `{accepted: true, project_id, base_revision}`. The handle must be the visible project's current bridge
