@@ -71,7 +71,8 @@ class ProjectDiscussion {
   double exchange_wake_scheduled = 0;
   bool load_origin(const std::string &draft_id, bool preserve_error = false);
   bool capture(const std::string &table_id, const std::vector<std::string> &records,
-               const std::vector<std::string> &fields, const std::string &title);
+               const std::vector<std::string> &fields, const std::string &title,
+               std::function<void(bool)> complete = {});
   bool add_message(const std::string &text);
   bool link_review();
 

@@ -601,15 +601,17 @@ bool ProjectDiscussion::load_origin(const std::string &draft_id, const bool pres
 }
 
 bool ProjectDiscussion::capture(const std::string &table_id, const std::vector<std::string> &records,
-                                const std::vector<std::string> &fields, const std::string &title)
+                                const std::vector<std::string> &fields, const std::string &title,
+                                std::function<void(bool)> complete)
 {
   if (!supported() || busy_ || project_.busy()) { return false; }
   auto params = request("context", {{"table_id", table_id}, {"record_ids", records}, {"field_ids", fields},
       {"expected_revision", project_.project()->revision}, {"title", title}}, "context_id");
-  return call("project.contexts.capture", std::move(params), [this](const Json &result) {
+  return call("project.contexts.capture", std::move(params), [this, complete](const Json &result) {
     context_ = result.at("context");
     contexts_.loaded = false;
-  });
+    if (complete) { complete(true); }
+  }, false, [complete](const std::string &) { if (complete) { complete(false); } });
 }
 
 bool ProjectDiscussion::add_message(const std::string &text)

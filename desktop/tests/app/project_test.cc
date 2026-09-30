@@ -645,6 +645,198 @@ TEST_F(ProjectProposal, ConversionStaysInOriginalProjectAndIsRecoveredOnlyByRead
   EXPECT_TRUE(state().saved_review().empty());
 }
 
+class ProjectScope : public ProjectPython {
+ protected:
+  const std::string second_row = "44444444-4444-4444-8444-444444444444";
+  const std::string second_field = "55555555-5555-4555-8555-555555555555";
+  const ui::Widget *widget(const std::string &key) { return f.screen.ui()->find(key); }
+  void open_picker()
+  {
+    auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+    f.screen.set_maximized(&area); ai_frame();
+    ASSERT_NE(widget("ai_choose_scope"), nullptr);
+    const auto [x, y] = f.widget_center("a2/main/ai_choose_scope");
+    f.drv->click(x, y); ai_frame();
+    ASSERT_NE(widget("ai_scope_capture"), nullptr);
+  }
+  void more_cells()
+  {
+    ASSERT_TRUE(state().apply(Json::array({
+      {{"op", "add_record"}, {"table_id", table_id}, {"id", second_row}},
+      {{"op", "add_field"}, {"table_id", table_id}, {"id", second_field}, {"name", "Note"}, {"type", "text"}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", second_row}, {"field_id", field_id}, {"value", 325}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", second_row}, {"field_id", second_field}, {"value", "Do not include"}}
+    }))); settled();
+  }
+};
+
+TEST_F(ProjectScope, CapturesCheckedRowsAndFieldsWithoutChangingSelectionOrSavedQuestion)
+{
+  populated(); more_cells();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Original")); settled();
+  const auto original = discussion.context();
+  ASSERT_TRUE(discussion.load_provider()); settled();
+  ASSERT_TRUE(discussion.prepare_question(original.at("id"), "Original question", "fixture-model")); ai_frame();
+  const auto question = discussion.exchange_question(), request = discussion.exchange_request();
+  const auto shared_row = state().record_id();
+  open_picker();
+  widget("ai_scope_all")->on_click(); f.drv->frame();
+  widget("ai_scope_kind")->index.assign(1); f.drv->frame();
+  widget("ai_scope_field/" + second_field)->boolean.assign(false); f.drv->frame();
+  ASSERT_TRUE(widget("ai_scope_capture")->enabled);
+  const auto *preview = widget("ai_scope_cells"); ASSERT_NE(preview, nullptr);
+  ASSERT_EQ(preview->table->rows, 2);
+  EXPECT_EQ(preview->table->cell(0, 2), "300"); EXPECT_EQ(preview->table->cell(1, 2), "325");
+  const auto [x, y] = f.widget_center("a2/main/ai_scope_capture"); f.drv->click(x, y); ai_frame();
+  ASSERT_NE(discussion.context().at("id"), original.at("id"));
+  EXPECT_EQ(discussion.context().at("selection").at("record_ids"), Json::array({record_id, second_row}));
+  EXPECT_EQ(discussion.context().at("selection").at("field_ids"), Json::array({field_id}));
+  EXPECT_EQ(discussion.context().at("source_revision"), 2);
+  EXPECT_EQ(discussion.exchange_request(), request); EXPECT_EQ(discussion.exchange_question(), question);
+  EXPECT_EQ(discussion.exchange_context(), original);
+  EXPECT_EQ(state().record_id(), shared_row); EXPECT_EQ(state().table_id(), table_id);
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectScope, StaleRevisionKeepsOldPreviewAndRequiresExplicitEmptyReload)
+{
+  populated(); open_picker();
+  const auto old_capture = widget("ai_scope_capture")->on_click;
+  const auto old_checkbox = widget("ai_scope_row/" + record_id)->boolean;
+  ASSERT_TRUE(state().apply(set_cell(321))); settled(); ai_frame();
+  ASSERT_NE(widget("ai_scope_reload"), nullptr);
+  EXPECT_FALSE(widget("ai_scope_capture")->enabled);
+  EXPECT_EQ(widget("ai_scope_cells")->table->cell(0, 2), "300");
+  old_capture(); old_checkbox.assign(false);
+  EXPECT_FALSE(state().discussion().busy()); EXPECT_TRUE(state().discussion().context().empty());
+  widget("ai_scope_reload")->on_click(); f.drv->frame();
+  EXPECT_FALSE(widget("ai_scope_capture")->enabled); EXPECT_EQ(widget("ai_scope_cells"), nullptr);
+  widget("ai_scope_row/" + record_id)->boolean.assign(true); f.drv->frame();
+  widget("ai_scope_kind")->index.assign(1); f.drv->frame();
+  widget("ai_scope_field/" + field_id)->boolean.assign(true); f.drv->frame();
+  EXPECT_EQ(widget("ai_scope_cells")->table->cell(0, 2), "321");
+  old_capture(); EXPECT_TRUE(state().discussion().context().empty());
+  widget("ai_scope_capture")->on_click(); ai_frame();
+  EXPECT_EQ(state().discussion().context().at("source_revision"), 2);
+}
+
+TEST_F(ProjectScope, OldWidgetsCannotCaptureAfterScopeChangeProjectSwitchOrEditorClose)
+{
+  populated(); more_cells(); open_picker();
+  const auto old_capture = widget("ai_scope_capture")->on_click;
+  widget("ai_scope_row/" + second_row)->boolean.assign(true); f.drv->frame();
+  old_capture(); EXPECT_TRUE(state().discussion().context().empty());
+  const auto previous = widget("ai_scope_capture")->on_click;
+  ASSERT_TRUE(state().create(dir.str() + "/other", "Other")); settled();
+  ASSERT_TRUE(state().apply(sample_commands())); settled(); ai_frame();
+  previous(); EXPECT_TRUE(state().discussion().context().empty());
+  EXPECT_EQ(widget("ai_scope_capture"), nullptr);
+  widget("ai_choose_scope")->on_click(); f.drv->frame();
+  const auto closed = widget("ai_scope_capture")->on_click;
+  const auto closed_tabs = widget("ai_scope_kind")->index;
+  ASSERT_TRUE(f.area("a2").set_tab_type(f.area("a2").active_tab(), kEditorProject)); f.drv->frame();
+  closed(); EXPECT_EQ(closed_tabs.value(), 0); closed_tabs.assign(1);
+  EXPECT_TRUE(state().discussion().context().empty());
+  EXPECT_FALSE(state().discussion().busy());
+}
+
+TEST_F(ProjectScope, CaptureFailureRetainsScopeUntilExplicitReload)
+{
+  populated(); open_picker();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  ASSERT_TRUE(scripts.execute("from suan.project import ProjectStore\nimport json\nProjectStore(" +
+      Json(dir.str() + "/project").dump() + ").apply(json.loads(" + Json(set_cell(700).dump()).dump() + "), expected_revision=1)"));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  EXPECT_EQ(state().project()->revision, 1); // No event from the independent writer.
+  widget("ai_scope_capture")->on_click(); ai_frame();
+  ASSERT_NE(widget("ai_scope_capture"), nullptr);
+  EXPECT_FALSE(widget("ai_scope_capture")->enabled);
+  ASSERT_FALSE(state().discussion().error().empty());
+  EXPECT_TRUE(state().discussion().context().empty());
+  EXPECT_TRUE(widget("ai_scope_row/" + record_id)->boolean.value());
+  EXPECT_EQ(widget("ai_scope_cells")->table->cell(0, 2), "300");
+  EXPECT_EQ(state().project()->revision, 2);
+  ASSERT_NE(widget("ai_scope_reload"), nullptr);
+}
+
+TEST_F(ProjectScope, ChoosingNewScopeBlocksPrepareAgainstPreviouslySavedData)
+{
+  populated(); auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Original")); settled();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area); ai_frame();
+  widget("ai_question/" + state().project()->handle)->string.assign("Question to prepare"); f.drv->frame();
+  ASSERT_TRUE(widget("ai_prepare")->enabled);
+  const auto old_prepare = widget("ai_prepare")->on_click;
+  const auto old_choose = widget("ai_choose_scope")->on_click;
+  old_choose(); f.drv->frame();
+  widget("ai_scope_clear")->on_click(); f.drv->frame();
+  EXPECT_FALSE(widget("ai_prepare")->enabled);
+  old_prepare(); EXPECT_TRUE(discussion.exchange_request().empty());
+  old_choose(); f.drv->frame(); // Must not reset the user's cleared scope.
+  EXPECT_FALSE(widget("ai_scope_row/" + record_id)->boolean.value());
+  widget("ai_scope_cancel")->on_click(); f.drv->frame();
+  EXPECT_TRUE(widget("ai_prepare")->enabled);
+  widget("ai_prepare")->on_click(); ai_frame();
+  EXPECT_EQ(discussion.exchange_context().at("title"), "Original");
+}
+
+TEST_F(ProjectScope, SwitchingTablesClearsScopeWithoutRetargetingSharedSelection)
+{
+  populated();
+  const std::string other_table = "77777777-7777-4777-8777-777777777777";
+  ASSERT_TRUE(state().apply(Json::array({
+    {{"op", "create_table"}, {"id", other_table}, {"name", "Other table"}},
+    {{"op", "add_record"}, {"table_id", other_table}, {"id", second_row}},
+    {{"op", "add_field"}, {"table_id", other_table}, {"id", second_field}, {"name", "Flag"}, {"type", "boolean"}}
+  }))); settled();
+  state().select_table(table_id); open_picker();
+  const auto old_capture = widget("ai_scope_capture")->on_click;
+  widget("ai_scope_table")->index.assign(1); f.drv->frame();
+  EXPECT_FALSE(widget("ai_scope_capture")->enabled);
+  widget("ai_scope_row/" + second_row)->boolean.assign(true); f.drv->frame();
+  widget("ai_scope_kind")->index.assign(1); f.drv->frame();
+  widget("ai_scope_field/" + second_field)->boolean.assign(true); f.drv->frame();
+  old_capture(); EXPECT_TRUE(state().discussion().context().empty());
+  widget("ai_scope_capture")->on_click(); ai_frame();
+  EXPECT_EQ(state().discussion().context().at("selection").at("table_id"), other_table);
+  EXPECT_EQ(state().table_id(), table_id); EXPECT_EQ(state().record_id(), record_id);
+}
+
+TEST_F(ProjectScope, PaginatedSelectionRejectsOversizeProductThenAllowsExplicitSubset)
+{
+  populated();
+  Json commands = Json::array();
+  for (int i = 1; i < 17; ++i) {
+    commands.push_back({{"op", "add_record"}, {"table_id", table_id},
+        {"id", std::to_string(40000000 + i) + "-4444-4444-8444-444444444444"}});
+  }
+  for (int i = 1; i < 60; ++i) {
+    commands.push_back({{"op", "add_field"}, {"table_id", table_id}, {"name", "Parameter " + std::to_string(i)},
+        {"type", "number"}, {"id", std::to_string(50000000 + i) + "-5555-4555-8555-555555555555"}});
+  }
+  ASSERT_TRUE(state().apply(commands)); settled(); open_picker();
+  widget("ai_scope_next")->on_click(); f.drv->frame();
+  ASSERT_NE(widget("ai_scope_row/40000008-4444-4444-8444-444444444444"), nullptr);
+  EXPECT_EQ(widget("ai_scope_row/" + record_id), nullptr);
+  widget("ai_scope_all")->on_click(); f.drv->frame();
+  EXPECT_FALSE(widget("ai_scope_capture")->enabled); // 17 * 60 = 1020.
+  EXPECT_EQ(widget("ai_scope_cells")->table->rows, 1020);
+  widget("ai_scope_kind")->index.assign(1); f.drv->frame();
+  widget("ai_scope_field/" + field_id)->boolean.assign(false); f.drv->frame();
+  EXPECT_FALSE(widget("ai_scope_capture")->enabled); // 17 * 59 = 1003.
+  widget("ai_scope_field/50000001-5555-4555-8555-555555555555")->boolean.assign(false); f.drv->frame();
+  ASSERT_TRUE(widget("ai_scope_capture")->enabled);
+  widget("ai_scope_capture")->on_click(); ai_frame();
+  EXPECT_EQ(state().discussion().context().at("selection").at("record_ids").size(), 17u);
+  EXPECT_EQ(state().discussion().context().at("selection").at("field_ids").size(), 58u);
+  EXPECT_EQ(state().project()->revision, 2);
+}
+
 TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
 {
   populated();

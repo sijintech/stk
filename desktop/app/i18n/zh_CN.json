@@ -1085,5 +1085,19 @@
   "ai.prepare": "准备问题（不发送）",
   "ai.scope_detail": "请求详情",
   "ai.single_turn": "不会附带其他问答、未保存的输入或文件。回复是普通文字，不会执行代码或修改项目数据。",
-  "ai.refresh_history": "刷新记录"
+  "ai.refresh_history": "刷新记录",
+  "ai.scope.choose": "选择多行与字段…",
+  "ai.scope.title": "选择下个问题使用的数据",
+  "ai.scope.hint": "选择一张表，再勾选要捕获的行与字段；此范围独立于表格编辑器的当前选择。",
+  "ai.scope.revision": "选择预览 · 修订 {revision}",
+  "ai.scope.stale": "选择期间项目已变化，预览保留旧值。请重新载入并选择后再捕获。",
+  "ai.scope.reload": "重新载入数据并清空选择",
+  "ai.scope.rows": "行",
+  "ai.scope.fields": "字段",
+  "ai.scope.page": "{page} / {pages}",
+  "ai.scope.limit": "每次最多捕获 1000 个单元格，请取消部分行或字段。",
+  "ai.scope.preview": "预览选定数值",
+  "ai.scope.capture_hint": "捕获只保存这些行与字段，不发送模型请求；已保存的问题保留原始上下文。",
+  "ai.scope.close": "关闭数据选择",
+  "ai.scope.finish_first": "请先捕获此次选择或关闭选择器，再准备问题。"
 }

@@ -31,11 +31,13 @@ add_library(stk_app STATIC
   src/editors/project_simulation_view.cc
   src/editors/python_editor.cc
   src/editors/ai_editor.cc
+  src/editors/project_context_picker.cc
   src/jobs_gpu.cc
   src/jobs_spec.cc
   src/jobs_state.cc
   src/project_state.cc
   src/project_table_view.cc
+  src/project_context_selection.cc
   src/project_discussion.cc
   src/project_review.cc
   src/script_state.cc

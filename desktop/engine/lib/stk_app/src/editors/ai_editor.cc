@@ -6,6 +6,7 @@
 #include "stk/app/project_table_view.hh"
 #include "stk/app/shell.hh"
 #include "stk/wm/window.hh"
+#include "project_context_picker.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -126,6 +127,7 @@ class AIEditor final : public Editor {
       shown_exchange_.clear(); transcript_.clear();
       shown_context_.clear(); captured_.reset();
       proposal_navigation_error_.clear();
+      picker_.close();
     }
     // Unsent input belongs to its project even when another project becomes active. It is
     // intentionally not part of layout JSON; only explicitly prepared questions are persisted.
@@ -154,7 +156,7 @@ class AIEditor final : public Editor {
       auto &left = columns.column();
       auto &right = columns.column();
       source(left, ctx, state, false);
-      configuration(left, ctx, state, draft);
+      if (!picker_.active()) { configuration(left, ctx, state, draft); }
       conversation(right, ctx, state, draft, key, true);
     }
     else {
@@ -162,7 +164,7 @@ class AIEditor final : public Editor {
       if (auto *panel = layout.panel("ai_context_settings", ctx.tr("ai.context_settings"), discussion.context().empty())) {
         settings_open = true;
         source(*panel, ctx, state, true);
-        configuration(*panel, ctx, state, draft);
+        if (!picker_.active()) { configuration(*panel, ctx, state, draft); }
       }
       conversation(layout, ctx, state, draft, key, false, settings_open);
     }
@@ -184,6 +186,7 @@ class AIEditor final : public Editor {
 
   void source(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool compact)
   {
+    if (picker_.active()) { picker_.draw(layout, ctx, state); return; }
     auto &discussion = state.discussion();
     auto &box = layout.box();
     box.label(ctx.tr("ai.context_title"));
@@ -206,6 +209,12 @@ class AIEditor final : public Editor {
     }).disable(state.busy() || discussion.busy() || !table || state.record_id().empty() ||
                (table && (table->fields.empty() || table->fields.size() > 64)));
     box.button("ai_select_data", ctx.tr("ai.select_data"), [ctx] { show_tables(ctx); });
+    std::weak_ptr<bool> weak = alive_;
+    box.button("ai_choose_scope", ctx.tr("ai.scope.choose"), [this, weak, &state,
+        handle = state.project()->handle, revision = state.project()->revision] {
+      if (weak.lock() && !picker_.active() && state.project() && state.project()->handle == handle &&
+          state.project()->revision == revision && !state.busy() && !state.discussion().busy()) { picker_.begin(state); }
+    }).disable(state.busy() || discussion.busy() || state.tables().empty());
     const auto &context = discussion.context();
     if (context.empty()) { box.paragraph(ctx.tr("ai.no_context")); return; }
     const auto identity = io::get_string(context, "id");
@@ -395,16 +404,17 @@ class AIEditor final : public Editor {
     const bool has_question = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.text.empty();
     layout.paragraph(ctx.tr("ai.prepare_hint"));
+    if (picker_.active()) { layout.paragraph(ctx.tr("ai.scope.finish_first")); }
     const auto context_id = io::get_string(discussion.context(), "id");
     layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id] {
-      if (!state.project() || state.project()->handle != handle || active_draft_ != key) { return; }
+      if (!state.project() || state.project()->handle != handle || active_draft_ != key || picker_.active()) { return; }
       const auto &current = drafts_.at(key);
       if (discussion.prepare_question(context_id, current.text, current.model,
           current.intent == 1 ? "stk.parameter-edits/1" : "stk.text/1")) {
         opened_history_ = true;
         proposal_navigation_error_.clear();
       }
-    }).disable(!enabled || discussion.exchange_busy() || context_id.empty() || !has_question || !model_has_text_ || discussion.provider().empty() ||
+    }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || !has_question || !model_has_text_ || discussion.provider().empty() ||
                (draft.intent == 1 && !discussion.edit_proposals_supported()));
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
       details->paragraph(ctx.tr("ai.single_turn"));
@@ -472,6 +482,7 @@ class AIEditor final : public Editor {
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::string proposal_navigation_error_, proposal_navigation_request_;
   std::shared_ptr<const CapturedProjectTable> captured_;
+  ProjectContextPicker picker_;
   ui::LogBuffer transcript_, raw_reply_;
 };
 }  // namespace

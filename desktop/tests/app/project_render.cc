@@ -32,8 +32,9 @@ int main(int argc, char **argv)
   if (output.empty()) { return 2; }
   const bool ai_stream = editor == "ai_stream";
   const bool ai_proposal = editor == "ai_proposal" || editor == "ai_proposal_narrow";
-  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal;
-  const int canvas_width = editor == "ai_narrow" || editor == "ai_proposal_narrow" ? 760 : 1280;
+  const bool ai_scope = editor == "ai_scope" || editor == "ai_scope_narrow";
+  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope;
+  const int canvas_width = editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions bo;
@@ -532,6 +533,41 @@ int main(int argc, char **argv)
         else { ok = false; }
       }
       ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+      if (ai_scope) {
+        // Enter the real picker and inspect the next scope without capturing or replacing history.
+        if (editor == "ai_scope_narrow") {
+          auto *settings = screen.ui()->find("ai_context_settings");
+          if (settings) {
+            const ui::Vec2 center{settings->rect.cx(), settings->rect.cy()};
+            screen.ui()->handle_event(ui::Event::mouse_down(center));
+            screen.ui()->handle_event(ui::Event::mouse_up(center));
+          } else { ok = false; }
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        }
+        auto *choose = screen.ui()->find("ai_choose_scope");
+        if (choose) { choose->on_click(); } else { ok = false; }
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        auto *all = screen.ui()->find("ai_scope_all");
+        if (all) { all->on_click(); } else { ok = false; }
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        auto *kind = screen.ui()->find("ai_scope_kind");
+        if (kind) { kind->index.assign(1); } else { ok = false; }
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        auto *note = screen.ui()->find("ai_scope_field/" + label);
+        if (note) { note->boolean.assign(false); } else { ok = false; }
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        if (editor == "ai_scope_narrow") {
+          const auto *kind_again = screen.ui()->find("ai_scope_kind");
+          if (kind_again) { kind_again->index.assign(0); } else { ok = false; }
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        }
+        const auto *capture = screen.ui()->find("ai_scope_capture");
+        const auto *preview = screen.ui()->find("ai_scope_cells");
+        const auto *prepare = screen.ui()->find("ai_prepare");
+        ok = ok && capture && capture->enabled && preview && preview->table->rows == 10 &&
+            prepare && !prepare->enabled && state.project()->revision == 2 &&
+            state.discussion().exchange_context().at("source_revision") == 1 && client->stats().schema_violations == 0;
+      }
       if (ai_stream) {
         const auto *cancel = screen.ui()->find("a2/main/ai_cancel");
         const auto *send = screen.ui()->find("a2/main/ai_send_saved");

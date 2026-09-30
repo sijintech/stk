@@ -2,6 +2,35 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-30：AI 多行、多字段上下文选择
+
+AI 工作区新增独立的范围选择器，复用已有上下文捕获接口，不扩展 SQLite 或桥格式。
+在一张表中按 UUID 勾选行与字段，分页、明确全选/清空、数量和数值预览；保持原表顺序，
+不改变共享表格当前行，也不继承其他编辑器的排序/筛选。快速捕获单行入口继续可用。
+选择器固定打开时的项目句柄、修订和表格副本；修订变化时保留旧预览，须明确重新载入后从空范围选择。
+单轴限制为 100 行、64 字段，乘积超过 1000 时不能捕获，不会截取超限范围。
+
+critical review 分别覆盖纯选择模型、界面异步生命周期、上下文身份和实际截图。发现并修正：
+
+- 选择新范围时准备按钮仍可能使用旧保存上下文；现已禁用，并在回调再次检查，关闭或捕获成功后才恢复。
+- 异步捕获刚排队就关闭选择器；现只在确认成功后关闭，失败保留范围与标题，旧修订仍要求明确重新载入。
+- 遗留页签 getter 引用已销毁编辑器；改为值捕获，并回归销毁后保留绑定。
+- 旧“选择范围”回调可重置正在编辑的选择；加入活动选择器检查。
+- 数值先完整序列化才截断；改为直接有界读取单元格，避免深层/超长值的完整展开。
+- 截图中的“保存的值”不适用于待捕获预览，改用普通“值”列名。
+
+纯模型 **10 项**、真实桥选择交互 **7 项**、原 AI 工作区 **4 项**、新增 GL/Vulkan 宽窄中英文截图 **8 项**，
+重点共 **29/29 通过**。首次回归修正了测试夹具的提供方载入、折叠面板点击与控件路径，未绕过生产检查。
+完整 Linux CTest **658/658 通过，失败/错误/跳过均为 0**。
+四张新增 GL 视图逐项检查，四张对应 Vulkan 图片 RGB 像素一致；窄窗口捕获按钮可见，后续对话可滚动。
+字典各 **1101 项**一致、无重复，改动文档 **138 个本地链接**有效。所有回归无外部模型调用。
+
+日志 `/tmp/stk-scope-focused2.log`、`/tmp/stk-scope-full.log`，JUnit `/tmp/stk-scope-full.xml`。
+最后列名修正后八项渲染再次通过，英文宽图已复看，四组 GL/Vulkan RGB 仍一致；
+日志 `/tmp/stk-scope-renders-final.log`。对应提交跨平台 CI 及 macOS/Windows 真机输入仍待验收。
+用法见[桌面指南](desktop.md#ai-准备工作区)、[上下文指南](project-contexts.md)；人工步骤见
+[工作台验收](workbench-acceptance.md#ai-多行上下文选择)。
+
 ## 2026-09-30：模型参数建议与修改检查
 
 新增 `stk.parameter-edits/1` 请求模式。完整文字回复经明确转换，严格限定为原始捕获范围内的标量
@@ -28,7 +57,16 @@
 
 日志 `/tmp/stk-proposal-integration.log`、`/tmp/stk-proposal-core-final.log`、`/tmp/stk-proposal-native-focused.log`、
 `/tmp/stk-proposal-full.log`、`/tmp/stk-proposal-python-full.log`；JUnit `/tmp/stk-proposal-full.xml`。
-本提交的跨平台 CI 及真实账户参数建议、macOS/Windows 真机输入仍待验收。
+提交 `bf9ccd1142722162750d15b6c47c447ede240cbd` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36677388526)
+五个任务全部通过：Linux **633/633**、macOS CPU **388/388** 与 Metal **79/79**、Windows CPU **348/348**，
+失败及跳过均为 0；Linux/macOS 逐项核对 JUnit，Windows 按 CTest 日志逐项计数。
+新增 `ProjectProposal` **7 项**与 `SavedReviewPython` **8 项**在三个桌面平台均实际执行；
+GL/Vulkan/Metal 的中英文宽/窄布局共 **12 张**参数建议截图已逐张复核，安装包及独立目录启动检查通过。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36677388512) 七个任务全部通过：Linux Python 3.10/3.12
+各 **1853 passed / 7 skipped / 4 deselected**，Windows Python 3.10/3.12 各 **1442 passed / 59 skipped / 260 deselected**，
+新增参数提案 **78 项**在四个矩阵任务中均通过；control **24 项**、desktop/MCP **3 项**及 web 构建通过。
+Runtime 跳过项包括可选依赖、平台限定、性能及真实求解器场景，未计为已验证；证据存于
+`/tmp/stk-proposal-ci-36677388526/audit-summary.json`。真实账户参数建议与 macOS/Windows 真机输入仍待验收。
 使用步骤见[参数提案指南](project-parameter-edits.md)，人工步骤见[工作台验收](workbench-acceptance.md)。
 
 ## 2026-09-30：临时流式回复

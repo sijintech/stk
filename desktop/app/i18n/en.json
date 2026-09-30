@@ -1085,5 +1085,19 @@
   "ai.prepare": "Prepare question (no send)",
   "ai.scope_detail": "Request details",
   "ai.single_turn": "Other questions, unsaved input and files are not included. Replies are plain text and do not execute code or change project data.",
-  "ai.refresh_history": "Refresh list"
+  "ai.refresh_history": "Refresh list",
+  "ai.scope.choose": "Choose rows and fields…",
+  "ai.scope.title": "Choose data for the next question",
+  "ai.scope.hint": "Choose one table and check the rows and fields to capture. This selection is separate from the table editor.",
+  "ai.scope.revision": "Selection preview · revision {revision}",
+  "ai.scope.stale": "The project changed while choosing data. This preview retains the old values. Reload and choose again before capturing.",
+  "ai.scope.reload": "Reload data and clear selection",
+  "ai.scope.rows": "Rows",
+  "ai.scope.fields": "Fields",
+  "ai.scope.page": "{page} / {pages}",
+  "ai.scope.limit": "A capture can contain at most 1000 cells. Uncheck some rows or fields.",
+  "ai.scope.preview": "Preview selected values",
+  "ai.scope.capture_hint": "Capture saves only these rows and fields. No model request is sent; saved questions keep their original context.",
+  "ai.scope.close": "Close data selection",
+  "ai.scope.finish_first": "Capture this selection or close it before preparing a question."
 }
