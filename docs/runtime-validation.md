@@ -32,6 +32,19 @@
 未修改 Python 后端、项目格式或图契约，没有模型调用；未据此宣称 macOS/Windows 真机操作及 Windows GPU 已验收。
 操作边界见[桌面指南](desktop.md)和[标量指南](scalar-volume.md)，真机步骤见[工作台验收](workbench-acceptance.md)。
 
+提交 `921f8e34f86555bae52fe4e09b896d3f452260f1` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36700121488)
+为 **4/5 作业通过**：Linux 实际 **816/816**、macOS CPU **532/532**、Metal **98/98**，均无失败、错误或跳过。
+Windows 已成功编译并实际执行 **492 项，487 通过、5 失败、0 跳过**；失败全部为五项 `ScalarVolumePython`，
+原因均是 Windows 测试虚拟环境只安装基础包，缺少 NumPy。不能把这次 Windows 作业记为通过。
+Windows 的全部 **9 项**配置捕获回归已通过，确认前一轮映射文件复用及迟到回调修复；
+新增 **4 项**相机、**6 项**标签和 **6 项**浮点上传数值测试也全部通过。
+现将 Windows CI 依赖改为显式科学/可视化 extras，并在编译前运行真实图依赖检查；此修复待下一次 CI 验证。
+全部 **12 张**GL/Vulkan/Metal 宽窄中英文标量图逐张复核；Linux/macOS 安装归档及独立目录启动检查通过。
+
+同一提交的[Runtime CI](https://github.com/sijintech/stk/actions/runs/36700121518) **7/7 作业通过**：
+Linux Python 3.10/3.12 各 **2028 passed / 7 skipped / 4 deselected**，Windows 两版本各 **1616 passed / 60 skipped / 260 deselected**；
+control **24 项**、desktop/MCP **3 项**与 Web 构建通过。原始日志、JUnit、截图及解析结果在 `/tmp/stk-fit-ci-36700121488/`。
+
 ## 2026-09-30：有符号标量体渲染与数值范围检查
 
 新增 `scalar-volume` 预设，明确选择数值字段、零起始分量及可选单位标签，保留正负值；

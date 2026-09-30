@@ -498,7 +498,10 @@ jobs:
         run: |
           python -m venv .venv-bridge
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./.venv-bridge/Scripts/python.exe -m pip install .
+          & ./.venv-bridge/Scripts/python.exe -m pip install ".[science,visualization]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PYTHONPATH = Join-Path $PWD 'desktop/tests/bridge'
+          & ./.venv-bridge/Scripts/python.exe desktop/tests/bridge/bridge_fixture.py check graph
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
