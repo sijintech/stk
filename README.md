@@ -66,6 +66,7 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 - plugins/synorder：Synorder 插件（暂缓，可选集成）。
 - examples/runtime：确定性参数扫描与 PNG／VTK 结果验收示例。
 - [examples/project_scan](examples/project_scan/README.md)：原生 Python 面板准备参数表/输入快照，运行面板明确提交，下载 VTK/图片并汇总到结果表。
+- [examples/project_analysis](examples/project_analysis/README.md)：无需服务器的合成 CSV 验收，明确冻结输入、运行保存分析并检查归档科学表格，保留当前项目与 Viewer。
 - tests：任务生命周期、协议、文件传输和科学数据格式的回归测试。
 - archive：退出当前构建的历史 C/C++ 工具、实验与旧打包文件，见[归档索引](archive/README.md)。
 
@@ -83,13 +84,17 @@ PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真�
 
 后续方向与阶段验收见[开发计划](docs/development-plan.md)：AI 工作区、分层节点编辑器和通用多维表格
 共用 SQLite 项目模型。产品约定见[项目工作台设计](docs/design/project-workbench.md)，
-技术提案见[项目数据模型](docs/design/project-model.md)；这些是待开发目标。
+技术提案见[项目数据模型](docs/design/project-model.md)；已交付基础与后续目标以开发计划中的状态为准。
 用户已反馈 macOS / Windows 均能打开窗口并看到 3D 渲染，范围见[补充验收记录](docs/runtime-validation.md#desktop-mac-windows-smoke)。
 现在可从“文件 → 项目表格 / Python”使用项目编辑与脚本面板；源码更新后重跑[启动脚本](desktop/QUICKSTART.md)
 进行增量编译。Python 面板支持多行运行、中断、文件执行以及项目/Runtime/布局 API；其他功能的统一脚本覆盖仍在推进。
 项目文件可登记、跳转 VSCode，并显式保存和校验[不可变输入副本](docs/project-snapshots.md)。
 项目编辑器的[讨论页](docs/project-contexts.md)可保存选定数据的上下文、文字消息及修改草案来源；
-在修改检查页查看差异后明确应用。当前尚未接入模型生成，保存和恢复讨论不会执行代码或提交计算。
+原生 AI 工作区已接入明确准备/发送、流式文字回复，以及捕获范围内的[模型参数建议](docs/project-parameter-edits.md)。
+建议须另行保存、预览并明确应用；保存和恢复讨论不会执行代码或提交计算，通用 AI 工具执行仍待开发。
+分析图可保存定义、精确编辑参数与请求输出，并通过[本机分析运行](docs/project-analysis-runs.md)冻结输入、明确执行和校验归档。
+历史图独立保留，内联科学表格可分页或按源坐标定位，查看类型、单位和精确值；节点连线编辑与大表 blob 读取仍待开发。
+macOS / Windows 可从 Python 面板运行[离线分析验收](examples/project_analysis/README.md)，创建新的合成数据项目完成这一流程。
 
 远程计算经控制服务：所有者用 `suan-control pair --role client --profile desktop` 签发配对码，在桌面程序
 “配对控制服务…”中输入；见 [控制服务指南](docs/hub.md)。

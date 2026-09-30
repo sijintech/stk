@@ -844,6 +844,54 @@ TEST(Region, WheelScrollsOverflowingBlock)
   EXPECT_LT(h.w("b0").rect.w, 300.0f - 2 * h.ctx->style().panel_margin) << "scrollbar space reserved";
 }
 
+TEST(Region, WrappedContentCanReachItsFinalControlAfterScrollbarReservation)
+{
+  for (const float scale : {1.0f, 1.5f, 2.0f}) {
+    SCOPED_TRACE(scale);
+    Harness h(scale);
+    const auto &style = h.ctx->style();
+    const std::string paragraph(37, 'a');
+    // This line fits before the vertical scrollbar is reserved and wraps after it.
+    float width = h.measurer.width(paragraph, style.font) + 2 * style.text_margin +
+        2 * style.panel_margin + style.scrollbar * 0.5f;
+    const float height = 6 * style.unit;
+    h.window = {width + 20, height + 20};
+    int buttons = 10, clicks = 0;
+    h.ui = [&](Context &ctx) {
+      auto &layout = ctx.block("wrapped", {0, 0, width, height}).layout();
+      for (int index = 0; index < buttons; ++index) {
+        layout.button("before" + std::to_string(index), "Before", {});
+      }
+      layout.paragraph(paragraph);
+      layout.button("last", "Last control", [&] { ++clicks; });
+    };
+    h.frame();
+    for (int frame = 0; frame < 3; ++frame) {
+      h.send(Event::wheel({width - 1, height * 0.5f}, -1000));
+      EXPECT_GE(h.w("last").rect.y, 0);
+      EXPECT_LE(h.w("last").rect.y1(), height);
+      h.frame();
+      EXPECT_LE(h.w("last").rect.y1(), height) << "redrawing must retain the reachable bottom";
+    }
+    h.click("last");
+    EXPECT_EQ(clicks, 1) << "the final control must receive real pointer input inside the region";
+    // A wider region changes wrapping and must clamp to its new reachable bottom.
+    width *= 2;
+    h.window.x = width + 20;
+    h.frame();
+    h.send(Event::wheel({width - 1, height * 0.5f}, -1000));
+    EXPECT_LE(h.w("last").rect.y1(), height);
+    h.click("last");
+    EXPECT_EQ(clicks, 2);
+    // Removing overflowing content restores the full width and clears old scrolling.
+    buttons = 0;
+    h.frame();
+    EXPECT_GE(h.w("last").rect.y, 0);
+    EXPECT_LE(h.w("last").rect.y1(), height);
+    EXPECT_FLOAT_EQ(h.w("last").rect.w, width - 2 * style.panel_margin);
+  }
+}
+
 TEST(Scale, UnitsFollowDpiTimesUserScale)
 {
   for (const auto &[dpi, user, unit] : {std::tuple{1.0f, 1.0f, 20.0f}, std::tuple{1.0f, 1.5f, 29.0f}, std::tuple{2.0f, 1.0f, 40.0f}}) {

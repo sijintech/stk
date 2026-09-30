@@ -1356,5 +1356,10 @@
   "analysis_table_grid.unit_missing": "归档元数据未提供此列单位。",
   "analysis_table_grid.unit": "完整单位标签（未转换）",
   "analysis_table_grid.choose_row": "请选择一行，检查此列对应的单元格。",
-  "analysis_table_grid.open_cell": "在属性中打开单元格"
+  "analysis_table_grid.open_cell": "在属性中打开单元格",
+  "analysis_table_grid.source_row": "源行",
+  "analysis_table_grid.source_column": "源列",
+  "analysis_table_grid.jump": "跳转到单元格",
+  "analysis_table_grid.jump_hint": "输入从 0 开始的十进制行列索引。按回车完成输入，再跳转到单元格。",
+  "analysis_table_grid.jump_invalid": "请输入表格范围内的有效行列索引，只允许十进制数字。当前页面与选择保持不变。"
 }

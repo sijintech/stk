@@ -331,6 +331,11 @@ class AnalysisTableGridEditorPython : public ::testing::Test {
     widget("analysis_table_grid_column")->index.assign(column); f.drv->frame();
     ASSERT_EQ(widget("analysis_table_grid_column")->index.value(), column);
   }
+  void jump(const std::string &row, const std::string &column) {
+    ASSERT_NO_FATAL_FAILURE(type_field("analysis_table_grid_jump_row", row));
+    ASSERT_NO_FATAL_FAILURE(type_field("analysis_table_grid_jump_column", column));
+    ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_jump"));
+  }
   bool has_text(const std::string_view text) {
     for (const auto &block : f.screen.ui()->blocks()) {
       for (const auto &item : block->widgets()) { if (item.text == text) { return true; } }
@@ -540,6 +545,12 @@ TEST_F(AnalysisTableGridEditorPython, EmptyInlineTableShowsNoRowsWithoutInventin
   EXPECT_EQ(widget("analysis_table_grid")->table->columns.size(), 1u);
   EXPECT_TRUE(has_text(store().tr("analysis_table_grid.empty")));
   EXPECT_FALSE(widget("analysis_table_grid_column")->enabled);
+  ASSERT_NE(widget("analysis_table_grid_jump_row"), nullptr);
+  ASSERT_NE(widget("analysis_table_grid_jump_column"), nullptr);
+  ASSERT_NE(widget("analysis_table_grid_jump"), nullptr);
+  EXPECT_FALSE(widget("analysis_table_grid_jump_row")->enabled);
+  EXPECT_FALSE(widget("analysis_table_grid_jump_column")->enabled);
+  EXPECT_FALSE(widget("analysis_table_grid_jump")->enabled);
   EXPECT_FALSE(widget("analysis_table_grid_rows_next")->enabled);
   EXPECT_FALSE(widget("analysis_table_grid_columns_next")->enabled);
   EXPECT_EQ(widget("analysis_table_grid_open_cell"), nullptr);
@@ -640,6 +651,188 @@ TEST_F(AnalysisTableGridEditorPython, DestroyedEditorAndReopenedProjectCannotReu
   old_row.assign(1); old_next(); f.drv->frame();
   EXPECT_EQ(area().editor().type().id, kEditorLogs); EXPECT_EQ(client->stats().calls_sent, sent);
   EXPECT_EQ(calls("project.analysis_runs.result").size(), 1u);
+}
+TEST_F(AnalysisTableGridEditorPython, JumpCommitsBothKeyboardFieldsWithTabAndFirstGoSelectsOriginalCoordinates)
+{
+  ASSERT_NO_FATAL_FAILURE(grid("paged"));
+  const auto sent = client->stats().calls_sent;
+  const auto retained_go = widget("analysis_table_grid_jump")->on_click;
+  ASSERT_NO_FATAL_FAILURE(type_field("analysis_table_grid_jump_row", "72", false));
+  EXPECT_FALSE(widget("analysis_table_grid_jump")->enabled);
+  retained_go(); f.drv->frame();
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "0");
+  // Tab commits row and focuses column before another frame can rebuild its setter.
+  f.drv->key(wm::Key::Tab); f.drv->frame();
+  ASSERT_TRUE(f.screen.ui()->text_input_active());
+  ASSERT_EQ(f.screen.ui()->editing(), widget("analysis_table_grid_jump_column")->id);
+  f.drv->key(wm::Key::Unknown, wm::ModNone, "9");
+  f.drv->key(wm::Key::Enter); f.drv->frame();
+  ASSERT_FALSE(f.screen.ui()->text_input_active());
+  EXPECT_EQ(widget("analysis_table_grid_jump_row")->string.value(), "72");
+  EXPECT_EQ(widget("analysis_table_grid_jump_column")->string.value(), "9");
+  retained_go(); f.drv->frame();
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "0");
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_jump"));
+  EXPECT_EQ(widget("analysis_table_grid")->table->rows, 56);
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "72");
+  EXPECT_EQ(widget("analysis_table_grid")->table->selected.value(), 0);
+  EXPECT_EQ(widget("analysis_table_grid_column")->index.value(), 0);
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "7209");
+  EXPECT_EQ(paragraph("analysis_table_grid_name"), "\"col9\"");
+  EXPECT_TRUE(has_text("Source row 72 · column 9"));
+  EXPECT_EQ(client->stats().calls_sent, sent); EXPECT_EQ(project().project()->revision, revision);
+}
+
+TEST_F(AnalysisTableGridEditorPython, JumpUsesExactWindowStartIncludingEndZeroAndRelativePreviousPages)
+{
+  ASSERT_NO_FATAL_FAILURE(grid("paged"));
+  ASSERT_NO_FATAL_FAILURE(jump("127", "15"));
+  EXPECT_EQ(widget("analysis_table_grid")->table->rows, 1);
+  EXPECT_EQ(widget("analysis_table_grid")->table->columns.size(), 2u);
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "12715");
+  EXPECT_FALSE(widget("analysis_table_grid_rows_next")->enabled);
+  EXPECT_FALSE(widget("analysis_table_grid_columns_next")->enabled);
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_rows_previous"));
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "63");
+  EXPECT_EQ(widget("analysis_table_grid")->table->selected.value(), -1);
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_columns_previous"));
+  EXPECT_EQ(paragraph("analysis_table_grid_name"), "\"col7\"");
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_rows_next"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_columns_next"));
+  ASSERT_NO_FATAL_FAILURE(grid_row(0));
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "12715");
+  ASSERT_NO_FATAL_FAILURE(jump("3", "2"));
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "302");
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_rows_previous"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_columns_previous"));
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "0");
+  EXPECT_EQ(paragraph("analysis_table_grid_name"), "\"9\"");
+  ASSERT_NO_FATAL_FAILURE(jump("0", "0"));
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "0");
+  EXPECT_EQ(widget("analysis_table_grid")->table->rows, 64);
+  EXPECT_EQ(calls("project.analysis_runs.result").size(), 1u);
+}
+
+TEST_F(AnalysisTableGridEditorPython, InvalidJumpTextAndBoundsKeepTheExactPageAndSelectionForCorrection)
+{
+  ASSERT_NO_FATAL_FAILURE(grid("paged"));
+  ASSERT_NO_FATAL_FAILURE(jump("72", "9"));
+  const auto sent = client->stats().calls_sent;
+  const std::vector<std::pair<std::string, std::string>> invalid{
+      {"", "9"}, {"-1", "9"}, {"+1", "9"}, {"1.5", "9"}, {"1e2", "9"},
+      {" 1", "9"}, {"１", "9"}, {"18446744073709551616", "9"},
+      {std::string(21, '0'), "9"}, {"128", "9"}, {"72", "16"}, {"72", "-1"}};
+  for (const auto &[row, column] : invalid) {
+    SCOPED_TRACE(row + "/" + column);
+    ASSERT_NO_FATAL_FAILURE(jump(row, column));
+    EXPECT_EQ(widget("analysis_table_grid_jump_row")->string.value(), row);
+    EXPECT_EQ(widget("analysis_table_grid_jump_column")->string.value(), column);
+    EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "72");
+    EXPECT_EQ(widget("analysis_table_grid")->table->selected.value(), 0);
+    EXPECT_EQ(paragraph("analysis_table_grid_value"), "7209");
+    EXPECT_TRUE(has_text(store().tr("analysis_table_grid.jump_invalid")));
+  }
+  ASSERT_NO_FATAL_FAILURE(jump("73", "10"));
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "7310");
+  EXPECT_FALSE(has_text(store().tr("analysis_table_grid.jump_invalid")));
+  EXPECT_EQ(client->stats().calls_sent, sent);
+}
+
+TEST_F(AnalysisTableGridEditorPython, RetainedJumpActionsAndSettersCannotOverrideNewTextPageNavigationOrArchive)
+{
+  ASSERT_NO_FATAL_FAILURE(grid("paged"));
+  const auto old_row = widget("analysis_table_grid_jump_row")->string;
+  const auto old_go = widget("analysis_table_grid_jump")->on_click;
+  ASSERT_NO_FATAL_FAILURE(type_field("analysis_table_grid_jump_row", "72"));
+  old_row.assign("127"); old_go(); f.drv->frame();
+  EXPECT_EQ(widget("analysis_table_grid_jump_row")->string.value(), "72");
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "0");
+  ASSERT_NO_FATAL_FAILURE(type_field("analysis_table_grid_jump_column", "9"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_jump"));
+  const auto before_page_row = widget("analysis_table_grid_jump_row")->string;
+  const auto before_page_go = widget("analysis_table_grid_jump")->on_click;
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_rows_previous"));
+  before_page_row.assign("127"); before_page_go(); f.drv->frame();
+  EXPECT_EQ(widget("analysis_table_grid_jump_row")->string.value(), "72");
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "8");
+  const auto before_navigation = widget("analysis_table_grid_jump_column")->string;
+  widget("analysis_saved_section")->index.assign(0); f.drv->frame();
+  widget("analysis_saved_section")->index.assign(1); f.drv->frame();
+  before_navigation.assign("15"); f.drv->frame();
+  EXPECT_EQ(widget("analysis_table_grid_jump_column")->string.value(), "9");
+  const auto before_archive = widget("analysis_table_grid_jump_row")->string;
+  ASSERT_NO_FATAL_FAILURE(click("analysis_run_read_result"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_run_read_result")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(select("analysis_result_outputs", "table"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_result_table_grid"));
+  before_archive.assign("127"); old_go(); f.drv->frame();
+  EXPECT_EQ(widget("analysis_table_grid_jump_row")->string.value(), "0");
+  EXPECT_EQ(widget("analysis_table_grid_jump_column")->string.value(), "0");
+  const auto destroyed_go = widget("analysis_table_grid_jump")->on_click;
+  const auto destroyed_row = widget("analysis_table_grid_jump_row")->string;
+  ASSERT_TRUE(area().set_tab_type(0, kEditorLogs)); f.drv->frame();
+  const auto sent = client->stats().calls_sent;
+  destroyed_row.assign("12"); destroyed_go(); f.drv->frame();
+  EXPECT_EQ(area().editor().type().id, kEditorLogs); EXPECT_EQ(client->stats().calls_sent, sent);
+}
+
+TEST_F(AnalysisTableGridEditorPython, CommittedJumpTextSurvivesAnotherWindowInputButGoWaitsUntilItFinishes)
+{
+  ASSERT_NO_FATAL_FAILURE(grid("paged"));
+  struct ExtraScreen {
+    AppShell &shell; wm::Screen screen; wmtest::ScreenDriver driver;
+    explicit ExtraScreen(AppShell &owner) : shell(owner), driver(screen, 1280, 1000, 1) {
+      shell.install(screen, nullptr); shell.build_default_layout(screen);
+    }
+    ~ExtraScreen() { shell.forget(screen); }
+  } extra(*f.shell);
+  auto *target = dynamic_cast<EditorArea *>(extra.screen.find_area("a2")); ASSERT_NE(target, nullptr);
+  ASSERT_TRUE(target->set_tab_type(0, kEditorProject)); ASSERT_TRUE(target->editor().show_view("review"));
+  extra.screen.set_maximized(target); extra.driver.frame(); loop.run_ready(); extra.driver.frame();
+  const auto *input = extra.screen.ui()->find("a2/main/review_source"); ASSERT_NE(input, nullptr);
+  const auto rect = input->rect;
+  extra.driver.click(int(rect.cx()), extra.screen.rect().ymax - 1 - int(rect.cy()));
+  extra.driver.key(wm::Key::Unknown, wm::ModNone, " pending text");
+  ASSERT_TRUE(extra.screen.ui()->text_input_active()); const auto typed = extra.screen.ui()->edit_state()->text();
+  ASSERT_NO_FATAL_FAILURE(type_field("analysis_table_grid_jump_row", "72"));
+  ASSERT_NO_FATAL_FAILURE(type_field("analysis_table_grid_jump_column", "9"));
+  EXPECT_EQ(widget("analysis_table_grid_jump_row")->string.value(), "72");
+  EXPECT_EQ(widget("analysis_table_grid_jump_column")->string.value(), "9");
+  EXPECT_FALSE(widget("analysis_table_grid_jump")->enabled);
+  const auto go = widget("analysis_table_grid_jump")->on_click;
+  go(); f.drv->frame();
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "0");
+  EXPECT_EQ(extra.screen.ui()->edit_state()->text(), typed);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  extra.driver.key(wm::Key::Enter, primary); extra.driver.frame();
+  ASSERT_FALSE(f.shell->text_input_active());
+  go(); f.drv->frame();
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "7209");
+  EXPECT_EQ(calls("project.analysis_runs.result").size(), 1u);
+}
+
+TEST_F(AnalysisTableGridEditorPython, ExplicitJumpPreservesSavedDraftInvalidParameterTextAndProjectHistory)
+{
+  ASSERT_NO_FATAL_FAILURE(edit("probe", "2.0"));
+  ASSERT_NO_FATAL_FAILURE(type("1e"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_parameter_apply"));
+  ASSERT_NO_FATAL_FAILURE(grid());
+  const auto sent = client->stats().calls_sent;
+  ASSERT_NO_FATAL_FAILURE(jump("2", "1"));
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "2");
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "14.5");
+  widget("analysis_saved_section")->index.assign(0); f.drv->frame();
+  EXPECT_EQ(cell("analysis_parameters", "probe"), "2.0");
+  EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "1e");
+  EXPECT_FALSE(widget("analysis_parameters_save")->enabled);
+  EXPECT_EQ(project().project()->revision, revision); EXPECT_EQ(client->stats().calls_sent, sent);
+  EXPECT_TRUE(calls("project.analyses.update").empty());
+  EXPECT_EQ(calls("project.analysis_runs.prepare").size(), 1u);
+  EXPECT_EQ(calls("project.analysis_runs.start").size(), 1u);
 }
 }  // namespace
 }  // namespace stk::app

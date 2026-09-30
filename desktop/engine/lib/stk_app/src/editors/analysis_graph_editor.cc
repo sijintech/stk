@@ -14,6 +14,7 @@
 #include "stk/wm/window.hh"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <set>
@@ -296,6 +297,8 @@ class AnalysisGraphEditor final : public Editor {
   AnalysisJsonText result_path_text_, result_scalar_text_;
   size_t result_path_page_ = 0, result_scalar_page_ = 0;
   std::string result_browser_error_;
+  std::string table_grid_jump_row_ = "0", table_grid_jump_column_ = "0", table_grid_jump_error_;
+  uint64_t table_grid_jump_row_generation_ = 0, table_grid_jump_column_generation_ = 0;
   bool result_grid_mode_ = false;
   std::shared_ptr<const AnalysisTableGrid> table_grid_;
   std::shared_ptr<const AnalysisTablePage> table_grid_page_;
@@ -1164,11 +1167,14 @@ class AnalysisGraphEditor final : public Editor {
     if (!panel) { return; }
     const auto generation = result_generation_, browser = result_browser_generation_, navigation = navigation_generation_;
     auto *shell = &ctx.area.shell();
-    const auto valid = [this, same_run, generation, browser, navigation, shell] {
-      return same_run() && !runs_->busy() && !store_->project().busy() && !shell->text_input_active() &&
+    const auto same_view = [this, same_run, generation, navigation] {
+      return same_run() && !runs_->busy() && !store_->project().busy() &&
           state_->saved() && saved_section_ == 1 && navigation_generation_ == navigation &&
           runs_->result_generation() == generation && result_generation_ == generation &&
-          result_browser_generation_ == browser && result_view_ == runs_->result_inspection();
+          result_view_ == runs_->result_inspection();
+    };
+    const auto valid = [this, same_view, browser, shell] {
+      return same_view() && result_browser_generation_ == browser && !shell->text_input_active();
     };
     const bool disabled = blocked || shell->text_input_active();
     panel->paragraph(ctx.tr("analysis_results.hint"));
@@ -1212,7 +1218,7 @@ class AnalysisGraphEditor final : public Editor {
         if (!valid()) { return; }
         try {
           auto grid = AnalysisTableGrid::from_output(model, name);
-          table_grid_ = std::move(grid);
+          clear_table_grid(); table_grid_ = std::move(grid);
           result_grid_mode_ = true; result_browser_error_.clear(); set_table_grid_page(0, 0);
         }
         catch (const std::exception &error) { result_browser_error_ = error.what(); result_grid_mode_ = false; ++result_browser_generation_; redraw(); }
@@ -1229,7 +1235,7 @@ class AnalysisGraphEditor final : public Editor {
       if (valid() && model->warnings().present) { result_output_ = -1; browse_result(model->warnings().path); }
     }).disable(disabled || !model->warnings().present);
     if (!result_browser_error_.empty()) { panel->paragraph(text(result_browser_error_)); }
-    if (result_grid_mode_) { table_grid_panel(*panel, ctx, valid, disabled); return; }
+    if (result_grid_mode_) { table_grid_panel(*panel, ctx, valid, same_view, disabled); return; }
     if (!result_path_) { return; }
     panel->label(ctx.tr("analysis_results.path"));
     if (result_path_text_.total_bytes == 0) { panel->paragraph(ctx.tr("analysis_results.root")); }
@@ -1304,6 +1310,8 @@ class AnalysisGraphEditor final : public Editor {
 
   void clear_table_grid()
   {
+    table_grid_jump_row_ = table_grid_jump_column_ = "0"; table_grid_jump_error_.clear();
+    ++table_grid_jump_row_generation_; ++table_grid_jump_column_generation_;
     result_grid_mode_ = false; table_grid_.reset(); table_grid_page_.reset(); table_grid_headers_.clear();
     table_grid_row_.reset(); table_grid_column_.reset(); table_grid_description_.reset();
     table_grid_name_ = {}; table_grid_unit_ = {}; table_grid_value_ = {};
@@ -1356,11 +1364,50 @@ class AnalysisGraphEditor final : public Editor {
     catch (const std::exception &error) { result_browser_error_ = error.what(); redraw(); }
   }
 
-  void table_grid_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool disabled)
+  static std::optional<size_t> table_grid_coordinate(const std::string &text, const size_t count)
+  {
+    if (text.empty() || text.size() > 20 || !std::all_of(text.begin(), text.end(), [](const char ch) { return ch >= '0' && ch <= '9'; })) { return {}; }
+    uint64_t value = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || value >= count) { return {}; }
+    return size_t(value);
+  }
+
+  void table_grid_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
+                        const std::function<bool()> &same_view, const bool disabled)
   {
     if (!table_grid_ || !table_grid_page_) { return; }
     const auto grid = table_grid_; const auto page = table_grid_page_;
     const auto current = [this, valid, grid, page] { return valid() && result_grid_mode_ && table_grid_ == grid && table_grid_page_ == page; };
+    // Text commits preserve the current field even if another installed window has
+    // an active input. Only the explicit jump/navigation actions require all text idle.
+    const auto editable = [this, same_view, grid, page] { return same_view() && result_grid_mode_ && table_grid_ == grid && table_grid_page_ == page; };
+    // Independent field generations allow Tab/click to commit one field and focus
+    // its sibling in the same frame; an older setter still cannot overwrite that
+    // field's newer committed text. Every commit invalidates all captured Go actions.
+    const auto jump_field = [this, editable](std::string *target, uint64_t *generation) {
+      return ui::Binding<std::string>{[copy = *target] { return copy; },
+          [this, editable, target, generation, expected = *generation](const std::string &value) {
+        if (!editable() || *generation != expected || value.size() > 64) { return; }
+        *target = value; ++*generation; table_grid_jump_error_.clear(); ++result_browser_generation_; redraw();
+      }};
+    };
+    const bool input_blocked = !same_view() || !page->total_rows || !page->total_columns;
+    layout.prop(ctx.tr("analysis_table_grid.source_row")).text_field("analysis_table_grid_jump_row", jump_field(&table_grid_jump_row_, &table_grid_jump_row_generation_), {.max_length = 64, .mono = true}).disable(input_blocked);
+    layout.prop(ctx.tr("analysis_table_grid.source_column")).text_field("analysis_table_grid_jump_column", jump_field(&table_grid_jump_column_, &table_grid_jump_column_generation_), {.max_length = 64, .mono = true}).disable(input_blocked);
+    layout.paragraph(ctx.tr("analysis_table_grid.jump_hint"));
+    layout.button("analysis_table_grid_jump", ctx.tr("analysis_table_grid.jump"), [this, current, grid] {
+      if (!current()) { return; }
+      const auto row = table_grid_coordinate(table_grid_jump_row_, grid->row_count());
+      const auto column = table_grid_coordinate(table_grid_jump_column_, grid->columns().size());
+      if (!row || !column) {
+        table_grid_jump_error_ = std::string(store_->tr("analysis_table_grid.jump_invalid"));
+        ++result_browser_generation_; redraw(); return;
+      }
+      table_grid_jump_error_.clear(); set_table_grid_page(*row, *column);
+      if (table_grid_page_ && table_grid_page_->row_offset == *row && table_grid_page_->column_offset == *column) { select_table_grid_cell(*row, *column); }
+    }).disable(disabled || input_blocked);
+    if (!table_grid_jump_error_.empty()) { layout.paragraph(table_grid_jump_error_); }
     layout.paragraph(ctx.tr("analysis_table_grid.hint"));
     layout.paragraph(ctx.store.catalog().format("analysis_table_grid.range", {
         {"first", page->rows.empty() ? "—" : std::to_string(page->row_offset)},

@@ -133,10 +133,15 @@ void Context::layout_block(Block &b)
       b.content_h_ = h + m;
       if (b.content_h_ > r.h) {
         w -= st.scrollbar;
+        // Reserving the scrollbar can wrap paragraphs onto additional lines. Measure
+        // that final width before clamping, or the bottom controls remain unreachable
+        // even after scrolling to the end (and every redraw clamps them out again).
+        h = LayoutEngine::resolve(*this, root, r.x + m, r.y + std::round(0.5f * m), w);
+        b.content_h_ = h + m;
       }
       float &scroll = scroll_[b.id_];
       scroll = std::clamp(scroll, 0.0f, std::max(0.0f, b.content_h_ - r.h));
-      if (scroll != 0.0f || b.content_h_ > r.h) {
+      if (scroll != 0.0f) {
         h = LayoutEngine::resolve(*this, root, r.x + m, r.y + std::round(0.5f * m) - std::round(scroll), w);
         b.content_h_ = h + m;
       }

@@ -64,6 +64,13 @@ def send(self, message, method=None):
         if mode == 'malformed':
             message = copy.deepcopy(message)
             message['result']['record_id'] = '00000000-0000-4000-8000-000000000000'
+    if message.get('event') == 'project.changed' and mode == 'malformed':
+        # The reply and change notification are separate protocol messages. Keep the
+        # event behind a handshake so malformed-reply recovery cannot rely on timing.
+        (control / 'changed-held').write_text('ready', encoding='utf-8')
+        while not (control / 'release-changed').exists():
+            if self.closing.wait(0.01):
+                return
     if method == 'project.analyses.get' and 'result' in message and mode == 'hold':
         (control / 'held').write_text('ready', encoding='utf-8')
         while not (control / 'release').exists():
@@ -286,6 +293,15 @@ TEST_P(ProjectAnalysesUncertain, AmbiguousCommittedSaveUsesOnlyExplicitReadbackO
   ASSERT_NO_FATAL_FAILURE(settled());
   ASSERT_TRUE(analyses->uncertain()) << analyses->error(); EXPECT_EQ(analyses->pending_id(), identity);
   EXPECT_FALSE(analyses->save_new("Duplicate", saved_document()));
+  if (std::string(GetParam()) == "malformed") {
+    ASSERT_TRUE(loop.pump_until([&] { return fs::exists(directory.path() / "changed-held"); }, 30));
+    EXPECT_EQ(project().project()->revision, 0) << "the completed malformed reply does not imply its event arrived";
+    ASSERT_NO_FATAL_FAILURE(write_text(directory.path() / "release-changed", "ready"));
+  }
+  ASSERT_TRUE(loop.pump_until([&] {
+    return !analyses->busy() && !project().busy() && !project().recent_loading() &&
+        project().project() && project().project()->revision == 1;
+  }, 30)) << project().error() << client->bridge_log().text();
   EXPECT_EQ(project().project()->revision, 1); EXPECT_EQ(calls("project.analyses.create").size(), 1u);
   ASSERT_TRUE(analyses->check_pending()); ASSERT_NO_FATAL_FAILURE(settled());
   EXPECT_FALSE(analyses->uncertain()); EXPECT_TRUE(analyses->pending_id().empty());

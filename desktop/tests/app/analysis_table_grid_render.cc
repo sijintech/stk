@@ -204,8 +204,11 @@ int main(int argc, char **argv)
       select("analysis_result_outputs", "table");
       click("analysis_result_table_grid");
       require(widget("analysis_table_grid") != nullptr, "explicit inline table grid");
-      click("analysis_table_grid_rows_next");
-      click("analysis_table_grid_columns_next");
+      require(widget("analysis_table_grid_jump_row") && widget("analysis_table_grid_jump_column"),
+          "explicit source coordinate inputs");
+      widget("analysis_table_grid_jump_row")->string.assign("64"); frame();
+      widget("analysis_table_grid_jump_column")->string.assign("8"); frame();
+      click("analysis_table_grid_jump");
       const auto *table = widget("analysis_table_grid");
       require(table && table->table && table->table->rows == 6, "all remaining rows after page64");
       require(table->table->cell(0, 1) == "\"alpha\"" && table->table->cell(1, 2) == "29.5",

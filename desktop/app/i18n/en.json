@@ -1356,5 +1356,10 @@
   "analysis_table_grid.unit_missing": "Unit is absent from the archived metadata.",
   "analysis_table_grid.unit": "Exact unit label (no conversion)",
   "analysis_table_grid.choose_row": "Select a row to inspect its cell in this column.",
-  "analysis_table_grid.open_cell": "Open cell in Properties"
+  "analysis_table_grid.open_cell": "Open cell in Properties",
+  "analysis_table_grid.source_row": "Source row",
+  "analysis_table_grid.source_column": "Source column",
+  "analysis_table_grid.jump": "Go to cell",
+  "analysis_table_grid.jump_hint": "Enter zero-based decimal row and column indices. Press Enter to finish typing, then Go to cell.",
+  "analysis_table_grid.jump_invalid": "Enter valid row and column indices within this table. Use decimal digits only; the current page and selection are unchanged."
 }
