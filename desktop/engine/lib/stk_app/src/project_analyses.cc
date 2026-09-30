@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/project_analyses.hh"
+#include "stk/app/analysis_document.hh"
 
 #include "stk/app/app_store.hh"
 #include "stk/app/jobs_spec.hh"
@@ -224,6 +225,30 @@ bool ProjectAnalyses::replace_parameters(const Json &parameters, const uint64_t 
       io::get_string(selected_, "state") != "readable" || stale()) { return false; }
   auto document = selected_.at("document");
   document["parameters"] = parameters;
+  return write("project.analyses.update", selected_.at("id").get<std::string>(),
+               selected_.at("name").get<std::string>(), document, selected_revision_);
+}
+
+bool ProjectAnalyses::replace_submission(const Json &parameters, const Json &outputs,
+                                        const uint64_t expected_selected_version)
+{
+  sync();
+  if (!parameters.is_object() || parameters.size() > AnalysisDocumentLimits::max_overrides ||
+      !outputs.is_array() || outputs.size() > 256 || selected_version_ != expected_selected_version ||
+      selected_.is_null() || io::get_string(selected_, "state") != "readable" || stale() ||
+      busy_ || uncertain_ || project_.busy()) { return false; }
+  Json document;
+  try {
+    // Bound caller-owned values and the selected source before any document/value copies.
+    check_analysis_json_bounds(parameters);
+    check_analysis_json_bounds(outputs);
+    check_analysis_document_bounds(selected_.at("document"));
+    document = selected_.at("document");
+    document["parameters"] = parameters;
+    document["outputs"] = outputs;
+    check_analysis_document_bounds(document);
+  }
+  catch (const std::exception &) { return false; }
   return write("project.analyses.update", selected_.at("id").get<std::string>(),
                selected_.at("name").get<std::string>(), document, selected_revision_);
 }

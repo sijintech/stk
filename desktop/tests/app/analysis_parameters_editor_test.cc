@@ -296,10 +296,15 @@ TEST_F(AnalysisParametersEditorPython, DifferingLostReplyReadbackKeepsDraftUntil
   external["parameters"]["component"] = 3;
   ASSERT_NO_FATAL_FAILURE(call("project.analyses.update", {{"handle", handle()}, {"analysis_id", analysis_id}, {"name", "Other author"},
       {"document", external}, {"expected_revision", current.at("revision")}}, changed));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().project()->revision == changed.at("revision").get<int64_t>() &&
+      !project().busy() && widget("analysis_check_save") && widget("analysis_check_save")->enabled; }));
+  const auto reads_before = calls("project.analyses.get").size();
   ASSERT_NO_FATAL_FAILURE(click("analysis_check_save"));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_parameters_discard") && widget("analysis_parameters_discard")->enabled; }));
   EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "2"); EXPECT_FALSE(widget("analysis_parameter_value")->enabled);
   EXPECT_FALSE(widget("analysis_parameters_save")->enabled); EXPECT_EQ(calls("project.analyses.update").size(), 2u);
+  EXPECT_EQ(calls("project.analyses.get").size(), reads_before + 1);
   ASSERT_NO_FATAL_FAILURE(click("analysis_parameters_discard"));
   ASSERT_NO_FATAL_FAILURE(row("component"));
   EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "3");
@@ -432,10 +437,15 @@ TEST_F(AnalysisParametersEditorPython, MissingLostReplyReadbackKeepsLocalCandida
   const Json commands = Json::array({{{"op", "delete_record"}, {"id", analysis_id}}});
   ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", current.at("revision")},
       {"commands", commands}}, removed));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().project()->revision == removed.at("revision").get<int64_t>() &&
+      !project().busy() && widget("analysis_check_save") && widget("analysis_check_save")->enabled; }));
+  const auto recovery_reads = calls("project.analyses.get").size();
   ASSERT_NO_FATAL_FAILURE(click("analysis_check_save"));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_parameters_discard") && widget("analysis_parameters_discard")->enabled; }));
   EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "2"); EXPECT_FALSE(widget("analysis_parameters_save")->enabled);
   EXPECT_EQ(calls("project.analyses.update").size(), 1u);
+  EXPECT_EQ(calls("project.analyses.get").size(), recovery_reads + 1);
   ASSERT_NO_FATAL_FAILURE(click("analysis_parameters_discard"));
   const auto reads_before = calls("project.analyses.get").size();
   ASSERT_NO_FATAL_FAILURE(click("analysis_reload"));

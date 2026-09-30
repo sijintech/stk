@@ -356,5 +356,207 @@ TEST(AnalysisParameterDraft, ReadBackMatchIsTypedFullDocumentObservationWithoutA
   EXPECT_EQ(model.baseline_document().at("parameters").at("gain"), 1);
 }
 
+
+Draft output_draft(Json parameters = Json::object(), Json requested = Json::array({"gamma", "alpha"}))
+{
+  auto document = definition(std::move(parameters));
+  document["graph"]["outputs"] = {{"alpha", "source.value"}, {"beta", "source.value"}, {"gamma", "source.value"}};
+  document["outputs"] = std::move(requested);
+  Draft model;
+  model.pin("project-opening", identity, 7, "Saved scalar", document);
+  return model;
+}
+
+TEST(AnalysisOutputDraft, UnpinnedModelCannotSelectOutputsOrFabricateADocument)
+{
+  Draft model;
+  EXPECT_EQ(model.outputs(), Json::array()); EXPECT_FALSE(model.output_selected("alpha"));
+  EXPECT_FALSE(model.set_outputs(Json::array(), model.generation()).accepted);
+  EXPECT_FALSE(model.set_output("alpha", true, model.generation()).accepted);
+  EXPECT_FALSE(model.set_output("alpha", false, model.generation()).accepted);
+  EXPECT_FALSE(model.dirty()); EXPECT_TRUE(model.candidate_document().is_null());
+}
+
+TEST(AnalysisOutputDraft, ExactInitialOrderAndReturnedArraysAreDetached)
+{
+  auto model = output_draft();
+  const auto original = exact(model.baseline_document());
+  EXPECT_EQ(model.outputs(), Json::array({"gamma", "alpha"}));
+  EXPECT_TRUE(model.output_selected("gamma")); EXPECT_TRUE(model.output_selected("alpha"));
+  EXPECT_FALSE(model.output_selected("beta")); EXPECT_FALSE(model.output_selected("unknown"));
+  auto outputs = model.outputs(); outputs.clear();
+  auto document = model.candidate_document(); document["outputs"] = Json::array({"beta"});
+  EXPECT_EQ(exact(model.candidate_document()), original); EXPECT_FALSE(model.dirty());
+  EXPECT_EQ(model.name(), "Saved scalar"); EXPECT_EQ(model.analysis_id(), identity); EXPECT_EQ(model.revision(), 7);
+}
+
+TEST(AnalysisOutputDraft, TogglePreservesRemainingOrderAppendsAndRecognizesNoOps)
+{
+  auto model = output_draft();
+  const auto generation = model.generation(), initial = model.version();
+  ASSERT_TRUE(model.set_output("alpha", true, generation).accepted);
+  ASSERT_TRUE(model.set_output("beta", false, generation).accepted);
+  EXPECT_EQ(model.version(), initial); EXPECT_FALSE(model.dirty());
+  ASSERT_TRUE(model.set_output("alpha", false, generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array({"gamma"})); EXPECT_TRUE(model.dirty());
+  ASSERT_TRUE(model.set_output("beta", true, generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array({"gamma", "beta"}));
+  ASSERT_TRUE(model.set_output("alpha", true, generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array({"gamma", "beta", "alpha"}));
+  ASSERT_TRUE(model.set_output("beta", false, generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array({"gamma", "alpha"})); EXPECT_FALSE(model.dirty());
+  const auto version = model.version();
+  EXPECT_FALSE(model.set_output("unknown", false, generation).accepted);
+  EXPECT_FALSE(model.set_output("unknown", true, generation).accepted);
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(model.generation(), generation);
+}
+
+TEST(AnalysisOutputDraft, ExplicitReplacementOrderIsIntentAndNoOutputsNeverMeansAll)
+{
+  auto model = output_draft(); const auto generation = model.generation();
+  ASSERT_TRUE(model.set_outputs(Json::array({"alpha", "gamma"}), generation).accepted);
+  EXPECT_TRUE(model.dirty()); EXPECT_EQ(model.outputs(), Json::array({"alpha", "gamma"}));
+  const auto version = model.version();
+  ASSERT_TRUE(model.set_outputs(Json::array({"alpha", "gamma"}), generation).accepted);
+  EXPECT_EQ(model.version(), version);
+  ASSERT_TRUE(model.set_outputs(Json::array(), generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array()); EXPECT_EQ(model.candidate_document().at("outputs"), Json::array());
+  EXPECT_FALSE(model.output_selected("alpha")); EXPECT_EQ(model.candidate_document().at("graph").at("outputs").size(), 3u);
+  auto empty = output_draft(Json::object(), Json::array()); const auto clean_version = empty.version();
+  ASSERT_TRUE(empty.set_outputs(Json::array(), empty.generation()).accepted);
+  EXPECT_FALSE(empty.dirty()); EXPECT_EQ(empty.version(), clean_version);
+  EXPECT_EQ(empty.outputs(), Json::array());
+}
+
+TEST(AnalysisOutputDraft, ClearingOutputsPreservesExactParameterTypesAndUnknownKeys)
+{
+  auto model = output_draft({{"", uint64_t(9007199254740993ULL)}, {"maximum", std::numeric_limits<uint64_t>::max()},
+      {"minimum", std::numeric_limits<int64_t>::min()}, {"zero", -0.0}, {"null", nullptr}, {"text", "null"},
+      {"unknown/path", Json::array({1, 1.0, nullptr})}});
+  const auto parameters = exact(model.parameters()), graph = exact(model.baseline_document().at("graph"));
+  ASSERT_TRUE(model.set("gain", 1.0, model.generation()).accepted);
+  const auto changed_parameters = exact(model.parameters());
+  ASSERT_TRUE(model.set_outputs(Json::array(), model.generation()).accepted);
+  EXPECT_EQ(exact(model.parameters()), changed_parameters);
+  EXPECT_EQ(exact(model.candidate_document().at("graph")), graph);
+  ASSERT_TRUE(model.remove("gain", model.generation()).accepted);
+  EXPECT_EQ(exact(model.parameters()), parameters); EXPECT_TRUE(model.outputs().empty()); EXPECT_TRUE(model.dirty());
+}
+
+TEST(AnalysisOutputDraft, ParameterSetRemoveAndRejectedRawTextPreserveOutputEdits)
+{
+  auto model = output_draft({{"gain", 1}}); const auto generation = model.generation();
+  ASSERT_TRUE(model.set_outputs(Json::array({"beta"}), generation).accepted);
+  ASSERT_TRUE(model.set("gain", 2.0, generation).accepted);
+  ASSERT_TRUE(model.set_text("literal", "null", Draft::TextMode::LiteralString, generation).accepted);
+  ASSERT_TRUE(model.set("nil", nullptr, generation).accepted);
+  ASSERT_TRUE(model.remove("gain", generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array({"beta"}));
+  EXPECT_TRUE(model.override_value("nil")->is_null()); EXPECT_EQ(*model.override_value("literal"), "null");
+  const auto candidate = exact(model.candidate_document()); const auto version = model.version();
+  EXPECT_FALSE(model.set_text("bad", "[1,", Draft::TextMode::Json, generation).accepted);
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(exact(model.candidate_document()), candidate);
+  ASSERT_TRUE(model.revert(generation));
+  EXPECT_EQ(*model.override_value("gain"), 1); EXPECT_FALSE(model.has_override("nil"));
+  EXPECT_EQ(model.outputs(), Json::array({"gamma", "alpha"})); EXPECT_FALSE(model.dirty());
+  const auto reverted = model.version(); ASSERT_TRUE(model.revert(generation)); EXPECT_EQ(model.version(), reverted);
+}
+
+TEST(AnalysisOutputDraft, InvalidArraysAndUnknownNamesRejectWithoutMutation)
+{
+  auto model = output_draft({{"gain", 1}});
+  ASSERT_TRUE(model.set("gain", 2, model.generation()).accepted);
+  ASSERT_TRUE(model.set_outputs(Json::array({"beta"}), model.generation()).accepted);
+  const auto candidate = exact(model.candidate_document()); const auto version = model.version();
+  for (const auto &invalid : {Json(), Json(true), Json("alpha"), Json::object(), Json::array({"alpha", "alpha"}),
+       Json::array({"unknown"}), Json::array({nullptr}), Json::array({1}), Json::array({Json::object()}),
+       Json::array({""}), Json::array({std::string("\xff", 1)}), Json::array({std::string(Draft::max_document_bytes, 'x')})}) {
+    const auto result = model.set_outputs(invalid, model.generation());
+    EXPECT_FALSE(result.accepted); EXPECT_FALSE(result.error.empty());
+    EXPECT_EQ(model.version(), version); EXPECT_EQ(exact(model.candidate_document()), candidate);
+  }
+  Json deep = 0;
+  for (int i = 0; i < 10000; ++i) { deep = Json::array({std::move(deep)}); }
+  EXPECT_FALSE(model.set_outputs(deep, model.generation()).accepted);
+  EXPECT_FALSE(model.set_output(std::string(Draft::max_document_bytes, 'x'), false, model.generation()).accepted);
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(exact(model.candidate_document()), candidate);
+}
+
+TEST(AnalysisOutputDraft, SelectsAtMost256DistinctDeclaredNamesEvenWhenGraphDeclaresMore)
+{
+  auto document = definition(); document["graph"]["outputs"] = Json::object(); document["outputs"] = Json::array();
+  Json chosen = Json::array();
+  for (size_t i = 0; i < 257; ++i) {
+    const auto name = "output" + std::to_string(i);
+    document["graph"]["outputs"][name] = "source.value";
+    if (i < 256) { chosen.push_back(name); }
+  }
+  Draft model; model.pin("project-opening", identity, 7, "Saved scalar", document);
+  ASSERT_TRUE(model.set_outputs(chosen, model.generation()).accepted);
+  EXPECT_EQ(model.outputs(), chosen); EXPECT_EQ(model.outputs().size(), 256u);
+  const auto version = model.version();
+  EXPECT_FALSE(model.set_output("output256", true, model.generation()).accepted);
+  chosen.push_back("output256"); EXPECT_FALSE(model.set_outputs(chosen, model.generation()).accepted);
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(model.outputs().size(), 256u);
+  ASSERT_TRUE(model.set_output("output100", false, model.generation()).accepted);
+  ASSERT_TRUE(model.set_output("output256", true, model.generation()).accepted);
+  EXPECT_EQ(model.outputs().back(), "output256"); EXPECT_EQ(model.outputs().size(), 256u);
+  ASSERT_TRUE(model.set_outputs(Json::array(), model.generation()).accepted); EXPECT_FALSE(model.dirty());
+}
+
+TEST(AnalysisOutputDraft, ParameterBoundsAreEnforcedOnTheCombinedCandidate)
+{
+  auto model = output_draft(); const auto generation = model.generation();
+  ASSERT_TRUE(model.set_outputs(Json::array({"beta", "alpha"}), generation).accepted);
+  const std::string exact_fit(Draft::max_parameters_bytes - 8, 'x');
+  ASSERT_TRUE(model.set("a", exact_fit, generation).accepted);
+  const auto candidate = exact(model.candidate_document()); const auto version = model.version();
+  EXPECT_FALSE(model.set("a", exact_fit + "x", generation).accepted);
+  EXPECT_FALSE(model.set("other", nullptr, generation).accepted);
+  EXPECT_EQ(exact(model.candidate_document()), candidate); EXPECT_EQ(model.version(), version);
+  ASSERT_TRUE(model.set_output("gamma", true, generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array({"beta", "alpha", "gamma"}));
+  EXPECT_EQ(*model.override_value("a"), exact_fit);
+}
+
+TEST(AnalysisOutputDraft, StaleCallbacksPinResetAndFailedPinKeepTheWholeDraftAtomic)
+{
+  auto model = output_draft(); const auto generation = model.generation();
+  ASSERT_TRUE(model.set_outputs(Json::array({"beta"}), generation).accepted);
+  ASSERT_TRUE(model.set("gain", 2, generation).accepted);
+  const auto candidate = exact(model.candidate_document()); const auto version = model.version();
+  EXPECT_FALSE(model.set_outputs(Json::array(), generation + 1).accepted);
+  EXPECT_FALSE(model.set_output("beta", false, generation + 1).accepted);
+  auto bad = definition(); bad["outputs"] = Json::array({"missing"});
+  EXPECT_THROW(model.pin("other", identity, 8, "Changed", bad), std::invalid_argument);
+  EXPECT_EQ(exact(model.candidate_document()), candidate); EXPECT_EQ(model.version(), version);
+  model.pin("other", identity, 8, "Changed", definition({{"gain", 9}}));
+  EXPECT_FALSE(model.dirty()); EXPECT_EQ(model.outputs(), Json::array({"value"}));
+  EXPECT_FALSE(model.set_outputs(Json::array(), generation).accepted);
+  EXPECT_FALSE(model.set_output("value", false, generation).accepted);
+  EXPECT_EQ(*model.override_value("gain"), 9);
+  const auto current = model.generation(); model.reset();
+  EXPECT_FALSE(model.pinned()); EXPECT_FALSE(model.dirty()); EXPECT_EQ(model.outputs(), Json::array());
+  EXPECT_FALSE(model.set_outputs(Json::array(), current).accepted);
+}
+
+TEST(AnalysisOutputDraft, ReadBackMatchingIncludesOutputOrderAndAllAcceptedParameterEdits)
+{
+  auto model = output_draft({{"gain", 1}});
+  ASSERT_TRUE(model.set("gain", 2.0, model.generation()).accepted);
+  ASSERT_TRUE(model.set_outputs(Json::array({"alpha", "gamma"}), model.generation()).accepted);
+  auto candidate = model.candidate_document(); const auto version = model.version();
+  EXPECT_TRUE(model.matches(identity, "Saved scalar", candidate));
+  candidate["outputs"] = Json::array({"gamma", "alpha"});
+  EXPECT_FALSE(model.matches(identity, "Saved scalar", candidate));
+  candidate = model.candidate_document(); candidate["parameters"]["gain"] = 2;
+  EXPECT_FALSE(model.matches(identity, "Saved scalar", candidate));
+  candidate = model.candidate_document(); candidate["outputs"] = Json::array();
+  EXPECT_FALSE(model.matches(identity, "Saved scalar", candidate));
+  ASSERT_TRUE(model.set_outputs(Json::array(), model.generation()).accepted);
+  EXPECT_TRUE(model.matches(identity, "Saved scalar", candidate));
+  EXPECT_EQ(model.version(), version + 1); EXPECT_TRUE(model.dirty()); EXPECT_EQ(model.revision(), 7);
+}
+
 }  // namespace
 }  // namespace stk::app

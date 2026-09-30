@@ -267,6 +267,9 @@ class AnalysisGraphEditor final : public Editor {
   std::string document_name_;
   AnalysisParameterDraft parameter_draft_;
   std::optional<std::string> parameter_key_;
+  std::optional<std::string> draft_output_key_;
+  size_t draft_output_page_ = 0;
+  uint64_t draft_output_page_generation_ = 0;
   std::string parameter_buffer_, parameter_original_, parameter_error_;
   bool parameter_buffer_changed_ = false, parameter_detached_ = false, parameter_saving_ = false;
   uint64_t parameter_epoch_ = 0, parameter_selection_ = 0, parameter_save_generation_ = 0, parameter_save_version_ = 0;
@@ -304,7 +307,9 @@ class AnalysisGraphEditor final : public Editor {
   }
   void clear_parameter_draft()
   {
-    parameter_draft_.reset(); parameter_key_.reset(); parameter_buffer_.clear(); parameter_original_.clear();
+    parameter_draft_.reset(); parameter_key_.reset(); draft_output_key_.reset(); parameter_buffer_.clear(); parameter_original_.clear();
+    draft_output_page_ = 0;
+    ++draft_output_page_generation_;
     parameter_error_.clear(); parameter_buffer_changed_ = parameter_detached_ = parameter_saving_ = false;
     parameter_input_id_ = 0;
   }
@@ -351,13 +356,18 @@ class AnalysisGraphEditor final : public Editor {
     const auto &selected = documents_->selected();
     try {
       if (!parameter_draft_.pinned() || parameter_draft_.analysis_id() != io::get_string(selected, "id")) {
-        parameter_key_.reset();
+        parameter_key_.reset(); draft_output_key_.reset(); draft_output_page_ = 0;
       }
       parameter_draft_.pin(documents_->handle(), io::get_string(selected, "id"), documents_->selected_revision(),
                           io::get_string(selected, "name"), selected.at("document"));
       if (parameter_key_ && !parameter_draft_.has_override(*parameter_key_) && parameter_declaration(*parameter_key_).is_null()) {
         parameter_key_.reset();
       }
+      if (draft_output_key_ && !parameter_draft_.baseline_document().at("graph").at("outputs").contains(*draft_output_key_)) {
+        draft_output_key_.reset();
+      }
+      const auto output_count = parameter_draft_.baseline_document().at("graph").at("outputs").size();
+      draft_output_page_ = std::min(draft_output_page_, output_count ? (output_count - 1) / 64 : 0);
       parameter_epoch_ = documents_->epoch(); parameter_selection_ = documents_->selected_version();
       parameter_detached_ = parameter_saving_ = false;
       parameter_buffer_from_value();
@@ -391,21 +401,34 @@ class AnalysisGraphEditor final : public Editor {
     const auto selection = parameter_selection_;
     actions.button("analysis_parameters_save", ctx.tr("analysis_parameters.save"), [this, valid, version, selection] {
       if (!valid() || !parameter_current() || (parameter_ui_ && parameter_ui_->text_input_active()) || parameter_buffer_changed_ ||
+          state_->source() == AnalysisGraphState::Source::Run ||
           parameter_draft_.version() != version || !parameter_draft_.dirty() ||
           documents_->selected_version() != selection) { return; }
-      if (documents_->replace_parameters(parameter_draft_.parameters(), selection)) {
+      if (documents_->replace_submission(parameter_draft_.parameters(), parameter_draft_.outputs(), selection)) {
         parameter_saving_ = true; parameter_save_generation_ = parameter_draft_.generation();
         parameter_save_version_ = parameter_draft_.version(); document_navigation_ = navigation_generation_;
       }
     }).disable(blocked || !parameter_draft_.dirty() || parameter_buffer_changed_ || (parameter_ui_ && parameter_ui_->text_input_active()));
     actions.button("analysis_parameters_discard", ctx.tr("analysis_parameters.discard"), [this, valid] {
-      if (!valid() || documents_->busy() || documents_->uncertain() || parameter_text_active()) { return; }
+      if (!valid() || documents_->busy() || documents_->uncertain() || parameter_text_active() ||
+          state_->source() == AnalysisGraphState::Source::Run) { return; }
       clear_parameter_draft();
       if (!documents_->selected().is_null() && io::get_string(documents_->selected(), "state") == "readable") {
         pin_parameters();
       }
       redraw();
     }).disable(busy || parameter_text_active() || (!parameter_edits() && !unavailable));
+
+    if (auto *parameters = panel->panel("analysis_parameter_values_panel", ctx.tr("analysis_graph.graph_parameters"), true)) {
+      parameter_values_panel(*parameters, ctx, valid, generation, version, blocked);
+    }
+    draft_outputs_panel(*panel, ctx, valid, generation, version, blocked);
+  }
+
+  void parameter_values_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
+                              const uint64_t generation, const uint64_t version, const bool blocked)
+  {
+    auto *panel = &layout;
 
     std::vector<std::string> names;
     std::set<std::string> seen;
@@ -484,6 +507,90 @@ class AnalysisGraphEditor final : public Editor {
       redraw();
     }).disable(blocked || parameter_text_active() || parameter_buffer_changed_ || !parameter_draft_.has_override(key));
   }
+
+  void draft_outputs_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
+                           const uint64_t generation, const uint64_t version, const bool blocked)
+  {
+    auto *panel = layout.panel("analysis_output_panel", ctx.tr("analysis_outputs.title"), true);
+    if (!panel) { return; }
+    const auto requested = parameter_draft_.outputs();
+    const auto &declared = parameter_draft_.baseline_document().at("graph").at("outputs");
+    panel->paragraph(ctx.tr("analysis_outputs.hint"));
+    panel->label(ctx.store.catalog().format("analysis_outputs.count", {{"selected", std::to_string(requested.size())},
+        {"total", std::to_string(declared.size())}}));
+    if (requested.empty()) { panel->paragraph(ctx.tr("analysis_outputs.empty")); }
+    const auto page = draft_output_page_;
+    const auto page_generation = draft_output_page_generation_;
+    const auto navigation = navigation_generation_;
+    const auto offset = page * 64;
+    const auto editable = [this, valid, version, page_generation, navigation] {
+      return valid() && parameter_current() && parameter_draft_.version() == version &&
+          draft_output_page_generation_ == page_generation && navigation_generation_ == navigation &&
+          state_->source() != AnalysisGraphState::Source::Run && !documents_->busy() && !documents_->uncertain() &&
+          !store_->project().busy() && !parameter_buffer_changed_ && !parameter_text_active();
+    };
+    const bool disabled = blocked || parameter_buffer_changed_ || parameter_text_active();
+    std::vector<std::string> names, all_names; Rows rows; int selected = -1;
+    size_t index = 0;
+    for (const auto &[name, output] : declared.items()) {
+      if (declared.size() <= AnalysisParameterDraft::max_outputs) { all_names.push_back(name); }
+      if (index++ < offset || names.size() == 64) { continue; }
+      if (draft_output_key_ && *draft_output_key_ == name) { selected = int(names.size()); }
+      names.push_back(name);
+      const auto requested_name = std::find(requested.begin(), requested.end(), Json(name));
+      rows.push_back({text(name), requested_name == requested.end() ? std::string(ctx.tr("analysis_graph.not_requested")) :
+          std::string(ctx.tr("analysis_graph.requested")) + " #" + std::to_string(std::distance(requested.begin(), requested_name) + 1),
+          output.is_string() ? text(output.get_ref<const std::string &>()) : summary(output)});
+    }
+    ui::TableSpec spec;
+    spec.columns = {{std::string(ctx.tr("analysis_graph.output")), 6}, {std::string(ctx.tr("analysis_graph.request")), 9},
+        {std::string(ctx.tr("analysis_graph.port")), 10}};
+    spec.rows = int(rows.size()); spec.visible_rows = float(std::min(4, std::max(1, spec.rows)));
+    // Both counters are monotonic: data edits and page round trips invalidate the sort cache.
+    spec.data_version = version + page_generation;
+    spec.cell = [rows](const int row, const int col) { return rows.at(size_t(row)).at(size_t(col)); };
+    spec.selected = {[selected] { return selected; }, [this, editable, names](const int index) {
+      if (!editable() || index < 0 || size_t(index) >= names.size()) { return; }
+      draft_output_key_ = names[size_t(index)]; redraw();
+    }};
+    panel->table("analysis_output_choices", std::move(spec)).disable(disabled);
+    panel->label(ctx.store.catalog().format("analysis_outputs.page", {{"first", std::to_string(names.empty() ? 0 : offset + 1)},
+        {"last", std::to_string(offset + names.size())}, {"total", std::to_string(declared.size())}}));
+    auto &pages = panel->row();
+    pages.button("analysis_outputs_previous", ctx.tr("analysis_documents.previous"), [this, editable, page] {
+      if (!editable() || page == 0) { return; }
+      draft_output_page_ = page - 1; ++draft_output_page_generation_; draft_output_key_.reset(); redraw();
+    }).disable(disabled || page == 0);
+    pages.button("analysis_outputs_next", ctx.tr("analysis_documents.next"), [this, editable, page, total = declared.size()] {
+      if (!editable() || (page + 1) * 64 >= total) { return; }
+      draft_output_page_ = page + 1; ++draft_output_page_generation_; draft_output_key_.reset(); redraw();
+    }).disable(disabled || offset + names.size() >= declared.size());
+    if (selected >= 0 && draft_output_key_) {
+      const auto name = *draft_output_key_;
+      panel->label(text(name));
+      panel->checkbox("analysis_output_requested", ctx.tr("analysis_outputs.requested"),
+          {[selected = parameter_draft_.output_selected(name)] { return selected; },
+           [this, editable, name, generation](const bool selected) {
+        if (!editable() || draft_output_key_ != name) { return; }
+        const auto result = parameter_draft_.set_output(name, selected, generation);
+        parameter_error_ = result.accepted ? "" : result.error; redraw();
+      }}).disable(disabled);
+    }
+    auto &actions = panel->row();
+    actions.button("analysis_outputs_all", ctx.tr("analysis_outputs.all"), [this, editable, generation, all_names, total = declared.size()] {
+      if (!editable()) { return; }
+      if (all_names.empty() || total > AnalysisParameterDraft::max_outputs) { return; }
+      const auto result = parameter_draft_.set_outputs(Json(all_names), generation);
+      parameter_error_ = result.accepted ? "" : result.error; redraw();
+    }).disable(disabled || names.empty() || declared.size() > AnalysisParameterDraft::max_outputs);
+    if (declared.size() > AnalysisParameterDraft::max_outputs) { panel->paragraph(ctx.tr("analysis_outputs.limit")); }
+    actions.button("analysis_outputs_clear", ctx.tr("analysis_outputs.clear"), [this, editable, generation] {
+      if (!editable()) { return; }
+      const auto result = parameter_draft_.set_outputs(Json::array(), generation);
+      parameter_error_ = result.accepted ? "" : result.error; redraw();
+    }).disable(disabled || requested.empty());
+  }
+
   void place_canvas(const double width, const double height)
   {
     if (!fit_ && !focus_selected_) { return; }

@@ -136,11 +136,16 @@ TEST_F(FakeBridge, EventsInterleavedWithResponsesKeepTheirOrderOnTheLoop)
     seen.push_back("tick" + std::to_string(data["i"].get<int>()));
   });
   bool done = false;
-  client->call("interleave", {{"n", 3}}).then([&](Result<Json> r) {
+  // Establish the continuation while pending. A fast peer can otherwise finish call() before
+  // then() attaches, in which case the continuation correctly queues after the later events.
+  auto pending = client->call("interleave.hold", {{"n", 3}});
+  ASSERT_FALSE(pending.ready());
+  pending.then([&](Result<Json> r) {
     ASSERT_TRUE(r.ok());
     seen.push_back("response");
     done = true;
   });
+  ASSERT_TRUE(client->call("interleave.release").get().ok());
   ASSERT_TRUE(loop.pump_until([&] { return done && seen.size() == 7; }));
   const std::vector<std::string> expected = {"tick0", "tick1", "tick2", "response", "tick3", "tick4", "tick5"};
   EXPECT_EQ(seen, expected);
@@ -148,6 +153,29 @@ TEST_F(FakeBridge, EventsInterleavedWithResponsesKeepTheirOrderOnTheLoop)
   client->call("interleave", {{"n", 2}}).get();
   loop.run_ready();
   EXPECT_EQ(seen.size(), 7u); /* the listener is gone */
+}
+
+TEST_F(FakeBridge, ContinuationAttachedAfterInterleavedEventsQueuesAfterThoseEvents)
+{
+  ManualLoop loop;
+  auto client = started(options({}, loop.executor()));
+  std::vector<std::string> seen;
+  ListenerHandle ticks = client->on_event("test.tick", [&](const std::string &, const Json &data) {
+    seen.push_back("tick" + std::to_string(data["i"].get<int>()));
+  });
+  auto completed = client->call("interleave", {{"n", 3}});
+  ASSERT_TRUE(completed.get().ok());
+  // The peer emits all six ticks before handling this echo. Its reply is a reader-side barrier,
+  // so the executor already holds the entire event sequence when the late continuation attaches.
+  ASSERT_TRUE(client->call("echo").get().ok());
+  ASSERT_TRUE(completed.ready());
+  bool done = false;
+  completed.then([&](Result<Json> result) {
+    ASSERT_TRUE(result.ok()); seen.push_back("response"); done = true;
+  });
+  ASSERT_TRUE(loop.pump_until([&] { return done && seen.size() == 7; }));
+  const std::vector<std::string> expected = {"tick0", "tick1", "tick2", "tick3", "tick4", "tick5", "response"};
+  EXPECT_EQ(seen, expected);
 }
 
 TEST_F(FakeBridge, TimeoutAndCancelAreLocal)

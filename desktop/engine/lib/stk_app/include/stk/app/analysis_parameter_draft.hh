@@ -12,13 +12,14 @@
 
 namespace stk::app {
 
-/** Detached editor-local edits to one saved analysis's submitted parameters. No I/O, evaluation,
+/** Detached editor-local edits to one saved analysis's submitted parameters and requested outputs. No I/O, evaluation,
  * implicit defaults, rebasing or live-project observation occurs here. Call current() against the
  * live opening handle/revision before editing or saving. Backend structural validation remains
  * authoritative; pin() accepts an already-read document and checks its shape and storage bounds. */
 class AnalysisParameterDraft {
  public:
   static constexpr size_t max_overrides = AnalysisDocumentLimits::max_overrides;
+  static constexpr size_t max_outputs = 256;
   static constexpr size_t max_parameters_bytes = AnalysisDocumentLimits::max_parameters_bytes;
   static constexpr size_t max_graph_bytes = AnalysisDocumentLimits::max_graph_bytes;
   static constexpr size_t max_document_bytes = AnalysisDocumentLimits::max_document_bytes;
@@ -49,13 +50,16 @@ class AnalysisParameterDraft {
    * A text editor may submit multiple edits against the same generation before being rebuilt. */
   uint64_t generation() const { return generation_; }
   uint64_t version() const { return version_; }
-  bool dirty() const { return !edits_.empty(); }
+  bool dirty() const { return !edits_.empty() || outputs_override_.has_value(); }
 
   bool has_override(const std::string &name) const;
   /** Disengaged means no override; an engaged JSON null is an explicit submitted null. */
   std::optional<io::Json> override_value(const std::string &name) const;
   /** Detached copies. An unpinned draft returns an empty parameters object/null document. */
   io::Json parameters() const;
+  /** Detached ordered array. An unpinned draft returns []; empty never means all outputs. */
+  io::Json outputs() const;
+  bool output_selected(const std::string &name) const;
   io::Json candidate_document() const;
 
   /** Valid no-ops are accepted without changing version. Rejected edits preserve all state.
@@ -66,6 +70,11 @@ class AnalysisParameterDraft {
   EditResult set_text(const std::string &name, std::string_view text, TextMode mode,
                       uint64_t expected_generation);
   EditResult remove(const std::string &name, uint64_t expected_generation);
+  /** Exact ordered replacement of 0..256 distinct declared output names. No parameter changes.
+   * Toggle-on appends; toggle-off removes only that name. Unknown names always fail, even off. */
+  EditResult set_outputs(const io::Json &outputs, uint64_t expected_generation);
+  EditResult set_output(const std::string &name, bool selected, uint64_t expected_generation);
+  /** Discard both accepted parameter and output edits; unaccepted text belongs to the caller. */
   bool revert(uint64_t expected_generation);
 
   /** Current-state observation only, never a transaction receipt or automatic adoption.
@@ -82,6 +91,7 @@ class AnalysisParameterDraft {
   io::Json baseline_;
   // Disengaged optional removes a key; engaged JSON null is an explicit override.
   std::map<std::string, std::optional<io::Json>> edits_;
+  std::optional<io::Json> outputs_override_;
 };
 
 }  // namespace stk::app

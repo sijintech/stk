@@ -5,6 +5,7 @@
 #include "stk/core/utf8.hh"
 #include "stk/io/graph.hh"
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 #include <stdexcept>
@@ -156,14 +157,14 @@ void AnalysisParameterDraft::pin(std::string handle, std::string analysis_id, in
   catch (const std::exception &e) { throw std::invalid_argument(e.what()); }
   Json detached = document;
   handle_ = std::move(handle); analysis_id_ = std::move(analysis_id); revision_ = revision;
-  name_ = std::move(name); baseline_ = std::move(detached); edits_.clear();
+  name_ = std::move(name); baseline_ = std::move(detached); edits_.clear(); outputs_override_.reset();
   ++generation_; ++version_;
 }
 
 void AnalysisParameterDraft::reset()
 {
   handle_.clear(); analysis_id_.clear(); name_.clear(); revision_ = -1;
-  baseline_ = nullptr; edits_.clear(); ++generation_; ++version_;
+  baseline_ = nullptr; edits_.clear(); outputs_override_.reset(); ++generation_; ++version_;
 }
 
 bool AnalysisParameterDraft::current(const std::string &handle, int64_t revision) const
@@ -205,10 +206,27 @@ Json AnalysisParameterDraft::parameters() const
 Json AnalysisParameterDraft::document_with(const Json &parameters) const
 {
   if (!pinned()) { return nullptr; }
-  Json result = baseline_; result["parameters"] = parameters; return result;
+  Json result = baseline_; result["parameters"] = parameters;
+  if (outputs_override_) { result["outputs"] = *outputs_override_; }
+  return result;
 }
 
 Json AnalysisParameterDraft::candidate_document() const { return document_with(parameters()); }
+
+Json AnalysisParameterDraft::outputs() const
+{
+  if (!pinned()) { return Json::array(); }
+  return outputs_override_ ? *outputs_override_ : baseline_.at("outputs");
+}
+
+bool AnalysisParameterDraft::output_selected(const std::string &name) const
+{
+  if (!pinned()) { return false; }
+  const auto &values = outputs_override_ ? *outputs_override_ : baseline_.at("outputs");
+  return std::find_if(values.begin(), values.end(), [&name](const Json &value) {
+    return value.get_ref<const std::string &>() == name;
+  }) != values.end();
+}
 
 AnalysisParameterDraft::EditResult AnalysisParameterDraft::set(const std::string &name, const Json &value,
                                                                uint64_t generation)
@@ -254,10 +272,52 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::remove(const std::str
   catch (const std::invalid_argument &error) { return {false, error.what()}; }
 }
 
+AnalysisParameterDraft::EditResult AnalysisParameterDraft::set_outputs(const Json &values, uint64_t generation)
+{
+  if (!accepts(generation)) { return {false, "The analysis draft has changed or is unavailable"}; }
+  try {
+    // Bound every element before making a candidate copy; nested/huge values cannot reach the
+    // serializer. A declared graph output is an identifier, not an arbitrary parameter key.
+    require(values.is_array() && values.size() <= max_outputs,
+            "Select at most 256 distinct declared outputs");
+    const auto &declared = baseline_.at("graph").at("outputs");
+    std::set<std::string_view> selected;
+    for (const auto &value : values) {
+      require(value.is_string(), "Output names must be declared graph identifiers");
+      const auto &name = value.get_ref<const std::string &>();
+      require(io::is_graph_id(name) && declared.contains(name) && selected.insert(name).second,
+              "Output names must be distinct declared graph identifiers");
+    }
+    Json candidate = candidate_document(); candidate["outputs"] = values;
+    check_analysis_document_bounds(candidate);
+    if (values == outputs()) { return {true, {}}; }
+    if (values == baseline_.at("outputs")) { outputs_override_.reset(); }
+    else { outputs_override_ = values; }
+    ++version_; return {true, {}};
+  }
+  catch (const std::invalid_argument &error) { return {false, error.what()}; }
+}
+
+AnalysisParameterDraft::EditResult AnalysisParameterDraft::set_output(const std::string &name,
+                                                                    const bool selected, uint64_t generation)
+{
+  if (!accepts(generation)) { return {false, "The analysis draft has changed or is unavailable"}; }
+  if (!io::is_graph_id(name) || !baseline_.at("graph").at("outputs").contains(name)) {
+    return {false, "Output names must be declared graph identifiers"};
+  }
+  auto values = outputs();
+  const auto found = std::find_if(values.begin(), values.end(), [&name](const Json &value) {
+    return value.get_ref<const std::string &>() == name;
+  });
+  if (selected && found == values.end()) { values.push_back(name); }
+  else if (!selected && found != values.end()) { values.erase(found); }
+  return set_outputs(values, generation);
+}
+
 bool AnalysisParameterDraft::revert(uint64_t generation)
 {
   if (!accepts(generation)) { return false; }
-  if (dirty()) { edits_.clear(); ++version_; }
+  if (dirty()) { edits_.clear(); outputs_override_.reset(); ++version_; }
   return true;
 }
 

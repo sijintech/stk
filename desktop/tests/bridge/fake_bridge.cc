@@ -6,7 +6,8 @@
  * Methods: hello, echo {..} -> {params}, slow {ms} -> {slept}, hold {tag} (answered in reverse
  * order once `release` arrives), split {text} (the response written a few bytes at a time),
  * oversize / badutf8 / badjson (junk lines first, then the response), interleave {n} (events
- * around the response), partial_crash (half a line, then _exit), logs.subscribe (a fake log
+ * around the response), interleave.hold {n} (same sequence held until interleave.release),
+ * partial_crash (half a line, then _exit), logs.subscribe (a fake log
  * stream from `offsets`), unsubscribe, stats -> {unsubscribes}, anything else -> {method}.
  *
  * Options:
@@ -116,6 +117,17 @@ void send(const Json &message)
 void respond(const Json &id, const Json &result)
 {
   send(Json{{"id", id}, {"result", result}});
+}
+
+void interleave(const Json &id, const int n)
+{
+  for (int i = 0; i < n; i++) {
+    send(Json{{"event", "test.tick"}, {"data", {{"i", i}}}});
+  }
+  respond(id, Json{{"n", n}});
+  for (int i = n; i < 2 * n; i++) {
+    send(Json{{"event", "test.tick"}, {"data", {{"i", i}}}});
+  }
 }
 
 void respond_error(const Json &id, const std::string &code, const std::string &message, const Json &data = nullptr)
@@ -517,6 +529,7 @@ int main(int argc, char **argv)
   }
   std::vector<std::thread> threads;
   std::deque<std::pair<Json, Json>> held;
+  std::vector<std::pair<Json, int>> held_interleaves;
   std::string line;
   while (std::getline(std::cin, line)) {
     if (line.empty()) {
@@ -647,14 +660,15 @@ int main(int argc, char **argv)
       respond(id, Json{{"after", "badjson"}});
     }
     else if (method == "interleave") {
-      const int n = params.value("n", 3);
-      for (int i = 0; i < n; i++) {
-        send(Json{{"event", "test.tick"}, {"data", {{"i", i}}}});
-      }
-      respond(id, Json{{"n", n}});
-      for (int i = n; i < 2 * n; i++) {
-        send(Json{{"event", "test.tick"}, {"data", {{"i", i}}}});
-      }
+      interleave(id, params.value("n", 3));
+    }
+    else if (method == "interleave.hold") {
+      held_interleaves.emplace_back(id, params.value("n", 3));
+    }
+    else if (method == "interleave.release") {
+      for (const auto &[held_id, n] : held_interleaves) { interleave(held_id, n); }
+      held_interleaves.clear();
+      respond(id, Json{{"released", true}});
     }
     else if (method == "partial_crash") {
       write_raw("{\"id\":" + id.dump() + ",\"result\":{\"cut");

@@ -41,6 +41,10 @@ class ProjectAnalyses {
   bool rename(const std::string &name);
   /** Replace submitted overrides only, preserving the selected graph, outputs and name. */
   bool replace_parameters(const io::Json &parameters, uint64_t expected_selected_version);
+  /** Replace submitted overrides and requested output order in one CAS write, preserving the
+   * selected graph, name and identity. Explicit empty outputs remain empty. */
+  bool replace_submission(const io::Json &parameters, const io::Json &outputs,
+                          uint64_t expected_selected_version);
   /** Observe the existing identity after an ambiguous reply; never sends the mutation again. */
   bool check_pending();
 
