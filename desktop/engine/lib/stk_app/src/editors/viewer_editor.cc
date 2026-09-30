@@ -877,7 +877,8 @@ class ViewerEditor final : public Editor {
     ViewerState &vs = ctx.store.viewer();
     entries.push_back({std::string(ctx.tr("viewer.action.open")), [&vs]() { vs.open_dialog = true; }});
     entries.push_back({std::string(ctx.tr("viewer.action.export")), [this, &vs]() { open_export(vs); }, vs.payload() != nullptr});
-    entries.push_back({std::string(ctx.tr("viewer.action.close")), [&vs]() { vs.close(); }, vs.payload() != nullptr});
+    entries.push_back({std::string(ctx.tr("viewer.action.close")), [&vs]() { vs.close(); },
+                      vs.payload() != nullptr || vs.source().kind != SourceKind::None || vs.evaluating()});
   }
 
   /* ---- Persistence (per area: tool, navigation, lighting, camera) ---- */

@@ -28,6 +28,9 @@
 namespace stk::ui {
 class TextMeasurer;
 }
+namespace stk::io {
+class Payload;
+}
 namespace stk::wm {
 class Window;
 class WindowManager;
@@ -135,6 +138,17 @@ class AppShell {
   void open_saved_review(wm::Screen *screen, std::string handle, int64_t expected_revision,
                          io::Json draft, uint64_t expected_review_generation,
                          std::function<bool()> valid, ScriptState::Completion complete);
+
+  /** Pure preflight for importing an explicitly selected analysis output. All Viewer areas
+   * share one state: an occupied Viewer or any active desktop text edit prevents adoption.
+   * The returned version must still match after the payload has been read and verified. */
+  bridge::Result<uint64_t> analysis_payload_target(wm::Screen *screen);
+  /** Adopt an already decoded, verified payload into an empty shared Viewer. The durable run
+   * keeps its provenance separately; this import never invents a submitted Viewer graph.
+   * Navigation and adoption are deferred with project, caller and Viewer-version fences. */
+  void open_analysis_payload(wm::Screen *screen, std::string handle, uint64_t expected_viewer_version,
+                             std::shared_ptr<const io::Payload> payload, std::string label,
+                             std::function<bool()> valid, ScriptState::Completion complete);
 
   /** Where File > Save layout writes (default: wm::default_layout_path()). Empty = disabled. */
   std::filesystem::path layout_path;

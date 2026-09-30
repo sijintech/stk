@@ -97,7 +97,7 @@ def test_complete_reply_stays_text_until_explicit_conversion_then_reopens_with_p
     assert reopened.requests.edit_proposal(item["id"]) == {k: v for k, v in result.items() if k != "replayed"}
     assert reopened.requests.propose_edits(item["id"], expected_revision=1) == {**result, "replayed": True}
     assert store.snapshot() == before and store.history() == history
-    assert store.requests.get(item["id"]) == item and store.info()["format_version"] == 8
+    assert store.requests.get(item["id"]) == item and store.info()["format_version"] == 9
     with sqlite3.connect(store.path) as db:
         assert db.execute("SELECT count(*) FROM run_plans").fetchone()[0] == 0
 

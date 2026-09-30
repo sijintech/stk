@@ -4,12 +4,15 @@
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_table_view.hh"
 #include "stk/app/project_analyses.hh"
+#include "stk/app/project_analysis_runs.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/shell.hh"
 #include "stk/bridge/client.hh"
 #include "stk/ui/gpu_painter.hh"
+#include "stk/wm/window.hh"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace stk::app {
@@ -102,6 +105,21 @@ class AnalysisGraphEditor final : public Editor {
   void draw_sidebar(ui::Layout &layout, EditorContext &ctx) override
   {
     attach(ctx);
+    if (state_->catalog_loading()) { layout.paragraph(ctx.tr("analysis_graph.catalog_loading")); }
+    if (!state_->catalog_error().empty()) {
+      layout.paragraph(ctx.tr("analysis_graph.catalog_unavailable"));
+      layout.paragraph(text(state_->catalog_error()));
+    }
+    if (state_->saved()) {
+      const std::weak_ptr<bool> weak = alive_;
+      layout.tabs("analysis_saved_section", {std::string(ctx.tr("analysis_runs.definition")),
+          std::string(ctx.tr("analysis_runs.title"))}, {[value = saved_section_] { return value; },
+          [this, weak](const int value) {
+        const auto live = weak.lock();
+        if (live && *live && value >= 0 && value <= 1) { saved_section_ = value; redraw(); }
+      }});
+      if (saved_section_ == 1) { runs_panel(layout, ctx); return; }
+    }
     documents_panel(layout, ctx);
     source_panel(layout, ctx);
     if (!state_->view()) { return; }
@@ -212,9 +230,14 @@ class AnalysisGraphEditor final : public Editor {
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::unique_ptr<AnalysisGraphState> state_;
   std::unique_ptr<ProjectAnalyses> documents_;
+  std::unique_ptr<ProjectAnalysisRuns> runs_;
   uint64_t document_epoch_ = 0, document_version_ = 0;
   uint64_t navigation_generation_ = 0, document_navigation_ = 0;
   std::string document_name_;
+  int saved_section_ = 0, snapshot_index_ = -1, file_index_ = -1, output_index_ = -1, mapping_index_ = -1;
+  uint64_t runs_epoch_ = 0, run_selection_ = 0, bindings_generation_ = 0;
+  std::string binding_name_ = "data", binding_path_, binding_error_;
+  Json bindings_ = Json::object();
   AnalysisGraphCanvas canvas_;
   AppStore *store_ = nullptr;
   std::shared_ptr<const AnalysisGraphView> canvas_view_;
@@ -246,6 +269,7 @@ class AnalysisGraphEditor final : public Editor {
       state_->show_displayed(initial_displayed_);
       if (initial_saved_) { state_->show_saved(); }
       documents_ = std::make_unique<ProjectAnalyses>(ctx.store);
+      runs_ = std::make_unique<ProjectAnalysisRuns>(ctx.store);
     }
     documents_->sync();
     if (document_epoch_ != documents_->epoch()) {
@@ -267,6 +291,16 @@ class AnalysisGraphEditor final : public Editor {
       }
     }
     state_->sync();
+    state_->ensure_catalog();
+    runs_->sync();
+    if (runs_epoch_ != runs_->epoch()) {
+      runs_epoch_ = runs_->epoch(); snapshot_index_ = file_index_ = output_index_ = mapping_index_ = -1;
+      bindings_ = Json::object(); binding_name_ = "data"; binding_path_.clear(); binding_error_.clear();
+      ++bindings_generation_;
+    }
+    if (run_selection_ != runs_->selection_generation()) {
+      run_selection_ = runs_->selection_generation(); output_index_ = -1;
+    }
     if (canvas_view_ != state_->view()) {
       canvas_view_ = state_->view();
       canvas_.set_view(canvas_view_);
@@ -281,6 +315,303 @@ class AnalysisGraphEditor final : public Editor {
     const auto &inspection = *state_->inspection();
     if (!inspection.shown_graph_verified.value_or(false)) { return false; }
     return state_->displayed() ? bool(inspection.shown_configuration) : inspection.shown_matches_desired.value_or(false);
+  }
+
+  void poll_runs(EditorContext &ctx)
+  {
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const double wake = runs_->pump(now);
+    auto *manager = ctx.area.shell().window_manager();
+    if (!manager || !std::isfinite(wake) ||
+        (runs_->wake_scheduled > now && runs_->wake_scheduled <= wake + 1e-4)) { return; }
+    runs_->wake_scheduled = wake;
+    const auto delay = uint64_t(std::clamp((wake - now) * 1000.0 + 1.0, 1.0, 60000.0));
+    const std::weak_ptr<bool> weak = alive_;
+    manager->add_timer(delay, 0, [this, weak] {
+      const auto live = weak.lock(); if (live && *live) { redraw(); }
+    });
+  }
+
+  void runs_panel(ui::Layout &layout, EditorContext &ctx)
+  {
+    poll_runs(ctx);
+    if (!runs_->supported()) {
+      layout.paragraph(ctx.tr(ctx.store.project().project() && ctx.store.project().project()->format_version < 9 ?
+          "analysis_runs.upgrade" : "analysis_runs.unavailable"));
+      return;
+    }
+    layout.paragraph(ctx.tr("analysis_runs.canvas_hint"));
+    if (!state_->document_id().empty()) { layout.label(text(state_->document_id())); }
+    const std::weak_ptr<bool> weak = alive_;
+    const auto epoch = runs_->epoch();
+    const auto valid = [this, weak, epoch] {
+      const auto live = weak.lock();
+      if (!live || !*live) { return false; }
+      runs_->sync(); return runs_->epoch() == epoch;
+    };
+    const bool blocked = runs_->busy() || ctx.store.project().busy();
+    if (!runs_->error().empty()) { layout.paragraph(text(runs_->error())); }
+    if (runs_->uncertain()) {
+      layout.paragraph(ctx.tr("analysis_runs.uncertain"));
+      layout.label(text(runs_->pending_id()));
+      layout.button("analysis_run_check", ctx.tr("analysis_runs.check"), [this, valid] {
+        if (valid()) { runs_->check_pending(); }
+      }).disable(blocked);
+    }
+    if (auto *prepare = layout.panel("analysis_run_prepare_panel", ctx.tr("analysis_runs.prepare_title"), runs_->run().is_null())) {
+      binding_controls(*prepare, ctx, valid, blocked);
+      const auto generation = state_->generation(), bindings_generation = bindings_generation_;
+      const auto id = state_->document_id(), snapshot = selected_snapshot_id();
+      const auto revision = state_->document_revision();
+      const auto bindings = bindings_;
+      prepare->paragraph(ctx.tr("analysis_runs.prepare_hint"));
+      if (id.empty()) { prepare->paragraph(ctx.tr("analysis_runs.select_definition")); }
+      else {
+        prepare->label(text(id));
+        prepare->label(ctx.store.catalog().format("analysis_documents.revision", {{"revision", std::to_string(revision)}}));
+        if (state_->document_stale()) { prepare->paragraph(ctx.tr("analysis_runs.stale_definition")); }
+      }
+      prepare->button("analysis_run_prepare", ctx.tr("analysis_runs.prepare"),
+          [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
+        if (!valid()) { return; }
+        state_->sync();
+        if (state_->saved() && state_->generation() == generation && bindings_generation_ == bindings_generation &&
+            state_->document_id() == id && !state_->document_stale()) {
+          runs_->prepare(id, revision, snapshot, bindings);
+        }
+      }).disable(blocked || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() || bindings.empty());
+    }
+    if (auto *history = layout.panel("analysis_run_history", ctx.tr("analysis_runs.history"), runs_->run().is_null())) {
+      history->button("analysis_run_list", ctx.tr("analysis_runs.refresh"), [this, valid] {
+        if (valid()) { runs_->load_page(runs_->offset()); }
+      }).disable(blocked);
+      if (!runs_->page().is_null()) {
+        const auto rows = runs_->page().at("runs");
+        if (rows.empty()) { history->paragraph(ctx.tr("analysis_runs.empty")); }
+        else {
+          ui::TableSpec spec;
+          spec.columns = {{std::string(ctx.tr("analysis_documents.name")), 9},
+              {std::string(ctx.tr("analysis_documents.state")), 7}, {"ID", 10}};
+          spec.rows = int(rows.size()); spec.visible_rows = float(std::min(4, spec.rows));
+          spec.data_version = runs_->version();
+          Rows cells; int selected = -1;
+          for (size_t i = 0; i < rows.size(); ++i) {
+            if (io::get_string(runs_->run(), "id") == io::get_string(rows[i], "id")) { selected = int(i); }
+            cells.push_back({text(io::get_string(rows[i], "analysis_name")),
+                std::string(ctx.tr("analysis_runs.status." + io::get_string(rows[i], "status"))),
+                io::get_string(rows[i], "id").substr(0, 8)});
+          }
+          spec.cell = [cells](const int row, const int column) { return cells.at(size_t(row)).at(size_t(column)); };
+          const auto offset = runs_->offset();
+          spec.selected = {[selected] { return selected; }, [this, valid, rows, offset](const int row) {
+            if (valid() && runs_->offset() == offset && row >= 0 && size_t(row) < rows.size()) {
+              runs_->load(rows[size_t(row)].at("id").get<std::string>());
+            }
+          }};
+          history->table("analysis_run_rows", std::move(spec)).disable(blocked);
+        }
+        auto &buttons = history->row();
+        const auto offset = runs_->offset(), next = io::get_int(runs_->page(), "next_offset", -1);
+        buttons.button("analysis_run_previous", ctx.tr("analysis_documents.previous"), [this, valid, offset] {
+          if (valid()) { runs_->load_page(std::max<int64_t>(0, offset - 50)); }
+        }).disable(blocked || offset == 0);
+        buttons.button("analysis_run_next", ctx.tr("analysis_documents.next"), [this, valid, next] {
+          if (valid()) { runs_->load_page(next); }
+        }).disable(blocked || next < 0);
+      }
+    }
+    run_controls(layout, ctx, valid, blocked);
+  }
+
+  std::string selected_snapshot_id() const
+  {
+    const auto &snapshots = runs_->snapshots();
+    return snapshot_index_ >= 0 && size_t(snapshot_index_) < snapshots.size() ?
+        io::get_string(snapshots[size_t(snapshot_index_)], "id") : std::string();
+  }
+
+  void binding_controls(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool blocked)
+  {
+    layout.paragraph(ctx.tr("analysis_runs.snapshot_hint"));
+    layout.button("analysis_run_snapshots", ctx.tr("analysis_runs.load_snapshots"), [this, valid] {
+      if (valid() && runs_->load_snapshots()) {
+        // A refreshed list can have a different ordering; retain explicit mappings only by
+        // forcing an explicit selection again, never reinterpret an old list index.
+        snapshot_index_ = file_index_ = mapping_index_ = -1;
+        bindings_ = Json::object(); binding_path_.clear(); ++bindings_generation_;
+      }
+    }).disable(blocked || !bindings_.empty());
+    const auto snapshots = runs_->snapshots();
+    std::vector<std::string> labels{std::string(ctx.tr("analysis_runs.choose_snapshot"))};
+    for (const auto &snapshot : snapshots) {
+      labels.push_back(io::get_string(snapshot, "id").substr(0, 8) + " · " +
+          std::to_string(snapshot.at("manifest").at("files").size()) + " " + std::string(ctx.tr("analysis_runs.files")));
+    }
+    layout.dropdown("analysis_run_snapshot", std::move(labels), {[selected = snapshot_index_ + 1] { return selected; },
+        [this, valid, snapshots](const int index) {
+      if (!valid() || index < 0 || size_t(index) > snapshots.size() || !bindings_.empty()) { return; }
+      snapshot_index_ = index - 1; file_index_ = mapping_index_ = -1;
+      binding_path_.clear(); binding_error_.clear(); ++bindings_generation_;
+    }}).disable(blocked || snapshots.empty() || !bindings_.empty());
+    omitted(layout, ctx, runs_->omitted_snapshots());
+    if (snapshot_index_ < 0 || size_t(snapshot_index_) >= snapshots.size()) { return; }
+    const auto snapshot_id = selected_snapshot_id();
+    const auto files = snapshots[size_t(snapshot_index_)].at("manifest").at("files");
+    std::vector<std::string> names{std::string(ctx.tr("analysis_runs.choose_file"))};
+    for (const auto &file : files) { names.push_back(text(io::get_string(file, "name"))); }
+    layout.dropdown("analysis_run_file", std::move(names), {[selected = file_index_ + 1] { return selected; },
+        [this, valid, files, snapshot_id](const int index) {
+      if (!valid() || selected_snapshot_id() != snapshot_id || index < 0 || size_t(index) > files.size()) { return; }
+      file_index_ = index - 1;
+      binding_path_ = file_index_ >= 0 ? io::get_string(files[size_t(file_index_)], "name") : std::string();
+    }}).disable(blocked);
+    const auto draft_field = [this, valid, snapshot_id](std::string *value) {
+      return ui::Binding<std::string>{[copy = *value] { return copy; }, [this, valid, snapshot_id, value](const std::string &input) {
+        if (valid() && selected_snapshot_id() == snapshot_id) { *value = input; }
+      }};
+    };
+    layout.prop(ctx.tr("analysis_runs.binding")).text_field("analysis_run_binding", draft_field(&binding_name_), {.max_length = 64}).disable(blocked);
+    layout.prop(ctx.tr("analysis_runs.relative_path")).text_field("analysis_run_path", draft_field(&binding_path_), {.max_length = 1024}).disable(blocked);
+    layout.button("analysis_run_add_file", ctx.tr("analysis_runs.add_file"), [this, valid, files, snapshot_id] {
+      if (!valid() || selected_snapshot_id() != snapshot_id || file_index_ < 0 || size_t(file_index_) >= files.size()) { return; }
+      size_t count = 0; for (const auto &binding : bindings_) { count += binding.size(); }
+      if (binding_name_.empty() || binding_path_.empty() || count >= 100 ||
+          (!bindings_.contains(binding_name_) && bindings_.size() >= 32) ||
+          (bindings_.contains(binding_name_) && bindings_.at(binding_name_).contains(binding_path_))) {
+        binding_error_ = std::string(store_->tr("analysis_runs.mapping_invalid")); redraw(); return;
+      }
+      bindings_[binding_name_][binding_path_] = files[size_t(file_index_)].at("record_id");
+      binding_error_.clear(); ++bindings_generation_; redraw();
+    }).disable(blocked || file_index_ < 0);
+    if (!binding_error_.empty()) { layout.paragraph(binding_error_); }
+    Rows rows; std::vector<std::pair<std::string, std::string>> keys;
+    for (auto binding = bindings_.begin(); binding != bindings_.end(); ++binding) {
+      for (auto file = binding.value().begin(); file != binding.value().end(); ++file) {
+        rows.push_back({text(binding.key()), text(file.key()), file.value().get<std::string>().substr(0, 8)});
+        keys.emplace_back(binding.key(), file.key());
+      }
+    }
+    if (!rows.empty()) {
+      ui::TableSpec spec;
+      spec.columns = {{std::string(ctx.tr("analysis_runs.binding")), 5},
+          {std::string(ctx.tr("analysis_runs.relative_path")), 10}, {"ID", 6}};
+      spec.rows = int(rows.size()); spec.visible_rows = float(std::min(4, spec.rows)); spec.data_version = bindings_generation_;
+      spec.cell = [rows](const int row, const int column) { return rows.at(size_t(row)).at(size_t(column)); };
+      const auto generation = bindings_generation_;
+      spec.selected = {[index = mapping_index_] { return index; }, [this, valid, generation](const int index) {
+        if (valid() && bindings_generation_ == generation) { mapping_index_ = index; }
+      }};
+      layout.table("analysis_run_bindings", std::move(spec)).disable(blocked);
+      auto &buttons = layout.row();
+      buttons.button("analysis_run_remove_file", ctx.tr("analysis_runs.remove_file"), [this, valid, generation, keys] {
+        if (!valid() || bindings_generation_ != generation || mapping_index_ < 0 || size_t(mapping_index_) >= keys.size()) { return; }
+        const auto &[binding, path] = keys[size_t(mapping_index_)];
+        bindings_[binding].erase(path); if (bindings_[binding].empty()) { bindings_.erase(binding); }
+        mapping_index_ = -1; ++bindings_generation_; redraw();
+      }).disable(blocked || mapping_index_ < 0 || size_t(mapping_index_) >= keys.size());
+      buttons.button("analysis_run_clear_files", ctx.tr("analysis_runs.clear_files"), [this, valid] {
+        if (valid()) { bindings_ = Json::object(); mapping_index_ = -1; ++bindings_generation_; redraw(); }
+      }).disable(blocked);
+    }
+  }
+
+  void run_controls(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool blocked)
+  {
+    const auto run = runs_->run();
+    if (run.is_null()) { return; }
+    const auto id = io::get_string(run, "id"), status = io::get_string(run, "status");
+    const auto selection = runs_->selection_generation();
+    const auto same_run = [this, valid, id, selection] {
+      return valid() && runs_->selection_generation() == selection && io::get_string(runs_->run(), "id") == id;
+    };
+    auto &box = layout.box();
+    box.label(text(io::get_string(run, "analysis_name")));
+    box.label(ctx.tr("analysis_runs.status." + status));
+    box.paragraph(id);
+    box.label(ctx.store.catalog().format("analysis_documents.revision", {{"revision", std::to_string(io::get_int(run, "source_revision", -1))}}));
+    if (!run.at("error").is_null()) { box.paragraph(text(io::get_string(run.at("error"), "message"))); }
+    const bool partial = !run.at("result").is_null() && run.at("result").at("has_errors").get<bool>();
+    if (partial) { box.paragraph(ctx.tr("analysis_runs.partial")); }
+    if (status == "unknown") { box.paragraph(ctx.tr("analysis_runs.unknown_hint")); }
+    if (status == "running" || status == "cancel_requested") {
+      box.paragraph(ctx.tr(runs_->following() ? "analysis_runs.following" : "analysis_runs.follow_stopped"));
+    }
+    auto &actions = box.row();
+    actions.button("analysis_run_start", ctx.tr("analysis_runs.start"), [this, same_run] {
+      if (same_run()) { runs_->start(); }
+    }).disable(blocked || runs_->uncertain() || status != "prepared");
+    actions.button("analysis_run_cancel", ctx.tr("analysis_runs.cancel"), [this, same_run] {
+      if (same_run()) { runs_->cancel(); }
+    }).disable(blocked || runs_->uncertain() || (status != "prepared" && status != "running" && status != "cancel_requested"));
+    box.button("analysis_run_refresh", ctx.tr("analysis_runs.refresh_selected"), [this, same_run, id] {
+      if (same_run()) { runs_->load(id); }
+    }).disable(blocked);
+    box.button("analysis_run_recover", ctx.tr("analysis_runs.recover"), [this, same_run] {
+      if (same_run()) { runs_->recover(); }
+    }).disable(blocked || runs_->uncertain() || (status != "running" && status != "cancel_requested"))
+      .tip(ctx.tr("analysis_runs.recover_hint"));
+    if (auto *frozen = box.panel("analysis_run_frozen", ctx.tr("analysis_runs.frozen"), false)) {
+      frozen->paragraph(io::get_string(run, "snapshot_id"));
+      frozen->paragraph(io::get_string(run, "plan_sha256"));
+      Rows rows;
+      for (auto binding = run.at("bindings").begin(); binding != run.at("bindings").end(); ++binding) {
+        for (auto file = binding.value().begin(); file != binding.value().end(); ++file) {
+          rows.push_back({text(binding.key()), text(file.key()), io::get_string(file.value(), "sha256")});
+        }
+      }
+      table(*frozen, "analysis_run_frozen_files", {{std::string(ctx.tr("analysis_runs.binding")), 5},
+          {std::string(ctx.tr("analysis_runs.relative_path")), 10}, {"SHA-256", 12}}, std::move(rows), runs_->version());
+      frozen->label(ctx.tr("analysis_graph.submitted"));
+      Rows parameters;
+      for (const auto &[name, value] : run.at("document").at("parameters").items()) {
+        const char *type = value.is_null() ? "discussion.cells.null" : value.is_string() ? "project.type.text" :
+            value.is_boolean() ? "project.type.boolean" : value.is_number_integer() ? "project.type.integer" :
+            value.is_number() ? "project.type.number" : "project.type.json";
+        parameters.push_back({text(name), std::string(ctx.tr(type)), summary(value)});
+      }
+      if (parameters.empty()) { frozen->paragraph("{}"); }
+      else {
+        table(*frozen, "analysis_run_frozen_parameters", {{std::string(ctx.tr("analysis_graph.parameter")), 8},
+            {std::string(ctx.tr("analysis_graph.type")), 7}, {std::string(ctx.tr("analysis_graph.value")), 12}},
+            std::move(parameters), runs_->version());
+      }
+      frozen->label(ctx.tr("analysis_graph.outputs"));
+      Rows outputs;
+      for (const auto &output : run.at("document").at("outputs")) { outputs.push_back({summary(output)}); }
+      if (outputs.empty()) { frozen->paragraph("[]"); }
+      else {
+        table(*frozen, "analysis_run_frozen_outputs", {{std::string(ctx.tr("analysis_graph.output")), 12}},
+            std::move(outputs), runs_->version(), 3);
+      }
+      frozen->paragraph(ctx.tr("analysis_runs.budget"));
+    }
+    box.button("analysis_run_read_result", ctx.tr("analysis_runs.read_result"), [this, same_run] {
+      if (same_run() && runs_->read_result()) { output_index_ = -1; }
+    }).disable(blocked || run.at("result").is_null());
+    if (runs_->result().is_null()) { return; }
+    const auto outputs = runs_->payload_outputs();
+    if (outputs.empty()) { box.paragraph(ctx.tr("analysis_runs.no_payload")); return; }
+    std::vector<std::string> choices{std::string(ctx.tr("analysis_runs.choose_output"))};
+    choices.insert(choices.end(), outputs.begin(), outputs.end());
+    box.dropdown("analysis_run_output", std::move(choices), {[selected = output_index_ + 1] { return selected; },
+        [this, same_run, outputs](const int index) {
+      if (same_run() && index >= 0 && size_t(index) <= outputs.size()) { output_index_ = index - 1; }
+    }}).disable(blocked);
+    auto *shell = &ctx.area.shell(); auto *screen = ctx.area.screen();
+    box.paragraph(ctx.tr("analysis_runs.viewer_hint"));
+    box.button("analysis_run_show", ctx.tr("analysis_runs.show"), [this, same_run, shell, screen, outputs, id] {
+      if (!same_run() || output_index_ < 0 || size_t(output_index_) >= outputs.size()) { return; }
+      const auto target = shell->analysis_payload_target(screen);
+      if (!target) { if (store_->toast) { store_->toast(target.error().message, ui::ToastKind::Warning); } return; }
+      const auto output = outputs[size_t(output_index_)];
+      const auto payload = runs_->decode_payload(output);
+      if (!payload || !same_run()) { return; }
+      const auto label = io::get_string(runs_->run(), "analysis_name") + " · " + id.substr(0, 8) + " / " + output;
+      shell->open_analysis_payload(screen, runs_->handle(), target.value(), payload, label, same_run,
+          [this, same_run](bridge::Result<Json> result) {
+        if (same_run() && !result && store_->toast) { store_->toast(result.error().message, ui::ToastKind::Warning); }
+      });
+    }).disable(blocked || output_index_ < 0 || size_t(output_index_) >= outputs.size());
   }
 
   void documents_panel(ui::Layout &layout, EditorContext &ctx)

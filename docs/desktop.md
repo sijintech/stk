@@ -38,6 +38,8 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 可在“当前参数”和“已显示结果”间对比提交配置，显式校验不运行节点；完整用法与来源核对边界见[分析节点图](analysis-graphs.md)。
 展开“项目分析文档”可把当前检查的定义保存到项目，或从列表打开“保存的分析”；保存、改名与撤销复用普通表格，
 打开文档不运行图，也不把当前三维结果附给该文档，见[保存分析定义](project-analyses.md)。
+保存分析的“运行”页可将定义绑定到明确的输入快照，先准备再执行；完成后读取校验过的归档并选择输出，
+明确打开到空 Viewer，见[分析执行记录](project-analysis-runs.md)。旧项目需明确备份升级到格式 9。
 
 **视图 → 聚焦准备** 会激活现有 AI 标签并最大化其区域；**聚焦分析** 对 Viewer 做同样操作。
 没有对应标签时会在有空位的区域新增，已有面板和分栏比例保留。**恢复分栏布局** 显示原分栏，
@@ -407,7 +409,9 @@ to a graph; source-file freshness is not inferred. Validation is explicit and ne
 Home fits the graph, F frames the selected node, and N toggles the inspector. **Project analyses** saves a copied
 definition in ordinary project cells; the **Saved analysis** tab reads it independently of the Viewer.
 Saving, reading and renaming never evaluate nodes. See [analysis graphs](analysis-graphs.md) and
-[saved analysis documents](project-analyses.md); connection editing and execution bindings remain planned.
+[saved analysis documents](project-analyses.md). The saved-analysis Runs tab explicitly binds input snapshots,
+prepares and starts a local attempt, and reads verified archived results for import into an empty Viewer;
+see [analysis runs](project-analysis-runs.md). Connection editing and hierarchical workflows remain planned.
 
 ### Install
 

@@ -99,6 +99,10 @@ class Project:
         return ProjectAnalyses(self._call, self.handle)
 
     @property
+    def analysis_runs(self):
+        return ProjectAnalysisRuns(self._call, self.handle)
+
+    @property
     def runs(self):
         return ProjectRuns(self._call, self.handle)
 
@@ -337,6 +341,46 @@ class ProjectAnalyses:
 
     def list(self, *, offset=0, limit=50):
         return self._call("project.analyses.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+
+class ProjectAnalysisRuns:
+    """Snapshot-bound local analysis runs, separate from Runtime simulation tasks.
+
+    Preparation freezes a definition and file mapping. Only start dispatches work;
+    reads, recovery and opening a project never restart an interrupted execution.
+    """
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def prepare(self, analysis_id, snapshot_id, bindings, *, run_id, expected_revision):
+        """Freeze an explicit file-snapshot mapping at this revision, without executing nodes."""
+        return self._call("project.analysis_runs.prepare", {
+            "handle": self.handle, "analysis_id": analysis_id, "snapshot_id": snapshot_id,
+            "bindings": bindings, "run_id": run_id, "expected_revision": expected_revision,
+        })["run"]
+
+    def get(self, run_id):
+        return self._call("project.analysis_runs.get", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def list(self, *, offset=0, limit=50):
+        return self._call("project.analysis_runs.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def start(self, run_id):
+        """Explicitly claim prepared work once; terminal or unknown runs are never replayed."""
+        return self._call("project.analysis_runs.start", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def cancel(self, run_id):
+        """Record cancellation intent; an already confirmed result may win the race."""
+        return self._call("project.analysis_runs.cancel", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def recover(self, run_id):
+        """Mark interrupted work unknown only after checking no executor still owns it; never run it again."""
+        return self._call("project.analysis_runs.recover", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def result(self, run_id):
+        """Verify and read an archived graph result, including partial failures; never open a Viewer."""
+        return self._call("project.analysis_runs.result", {"handle": self.handle, "run_id": run_id})
 
 
 class ProjectFiles:

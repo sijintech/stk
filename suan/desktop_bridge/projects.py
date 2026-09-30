@@ -12,6 +12,7 @@ from uuid import uuid4
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 from suan.project.analyses import AnalysisNotFound
+from suan.project.analysis_runs import AnalysisRunNotFound
 from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, provider_info
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
@@ -20,36 +21,42 @@ from .recent_projects import RecentProjects
 
 
 class ProjectSessions:
-    def __init__(self, state_dir=None):
+    def __init__(self, state_dir=None, *, analysis_executor=None):
         self._recent = RecentProjects(state_dir)
         self._lock = threading.RLock()
         self._stores = {}
         self._closed = False
         self._executor = RequestExecutor({ALIYUN_ADAPTER: AliyunTokenPlanAdapter()})
+        self._analysis_executor = analysis_executor
 
     @contextmanager
     def _operation(self):
         with self._lock:
             if self._closed:
                 raise BridgeError("shutting_down", "Project sessions are closed")
-            try:
+            with self._errors():
                 yield
-            except RevisionConflict as exc:
-                raise BridgeError("conflict", str(exc)) from None
-            except AnalysisNotFound as exc:
-                raise BridgeError("not_found", str(exc)) from None
-            except RequestBusy:
-                raise BridgeError("busy", "A live executor owns this request or the local executor has reached its 8-request limit") from None
-            except UnsupportedProjectFormat as exc:
-                raise BridgeError("unsupported", str(exc)) from None
-            except FileExistsError:
-                raise BridgeError("conflict", "A project database already exists at this location; open it instead") from None
-            except FileNotFoundError:
-                raise BridgeError("not_found", "Project database not found") from None
-            except PermissionError:
-                raise BridgeError("unavailable", "Project location is not accessible", retryable=False) from None
-            except (ProjectError, OSError) as exc:
-                raise BridgeError("invalid_params", str(exc)) from None
+
+    @contextmanager
+    def _errors(self):
+        try:
+            yield
+        except RevisionConflict as exc:
+            raise BridgeError("conflict", str(exc)) from None
+        except (AnalysisNotFound, AnalysisRunNotFound) as exc:
+            raise BridgeError("not_found", str(exc)) from None
+        except RequestBusy:
+            raise BridgeError("busy", "A live executor owns this request or the local executor has reached its 8-request limit") from None
+        except UnsupportedProjectFormat as exc:
+            raise BridgeError("unsupported", str(exc)) from None
+        except FileExistsError:
+            raise BridgeError("conflict", "A project database already exists at this location; open it instead") from None
+        except FileNotFoundError:
+            raise BridgeError("not_found", "Project database or archived file not found") from None
+        except PermissionError:
+            raise BridgeError("unavailable", "Project location is not accessible", retryable=False) from None
+        except (ProjectError, OSError) as exc:
+            raise BridgeError("invalid_params", str(exc)) from None
 
     @staticmethod
     def _directory(value):
@@ -112,7 +119,10 @@ class ProjectSessions:
 
     def close(self, params):
         with self._operation():
-            return {"closed": self._stores.pop(params["handle"], None) is not None}
+            store = self._stores.pop(params["handle"], None)
+            if store is not None and self._analysis_executor is not None:
+                self._analysis_executor.close_project(store)
+            return {"closed": store is not None}
 
     def snapshot(self, params):
         with self._operation():
@@ -183,6 +193,26 @@ class ProjectSessions:
             if action == "list":
                 return analyses.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
             return analyses.get(params["analysis_id"])
+
+    def analysis_runs(self, action, params):
+        with self._operation():
+            store = self._get(params["handle"])
+            runs = store.analysis_runs
+            if action == "prepare":
+                return {"run": runs.prepare(params["analysis_id"], params["snapshot_id"], params["bindings"],
+                    run_id=params["run_id"], expected_revision=params["expected_revision"])}
+            if action == "get":
+                return {"run": runs.get(params["run_id"])}
+            if action == "list":
+                return runs.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
+            if self._analysis_executor is None:
+                raise BridgeError("unsupported", "No local analysis executor is installed")
+            if action in {"start", "cancel", "recover"}:
+                return {"run": getattr(self._analysis_executor, action)(store, params["run_id"])}
+        # Reading a potentially large artifact must not block close or unrelated project edits.
+        # Its original store remains pinned; a closed handle is never rebound to another project.
+        with self._errors():
+            return self._analysis_executor.result(store, params["run_id"])
 
     def requests(self, action, params):
         with self._operation():
@@ -273,6 +303,8 @@ class ProjectSessions:
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.
         self._closed = True
+        if self._analysis_executor is not None:
+            self._analysis_executor.shutdown(wait=False)
         self._executor.shutdown(wait=False)
         if self._lock.acquire(blocking=False):
             try:

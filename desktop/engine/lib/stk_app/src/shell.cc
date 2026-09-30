@@ -311,6 +311,74 @@ void AppShell::open_saved_review(wm::Screen *screen, std::string handle, const i
   });
 }
 
+bridge::Result<uint64_t> AppShell::analysis_payload_target(wm::Screen *screen)
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  if (!screen || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) {
+    return Error::make(ErrorCode::Unavailable, std::string(store_.tr("app.focus.closed")));
+  }
+  for (auto *target : screens_) {
+    if (target->ui() && target->ui()->text_input_active()) {
+      return Error::make(ErrorCode::Busy, std::string(store_.tr("analysis_runs.finish_input")));
+    }
+  }
+  auto &viewer = store_.viewer();
+  if (viewer.source().kind != SourceKind::None || viewer.base_payload() || viewer.evaluating() ||
+      store_.has_open_result()) {
+    return Error::make(ErrorCode::Busy, std::string(store_.tr("analysis_runs.viewer_occupied")));
+  }
+  bool available = false;
+  for (auto *area : screen->areas()) {
+    auto *editor = dynamic_cast<EditorArea *>(area);
+    if (!editor) { continue; }
+    if (editor->tab_count() < 16) { available = true; }
+    for (int i = 0; i < editor->tab_count(); ++i) {
+      if (editor->tab(i).type().id == kEditorViewer) { available = true; }
+    }
+  }
+  if (!available || !registry_.find(kEditorViewer)) {
+    return Error::make(ErrorCode::Unavailable, std::string(store_.tr("app.focus.no_capacity")));
+  }
+  return viewer.version();
+}
+
+void AppShell::open_analysis_payload(wm::Screen *screen, std::string handle,
+                                     const uint64_t expected_viewer_version,
+                                     std::shared_ptr<const io::Payload> payload, std::string label,
+                                     std::function<bool()> valid, ScriptState::Completion complete)
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  if (!valid || !valid() || !complete) { return; }
+  const auto preflight = analysis_payload_target(screen);
+  if (!preflight) { complete(preflight.error()); return; }
+  if (!payload) {
+    complete(Error::make(ErrorCode::InvalidParams, std::string(store_.tr("analysis_runs.no_payload"))));
+    return;
+  }
+  const std::weak_ptr<bool> weak = alive_;
+  screen->defer([this, weak, screen, handle = std::move(handle), expected_viewer_version,
+                 payload = std::move(payload), label = std::move(label),
+                 valid = std::move(valid), complete = std::move(complete)]() mutable {
+    if (!weak.lock() || !valid()) { return; }
+    const auto target = analysis_payload_target(screen);
+    if (!target) { complete(target.error()); return; }
+    auto &project = store_.project();
+    project.sync();
+    if (!project.project() || project.project()->handle != handle || target.value() != expected_viewer_version) {
+      complete(Error::make(ErrorCode::Conflict, std::string(store_.tr("analysis_runs.target_changed"))));
+      return;
+    }
+    // Capacity and input were checked before navigation. Factory failures leave the empty
+    // Viewer unchanged; after successful activation, adoption cannot call the bridge.
+    const auto activated = activate_editor(screen, kEditorViewer, true);
+    if (!activated) { complete(activated.error()); return; }
+    store_.viewer().open_payload(std::move(payload), std::move(label));
+    complete(activated.value());
+  });
+}
+
 class AppShell::TopBar final : public wm::Region {
  public:
   TopBar(AppShell &shell, wm::Screen &screen) : Region("topbar"), shell_(shell), screen_(screen)

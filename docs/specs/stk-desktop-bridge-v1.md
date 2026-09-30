@@ -540,6 +540,10 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.analyses.create` / `project.analyses.update` | `{handle, analysis_id, name, document, expected_revision}` | `{revision, commands, table_id, record_id}` |
 | `project.analyses.list` | `{handle, offset?, limit?}` | `{revision, table_id, compatible, error, offset, total, analyses: [analysisSummary]}` |
 | `project.analyses.get` | `{handle, analysis_id}` | `{revision, table_id, compatible, error, analysis: analysisSummary + {document}}` |
+| `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision}` | `{run: analysisRun}` |
+| `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
+| `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
+| `project.analysis_runs.result` | `{handle, run_id}` | `{run: analysisRun, result: graphResult, blob_dir: absolute-local-path}` |
 | `project.snapshots.capture` | `{handle, expected_revision, record_ids, max_bytes?}` | `{revision, snapshot: inputManifest}` |
 | `project.snapshots.list` | `{handle}` | `{revision, snapshots: [inputManifest]}` |
 | `project.snapshots.get` | `{handle, snapshot_id}` | `{snapshot: inputManifest}` |
@@ -580,6 +584,60 @@ are `invalid_params` on writes, and stale revisions or occupied create IDs are `
 List defaults to offset 0 and limit 50 (1–100), reports the full count, and continues to page collections
 enlarged through generic project edits. Neither read emits project events. The original handle stays pinned
 through close/reopen and project replacement checks, like other project operations.
+
+The optional `project.analysis_runs.*` methods require project format 9, with an explicit backup-first
+upgrade for older projects. They add an immutable analysis plan and an append-only execution journal,
+separate from editable definitions and ordinary undo. Preparation freezes the full readable analysis
+document/name/UUID, current source revision, input snapshot identity/hash, and explicit file mappings.
+It does not evaluate the graph, inspect live input files, run a model, or increment the editable revision.
+`bindings` maps graph binding names to `{relative_posix_path: snapshot_file_record_uuid}` objects.
+Names match `^[a-z][a-z0-9_]{0,63}$`; 1–32 bindings contain 1–100 mappings in total, with a logical sum
+of at most 256 MiB, including repeated references. Paths have at most 1024 UTF-8 bytes and 255 bytes
+per component; traversal, absolute paths, backslashes, nonportable Windows names/characters, and
+case-folded/NFC or file-versus-directory collisions are rejected. Input files are copied and hashed
+from the snapshot objects into private staging directories, never linked to mutable original paths.
+
+The same caller-owned run UUID and exact original preparation request return the original frozen record,
+even after later edits; a different request under that UUID is a conflict. First preparation requires the
+current `expected_revision`. Typed JSON values, explicit nulls and empty output selections are preserved.
+Preparation checks structure and snapshot metadata; graph semantics and actual input contents may still
+fail during explicit execution. Runtime task submission is not involved. This extension does not freeze
+the installed Python, plugin or driver environment, so it does not promise bitwise reproduction.
+
+`analysisRun` contains `id`, `project_id`, `source_revision`, `created_at`, `analysis_id`, `analysis_name`,
+`document`, `snapshot_id`, `snapshot_sha256`, frozen `bindings` (each path maps to `{record_id, sha256, size}`),
+`profile`, `budget`, `plan_sha256`, `status`, `updated_at`, nullable `started_at`, `finished_at`,
+`cancel_requested_at`, `executor_id`, `error` and `result`. The profile is `desktop`; the graph budget is
+`{max_seconds: 300, max_output_bytes: 268435456}`. A separate 300-second wall-clock watchdog includes
+copying, waiting for the shared worker, evaluation and archiving; worker termination and database settlement
+can take additional time. At most four local analyses are active, sharing the existing serial graph worker.
+Cancelling a queued analysis does not terminate another graph's active evaluation.
+
+Statuses are `prepared`, `running`, `cancel_requested`, `succeeded`, `failed`, `cancelled`, and `unknown`.
+Start durably claims an attempt once and holds a cross-process lease; repeated starts of an already claimed
+or terminal record only return its state. Cancellation is saved before signalling the worker. Confirmed
+completion may win a cancellation race, while retaining `cancel_requested_at`. `recover` requires a vacant
+lease before marking an abandoned active attempt unknown; it never resubmits. Ordinary reads, reopening,
+and bridge reconnection do not recover or execute anything. New computation requires a new prepared UUID.
+Neither preparation nor lifecycle changes emit `project.changed` or add ordinary undo entries.
+
+An archived result summary is `{directory, manifest_sha256, graph_hash, output_count, has_payload,
+has_errors, size_bytes}`. `graph_hash` is the bare SHA-256 of the frozen graph. The relative directory is
+`.stk/analysis-runs/<run-uuid>/result`; its canonical graph-result JSON is at most 4 MiB and all archived
+files together at most 256 MiB. Every referenced blob is rehashed before publication; cache existence alone
+is insufficient. The archive is published before the terminal journal event and is never replaced or adopted
+from an unregistered remnant. Graph results containing output errors are `failed`, with their partial archive
+still readable; `succeeded` requires no graph-result errors. Non-payload or empty-output results are valid.
+Reading an archive verifies its manifest and all referenced bytes again, returning the original pinned run
+and an absolute blob directory for local decoding. It does not evaluate nodes or configure the Viewer.
+Missing/corrupt archives fail explicitly, without silently refilling them from the cache.
+
+List defaults to offset 0 and limit 50 (1–100), in insertion order. Summaries contain every run field except
+`document` and `bindings`; get returns the full frozen plan. Handles remain pinned to the original open
+project session. Project close or bridge shutdown requests cancellation of owned work, but does not roll
+back plugin side effects. Lost workers leave recoverable uncertainty and are never automatically replayed.
+SQLite-only backup excludes input objects and result archives. See the [analysis-run guide](../project-analysis-runs.md)
+for native navigation, explicit import into an empty shared Viewer, and project-directory preservation.
 
 - `project.preview` evaluates ordinary edit commands on an in-memory SQLite copy (source logical size
   at most 128 MiB). It performs no persisted edit, file operation or task submission, and emits no

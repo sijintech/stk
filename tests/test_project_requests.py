@@ -314,6 +314,8 @@ def test_even_independently_valid_but_replaced_ancestors_are_rejected(journal, a
 def test_format7_upgrade_preserves_context_and_messages_and_backs_up_before_schema_change(journal):
     store, _, context, message = journal
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE IF EXISTS analysis_run_events")
+        db.execute("DROP TABLE IF EXISTS analysis_run_plans")
         db.execute("DROP TABLE project_requests")
         db.execute("PRAGMA user_version=7")
     old = ProjectStore(store.directory)
@@ -322,7 +324,7 @@ def test_format7_upgrade_preserves_context_and_messages_and_backs_up_before_sche
         old.requests.list()
     assert old.discussion.get(message["id"]) == message
     result = old.upgrade(expected_revision=1)
-    assert result["upgraded"] and result["format_version"] == 8 and result["revision"] == 2
+    assert result["upgraded"] and result["format_version"] == 9 and result["revision"] == 2
     with sqlite3.connect(result["backup"]["path"]) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 7
         assert db.execute("SELECT revision FROM project").fetchone()[0] == 1

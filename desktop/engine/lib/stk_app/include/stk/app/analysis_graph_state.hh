@@ -16,8 +16,8 @@ struct AnalysisGraphDefinition {
   std::vector<std::string> requested_outputs;
 };
 
-/** Editor-local, read-only inspection. sync() never pumps/evaluates the Viewer. Only validate()
- * sends a bridge request, for the exact graph and submitted parameters currently inspected.
+/** Editor-local, read-only inspection. sync() never pumps/evaluates the Viewer or sends requests.
+ * ensure_catalog() reads node metadata; validate() checks the exact inspected graph/parameters.
  * Results from another configuration, bridge session, mode, or destroyed editor are ignored. */
 class AnalysisGraphState {
  public:
@@ -27,6 +27,11 @@ class AnalysisGraphState {
   AnalysisGraphState &operator=(const AnalysisGraphState &) = delete;
 
   void sync();
+  /** Read missing node metadata once per ready bridge session, independently of Viewer work.
+   * An already available Viewer catalog is reused. No redraw-driven retries after an error. */
+  bool ensure_catalog();
+  bool catalog_loading() const { return catalog_loading_; }
+  const std::string &catalog_error() const { return catalog_error_; }
   void show_displayed(bool displayed);
   bool displayed() const { return displayed_; }
   void show_saved();
@@ -58,6 +63,7 @@ class AnalysisGraphState {
 
  private:
   void invalidate_validation();
+  void reset_catalog_request();
   ViewerState &viewer_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   bool displayed_ = false, saved_ = false, validating_ = false, dirty_ = true;
@@ -69,10 +75,12 @@ class AnalysisGraphState {
   std::optional<AnalysisGraphDefinition> definition_, document_definition_;
   std::string document_handle_, document_id_;
   int64_t document_revision_ = -1;
-  io::Json catalog_, validation_;
+  io::Json catalog_, independent_catalog_, validation_;
+  bool catalog_requested_ = false, catalog_loading_ = false;
+  uint64_t catalog_request_generation_ = 0;
   std::shared_ptr<const AnalysisGraphView> view_;
-  std::string error_, validation_error_;
-  std::optional<bridge::Future<io::Json>> validation_future_;
+  std::string error_, validation_error_, catalog_error_;
+  std::optional<bridge::Future<io::Json>> validation_future_, catalog_future_;
 };
 
 }  // namespace stk::app

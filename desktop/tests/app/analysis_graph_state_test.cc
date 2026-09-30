@@ -3,12 +3,14 @@
 
 #include "stk/app/analysis_graph_canvas.hh"
 #include "stk/app/analysis_graph_state.hh"
+#include "stk/app/project_state.hh"
 #include "stk/bridge/process.hh"
 #include "stk/core/paths.hh"
 #include "../bridge/support.hh"
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 
 namespace stk::app {
 namespace {
@@ -57,7 +59,8 @@ class AnalysisGraphPython : public ::testing::Test {
   Json presets = graph_test_presets(), catalog = graph_test_catalog();
   std::unique_ptr<bridge::Client> client, replacement;
 
-  void start_client(std::unique_ptr<bridge::Client> &target, const std::string &name)
+  void start_client(std::unique_ptr<bridge::Client> &target, const std::string &name,
+                    const bool reject_catalog = false)
   {
     std::string python = STK_BRIDGE_TEST_PYTHON_DEFAULT;
     if (const char *env = std::getenv("STK_BRIDGE_TEST_PYTHON"); env && *env) { python = env; }
@@ -73,6 +76,20 @@ class AnalysisGraphPython : public ::testing::Test {
     options.env["STK_TOKEN_PLAN_API_KEY"] = "";
     options.executor = loop.executor();
     options.strict = options.validate = true;
+    if (reject_catalog) {
+      const auto script = dir.path() / "catalog-error.py";
+      std::ofstream stream(script);
+      stream << "from suan.desktop_bridge.graphs import GraphService\n"
+                "from suan.desktop_bridge.protocol import BridgeError\n"
+                "from suan.desktop_bridge.__main__ import main\n"
+                "def unavailable(self):\n"
+                "    raise BridgeError('unavailable', 'fixture catalog unavailable')\n"
+                "GraphService.catalog = unavailable\n"
+                "main()\n";
+      stream.close(); ASSERT_TRUE(stream.good());
+      options.command = {python, "-u", core::path_to_utf8(script), "--stdio", "--state-dir",
+          options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+    }
     target = bridge::Client::create(options);
     ASSERT_TRUE(target->start());
     ASSERT_TRUE(target->wait_ready(60)) << target->bridge_log().text();
@@ -246,6 +263,134 @@ TEST_F(AnalysisGraphPython, DestroyedControllerAndClosedBridgeCannotAcceptAnOldR
   client->close(); next.sync(); loop.run_ready();
   EXPECT_FALSE(next.validation_available()); EXPECT_FALSE(next.validate());
   EXPECT_TRUE(next.validation().is_null()); EXPECT_FALSE(next.validating());
+}
+
+class AnalysisGraphCatalogPython : public AnalysisGraphPython {
+ protected:
+  void SetUp() override
+  {
+    viewer.prefetch_neighbours = false;
+    viewer.set_auto_evaluate(false);
+    ASSERT_NO_FATAL_FAILURE(start_client(client, "catalog-bridge"));
+    if (!client) { return; }
+    loop.run_ready(); store.set_bridge(client.get());
+    ASSERT_TRUE(viewer.catalog().is_null());
+  }
+
+  void catalog_settled(AnalysisGraphState &state)
+  {
+    ASSERT_TRUE(loop.pump_until([&] { return !state.catalog_loading(); }, 30)) << client->bridge_log().text();
+  }
+
+  void catalog_queued(AnalysisGraphState &state)
+  {
+    ASSERT_TRUE(state.ensure_catalog());
+    ASSERT_TRUE(bridge::test::wait_until([&] { return loop.queued() > 0; }, 30));
+    ASSERT_TRUE(state.catalog_loading());
+  }
+};
+
+TEST_F(AnalysisGraphCatalogPython, SavedFirstOpenReadsKnownNodeMetadataWithoutTouchingViewer)
+{
+  auto &project = store.project(); project.sync();
+  ASSERT_TRUE(project.create(dir.str() + "/project", "Analysis only"));
+  ASSERT_TRUE(loop.pump_until([&] { return project.loaded() && !project.busy() && !project.recent_loading(); }, 30));
+  const auto inspection = viewer.graph_inspection();
+  const auto version = viewer.version();
+  const auto calls = client->stats().calls_sent;
+  AnalysisGraphState state(viewer);
+  ASSERT_TRUE(state.open_document(project.project()->handle, "087f9bca-672d-4b19-9293-302224afca5a", 0,
+      {{"format", "stk.analysis-document/1"}, {"graph", presets.at("presets")[0].at("graph")},
+       {"parameters", Json::object()}, {"outputs", Json::array()}}));
+  ASSERT_TRUE(state.view());
+  EXPECT_FALSE(state.view()->nodes.front().known_type);
+  EXPECT_EQ(client->stats().calls_sent, calls); // Construction, open and sync remain request-free.
+  ASSERT_TRUE(state.ensure_catalog()); EXPECT_FALSE(state.ensure_catalog());
+  ASSERT_NO_FATAL_FAILURE(catalog_settled(state));
+  EXPECT_TRUE(state.catalog_error().empty()) << state.catalog_error();
+  ASSERT_TRUE(state.view());
+  for (const auto &node : state.view()->nodes) { EXPECT_TRUE(node.known_type) << node.type; }
+  for (int i = 0; i < 5; ++i) { state.sync(); EXPECT_FALSE(state.ensure_catalog()); }
+  EXPECT_EQ(client->stats().calls_sent, calls + 1);
+  EXPECT_TRUE(viewer.catalog().is_null());
+  EXPECT_EQ(viewer.version(), version); EXPECT_EQ(viewer.graph_inspection(), inspection);
+  EXPECT_FALSE(state.inspection()); EXPECT_FALSE(state.configuration());
+}
+
+TEST_F(AnalysisGraphCatalogPython, PendingViewerWaitingForMetadataIsNeverStartedByAnalysisMetadata)
+{
+  store.set_bridge(nullptr);
+  fs::create_directories(dir.path() / "pending");
+  ASSERT_TRUE(viewer.open_path(core::path_to_utf8(dir.path() / "pending"), "muferro-domains"));
+  store.set_bridge(client.get());
+  const auto inspection = viewer.graph_inspection();
+  const auto version = viewer.version();
+  const auto calls = client->stats().calls_sent;
+  AnalysisGraphState state(viewer);
+  ASSERT_TRUE(state.ensure_catalog());
+  ASSERT_NO_FATAL_FAILURE(catalog_settled(state));
+  EXPECT_TRUE(state.catalog_error().empty());
+  EXPECT_EQ(client->stats().calls_sent, calls + 1);
+  EXPECT_EQ(viewer.version(), version); EXPECT_EQ(viewer.graph_inspection(), inspection);
+  EXPECT_TRUE(viewer.catalog().is_null()); EXPECT_FALSE(viewer.presets_loaded());
+  EXPECT_EQ(viewer.evaluations_started(), 0); EXPECT_FALSE(viewer.evaluating());
+}
+
+TEST_F(AnalysisGraphPython, ExistingViewerCatalogIsReusedWithoutAnotherRequest)
+{
+  const auto calls = client->stats().calls_sent;
+  AnalysisGraphState state(viewer);
+  EXPECT_FALSE(state.ensure_catalog()); EXPECT_FALSE(state.catalog_loading());
+  EXPECT_TRUE(state.catalog_error().empty()); EXPECT_EQ(client->stats().calls_sent, calls);
+  ASSERT_TRUE(state.view());
+  for (const auto &node : state.view()->nodes) { EXPECT_TRUE(node.known_type) << node.type; }
+}
+
+TEST_F(AnalysisGraphCatalogPython, QueuedCatalogFromDetachedSessionCannotBecomeTheNewCache)
+{
+  AnalysisGraphState state(viewer);
+  ASSERT_NO_FATAL_FAILURE(catalog_queued(state));
+  store.set_bridge(nullptr); // No intervening sync: the callback itself must detect detachment.
+  loop.run_ready(); state.sync();
+  EXPECT_FALSE(state.catalog_loading()); EXPECT_TRUE(state.catalog_error().empty());
+  EXPECT_FALSE(state.ensure_catalog());
+  ASSERT_NO_FATAL_FAILURE(start_client(replacement, "new-catalog-bridge"));
+  loop.run_ready(); store.set_bridge(replacement.get());
+  const auto calls = replacement->stats().calls_sent;
+  ASSERT_TRUE(state.ensure_catalog()); // Old response did not populate an unscoped cache.
+  ASSERT_NO_FATAL_FAILURE(catalog_settled(state));
+  EXPECT_TRUE(state.catalog_error().empty()); EXPECT_EQ(replacement->stats().calls_sent, calls + 1);
+}
+
+TEST_F(AnalysisGraphCatalogPython, DestroyedControllerRejectsQueuedCatalogAndNewControllerReadsIndependently)
+{
+  auto state = std::make_unique<AnalysisGraphState>(viewer);
+  ASSERT_NO_FATAL_FAILURE(catalog_queued(*state));
+  state.reset(); loop.run_ready();
+  EXPECT_TRUE(viewer.catalog().is_null());
+  AnalysisGraphState next(viewer);
+  ASSERT_TRUE(next.ensure_catalog());
+  ASSERT_NO_FATAL_FAILURE(catalog_settled(next));
+  EXPECT_TRUE(next.catalog_error().empty());
+}
+
+TEST_F(AnalysisGraphCatalogPython, CatalogFailureIsVisibleAndRepeatedFramesDoNotRetry)
+{
+  ASSERT_NO_FATAL_FAILURE(start_client(replacement, "unavailable-catalog-bridge", true));
+  loop.run_ready(); store.set_bridge(replacement.get());
+  AnalysisGraphState state(viewer);
+  const auto calls = replacement->stats().calls_sent;
+  ASSERT_TRUE(state.ensure_catalog());
+  ASSERT_NO_FATAL_FAILURE(catalog_settled(state));
+  EXPECT_NE(state.catalog_error().find("fixture catalog unavailable"), std::string::npos);
+  for (int i = 0; i < 5; ++i) { state.sync(); EXPECT_FALSE(state.ensure_catalog()); }
+  EXPECT_EQ(replacement->stats().calls_sent, calls + 1);
+  EXPECT_TRUE(viewer.catalog().is_null());
+  store.set_bridge(client.get()); state.sync();
+  EXPECT_TRUE(state.catalog_error().empty());
+  ASSERT_TRUE(state.ensure_catalog());
+  ASSERT_NO_FATAL_FAILURE(catalog_settled(state));
+  EXPECT_TRUE(state.catalog_error().empty());
 }
 
 }  // namespace

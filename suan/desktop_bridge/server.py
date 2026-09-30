@@ -25,6 +25,7 @@ from .hub import HubResponseError, hub_error
 from .connections import ConnectionStore
 from .graphs import GraphService
 from .projects import ProjectSessions
+from .analysis_runs import AnalysisRunExecutor
 from .project_runs import ProjectRuns
 from .scripts import ScriptSessions
 from .ui_requests import UIRequests, UI_OPERATIONS
@@ -149,7 +150,8 @@ class Bridge:
         self.inspected = {}
         self.connections = ConnectionStore(self.state_dir)
         self.graphs = GraphService(self.cache_dir, self.connections, self.emit)
-        self.projects = ProjectSessions(self.state_dir)
+        self.analysis_executor = AnalysisRunExecutor(self.graphs.worker, self.graphs.blobs.root)
+        self.projects = ProjectSessions(self.state_dir, analysis_executor=self.analysis_executor)
         self.project_runs = ProjectRuns(self.projects, self.connections.backend)
         self.ui = UIRequests(self.emit)
         self.scripts = ScriptSessions(self.emit, self.script_call)
@@ -248,6 +250,13 @@ class Bridge:
             "project.analyses.update": lambda p, c: self.edit_project_analyses("update", p, c),
             "project.analyses.get": lambda p, c: self.projects.analyses("get", p),
             "project.analyses.list": lambda p, c: self.projects.analyses("list", p),
+            "project.analysis_runs.prepare": lambda p, c: self.projects.analysis_runs("prepare", p),
+            "project.analysis_runs.get": lambda p, c: self.projects.analysis_runs("get", p),
+            "project.analysis_runs.list": lambda p, c: self.projects.analysis_runs("list", p),
+            "project.analysis_runs.start": lambda p, c: self.projects.analysis_runs("start", p),
+            "project.analysis_runs.cancel": lambda p, c: self.projects.analysis_runs("cancel", p),
+            "project.analysis_runs.recover": lambda p, c: self.projects.analysis_runs("recover", p),
+            "project.analysis_runs.result": lambda p, c: self.projects.analysis_runs("result", p),
             "project.snapshots.list": lambda p, c: self.projects.snapshots("list", p),
             "project.snapshots.capture": self.capture_project_files,
             "project.snapshots.get": lambda p, c: self.projects.snapshots("get", p),
@@ -399,6 +408,7 @@ class Bridge:
         if self.closed.is_set():
             return
         self.closing.set()
+        self.analysis_executor.shutdown(wait=False)
         self.ui.close()
         self.scripts.shutdown()
         self.subscriptions.stop_all()
@@ -449,6 +459,8 @@ class Bridge:
                  "project.csv.import", "project.csv.export",
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
                  "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
+                 "project.analysis_runs.prepare", "project.analysis_runs.get", "project.analysis_runs.list",
+                 "project.analysis_runs.start", "project.analysis_runs.cancel", "project.analysis_runs.recover", "project.analysis_runs.result",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
                  "project.snapshots.verify", "project.snapshots.resolve",
                  "project.runs.prepare", "project.runs.list", "project.runs.get",

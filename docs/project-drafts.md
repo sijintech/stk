@@ -4,7 +4,7 @@
 再显式载入、检查和应用。项目数据仍由同一个编辑引擎修改；保存草案不会修改表格、提升编辑修订、
 准备运行或提交任务。格式 7 已另行提供[项目上下文与讨论记录](project-contexts.md)；当前没有模型调用或审批快照。
 
-新建项目使用格式 8；草案接口最低需要格式 6。已有旧项目须通过“备份并升级项目”、`store.upgrade(expected_revision=...)`
+新建项目使用格式 9；草案接口最低需要格式 6。已有旧项目须通过“备份并升级项目”、`store.upgrade(expected_revision=...)`
 或 `stk.project.upgrade(expected_revision=...)` 显式升级；升级先创建并校验数据库备份。
 打开项目不自动迁移；旧格式调用草案接口返回 `unsupported`。迁移和备份边界见[项目存储指南](project.md)。
 

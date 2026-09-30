@@ -2712,7 +2712,8 @@
                                 4,
                                 5,
                                 6,
-                                7
+                                7,
+                                8
                               ]
                             },
                             "to_version": {
@@ -2723,7 +2724,8 @@
                                 5,
                                 6,
                                 7,
-                                8
+                                8,
+                                9
                               ]
                             }
                           },
@@ -5689,6 +5691,202 @@
         },
         "result": {
           "$ref": "#/$defs/projectAnalysisListResult"
+        }
+      },
+      "project.analysis_runs.prepare": {
+        "description": "Freeze a saved analysis and explicit file-snapshot mapping at a project revision, without executing nodes or changing editable revision/history. Same UUID and original request return the frozen run.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "analysis_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "snapshot_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "bindings": {
+              "$ref": "#/$defs/projectAnalysisRunBindings"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "analysis_id",
+            "snapshot_id",
+            "bindings",
+            "run_id",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisRunResult"
+        }
+      },
+      "project.analysis_runs.get": {
+        "description": "Read one immutable plan and observed lifecycle; no recovery or execution.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisRunResult"
+        }
+      },
+      "project.analysis_runs.start": {
+        "description": "Explicitly claim prepared work once and dispatch locally. Other states return unchanged; never replay unknown or terminal work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisRunResult"
+        }
+      },
+      "project.analysis_runs.cancel": {
+        "description": "Request cancellation without rolling back confirmed results or cancelling unrelated graph work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisRunResult"
+        }
+      },
+      "project.analysis_runs.recover": {
+        "description": "Explicitly mark abandoned active work unknown after acquiring its vacant executor lease. Never restarts work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisRunResult"
+        }
+      },
+      "project.analysis_runs.result": {
+        "description": "Verify the archived graph result and every referenced blob; partial failed results may be read. No evaluation or Viewer navigation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectAnalysisRun"
+            },
+            "result": {
+              "$ref": "#/$defs/graphResult"
+            },
+            "blob_dir": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "run",
+            "result",
+            "blob_dir"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.analysis_runs.list": {
+        "description": "Read a bounded page of run summaries without document or file mapping contents; never recovers or executes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisRunListResult"
         }
       }
     },
@@ -8852,6 +9050,516 @@
         "displayed",
         "displayed_graph_verified",
         "configuration"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisRunBindings": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 32,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "maxProperties": 100,
+        "propertyNames": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "additionalProperties": {
+          "$ref": "#/$defs/projectUuid"
+        }
+      }
+    },
+    "projectAnalysisRunFrozenBindings": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 32,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "maxProperties": 100,
+        "propertyNames": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 268435456
+            }
+          },
+          "required": [
+            "record_id",
+            "sha256",
+            "size"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "projectAnalysisRunArchive": {
+      "type": "object",
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "graph_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "output_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        },
+        "has_payload": {
+          "type": "boolean"
+        },
+        "has_errors": {
+          "type": "boolean"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        }
+      },
+      "required": [
+        "directory",
+        "manifest_sha256",
+        "graph_hash",
+        "output_count",
+        "has_payload",
+        "has_errors",
+        "size_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisRun": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "analysis_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "analysis_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "document": {
+          "$ref": "#/$defs/projectAnalysisDocument"
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bindings": {
+          "$ref": "#/$defs/projectAnalysisRunFrozenBindings"
+        },
+        "profile": {
+          "const": "desktop"
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "max_seconds": {
+              "const": 300
+            },
+            "max_output_bytes": {
+              "const": 268435456
+            }
+          },
+          "required": [
+            "max_seconds",
+            "max_output_bytes"
+          ],
+          "additionalProperties": false
+        },
+        "plan_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "enum": [
+            "prepared",
+            "running",
+            "cancel_requested",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "unknown"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cancel_requested_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "executor_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectAnalysisRunArchive"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "source_revision",
+        "created_at",
+        "analysis_id",
+        "analysis_name",
+        "document",
+        "snapshot_id",
+        "snapshot_sha256",
+        "bindings",
+        "profile",
+        "budget",
+        "plan_sha256",
+        "status",
+        "updated_at",
+        "started_at",
+        "finished_at",
+        "cancel_requested_at",
+        "executor_id",
+        "error",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisRunSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "analysis_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "analysis_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "profile": {
+          "const": "desktop"
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "max_seconds": {
+              "const": 300
+            },
+            "max_output_bytes": {
+              "const": 268435456
+            }
+          },
+          "required": [
+            "max_seconds",
+            "max_output_bytes"
+          ],
+          "additionalProperties": false
+        },
+        "plan_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "enum": [
+            "prepared",
+            "running",
+            "cancel_requested",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "unknown"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cancel_requested_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "executor_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectAnalysisRunArchive"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "source_revision",
+        "created_at",
+        "analysis_id",
+        "analysis_name",
+        "snapshot_id",
+        "snapshot_sha256",
+        "profile",
+        "budget",
+        "plan_sha256",
+        "status",
+        "updated_at",
+        "started_at",
+        "finished_at",
+        "cancel_requested_at",
+        "executor_id",
+        "error",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisRunResult": {
+      "type": "object",
+      "properties": {
+        "run": {
+          "$ref": "#/$defs/projectAnalysisRun"
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisRunListResult": {
+      "type": "object",
+      "properties": {
+        "runs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/projectAnalysisRunSummary"
+          }
+        },
+        "next_offset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "runs",
+        "next_offset"
       ],
       "additionalProperties": false
     }

@@ -7,6 +7,11 @@
 
 namespace stk::app {
 namespace {
+std::string bridge_session(const bridge::Client *client)
+{
+  return client && client->state() == bridge::BridgeState::Ready ?
+      std::to_string(client->bridge_pid()) + ":" + std::to_string(client->stats().spawned) : std::string();
+}
 bool same_json(const io::Json &a, const io::Json &b)
 {
   // JSON equality alone conflates integer 1 with float 1.0. Preserve the submitted types while
@@ -40,6 +45,7 @@ AnalysisGraphState::~AnalysisGraphState()
 {
   *alive_ = false;
   if (validation_future_) { validation_future_->cancel(); }
+  if (catalog_future_) { catalog_future_->cancel(); }
 }
 
 const ViewerGraphConfiguration *AnalysisGraphState::configuration() const
@@ -58,6 +64,58 @@ void AnalysisGraphState::invalidate_validation()
   if (old) { old->cancel(); }
 }
 
+void AnalysisGraphState::reset_catalog_request()
+{
+  ++catalog_request_generation_;
+  catalog_requested_ = catalog_loading_ = false;
+  independent_catalog_ = nullptr;
+  catalog_error_.clear();
+  auto old = std::move(catalog_future_);
+  catalog_future_.reset();
+  if (old) { old->cancel(); }
+}
+
+bool AnalysisGraphState::ensure_catalog()
+{
+  sync();
+  if (!catalog_.is_null() || !bridge_ || session_.empty() || catalog_requested_) { return false; }
+  catalog_requested_ = true;
+  const auto hello = bridge_->hello_info();
+  if (!hello || !hello->has_method("graph.catalog")) {
+    catalog_error_ = "This bridge does not provide a node catalog";
+    viewer_.store().changed();
+    return false;
+  }
+  catalog_loading_ = true;
+  const auto request = ++catalog_request_generation_;
+  auto *client = bridge_;
+  const auto session = session_;
+  const std::weak_ptr<bool> weak = alive_;
+  catalog_future_ = client->graph_catalog();
+  catalog_future_->then([this, weak, request, client, session](bridge::Result<io::Json> result) {
+    const auto live = weak.lock();
+    if (!live || !*live || request != catalog_request_generation_ ||
+        viewer_.store().bridge() != client || bridge_session(client) != session) { return; }
+    catalog_future_.reset();
+    catalog_loading_ = false;
+    if (!result) { catalog_error_ = result.error().message; }
+    else {
+      try {
+        const auto &catalog = result.value().at("catalog");
+        (void)io::Catalog::from_json(catalog);
+        independent_catalog_ = catalog;
+        catalog_error_.clear();
+        dirty_ = true;
+        sync();
+      }
+      catch (const std::exception &error) { catalog_error_ = error.what(); }
+    }
+    viewer_.store().changed();
+  });
+  viewer_.store().changed();
+  return true;
+}
+
 void AnalysisGraphState::sync()
 {
   if (!document_handle_.empty()) {
@@ -69,9 +127,14 @@ void AnalysisGraphState::sync()
     }
   }
   auto *bridge = viewer_.store().bridge();
-  const std::string session = bridge && bridge->state() == bridge::BridgeState::Ready ?
-      std::to_string(bridge->bridge_pid()) + ":" + std::to_string(bridge->stats().spawned) : std::string();
-  const auto &catalog = viewer_.catalog();
+  const std::string session = bridge_session(bridge);
+  if (bridge != bridge_ || session != session_) { reset_catalog_request(); }
+  if (!viewer_.catalog().is_null() && (catalog_loading_ || !catalog_error_.empty())) {
+    // A separately opened Viewer may have obtained metadata while this controller waited.
+    // Its available cache wins; do not keep reporting an obsolete failure/loading state.
+    reset_catalog_request();
+  }
+  const auto &catalog = viewer_.catalog().is_null() ? independent_catalog_ : viewer_.catalog();
   if (!dirty_ && viewer_version_ == viewer_.version() && bridge == bridge_ && session == session_) { return; }
   const auto next = saved_ ? nullptr : viewer_.graph_inspection();
   const std::optional<ViewerGraphConfiguration> configuration = saved_ ? std::nullopt :
