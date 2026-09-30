@@ -68,6 +68,7 @@ void ProjectAnalysisRuns::reset()
   busy_ = uncertain_ = following_ = clock_seen_ = false;
   error_.clear(); pending_id_.clear(); blob_dir_.clear();
   page_ = run_ = result_ = nullptr; snapshots_ = Json::array();
+  reusable_inputs_.reset(); ++reusable_inputs_generation_;
   omitted_snapshots_ = 0; offset_ = 0; now_ = due_ = wake_scheduled = 0; deadline_ = -1;
   auto old = std::move(future_); future_.reset();
   if (old) { old->cancel(); }
@@ -98,6 +99,12 @@ bool ProjectAnalysisRuns::supported() const
   }
   return true;
 }
+bool ProjectAnalysisRuns::reusable_inputs_supported() const
+{
+  const auto hello = client_ ? client_->hello_info() : std::nullopt;
+  return supported() && hello && hello->has_method("project.snapshots.get");
+}
+
 bool ProjectAnalysisRuns::call(const std::string &method, Json params,
                               std::function<void(const Json &)> done,
                               std::function<void(const bridge::Error &)> failed)
@@ -144,6 +151,7 @@ void ProjectAnalysisRuns::accept_run(const Json &value, const std::string &id)
   }
   if (run_.is_null() || run_.at("id") != id) {
     ++selection_generation_; result_ = nullptr; blob_dir_.clear();
+    reusable_inputs_.reset(); ++reusable_inputs_generation_;
   }
   else if (!same_json(run_.at("result"), value.at("result"))) { result_ = nullptr; blob_dir_.clear(); }
   run_ = value;
@@ -210,7 +218,10 @@ bool ProjectAnalysisRuns::read(const std::string &id, const bool begin_following
 bool ProjectAnalysisRuns::load(const std::string &id)
 {
   const bool accepted = read(id, true);
-  if (accepted) { ++selection_generation_; following_ = false; }
+  if (accepted) {
+    ++selection_generation_; following_ = false;
+    reusable_inputs_.reset(); ++reusable_inputs_generation_;
+  }
   return accepted;
 }
 bool ProjectAnalysisRuns::prepare(const std::string &analysis_id, const int64_t revision,
@@ -238,7 +249,7 @@ bool ProjectAnalysisRuns::prepare(const std::string &analysis_id, const int64_t 
       uncertain_ = false; pending_id_.clear();
     }
   });
-  if (accepted) { ++selection_generation_; }
+  if (accepted) { ++selection_generation_; reusable_inputs_.reset(); ++reusable_inputs_generation_; }
   else { uncertain_ = false; pending_id_.clear(); }
   return accepted;
 }
@@ -268,6 +279,23 @@ bool ProjectAnalysisRuns::start() { return command("start"); }
 bool ProjectAnalysisRuns::cancel() { return command("cancel"); }
 bool ProjectAnalysisRuns::recover() { return command("recover"); }
 bool ProjectAnalysisRuns::check_pending() { return !pending_id_.empty() && load(pending_id_); }
+bool ProjectAnalysisRuns::read_reusable_inputs()
+{
+  sync();
+  if (!reusable_inputs_supported() || busy_ || project_.busy() || uncertain_ || run_.is_null()) { return false; }
+  AnalysisInputReusePlan plan;
+  try { plan = analysis_input_reuse_plan(run_, project_.project()->id); }
+  catch (const std::exception &error) { error_ = error.what(); changed(); return false; }
+  const auto selection = selection_generation_;
+  const auto snapshot = plan.snapshot_id;
+  return call("project.snapshots.get", {{"snapshot_id", snapshot}}, [this, plan = std::move(plan), selection](const Json &response) {
+    if (selection_generation_ != selection || run_.is_null() || io::get_string(run_, "id") != plan.run_id ||
+        io::get_string(run_, "plan_sha256") != plan.plan_sha256) { return; }
+    auto reused = analysis_reused_inputs(plan, response.at("snapshot"));
+    reusable_inputs_ = std::move(reused); ++reusable_inputs_generation_;
+  });
+}
+
 bool ProjectAnalysisRuns::read_result()
 {
   sync();

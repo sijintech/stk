@@ -1303,5 +1303,13 @@
   "analysis_outputs.all": "选择全部输出",
   "analysis_outputs.clear": "清空已选输出",
   "analysis_outputs.page": "输出 {first}–{last} / {total}",
-  "analysis_outputs.limit": "最多可请求 256 个输出。请跨页逐个选择；此流程图无法选择全部输出。"
+  "analysis_outputs.limit": "最多可请求 256 个输出。请跨页逐个选择；此流程图无法选择全部输出。",
+  "analysis_inputs.reuse": "复用输入",
+  "analysis_inputs.clear": "清空输入准备",
+  "analysis_inputs.reused": "输入准备已从已保存的运行复制；当前加载的分析仍是目标。",
+  "analysis_inputs.metadata_only": "快照元数据与原运行一致。此处尚未检查文件内容；开始运行时才会验证。",
+  "analysis_inputs.copied": "输入已复制。请在“准备运行”中检查映射，再明确准备新的运行。",
+  "analysis_inputs.not_adopted": "未接纳输入元数据：视图、目标或输入准备已变化，或桌面仍有正在编辑的文本。准备好后请清空输入准备，再选择复用输入。",
+  "analysis_inputs.reading": "正在读取指定输入快照的元数据…",
+  "analysis_inputs.finish_text": "按回车完成绑定名或路径输入后，再添加文件。"
 }

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "stk/bridge/client.hh"
+#include "stk/app/analysis_input_reuse.hh"
 
 namespace stk::io { class Payload; }
 namespace stk::app {
@@ -17,6 +18,7 @@ class ProjectAnalysisRuns {
   ~ProjectAnalysisRuns();
   void sync();
   bool supported() const;
+  bool reusable_inputs_supported() const;
   bool busy() const { return busy_; }
   bool uncertain() const { return uncertain_; }
   bool following() const { return following_; }
@@ -32,6 +34,8 @@ class ProjectAnalysisRuns {
   const io::Json &snapshots() const { return snapshots_; }
   size_t omitted_snapshots() const { return omitted_snapshots_; }
   const io::Json &result() const { return result_; }
+  const std::optional<AnalysisReusedInputs> &reusable_inputs() const { return reusable_inputs_; }
+  uint64_t reusable_inputs_generation() const { return reusable_inputs_generation_; }
   std::vector<std::string> payload_outputs() const;
 
   bool load_snapshots();
@@ -44,6 +48,9 @@ class ProjectAnalysisRuns {
   bool recover();
   bool check_pending();
   bool read_result();
+  /** Read exact snapshot metadata for the selected frozen run. Never copies file bytes or
+   * prepares/starts a run. Published staging is independent of the editor's local input form. */
+  bool read_reusable_inputs();
   /** Decode only an explicitly selected output from the previously verified archive. Payload
    * decoding verifies its referenced bytes again; failures never change the current Viewer. */
   std::shared_ptr<const io::Payload> decode_payload(const std::string &output);
@@ -67,6 +74,8 @@ class ProjectAnalysisRuns {
   bridge::Client *client_ = nullptr;
   std::string handle_, session_, error_, pending_id_, blob_dir_;
   uint64_t epoch_ = 0, version_ = 0, selection_generation_ = 0;
+  uint64_t reusable_inputs_generation_ = 0;
+  std::optional<AnalysisReusedInputs> reusable_inputs_;
   bool busy_ = false, uncertain_ = false, following_ = false, clock_seen_ = false;
   double now_ = 0, due_ = 0, deadline_ = -1;
   int64_t offset_ = 0;

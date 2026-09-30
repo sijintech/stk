@@ -242,7 +242,7 @@ class ProjectAnalysisRunsPython : public ::testing::Test {
     }, 30));
     widget("analysis_run_snapshot")->index.assign(1); f.drv->frame();
     ASSERT_NE(widget("analysis_run_file"), nullptr); widget("analysis_run_file")->index.assign(1); f.drv->frame();
-    ASSERT_NE(widget("analysis_run_path"), nullptr); widget("analysis_run_path")->string.assign("input.dat");
+    ASSERT_NE(widget("analysis_run_path"), nullptr); widget("analysis_run_path")->string.assign("input.dat"); f.drv->frame();
     widget("analysis_run_add_file")->on_click(); f.drv->frame();
     ASSERT_NE(widget("analysis_run_bindings"), nullptr); ASSERT_EQ(widget("analysis_run_bindings")->table->rows, 1);
     ASSERT_NE(widget("analysis_run_prepare"), nullptr); ASSERT_TRUE(widget("analysis_run_prepare")->enabled);

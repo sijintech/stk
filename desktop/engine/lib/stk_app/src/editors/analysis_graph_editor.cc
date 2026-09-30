@@ -279,6 +279,13 @@ class AnalysisGraphEditor final : public Editor {
   uint64_t runs_epoch_ = 0, run_selection_ = 0, bindings_generation_ = 0;
   std::string binding_name_ = "data", binding_path_, binding_error_;
   Json bindings_ = Json::object();
+  std::optional<AnalysisReusedInputs> reused_inputs_;
+  struct InputReusePending {
+    uint64_t expected_generation;
+    std::function<bool()> valid;
+  };
+  std::optional<InputReusePending> input_reuse_pending_;
+  std::string input_reuse_notice_;
   AnalysisGraphCanvas canvas_;
   AppStore *store_ = nullptr;
   std::shared_ptr<const AnalysisGraphView> canvas_view_;
@@ -658,12 +665,23 @@ class AnalysisGraphEditor final : public Editor {
     state_->ensure_catalog();
     runs_->sync();
     if (runs_epoch_ != runs_->epoch()) {
-      runs_epoch_ = runs_->epoch(); snapshot_index_ = file_index_ = output_index_ = mapping_index_ = -1;
-      bindings_ = Json::object(); binding_name_ = "data"; binding_path_.clear(); binding_error_.clear();
-      ++bindings_generation_;
+      runs_epoch_ = runs_->epoch(); output_index_ = -1; clear_input_preparation();
     }
     if (run_selection_ != runs_->selection_generation()) {
       run_selection_ = runs_->selection_generation(); output_index_ = -1;
+    }
+    if (input_reuse_pending_ && (runs_->reusable_inputs_generation() >= input_reuse_pending_->expected_generation || !runs_->busy())) {
+      // A completion is consumed exactly once, including refusals. Later clearing/finishing text
+      // must never cause a formerly rejected response to fill the preparation form.
+      auto pending = std::move(*input_reuse_pending_); input_reuse_pending_.reset();
+      if (runs_->reusable_inputs_generation() == pending.expected_generation && runs_->reusable_inputs() &&
+          pending.valid() && input_preparation_pristine() && !ctx.area.shell().text_input_active()) {
+        reused_inputs_ = *runs_->reusable_inputs(); bindings_ = reused_inputs_->bindings;
+        snapshot_index_ = file_index_ = mapping_index_ = -1; binding_name_ = "data"; binding_path_.clear(); binding_error_.clear();
+        input_reuse_notice_ = "analysis_inputs.copied";
+        ++bindings_generation_;
+      }
+      else { input_reuse_notice_ = "analysis_inputs.not_adopted"; }
     }
     if (canvas_view_ != state_->view()) {
       canvas_view_ = state_->view();
@@ -716,6 +734,8 @@ class AnalysisGraphEditor final : public Editor {
     };
     const bool blocked = runs_->busy() || ctx.store.project().busy();
     if (!runs_->error().empty()) { layout.paragraph(text(runs_->error())); }
+    if (!input_reuse_notice_.empty()) { layout.paragraph(ctx.tr(input_reuse_notice_)); }
+    if (input_reuse_pending_) { layout.paragraph(ctx.tr("analysis_inputs.reading")); }
     if (runs_->uncertain()) {
       layout.paragraph(ctx.tr("analysis_runs.uncertain"));
       layout.label(text(runs_->pending_id()));
@@ -790,55 +810,99 @@ class AnalysisGraphEditor final : public Editor {
 
   std::string selected_snapshot_id() const
   {
+    if (reused_inputs_) { return reused_inputs_->snapshot_id; }
     const auto &snapshots = runs_->snapshots();
     return snapshot_index_ >= 0 && size_t(snapshot_index_) < snapshots.size() ?
         io::get_string(snapshots[size_t(snapshot_index_)], "id") : std::string();
   }
 
+  Json selected_snapshot_files() const
+  {
+    if (reused_inputs_) { return reused_inputs_->files; }
+    const auto &snapshots = runs_->snapshots();
+    return snapshot_index_ >= 0 && size_t(snapshot_index_) < snapshots.size() ?
+        snapshots[size_t(snapshot_index_)].at("manifest").at("files") : Json::array();
+  }
+
+  bool input_preparation_pristine() const
+  {
+    return !reused_inputs_ && snapshot_index_ < 0 && file_index_ < 0 && mapping_index_ < 0 &&
+        binding_name_ == "data" && binding_path_.empty() && bindings_.empty();
+  }
+
+  void clear_input_preparation()
+  {
+    input_reuse_pending_.reset(); reused_inputs_.reset(); snapshot_index_ = file_index_ = mapping_index_ = -1;
+    input_reuse_notice_.clear();
+    bindings_ = Json::object(); binding_name_ = "data"; binding_path_.clear(); binding_error_.clear(); ++bindings_generation_;
+  }
+
   void binding_controls(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool blocked)
   {
+    auto *shell = &ctx.area.shell();
+    const auto navigation = navigation_generation_;
+    const auto form_generation = bindings_generation_;
+    const auto form_valid = [this, valid, navigation, form_generation] {
+      return valid() && navigation_generation_ == navigation && bindings_generation_ == form_generation &&
+          state_->saved() && saved_section_ == 1;
+    };
+    layout.button("analysis_input_preparation_clear", ctx.tr("analysis_inputs.clear"), [this, form_valid, shell, navigation] {
+      if (!form_valid() || shell->text_input_active() || navigation_generation_ != navigation || !state_->saved() || saved_section_ != 1) { return; }
+      clear_input_preparation(); redraw();
+    }).disable(shell->text_input_active());
+    if (reused_inputs_) {
+      layout.paragraph(ctx.tr("analysis_inputs.reused"));
+      table(layout, "analysis_reused_inputs", {{std::string(ctx.tr("analysis_graph.parameter")), 8},
+          {std::string(ctx.tr("analysis_graph.value")), 22}},
+          {{std::string(ctx.tr("analysis_runs.run_id")), reused_inputs_->run_id},
+           {std::string(ctx.tr("analysis_runs.snapshot_id")), reused_inputs_->snapshot_id},
+           {std::string(ctx.tr("analysis_runs.snapshot_hash")), reused_inputs_->snapshot_sha256}}, bindings_generation_, 3);
+      layout.paragraph(ctx.tr("analysis_inputs.metadata_only"));
+    }
     layout.paragraph(ctx.tr("analysis_runs.snapshot_hint"));
-    layout.button("analysis_run_snapshots", ctx.tr("analysis_runs.load_snapshots"), [this, valid] {
-      if (valid() && runs_->load_snapshots()) {
+    layout.button("analysis_run_snapshots", ctx.tr("analysis_runs.load_snapshots"), [this, form_valid] {
+      if (form_valid() && input_preparation_pristine() && runs_->load_snapshots()) {
         // A refreshed list can have a different ordering; retain explicit mappings only by
         // forcing an explicit selection again, never reinterpret an old list index.
         snapshot_index_ = file_index_ = mapping_index_ = -1;
         bindings_ = Json::object(); binding_path_.clear(); ++bindings_generation_;
       }
-    }).disable(blocked || !bindings_.empty());
+    }).disable(blocked || !input_preparation_pristine());
     const auto snapshots = runs_->snapshots();
     std::vector<std::string> labels{std::string(ctx.tr("analysis_runs.choose_snapshot"))};
     for (const auto &snapshot : snapshots) {
       labels.push_back(io::get_string(snapshot, "id").substr(0, 8) + " · " +
           std::to_string(snapshot.at("manifest").at("files").size()) + " " + std::string(ctx.tr("analysis_runs.files")));
     }
-    layout.dropdown("analysis_run_snapshot", std::move(labels), {[selected = snapshot_index_ + 1] { return selected; },
-        [this, valid, snapshots](const int index) {
-      if (!valid() || index < 0 || size_t(index) > snapshots.size() || !bindings_.empty()) { return; }
+    if (!reused_inputs_) { layout.dropdown("analysis_run_snapshot", std::move(labels), {[selected = snapshot_index_ + 1] { return selected; },
+        [this, form_valid, snapshots](const int index) {
+      if (!form_valid() || reused_inputs_ || index < 0 || size_t(index) > snapshots.size() || !bindings_.empty()) { return; }
       snapshot_index_ = index - 1; file_index_ = mapping_index_ = -1;
       binding_path_.clear(); binding_error_.clear(); ++bindings_generation_;
-    }}).disable(blocked || snapshots.empty() || !bindings_.empty());
+    }}).disable(blocked || snapshots.empty() || !bindings_.empty()); }
     omitted(layout, ctx, runs_->omitted_snapshots());
-    if (snapshot_index_ < 0 || size_t(snapshot_index_) >= snapshots.size()) { return; }
     const auto snapshot_id = selected_snapshot_id();
-    const auto files = snapshots[size_t(snapshot_index_)].at("manifest").at("files");
+    if (snapshot_id.empty()) { return; }
+    const auto files = selected_snapshot_files();
     std::vector<std::string> names{std::string(ctx.tr("analysis_runs.choose_file"))};
     for (const auto &file : files) { names.push_back(text(io::get_string(file, "name"))); }
     layout.dropdown("analysis_run_file", std::move(names), {[selected = file_index_ + 1] { return selected; },
-        [this, valid, files, snapshot_id](const int index) {
-      if (!valid() || selected_snapshot_id() != snapshot_id || index < 0 || size_t(index) > files.size()) { return; }
+        [this, form_valid, files, snapshot_id](const int index) {
+      if (!form_valid() || selected_snapshot_id() != snapshot_id || index < 0 || size_t(index) > files.size()) { return; }
       file_index_ = index - 1;
       binding_path_ = file_index_ >= 0 ? io::get_string(files[size_t(file_index_)], "name") : std::string();
+      ++bindings_generation_; redraw();
     }}).disable(blocked);
-    const auto draft_field = [this, valid, snapshot_id](std::string *value) {
-      return ui::Binding<std::string>{[copy = *value] { return copy; }, [this, valid, snapshot_id, value](const std::string &input) {
-        if (valid() && selected_snapshot_id() == snapshot_id) { *value = input; }
+    const auto draft_field = [this, form_valid, snapshot_id](std::string *value) {
+      return ui::Binding<std::string>{[copy = *value] { return copy; }, [this, form_valid, snapshot_id, value](const std::string &input) {
+        if (form_valid() && selected_snapshot_id() == snapshot_id) { *value = input; ++bindings_generation_; redraw(); }
       }};
     };
     layout.prop(ctx.tr("analysis_runs.binding")).text_field("analysis_run_binding", draft_field(&binding_name_), {.max_length = 64}).disable(blocked);
     layout.prop(ctx.tr("analysis_runs.relative_path")).text_field("analysis_run_path", draft_field(&binding_path_), {.max_length = 1024}).disable(blocked);
-    layout.button("analysis_run_add_file", ctx.tr("analysis_runs.add_file"), [this, valid, files, snapshot_id] {
-      if (!valid() || selected_snapshot_id() != snapshot_id || file_index_ < 0 || size_t(file_index_) >= files.size()) { return; }
+    layout.paragraph(ctx.tr("analysis_inputs.finish_text"));
+    layout.button("analysis_run_add_file", ctx.tr("analysis_runs.add_file"), [this, form_valid, files, snapshot_id, shell] {
+      if (shell->text_input_active() || !form_valid() || selected_snapshot_id() != snapshot_id || file_index_ < 0 || size_t(file_index_) >= files.size()) { return; }
       size_t count = 0; for (const auto &binding : bindings_) { count += binding.size(); }
       if (binding_name_.empty() || binding_path_.empty() || count >= 100 ||
           (!bindings_.contains(binding_name_) && bindings_.size() >= 32) ||
@@ -847,7 +911,7 @@ class AnalysisGraphEditor final : public Editor {
       }
       bindings_[binding_name_][binding_path_] = files[size_t(file_index_)].at("record_id");
       binding_error_.clear(); ++bindings_generation_; redraw();
-    }).disable(blocked || file_index_ < 0);
+    }).disable(blocked || file_index_ < 0 || shell->text_input_active());
     if (!binding_error_.empty()) { layout.paragraph(binding_error_); }
     Rows rows; std::vector<std::pair<std::string, std::string>> keys;
     for (auto binding = bindings_.begin(); binding != bindings_.end(); ++binding) {
@@ -863,19 +927,19 @@ class AnalysisGraphEditor final : public Editor {
       spec.rows = int(rows.size()); spec.visible_rows = float(std::min(4, spec.rows)); spec.data_version = bindings_generation_;
       spec.cell = [rows](const int row, const int column) { return rows.at(size_t(row)).at(size_t(column)); };
       const auto generation = bindings_generation_;
-      spec.selected = {[index = mapping_index_] { return index; }, [this, valid, generation](const int index) {
-        if (valid() && bindings_generation_ == generation) { mapping_index_ = index; }
+      spec.selected = {[index = mapping_index_] { return index; }, [this, form_valid, generation](const int index) {
+        if (form_valid() && bindings_generation_ == generation && index >= 0) { mapping_index_ = index; ++bindings_generation_; redraw(); }
       }};
       layout.table("analysis_run_bindings", std::move(spec)).disable(blocked);
       auto &buttons = layout.row();
-      buttons.button("analysis_run_remove_file", ctx.tr("analysis_runs.remove_file"), [this, valid, generation, keys] {
-        if (!valid() || bindings_generation_ != generation || mapping_index_ < 0 || size_t(mapping_index_) >= keys.size()) { return; }
+      buttons.button("analysis_run_remove_file", ctx.tr("analysis_runs.remove_file"), [this, form_valid, generation, keys] {
+        if (!form_valid() || bindings_generation_ != generation || mapping_index_ < 0 || size_t(mapping_index_) >= keys.size()) { return; }
         const auto &[binding, path] = keys[size_t(mapping_index_)];
         bindings_[binding].erase(path); if (bindings_[binding].empty()) { bindings_.erase(binding); }
         mapping_index_ = -1; ++bindings_generation_; redraw();
       }).disable(blocked || mapping_index_ < 0 || size_t(mapping_index_) >= keys.size());
-      buttons.button("analysis_run_clear_files", ctx.tr("analysis_runs.clear_files"), [this, valid] {
-        if (valid()) { bindings_ = Json::object(); mapping_index_ = -1; ++bindings_generation_; redraw(); }
+      buttons.button("analysis_run_clear_files", ctx.tr("analysis_runs.clear_files"), [this, form_valid] {
+        if (form_valid()) { bindings_ = Json::object(); mapping_index_ = -1; ++bindings_generation_; redraw(); }
       }).disable(blocked);
     }
   }
@@ -904,6 +968,26 @@ class AnalysisGraphEditor final : public Editor {
     }
     const auto plan = io::get_string(run, "plan_sha256");
     const auto navigation = navigation_generation_;
+    const auto input_generation = bindings_generation_;
+    const auto document_epoch = documents_->epoch(), document_version = documents_->selected_version();
+    const auto target = state_->document_id();
+    const auto reuse_valid = [this, same_run, navigation, input_generation, document_epoch, document_version, target, plan] {
+      if (!same_run()) { return false; }
+      documents_->sync();
+      return navigation_generation_ == navigation && bindings_generation_ == input_generation &&
+          state_->saved() && saved_section_ == 1 && !target.empty() && state_->document_id() == target &&
+          documents_->epoch() == document_epoch && documents_->selected_version() == document_version &&
+          io::get_string(documents_->selected(), "id") == target &&
+          !documents_->busy() && !store_->project().busy() && io::get_string(runs_->run(), "plan_sha256") == plan;
+    };
+    box.button("analysis_run_reuse_inputs", ctx.tr("analysis_inputs.reuse"), [this, reuse_valid, shell] {
+      if (!reuse_valid() || shell->text_input_active() || !input_preparation_pristine() || input_reuse_pending_) { return; }
+      const auto expected = runs_->reusable_inputs_generation() + 1;
+      if (runs_->read_reusable_inputs()) {
+        input_reuse_pending_ = InputReusePending{expected, reuse_valid}; input_reuse_notice_.clear(); redraw();
+      }
+    }).disable(blocked || runs_->uncertain() || !runs_->reusable_inputs_supported() || target.empty() ||
+        documents_->busy() || !input_preparation_pristine() || input_reuse_pending_ || shell->text_input_active());
     box.button("analysis_run_inspect", ctx.tr("analysis_runs.inspect"), [this, same_run, plan, shell, navigation] {
       if (!same_run() || runs_->busy() || store_->project().busy() || shell->text_input_active() ||
           navigation_generation_ != navigation || !state_->saved() || saved_section_ != 1 ||

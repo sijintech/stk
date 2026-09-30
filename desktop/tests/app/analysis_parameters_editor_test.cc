@@ -316,7 +316,7 @@ TEST_F(AnalysisParametersEditorPython, DirtyDraftFencesAlreadyCapturedRunPrepare
   ASSERT_NO_FATAL_FAILURE(click("analysis_run_snapshots"));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_run_snapshot") && widget("analysis_run_snapshot")->items.size() == 2; }));
   widget("analysis_run_snapshot")->index.assign(1); f.drv->frame(); widget("analysis_run_file")->index.assign(1); f.drv->frame();
-  widget("analysis_run_path")->string.assign("input.dat");
+  widget("analysis_run_path")->string.assign("input.dat"); f.drv->frame();
   ASSERT_NO_FATAL_FAILURE(click("analysis_run_add_file"));
   ASSERT_TRUE(widget("analysis_run_prepare")->enabled); const auto prepare = widget("analysis_run_prepare")->on_click;
   widget("analysis_saved_section")->index.assign(0); f.drv->frame();

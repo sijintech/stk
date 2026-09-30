@@ -1303,5 +1303,13 @@
   "analysis_outputs.all": "Select all outputs",
   "analysis_outputs.clear": "Clear selected outputs",
   "analysis_outputs.page": "Outputs {first}–{last} of {total}",
-  "analysis_outputs.limit": "At most 256 outputs can be requested. Select individual outputs across pages; Select all is unavailable for this graph."
+  "analysis_outputs.limit": "At most 256 outputs can be requested. Select individual outputs across pages; Select all is unavailable for this graph.",
+  "analysis_inputs.reuse": "Reuse inputs",
+  "analysis_inputs.clear": "Clear input preparation",
+  "analysis_inputs.reused": "Input preparation copied from a saved run. The currently loaded analysis remains the target.",
+  "analysis_inputs.metadata_only": "Snapshot metadata matches the saved run. File bytes have not been checked here; Start verifies them.",
+  "analysis_inputs.copied": "Inputs copied. Review the mappings in Prepare a run before explicitly preparing a new run.",
+  "analysis_inputs.not_adopted": "The input metadata was not adopted. The view, target or preparation changed, or a desktop text edit is active. Clear input preparation and choose Reuse inputs again when ready.",
+  "analysis_inputs.reading": "Reading the exact input snapshot metadata…",
+  "analysis_inputs.finish_text": "Press Enter to finish binding or path input before adding a file."
 }
