@@ -358,6 +358,91 @@ TEST_F(AnalysisInputReuseEditorPython, ExactSnapshotOutsideFirstHundredIsPinnedW
   EXPECT_EQ(separate.snapshots().size(), 100u);
 }
 
+TEST_F(AnalysisInputReuseEditorPython, BindingTabCommitsRelativePathAndFreshAddKeepsFrozenInputIdentity)
+{
+  ASSERT_NO_FATAL_FAILURE(edit("component", "2"));
+  ASSERT_NO_FATAL_FAILURE(type("1e"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_parameter_apply"));
+  ASSERT_NO_FATAL_FAILURE(select_original());
+  ASSERT_NO_FATAL_FAILURE(reuse());
+  ASSERT_NE(widget("analysis_run_file"), nullptr);
+  widget("analysis_run_file")->index.assign(1); f.drv->frame();
+  ASSERT_NE(widget("analysis_run_add_file"), nullptr);
+  const auto old_add = widget("analysis_run_add_file")->on_click;
+  const auto old_clear = widget("analysis_input_preparation_clear")->on_click;
+  const auto old_binding = widget("analysis_run_binding")->string;
+  const auto old_path = widget("analysis_run_path")->string;
+  ASSERT_NO_FATAL_FAILURE(type_field("analysis_run_binding", "extra_data", false));
+  EXPECT_FALSE(widget("analysis_run_add_file")->enabled);
+  old_add(); old_clear(); f.drv->frame();
+  ASSERT_TRUE(f.screen.ui()->text_input_active());
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "extra_data");
+  ASSERT_NE(widget("analysis_run_bindings"), nullptr);
+  EXPECT_EQ(widget("analysis_run_bindings")->table->rows, 1);
+
+  // Tab commits the binding and starts the sibling field before the next frame.
+  // A form-wide generation must not invalidate the new field's captured setter.
+  f.drv->key(wm::Key::Tab); f.drv->frame();
+  ASSERT_TRUE(f.screen.ui()->text_input_active());
+  ASSERT_NE(widget("analysis_run_path"), nullptr);
+  ASSERT_EQ(f.screen.ui()->editing(), widget("analysis_run_path")->id);
+  f.drv->key(wm::Key::Unknown, wm::ModNone, "nested/typed-input.dat");
+  f.drv->frame();
+  ASSERT_EQ(f.screen.ui()->edit_state()->text(), "nested/typed-input.dat");
+  f.drv->key(wm::Key::Enter); f.drv->frame();
+  ASSERT_FALSE(f.screen.ui()->text_input_active());
+  EXPECT_EQ(widget("analysis_run_binding")->string.value(), "extra_data");
+  EXPECT_EQ(widget("analysis_run_path")->string.value(), "nested/typed-input.dat");
+  old_binding.assign("stale_binding"); old_path.assign("stale.dat"); f.drv->frame();
+  EXPECT_EQ(widget("analysis_run_binding")->string.value(), "extra_data");
+  EXPECT_EQ(widget("analysis_run_path")->string.value(), "nested/typed-input.dat");
+  old_add(); f.drv->frame();
+  EXPECT_EQ(widget("analysis_run_bindings")->table->rows, 1);
+  const auto before_add_binding = widget("analysis_run_binding")->string;
+  const auto before_add_path = widget("analysis_run_path")->string;
+  const auto *add = widget("analysis_run_add_file");
+  ASSERT_NE(add, nullptr);
+  ASSERT_TRUE(add->enabled);
+  const auto sidebar = area().find_region(EditorArea::kSidebar)->ui_rect();
+  ASSERT_EQ(add->rect.intersect(sidebar), add->rect);
+  const auto [x, y] = f.widget_center(add->key);
+  f.drv->click(x, y); f.drv->frame();
+  ASSERT_NE(widget("analysis_run_bindings"), nullptr);
+  EXPECT_EQ(widget("analysis_run_bindings")->table->rows, 2);
+  EXPECT_EQ(cell("analysis_run_bindings", "extra_data", 1), "nested/typed-input.dat");
+  EXPECT_EQ(cell("analysis_run_bindings", "extra_data", 2), file_id.substr(0, 8));
+  EXPECT_EQ(cell("analysis_run_bindings", "data", 1), "input.dat");
+  before_add_binding.assign("stale_after_add"); before_add_path.assign("stale-after-add.dat"); f.drv->frame();
+  EXPECT_EQ(widget("analysis_run_binding")->string.value(), "extra_data");
+  EXPECT_EQ(widget("analysis_run_path")->string.value(), "nested/typed-input.dat");
+  const auto before_file_binding = widget("analysis_run_binding")->string;
+  const auto before_file_path = widget("analysis_run_path")->string;
+  widget("analysis_run_file")->index.assign(0); f.drv->frame();
+  widget("analysis_run_file")->index.assign(1); f.drv->frame();
+  before_file_binding.assign("stale_after_file"); before_file_path.assign("stale-after-file.dat"); f.drv->frame();
+  EXPECT_EQ(widget("analysis_run_binding")->string.value(), "extra_data");
+  EXPECT_EQ(widget("analysis_run_path")->string.value(), "input.dat");
+  EXPECT_EQ(cell("analysis_run_bindings", "extra_data", 1), "nested/typed-input.dat");
+  EXPECT_EQ(cell("analysis_reused_inputs", std::string(store().tr("analysis_runs.snapshot_id"))), snapshot.at("id").get<std::string>());
+  EXPECT_EQ(calls("project.snapshots.get").size(), 1u);
+  EXPECT_EQ(calls("project.snapshots.get").back().at("snapshot_id"), snapshot.at("id"));
+  ASSERT_NE(widget("analysis_run_prepare"), nullptr);
+  EXPECT_FALSE(widget("analysis_run_prepare")->enabled);
+  widget("analysis_run_prepare")->on_click(); f.drv->frame();
+  EXPECT_EQ(calls("project.analysis_runs.prepare").size(), 1u);
+  Json original;
+  ASSERT_NO_FATAL_FAILURE(call("project.analysis_runs.get", {{"handle", handle()}, {"run_id", run_id}}, original));
+  EXPECT_EQ(exact(original.at("run")), exact(frozen));
+  EXPECT_EQ(project().project()->revision, revision);
+
+  widget("analysis_saved_section")->index.assign(0); f.drv->frame();
+  EXPECT_EQ(cell("analysis_parameters", "component"), "2");
+  ASSERT_NE(widget("analysis_parameter_value"), nullptr);
+  EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "1e");
+  EXPECT_FALSE(widget("analysis_parameters_save")->enabled);
+  EXPECT_TRUE(calls("project.analyses.update").empty());
+}
+
 TEST_F(AnalysisInputReuseEditorPython, UnaddedFormTextRequiresExplicitClearAndLastKeypressIsPreserved)
 {
   ASSERT_NO_FATAL_FAILURE(select_original());

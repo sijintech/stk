@@ -279,6 +279,7 @@ class AnalysisGraphEditor final : public Editor {
   ui::WidgetId parameter_input_id_ = 0;
   int saved_section_ = 0, snapshot_index_ = -1, file_index_ = -1, output_index_ = -1, mapping_index_ = -1;
   uint64_t runs_epoch_ = 0, run_selection_ = 0, bindings_generation_ = 0;
+  uint64_t binding_name_generation_ = 0, binding_path_generation_ = 0;
   std::string binding_name_ = "data", binding_path_, binding_error_;
   Json bindings_ = Json::object();
   std::optional<AnalysisReusedInputs> reused_inputs_;
@@ -700,7 +701,7 @@ class AnalysisGraphEditor final : public Editor {
         reused_inputs_ = *runs_->reusable_inputs(); bindings_ = reused_inputs_->bindings;
         snapshot_index_ = file_index_ = mapping_index_ = -1; binding_name_ = "data"; binding_path_.clear(); binding_error_.clear();
         input_reuse_notice_ = "analysis_inputs.copied";
-        ++bindings_generation_;
+        binding_form_changed();
       }
       else { input_reuse_notice_ = "analysis_inputs.not_adopted"; }
     }
@@ -857,11 +858,16 @@ class AnalysisGraphEditor final : public Editor {
         binding_name_ == "data" && binding_path_.empty() && bindings_.empty();
   }
 
+  void binding_form_changed()
+  {
+    ++bindings_generation_; ++binding_name_generation_; ++binding_path_generation_;
+  }
+
   void clear_input_preparation()
   {
     input_reuse_pending_.reset(); reused_inputs_.reset(); snapshot_index_ = file_index_ = mapping_index_ = -1;
     input_reuse_notice_.clear();
-    bindings_ = Json::object(); binding_name_ = "data"; binding_path_.clear(); binding_error_.clear(); ++bindings_generation_;
+    bindings_ = Json::object(); binding_name_ = "data"; binding_path_.clear(); binding_error_.clear(); binding_form_changed();
   }
 
   void binding_controls(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool blocked)
@@ -869,9 +875,11 @@ class AnalysisGraphEditor final : public Editor {
     auto *shell = &ctx.area.shell();
     const auto navigation = navigation_generation_;
     const auto form_generation = bindings_generation_;
-    const auto form_valid = [this, valid, navigation, form_generation] {
-      return valid() && navigation_generation_ == navigation && bindings_generation_ == form_generation &&
-          state_->saved() && saved_section_ == 1;
+    const auto same_form = [this, valid, navigation] {
+      return valid() && navigation_generation_ == navigation && state_->saved() && saved_section_ == 1;
+    };
+    const auto form_valid = [this, same_form, form_generation] {
+      return same_form() && bindings_generation_ == form_generation;
     };
     layout.button("analysis_input_preparation_clear", ctx.tr("analysis_inputs.clear"), [this, form_valid, shell, navigation] {
       if (!form_valid() || shell->text_input_active() || navigation_generation_ != navigation || !state_->saved() || saved_section_ != 1) { return; }
@@ -892,7 +900,7 @@ class AnalysisGraphEditor final : public Editor {
         // A refreshed list can have a different ordering; retain explicit mappings only by
         // forcing an explicit selection again, never reinterpret an old list index.
         snapshot_index_ = file_index_ = mapping_index_ = -1;
-        bindings_ = Json::object(); binding_path_.clear(); ++bindings_generation_;
+        bindings_ = Json::object(); binding_path_.clear(); binding_form_changed();
       }
     }).disable(blocked || !input_preparation_pristine());
     const auto snapshots = runs_->snapshots();
@@ -905,7 +913,7 @@ class AnalysisGraphEditor final : public Editor {
         [this, form_valid, snapshots](const int index) {
       if (!form_valid() || reused_inputs_ || index < 0 || size_t(index) > snapshots.size() || !bindings_.empty()) { return; }
       snapshot_index_ = index - 1; file_index_ = mapping_index_ = -1;
-      binding_path_.clear(); binding_error_.clear(); ++bindings_generation_;
+      binding_path_.clear(); binding_error_.clear(); binding_form_changed();
     }}).disable(blocked || snapshots.empty() || !bindings_.empty()); }
     omitted(layout, ctx, runs_->omitted_snapshots());
     const auto snapshot_id = selected_snapshot_id();
@@ -918,15 +926,20 @@ class AnalysisGraphEditor final : public Editor {
       if (!form_valid() || selected_snapshot_id() != snapshot_id || index < 0 || size_t(index) > files.size()) { return; }
       file_index_ = index - 1;
       binding_path_ = file_index_ >= 0 ? io::get_string(files[size_t(file_index_)], "name") : std::string();
-      ++bindings_generation_; redraw();
+      binding_form_changed(); redraw();
     }}).disable(blocked);
-    const auto draft_field = [this, form_valid, snapshot_id](std::string *value) {
-      return ui::Binding<std::string>{[copy = *value] { return copy; }, [this, form_valid, snapshot_id, value](const std::string &input) {
-        if (form_valid() && selected_snapshot_id() == snapshot_id) { *value = input; ++bindings_generation_; redraw(); }
+    // Tab commits one field and focuses its sibling before the next redraw. Keep
+    // separate text generations, while every commit still invalidates captured actions.
+    // Non-text preparation changes invalidate both fields through binding_form_changed().
+    const auto draft_field = [this, same_form, snapshot_id](std::string *value, uint64_t *generation) {
+      return ui::Binding<std::string>{[copy = *value] { return copy; },
+          [this, same_form, snapshot_id, value, generation, expected = *generation](const std::string &input) {
+        if (!same_form() || selected_snapshot_id() != snapshot_id || *generation != expected) { return; }
+        *value = input; ++*generation; ++bindings_generation_; redraw();
       }};
     };
-    layout.prop(ctx.tr("analysis_runs.binding")).text_field("analysis_run_binding", draft_field(&binding_name_), {.max_length = 64}).disable(blocked);
-    layout.prop(ctx.tr("analysis_runs.relative_path")).text_field("analysis_run_path", draft_field(&binding_path_), {.max_length = 1024}).disable(blocked);
+    layout.prop(ctx.tr("analysis_runs.binding")).text_field("analysis_run_binding", draft_field(&binding_name_, &binding_name_generation_), {.max_length = 64}).disable(blocked);
+    layout.prop(ctx.tr("analysis_runs.relative_path")).text_field("analysis_run_path", draft_field(&binding_path_, &binding_path_generation_), {.max_length = 1024}).disable(blocked);
     layout.paragraph(ctx.tr("analysis_inputs.finish_text"));
     layout.button("analysis_run_add_file", ctx.tr("analysis_runs.add_file"), [this, form_valid, files, snapshot_id, shell] {
       if (shell->text_input_active() || !form_valid() || selected_snapshot_id() != snapshot_id || file_index_ < 0 || size_t(file_index_) >= files.size()) { return; }
@@ -937,7 +950,7 @@ class AnalysisGraphEditor final : public Editor {
         binding_error_ = std::string(store_->tr("analysis_runs.mapping_invalid")); redraw(); return;
       }
       bindings_[binding_name_][binding_path_] = files[size_t(file_index_)].at("record_id");
-      binding_error_.clear(); ++bindings_generation_; redraw();
+      binding_error_.clear(); binding_form_changed(); redraw();
     }).disable(blocked || file_index_ < 0 || shell->text_input_active());
     if (!binding_error_.empty()) { layout.paragraph(binding_error_); }
     Rows rows; std::vector<std::pair<std::string, std::string>> keys;
@@ -955,7 +968,7 @@ class AnalysisGraphEditor final : public Editor {
       spec.cell = [rows](const int row, const int column) { return rows.at(size_t(row)).at(size_t(column)); };
       const auto generation = bindings_generation_;
       spec.selected = {[index = mapping_index_] { return index; }, [this, form_valid, generation](const int index) {
-        if (form_valid() && bindings_generation_ == generation && index >= 0) { mapping_index_ = index; ++bindings_generation_; redraw(); }
+        if (form_valid() && bindings_generation_ == generation && index >= 0) { mapping_index_ = index; binding_form_changed(); redraw(); }
       }};
       layout.table("analysis_run_bindings", std::move(spec)).disable(blocked);
       auto &buttons = layout.row();
@@ -963,10 +976,10 @@ class AnalysisGraphEditor final : public Editor {
         if (!form_valid() || bindings_generation_ != generation || mapping_index_ < 0 || size_t(mapping_index_) >= keys.size()) { return; }
         const auto &[binding, path] = keys[size_t(mapping_index_)];
         bindings_[binding].erase(path); if (bindings_[binding].empty()) { bindings_.erase(binding); }
-        mapping_index_ = -1; ++bindings_generation_; redraw();
+        mapping_index_ = -1; binding_form_changed(); redraw();
       }).disable(blocked || mapping_index_ < 0 || size_t(mapping_index_) >= keys.size());
       buttons.button("analysis_run_clear_files", ctx.tr("analysis_runs.clear_files"), [this, form_valid] {
-        if (form_valid()) { bindings_ = Json::object(); mapping_index_ = -1; ++bindings_generation_; redraw(); }
+        if (form_valid()) { bindings_ = Json::object(); mapping_index_ = -1; binding_form_changed(); redraw(); }
       }).disable(blocked);
     }
   }

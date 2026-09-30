@@ -10,6 +10,7 @@
 #include "../wm/support.hh"
 
 #include <cstdlib>
+#include <filesystem>
 
 namespace stk::app {
 namespace {
@@ -804,6 +805,178 @@ TEST_F(ScriptPython, ViewerSeriesStepAndPlaybackUseTheSameSharedTimeline)
   EXPECT_EQ(viewer.step_index(), 1);
   execute("stk.viewer.step(0.5)", "failed");
   EXPECT_EQ(viewer.step_index(), 1);
+}
+
+TEST_F(ScriptPython, OfflineAnalysisFileButtonPreservesCurrentWorkAndOpensItsArchivedGrid)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  const std::string payload_path = std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp";
+  ASSERT_NO_FATAL_FAILURE(execute("stk.project.apply([{'op':'create_table','name':'Keep existing work'}], expected_revision=0)\n"
+      "stk.viewer.open(" + Json(payload_path).dump() + ", focus=False)"));
+  auto &project = f.shell->store().project();
+  auto &viewer = f.shell->store().viewer();
+  ASSERT_TRUE(pump([&] { return !project.busy() && project.project()->revision == 1 && bool(viewer.payload()); }));
+  const auto previous_handle = project.project()->handle;
+  const auto previous_payload = viewer.payload();
+  const auto previous_source = viewer.source().key();
+  const auto evaluations = viewer.evaluations_started();
+  const std::string destination = dir.str() + "/new analysis project";
+  const std::string runner = dir.str() + "/Run local analysis.py";
+  const std::string example = std::string(STK_REPO_ROOT) + "/examples/project_analysis/offline.py";
+  ASSERT_TRUE(wmtest::write_text(runner,
+      "import runpy\nfrom suan.scripting import API\n"
+      "before = stk.project.snapshot()\nbefore_history = stk.project.history()\ncounts = {}\n"
+      "def audited(operation, params):\n"
+      "    counts[operation] = counts.get(operation, 0) + 1\n"
+      "    return stk.call(operation, **params)\n"
+      "example = runpy.run_path(" + Json(example).dump() + ")\n"
+      "offline_analysis_demo = example['create_demo'](API(audited), " + Json(destination).dump() + ", wait_seconds=30)\n"
+      "assert offline_analysis_demo['status'] == 'succeeded' and offline_analysis_demo['verified_result']\n"
+      "assert counts['project.analysis_runs.prepare'] == counts['project.analysis_runs.start'] == 1\n"
+      "assert counts['project.analysis_runs.result'] == 1\n"
+      "assert not any(op.startswith(('ui.', 'runtime.', 'graph.', 'connection.', 'model.')) for op in counts)\n"
+      "assert stk.project.snapshot() == before and stk.project.history() == before_history\n"));
+
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto script_before = state().status().at("run").at("id");
+  auto context = area.context(nullptr, nullptr);
+  ASSERT_TRUE(area.editor().on_drop({runner}, context));
+  f.drv->frame(); loop.run_ready();
+  ASSERT_FALSE(std::filesystem::exists(destination));
+  EXPECT_EQ(state().status().at("run").at("id"), script_before);
+  EXPECT_FALSE(state().busy());
+  // Run the selected file through a real pointer click, including the scroll needed
+  // to reach the file controls below the Python input and output panels.
+  const auto main_rect = area.find_region(EditorArea::kMain)->ui_rect();
+  f.screen.ui()->handle_event(ui::Event::wheel({main_rect.x1() - 2, main_rect.cy()}, -1000));
+  f.drv->frame();
+  // A drop fills the path but does not change the panel's remembered closed state.
+  // Explicitly expand it, just as the Run file instructions require.
+  const auto *file_panel = f.screen.ui()->find("a2/main/python_file");
+  ASSERT_NE(file_panel, nullptr);
+  ASSERT_EQ(file_panel->rect.intersect(main_rect), file_panel->rect);
+  const auto [panel_x, panel_y] = f.widget_center(file_panel->key);
+  f.drv->click(panel_x, panel_y);
+  f.screen.ui()->handle_event(ui::Event::wheel({main_rect.x1() - 2, main_rect.cy()}, -1000));
+  f.drv->frame();
+  const auto *file_path = f.screen.ui()->find("a2/main/python_file/python_path");
+  ASSERT_NE(file_path, nullptr); EXPECT_EQ(file_path->string.value(), runner);
+  EXPECT_EQ(state().status().at("run").at("id"), script_before);
+  const auto *run_file = f.screen.ui()->find("a2/main/python_file/python_run_file");
+  ASSERT_NE(run_file, nullptr); ASSERT_TRUE(run_file->enabled);
+  ASSERT_EQ(run_file->rect.intersect(main_rect), run_file->rect);
+  const auto layout_before = wm::layout_to_json(f.shell->capture_layout(f.screen, nullptr));
+  const auto [run_x, run_y] = f.widget_center(run_file->key);
+  f.drv->click(run_x, run_y);
+  ASSERT_TRUE(pump([&] {
+    f.drv->frame();
+    return !state().busy() && state().status().contains("run") && state().status().at("run").is_object() &&
+        state().status().at("run").at("id") != script_before;
+  }, 60)) << output() << client->bridge_log().text();
+  ASSERT_EQ(state().status().at("run").at("state"), "succeeded") << output();
+  ASSERT_TRUE(state().error().empty()) << state().error();
+  EXPECT_NE(output().find("Verified synthetic inline table: 73 rows"), std::string::npos);
+  EXPECT_EQ(project.project()->handle, previous_handle); EXPECT_EQ(project.project()->revision, 1);
+  EXPECT_EQ(viewer.payload(), previous_payload); EXPECT_EQ(viewer.source().key(), previous_source);
+  EXPECT_EQ(wm::layout_to_json(f.shell->capture_layout(f.screen, nullptr)), layout_before);
+  const auto receipt = io::parse_json(wmtest::read_text(destination + "/demo.json"));
+  const auto project_id = receipt.at("project_id").get<std::string>();
+  const auto analysis_id = receipt.at("analysis_id").get<std::string>();
+  const auto run_id = receipt.at("run_id").get<std::string>();
+  ASSERT_EQ(receipt.at("revision"), 3); ASSERT_TRUE(receipt.at("synthetic").get<bool>());
+
+  const auto widget = [&](const char *key) { return f.screen.ui()->find(key); };
+  const auto wait = [&](const std::function<bool()> &condition) {
+    ASSERT_TRUE(pump([&] { f.drv->frame(); return condition(); })) << output() << client->bridge_log().text();
+  };
+  const auto click = [&](const char *key) {
+    const auto *value = widget(key); ASSERT_NE(value, nullptr); ASSERT_TRUE(value->enabled); ASSERT_TRUE(value->on_click);
+    value->on_click(); f.drv->frame();
+  };
+  const auto toggle = [&](const char *key) {
+    const auto *value = widget(key); ASSERT_NE(value, nullptr);
+    const ui::Vec2 center{value->rect.cx(), value->rect.cy()};
+    f.screen.ui()->handle_event(ui::Event::mouse_down(center));
+    f.screen.ui()->handle_event(ui::Event::mouse_up(center)); f.drv->frame();
+  };
+  const auto select = [&](const char *key, const int column, const std::string &identity) {
+    const auto *value = widget(key); ASSERT_NE(value, nullptr); ASSERT_TRUE(value->enabled); ASSERT_TRUE(value->table);
+    const auto table = *value->table; int row = -1;
+    for (int index = 0; index < table.rows; ++index) {
+      const auto cell = table.cell(index, column);
+      if (cell == identity || cell == Json(identity).dump()) { row = index; }
+    }
+    ASSERT_GE(row, 0) << identity; table.selected.assign(row); f.drv->frame();
+  };
+  const auto paragraph = [&](const std::string &scope) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &value : block->widgets()) {
+        if (value.type == ui::WidgetType::Paragraph && value.key.find("/" + scope + "/") != std::string::npos) { return value.text; }
+      }
+    }
+    return std::string();
+  };
+
+  // The script never switches projects. Use the explicit native Open action next.
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.drv->frame();
+  f.screen.ui()->handle_event(ui::Event::wheel({main_rect.x1() - 2, main_rect.cy()}, 1000));
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(toggle("project_location"));
+  ASSERT_NE(widget("a2/main/project_location/directory"), nullptr);
+  widget("a2/main/project_location/directory")->string.assign(destination); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("a2/main/project_location/open"));
+  ASSERT_NO_FATAL_FAILURE(wait([&] { return project.loaded() && !project.busy() && project.project()->id == project_id; }));
+  EXPECT_EQ(project.project()->revision, 3);
+  ASSERT_TRUE(area.set_tab_type(0, kEditorAnalysisGraph));
+  ASSERT_TRUE(area.editor().load_state({{"saved", true}}));
+  area.find_region(EditorArea::kSidebar)->set_size_1x(550); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("analysis_list"));
+  ASSERT_NO_FATAL_FAILURE(wait([&] { return widget("analysis_documents") && widget("analysis_documents")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(select("analysis_documents", 2, analysis_id));
+  ASSERT_NO_FATAL_FAILURE(wait([&] { return widget("analysis_rename") && widget("analysis_rename")->enabled; }));
+  ASSERT_NE(widget("analysis_saved_section"), nullptr);
+  widget("analysis_saved_section")->index.assign(1); f.drv->frame();
+  if (!widget("analysis_run_list")) { ASSERT_NO_FATAL_FAILURE(toggle("analysis_run_history")); }
+  ASSERT_NO_FATAL_FAILURE(click("analysis_run_list"));
+  ASSERT_NO_FATAL_FAILURE(wait([&] { return widget("analysis_run_rows") && widget("analysis_run_rows")->enabled; }));
+  ASSERT_EQ(widget("analysis_run_rows")->table->rows, 1);
+  ASSERT_NO_FATAL_FAILURE(select("analysis_run_rows", 2, run_id.substr(0, 8)));
+  ASSERT_NO_FATAL_FAILURE(wait([&] { return widget("analysis_run_read_result") && widget("analysis_run_read_result")->enabled; }));
+  EXPECT_EQ(widget("analysis_result_outputs"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("analysis_run_read_result"));
+  ASSERT_NO_FATAL_FAILURE(wait([&] { return widget("analysis_result_outputs") && widget("analysis_result_outputs")->enabled; }));
+  ASSERT_EQ(widget("analysis_result_outputs")->table->rows, 1);
+  ASSERT_NO_FATAL_FAILURE(select("analysis_result_outputs", 0, "table"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_result_table_grid"));
+  ASSERT_NE(widget("analysis_table_grid"), nullptr);
+  ASSERT_NE(widget("analysis_table_grid_jump_row"), nullptr);
+  ASSERT_NE(widget("analysis_table_grid_jump_column"), nullptr);
+  EXPECT_EQ(widget("analysis_table_grid")->table->rows, 64);
+  widget("analysis_table_grid_jump_row")->string.assign("0"); f.drv->frame();
+  widget("analysis_table_grid_jump_column")->string.assign("1"); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_jump"));
+  EXPECT_EQ(paragraph("analysis_table_grid_name"), "\"temperature_difference\"");
+  EXPECT_EQ(paragraph("analysis_table_grid_unit"), "\"K\"");
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "-9.5");
+  widget("analysis_table_grid_jump_row")->string.assign("72"); f.drv->frame();
+  widget("analysis_table_grid_jump_column")->string.assign("9"); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("analysis_table_grid_jump"));
+  EXPECT_EQ(widget("analysis_table_grid")->table->rows, 1);
+  EXPECT_EQ(widget("analysis_table_grid")->table->cell(0, 0), "72");
+  EXPECT_EQ(widget("analysis_table_grid")->table->selected.value(), 0);
+  EXPECT_EQ(paragraph("analysis_table_grid_name"), "\"sample_7\"");
+  EXPECT_EQ(paragraph("analysis_table_grid_value"), "576");
+  EXPECT_EQ(viewer.payload(), previous_payload); EXPECT_EQ(viewer.source().key(), previous_source);
+  EXPECT_EQ(viewer.evaluations_started(), evaluations); EXPECT_EQ(project.project()->revision, 3);
+  ASSERT_NO_FATAL_FAILURE(execute("sample = stk.project\nruns = sample.analysis_runs.list()['runs']\n"
+      "assert len(runs) == 1 and runs[0]['id'] == " + Json(run_id).dump() + "\n"
+      "assert runs[0]['status'] == 'succeeded'\n"
+      "assert sample.analysis_runs.get(runs[0]['id'])['result']['has_payload'] is False\n"
+      "assert sample.runs.list()['runs'] == [] and sample.requests.list()['requests'] == []\n"));
 }
 
 #ifndef _WIN32  // The Windows bridge test environment intentionally has no NumPy/VTK.
