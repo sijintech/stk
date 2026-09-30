@@ -1339,5 +1339,22 @@
   "analysis_results.type.float": "Float",
   "analysis_results.type.string": "String",
   "analysis_results.type.array": "Array",
-  "analysis_results.type.object": "Object"
+  "analysis_results.type.object": "Object",
+  "analysis_table_grid.open": "Table grid",
+  "analysis_table_grid.properties": "Properties",
+  "analysis_table_grid.hint": "Select a row and a visible column to inspect an exact cell. Source order is preserved; row and column indices start at 0.",
+  "analysis_table_grid.range": "Rows {first}–{last} / {total} · Columns {first_column}–{last_column} / {columns}",
+  "analysis_table_grid.empty": "This table has no rows.",
+  "analysis_table_grid.row": "Row",
+  "analysis_table_grid.previous_rows": "Previous rows",
+  "analysis_table_grid.next_rows": "Next rows",
+  "analysis_table_grid.previous_columns": "Previous columns",
+  "analysis_table_grid.next_columns": "Next columns",
+  "analysis_table_grid.column": "Cell column",
+  "analysis_table_grid.identity": "Source row {row} · column {column}",
+  "analysis_table_grid.name": "Exact column name",
+  "analysis_table_grid.unit_missing": "Unit is absent from the archived metadata.",
+  "analysis_table_grid.unit": "Exact unit label (no conversion)",
+  "analysis_table_grid.choose_row": "Select a row to inspect its cell in this column.",
+  "analysis_table_grid.open_cell": "Open cell in Properties"
 }

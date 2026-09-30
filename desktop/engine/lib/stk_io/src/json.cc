@@ -210,23 +210,27 @@ void dump(std::string &out, const Json &value, bool sort_keys, bool compact, boo
     }
     case Json::value_t::object: {
       out.push_back('{');
-      std::vector<const std::string *> keys;
-      keys.reserve(value.size());
+      // ordered_json resolves an object key by scanning its entries. Keep each value
+      // paired with its borrowed key so wide scientific tables serialize without a
+      // second linear lookup per column, in either source or sorted key order.
+      struct Entry { const std::string *key; const Json *value; };
+      std::vector<Entry> entries;
+      entries.reserve(value.size());
       for (auto it = value.begin(); it != value.end(); ++it) {
-        keys.push_back(&it.key());
+        entries.push_back({&it.key(), &it.value()});
       }
       if (sort_keys) {
-        std::sort(keys.begin(), keys.end(), [](const std::string *a, const std::string *b) { return *a < *b; });
+        std::sort(entries.begin(), entries.end(), [](const Entry &a, const Entry &b) { return *a.key < *b.key; });
       }
       bool first = true;
-      for (const std::string *key : keys) {
+      for (const auto &entry : entries) {
         if (!first) {
           out += compact ? "," : ", ";
         }
         first = false;
-        append_string(out, *key);
+        append_string(out, *entry.key);
         out += compact ? ":" : ": ";
-        dump(out, value.at(*key), sort_keys, compact, canonical);
+        dump(out, *entry.value, sort_keys, compact, canonical);
       }
       out.push_back('}');
       return;

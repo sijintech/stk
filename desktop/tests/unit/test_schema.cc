@@ -7,6 +7,7 @@
 #include "stk/io/schema.hh"
 
 #include <gtest/gtest.h>
+#include <limits>
 
 using namespace stk;
 using io::Json;
@@ -102,4 +103,45 @@ TEST(Json, PythonFloatReprAndCanonicalJson)
   EXPECT_EQ(io::python_json_dumps(io::parse_json(R"({"a":[1,{"b":2.5}]})")), R"({"a": [1, {"b": 2.5}]})");
   EXPECT_THROW(io::parse_json("[NaN]"), io::JsonError);
   EXPECT_THROW(io::parse_json("{"), io::JsonError);
+}
+
+TEST(Json, ObjectSerializationKeepsTypedValuesPairedWithTheirKeys)
+{
+  const Json value{{"z", {{"z", 1.0}, {"a", -0.0}}},
+      {"a", Json::array({std::numeric_limits<uint64_t>::max(), nullptr, "null", true})}, {"α", "line\n"}};
+  EXPECT_EQ(io::python_json_dumps(value, false, true),
+      R"({"z":{"z":1.0,"a":-0.0},"a":[18446744073709551615,null,"null",true],"α":"line\n"})");
+  EXPECT_EQ(io::python_json_dumps(value, true, true),
+      R"({"a":[18446744073709551615,null,"null",true],"z":{"a":-0.0,"z":1.0},"α":"line\n"})");
+  EXPECT_EQ(io::python_json_dumps(value, true, false),
+      R"({"a": [18446744073709551615, null, "null", true], "z": {"a": -0.0, "z": 1.0}, "α": "line\n"})");
+  EXPECT_EQ(io::canonical_json(value),
+      R"({"a":[18446744073709551615,null,"null",true],"z":{"a":0.0,"z":1.0},"α":"line\n"})");
+  EXPECT_EQ(value.begin().key(), "z"); // Encoding never reorders the original object.
+}
+
+TEST(Json, WideObjectsEncodeEveryKeyValuePairInSourceAndSortedOrder)
+{
+  Json value = Json::object();
+  auto &entries = value.get_ref<Json::object_t &>();
+  constexpr int count = 20000;
+  entries.reserve(count);
+  std::string source = "{", sorted = "{";
+  for (int i = count - 1; i >= 0; --i) {
+    // Controlled unique keys: append directly so fixture construction itself does
+    // not use ordered_json's per-insertion linear duplicate-key lookup.
+    const auto key = "column" + std::to_string(100000 + i);
+    entries.emplace_back(key, Json(i));
+    if (i != count - 1) { source += ','; }
+    source += '"' + key + "\":" + std::to_string(i);
+  }
+  for (int i = 0; i < count; ++i) {
+    if (i) { sorted += ','; }
+    sorted += "\"column" + std::to_string(100000 + i) + "\":" + std::to_string(i);
+  }
+  source += '}'; sorted += '}';
+  EXPECT_EQ(io::python_json_dumps(value, false, true), source);
+  EXPECT_EQ(io::python_json_dumps(value, true, true), sorted);
+  EXPECT_EQ(io::canonical_json(value), sorted);
+  EXPECT_EQ(value.begin().key(), "column119999");
 }

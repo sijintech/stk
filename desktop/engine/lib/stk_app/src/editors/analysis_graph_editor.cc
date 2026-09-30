@@ -2,6 +2,7 @@
 #include "stk/app/analysis_graph_canvas.hh"
 #include "stk/app/analysis_graph_state.hh"
 #include "stk/app/analysis_parameter_draft.hh"
+#include "stk/app/analysis_table_grid.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_table_view.hh"
 #include "stk/app/project_analyses.hh"
@@ -295,6 +296,14 @@ class AnalysisGraphEditor final : public Editor {
   AnalysisJsonText result_path_text_, result_scalar_text_;
   size_t result_path_page_ = 0, result_scalar_page_ = 0;
   std::string result_browser_error_;
+  bool result_grid_mode_ = false;
+  std::shared_ptr<const AnalysisTableGrid> table_grid_;
+  std::shared_ptr<const AnalysisTablePage> table_grid_page_;
+  std::vector<std::string> table_grid_headers_;
+  std::optional<size_t> table_grid_row_, table_grid_column_;
+  AnalysisJsonText table_grid_name_, table_grid_unit_, table_grid_value_;
+  std::optional<AnalysisJsonDescription> table_grid_description_;
+  size_t table_grid_name_page_ = 0, table_grid_unit_page_ = 0, table_grid_value_page_ = 0;
   AnalysisGraphCanvas canvas_;
   AppStore *store_ = nullptr;
   std::shared_ptr<const AnalysisGraphView> canvas_view_;
@@ -696,7 +705,7 @@ class AnalysisGraphEditor final : public Editor {
       result_view_ = runs_->result_inspection(); result_generation_ = runs_->result_generation();
       result_output_ = result_property_ = -1; result_path_.reset(); result_properties_.reset();
       result_scalar_description_.reset(); result_scalar_text_ = {}; result_path_text_ = {};
-      result_path_page_ = result_scalar_page_ = 0; result_browser_error_.clear(); ++result_browser_generation_;
+      result_path_page_ = result_scalar_page_ = 0; result_browser_error_.clear(); clear_table_grid(); ++result_browser_generation_;
     }
     if (canvas_view_ != state_->view()) {
       canvas_view_ = state_->view();
@@ -1122,6 +1131,7 @@ class AnalysisGraphEditor final : public Editor {
       if (result_container(description.type)) { properties = std::make_shared<const AnalysisJsonPropertyPage>(result_view_->children(path, offset)); }
       else { scalar = result_view_->scalar_text(path); }
       auto path_text = result_view_->path_text(path);
+      result_grid_mode_ = false;
       result_path_ = std::move(path); result_properties_ = std::move(properties); result_property_ = -1;
       result_scalar_description_ = result_container(description.type) ? std::nullopt : std::optional(description);
       result_scalar_text_ = std::move(scalar); result_path_text_ = std::move(path_text);
@@ -1177,7 +1187,7 @@ class AnalysisGraphEditor final : public Editor {
       spec.cell = [rows = std::move(rows)](int row, int col) { return rows.at(size_t(row)).at(size_t(col)); };
       spec.selected = {[selected = result_output_] { return selected; }, [this, valid, model](int index) {
         if (!valid() || index < 0 || size_t(index) >= model->outputs().size()) { return; }
-        result_output_ = index;
+        clear_table_grid(); result_output_ = index;
         const auto &output = model->outputs()[size_t(index)];
         if (output.delivered) { browse_result(output.path); }
         else {
@@ -1194,6 +1204,23 @@ class AnalysisGraphEditor final : public Editor {
       if (output.content_not_loaded) { panel->paragraph(ctx.tr("analysis_results.not_loaded")); }
       if (output.metadata_only) { panel->paragraph(ctx.tr("analysis_results.metadata")); }
     }
+    if (result_output_ >= 0 && size_t(result_output_) < model->outputs().size()) {
+      const auto &output = model->outputs()[size_t(result_output_)];
+      auto &views = panel->row();
+      const auto name = output.name;
+      views.button("analysis_result_table_grid", ctx.tr("analysis_table_grid.open"), [this, valid, model, name] {
+        if (!valid()) { return; }
+        try {
+          auto grid = AnalysisTableGrid::from_output(model, name);
+          table_grid_ = std::move(grid);
+          result_grid_mode_ = true; result_browser_error_.clear(); set_table_grid_page(0, 0);
+        }
+        catch (const std::exception &error) { result_browser_error_ = error.what(); result_grid_mode_ = false; ++result_browser_generation_; redraw(); }
+      }).disable(disabled || !output.delivered || output.delivery_type != "table" || output.content_not_loaded);
+      views.button("analysis_result_properties_view", ctx.tr("analysis_table_grid.properties"), [this, valid, model, name] {
+        if (valid()) { browse_result(AnalysisJsonPath{std::string("outputs"), name}); }
+      }).disable(disabled || !output.delivered);
+    }
     auto &issues = panel->row();
     issues.button("analysis_result_errors", ctx.tr("analysis_results.errors"), [this, valid, model] {
       if (valid() && model->errors().present) { result_output_ = -1; browse_result(model->errors().path); }
@@ -1202,6 +1229,7 @@ class AnalysisGraphEditor final : public Editor {
       if (valid() && model->warnings().present) { result_output_ = -1; browse_result(model->warnings().path); }
     }).disable(disabled || !model->warnings().present);
     if (!result_browser_error_.empty()) { panel->paragraph(text(result_browser_error_)); }
+    if (result_grid_mode_) { table_grid_panel(*panel, ctx, valid, disabled); return; }
     if (!result_path_) { return; }
     panel->label(ctx.tr("analysis_results.path"));
     if (result_path_text_.total_bytes == 0) { panel->paragraph(ctx.tr("analysis_results.root")); }
@@ -1272,6 +1300,156 @@ class AnalysisGraphEditor final : public Editor {
       const auto &text = path ? result_path_text_ : result_scalar_text_;
       if (page + 1 < text.pages.size()) { ++page; ++result_browser_generation_; redraw(); }
     }).disable(disabled || index + 1 >= value.pages.size());
+  }
+
+  void clear_table_grid()
+  {
+    result_grid_mode_ = false; table_grid_.reset(); table_grid_page_.reset(); table_grid_headers_.clear();
+    table_grid_row_.reset(); table_grid_column_.reset(); table_grid_description_.reset();
+    table_grid_name_ = {}; table_grid_unit_ = {}; table_grid_value_ = {};
+    table_grid_name_page_ = table_grid_unit_page_ = table_grid_value_page_ = 0;
+  }
+
+  void select_table_grid_cell(const std::optional<size_t> row, const size_t column)
+  {
+    if (!table_grid_ || column >= table_grid_->columns().size() || (row && *row >= table_grid_->row_count())) { return; }
+    try {
+      auto name = result_view_->scalar_text(table_grid_->column_name_path(column));
+      AnalysisJsonText unit, value;
+      std::optional<AnalysisJsonDescription> description;
+      if (table_grid_->columns()[column].has_unit) { unit = result_view_->scalar_text(table_grid_->unit_path(column)); }
+      if (row) {
+        const auto path = table_grid_->cell_path(*row, column); description = result_view_->describe(path);
+        if (!result_container(description->type)) { value = result_view_->scalar_text(path); }
+      }
+      table_grid_row_ = row; table_grid_column_ = column; table_grid_description_ = std::move(description);
+      table_grid_name_ = std::move(name); table_grid_unit_ = std::move(unit); table_grid_value_ = std::move(value);
+      table_grid_name_page_ = table_grid_unit_page_ = table_grid_value_page_ = 0;
+      result_browser_error_.clear(); ++result_browser_generation_; redraw();
+    }
+    catch (const std::exception &error) { result_browser_error_ = error.what(); redraw(); }
+  }
+
+  void set_table_grid_page(const size_t row, const size_t column)
+  {
+    if (!table_grid_) { return; }
+    try {
+      auto page = std::make_shared<const AnalysisTablePage>(table_grid_->page(row, column));
+      std::vector<std::string> headers;
+      for (const auto index : page->columns) {
+        const auto &item = table_grid_->columns()[index];
+        std::string label = item.label + (item.label_truncated ? " …" : "");
+        if (item.has_unit) {
+          const auto unit = table_grid_->unit_description(index);
+          label += " [" + unit.preview + (unit.preview_truncated ? " …" : "") + "]";
+        }
+        headers.push_back(std::move(label));
+      }
+      table_grid_page_ = std::move(page); table_grid_headers_ = std::move(headers);
+      table_grid_row_.reset(); table_grid_column_.reset(); table_grid_description_.reset();
+      table_grid_name_ = {}; table_grid_unit_ = {}; table_grid_value_ = {};
+      table_grid_name_page_ = table_grid_unit_page_ = table_grid_value_page_ = 0;
+      result_browser_error_.clear(); ++result_browser_generation_;
+      if (!table_grid_page_->columns.empty()) { select_table_grid_cell(std::nullopt, table_grid_page_->columns.front()); }
+      redraw();
+    }
+    catch (const std::exception &error) { result_browser_error_ = error.what(); redraw(); }
+  }
+
+  void table_grid_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool disabled)
+  {
+    if (!table_grid_ || !table_grid_page_) { return; }
+    const auto grid = table_grid_; const auto page = table_grid_page_;
+    const auto current = [this, valid, grid, page] { return valid() && result_grid_mode_ && table_grid_ == grid && table_grid_page_ == page; };
+    layout.paragraph(ctx.tr("analysis_table_grid.hint"));
+    layout.paragraph(ctx.store.catalog().format("analysis_table_grid.range", {
+        {"first", page->rows.empty() ? "—" : std::to_string(page->row_offset)},
+        {"last", page->rows.empty() ? "—" : std::to_string(page->row_offset + page->rows.size() - 1)},
+        {"total", std::to_string(page->total_rows)},
+        {"first_column", page->columns.empty() ? "—" : std::to_string(page->column_offset)},
+        {"last_column", page->columns.empty() ? "—" : std::to_string(page->columns.back())},
+        {"columns", std::to_string(page->total_columns)}}));
+    if (page->rows.empty()) { layout.paragraph(ctx.tr("analysis_table_grid.empty")); }
+    ui::TableSpec spec;
+    spec.columns = {{std::string(ctx.tr("analysis_table_grid.row")), 4, false}};
+    for (const auto &title : table_grid_headers_) { spec.columns.push_back({title, 8, false}); }
+    spec.rows = int(page->rows.size()); spec.visible_rows = float(std::max(1, std::min(6, spec.rows)));
+    spec.data_version = result_browser_generation_;
+    spec.cell = [page](int row, int column) {
+      if (column == 0) { return std::to_string(page->row_offset + size_t(row)); }
+      const auto &value = page->rows.at(size_t(row)).at(size_t(column - 1));
+      return value.preview + (value.preview_truncated ? " …" : "");
+    };
+    const int selected = table_grid_row_ && *table_grid_row_ >= page->row_offset &&
+        *table_grid_row_ - page->row_offset < page->rows.size() ? int(*table_grid_row_ - page->row_offset) : -1;
+    spec.selected = {[selected] { return selected; }, [this, current, page](int row) {
+      if (!current() || row < 0 || size_t(row) >= page->rows.size() || page->columns.empty()) { return; }
+      select_table_grid_cell(page->row_offset + size_t(row), table_grid_column_.value_or(page->columns.front()));
+    }};
+    layout.table("analysis_table_grid", std::move(spec)).disable(disabled);
+    auto &row_pages = layout.row();
+    row_pages.button("analysis_table_grid_rows_previous", ctx.tr("analysis_table_grid.previous_rows"), [this, current, page] {
+      if (current() && page->row_offset) { set_table_grid_page(page->row_offset >= 64 ? page->row_offset - 64 : 0, page->column_offset); }
+    }).disable(disabled || page->row_offset == 0);
+    row_pages.button("analysis_table_grid_rows_next", ctx.tr("analysis_table_grid.next_rows"), [this, current, page] {
+      if (current() && page->next_row_offset) { set_table_grid_page(*page->next_row_offset, page->column_offset); }
+    }).disable(disabled || !page->next_row_offset);
+    auto &column_pages = layout.row();
+    column_pages.button("analysis_table_grid_columns_previous", ctx.tr("analysis_table_grid.previous_columns"), [this, current, page] {
+      if (current() && page->column_offset) { set_table_grid_page(page->row_offset, page->column_offset >= 8 ? page->column_offset - 8 : 0); }
+    }).disable(disabled || page->column_offset == 0);
+    column_pages.button("analysis_table_grid_columns_next", ctx.tr("analysis_table_grid.next_columns"), [this, current, page] {
+      if (current() && page->next_column_offset) { set_table_grid_page(page->row_offset, *page->next_column_offset); }
+    }).disable(disabled || !page->next_column_offset);
+    std::vector<std::string> columns; int column_index = -1;
+    for (size_t index = 0; index < page->columns.size(); ++index) {
+      const auto &column = grid->columns()[page->columns[index]];
+      columns.push_back(std::to_string(column.index) + " · " + column.label + (column.label_truncated ? " …" : ""));
+      if (table_grid_column_ == page->columns[index]) { column_index = int(index); }
+    }
+    layout.prop(ctx.tr("analysis_table_grid.column")).dropdown("analysis_table_grid_column", std::move(columns),
+        {[column_index] { return column_index; }, [this, current, page](int index) {
+      if (current() && index >= 0 && size_t(index) < page->columns.size()) { select_table_grid_cell(table_grid_row_, page->columns[size_t(index)]); }
+    }}).disable(disabled || page->columns.empty());
+    if (!table_grid_column_) { return; }
+    const auto &column = grid->columns()[*table_grid_column_];
+    layout.label(ctx.store.catalog().format("analysis_table_grid.identity", {{"row", table_grid_row_ ? std::to_string(*table_grid_row_) : "—"},
+        {"column", std::to_string(*table_grid_column_)}}));
+    table_grid_text(layout, ctx, current, disabled, 0);
+    if (!column.has_unit) { layout.paragraph(ctx.tr("analysis_table_grid.unit_missing")); }
+    else { table_grid_text(layout, ctx, current, disabled, 1); }
+    if (!table_grid_description_) { layout.paragraph(ctx.tr("analysis_table_grid.choose_row")); return; }
+    layout.label(std::string(ctx.tr("analysis_results.exact")) + " · " + std::string(ctx.tr(result_type_key(table_grid_description_->type))));
+    if (result_container(table_grid_description_->type)) { layout.paragraph(table_grid_description_->preview); }
+    else { table_grid_text(layout, ctx, current, disabled, 2); }
+    layout.button("analysis_table_grid_open_cell", ctx.tr("analysis_table_grid.open_cell"), [this, current, grid] {
+      if (current() && table_grid_row_ && table_grid_column_) { browse_result(grid->cell_path(*table_grid_row_, *table_grid_column_)); }
+    }).disable(disabled);
+  }
+
+  void table_grid_text(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool disabled, const int kind)
+  {
+    const auto &value = kind == 0 ? table_grid_name_ : kind == 1 ? table_grid_unit_ : table_grid_value_;
+    auto &page = kind == 0 ? table_grid_name_page_ : kind == 1 ? table_grid_unit_page_ : table_grid_value_page_;
+    if (value.pages.empty()) { return; }
+    const std::string key = kind == 0 ? "analysis_table_grid_name" : kind == 1 ? "analysis_table_grid_unit" : "analysis_table_grid_value";
+    if (kind < 2) { layout.label(ctx.tr(kind == 0 ? "analysis_table_grid.name" : "analysis_table_grid.unit")); }
+    layout.scope(key).paragraph(value.pages.at(page));
+    if (value.pages.size() <= 1) { return; }
+    layout.label(ctx.store.catalog().format("analysis_results.text_page", {{"page", std::to_string(page + 1)},
+        {"total", std::to_string(value.pages.size())}, {"bytes", std::to_string(value.total_bytes)}}));
+    auto &buttons = layout.row();
+    buttons.button(key + "_previous", ctx.tr("analysis_documents.previous"), [this, valid, kind] {
+      if (!valid()) { return; }
+      auto &index = kind == 0 ? table_grid_name_page_ : kind == 1 ? table_grid_unit_page_ : table_grid_value_page_;
+      if (index) { --index; ++result_browser_generation_; redraw(); }
+    }).disable(disabled || page == 0);
+    buttons.button(key + "_next", ctx.tr("analysis_documents.next"), [this, valid, kind] {
+      if (!valid()) { return; }
+      auto &index = kind == 0 ? table_grid_name_page_ : kind == 1 ? table_grid_unit_page_ : table_grid_value_page_;
+      const auto &text = kind == 0 ? table_grid_name_ : kind == 1 ? table_grid_unit_ : table_grid_value_;
+      if (index + 1 < text.pages.size()) { ++index; ++result_browser_generation_; redraw(); }
+    }).disable(disabled || page + 1 >= value.pages.size());
   }
 
   void documents_panel(ui::Layout &layout, EditorContext &ctx)

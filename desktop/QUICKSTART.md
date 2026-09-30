@@ -115,6 +115,16 @@ CMake、Ninja 和 STK science / visualization / control 依赖安装在专用 ve
 不需要 Runtime/SSH/Hub；数据是合成演示场。具体检查步骤和布局恢复见[离线工作台演示](../examples/project_scan/OFFLINE.md)。
 新增项目、Python、文件、预览及远程运行的真机检查见[工作台验收清单](../docs/workbench-acceptance.md)。
 
+## 离线检查保存分析与结果表格
+
+在 **文件 → Python → 运行 Python 文件** 中明确执行 `examples/project_analysis/offline.py` 的绝对路径。
+它创建全新的合成 CSV 项目、冻结输入、保存定义，并启动一次本机表格分析；不需要服务器、网络或模型服务。
+现有项目和 Viewer 保持原状。完成后按控制台提供的目录明确打开新项目，进入“保存的分析 → 运行”，
+读取归档并打开“表格视图”，验证行列分页、单位与精确值。
+
+该示例是软件验收数据；观察超时不代表取消，重新运行脚本会创建另一个新项目。
+完整步骤、预期数值和只读恢复方法见[离线分析验收](../examples/project_analysis/README.md)。
+
 ## 测试项目表格
 
 更新源码后重跑脚本进行增量编译（本次不要用 `--launch-only`）。主窗口内选择

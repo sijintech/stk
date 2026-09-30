@@ -1339,5 +1339,22 @@
   "analysis_results.type.float": "浮点数",
   "analysis_results.type.string": "字符串",
   "analysis_results.type.array": "数组",
-  "analysis_results.type.object": "对象"
+  "analysis_results.type.object": "对象",
+  "analysis_table_grid.open": "表格视图",
+  "analysis_table_grid.properties": "属性",
+  "analysis_table_grid.hint": "选择行和当前页的列，检查精确单元值。保持原始顺序，行列索引从 0 开始。",
+  "analysis_table_grid.range": "行 {first}–{last} / {total} · 列 {first_column}–{last_column} / {columns}",
+  "analysis_table_grid.empty": "此表格没有数据行。",
+  "analysis_table_grid.row": "行",
+  "analysis_table_grid.previous_rows": "上一页行",
+  "analysis_table_grid.next_rows": "下一页行",
+  "analysis_table_grid.previous_columns": "上一页列",
+  "analysis_table_grid.next_columns": "下一页列",
+  "analysis_table_grid.column": "单元格列",
+  "analysis_table_grid.identity": "源行 {row} · 列 {column}",
+  "analysis_table_grid.name": "完整列名",
+  "analysis_table_grid.unit_missing": "归档元数据未提供此列单位。",
+  "analysis_table_grid.unit": "完整单位标签（未转换）",
+  "analysis_table_grid.choose_row": "请选择一行，检查此列对应的单元格。",
+  "analysis_table_grid.open_cell": "在属性中打开单元格"
 }
