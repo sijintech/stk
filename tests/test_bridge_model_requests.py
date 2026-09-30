@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from suan.project import ProjectStore
+from suan.desktop_bridge.schema import validate_outgoing, validate_params
 from suan.project.aliyun import ALIYUN_ADAPTER, API_KEY_ENV, MODEL_ENV, BASE_URL
 from suan.project.request_executor import ConfirmedCancellation
 from suan.scripting import Project
@@ -14,15 +15,146 @@ from test_request_executor import ControlledAdapter, StreamingAdapter, eventuall
 from test_desktop_scripts import scripts, execute  # noqa: F401
 
 
-def prepare(harness, model):
+def prepare(harness, model, *, prompt_version="stk.text/1"):
     store, _ = model
     context = capture(model)
     message = store.discussion.add('Explain saved values', message_id=str(uuid4()), context_id=context['id'])
     info = harness.call('project.open', {'directory': str(store.directory)})['project']
     p = Project(lambda method, params: harness.call(method, params), info['handle'])
     saved = p.requests.create(message['id'], request_id=str(uuid4()),
-                             configuration={'adapter': ALIYUN_ADAPTER, 'model': 'fixture-model'})
+                             configuration={'adapter': ALIYUN_ADAPTER, 'model': 'fixture-model'},
+                             prompt_version=prompt_version)
     return p, saved
+
+
+def parameter_reply(model, saved, *, value=320):
+    _, ids = model
+    return json.dumps({'format': 'stk.parameter-edits/1', 'context_id': saved['context_id'],
+        'base_revision': saved['source_revision'], 'summary': 'Inspect a higher temperature.',
+        'edits': [{'record_id': ids['first'], 'field_id': ids['temperature'], 'value': value}]})
+
+
+def completed_parameter(harness, model, *, prompt_version='stk.parameter-edits/1', text=None):
+    p, saved = prepare(harness, model, prompt_version=prompt_version)
+    store, _ = model
+    owner = str(uuid4())
+    assert store.requests._claim(saved['id'], executor_id=owner)[1]
+    store.requests._complete(saved['id'], executor_id=owner,
+                             text=parameter_reply(model, saved) if text is None else text)
+    return p, saved
+
+
+def test_parameter_reply_requires_explicit_conversion_and_separate_apply(inproc, model):
+    h = inproc()
+    p, saved = prepare(h, model, prompt_version='stk.parameter-edits/1')
+    store, ids = model
+    before, history = store.snapshot(), store.history()
+    executor = h.bridge.projects._executor
+    adapter = ControlledAdapter(parameter_reply(model, saved))
+    executor._adapters[ALIYUN_ADAPTER] = adapter
+    try:
+        assert p.requests.edit_proposal(saved['id']) == {'request_id': saved['id'], 'draft': None, 'proposal': None}
+        assert p.requests.start(saved['id'])['status'] == 'running'
+        assert adapter.started.wait(5)
+    finally:
+        adapter.release.set()
+    eventually(lambda: idle(executor))
+    assert len(adapter.inputs) == 1
+    assert adapter.inputs[0]['prompt_version'] == 'stk.parameter-edits/1'
+    assert p.requests.get(saved['id'])['status'] == 'completed'
+    assert p.drafts.list()['drafts'] == []
+    assert p.requests.edit_proposal(saved['id']) == {'request_id': saved['id'], 'draft': None, 'proposal': None}
+    result = p.requests.propose_edits(saved['id'], expected_revision=1)
+    assert result['replayed'] is False and result['draft']['status'] == 'pending'
+    assert result['draft']['commands'] == [{'op': 'set_cell', 'table_id': ids['table'],
+        'record_id': ids['first'], 'field_id': ids['temperature'], 'value': 320}]
+    assert result['proposal']['message_id'] == saved['assistant_message_id']
+    assert result['proposal']['context_id'] == saved['context_id']
+    assert result['proposal']['draft_id'] == result['draft']['id']
+    assert p.requests.edit_proposal(saved['id']) == {k: v for k, v in result.items() if k != 'replayed'}
+    assert p.requests.propose_edits(saved['id'], expected_revision=1) == {**result, 'replayed': True}
+    assert store.snapshot() == before and store.history() == history
+    assert h.events_of('project.changed') == []
+    with store._connect() as db:
+        assert db.execute('SELECT count(*) FROM run_plans').fetchone()[0] == 0
+    assert p.drafts.apply(result['draft']['id'], expected_revision=1)['revision'] == 2
+    assert store.snapshot()['tables'][0]['records'][0]['values'][ids['temperature']] == 320
+    assert len(adapter.inputs) == 1 and not h.violations
+
+
+@pytest.mark.parametrize('terminal', ['applied', 'discarded'])
+def test_parameter_pair_reopens_and_recovers_terminal_receipt_without_rebase(inproc, model, terminal):
+    h = inproc()
+    p, saved = completed_parameter(h, model)
+    store, _ = model
+    pair = p.requests.propose_edits(saved['id'], expected_revision=1)
+    if terminal == 'applied':
+        p.drafts.apply(pair['draft']['id'], expected_revision=1)
+        p.undo(expected_revision=2)
+    else:
+        p.drafts.discard(pair['draft']['id'])
+        p.apply([{'op': 'rename_table', 'id': model[1]['table'], 'name': 'Changed'}], expected_revision=1)
+    before, history = store.snapshot(), store.history()
+    h.call('project.close', {'handle': p.handle})
+    second = inproc(state='reopened')
+    info = second.call('project.open', {'directory': str(store.directory)})['project']
+    p = Project(lambda method, params: second.call(method, params), info['handle'])
+    restored = p.requests.edit_proposal(saved['id'])
+    assert restored['draft']['id'] == pair['draft']['id'] and restored['draft']['status'] == terminal
+    assert restored['proposal'] == pair['proposal']
+    assert p.requests.propose_edits(saved['id'], expected_revision=1) == {**restored, 'replayed': True}
+    assert p.drafts.list()['drafts'][0]['status'] == terminal
+    assert store.snapshot() == before and store.history() == history
+    assert second.events_of('project.changed') == [] and not second.violations
+
+
+@pytest.mark.parametrize('scenario,code', [
+    ('pending', 'conflict'), ('text', 'invalid_params'), ('malformed', 'invalid_params'),
+    ('stale', 'conflict'), ('wrong-revision', 'conflict'), ('foreign-project', 'invalid_params'),
+])
+def test_parameter_conversion_errors_preserve_project_and_create_no_pair(inproc, model, scenario, code):
+    h = inproc()
+    if scenario == 'pending':
+        p, saved = prepare(h, model, prompt_version='stk.parameter-edits/1')
+    else:
+        p, saved = completed_parameter(h, model,
+            prompt_version='stk.text/1' if scenario == 'text' else 'stk.parameter-edits/1',
+            text='```json\n{}\n```' if scenario == 'malformed' else None)
+    store, ids = model
+    if scenario == 'stale':
+        store.apply([{'op': 'rename_table', 'id': ids['table'], 'name': 'Changed externally'}], expected_revision=1)
+    before, history = store.snapshot(), store.history()
+    handle = p.handle
+    if scenario == 'foreign-project':
+        handle = h.call('project.create', {'directory': str(store.directory.parent / 'other'), 'name': 'Other'})['project']['handle']
+    assert h.error('project.requests.propose_edits', {'handle': handle, 'request_id': saved['id'],
+        'expected_revision': 2 if scenario == 'wrong-revision' else 1})['code'] == code
+    assert p.requests.edit_proposal(saved['id']) == {'request_id': saved['id'], 'draft': None, 'proposal': None}
+    assert store.drafts.list()['drafts'] == [] and store.discussion.proposals()['proposals'] == []
+    assert store.snapshot() == before and store.history() == history
+    assert h.events_of('project.changed') == [] and not h.violations
+
+
+def test_parameter_contract_rejects_extra_fields_invalid_preconditions_and_partial_pairs(inproc, model):
+    h = inproc()
+    p, saved = completed_parameter(h, model)
+    params = {'handle': p.handle, 'request_id': saved['id'], 'expected_revision': 1}
+    for invalid in (None, True, -1, 1.5, 2**63, '1'):
+        malformed = {**params, 'expected_revision': invalid}
+        assert validate_params('project.requests.propose_edits', malformed)
+        assert h.error('project.requests.propose_edits', malformed)['code'] == 'invalid_params'
+    for key, value in [('commands', []), ('draft_id', str(uuid4())), ('force', True), ('api_key', 'never-stored')]:
+        assert h.error('project.requests.propose_edits', {**params, key: value})['code'] == 'invalid_params'
+    assert h.error('project.requests.edit_proposal', params)['code'] == 'invalid_params'
+    pair = p.requests.propose_edits(saved['id'], expected_revision=1)
+    read = {k: v for k, v in pair.items() if k != 'replayed'}
+    for method, result in [('project.requests.propose_edits', pair), ('project.requests.edit_proposal', read)]:
+        assert not validate_outgoing({'id': 'schema-check', 'result': result}, method)
+        for key in ('draft', 'proposal'):
+            assert validate_outgoing({'id': 'schema-check', 'result': {**result, key: {}}}, method)
+            assert validate_outgoing({'id': 'schema-check', 'result': {**result, key: None}}, method)
+            assert validate_outgoing({'id': 'schema-check', 'result': {**result, key: {**result[key], 'extra': True}}}, method)
+    assert not h.violations
 
 
 def test_missing_credentials_status_and_closed_handles_never_claim(inproc, model, monkeypatch):

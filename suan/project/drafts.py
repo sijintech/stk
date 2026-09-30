@@ -136,24 +136,34 @@ class Drafts:
                     return existing
             raise
         normalized = _commands(self.store, proposal["commands"], expected_revision)
+        with self.store._connect(write=True) as db:
+            return self._save_validated(db, normalized, expected_revision=expected_revision,
+                                        title=title, draft_id=draft_id, request_sha256=request_sha256)
+
+    def _save_validated(self, db, normalized, *, expected_revision, title, draft_id, request_sha256):
+        """Save already-previewed commands within the caller's write transaction.
+
+        The original request digest can differ from the normalized commands when
+        preview generated UUIDs. Callers must preview first; this final CAS and
+        insert allow a durable proposal and its provenance to commit together.
+        """
+        self._require(db)
+        existing = self._existing(db, draft_id, request_sha256)
+        if existing is not None:
+            return existing
+        current = db.execute("SELECT revision FROM project").fetchone()[0]
+        if current != expected_revision:
+            raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {current}")
         draft = {"id": draft_id, "project_id": self.store._project_id, "title": title,
                  "base_revision": expected_revision, "commands": normalized,
                  "created_at": datetime.now(timezone.utc).isoformat(), "status": "pending",
                  "applied_revision": None, "closed_at": None}
         digest = _digest({**{key: draft[key] for key in _IMMUTABLE}, "request_sha256": request_sha256})
-        with self.store._connect(write=True) as db:
-            self._require(db)
-            existing = self._existing(db, draft_id, request_sha256)
-            if existing is not None:
-                return existing
-            current = db.execute("SELECT revision FROM project").fetchone()[0]
-            if current != expected_revision:
-                raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {current}")
-            db.execute("""INSERT INTO project_drafts
-                (id, project_id, title, base_revision, commands, request_sha256, sha256, created_at,
-                 status, applied_revision, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL)""",
-                       (draft_id, draft["project_id"], title, expected_revision, _canonical(normalized),
-                        request_sha256, digest, draft["created_at"]))
+        db.execute("""INSERT INTO project_drafts
+            (id, project_id, title, base_revision, commands, request_sha256, sha256, created_at,
+             status, applied_revision, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL)""",
+                   (draft_id, draft["project_id"], title, expected_revision, _canonical(normalized),
+                    request_sha256, digest, draft["created_at"]))
         return draft
 
     def get(self, draft_id):

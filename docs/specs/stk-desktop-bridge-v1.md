@@ -519,7 +519,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.discussion.list` | `{handle, offset?, limit?}` | `{messages: [message summary], next_offset: integer|null}` |
 | `project.discussion.link_draft` | `{handle, proposal_id, message_id, draft_id}` | `{proposal}` |
 | `project.discussion.proposals` | `{handle, offset?, limit?, draft_id?}` | `{proposals: [proposal], next_offset: integer|null}` |
-| `project.requests.create` | `{handle, request_id, message_id, configuration}` | `{request}` |
+| `project.requests.create` | `{handle, request_id, message_id, configuration, prompt_version?}` | `{request}` |
 | `project.requests.get` | `{handle, request_id}` | `{request}` |
 | `project.requests.progress` | `{handle, request_id}` | `{request, progress: {executor_id, sequence, text, text_bytes}\|null}` (bounded unsaved text; no send) |
 | `project.requests.list` | `{handle, offset?, limit?}` | `{requests: [request], next_offset: integer|null}` |
@@ -527,6 +527,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.requests.provider` | `{handle}` | `{provider}` (local configuration presence only) |
 | `project.requests.start` | `{handle, request_id}` | `{request}` (durable claim or existing state) |
 | `project.requests.recover` | `{handle, request_id}` | `{request}` (local abandoned-owner reconciliation only) |
+| `project.requests.propose_edits` | `{handle, request_id, expected_revision}` | `{request_id, draft, proposal, replayed: boolean}` (save a review draft; no apply) |
+| `project.requests.edit_proposal` | `{handle, request_id}` | `{request_id, draft, proposal}` (full saved pair or both null; no conversion) |
 | `project.history` | `{handle}` | `{history: [{revision, created_at, commands}]}` |
 | `project.backup` | `{handle}` | `{path, project_id, revision, format_version}` |
 | `project.upgrade` | `{handle, expected_revision}` | `{upgraded, revision, format_version, backup: object|null}` |
@@ -693,15 +695,19 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   nor changes its status; context selection is not an authorization scope for draft commands.
   Draft application retains all format 6 checks and atomic receipt semantics. See
   [context and discussion guide](../project-contexts.md) for usage and recovery boundaries.
-- `project.requests.*` is an optional format 8 extension for durable text-request records. Check
+- `project.requests.*` is an optional format 8 extension for durable model-request records. Check
   `hello.methods`; earlier formats return `unsupported` and require explicit backup/upgrade.
-  The bridge exposes create/get/list/cancel/provider/start/recover/progress. Creating a record saves intent;
+  The bridge exposes create/get/list/cancel/provider/start/recover/progress/propose_edits/edit_proposal.
+  Creating a record saves intent;
   only explicit start can send the saved input. Get/list/progress, opening a project and restoring a view
   never send or poll a provider. These methods do not change project revision/history/undo, apply
   a draft or submit a Runtime task, and emit no event, including no `project.changed`. Refresh
-  explicitly to read changes from SQLite. The Python facade exposes the same eight operations as
-  `p.requests.*` on its pinned handle; older bridges may expose only the first four or seven methods.
+  explicitly to read changes from SQLite. The Python facade exposes these operations as
+  `p.requests.*` on its pinned handle; older bridges may expose only a subset.
   Progress is a separately optional capability: an older bridge can still send and read complete replies.
+  Parameter proposals are also optional: require both proposal methods before exposing that mode,
+  and use ordinary text requests with older bridges. The default Python create call omits
+  `prompt_version` from the wire for compatibility.
 - Provider returns exactly `{adapter, base_url, key_env, model_env, configured, model}` inside
   `{provider}`. The built-in adapter is `aliyun-token-plan/1`, with fixed base URL
   `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`, key environment variable
@@ -720,7 +726,11 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   Create requires a caller-retained `request_id` and an existing `user` message in this project.
   It binds that message's saved context and source revision; it does not select the current table,
   add other conversation history or reread live data. `assistant_message_id` is derived from the
-  project/request UUIDs and reserved against manual message insertion. `prompt_version` is `stk.text/1`;
+  project/request UUIDs and reserved against manual message insertion. Optional `prompt_version`
+  defaults to `stk.text/1`; the only other supported value is `stk.parameter-edits/1`.
+  Storage remains format 8, but older readers that recognize only `stk.text/1` may reject a
+  structured request or a request list containing one. Forward compatibility with those readers
+  is not promised; use a reader supporting both prompt versions for projects containing this mode.
   `input_sha256` covers canonical UTF-8 JSON containing exactly the saved context, user message,
   normalized configuration and prompt version. Complete input is limited to 1 MiB. Get/list return
   the same metadata shape without input values or message text. Each read verifies record checksums,
@@ -732,10 +742,49 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   configurations always contain this output limit; a supplied temperature is normalized to a number.
   URLs, credential fields and arbitrary provider parameters are not accepted. These names do not
   resolve to dynamic imports or network endpoints. Repeating a request UUID with the same message
-  and normalized configuration returns its saved record, including its current terminal state;
+  and normalized configuration/prompt version returns its saved record, including its current terminal state;
   different input under that UUID is `conflict`. A changed input requires a new UUID. List defaults
   to offset 0 and limit 100, accepts a nonnegative signed-64-bit offset and limit 1–100, preserves
   creation order, includes terminal records and ends with `next_offset=null`.
+- `project.requests.propose_edits` explicitly converts a **completed** `stk.parameter-edits/1`
+  request into one ordinary saved draft and its assistant-message provenance. Completion alone
+  saves only the assistant text; it does not parse a proposal, save a draft, focus a desktop view
+  or apply changes. Conversion accepts only `{handle, request_id, expected_revision}`;
+  callers cannot supply replacement text, commands, IDs, titles, credentials or a force option.
+  A request that has not completed returns `conflict`; an incompatible prompt version or invalid
+  response document returns `invalid_params`.
+  The saved assistant text must be one strict JSON object with exactly
+  `{format: "stk.parameter-edits/1", context_id, base_revision, summary, edits}`. Summary is
+  nonblank, valid UTF-8 and at most 4096 characters; it remains in the original assistant message.
+  Each of 1–1000 edits is exactly `{record_id, field_id, value}` with a unique target. IDs and
+  base revision must match the immutable captured context. Duplicate JSON keys, code fences,
+  nonfinite values, extra members and incomplete documents are rejected.
+  Only captured, explicitly selected scalar literal cells (`text`, `integer`, `number`, `boolean`)
+  are eligible; explicit null and captured unset cells are allowed. Omitted values/content,
+  missing objects, JSON fields and formula/reference targets are rejected. Each canonical value
+  is at most 16 KiB and must satisfy the existing field type, including signed-64-bit integers.
+  The compiler derives table identity from the saved context and emits only ordinary `set_cell`
+  commands. A bounded preview validates these commands against the current project. Saving then
+  rechecks original request/result identity, current target type/unit/membership and revision in
+  the same transaction that inserts both the draft and provenance. A failure saves neither.
+- On first conversion, `expected_revision` must equal both the request's original source revision
+  and the current project revision. Stale data returns `conflict`; conversion never rebases.
+  Returned `draft` is the full canonical `projectDraft` (including normalized commands and status);
+  `proposal` is the full `projectDiscussionProposal` linking that draft to the saved assistant and
+  its context. Both IDs are derived deterministically from the project/request identity.
+  `replayed=false` means the pair was first saved; an identical repeat returns `replayed=true`.
+  Existing pairs can be recovered after later project edits, application, discard or undo, provided
+  the caller still supplies the original source revision. The original terminal draft receipt is
+  returned, never revived or copied. A different precondition or conflicting occupied ID is rejected.
+  A completed response with cancellation intent still requires this explicit conversion action.
+- `project.requests.edit_proposal` is a read-only lookup by request UUID. It returns exactly
+  `{request_id, draft, proposal}` with both objects null if no conversion has been saved, including
+  for ordinary text and pending requests. A saved pair is checked against the original request,
+  response, commands and provenance; terminal status is preserved. Partial or mismatched pairs
+  are errors, not absent results. This lookup never parses an absent pair into a new proposal.
+  Neither proposal method changes format 8, project revision/history/undo, runs a task, calls a
+  model, applies a draft or emits an event. Applying the saved draft remains a separate explicit
+  `project.drafts.apply` action with its existing revision and durable replay checks.
 - Saved request states are `pending` (intent saved, not claimed), `running` (claim persisted before
   a possible send), `completed` (full response and assistant message atomically saved), `failed`
   (known failure), `cancelled` (before dispatch or with confirmed cancellation evidence), and

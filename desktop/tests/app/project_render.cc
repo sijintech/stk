@@ -31,8 +31,9 @@ int main(int argc, char **argv)
   }
   if (output.empty()) { return 2; }
   const bool ai_stream = editor == "ai_stream";
-  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream;
-  const int canvas_width = editor == "ai_narrow" ? 760 : 1280;
+  const bool ai_proposal = editor == "ai_proposal" || editor == "ai_proposal_narrow";
+  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal;
+  const int canvas_width = editor == "ai_narrow" || editor == "ai_proposal_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions bo;
@@ -234,18 +235,27 @@ int main(int argc, char **argv)
         ok = ok && discussion.capture(table, {record, "40000001-4444-4444-8444-444444444444"}, {temperature, derived},
             lang == "zh" ? "前两个温度案例" : "First two temperature cases") && wait() && !discussion.context().empty();
         const auto context_id = io::get_string(discussion.context(), "id");
-        ok = ok && discussion.add_message(lang == "zh" ? "请比较这两个温度案例。\n先检查参数变化，再决定是否启动计算。" :
-            "Compare these two temperature cases.\nReview the parameter change before deciding whether to run.") && wait();
-        state.set_review_source(io::Json::array({{{"op", "set_cell"}, {"table_id", table}, {"record_id", record},
-            {"field_id", temperature}, {"value", 350}}}).dump());
-        ok = ok && state.preview() && wait() && state.save_review("350 K") && wait();
-        ok = ok && discussion.link_review() && wait();
-        state.discard_review();
-        ok = ok && state.apply(io::Json::array({{{"op", "set_cell"}, {"table_id", table}, {"record_id", record},
-            {"field_id", temperature}, {"value", 310}}})) && wait();
-        ok = ok && discussion.capture(table, {record}, {temperature},
-            lang == "zh" ? "编辑后的新上下文" : "New context after editing") && wait();
-        ok = ok && discussion.load_context(context_id) && wait() && discussion.load_page("contexts") && wait();
+        const std::string question = ai_proposal ?
+            (lang == "zh" ? "请建议将第一个案例的温度改为 350 K，保留单位。\n先保存为草案供检查，不要应用或启动计算。" :
+             "Suggest raising the first case to 350 K, keeping its units.\nSave a draft for review; do not apply it or run a simulation.") :
+            (lang == "zh" ? "请比较这两个温度案例。\n先检查参数变化，再决定是否启动计算。" :
+             "Compare these two temperature cases.\nReview the parameter change before deciding whether to run.");
+        ok = ok && discussion.add_message(question) && wait();
+        if (!ai_proposal) {
+          // Existing discussion fixtures intentionally show a historical context.
+          // A new parameter proposal instead retains the captured current revision.
+          state.set_review_source(io::Json::array({{{"op", "set_cell"}, {"table_id", table}, {"record_id", record},
+              {"field_id", temperature}, {"value", 350}}}).dump());
+          ok = ok && state.preview() && wait() && state.save_review("350 K") && wait();
+          ok = ok && discussion.link_review() && wait();
+          state.discard_review();
+          ok = ok && state.apply(io::Json::array({{{"op", "set_cell"}, {"table_id", table}, {"record_id", record},
+              {"field_id", temperature}, {"value", 310}}})) && wait();
+          ok = ok && discussion.capture(table, {record}, {temperature},
+              lang == "zh" ? "编辑后的新上下文" : "New context after editing") && wait();
+          ok = ok && discussion.load_context(context_id) && wait();
+        }
+        ok = ok && discussion.load_page("contexts") && wait();
         ok = ok && (ai || area->editor().show_view("discussion")) && discussion.error().empty();
       }
       if (editor == "requests" || ai) {
@@ -254,11 +264,12 @@ int main(int argc, char **argv)
         const std::string cancelled = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
         for (const auto &id : {pending, cancelled}) {
           std::optional<bridge::Result<io::Json>> result;
-          client->call("project.requests.create", {{"handle", state.project()->handle}, {"request_id", id},
+          io::Json params = {{"handle", state.project()->handle}, {"request_id", id},
               {"message_id", discussion.message().at("id")},
               {"configuration", {{"adapter", ai_stream ? "aliyun-token-plan/1" : "test-controlled"},
-                                 {"model", "fixture-v1"}}}})
-              .then([&](auto value) { result = value; });
+                                 {"model", "fixture-v1"}}}};
+          if (ai_proposal) { params["prompt_version"] = "stk.parameter-edits/1"; }
+          client->call("project.requests.create", std::move(params)).then([&](auto value) { result = value; });
           ok = ok && loop.pump_until([&] { return result.has_value(); }, 30) && result->ok();
         }
         const auto wait = [&] { return loop.pump_until([&] { return !discussion.busy(); }, 30); };
@@ -288,7 +299,7 @@ int main(int argc, char **argv)
           // Controlled completion for rendering only; fixture credentials are empty.
           auto &scripts = shell.store().scripts();
           ok = ok && loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30);
-          const std::string answer = lang == "zh" ?
+          std::string answer = lang == "zh" ?
               "受控显示样例\n\n两个案例的保存温度分别是 300 K 和 325 K，相差 25 K。\n"
               "派生温度分别是 310 K 和 335 K。\n\n这份上下文不包含模拟输出，无法判断结果差异。"
               "可以先检查参数的单位和来源，再选择需要运行的案例。保存的回答与捕获时的输入版本关联，"
@@ -297,6 +308,17 @@ int main(int argc, char **argv)
               "Derived temperatures are 310 K and 335 K.\n\nNo simulation outputs were included; result differences cannot be assessed. "
               "Review units and sources before choosing which cases to run. This saved answer is linked to the captured input version; "
               "later table edits do not rewrite that record. Preparing a question does not change parameters or submit simulations.";
+          if (ai_proposal) {
+            answer = io::Json{{"format", "stk.parameter-edits/1"},
+                {"context_id", discussion.context().at("id")}, {"base_revision", state.project()->revision},
+                {"summary", lang == "zh" ?
+                    "建议把第一个案例的温度从 300 K 提高到 350 K，以便与第二个案例比较。"
+                    "保留 K 单位和派生温度公式。该建议尚未应用，也没有启动模拟。" :
+                    "Raise the first case from 300 K to 350 K for comparison with the second case. "
+                    "Keep the K unit and the derived-temperature formula. This suggestion has not been applied and no simulation was started."},
+                {"edits", io::Json::array({{{"record_id", "40000000-4444-4444-8444-444444444444"},
+                                          {"field_id", temperature}, {"value", 350}}})}}.dump();
+          }
           ok = ok && scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
               "s=ProjectStore(" + io::Json(dir.str() + "/project").dump() + ")\nowner=str(uuid4())\n"
               "s.requests._claim('" + pending + "', executor_id=owner)\n"
@@ -305,6 +327,18 @@ int main(int argc, char **argv)
               scripts.status().at("run").at("state") == "succeeded";
           ok = ok && discussion.load_exchange(pending) &&
               loop.pump_until([&] { return !discussion.exchange_busy(); }, 30) && !discussion.exchange_reply().empty();
+          if (ai_proposal) {
+            // Completion itself creates no draft. Conversion is a separate explicit
+            // bridge operation, and the AI editor displays the saved pending candidate.
+            ok = ok && discussion.exchange_edit_proposal().at("draft").is_null();
+            ok = ok && discussion.propose_exchange_edits() && wait();
+            const auto candidate = discussion.exchange_edit_proposal().at("draft");
+            ok = ok && io::get_string(candidate, "status") == "pending" && candidate.at("base_revision") == 1 &&
+                 candidate.at("commands").size() == 1 && candidate.at("commands").front().at("value") == 350;
+            state.refresh();
+            ok = ok && loop.pump_until([&] { return !state.busy(); }, 30) && state.project()->revision == 1 &&
+                 state.table()->text(0, 0) == "300" && state.saved_review().empty() && !state.review();
+          }
           ok = ok && discussion.load_page("requests") && wait();
         }
       }
@@ -510,6 +544,23 @@ int main(int argc, char **argv)
         }
         ok = ok && cancel && cancel->enabled && send && !send->enabled && temporary_label &&
              state.discussion().exchange_reply().empty() && client->stats().schema_violations == 0;
+      }
+      if (ai_proposal) {
+        const auto *save = screen.ui()->find("a2/main/ai_save_edits");
+        const auto *open = screen.ui()->find("a2/main/ai_open_edits");
+        const auto *transcript = screen.ui()->find("a2/main/ai_transcript");
+        bool suggested_cell = false;
+        if (transcript && transcript->log) {
+          for (size_t line = 0; line < transcript->log->line_count(); ++line) {
+            const auto text = transcript->log->line(line);
+            suggested_cell |= text.find("Temperature") != std::string_view::npos && text.find("350") != std::string_view::npos;
+          }
+        }
+        ok = ok && save && !save->enabled && open && open->enabled && suggested_cell &&
+             state.project()->revision == 1 && state.table()->text(0, 0) == "300" &&
+             state.saved_review().empty() && !state.review() &&
+             io::get_string(state.discussion().exchange_edit_proposal().at("draft"), "status") == "pending" &&
+             client->stats().schema_violations == 0;
       }
       ok = ok && gfx::png_write(output, image);
     }

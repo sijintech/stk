@@ -125,9 +125,13 @@ class ProjectRequests:
     def __init__(self, call, handle):
         self._call, self.handle = call, handle
 
-    def create(self, message_id, *, request_id, configuration):
-        return self._call("project.requests.create", {"handle": self.handle, "message_id": message_id,
-            "request_id": request_id, "configuration": configuration})["request"]
+    def create(self, message_id, *, request_id, configuration, prompt_version="stk.text/1"):
+        params = {"handle": self.handle, "message_id": message_id,
+                  "request_id": request_id, "configuration": configuration}
+        # Preserve the existing text-only wire shape for bridges predating structured requests.
+        if prompt_version != "stk.text/1":
+            params["prompt_version"] = prompt_version
+        return self._call("project.requests.create", params)["request"]
 
     def get(self, request_id):
         return self._call("project.requests.get", {"handle": self.handle, "request_id": request_id})["request"]
@@ -135,6 +139,15 @@ class ProjectRequests:
     def progress(self, request_id):
         """Read saved state and bounded, unsaved stream text; never send or recover."""
         return self._call("project.requests.progress", {"handle": self.handle, "request_id": request_id})
+
+    def propose_edits(self, request_id, *, expected_revision):
+        """Explicitly save a completed parameter reply as a review draft; never apply or send."""
+        return self._call("project.requests.propose_edits", {"handle": self.handle,
+            "request_id": request_id, "expected_revision": expected_revision})
+
+    def edit_proposal(self, request_id):
+        """Read the request's saved draft and provenance, or two nulls; never create or rebase."""
+        return self._call("project.requests.edit_proposal", {"handle": self.handle, "request_id": request_id})
 
     def list(self, *, offset=0, limit=100):
         return self._call("project.requests.list", {"handle": self.handle, "offset": offset, "limit": limit})

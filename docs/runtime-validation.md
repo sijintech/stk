@@ -2,6 +2,35 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-30：模型参数建议与修改检查
+
+新增 `stk.parameter-edits/1` 请求模式。完整文字回复经明确转换，严格限定为原始捕获范围内的标量
+`set_cell`；类型、单位、公式/引用保护、来源修订及大小限制均由本机检查。草案和助手来源在一个事务内保存，
+同一请求重试找回原身份及当前状态，应用后撤销不重新打开回执。格式保持 8，旧文字请求摘要不变；
+旧读取器可能不支持新的请求模式，不能把格式号相同视作模式兼容。
+
+原生 AI 工作区增加用途选择、可读的建议摘要及数值、原始回复详情，以及显式保存建议和打开修改检查。
+检查入口重新读取保存记录，固定请求、项目、编辑器和检查代次，保留草案身份；不自动预览、应用或运行任务。
+已占用的检查、活动文字输入、过期修订与无可用标签位置都会拒绝导航。应用/丢弃后已有 AI 页自动重读状态。
+
+关键节点 critical review 分别覆盖存储原子性、桥与兼容性、原生异步生命周期和实际渲染，修正三项问题：
+
+- 标签已满时先检查目标容量，再接纳草案，避免失败导航留下半完成的检查状态。
+- 格式化前限制 JSON 嵌套深度，只显示标量；24,000 层异常回复退回原文，不能生成草案。
+- 应用或丢弃时通知 AI 控制器重读候选状态，并隔离此前排队的读取，避免继续显示待处理。
+
+后端/桥/真实 Python worker 的组合回归 **455 项通过**，核心参数提案单文件 **78 项通过**。
+原生重点回归 **29/29**；完整 Linux CTest **633/633，失败/错误/跳过均为 0**。
+新增八张参数建议宽/窄、中英文 GL/Vulkan 图片已复核：四个 GL 视图逐项检查，对应 Vulkan 的 RGB 像素完全一致。
+原 AI 窄布局与流式视图也已复看，十组 AI 相关 GL/Vulkan 截图像素一致。字典各 **1087 项**一致且无重复。
+完整 Python 回归 **1838 passed / 22 skipped / 4 deselected**；跳过包括本机离屏 VTK 探针不可用的 15 项、
+可选 MCP、真实许可求解器和性能场景，不计为已验证。全部模型测试使用受控适配器，没有调用真实账户。
+
+日志 `/tmp/stk-proposal-integration.log`、`/tmp/stk-proposal-core-final.log`、`/tmp/stk-proposal-native-focused.log`、
+`/tmp/stk-proposal-full.log`、`/tmp/stk-proposal-python-full.log`；JUnit `/tmp/stk-proposal-full.xml`。
+本提交的跨平台 CI 及真实账户参数建议、macOS/Windows 真机输入仍待验收。
+使用步骤见[参数提案指南](project-parameter-edits.md)，人工步骤见[工作台验收](workbench-acceptance.md)。
+
 ## 2026-09-30：临时流式回复
 
 阿里适配器新增一次性 SSE 读取，保留非流式调用接口。执行器在内存中收集有界文字，
@@ -22,8 +51,19 @@
 新增中英文 GL/Vulkan/Metal 的临时回复截图用例，并在各平台 CI 强制检查这些用例实际运行。
 Linux 完整 CTest **610/610 通过，失败/错误/跳过均为 0**；JUnit `/tmp/stk-stream-full.xml`，
 日志 `/tmp/stk-stream-full.log`。四张新增中英文 GL/Vulkan 截图已逐项检查，临时标记、换行及操作按钮正常。
-中英文字典各 **1073 项**一致、无重复。本次提交的跨平台 CI 状态将在完成后补记；
-此前提交通过不代替本次验证，真实账户流式调用及 macOS/Windows 原生真机验收仍待完成。
+中英文字典各 **1073 项**一致、无重复。
+
+提交 `6123300` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36675028481) **5/5 任务通过**：
+Linux **610**、macOS CPU **373** / Metal **75**、Windows CPU **333** 项，均无失败或跳过。
+Linux/macOS 已下载 JUnit 独立计数；Windows 已逐条核对实际 CTest 结果行。
+四项流式/旧桥回退测试在三个平台实际通过，新增六张 Linux/Metal 中英文流式截图均已检查。
+安装包及独立启动检查通过，证据 `/tmp/stk-stream-ci-36675028481/audit-summary.json`。
+
+同一提交的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36675028490) **7/7 任务通过**：
+Python 3.10/3.12 的 Linux 各 **1747 passed / 7 skipped / 4 deselected**，
+Windows 各 **1336 passed / 59 skipped / 260 deselected**；控制 24 项、旧桌面/MCP 3 项及 Web 构建通过。
+跳过项为可选依赖、平台能力及独立真实求解器/性能验收，不计为已验证能力。
+真实账户流式调用及 macOS/Windows 原生真机验收仍待完成。
 
 ## 2026-09-30：原生 AI 准备工作区
 

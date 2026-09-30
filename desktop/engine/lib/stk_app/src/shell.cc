@@ -10,6 +10,7 @@
 #include <filesystem>
 
 #include "stk/app/editor_area.hh"
+#include "stk/app/project_state.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/gfx/fonts.hh"
@@ -131,6 +132,82 @@ Editor *AppShell::focus_editor(wm::Screen &screen, const std::string &type)
   }
   return nullptr;
 }
+
+void AppShell::open_saved_review(wm::Screen *screen, std::string handle, const int64_t expected_revision,
+                                 io::Json draft, const uint64_t expected_review_generation,
+                                 std::function<bool()> valid, ScriptState::Completion complete)
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  if (!valid || !valid() || !complete) { return; }
+  if (!screen || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) {
+    complete(Error::make(ErrorCode::Unavailable, "The target desktop screen was closed"));
+    return;
+  }
+  std::weak_ptr<bool> weak = alive_;
+  screen->defer([this, weak, screen, handle = std::move(handle), expected_revision,
+                 draft = std::move(draft), expected_review_generation,
+                 valid = std::move(valid), complete = std::move(complete)]() mutable {
+    if (!weak.lock() || !valid()) { return; }
+    if (std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) {
+      complete(Error::make(ErrorCode::Unavailable, "The target desktop screen was closed"));
+      return;
+    }
+    auto &project = store_.project();
+    project.sync();
+    if (project.review_generation() != expected_review_generation) {
+      complete(Error::make(ErrorCode::Conflict, "The review changed before the saved draft could be opened"));
+      return;
+    }
+    for (auto *target : screens_) {
+      if (target->ui() && target->ui()->text_input_active()) {
+        complete(Error::make(ErrorCode::Busy, "Finish the current desktop text edit before opening a review"));
+        return;
+      }
+    }
+    // Preselect the exact destination. A full area must not hide another area's
+    // available slot, and a completely full layout must not consume the draft.
+    EditorArea *destination = nullptr;
+    int project_tab = -1;
+    for (auto *area : screen->areas()) {
+      auto *editor = dynamic_cast<EditorArea *>(area);
+      if (!editor) { continue; }
+      for (int i = 0; i < editor->tab_count(); ++i) {
+        if (editor->tab(i).type().id == kEditorProject) {
+          destination = editor;
+          project_tab = i;
+          break;
+        }
+      }
+      if (project_tab >= 0) { break; }
+      // EditorArea::add_tab enforces this same 16-tab limit.
+      if (editor->tab_count() < 16 &&
+          (!destination || destination->editor().type().id == kEditorPython)) {
+        destination = editor;
+      }
+    }
+    if (!destination || !registry_.find(kEditorProject)) {
+      complete(Error::make(ErrorCode::Unavailable, "The target desktop has no available project editor tab"));
+      return;
+    }
+    auto result = project.request_saved_review(handle, expected_revision, draft);
+    if (result.ok()) {
+      if (project_tab >= 0) { destination->set_active_tab(project_tab); }
+      else if (!destination->add_tab(kEditorProject)) {
+        // A failed editor factory must not leave an adopted but invisible review.
+        // Adoption required an empty review, so restore that state without touching
+        // the durable draft. Normal capacity failures were rejected before adoption.
+        project.discard_review();
+        complete(Error::make(ErrorCode::Unavailable, "The project review editor could not be opened"));
+        return;
+      }
+      if (screen->maximized()) { screen->set_maximized(destination); }
+      destination->editor().show_view("review");
+    }
+    complete(std::move(result));
+  });
+}
+
 class AppShell::TopBar final : public wm::Region {
  public:
   TopBar(AppShell &shell, wm::Screen &screen) : Region("topbar"), shell_(shell), screen_(screen)

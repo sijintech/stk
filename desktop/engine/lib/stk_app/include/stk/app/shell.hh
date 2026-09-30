@@ -118,6 +118,13 @@ class AppShell {
   /** User UI scale (applied to the window manager in GUI mode). */
   void set_ui_scale(float scale);
 
+  /** Defer saved-draft adoption and Review navigation into the originating screen.
+   * `valid` must fence the caller's lifetime and selected request. Expired callers
+   * receive no callback; live conflicts preserve all review and text input state. */
+  void open_saved_review(wm::Screen *screen, std::string handle, int64_t expected_revision,
+                         io::Json draft, uint64_t expected_review_generation,
+                         std::function<bool()> valid, ScriptState::Completion complete);
+
   /** Where File > Save layout writes (default: wm::default_layout_path()). Empty = disabled. */
   std::filesystem::path layout_path;
   /** Called by File > Quit and Ctrl+Q (GUI). */

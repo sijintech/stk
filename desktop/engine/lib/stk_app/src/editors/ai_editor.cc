@@ -34,6 +34,61 @@ void show_tables(EditorContext ctx)
   });
 }
 
+std::string parameter_reply(const Json &reply, const Json &context, EditorContext &ctx)
+{
+  const auto original = io::get_string(reply, "text");
+  // A reply is still unvalidated model text. Bound nesting before parsing or
+  // serializing any value; deeply nested invalid suggestions stay plain text.
+  int depth = 0;
+  bool quoted = false, escaped = false;
+  for (const char c : original) {
+    if (escaped) { escaped = false; continue; }
+    if (quoted && c == '\\') { escaped = true; continue; }
+    if (c == '"') { quoted = !quoted; continue; }
+    if (quoted) { continue; }
+    if ((c == '{' || c == '[') && ++depth > 8) { return original; }
+    if ((c == '}' || c == ']') && --depth < 0) { return original; }
+  }
+  try {
+    const auto content = Json::parse(original);
+    if (content.at("format") != "stk.parameter-edits/1" || !content.at("summary").is_string() ||
+        !content.at("edits").is_array() || content.at("edits").empty() || content.at("edits").size() > 1000) { return original; }
+    std::string text = content.at("summary").get<std::string>() + "\n\n" +
+        ctx.store.catalog().format("ai.suggested_changes", {{"count", std::to_string(content.at("edits").size())}});
+    const auto fields = context.at("content").at("value").at("fields");
+    const auto records = context.at("selection").at("record_ids");
+    for (const auto &edit : content.at("edits")) {
+      if (!edit.is_object() || !edit.at("field_id").is_string() || !edit.at("record_id").is_string() ||
+          !edit.at("value").is_primitive()) { return original; }
+      const auto field = std::find_if(fields.begin(), fields.end(), [&](const auto &item) { return item.at("id") == edit.at("field_id"); });
+      const auto record = std::find(records.begin(), records.end(), edit.at("record_id"));
+      const auto row = record == records.end() ? "?" : std::to_string(std::distance(records.begin(), record) + 1);
+      const auto name = field == fields.end() ? "?" : io::get_string(*field, "name");
+      text += "\n" + ctx.store.catalog().format("ai.suggested_cell", {{"record", row}, {"field", name},
+          {"value", edit.at("value").dump()}});
+    }
+    // This is display formatting only. The backend compiler independently validates
+    // the original saved text before any candidate can be created.
+    return text;
+  }
+  catch (const std::exception &) { return original; }
+}
+
+ui::LogBuffer wrapped_text(std::string text, const float width, EditorContext &ctx)
+{
+  ui::LogBuffer normalized(std::numeric_limits<size_t>::max()), result(std::numeric_limits<size_t>::max());
+  normalized.append(text);
+  text.clear();
+  for (size_t i = 0; i < normalized.line_count(); ++i) { text += std::string(normalized.line(i)) + "\n"; }
+  if (ctx.ui) {
+    for (const auto &line : ui::break_lines(text, width, ctx.ui->measurer(), ctx.ui->style().mono)) {
+      result.append(text.substr(line.begin, line.end - line.begin) + "\n");
+    }
+  }
+  else { result.append(text); }
+  return result;
+}
+
 class AIEditor final : public Editor {
  public:
   explicit AIEditor(const EditorType &type) : Editor(type) {}
@@ -70,6 +125,7 @@ class AIEditor final : public Editor {
       opened_history_ = false;
       shown_exchange_.clear(); transcript_.clear();
       shown_context_.clear(); captured_.reset();
+      proposal_navigation_error_.clear();
     }
     // Unsent input belongs to its project even when another project becomes active. It is
     // intentionally not part of layout JSON; only explicitly prepared questions are persisted.
@@ -87,6 +143,10 @@ class AIEditor final : public Editor {
     if (!state.error().empty()) { layout.paragraph(state.error()); }
     if (!discussion.error().empty()) { layout.paragraph(discussion.error()); }
     if (!discussion.exchange_error().empty()) { layout.paragraph(discussion.exchange_error()); }
+    if (!proposal_navigation_error_.empty() &&
+        proposal_navigation_request_ == io::get_string(discussion.exchange_request(), "id")) {
+      layout.paragraph(proposal_navigation_error_);
+    }
     const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
     const float scale = ctx.ui ? ctx.ui->style().unit / 20.0f : 1.0f;
     if (width >= 920.0f * scale) {
@@ -109,7 +169,7 @@ class AIEditor final : public Editor {
   }
 
  private:
-  struct Draft { std::string text, model; bool model_initialized = false; };
+  struct Draft { std::string text, model; bool model_initialized = false; int intent = 0; };
 
   void poll(EditorContext &ctx, ProjectDiscussion &discussion)
   {
@@ -260,6 +320,7 @@ class AIEditor final : public Editor {
     const auto progress = discussion.exchange_progress();
     const auto context = discussion.exchange_context();
     const std::string id = io::get_string(request, "id"), status = io::get_string(request, "status");
+    const bool parameter_request = io::get_string(request, "prompt_version") == "stk.parameter-edits/1";
     const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
     const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
     // Reserve region padding, the split gutter and the log scrollbar. Use the same
@@ -269,25 +330,19 @@ class AIEditor final : public Editor {
         std::to_string(unit) + std::string(ctx.tr("ai.you"));
     if (shown_exchange_ != content) {
       shown_exchange_ = content;
-      transcript_ = ui::LogBuffer(std::numeric_limits<size_t>::max());
       std::string text;
       if (!question.empty()) { text += std::string(ctx.tr("ai.you")) + "\n" + io::get_string(question, "text") + "\n\n"; }
-      if (!reply.empty()) { text += std::string(ctx.tr("ai.assistant")) + "\n" + io::get_string(reply, "text"); }
+      if (!reply.empty()) {
+        text += std::string(ctx.tr(parameter_request ? "ai.parameter_reply" : "ai.assistant")) + "\n" +
+            (parameter_request ? parameter_reply(reply, context, ctx) : io::get_string(reply, "text"));
+      }
       else if (!progress.empty() && !io::get_string(progress, "text").empty()) {
         text += std::string(ctx.tr("ai.temporary_reply")) + "\n" + io::get_string(progress, "text");
       }
       // Measure what the log actually displays: tabs expand before wrapping,
       // and terminal escape bytes do not count towards visible line width.
-      ui::LogBuffer normalized(std::numeric_limits<size_t>::max());
-      normalized.append(text);
-      text.clear();
-      for (size_t i = 0; i < normalized.line_count(); ++i) { text += std::string(normalized.line(i)) + "\n"; }
-      if (ctx.ui) {
-        for (const auto &line : ui::break_lines(text, wrap_width, ctx.ui->measurer(), ctx.ui->style().mono)) {
-          transcript_.append(text.substr(line.begin, line.end - line.begin) + "\n");
-        }
-      }
-      else { transcript_.append(text); }
+      transcript_ = wrapped_text(std::move(text), wrap_width, ctx);
+      raw_reply_ = wrapped_text(io::get_string(reply, "text"), wrap_width, ctx);
     }
     if (!request.empty()) {
       layout.paragraph(std::string(ctx.tr("discussion.requests." + status)) + " · " +
@@ -300,8 +355,9 @@ class AIEditor final : public Editor {
     }
     else { layout.paragraph(ctx.tr(discussion.exchange_busy() ? "ai.loading" : "ai.empty")); }
     const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
-    const float transcript_units = wide ? std::clamp(height / unit - 22.0f, 5.0f, 22.0f) :
-        settings_open ? 6.0f : std::clamp(height / unit - 24.0f, 6.0f, 22.0f);
+    const float candidate_space = parameter_request && status == "completed" ? 4.0f : 0.0f;
+    const float transcript_units = wide ? std::clamp(height / unit - 23.0f - candidate_space, 5.0f, 22.0f) :
+        settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
     layout.log_view("ai_transcript", transcript_, transcript_units);
     auto &actions = layout.row();
     actions.button("ai_send_saved", ctx.tr("ai.send_saved"), [&discussion, &state, handle, id] {
@@ -328,8 +384,12 @@ class AIEditor final : public Editor {
         }
       }).disable(!enabled);
     }
+    if (parameter_request && status == "completed") { proposal_actions(layout, ctx, state, handle, id, enabled); }
     layout.separator();
     layout.label(ctx.tr("ai.compose"));
+    layout.prop(ctx.tr("ai.intent")).dropdown("ai_intent/" + handle,
+        {std::string(ctx.tr("ai.intent_discuss")), std::string(ctx.tr("ai.intent_edits"))}, ui::bind(draft.intent));
+    if (draft.intent == 1 && !discussion.edit_proposals_supported()) { layout.paragraph(ctx.tr("ai.edits_unavailable")); }
     // Active toolkit edits must disappear on project switch before a new binding is installed.
     auto &input = layout.text_area("ai_question/" + handle, ui::bind(draft.text), {.max_length = 65536, .visible_lines = 4});
     const bool has_question = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
@@ -339,22 +399,80 @@ class AIEditor final : public Editor {
     layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id] {
       if (!state.project() || state.project()->handle != handle || active_draft_ != key) { return; }
       const auto &current = drafts_.at(key);
-      if (discussion.prepare_question(context_id, current.text, current.model)) {
+      if (discussion.prepare_question(context_id, current.text, current.model,
+          current.intent == 1 ? "stk.parameter-edits/1" : "stk.text/1")) {
         opened_history_ = true;
+        proposal_navigation_error_.clear();
       }
-    }).disable(!enabled || discussion.exchange_busy() || context_id.empty() || !has_question || !model_has_text_ || discussion.provider().empty());
+    }).disable(!enabled || discussion.exchange_busy() || context_id.empty() || !has_question || !model_has_text_ || discussion.provider().empty() ||
+               (draft.intent == 1 && !discussion.edit_proposals_supported()));
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
       details->paragraph(ctx.tr("ai.single_turn"));
       if (!id.empty()) { details->paragraph(id); details->paragraph(io::get_string(request, "context_id")); }
+      if (parameter_request && !reply.empty()) {
+        details->label(ctx.tr("ai.raw_reply"));
+        details->log_view("ai_raw_reply", raw_reply_, 6);
+      }
     }
+  }
+
+  void proposal_actions(ui::Layout &layout, EditorContext &ctx, ProjectState &state,
+                        const std::string &handle, const std::string &id, const bool enabled)
+  {
+    auto &discussion = state.discussion();
+    const auto result = discussion.exchange_edit_proposal();
+    const auto saved = result.value("draft", Json());
+    const bool current = io::get_int(discussion.exchange_request(), "source_revision", -1) == state.project()->revision;
+    const auto saved_status = saved.is_null() ? "" : io::get_string(saved, "status");
+    if (saved_status == "applied") {
+      layout.paragraph(ctx.store.catalog().format("project.drafts.applied_at", {{"revision", std::to_string(io::get_int(saved, "applied_revision", -1))}}));
+    }
+    else {
+      layout.paragraph(ctx.tr(saved_status == "discarded" ? "ai.edits_discarded" : !current ? "ai.edits_stale" :
+          saved.is_null() ? "ai.edits_not_saved" : "ai.edits_saved"));
+    }
+    if (!saved.is_null()) {
+      layout.label(ctx.tr("project.drafts." + io::get_string(saved, "status")));
+    }
+    const auto generation = discussion.exchange_generation();
+    std::weak_ptr<bool> weak = alive_;
+    const auto valid = [weak, &state, &discussion, handle, id, generation] {
+      return weak.lock() && state.project() && state.project()->handle == handle &&
+          discussion.exchange_generation() == generation && io::get_string(discussion.exchange_request(), "id") == id;
+    };
+    auto &actions = layout.row();
+    actions.button("ai_save_edits", ctx.tr("ai.save_edits"), [this, valid, &discussion, id] {
+      if (valid()) { proposal_navigation_error_.clear(); proposal_navigation_request_ = id; discussion.propose_exchange_edits(); }
+    }).disable(!enabled || discussion.exchange_busy() || !discussion.edit_proposals_supported() || !saved.is_null() || !current);
+    actions.button("ai_open_edits", ctx.tr("ai.open_edits"), [this, valid, weak, &discussion, &state,
+        shell = &ctx.area.shell(), screen = ctx.area.screen(), store = &ctx.store, handle, id] {
+      if (!valid()) { return; }
+      proposal_navigation_error_.clear();
+      proposal_navigation_request_ = id;
+      const auto revision = state.project()->revision;
+      const auto review_generation = state.review_generation();
+      discussion.read_exchange_edit_proposal([this, weak, valid, shell, screen, store, handle, revision, review_generation](const Json &fresh) {
+        if (!valid()) { return; }
+        if (fresh.at("draft").is_null()) { proposal_navigation_error_ = std::string(store->tr("ai.edits_not_saved")); return; }
+        shell->open_saved_review(screen, handle, revision, fresh.at("draft"), review_generation, valid,
+            [this, weak, store](bridge::Result<Json> opened) {
+          if (!weak.lock()) { return; }
+          proposal_navigation_error_ = opened.ok() ? "" : opened.error().message;
+          store->changed();
+        });
+      });
+    }).disable(!enabled || discussion.exchange_busy() || !discussion.edit_proposals_supported() || !current || saved.is_null() ||
+               (!saved.is_null() && io::get_string(saved, "status") != "pending"));
   }
 
   std::unordered_map<std::string, Draft> drafts_;
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
   bool model_has_text_ = false;
+  std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+  std::string proposal_navigation_error_, proposal_navigation_request_;
   std::shared_ptr<const CapturedProjectTable> captured_;
-  ui::LogBuffer transcript_;
+  ui::LogBuffer transcript_, raw_reply_;
 };
 }  // namespace
 

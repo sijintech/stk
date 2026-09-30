@@ -182,7 +182,12 @@ class ProjectSessions:
                 return self._executor.progress(store, params["request_id"])
             if action == "create":
                 return {"request": requests.create(params["message_id"], request_id=params["request_id"],
-                                                    configuration=params["configuration"])}
+                                                    configuration=params["configuration"],
+                                                    prompt_version=params.get("prompt_version", "stk.text/1"))}
+            if action == "propose_edits":
+                return requests.propose_edits(params["request_id"], expected_revision=params["expected_revision"])
+            if action == "edit_proposal":
+                return requests.edit_proposal(params["request_id"])
             if action == "list":
                 return requests.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
             return {"request": requests.get(params["request_id"])}

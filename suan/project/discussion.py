@@ -129,32 +129,36 @@ class Discussion:
             raise ProjectError(f"Invalid stored project proposal: {exc}") from None
 
     def link_draft(self, message_id, draft_id, *, proposal_id):
+        with self.store._connect(write=True) as db:
+            _require(db)
+            return self._link_draft(db, message_id, draft_id, proposal_id=proposal_id)
+
+    def _link_draft(self, db, message_id, draft_id, *, proposal_id):
+        """Link provenance within the caller's transaction, without editing a draft."""
         _id(message_id)
         _id(draft_id)
         _id(proposal_id)
         request = _digest({"message_id": message_id, "draft_id": draft_id})
-        with self.store._connect(write=True) as db:
-            _require(db)
-            existing = db.execute("SELECT * FROM project_proposals WHERE id=?", (proposal_id,)).fetchone()
-            if existing is not None:
-                proposal = self._decode_proposal(db, existing)
-                if existing["request_sha256"] != request:
-                    raise RevisionConflict("Proposal ID already belongs to a different request")
-                return proposal
-            if db.execute("SELECT id FROM project_proposals WHERE draft_id=?", (draft_id,)).fetchone() is not None:
-                raise RevisionConflict("Draft already has a provenance link")
-            message = self._get_message(db, message_id)
-            context = self.store.contexts._get(db, message["context_id"])
-            draft = self.store.drafts._decode(db.execute("SELECT * FROM project_drafts WHERE id=?", (draft_id,)).fetchone())
-            if draft["base_revision"] != context["source_revision"]:
-                raise RevisionConflict("Draft base revision does not match the message context")
-            proposal = {"id": proposal_id, "project_id": self.store._project_id, "message_id": message_id,
-                        "context_id": context["id"], "draft_id": draft_id, "base_revision": draft["base_revision"],
-                        "created_at": datetime.now(timezone.utc).isoformat()}
-            db.execute("INSERT INTO project_proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                       (proposal_id, self.store._project_id, message_id, context["id"], draft_id, draft["base_revision"],
-                        _encode(proposal).decode("utf-8"), request, _digest({"payload": proposal, "request_sha256": request})))
+        existing = db.execute("SELECT * FROM project_proposals WHERE id=?", (proposal_id,)).fetchone()
+        if existing is not None:
+            proposal = self._decode_proposal(db, existing)
+            if existing["request_sha256"] != request:
+                raise RevisionConflict("Proposal ID already belongs to a different request")
             return proposal
+        if db.execute("SELECT id FROM project_proposals WHERE draft_id=?", (draft_id,)).fetchone() is not None:
+            raise RevisionConflict("Draft already has a provenance link")
+        message = self._get_message(db, message_id)
+        context = self.store.contexts._get(db, message["context_id"])
+        draft = self.store.drafts._decode(db.execute("SELECT * FROM project_drafts WHERE id=?", (draft_id,)).fetchone())
+        if draft["base_revision"] != context["source_revision"]:
+            raise RevisionConflict("Draft base revision does not match the message context")
+        proposal = {"id": proposal_id, "project_id": self.store._project_id, "message_id": message_id,
+                    "context_id": context["id"], "draft_id": draft_id, "base_revision": draft["base_revision"],
+                    "created_at": datetime.now(timezone.utc).isoformat()}
+        db.execute("INSERT INTO project_proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   (proposal_id, self.store._project_id, message_id, context["id"], draft_id, draft["base_revision"],
+                    _encode(proposal).decode("utf-8"), request, _digest({"payload": proposal, "request_sha256": request})))
+        return proposal
 
     def proposals(self, *, offset=0, limit=100, draft_id=None):
         _pagination(offset, limit)

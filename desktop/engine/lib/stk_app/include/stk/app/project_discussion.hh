@@ -23,6 +23,7 @@ class ProjectDiscussion {
   bool requests_supported() const;
   bool generation_supported() const;
   bool progress_supported() const;
+  bool edit_proposals_supported() const;
   bool provider_loaded() const { return provider_loaded_; }
   const io::Json &provider() const { return provider_; }
   bool busy() const { return busy_; }
@@ -44,7 +45,14 @@ class ProjectDiscussion {
   bool start_request(const std::string &id);
   bool recover_request(const std::string &id);
   /** Prepare a question against the currently inspected saved context. Never sends. */
-  bool prepare_question(const std::string &context_id, const std::string &text, const std::string &model);
+  bool prepare_question(const std::string &context_id, const std::string &text, const std::string &model,
+                        const std::string &prompt_version = "stk.text/1");
+  /** Explicitly compile a completed parameter reply into a saved draft; never applies. */
+  bool propose_exchange_edits();
+  /** Explicitly re-read the selected request's saved candidate before opening Review. */
+  bool read_exchange_edit_proposal(std::function<void(const io::Json &)> done);
+  /** Local draft resolution invalidates only the matching saved candidate observation. */
+  void draft_changed(const std::string &draft_id);
   /** Read one immutable exchange, independently of the legacy discussion browsing selection. */
   bool load_exchange(const std::string &request_id);
   bool refresh_exchange();
@@ -55,6 +63,8 @@ class ProjectDiscussion {
   const io::Json &exchange_question() const { return exchange_question_; }
   const io::Json &exchange_reply() const { return exchange_reply_; }
   const io::Json &exchange_progress() const { return exchange_progress_; }
+  const io::Json &exchange_edit_proposal() const { return exchange_edit_proposal_; }
+  uint64_t exchange_generation() const { return exchange_generation_; }
   bool exchange_busy() const { return exchange_preparing_ || exchange_reading_ || exchange_pending_; }
   const std::string &exchange_error() const { return exchange_error_; }
   bool following() const { return exchange_following_; }
@@ -92,6 +102,7 @@ class ProjectDiscussion {
   io::Json exchange_request_ = io::Json::object(), exchange_context_ = io::Json::object();
   io::Json exchange_question_ = io::Json::object(), exchange_reply_ = io::Json::object();
   io::Json exchange_progress_ = io::Json::object();
+  io::Json exchange_edit_proposal_ = io::Json::object();
   std::string exchange_id_, exchange_error_;
   uint64_t exchange_generation_ = 0, exchange_flight_ = 0;
   bool exchange_preparing_ = false, exchange_reading_ = false, exchange_pending_ = false;

@@ -74,12 +74,17 @@ class ProjectState {
   const std::string &review_source() const { return review_source_; }
   const std::string &review_error() const { return review_error_; }
   const std::shared_ptr<const ProjectReview> &review() const { return review_; }
+  uint64_t review_generation() const { return review_generation_; }
   void set_review_source(std::string source);
   bool preview_supported() const;
   bool preview();
   /** Accept an external draft only for the current handle/revision and an empty review. */
   bridge::Result<io::Json> request_review(const std::string &handle, int64_t expected_revision,
                                         const io::Json &commands);
+  /** Adopt a pending saved draft into an empty review without previewing or applying it.
+   * The caller must protect active text input and deferred UI navigation separately. */
+  bridge::Result<io::Json> request_saved_review(const std::string &handle, int64_t expected_revision,
+                                              const io::Json &draft);
   /** Shared selection, pinned to the currently opened handle. Does not focus or open an editor. */
   bridge::Result<io::Json> request_selection(const std::string &handle) const;
   bridge::Result<io::Json> request_select(const std::string &handle, int64_t expected_revision,

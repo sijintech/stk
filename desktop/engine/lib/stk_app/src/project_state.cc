@@ -14,6 +14,18 @@ namespace stk::app {
 
 using io::Json;
 
+namespace {
+bool canonical_project_uuid(const std::string_view id)
+{
+  if (id.size() != 36) { return false; }
+  for (size_t i = 0; i < id.size(); ++i) {
+    if (i == 8 || i == 13 || i == 18 || i == 23) { if (id[i] != '-') { return false; } }
+    else if (!((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f'))) { return false; }
+  }
+  return true;
+}
+}  // namespace
+
 ProjectTable ProjectTable::from_json(const Json &value)
 {
   ProjectTable table;
@@ -589,15 +601,7 @@ bridge::Result<Json> ProjectState::request_select(const std::string &handle, con
 {
   using bridge::Error;
   using bridge::ErrorCode;
-  const auto canonical_id = [](const std::string &id) {
-    if (id.size() != 36) { return false; }
-    for (size_t i = 0; i < id.size(); ++i) {
-      if (i == 8 || i == 13 || i == 18 || i == 23) { if (id[i] != '-') { return false; } }
-      else if (!((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f'))) { return false; }
-    }
-    return true;
-  };
-  if (expected_revision < 0 || !canonical_id(table_id) || !canonical_id(record_id)) {
+  if (expected_revision < 0 || !canonical_project_uuid(table_id) || !canonical_project_uuid(record_id)) {
     return Error::make(ErrorCode::InvalidParams, "Selection requires canonical table/record UUIDs and a nonnegative revision");
   }
   const auto current = request_selection(handle);
@@ -648,6 +652,84 @@ bridge::Result<Json> ProjectState::request_review(const std::string &handle, con
   return Json{{"accepted", true}, {"project_id", project_->id}, {"base_revision", expected_revision}};
 }
 
+bridge::Result<Json> ProjectState::request_saved_review(const std::string &handle,
+                                                       const int64_t expected_revision, const Json &draft)
+{
+  using bridge::Error;
+  using bridge::ErrorCode;
+  if (expected_revision < 0) {
+    return Error::make(ErrorCode::InvalidParams, "Saved review requires a nonnegative revision");
+  }
+  if (client_ != store_.bridge() || !ready()) {
+    return Error::make(ErrorCode::Unavailable, "The project bridge is not ready");
+  }
+  if (!project_ || project_->handle != handle || project_->revision != expected_revision ||
+      dirty_revision_ > expected_revision) {
+    return Error::make(ErrorCode::Conflict, "The visible project or its revision changed; inspect the project again");
+  }
+  if (busy() || !loaded()) { return Error::make(ErrorCode::Busy, "The project controller is busy"); }
+  if (!preview_supported() || !drafts_supported()) {
+    return Error::make(ErrorCode::Unsupported, "Saved project review is unavailable");
+  }
+  if (review_ || review_source_ != "[]" || !review_error_.empty() || !saved_review_.empty() || !save_request_.empty()) {
+    return Error::make(ErrorCode::Conflict, "A review draft already exists; inspect and clear it in the desktop first");
+  }
+  if (!draft.is_object() || draft.size() != 9) {
+    return Error::make(ErrorCode::InvalidParams, "Saved review requires a complete project draft");
+  }
+  for (const char *key : {"id", "project_id", "title", "base_revision", "commands", "created_at",
+                          "status", "applied_revision", "closed_at"}) {
+    if (!draft.contains(key)) {
+      return Error::make(ErrorCode::InvalidParams, "Saved review requires a complete project draft");
+    }
+  }
+  if (!draft.at("id").is_string() || !canonical_project_uuid(draft.at("id").get_ref<const std::string &>()) ||
+      !draft.at("project_id").is_string() || !canonical_project_uuid(draft.at("project_id").get_ref<const std::string &>()) ||
+      !draft.at("title").is_string() || draft.at("title").get_ref<const std::string &>().empty() ||
+      draft.at("title").get_ref<const std::string &>().size() > 4096 ||
+      !draft.at("created_at").is_string() || draft.at("created_at").get_ref<const std::string &>().empty() ||
+      draft.at("created_at").get_ref<const std::string &>().size() > 64 ||
+      !draft.at("base_revision").is_number_integer() || draft.at("base_revision") < 0 ||
+      draft.at("base_revision") > std::numeric_limits<int64_t>::max()) {
+    return Error::make(ErrorCode::InvalidParams, "Saved review has invalid identity or metadata");
+  }
+  if (draft.at("project_id") != project_->id || draft.at("base_revision") != expected_revision) {
+    return Error::make(ErrorCode::Conflict, "Saved review belongs to a different project or base revision");
+  }
+  if (draft.at("status") != "pending" || !draft.at("applied_revision").is_null() || !draft.at("closed_at").is_null()) {
+    return Error::make(ErrorCode::Conflict, "Only a pending saved draft can be opened for review");
+  }
+  const auto &commands = draft.at("commands");
+  if (!commands.is_array() || commands.empty() || commands.size() > 1000 ||
+      !std::all_of(commands.begin(), commands.end(), [](const auto &command) { return command.is_object(); })) {
+    return Error::make(ErrorCode::InvalidParams, "Saved review requires 1 to 1000 project command objects");
+  }
+  std::string source;
+  try {
+    source = commands.dump();
+    if (source.size() > 256 * 1024) {
+      return Error::make(ErrorCode::InvalidParams, "Review commands exceed 256 KiB");
+    }
+    // A native JSON value can contain nonfinite numbers even though wire JSON
+    // cannot. Do not let dump() silently change such numbers into null values.
+    (void)io::parse_json(io::python_json_dumps(commands, false, true));
+  }
+  catch (const std::exception &) {
+    return Error::make(ErrorCode::InvalidParams, "Saved review commands must contain valid finite UTF-8 JSON data");
+  }
+  // Retain the saved identity. set_review_source()/request_review() intentionally
+  // create an unsaved proposal and would discard its atomic apply receipt path.
+  ++review_generation_;
+  saved_review_ = draft;
+  review_source_ = std::move(source);
+  review_.reset();
+  review_error_.clear();
+  drafts_error_.clear();
+  changed();
+  return Json{{"accepted", true}, {"project_id", project_->id}, {"base_revision", expected_revision},
+              {"draft_id", draft.at("id")}};
+}
+
 bool ProjectState::apply_review()
 {
   if (!can_apply_review()) { return false; }
@@ -658,13 +740,15 @@ bool ProjectState::apply_review()
   if (!saved_review_.empty()) {
     busy_ = true;
     const auto generation = review_generation_;
+    const auto draft_id = io::get_string(saved_review_, "id");
     bridge::CallOptions options;
     options.retry = bridge::CallOptions::Retry::Never;
     on(client_->call("project.drafts.apply", {{"handle", project_->handle},
         {"draft_id", saved_review_.at("id")}, {"expected_revision", review->base_revision}}, options),
-       [this, generation](const bridge::Result<Json> &result) {
+       [this, generation, draft_id](const bridge::Result<Json> &result) {
       busy_ = false;
       drafts_loaded_ = false;
+      discussion_->draft_changed(draft_id);
       if (!result.ok()) { fail(result.error()); }
       else {
         if (generation == review_generation_) { saved_review_ = result.value().at("draft"); }
@@ -808,6 +892,7 @@ bool ProjectState::discard_saved_draft(const std::string &id)
      [this, generation, id](const bridge::Result<Json> &result) {
     busy_ = false;
     drafts_loaded_ = false;
+    discussion_->draft_changed(id);
     if (!result.ok()) { drafts_error_ = result.error().describe(); }
     else if (generation == review_generation_ && io::get_string(saved_review_, "id") == id) {
       ++review_generation_;

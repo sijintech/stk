@@ -11,6 +11,24 @@
 namespace stk::app {
 using io::Json;
 
+namespace {
+void validate_edit_proposal(const Json &result, const Json &request)
+{
+  if (result.at("request_id") != request.at("id")) { throw std::runtime_error("Unexpected parameter proposal request"); }
+  const auto &draft = result.at("draft"), &proposal = result.at("proposal");
+  if (draft.is_null() && proposal.is_null()) { return; }
+  if (draft.is_null() || proposal.is_null() || request.at("status") != "completed" ||
+      request.at("prompt_version") != "stk.parameter-edits/1" ||
+      draft.at("project_id") != request.at("project_id") || proposal.at("project_id") != request.at("project_id") ||
+      draft.at("id") != proposal.at("draft_id") || draft.at("base_revision") != request.at("source_revision") ||
+      proposal.at("base_revision") != request.at("source_revision") ||
+      proposal.at("context_id") != request.at("context_id") ||
+      proposal.at("message_id") != request.at("assistant_message_id")) {
+    throw std::runtime_error("Parameter proposal has inconsistent provenance");
+  }
+}
+}  // namespace
+
 void ProjectDiscussion::reset()
 {
   ++epoch_;
@@ -23,6 +41,7 @@ void ProjectDiscussion::reset()
   provider_ = Json::object(); provider_loaded_ = false;
   ++exchange_generation_; ++exchange_flight_;
   exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = exchange_progress_ = Json::object();
+  exchange_edit_proposal_ = Json::object();
   exchange_id_.clear(); exchange_error_.clear();
   exchange_preparing_ = exchange_reading_ = exchange_pending_ = exchange_following_ = false;
   exchange_clock_seen_ = false;
@@ -107,6 +126,13 @@ bool ProjectDiscussion::progress_supported() const
   if (!requests_supported()) { return false; }
   const auto hello = store_.bridge()->hello_info();
   return hello && hello->has_method("project.requests.progress");
+}
+
+bool ProjectDiscussion::edit_proposals_supported() const
+{
+  if (!generation_supported()) { return false; }
+  const auto hello = store_.bridge()->hello_info();
+  return hello && hello->has_method("project.requests.propose_edits") && hello->has_method("project.requests.edit_proposal");
 }
 
 bool ProjectDiscussion::load_provider()
@@ -243,16 +269,19 @@ void ProjectDiscussion::exchange_failed(const std::string &error)
 }
 
 bool ProjectDiscussion::prepare_question(const std::string &context_id, const std::string &text,
-                                         const std::string &model)
+                                         const std::string &model, const std::string &prompt_version)
 {
+  if (prompt_version != "stk.text/1" &&
+      (prompt_version != "stk.parameter-edits/1" || !edit_proposals_supported())) { return false; }
   if (!generation_supported() || busy_ || project_.busy() || exchange_reading_ || provider_.empty() || context_.empty() ||
       io::get_string(context_, "id") != context_id || text.empty() || model.empty()) { return false; }
   const Json saved_context = context_;
   const auto message_params = request("exchange_message", {{"context_id", context_id}, {"text", text}, {"role", "user"}},
                                       "message_id");
-  const auto request_params = request("exchange_generation", {{"message_id", message_params.at("message_id")},
-      {"configuration", {{"adapter", provider_.at("adapter")}, {"model", model}, {"max_output_tokens", 4096}}}},
-      "request_id");
+  Json input = {{"message_id", message_params.at("message_id")},
+      {"configuration", {{"adapter", provider_.at("adapter")}, {"model", model}, {"max_output_tokens", 4096}}}};
+  if (prompt_version != "stk.text/1") { input["prompt_version"] = prompt_version; }
+  const auto request_params = request("exchange_generation", std::move(input), "request_id");
   const auto id = request_params.at("request_id").get<std::string>();
   const bool accepted = call("project.discussion.add", message_params,
       [this, saved_context, message_params, request_params](const Json &result) {
@@ -267,6 +296,7 @@ bool ProjectDiscussion::prepare_question(const std::string &context_id, const st
         [this, saved_context, question, request_params](const Json &created) {
       const auto record = created.at("request");
       if (record.at("id") != request_params.at("request_id") ||
+          record.at("prompt_version") != request_params.value("prompt_version", "stk.text/1") ||
           io::canonical_json(record.at("configuration")) != io::canonical_json(request_params.at("configuration"))) {
         throw std::runtime_error("Saved request does not match its prepared input");
       }
@@ -290,6 +320,7 @@ bool ProjectDiscussion::prepare_question(const std::string &context_id, const st
     ++exchange_generation_;
     exchange_id_ = id;
     exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = exchange_progress_ = Json::object();
+    exchange_edit_proposal_ = Json::object();
     exchange_error_.clear();
     exchange_preparing_ = true;
     exchange_pending_ = exchange_following_ = false;
@@ -299,6 +330,52 @@ bool ProjectDiscussion::prepare_question(const std::string &context_id, const st
   return accepted;
 }
 
+bool ProjectDiscussion::propose_exchange_edits()
+{
+  if (!edit_proposals_supported() || exchange_busy() || exchange_request_.empty() ||
+      exchange_request_.at("status") != "completed" || exchange_request_.at("prompt_version") != "stk.parameter-edits/1") {
+    return false;
+  }
+  const auto id = exchange_id_;
+  const auto generation = exchange_generation_;
+  return call("project.requests.propose_edits", {{"request_id", id},
+      {"expected_revision", exchange_request_.at("source_revision")}},
+      [this, id, generation](const Json &result) {
+    if (id != exchange_id_ || generation != exchange_generation_) { return; }
+    validate_edit_proposal(result, exchange_request_);
+    exchange_edit_proposal_ = result;
+    exchange_changed();
+  });
+}
+
+bool ProjectDiscussion::read_exchange_edit_proposal(std::function<void(const Json &)> done)
+{
+  if (!edit_proposals_supported() || exchange_busy() || exchange_request_.empty() ||
+      exchange_request_.at("status") != "completed" || exchange_request_.at("prompt_version") != "stk.parameter-edits/1") {
+    return false;
+  }
+  const auto id = exchange_id_;
+  const auto generation = exchange_generation_;
+  return call("project.requests.edit_proposal", {{"request_id", id}},
+      [this, id, generation, done = std::move(done)](const Json &result) {
+    if (id != exchange_id_ || generation != exchange_generation_) { return; }
+    validate_edit_proposal(result, exchange_request_);
+    exchange_edit_proposal_ = result;
+    exchange_changed();
+    if (done) { done(result); }
+  });
+}
+
+void ProjectDiscussion::draft_changed(const std::string &draft_id)
+{
+  const auto draft = exchange_edit_proposal_.value("draft", Json());
+  if (draft.is_null() || io::get_string(draft, "id") != draft_id) { return; }
+  ++exchange_generation_;
+  exchange_pending_ = true;
+  exchange_error_.clear();
+  exchange_changed();
+}
+
 bool ProjectDiscussion::load_exchange(const std::string &id)
 {
   if (!requests_supported() || busy_ || project_.busy() || id.empty()) { return false; }
@@ -306,6 +383,7 @@ bool ProjectDiscussion::load_exchange(const std::string &id)
   ++exchange_generation_;
   exchange_id_ = id;
   exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = exchange_progress_ = Json::object();
+  exchange_edit_proposal_ = Json::object();
   exchange_error_.clear();
   exchange_pending_ = true;
   exchange_following_ = false;
@@ -413,6 +491,15 @@ void ProjectDiscussion::read_exchange_parts(std::shared_ptr<Json> bundle, const 
     }
   }
   if (!bundle->contains("reply")) { (*bundle)["reply"] = Json::object(); }
+  if (!bundle->contains("edit_proposal") && io::get_string(record, "status") == "completed" &&
+      io::get_string(record, "prompt_version") == "stk.parameter-edits/1" && edit_proposals_supported()) {
+    exchange_read("project.requests.edit_proposal", {{"request_id", record.at("id")}}, generation, flight,
+        [this, bundle, generation, flight](const Json &result) {
+      (*bundle)["edit_proposal"] = result;
+      read_exchange_parts(bundle, generation, flight);
+    });
+    return;
+  }
   publish_exchange(*bundle);
 }
 
@@ -421,6 +508,7 @@ void ProjectDiscussion::publish_exchange(const Json &bundle)
   const auto &record = bundle.at("request"), &context = bundle.at("context");
   const auto &question = bundle.at("question"), &reply = bundle.at("reply");
   const auto progress = bundle.value("progress", Json());
+  const auto edit_proposal = bundle.value("edit_proposal", Json::object());
   if (record.at("id") != exchange_id_ || context.at("id") != record.at("context_id") ||
       context.at("project_id") != record.at("project_id") || context.at("source_revision") != record.at("source_revision") ||
       question.at("id") != record.at("message_id") || question.at("context_id") != context.at("id") ||
@@ -454,9 +542,11 @@ void ProjectDiscussion::publish_exchange(const Json &bundle)
       }
     }
   }
+  if (!edit_proposal.empty()) { validate_edit_proposal(edit_proposal, record); }
   exchange_request_ = record; exchange_context_ = context;
   exchange_question_ = question; exchange_reply_ = reply;
   exchange_progress_ = progress.is_null() ? Json::object() : progress;
+  exchange_edit_proposal_ = edit_proposal;
   // Keep visible history labels consistent with the newly read status without
   // changing its selection, pagination or starting another bridge call.
   for (auto &item : request_page_.items) {

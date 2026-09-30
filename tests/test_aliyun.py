@@ -1,6 +1,7 @@
 """Token Plan wire contract with stdlib HTTP parsing and no external network."""
 
 from copy import deepcopy
+import hashlib
 import http.client
 import io
 import json
@@ -13,6 +14,7 @@ import pytest
 from suan.project import ProjectError
 from suan.project import aliyun
 from suan.project.request_executor import ConfirmedCancellation, DefinitiveFailure, InvalidResponse
+from suan.project.requests import PARAMETER_EDITS_PROMPT_VERSION, PROMPT_VERSION
 from test_project_contexts import model, capture  # noqa: F401
 
 
@@ -662,3 +664,97 @@ def test_stream_bad_observer_fails_before_connection(frozen, wire):
     with pytest.raises(DefinitiveFailure, match="observer"):
         aliyun.AliyunTokenPlanAdapter().send_stream(frozen, threading.Event(), None)
     assert not socket.sent and not wire.connections
+
+
+@pytest.fixture
+def edits_frozen(model, frozen):
+    store, _ = model
+    record = store.requests.create(frozen["message"]["id"], request_id=str(uuid4()),
+                                   configuration=frozen["configuration"], prompt_version=PARAMETER_EDITS_PROMPT_VERSION)
+    return store.requests.input(record["id"])
+
+
+@pytest.mark.parametrize("streaming", [False, True], ids=["complete", "stream"])
+def test_parameter_edit_mode_uses_fixed_policy_and_preserves_saved_scope(edits_frozen, model, wire, streaming):
+    _, ids = model
+    context = edits_frozen["context"]
+    # This selected scalar has neither a literal nor a definition in the saved capture.
+    row = next(item for item in context["content"]["value"]["records"] if item["id"] == ids["second"])
+    assert ids["temperature"] not in row["literals"] and ids["temperature"] not in row["definitions"]
+    answer = json.dumps({"format": PARAMETER_EDITS_PROMPT_VERSION, "context_id": context["id"],
+                         "base_revision": context["source_revision"], "summary": "Fill the captured blank temperature",
+                         "edits": [{"record_id": ids["second"], "field_id": ids["temperature"], "value": 325}]})
+    if streaming:
+        socket = stream_wire(wire, [stream_chunk(answer[:40], role="assistant"),
+                                   stream_chunk(answer[40:], finish="stop"), "[DONE]"])
+        deltas = []
+        reply = send_stream(edits_frozen, deltas)
+        assert "".join(deltas) == answer
+    else:
+        data = completion()
+        data["choices"][0]["message"]["content"] = answer
+        socket = wire(data)
+        reply = send(edits_frozen)
+    _, body = b"".join(socket.sent).split(b"\r\n\r\n", 1)
+    payload = json.loads(body)
+    assert set(payload) == {"model", "stream", "enable_thinking", "max_tokens", "temperature", "messages"} | (
+        {"stream_options"} if streaming else set())
+    assert payload["stream"] is streaming and payload["enable_thinking"] is False
+    assert [message["role"] for message in payload["messages"]] == ["system", "user"]
+    user = json.loads(payload["messages"][1]["content"])
+    assert user == {"saved_context": context, "question": edits_frozen["message"]["text"]}
+    policy = payload["messages"][0]["content"]
+    for requirement in (
+            "exactly one strict JSON document", "without Markdown", "format, context_id, base_revision, summary, edits",
+            'format to "stk.parameter-edits/1"', "context_id to saved_context.id",
+            "saved_context.source_revision", "4096 characters", "1 to 1000", "exactly record_id, field_id, value",
+            "pair must be unique", "never invent IDs", "selected in saved_context.selection",
+            "omitted literal is not editable", "JSON fields are forbidden", "formulas and references",
+            "captured blank cell", "included null", "without type coercion", "unchanged units",
+            "16 KiB UTF-8", "64 KiB UTF-8", "no tools", "human action to apply"):
+        assert requirement in policy
+    assert reply.text == answer and len(wire.connections) == 1 and socket.closed
+
+
+@pytest.mark.parametrize("streaming", [False, True], ids=["complete", "stream"])
+def test_original_text_mode_policy_and_wire_shape_are_unchanged(frozen, wire, streaming):
+    socket = stream_wire(wire) if streaming else wire()
+    send_stream(frozen, []) if streaming else send(frozen)
+    payload = json.loads(b"".join(socket.sent).split(b"\r\n\r\n", 1)[1])
+    # Pin the released stk.text/1 prompt from 6123300; adding another mode must
+    # not silently change the meaning of an existing saved request identity.
+    assert hashlib.sha256(payload["messages"][0]["content"].encode()).hexdigest() == (
+        "ddee9c489b3bfe4468489542ee680b10252564435dd03e3aa63cc18ca148e371")
+    assert frozen["prompt_version"] == PROMPT_VERSION
+    expected = {"model": "qwen-test", "stream": streaming, "enable_thinking": False, "max_tokens": 128,
+                "temperature": 0.25, "messages": [payload["messages"][0], {"role": "user", "content":
+                    aliyun._encode({"saved_context": frozen["context"], "question": frozen["message"]["text"]}).decode()}]}
+    if streaming:
+        expected["stream_options"] = {"include_usage": True}
+    assert payload == expected
+
+
+@pytest.mark.parametrize("initial_mode", [PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VERSION], ids=["text", "edits"])
+@pytest.mark.parametrize("streaming", [False, True], ids=["complete", "stream"])
+def test_prepared_credentials_and_payload_cannot_be_rebound_to_another_prompt_mode(
+        frozen, edits_frozen, wire, initial_mode, streaming):
+    selected = deepcopy(frozen if initial_mode == PROMPT_VERSION else edits_frozen)
+    prepared = aliyun.AliyunTokenPlanAdapter().prepare(selected)
+    selected["prompt_version"] = PARAMETER_EDITS_PROMPT_VERSION if initial_mode == PROMPT_VERSION else PROMPT_VERSION
+    socket = stream_wire(wire) if streaming else wire()
+    with pytest.raises(DefinitiveFailure, match="no longer matches"):
+        if streaming:
+            prepared.send_stream(selected, threading.Event(), lambda delta: None)
+        else:
+            prepared.send(selected, threading.Event())
+    assert not wire.connections and not socket.sent
+
+
+@pytest.mark.parametrize("version", [None, True, 1, [], {}, "stk.parameter-edits/2", "stk.text/2"],
+                         ids=["null", "boolean", "integer", "array", "object", "future-edits", "future-text"])
+def test_unknown_prompt_versions_fail_local_preflight_without_sending(frozen, wire, version):
+    frozen["prompt_version"] = version
+    socket = wire()
+    with pytest.raises(ProjectError, match="Invalid frozen input"):
+        aliyun.AliyunTokenPlanAdapter().prepare(frozen)
+    assert not wire.connections and not socket.sent

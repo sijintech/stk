@@ -17,6 +17,8 @@ from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _id
 
 
 PROMPT_VERSION = "stk.text/1"
+PARAMETER_EDITS_PROMPT_VERSION = "stk.parameter-edits/1"
+SUPPORTED_PROMPT_VERSIONS = frozenset({PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VERSION})
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8192
 _SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
@@ -91,6 +93,17 @@ def _assistant_id(request_id, project_id):
     return str(uuid5(UUID(request_id), project_id + ":assistant"))
 
 
+def _request_hash(message_id, configuration, prompt_version):
+    if not isinstance(prompt_version, str) or prompt_version not in SUPPORTED_PROMPT_VERSIONS:
+        raise ProjectError("Unsupported project request prompt version")
+    value = {"message_id": message_id, "configuration": configuration}
+    # Preserve the original format-8 text-request identity, including retries made
+    # by clients that explicitly specify the previously implicit default.
+    if prompt_version != PROMPT_VERSION:
+        value["prompt_version"] = prompt_version
+    return _digest(value)
+
+
 class Requests:
     def __init__(self, store):
         self.store = store
@@ -140,12 +153,12 @@ class Requests:
                 raise ValueError("assistant identity mismatch")
             if type(identity["source_revision"]) is not int or not 0 <= identity["source_revision"] < 2**63:
                 raise ValueError("invalid source revision")
-            if identity["configuration"] != _configuration(identity["configuration"]) or identity["prompt_version"] != PROMPT_VERSION:
+            if identity["configuration"] != _configuration(identity["configuration"]):
                 raise ValueError("invalid input configuration")
             for key in ("input_sha256", "context_sha256", "message_sha256"):
                 if not isinstance(identity[key], str) or not _HASH.fullmatch(identity[key]):
                     raise ValueError("invalid input checksum")
-            request_hash = _digest({"message_id": identity["message_id"], "configuration": identity["configuration"]})
+            request_hash = _request_hash(identity["message_id"], identity["configuration"], identity["prompt_version"])
             if request_hash != row["request_sha256"] or _digest({"payload": identity, "request_sha256": request_hash}) != row["sha256"]:
                 raise ValueError("identity checksum mismatch")
             if _digest({"id": identity["id"], "sha256": row["sha256"], "state": state}) != row["state_sha256"]:
@@ -203,11 +216,11 @@ class Requests:
                    (state["status"], _encode(state).decode("utf-8"), digest, identity["id"]))
         return self._public(identity, state)
 
-    def create(self, message_id, *, request_id, configuration):
+    def create(self, message_id, *, request_id, configuration, prompt_version=PROMPT_VERSION):
         _id(message_id)
         _id(request_id)
         configuration = _configuration(configuration)
-        request_hash = _digest({"message_id": message_id, "configuration": configuration})
+        request_hash = _request_hash(message_id, configuration, prompt_version)
         with self.store._connect(write=True) as db:
             _require(db)
             existing = db.execute("SELECT * FROM project_requests WHERE id=?", (request_id,)).fetchone()
@@ -220,7 +233,7 @@ class Requests:
             if message["role"] != "user":
                 raise ProjectError("A text request must reference a user message")
             context = self.store.contexts._get(db, message["context_id"])
-            selected = {"context": context, "message": message, "configuration": configuration, "prompt_version": PROMPT_VERSION}
+            selected = {"context": context, "message": message, "configuration": configuration, "prompt_version": prompt_version}
             if len(_encode(selected)) > MAX_INPUT_BYTES:
                 raise ProjectError("Request input exceeds the 1 MiB limit")
             assistant_id = _assistant_id(request_id, self.store._project_id)
@@ -230,7 +243,7 @@ class Requests:
             identity = {"id": request_id, "project_id": self.store._project_id, "context_id": context["id"],
                         "message_id": message_id, "assistant_message_id": assistant_id,
                         "source_revision": context["source_revision"], "configuration": configuration,
-                        "prompt_version": PROMPT_VERSION, "input_sha256": _digest(selected), "created_at": now,
+                        "prompt_version": prompt_version, "input_sha256": _digest(selected), "created_at": now,
                         "context_sha256": _digest(context), "message_sha256": _digest(message)}
             state = {"status": "pending", "cancel_requested": False, "executor_id": None, "updated_at": now,
                      "error_code": None, "result": None}
@@ -264,6 +277,16 @@ class Requests:
             ancestors = {}
             identity, _ = self._read(db, request_id, ancestors)
             return self._input(db, identity, ancestors)
+
+    def propose_edits(self, request_id, *, expected_revision):
+        """Explicitly validate and save one parameter draft; never apply or send."""
+        from .parameter_edits import propose_edits
+        return propose_edits(self, request_id, expected_revision=expected_revision)
+
+    def edit_proposal(self, request_id):
+        """Read an existing conversion without creating, previewing or applying it."""
+        from .parameter_edits import edit_proposal
+        return edit_proposal(self, request_id)
 
     def _claim(self, request_id, *, executor_id):
         _id(request_id)

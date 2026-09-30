@@ -450,6 +450,201 @@ TEST_F(ProjectLegacyStream, OlderBridgeFallsBackToSavedStatusAndCompletion)
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
+class ProjectProposal : public ProjectPython {
+ protected:
+  void prepare_suggestion()
+  {
+    populated();
+    auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+    f.screen.set_maximized(&area); ai_frame();
+    auto &discussion = state().discussion();
+    ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Parameter scope")); settled();
+    ASSERT_TRUE(discussion.edit_proposals_supported());
+    f.drv->frame();
+    const auto handle = state().project()->handle;
+    f.screen.ui()->find("a2/main/ai_intent/" + handle)->index.assign(1);
+    f.screen.ui()->find("a2/main/ai_question/" + handle)->string.assign("Raise the temperature to 350 K.");
+    f.drv->frame();
+    click("ai_prepare");
+    ASSERT_EQ(discussion.exchange_request().at("prompt_version"), "stk.parameter-edits/1");
+    ASSERT_EQ(discussion.exchange_request().at("status"), "pending");
+  }
+
+  void completed_suggestion(const std::string &replacement = "")
+  {
+    prepare_suggestion();
+    auto &discussion = state().discussion();
+    const auto request = discussion.exchange_request();
+    const Json response = {{"format", "stk.parameter-edits/1"}, {"context_id", request.at("context_id")},
+        {"base_revision", 1}, {"summary", "Raise the selected temperature to 350 K."},
+        {"edits", Json::array({{{"record_id", record_id}, {"field_id", field_id}, {"value", 350}}})}};
+    auto &scripts = f.shell->store().scripts();
+    ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }));
+    ASSERT_TRUE(scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+        "s=ProjectStore(" + Json(dir.str() + "/project").dump() + ")\nowner=str(uuid4())\n"
+        "s.requests._claim(" + request.at("id").dump() + ", executor_id=owner)\n"
+        "s.requests._complete(" + request.at("id").dump() + ", executor_id=owner, text=" +
+            Json(replacement.empty() ? response.dump() : replacement).dump() + ")"));
+    ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }));
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+    ASSERT_TRUE(discussion.refresh_exchange()); ai_frame();
+    ASSERT_EQ(discussion.exchange_request().at("status"), "completed");
+    ASSERT_TRUE(discussion.exchange_edit_proposal().at("draft").is_null());
+  }
+
+  void click(const std::string &key, bool wait = true)
+  {
+    const auto *widget = f.screen.ui()->find("a2/main/" + key);
+    ASSERT_NE(widget, nullptr); ASSERT_TRUE(widget->enabled);
+    const auto [x, y] = f.widget_center("a2/main/" + key);
+    f.drv->click(x, y);
+    if (wait) { settled(); f.screen.run_deferred(); ai_frame(); }
+  }
+};
+
+TEST_F(ProjectProposal, PreparedPurposeIsFrozenAndTextModeKeepsItsDefaultContract)
+{
+  prepare_suggestion();
+  auto &discussion = state().discussion();
+  const auto request = discussion.exchange_request();
+  const auto question = discussion.exchange_question();
+  f.screen.ui()->find("a2/main/ai_intent/" + state().project()->handle)->index.assign(0);
+  f.drv->frame();
+  EXPECT_EQ(discussion.exchange_request(), request);
+  click("ai_prepare");
+  EXPECT_EQ(discussion.exchange_request().at("prompt_version"), "stk.text/1");
+  EXPECT_NE(discussion.exchange_request().at("id"), request.at("id"));
+  EXPECT_EQ(discussion.exchange_question().at("id"), question.at("id"));
+  EXPECT_EQ(discussion.exchange_request().at("status"), "pending");
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectProposal, SuggestionIsSavedThenOpenedAndAppliedThroughItsDurableReceipt)
+{
+  completed_suggestion();
+  auto &discussion = state().discussion();
+  const auto request_id = discussion.exchange_request().at("id").get<std::string>();
+  EXPECT_TRUE(state().saved_review().empty());
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/ai_open_edits")->enabled);
+  const auto *log = f.screen.ui()->find("a2/main/ai_transcript")->log;
+  std::string shown;
+  for (size_t i = 0; i < log->line_count(); ++i) { shown += std::string(log->line(i)); }
+  EXPECT_NE(shown.find("Temperature: 350"), std::string::npos);
+  EXPECT_EQ(shown.find("stk.parameter-edits/1"), std::string::npos);
+  click("ai_save_edits");
+  const auto draft = discussion.exchange_edit_proposal().at("draft");
+  EXPECT_EQ(draft.at("status"), "pending");
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_TRUE(state().saved_review().empty());
+  click("ai_open_edits");
+  EXPECT_EQ(state().saved_review().at("id"), draft.at("id"));
+  EXPECT_FALSE(state().review());
+  EXPECT_FALSE(state().can_apply_review());
+  ASSERT_NE(f.screen.maximized(), nullptr);
+  EXPECT_EQ(dynamic_cast<EditorArea *>(f.screen.maximized())->editor().type().id, kEditorProject);
+  ASSERT_TRUE(state().preview()); settled();
+  ASSERT_TRUE(state().can_apply_review());
+  ASSERT_TRUE(state().apply_review()); settled();
+  EXPECT_EQ(state().saved_review().at("id"), draft.at("id"));
+  EXPECT_EQ(state().saved_review().at("status"), "applied");
+  EXPECT_EQ(state().table()->text(0, 0), "350");
+  f.screen.set_maximized(&f.area("a2")); ai_frame();
+  EXPECT_EQ(discussion.exchange_edit_proposal().at("draft").at("status"), "applied");
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/ai_open_edits")->enabled);
+  ASSERT_TRUE(state().undo()); settled();
+  state().discard_review();
+  f.screen.set_maximized(&f.area("a2")); ai_frame();
+  ASSERT_TRUE(discussion.load_exchange(request_id)); ai_frame();
+  EXPECT_EQ(discussion.exchange_edit_proposal().at("draft").at("id"), draft.at("id"));
+  EXPECT_EQ(discussion.exchange_edit_proposal().at("draft").at("status"), "applied");
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/ai_save_edits")->enabled);
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/ai_open_edits")->enabled);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectProposal, ExistingAndInterveningReviewAreNeverReplacedByAIHandoff)
+{
+  completed_suggestion(); click("ai_save_edits");
+  const auto original = set_cell(999).dump();
+  state().set_review_source(original);
+  click("ai_open_edits");
+  EXPECT_EQ(state().review_source(), original);
+  EXPECT_TRUE(state().saved_review().empty());
+  EXPECT_EQ(f.screen.maximized(), &f.area("a2"));
+  EXPECT_EQ(f.area("a2").editor().type().id, kEditorAI);
+  state().discard_review(); ai_frame();
+  click("ai_open_edits", false);
+  state().set_review_source("An intervening unsaved review");
+  state().discard_review();
+  settled(); f.screen.run_deferred(); ai_frame();
+  EXPECT_EQ(state().review_source(), "[]");
+  EXPECT_TRUE(state().saved_review().empty());
+  EXPECT_EQ(f.area("a2").editor().type().id, kEditorAI);
+  EXPECT_EQ(state().project()->revision, 1);
+}
+
+TEST_F(ProjectProposal, ClosedOriginEditorFencesQueuedProposalNavigation)
+{
+  completed_suggestion(); click("ai_save_edits");
+  click("ai_open_edits", false);
+  ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorViewer));
+  settled(); f.screen.run_deferred(); f.drv->frame();
+  EXPECT_TRUE(state().saved_review().empty());
+  EXPECT_EQ(state().review_source(), "[]");
+  EXPECT_EQ(f.area("a2").editor().type().id, kEditorViewer);
+  EXPECT_EQ(f.screen.maximized(), &f.area("a2"));
+}
+
+TEST_F(ProjectProposal, DiscardedSuggestionUpdatesWithoutManuallyRefreshingTheExchange)
+{
+  completed_suggestion(); click("ai_save_edits"); click("ai_open_edits");
+  const auto id = state().saved_review().at("id").get<std::string>();
+  ASSERT_TRUE(state().discard_saved_draft(id)); settled();
+  f.screen.set_maximized(&f.area("a2")); ai_frame();
+  EXPECT_EQ(state().discussion().exchange_edit_proposal().at("draft").at("status"), "discarded");
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/ai_save_edits")->enabled);
+  EXPECT_FALSE(f.screen.ui()->find("a2/main/ai_open_edits")->enabled);
+  EXPECT_EQ(state().project()->revision, 1);
+}
+
+TEST_F(ProjectProposal, DeeplyNestedInvalidSuggestionStaysPlainTextAndCannotSaveADraft)
+{
+  const auto text = std::string("{\"format\":\"stk.parameter-edits/1\",\"summary\":\"Malformed suggestion\",\"edits\":[{") +
+      "\"record_id\":\"" + record_id + "\",\"field_id\":\"" + field_id + "\",\"value\":" +
+      std::string(24000, '[') + "0" + std::string(24000, ']') + "}]}";
+  completed_suggestion(text);
+  auto &discussion = state().discussion();
+  EXPECT_EQ(discussion.exchange_reply().at("text"), text);
+  ASSERT_NE(f.screen.ui()->find("a2/main/ai_transcript"), nullptr);
+  click("ai_save_edits");
+  EXPECT_FALSE(discussion.error().empty());
+  EXPECT_TRUE(discussion.exchange_edit_proposal().at("draft").is_null());
+  EXPECT_TRUE(state().saved_review().empty());
+  EXPECT_EQ(state().project()->revision, 1);
+}
+
+TEST_F(ProjectProposal, ConversionStaysInOriginalProjectAndIsRecoveredOnlyByReading)
+{
+  completed_suggestion();
+  auto &discussion = state().discussion();
+  const auto request_id = discussion.exchange_request().at("id").get<std::string>();
+  ASSERT_TRUE(discussion.propose_exchange_edits());
+  ASSERT_TRUE(state().create(dir.str() + "/other-project", "Other project")); settled(); ai_frame();
+  EXPECT_TRUE(discussion.exchange_edit_proposal().empty());
+  EXPECT_TRUE(state().saved_review().empty());
+  EXPECT_EQ(state().project()->revision, 0);
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled(); ai_frame();
+  ASSERT_TRUE(discussion.load_exchange(request_id)); ai_frame();
+  ASSERT_FALSE(discussion.exchange_edit_proposal().at("draft").is_null());
+  EXPECT_EQ(discussion.exchange_edit_proposal().at("draft").at("status"), "pending");
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_TRUE(state().saved_review().empty());
+}
+
 TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
 {
   populated();
