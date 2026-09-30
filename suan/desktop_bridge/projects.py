@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
+from suan.project.analyses import AnalysisNotFound
 from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, provider_info
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
@@ -35,6 +36,8 @@ class ProjectSessions:
                 yield
             except RevisionConflict as exc:
                 raise BridgeError("conflict", str(exc)) from None
+            except AnalysisNotFound as exc:
+                raise BridgeError("not_found", str(exc)) from None
             except RequestBusy:
                 raise BridgeError("busy", "A live executor owns this request or the local executor has reached its 8-request limit") from None
             except UnsupportedProjectFormat as exc:
@@ -167,6 +170,19 @@ class ProjectSessions:
     def history(self, params):
         with self._operation():
             return {"history": self._get(params["handle"]).history()}
+
+    def analyses(self, action, params):
+        with self._operation():
+            analyses = self._get(params["handle"]).analyses
+            if action == "create":
+                return analyses.create(params["name"], params["document"], analysis_id=params["analysis_id"],
+                                       expected_revision=params["expected_revision"])
+            if action == "update":
+                return analyses.update(params["analysis_id"], params["name"], params["document"],
+                                       expected_revision=params["expected_revision"])
+            if action == "list":
+                return analyses.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
+            return analyses.get(params["analysis_id"])
 
     def requests(self, action, params):
         with self._operation():

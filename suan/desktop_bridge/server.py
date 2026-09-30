@@ -244,6 +244,10 @@ class Bridge:
             "project.files.index": lambda p, c: self.edit_project_files("index", p, c),
             "project.files.refresh": lambda p, c: self.edit_project_files("refresh", p, c),
             "project.files.resolve": lambda p, c: self.projects.files("resolve", p),
+            "project.analyses.create": lambda p, c: self.edit_project_analyses("create", p, c),
+            "project.analyses.update": lambda p, c: self.edit_project_analyses("update", p, c),
+            "project.analyses.get": lambda p, c: self.projects.analyses("get", p),
+            "project.analyses.list": lambda p, c: self.projects.analyses("list", p),
             "project.snapshots.list": lambda p, c: self.projects.snapshots("list", p),
             "project.snapshots.capture": self.capture_project_files,
             "project.snapshots.get": lambda p, c: self.projects.snapshots("get", p),
@@ -444,6 +448,7 @@ class Bridge:
                  "project.requests.propose_edits", "project.requests.edit_proposal",
                  "project.csv.import", "project.csv.export",
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
+                 "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
                  "project.snapshots.verify", "project.snapshots.resolve",
                  "project.runs.prepare", "project.runs.list", "project.runs.get",
@@ -554,6 +559,12 @@ class Bridge:
 
     def edit_project_files(self, action, params, context):
         result = self.projects.files(action, params)
+        context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                            "revision": result["revision"]}))
+        return result
+
+    def edit_project_analyses(self, action, params, context):
+        result = self.projects.analyses(action, params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
         return result

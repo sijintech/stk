@@ -31,6 +31,23 @@ print(shown["error"], shown["layers"])
 等待期间来源切换会报错，防止把另一份数据当成原请求完成。禁用自动求值后仍有待应用参数时，应先明确
 `evaluate()` 再等待。状态读取会推动已有的 UI 延迟更新，但不会提交 Runtime 模拟任务。
 
+## 纯读取分析配置
+
+```python
+capture = stk.viewer.graph_configuration(displayed=False)
+configuration = capture["configuration"]  # 没有原始图定义时为 None
+```
+
+这项可选能力读取单次不可变配置，不推进延迟求值、刷新元数据或切换页面。
+`displayed=True` 读取本机保存的已显示结果提交配置；`displayed` 必须是布尔值。
+返回 Viewer 代次、选择模式、已显示图的哈希核对状态，以及图、提交参数、请求输出和完整来源提示。
+没有原始定义的导入结果返回 `configuration=None`；不会根据预设名称或哈希重建图。
+核对状态为 `True`、`False` 或 `None`，不验证源文件变化、输入内容或节点实现版本。
+
+捕获响应不包含结果回执和解析值。需要持久保存时，把 `graph`、`parameters`、`requested_outputs`
+明确组成[项目分析文档](project-analyses.md)再调用保存接口；来源提示不等于冻结的执行绑定。
+旧桌面未协商此能力时返回 `unsupported`，没有桌面连接时为 `unavailable`；不会回退到会推动 UI 更新的 `status()`。
+
 ## 参数、图层和时间步
 
 ```python

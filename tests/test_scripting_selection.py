@@ -42,7 +42,7 @@ def test_selection_helpers_keep_the_held_handle_and_forward_explicit_identity_on
 
 def test_original_six_and_all_current_desktop_capabilities_fit_attach_schema():
     original = ["layout.get", "layout.apply", "editors.list", "project.current", "project.open", "project.close"]
-    assert len(UI_OPERATIONS) == 23 and {"project.selection", "project.select"} <= set(UI_OPERATIONS)
+    assert len(UI_OPERATIONS) == 24 and {"project.selection", "project.select"} <= set(UI_OPERATIONS)
     assert validate_params("ui.attach", {"operations": original}) == []
     assert validate_params("ui.attach", {"operations": list(UI_OPERATIONS)}) == []
     assert validate_params("ui.attach", {"operations": ["project.selection", "project.selection"]})

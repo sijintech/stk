@@ -20,6 +20,16 @@ class Viewer:
     def presets(self):
         return self._operation("presets")
 
+    def graph_configuration(self, *, displayed=False):
+        """Read a detached configuration snapshot without advancing Viewer work.
+
+        A null configuration means the selected definition is unavailable (including imported
+        results without their original graph). Source identity is a hint, not frozen input bytes.
+        """
+        if type(displayed) is not bool:
+            raise TypeError("displayed must be a boolean")
+        return self._operation("graph_configuration", {"displayed": displayed})
+
     def open(self, path, *, preset=None, parameters=None, focus=True):
         """Open a payload, result/run directory or scientific field file. Evaluation is asynchronous; use status/wait."""
         params = {"path": str(Path(path).expanduser().resolve()), "focus": focus}

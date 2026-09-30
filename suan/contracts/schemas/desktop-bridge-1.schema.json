@@ -3092,7 +3092,7 @@
                 "$ref": "#/$defs/uiOperation"
               },
               "uniqueItems": true,
-              "maxItems": 23
+              "maxItems": 24
             }
           },
           "required": [
@@ -5564,6 +5564,132 @@
             }
           ]
         }
+      },
+      "project.analyses.create": {
+        "description": "Explicit ordinary-table create of a saved analysis document; one undoable project edit, no graph validation, evaluation or file access.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "analysis_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "document": {
+              "$ref": "#/$defs/projectAnalysisDocument"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "analysis_id",
+            "name",
+            "document",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
+      },
+      "project.analyses.update": {
+        "description": "Explicit ordinary-table update of a saved analysis document; one undoable project edit, no graph validation, evaluation or file access.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "analysis_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "document": {
+              "$ref": "#/$defs/projectAnalysisDocument"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "analysis_id",
+            "name",
+            "document",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
+      },
+      "project.analyses.get": {
+        "description": "Read one saved analysis at the observed revision; malformed/future documents remain inspectable as invalid/unsupported.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "analysis_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "analysis_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisGetResult"
+        }
+      },
+      "project.analyses.list": {
+        "description": "Read bounded saved-analysis summaries without creating a table or evaluating cells.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisListResult"
+        }
       }
     },
     "events": {
@@ -6433,7 +6559,8 @@
         "viewer.reset_camera",
         "project.review",
         "project.selection",
-        "project.select"
+        "project.select",
+        "viewer.graph_configuration"
       ]
     },
     "scriptRun": {
@@ -8068,6 +8195,663 @@
       },
       "required": [
         "restored"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisGraphIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "projectAnalysisGraphPortRef": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}\\.[a-z][a-z0-9_]{0,63}$"
+    },
+    "projectAnalysisGraphNodeTypeRef": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*@[1-9][0-9]*$",
+      "description": "namespace.family.name@major, e.g. stk.filter.contour@1"
+    },
+    "projectAnalysisGraphLink": {
+      "type": "object",
+      "required": [
+        "from"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/projectAnalysisGraphPortRef"
+        },
+        "as": {
+          "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+        }
+      },
+      "additionalProperties": false
+    },
+    "projectAnalysisGraphNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+        },
+        "type": {
+          "$ref": "#/$defs/projectAnalysisGraphNodeTypeRef"
+        },
+        "params": {
+          "type": "object"
+        },
+        "inputs": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/projectAnalysisGraphLink"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/projectAnalysisGraphLink"
+                }
+              }
+            ]
+          }
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "ui": {
+          "type": "object"
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "projectAnalysisGraphParameter": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "default"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+        },
+        "type": {
+          "enum": [
+            "number",
+            "integer",
+            "boolean",
+            "string",
+            "step",
+            "vector3",
+            "int3",
+            "range",
+            "enum",
+            "json"
+          ]
+        },
+        "default": true,
+        "choices": {
+          "type": "array",
+          "minItems": 1
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "ui": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "projectAnalysisGraphParamRef": {
+      "type": "object",
+      "required": [
+        "$param"
+      ],
+      "properties": {
+        "$param": {
+          "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+        }
+      },
+      "additionalProperties": false
+    },
+    "projectAnalysisGraphTime": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "enum": [
+            "step",
+            "time"
+          ]
+        },
+        "current": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "range": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "stride": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "policy": {
+          "enum": [
+            "latest_at_or_before",
+            "exact"
+          ]
+        },
+        "fps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "projectAnalysisGraph": {
+      "type": "object",
+      "required": [
+        "schema",
+        "nodes",
+        "outputs"
+      ],
+      "properties": {
+        "schema": {
+          "const": "stk.graph/1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string"
+        },
+        "catalog": {
+          "type": "object",
+          "description": "Minimum catalog version per node-type namespace, e.g. {\"stk\": 1}. null means any.",
+          "additionalProperties": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectAnalysisGraphParameter"
+          },
+          "maxItems": 64
+        },
+        "time": {
+          "$ref": "#/$defs/projectAnalysisGraphTime"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectAnalysisGraphNode"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "outputs": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/projectAnalysisGraphPortRef"
+          }
+        },
+        "ui": {
+          "type": "object"
+        },
+        "extensions": {
+          "type": "object"
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "projectAnalysisDocument": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.analysis-document/1"
+        },
+        "graph": {
+          "$ref": "#/$defs/projectAnalysisGraph"
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "maxItems": 256,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "format",
+        "graph",
+        "parameters",
+        "outputs"
+      ],
+      "additionalProperties": false,
+      "description": "Editable structural graph document; readability is not semantic validation. Graph<=256 KiB, parameter overrides<=64 KiB, document<=384 KiB, maximum depth64. Outputs must name declared graph outputs; empty selects none. Bytes and cross-field limits are checked by storage."
+    },
+    "projectAnalysisSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "state": {
+          "enum": [
+            "readable",
+            "invalid",
+            "unsupported"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "format",
+        "state",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysis": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "state": {
+          "enum": [
+            "readable",
+            "invalid",
+            "unsupported"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "document": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/projectAnalysisDocument"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "format",
+        "state",
+        "error",
+        "document"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "state": {
+                  "const": "readable"
+                },
+                "document": {
+                  "$ref": "#/$defs/projectAnalysisDocument"
+                }
+              }
+            },
+            {
+              "properties": {
+                "state": {
+                  "enum": [
+                    "invalid",
+                    "unsupported"
+                  ]
+                },
+                "document": {
+                  "type": "null"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "projectAnalysisWriteResult": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectCommand"
+          }
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "record_id": {
+          "$ref": "#/$defs/projectUuid"
+        }
+      },
+      "required": [
+        "revision",
+        "commands",
+        "table_id",
+        "record_id"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisListResult": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "compatible": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "analyses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectAnalysisSummary"
+          },
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "revision",
+        "table_id",
+        "compatible",
+        "error",
+        "offset",
+        "total",
+        "analyses"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisGetResult": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "compatible": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "analysis": {
+          "$ref": "#/$defs/projectAnalysis"
+        }
+      },
+      "required": [
+        "revision",
+        "table_id",
+        "compatible",
+        "error",
+        "analysis"
+      ],
+      "additionalProperties": false
+    },
+    "uiViewerGraphConfigurationParams": {
+      "type": "object",
+      "properties": {
+        "displayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "displayed"
+      ],
+      "additionalProperties": false
+    },
+    "uiViewerGraphSource": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "none",
+            "payload",
+            "result",
+            "run",
+            "task"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "field_file": {
+          "type": "string"
+        },
+        "connection": {
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "series": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "path",
+        "field_file",
+        "connection",
+        "node",
+        "workspace_id",
+        "task_id",
+        "series"
+      ],
+      "additionalProperties": false
+    },
+    "uiViewerGraphConfiguration": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/uiViewerGraphSource"
+        },
+        "preset_id": {
+          "type": "string"
+        },
+        "graph": {
+          "type": "object"
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "requested_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "source",
+        "preset_id",
+        "graph",
+        "parameters",
+        "requested_outputs"
+      ],
+      "additionalProperties": false
+    },
+    "uiViewerGraphConfigurationResult": {
+      "type": "object",
+      "properties": {
+        "viewer_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "displayed": {
+          "type": "boolean"
+        },
+        "displayed_graph_verified": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "configuration": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/uiViewerGraphConfiguration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "viewer_version",
+        "displayed",
+        "displayed_graph_verified",
+        "configuration"
       ],
       "additionalProperties": false
     }

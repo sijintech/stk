@@ -10,6 +10,12 @@
 
 namespace stk::app {
 
+/** An inspectable definition has no implied data source, execution, or result. */
+struct AnalysisGraphDefinition {
+  io::Json graph, parameters;
+  std::vector<std::string> requested_outputs;
+};
+
 /** Editor-local, read-only inspection. sync() never pumps/evaluates the Viewer. Only validate()
  * sends a bridge request, for the exact graph and submitted parameters currently inspected.
  * Results from another configuration, bridge session, mode, or destroyed editor are ignored. */
@@ -23,7 +29,20 @@ class AnalysisGraphState {
   void sync();
   void show_displayed(bool displayed);
   bool displayed() const { return displayed_; }
+  void show_saved();
+  bool saved() const { return saved_; }
+  /** Accept a copied project definition for the currently open project. Loading it never changes
+   * the Viewer; the opening handle fences the document and pending validation after close/reopen. */
+  bool open_document(const std::string &handle, const std::string &analysis_id,
+                     int64_t revision, const io::Json &document, bool activate = true);
+  void clear_document();
+  const std::string &document_id() const { return document_id_; }
+  int64_t document_revision() const { return document_revision_; }
+  bool document_stale() const;
+  const AnalysisGraphDefinition *definition() const { return definition_ ? &*definition_ : nullptr; }
+  /** Null in saved mode. A saved definition has no current Viewer receipt attached. */
   const std::shared_ptr<const ViewerGraphInspection> &inspection() const { return inspection_; }
+  /** Only present in a Viewer mode. Saved documents never fabricate a Viewer source. */
   const ViewerGraphConfiguration *configuration() const;
   const std::shared_ptr<const AnalysisGraphView> &view() const { return view_; }
   const std::string &error() const { return error_; }
@@ -41,12 +60,15 @@ class AnalysisGraphState {
   void invalidate_validation();
   ViewerState &viewer_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
-  bool displayed_ = false, validating_ = false;
-  uint64_t generation_ = 0;
+  bool displayed_ = false, saved_ = false, validating_ = false, dirty_ = true;
+  uint64_t generation_ = 0, viewer_version_ = 0;
   bridge::Client *bridge_ = nullptr;
   std::string session_;
   std::shared_ptr<const ViewerGraphInspection> inspection_;
   std::optional<ViewerGraphConfiguration> configuration_;
+  std::optional<AnalysisGraphDefinition> definition_, document_definition_;
+  std::string document_handle_, document_id_;
+  int64_t document_revision_ = -1;
   io::Json catalog_, validation_;
   std::shared_ptr<const AnalysisGraphView> view_;
   std::string error_, validation_error_;

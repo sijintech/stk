@@ -14,7 +14,7 @@ from .protocol import BridgeError
 UI_OPERATIONS = ("layout.get", "layout.apply", "layout.unmaximize", "editors.list", "editors.activate",
                  "project.current", "project.open", "project.close", "project.review",
                  "project.selection", "project.select",
-                 "viewer.status", "viewer.presets", "viewer.open", "viewer.close", "viewer.configure",
+                 "viewer.status", "viewer.presets", "viewer.graph_configuration", "viewer.open", "viewer.close", "viewer.configure",
                  "viewer.preset", "viewer.evaluate", "viewer.cancel", "viewer.layer", "viewer.step", "viewer.play",
                  "viewer.reset_camera")
 

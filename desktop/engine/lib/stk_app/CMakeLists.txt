@@ -40,6 +40,7 @@ add_library(stk_app STATIC
   src/jobs_spec.cc
   src/jobs_state.cc
   src/project_state.cc
+  src/project_analyses.cc
   src/project_table_view.cc
   src/project_context_selection.cc
   src/project_discussion.cc

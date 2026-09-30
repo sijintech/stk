@@ -95,6 +95,10 @@ class Project:
         return ProjectFiles(self._call, self.handle)
 
     @property
+    def analyses(self):
+        return ProjectAnalyses(self._call, self.handle)
+
+    @property
     def runs(self):
         return ProjectRuns(self._call, self.handle)
 
@@ -309,6 +313,30 @@ class ProjectSnapshots:
         """Verify frozen bytes and return their path, irrespective of later source/index edits."""
         return self._call("project.snapshots.resolve", {"handle": self.handle, "snapshot_id": snapshot_id,
                                                        "record_id": record_id})
+
+
+class ProjectAnalyses:
+    """Saved editable graph documents. Reading and writing never validates or executes nodes."""
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def create(self, name, document, *, analysis_id, expected_revision):
+        """Save one caller-owned UUID as an ordinary undoable project edit; never retry implicitly."""
+        return self._call("project.analyses.create", {"handle": self.handle, "analysis_id": analysis_id,
+            "name": name, "document": document, "expected_revision": expected_revision})
+
+    def update(self, analysis_id, name, document, *, expected_revision):
+        """Replace the complete document at an explicit project revision; preserve its record UUID."""
+        return self._call("project.analyses.update", {"handle": self.handle, "analysis_id": analysis_id,
+            "name": name, "document": document, "expected_revision": expected_revision})
+
+    def get(self, analysis_id):
+        """Return the observed revision and readable/invalid/unsupported document state."""
+        return self._call("project.analyses.get", {"handle": self.handle, "analysis_id": analysis_id})
+
+    def list(self, *, offset=0, limit=50):
+        return self._call("project.analyses.list", {"handle": self.handle, "offset": offset, "limit": limit})
 
 
 class ProjectFiles:

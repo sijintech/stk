@@ -2,6 +2,45 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-30：项目分析文档保存、重开与独立检查
+
+新增 `stk.analysis-document/1`，把完整节点图、提交参数和输出选择保存为普通项目表格中的一条记录。
+固定表/字段 UUID、修订检查和普通撤销沿用既有项目接口；要求格式至少为 3，当前格式 8 不变。
+原生分析图增加“保存的分析”、明确保存、分页列表、重新载入和改名；Python/桥另支持完整定义替换。
+纯 Viewer 配置捕获是单独协商的只读操作，不推进待求值工作、刷新元数据或切换焦点。
+保存定义不冻结执行来源绑定、数据内容或节点实现，也不自动运行图；未知节点等语义错误可作为结构合格的草稿保存。
+
+关键节点 critical review 覆盖事务边界、损坏数据、桥契约、原生异步寿命、真实输入与中英文截图。
+实现及复查修正了以下问题：
+
+- 保存后的快照可能超过桌面消息容量：在同一写事务内增量检查完整快照的 12 MiB 上限，失败回滚修订、历史及重做栈。
+  分页读直接检查有界字面量，不求值公式或加载节点；管理字段被改为引用/公式时明确诊断，不静默覆盖。
+- 保存模式曾沿用 Viewer 检查对象：现使用独立定义，不显示或关联 Viewer 回执、解析值；Viewer 单独变化不使保存图校验失效。
+- 等待保存/读取时切换标签，迟到响应可能夺回页面：保留最新导航选择，旧响应只更新对应的已保存定义。
+- 保存回复丢失时不能盲目重发：派发后保留 UUID，明确读取核对当前内容；关闭编辑器或切换项目/桥时把待核对标识写入本地日志。
+  当前观察不是找回原始事务回执，取消本地等待也不保证撤销已提交的编辑。
+- 名称与列表的旧回调需核对项目、选择、分页及修订；实际 Unicode 输入后第一次点击保存的完整事件链已验证。
+
+后端存储专项 **67 项**、项目存储/撤销/文件/桥组合 **190 项**通过；桥、脚本和图结构契约专项 **104 项**通过。
+首次全量 Python 回归暴露测试关键字白名单落后于实际验证器；核对双方实现后补齐四个已支持关键字，
+新增 14 项创建/替换契约回归并与独立 JSON Schema 验证器交叉检查，没有放宽结构契约。
+首次原生回归的七项失败来自测试夹具：五项把 JSON 对象键顺序误当内容差异，两项修改了夹具预设未声明的参数。
+修正比较及参数选择后，UUID、修订、恰好一次写入、零隐式求值和迟到响应的严格断言均保留。
+
+最终完整 Python 回归 **1945 passed / 22 skipped / 4 deselected**；跳过项包括本机离屏 VTK 不可用、可选依赖、
+真实许可求解器及性能场景，不计为已验证。日志 `/tmp/stk-analysis-docs-python-final.log`，
+JUnit `/tmp/stk-analysis-docs-python-final.xml`。
+
+最终原生专项 **102/102**，完整 Linux CTest **780/780，失败/错误/跳过均为 0**。
+新增 **28 项 CPU 测试**及 **8 项 GL/Vulkan 保存分析渲染**均实际执行；八张保存图逐张复核，
+窄图保留选中节点的可读缩放，滚动表格、定义来源和修订提示可见。原有布局基准未修改。
+中英文字典各 **1206 项**一致且无重复，改动文档的本地链接全部有效。
+
+日志 `/tmp/stk-analysis-docs-focused-final.log`、`/tmp/stk-analysis-docs-full.log`；
+JUnit `/tmp/stk-analysis-docs-focused-final.xml`、`/tmp/stk-analysis-docs-full.xml`。
+本轮没有真实模型调用；本地 Linux 验证不代表 macOS/Windows 真机交互、Windows GPU 或异机 SSH 验收。
+操作与限制见[项目分析文档](project-analyses.md)，人工步骤见[工作台验收](workbench-acceptance.md)。
+
 ## 2026-09-30：分析节点图与结果来源检查
 
 新增原生“分析节点图”编辑器，复用当前 Viewer 预设与求值时冻结的配置。
@@ -31,7 +70,16 @@
 
 中英文字典各 **1179 项**一致且无重复；改动文档的 **142 个本地链接、19 个锚点**有效。
 最终资源同步后的完整 Linux CTest **744/744，通过项实际执行，失败/错误/跳过均为 0**，所有旧布局基准保持原值。
-日志 `/tmp/stk-graph-full-final.log`，JUnit `/tmp/stk-graph-full-final.xml`；本提交跨平台 CI 待回收证据。
+日志 `/tmp/stk-graph-full-final.log`，JUnit `/tmp/stk-graph-full-final.xml`。
+提交 `20680eb1f6dd92715a447d2c54afe5f979bcd684` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36688052923)
+五个任务全部通过：Linux **744/744**、macOS CPU **479/479** 与 Metal **89/89**、Windows CPU **439/439**，
+均无失败、错误或跳过。Linux/macOS 逐项核对 JUnit，Windows 逐项核对 CTest 日志；新增模型、画布、
+来源、控制器与交互 **58 项 CPU 测试**在三个平台全部执行，Linux **8 项**、Metal **4 项**节点图渲染全部执行。
+GL/Vulkan/Metal 宽窄中英文共 **12 张**截图已逐张复核；Linux/macOS 打包及独立目录启动检查通过。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36688052859) 七个任务全部通过：Linux Python 3.10/3.12
+各 **1861 passed / 7 skipped / 4 deselected**，Windows Python 3.10/3.12 各 **1450 passed / 59 skipped / 260 deselected**；
+control **24 项**、desktop/MCP **3 项**及 web 构建通过。跳过项为可选依赖、平台限定、性能及真实求解器场景，
+不计为已验证；Windows runner 未执行 GPU 渲染。证据存于 `/tmp/stk-graph-ci-36688052923/audit-summary.json`。
 本轮没有修改 Python 求值后端，也没有外部模型调用；macOS/Windows 真机输入、触控板和高 DPI 仍待验收。
 专项日志 `/tmp/stk-graph-focused-final.log`、JUnit `/tmp/stk-graph-focused-final.xml`。
 用法与边界见[分析节点图指南](analysis-graphs.md)，人工步骤见[工作台验收](workbench-acceptance.md)。

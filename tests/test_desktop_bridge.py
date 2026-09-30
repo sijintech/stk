@@ -279,8 +279,9 @@ def test_schema_describes_every_method_and_event():
     assert set(document["$defs"]["error"]["properties"]["code"]["enum"]) == set(ERROR_CODES)
     # Every keyword the schema uses is in the subset suan.graph.schema.check_value (and stk_io) implement.
     allowed = {"$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "minimum",
-               "maximum", "minLength", "maxLength", "pattern", "items", "minItems", "maxItems", "properties",
-               "required", "additionalProperties", "patternProperties", "maxProperties", "anyOf", "oneOf", "allOf",
+               "maximum", "exclusiveMinimum", "minLength", "maxLength", "pattern", "items", "prefixItems",
+               "minItems", "maxItems", "properties", "required", "additionalProperties", "patternProperties",
+               "propertyNames", "minProperties", "maxProperties", "anyOf", "oneOf", "allOf",
                "not", "uniqueItems"}
 
     def walk(node, where):
@@ -296,6 +297,39 @@ def test_schema_describes_every_method_and_event():
             for index, item in enumerate(node):
                 walk(item, f"{where}/{index}")
     walk(document, "")
+
+
+@pytest.mark.parametrize("method", ["project.analyses.create", "project.analyses.update"])
+@pytest.mark.parametrize("path,value,error_path", [
+    (("nodes", 1, "inputs"), {"Bad": {"from": "run.frames"}}, "/nodes/1/inputs/Bad"),
+    (("outputs",), {"bad/name": "run.frames"}, "/outputs/bad~1name"),
+    (("outputs",), {}, "/outputs"),
+    (("time", "range"), ["0", 1], "/time/range/0"),
+    (("time", "range"), [0, None], "/time/range/1"),
+    (("time", "stride"), 0, "/time/stride"),
+    (("time", "fps"), -1, "/time/fps"),
+], ids=["input-name", "output-name", "empty-outputs", "range-start", "range-end", "zero-stride", "negative-fps"])
+def test_analysis_graph_contract_enforces_embedded_keywords(method, path, value, error_path):
+    graph = {"schema": "stk.graph/1", "nodes": [
+        {"id": "run", "type": "stk.source.muferro_run@1"},
+        {"id": "future", "type": "fixture.unknown.node@1", "inputs": {"in": {"from": "run.frames"}}},
+    ], "outputs": {"frames": "run.frames"}, "time": {"range": [0, 1], "stride": 0.1, "fps": 24}}
+    message = {"id": 1, "method": method, "params": {
+        "handle": "a" * 32, "analysis_id": "11111111-1111-4111-8111-111111111111", "name": "Saved",
+        "document": {"format": "stk.analysis-document/1", "graph": graph, "parameters": {}, "outputs": []},
+        "expected_revision": 0,
+    }}
+    # Structural validation accepts editable drafts and a positive fractional time stride.
+    assert bridge_schema.validate_incoming(message) == []
+    assert second_opinion(message) == []
+    target = graph
+    for component in path[:-1]:
+        target = target[component]
+    target[path[-1]] = value
+    issues = bridge_schema.validate_incoming(message)
+    assert any(pointer == "/params/document/graph" + error_path for pointer, _ in issues), issues
+    if JSONSCHEMA is not None:
+        assert second_opinion(message)
 
 
 def test_schema_is_valid_draft_2020_12_and_agrees_with_the_subset_validator():

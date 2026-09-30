@@ -276,6 +276,11 @@ class ProjectStore:
         return FileIndex(self)
 
     @property
+    def analyses(self):
+        from .analyses import Analyses
+        return Analyses(self)
+
+    @property
     def snapshots(self):
         from .snapshots import Snapshots
         return Snapshots(self)

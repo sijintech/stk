@@ -537,11 +537,49 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.files.index` | `{handle, expected_revision, paths: [string]}` | `{revision, commands, table_id, record_ids}` |
 | `project.files.refresh` | `{handle, expected_revision, record_ids: [uuid]}` | `{revision, commands, table_id, record_ids}` |
 | `project.files.resolve` | `{handle, expected_revision, record_id}` | `{revision, record_id, path, kind}` |
+| `project.analyses.create` / `project.analyses.update` | `{handle, analysis_id, name, document, expected_revision}` | `{revision, commands, table_id, record_id}` |
+| `project.analyses.list` | `{handle, offset?, limit?}` | `{revision, table_id, compatible, error, offset, total, analyses: [analysisSummary]}` |
+| `project.analyses.get` | `{handle, analysis_id}` | `{revision, table_id, compatible, error, analysis: analysisSummary + {document}}` |
 | `project.snapshots.capture` | `{handle, expected_revision, record_ids, max_bytes?}` | `{revision, snapshot: inputManifest}` |
 | `project.snapshots.list` | `{handle}` | `{revision, snapshots: [inputManifest]}` |
 | `project.snapshots.get` | `{handle, snapshot_id}` | `{snapshot: inputManifest}` |
 | `project.snapshots.verify` | `{handle, snapshot_id}` | `{snapshot_id, ok, files: [{record_id, sha256, state, error}]}` |
 | `project.snapshots.resolve` | `{handle, snapshot_id, record_id}` | `{snapshot_id, record_id, name, path, location, sha256, size}` |
+
+The optional `project.analyses.*` methods save editable analysis documents in ordinary project tables
+(project format 3 or later; no new database format). The document is exactly
+`{format: "stk.analysis-document/1", graph, parameters, outputs}`. `graph` follows the published
+`stk.graph/1` structural schema; unknown node types, duplicate node IDs, cycles and dangling links remain
+editable and require a separate explicit `graph.validate`. `parameters` is the submitted override object;
+`outputs` contains up to 256 distinct declared graph output names. An empty selection stays empty.
+Saving does not validate semantic graph behavior, evaluate nodes, load plugins, open source files, submit tasks
+or contact a model. Writes retain ordinary scalar project checks and evaluated snapshot bounds; reads do not
+evaluate project expressions. No source bindings or result receipts are inferred or saved.
+
+Create requires an unused caller-owned UUID; update replaces the complete existing document under that UUID.
+Both require the exact current project revision, commit one ordinary undoable edit, and emit one existing
+`project.changed` event after a successful response. They never retry automatically. After a lost response,
+read the UUID and current revision before deciding what to do; repeated create is a conflict, not a second record.
+Names contain 1–256 characters and at most 1024 UTF-8 bytes. The graph is bounded to 256 KiB, 200 nodes,
+64 parameter declarations and 64 KiB per node's parameters; at most 64 overrides occupy at most 64 KiB, the complete
+document at most 384 KiB, and JSON depth at most 64. API writes limit the managed collection to 128 records
+and 4 MiB of stored managed-cell JSON, and roll back if the proposed project snapshot exceeds 12 MiB.
+Byte/depth/cross-field bounds are checked by storage in addition to the canonical `projectAnalysisDocument`
+definition in the bridge schema.
+
+`analysisSummary` is exactly `{id, name: string|null, format: string|null, state, error}`; `state` is
+`readable`, `invalid`, or `unsupported`. Get adds `document`, which is the full document only for a readable
+row and otherwise null. Readable means structurally inspectable, not semantically valid or reproducible.
+Names/formats that cannot safely be summarized are null. Errors are always present, empty on success,
+and bounded to 512 UTF-8 bytes. `compatible` checks the required managed field IDs, types and units;
+renaming tables/fields does not change their identities. Missing tables return a compatible empty list without
+creating anything. Read methods inspect saved literals directly and do not evaluate formulas; malformed
+rows and future document versions remain inspectable. Updating a future version is `unsupported`, so it
+cannot silently downgrade. An absent analysis UUID is `not_found`; incompatible fields or invalid documents
+are `invalid_params` on writes, and stale revisions or occupied create IDs are `conflict`.
+List defaults to offset 0 and limit 50 (1–100), reports the full count, and continues to page collections
+enlarged through generic project edits. Neither read emits project events. The original handle stays pinned
+through close/reopen and project replacement checks, like other project operations.
 
 - `project.preview` evaluates ordinary edit commands on an in-memory SQLite copy (source logical size
   at most 128 MiB). It performs no persisted edit, file operation or task submission, and emits no
@@ -952,7 +990,7 @@ to bridge stderr. EOF/close/shutdown stops the worker; restarting never restores
 - `ui.attach {operations}` returns `{session, operations}`. The local client advertises supported
   operation names: `layout.get`, `layout.apply`, `editors.list`, `project.current`, `project.open`,
   `project.close`, optional `project.review`, `project.selection`, `project.select`, `editors.activate`,
-  `layout.unmaximize`, plus the Viewer operations below. The current supported set contains 23 operation names; discover and negotiate
+  `layout.unmaximize`, plus the Viewer operations below. The current supported set contains 24 operation names; discover and negotiate
   names rather than assuming support from that count. Reattaching the same set is idempotent; changing it requires detach.
 - `ui.request {session, request, operation, params, expires_at_ms}` asks that executor to perform one
   operation. Requests are correlated by both IDs, expire after 30 seconds, and are never replayed.
@@ -981,6 +1019,30 @@ not network endpoints. See [Viewer scripting](../scripting-viewer.md) for exact 
  Invalid parameters return `invalid_params`; absent capabilities
 return `unsupported`, and an absent desktop returns `unavailable`. Applying a layout validates the whole
 description before changing the current screen; geometry is captured for round trips but not forced on apply.
+
+The optional `viewer.graph_configuration {displayed: boolean}` operation is a pure read of one immutable
+Viewer inspection snapshot. Both the parameter and its boolean type are required; extra parameters are rejected.
+It returns exactly `{viewer_version, displayed, displayed_graph_verified: boolean|null, configuration}`.
+`configuration` is null when the selected definition is unavailable, including an imported result without its
+original graph. Otherwise it is `{source, preset_id, graph, parameters, requested_outputs}`, where source is
+`{key, kind, path, field_file, connection, node, workspace_id, task_id, series}`. Source kind is one of
+`none`, `payload`, `result`, `run`, `task`; these are provenance hints, not frozen file contents or access grants.
+The graph and submitted parameters are detached copies from the desired configuration (`displayed=false`) or
+the configuration associated locally with the displayed result (`displayed=true`). Resolved values and result
+payloads are not included. `displayed_graph_verified` describes the displayed receipt's two graph hashes:
+true for a matching graph, false for a mismatch, null when verification is unavailable. It does not assert source
+freshness, parameter equality, or current node implementation identity, and never substitutes the displayed graph
+for the desired graph. `viewer_version` is an ephemeral inspection generation, not a project revision.
+
+This read never pumps the Viewer, refreshes metadata, advances pending evaluation, focuses a tab or saves a
+project edit. Unlike `viewer.status`, it cannot advance delayed Viewer work. Python exposes it as
+`stk.viewer.graph_configuration(*, displayed=False)` with a strict boolean argument. To save an available
+configuration, explicitly construct an analysis document from `graph`, `parameters` and `requested_outputs`
+(renamed to `outputs`) and call `stk.project.analyses.create` with a chosen UUID and project revision.
+The source hints and verification flag are not fields in the saved analysis document. A desktop that has not
+advertised this operation returns `unsupported`; no attached desktop returns `unavailable`. Original six-operation
+attachments remain valid. Canonical params/result definitions are `uiViewerGraphConfigurationParams` and
+`uiViewerGraphConfigurationResult` in the bridge schema.
 
 The optional `editors.activate {editor_id, maximize}` operation returns the flat object
 `{area_id, editor_id, tab_index, maximized}`. Both parameters are required and no extra parameters

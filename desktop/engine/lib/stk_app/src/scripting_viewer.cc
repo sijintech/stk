@@ -21,7 +21,7 @@ using bridge::Error;
 using bridge::ErrorCode;
 
 const std::map<std::string, std::set<std::string>> operations = {
-    {"viewer.status", {}}, {"viewer.presets", {}},
+    {"viewer.status", {}}, {"viewer.presets", {}}, {"viewer.graph_configuration", {"displayed"}},
     {"viewer.open", {"path", "preset", "parameters", "focus"}},
     {"viewer.close", {"expected_source"}},
     {"viewer.configure", {"parameters", "auto_evaluate", "overlays", "prefetch", "fps", "loop", "expected_source"}},
@@ -101,6 +101,29 @@ void AppShell::perform_viewer_request(wm::Screen &screen, const std::string &ope
     require(found->second.count(it.key()) != 0, "Unknown parameter: " + it.key());
   }
   auto &viewer = store_.viewer();
+  if (operation == "viewer.graph_configuration") {
+    require(params.contains("displayed") && params["displayed"].is_boolean(), "displayed must be boolean");
+    const bool displayed = params["displayed"].get<bool>();
+    const auto snapshot = viewer.graph_inspection();
+    Json result = {{"viewer_version", snapshot->version}, {"displayed", displayed},
+                   {"displayed_graph_verified", nullptr}, {"configuration", nullptr}};
+    if (snapshot->shown_graph_verified) { result["displayed_graph_verified"] = *snapshot->shown_graph_verified; }
+    const auto &configuration = displayed ? snapshot->shown_configuration : snapshot->desired;
+    if (configuration) {
+      const auto &source = configuration->source;
+      result["configuration"] = {
+          {"source", {{"key", source.key()}, {"kind", source_kind_name(source.kind)},
+                      {"path", source.path}, {"field_file", source.field_file}, {"connection", source.connection},
+                      {"node", source.node}, {"workspace_id", source.workspace_id}, {"task_id", source.task_id},
+                      {"series", source.series}}},
+          {"preset_id", configuration->preset_id}, {"graph", configuration->graph},
+          {"parameters", configuration->parameters}, {"requested_outputs", configuration->requested_outputs}};
+    }
+    // Export one copied snapshot. Unlike status(), this read never services pending Viewer work
+    // or refreshes metadata, moves focus, changes the project, or tags the UI for redraw.
+    complete(std::move(result));
+    return;
+  }
   if (params.contains("expected_source")) {
     const auto expected = required_string(params, "expected_source");
     if (expected != viewer.source().key()) {

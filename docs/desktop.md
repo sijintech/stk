@@ -36,6 +36,8 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 
 **视图 → 分析图** 打开当前 Viewer 预设的只读图检查，端口、参数、引用及输出使用通用表格。
 可在“当前参数”和“已显示结果”间对比提交配置，显式校验不运行节点；完整用法与来源核对边界见[分析节点图](analysis-graphs.md)。
+展开“项目分析文档”可把当前检查的定义保存到项目，或从列表打开“保存的分析”；保存、改名与撤销复用普通表格，
+打开文档不运行图，也不把当前三维结果附给该文档，见[保存分析定义](project-analyses.md)。
 
 **视图 → 聚焦准备** 会激活现有 AI 标签并最大化其区域；**聚焦分析** 对 Viewer 做同样操作。
 没有对应标签时会在有空位的区域新增，已有面板和分栏比例保留。**恢复分栏布局** 显示原分栏，
@@ -399,8 +401,10 @@ macOS/Windows real-account acceptance remains separate.
 **View → Node Graph** inspects the Viewer's current preset and recorded result configuration with a read-only
 node canvas and common parameter/port/output tables. Graph hashes must match before receipt details are attached
 to a graph; source-file freshness is not inferred. Validation is explicit and never evaluates nodes.
-Home fits the graph, F frames the selected node, and N toggles the inspector. See [analysis graphs](analysis-graphs.md)
-for provenance, navigation and the boundary before project-saved graphs and connection editing.
+Home fits the graph, F frames the selected node, and N toggles the inspector. **Project analyses** saves a copied
+definition in ordinary project cells; the **Saved analysis** tab reads it independently of the Viewer.
+Saving, reading and renaming never evaluate nodes. See [analysis graphs](analysis-graphs.md) and
+[saved analysis documents](project-analyses.md); connection editing and execution bindings remain planned.
 
 ### Install
 

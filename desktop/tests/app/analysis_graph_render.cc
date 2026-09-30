@@ -2,6 +2,7 @@
 /** Real local graph evaluation -> verified Viewer receipt -> read-only native graph -> PNG. */
 #include "stk/app/editor_area.hh"
 #include "stk/app/bridge_status.hh"
+#include "stk/app/project_state.hh"
 #include "stk/app/shell.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
@@ -27,9 +28,10 @@ int main(int argc, char **argv)
     else if (arg == "--mode") { mode = argv[i + 1]; }
     else { return 2; }
   }
-  if (output.empty() || (mode != "wide" && mode != "narrow")) { return 2; }
-  const bool narrow = mode == "narrow";
-  const int width = narrow ? 760 : 1440, height = 1000;
+  if (output.empty() || (mode != "wide" && mode != "narrow" && mode != "saved_wide" && mode != "saved_narrow")) { return 2; }
+  const bool saved = mode == "saved_wide" || mode == "saved_narrow";
+  const bool narrow = mode == "narrow" || mode == "saved_narrow";
+  const int width = narrow ? 760 : 1440, height = saved ? 1200 : 1000;
   bridge::test::TempDir directory{"graph-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions options;
@@ -94,17 +96,91 @@ int main(int argc, char **argv)
     viewer.set_auto_evaluate(false);
     viewer.set_parameter("colormap", ui::FormValue::string("turbo"));
     ok = ok && viewer.graph_inspection()->shown_matches_desired == false;
+    const auto original_viewer = viewer.graph_inspection();
+    auto &project = shell.store().project();
+    if (saved) {
+      project.sync();
+      ok = ok && project.create(directory.str() + "/project", "Saved analyses") &&
+          loop.pump_until([&] { return project.loaded() && !project.busy(); }, 30);
+      ok = ok && project.project() && project.project()->revision == 0;
+    }
     auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
     ok = ok && area && area->set_tab_type(0, app::kEditorAnalysisGraph);
     if (ok) {
-      area->find_region(app::EditorArea::kSidebar)->set_size_1x(narrow ? 260 : 350);
+      area->find_region(app::EditorArea::kSidebar)->set_size_1x(saved ? (narrow ? 340 : 430) : (narrow ? 260 : 350));
       screen.set_maximized(area);
       wm::DrawContext context;
       context.ui_scale = 1; context.fonts = &gpu->fonts(); context.rect = {0, 0, width, height}; context.now = 100;
       gfx::Image image;
       auto frame = [&] { return gfx::render_offscreen(width, height, [&] { screen.draw(context); }, image, error); };
+      auto has_text = [&](const std::string &text) {
+        for (const auto &block : screen.ui()->blocks()) {
+          for (const auto &widget : block->widgets()) {
+            if (widget.text.find(text) != std::string::npos) { return true; }
+          }
+        }
+        return false;
+      };
+      auto toggle_panel = [&](const char *key) {
+        const auto *panel = screen.ui()->find(key);
+        if (!panel) { return false; }
+        const ui::Vec2 center{panel->rect.x + panel->rect.w / 2, panel->rect.y + panel->rect.h / 2};
+        screen.ui()->handle_event(ui::Event::mouse_down(center));
+        screen.ui()->handle_event(ui::Event::mouse_up(center));
+        return frame();
+      };
       ok = ok && frame();
-      if (narrow) {
+      if (saved) {
+        ok = ok && toggle_panel("graph_documents");
+        const ui::Widget *name = nullptr;
+        for (const auto &block : screen.ui()->blocks()) {
+          for (const auto &widget : block->widgets()) {
+            if (widget.key.find("/analysis_name/") != std::string::npos) { name = &widget; }
+          }
+        }
+        if (name && name->enabled) { name->string.assign("analysis"); } else { ok = false; }
+        ok = ok && frame();
+        const auto *save = screen.ui()->find("analysis_save");
+        if (save && save->enabled) { save->on_click(); } else { ok = false; }
+        ok = ok && loop.pump_until([&] {
+          if (!frame()) { ok = false; return true; }
+          const auto *tabs = screen.ui()->find("graph_mode");
+          return !project.busy() && project.project()->revision == 1 && tabs && tabs->index.value() == 2;
+        }, 30);
+        ok = ok && project.tables().size() == 1 && project.tables().front().records.size() == 1;
+        const auto *refresh = screen.ui()->find("analysis_list");
+        if (refresh && refresh->enabled) { refresh->on_click(); } else { ok = false; }
+        ok = ok && loop.pump_until([&] {
+          if (!frame()) { ok = false; return true; }
+          return screen.ui()->find("analysis_documents") != nullptr;
+        }, 30);
+        // Load the persisted record through the normal list after returning to the live view.
+        // This proves the saved canvas comes from a project read, not the initial save copy.
+        const auto *tabs = screen.ui()->find("graph_mode");
+        if (tabs) { tabs->index.assign(0); } else { ok = false; }
+        ok = ok && frame();
+        const auto *list = screen.ui()->find("analysis_documents");
+        if (list && list->enabled && list->table && list->table->rows == 1 &&
+            project.tables().size() == 1 && project.tables().front().records.size() == 1) {
+          ok = ok && list->table->cell(0, 0) == "analysis" &&
+              list->table->cell(0, 1) == shell.store().tr("analysis_documents.state.readable") &&
+              list->table->cell(0, 2) == project.tables().front().records.front().id;
+          list->table->selected.assign(0);
+        }
+        else { ok = false; }
+        ok = ok && loop.pump_until([&] {
+          if (!frame()) { ok = false; return true; }
+          const auto *current = screen.ui()->find("graph_mode");
+          return current && current->index.value() == 2 && screen.ui()->find("analysis_rename") &&
+              screen.ui()->find("analysis_rename")->enabled;
+        }, 30);
+        ok = ok && has_text(std::string(shell.store().tr("analysis_documents.definition_only"))) &&
+            !has_text(std::string(shell.store().tr("analysis_graph.executed_receipt"))) &&
+            !has_text(std::string(shell.store().tr("analysis_graph.same_configuration"))) &&
+            !has_text(std::string(shell.store().tr("analysis_graph.different_configuration")));
+        if (original_viewer->shown_evaluation) { ok = ok && !has_text(original_viewer->shown_evaluation->eval_id); }
+      }
+      else if (narrow) {
         const auto *mode_widget = screen.ui()->find("graph_mode");
         if (mode_widget) { mode_widget->index.assign(1); } else { ok = false; }
         ok = ok && frame();
@@ -123,6 +199,21 @@ int main(int argc, char **argv)
         ok = ok && found;
       }
       ok = ok && frame();
+      if (saved) {
+        ok = ok && has_text(std::string(shell.store().tr("analysis_graph.submitted")) + ": turbo") &&
+            !has_text(std::string(shell.store().tr("analysis_graph.executed_receipt")));
+        // Keep the document list and source disclaimer visible alongside typed submitted values.
+        ok = ok && toggle_panel("graph_node") && toggle_panel("graph_parameters");
+        const auto *values = screen.ui()->find("graph_parameter_values");
+        bool colormap = false;
+        if (values && values->table) {
+          for (int row = 0; row < values->table->rows; ++row) {
+            ok = ok && values->table->cell(row, 2).empty();
+            colormap |= values->table->cell(row, 0) == "colormap" && values->table->cell(row, 1) == "turbo";
+          }
+        }
+        ok = ok && colormap;
+      }
       const auto *validate = screen.ui()->find("graph_validate");
       if (validate && validate->enabled) { validate->on_click(); } else { ok = false; }
       ok = ok && loop.pump_until([&] {
@@ -140,6 +231,10 @@ int main(int argc, char **argv)
       if (!narrow) {
         const auto *fit = screen.ui()->find("graph_fit");
         if (fit && fit->enabled) { fit->on_click(); } else { ok = false; }
+      }
+      if (saved) {
+        ok = ok && viewer.graph_inspection() == original_viewer && viewer.payload() &&
+            project.project()->revision == 1 && has_text(std::string(shell.store().tr("analysis_documents.definition_only")));
       }
       ok = ok && frame() && gfx::png_write(output, image);
     }

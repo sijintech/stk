@@ -2,7 +2,8 @@
 add_executable(stk-project-tests project_test.cc script_test.cc project_table_view_test.cc
   project_context_selection_test.cc saved_review_test.cc focus_test.cc analysis_graph_view_test.cc
   analysis_graph_canvas_test.cc viewer_graph_inspection_test.cc
-  analysis_graph_state_test.cc analysis_graph_editor_test.cc)
+  analysis_graph_state_test.cc analysis_graph_editor_test.cc viewer_graph_configuration_test.cc
+  project_analyses_test.cc analysis_documents_editor_test.cc)
 target_link_libraries(stk-project-tests PRIVATE stk_jobs_test_support GTest::gtest_main)
 if(MSVC)
   target_compile_options(stk-project-tests PRIVATE /W3 /utf-8 /bigobj)
@@ -84,7 +85,7 @@ set_target_properties(stk-analysis-graph-render PROPERTIES RUNTIME_OUTPUT_DIRECT
 if(MSVC)
   target_compile_options(stk-analysis-graph-render PRIVATE /W3 /utf-8 /bigobj)
 endif()
-foreach(_mode wide narrow)
+foreach(_mode wide narrow saved_wide saved_narrow)
   foreach(_lang en zh)
     foreach(_be ${_jobs_backends})
       add_test(NAME analysis_graph_${_mode}_render_${_be}_${_lang} COMMAND stk-analysis-graph-render
