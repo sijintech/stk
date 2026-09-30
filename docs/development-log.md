@@ -65,7 +65,10 @@ macOS CPU **739/739** / Metal **134/134**、Windows CPU **698/698** 通过，两
 Linux/macOS 打包、签名检查及全新目录启动/载荷/预设检查通过（macOS 为 ad-hoc 临时签名，未公证）。
 Linux **1094/1095**：唯一失败的旧 `wm_app_window_weston` 打印全部检查与零内存泄漏后，缺少要求的最终 `PASS`。
 日志没有记录子进程退出码，根因仍未确定；不能据此断言仅为 CI 环境问题。本机同提交定向连续 **20 次**未复现。
-原始失败保留于 `/tmp/stk-final-handoff-ci/attempt1`，同提交仅重跑该失败任务以检查偶发性，结果另行记录。
+原始失败保留于 `/tmp/stk-final-handoff-ci/attempt1`。同提交仅重跑该 Linux 任务的
+[第二次执行](https://github.com/sijintech/stk/actions/runs/36731162962/attempts/2)已通过：直接日志确认 **1095/1095**，
+包含原 Weston 用例和两个新增用例，其余四个任务沿用首次成功结果。证据单独保存在 `attempt2`，
+这次未复现不能作为已修复根因的依据。
 
 收尾 critical review 发现测试包装层的独立缺口：CTest 匹配到成功文字时会忽略普通退出码，包装层又将子进程信号转为普通退出。
 已补充非零退出、命名/无名信号、超时的明确 `FAIL:`，保留 0/77 状态且不自行输出 `PASS`；

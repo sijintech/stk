@@ -40,6 +40,10 @@ Linux **1094/1095**，唯一失败为旧 `wm_app_window_weston`：全部检查�
 无原生跳过；Linux/macOS 打包和全新目录启动、载荷及实际预设检查通过，macOS ad-hoc 签名校验通过。
 证据 `/tmp/stk-final-handoff-ci/audit-summary.json` 与 `attempt1` 中的原始日志/元数据。
 同提交本机 `--repeat until-fail:20` 全部通过；仅重跑远端失败任务一次以检查偶发性，不将重跑当作已修复根因。
+[同提交第二次执行](https://github.com/sijintech/stk/actions/runs/36731162962/attempts/2)的 Linux 任务已成功，
+直接日志确认 **1095/1095** 通过，原 `wm_app_window_weston` 为 **1.13 秒**，两个新增用例也通过；
+其他四个任务沿用首次执行的成功结果，没有全部重跑。证据单独保存在 `/tmp/stk-final-handoff-ci/attempt2`，
+首次失败记录仍保留；相同提交的一次成功重跑不能定位或证明修复了原始退出问题。
 
 ## 2026-09-30：显示服务器包装层的退出诊断
 
