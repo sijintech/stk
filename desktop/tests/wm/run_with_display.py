@@ -253,6 +253,27 @@ def stop(proc: subprocess.Popen) -> None:
             proc.wait()
 
 
+def run_command(cmd: list[str], env: dict, timeout: float) -> int:
+    """Keep child failures visible even when CTest requires a matching PASS line."""
+    try:
+        result = subprocess.run(cmd, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"FAIL: command timed out after {timeout:g} s", flush=True)
+        return 1
+    code = result.returncode
+    if code < 0:
+        try:
+            name = signal.Signals(-code).name
+        except ValueError:
+            name = "unnamed"
+        print(f"FAIL: command terminated by signal {-code} ({name})", flush=True)
+    elif code not in (0, SKIP):
+        print(f"FAIL: command exited with status {code}", flush=True)
+    else:
+        print(f"command exit status: {code}", flush=True)
+    return code
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--server", choices=("xvfb", "weston"), required=True)
@@ -283,11 +304,7 @@ def main() -> int:
             print(f"FAIL: {info} listens on a TCP port; refusing to run", flush=True)
             return 1
         print(f"display: {info} (unix sockets only)", flush=True)
-        try:
-            return subprocess.run(cmd, env=env, timeout=args.timeout).returncode
-        except subprocess.TimeoutExpired:
-            print(f"FAIL: command timed out after {args.timeout:g} s", flush=True)
-            return 1
+        return run_command(cmd, env, args.timeout)
     finally:
         stop(proc)
 

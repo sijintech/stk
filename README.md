@@ -77,7 +77,7 @@ suan graph run muferro-domains --bind run=/path/to/case --out ./domains --param 
 （`suan.desktop_bridge`，MIT）连接本机 Runtime、`suan connect` 连接与控制服务。桌面里程碑 D1 已完成：任务页
 （上传、提交、日志、取消、校验下载）与查看器、属性、探针（节点图预设在数据旁求值、GPU 显示、拾取原始值、
 PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真实验收，macOS（Metal）在 CI 中构建并做无界面
-测试，Windows 在 CI 中编译并运行 CPU 测试。CI 生成 Linux 可重定位压缩包与 macOS `STK.app`（未签名）；程序包
+测试，Windows 在 CI 中编译并运行 CPU 测试。CI 生成 Linux 可重定位压缩包与 macOS `STK.app`（ad-hoc 临时签名，未公证）；程序包
 不含 Python，需在虚拟环境中安装 STK 并用 `STK_PYTHON` 指定。安装、连接、使用、快捷键与故障排查见
 [桌面程序指南](docs/desktop.md)，验收见 [验收记录](docs/runtime-validation.md)，开发与打包见
 [`desktop/README.md`](desktop/README.md)。

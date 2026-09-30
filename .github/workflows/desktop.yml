@@ -157,6 +157,8 @@ jobs:
             build/packaging/check/*.png
             build/spike/*.png
             build/ctest-junit.xml
+            build/Testing/Temporary/LastTest.log
+            build/tests/wm/d_*/server.log
           if-no-files-found: ignore
           retention-days: 14
 

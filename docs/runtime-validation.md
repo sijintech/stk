@@ -30,7 +30,34 @@ Viewer 载荷/来源和布局；示例调用审计未出现 UI、Runtime、独�
 失败/错误/跳过均为 0；完整套件包含上述原生脚本链路、Tab 回归及既有 GL/Vulkan 渲染。
 证据为 `/tmp/stk-analysis-handoff-full-build-final.log`、`/tmp/stk-analysis-handoff-focused-green.*`、
 `/tmp/stk-analysis-handoff-full-final.*`。十份交接/指南/设计文档的 **233 个本地文件链接**有效。
-精确提交的跨平台 CI 尚待验收，不能把本机结果作为远端结论。
+提交 `c6b6d14` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36731162900) **7/7 任务通过**：
+Linux Python 3.10/3.12 各 **2201 passed / 7 skipped / 4 deselected**，Windows 两版本各
+**1788 passed / 61 skipped / 260 deselected**；14 项离线示例在四个组合均通过，控制协议 24 项、桌面 MCP 3 项和 Web 检查通过。
+[桌面 CI 首次执行](https://github.com/sijintech/stk/actions/runs/36731162962/attempts/1) **4/5 任务通过**：
+macOS CPU **739/739**、Metal **134/134**、Windows CPU **698/698**，两项新增用例在三个平台均通过。
+Linux **1094/1095**，唯一失败为旧 `wm_app_window_weston`：全部检查包括零 guardedalloc 泄漏已输出，
+但最终 `PASS` 行缺失，CTest 报 required regular expression not found；现有包装层未记录子进程退出码。
+无原生跳过；Linux/macOS 打包和全新目录启动、载荷及实际预设检查通过，macOS ad-hoc 签名校验通过。
+证据 `/tmp/stk-final-handoff-ci/audit-summary.json` 与 `attempt1` 中的原始日志/元数据。
+同提交本机 `--repeat until-fail:20` 全部通过；仅重跑远端失败任务一次以检查偶发性，不将重跑当作已修复根因。
+
+## 2026-09-30：显示服务器包装层的退出诊断
+
+上述失败的具体信号/退出原因仍未知，不能把正常窗口清理与零内存块当作整个进程正常退出。
+独立审查确认 CTest 的 `PASS_REGULAR_EXPRESSION` 会忽略普通退出码，包装脚本将子进程信号转换成普通退出后可能丢失失败判据。
+修正包装层：0/77 只报告状态，非零退出、信号（含无枚举名称的实时信号）与超时打印明确 `FAIL:`，保留原子进程状态；
+不提前刷新原冒烟测试最终 `PASS`，不增加跳过或放宽通过条件。两个 Viewer GUI-open 用例同步增加 `FAIL` 匹配。
+CI 另外归档 `LastTest.log` 与显示服务器日志，方便后续区分正常退出、信号和服务器故障。
+
+新增六个真实子进程回归，覆盖成功且不伪造 `PASS`、跳过 77、已输出 `PASS` 后退出 3、命名/无名信号、超时。
+审查移除超时场景对 Python 在 0.5 秒内完成启动的假设；信号用例同时检查包装进程的精确 POSIX 退出码。
+此补丁仅改进故障可观察性和测试判据，没有修改桌面产品行为，也不声称已修复原始 Weston 偶发故障。
+构建成功后，完整 Linux CTest **1096/1096 通过**，失败/错误/跳过均为 0，其中包装层用例实际执行上述六个子进程场景。
+随后补齐 Viewer 的一行失败匹配并重新生成、构建，最终显示包装层、X11/Wayland 窗口和 Viewer GUI-open 定向
+**10/10 通过、无跳过**；没有因仅此测试属性变化重复整个套件。
+证据 `/tmp/stk-display-exit-build.log`、`/tmp/stk-display-exit-full.{log,xml}`、
+`/tmp/stk-display-exit-build-final.log`、`/tmp/stk-display-exit-focused-final.{log,xml}`。
+此收尾补丁的远端 CI 结果需另行记录，不沿用 `c6b6d14` 的结论。
 
 ## 2026-09-30：源坐标定位与窄侧栏完整滚动
 
@@ -66,7 +93,15 @@ EN/ZH 各 **1362 条消息**一致，八份指南 **201 个本地链接**有效�
 没有主动刷新掩盖事件链，也没有放宽原 UUID、一次创建、一次明确读取和一条历史记录的断言。
 畸形回复与丢失回复两项定向复测 **2/2 通过**，证据为 `/tmp/stk-analysis-handoff-focused-final.log`；
 同批尚在开发的 M17 脚本入口测试因文件面板尚未展开而找不到按钮，不属于本次 M16 提交，也未计入这两项通过结果。
-最终测试夹具修改后未重复完整套件；M16 跨平台 CI 尚未验收，不能沿用 M15 结果替代。
+M16 提交前的最终测试夹具修改后未重复完整套件；其后提交 `86007e3` 的
+[桌面 CI](https://github.com/sijintech/stk/actions/runs/36728057610) **5/5 任务通过**：Linux **1093/1093**、
+macOS CPU **737/737** 与 Metal **134/134**、Windows CPU **696/696**，失败/错误/跳过均为 0。
+全部 **7 项新 CPU** 及畸形/丢失回复修复场景在三平台实际通过；**12 张**更新的 GL/Vulkan/Metal 图逐张复查。
+Linux 全新目录 GL/Vulkan 包冒烟、macOS 签名校验及全新应用/载荷/预设 Metal 冒烟通过。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36728057735) **7/7 任务通过**：两个 Linux Python 版本各
+**2201 passed / 7 skipped / 4 deselected**，两个 Windows 版本各 **1788 passed / 61 skipped / 260 deselected**；
+14 项离线示例在四个组合均通过，控制协议 24 项、桌面 MCP 3 项和 Web 检查通过。
+证据 `/tmp/stk-table-jump-ci-36728057610/audit-summary.json`；M15 的失败历史保留，修复结论来自本次实际执行。
 
 ## 2026-09-30：内联科学结果表格
 

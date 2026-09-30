@@ -145,7 +145,7 @@ if(NOT WIN32)
         LABELS "app;gpu;window" TIMEOUT 180 SKIP_RETURN_CODE 77
         ENVIRONMENT "${_live_env};XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/config_${_server}"
         RESOURCE_LOCK display_${_server} PASS_REGULAR_EXPRESSION "frame\\(s\\) presented"
-        FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|cannot open")
+        FAIL_REGULAR_EXPRESSION "FAIL|leaked|Error: Not freed memory|cannot open")
       add_test(NAME app_viewer_window_${_server}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/wm/run_with_display.py --server ${_server}
                 --workdir ${CMAKE_CURRENT_BINARY_DIR}/d_${_server} ${_sysroot_arg} --timeout 480

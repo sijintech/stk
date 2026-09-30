@@ -206,6 +206,9 @@ gtest_discover_tests(stk_wm_tests DISCOVERY_TIMEOUT 60 NO_PRETTY_VALUES PROPERTI
 
 find_package(Python3 COMPONENTS Interpreter)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND)
+  add_test(NAME wm_display_runner_exit_status
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_run_with_display.py)
+  set_tests_properties(wm_display_runner_exit_status PROPERTIES LABELS "wm" TIMEOUT 30)
   set(_runner "${CMAKE_CURRENT_SOURCE_DIR}/run_with_display.py")
   set(_sysroot_arg "")
   if(STK_SYSROOT_FOUND)
