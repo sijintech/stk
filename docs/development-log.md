@@ -1,6 +1,6 @@
 # 开发交接记录
 
-## 2026-09-30：AI 准备工作区首版（Linux 完整回归通过，CI 待记录）
+## 2026-09-30：AI 准备工作区首版（本机及跨平台 CI 通过）
 
 新增原生 **AI 工作区** 编辑器，可从项目页头或文件菜单打开，并返回项目表格选择数据。
 单页串联明确捕获选中记录全部字段、输入问题、**准备问题（不发送）**、核对保存内容与明确发送。
@@ -21,9 +21,14 @@
 最终 Linux 完整 CTest **602/602 通过，失败/错误/跳过均为 0**；八张 AI 中英文宽/窄 GL/Vulkan 截图已检查，
 中英文字典各 **1072 项**一致、无重复。新增编辑器名称使下拉框变宽，首轮 10 份旧布局基准不匹配；
 独立结构比较确认更新只涉及页头控件横坐标/宽度，区域、分隔条和正文未变，再运行完整套件通过。
-GL/Vulkan/Metal 中英文宽/窄截图均已纳入 CI 配置；**新提交的跨平台 CI 待记录**。
+代码提交 `852b343` 的 [桌面 CI](https://github.com/sijintech/stk/actions/runs/36667294145) **5/5 任务通过**：
+Linux **602/602**、macOS CPU **369/369** 与 Metal **73/73**、Windows MSVC CPU **329/329**，均无失败、错误或跳过。
+Linux/macOS 安装包及启动检查通过；八项 Linux 和四项 Metal AI 宽/窄中英文渲染实际执行，截图已复核。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36667294040) **7/7 任务通过**：Linux Python 3.10/3.12 各
+1665 通过、7 跳过；Windows Python 3.10/3.12 各 1254 通过、59 跳过，范围与排除项见[验收记录](runtime-validation.md)。
 此轮未调用真实模型；此前 Linux 单次账号验证与双平台真实账户待验收范围保持不变。
 日志 `/tmp/stk-ai-full-final.log`，JUnit `/tmp/stk-ai-full-final.xml`；范围见[验收记录](runtime-validation.md)。
+CI 证据在 `/tmp/stk-ai-ci-36667294145/`，Windows 日志 `/tmp/stk-ai-windows-36667294145.log`。
 
 后续依次补齐真机使用反馈、流式显示和通过检查/应用流程的结构化修改提案；工具执行、自动模拟流程与
 完整 AI 主页仍属后续计划。用法见[桌面指南](desktop.md#ai-准备工作区)，验收见[工作台清单](workbench-acceptance.md#ai-准备工作区)。

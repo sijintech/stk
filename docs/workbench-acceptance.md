@@ -128,8 +128,9 @@ CSV 可使用项目中的 `results-summary.csv` 测试显式类型导入，导�
 
 ## AI 准备工作区
 
-首版控制器/交互/截图与 App 重点测试 41/41、Linux 完整回归 602/602 通过，均无跳过；跨平台 CI 待记录，
-以下 macOS/Windows 真机步骤尚未标记通过。
+首版重点测试 41/41、Linux 完整回归 602/602 通过，均无跳过；`852b343` 的桌面及 Runtime CI 全部通过。
+原生 CI 为 Linux 602、macOS CPU 369 / Metal 73、Windows CPU 329 项，均无失败或跳过，见[验收记录](runtime-validation.md)。
+以下 macOS/Windows 真实模型及输入设备检查尚未标记通过；Windows CI 未包含 GPU 真机渲染。
 先在测试项目使用合成数据，不需要凭据即可完成准备、历史和取消检查：
 
 1. 从项目页头或 **文件 → AI 工作区** 打开，确认原项目表格/Viewer 标签保留。

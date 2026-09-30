@@ -24,7 +24,21 @@ SQLite 重读配置后的字段顺序导致相同准备被拒绝，改为规范�
 首轮完整回归中 10 份原布局基准因新增 AI 编辑器名称扩大下拉框而不匹配；逐项结构比较确认
 全部差异只在页头控件横坐标/宽度，区域、分隔条、正文与控件类型不变，更新基准后完整套件通过。
 日志 `/tmp/stk-ai-full-final.log`，JUnit `/tmp/stk-ai-full-final.xml`。
-新提交的跨平台 CI 待记录，macOS/Windows 原生真实模型和实际输入设备验收仍待完成；本轮未调用真实模型，
+
+代码提交 `852b343` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/36667294040) **7/7 任务通过**。
+Linux Python 3.10/3.12 各 **1665 passed、7 skipped、4 deselected**；Windows Python 3.10/3.12 各
+**1254 passed、59 skipped、260 deselected**。控制/Blender 协议 **24 passed**，旧桌面/MCP **3 passed**，
+Web 构建、两版 Linux graph doctor 和 wheel/sdist 构建均成功。跳过项为可选依赖、性能、平台及许可求解器场景，
+没有失败记录；日志 `/tmp/stk-ai-runtime-36667294040.log`。
+
+同一代码提交 `852b343` 的 [桌面 CI](https://github.com/sijintech/stk/actions/runs/36667294145) **5/5 任务通过**：
+Linux **602/602**、macOS CPU **369/369** 与 Metal **73/73**、Windows MSVC CPU **329/329**，均无失败、错误或跳过。
+Linux/macOS 数量由下载的 JUnit 实际用例核对；Windows 日志逐项核对 329 个通过用例，新增 4 项 AIWorkspace
+与 6 项 Exchange 测试全部实际运行。八项 Linux、四项 Metal 的 AI 宽/窄中英文渲染全部通过，截图已复核。
+Linux/macOS 安装包与启动检查通过。CI artifact 位于 `/tmp/stk-ai-ci-36667294145/`，
+Windows 日志 `/tmp/stk-ai-windows-36667294145.log`。
+
+macOS/Windows 原生真实模型、Windows GPU 真机渲染和实际输入设备验收仍待完成；本轮未调用真实模型，
 不扩大此前 Linux 合成单元格真实账户验收的范围。用法见[桌面指南](desktop.md#ai-准备工作区)，
 人工步骤见[工作台验收](workbench-acceptance.md#ai-准备工作区)。
 

@@ -22,7 +22,7 @@ GHOST，绘制用 Blender 的 GPU 模块（Linux 上 OpenGL 或 Vulkan，macOS �
   预设（如 `muferro-domains`）在数据旁求值，GPU 显示、拾取并查询原始值，导出 PNG 与逐步序列。
 - **传输、日志、桥日志**：上传下载进度与续传、程序日志、桥的 stderr 与重启。
 - **AI 工作区**：在同一页检查捕获数据、准备和明确发送保存的问题、查看请求状态与普通文字回复；
-  首版 Linux 完整回归已通过，跨平台 CI 待记录，不改变默认启动布局。
+  首版本机及跨平台 CI 已通过，不改变默认启动布局。
 
 ![STK 桌面程序：左为任务，中为查看器（muFerro 畴结构），右为属性，下方为探针](images/desktop/overview-zh.png)
 
@@ -51,7 +51,7 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 
 首版是单条问题与选定上下文的文字请求，不自动附带其他问答、文件或未保存输入；没有流式输出、
 工具调用、自动修改/模拟、Markdown 渲染或默认 AI 主页切换。本轮重点回归 41/41、Linux 完整回归 602/602 通过，
-均无跳过，跨平台 CI 待记录；
+均无跳过；`852b343` 的桌面与 Runtime CI 全部通过，平台数量见[验收记录](runtime-validation.md)。
 双平台真实模型和输入设备验收见[工作台清单](workbench-acceptance.md#ai-准备工作区)。
 
 ## 安装
@@ -367,7 +367,8 @@ without provider queries, sends or recovery. Unprepared text stays in this edito
 Preparation saves a message before creating its request: failure can leave that message, and identity reuse
 covers the same current input within the session, not a transaction resumed across restarts.
 No streaming, tools, automatic workflow execution or default-homepage change is included. Focused checks
-pass 41/41 and full Linux CTest passes 602/602, without skips. Cross-platform CI is pending;
+pass 41/41 and full Linux CTest passes 602/602, without skips. Desktop and Runtime CI passed for `852b343`;
+see the [acceptance record](runtime-validation.md) for platform totals.
 macOS/Windows real-account acceptance remains separate.
 
 ### Install
