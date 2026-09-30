@@ -4,7 +4,8 @@ target_link_libraries(stk-scalar-volume-tests PRIVATE stk_jobs_test_support GTes
 if(MSVC)
   target_compile_options(stk-scalar-volume-tests PRIVATE /W3 /utf-8 /bigobj)
 endif()
-gtest_discover_tests(stk-scalar-volume-tests PROPERTIES LABELS "project;scalar" TIMEOUT 120 DISCOVERY_TIMEOUT 60)
+# Keep discovery properties single-valued: semicolon labels break the generated MSVC command.
+gtest_discover_tests(stk-scalar-volume-tests PROPERTIES LABELS "project" TIMEOUT 120 DISCOVERY_TIMEOUT 60)
 
 add_executable(stk-scalar-volume-render scalar_volume_render.cc)
 target_link_libraries(stk-scalar-volume-render PRIVATE stk_jobs_test_support stk_gfx)

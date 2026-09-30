@@ -64,6 +64,23 @@ Python 跳过项仍为本机离屏 VTK、可选依赖、性能和真实许可求
 `/tmp/stk-scalar-python-full.log`；对应同名 XML 保存测试结果。本轮无真实模型调用。
 以上是本地 Linux 验证，不代表 macOS/Windows 真机交互、Windows GPU 或异机 SSH 已验收。
 
+提交 `a830dce6b742273acf0944a351cfae9c01b58ac7` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36697082152)
+四个作业通过，Windows 作业在测试发现阶段构建失败，**未执行 CTest**。
+Linux 实际 **804/804**、macOS CPU **522/522**、Metal **97/97**，均无失败、错误或跳过；
+新增 CPU 回归在 Linux 实际执行 **16 项**、macOS **15 项**（另一个 Viewer 表单用例仅纳入 Linux），
+两平台均执行了全部 **9 项**配置捕获回归。Linux **8 项**及 Metal **4 项**标量渲染全部执行，
+**12 张**宽窄中英文截图逐张复核，确认有符号范围、字段、分量和单位；窄视口裁切及浅底文字问题仍在此提交中可见，
+修复属于下一轮。Linux/macOS 打包及独立目录启动检查均通过。
+Windows 失败来自 `gtest_discover_tests` 的分号标签在 MSVC 命令中破坏引号，导致带空格的 CMake 模块路径解析错误；
+因此上一轮 Windows 捕获夹具修复仍未得到实际测试确认，不能将本次桌面运行记为全通过。
+已把该 CPU 目标的发现标签收敛为既有 `project` 标签，保留所有五项测试及原超时；修复仍需下一次 Windows CI 确认。
+
+同一提交的[Runtime CI](https://github.com/sijintech/stk/actions/runs/36697082091) **7/7 作业通过**：
+Linux Python 3.10/3.12 各 **2028 passed / 7 skipped / 4 deselected**，
+Windows Python 3.10/3.12 各 **1616 passed / 60 skipped / 260 deselected**；control **24 项**、desktop/MCP **3 项**和 Web 构建通过。
+跳过的可选依赖、Windows VTK/平台场景及真实求解器不计为验证。原始日志、JUnit、截图及解析结果位于
+`/tmp/stk-scalar-ci-36697082152/`。
+
 ## 2026-09-30：项目分析文档保存、重开与独立检查
 
 新增 `stk.analysis-document/1`，把完整节点图、提交参数和输出选择保存为普通项目表格中的一条记录。
