@@ -463,6 +463,7 @@ TEST_F(PythonBridge, GraphPresets)
     ids.insert(preset["id"].get<std::string>());
   }
   EXPECT_TRUE(ids.count("muferro-domains"));
+  EXPECT_TRUE(ids.count("scalar-volume"));
   const Result<Json> catalog = client->graph_catalog().get();
   ASSERT_TRUE(catalog.ok());
   EXPECT_EQ(catalog.value()["catalog"]["schema"], "stk.catalog/1");

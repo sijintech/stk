@@ -1,0 +1,233 @@
+{
+ "id": "scalar-volume",
+ "name": "Signed scalar / component volume",
+ "description": "Volume rendering of one explicitly named point field and zero-based component, preserving signed values. Optional result-unit metadata relabeling does not convert values.",
+ "bindings": [
+  {
+   "name": "data",
+   "description": "The directory (or Runtime task) holding the field file."
+  }
+ ],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "scalar-volume",
+  "name": "Signed scalar / component volume",
+  "description": "stk.filter.calculator (component, no magnitude) -> stk.render.volume. Input must be a numeric non-label point field of an image.",
+  "catalog": {
+   "stk": 1
+  },
+  "parameters": [
+   {
+    "name": "path",
+    "type": "string",
+    "default": "Polar.00000000.dat",
+    "label": "Field file",
+    "description": "Path inside the binding: DAT, NPY, VTI, legacy VTK or VTKHDF."
+   },
+   {
+    "name": "field",
+    "type": "string",
+    "default": "Polar",
+    "label": "Field name",
+    "description": "Exact STK point-field name. Missing, nonnumeric and label fields are errors; there is no automatic fallback."
+   },
+   {
+    "name": "component",
+    "type": "integer",
+    "default": 0,
+    "minimum": 0,
+    "maximum": 4095,
+    "label": "Component (0-based)",
+    "description": "Zero for scalar data; a vector or array component must exist. Never computes a magnitude."
+   },
+   {
+    "name": "unit",
+    "type": "json",
+    "default": null,
+    "label": "Result unit (label only)",
+    "description": "Null preserves the source unit. A nonempty string only relabels the selected field; it does not convert numerical values."
+   },
+   {
+    "name": "colormap",
+    "type": "enum",
+    "choices": [
+     "viridis",
+     "cividis",
+     "coolwarm",
+     "turbo",
+     "gray"
+    ],
+    "default": "viridis",
+    "label": "Colormap"
+   },
+   {
+    "name": "range",
+    "type": "range",
+    "default": [
+     null,
+     null
+    ],
+    "label": "Value range",
+    "description": "[min, max] of the transfer functions (null = the data range)."
+   },
+   {
+    "name": "opacity",
+    "type": "json",
+    "default": [
+     [
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.8
+     ]
+    ],
+    "label": "Opacity points",
+    "description": "[x, alpha] pairs, x normalized over the value range."
+   },
+   {
+    "name": "view",
+    "type": "enum",
+    "choices": [
+     "iso",
+     "+x",
+     "-x",
+     "+y",
+     "-y",
+     "+z",
+     "-z"
+    ],
+    "default": "iso",
+    "label": "View"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "src",
+    "type": "stk.source.file@1",
+    "params": {
+     "binding": "data",
+     "path": {
+      "$param": "path"
+     },
+     "association": "point"
+    }
+   },
+   {
+    "id": "component",
+    "type": "stk.filter.calculator@1",
+    "inputs": {
+     "in": {
+      "from": "src.out"
+     }
+    },
+    "params": {
+     "operation": "component",
+     "field": {
+      "$param": "field"
+     },
+     "component": {
+      "$param": "component"
+     },
+     "unit": {
+      "$param": "unit"
+     },
+     "result": null,
+     "keep_input": false
+    }
+   },
+   {
+    "id": "volume",
+    "type": "stk.render.volume@1",
+    "inputs": {
+     "in": {
+      "from": "component.out"
+     }
+    },
+    "params": {
+     "field": null,
+     "colormap": {
+      "$param": "colormap"
+     },
+     "range": {
+      "$param": "range"
+     },
+     "opacity": {
+      "$param": "opacity"
+     }
+    }
+   },
+   {
+    "id": "bar",
+    "type": "stk.render.scalar_bar@1",
+    "inputs": {
+     "source": {
+      "from": "volume.layer"
+     }
+    },
+    "params": {
+     "title": null
+    }
+   },
+   {
+    "id": "box",
+    "type": "stk.render.outline@1",
+    "inputs": {
+     "in": {
+      "from": "src.out"
+     }
+    }
+   },
+   {
+    "id": "axes",
+    "type": "stk.render.axes@1"
+   },
+   {
+    "id": "camera",
+    "type": "stk.view.camera@1",
+    "params": {
+     "preset": {
+      "$param": "view"
+     }
+    }
+   },
+   {
+    "id": "scene",
+    "type": "stk.view.scene@1",
+    "inputs": {
+     "layers": [
+      {
+       "from": "volume.layer"
+      },
+      {
+       "from": "box.layer"
+      },
+      {
+       "from": "bar.layer"
+      },
+      {
+       "from": "axes.layer"
+      }
+     ],
+     "camera": {
+      "from": "camera.camera"
+     }
+    }
+   },
+   {
+    "id": "png",
+    "type": "stk.output.image@1",
+    "inputs": {
+     "source": {
+      "from": "scene.scene"
+     }
+    }
+   }
+  ],
+  "outputs": {
+   "view": "scene.scene",
+   "image": "png.image"
+  }
+ }
+}

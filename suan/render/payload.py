@@ -80,6 +80,22 @@ def _np():
     return numpy
 
 
+def _check_volume_float32(data, *, path):
+    """Reject finite-to-infinite display conversion before any voxel reduction.
+
+    Existing NaN/Inf samples retain their missing-value policy. Small buffered
+    chunks bound temporary memory even for a strided, large float64 volume.
+    """
+    np = _np()
+    if data.dtype.kind != "f" or data.dtype.itemsize <= 4:
+        return
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        for block in np.nditer(data, flags=["external_loop", "buffered", "zerosize_ok"],
+                               buffersize=65536, order="K"):
+            if np.any(np.isfinite(block) & ~np.isfinite(block.astype(np.float32))):
+                raise PayloadError("Finite volume values overflow float32", path=path)
+
+
 def type_of(array):
     """Accessor type name of a NumPy array's dtype."""
     kind, size = array.dtype.kind, array.dtype.itemsize
@@ -1478,6 +1494,11 @@ class _Encoder:
         origin = self.layer_origin(layer, entry)
         grid = dict(g["grid"])
         data = np.asarray(g["data"])
+        encoding = g.get("encoding") or "auto"
+        if encoding == "auto":
+            encoding = ENCODINGS[self.profile]
+        if encoding == "f32":
+            _check_volume_float32(data, path=f"/layers/{layer.id}/data")
         dims = [int(n) for n in grid["dimensions"]]
         target = self.allocation.get(layer.id, math.prod(dims))
         if math.prod(dims) > target:
@@ -1489,9 +1510,6 @@ class _Encoder:
             dims = new_dims
         info = self.color_info(layer)
         categorical = info["categorical"]
-        encoding = g.get("encoding") or "auto"
-        if encoding == "auto":
-            encoding = ENCODINGS[self.profile]
         values = data.reshape(-1)
         finite = values[np.isfinite(values)] if values.dtype.kind == "f" else values
         lo, hi = (float(finite.min()), float(finite.max())) if len(finite) else (0.0, 0.0)
@@ -1508,6 +1526,9 @@ class _Encoder:
             kind = encoding
             top = 255 if kind == "u8" else 65535
             scale = (hi - lo) / top if hi > lo else 1.0
+            if not math.isfinite(scale) or scale <= 0 or not math.isfinite(lo):
+                raise PayloadError("Volume range cannot be represented by a finite positive quantization scale",
+                                   path=f"/layers/{layer.id}/value_scale")
             with np.errstate(invalid="ignore"):
                 quantized = np.clip(np.rint((values.astype(np.float64) - lo) / scale), 0, top)
             stored = np.nan_to_num(quantized, nan=0.0).astype(np.uint8 if kind == "u8" else np.uint16)

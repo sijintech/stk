@@ -173,8 +173,9 @@ TEST(ViewerFake, MetadataAndOpeningARunFolderEvaluates)
   FakeViewer f;
   f.vs->refresh_metadata();
   ASSERT_TRUE(f.pump_until([&] { return f.vs->presets_loaded() && f.vs->colormaps() && !f.vs->catalog().is_null(); }));
-  EXPECT_EQ(f.vs->presets().size(), 7u);
+  EXPECT_EQ(f.vs->presets().size(), 8u);
   EXPECT_NE(f.vs->preset("muferro-domains"), nullptr);
+  EXPECT_NE(f.vs->preset("scalar-volume"), nullptr);
   ASSERT_EQ(f.vs->colormaps()->size(), 2u);
   EXPECT_EQ(f.vs->colormaps()->front().lut.size(), 256u);
 

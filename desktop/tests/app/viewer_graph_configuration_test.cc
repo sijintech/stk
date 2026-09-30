@@ -82,14 +82,28 @@ class ViewerGraphConfigurationTest : public ::testing::Test {
     ui_loop.run_ready();
   }
 
-  Result request(const Json &params, const int64_t deadline = std::numeric_limits<int64_t>::max())
+  Result request(const Json &params, const int64_t deadline = std::numeric_limits<int64_t>::max(),
+                 const double timeout_s = 30, const bool hold = false)
   {
-    std::optional<Result> result;
-    ui_client->call("fixture.capture", {{"params", params}, {"expires_at_ms", deadline}}).then(
-        [&](Result value) { result = std::move(value); });
-    EXPECT_TRUE(ui_loop.pump_until([&] { f.screen.run_deferred(); return bool(result); }, 30));
-    EXPECT_TRUE(result);
-    return result ? std::move(*result) : Result(bridge::Error::make(ErrorCode::Unavailable, "Missing response"));
+    auto result = std::make_shared<std::optional<Result>>();
+    auto held = std::make_shared<bool>(false);
+    bridge::ListenerHandle listener;
+    if (hold) {
+      listener = ui_client->on_event("fixture.held", [held](const auto &, const auto &) { *held = true; });
+    }
+    auto pending = ui_client->call("fixture.capture", {{"params", params}, {"expires_at_ms", deadline},
+                                                       {"hold", hold}});
+    pending.then([result](Result value) { *result = std::move(value); });
+    if (hold && !ui_loop.pump_until([&] { return *held || bool(*result); }, 30)) {
+      pending.cancel();
+      return bridge::Error::make(ErrorCode::Unavailable, "Fixture did not hold capture: " +
+                                                         ui_client->bridge_log().text());
+    }
+    if (!ui_loop.pump_until([&] { f.screen.run_deferred(); return bool(*result); }, timeout_s)) {
+      pending.cancel();
+      return bridge::Error::make(ErrorCode::Timeout, "Missing capture response: " + ui_client->bridge_log().text());
+    }
+    return std::move(**result);
   }
 
   void open_run()
@@ -153,8 +167,10 @@ TEST_F(ViewerGraphConfigurationTest, ExportsCopiedConfigurationWithoutLayoutOrVi
   EXPECT_EQ(configuration.at("requested_outputs"), snapshot->desired->requested_outputs);
   EXPECT_EQ(configuration.at("preset_id"), "muferro-domains");
   EXPECT_EQ(configuration.at("source"), (Json{{"key", viewer().source().key()}, {"kind", "run"},
-      {"path", core::path_to_utf8(dir.path() / "run")}, {"field_file", ""}, {"connection", ""},
+      {"path", viewer().source().path}, {"field_file", ""}, {"connection", ""},
       {"node", ""}, {"workspace_id", ""}, {"task_id", ""}, {"series", false}}));
+  EXPECT_TRUE(fs::equivalent(core::path_from_utf8(configuration.at("source").at("path").get<std::string>()),
+                             dir.path() / "run"));
   EXPECT_EQ(result.value().at("viewer_version"), snapshot->version);
   result.value()["configuration"]["graph"]["nodes"][0]["id"] = "changed_copy";
   result.value()["configuration"]["parameters"]["step"] = 17;
@@ -229,41 +245,60 @@ TEST_F(ViewerGraphConfigurationTest, StrictBooleanAndExactParameterNamesAreRequi
   EXPECT_EQ(f.shell->store().version(), version);
 }
 
+TEST_F(ViewerGraphConfigurationTest, TimedOutCaptureCanReceiveALateReplyWithoutTouchingExpiredStackState)
+{
+  const auto timed_out = request({{"displayed", false}}, std::numeric_limits<int64_t>::max(), 0.02, true);
+  ASSERT_FALSE(timed_out.ok());
+  EXPECT_EQ(timed_out.error().code, ErrorCode::Timeout);
+  // request() has returned. Its local cancellation continuation and a subsequent
+  // remote reply must both remain safe while this new call is being observed.
+  auto released = std::make_shared<std::optional<Result>>();
+  ui_client->call("fixture.release").then([released](Result value) { *released = std::move(value); });
+  ASSERT_TRUE(ui_loop.pump_until([&] { f.screen.run_deferred(); return bool(*released); }, 30));
+  ASSERT_TRUE((*released)->ok());
+  EXPECT_EQ((*released)->value().at("released"), 1);
+  const auto next = request({{"displayed", false}});
+  ASSERT_TRUE(next.ok()) << next.error().describe();
+  EXPECT_TRUE(next.value().at("configuration").is_null());
+  EXPECT_EQ(ui_client->stats().protocol_errors, 0u);
+  EXPECT_EQ(viewer().evaluations_started(), 0);
+}
+
 TEST_F(ViewerGraphConfigurationTest, ExpiredCancelledAndClosedScreenRequestsCannotExportLaterState)
 {
   const auto expired = request({{"displayed", false}}, 0);
   ASSERT_FALSE(expired.ok()); EXPECT_EQ(expired.error().code, ErrorCode::Timeout);
-  bool queued = false;
-  auto listener = ui_client->on_event("ui.request", [&](const auto &, const auto &) { queued = true; });
-  std::optional<Result> closed;
+  auto queued = std::make_shared<bool>(false);
+  auto listener = ui_client->on_event("ui.request", [queued](const auto &, const auto &) { *queued = true; });
+  auto closed = std::make_shared<std::optional<Result>>();
   ui_client->call("fixture.capture", {{"params", {{"displayed", false}}},
-      {"expires_at_ms", std::numeric_limits<int64_t>::max()}}).then([&](Result value) { closed = std::move(value); });
-  ASSERT_TRUE(ui_loop.pump_until([&] { return queued; }, 30));
+      {"expires_at_ms", std::numeric_limits<int64_t>::max()}}).then([closed](Result value) { *closed = std::move(value); });
+  ASSERT_TRUE(ui_loop.pump_until([&] { return *queued; }, 30));
   f.shell->forget(f.screen);
-  ASSERT_TRUE(ui_loop.pump_until([&] { f.screen.run_deferred(); return bool(closed); }, 30));
-  ASSERT_TRUE(closed); ASSERT_FALSE(closed->ok());
-  EXPECT_EQ(closed->error().code, ErrorCode::Unavailable);
+  ASSERT_TRUE(ui_loop.pump_until([&] { f.screen.run_deferred(); return bool(*closed); }, 30));
+  ASSERT_TRUE(*closed); ASSERT_FALSE((*closed)->ok());
+  EXPECT_EQ((*closed)->error().code, ErrorCode::Unavailable);
   const auto absent = request({{"displayed", false}});
   ASSERT_FALSE(absent.ok()); EXPECT_EQ(absent.error().code, ErrorCode::Unavailable);
 
   f.shell->install(f.screen, nullptr);
-  queued = false;
-  std::optional<Result> cancelled;
+  *queued = false;
+  auto cancelled = std::make_shared<std::optional<Result>>();
   auto pending = ui_client->call("fixture.capture", {{"params", {{"displayed", false}}},
       {"expires_at_ms", std::numeric_limits<int64_t>::max()}});
-  pending.then([&](Result value) { cancelled = std::move(value); });
-  ASSERT_TRUE(ui_loop.pump_until([&] { return queued; }, 30));
+  pending.then([cancelled](Result value) { *cancelled = std::move(value); });
+  ASSERT_TRUE(ui_loop.pump_until([&] { return *queued; }, 30));
   const auto snapshot = viewer().graph_inspection();
   f.shell->store().set_bridge(nullptr);
   f.screen.run_deferred(); ui_loop.run_ready();
-  EXPECT_FALSE(cancelled); EXPECT_EQ(viewer().graph_inspection(), snapshot);
+  EXPECT_FALSE(*cancelled); EXPECT_EQ(viewer().graph_inspection(), snapshot);
   pending.cancel(); ui_loop.run_ready();
 }
 
 // Synthetic graph receipt and static payload only: this portable fixture uses no NumPy, VTK,
 // network or native fake process. The real Python graph hash remains authoritative.
 constexpr const char *kCaptureBridge = R"PY(
-import json, os, shutil, sys
+import hashlib, json, os, shutil, sys
 from pathlib import Path
 from suan.graph.schema import graph_hash
 root, temporary = map(Path, sys.argv[1:3])
@@ -271,6 +306,7 @@ preset = json.loads((root/'suan/graph/presets/muferro-domains.json').read_text(e
 fixture = root/'desktop/tests/viewer/fixtures/muferro_domains'
 blob_dir = temporary/'blobs'
 pending = {}
+held = []
 for line in sys.stdin:
     message = json.loads(line)
     method, params = message['method'], message.get('params', {})
@@ -279,7 +315,8 @@ for line in sys.stdin:
         result = {'protocol': 1, 'server': {'name': 'capture-fixture', 'version': '1', 'python': sys.version,
             'platform': sys.platform, 'pid': os.getpid()},
             'methods': ['hello', 'graph.evaluate', 'graph.cancel', 'script.open', 'script.read',
-                'script.catalog', 'ui.attach', 'ui.reply', 'fixture.capture'], 'events': ['ui.request'],
+                'script.catalog', 'ui.attach', 'ui.reply', 'fixture.capture', 'fixture.release'],
+            'events': ['ui.request', 'fixture.held'],
             'limits': {'max_line_bytes': 16777216, 'max_inflight': 64},
             'paths': {key: str(temporary) for key in ('state_dir','cache_dir','download_dir')}, 'resumed_transfers': []}
         result['paths']['blob_dir'] = str(blob_dir)
@@ -290,10 +327,19 @@ for line in sys.stdin:
     elif method == 'fixture.capture':
         request = str(message['id'])
         pending[request] = message['id']
-        print(json.dumps({'event':'ui.request','data':{'session':'ui-fixture','request':request,
+        event = {'event':'ui.request','data':{'session':'ui-fixture','request':request,
             'operation':'viewer.graph_configuration','params':params['params'],
-            'expires_at_ms':params['expires_at_ms']}}), flush=True)
+            'expires_at_ms':params['expires_at_ms']}}
+        if params.get('hold'):
+            held.append(event)
+            print(json.dumps({'event':'fixture.held','data':{'request':request}}), flush=True)
+        else:
+            print(json.dumps(event), flush=True)
         continue
+    elif method == 'fixture.release':
+        result = {'released':len(held)}
+        for event in held: print(json.dumps(event), flush=True)
+        held.clear()
     elif method == 'ui.reply':
         original = pending.pop(params['request'])
         key = 'result' if 'result' in params else 'error'
@@ -304,7 +350,12 @@ for line in sys.stdin:
         for buffer in manifest['buffers']:
             digest = buffer['sha256']; target = blob_dir/digest[:2]/digest
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(fixture/(digest+'.bin'), target)
+            # Immutable CAS blobs may already be mapped by the previous payload.
+            # Windows denies overwriting a mapped file; identical bytes are reused.
+            if target.exists():
+                assert hashlib.sha256(target.read_bytes()).hexdigest() == digest
+            else:
+                shutil.copyfile(fixture/(digest+'.bin'), target)
             buffer['uri'] = 'sha256:'+digest
         hashed = graph_hash(preset['graph'])
         receipt = {'schema':'stk.graph-result/1','graph_hash':hashed,'graph_sha256':hashed[7:],
@@ -329,9 +380,16 @@ TEST_F(ViewerGraphConfigurationTest, DisplayedExportRetainsSubmittedIntentAndAll
     SCOPED_TRACE(mode);
     { std::ofstream file(dir.path() / "receipt-mode"); file << mode; }
     viewer().set_parameter("min_magnitude", ui::FormValue::number(0.1));
+    const auto previous_payload = viewer().payload_serial();
     viewer().evaluate_now();
-    ASSERT_TRUE(ui_loop.pump_until([&] { return !viewer().evaluating() && bool(viewer().payload()); }, 30))
+    ASSERT_TRUE(ui_loop.pump_until([&] {
+      return !viewer().evaluating() &&
+             (viewer().payload_serial() > previous_payload || !viewer().eval_error().empty());
+    }, 30))
         << viewer().eval_error() << ui_client->bridge_log().text();
+    ASSERT_TRUE(viewer().eval_error().empty()) << viewer().eval_error() << ui_client->bridge_log().text();
+    ASSERT_GT(viewer().payload_serial(), previous_payload);
+    ASSERT_TRUE(viewer().payload());
     viewer().set_auto_evaluate(false);
     viewer().set_parameter("min_magnitude", ui::FormValue::number(0.75));
     const auto snapshot = viewer().graph_inspection();

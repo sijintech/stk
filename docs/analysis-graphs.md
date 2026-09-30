@@ -69,3 +69,6 @@ Shift+滚轮横移，Home 或“适应”显示整个图；F 或“定位节点�
 
 验证结果按对应提交记录在[验收记录](runtime-validation.md)。macOS/Windows 真机鼠标、触控板及高 DPI 操作
 仍按[工作台验收](workbench-acceptance.md)单独确认。
+
+[标量分量体渲染](scalar-volume.md)提供明确的 `src → component → volume` 示例，
+可用此页核对选择的字段、分量、单位及结果来源，再保存完整分析定义。

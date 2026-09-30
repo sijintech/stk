@@ -431,10 +431,6 @@ SchemaNode declaration_node(const Json &decl)
   if (decl.contains("unit") && decl["unit"].is_string()) {
     n.unit = decl["unit"].template get<std::string>();
   }
-  if (decl.contains("default")) {
-    n.default_value = n.type == SchemaType::Json ? FormValue::string(decl["default"].dump())
-                                                 : value_from_json(decl["default"]);
-  }
   return n;
 }
 
@@ -465,6 +461,15 @@ SchemaNode form_schema(const std::vector<stk::io::ParameterForm> &forms)
     }
     if (n.widget.empty()) {
       n.widget = f.widget;
+    }
+    /* Null is allowed only by the declaration AND every referencing schema. A nullable
+     * node input cannot widen a strict string declaration or another strict reference. */
+    n.nullable = stk::io::check_value(Json(), f.schema).empty();
+    /* JSON declarations can inherit a concrete editor from their references. Convert the
+     * original default after that choice so null and strings remain values, not JSON text. */
+    if (f.declaration.contains("default")) {
+      const Json &value = f.declaration["default"];
+      n.default_value = n.type == SchemaType::Json ? FormValue::string(value.dump()) : value_from_json(value);
     }
     root.properties.push_back(std::move(n));
   }

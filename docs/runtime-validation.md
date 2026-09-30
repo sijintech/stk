@@ -2,6 +2,38 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-30：有符号标量体渲染与数值范围检查
+
+新增 `scalar-volume` 预设，明确选择数值字段、零起始分量及可选单位标签，保留正负值；
+原 `volume` 的模长语义和默认打开行为不变。单位为空时沿用源数据元信息，明确标签只改标注、不换算数值。
+分析定义可以保存并重开这些参数；错误字段或分量不会偷偷改用其他字段，失败时仍保留并标明旧结果。
+
+critical review 分别检查后端科学数值、原生上传与传递函数、表单类型、真实桥和中英文渲染。
+发现并修正以下问题：
+
+- 原 GPU 浮点路径把低于固定负阈值的有限值当作缺失值，且极大正负范围可能在 shader 中溢出。
+  现在只对独立上传副本用 CPU 双精度归一化，缺失值使用分开的有限哨兵；原始数据、探针和物理单位色条保持原值。
+  极小范围、常数场、全负场及正负极值均有独立数值与 GPU 对照。
+- 原浮点下采样可能漏掉被跳过样本的溢出。现在在下采样前检查源数组，有限值转 float32 溢出时明确拒绝。
+  量化比例溢出或下溢到零同样报错；没有改变现有 NaN/Inf 量化规则，也不将其解释为可靠的缺失值掩码。
+- 表单根据初始通用类型转换默认值，可能把 JSON null 误变为文字，或放宽必需字段。
+  现在先完成引用类型交集再构造默认值；单位清空恢复 null，严格字段仍不接受 null。
+- 实际中文截图出现英文参数名和截断，已补齐字段、分量、单位及色图翻译；原有七个预设的布局基准逐叶比较完全一致。
+
+后端新增 **68 项**数值与真实图求值回归。原生专项 **33/33** 通过，涵盖真实桥、保存重开、表单、
+极值归一化及 GL/Vulkan；最终本地完整回归为 Python **2013 passed / 22 skipped / 4 deselected**，
+Linux CTest **804/804，失败/错误/跳过均为 0**，其中包含上一轮 Windows 夹具修复与新增迟到回复回归。
+Python 跳过项仍为本机离屏 VTK、可选依赖、性能和真实许可求解器场景，
+不计为已验证。中英文字典各 **1213 项**一致且无重复；新增预设以外的全部表单布局基准保持原值。
+
+八张 GL/Vulkan 宽窄中英文截图逐张复核，真实桥产生的负值、字段、分量与单位标签可见。
+复查另发现原有窄视口取景裁切和浅色背景文字对比度不足，已列入下一轮修复；本轮没有隐式改写用户相机。
+线性过滤下缺失边界仍使用近似哨兵插值，量化缺失值仍沿用端点编码，限制见[标量体渲染指南](scalar-volume.md)。
+
+日志 `/tmp/stk-scalar-focused.log`、`/tmp/stk-scalar-renders-final.log`、`/tmp/stk-scalar-full-final.log`、
+`/tmp/stk-scalar-python-full.log`；对应同名 XML 保存测试结果。本轮无真实模型调用。
+以上是本地 Linux 验证，不代表 macOS/Windows 真机交互、Windows GPU 或异机 SSH 已验收。
+
 ## 2026-09-30：项目分析文档保存、重开与独立检查
 
 新增 `stk.analysis-document/1`，把完整节点图、提交参数和输出选择保存为普通项目表格中的一条记录。
@@ -38,6 +70,22 @@ JUnit `/tmp/stk-analysis-docs-python-final.xml`。
 
 日志 `/tmp/stk-analysis-docs-focused-final.log`、`/tmp/stk-analysis-docs-full.log`；
 JUnit `/tmp/stk-analysis-docs-focused-final.xml`、`/tmp/stk-analysis-docs-full.xml`。
+
+提交 `c3509706356beba27264611bc9b5389f3cf47114` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36692666924)
+四个任务通过、Windows CPU 任务失败：Linux **780/780**、macOS CPU **507/507** 与 Metal **93/93**，
+这些平台均无失败、错误或跳过；Windows **465 passed / 2 failed / 0 skipped**。
+新增 **28 项 CPU 测试**在三个平台均实际执行，Linux/macOS 全通过，Windows 的两项失败均在配置捕获测试中。
+一项错误比较未规范化的 Windows 路径；另一项夹具重复覆盖仍被旧载荷映射的同名缓存文件，
+随后旧载荷等待条件掩盖新求值失败，超时回调引用已离开的栈变量并导致堆错误。
+已隔离修正夹具路径比较、不可变缓存复用、新载荷确认及回调寿命，并新增受控迟到回复回归；
+**Windows 修复仍待下一轮 CI 验证，不能把本次桌面运行记为全通过。**
+Linux **8 项**、Metal **4 项**保存分析渲染均实际执行，全部 **12 张**宽窄中英文截图逐张复核；
+Linux/macOS 打包和独立目录启动检查通过。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36692666888) 七个任务全部通过：Linux Python 3.10/3.12
+各 **1960 passed / 7 skipped / 4 deselected**，Windows Python 3.10/3.12 各 **1549 passed / 59 skipped / 260 deselected**；
+control **24 项**、desktop/MCP **3 项**及 web 构建通过。跳过项为可选依赖、平台限定、性能与真实求解器场景，
+不计为已验证；Windows runner 不执行 GPU 渲染。证据存于 `/tmp/stk-analyses-ci-36692666924/audit-summary.json`。
+
 本轮没有真实模型调用；本地 Linux 验证不代表 macOS/Windows 真机交互、Windows GPU 或异机 SSH 验收。
 操作与限制见[项目分析文档](project-analyses.md)，人工步骤见[工作台验收](workbench-acceptance.md)。
 

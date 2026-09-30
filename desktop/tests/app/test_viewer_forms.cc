@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/** \file The Properties editor's forms for all 7 presets (JSON Schema -> stk_ui build_form,
+/** \file The Properties editor's forms for all shipped presets (JSON Schema -> stk_ui build_form,
  * grouped by x-stk-group, data vs client stage boxes), as layout goldens in zh and en (fake text
  * measurer, no GPU; STK_UPDATE_GOLDENS=1 rewrites desktop/tests/app/golden/), plus the Viewer
  * editor's sidebar and the Probe editor with a pick. */
@@ -91,7 +91,7 @@ TEST_P(PropertiesForms, AllPresetsMatchGoldens)
   AppFixture f(lang, 1.0f, 1280, 900);
   app::ViewerState &vs = f.shell->store().viewer();
   vs.set_metadata(stk::apptest::repo_presets(), stk::apptest::repo_catalog());
-  ASSERT_EQ(vs.presets().size(), 7u);
+  ASSERT_EQ(vs.presets().size(), 8u);
   nlohmann::ordered_json doc = nlohmann::ordered_json::object();
   for (const app::PresetInfo &p : vs.presets()) {
     vs.select_preset(p.id);
@@ -118,6 +118,49 @@ TEST_P(PropertiesForms, AllPresetsMatchGoldens)
 
 INSTANTIATE_TEST_SUITE_P(App, PropertiesForms, ::testing::Values("en", "zh"),
                          [](const ::testing::TestParamInfo<const char *> &i) { return std::string(i.param); });
+
+TEST(ViewerEditors, ScalarVolumeFormPreservesExplicitFieldComponentAndUnitStages)
+{
+  AppFixture f("en", 1.0f, 1280, 1000);
+  app::ViewerState &vs = f.shell->store().viewer();
+  vs.set_metadata(stk::apptest::repo_presets(), stk::apptest::repo_catalog());
+  vs.select_preset("scalar-volume");
+  f.drv->frame();
+  ASSERT_NE(vs.schema().property("unit"), nullptr);
+  EXPECT_EQ(vs.schema().property("unit")->type, ui::SchemaType::String);
+  EXPECT_TRUE(vs.schema().property("unit")->nullable);
+  EXPECT_FALSE(vs.schema().property("field")->nullable);
+  EXPECT_EQ(vs.parameters()["path"], "Polar.00000000.dat");
+  EXPECT_EQ(vs.parameters()["field"], "Polar");
+  EXPECT_EQ(vs.parameters()["component"], 0);
+  EXPECT_TRUE(vs.parameters()["component"].is_number_integer());
+  EXPECT_TRUE(vs.form().get("unit").is_null());
+  EXPECT_FALSE(vs.parameters().contains("unit")) << "the Viewer omits null overrides and uses the graph default";
+  for (const char *name : {"path", "field", "component", "unit"}) {
+    EXPECT_EQ(vs.param_stage(name), "data") << name;
+  }
+  for (const char *name : {"colormap", "range", "opacity", "view"}) {
+    EXPECT_EQ(vs.param_stage(name), "client") << name;
+  }
+  for (const char *name : {"field", "component", "unit"}) {
+    ASSERT_NE(find(f, name), nullptr) << name;
+  }
+  EXPECT_TRUE(find(f, "unit")->string.get().empty());
+  find(f, "field")->string.set("Strain");
+  find(f, "component")->number.set(2);
+  find(f, "unit")->string.set("milli-strain");
+  EXPECT_EQ(vs.parameters()["field"], "Strain");
+  EXPECT_EQ(vs.parameters()["component"], 2);
+  EXPECT_TRUE(vs.parameters()["component"].is_number_integer());
+  EXPECT_EQ(vs.parameters()["unit"], "milli-strain");
+  find(f, "unit")->string.set("");
+  EXPECT_TRUE(vs.form().get("unit").is_null());
+  EXPECT_FALSE(vs.parameters().contains("unit"));
+  find(f, "field")->string.set("");
+  EXPECT_TRUE(vs.parameters().contains("field"));
+  EXPECT_EQ(vs.parameters()["field"], "");
+  EXPECT_EQ(vs.evaluations_started(), 0) << "editing a form with no open data source cannot execute a graph";
+}
 
 TEST(ViewerEditors, ColormapParametersUseTheColormapList)
 {

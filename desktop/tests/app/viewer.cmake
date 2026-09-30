@@ -5,7 +5,7 @@
 #                             cancellation, progress, prefetch and cached step switches, camera
 #                             preservation, playback, probe, layer overrides, sequence export),
 #                             result / series folders, and layout goldens of the Properties forms
-#                             of all 7 presets (zh / en; STK_UPDATE_GOLDENS=1 rewrites golden/).
+#                             of all 8 presets (zh / en; STK_UPDATE_GOLDENS=1 rewrites golden/).
 #   stk_app_viewer_gpu_tests  gtest with a GPU and the real Python bridge (labels "app;gpu;bridge"):
 #                             muferro-domains on a fake muFerro run; a client-stage change re-runs
 #                             no data node and re-renders; a data-stage change re-runs data nodes;

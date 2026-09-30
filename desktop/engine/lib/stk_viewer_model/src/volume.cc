@@ -82,6 +82,17 @@ std::array<double, 2> stored_range(std::span<const uint16_t> values, bool normal
   return stored_range_impl(values, normalized ? 65535.0 : 1.0);
 }
 
+std::array<double, 2> normalize_volume_floats(std::span<float> values)
+{
+  const auto range = stored_range(std::span<const float>(values));
+  const double lo = range[0], width = range[1] - lo;
+  for (float &value : values) {
+    value = std::isfinite(value) ? float(std::clamp((double(value) - lo) / width, 0.0, 1.0)) :
+                                  kVolumeHoleValue;
+  }
+  return range;
+}
+
 /* GCC folds the two identical sort comparators below (array<double, 4> and array<double, 2>) and then
  * reports a false -Warray-bounds in sanitizer builds. */
 #if defined(__GNUC__) && !defined(__clang__)

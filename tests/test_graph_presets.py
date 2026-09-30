@@ -13,7 +13,8 @@ from suan.graph.registry import Registry
 from suan.graph.schema import validate_graph
 
 ROOT = Path(__file__).resolve().parents[1]
-PRESETS = ("energy-plot", "iso", "muferro-domains", "muferro-polarization-glyphs", "slice", "vectors", "volume")
+PRESETS = ("energy-plot", "iso", "muferro-domains", "muferro-polarization-glyphs",
+           "scalar-volume", "slice", "vectors", "volume")
 
 
 def spec_registry():

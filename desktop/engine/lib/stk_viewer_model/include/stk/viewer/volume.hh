@@ -57,6 +57,13 @@ std::array<double, 2> stored_range(std::span<const float> values);
 std::array<double, 2> stored_range(std::span<const uint8_t> values, bool normalized = false);
 std::array<double, 2> stored_range(std::span<const uint16_t> values, bool normalized = false);
 
+/** Detached f32 volume upload: finite samples become [0,1], nonfinite samples a finite hole
+ * sentinel. Returns the original stored_range for transfer_lut(), leaving physical units and
+ * payload/probe values unchanged. Double arithmetic handles the entire finite f32 domain. */
+inline constexpr float kVolumeHoleValue = -2.0f;
+inline constexpr float kVolumeHoleThreshold = -1.0f;
+std::array<double, 2> normalize_volume_floats(std::span<float> values);
+
 /** vtkColorTransferFunction evaluation: piecewise linear in RGB between sorted points, clamped at the ends. */
 RGB evaluate_color(const std::vector<std::array<double, 4>> &points, double value);
 /** Piecewise-linear opacity, constant beyond the end points (colormaps.py opacity_at). */

@@ -528,3 +528,6 @@ Until M-D2 exit the Qt `suan-gui` keeps working; new features go into the deskto
 
 Remaining M-D2 work is now scheduled under P0/P3/P5 in the [development plan](development-plan.md).
 Qt archival still needs a recorded parity, platform-input and distribution acceptance decision.
+
+有符号标量或向量分量可使用[标量分量体渲染](scalar-volume.md)：明确字段、分量及单位标签，保留正负值。
+Signed scalar and vector-component inspection is available through the `scalar-volume` preset; see the [guide](scalar-volume.md).

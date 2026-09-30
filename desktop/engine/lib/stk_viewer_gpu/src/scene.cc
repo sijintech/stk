@@ -917,10 +917,13 @@ struct Builder {
     lv.grid = grid;
     lv.voxels = uint64_t(dims[0]) * uint64_t(dims[1]) * uint64_t(dims[2]);
     const io::PayloadAccessor &a = p.accessor(data_id);
-    const std::string key = accessor_key(p, a) + ":vol:" + std::to_string(dims[0]) + "x" +
-                            std::to_string(dims[1]) + "x" + std::to_string(dims[2]);
     const bool u8 = a.type == io::ComponentType::U8;
     const bool u16 = a.type == io::ComponentType::U16;
+    /* The normalization domain is derived only from these accessor bytes, so the accessor key
+     * also identifies the normalized texture. Transfer functions retain their own content key. */
+    const std::string key = accessor_key(p, a) + ":vol:" + std::to_string(dims[0]) + "x" +
+                            std::to_string(dims[1]) + "x" + std::to_string(dims[2]) +
+                            (!u8 && !u16 ? ":unit-f32" : "");
     /* Texture value -> stored value (normalized accessors store x / 255 or x / 65535, web floats()). */
     lv.tex_scale = a.normalized ? 1.0 : u8 ? 255.0 : u16 ? 65535.0 : 1.0;
     /* Stored-value domain of the transfer-function LUT: the data range. */
@@ -934,22 +937,19 @@ struct Builder {
     }
     else {
       floats = p.floats(data_id);
-      range = viewer::stored_range(std::span<const float>(floats));
+      range = viewer::normalize_volume_floats(floats);
     }
     const double lo = range[0], hi = range[1];
     lv.stored_lo = lo;
     lv.stored_hi = hi;
-    /* Non-finite f32 voxels (no NaN/Inf on the GPU) become a finite value far below the data, which
-     * the ray marcher skips as a hole (transparent); u8/u16 data has none. */
+    /* Normalize f32 in CPU double arithmetic: shader subtraction cannot overflow at +/-FLT_MAX
+     * or collapse a tiny/constant domain, and finite negative data can never resemble a hole.
+     * Nearest sampling preserves holes exactly; linear sampling blends the finite sentinel with
+     * adjacent values and skips samples below the threshold (an approximate boundary mask). */
     if (!u8 && !u16) {
-      const double gap = std::max(hi - lo, std::abs(lo)) + 1.0;
-      lv.hole_below = std::max(lo - gap, -1e37);
-      const float sentinel = float(std::max(lo - 2.0 * gap, -2e37));
-      for (float &f : floats) {
-        if (!std::isfinite(f)) {
-          f = sentinel;
-        }
-      }
+      lv.stored_lo = 0.0;
+      lv.stored_hi = 1.0;
+      lv.hole_below = viewer::kVolumeHoleThreshold;
       check_finite_upload(floats, "volume data");
     }
     lv.texture = cache.get(key, [&] {

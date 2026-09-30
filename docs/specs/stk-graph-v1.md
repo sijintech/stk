@@ -489,9 +489,15 @@ the plot node's full key and the format, so a warm request renders nothing.
 
 ## 10. Presets (content owned by Phase C1, `suan/graph/presets/*.json`)
 
-`slice`, `iso`, `vectors` (reproduce today's `view.build` modes), `volume`, `muferro-domains`,
+`slice`, `iso`, `vectors` (reproduce today's `view.build` modes), `volume`, `scalar-volume`, `muferro-domains`,
 `muferro-polarization-glyphs`, `energy-plot`. Presets bind a source binding named `run` (muFerro)
 or `data` (generic file) and expose `step` plus their main thresholds as graph parameters.
+
+`volume` computes field magnitude. `scalar-volume` preserves one explicitly named numeric, non-label
+point-field component of an image: `field` is a strict string and `component` is a zero-based integer
+in 0–4095 that must exist in that field. Missing or unsupported fields fail without selecting another
+array. Its optional `unit` is null to preserve source metadata, or a nonempty string to relabel only
+the selected result; it never converts numerical values. File-open defaults remain unchanged.
 
 ## 11. Validation (`suan.graph.schema.validate_graph(graph, registry, *, parameters=None)`)
 

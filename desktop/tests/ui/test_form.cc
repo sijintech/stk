@@ -139,6 +139,93 @@ TEST(FormSchema, JsonSchemaShapes)
   EXPECT_EQ(j.default_value->str, "all");
 }
 
+TEST(FormSchema, JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization)
+{
+  for (const ordered_json &value : {ordered_json(nullptr), ordered_json("C/m^2"), ordered_json("null")}) {
+    SCOPED_TRACE(value.dump());
+    const ordered_json graph = {
+        {"parameters", ordered_json::array({{{"name", "unit"}, {"type", "json"}, {"default", value}}})},
+        {"nodes", ordered_json::array({{{"id", "calc"}, {"type", "stk.filter.calculator@1"},
+                                        {"params", {{"unit", {{"$param", "unit"}}}}}}})}};
+    const SchemaNode schema = preset_schema(graph, catalog());
+    ASSERT_NE(schema.property("unit"), nullptr);
+    const SchemaNode &unit = *schema.property("unit");
+    EXPECT_EQ(unit.type, SchemaType::String);
+    EXPECT_TRUE(unit.nullable);
+    ASSERT_TRUE(unit.default_value);
+    EXPECT_EQ(*unit.default_value, form_value_from_json(value));
+    FormModel model;
+    model.init_defaults(schema);
+    EXPECT_EQ(form_values_to_ordered_json(model, schema)["unit"], value);
+  }
+}
+
+TEST(FormSchema, NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)
+{
+  const ordered_json nullable = {{"id", "calc"}, {"type", "stk.filter.calculator@1"},
+                                 {"params", {{"unit", {{"$param", "shared"}}}}}};
+  const ordered_json strict = {{"id", "source"}, {"type", "stk.source.file@1"},
+                               {"params", {{"binding", {{"$param", "shared"}}}}}};
+  for (const char *type : {"json", "string"}) {
+    for (const bool strict_first : {false, true}) {
+      SCOPED_TRACE(std::string(type) + (strict_first ? ": strict first" : ": nullable first"));
+      const ordered_json graph = {
+          {"parameters", ordered_json::array({{{"name", "shared"}, {"type", type}, {"default", "data"}}})},
+          {"nodes", strict_first ? ordered_json::array({strict, nullable}) : ordered_json::array({nullable, strict})}};
+      const SchemaNode schema = preset_schema(graph, catalog());
+      ASSERT_NE(schema.property("shared"), nullptr);
+      EXPECT_EQ(schema.property("shared")->type, SchemaType::String);
+      EXPECT_FALSE(schema.property("shared")->nullable);
+      FormModel model;
+      model.init_defaults(schema);
+      EXPECT_EQ(form_values_to_ordered_json(model, schema)["shared"], "data");
+    }
+  }
+  /* A strict declaration remains strict even when its only reference accepts null. */
+  const ordered_json graph = {
+      {"parameters", ordered_json::array({{{"name", "shared"}, {"type", "string"}, {"default", "data"}}})},
+      {"nodes", ordered_json::array({nullable})}};
+  const SchemaNode schema = preset_schema(graph, catalog());
+  ASSERT_NE(schema.property("shared"), nullptr);
+  EXPECT_FALSE(schema.property("shared")->nullable);
+}
+
+TEST(FormBuilder, ScalarVolumeNullableUnitAndStrictFieldRoundTrip)
+{
+  const auto scalar = ordered_json::parse(test::read_text(std::string(STK_REPO_ROOT) + "/suan/graph/presets/scalar-volume.json"));
+  const SchemaNode all = preset_schema(scalar, catalog());
+  ASSERT_NE(all.property("field"), nullptr);
+  ASSERT_NE(all.property("unit"), nullptr);
+  SchemaNode schema;
+  schema.type = SchemaType::Object;
+  schema.properties = {*all.property("field"), *all.property("unit")};
+  EXPECT_FALSE(schema.property("field")->nullable);
+  EXPECT_TRUE(schema.property("unit")->nullable);
+  Harness h;
+  FormModel model;
+  h.ui = [&](Context &ctx) { build_form(ctx.block("form", {0, 0, 400, 500}).layout(), schema, model); };
+  h.frame();
+  const auto values = [&]() { return form_values_to_ordered_json(model, schema); };
+  EXPECT_EQ(values()["field"], "Polar");
+  EXPECT_TRUE(values()["unit"].is_null());
+  EXPECT_EQ(h.w("unit").type, WidgetType::TextField);
+  EXPECT_TRUE(h.w("unit").string.get().empty());
+  h.click("unit");
+  h.type("C/m^2");
+  h.key(Key::Enter);
+  EXPECT_EQ(values()["unit"], "C/m^2");
+  h.click("unit");
+  h.key(Key::A, MOD_CTRL);
+  h.key(Key::Backspace);
+  h.key(Key::Enter);
+  EXPECT_TRUE(values()["unit"].is_null());
+  h.click("field");
+  h.key(Key::A, MOD_CTRL);
+  h.key(Key::Backspace);
+  h.key(Key::Enter);
+  EXPECT_EQ(values()["field"], "") << "clearing a strict field must not silently select an automatic null field";
+}
+
 TEST(FormBuilder, PresetFormWidgetsAndEditing)
 {
   Harness h;

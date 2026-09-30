@@ -1205,5 +1205,12 @@
   "analysis_documents.state.invalid": "需修复",
   "analysis_documents.state.unsupported": "不支持",
   "analysis_documents.previous": "上一页",
-  "analysis_documents.next": "下一页"
+  "analysis_documents.next": "下一页",
+  "props.preset.scalar-volume": "标量分量体渲染",
+  "props.preset.scalar-volume.description": "明确指定点数据字段，保留正负值；分量从 0 开始计数。单位留空时保留来源单位；填写新单位只更换标签，不换算数值。",
+  "param.path": "场文件",
+  "param.field": "字段名",
+  "param.component": "分量（从 0 起）",
+  "param.unit": "单位标签",
+  "param.colormap": "色图"
 }

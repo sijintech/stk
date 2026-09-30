@@ -147,3 +147,105 @@ TEST(StoredRange, EmptyNonfiniteAndConstantSamples)
     EXPECT_GT(range[1], value);
   }
 }
+
+TEST(VolumeFloatTexture, AllNegativeValuesCannotBecomeHoles)
+{
+  std::vector<float> values{-1.0e38f, -7.5e37f, -5.0e37f};
+  const auto original = values;
+  const auto range = normalize_volume_floats(values);
+  EXPECT_EQ(range, (std::array<double, 2>{double(original.front()), double(original.back())}));
+  EXPECT_FLOAT_EQ(values.front(), 0.0f);
+  EXPECT_NEAR(values[1], 0.5f, 2.0f * std::numeric_limits<float>::epsilon());
+  EXPECT_FLOAT_EQ(values.back(), 1.0f);
+  for (const float value : values) {
+    EXPECT_GE(value, 0.0f);
+    EXPECT_GT(value, kVolumeHoleThreshold);
+  }
+}
+
+TEST(VolumeFloatTexture, OppositeExtremeValuesDoNotOverflow)
+{
+  std::vector<float> values{-3.0e38f, 0.0f, 3.0e38f};
+  const auto range = normalize_volume_floats(values);
+  EXPECT_GT(range[1] - range[0], double(std::numeric_limits<float>::max()));
+  EXPECT_TRUE(std::isfinite(range[1] - range[0]));
+  EXPECT_EQ(values, (std::vector<float>{0.0f, 0.5f, 1.0f}));
+}
+
+TEST(VolumeFloatTexture, SubnormalRangeRetainsEndpointsAndZero)
+{
+  const float tiny = std::numeric_limits<float>::denorm_min();
+  std::vector<float> values{-tiny, 0.0f, tiny};
+  EXPECT_EQ(normalize_volume_floats(values), (std::array<double, 2>{-double(tiny), double(tiny)}));
+  EXPECT_EQ(values, (std::vector<float>{0.0f, 0.5f, 1.0f}));
+}
+
+TEST(VolumeFloatTexture, ConstantsAcrossFloat32ScalesUseExpandedDomain)
+{
+  for (const float value : {0.0f, -0.0f, std::numeric_limits<float>::denorm_min(),
+                            -std::numeric_limits<float>::denorm_min(), 1.0e-30f, -1.0e-30f,
+                            std::ldexp(1.0f, 100), -std::ldexp(1.0f, 100),
+                            std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()}) {
+    SCOPED_TRACE(value);
+    std::vector<float> values(3, value);
+    const auto range = normalize_volume_floats(values);
+    EXPECT_TRUE(std::isfinite(range[0]));
+    EXPECT_TRUE(std::isfinite(range[1]));
+    EXPECT_LT(range[0], double(value));
+    EXPECT_GT(range[1], double(value));
+    /* Adjacent doubles around an exact power of two have unequal spacing. The normalized
+     * constant need not be 0.5; inverse mapping is bounded by the upload's relative precision. */
+    const double t = (double(value) - range[0]) / (range[1] - range[0]);
+    for (const float uploaded : values) {
+      EXPECT_TRUE(std::isfinite(uploaded));
+      EXPECT_GT(uploaded, 0.0f);
+      EXPECT_LT(uploaded, 1.0f);
+      EXPECT_FLOAT_EQ(uploaded, float(t));
+      EXPECT_NEAR(range[0] + double(uploaded) * (range[1] - range[0]), double(value),
+                  (range[1] - range[0]) * std::numeric_limits<float>::epsilon());
+    }
+  }
+}
+
+TEST(VolumeFloatTexture, MissingSamplesUseSeparateFiniteDomain)
+{
+  EXPECT_EQ(normalize_volume_floats({}), (std::array<double, 2>{0.0, 1.0}));
+  std::vector<float> missing{NAN, INFINITY, -INFINITY};
+  EXPECT_EQ(normalize_volume_floats(missing), (std::array<double, 2>{0.0, 1.0}));
+  EXPECT_EQ(missing, std::vector<float>(3, kVolumeHoleValue));
+  std::vector<float> mixed{NAN, -1.0e38f, INFINITY, -5.0e37f, -INFINITY};
+  normalize_volume_floats(mixed);
+  EXPECT_EQ(mixed, (std::vector<float>{kVolumeHoleValue, 0.0f, kVolumeHoleValue, 1.0f, kVolumeHoleValue}));
+  EXPECT_LT(kVolumeHoleValue, kVolumeHoleThreshold);
+  EXPECT_LT(kVolumeHoleThreshold, 0.0f);
+  for (const float value : mixed) {
+    EXPECT_TRUE(std::isfinite(value));
+  }
+}
+
+TEST(VolumeFloatTexture, OriginalDomainReconstructsSignedValuesAndPhysicalTransfer)
+{
+  const std::vector<float> original{-37.0f, -16.25f, -0.125f, 0.0f, 4.5f, 81.0f};
+  auto uploaded = original;
+  const auto range = normalize_volume_floats(uploaded);
+  const double width = range[1] - range[0];
+  VolumeTransfer tf;
+  tf.value_scale = 3.0;
+  tf.value_offset = -8.0;
+  tf.color_points = {{-119.0, 0.0, 0.0, 1.0}, {235.0, 1.0, 0.0, 0.0}};
+  tf.opacity_points = {{-119.0, 0.1}, {235.0, 0.9}};
+  for (size_t i = 0; i < original.size(); i++) {
+    const double recovered = range[0] + double(uploaded[i]) * width;
+    EXPECT_NEAR(recovered, original[i], width * std::numeric_limits<float>::epsilon());
+    EXPECT_NEAR(tf.stored_to_physical(recovered), tf.stored_to_physical(original[i]),
+                width * tf.value_scale * std::numeric_limits<float>::epsilon());
+  }
+  /* Normalization changes texture coordinates only; the LUT still spans original physical units. */
+  const auto lut = transfer_lut(tf, range[0], range[1], 16);
+  for (size_t i = 0; i < lut.size(); i++) {
+    const double t = (double(i) + 0.5) / double(lut.size());
+    EXPECT_NEAR(lut[i][0], t, 1e-7);
+    EXPECT_NEAR(lut[i][2], 1.0 - t, 1e-7);
+    EXPECT_NEAR(lut[i][3], 0.1 + 0.8 * t, 1e-7);
+  }
+}

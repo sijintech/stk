@@ -1,0 +1,91 @@
+# 保留正负值的标量体渲染
+
+`scalar-volume` 预设显示明确指定字段的一个分量，保留正负值。它适合温度差、位移分量、极化分量等
+标量检查。已有 `volume` 预设继续计算模长，直接打开场文件时的默认选择也仍为 `volume`。
+两者用途不同，不能把模长画面当作有符号分量的原值。
+
+## 桌面操作
+
+1. 打开科学场文件，在 **属性 → 预设** 选择 **标量分量体渲染 / Signed scalar volume**。
+2. **字段**填写 STK 读取后的字段名称，**分量**从 0 开始计数。标量用 0；三分量数据使用 0、1 或 2。
+   默认字段 `Polar` 对应常见 MuFerro 输出，换文件后应明确填写实际字段，不会自动选择其他字段。
+3. **单位**留空时保留来源单位，填写时仅更换所选结果字段的单位标签，数值不做换算。
+   没有物理单位的 DAT/NPY 数据可能显示 `unspecified`；不能据此推断真实单位。
+4. 设置色图、数值范围和不透明度。可以关闭自动求值，集中修改后点击 **计算**。
+   参数修改后保留的旧画面属于此前配置，应等求值成功后再检查色标和结果。
+5. 在 **分析图**中检查 `src → component → volume` 的处理路径，并按需[保存分析定义](project-analyses.md)。
+   保存、重新载入定义不会自动运行图。
+
+当前采用字段文本框和数字分量索引，没有字段自动发现下拉框。字段名称区分大小写；读取 VTK 文件时
+名称可能经过 STK 规范化，不承诺与文件中的任意原始名称逐字相同。
+
+## 输入与参数
+
+输入须为规则图像网格上的数值点数据，支持已有 DAT、NPY、VTI、legacy VTK、VTKHDF 读取路径。
+文件扩展名本身不保证包含所需网格或字段。单元数据、几何表面、字符串字段和分类标签不作为此预设的输入；
+不存在的字段和越界分量会报告错误，不回退到其他字段，也不自动进行 cell-to-point 转换。
+
+| 参数 | 含义 |
+|---|---|
+| `path` | 数据绑定内的文件名；直接打开文件时使用所选文件名 |
+| `field` | 明确的 STK 点字段名，默认 `Polar` |
+| `component` | 从 0 开始的整数，界面/图声明限制 0–4095；还须小于字段实际分量数 |
+| `unit` | `null` 保留来源单位；非空字符串仅更换结果单位标签 |
+| `colormap` | 已有连续色图，如 `coolwarm`、`viridis` |
+| `range` | 传递函数范围，`[null, null]` 使用数据范围；不修改样本值 |
+| `opacity` | 归一化位置与不透明度的控制点 |
+| `view` | 已有相机方向预设 |
+
+字段、分量和单位属于数据处理参数；颜色等外观参数复用已计算的数据节点。
+预设通过 Calculator 的 `component` 操作生成唯一的标量字段，再传给体渲染，保留源数组与其他字段不被改写。
+零起始分量只是数组索引；首版不推断张量约定、坐标基或物理分量名称。
+
+## Python
+
+```python
+stk.viewer.open(
+    "/absolute/path/to/field.vti",
+    preset="scalar-volume",
+    parameters={"field": "temperature_difference", "component": 0},
+)
+shown = stk.viewer.wait(timeout=120)
+if shown["error"] or shown["metadata_error"]:
+    raise RuntimeError(shown["error"] or shown["metadata_error"])
+```
+
+对于多分量字段，明确修改索引和单位标签：
+
+```python
+key = stk.viewer.status()["source"]["key"]
+stk.viewer.configure(
+    auto_evaluate=False,
+    parameters={"component": 2, "unit": "C/m^2"},
+    expected_source=key,
+)
+stk.viewer.evaluate(expected_source=key)
+shown = stk.viewer.wait(timeout=120)
+if shown["error"] or shown["metadata_error"]:
+    raise RuntimeError(shown["error"] or shown["metadata_error"])
+```
+
+通过 `parameters={"unit": None}` 恢复来源单位；这不是删除来源中的单位。
+原生空文本框对应同一语义，不会把空值提交成字符串 `"null"`。
+字符串 `"null"` 本身仍是一个明确的标签，和 JSON `null` 不同。
+接口与异步等待语义见 [Viewer Python 指南](scripting-viewer.md)。
+
+## 数值与显示精度
+
+分量提取保留源数值；显示载荷使用既有精度和预算规则，不是任意精度的数据存档。
+
+- 桌面默认使用 float32 显示样本，允许正常舍入及极小值下溢。有限源值转换后若溢出为无穷值，
+  编码会明确失败；检查发生在体素降采样之前，不能通过预算裁剪隐藏不可表示的源值。
+- 原生 GPU 在独立上传副本中归一化 float32 值，避免合法的大负值被当作空洞，或极大/极小范围在着色器中失效。
+  传递函数仍按原值计算，载荷、色标及探针数据不因此改写。
+- Web/phone 的既有 u16/u8 编码带量化误差；有限非恒定范围中误差约为半个量化步长，另有浮点运算误差。
+  无法表示的范围或非正/非有限量化步长会被拒绝。体素预算还可能降低空间分辨率。
+- float32 中的 NaN/Inf 在原生渲染中作为缺失样本。最近邻采样保留空洞；线性插值在空洞边界使用近似遮罩。
+  u8/u16 沿用既有缺失值编码：NaN/负无穷映射为编码 0，正无穷映射为编码最大值，不能当作可靠的缺失掩码。
+  恒定或全缺失范围使用步长 1，正无穷的重建值可能超过观察到的有限最大值。
+
+科学验收使用独立数组及解码后的样本、范围和单位核对；截图只验证显示与控件可用性。
+当前验证范围及平台边界见[验收记录](runtime-validation.md)。

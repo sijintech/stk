@@ -105,7 +105,7 @@ TEST(Graph, ModelsPresetsAndForms)
   EXPECT_TRUE(contour->param("field")->required);
 
   const std::vector<io::Preset> presets = io::Preset::load_directory(test::repo_root() / "suan" / "graph" / "presets");
-  ASSERT_EQ(presets.size(), 7u);
+  ASSERT_EQ(presets.size(), 8u);
   for (const io::Preset &preset : presets) {
     const io::Graph graph = io::Graph::from_json(preset.graph);
     EXPECT_FALSE(graph.nodes.empty()) << preset.id;

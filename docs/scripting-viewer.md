@@ -21,6 +21,8 @@ print(shown["error"], shown["layers"])
 `stk.viewer.open("/absolute/field.vtk", preset="slice")`。该方式绑定父目录并固定初始 `path` 为所选文件名，
 即使父目录另有 `result.json`，也不会打开另一份结果。切换场预设保留所选文件名；后续仍可明确修改 `path` 参数。
 `source.field_file` 记录打开时的文件名，来源 key 区分同目录不同文件；它不是内容哈希。
+有符号标量或向量分量可明确选择 `scalar-volume`，并填写 `field`、零起始 `component`；
+`unit` 只更换结果标签，不转换数值，见[标量体渲染](scalar-volume.md)。默认 `volume` 仍计算模长。
 可用预设及其参数声明见 `stk.viewer.presets()`；
 启动期间 `ready=False` 表示元数据仍在加载，等待后再指定预设。载荷/已保存结果不接受图预设参数。
 路径由 Python 按当前工作目录转为绝对路径；打开时默认切换到 Viewer 标签，`focus=False` 保持当前标签。

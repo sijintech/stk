@@ -370,6 +370,119 @@ TEST(NonFinite, NanAndInfWithoutGpuNanSemantics)
   EXPECT_EQ(r.layer_id, "smooth");
 }
 
+std::shared_ptr<const io::Payload> float_volume_payload(const std::vector<float> &values,
+                                                       std::array<double, 2> range,
+                                                       const char *sampling = "linear")
+{
+  PayloadBuilder b({0, 0, 0});
+  std::vector<uint8_t> lut;
+  for (int i = 0; i < 256; i++) {
+    lut.insert(lut.end(), {uint8_t(i), uint8_t(80), uint8_t(255 - i), uint8_t(255)});
+  }
+  b.accessor("lut", lut, "u8", 4);
+  b.manifest()["colormaps"] = {{{"id", "cm"}, {"name", "signed ramp"}, {"categorical", false},
+                                {"lut", "lut"}, {"size", 256}}};
+  b.accessor("vol", values, "f32", 1);
+  b.layer({{"id", "volume"}, {"type", "volume"},
+           {"grid", {{"dimensions", {5, 5, 5}}, {"origin", {-1.0, -1.0, -1.0}},
+                     {"spacing", {0.5, 0.5, 0.5}}}},
+           {"data", "vol"}, {"value_range", range}, {"sampling", sampling}, {"shade", false},
+           {"transfer_function", {{"colormap", "cm"}, {"range", range},
+                                  {"opacity", {{range[0], 0.35}, {range[1], 0.35}}}}}});
+  b.manifest()["bounds"] = {{-1.0, -1.0, -1.0}, {1.0, 1.0, 1.0}};
+  b.manifest()["view"] = {{"schema", "stk.view/1"},
+                          {"camera", {{"preset", "+z"}, {"projection", "parallel"}}},
+                          {"background", {{"type", "solid"}, {"color", {1.0, 1.0, 1.0}}}}};
+  return b.build();
+}
+
+std::vector<float> volume_x_ramp(const std::array<float, 5> &row)
+{
+  std::vector<float> values;
+  for (int yz = 0; yz < 25; yz++) {
+    values.insert(values.end(), row.begin(), row.end());
+  }
+  return values;
+}
+
+TEST(NonFinite, FloatVolumesAcrossSignedScalesMatchUnitDomain)
+{
+  const uint64_t gate_before = nonfinite_float_uploads();
+  Viewer v(gpu().fonts());
+  v.set_payload(float_volume_payload(volume_x_ramp({0.0f, 0.25f, 0.5f, 0.75f, 1.0f}), {0.0, 1.0}));
+  const gfx::Image expected = render(v, "volume_unit_domain", size(256, 256));
+  ASSERT_LT(count_color(expected, {255, 255, 255}), size_t(256 * 256 - 10000));
+  const float tiny = std::numeric_limits<float>::denorm_min();
+  const std::vector<std::array<float, 5>> rows = {
+      {-4.0f, -2.0f, 0.0f, 2.0f, 4.0f},
+      {-1.0e38f, -8.75e37f, -7.5e37f, -6.25e37f, -5.0e37f},
+      {-3.0e38f, -1.5e38f, 0.0f, 1.5e38f, 3.0e38f},
+      {-4.0f * tiny, -2.0f * tiny, 0.0f, 2.0f * tiny, 4.0f * tiny}};
+  for (size_t i = 0; i < rows.size(); i++) {
+    SCOPED_TRACE(i);
+    const auto source = volume_x_ramp(rows[i]);
+    const auto payload = float_volume_payload(source, {double(rows[i].front()), double(rows[i].back())});
+    v.set_payload(payload);
+    const gfx::Image actual = render(v, "volume_signed_scale_" + std::to_string(i), size(256, 256));
+    int max_diff = 0;
+    EXPECT_LT(differing_fraction(expected, actual, 2, &max_diff), 0.005) << "max diff " << max_diff;
+    EXPECT_GT(ssim(expected, actual), 0.995);
+    /* Texture preparation must not rewrite mapped source values or the physical manifest range. */
+    EXPECT_EQ(payload->floats("vol"), source);
+    EXPECT_EQ((*payload->layer("volume"))["value_range"],
+              (io::Json::array({double(rows[i].front()), double(rows[i].back())})));
+  }
+  EXPECT_EQ(nonfinite_float_uploads(), gate_before);
+}
+
+TEST(NonFinite, ConstantFloatVolumesAcrossScalesRemainVisible)
+{
+  const uint64_t gate_before = nonfinite_float_uploads();
+  Viewer v(gpu().fonts());
+  v.set_payload(float_volume_payload(std::vector<float>(125, 0.5f), {0.5, 0.5}));
+  const gfx::Image expected = render(v, "volume_constant_midpoint", size(256, 256));
+  ASSERT_LT(count_color(expected, {255, 255, 255}), size_t(256 * 256 - 10000));
+  const std::array<float, 7> constants{0.0f, std::numeric_limits<float>::denorm_min(), -1.0e-30f,
+                                      std::ldexp(1.0f, 100), -std::ldexp(1.0f, 100),
+                                      std::numeric_limits<float>::max(),
+                                      -std::numeric_limits<float>::max()};
+  for (size_t i = 0; i < constants.size(); i++) {
+    SCOPED_TRACE(i);
+    const float value = constants[i];
+    v.set_payload(float_volume_payload(std::vector<float>(125, value), {double(value), double(value)}));
+    const gfx::Image actual = render(v, "volume_constant_scale_" + std::to_string(i), size(256, 256));
+    EXPECT_LT(differing_fraction(expected, actual, 2), 0.005);
+    EXPECT_GT(ssim(expected, actual), 0.995);
+  }
+  EXPECT_EQ(nonfinite_float_uploads(), gate_before);
+}
+
+TEST(NonFinite, MissingFloatVolumeSamplesStaySeparateFromExtremeFiniteValues)
+{
+  const uint64_t gate_before = nonfinite_float_uploads();
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float inf = std::numeric_limits<float>::infinity();
+  Viewer v(gpu().fonts());
+  for (const char *sampling : {"nearest", "linear"}) {
+    SCOPED_TRACE(sampling);
+    v.set_payload(float_volume_payload(volume_x_ramp({nan, inf, -inf, 0.0f, 1.0f}), {0.0, 1.0}, sampling));
+    const gfx::Image expected = render(v, std::string("volume_mixed_unit_") + sampling, size(256, 256));
+    ASSERT_LT(count_color(expected, {255, 255, 255}), size_t(256 * 256 - 1000));
+    const auto payload = float_volume_payload(volume_x_ramp({nan, inf, -inf, -1.0e38f, -5.0e37f}),
+                                               {double(-1.0e38f), double(-5.0e37f)}, sampling);
+    v.set_payload(payload);
+    const gfx::Image actual = render(v, std::string("volume_mixed_extreme_") + sampling, size(256, 256));
+    EXPECT_LT(differing_fraction(expected, actual, 2), 0.005);
+    EXPECT_TRUE(std::isnan(payload->floats("vol")[0]));
+    EXPECT_EQ(payload->floats("vol")[1], inf);
+    EXPECT_EQ(payload->floats("vol")[2], -inf);
+    v.set_payload(float_volume_payload(volume_x_ramp({nan, inf, -inf, nan, inf}), {0.0, 1.0}, sampling));
+    const gfx::Image empty = render(v, std::string("volume_all_missing_") + sampling, size(256, 256));
+    EXPECT_EQ(count_color(empty, {255, 255, 255}), size_t(256 * 256));
+  }
+  EXPECT_EQ(nonfinite_float_uploads(), gate_before);
+}
+
 /* -------------------------------------------------------------------- */
 /* Exact LUT binning (spec §5): values on and next to bin edges, below, above and NaN. */
 

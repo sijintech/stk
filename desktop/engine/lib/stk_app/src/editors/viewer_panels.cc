@@ -218,7 +218,12 @@ class PropertiesEditor final : public Editor {
     const std::string name = m.name;
     ui::FormModel *form = &vs.form();
     std::shared_ptr<const std::vector<ui::ColormapItem>> list = items;
-    l.prop(ui::schema_label(m, ctx.store.language()))
+    std::string label = ui::schema_label(m, ctx.store.language());
+    // Match build_form's glossary fallback when this custom gradient widget replaces its field.
+    if (ctx.store.language().rfind("zh", 0) == 0 && m.title_zh.empty()) {
+      label = ctx.store.catalog().tr_or("param." + m.name, label);
+    }
+    l.prop(label)
         .colormap_dropdown(name, list,
                            {[form, name, list]() {
                               const std::string cur = form->get(name).str;

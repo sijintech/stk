@@ -1205,5 +1205,12 @@
   "analysis_documents.state.invalid": "Needs repair",
   "analysis_documents.state.unsupported": "Unsupported",
   "analysis_documents.previous": "Previous",
-  "analysis_documents.next": "Next"
+  "analysis_documents.next": "Next",
+  "props.preset.scalar-volume": "Signed scalar volume",
+  "props.preset.scalar-volume.description": "Preserves positive and negative values of an explicitly named point field. Components start at 0. A blank unit keeps the source unit; a new unit label does not convert values.",
+  "param.path": "Field file",
+  "param.field": "Field name",
+  "param.component": "Component (0-based)",
+  "param.unit": "Unit label",
+  "param.colormap": "Colormap"
 }
