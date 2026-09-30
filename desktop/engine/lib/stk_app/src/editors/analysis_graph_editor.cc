@@ -77,22 +77,28 @@ class AnalysisGraphEditor final : public Editor {
   void draw_main(ui::Layout &layout, EditorContext &ctx) override
   {
     attach(ctx);
-    const bool displayed = state_->displayed();
     const std::weak_ptr<bool> weak = alive_;
-    const bool saved = state_->saved();
-    layout.tabs("graph_mode", {std::string(ctx.tr("analysis_graph.desired")), std::string(ctx.tr("analysis_graph.displayed")),
-        std::string(ctx.tr("analysis_documents.tab"))},
-        {[displayed, saved] { return saved ? 2 : displayed ? 1 : 0; }, [this, weak](const int value) {
-          if (const auto live = weak.lock(); live && *live && value >= 0 && value <= 2) {
+    auto *shell = &ctx.area.shell();
+    const auto mode = state_->source();
+    std::vector<std::string> modes{std::string(ctx.tr("analysis_graph.desired")), std::string(ctx.tr("analysis_graph.displayed")),
+        std::string(ctx.tr("analysis_documents.tab")), std::string(ctx.tr("analysis_runs.graph_tab"))};
+    ui::Binding<int> mode_binding{[mode] { return int(mode); }, [this, weak, shell](const int value) {
+          if (const auto live = weak.lock(); live && *live && value >= 0 && value <= 3 && !shell->text_input_active()) {
             ++navigation_generation_;
-            if (value == 2) { state_->show_saved(); }
+            if (value == 3) { state_->show_run(); }
+            else if (value == 2) { state_->show_saved(); }
             else { state_->show_displayed(value == 1); }
             redraw();
           }
-        }});
+        }};
+    const bool narrow = ctx.draw && ctx.draw->rect.width() < 560 * ctx.draw->ui_scale;
+    auto &selector = narrow ? layout.dropdown("graph_mode", std::move(modes), std::move(mode_binding)) :
+        layout.tabs("graph_mode", std::move(modes), std::move(mode_binding));
+    selector.disable(shell->text_input_active());
     if (!state_->view()) {
-      layout.paragraph(ctx.tr(saved ? "analysis_documents.no_document" :
-          displayed ? "analysis_graph.no_displayed_graph" : "analysis_graph.no_desired_graph"));
+      layout.paragraph(ctx.tr(mode == AnalysisGraphState::Source::Run ? "analysis_runs.no_frozen_graph" :
+          state_->saved() ? "analysis_documents.no_document" :
+          state_->displayed() ? "analysis_graph.no_displayed_graph" : "analysis_graph.no_desired_graph"));
       if (!state_->error().empty()) { layout.paragraph(text(state_->error())); }
       return;
     }
@@ -118,12 +124,28 @@ class AnalysisGraphEditor final : public Editor {
           std::string(ctx.tr("analysis_runs.title"))}, {[value = saved_section_] { return value; },
           [this, weak](const int value) {
         const auto live = weak.lock();
-        if (live && *live && value >= 0 && value <= 1) { saved_section_ = value; redraw(); }
+        if (live && *live && value >= 0 && value <= 1 && value != saved_section_) {
+          ++navigation_generation_; saved_section_ = value; redraw();
+        }
       }});
       if (saved_section_ == 1) { runs_panel(layout, ctx); return; }
     }
-    if (state_->saved() || parameter_edits()) { parameter_panel(layout, ctx); }
-    documents_panel(layout, ctx);
+    if (state_->source() == AnalysisGraphState::Source::Run) {
+      if (parameter_edits()) { layout.paragraph(ctx.tr("analysis_runs.saved_draft_preserved")); }
+      const std::weak_ptr<bool> weak = alive_;
+      auto *shell = &ctx.area.shell();
+      const auto navigation = navigation_generation_;
+      layout.button("analysis_run_return_saved", ctx.tr("analysis_runs.return_saved"), [this, weak, shell, navigation] {
+        if (const auto live = weak.lock(); live && *live && !shell->text_input_active() &&
+            navigation_generation_ == navigation && state_->source() == AnalysisGraphState::Source::Run) {
+          ++navigation_generation_; state_->show_saved(); saved_section_ = 0; redraw();
+        }
+      }).disable(shell->text_input_active());
+    }
+    else {
+      if (state_->saved() || parameter_edits()) { parameter_panel(layout, ctx); }
+      documents_panel(layout, ctx);
+    }
     source_panel(layout, ctx);
     if (!state_->view()) { return; }
     node_panel(layout, ctx);
@@ -214,17 +236,23 @@ class AnalysisGraphEditor final : public Editor {
   {
     nlohmann::json result = {{"displayed", state_ ? state_->displayed() : initial_displayed_}};
     if (state_ ? state_->saved() : initial_saved_) { result["saved"] = true; }
+    if (state_ ? state_->source() == AnalysisGraphState::Source::Run : initial_run_) { result["run"] = true; }
     return result;
   }
   bool load_state(const nlohmann::json &value) override
   {
     if (!value.is_object() || (value.contains("displayed") && !value.at("displayed").is_boolean()) ||
-        (value.contains("saved") && !value.at("saved").is_boolean())) { return false; }
+        (value.contains("saved") && !value.at("saved").is_boolean()) ||
+        (value.contains("run") && !value.at("run").is_boolean())) { return false; }
+    ++navigation_generation_;
     initial_displayed_ = value.value("displayed", false);
     initial_saved_ = value.value("saved", false);
+    initial_run_ = value.value("run", false);
     if (state_) {
       state_->show_displayed(initial_displayed_);
       if (initial_saved_) { state_->show_saved(); }
+      state_->clear_run();
+      if (initial_run_) { state_->show_run(); }
     }
     return true;
   }
@@ -253,7 +281,7 @@ class AnalysisGraphEditor final : public Editor {
   std::shared_ptr<const AnalysisGraphView> canvas_view_;
   std::optional<size_t> selected_;
   int selected_parameter_ = 0;
-  bool fit_ = true, focus_selected_ = false, dragging_ = false, initial_displayed_ = false, initial_saved_ = false;
+  bool fit_ = true, focus_selected_ = false, dragging_ = false, initial_displayed_ = false, initial_saved_ = false, initial_run_ = false;
   double last_x_ = 0, last_y_ = 0, ui_scale_ = 1;
   float canvas_top_ = 60;
 
@@ -477,6 +505,7 @@ class AnalysisGraphEditor final : public Editor {
       state_ = std::make_unique<AnalysisGraphState>(ctx.store.viewer());
       state_->show_displayed(initial_displayed_);
       if (initial_saved_) { state_->show_saved(); }
+      if (initial_run_) { state_->show_run(); }
       documents_ = std::make_unique<ProjectAnalyses>(ctx.store);
       runs_ = std::make_unique<ProjectAnalysisRuns>(ctx.store);
     }
@@ -539,7 +568,7 @@ class AnalysisGraphEditor final : public Editor {
 
   bool result_corresponds() const
   {
-    if (state_->saved()) { return false; }
+    if (!state_->inspection()) { return false; }
     const auto &inspection = *state_->inspection();
     if (!inspection.shown_graph_verified.value_or(false)) { return false; }
     return state_->displayed() ? bool(inspection.shown_configuration) : inspection.shown_matches_desired.value_or(false);
@@ -746,13 +775,14 @@ class AnalysisGraphEditor final : public Editor {
 
   void run_controls(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool blocked)
   {
-    const auto run = runs_->run();
+    const auto &run = runs_->run();
     if (run.is_null()) { return; }
     const auto id = io::get_string(run, "id"), status = io::get_string(run, "status");
     const auto selection = runs_->selection_generation();
     const auto same_run = [this, valid, id, selection] {
       return valid() && runs_->selection_generation() == selection && io::get_string(runs_->run(), "id") == id;
     };
+    auto *shell = &ctx.area.shell();
     auto &box = layout.box();
     box.label(text(io::get_string(run, "analysis_name")));
     box.label(ctx.tr("analysis_runs.status." + status));
@@ -765,6 +795,14 @@ class AnalysisGraphEditor final : public Editor {
     if (status == "running" || status == "cancel_requested") {
       box.paragraph(ctx.tr(runs_->following() ? "analysis_runs.following" : "analysis_runs.follow_stopped"));
     }
+    const auto plan = io::get_string(run, "plan_sha256");
+    const auto navigation = navigation_generation_;
+    box.button("analysis_run_inspect", ctx.tr("analysis_runs.inspect"), [this, same_run, plan, shell, navigation] {
+      if (!same_run() || runs_->busy() || store_->project().busy() || shell->text_input_active() ||
+          navigation_generation_ != navigation || !state_->saved() || saved_section_ != 1 ||
+          io::get_string(runs_->run(), "plan_sha256") != plan) { return; }
+      if (state_->open_frozen_run(runs_->handle(), runs_->run())) { ++navigation_generation_; redraw(); }
+    }).disable(blocked || shell->text_input_active());
     auto &actions = box.row();
     actions.button("analysis_run_start", ctx.tr("analysis_runs.start"), [this, same_run] {
       if (same_run()) { runs_->start(); }
@@ -826,7 +864,7 @@ class AnalysisGraphEditor final : public Editor {
         [this, same_run, outputs](const int index) {
       if (same_run() && index >= 0 && size_t(index) <= outputs.size()) { output_index_ = index - 1; }
     }}).disable(blocked);
-    auto *shell = &ctx.area.shell(); auto *screen = ctx.area.screen();
+    auto *screen = ctx.area.screen();
     box.paragraph(ctx.tr("analysis_runs.viewer_hint"));
     box.button("analysis_run_show", ctx.tr("analysis_runs.show"), [this, same_run, shell, screen, outputs, id] {
       if (!same_run() || output_index_ < 0 || size_t(output_index_) >= outputs.size()) { return; }
@@ -954,6 +992,34 @@ class AnalysisGraphEditor final : public Editor {
 
   void source_panel(ui::Layout &layout, EditorContext &ctx)
   {
+    if (state_->source() == AnalysisGraphState::Source::Run) {
+      auto *panel = layout.panel("graph_run_source", ctx.tr("analysis_runs.frozen"), true);
+      if (!panel) { return; }
+      panel->paragraph(ctx.tr("analysis_runs.frozen_definition"));
+      const auto *run = state_->frozen_run();
+      if (!run) { panel->paragraph(ctx.tr("analysis_runs.no_frozen_graph")); return; }
+      Rows provenance{
+          {std::string(ctx.tr("analysis_runs.run_id")), run->id},
+          {std::string(ctx.tr("analysis_documents.name")), text(run->analysis_name)},
+          {std::string(ctx.tr("analysis_runs.analysis_id")), run->analysis_id},
+          {std::string(ctx.tr("analysis_runs.source_revision")), std::to_string(run->source_revision)},
+          {std::string(ctx.tr("jobs.info.created")), run->created_at},
+          {std::string(ctx.tr("analysis_runs.snapshot_id")), run->snapshot_id},
+          {std::string(ctx.tr("analysis_runs.snapshot_hash")), run->snapshot_sha256},
+          {std::string(ctx.tr("analysis_runs.plan_hash")), run->plan_sha256}};
+      table(*panel, "graph_run_provenance", {{std::string(ctx.tr("analysis_graph.parameter")), 9},
+          {std::string(ctx.tr("analysis_graph.value")), 22}}, std::move(provenance), state_->generation(), 4);
+      Rows files;
+      for (const auto &[binding, entries] : run->bindings.items()) {
+        for (const auto &[path, file] : entries.items()) {
+          files.push_back({text(binding), text(path), io::get_string(file, "sha256")});
+        }
+      }
+      table(*panel, "graph_run_files", {{std::string(ctx.tr("analysis_runs.binding")), 5},
+          {std::string(ctx.tr("analysis_runs.relative_path")), 9}, {"SHA-256", 16}}, std::move(files), state_->generation(), 3);
+      panel->paragraph(ctx.tr("analysis_documents.catalog_defaults"));
+      return;
+    }
     auto *panel = layout.panel("graph_source", ctx.tr("analysis_graph.source"), true);
     if (!panel) { return; }
     if (state_->saved()) {
@@ -1080,7 +1146,8 @@ class AnalysisGraphEditor final : public Editor {
 
   void parameters_panel(ui::Layout &layout, EditorContext &ctx)
   {
-    auto *panel = layout.panel("graph_parameters", ctx.tr("analysis_graph.graph_parameters"), false);
+    const bool frozen = state_->source() == AnalysisGraphState::Source::Run;
+    auto *panel = layout.panel("graph_parameters", ctx.tr("analysis_graph.graph_parameters"), frozen);
     if (!panel || !state_->definition()) { return; }
     Rows rows;
     const auto &parameters = state_->definition()->parameters;
@@ -1091,18 +1158,28 @@ class AnalysisGraphEditor final : public Editor {
           const auto &values = state_->inspection()->shown_resolved_parameters;
           if (values.is_object() && values.contains(it.key())) { resolved = summary(values.at(it.key())); }
         }
-        rows.push_back({text(it.key()), summary(it.value()), resolved});
+        if (frozen) {
+          const auto &value = it.value();
+          const char *type = value.is_null() ? "discussion.cells.null" : value.is_string() ? "project.type.text" :
+              value.is_boolean() ? "project.type.boolean" : value.is_number_integer() ? "project.type.integer" :
+              value.is_number() ? "project.type.number" : "project.type.json";
+          rows.push_back({it.key().empty() ? "\"\"" : text(it.key()), text(io::python_json_dumps(value, false, true)),
+              std::string(ctx.tr(type))});
+        }
+        else { rows.push_back({text(it.key()), summary(it.value()), resolved}); }
       }
     }
-    table(*panel, "graph_parameter_values", {{std::string(ctx.tr("analysis_graph.parameter")), 8},
-        {std::string(ctx.tr("analysis_graph.submitted")), 10}, {std::string(ctx.tr("analysis_graph.resolved")), 10}},
+    table(*panel, "graph_parameter_values", {{std::string(ctx.tr("analysis_graph.parameter")), frozen ? 6.0f : 8.0f},
+        {std::string(ctx.tr("analysis_graph.submitted")), 10},
+        {std::string(ctx.tr(frozen ? "analysis_graph.type" : "analysis_graph.resolved")), frozen ? 5.0f : 10.0f}},
         std::move(rows), state_->generation());
     if (parameters.size() > 64) { omitted(*panel, ctx, parameters.size() - 64); }
   }
 
   void outputs_panel(ui::Layout &layout, EditorContext &ctx)
   {
-    auto *panel = layout.panel("graph_outputs", ctx.tr("analysis_graph.outputs"), false);
+    const bool frozen = state_->source() == AnalysisGraphState::Source::Run;
+    auto *panel = layout.panel("graph_outputs", ctx.tr("analysis_graph.outputs"), frozen);
     if (!panel || !state_->definition()) { return; }
     Rows rows;
     const auto &config = *state_->definition();
@@ -1114,14 +1191,18 @@ class AnalysisGraphEditor final : public Editor {
       if (result_corresponds() && result) {
         if (const auto *value = result->output(output.name)) { available = text(value->type); }
       }
-      rows.push_back({text(output.name), text(output.node + "." + output.port),
-          std::string(ctx.tr(requested ? "analysis_graph.requested" : "analysis_graph.not_requested")), available});
+      const auto request = std::string(ctx.tr(requested ? "analysis_graph.requested" : "analysis_graph.not_requested"));
+      const auto endpoint = text(output.node + "." + output.port);
+      rows.push_back({text(output.name), frozen ? request : endpoint, frozen ? endpoint : request});
+      if (!frozen) { rows.back().push_back(available); }
     }
-    table(*panel, "graph_output_rows", {{std::string(ctx.tr("analysis_graph.output")), 6},
-        {std::string(ctx.tr("analysis_graph.port")), 10}, {std::string(ctx.tr("analysis_graph.request")), 9},
-        {std::string(ctx.tr("analysis_graph.result")), 7}}, std::move(rows), state_->generation());
+    std::vector<ui::TableColumn> columns{{std::string(ctx.tr("analysis_graph.output")), 6},
+        {std::string(ctx.tr(frozen ? "analysis_graph.request" : "analysis_graph.port")), frozen ? 9.0f : 10.0f},
+        {std::string(ctx.tr(frozen ? "analysis_graph.port" : "analysis_graph.request")), frozen ? 10.0f : 9.0f}};
+    if (!frozen) { columns.push_back({std::string(ctx.tr("analysis_graph.result")), 7}); }
+    table(*panel, "graph_output_rows", std::move(columns), std::move(rows), state_->generation());
     omitted(*panel, ctx, state_->view()->omitted_outputs);
-    panel->paragraph(ctx.tr("analysis_graph.no_fetch"));
+    panel->paragraph(ctx.tr(frozen ? "analysis_runs.result_not_inspected" : "analysis_graph.no_fetch"));
   }
 
   void validation_panel(ui::Layout &layout, EditorContext &ctx)

@@ -1281,5 +1281,18 @@
   "analysis_parameters.apply_value": "应用值",
   "analysis_parameters.set_null": "设为 null",
   "analysis_parameters.remove": "移除覆盖",
-  "analysis_parameters.run_guard": "尚未保存的参数输入不属于当前保存定义。请返回“分析定义”，保存或放弃后再准备运行。"
+  "analysis_parameters.run_guard": "尚未保存的参数输入不属于当前保存定义。请返回“分析定义”，保存或放弃后再准备运行。",
+  "analysis_runs.inspect": "检查冻结流程图",
+  "analysis_runs.graph_tab": "冻结运行",
+  "analysis_runs.no_frozen_graph": "请在已保存的运行中选择“检查冻结流程图”。恢复此视图不会读取运行。",
+  "analysis_runs.frozen_definition": "此定义副本属于下方标识的运行。选择其他运行或修改已保存的分析不会替换它。",
+  "analysis_runs.saved_draft_preserved": "已保留您的分析参数编辑。返回“已保存分析”可继续编辑。",
+  "analysis_runs.return_saved": "返回已保存分析",
+  "analysis_runs.run_id": "运行 ID",
+  "analysis_runs.analysis_id": "分析 ID",
+  "analysis_runs.source_revision": "来源项目版本",
+  "analysis_runs.snapshot_id": "快照 ID",
+  "analysis_runs.snapshot_hash": "快照 SHA-256",
+  "analysis_runs.plan_hash": "计划 SHA-256",
+  "analysis_runs.result_not_inspected": "这里只显示冻结的输出选择，不读取或验证已归档的结果。"
 }

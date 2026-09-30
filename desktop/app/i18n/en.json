@@ -1281,5 +1281,18 @@
   "analysis_parameters.apply_value": "Apply value",
   "analysis_parameters.set_null": "Set null",
   "analysis_parameters.remove": "Remove override",
-  "analysis_parameters.run_guard": "Unsaved parameter input is not part of this saved definition. Return to Definition and Save or discard it before preparing a run."
+  "analysis_parameters.run_guard": "Unsaved parameter input is not part of this saved definition. Return to Definition and Save or discard it before preparing a run.",
+  "analysis_runs.inspect": "Inspect frozen graph",
+  "analysis_runs.graph_tab": "Frozen run",
+  "analysis_runs.no_frozen_graph": "Select a saved run and choose Inspect frozen graph. Restoring this view does not read a run.",
+  "analysis_runs.frozen_definition": "This copied definition belongs to the identified run. Selecting another run or changing a saved analysis does not replace it.",
+  "analysis_runs.saved_draft_preserved": "Your saved-analysis parameter edits are retained. Return to Saved analysis to continue editing.",
+  "analysis_runs.return_saved": "Return to Saved analysis",
+  "analysis_runs.run_id": "Run ID",
+  "analysis_runs.analysis_id": "Analysis ID",
+  "analysis_runs.source_revision": "Source project revision",
+  "analysis_runs.snapshot_id": "Snapshot ID",
+  "analysis_runs.snapshot_hash": "Snapshot SHA-256",
+  "analysis_runs.plan_hash": "Plan SHA-256",
+  "analysis_runs.result_not_inspected": "Only the frozen output selection is shown. This view does not read or verify archived results."
 }

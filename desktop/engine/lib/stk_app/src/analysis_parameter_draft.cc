@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/analysis_parameter_draft.hh"
+#include "stk/app/analysis_document.hh"
 
 #include "stk/core/utf8.hh"
 #include "stk/io/graph.hh"
@@ -52,89 +53,6 @@ bool visible_name(std::string_view name)
   return false;
 }
 
-/** Match the storage clone's raw budget/depth before copying or recursively serializing JSON.
- * Object keys count as values at depth+1. The raw budget deliberately precedes canonical bytes. */
-void plain_json(const Json &value, size_t byte_limit = Draft::max_document_bytes)
-{
-  struct Item { const Json *value; size_t depth; };
-  std::vector<Item> pending{{&value, 0}};
-  size_t scheduled = 1, budget = 0;
-  auto add_bytes = [&](size_t count) {
-    require(count <= byte_limit - budget, "Analysis JSON exceeds its byte limit");
-    budget += count;
-  };
-  auto string = [&](const std::string &text) {
-    require(text.size() <= byte_limit && core::utf8::is_valid(text), "Analysis JSON strings must be bounded valid UTF-8");
-    add_bytes(text.size()); add_bytes(2);
-  };
-  while (!pending.empty()) {
-    const auto [current, depth] = pending.back(); pending.pop_back();
-    require(depth <= Draft::max_depth, "Analysis JSON exceeds its depth limit");
-    if (current->is_object() || current->is_array()) {
-      add_bytes(2);
-      const size_t multiplier = current->is_object() ? 2 : 1;
-      require(current->size() <= (Draft::max_document_bytes - scheduled) / multiplier,
-              "Analysis JSON exceeds its item limit");
-      scheduled += current->size() * multiplier;
-      for (auto it = current->begin(); it != current->end(); ++it) {
-        if (current->is_object()) {
-          require(depth + 1 <= Draft::max_depth, "Analysis JSON exceeds its depth limit");
-          string(it.key());
-        }
-        pending.push_back({&it.value(), depth + 1});
-      }
-    }
-    else if (current->is_string()) { string(current->get_ref<const std::string &>()); }
-    else if (current->is_number_float()) {
-      require(std::isfinite(current->get<double>()), "Analysis JSON numbers must be finite");
-      add_bytes(io::python_float_repr(current->get<double>()).size());
-    }
-    else if (current->is_number_integer()) { add_bytes(io::python_str(*current).size()); }
-    else if (current->is_null() || current->is_boolean()) { add_bytes(4); }
-    else { throw std::invalid_argument("Analysis values must be plain JSON data"); }
-  }
-}
-
-void document_bounds(const Json &document)
-{
-  plain_json(document);
-  require(document.is_object() && document.size() == 4 && document.contains("format") &&
-      document.at("format") == "stk.analysis-document/1" && document.contains("graph") &&
-      document.contains("parameters") && document.contains("outputs"), "Invalid saved analysis document shape");
-  const auto &graph = document.at("graph");
-  const auto &parameters = document.at("parameters");
-  const auto &outputs = document.at("outputs");
-  require(graph.is_object() && io::canonical_json(graph).size() <= Draft::max_graph_bytes,
-          "Analysis graph exceeds its 256 KiB limit or is not an object");
-  require(parameters.is_object() && parameters.size() <= Draft::max_overrides &&
-      io::canonical_json(parameters).size() <= Draft::max_parameters_bytes,
-      "Analysis parameters require at most 64 overrides and 64 KiB");
-  require(outputs.is_array() && outputs.size() <= 256 && graph.contains("outputs") &&
-      graph.at("outputs").is_object(), "Analysis outputs must name declared graph outputs");
-  std::set<std::string> selected;
-  for (const auto &output : outputs) {
-    require(output.is_string(), "Analysis outputs must be strings");
-    const auto &name = output.get_ref<const std::string &>();
-    require(graph.at("outputs").contains(name) && selected.insert(name).second,
-            "Analysis outputs must be distinct declared graph outputs");
-  }
-  require(graph.contains("nodes") && graph.at("nodes").is_array() &&
-      !graph.at("nodes").empty() && graph.at("nodes").size() <= 200,
-      "Analysis graph requires between 1 and 200 nodes");
-  if (graph.contains("parameters")) {
-    require(graph.at("parameters").is_array() && graph.at("parameters").size() <= 64,
-            "Analysis graph allows at most 64 declared parameters");
-  }
-  for (const auto &node : graph.at("nodes")) {
-    require(node.is_object(), "Analysis graph nodes must be objects");
-    if (node.contains("params")) {
-      require(node.at("params").is_object() && io::canonical_json(node.at("params")).size() <= Draft::max_parameters_bytes,
-              "Analysis node parameters require an object of at most 64 KiB");
-    }
-  }
-  require(io::canonical_json(document).size() <= Draft::max_document_bytes,
-          "Analysis document exceeds its 384 KiB limit");
-}
 
 bool same_json(const Json &a, const Json &b)
 {
@@ -232,7 +150,7 @@ void AnalysisParameterDraft::pin(std::string handle, std::string analysis_id, in
       canonical_uuid(analysis_id) && revision >= 0, "Analysis draft requires an opening handle, UUID and revision");
   require(name.size() <= 1024 && core::utf8::is_valid(name) && name.find('\0') == std::string::npos &&
       core::utf8::count_code_points(name) <= 256 && visible_name(name), "Invalid saved analysis name");
-  document_bounds(document);
+  check_analysis_document_bounds(document);
   // These are basic shape checks, not a substitute for the backend's full structural schema.
   try { (void)io::Graph::from_json(document.at("graph")); }
   catch (const std::exception &e) { throw std::invalid_argument(e.what()); }
@@ -297,9 +215,9 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::set(const std::string
 {
   if (!accepts(generation)) { return {false, "The parameter draft has changed or is unavailable"}; }
   try {
-    parameter_key(name); plain_json(value);
+    parameter_key(name); check_analysis_json_bounds(value);
     Json next = parameters(); next[name] = value;
-    document_bounds(document_with(next));
+    check_analysis_document_bounds(document_with(next));
     const auto current = override_value(name);
     if (current && same_json(*current, value)) { return {true, {}}; }
     const auto &base = baseline_.at("parameters");
@@ -347,7 +265,7 @@ bool AnalysisParameterDraft::matches(const std::string &analysis_id, const std::
                                     const Json &document) const
 {
   if (!pinned() || analysis_id != analysis_id_ || name != name_) { return false; }
-  try { document_bounds(document); return same_json(candidate_document(), document); }
+  try { check_analysis_document_bounds(document); return same_json(candidate_document(), document); }
   catch (const std::invalid_argument &) { return false; }
 }
 

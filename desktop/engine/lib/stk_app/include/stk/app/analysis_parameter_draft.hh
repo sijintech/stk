@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
-#include "stk/io/json.hh"
+#include "stk/app/analysis_document.hh"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,13 +18,13 @@ namespace stk::app {
  * authoritative; pin() accepts an already-read document and checks its shape and storage bounds. */
 class AnalysisParameterDraft {
  public:
-  static constexpr size_t max_overrides = 64;
-  static constexpr size_t max_parameters_bytes = 64 * 1024;
-  static constexpr size_t max_graph_bytes = 256 * 1024;
-  static constexpr size_t max_document_bytes = 384 * 1024;
+  static constexpr size_t max_overrides = AnalysisDocumentLimits::max_overrides;
+  static constexpr size_t max_parameters_bytes = AnalysisDocumentLimits::max_parameters_bytes;
+  static constexpr size_t max_graph_bytes = AnalysisDocumentLimits::max_graph_bytes;
+  static constexpr size_t max_document_bytes = AnalysisDocumentLimits::max_document_bytes;
   // Typed editing text may exceed canonical parameter bytes (for example many -0.0 values).
   static constexpr size_t max_text_bytes = max_document_bytes;
-  static constexpr size_t max_depth = 64;
+  static constexpr size_t max_depth = AnalysisDocumentLimits::max_depth;
 
   enum class TextMode { Json, LiteralString };
   struct EditResult {

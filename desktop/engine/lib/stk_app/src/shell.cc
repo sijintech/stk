@@ -311,6 +311,13 @@ void AppShell::open_saved_review(wm::Screen *screen, std::string handle, const i
   });
 }
 
+bool AppShell::text_input_active() const
+{
+  return std::any_of(screens_.begin(), screens_.end(), [](const auto *screen) {
+    return screen->ui() && screen->ui()->text_input_active();
+  });
+}
+
 bridge::Result<uint64_t> AppShell::analysis_payload_target(wm::Screen *screen)
 {
   using bridge::Error;

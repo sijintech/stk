@@ -103,6 +103,8 @@ class AppShell {
   {
     return screens_.size();
   }
+  /** Whether an installed window has an active text edit. Pure inspection, without committing it. */
+  bool text_input_active() const;
   /** Replaces the screen's tree with the default layout. */
   void build_default_layout(wm::Screen &screen);
 
