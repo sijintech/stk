@@ -1063,6 +1063,7 @@
   "ai.empty": "Prepare your first question below. Saved replies will appear here.",
   "ai.you": "You",
   "ai.assistant": "AI",
+  "ai.temporary_reply": "AI · temporary reply (not saved yet)",
   "ai.send_saved": "Send this saved question",
   "ai.refresh": "Refresh reply",
   "ai.compose": "Prepare a question",

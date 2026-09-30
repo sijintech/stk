@@ -482,3 +482,376 @@ def test_worker_finishing_before_shutdown_thread_still_saves_uncertain(model, ex
         resume.set()
         for thread in shutdown_threads:
             thread.join(5)
+
+
+class StreamingAdapter(ControlledAdapter):
+    """A controlled delta sender; no network, credentials, or background emitter."""
+
+    def __init__(self, chunks=("partial",), result=None):
+        super().__init__("".join(chunks) if result is None and all(isinstance(x, str) for x in chunks) else result)
+        self.chunks = chunks
+        self.on_text = None
+        self.emitted = threading.Event()
+
+    def send(self, value, cancel_event):
+        raise AssertionError("The optional streaming method should be preferred")
+
+    def send_stream(self, value, cancel_event, on_text):
+        self.inputs.append(deepcopy(value))
+        self.cancel_event, self.on_text = cancel_event, on_text
+        self.started.set()
+        for chunk in self.chunks:
+            on_text(chunk)
+        self.emitted.set()
+        assert self.release.wait(8), "test stream was not released"
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
+def test_progress_returns_bounded_utf8_snapshots_and_only_completion_publishes(model, executors):
+    store, _ = model
+    saved = request(model)
+    chunks = ["你", "好", "\n", "🙂"]
+    adapter = StreamingAdapter(chunks)
+    executor = executors(adapter)
+    before, history = store.snapshot(), store.history()
+    assert executor.progress(store, saved["id"]) == {"request": saved, "progress": None}
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    observed = executor.progress(store, saved["id"])
+    assert observed["request"]["status"] == "running" and observed["request"]["result"] is None
+    assert observed["progress"] == {"executor_id": executor.executor_id, "sequence": 4,
+                                    "text": "你好\n🙂", "text_bytes": 11}
+    assert len(store.discussion.list()["messages"]) == 1
+    assert executor.progress(store, saved["id"]) == observed
+    adapter.on_text("")
+    assert executor.progress(store, saved["id"]) == observed
+    observed["progress"]["text"] = "caller mutation"
+    assert executor.progress(store, saved["id"])["progress"]["text"] == "你好\n🙂"
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    result = executor.progress(store, saved["id"])
+    assert result["progress"] is None and result["request"]["status"] == "completed"
+    assert store.discussion.get(saved["assistant_message_id"])["text"] == "你好\n🙂"
+    assert store.snapshot() == before and store.history() == history
+
+
+def test_progress_starts_with_sequence_zero_and_never_crosses_executor_or_path(model, executors, tmp_path):
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter((), "complete")
+    executor, foreign = executors(adapter), executors()
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    snapshot = executor.progress(store, saved["id"])
+    assert snapshot["progress"] == {"executor_id": executor.executor_id, "sequence": 0, "text": "", "text_bytes": 0}
+    assert foreign.progress(store, saved["id"]) == {"request": snapshot["request"], "progress": None}
+    copied = tmp_path / "copied"
+    copied.mkdir()
+    shutil.copyfile(store.path, copied / "project.sqlite3")
+    assert executor.progress(ProjectStore(copied), saved["id"]) == {"request": snapshot["request"], "progress": None}
+    # A new store object for the same original path may read this live owner's buffer.
+    assert executor.progress(ProjectStore(store.directory), saved["id"]) == snapshot
+    adapter.on_text("complete")
+    assert executor.progress(store, saved["id"])["progress"]["sequence"] == 1
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+
+
+def test_nonstreaming_request_progress_is_always_null(model, executors):
+    store, _ = model
+    saved = request(model)
+    adapter = ControlledAdapter()
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.started.wait(5)
+    result = executor.progress(store, saved["id"])
+    assert result["progress"] is None and result["request"]["status"] == "running"
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    assert executor.progress(store, saved["id"])["progress"] is None
+
+
+def test_cancel_hides_progress_but_valid_late_full_response_can_still_complete(model, executors):
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter(["before"], "beforeafter")
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    assert executor.progress(store, saved["id"])["progress"]["text"] == "before"
+    cancelled = executor.cancel(store, saved["id"])
+    assert cancelled["status"] == "uncertain" and cancelled["cancel_requested"]
+    adapter.on_text("after")
+    assert executor.progress(store, saved["id"]) == {"request": cancelled, "progress": None}
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    completed = executor.progress(store, saved["id"])
+    assert completed["progress"] is None and completed["request"]["status"] == "completed"
+    assert completed["request"]["cancel_requested"]
+    assert store.discussion.get(saved["assistant_message_id"])["text"] == "beforeafter"
+
+
+def test_external_cancel_or_confirmed_terminal_hides_live_buffer(model, executors):
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter()
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    assert executor.progress(store, saved["id"])["progress"] is not None
+    store.requests.cancel(saved["id"])
+    assert not adapter.cancel_event.is_set()  # Different callers cannot signal this worker.
+    assert executor.progress(store, saved["id"])["progress"] is None
+    cancelled = store.requests._settle(saved["id"], executor_id=executor.executor_id,
+                                       status="cancelled", code="cancel_confirmed")
+    assert executor.progress(store, saved["id"]) == {"request": cancelled, "progress": None}
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    assert len(store.discussion.list()["messages"]) == 1
+
+
+def test_shutdown_hides_and_fences_stream_but_retains_lock_until_worker_exits(model, executors):
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter()
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    job = next(iter(executor._active.values()))
+    executor.shutdown(wait=False)
+    adapter.on_text("must be ignored")
+    assert executor.progress(store, saved["id"])["progress"] is None
+    with pytest.raises(RequestBusy):
+        _RequestLock(store, saved["id"])
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    adapter.on_text("\ud800")  # Even malformed retained callbacks are ignored after closure.
+    assert not job.text and not job.accepting.is_set()
+    assert store.requests.get(saved["id"])["status"] == "uncertain"
+    assert len(store.discussion.list()["messages"]) == 1
+
+
+def test_stream_callback_closes_before_complete_response_validation(model, executors, monkeypatch):
+    import suan.project.request_executor as module
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter()
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    entered, release = threading.Event(), threading.Event()
+    original = module._validate_metadata
+    def block(metadata):
+        entered.set()
+        assert release.wait(5)
+        return original(metadata)
+    monkeypatch.setattr(module, "_validate_metadata", block)
+    adapter.release.set()
+    try:
+        assert entered.wait(5)
+        adapter.on_text("late after adapter returned")
+        snapshot = executor.progress(store, saved["id"])
+        assert snapshot["progress"] is None and snapshot["request"]["status"] == "running"
+    finally:
+        release.set()
+    eventually(lambda: idle(executor))
+    assert store.requests.get(saved["id"])["status"] == "completed"
+    assert store.discussion.get(saved["assistant_message_id"])["text"] == "partial"
+
+
+@pytest.mark.parametrize("chunks", [[None], [123], ["\ud800"], ["x" * 65537], ["汉" * 21846],
+                                    ["a" * 65536, "b"]],
+                         ids=["null", "integer", "invalid-utf8", "large-chunk", "utf8-limit", "cumulative-limit"])
+def test_invalid_or_oversized_stream_is_failed_without_partial_message(model, executors, chunks):
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter(chunks, "safe final cannot hide invalid chunks")
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    eventually(lambda: idle(executor))
+    record = store.requests.get(saved["id"])
+    assert record["status"] == "failed" and record["error_code"] == "response_invalid"
+    assert executor.progress(store, saved["id"])["progress"] is None
+    assert len(store.discussion.list()["messages"]) == 1
+
+
+def test_swallowed_callback_error_or_mismatched_final_cannot_publish(model, executors):
+    from suan.project.request_executor import InvalidResponse
+    store, _ = model
+    class Swallowing(StreamingAdapter):
+        def send_stream(self, value, cancel_event, on_text):
+            try:
+                on_text(None)
+            except InvalidResponse:
+                pass
+            return "apparently complete"
+    for adapter in (Swallowing(), StreamingAdapter(["observed"], "different final")):
+        saved = request(model)
+        executor = executors(adapter)
+        executor.start(store, saved["id"])
+        adapter.release.set()
+        eventually(lambda: idle(executor))
+        assert store.requests.get(saved["id"])["error_code"] == "response_invalid"
+    assert len(store.discussion.list()["messages"]) == 2  # Only the two saved user messages.
+
+
+def test_stream_limit_accepts_exact_utf8_boundary_and_cleanup_releases_buffer(model, executors):
+    store, _ = model
+    saved = request(model)
+    text = "🙂" * 16384
+    adapter = StreamingAdapter([text])
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    job = next(iter(executor._active.values()))
+    progress = executor.progress(store, saved["id"])["progress"]
+    assert progress["text_bytes"] == 65536 and progress["text"] == text
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    assert not job.text and store.discussion.get(saved["assistant_message_id"])["text"] == text
+
+
+def test_progress_validates_replaced_database_before_returning_cached_text(model, executors, tmp_path):
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter()
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    original = tmp_path / "original.sqlite3"
+    shutil.copyfile(store.path, original)
+    other = ProjectStore.create(tmp_path / "other", "Other")
+    shutil.copyfile(other.path, store.path)
+    try:
+        with pytest.raises(ProjectError, match="replaced"):
+            executor.progress(store, saved["id"])
+    finally:
+        shutil.copyfile(original, store.path)
+        adapter.release.set()
+    eventually(lambda: idle(executor))
+
+
+def test_capacity_limit_preserves_pending_and_cancelled_live_workers_keep_their_slot(model, executors):
+    from suan.project.request_executor import MAX_ACTIVE_REQUESTS
+    store, _ = model
+    saved = [request(model) for _ in range(MAX_ACTIVE_REQUESTS + 1)]
+    adapter = ControlledAdapter()
+    executor = executors(adapter)
+    for item in saved[:-1]:
+        assert executor.start(store, item["id"])["status"] == "running"
+    eventually(lambda: len(adapter.inputs) == MAX_ACTIVE_REQUESTS)
+    # Repeated starts at capacity still return the one saved attempt.
+    assert executor.start(store, saved[0]["id"])["status"] == "running"
+    with pytest.raises(RequestBusy, match="8 active"):
+        executor.start(store, saved[-1]["id"])
+    assert executor.progress(store, saved[-1]["id"]) == {"request": saved[-1], "progress": None}
+    executor.cancel(store, saved[0]["id"])
+    with pytest.raises(RequestBusy, match="8 active"):
+        executor.start(store, saved[-1]["id"])
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    executor.start(store, saved[-1]["id"])
+    eventually(lambda: idle(executor))
+    assert len(adapter.inputs) == MAX_ACTIVE_REQUESTS + 1
+    assert store.requests.get(saved[-1]["id"])["status"] == "completed"
+
+
+def test_preflight_and_dispatch_failures_never_leak_capacity_slots(model, executors, monkeypatch):
+    from suan.project.request_executor import MAX_ACTIVE_REQUESTS
+    store, _ = model
+    class PreparationFailure(ControlledAdapter):
+        def prepare(self, frozen_input):
+            raise ProjectError("local preflight failed")
+    executor = executors(PreparationFailure())
+    for _ in range(MAX_ACTIVE_REQUESTS + 1):
+        saved = request(model)
+        with pytest.raises(ProjectError, match="preflight"):
+            executor.start(store, saved["id"])
+        assert store.requests.get(saved["id"]) == saved and idle(executor)
+    adapter = ControlledAdapter()
+    executor._adapters["controlled"] = adapter
+    with monkeypatch.context() as patch:
+        def fail_start(self):
+            raise RuntimeError("dispatch failure")
+        patch.setattr(threading.Thread, "start", fail_start)
+        for _ in range(MAX_ACTIVE_REQUESTS + 1):
+            saved = request(model)
+            assert executor.start(store, saved["id"])["error_code"] == "dispatch_failed"
+            assert idle(executor)
+            lease = _RequestLock(store, saved["id"])
+            lease.release()
+    adapter.release.set()
+    saved = request(model)
+    executor.start(store, saved["id"])
+    eventually(lambda: idle(executor))
+    assert store.requests.get(saved["id"])["status"] == "completed"
+
+
+def test_prepared_stream_only_sender_is_supported_without_a_send_method(model, executors):
+    store, _ = model
+    saved = request(model)
+    class StreamOnly(StreamingAdapter):
+        send = None
+    prepared = StreamOnly()
+    class Factory:
+        release = prepared.release
+        def prepare(self, frozen_input):
+            assert frozen_input == store.requests.input(saved["id"])
+            return prepared
+    executor = executors(Factory())
+    executor.start(store, saved["id"])
+    assert prepared.emitted.wait(5)
+    assert executor.progress(store, saved["id"])["progress"]["text"] == "partial"
+    prepared.release.set()
+    eventually(lambda: idle(executor))
+    assert store.requests.get(saved["id"])["status"] == "completed"
+
+
+def test_shutdown_preserves_complete_response_already_accepted_for_atomic_save(model, executors, monkeypatch):
+    from suan.project.requests import Requests
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter()
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    entered, release = threading.Event(), threading.Event()
+    original = Requests._complete
+    def pending_commit(self, request_id, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(self, request_id, **kwargs)
+    monkeypatch.setattr(Requests, "_complete", pending_commit)
+    adapter.release.set()
+    try:
+        assert entered.wait(5)
+        assert store.requests.get(saved["id"])["status"] == "running"
+        executor.shutdown(wait=False)
+        assert executor._closing.is_set()
+        # Streaming acceptance ended before the response entered atomic save.
+        adapter.on_text("too late")
+    finally:
+        release.set()
+    eventually(lambda: idle(executor))
+    result = store.requests.get(saved["id"])
+    assert result["status"] == "completed"
+    assert store.discussion.get(result["assistant_message_id"])["text"] == "partial"
+    assert executor.progress(store, saved["id"])["progress"] is None
+
+
+def test_uncertain_owner_observation_hides_stream_without_discarding_valid_completion(model, executors):
+    store, _ = model
+    saved = request(model)
+    adapter = StreamingAdapter()
+    executor = executors(adapter)
+    executor.start(store, saved["id"])
+    assert adapter.emitted.wait(5)
+    uncertain = store.requests._settle(saved["id"], executor_id=executor.executor_id,
+                                       status="uncertain", code="transport_uncertain")
+    assert not uncertain["cancel_requested"]
+    assert executor.progress(store, saved["id"]) == {"request": uncertain, "progress": None}
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    assert store.requests.get(saved["id"])["status"] == "completed"

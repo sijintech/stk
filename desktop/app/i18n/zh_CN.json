@@ -1063,6 +1063,7 @@
   "ai.empty": "在下方准备第一条问题，保存的回复将在这里显示。",
   "ai.you": "你",
   "ai.assistant": "AI",
+  "ai.temporary_reply": "AI · 临时回复（尚未保存）",
   "ai.send_saved": "发送这条已保存的问题",
   "ai.refresh": "刷新回复",
   "ai.compose": "准备问题",

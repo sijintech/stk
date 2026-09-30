@@ -22,7 +22,7 @@ void ProjectDiscussion::reset()
   context_ = message_ = origin_ = requests_ = generation_request_ = Json::object();
   provider_ = Json::object(); provider_loaded_ = false;
   ++exchange_generation_; ++exchange_flight_;
-  exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = Json::object();
+  exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = exchange_progress_ = Json::object();
   exchange_id_.clear(); exchange_error_.clear();
   exchange_preparing_ = exchange_reading_ = exchange_pending_ = exchange_following_ = false;
   exchange_clock_seen_ = false;
@@ -100,6 +100,13 @@ bool ProjectDiscussion::generation_supported() const
     if (!hello || !hello->has_method(method)) { return false; }
   }
   return true;
+}
+
+bool ProjectDiscussion::progress_supported() const
+{
+  if (!requests_supported()) { return false; }
+  const auto hello = store_.bridge()->hello_info();
+  return hello && hello->has_method("project.requests.progress");
 }
 
 bool ProjectDiscussion::load_provider()
@@ -214,6 +221,7 @@ bool ProjectDiscussion::mutate_request(const std::string &method, const std::str
   if (accepted && exchange_id_ == id) {
     ++exchange_generation_;
     exchange_pending_ = exchange_following_ = false;
+    if (method == "project.requests.cancel") { exchange_progress_ = Json::object(); }
     exchange_error_.clear();
     exchange_wake_scheduled = 0;
   }
@@ -281,7 +289,7 @@ bool ProjectDiscussion::prepare_question(const std::string &context_id, const st
   if (accepted) {
     ++exchange_generation_;
     exchange_id_ = id;
-    exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = Json::object();
+    exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = exchange_progress_ = Json::object();
     exchange_error_.clear();
     exchange_preparing_ = true;
     exchange_pending_ = exchange_following_ = false;
@@ -297,7 +305,7 @@ bool ProjectDiscussion::load_exchange(const std::string &id)
   if (exchange_id_ == id) { return refresh_exchange(); }
   ++exchange_generation_;
   exchange_id_ = id;
-  exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = Json::object();
+  exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = exchange_progress_ = Json::object();
   exchange_error_.clear();
   exchange_pending_ = true;
   exchange_following_ = false;
@@ -328,9 +336,11 @@ bool ProjectDiscussion::begin_exchange_read()
   exchange_reading_ = true;
   exchange_pending_ = false;
   const auto generation = exchange_generation_, flight = ++exchange_flight_;
-  exchange_read("project.requests.get", {{"request_id", exchange_id_}}, generation, flight,
+  exchange_read(progress_supported() ? "project.requests.progress" : "project.requests.get",
+      {{"request_id", exchange_id_}}, generation, flight,
       [this, generation, flight](const Json &result) {
-    auto bundle = std::make_shared<Json>(Json{{"request", result.at("request")}});
+    auto bundle = std::make_shared<Json>(Json{{"request", result.at("request")},
+        {"progress", result.value("progress", Json())}});
     read_exchange_parts(std::move(bundle), generation, flight);
   });
   return true;
@@ -410,6 +420,7 @@ void ProjectDiscussion::publish_exchange(const Json &bundle)
 {
   const auto &record = bundle.at("request"), &context = bundle.at("context");
   const auto &question = bundle.at("question"), &reply = bundle.at("reply");
+  const auto progress = bundle.value("progress", Json());
   if (record.at("id") != exchange_id_ || context.at("id") != record.at("context_id") ||
       context.at("project_id") != record.at("project_id") || context.at("source_revision") != record.at("source_revision") ||
       question.at("id") != record.at("message_id") || question.at("context_id") != context.at("id") ||
@@ -420,8 +431,32 @@ void ProjectDiscussion::publish_exchange(const Json &bundle)
         reply.at("project_id") != record.at("project_id") || reply.at("role") != "assistant"))) {
     throw std::runtime_error("Saved exchange has inconsistent provenance");
   }
+  if (!progress.is_null()) {
+    if (!progress.at("sequence").is_number_integer() || progress.at("sequence") < 0 ||
+        progress.at("sequence") > std::numeric_limits<int64_t>::max() ||
+        !progress.at("text_bytes").is_number_integer() || progress.at("text_bytes") < 0) {
+      throw std::runtime_error("Invalid temporary reply counters");
+    }
+    const auto text = progress.at("text").get<std::string>();
+    const auto sequence = progress.at("sequence").get<int64_t>();
+    if (record.at("status") != "running" || record.at("cancel_requested") != false ||
+        progress.at("executor_id") != record.at("executor_id") || sequence < 0 ||
+        text.size() > 65536 || progress.at("text_bytes") != text.size()) {
+      throw std::runtime_error("Invalid temporary reply identity or size");
+    }
+    if (!exchange_progress_.empty() && exchange_request_.at("id") == record.at("id") &&
+        exchange_progress_.at("executor_id") == progress.at("executor_id")) {
+      const auto previous_sequence = exchange_progress_.at("sequence").get<int64_t>();
+      const auto previous_text = exchange_progress_.at("text").get<std::string>();
+      if (sequence < previous_sequence || !text.starts_with(previous_text) ||
+          (sequence == previous_sequence && text != previous_text)) {
+        throw std::runtime_error("Temporary reply moved backwards");
+      }
+    }
+  }
   exchange_request_ = record; exchange_context_ = context;
   exchange_question_ = question; exchange_reply_ = reply;
+  exchange_progress_ = progress.is_null() ? Json::object() : progress;
   // Keep visible history labels consistent with the newly read status without
   // changing its selection, pagination or starting another bridge call.
   for (auto &item : request_page_.items) {

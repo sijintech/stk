@@ -36,7 +36,7 @@ class ProjectSessions:
             except RevisionConflict as exc:
                 raise BridgeError("conflict", str(exc)) from None
             except RequestBusy:
-                raise BridgeError("busy", "A live executor still owns this request") from None
+                raise BridgeError("busy", "A live executor owns this request or the local executor has reached its 8-request limit") from None
             except UnsupportedProjectFormat as exc:
                 raise BridgeError("unsupported", str(exc)) from None
             except FileExistsError:
@@ -178,6 +178,8 @@ class ProjectSessions:
                 return {"provider": provider_info()}
             if action in {"start", "cancel", "recover"}:
                 return {"request": getattr(self._executor, action)(store, params["request_id"])}
+            if action == "progress":
+                return self._executor.progress(store, params["request_id"])
             if action == "create":
                 return {"request": requests.create(params["message_id"], request_id=params["request_id"],
                                                     configuration=params["configuration"])}

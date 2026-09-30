@@ -6,7 +6,7 @@ OpenAI 兼容文字接口，使用指定地址 `https://token-plan.cn-beijing.ma
 所有请求状态与文字回复均不修改参数修订、撤销历史、草案或仿真任务。
 
 旧项目先明确 **备份并升级项目**，最低需要格式 8；本轮没有新增 SQLite 格式。普通打开不迁移，
-规则见[项目指南](project.md#数据库备份与显式升级)。流式显示、远端查询、工具提案及自动执行尚未实现。
+规则见[项目指南](project.md#数据库备份与显式升级)。AI 工作区已接入临时流式显示；远端查询、工具提案及自动执行尚未实现。
 
 ## 配置本机凭据和模型
 
@@ -67,7 +67,11 @@ macOS 使用 zsh 时应在对应 shell 中导出，Windows 则按上面的 Power
 
 可从项目页头或文件菜单打开新的 [AI 工作区](desktop.md#ai-准备工作区)，在同一页完成捕获、准备问题（只保存）、
 核对及明确发送。工作区显示时，对运行中/不确定记录约每秒读取一次本地状态，最多 90 秒；出错或到期暂停，
-明确刷新可继续读取。这个过程不会查询提供方、重发或核对遗留执行，也不是流式显示。
+明确刷新可继续读取。这个过程不会查询提供方、重发或核对遗留执行。
+由本桥正在执行的流式请求会显示 **临时回复（尚未保存）**；每次读取替换当前片段快照，不重复拼接。
+只有完整回复通过校验后才保存为正式助手消息。断流、取消或桥退出不保存半条回答；
+取消时立即隐藏临时片段，但已发出的请求仍可能返回完整有效回复并保存。切换项目不会串入其他项目的片段。
+其他桥进程或旧版桥不提供临时片段，仍可读取正式状态和完整回复；没有片段不代表远端未执行或已停止。
 下面保留 **项目表格 → 讨论 → 请求** 页的操作步骤；该页仍需手动刷新。
 
 1. 按[上下文指南](project-contexts.md)明确捕获行和字段，保存一条用户消息，核对所引用的上下文。
@@ -145,17 +149,22 @@ print(p.requests.list(limit=20))
 手工消息不能占用它。相同请求 UUID 和相同内容返回原记录，改变内容复用 UUID 会冲突。
 
 阿里适配器在领取执行权前验证输入并将凭据、请求体绑定到本次调用。它以普通 HTTPS 发出一次
-`POST /compatible-mode/v1/chat/completions`，使用 `stream=false`、`enable_thinking=false` 和 `max_tokens`；
+`POST /compatible-mode/v1/chat/completions`，执行器使用 `stream=true`、`stream_options.include_usage=true`、
+`enable_thinking=false` 和 `max_tokens`；适配器保留原非流式调用接口供已有调用方使用。
 不发送工具、不跟随重定向、不自动重试。请求体只包含固定系统说明、保存的上下文及用户文字，
 不会读其他文件、查询当前表格或附带完整讨论历史。参数依据见[阿里 Chat Completions 文档](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)。
 
 保存输入限 1 MiB，重新编码的请求体限 2 MiB，HTTP 回复限 1 MiB，最终文字限 64 KiB UTF-8。
 不会静默裁剪超限内容；目前没有本地模型 token 计数器，实际上下文长度和输出预算仍由服务校验。
-网络步骤使用 60 秒超时预算；取消不强制中止已发出的 HTTP 读取，也没有流式显示。
-仅接受一条 `finish_reason=stop` 的完整助手文字；截断、工具调用、无效 JSON、超限或仅推理内容不能冒充完整回复。
+网络步骤共用 60 秒超时预算；取消不强制中止已发出的 HTTP 读取。
+流式回复须是一条助手文字，先收到 `finish_reason=stop`，再收到 `[DONE]`，并正常结束 HTTP 消息体；
+截断、工具调用、无效 JSON、超限或仅推理内容不能冒充完整回复。协议依据见[阿里流式文档](https://help.aliyun.com/zh/model-studio/stream)。
+同一执行器最多保留 8 条仍在执行的请求；满额时新请求保持尚未发送，可在已有执行结束后明确发送。
+`p.requests.progress(id)` 只读返回正式 `request` 和可空的临时 `progress`，片段不进入 SQLite。
+临时快照包含执行器身份、序列号、累计文字和 UTF-8 字节数；取消、不确定、终态和执行器关闭时不返回片段。
 
-HTTP 明确拒绝保存为 `failed/adapter_failed`；不完整或非法完整响应为 `failed/response_invalid`。
-连接中断、超时、重定向或不确定服务器状态保留 `uncertain/transport_uncertain`。
+HTTP 明确拒绝保存为 `failed/adapter_failed`；非法完整响应为 `failed/response_invalid`。
+流式结束证据到齐前断流、连接中断、超时、重定向或不确定服务器状态保留 `uncertain/transport_uncertain`。
 错误响应正文、异常原文、认证头和密钥不写入项目。`result` 仅含助手消息 ID、文字摘要及受限观察：
 模型、远端请求 ID、非负 64 位输入/输出 token 数。完整消息和完成标记原子保存，失败全部回滚。
 

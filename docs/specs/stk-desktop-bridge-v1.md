@@ -124,7 +124,7 @@ request (same idempotency key) may succeed.
 | `graph_error` | no | Graph validation or evaluation failed: `data.graph_code` (stk-graph-v1 codes), `issues`, `node`, `errors` |
 | `cancelled` | no | The operation was cancelled |
 | `timeout` | yes | A hub action has not finished within the wait; repeat the request to keep waiting |
-| `busy` | yes / no | Too many requests in flight (`retryable: true`); another bridge holds the state directory (§1; `data.state_dir`, `retryable: false`, exits with status 3); or a live model executor owns the requested execution lock (§13; `retryable: false`) |
+| `busy` | yes / no | Too many requests in flight (`retryable: true`); another bridge holds the state directory (§1; `data.state_dir`, `retryable: false`, exits with status 3); or a model execution lock is held / the local executor already has 8 active requests (§13; `retryable: false`) |
 | `result_too_large` | no | The response would exceed `max_line_bytes` |
 | `shutting_down` | no | The bridge is exiting |
 | `internal_error` | no | A bridge bug (details on stderr) |
@@ -521,6 +521,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.discussion.proposals` | `{handle, offset?, limit?, draft_id?}` | `{proposals: [proposal], next_offset: integer|null}` |
 | `project.requests.create` | `{handle, request_id, message_id, configuration}` | `{request}` |
 | `project.requests.get` | `{handle, request_id}` | `{request}` |
+| `project.requests.progress` | `{handle, request_id}` | `{request, progress: {executor_id, sequence, text, text_bytes}\|null}` (bounded unsaved text; no send) |
 | `project.requests.list` | `{handle, offset?, limit?}` | `{requests: [request], next_offset: integer|null}` |
 | `project.requests.cancel` | `{handle, request_id}` | `{request}` |
 | `project.requests.provider` | `{handle}` | `{provider}` (local configuration presence only) |
@@ -694,12 +695,13 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   [context and discussion guide](../project-contexts.md) for usage and recovery boundaries.
 - `project.requests.*` is an optional format 8 extension for durable text-request records. Check
   `hello.methods`; earlier formats return `unsupported` and require explicit backup/upgrade.
-  The bridge exposes create/get/list/cancel/provider/start/recover. Creating a record saves intent;
-  only explicit start can send the saved input. Get/list, opening a project and restoring a view
+  The bridge exposes create/get/list/cancel/provider/start/recover/progress. Creating a record saves intent;
+  only explicit start can send the saved input. Get/list/progress, opening a project and restoring a view
   never send or poll a provider. These methods do not change project revision/history/undo, apply
   a draft or submit a Runtime task, and emit no event, including no `project.changed`. Refresh
-  explicitly to read changes from SQLite. The Python facade exposes the same seven operations as
-  `p.requests.*` on its pinned handle; older bridges may expose only the first four methods.
+  explicitly to read changes from SQLite. The Python facade exposes the same eight operations as
+  `p.requests.*` on its pinned handle; older bridges may expose only the first four or seven methods.
+  Progress is a separately optional capability: an older bridge can still send and read complete replies.
 - Provider returns exactly `{adapter, base_url, key_env, model_env, configured, model}` inside
   `{provider}`. The built-in adapter is `aliyun-token-plan/1`, with fixed base URL
   `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`, key environment variable
@@ -709,7 +711,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
   there is no guessed default. A request always uses its saved configuration, not a later model
   environment change. Provider reads local configuration only and returns no credential value.
   Credentials, endpoint overrides and arbitrary adapter configuration are not accepted by any
-  request method. Real account operation has not been validated; API compatibility does not establish
+  request method. Provider status does not validate real account operation; API compatibility does not establish
   STK's eligibility under the provider's current Token Plan tool/use terms.
 - A request is the closed, flat object
   `{id, project_id, context_id, message_id, assistant_message_id, source_revision, configuration,
@@ -760,31 +762,61 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 - The local `suan.project.request_executor.RequestExecutor` defaults to an empty trusted adapter
   registry; the bridge explicitly registers `AliyunTokenPlanAdapter`. Start first reads the saved
   request. A non-pending record is returned unchanged and never resubmitted. For pending work,
-  start obtains its nonblocking OS lock, validates immutable input and runs optional adapter
+  start first rejects a ninth active job with `busy`, leaving the request pending; the bound includes
+  cancelled workers until they actually exit. It then obtains its nonblocking OS lock, validates immutable input and runs optional adapter
   preparation before committing a single claim. Token Plan preparation validates the payload and
   credential locally and captures both in memory; failure returns `invalid_params` with the request
   still pending. Missing adapters likewise leave it pending. The prepared sender is invoked only
   after `running` and `executor_id` are committed. Start acknowledges that claim without waiting
   for the network response. It holds no SQLite transaction during network I/O and never retries.
   A live execution lock prevents another sender or local recovery (`busy`).
+- A prepared sender may implement `send_stream(frozen_input, cancel_event, on_text)`; when present,
+  the executor prefers it to `send`. `on_text` accepts UTF-8 text **deltas**, in order. Empty deltas
+  do nothing; each accepted nonempty delta increments `sequence`. The per-job byte buffer is limited
+  to 64 KiB, with at most eight active jobs per executor. Invalid/oversized deltas permanently reject
+  that response even if an adapter catches the observer error. The sender still returns one complete
+  `TextResponse`; its text must exactly equal concatenated deltas before the existing atomic save.
+  Returning/raising closes the callback before validation or save. Retained late callbacks are ignored,
+  and job exit clears the buffer. Fragments never enter SQLite or become ordinary assistant messages.
+- `progress` returns the existing complete request metadata plus either null or exactly
+  `{executor_id, sequence, text, text_bytes}`. It validates the original project and request lineage
+  before reading memory. A snapshot exists only for this bridge's active streaming job, with a matching
+  saved `executor_id`, `status="running"`, no cancellation intent, and an accepting callback.
+  `sequence` is a nonnegative signed-64-bit integer (initially 0); `text_bytes` is the exact UTF-8 byte
+  length in [0, 65536]. `text` is a full replaceable snapshot, not another delta. No timestamps,
+  credentials, headers, raw provider events or raw errors are returned. The method has no side effects
+  and never contacts a provider, starts work or reconciles an abandoned owner.
+  Nonstreaming, pending, uncertain, terminal, foreign-owner and closing executions return null.
+  Null does not prove that nothing was sent, that generation stopped, or that a complete response exists.
+  Cancellation immediately hides the snapshot but still permits bounded collection and eventual valid
+  completion with `cancel_requested=true`. Closing/reopening the same project in the same bridge can
+  observe its still-live worker; a new bridge has no saved fragments and never reconstructs/replays them.
+  Clients preserve handle/request/owner and response-generation checks, clearly mark text as unsaved,
+  and replace it with the saved assistant message only after completed state and provenance validation.
 - Explicit recover only acts on `running`: it must acquire the request's free OS lock before marking
   it `uncertain/executor_lost`; other states are returned unchanged. It does not send, query a provider
   or revert to pending. Closing a project handle or switching projects leaves accepted work bound
   to the original project UUID and database. Bridge shutdown fences late responses and asynchronously
-  attempts to mark active work uncertain; a live worker retains its lock until it exits. If persistence
+  attempts to mark active work uncertain; a live worker retains its lock until it exits. A full response
+  already accepted for atomic saving before the shutdown fence may finish committing and remain completed;
+  shutdown prevents later responses from beginning publication and immediately hides/fences stream callbacks.
+  If persistence
   is unavailable or process exit interrupts cleanup, later explicit recover can reconcile a saved
   running claim. Neither shutdown nor recovery proves remote cancellation.
   The fixed journal error codes are `adapter_unavailable`, `adapter_failed`, `response_invalid`, `dispatch_failed`
   (failed), `executor_lost`, `cancel_unconfirmed`, `transport_uncertain`, `local_save_failed`
   (uncertain), and `cancelled_before_start`, `cancel_confirmed` (cancelled). Pending/running/completed
   have null `error_code`. The fixed Token Plan adapter uses one verified HTTPS Chat Completions
-  POST with `stream=false` and `enable_thinking=false`; it sends no tools. It accepts only one complete
-  assistant text with `finish_reason=stop`, rejects tool/function output and truncation, bounds the
+  POST with `stream=true`, `stream_options.include_usage=true` and `enable_thinking=false`; it sends no tools.
+  Its direct nonstreaming `send` remains available to trusted Python callers. Streaming accepts only one
+  assistant text ending in `finish_reason=stop`, followed by `[DONE]` and complete HTTP framing;
+  missing completion markers or transport interruption remain uncertain. It rejects tool/function output,
+  refusal, reasoning fragments and explicit truncation, bounds the
   HTTP body to 1 MiB and the saved text to 64 KiB, and uses a 60-second socket timeout with elapsed
   deadline checks between operations. It follows no redirects, uses no proxy and makes no retry.
   This adapter requires temperature below 2, within the generic configuration range above. Known
   rejection responses are failed; transport errors, ambiguous statuses and timeouts remain uncertain.
-  No remote cancellation/query, streaming, token counting or tool execution is implemented. See
+  No remote cancellation/query, token counting or tool execution is implemented. See
   [request guide](../project-requests.md) for configuration, exact transport scope, lock guarantees
   and save-failure limits.
 - **Uncertain responses:** create/apply/backup/upgrade/undo/redo and file index/refresh are never automatically retried. If a response is lost,

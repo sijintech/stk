@@ -2,6 +2,8 @@
 
 No adapter is installed by default. Callers may inject trusted adapter objects with
 ``send(frozen_input, cancel_event)`` returning text or :class:`TextResponse`.
+An optional ``send_stream(frozen_input, cancel_event, on_text)`` reports text
+deltas to a bounded in-memory buffer and still returns the complete response.
 Adapters must not retry a submission themselves. A cancellation event only conveys
 local intent; :class:`ConfirmedCancellation` requires proof of a terminal outcome.
 
@@ -11,19 +13,19 @@ marks abandoned work uncertain; neither opening a project nor recovery sends it.
 """
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 import stat
 import threading
 from uuid import uuid4
 
-from .discussion import _message_text
+from .discussion import MAX_TEXT_BYTES, _message_text
 from .requests import _validate_metadata
 from .store import ProjectError, _id
 
 
 class RequestBusy(ProjectError):
-    """Another live executor still holds this request's local execution lock."""
+    """An execution lock is held or this executor has reached its active-job limit."""
 
 
 class DefinitiveFailure(Exception):
@@ -46,6 +48,7 @@ class TextResponse:
 
 _HELD_LOCKS = set()
 _HELD_LOCKS_GUARD = threading.Lock()
+MAX_ACTIVE_REQUESTS = 8
 
 
 class _RequestLock:
@@ -107,6 +110,11 @@ class _Job:
     request_id: str
     lock: _RequestLock
     cancel: threading.Event
+    streaming: bool = False
+    accepting: threading.Event = field(default_factory=threading.Event)
+    text: bytearray = field(default_factory=bytearray)
+    sequence: int = 0
+    invalid_text: bool = False
 
 
 class RequestExecutor:
@@ -134,6 +142,10 @@ class RequestExecutor:
         if self._closing.is_set():
             raise ProjectError("Request executor is closed")
 
+    @staticmethod
+    def _can_send(adapter):
+        return callable(getattr(adapter, "send_stream", None)) or callable(getattr(adapter, "send", None))
+
     def start(self, store, request_id):
         """Start a pending request once; repeated starts never resend it."""
         with self._lock:
@@ -141,8 +153,10 @@ class RequestExecutor:
             record = store.requests.get(request_id)
             if record["status"] != "pending":
                 return record
+            if len(self._active) >= MAX_ACTIVE_REQUESTS:
+                raise RequestBusy("The local request executor already has 8 active requests")
             adapter = self._adapters.get(record["configuration"]["adapter"])
-            if adapter is None or not callable(getattr(adapter, "send", None)):
+            if adapter is None or not (self._can_send(adapter) or callable(getattr(adapter, "prepare", None))):
                 raise ProjectError("No trusted adapter is configured for this request")
             try:
                 lease = _RequestLock(store, request_id)
@@ -157,14 +171,17 @@ class RequestExecutor:
                 prepare = getattr(adapter, "prepare", None)
                 if callable(prepare):
                     adapter = prepare(deepcopy(frozen_input))
-                    if not callable(getattr(adapter, "send", None)):
+                    if not self._can_send(adapter):
                         raise ProjectError("Adapter preparation did not produce a text sender")
                 self._check_open()
                 record, claimed = store.requests._claim(request_id, executor_id=self.executor_id)
                 if not claimed:
                     lease.release()
                     return record
-                job = _Job(store, request_id, lease, threading.Event())
+                job = _Job(store, request_id, lease, threading.Event(),
+                           streaming=callable(getattr(adapter, "send_stream", None)))
+                if job.streaming:
+                    job.accepting.set()
                 key = self._key(store, request_id)
                 self._active[key] = job
                 try:
@@ -172,6 +189,7 @@ class RequestExecutor:
                                               name="stk-text-request", daemon=True)
                     thread.start()
                 except Exception:
+                    job.accepting.clear()
                     self._active.pop(key, None)
                     return store.requests._settle(request_id, executor_id=self.executor_id,
                                                   status="failed", code="dispatch_failed")
@@ -187,6 +205,47 @@ class RequestExecutor:
         return job.store.requests._settle(job.request_id, executor_id=self.executor_id,
                                           status=status, code=code)
 
+    def _on_text(self, job, delta):
+        """Accept only live deltas; a retained callback cannot revive a finished job."""
+        if self._closing.is_set() or not job.accepting.is_set():
+            return
+        with self._lock:
+            if (self._closing.is_set() or not job.accepting.is_set()
+                    or self._active.get(self._key(job.store, job.request_id)) is not job):
+                return
+            try:
+                # Check code points before encoding so an arbitrary oversized
+                # callback cannot allocate an unbounded temporary UTF-8 buffer.
+                if job.invalid_text or not isinstance(delta, str) or len(delta) > MAX_TEXT_BYTES:
+                    raise ValueError
+                encoded = delta.encode("utf-8")
+                if len(job.text) + len(encoded) > MAX_TEXT_BYTES:
+                    raise ValueError
+            except (ValueError, UnicodeError):
+                job.invalid_text = True
+                raise InvalidResponse("Stream text exceeds its limit or is not valid UTF-8") from None
+            if encoded:
+                job.text.extend(encoded)
+                job.sequence += 1
+
+    def progress(self, store, request_id):
+        """Read validated saved state and this owner's ephemeral text without sending.
+
+        A missing snapshot makes no assertion about remote execution. The original
+        database and request lineage are checked even when an in-memory job exists.
+        """
+        with self._lock:
+            record = store.requests.get(request_id)
+            job = self._active.get(self._key(store, request_id))
+            progress = None
+            if (not self._closing.is_set() and job is not None and job.streaming
+                    and job.accepting.is_set() and not job.invalid_text
+                    and record["executor_id"] == self.executor_id
+                    and record["status"] == "running" and not record["cancel_requested"]):
+                progress = {"executor_id": self.executor_id, "sequence": job.sequence,
+                            "text": job.text.decode("utf-8"), "text_bytes": len(job.text)}
+            return {"request": record, "progress": progress}
+
     def _run(self, job, adapter, frozen_input):
         try:
             with self._lock:
@@ -197,7 +256,13 @@ class RequestExecutor:
                     self._settle(job, "cancelled", "cancel_confirmed")
                     return
             try:
-                response = adapter.send(frozen_input, job.cancel)
+                try:
+                    response = (adapter.send_stream(frozen_input, job.cancel, lambda delta: self._on_text(job, delta))
+                                if job.streaming else adapter.send(frozen_input, job.cancel))
+                finally:
+                    # Fence callbacks before validating or persisting completion,
+                    # including callbacks retained by an adapter-owned thread.
+                    job.accepting.clear()
             except ConfirmedCancellation:
                 status, code = "cancelled", "cancel_confirmed"
             except DefinitiveFailure:
@@ -214,6 +279,9 @@ class RequestExecutor:
                         raise ProjectError("Adapter did not return a complete text response")
                     text = _message_text(response.text)
                     metadata = _validate_metadata(response.metadata)
+                    with self._lock:
+                        if job.streaming and (job.invalid_text or job.text != text.encode("utf-8")):
+                            raise InvalidResponse("Complete text does not match the received stream")
                 except Exception:
                     status, code = "failed", "response_invalid"
                 else:
@@ -238,6 +306,7 @@ class RequestExecutor:
                     except BaseException:
                         pass
         finally:
+            job.accepting.clear()
             with self._lock:
                 if self._closing.is_set() and not self._closed:
                     # The worker can finish before asynchronous shutdown acquires
@@ -247,6 +316,7 @@ class RequestExecutor:
                     except (ProjectError, OSError):
                         pass
                 self._active.pop(self._key(job.store, job.request_id), None)
+                job.text.clear()
                 job.lock.release()
 
     def cancel(self, store, request_id):
@@ -288,6 +358,8 @@ class RequestExecutor:
                 return
             self._closed = True
             for job in self._active.values():
+                job.accepting.clear()
+                job.text.clear()
                 job.cancel.set()
                 try:
                     self._settle(job, "uncertain", "executor_lost")

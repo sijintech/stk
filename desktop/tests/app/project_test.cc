@@ -216,6 +216,7 @@ class ProjectPython : public ::testing::Test {
   std::unique_ptr<bridge::Client> client;
 
   ProjectState &state() { return f.shell->store().project(); }
+  virtual void configure_bridge(bridge::ClientOptions &, const std::string &) {}
 
   void SetUp() override
   {
@@ -240,6 +241,7 @@ class ProjectPython : public ::testing::Test {
     options.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
     options.executor = loop.executor();
     options.strict = options.validate = true;
+    configure_bridge(options, python);
     client = bridge::Client::create(options);
     ASSERT_TRUE(client->start());
     f.shell->store().set_bridge(client.get());
@@ -305,6 +307,148 @@ class ProjectPython : public ::testing::Test {
     f.drv->frame();
   }
 };
+
+class ProjectStream : public ProjectPython {
+ protected:
+  virtual bool legacy() const { return false; }
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    options.command = {python, std::string(STK_REPO_ROOT) + "/desktop/tests/bridge/stream_bridge.py",
+        dir.str(), legacy() ? "legacy" : "progress", "--stdio", "--state-dir", options.state_dir,
+        "--cache-dir", options.cache_dir, "--strict"};
+  }
+
+  void prepare_stream()
+  {
+    populated();
+    auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+    f.screen.set_maximized(&area); ai_frame();
+    auto &discussion = state().discussion();
+    ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Streaming scope")); settled();
+    ASSERT_TRUE(discussion.prepare_question(discussion.context().at("id"), "Explain the temperature", "fixture-model"));
+    settled(); ai_frame();
+    ASSERT_EQ(discussion.exchange_request().at("status"), "pending");
+  }
+
+  void start_stream()
+  {
+    auto &discussion = state().discussion();
+    ASSERT_TRUE(discussion.start_request(discussion.exchange_request().at("id"))); settled();
+    ASSERT_TRUE(loop.pump_until([&] { return std::filesystem::exists(dir.str() + "/first"); }, 30));
+    read_exchange();
+  }
+
+  void read_exchange()
+  {
+    ASSERT_TRUE(state().discussion().refresh_exchange());
+    ai_frame();
+  }
+
+  void advance(int step) { std::ofstream(dir.str() + "/advance") << step; }
+
+  void completion()
+  {
+    advance(2);
+    auto &discussion = state().discussion();
+    ASSERT_TRUE(loop.pump_until([&] {
+      discussion.pump(std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count());
+      return discussion.exchange_request().value("status", "") == "completed";
+    }, 30)) << discussion.exchange_error() << client->bridge_log().text();
+    ai_frame();
+  }
+
+  std::string transcript()
+  {
+    const auto *widget = f.screen.ui()->find("a2/main/ai_transcript");
+    if (!widget || !widget->log) { return {}; }
+    std::string text;
+    for (size_t i = 0; i < widget->log->line_count(); ++i) { text += std::string(widget->log->line(i)) + "\n"; }
+    return text;
+  }
+};
+
+TEST_F(ProjectStream, TemporaryReplyIsIncrementalAndOnlyCompletedReplyIsSaved)
+{
+  prepare_stream(); start_stream();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.progress_supported());
+  ASSERT_FALSE(discussion.exchange_progress().empty()) << discussion.exchange_error();
+  EXPECT_EQ(discussion.exchange_progress().at("text"), "温度 ");
+  EXPECT_EQ(discussion.exchange_progress().at("text_bytes"), 7);
+  EXPECT_TRUE(discussion.exchange_reply().empty());
+  EXPECT_NE(transcript().find("temporary reply (not saved yet)"), std::string::npos);
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  EXPECT_EQ(discussion.page("messages").items.size(), 1u);
+  advance(1);
+  ASSERT_TRUE(loop.pump_until([&] { return std::filesystem::exists(dir.str() + "/second"); }));
+  read_exchange();
+  EXPECT_EQ(discussion.exchange_progress().at("text"), "温度 300");
+  const auto second = discussion.exchange_progress();
+  read_exchange();
+  EXPECT_EQ(discussion.exchange_progress(), second); // A snapshot is replaced, never appended twice.
+  EXPECT_NE(transcript().find("温度 300"), std::string::npos);
+  completion();
+  EXPECT_TRUE(discussion.exchange_progress().empty());
+  EXPECT_EQ(discussion.exchange_reply().at("text"), "温度 300 K。");
+  EXPECT_EQ(transcript().find("temporary reply"), std::string::npos);
+  ASSERT_TRUE(discussion.load_page("messages")); settled();
+  EXPECT_EQ(discussion.page("messages").items.size(), 2u);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectStream, CancellationHidesTemporaryReplyButCanObserveValidLateCompletion)
+{
+  prepare_stream(); start_stream();
+  auto &discussion = state().discussion();
+  ASSERT_FALSE(discussion.exchange_progress().empty());
+  ASSERT_TRUE(discussion.cancel_request(discussion.exchange_request().at("id")));
+  EXPECT_TRUE(discussion.exchange_progress().empty());
+  settled(); ai_frame();
+  EXPECT_TRUE(discussion.exchange_progress().empty());
+  EXPECT_TRUE(discussion.exchange_reply().empty());
+  EXPECT_EQ(discussion.exchange_request().at("cancel_requested"), true);
+  EXPECT_EQ(transcript().find("温度 "), std::string::npos);
+  completion();
+  EXPECT_EQ(discussion.exchange_reply().at("text"), "温度 300 K。");
+  EXPECT_TRUE(discussion.exchange_progress().empty());
+}
+
+TEST_F(ProjectStream, SwitchingProjectsClearsPartialReplyAndReopeningReadsItsOriginalOwner)
+{
+  prepare_stream(); start_stream();
+  auto &discussion = state().discussion();
+  const auto id = discussion.exchange_request().at("id").get<std::string>();
+  ASSERT_FALSE(discussion.exchange_progress().empty());
+  ASSERT_TRUE(discussion.refresh_exchange()); // Leave this reply queued while the handle changes.
+  ASSERT_TRUE(state().create(dir.str() + "/second-project", "Other project")); settled(); ai_frame();
+  EXPECT_TRUE(discussion.exchange_request().empty());
+  EXPECT_TRUE(discussion.exchange_progress().empty());
+  EXPECT_EQ(transcript().find("温度 "), std::string::npos);
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled(); ai_frame();
+  ASSERT_TRUE(discussion.load_exchange(id)); ai_frame();
+  ASSERT_FALSE(discussion.exchange_progress().empty()) << discussion.exchange_error();
+  EXPECT_EQ(discussion.exchange_progress().at("text"), "温度 ");
+  completion();
+  EXPECT_EQ(discussion.exchange_reply().at("text"), "温度 300 K。");
+}
+
+class ProjectLegacyStream : public ProjectStream {
+ protected:
+  bool legacy() const override { return true; }
+};
+
+TEST_F(ProjectLegacyStream, OlderBridgeFallsBackToSavedStatusAndCompletion)
+{
+  prepare_stream(); start_stream();
+  auto &discussion = state().discussion();
+  EXPECT_FALSE(discussion.progress_supported());
+  EXPECT_TRUE(discussion.exchange_progress().empty());
+  EXPECT_EQ(discussion.exchange_request().at("status"), "running");
+  completion();
+  EXPECT_EQ(discussion.exchange_reply().at("text"), "温度 300 K。");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
 
 TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
 {

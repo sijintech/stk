@@ -1,4 +1,4 @@
-"""Request intent is durable through the real bridge; no send operation is exposed."""
+"""Saving and observing request intent through the real bridge never sends it."""
 
 from uuid import uuid4
 
@@ -22,6 +22,8 @@ def test_request_catalog_schema_and_closed_handles(inproc, model):
     assert saved["status"] == "pending" and saved["executor_id"] is None and saved["result"] is None
     assert harness.call("project.requests.create", params)["request"] == saved
     assert harness.call("project.requests.get", {"handle": info["handle"], "request_id": saved["id"]})["request"] == saved
+    assert harness.call("project.requests.progress", {"handle": info["handle"], "request_id": saved["id"]}) == {
+        "request": saved, "progress": None}
     assert harness.call("project.requests.list", {"handle": info["handle"], "limit": 1}) == {"requests": [saved], "next_offset": None}
     assert harness.error("project.requests.create", {**params, "configuration": {**params["configuration"], "api_key": "must-not-store"}})["code"] == "invalid_params"
     for key in ("adapter", "model"):
@@ -32,10 +34,12 @@ def test_request_catalog_schema_and_closed_handles(inproc, model):
     catalog = harness.call("script.catalog")
     assert {"project.requests.create", "project.requests.get", "project.requests.list", "project.requests.cancel"} <= catalog["operations"].keys()
     assert "project.requests.start" in catalog["operations"]
+    assert "project.requests.progress" in catalog["operations"]
     assert harness.error("project.requests.start", {"handle": info["handle"], "request_id": saved["id"]})["code"] == "invalid_params"
     assert store.snapshot() == before and store.history() == history and harness.events_of("project.changed") == []
     assert harness.call("project.close", {"handle": info["handle"]})["closed"]
     assert harness.error("project.requests.get", {"handle": info["handle"], "request_id": saved["id"]})["code"] == "not_found"
+    assert harness.error("project.requests.progress", {"handle": info["handle"], "request_id": saved["id"]})["code"] == "not_found"
     assert not harness.violations
 
 
@@ -56,6 +60,7 @@ request = p.requests.create(message['id'], request_id=request_id,
     configuration={{'adapter':'test-controlled','model':'fixture-v1','max_output_tokens':32}})
 assert request['context_id'] == context['id'] and request['status'] == 'pending'
 assert p.requests.get(request_id) == request
+assert p.requests.progress(request_id) == {{'request': request, 'progress': None}}
 assert p.requests.list()['requests'] == [request]
 cancelled = p.requests.cancel(request_id)
 assert cancelled['status'] == 'cancelled' and cancelled['cancel_requested']
@@ -71,6 +76,7 @@ p = stk.projects.open({str(store.directory)!r})
 request = p.requests.list()['requests'][0]
 assert request['status'] == 'cancelled' and request['executor_id'] is None
 assert request['result'] is None and p.requests.get(request['id']) == request
+assert p.requests.progress(request['id']) == {{'request': request, 'progress': None}}
 assert len(p.discussion.list()['messages']) == 1
 ''')
     assert result["run"]["state"] == "succeeded", scripts.call("script.read", {"session": session})["text"]

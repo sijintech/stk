@@ -10,7 +10,7 @@ from suan.project.request_executor import ConfirmedCancellation
 from suan.scripting import Project
 from test_desktop_bridge import bridge_env, inproc  # noqa: F401
 from test_project_contexts import model, capture  # noqa: F401
-from test_request_executor import ControlledAdapter, eventually, idle
+from test_request_executor import ControlledAdapter, StreamingAdapter, eventually, idle
 from test_desktop_scripts import scripts, execute  # noqa: F401
 
 
@@ -39,7 +39,8 @@ def test_missing_credentials_status_and_closed_handles_never_claim(inproc, model
     assert p.requests.get(saved['id']) == saved
     assert p.requests.recover(saved['id']) == saved
     assert h.call('project.close', {'handle': p.handle})['closed']
-    for method, extra in [('provider', {}), ('start', {'request_id': saved['id']}), ('recover', {'request_id': saved['id']})]:
+    for method, extra in [('provider', {}), ('start', {'request_id': saved['id']}), ('recover', {'request_id': saved['id']}),
+                          ('progress', {'request_id': saved['id']})]:
         assert h.error('project.requests.' + method, {'handle': p.handle, **extra})['code'] == 'not_found'
     assert store.snapshot() == before and store.history() == history
     assert h.events_of('project.changed') == [] and not h.violations
@@ -134,6 +135,7 @@ try:
 except ScriptError:
     pass
 assert p.requests.get(r['id']) == r
+assert p.requests.progress(r['id']) == {'request': r, 'progress': None}
 assert p.requests.recover(r['id']) == r
 ''', project_handle=info['handle'])
     assert result['run']['state'] == 'succeeded', scripts.call('script.read', {'session': session})['text']
@@ -149,15 +151,15 @@ assert p.requests.recover(r['id']) == r
 def test_registered_provider_wire_to_saved_result(inproc, model, monkeypatch, outcome, status, code):
     import http.client
     from suan.project import aliyun
-    from test_aliyun import WireSocket, completion
+    from test_aliyun import WireSocket, stream_records, sse_body
     key = 'sk-sp-isolated-test-credential'
     monkeypatch.setenv(API_KEY_ENV, key)
-    payload = completion()
+    payload = stream_records()
     if outcome == 'truncated':
-        payload['choices'][0]['finish_reason'] = 'length'
+        payload[1]['choices'][0]['finish_reason'] = 'length'
     http_status = {'rejected': 401, 'server-uncertain': 503}.get(outcome, 200)
-    body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-    socket = WireSocket((f'HTTP/1.1 {http_status} fixture\r\nContent-Type: application/json\r\n'
+    body = sse_body(payload)
+    socket = WireSocket((f'HTTP/1.1 {http_status} fixture\r\nContent-Type: text/event-stream\r\n'
                          f'Content-Length: {len(body)}\r\n\r\n').encode('ascii') + body)
     connections = []
     def connection():
@@ -176,14 +178,99 @@ def test_registered_provider_wire_to_saved_result(inproc, model, monkeypatch, ou
     assert result['status'] == status and result['error_code'] == code
     if status == 'completed':
         message = p.discussion.get(result['result']['message_id'])
-        assert message['text'] == payload['choices'][0]['message']['content']
+        assert message['text'] == '温度 300 K。'
         assert message['context_id'] == saved['context_id']
-        assert result['result']['metadata']['remote_request_id'] == payload['id']
+        assert result['result']['metadata']['remote_request_id'] == payload[0]['id']
     else:
         assert result['result'] is None and len(p.discussion.list()['messages']) == 1
     assert p.requests.start(saved['id']) == result and len(connections) == 1
     headers, sent = b''.join(socket.sent).split(b'\r\n\r\n', 1)
     assert headers.startswith(b'POST /compatible-mode/v1/chat/completions HTTP/1.1')
-    assert json.loads(sent)['model'] == 'fixture-model' and key.encode() not in sent
+    assert json.loads(sent)['model'] == 'fixture-model' and json.loads(sent)['stream'] is True and key.encode() not in sent
     assert key not in json.dumps(result) and store.snapshot() == before and store.history() == history
     assert not h.violations and h.events_of('project.changed') == []
+
+
+def test_bridge_progress_tracks_original_handle_owner_and_never_publishes_partial_messages(inproc, model, monkeypatch):
+    h = inproc()
+    p, saved = prepare(h, model)
+    adapter = StreamingAdapter(["正在", "分析"], "正在分析，完成")
+    executor = h.bridge.projects._executor
+    executor._adapters[ALIYUN_ADAPTER] = adapter
+    store, _ = model
+    before, history = store.snapshot(), store.history()
+    monkeypatch.setenv(API_KEY_ENV, 'test-credential-never-in-progress')
+    assert p.requests.progress(saved['id']) == {'request': saved, 'progress': None}
+    try:
+        p.requests.start(saved['id'])
+        assert adapter.emitted.wait(5)
+        observed = p.requests.progress(saved['id'])
+        assert observed['progress'] == {'executor_id': executor.executor_id, 'sequence': 2,
+                                         'text': '正在分析', 'text_bytes': 12}
+        assert len(p.discussion.list()['messages']) == 1
+        assert 'test-credential-never-in-progress' not in json.dumps(observed)
+        other_bridge = inproc(state='other-progress-owner')
+        foreign = other_bridge.call('project.open', {'directory': str(store.directory)})['project']
+        assert other_bridge.call('project.requests.progress', {'handle': foreign['handle'], 'request_id': saved['id']}) == {
+            'request': observed['request'], 'progress': None}
+        assert h.call('project.close', {'handle': p.handle})['closed']
+        assert h.error('project.requests.progress', {'handle': p.handle, 'request_id': saved['id']})['code'] == 'not_found'
+        other_project = h.call('project.create', {'directory': str(store.directory.parent / 'other'), 'name': 'Other'})['project']
+        assert h.error('project.requests.progress', {'handle': other_project['handle'], 'request_id': saved['id']})['code'] == 'invalid_params'
+        reopened = h.call('project.open', {'directory': str(store.directory)})['project']
+        assert reopened['handle'] != p.handle
+        p = Project(lambda method, params: h.call(method, params), reopened['handle'])
+        assert p.requests.progress(saved['id']) == observed
+        cancelled = p.requests.cancel(saved['id'])
+        adapter.on_text('，完成')
+        assert p.requests.progress(saved['id']) == {'request': cancelled, 'progress': None}
+    finally:
+        adapter.release.set()
+    eventually(lambda: idle(executor))
+    result = p.requests.progress(saved['id'])
+    assert result['progress'] is None and result['request']['status'] == 'completed'
+    assert result['request']['cancel_requested'] and p.discussion.get(saved['assistant_message_id'])['text'] == '正在分析，完成'
+    assert store.snapshot() == before and store.history() == history
+    assert not h.events_of('project.changed') and not h.violations and not other_bridge.violations
+
+
+def test_bridge_progress_after_shutdown_is_empty_in_a_new_executor(inproc, model):
+    h = inproc()
+    p, saved = prepare(h, model)
+    adapter = StreamingAdapter()
+    executor = h.bridge.projects._executor
+    executor._adapters[ALIYUN_ADAPTER] = adapter
+    p.requests.start(saved['id'])
+    assert adapter.emitted.wait(5)
+    assert p.requests.progress(saved['id'])['progress'] is not None
+    h.bridge.shutdown()
+    adapter.on_text('late ignored')
+    adapter.release.set()
+    eventually(lambda: idle(executor))
+    second = inproc(state='after-progress-shutdown')
+    store, _ = model
+    reopened = second.call('project.open', {'directory': str(store.directory)})['project']
+    result = second.call('project.requests.progress', {'handle': reopened['handle'], 'request_id': saved['id']})
+    assert result['progress'] is None and result['request']['status'] == 'uncertain'
+    assert len(store.discussion.list()['messages']) == 1 and len(adapter.inputs) == 1
+    assert not second.violations
+
+
+def test_bridge_capacity_error_leaves_ninth_request_pending(inproc, model):
+    from suan.project.request_executor import MAX_ACTIVE_REQUESTS
+    h = inproc()
+    prepared = [prepare(h, model) for _ in range(MAX_ACTIVE_REQUESTS + 1)]
+    adapter = ControlledAdapter()
+    executor = h.bridge.projects._executor
+    executor._adapters[ALIYUN_ADAPTER] = adapter
+    try:
+        for p, saved in prepared[:-1]:
+            assert p.requests.start(saved['id'])['status'] == 'running'
+        p, saved = prepared[-1]
+        error = h.error('project.requests.start', {'handle': p.handle, 'request_id': saved['id']})
+        assert error['code'] == 'busy' and '8-request limit' in error['message']
+        assert p.requests.progress(saved['id']) == {'request': saved, 'progress': None}
+    finally:
+        adapter.release.set()
+    eventually(lambda: idle(executor))
+    assert not h.violations

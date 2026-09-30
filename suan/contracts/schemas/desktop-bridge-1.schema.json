@@ -5407,6 +5407,48 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.requests.progress": {
+        "description": "Read validated saved request state and bounded unsaved text from this bridge executor, without sending, recovering, or querying a provider.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "request_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/projectRequest"
+            },
+            "progress": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectRequestProgress"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "request",
+            "progress"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -7808,6 +7850,35 @@
       "not": {
         "pattern": "//"
       }
+    },
+    "projectRequestProgress": {
+      "type": "object",
+      "properties": {
+        "executor_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "text_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        }
+      },
+      "required": [
+        "executor_id",
+        "sequence",
+        "text",
+        "text_bytes"
+      ],
+      "additionalProperties": false
     }
   }
 }

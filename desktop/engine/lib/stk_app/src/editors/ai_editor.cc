@@ -257,6 +257,7 @@ class AIEditor final : public Editor {
     const auto request = discussion.exchange_request();
     const auto question = discussion.exchange_question();
     const auto reply = discussion.exchange_reply();
+    const auto progress = discussion.exchange_progress();
     const auto context = discussion.exchange_context();
     const std::string id = io::get_string(request, "id"), status = io::get_string(request, "status");
     const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
@@ -264,7 +265,7 @@ class AIEditor final : public Editor {
     // Reserve region padding, the split gutter and the log scrollbar. Use the same
     // font as LogView; line breaks affect display only, never the saved reply.
     const float wrap_width = std::max(unit, width * (wide ? 0.68f : 1.0f) - 4 * unit);
-    const std::string content = question.dump() + reply.dump() + std::to_string(wrap_width) +
+    const std::string content = question.dump() + reply.dump() + progress.dump() + std::to_string(wrap_width) +
         std::to_string(unit) + std::string(ctx.tr("ai.you"));
     if (shown_exchange_ != content) {
       shown_exchange_ = content;
@@ -272,6 +273,9 @@ class AIEditor final : public Editor {
       std::string text;
       if (!question.empty()) { text += std::string(ctx.tr("ai.you")) + "\n" + io::get_string(question, "text") + "\n\n"; }
       if (!reply.empty()) { text += std::string(ctx.tr("ai.assistant")) + "\n" + io::get_string(reply, "text"); }
+      else if (!progress.empty() && !io::get_string(progress, "text").empty()) {
+        text += std::string(ctx.tr("ai.temporary_reply")) + "\n" + io::get_string(progress, "text");
+      }
       // Measure what the log actually displays: tabs expand before wrapping,
       // and terminal escape bytes do not count towards visible line width.
       ui::LogBuffer normalized(std::numeric_limits<size_t>::max());

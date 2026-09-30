@@ -132,6 +132,10 @@ class ProjectRequests:
     def get(self, request_id):
         return self._call("project.requests.get", {"handle": self.handle, "request_id": request_id})["request"]
 
+    def progress(self, request_id):
+        """Read saved state and bounded, unsaved stream text; never send or recover."""
+        return self._call("project.requests.progress", {"handle": self.handle, "request_id": request_id})
+
     def list(self, *, offset=0, limit=100):
         return self._call("project.requests.list", {"handle": self.handle, "offset": offset, "limit": limit})
 

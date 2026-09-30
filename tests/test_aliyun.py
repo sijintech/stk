@@ -364,3 +364,301 @@ def test_chunked_reply_and_optional_metadata(frozen, wire):
     socket = wire(raw=raw)
     result = send(frozen)
     assert result.text == "已检查保存的参数。" and result.metadata == {} and socket.closed
+
+
+def stream_chunk(content=None, *, role=None, finish=None, usage=None, **changes):
+    return {"id": "chatcmpl-stream-1", "object": "chat.completion.chunk", "model": "qwen-test-version",
+            "choices": ([{"index": 0, "finish_reason": finish, "delta": {"role": role, "content": content}}]
+                        if usage is None else []), "usage": usage, **changes}
+
+
+def stream_records():
+    return [stream_chunk("", role="assistant"), stream_chunk("温度"), stream_chunk(" 300 K。"),
+            stream_chunk("", finish="stop"),
+            stream_chunk(usage={"prompt_tokens": 80, "completion_tokens": 12, "total_tokens": 92}), "[DONE]"]
+
+
+def sse_body(records=None, newline=b"\n"):
+    return b"".join(b"data: " + (value.encode() if isinstance(value, str)
+                                    else json.dumps(value, ensure_ascii=False).encode("utf-8"))
+                    + newline * 2 for value in (stream_records() if records is None else records))
+
+
+def stream_wire(wire, records=None, *, body=None, pieces=None, headers=b"", length=None, **kwargs):
+    body = sse_body(records) if body is None else body
+    if pieces is None:
+        framing = b"Content-Length: " + str(len(body) if length is None else length).encode() + b"\r\n"
+    else:
+        framing = b"Transfer-Encoding: chunked\r\n"
+        body = b"".join(f"{len(piece):x}\r\n".encode() + piece + b"\r\n" for piece in pieces) + b"0\r\n\r\n"
+    return wire(raw=b"HTTP/1.1 200 fixture\r\nContent-Type: text/event-stream; charset=utf-8\r\n"
+                    + framing + headers + b"\r\n" + body, **kwargs)
+
+
+def send_stream(frozen, deltas, cancel=None):
+    return aliyun.AliyunTokenPlanAdapter().send_stream(frozen, cancel or threading.Event(), deltas.append)
+
+
+def test_stream_payload_is_frozen_and_only_validated_deltas_reach_observer(frozen, wire, monkeypatch):
+    prepared = aliyun.AliyunTokenPlanAdapter().prepare(frozen)
+    monkeypatch.setenv(aliyun.API_KEY_ENV, "sk-sp-later-test-credential")
+    monkeypatch.setenv(aliyun.MODEL_ENV, "later-model")
+    monkeypatch.setenv("HTTPS_PROXY", "http://unwanted-proxy:8080")
+    socket = stream_wire(wire)
+    deltas = []
+    reply = prepared.send_stream(frozen, threading.Event(), deltas.append)
+    headers, body = b"".join(socket.sent).split(b"\r\n\r\n", 1)
+    assert b"Authorization: Bearer " + KEY.encode() + b"\r\n" in headers
+    assert b"Accept: text/event-stream\r\n" in headers
+    assert b"Host: token-plan.cn-beijing.maas.aliyuncs.com\r\n" in headers
+    payload = json.loads(body)
+    assert payload["stream"] is True and payload["stream_options"] == {"include_usage": True}
+    assert payload["enable_thinking"] is False and payload["model"] == "qwen-test"
+    assert payload["max_tokens"] == 128 and payload["temperature"] == 0.25
+    assert json.loads(payload["messages"][1]["content"]) == {
+        "saved_context": frozen["context"], "question": frozen["message"]["text"]}
+    assert KEY.encode() not in body and "later-model" not in body.decode()
+    assert deltas == ["温度", " 300 K。"] and reply.text == "".join(deltas)
+    assert reply.metadata == {"remote_request_id": "chatcmpl-stream-1", "model": "qwen-test-version",
+                              "input_tokens": 80, "output_tokens": 12}
+    assert socket.closed and all(stream.closed for stream in socket.streams) and len(wire.connections) == 1
+    frozen["message"]["text"] = "Changed after preflight"
+    with pytest.raises(DefinitiveFailure, match="no longer matches"):
+        prepared.send_stream(frozen, threading.Event(), deltas.append)
+    assert len(wire.connections) == 1
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"], ids=["lf", "crlf", "cr"])
+def test_stream_fragmentation_handles_utf8_lines_comments_and_multiline_data(frozen, wire, newline):
+    records = stream_records()
+    body = b"\xef\xbb\xbf: keepalive" + newline + b"id: ignored" + newline + b"retry: 1" + newline * 2
+    # Multiline JSON data is one SSE event, including UTF-8 split inside every character.
+    first = json.dumps(records[0]).encode().replace(b'"object":', b'\n"object":')
+    body += newline.join(b"data: " + line for line in first.split(b"\n")) + newline * 2
+    body += sse_body(records[1:], newline)
+    socket = stream_wire(wire, pieces=[body[i:i + 1] for i in range(len(body))])
+    observed = []
+    def progress(text):
+        assert socket.streams[0].tell() < len(socket.response)
+        observed.append(text)
+    reply = aliyun.AliyunTokenPlanAdapter().send_stream(frozen, threading.Event(), progress)
+    assert observed == ["温度", " 300 K。"] and reply.text == "".join(observed)
+    assert socket.closed and len(wire.connections) == 1
+
+
+def test_stream_accepts_optional_metadata_and_whitespace_deltas(frozen, wire):
+    records = [stream_chunk(" ", role="assistant"), stream_chunk("answer", finish="stop"), "[DONE]"]
+    for record in records[:-1]:
+        del record["id"], record["model"]
+        record["choices"][0]["delta"].update(tool_calls=[], refusal=None, reasoning_content="")
+    stream_wire(wire, records)
+    observed = []
+    reply = send_stream(frozen, observed)
+    assert observed == [" ", "answer"] and reply.text == " answer" and reply.metadata == {}
+
+
+@pytest.mark.parametrize("kind", ["length", "tools-finish", "tool", "function", "refusal", "audio", "reasoning",
+                                  "content-list", "surrogate", "no-role", "user-role", "extra-choice", "bool-index",
+                                  "changed-model", "unsafe-id", "missing-delta", "wrong-object", "provider-error",
+                                  "bool-tokens", "negative-tokens", "large-tokens", "bad-total", "missing-token",
+                                  "early-usage", "duplicate-usage", "early-done", "after-stop", "after-done",
+                                  "empty", "oversized"])
+def test_invalid_streams_never_become_complete_replies(frozen, wire, kind):
+    records = stream_records()
+    choice, delta = records[1]["choices"][0], records[1]["choices"][0]["delta"]
+    if kind in {"length", "tools-finish"}:
+        choice["finish_reason"] = "length" if kind == "length" else "tool_calls"
+    elif kind in {"tool", "function", "refusal", "audio", "reasoning"}:
+        key, value = {"tool": ("tool_calls", [{"function": {"name": "run"}}]),
+                      "function": ("function_call", {"name": "run"}), "refusal": ("refusal", "declined"),
+                      "audio": ("audio", {}), "reasoning": ("reasoning_content", "private reasoning")}[kind]
+        delta[key] = value
+    elif kind in {"content-list", "surrogate"}:
+        delta["content"] = [{"text": "wrong shape"}] if kind == "content-list" else "\ud800"
+    elif kind == "no-role":
+        records[0]["choices"][0]["delta"]["role"] = None
+    elif kind == "user-role":
+        delta["role"] = "user"
+    elif kind == "extra-choice":
+        records[1]["choices"].append(deepcopy(choice))
+    elif kind == "bool-index":
+        choice["index"] = False
+    elif kind == "changed-model":
+        records[1]["model"] = "different-model"
+    elif kind == "unsafe-id":
+        records[1]["id"] = "https://credential@example/"
+    elif kind == "missing-delta":
+        del choice["delta"]
+    elif kind == "wrong-object":
+        records[1]["object"] = "chat.completion"
+    elif kind == "provider-error":
+        records[1]["error"] = {"message": KEY}
+    elif kind in {"bool-tokens", "negative-tokens", "large-tokens", "bad-total", "missing-token"}:
+        usage = records[-2]["usage"]
+        if kind == "missing-token":
+            del usage["completion_tokens"]
+        else:
+            usage["total_tokens" if kind == "bad-total" else "completion_tokens"] = {
+                "bool-tokens": True, "negative-tokens": -1, "large-tokens": 2**63, "bad-total": "92"}[kind]
+    elif kind == "early-usage":
+        records.insert(1, records.pop(-2))
+    elif kind == "duplicate-usage":
+        records.insert(-1, deepcopy(records[-2]))
+    elif kind == "early-done":
+        records.insert(1, "[DONE]")
+    elif kind == "after-stop":
+        records.insert(-2, stream_chunk("late text"))
+    elif kind == "after-done":
+        records.append(stream_chunk("late text"))
+    elif kind == "empty":
+        records[1]["choices"][0]["delta"]["content"] = " "
+        records[2]["choices"][0]["delta"]["content"] = "\n"
+    else:
+        delta["content"] = "x" * (64 * 1024 + 1)
+    # ASCII encoding deliberately preserves malformed Unicode as JSON escapes.
+    body = b"".join(b"data: " + (record.encode() if isinstance(record, str)
+                                    else json.dumps(record).encode()) + b"\n\n" for record in records)
+    socket = stream_wire(wire, body=body)
+    observed = []
+    with pytest.raises(InvalidResponse) as error:
+        send_stream(frozen, observed)
+    assert KEY not in str(error.value) and error.value.__cause__ is None
+    assert socket.closed and len(wire.connections) == 1
+    if kind in {"tool", "function", "refusal", "audio", "reasoning", "length", "tools-finish", "oversized"}:
+        assert observed == []  # Reject the whole event before publishing its text.
+
+
+@pytest.mark.parametrize("kind", ["no-done", "no-stop-or-done", "unterminated-event", "short-http-body",
+                                  "incomplete-http-chunk"])
+def test_incomplete_streams_are_uncertain_not_success_or_confirmed_cancel(frozen, wire, kind):
+    records = stream_records()
+    body, length = sse_body(records), None
+    if kind == "no-done":
+        body = sse_body(records[:-1])
+    elif kind == "no-stop-or-done":
+        body = sse_body(records[:3])
+    elif kind == "unterminated-event":
+        body = body[:-1]
+    elif kind == "short-http-body":
+        length = len(body) + 100
+    if kind == "incomplete-http-chunk":
+        raw = (b"HTTP/1.1 200 fixture\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n"
+               + f"{len(body) + 100:x}\r\n".encode() + body)
+        socket = wire(raw=raw)
+    else:
+        socket = stream_wire(wire, body=body, length=length)
+    deltas, cancel = [], threading.Event()
+    def progress(text):
+        deltas.append(text)
+        cancel.set()
+    with pytest.raises(RuntimeError, match="outcome is uncertain"):
+        aliyun.AliyunTokenPlanAdapter().send_stream(frozen, cancel, progress)
+    assert "".join(deltas) == "温度 300 K。" and socket.closed and len(wire.connections) == 1
+
+
+@pytest.mark.parametrize("kind", ["invalid-json", "duplicate-key", "nonfinite", "invalid-utf8", "invalid-tail", "gzip",
+                                  "oversized-length", "oversized-body", "wrong-content-type"])
+def test_stream_framing_encoding_and_wire_bounds(frozen, wire, kind):
+    body, headers, length = sse_body(), b"", None
+    if kind == "invalid-json":
+        body = b"data: not-json " + KEY.encode() + b"\n\n"
+    elif kind == "duplicate-key":
+        body = b'data: {"choices":[],"choices":[]}\n\n'
+    elif kind == "nonfinite":
+        body = b'data: {"invalid":NaN}\n\n'
+    elif kind == "invalid-utf8":
+        body = b": invalid comment \xff\n\n"
+    elif kind == "invalid-tail":
+        body = b": invalid comment \xff"
+    elif kind == "gzip":
+        headers = b"Content-Encoding: gzip\r\n"
+    elif kind == "oversized-length":
+        length = aliyun.MAX_RESPONSE_BYTES + 1
+    elif kind == "oversized-body":
+        body = b":" + b"x" * aliyun.MAX_RESPONSE_BYTES
+    if kind == "wrong-content-type":
+        socket = wire()
+    elif kind == "oversized-body":
+        socket = stream_wire(wire, pieces=[body])
+    else:
+        socket = stream_wire(wire, body=body, headers=headers, length=length)
+    with pytest.raises(InvalidResponse) as error:
+        send_stream(frozen, [])
+    assert KEY not in str(error.value) and socket.closed and len(wire.connections) == 1
+
+
+@pytest.mark.parametrize("status", [401, 429, 302, 503])
+def test_stream_http_failures_never_leak_or_retry(frozen, wire, status):
+    socket = wire({"error": {"message": KEY}}, status=status,
+                  headers={"Location": "https://secret@unwanted-host/path"})
+    with pytest.raises(DefinitiveFailure if status in {401, 429} else RuntimeError) as error:
+        send_stream(frozen, [])
+    assert KEY not in str(error.value) and socket.closed and len(wire.connections) == 1
+
+
+def test_stream_cancellation_only_confirms_when_unsent(frozen, wire):
+    cancel, deltas = threading.Event(), []
+    cancel.set()
+    socket = stream_wire(wire)
+    with pytest.raises(ConfirmedCancellation):
+        send_stream(frozen, deltas, cancel)
+    assert not socket.sent and not wire.connections
+    cancel.clear()
+    socket = stream_wire(wire, on_connect=cancel.set)
+    with pytest.raises(ConfirmedCancellation):
+        send_stream(frozen, deltas, cancel)
+    assert not socket.sent and socket.closed
+    cancel.clear()
+    socket = stream_wire(wire, on_request=cancel.set)
+    reply = send_stream(frozen, deltas, cancel)
+    assert cancel.is_set() and reply.text == "".join(deltas) and socket.closed
+
+
+def test_stream_callback_failures_are_redacted_and_validator_failure_is_preserved(frozen, wire):
+    socket = stream_wire(wire)
+    def broken(text):
+        raise ValueError(KEY)
+    with pytest.raises(RuntimeError, match="outcome is uncertain") as error:
+        aliyun.AliyunTokenPlanAdapter().send_stream(frozen, threading.Event(), broken)
+    assert KEY not in str(error.value) and socket.closed
+    socket = stream_wire(wire)
+    def invalid(text):
+        raise InvalidResponse("Invalid text delta")
+    with pytest.raises(InvalidResponse, match="Invalid text delta"):
+        aliyun.AliyunTokenPlanAdapter().send_stream(frozen, threading.Event(), invalid)
+    assert socket.closed
+
+
+def test_stream_deadline_bounds_total_read_time(frozen, wire, monkeypatch):
+    clock, deltas = [0], []
+    monkeypatch.setattr(aliyun.time, "monotonic", lambda: clock[0])
+    records = stream_records()
+    socket = stream_wire(wire, pieces=[sse_body(records[:2]), sse_body(records[2:])])
+    def progress(text):
+        deltas.append(text)
+        clock[0] = aliyun.TIMEOUT_SECONDS + 1
+    with pytest.raises(RuntimeError, match="outcome is uncertain"):
+        aliyun.AliyunTokenPlanAdapter().send_stream(frozen, threading.Event(), progress)
+    assert deltas == ["温度"] and socket.closed and len(wire.connections) == 1
+
+
+def test_stream_size_limit_counts_aggregate_utf8_not_individual_chunks(frozen, wire):
+    records = [stream_chunk("汉" * 10000, role="assistant"), stream_chunk("汉" * 10000),
+               stream_chunk("汉" * 1845 + "x", finish="stop"), "[DONE]"]
+    stream_wire(wire, records)
+    deltas = []
+    reply = send_stream(frozen, deltas)
+    assert len(reply.text.encode("utf-8")) == 64 * 1024 and reply.text == "".join(deltas)
+    records[-2]["choices"][0]["delta"]["content"] += "x"
+    stream_wire(wire, records)
+    deltas = []
+    with pytest.raises(InvalidResponse):
+        send_stream(frozen, deltas)
+    assert len("".join(deltas).encode("utf-8")) == 60000
+
+
+def test_stream_bad_observer_fails_before_connection(frozen, wire):
+    socket = stream_wire(wire)
+    with pytest.raises(DefinitiveFailure, match="observer"):
+        aliyun.AliyunTokenPlanAdapter().send_stream(frozen, threading.Event(), None)
+    assert not socket.sent and not wire.connections

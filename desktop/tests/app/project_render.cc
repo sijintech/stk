@@ -30,7 +30,8 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (output.empty()) { return 2; }
-  const bool ai = editor == "ai" || editor == "ai_narrow";
+  const bool ai_stream = editor == "ai_stream";
+  const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream;
   const int canvas_width = editor == "ai_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
@@ -45,8 +46,27 @@ int main(int argc, char **argv)
   bo.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
   bo.executor = loop.executor();
   bo.strict = bo.validate = true;
-  auto client = bridge::Client::create(bo);
   std::string error;
+  const std::string stream_prefix = lang == "zh" ?
+      "已收到保存的上下文，正在生成回复。\n\n"
+      "第一组案例的温度是 300 K，第二组案例是 325 K，相差 25 K。"
+      "以下内容仍在生成，只是临时显示；完整回答尚未保存。\n\n"
+      "这份上下文没有包含模拟输出，因此不能据此判断结果差异。正在检查参数单位与来源……" :
+      "Reading the saved context and generating a reply.\n\n"
+      "The first case is 300 K and the second is 325 K, a difference of 25 K. "
+      "This text is still being generated and is shown temporarily; the complete answer has not been saved.\n\n"
+      "No simulation outputs were included, so result differences cannot be assessed. Checking units and sources...";
+  if (ai_stream) {
+    const auto python = bridge::find_python(bo.python, error);
+    if (!python) { fprintf(stderr, "FAIL: %s\n", error.c_str()); return 1; }
+    // The test wrapper installs a file-controlled adapter, never the network transport.
+    bo.command = {*python, std::string(STK_REPO_ROOT) + "/desktop/tests/bridge/stream_bridge.py",
+        dir.str(), "progress", "--stdio", "--state-dir", bo.state_dir, "--cache-dir", bo.cache_dir, "--strict"};
+    std::ofstream prefix(core::path_from_utf8(dir.str() + "/prefix.txt"), std::ios::binary);
+    prefix << stream_prefix;
+    if (!prefix) { fprintf(stderr, "FAIL: cannot write stream fixture\n"); return 1; }
+  }
+  auto client = bridge::Client::create(bo);
   if (!client->start(&error)) { fprintf(stderr, "FAIL: %s\n", error.c_str()); return 1; }
   gfx::Backend backend;
   if (!gfx::resolve_backend(backend_name, backend, error)) { return 2; }
@@ -236,7 +256,8 @@ int main(int argc, char **argv)
           std::optional<bridge::Result<io::Json>> result;
           client->call("project.requests.create", {{"handle", state.project()->handle}, {"request_id", id},
               {"message_id", discussion.message().at("id")},
-              {"configuration", {{"adapter", "test-controlled"}, {"model", "fixture-v1"}}}})
+              {"configuration", {{"adapter", ai_stream ? "aliyun-token-plan/1" : "test-controlled"},
+                                 {"model", "fixture-v1"}}}})
               .then([&](auto value) { result = value; });
           ok = ok && loop.pump_until([&] { return result.has_value(); }, 30) && result->ok();
         }
@@ -244,7 +265,26 @@ int main(int argc, char **argv)
         ok = ok && discussion.cancel_request(cancelled) && wait() && discussion.load_request(pending) && wait();
         ok = ok && discussion.load_page("requests") && wait() && discussion.page("requests").items.size() == 2;
         ok = ok && discussion.load_provider() && wait();
-        if (ai) {
+        if (ai_stream) {
+          // Use the registered executor and progress API. Leave the adapter at its
+          // first marker so the capture shows unsaved text, never a fabricated completion.
+          ok = ok && discussion.start_request(pending) && wait();
+          ok = ok && loop.pump_until([&] {
+            return std::filesystem::exists(core::path_from_utf8(dir.str() + "/first"));
+          }, 30);
+          ok = ok && discussion.load_exchange(pending) && loop.pump_until([&] {
+            discussion.pump(std::chrono::duration<double>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+            return !discussion.exchange_busy();
+          }, 30);
+          ok = ok && discussion.progress_supported() && discussion.exchange_reply().empty() &&
+               !discussion.exchange_progress().empty() &&
+               io::get_string(discussion.exchange_progress(), "text") == stream_prefix &&
+               io::get_string(discussion.exchange_request(), "status") == "running";
+          ok = ok && discussion.load_page("messages") && wait() && discussion.page("messages").items.size() == 1;
+          ok = ok && discussion.load_page("requests") && wait();
+        }
+        else if (ai) {
           // Controlled completion for rendering only; fixture credentials are empty.
           auto &scripts = shell.store().scripts();
           ok = ok && loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30);
@@ -458,6 +498,19 @@ int main(int argc, char **argv)
         else { ok = false; }
       }
       ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+      if (ai_stream) {
+        const auto *cancel = screen.ui()->find("a2/main/ai_cancel");
+        const auto *send = screen.ui()->find("a2/main/ai_send_saved");
+        const auto *transcript = screen.ui()->find("a2/main/ai_transcript");
+        bool temporary_label = false;
+        if (transcript && transcript->log) {
+          for (size_t line = 0; line < transcript->log->line_count(); ++line) {
+            temporary_label |= transcript->log->line(line).find(shell.store().tr("ai.temporary_reply")) != std::string_view::npos;
+          }
+        }
+        ok = ok && cancel && cancel->enabled && send && !send->enabled && temporary_label &&
+             state.discussion().exchange_reply().empty() && client->stats().schema_violations == 0;
+      }
       ok = ok && gfx::png_write(output, image);
     }
     if (!ok) { fprintf(stderr, "FAIL: %s %s\n%s", state.error().c_str(), error.c_str(), client->bridge_log().text().c_str()); rc = 1; }

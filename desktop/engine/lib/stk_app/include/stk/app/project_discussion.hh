@@ -22,6 +22,7 @@ class ProjectDiscussion {
   bool supported() const;
   bool requests_supported() const;
   bool generation_supported() const;
+  bool progress_supported() const;
   bool provider_loaded() const { return provider_loaded_; }
   const io::Json &provider() const { return provider_; }
   bool busy() const { return busy_; }
@@ -53,6 +54,7 @@ class ProjectDiscussion {
   const io::Json &exchange_context() const { return exchange_context_; }
   const io::Json &exchange_question() const { return exchange_question_; }
   const io::Json &exchange_reply() const { return exchange_reply_; }
+  const io::Json &exchange_progress() const { return exchange_progress_; }
   bool exchange_busy() const { return exchange_preparing_ || exchange_reading_ || exchange_pending_; }
   const std::string &exchange_error() const { return exchange_error_; }
   bool following() const { return exchange_following_; }
@@ -89,6 +91,7 @@ class ProjectDiscussion {
   bool provider_loaded_ = false;
   io::Json exchange_request_ = io::Json::object(), exchange_context_ = io::Json::object();
   io::Json exchange_question_ = io::Json::object(), exchange_reply_ = io::Json::object();
+  io::Json exchange_progress_ = io::Json::object();
   std::string exchange_id_, exchange_error_;
   uint64_t exchange_generation_ = 0, exchange_flight_ = 0;
   bool exchange_preparing_ = false, exchange_reading_ = false, exchange_pending_ = false;

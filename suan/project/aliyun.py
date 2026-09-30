@@ -15,7 +15,7 @@ import ssl
 import time
 
 from .contexts import _encode
-from .discussion import _message_text
+from .discussion import MAX_TEXT_BYTES, _message_text
 from .request_executor import ConfirmedCancellation, DefinitiveFailure, InvalidResponse, TextResponse
 from .requests import MAX_INPUT_BYTES, PROMPT_VERSION, _configuration, _identifier, _validate_metadata
 from .store import ProjectError
@@ -95,7 +95,11 @@ def _payload(frozen_input):
         # JSON nesting escapes strings again; input and wire bounds are separate.
         if len(payload) > MAX_INPUT_BYTES * 2:
             raise ValueError
-        return payload, hashlib.sha256(encoded).digest()
+        body.update(stream=True, stream_options={"include_usage": True})
+        stream_payload = _encode(body)
+        if len(stream_payload) > MAX_INPUT_BYTES * 2:
+            raise ValueError
+        return payload, stream_payload, hashlib.sha256(encoded).digest()
     except ProjectError:
         raise
     except (KeyError, TypeError, ValueError, RecursionError, UnicodeError):
@@ -117,16 +121,21 @@ def _remaining(deadline):
     return remaining
 
 
-def _read_response(transport_socket, response, deadline):
+def _response_length(response, content_type):
     if response.getheader("Content-Encoding", "identity").lower() != "identity":
         raise InvalidResponse("Unsupported response encoding")
-    if response.getheader("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
-        raise InvalidResponse("Expected a JSON text response")
+    if response.getheader("Content-Type", "").split(";", 1)[0].strip().lower() != content_type:
+        raise InvalidResponse("Unexpected response content type")
     length = response.getheader("Content-Length")
     if length is not None:
         if not re.fullmatch(r"[0-9]{1,10}", length) or int(length) > MAX_RESPONSE_BYTES:
             raise InvalidResponse("Response exceeds the size limit or has invalid framing")
         length = int(length)
+    return length
+
+
+def _read_response(transport_socket, response, deadline):
+    length = _response_length(response, "application/json")
     chunks, size = [], 0
     while True:
         transport_socket.settimeout(_remaining(deadline))
@@ -189,13 +198,156 @@ def _response(raw):
         raise InvalidResponse("Provider did not return one complete text response") from None
 
 
+def _stream_events(transport_socket, response, deadline):
+    """Decode bounded SSE records across arbitrary HTTP/UTF-8 boundaries.
+
+    SSE comments and unknown fields are inert. In particular, ``retry`` and
+    ``id`` never cause reconnects. Only a blank line dispatches a data event.
+    """
+    length = _response_length(response, "text/event-stream")
+    size, line, data, skip_lf, first_line = 0, bytearray(), [], False, True
+    while True:
+        transport_socket.settimeout(_remaining(deadline))
+        chunk = response.read1(min(65536, MAX_RESPONSE_BYTES + 1 - size))
+        if not chunk:
+            # Even a clean HTTP EOF is not evidence of a completed model call.
+            if length is not None and size != length:
+                raise RuntimeError
+            if line or data:
+                try:
+                    line.decode("utf-8")
+                except UnicodeError:
+                    raise InvalidResponse("Invalid UTF-8 in streaming response") from None
+                raise RuntimeError
+            return
+        size += len(chunk)
+        if size > MAX_RESPONSE_BYTES:
+            raise InvalidResponse("Response exceeds the size limit")
+        for byte in chunk:
+            if skip_lf:
+                skip_lf = False
+                if byte == 10:
+                    continue
+            if byte not in (10, 13):
+                line.append(byte)
+                continue
+            skip_lf = byte == 13
+            try:
+                value = line.decode("utf-8")
+            except UnicodeError:
+                raise InvalidResponse("Invalid UTF-8 in streaming response") from None
+            line.clear()
+            if first_line:
+                value = value.removeprefix("\ufeff")
+                first_line = False
+            if not value:
+                if data:
+                    yield "\n".join(data)
+                    data.clear()
+                continue
+            name, separator, value = value.partition(":")
+            if name == "data":
+                if separator and value.startswith(" "):
+                    value = value[1:]
+                data.append(value)
+
+
+def _stream_response(transport_socket, response, deadline, on_text):
+    """Publish provisional deltas; return only after stop, DONE and clean framing."""
+    parts, metadata = [], {}
+    text_size, stopped, done, role_seen, usage_seen = 0, False, False, False, False
+    for event in _stream_events(transport_socket, response, deadline):
+        try:
+            if done:
+                raise ValueError
+            if event == "[DONE]":
+                if not stopped or not role_seen:
+                    raise ValueError
+                done = True
+                continue
+            data = json.loads(event, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
+            if (not isinstance(data, dict) or data.get("object") != "chat.completion.chunk"
+                    or data.get("error")):
+                raise ValueError
+            observed = {}
+            for source, target in (("id", "remote_request_id"), ("model", "model")):
+                if source in data:
+                    observed[target] = data[source]
+            observed = _validate_metadata(observed)
+            if any(key in metadata and metadata[key] != value for key, value in observed.items()):
+                raise ValueError
+            metadata.update(observed)
+            choices, usage = data["choices"], data.get("usage")
+            if not isinstance(choices, list):
+                raise ValueError
+            if not choices:
+                if not stopped or usage_seen or not isinstance(usage, dict):
+                    raise ValueError
+                counts = {}
+                for source, target in (("prompt_tokens", "input_tokens"),
+                                       ("completion_tokens", "output_tokens")):
+                    counts[target] = usage[source]
+                # This count is not persisted, but still must be a valid integer.
+                if "total_tokens" in usage:
+                    _validate_metadata({"input_tokens": usage["total_tokens"]})
+                metadata.update(_validate_metadata(counts))
+                usage_seen = True
+                continue
+            if stopped or len(choices) != 1 or usage is not None:
+                raise ValueError
+            choice = choices[0]
+            if (not isinstance(choice, dict) or type(choice.get("index")) is not int
+                    or choice["index"] != 0 or choice.get("finish_reason") not in (None, "stop")):
+                raise ValueError
+            delta = choice["delta"]
+            if (not isinstance(delta, dict) or delta.get("role") not in (None, "assistant")
+                    or delta.get("tool_calls") not in (None, [])
+                    or delta.get("function_call") is not None or delta.get("audio") is not None
+                    or delta.get("refusal") is not None
+                    or delta.get("reasoning_content") not in (None, "")):
+                raise ValueError
+            role_seen = role_seen or delta.get("role") == "assistant"
+            text = delta.get("content")
+            if text is not None and not isinstance(text, str):
+                raise ValueError
+            if text:
+                if not role_seen:
+                    raise ValueError
+                text_size += len(text.encode("utf-8"))
+                if text_size > MAX_TEXT_BYTES:
+                    raise ValueError
+            stopped = choice.get("finish_reason") == "stop"
+        except (KeyError, TypeError, ValueError, RecursionError, UnicodeError, ProjectError):
+            raise InvalidResponse("Provider did not return one complete text stream") from None
+        if text:
+            parts.append(text)
+            # Exceptions from a local observer are transport uncertainty, not a
+            # definitive statement about whether the provider completed work.
+            on_text(text)
+    if not done:
+        raise RuntimeError
+    try:
+        return TextResponse(_message_text("".join(parts)), metadata)
+    except ProjectError:
+        raise InvalidResponse("Provider did not return one complete text stream") from None
+
+
 @dataclass(frozen=True, repr=False)
 class _Prepared:
     key: str = field(repr=False)
     payload: bytes = field(repr=False)
+    stream_payload: bytes = field(repr=False)
     input_hash: bytes = field(repr=False)
 
     def send(self, frozen_input, cancel_event):
+        return self._send(frozen_input, cancel_event, None)
+
+    def send_stream(self, frozen_input, cancel_event, on_text):
+        if not callable(on_text):
+            raise DefinitiveFailure("A streaming observer is required")
+        return self._send(frozen_input, cancel_event, on_text)
+
+    def _send(self, frozen_input, cancel_event, on_text):
         # Even trusted callers cannot rebind a prepared credential/payload to a
         # different saved request after preflight or mutate the submitted bytes.
         try:
@@ -215,9 +367,10 @@ class _Prepared:
                 raise ConfirmedCancellation("Request was cancelled before submission")
             transport_socket = connection.sock
             transport_socket.settimeout(_remaining(deadline))
-            connection.request("POST", _PATH, body=self.payload,
+            connection.request("POST", _PATH, body=self.payload if on_text is None else self.stream_payload,
                                headers={"Authorization": "Bearer " + self.key,
-                                        "Content-Type": "application/json", "Accept": "application/json",
+                                        "Content-Type": "application/json",
+                                        "Accept": "application/json" if on_text is None else "text/event-stream",
                                         "Accept-Encoding": "identity", "Connection": "close"})
             transport_socket.settimeout(_remaining(deadline))
             response = connection.getresponse()
@@ -225,6 +378,8 @@ class _Prepared:
                 raise DefinitiveFailure("Provider rejected the request")
             if response.status != 200:
                 raise RuntimeError
+            if on_text is not None:
+                return _stream_response(transport_socket, response, deadline, on_text)
             return _response(_read_response(transport_socket, response, deadline))
         except (ConfirmedCancellation, DefinitiveFailure, InvalidResponse):
             raise
@@ -248,8 +403,12 @@ class _Prepared:
 class AliyunTokenPlanAdapter:
     def prepare(self, frozen_input):
         """Validate locally and bind credentials before the durable claim."""
-        payload, digest = _payload(frozen_input)
-        return _Prepared(_credential(), payload, digest)
+        payload, stream_payload, digest = _payload(frozen_input)
+        return _Prepared(_credential(), payload, stream_payload, digest)
 
     def send(self, frozen_input, cancel_event):
         return self.prepare(frozen_input).send(frozen_input, cancel_event)
+
+    def send_stream(self, frozen_input, cancel_event, on_text):
+        """Send once; nonempty text deltas are provisional until this returns."""
+        return self.prepare(frozen_input).send_stream(frozen_input, cancel_event, on_text)
