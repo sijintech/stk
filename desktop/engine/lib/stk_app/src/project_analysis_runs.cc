@@ -2,6 +2,7 @@
 #include "stk/app/project_analysis_runs.hh"
 
 #include "stk/app/app_store.hh"
+#include "stk/app/analysis_document.hh"
 #include "stk/app/jobs_spec.hh"
 #include "stk/app/project_state.hh"
 #include "stk/core/paths.hh"
@@ -26,9 +27,41 @@ bool same_json(const Json &a, const Json &b)
 {
   return io::python_json_dumps(a, true, true) == io::python_json_dumps(b, true, true);
 }
+bool bounded_run_metadata(const Json &run, const bool full)
+{
+  if (!run.is_object() || run.size() != (full ? 21 : 19)) { return false; }
+  for (const auto *key : {"id", "project_id", "analysis_id", "analysis_name", "snapshot_id", "snapshot_sha256", "plan_sha256",
+       "profile", "status", "created_at", "updated_at"}) {
+    if (!run.contains(key) || !run.at(key).is_string() || run.at(key).get_ref<const std::string &>().size() > 1024) { return false; }
+  }
+  for (const auto *key : {"started_at", "finished_at", "cancel_requested_at", "executor_id"}) {
+    if (!run.contains(key) || (!run.at(key).is_null() && (!run.at(key).is_string() ||
+        run.at(key).get_ref<const std::string &>().size() > 128))) { return false; }
+  }
+  if (!run.contains("source_revision") || !run.at("source_revision").is_number_integer() ||
+      !run.contains("budget") || !run.at("budget").is_object() || run.at("budget").size() != 2 ||
+      !run.at("budget").contains("max_seconds") || !run.at("budget").contains("max_output_bytes") ||
+      !run.at("budget").at("max_seconds").is_number_integer() || !run.at("budget").at("max_output_bytes").is_number_integer() ||
+      !run.contains("error") || !run.contains("result") ||
+      (full && (!run.contains("document") || !run.contains("bindings")))) { return false; }
+  const auto &error = run.at("error");
+  if (!error.is_null() && (!error.is_object() || error.size() != 2 || !error.contains("code") || !error.contains("message") ||
+      !error.at("code").is_string() || !error.at("message").is_string() ||
+      error.at("code").get_ref<const std::string &>().size() > 128 || error.at("message").get_ref<const std::string &>().size() > 4096)) { return false; }
+  const auto &receipt = run.at("result");
+  if (!receipt.is_null()) {
+    if (!receipt.is_object() || receipt.size() != 7) { return false; }
+    for (const auto *key : {"directory", "manifest_sha256", "graph_hash"}) {
+      if (!receipt.contains(key) || !receipt.at(key).is_string() || receipt.at(key).get_ref<const std::string &>().size() > 1024) { return false; }
+    }
+    for (const auto *key : {"has_payload", "has_errors"}) { if (!receipt.contains(key) || !receipt.at(key).is_boolean()) { return false; } }
+    for (const auto *key : {"output_count", "size_bytes"}) { if (!receipt.contains(key) || !receipt.at(key).is_number_integer()) { return false; } }
+  }
+  return true;
+}
 bool valid_run(const Json &run, const std::string &project, const bool full)
 {
-  if (!run.is_object() || io::get_string(run, "id").empty() || io::get_string(run, "project_id") != project ||
+  if (!bounded_run_metadata(run, full) || io::get_string(run, "id").empty() || io::get_string(run, "project_id") != project ||
       io::get_int(run, "source_revision", -1) < 0 || io::get_string(run, "analysis_id").empty() ||
       io::get_string(run, "snapshot_id").empty() || io::get_string(run, "plan_sha256").size() != 64 ||
       !run.contains("result") || !run.contains("error")) { return false; }
@@ -62,12 +95,21 @@ ProjectAnalysisRuns::~ProjectAnalysisRuns()
   if (future_) { future_->cancel(); }
 }
 void ProjectAnalysisRuns::changed() { ++version_; store_.changed(); }
+const Json &ProjectAnalysisRuns::result() const
+{
+  static const Json empty;
+  return result_inspection_ ? result_inspection_->result() : empty;
+}
+void ProjectAnalysisRuns::clear_result()
+{
+  result_inspection_.reset(); blob_dir_.clear(); ++result_generation_;
+}
 void ProjectAnalysisRuns::reset()
 {
   ++epoch_; ++selection_generation_;
   busy_ = uncertain_ = following_ = clock_seen_ = false;
   error_.clear(); pending_id_.clear(); blob_dir_.clear();
-  page_ = run_ = result_ = nullptr; snapshots_ = Json::array();
+  page_ = run_ = nullptr; snapshots_ = Json::array(); clear_result();
   reusable_inputs_.reset(); ++reusable_inputs_generation_;
   omitted_snapshots_ = 0; offset_ = 0; now_ = due_ = wake_scheduled = 0; deadline_ = -1;
   auto old = std::move(future_); future_.reset();
@@ -150,10 +192,10 @@ void ProjectAnalysisRuns::accept_run(const Json &value, const std::string &id)
     throw std::runtime_error("The frozen analysis run identity changed");
   }
   if (run_.is_null() || run_.at("id") != id) {
-    ++selection_generation_; result_ = nullptr; blob_dir_.clear();
+    ++selection_generation_; clear_result();
     reusable_inputs_.reset(); ++reusable_inputs_generation_;
   }
-  else if (!same_json(run_.at("result"), value.at("result"))) { result_ = nullptr; blob_dir_.clear(); }
+  else if (!same_json(run_.at("result"), value.at("result"))) { clear_result(); }
   run_ = value;
   if (!page_.is_null()) {
     for (auto &item : page_.at("runs")) {
@@ -301,29 +343,65 @@ bool ProjectAnalysisRuns::read_result()
   sync();
   if (run_.is_null() || run_.at("result").is_null()) { return false; }
   const auto id = run_.at("id").get<std::string>();
-  return call("project.analysis_runs.result", {{"run_id", id}}, [this, id](const Json &response) {
+  const auto selection = selection_generation_;
+  return call("project.analysis_runs.result", {{"run_id", id}}, [this, id, selection](const Json &response) {
+    if (selection != selection_generation_) { return; }
     const auto &run = response.at("run"), &document = response.at("result");
-    if (!document.is_object() || io::get_string(document, "schema") != "stk.graph-result/1" ||
-        !document.contains("outputs") || !document.at("outputs").is_object() || document.at("outputs").size() > 256 ||
-        !response.contains("blob_dir") || !response.at("blob_dir").is_string() ||
-        !core::path_from_utf8(response.at("blob_dir").get<std::string>()).is_absolute() ||
-        !run.contains("result") || !run.at("result").is_object() ||
-        io::get_string(document, "graph_sha256") != io::get_string(run.at("result"), "graph_hash") ||
-        io::get_string(document, "graph_hash") != "sha256:" + io::get_string(document, "graph_sha256")) {
-      throw std::runtime_error("Invalid archived analysis result");
+    if (!project_.project() || !valid_run(run, project_.project()->id, true) ||
+        io::get_string(run, "id") != id || run_.is_null() || io::get_string(run_, "id") != id ||
+        !run.at("result").is_object()) { throw std::runtime_error("Invalid archived analysis run"); }
+    // Bound both immutable plans before comparing or hashing their recursive values.
+    check_analysis_document_bounds(run.at("document"));
+    check_analysis_document_bounds(run_.at("document"));
+    analysis_input_reuse_plan(run, project_.project()->id);
+    analysis_input_reuse_plan(run_, project_.project()->id);
+    for (const auto *key : {"id", "project_id", "created_at", "analysis_id", "analysis_name", "snapshot_id", "snapshot_sha256", "profile", "plan_sha256"}) {
+      for (const auto *candidate : {&run, static_cast<const Json *>(&run_)}) {
+        if (!candidate->contains(key) || !candidate->at(key).is_string() || candidate->at(key).get_ref<const std::string &>().size() > 1024) {
+          throw std::runtime_error("Invalid frozen analysis metadata");
+        }
+      }
     }
+    for (const auto *candidate : {&run, static_cast<const Json *>(&run_)}) {
+      const auto &budget = candidate->at("budget");
+      if (!budget.is_object() || budget.size() != 2 || !budget.contains("max_seconds") || !budget.contains("max_output_bytes") ||
+          !budget.at("max_seconds").is_number_integer() || !budget.at("max_output_bytes").is_number_integer() ||
+          budget.at("max_seconds") != 300 || budget.at("max_output_bytes") != 268435456) {
+        throw std::runtime_error("Invalid frozen analysis budget");
+      }
+    }
+    for (const auto *key : {"id", "project_id", "source_revision", "created_at", "analysis_id", "analysis_name",
+         "document", "snapshot_id", "snapshot_sha256", "bindings", "profile", "budget", "plan_sha256"}) {
+      if (!same_json(run.at(key), run_.at(key))) { throw std::runtime_error("The frozen analysis run identity changed"); }
+    }
+    auto inspector = AnalysisResultInspection::from_result(run.at("document").at("outputs"), document);
+    const auto &receipt = run.at("result");
+    auto blob_dir = response.at("blob_dir").get<std::string>();
+    const auto graph_hash = io::graph_hash(run.at("document").at("graph"));
+    const bool has_errors = document.contains("errors") && !document.at("errors").is_null() && !document.at("errors").empty();
+    bool has_payload = false;
+    for (const auto &output : inspector->outputs()) { has_payload |= output.delivered && output.delivery_type == "payload"; }
+    if (!core::path_from_utf8(blob_dir).is_absolute() ||
+        io::get_string(document, "graph_hash") != graph_hash ||
+        io::get_string(document, "graph_sha256") != graph_hash.substr(7) ||
+        io::get_string(receipt, "graph_hash") != graph_hash.substr(7) ||
+        io::get_string(receipt, "manifest_sha256") != inspector->encoded_sha256() ||
+        io::get_int(receipt, "output_count", -1) != int64_t(document.at("outputs").size()) ||
+        io::get_int(receipt, "size_bytes", -1) < int64_t(inspector->encoded_bytes()) ||
+        receipt.at("has_payload") != has_payload || receipt.at("has_errors") != has_errors) {
+      throw std::runtime_error("The archived result does not match its verified receipt");
+    }
+    // All fallible semantic validation precedes publication. A failed refresh preserves the
+    // previously verified run/result/blob/model bundle; no stale JSON can acquire a new receipt.
     accept_run(run, id);
-    if (io::graph_hash(run_.at("document").at("graph")) != io::get_string(document, "graph_hash")) {
-      throw std::runtime_error("The result graph does not match the frozen analysis");
-    }
-    result_ = document; blob_dir_ = response.at("blob_dir").get<std::string>();
+    result_inspection_ = std::move(inspector); blob_dir_ = std::move(blob_dir); ++result_generation_;
   });
 }
 std::vector<std::string> ProjectAnalysisRuns::payload_outputs() const
 {
   std::vector<std::string> outputs;
-  if (!result_.is_object()) { return outputs; }
-  for (auto it = result_.at("outputs").begin(); it != result_.at("outputs").end(); ++it) {
+  if (!result().is_object()) { return outputs; }
+  for (auto it = result().at("outputs").begin(); it != result().at("outputs").end(); ++it) {
     if (io::get_string(it.value(), "type") == "payload" && it.value().contains("manifest") &&
         it.value().at("manifest").is_object()) { outputs.push_back(it.key()); }
   }
@@ -332,9 +410,9 @@ std::vector<std::string> ProjectAnalysisRuns::payload_outputs() const
 std::shared_ptr<const io::Payload> ProjectAnalysisRuns::decode_payload(const std::string &output)
 {
   sync();
-  if (!supported() || busy_ || result_.is_null() || blob_dir_.empty() || output.empty()) { return nullptr; }
+  if (!supported() || busy_ || result().is_null() || blob_dir_.empty() || output.empty()) { return nullptr; }
   try {
-    const auto &selected = result_.at("outputs").at(output);
+    const auto &selected = result().at("outputs").at(output);
     if (io::get_string(selected, "type") != "payload") { throw std::runtime_error("Select a payload output"); }
     const io::BlobCache blobs(core::path_from_utf8(blob_dir_));
     return std::make_shared<const io::Payload>(io::decode_manifest(selected.at("manifest"), blobs.provider(false)));

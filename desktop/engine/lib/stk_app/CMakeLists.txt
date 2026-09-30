@@ -18,6 +18,7 @@ add_library(stk_app STATIC
   src/analysis_graph_view.cc
   src/analysis_graph_canvas.cc
   src/analysis_input_reuse.cc
+  src/analysis_result_inspection.cc
   src/analysis_parameter_draft.cc
   src/app_store.cc
   src/bridge_status.cc

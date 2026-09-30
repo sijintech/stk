@@ -286,6 +286,15 @@ class AnalysisGraphEditor final : public Editor {
   };
   std::optional<InputReusePending> input_reuse_pending_;
   std::string input_reuse_notice_;
+  std::shared_ptr<const AnalysisResultInspection> result_view_;
+  uint64_t result_generation_ = 0, result_browser_generation_ = 0;
+  int result_output_ = -1, result_property_ = -1;
+  std::optional<AnalysisJsonPath> result_path_;
+  std::shared_ptr<const AnalysisJsonPropertyPage> result_properties_;
+  std::optional<AnalysisJsonDescription> result_scalar_description_;
+  AnalysisJsonText result_path_text_, result_scalar_text_;
+  size_t result_path_page_ = 0, result_scalar_page_ = 0;
+  std::string result_browser_error_;
   AnalysisGraphCanvas canvas_;
   AppStore *store_ = nullptr;
   std::shared_ptr<const AnalysisGraphView> canvas_view_;
@@ -683,6 +692,12 @@ class AnalysisGraphEditor final : public Editor {
       }
       else { input_reuse_notice_ = "analysis_inputs.not_adopted"; }
     }
+    if (result_view_ != runs_->result_inspection() || result_generation_ != runs_->result_generation()) {
+      result_view_ = runs_->result_inspection(); result_generation_ = runs_->result_generation();
+      result_output_ = result_property_ = -1; result_path_.reset(); result_properties_.reset();
+      result_scalar_description_.reset(); result_scalar_text_ = {}; result_path_text_ = {};
+      result_path_page_ = result_scalar_page_ = 0; result_browser_error_.clear(); ++result_browser_generation_;
+    }
     if (canvas_view_ != state_->view()) {
       canvas_view_ = state_->view();
       canvas_.set_view(canvas_view_);
@@ -1047,29 +1062,216 @@ class AnalysisGraphEditor final : public Editor {
       if (same_run() && runs_->read_result()) { output_index_ = -1; }
     }).disable(blocked || run.at("result").is_null());
     if (runs_->result().is_null()) { return; }
+    result_panel(box, ctx, same_run, blocked);
     const auto outputs = runs_->payload_outputs();
+    const auto archive_generation = runs_->result_generation();
+    const auto same_archive = [this, same_run, archive_generation] {
+      return same_run() && runs_->result_generation() == archive_generation;
+    };
     if (outputs.empty()) { box.paragraph(ctx.tr("analysis_runs.no_payload")); return; }
     std::vector<std::string> choices{std::string(ctx.tr("analysis_runs.choose_output"))};
     choices.insert(choices.end(), outputs.begin(), outputs.end());
     box.dropdown("analysis_run_output", std::move(choices), {[selected = output_index_ + 1] { return selected; },
-        [this, same_run, outputs](const int index) {
-      if (same_run() && index >= 0 && size_t(index) <= outputs.size()) { output_index_ = index - 1; }
+        [this, same_archive, outputs](const int index) {
+      if (same_archive() && index >= 0 && size_t(index) <= outputs.size()) { output_index_ = index - 1; }
     }}).disable(blocked);
     auto *screen = ctx.area.screen();
     box.paragraph(ctx.tr("analysis_runs.viewer_hint"));
-    box.button("analysis_run_show", ctx.tr("analysis_runs.show"), [this, same_run, shell, screen, outputs, id] {
-      if (!same_run() || output_index_ < 0 || size_t(output_index_) >= outputs.size()) { return; }
+    box.button("analysis_run_show", ctx.tr("analysis_runs.show"), [this, same_archive, shell, screen, outputs, id] {
+      if (!same_archive() || output_index_ < 0 || size_t(output_index_) >= outputs.size()) { return; }
       const auto target = shell->analysis_payload_target(screen);
       if (!target) { if (store_->toast) { store_->toast(target.error().message, ui::ToastKind::Warning); } return; }
       const auto output = outputs[size_t(output_index_)];
       const auto payload = runs_->decode_payload(output);
-      if (!payload || !same_run()) { return; }
+      if (!payload || !same_archive()) { return; }
       const auto label = io::get_string(runs_->run(), "analysis_name") + " · " + id.substr(0, 8) + " / " + output;
-      shell->open_analysis_payload(screen, runs_->handle(), target.value(), payload, label, same_run,
-          [this, same_run](bridge::Result<Json> result) {
-        if (same_run() && !result && store_->toast) { store_->toast(result.error().message, ui::ToastKind::Warning); }
+      shell->open_analysis_payload(screen, runs_->handle(), target.value(), payload, label, same_archive,
+          [this, same_archive](bridge::Result<Json> result) {
+        if (same_archive() && !result && store_->toast) { store_->toast(result.error().message, ui::ToastKind::Warning); }
       });
     }).disable(blocked || output_index_ < 0 || size_t(output_index_) >= outputs.size());
+  }
+
+  static bool result_container(const AnalysisJsonType type)
+  {
+    return type == AnalysisJsonType::Object || type == AnalysisJsonType::Array;
+  }
+
+  static const char *result_type_key(const AnalysisJsonType type)
+  {
+    switch (type) {
+      case AnalysisJsonType::Null: return "analysis_results.type.null";
+      case AnalysisJsonType::Boolean: return "analysis_results.type.boolean";
+      case AnalysisJsonType::Integer: return "analysis_results.type.integer";
+      case AnalysisJsonType::UnsignedInteger: return "analysis_results.type.unsigned";
+      case AnalysisJsonType::Float: return "analysis_results.type.float";
+      case AnalysisJsonType::String: return "analysis_results.type.string";
+      case AnalysisJsonType::Array: return "analysis_results.type.array";
+      case AnalysisJsonType::Object: return "analysis_results.type.object";
+    }
+    return "analysis_results.unknown";
+  }
+
+  void browse_result(AnalysisJsonPath path, const size_t offset = 0)
+  {
+    if (!result_view_) { return; }
+    try {
+      const auto description = result_view_->describe(path);
+      std::shared_ptr<const AnalysisJsonPropertyPage> properties;
+      AnalysisJsonText scalar;
+      if (result_container(description.type)) { properties = std::make_shared<const AnalysisJsonPropertyPage>(result_view_->children(path, offset)); }
+      else { scalar = result_view_->scalar_text(path); }
+      auto path_text = result_view_->path_text(path);
+      result_path_ = std::move(path); result_properties_ = std::move(properties); result_property_ = -1;
+      result_scalar_description_ = result_container(description.type) ? std::nullopt : std::optional(description);
+      result_scalar_text_ = std::move(scalar); result_path_text_ = std::move(path_text);
+      result_path_page_ = result_scalar_page_ = 0; result_browser_error_.clear(); ++result_browser_generation_; redraw();
+    }
+    catch (const std::exception &error) { result_browser_error_ = error.what(); redraw(); }
+  }
+
+  void select_result_property(const int index)
+  {
+    if (!result_view_ || !result_path_ || !result_properties_ || index < 0 || size_t(index) >= result_properties_->rows.size()) { return; }
+    try {
+      const auto &item = result_properties_->rows[size_t(index)];
+      AnalysisJsonText scalar;
+      if (!result_container(item.value.type)) {
+        auto path = *result_path_; path.push_back(item.component); scalar = result_view_->scalar_text(path);
+      }
+      result_property_ = index;
+      result_scalar_description_ = result_container(item.value.type) ? std::nullopt : std::optional(item.value);
+      result_scalar_text_ = std::move(scalar); result_scalar_page_ = 0; result_browser_error_.clear();
+      ++result_browser_generation_; redraw();
+    }
+    catch (const std::exception &error) { result_browser_error_ = error.what(); redraw(); }
+  }
+
+  void result_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &same_run, const bool blocked)
+  {
+    if (!result_view_) { return; }
+    auto *panel = layout.panel("analysis_result_inspection", ctx.tr("analysis_results.title"), true);
+    if (!panel) { return; }
+    const auto generation = result_generation_, browser = result_browser_generation_, navigation = navigation_generation_;
+    auto *shell = &ctx.area.shell();
+    const auto valid = [this, same_run, generation, browser, navigation, shell] {
+      return same_run() && !runs_->busy() && !store_->project().busy() && !shell->text_input_active() &&
+          state_->saved() && saved_section_ == 1 && navigation_generation_ == navigation &&
+          runs_->result_generation() == generation && result_generation_ == generation &&
+          result_browser_generation_ == browser && result_view_ == runs_->result_inspection();
+    };
+    const bool disabled = blocked || shell->text_input_active();
+    panel->paragraph(ctx.tr("analysis_results.hint"));
+    const auto model = result_view_;
+    if (model->outputs().empty()) { panel->paragraph(ctx.tr("analysis_results.empty")); }
+    else {
+      Rows rows;
+      for (const auto &output : model->outputs()) {
+        rows.push_back({output.name, std::string(ctx.tr(output.delivered ? "analysis_results.delivered" : "analysis_results.missing")),
+            output.delivery_type.empty() ? std::string(ctx.tr("analysis_results.unknown")) : output.delivery_type});
+      }
+      ui::TableSpec spec;
+      spec.columns = {{std::string(ctx.tr("analysis_graph.output")), 6},
+          {std::string(ctx.tr("analysis_results.delivery")), 8}, {std::string(ctx.tr("analysis_graph.type")), 8}};
+      spec.rows = int(rows.size()); spec.visible_rows = float(std::min(5, spec.rows)); spec.data_version = result_browser_generation_;
+      spec.cell = [rows = std::move(rows)](int row, int col) { return rows.at(size_t(row)).at(size_t(col)); };
+      spec.selected = {[selected = result_output_] { return selected; }, [this, valid, model](int index) {
+        if (!valid() || index < 0 || size_t(index) >= model->outputs().size()) { return; }
+        result_output_ = index;
+        const auto &output = model->outputs()[size_t(index)];
+        if (output.delivered) { browse_result(output.path); }
+        else {
+          result_path_.reset(); result_properties_.reset(); result_property_ = -1;
+          result_scalar_description_.reset(); result_scalar_text_ = {}; result_path_text_ = {};
+          result_browser_error_.clear(); ++result_browser_generation_; redraw();
+        }
+      }};
+      panel->table("analysis_result_outputs", std::move(spec)).disable(disabled);
+    }
+    if (result_output_ >= 0 && size_t(result_output_) < model->outputs().size()) {
+      const auto &output = model->outputs()[size_t(result_output_)];
+      if (!output.delivered) { panel->paragraph(ctx.tr("analysis_results.missing_hint")); }
+      if (output.content_not_loaded) { panel->paragraph(ctx.tr("analysis_results.not_loaded")); }
+      if (output.metadata_only) { panel->paragraph(ctx.tr("analysis_results.metadata")); }
+    }
+    auto &issues = panel->row();
+    issues.button("analysis_result_errors", ctx.tr("analysis_results.errors"), [this, valid, model] {
+      if (valid() && model->errors().present) { result_output_ = -1; browse_result(model->errors().path); }
+    }).disable(disabled || !model->errors().present);
+    issues.button("analysis_result_warnings", ctx.tr("analysis_results.warnings"), [this, valid, model] {
+      if (valid() && model->warnings().present) { result_output_ = -1; browse_result(model->warnings().path); }
+    }).disable(disabled || !model->warnings().present);
+    if (!result_browser_error_.empty()) { panel->paragraph(text(result_browser_error_)); }
+    if (!result_path_) { return; }
+    panel->label(ctx.tr("analysis_results.path"));
+    if (result_path_text_.total_bytes == 0) { panel->paragraph(ctx.tr("analysis_results.root")); }
+    else { panel->scope("analysis_result_path_text").paragraph(result_path_text_.pages.at(result_path_page_)); }
+    result_text_pages(*panel, ctx, valid, disabled, true);
+    auto &navigation_row = panel->row();
+    navigation_row.button("analysis_result_up", ctx.tr("analysis_results.up"), [this, valid] {
+      if (valid() && result_path_ && !result_path_->empty()) { auto path = *result_path_; path.pop_back(); browse_result(std::move(path)); }
+    }).disable(disabled || result_path_->empty());
+    navigation_row.button("analysis_result_open", ctx.tr("analysis_results.open"), [this, valid] {
+      if (!valid() || !result_path_ || !result_properties_ || result_property_ < 0 ||
+          size_t(result_property_) >= result_properties_->rows.size()) { return; }
+      const auto &property = result_properties_->rows[size_t(result_property_)];
+      auto path = *result_path_; path.push_back(property.component); browse_result(std::move(path));
+    }).disable(disabled || !result_properties_ || result_property_ < 0 ||
+        size_t(result_property_) >= result_properties_->rows.size());
+    if (result_properties_) {
+      const auto page = result_properties_;
+      panel->label(ctx.store.catalog().format("analysis_results.properties_page", {{"first", std::to_string(page->total ? page->offset + 1 : 0)},
+          {"last", std::to_string(page->offset + page->rows.size())}, {"total", std::to_string(page->total)}}));
+      ui::TableSpec spec;
+      spec.columns = {{std::string(ctx.tr("analysis_results.key")), 6}, {std::string(ctx.tr("analysis_graph.value")), 10},
+          {std::string(ctx.tr("analysis_graph.type")), 6}};
+      spec.rows = int(page->rows.size()); spec.visible_rows = float(std::max(1, std::min(6, spec.rows)));
+      spec.data_version = result_browser_generation_;
+      std::vector<std::string> types; for (const auto &item : page->rows) { types.emplace_back(ctx.tr(result_type_key(item.value.type))); }
+      spec.cell = [page, types = std::move(types)](int row, int column) {
+        const auto &item = page->rows.at(size_t(row));
+        if (column == 0) { return item.label + (item.label_truncated ? " …" : ""); }
+        if (column == 1) { return item.value.preview + (item.value.preview_truncated ? " …" : ""); }
+        return types.at(size_t(row));
+      };
+      spec.selected = {[selected = result_property_] { return selected; }, [this, valid](int index) {
+        if (valid()) { select_result_property(index); }
+      }};
+      panel->table("analysis_result_properties", std::move(spec)).disable(disabled);
+      auto &pages = panel->row();
+      pages.button("analysis_result_previous", ctx.tr("analysis_documents.previous"), [this, valid, page] {
+        if (valid() && result_path_ && page->offset) { browse_result(*result_path_, page->offset > 64 ? page->offset - 64 : 0); }
+      }).disable(disabled || page->offset == 0);
+      pages.button("analysis_result_next", ctx.tr("analysis_documents.next"), [this, valid, page] {
+        if (valid() && result_path_ && page->next_offset) { browse_result(*result_path_, *page->next_offset); }
+      }).disable(disabled || !page->next_offset);
+    }
+    if (result_scalar_description_) {
+      panel->label(std::string(ctx.tr("analysis_results.exact")) + " · " + std::string(ctx.tr(result_type_key(result_scalar_description_->type))));
+      panel->scope("analysis_result_scalar_text").paragraph(result_scalar_text_.pages.at(result_scalar_page_));
+      result_text_pages(*panel, ctx, valid, disabled, false);
+    }
+  }
+
+  void result_text_pages(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid, const bool disabled, const bool path)
+  {
+    const auto &value = path ? result_path_text_ : result_scalar_text_;
+    auto &index = path ? result_path_page_ : result_scalar_page_;
+    if (value.pages.size() <= 1) { return; }
+    layout.label(ctx.store.catalog().format("analysis_results.text_page", {{"page", std::to_string(index + 1)},
+        {"total", std::to_string(value.pages.size())}, {"bytes", std::to_string(value.total_bytes)}}));
+    auto &buttons = layout.row();
+    buttons.button(path ? "analysis_result_path_previous" : "analysis_result_scalar_previous", ctx.tr("analysis_documents.previous"), [this, valid, path] {
+      if (!valid()) { return; }
+      auto &page = path ? result_path_page_ : result_scalar_page_;
+      if (page) { --page; ++result_browser_generation_; redraw(); }
+    }).disable(disabled || index == 0);
+    buttons.button(path ? "analysis_result_path_next" : "analysis_result_scalar_next", ctx.tr("analysis_documents.next"), [this, valid, path] {
+      if (!valid()) { return; }
+      auto &page = path ? result_path_page_ : result_scalar_page_;
+      const auto &text = path ? result_path_text_ : result_scalar_text_;
+      if (page + 1 < text.pages.size()) { ++page; ++result_browser_generation_; redraw(); }
+    }).disable(disabled || index + 1 >= value.pages.size());
   }
 
   void documents_panel(ui::Layout &layout, EditorContext &ctx)

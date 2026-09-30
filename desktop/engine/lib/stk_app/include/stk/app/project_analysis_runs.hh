@@ -3,6 +3,7 @@
 
 #include "stk/bridge/client.hh"
 #include "stk/app/analysis_input_reuse.hh"
+#include "stk/app/analysis_result_inspection.hh"
 
 namespace stk::io { class Payload; }
 namespace stk::app {
@@ -33,7 +34,9 @@ class ProjectAnalysisRuns {
   const io::Json &run() const { return run_; }
   const io::Json &snapshots() const { return snapshots_; }
   size_t omitted_snapshots() const { return omitted_snapshots_; }
-  const io::Json &result() const { return result_; }
+  const io::Json &result() const;
+  const std::shared_ptr<const AnalysisResultInspection> &result_inspection() const { return result_inspection_; }
+  uint64_t result_generation() const { return result_generation_; }
   const std::optional<AnalysisReusedInputs> &reusable_inputs() const { return reusable_inputs_; }
   uint64_t reusable_inputs_generation() const { return reusable_inputs_generation_; }
   std::vector<std::string> payload_outputs() const;
@@ -61,6 +64,7 @@ class ProjectAnalysisRuns {
 
  private:
   void reset();
+  void clear_result();
   void changed();
   void accept_run(const io::Json &value, const std::string &run_id);
   bool call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done,
@@ -74,13 +78,14 @@ class ProjectAnalysisRuns {
   bridge::Client *client_ = nullptr;
   std::string handle_, session_, error_, pending_id_, blob_dir_;
   uint64_t epoch_ = 0, version_ = 0, selection_generation_ = 0;
-  uint64_t reusable_inputs_generation_ = 0;
+  uint64_t reusable_inputs_generation_ = 0, result_generation_ = 0;
+  std::shared_ptr<const AnalysisResultInspection> result_inspection_;
   std::optional<AnalysisReusedInputs> reusable_inputs_;
   bool busy_ = false, uncertain_ = false, following_ = false, clock_seen_ = false;
   double now_ = 0, due_ = 0, deadline_ = -1;
   int64_t offset_ = 0;
   size_t omitted_snapshots_ = 0;
-  io::Json page_, run_, result_, snapshots_ = io::Json::array();
+  io::Json page_, run_, snapshots_ = io::Json::array();
   std::optional<bridge::Future<io::Json>> future_;
 };
 }  // namespace stk::app
