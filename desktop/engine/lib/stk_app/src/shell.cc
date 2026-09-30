@@ -224,6 +224,18 @@ bridge::Result<io::Json> AppShell::restore_split_layout(wm::Screen *screen)
   return io::Json{{"restored", restored}};
 }
 
+void AppShell::activate_editor_later(wm::Screen *screen, std::string editor_id, const bool maximize,
+                                     std::function<bool()> valid)
+{
+  if (!screen || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
+  const std::weak_ptr<bool> weak = alive_;
+  screen->defer([this, weak, screen, editor_id = std::move(editor_id), maximize, valid = std::move(valid)] {
+    if (!weak.lock() || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
+    const auto result = activate_editor(screen, editor_id, maximize);
+    if (!result && store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
+  });
+}
+
 void AppShell::open_saved_review(wm::Screen *screen, std::string handle, const int64_t expected_revision,
                                  io::Json draft, const uint64_t expected_review_generation,
                                  std::function<bool()> valid, ScriptState::Completion complete)
@@ -732,6 +744,7 @@ std::vector<ui::MenuEntry> AppShell::view_menu(wm::Screen &screen)
   m.push_back({std::string(store_.tr("app.menu.view.focus_analysis")), [focus] { focus(kEditorViewer); }});
   m.push_back({std::string(store_.tr("app.menu.view.restore_split_layout")), [focus] { focus(""); },
                screen.maximized() != nullptr});
+  m.push_back({std::string(store_.tr("editor.analysis_graph.title")), [focus] { focus(kEditorAnalysisGraph); }});
   wm::Area *active = screen.maximized() ? screen.maximized() : screen.active_area();
   auto *ea = dynamic_cast<EditorArea *>(active);
   const bool maxed = screen.maximized() != nullptr;

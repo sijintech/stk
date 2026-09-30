@@ -14,6 +14,7 @@
 #include "stk/core/paths.hh"
 #include "stk/io/blob_cache.hh"
 #include "stk/io/catalog.hh"
+#include "stk/io/graph.hh"
 #include "stk/io/payload.hh"
 #include "stk/ui/form_json.hh"
 
@@ -31,6 +32,38 @@ constexpr size_t kMaxCachedResults = 32;
 std::string dumps(const Json &j)
 {
   return io::python_json_dumps(j, true, true);
+}
+
+bool same_graph_configuration(const ViewerGraphConfiguration &a, const ViewerGraphConfiguration &b)
+{
+  const auto &x = a.source, &y = b.source;
+  return x.kind == y.kind && x.path == y.path && x.field_file == y.field_file &&
+      x.connection == y.connection && x.node == y.node && x.workspace_id == y.workspace_id &&
+      x.task_id == y.task_id && x.series == y.series && a.preset_id == b.preset_id &&
+      a.requested_outputs == b.requested_outputs && dumps(a.graph) == dumps(b.graph) &&
+      dumps(a.parameters) == dumps(b.parameters);
+}
+
+std::optional<bool> verify_shown_graph(const ViewerGraphConfiguration &configuration,
+                                     const io::GraphResult &result)
+{
+  const auto hex_digest = [](const std::string &text) {
+    return text.size() == 64 && std::all_of(text.begin(), text.end(), [](const char c) {
+      return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    });
+  };
+  if (result.graph_hash.rfind("sha256:", 0) != 0 || !hex_digest(result.graph_hash.substr(7)) ||
+      !hex_digest(result.graph_sha256)) {
+    return std::nullopt;
+  }
+  if (result.graph_hash.substr(7) != result.graph_sha256) { return false; }
+  try {
+    return io::graph_hash(configuration.graph) == result.graph_hash;
+  }
+  catch (const std::exception &) {
+    // Metadata is not an evaluation. Unhashable local metadata cannot verify a receipt.
+    return std::nullopt;
+  }
 }
 
 bool ends_with(const std::string &s, const std::string &suffix)
@@ -331,6 +364,7 @@ struct ViewerState::Impl {
   struct Running {
     std::string eval_id, key, reason;
     Json params;
+    std::optional<ViewerGraphConfiguration> configuration;
     double t0 = 0.0;
     bridge::Future<bridge::HubPolicy> policy_future;
     bridge::Future<bridge::EvaluateResult> future;
@@ -341,6 +375,9 @@ struct ViewerState::Impl {
   std::optional<EvalRecord> last;
   std::optional<io::GraphResult> result;
   Json shown_params;
+  std::optional<ViewerGraphConfiguration> shown_configuration;
+  Json shown_resolved_parameters;
+  mutable std::shared_ptr<const ViewerGraphInspection> inspection;
   std::string eval_error;
   int started = 0, cancelled = 0, prefetched = 0;
 
@@ -350,6 +387,8 @@ struct ViewerState::Impl {
     EvalRecord record;
     Json step;
     Json params;
+    std::optional<ViewerGraphConfiguration> configuration;
+    Json resolved_parameters;
     uint64_t use = 0;
   };
   std::map<std::string, Frame> cache;
@@ -553,6 +592,13 @@ struct ViewerState::Impl {
     }
     const auto it = p->raw.find("graph");
     return it != p->raw.end() && it->is_object() ? &*it : nullptr;
+  }
+
+  std::optional<ViewerGraphConfiguration> graph_configuration(const Json &params) const
+  {
+    const auto *document = source.evaluates() ? graph() : nullptr;
+    if (!document) { return std::nullopt; }
+    return ViewerGraphConfiguration{source, preset_id, *document, params, payload_outputs()};
   }
 
   std::string binding_name() const
@@ -815,6 +861,8 @@ struct ViewerState::Impl {
   {
     result = f.result;
     shown_params = f.params;
+    shown_configuration = f.configuration;
+    shown_resolved_parameters = f.resolved_parameters;
     base = f.payload;
     apply_display();
     last = std::move(record);
@@ -998,6 +1046,7 @@ struct ViewerState::Impl {
     run.key = key;
     run.reason = reason;
     run.params = params;
+    run.configuration = graph_configuration(params);
     run.t0 = now();
     const std::string eval_id = ep.eval_id;
     started++;
@@ -1092,6 +1141,7 @@ struct ViewerState::Impl {
     }
     if (!r.ok()) {
       if (r.error().code == bridge::ErrorCode::Cancelled) {
+        changed();
         return;
       }
       if (is_main) {
@@ -1148,6 +1198,11 @@ struct ViewerState::Impl {
       return;
     }
     f.params = run.params;
+    f.configuration = std::move(run.configuration);
+    f.resolved_parameters = run.params;
+    for (const auto &[name, parameter] : f.result.parameters) {
+      f.resolved_parameters[name] = parameter.value;
+    }
     if (!step_param.empty()) {
       const auto it = f.result.parameters.find(step_param);
       f.step = it != f.result.parameters.end() ? it->second.value : run.params.value(step_param, Json());
@@ -1346,6 +1401,10 @@ struct ViewerState::Impl {
     try {
       doc = io::read_json_file(result_file);
       f.result = io::GraphResult::from_json(doc);
+      f.resolved_parameters = Json::object();
+      for (const auto &[name, parameter] : f.result.parameters) {
+        f.resolved_parameters[name] = parameter.value;
+      }
     }
     catch (const std::exception &e) {
       err = e.what();
@@ -1715,6 +1774,8 @@ void ViewerState::close()
   m.choices.clear();
   m.shown_step = Json();
   m.shown_params = Json();
+  m.shown_configuration.reset();
+  m.shown_resolved_parameters = Json();
   m.result.reset();
   m.last.reset();
   m.base.reset();
@@ -1866,6 +1927,32 @@ const std::optional<EvalRecord> &ViewerState::last_eval() const
 const std::optional<io::GraphResult> &ViewerState::result() const
 {
   return impl_->result;
+}
+
+std::shared_ptr<const ViewerGraphInspection> ViewerState::graph_inspection() const
+{
+  const Impl &m = *impl_;
+  if (m.inspection && m.inspection->version == m.version) { return m.inspection; }
+  auto snapshot = std::make_shared<ViewerGraphInspection>();
+  snapshot->version = m.version;
+  snapshot->source = m.source;
+  snapshot->desired = m.graph_configuration(m.parameters());
+  snapshot->shown_configuration = m.shown_configuration;
+  snapshot->shown_result = m.result;
+  snapshot->shown_evaluation = m.last;
+  snapshot->shown_resolved_parameters = m.shown_resolved_parameters;
+  if (snapshot->shown_configuration && snapshot->shown_result) {
+    snapshot->shown_graph_verified = verify_shown_graph(*snapshot->shown_configuration, *snapshot->shown_result);
+  }
+  if (snapshot->desired && snapshot->shown_configuration && snapshot->shown_graph_verified.value_or(false)) {
+    snapshot->shown_matches_desired = same_graph_configuration(*snapshot->desired, *snapshot->shown_configuration);
+  }
+  snapshot->has_payload = bool(m.base);
+  snapshot->evaluating = m.main.has_value();
+  snapshot->pending_edit = m.pending_reason;
+  snapshot->error = !m.open_error.empty() ? m.open_error : !m.eval_error.empty() ? m.eval_error : m.metadata_error;
+  m.inspection = std::move(snapshot);
+  return m.inspection;
 }
 
 const std::string &ViewerState::eval_error() const

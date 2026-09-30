@@ -34,6 +34,9 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 
 ## AI 准备工作区
 
+**视图 → 分析图** 打开当前 Viewer 预设的只读图检查，端口、参数、引用及输出使用通用表格。
+可在“当前参数”和“已显示结果”间对比提交配置，显式校验不运行节点；完整用法与来源核对边界见[分析节点图](analysis-graphs.md)。
+
 **视图 → 聚焦准备** 会激活现有 AI 标签并最大化其区域；**聚焦分析** 对 Viewer 做同样操作。
 没有对应标签时会在有空位的区域新增，已有面板和分栏比例保留。**恢复分栏布局** 显示原分栏，
 但不撤销刚才的标签选择。原窗口仍在输入文字时会先要求完成输入，其他窗口的输入保持原样。
@@ -376,18 +379,28 @@ sequence export) and **Transfers / Logs / Bridge log**. The D1 acceptance run is
 
 ### AI preparation workspace
 
-Open a format-8 project, then use the Project header or **File → AI Workspace**. Select a record in Project,
-explicitly capture it, and review its saved values. **Prepare question (no send)** saves the question and request;
+Open a format-8 project, then use the Project header or **File → AI Workspace**. Capture the selected record,
+or explicitly choose multiple rows and fields at a fixed revision, and review the saved values.
+**Prepare question (no send)** saves the question and request;
 **Send this saved question** is the separate provider action. See [provider setup](project-requests.md).
 Saved questions and wrapped plain-text replies share the page. While the workspace is visible, running/uncertain
 records are read locally about once per second for up to 90 seconds; errors pause this follow-up. Explicit refresh resumes local reads,
 without provider queries, sends or recovery. Unprepared text stays in this editor's per-project memory only.
 Preparation saves a message before creating its request: failure can leave that message, and identity reuse
 covers the same current input within the session, not a transaction resumed across restarts.
-No streaming, tools, automatic workflow execution or default-homepage change is included. Focused checks
-pass 41/41 and full Linux CTest passes 602/602, without skips. Desktop and Runtime CI passed for `852b343`;
-see the [acceptance record](runtime-validation.md) for platform totals.
+Streaming replies remain temporary until a complete validated response is saved; cancellation immediately hides
+the partial text. Parameter suggestions can be explicitly saved as a draft, opened for review, previewed and applied;
+completion alone never changes project values. See [parameter suggestions](project-parameter-edits.md).
+General tool execution, automatic workflow execution and a new default homepage remain planned.
+**View → Focus preparation / Focus analysis / Restore split layout** preserves existing editors and unsaved input.
+See the [acceptance record](runtime-validation.md) for verification by commit and platform.
 macOS/Windows real-account acceptance remains separate.
+
+**View → Node Graph** inspects the Viewer's current preset and recorded result configuration with a read-only
+node canvas and common parameter/port/output tables. Graph hashes must match before receipt details are attached
+to a graph; source-file freshness is not inferred. Validation is explicit and never evaluates nodes.
+Home fits the graph, F frames the selected node, and N toggles the inspector. See [analysis graphs](analysis-graphs.md)
+for provenance, navigation and the boundary before project-saved graphs and connection editing.
 
 ### Install
 

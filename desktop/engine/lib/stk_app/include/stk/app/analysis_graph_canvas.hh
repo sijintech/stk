@@ -1,0 +1,54 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+#pragma once
+
+#include "stk/app/analysis_graph_view.hh"
+#include "stk/ui/draw_list.hh"
+
+#include <memory>
+#include <optional>
+#include <string_view>
+
+namespace stk::app {
+
+/** CPU-only, read-only graph canvas. Coordinates are physical pixels local to its viewport,
+ * origin top-left. Drawing changes neither the graph nor selection and performs no GPU calls.
+ * Pan/zoom are ephemeral; a different view pointer resets them. The caller owns event routing. */
+class AnalysisGraphCanvas {
+ public:
+  static constexpr double min_zoom = 0.00001, max_zoom = 2.5;
+  void set_view(std::shared_ptr<const AnalysisGraphView> view);
+  const std::shared_ptr<const AnalysisGraphView> &view() const { return view_; }
+
+  /** Fit the immutable bounds with 32*ui_scale pixel padding, reduced for tiny viewports.
+   * Finite, positive dimensions and a UI scale in [0.25,8] are required. Invalid input, empty
+   * views or invalid bounds return false and retain the existing transform. */
+  bool fit(double width, double height, double ui_scale = 1);
+  bool pan(double dx, double dy);
+  /** Preserve the world point under the physical-pixel anchor; invalid inputs return false. */
+  bool zoom_at(double factor, double x, double y);
+  /** Last drawn node wins for overlap; points outside the last fit/draw viewport cannot hit. */
+  std::optional<size_t> hit(double x, double y) const;
+
+  /** Clipped background/grid, curves, nodes and typed ports. Fine labels are hidden at overview
+   * zooms. A DPI change preserves the world point at the viewport center without implicitly
+   * fitting; ordinary viewport resizing preserves pan/zoom. Call fit explicitly when desired.
+   * Invalid dimensions/scales return an empty list. Only the model's bounded visible entries
+   * are drawn; malformed geometry is skipped before conversion from double to float. */
+  ui::DrawList draw_list(double width, double height, double ui_scale,
+                        const ui::TextMeasurer &measurer, std::string_view language,
+                        std::optional<size_t> selected = {});
+
+  double zoom() const { return zoom_; }
+  double pan_x() const { return pan_x_; }
+  double pan_y() const { return pan_y_; }
+  double ui_scale() const { return ui_scale_; }
+  AnalysisGraphPoint to_screen(AnalysisGraphPoint point) const;
+  AnalysisGraphPoint to_graph(AnalysisGraphPoint point) const;
+
+ private:
+  std::shared_ptr<const AnalysisGraphView> view_;
+  double zoom_ = 1, pan_x_ = 0, pan_y_ = 0, ui_scale_ = 1;
+  double width_ = 0, height_ = 0;
+};
+
+}  // namespace stk::app

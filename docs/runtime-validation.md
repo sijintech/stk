@@ -2,6 +2,40 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-09-30：分析节点图与结果来源检查
+
+新增原生“分析节点图”编辑器，复用当前 Viewer 预设与求值时冻结的配置。
+只读画布显示有类型端口、连接顺序及节点参数；侧栏用通用表格检查默认值、明确值、缺失值、
+`$param` 引用、提交参数和输出。支持适应图、定位节点、平移、缩放与返回三维。
+图定义无位置时按依赖层次排列，循环、重复身份、未知类型与无效端点保留可见诊断。
+界面展开有界，超过 200 个节点拒绝展开，不改写原图；画布诊断与显式 `graph.validate` 分开。
+
+关键节点 critical review 分别覆盖纯展示模型、Viewer 来源、异步控制器、UI 生命周期与真实渲染。
+发现并修正以下问题：
+
+- 实际求值发送预设 ID，本地冻结的预设不能独自证明后端执行的图。现在结果的两个图哈希须有效、一致且匹配，
+  才关联节点执行、解析值及可用输出；导入载荷没有原始图时不猜测。哈希仍不验证源文件变化或节点实现版本。
+- `step="latest"` 与求值后具体步数不能混为同一提交；原始值和解析值分列，缓存切步保留原始配置与回执。
+- JSON 普通相等会合并整数与浮点数；配置比较改用规范化表示，忽略键顺序但保留数值类型。
+- 参数、来源、目录、桥会话或检查模式变化会丢弃旧校验响应；旧按钮再次核对代次，不校验新意图。
+- 返回三维的延迟导航检查原编辑器与目标窗口寿命，关闭或移动后的旧回调不能访问销毁的窗口。
+
+专项 **66/66 通过**：纯模型 14、画布 11、来源 13、控制器/原生交互 20，以及 GL/Vulkan 宽窄中英文渲染 8 项。
+渲染夹具生成本地科学场，经真实桥取得哈希匹配的结果，再修改颜色参数，检查当前与旧结果区别；
+查看、选择和校验都未增加 Viewer 求值次数。八张图片已逐张复核，窄窗口滚动与定位操作可达。
+首次完整回归的 10 项旧布局基准不匹配，结构比较确认 175 处差异仅为页头下拉框扩宽后控件横坐标及宽度变化。
+独立审查指出默认窄区域菜单被进一步挤压至 16px，因此缩短编辑器名称为“分析图”/“Node Graph”，
+保留完整功能名称用于说明；所有旧布局基准恢复原值，没有接纳挤压后的布局。
+原生测试夹具首次测到脚本启动的额外两次请求，改为等待 `script.read` 与 `ui.attach` 真正完成再建立基线；
+旧回调零请求、明确校验恰好一次请求及零求值的严格断言保留。
+
+中英文字典各 **1179 项**一致且无重复；改动文档的 **142 个本地链接、19 个锚点**有效。
+最终资源同步后的完整 Linux CTest **744/744，通过项实际执行，失败/错误/跳过均为 0**，所有旧布局基准保持原值。
+日志 `/tmp/stk-graph-full-final.log`，JUnit `/tmp/stk-graph-full-final.xml`；本提交跨平台 CI 待回收证据。
+本轮没有修改 Python 求值后端，也没有外部模型调用；macOS/Windows 真机输入、触控板和高 DPI 仍待验收。
+专项日志 `/tmp/stk-graph-focused-final.log`、JUnit `/tmp/stk-graph-focused-final.xml`。
+用法与边界见[分析节点图指南](analysis-graphs.md)，人工步骤见[工作台验收](workbench-acceptance.md)。
+
 ## 2026-09-30：准备、分析与分栏聚焦导航
 
 视图菜单增加聚焦准备（AI）、聚焦分析（Viewer）和恢复分栏布局。
@@ -24,7 +58,17 @@ Python 聚焦/能力协商/现有脚本及契约组合 **38 项通过**；原生
 随后追加并通过 **1 项**从 Python 输入框 Ctrl/Cmd+Enter 提交导航代码的真实操作回归。
 完整 Linux CTest **678/678，失败/错误/跳过均为 0**；新导航 CPU 11 项、真实 Python 5 项及菜单渲染 4 项全部实际执行。
 四张 GL/Vulkan 中英文菜单图片通过，两个 GL 视图已逐项查看，对应 Vulkan RGB 像素完全一致。
-字典各 **1109 项**一致且无重复。本提交跨平台 CI 及 macOS/Windows 真机操作另行验收。
+字典各 **1109 项**一致且无重复。
+提交 `cb22d552f412bd3267b2583e61abc14442782375` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36681997606)
+五个任务全部通过：Linux **678/678**、macOS CPU **421/421** 与 Metal **85/85**、Windows CPU **381/381**，
+均无失败或跳过。Linux/macOS 逐项核对 JUnit，Windows 按 CTest 日志逐项计数；新增 `FocusNavigation`
+**9 项**、`FocusMenuLayout` **2 项**及真实 Python 导航 **5 项**在三个桌面平台均实际执行。
+GL/Vulkan/Metal 中英文菜单共 **6 张**截图已逐张复核，Linux/macOS 打包及独立目录启动检查通过。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/36681997274) 七个任务全部通过：Linux Python 3.10/3.12
+各 **1861 passed / 7 skipped / 4 deselected**，Windows Python 3.10/3.12 各 **1450 passed / 59 skipped / 260 deselected**；
+新增 Python 导航 **8 项**在四个矩阵任务中均通过，control **24 项**、desktop/MCP **3 项**及 web 构建通过。
+跳过项仍为可选依赖、平台限定、性能及真实求解器场景，不计为已验证。证据存于
+`/tmp/stk-focus-ci-36681997606/audit-summary.json`；macOS/Windows 真机操作仍待验收。
 
 日志 `/tmp/stk-navigation-python.log`、`/tmp/stk-focus-native-focused.log`、`/tmp/stk-focus-console.log`、
 `/tmp/stk-focus-full.log`；JUnit `/tmp/stk-focus-full.xml`。

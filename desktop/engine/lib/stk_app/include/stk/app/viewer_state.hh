@@ -122,6 +122,40 @@ struct EvalRecord {
   bool from_cache = false;
 };
 
+/** The desktop's graph configuration at one instant. The graph is the preset document known
+ * to the desktop, not reconstructed from a result hash. Parameters include form defaults and
+ * remain the submitted values (for example, step="latest" is not replaced with a resolved step). */
+struct ViewerGraphConfiguration {
+  ViewerSource source;
+  std::string preset_id;
+  io::Json graph, parameters;
+  std::vector<std::string> requested_outputs;
+};
+
+/** Immutable, CPU-only inspection of the current intent and the payload actually on screen.
+ * Imported payloads/results have no shown_configuration: a result hash does not recover a graph.
+ * Configuration equality is not proof that source files or remote task contents are unchanged. */
+struct ViewerGraphInspection {
+  uint64_t version = 0;
+  ViewerSource source;
+  std::optional<ViewerGraphConfiguration> desired, shown_configuration;
+  std::optional<io::GraphResult> shown_result;
+  std::optional<EvalRecord> shown_evaluation;
+  /** Submitted parameters overlaid with values reported by the shown result. Imported results
+   * expose only reported values, without guessing missing preset defaults. Null with no result. */
+  io::Json shown_resolved_parameters;
+  /** Both result hashes verify the semantic graph frozen locally at dispatch. False means a
+   * mismatch; null means missing/unusable hashes or no dispatch configuration. This does not
+   * verify source contents, parameter substitution, or node implementation versions. */
+  std::optional<bool> shown_graph_verified;
+  /** Null when either configuration is unavailable or the shown graph is not verified;
+   * otherwise compares source, graph, preset,
+   * exact submitted parameters and requested outputs. It does not equate "latest" with a step. */
+  std::optional<bool> shown_matches_desired;
+  bool has_payload = false, evaluating = false;
+  std::string pending_edit, error;
+};
+
 /** A pick of the Viewer (GPU id pass refined in float64). */
 struct PickInfo {
   std::string layer_id, layer_name, layer_type;
@@ -246,6 +280,9 @@ class ViewerState {
   const std::optional<EvalRecord> &last_eval() const;
   /** The graph result on screen (nullopt for plain payloads). */
   const std::optional<io::GraphResult> &result() const;
+  /** Pure read: never pumps work, fetches metadata/artifacts or starts an evaluation. Snapshots
+   * are cached by #version and remain valid after subsequent edits, results, close or destruction. */
+  std::shared_ptr<const ViewerGraphInspection> graph_inspection() const;
   const std::string &eval_error() const;
   /** Node ids of the preset graph whose stage is source / data / analysis (from the catalog). */
   std::vector<std::string> data_nodes() const;

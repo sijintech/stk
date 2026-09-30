@@ -131,11 +131,11 @@ jobs:
         if: success() || failure()
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-junit.xml \
-            'PythonBridge\..*' 'ProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'SimulationPython\..*' 'ScriptPython\..*' 'JobsPython\..*' 'app_viewer_python_(vulkan|opengl)' \
+            'PythonBridge\..*' 'ProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'SimulationPython\..*' 'ScriptPython\..*' 'JobsPython\..*' 'app_viewer_python_(vulkan|opengl)' \
             'app_viewer_e2e_(vulkan|opengl)' 'app_viewer_window_(xvfb|weston)' 'package_install_check'
           for backend in opengl vulkan; do
             for language in en zh; do
-              for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs project_review project_review_errors project_drafts project_discussion project_requests project_filter project_simulation project_batches project_ai project_ai_narrow project_ai_stream project_ai_proposal project_ai_proposal_narrow project_ai_scope project_ai_scope_narrow project_ai_focus; do
+              for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs project_review project_review_errors project_drafts project_discussion project_requests project_filter project_simulation project_batches project_ai project_ai_narrow project_ai_stream project_ai_proposal project_ai_proposal_narrow project_ai_scope project_ai_scope_narrow project_ai_focus analysis_graph_wide analysis_graph_narrow; do
                 python3 desktop/tests/check_required_tests.py build/ctest-junit.xml "${editor}_render_${backend}_${language}"
               done
             done
@@ -393,11 +393,11 @@ jobs:
         if: success() || failure()
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-cpu.xml \
-            'PythonBridge\.(HelloListsTheProtocol|ColormapsList|GraphPresets|LocalGraphEvaluateOnAFakeMuferroRun|ManagedSSHProfileRoundTripDoesNotConnectImplicitly)' 'ProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'ScriptPython\..*'
+            'PythonBridge\.(HelloListsTheProtocol|ColormapsList|GraphPresets|LocalGraphEvaluateOnAFakeMuferroRun|ManagedSSHProfileRoundTripDoesNotConnectImplicitly)' 'ProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'ScriptPython\..*'
           python3 desktop/tests/check_required_tests.py build/ctest-metal.xml \
             'app_viewer_python_metal' 'app_viewer_e2e_metal' 'package_install_check'
           for language in en zh; do
-            for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs project_review project_review_errors project_drafts project_discussion project_requests project_filter project_simulation project_batches project_ai project_ai_narrow project_ai_stream project_ai_proposal project_ai_proposal_narrow project_ai_scope project_ai_scope_narrow project_ai_focus; do
+            for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_recent project_runs project_review project_review_errors project_drafts project_discussion project_requests project_filter project_simulation project_batches project_ai project_ai_narrow project_ai_stream project_ai_proposal project_ai_proposal_narrow project_ai_scope project_ai_scope_narrow project_ai_focus analysis_graph_wide analysis_graph_narrow; do
               python3 desktop/tests/check_required_tests.py build/ctest-metal.xml "${editor}_render_metal_${language}"
             done
           done
@@ -536,5 +536,5 @@ jobs:
 
       - name: Local project tests ran with the real Python bridge
         run: |
-          python desktop/tests/check_required_tests.py build/ctest-cpu.xml 'ProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'ScriptPython\..*' 'PythonBridge\.ManagedSSHProfileRoundTripDoesNotConnectImplicitly'
+          python desktop/tests/check_required_tests.py build/ctest-cpu.xml 'ProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'ScriptPython\..*' 'PythonBridge\.ManagedSSHProfileRoundTripDoesNotConnectImplicitly'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

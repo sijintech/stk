@@ -124,6 +124,10 @@ class AppShell {
    * screen. Other windows and their input are unaffected. */
   bridge::Result<io::Json> activate_editor(wm::Screen *screen, const std::string &editor_id, bool maximize);
   bridge::Result<io::Json> restore_split_layout(wm::Screen *screen);
+  /** Defer navigation from a widget. Checks screen membership before dereferencing it and again
+   * after the event, and fences shell/caller lifetime. Live failures are shown as a toast. */
+  void activate_editor_later(wm::Screen *screen, std::string editor_id, bool maximize,
+                             std::function<bool()> valid = {});
 
   /** Defer saved-draft adoption and Review navigation into the originating screen.
    * `valid` must fence the caller's lifetime and selected request. Expired callers
