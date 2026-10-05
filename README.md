@@ -1,5 +1,7 @@
 # STK - Suan Toolkit
 
+接手开发先读 [handoff.md](handoff.md) 与 [AGENTS.md](AGENTS.md)；Claude 的工作入口见 [CLAUDE.md](CLAUDE.md)。
+
 STK 为 MuPRO 等模拟计算提供输入准备、批量任务、数据处理与可视化，独立于 Synorder 发展。
 桌面程序 `stk-desktop`（直连 Runtime，或经控制服务与节点代理）、命令行 `suan`、MCP、网页和旧 Qt `suan-gui` 连接同一个持久 runtime；
 支持本机进程、PBS 和 Slurm，客户端断线后后台任务继续。MuPRO 作业的排队、提交、取消与恢复由 STK Runtime 负责。

@@ -12,7 +12,10 @@ critical review 补齐来源编辑器、外壳及项目打开会话保护；导�
 用户明确应用或重新载入后才继续；不隐式应用参数、执行计算或发送模型请求。
 构建、测试、失败记录及截图证据统一见[验收记录](runtime-validation.md#2026-10-05项目工作台与跨页草稿保护)。
 本轮最终重点回归 **61/61**、完整 Linux CTest **1114/1114** 通过，无失败、错误或跳过；新增八张工作台截图已检查。
-跨平台 CI 需按新提交跟踪。
+交接时确认 `b2e5632` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/37289712961) **5/5**、
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/37289713009) **7/7** 任务全部成功。
+Linux 1114、macOS CPU 749 / Metal 138、Windows CPU 708 项通过，无原生跳过；真机验收范围仍单独记录。
+后续开发入口统一在根目录 [handoff.md](../handoff.md)，Claude 入口为 [CLAUDE.md](../CLAUDE.md)。
 旧 Linux Wayland CSD 退出故障的 CI 已记录 SIGSEGV；本机 30 次未复现，根因仍待定位，不能作为本轮已修复项。
 
 ## 2026-09-30：持续开发交接——AI 建议到可追溯的分析结果

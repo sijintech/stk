@@ -10,9 +10,11 @@ The scripts prepare dependencies and a Python venv, compile the main executable 
 
 The [development plan](../docs/development-plan.md), [project workbench design](../docs/design/project-workbench.md)
 and [project model proposal](../docs/design/project-model.md) define the next development stages (Chinese).
-They describe the planned workbench. The first local SQLite project/table editor is available via
-**File → Project**; see [the project guide](../docs/project.md) for its implemented scope.
-AI, hierarchical workflows, formulas and rich table content remain planned.
+They distinguish shipped features from the planned workbench. **File → Workspace** opens project
+navigation to the existing AI, file, table, saved-analysis and run views. SQLite tables, formulas,
+AI requests and saved analysis runs are implemented; hierarchical workflows, the unified skill
+catalog and rich document previews remain planned. See [the desktop guide](../docs/desktop.md)
+and the current [developer handoff](../handoff.md) for scope and validation.
 Legacy M-D2 references below map to the platform and distribution work in that plan.
 
 ## Layout

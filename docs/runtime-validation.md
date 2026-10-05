@@ -32,7 +32,12 @@ CI 为新交互和 Linux GL/Vulkan、macOS Metal 工作台截图增加必跑检�
 工作流 YAML 与六份文档的 **214 个本地链接**有效。证据 `/tmp/stk-workspace-build-reviewed.log`、
 `/tmp/stk-workspace-test-reviewed-build.log`、`/tmp/stk-workspace-focused-final.{log,xml}`、
 `/tmp/stk-workspace-full-final.{log,xml}`、`/tmp/stk-workspace-required-final.log`。
-本次 macOS/Windows CI 与真机交互需要按新提交另行验收，不沿用前版平台结论。
+交接时已核对功能提交 `b2e5632` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/37289712961) **5/5 任务成功**：
+Linux **1114/1114**、macOS CPU **749/749** / Metal **138/138**、Windows CPU **708/708** 通过，无原生跳过；
+新增 10 项交互在三个平台均通过，两个 Weston 应用窗口用例本次通过。Linux/macOS 打包与干净环境检查通过。
+[Runtime CI](https://github.com/sijintech/stk/actions/runs/37289713009) **7/7 任务成功**；文档部署与 Secret scan 也成功。
+直接日志保存在 `/tmp/stk-handoff-b2e5632-{linux,macos,windows}.log`；本次交接未另行逐张检查 macOS CI 截图。
+真机交互仍按平台验收清单跟进，不能由 Windows CPU CI 替代 GPU/IME 或真实模型按钮验收。
 
 ### 旧 Wayland 退出故障的后续证据
 
