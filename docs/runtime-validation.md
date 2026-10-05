@@ -2,6 +2,24 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-05：技能目录契约与查询入口
+
+新增实验契约 `stk.skill/1` 与三个内置技能，桥 `skills.list/get`、Python `stk.skills`、`suan skills catalog/show`。
+本机 Linux（`/home/mnemora/opt/stk-venv`，Python 3.12）验证：
+
+- `tests/test_skill_catalog.py` **13/13** 通过：内置定义双语且与锁文件一致；哈希覆盖定义与模板、不受格式影响；
+  18 类坏定义逐项给出代码与 JSON 指针而不隐藏有效技能；跨来源重复、未知 ID/版本、参数越界；
+  缺少 matplotlib/VTK/numpy 或节点类型时的 `limited`/`unavailable`；分页与中英文查询；严格 schema 下的桥方法
+  （确认未启动图工作进程、未打开项目）；控制台与 CLI。
+- 依赖范围以实际求值核对：子进程屏蔽模块后 `scalar-volume` 的 `view` 无 VTK 可交付、无 numpy 失败；
+  `muferro-domains` 的 `fractions/families` 无 VTK 可交付，`view` 失败；两个能量 `energy` 输出无 matplotlib 失败，`table` 可交付。
+- 邻近套件（说明包、桥、图预设、控制台图与导航）**81 passed, 1 skipped**（性能基准）。
+- 完整 `pytest -m "not perf"`：**2199 passed, 24 skipped, 0 failed**；跳过均为既有环境原因
+  （性能基准、PySide6、本机离屏渲染 SIGSEGV、MCP 可选依赖、未配置真实 MuFerro）。
+  日志 `/tmp/claude-1000/-home-mnemora-xcheng-sijin-stk/07437944-4ce3-4414-bbc7-e80a0698ca9c/scratchpad/pytest-full-A.log`。
+
+PNG `image` 输出需要离屏 OpenGL；本机离屏子进程 SIGSEGV，目录据此只声明、不探测该能力。原生浏览页的验证见后续记录。
+
 ## 2026-10-05：项目工作台与跨页草稿保护
 
 新增原生 `workspace` 编辑器，从文件菜单和项目/AI/分析图页头进入；显示当前项目并定位对话、文件、

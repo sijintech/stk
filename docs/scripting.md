@@ -122,6 +122,7 @@ print(p.selection())
 | Runtime/Hub 工作区、上传/下载、任务提交/查询/取消、产物、日志 | `stk.runtime(connection, node=...)` 与 `stk.transfers`；复用已有幂等和审核规则 |
 | Viewer 打开/关闭、状态、预设参数、图层、求值、时间步/播放和相机重置 | `stk.viewer` 已接入共享原生状态，见[Viewer Python 指南](scripting-viewer.md) |
 | 分析图目录、连接校验、求值/取消、blob 与原场探针 | `stk.graph` 已接入现有图服务，保留 Hub 审核和结果，见[分析图 Python 指南](scripting-graphs.md) |
+| 版本化技能目录（实验性 `stk.skill/1`） | `stk.skills.list(offset=, limit=, query=)`、`stk.skills.get(id, version=)` 只读查询；不执行入口、不准备运行或调用模型，见[技能目录](skills.md) |
 | 项目分析定义保存、替换、分页查询与纯 Viewer 配置捕获 | `stk.project.analyses`、`stk.viewer.graph_configuration()`，不运行节点，见[分析文档指南](project-analyses.md) |
 | 快照绑定的本机分析执行与结果归档 | `stk.project.analysis_runs.prepare/get/list/start/cancel/recover/result`，格式 9；准备、开始与读取结果分开，普通读取不重跑，见[分析运行指南](project-analysis-runs.md) |
 | 相机完整变换、原生图编辑、完整项目打包与文档 | 统一操作与界面仍待逐步接入 |

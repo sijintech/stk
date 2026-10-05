@@ -27,8 +27,8 @@ from .schema import GraphError
 
 __all__ = [
     "ENTRY_POINT_GROUP", "NAMESPACES", "PRESET_ID_RE",
-    "build_registry", "catalog_document", "compare_catalog", "default_registry", "list_presets",
-    "load_entry_points", "load_preset", "present_families", "spec_catalog", "spec_catalog_path",
+    "build_registry", "catalog_document", "compare_catalog", "default_registry", "describe_preset", "list_presets",
+    "load_entry_points", "load_preset", "present_families", "preset_document", "spec_catalog", "spec_catalog_path",
 ]
 
 NAMESPACES = {"stk": 1}
@@ -187,22 +187,32 @@ def _bindings(graph, registry):
     return found
 
 
+def preset_document(preset_id):
+    """A shipped preset file as read: ``{"id", "graph", ...}`` (``GraphError('unknown_preset')`` otherwise).
+
+    A bare ``stk.graph/1`` file becomes ``{"id", "graph"}``; a new object is returned on every call.
+    """
+    return _read_preset(preset_id)
+
+
+def describe_preset(preset, registry=None):
+    """The :func:`list_presets` entry of a :func:`preset_document` (bindings resolved with ``registry``)."""
+    registry = registry if registry is not None else default_registry()
+    graph = preset["graph"]
+    described = {b.get("name"): b.get("description", "") for b in preset.get("bindings") or ()
+                 if isinstance(b, dict)}
+    return {
+        "id": preset["id"],
+        "name": preset.get("name") or graph.get("name") or preset["id"],
+        "description": preset.get("description") or graph.get("description") or "",
+        "graph": graph,
+        "bindings": [{"name": name, "description": described.get(name, "")}
+                     for name in _bindings(graph, registry)],
+        "parameters": graph.get("parameters") or [],
+    }
+
+
 def list_presets(registry=None):
     """``[{"id", "name", "description", "graph", "bindings": [{"name", "description"}], "parameters"}]``."""
     registry = registry if registry is not None else default_registry()
-    result = []
-    for item in _preset_files():
-        preset = _read_preset(item["id"])
-        graph = preset["graph"]
-        described = {b.get("name"): b.get("description", "") for b in preset.get("bindings") or ()
-                     if isinstance(b, dict)}
-        result.append({
-            "id": preset["id"],
-            "name": preset.get("name") or graph.get("name") or preset["id"],
-            "description": preset.get("description") or graph.get("description") or "",
-            "graph": graph,
-            "bindings": [{"name": name, "description": described.get(name, "")}
-                         for name in _bindings(graph, registry)],
-            "parameters": graph.get("parameters") or [],
-        })
-    return result
+    return [describe_preset(_read_preset(item["id"]), registry) for item in _preset_files()]

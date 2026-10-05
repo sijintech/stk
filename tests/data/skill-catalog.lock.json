@@ -1,0 +1,8 @@
+{
+ "schema": "stk.skill-lock/1",
+ "skills": {
+  "stk.muferro.domains@1": "967a537f9f7a4476cd664306c710a649d4d5fd87ff3850262d0c6acc4db93a34",
+  "stk.muferro.energy_trace@1": "6cd8371fea468b02c71823e7af9a5c6a3aa09dd1a739fedbdfd2dc9b98a9de3e",
+  "stk.visualize.scalar_volume@1": "47e53552f1248b6382be63cc354f88250bca016846235f75fd1d69ee7d4b4aec"
+ }
+}

@@ -203,6 +203,8 @@ class Bridge:
             "blob.ensure": lambda p, c: self.graphs.ensure(p["sha256"], p.get("connection")),
             "probe": lambda p, c: self.graphs.probe(p),
             "colormaps.list": lambda p, c: self.graphs.colormaps(),
+            "skills.list": lambda p, c: self.skills_list(p),
+            "skills.get": lambda p, c: self.skills_get(p),
             "project.create": lambda p, c: self.projects.create(p),
             "project.open": lambda p, c: self.projects.open(p),
             "project.list": lambda p, c: self.projects.list(p),
@@ -466,7 +468,7 @@ class Bridge:
                  "project.runs.prepare", "project.runs.list", "project.runs.get",
                  "project.runs.submit", "project.runs.refresh", "project.runs.cancel",
                  "graph.catalog", "graph.presets", "graph.validate", "graph.evaluate", "graph.cancel",
-                 "blob.ensure", "probe", "colormaps.list",
+                 "blob.ensure", "probe", "colormaps.list", "skills.list", "skills.get",
                  "connections.list", "connections.check", "connections.ssh",
                  "hub.devices", "hub.templates", "hub.actions", "hub.action",
                  "workspace.list", "workspace.create", "workspace.files", "upload.start", "download.start",
@@ -500,6 +502,26 @@ class Bridge:
         for callback in context.callbacks:
             callback()
         return result
+
+    def _skill_catalog(self):
+        # Reread per request: definitions are small and availability follows the environment.
+        from suan.skills.catalog import load_catalog
+        return load_catalog(self.graphs.registry())
+
+    def skills_list(self, params):
+        from suan.skills.catalog import DEFAULT_LIMIT, SkillCatalogError
+        try:
+            return self._skill_catalog().page(offset=params.get("offset", 0), limit=params.get("limit", DEFAULT_LIMIT),
+                                              query=params.get("query"))
+        except SkillCatalogError as exc:
+            raise BridgeError(exc.code, str(exc), data=exc.data) from None
+
+    def skills_get(self, params):
+        from suan.skills.catalog import SkillCatalogError
+        try:
+            return {"skill": self._skill_catalog().get(params["id"], params.get("version"))}
+        except SkillCatalogError as exc:
+            raise BridgeError(exc.code, str(exc), data=exc.data) from None
 
     def task_logs(self, params, context):
         import base64

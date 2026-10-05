@@ -1,0 +1,29 @@
+{
+ "schema": "stk.skill/1",
+ "id": "stk.muferro.domains",
+ "version": 1,
+ "title": {"en": "muFerro domain variants", "zh_CN": "muFerro 铁电畴变体"},
+ "summary": {
+  "en": "Classify the polarization of one muFerro frame into the 26 cubic variants, draw one surface per variant with a legend, and report variant fractions and the energy trace. Label -1 is unclassified or air and 0 is substrate; both are excluded from the fraction denominator.",
+  "zh_CN": "将一帧 muFerro 极化按 26 个立方变体分类，每个变体绘制一个表面并给出图例，同时报告变体占比与能量曲线。标签 -1 表示未分类或空气，0 表示衬底，两者都不计入占比分母。"
+ },
+ "guide": {"pack": "stk-visualize"},
+ "entry": {"kind": "graph.preset", "preset": "muferro-domains"},
+ "dependencies": {
+  "python": [
+   {"module": "numpy", "purpose": {"en": "Read frames, classify variants and count fractions.", "zh_CN": "读取帧数据、分类变体并统计占比。"}},
+   {"module": "vtk", "outputs": ["view", "image"],
+    "purpose": {"en": "Extract and smooth the variant surfaces; fractions do not need it.", "zh_CN": "提取并平滑变体表面；占比统计不需要。"}},
+   {"module": "matplotlib", "outputs": ["energy"], "purpose": {"en": "Draw the energy plot.", "zh_CN": "绘制能量曲线。"}}
+  ],
+  "runtime": [
+   {"capability": "offscreen_rendering", "outputs": ["image"],
+    "purpose": {"en": "The PNG image needs offscreen OpenGL (EGL or OSMesa).", "zh_CN": "PNG 图像需要离屏 OpenGL（EGL 或 OSMesa）。"}}
+  ]
+ },
+ "examples": [
+  {"title": {"en": "Latest frame: 3D domains and variant fractions", "zh_CN": "最新一帧：三维畴结构与变体占比"},
+   "parameters": {"step": "latest", "min_magnitude": 0.1},
+   "outputs": ["view", "fractions"]}
+ ]
+}

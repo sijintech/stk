@@ -5888,6 +5888,108 @@
         "result": {
           "$ref": "#/$defs/projectAnalysisRunListResult"
         }
+      },
+      "skills.list": {
+        "description": "Bounded page of the versioned built-in skill catalog (experimental stk.skill/1), filtered by a case-insensitive text query. Reads definitions only: never evaluates graphs, starts workers, touches projects or calls models.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "query": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "skills": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "$ref": "#/$defs/skillSummary"
+              }
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "problems": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "$ref": "#/$defs/skillProblem"
+              }
+            },
+            "problem_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "skills",
+            "total",
+            "offset",
+            "next_offset",
+            "problems",
+            "problem_count"
+          ]
+        }
+      },
+      "skills.get": {
+        "description": "One resolved skill: the latest version, or exactly 'version'. Unknown ids and versions are not_found with data.known_versions (and data.problems when only a broken definition exists).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 96
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "skill": {
+              "$ref": "#/$defs/skill"
+            }
+          },
+          "required": [
+            "skill"
+          ]
+        }
       }
     },
     "events": {
@@ -9562,6 +9664,484 @@
         "next_offset"
       ],
       "additionalProperties": false
+    },
+    "skillText": {
+      "description": "Localized text: English is always present; zh_CN when the definition provides it.",
+      "type": "object",
+      "properties": {
+        "en": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "zh_CN": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "en"
+      ]
+    },
+    "skillAvailability": {
+      "description": "Computed from the installed node types and Python modules without importing or running them. 'limited' lists the outputs that cannot be delivered; declared runtime capabilities are not probed.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "available",
+            "limited",
+            "unavailable"
+          ]
+        },
+        "unavailable_outputs": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "issues": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "subject": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "outputs": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "subject",
+              "outputs"
+            ]
+          }
+        }
+      },
+      "required": [
+        "status",
+        "unavailable_outputs",
+        "issues"
+      ]
+    },
+    "skillProblem": {
+      "description": "Why one definition file was skipped (it never hides the other skills).",
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "file": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 96
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "source",
+        "file",
+        "code",
+        "message",
+        "path"
+      ]
+    },
+    "skillSummary": {
+      "description": "One catalog row; skills.get returns the full definition.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 104
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "title": {
+          "$ref": "#/$defs/skillText"
+        },
+        "summary": {
+          "$ref": "#/$defs/skillText"
+        },
+        "availability": {
+          "$ref": "#/$defs/skillAvailability"
+        },
+        "entry": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "preset": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "ref",
+        "content_sha256",
+        "source",
+        "title",
+        "summary",
+        "entry",
+        "availability"
+      ]
+    },
+    "skill": {
+      "description": "A resolved stk.skill/1 definition (experimental). Inputs, parameters and outputs come from the entry's graph template; content_sha256 covers the definition and that template.",
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "stk.skill/1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 104
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "title": {
+          "$ref": "#/$defs/skillText"
+        },
+        "summary": {
+          "$ref": "#/$defs/skillText"
+        },
+        "availability": {
+          "$ref": "#/$defs/skillAvailability"
+        },
+        "guide": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "pack": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 1024
+                }
+              },
+              "required": [
+                "pack",
+                "description"
+              ]
+            }
+          ]
+        },
+        "entry": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "preset": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "operation": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "kind",
+            "operation"
+          ]
+        },
+        "inputs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "kind": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "name",
+              "kind",
+              "description"
+            ]
+          }
+        },
+        "parameters": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "from": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "type": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "name",
+              "from",
+              "type"
+            ]
+          }
+        },
+        "dependencies": {
+          "type": "object",
+          "properties": {
+            "nodes": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "available": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "type",
+                  "available"
+                ]
+              }
+            },
+            "python": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "module": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "outputs": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "purpose": {
+                    "$ref": "#/$defs/skillText"
+                  },
+                  "available": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "module",
+                  "outputs",
+                  "purpose",
+                  "available"
+                ]
+              }
+            },
+            "runtime": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "capability": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "outputs": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  },
+                  "purpose": {
+                    "$ref": "#/$defs/skillText"
+                  },
+                  "checked": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "capability",
+                  "outputs",
+                  "purpose",
+                  "checked"
+                ]
+              }
+            }
+          },
+          "required": [
+            "nodes",
+            "python",
+            "runtime"
+          ]
+        },
+        "examples": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "$ref": "#/$defs/skillText"
+              },
+              "parameters": {
+                "type": "object"
+              },
+              "outputs": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "string",
+                  "maxLength": 64
+                }
+              }
+            },
+            "required": [
+              "title",
+              "parameters",
+              "outputs"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "id",
+        "version",
+        "ref",
+        "content_sha256",
+        "source",
+        "title",
+        "summary",
+        "guide",
+        "entry",
+        "inputs",
+        "parameters",
+        "outputs",
+        "dependencies",
+        "examples",
+        "availability"
+      ]
     }
   }
 }

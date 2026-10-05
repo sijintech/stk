@@ -47,7 +47,7 @@ git log --oneline HEAD..origin/main
 | AI | 阿里 Token Plan、明确捕获上下文、准备/发送、临时流式回复、持久问答、标量参数建议与修改检查 | 不等于通用自主 Agent、文件/技能附件或完整 AI 批量模拟编排 |
 | 分析 | 节点图检查；保存定义；参数和有序输出联合草稿；冻结输入与独立运行；结果归档、精确内联表格与源坐标定位 | 节点连线编辑仍未实现；多层图、子图及大表 blob 有界读取仍待开发 |
 | Python / Runtime | 持久 Python 会话，项目/图/Viewer/布局等 API；Linux Runtime、MuFerro 流程、SSH 管理 | 不是所有 UI 操作都已覆盖；Runtime 服务端仍限 Linux；通用对等通信待开发 |
-| 技能 | `suan/skills/` 已有 `stk-visualize`、`stk-monitor` 的说明包及 `suan skills list/export` | 本次计划的统一版本化技能契约、项目引用及原生技能目录 UI **未实现**；也不能把节点目录直接当成完整技能库 |
+| 技能 | `stk-visualize`、`stk-monitor` 说明包及 `suan skills list/export`；实验契约 `stk.skill/1` 的三个内置技能，桥 `skills.list/get`、`stk.skills`、`suan skills catalog/show`（[技能目录](docs/skills.md)） | 原生技能浏览页随后交付；项目引用/版本固定、从技能直接运行、用户技能目录 **未实现**；节点目录不是技能库 |
 
 用户此前在 macOS 和 Windows 真机上确认过能启动并看到 3D；这不是对后续每个交互、IME、GPU 驱动或安装包的全面验收。
 

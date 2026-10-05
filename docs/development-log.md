@@ -1,5 +1,22 @@
 # 开发交接记录
 
+## 2026-10-05：技能目录首版——契约与查询入口
+
+按 handoff 顺序开始“内置技能目录首版”。先分清三类内容：给模型的 SKILL.md 说明包（`suan skills list/export`，保持不变）、
+可执行节点目录（`stk.catalog/1`）以及新的版本化技能（实验契约 `stk.skill/1`，见[技能目录](skills.md)）。
+首批只收录三个可离线验证的图预设：`stk.visualize.scalar_volume@1`、`stk.muferro.domains@1`、`stk.muferro.energy_trace@1`，
+没有把全部预设改名为技能。输入、参数和输出直接取自图模板；`content_sha256` 覆盖定义及模板，
+`tests/data/skill-catalog.lock.json` 使同一版本的内容漂移在 CI 中失败。
+
+查询入口为桥 `skills.list/get`（[协议 §16](specs/stk-desktop-bridge-v1.md#16-versioned-skill-catalog-additive-extension-experimental)）、
+Python `stk.skills` 与 `suan skills catalog/show`，共用一次解析；有界分页，不执行入口、不启动图工作进程、不触及项目或模型。
+坏定义逐文件列入 `problems` 而不影响其他技能；未知 ID/版本返回 `not_found` 与已知版本。
+
+critical review 时以实际求值核对依赖声明：在子进程中屏蔽模块后，畴结构的占比统计不需要 VTK，
+因此 VTK 只限定影响 `view`/`image`，而非整个技能；能量曲线需要 matplotlib，表格不需要。该核对已写成回归。
+本机 PNG 输出因离屏渲染子进程 SIGSEGV 不可用，目录只声明“离屏渲染未检测”，不把它报告为可用。
+项目引用、版本固定、迁移与备份尚未实现，未改数据库格式；原生浏览页为下一提交。
+
 ## 2026-10-05：围绕五类内容建立项目工作台入口
 
 按照项目、文件、技能、工作流、对话的分类调整路线图，本轮先交付原生项目导航。

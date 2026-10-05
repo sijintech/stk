@@ -8,7 +8,7 @@
 Status: **frozen for Milestone D1** (WP7), with the additive hub-mode changes of WP11 (§7.1, §9,
 §10, §1 state-directory lock) and the WP8 follow-ups (`bytes` in offset-based events, transfer
 idempotency keys, ids of undecodable lines, clarifications in §2, §3, §7, §8, §12), and the local
-project extension (§13, 2026-09-28); still
+project extension (§13, 2026-09-28) and the experimental skill catalog (§16, 2026-10-05); still
 `protocol: 1`. Schema: `suan/contracts/schemas/desktop-bridge-1.schema.json`
 (`suan.contracts.load_schema("desktop-bridge-1")`). Implementation: `suan/desktop_bridge/` (standard
 library plus the STK core it drives). Conformance tests: `tests/test_desktop_bridge*.py`. The C++
@@ -1235,3 +1235,36 @@ forwarding and keepalives. No interactive prompt, password persistence, automati
 service installation or remote Python/UI access is introduced. A private guardian watches parent-pipe EOF
 and cleans up SSH descendants on bridge death; shutdown/removal never cancels Runtime tasks.
 See the [SSH guide](../ssh.md) for setup, restart behavior and current validation limits.
+
+## 16. Versioned skill catalog (additive extension, experimental)
+
+`skills.list` and `skills.get` serve the built-in skill catalog (`stk.skill/1`, see the
+[skill guide](../skills.md)). The `stk.skill/1` definition format is **experimental and not frozen**;
+this section only fixes how the bridge serves it. Check `hello.methods`: an older bridge omits both
+methods and the client must show the catalog as unavailable rather than guess.
+
+| Method | Params | Result |
+|---|---|---|
+| `skills.list` | `{offset?: 0, limit?: 50 (1–200), query?: string ≤ 200}` | `{skills: [skillSummary], total, offset, next_offset, problems: [skillProblem] (≤ 50), problem_count}` |
+| `skills.get` | `{id, version?}` | `{skill}` |
+
+- Both are reads. They never evaluate graphs, start the graph worker, open or change projects,
+  prepare runs or call models; repeating them only answers again. Definitions are reread on every
+  call, so availability follows the environment the bridge runs in.
+- `query` is a case-insensitive substring over the id, `ref`, entry preset and every title and
+  summary language. Rows are ordered by id, then version; `next_offset` is null on the last page.
+- A skill is `id@version` (`ref`) plus `content_sha256`, the SHA-256 of the canonical JSON of its
+  definition and its graph template. The same `ref` with a different hash is a different definition.
+- `availability.status` is `available`, `limited` (`unavailable_outputs` cannot be delivered) or
+  `unavailable`. It comes from the installed node types and from locating Python modules without
+  importing them. Declared runtime capabilities (`dependencies.runtime`, e.g. offscreen rendering)
+  are reported with `checked: false`; they are not probed.
+- Definition files that cannot be used are listed in `problems` with `{source, file, code, message,
+  path, id?, version?}` and skipped; they never hide the other skills. Codes include `unreadable`,
+  `invalid_json`, `invalid_definition`, `file_name_mismatch`, `duplicate_skill`, `unsupported_entry`,
+  `unknown_preset`, `unknown_guide` and `invalid_reference`; clients must accept other codes.
+- `skills.get` without `version` returns the latest version. An unknown id or version is
+  `not_found` with `data: {id, known_versions, problems}`; `problems` explains an id that exists
+  only as an unusable definition. Out-of-range params are `invalid_params`.
+- The entry names what executes the skill (`graph.preset` run by `graph.evaluate`); the catalog
+  does not execute it. The Python console exposes both methods as `stk.skills.list/get`.

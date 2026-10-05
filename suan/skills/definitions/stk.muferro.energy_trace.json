@@ -1,0 +1,25 @@
+{
+ "schema": "stk.skill/1",
+ "id": "stk.muferro.energy_trace",
+ "version": 1,
+ "title": {"en": "muFerro energy trace", "zh_CN": "muFerro 能量曲线"},
+ "summary": {
+  "en": "Read the five muFerro energies of energy_out.dat as a table and plot them against the step. Energies stay in the solver's normalized units.",
+  "zh_CN": "将 energy_out.dat 中的五项 muFerro 能量读取为表格，并按步数绘制曲线。能量保持求解器的归一化单位。"
+ },
+ "guide": {"pack": "stk-visualize"},
+ "entry": {"kind": "graph.preset", "preset": "energy-plot"},
+ "dependencies": {
+  "python": [
+   {"module": "numpy", "purpose": {"en": "Parse energy_out.dat into a table.", "zh_CN": "将 energy_out.dat 解析为表格。"}},
+   {"module": "matplotlib", "outputs": ["energy"], "purpose": {"en": "Draw the energy plot.", "zh_CN": "绘制能量曲线。"}}
+  ]
+ },
+ "examples": [
+  {"title": {"en": "Plot the last 100 rows", "zh_CN": "绘制最后 100 行"},
+   "parameters": {"last_n": 100},
+   "outputs": ["energy"]},
+  {"title": {"en": "Full energy table (no plot)", "zh_CN": "完整能量表格（不绘图）"},
+   "outputs": ["table"]}
+ ]
+}

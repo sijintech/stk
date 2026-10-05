@@ -1,0 +1,27 @@
+{
+ "schema": "stk.skill/1",
+ "id": "stk.visualize.scalar_volume",
+ "version": 1,
+ "title": {"en": "Signed scalar volume", "zh_CN": "带符号标量体渲染"},
+ "summary": {
+  "en": "Volume-render one explicitly named point field and zero-based component of a field file, keeping negative and positive values. A result unit only relabels the field; values are never converted and no magnitude is computed.",
+  "zh_CN": "对场文件中明确指定的点场及零起始分量做体渲染，保留正负值。结果单位只改写标签，不换算数值，也不计算模长。"
+ },
+ "guide": {"pack": "stk-visualize"},
+ "entry": {"kind": "graph.preset", "preset": "scalar-volume"},
+ "dependencies": {
+  "python": [
+   {"module": "numpy", "purpose": {"en": "Read the field file and build the volume.", "zh_CN": "读取场文件并生成体数据。"}},
+   {"module": "vtk", "outputs": ["image"], "purpose": {"en": "Render the PNG image offscreen.", "zh_CN": "离屏渲染 PNG 图像。"}}
+  ],
+  "runtime": [
+   {"capability": "offscreen_rendering", "outputs": ["image"],
+    "purpose": {"en": "The PNG image needs offscreen OpenGL (EGL or OSMesa).", "zh_CN": "PNG 图像需要离屏 OpenGL（EGL 或 OSMesa）。"}}
+  ]
+ },
+ "examples": [
+  {"title": {"en": "z component of the polarization in the 3D view", "zh_CN": "在三维视图中查看极化的 z 分量"},
+   "parameters": {"path": "Polar.00000200.dat", "field": "Polar", "component": 2, "colormap": "coolwarm"},
+   "outputs": ["view"]}
+ ]
+}
