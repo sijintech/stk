@@ -10,6 +10,7 @@
 #include "project_review_view.hh"
 #include "project_discussion_view.hh"
 #include "project_simulation_view.hh"
+#include "project_navigation.hh"
 
 #include <algorithm>
 #include <filesystem>
@@ -27,13 +28,19 @@ class ProjectEditor final : public Editor {
 
   bool show_view(const std::string_view view) override
   {
-    if (view != "review" && view != "data" && view != "discussion") { return false; }
-    project_view_ = view == "review" ? 1 : view == "discussion" ? 2 : 0;
+    if (view != "review" && view != "data" && view != "discussion" && view != "files" && view != "runs" && view != "location") { return false; }
+    project_view_ = view == "review" ? 1 : view == "discussion" ? 2 : view == "files" ? 3 : view == "runs" ? 4 : view == "location" ? 5 : 0;
     return true;
+  }
+  bool can_change_project_selection(const std::string_view project_id) const override
+  {
+    return !(draft_dirty_ && draft_identity_.starts_with(project_id)) &&
+           !(manage_dirty_ && manage_identity_.starts_with(project_id));
   }
 
   void draw_header(ui::Layout &row, EditorContext &ctx) override
   {
+    workspace_link(row, ctx);
     auto &state = ctx.store.project();
     state.sync();
     row.button("project_ai", ctx.tr("editor.ai.title"), [ctx] {
@@ -72,7 +79,10 @@ class ProjectEditor final : public Editor {
     if (state.busy()) {
       layout.label(ctx.tr("project.busy"));
     }
-    if (auto *panel = layout.panel("project_location", ctx.tr("project.location"), !state.project())) {
+    const bool location_only = project_view_ == 5;
+    if (location_only) { layout.label(ctx.tr("project.location")); }
+    if (auto *panel = location_only ? &layout.scope("project_location") :
+        layout.panel("project_location", ctx.tr("project.location"), !state.project())) {
       panel->prop(ctx.tr("project.directory")).text_field("directory", ui::bind(directory_));
       panel->prop(ctx.tr("project.name")).text_field("name", ui::bind(name_));
       auto &buttons = panel->row();
@@ -84,6 +94,7 @@ class ProjectEditor final : public Editor {
       }).disable(!state.ready() || state.busy() || directory_.empty() || name_.empty());
     }
     recent_controls(layout, ctx, state);
+    if (location_only) { return; }
     if (!state.project()) {
       layout.paragraph(ctx.tr("project.intro"));
       return;
@@ -95,6 +106,20 @@ class ProjectEditor final : public Editor {
       return;
     }
     const bool editable = state.ready() && !state.busy();
+    if (project_view_ == 3) {
+      layout.label(ctx.tr("project.files.title"));
+      file_controls(layout, ctx, state, editable, true);
+      if (state.table() && state.table_id() == io::get_string(state.file_index(), "table_id")) {
+        draw_table(layout, ctx, state);
+        if (selected_visible(state)) { draw_cell(layout, ctx, state, editable); }
+      }
+      return;
+    }
+    if (project_view_ == 4) {
+      layout.label(ctx.tr("project.runs.title"));
+      run_controls(layout, ctx, state, editable, true);
+      return;
+    }
     if (state.project()->format_version < 9) {
       layout.paragraph(ctx.tr("project.upgrade_hint"));
       layout.button("upgrade_project", ctx.tr("project.upgrade"), [&state] { state.upgrade(); }).disable(!editable);
@@ -178,13 +203,14 @@ class ProjectEditor final : public Editor {
   }
 
  private:
-  void file_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  void file_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable,
+                     const bool standalone = false)
   {
     if (file_project_ != state.project()->id) {
       file_project_ = state.project()->id;
       file_paths_.clear();
     }
-    auto *panel = layout.panel("project_files", ctx.tr("project.files.title"), false);
+    auto *panel = standalone ? &layout.scope("project_files") : layout.panel("project_files", ctx.tr("project.files.title"), false);
     if (!panel) { return; }
     panel->paragraph(ctx.tr("project.files.hint"));
     panel->text_area("paths", ui::bind(file_paths_), {.max_length = 65536, .mono = true, .visible_lines = 3});
@@ -359,9 +385,10 @@ class ProjectEditor final : public Editor {
     panel->paragraph(ctx.tr("project.recent.hint"));
   }
 
-  void run_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  void run_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable,
+                    const bool standalone = false)
   {
-    auto *panel = layout.panel("project_runs", ctx.tr("project.runs.title"), false);
+    auto *panel = standalone ? &layout.scope("project_runs") : layout.panel("project_runs", ctx.tr("project.runs.title"), false);
     if (!panel) { return; }
     panel->paragraph(ctx.tr("project.runs.hint"));
     const bool enabled = editable && state.project()->format_version >= 5;

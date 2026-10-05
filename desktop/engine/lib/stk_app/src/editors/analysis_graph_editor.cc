@@ -12,6 +12,7 @@
 #include "stk/bridge/client.hh"
 #include "stk/ui/gpu_painter.hh"
 #include "stk/wm/window.hh"
+#include "project_navigation.hh"
 
 #include <algorithm>
 #include <charconv>
@@ -49,6 +50,15 @@ void table(ui::Layout &layout, std::string_view key, std::vector<ui::TableColumn
 class AnalysisGraphEditor final : public Editor {
  public:
   explicit AnalysisGraphEditor(const EditorType &type) : Editor(type) {}
+  bool show_view(const std::string_view view) override
+  {
+    if (view != "saved" && view != "runs") { return false; }
+    ++navigation_generation_;
+    initial_saved_ = true; initial_run_ = false; initial_displayed_ = false;
+    saved_section_ = view == "runs" ? 1 : 0;
+    if (state_) { state_->show_saved(); redraw(); }
+    return true;
+  }
   ~AnalysisGraphEditor() override { *alive_ = false; }
   bool draws_gpu() const override { return true; }
   bool has_sidebar() const override { return true; }
@@ -56,6 +66,7 @@ class AnalysisGraphEditor final : public Editor {
 
   void draw_header(ui::Layout &row, EditorContext &ctx) override
   {
+    workspace_link(row, ctx);
     attach(ctx);
     const std::weak_ptr<bool> weak = alive_;
     row.button("graph_fit", ctx.tr("analysis_graph.fit"), [this, weak] {

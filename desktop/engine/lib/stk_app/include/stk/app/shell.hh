@@ -105,6 +105,8 @@ class AppShell {
   }
   /** Whether an installed window has an active text edit. Pure inspection, without committing it. */
   bool text_input_active() const;
+  /** Lifetime fence for callbacks retained by editors or integrations. */
+  std::weak_ptr<void> lifetime() const { return alive_; }
   /** Replaces the screen's tree with the default layout. */
   void build_default_layout(wm::Screen &screen);
 
@@ -133,6 +135,10 @@ class AppShell {
    * after the event, and fences shell/caller lifetime. Live failures are shown as a toast. */
   void activate_editor_later(wm::Screen *screen, std::string editor_id, bool maximize,
                              std::function<bool()> valid = {});
+  /** Project-scoped navigation; never executes work or replaces existing editors. Empty handle
+   * is allowed only for workspace/project management. Checks all windows for active input. */
+  void open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
+                               std::function<bool()> valid = {});
 
   /** Defer saved-draft adoption and Review navigation into the originating screen.
    * `valid` must fence the caller's lifetime and selected request. Expired callers

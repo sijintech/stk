@@ -239,6 +239,41 @@ TEST_F(AnalysisParametersEditorPython, InvalidTextAndLastKeypressFenceRetainedSa
   EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "1");
 }
 
+TEST_F(AnalysisParametersEditorPython, WorkspaceRoundTripKeepsInvalidTextAndAcceptedParameterDraft)
+{
+  ASSERT_NO_FATAL_FAILURE(edit("component", "2"));
+  ASSERT_NO_FATAL_FAILURE(type("1e", false));
+  f.drv->key(wm::Key::Enter); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("analysis_parameter_apply"));
+  auto *editor = &area().editor();
+  const auto revision_before = project().project()->revision;
+  ASSERT_NE(widget("project_workspace"), nullptr);
+  widget("project_workspace")->on_click(); f.screen.run_deferred(); f.drv->frame();
+  ASSERT_NE(widget("workspace_analysis_runs"), nullptr);
+  widget("workspace_analysis_runs")->on_click(); f.screen.run_deferred(); f.drv->frame();
+  EXPECT_EQ(&area().editor(), editor);
+  ASSERT_NE(widget("analysis_saved_section"), nullptr);
+  EXPECT_EQ(widget("analysis_saved_section")->index.value(), 1);
+  ASSERT_NE(widget("project_workspace"), nullptr);
+  widget("project_workspace")->on_click(); f.screen.run_deferred(); f.drv->frame();
+  ASSERT_NE(widget("workspace_workflows"), nullptr);
+  widget("workspace_workflows")->on_click(); f.screen.run_deferred(); f.drv->frame();
+  EXPECT_EQ(&area().editor(), editor);
+  ASSERT_NE(widget("analysis_parameter_value"), nullptr);
+  EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "1e");
+  EXPECT_FALSE(widget("analysis_parameters_save")->enabled);
+  EXPECT_EQ(project().project()->revision, revision_before);
+  EXPECT_TRUE(calls("project.analyses.update").empty());
+  ASSERT_NO_FATAL_FAILURE(type("2", false));
+  f.drv->key(wm::Key::Enter); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("analysis_parameter_apply"));
+  ASSERT_NO_FATAL_FAILURE(save());
+  Json current;
+  ASSERT_NO_FATAL_FAILURE(read(current));
+  auto expected = document; expected["parameters"]["component"] = 2;
+  EXPECT_EQ(exact(current.at("analysis").at("document")), exact(expected));
+}
+
 TEST_F(AnalysisParametersEditorPython, NullAbsentEmptyStringAndEmptyUnknownKeyStayDistinct)
 {
   ASSERT_NO_FATAL_FAILURE(row("unit"));

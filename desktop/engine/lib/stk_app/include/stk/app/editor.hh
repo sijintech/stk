@@ -62,6 +62,8 @@ class Editor {
   {
     return *type_;
   }
+  /** Deferred navigation must not outlive the originating editor instance. */
+  std::weak_ptr<void> lifetime() const { return lifetime_; }
 
   /* ---- Regions ---- */
 
@@ -115,6 +117,8 @@ class Editor {
 
   /** Reveal a named subview on the UI thread; false means this editor has no such view. */
   virtual bool show_view(std::string_view view) { return false; }
+  /** Whether navigation may change a project's table/record selection without losing a draft. */
+  virtual bool can_change_project_selection(std::string_view project_id) const { return true; }
 
   /* ---- Persistence ---- */
 
@@ -131,6 +135,7 @@ class Editor {
 
  private:
   const EditorType *type_;
+  std::shared_ptr<void> lifetime_ = std::make_shared<bool>(true);
 };
 
 class EditorRegistry {
@@ -161,8 +166,9 @@ inline constexpr const char *kEditorProject = "project";
 inline constexpr const char *kEditorPython = "python";
 inline constexpr const char *kEditorAI = "ai";
 inline constexpr const char *kEditorAnalysisGraph = "analysis_graph";
+inline constexpr const char *kEditorWorkspace = "workspace";
 
-/** Registers the D1 editors for all seven ids. */
+/** Registers the built-in desktop editors. */
 void register_builtin_editors(EditorRegistry &registry);
 
 }  // namespace stk::app

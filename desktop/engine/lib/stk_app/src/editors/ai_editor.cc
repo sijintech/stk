@@ -7,6 +7,7 @@
 #include "stk/app/shell.hh"
 #include "stk/wm/window.hh"
 #include "project_context_picker.hh"
+#include "project_navigation.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -96,6 +97,7 @@ class AIEditor final : public Editor {
 
   void draw_header(ui::Layout &row, EditorContext &ctx) override
   {
+    workspace_link(row, ctx);
     row.button("ai_tables", ctx.tr("editor.project.title"), [ctx] { show_tables(ctx); }).width(7);
     auto &state = ctx.store.project();
     state.sync();

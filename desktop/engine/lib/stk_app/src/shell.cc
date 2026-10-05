@@ -236,6 +236,64 @@ void AppShell::activate_editor_later(wm::Screen *screen, std::string editor_id, 
   });
 }
 
+void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
+                                      std::function<bool()> valid)
+{
+  if (!screen || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
+  const std::weak_ptr<bool> weak = alive_;
+  screen->defer([this, weak, screen, page = std::move(page), handle = std::move(handle), valid = std::move(valid)] {
+    if (!weak.lock() || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
+    auto &project = store_.project();
+    project.sync();
+    if ((project.project() ? project.project()->handle : std::string()) != handle) { return; }
+    const bool management = page == "project" || page == "workspace";
+    if (!management && (!project.loaded() || !project.ready() || project.busy())) { return; }
+    if (text_input_active()) {
+      if (store_.toast) { store_.toast(std::string(store_.tr("app.focus.busy")), ui::ToastKind::Warning); }
+      return;
+    }
+    const char *editor = nullptr;
+    std::string view;
+    if (page == "workspace") { editor = kEditorWorkspace; }
+    else if (page == "conversation") { editor = kEditorAI; }
+    else if (page == "project" || page == "data" || page == "files" || page == "simulation_runs") {
+      editor = kEditorProject;
+      view = page == "files" ? "files" : page == "simulation_runs" ? "runs" : page == "project" ? "location" : "data";
+    }
+    else if (page == "workflows" || page == "analysis_runs") {
+      editor = kEditorAnalysisGraph;
+      view = page == "workflows" ? "saved" : "runs";
+    }
+    else { return; }
+    const auto file_table = page == "files" ? io::get_string(project.file_index(), "table_id") : std::string();
+    if (!file_table.empty() && file_table != project.table_id()) {
+      for (const auto *target : screens_) {
+        for (const auto *base : target->areas()) {
+          const auto *area = dynamic_cast<const EditorArea *>(base);
+          if (!area) { continue; }
+          for (int i = 0; i < area->tab_count(); ++i) {
+            if (!area->tab(i).can_change_project_selection(project.project()->id)) {
+              if (store_.toast) { store_.toast(std::string(store_.tr("workspace.selection_busy")), ui::ToastKind::Warning); }
+              return;
+            }
+          }
+        }
+      }
+    }
+    const auto result = activate_editor(screen, editor, true);
+    if (!result) {
+      if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
+      return;
+    }
+    auto *area = dynamic_cast<EditorArea *>(screen->find_area(io::get_string(result.value(), "area_id")));
+    if (!area) { return; }
+    if (!view.empty()) { area->editor().show_view(view); }
+    if (!file_table.empty()) { project.select_table(file_table); }
+    if (page == "workflows" || page == "analysis_runs") { area->set_sidebar_open(true); }
+    store_.changed();
+  });
+}
+
 void AppShell::open_saved_review(wm::Screen *screen, std::string handle, const int64_t expected_revision,
                                  io::Json draft, const uint64_t expected_review_generation,
                                  std::function<bool()> valid, ScriptState::Completion complete)
@@ -779,6 +837,10 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
       }
     });
   };
+  const std::weak_ptr<bool> weak = alive_;
+  m.push_back({std::string(store_.tr("editor.workspace.title")), [this, weak, s] {
+    if (weak.lock()) { activate_editor_later(s, kEditorWorkspace, true); }
+  }});
   m.push_back({std::string(store_.tr("editor.ai.title")), [show_editor] { show_editor(kEditorAI); }});
   m.push_back({std::string(store_.tr("editor.project.title")), [show_editor] { show_editor(kEditorProject); }});
   m.push_back({std::string(store_.tr("editor.python.title")), [show_editor] { show_editor(kEditorPython); }});

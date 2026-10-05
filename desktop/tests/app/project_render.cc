@@ -31,11 +31,13 @@ int main(int argc, char **argv)
   }
   if (output.empty()) { return 2; }
   const bool ai_stream = editor == "ai_stream";
+  const bool workspace = editor == "workspace" || editor == "workspace_narrow";
   const bool ai_proposal = editor == "ai_proposal" || editor == "ai_proposal_narrow";
   const bool ai_focus = editor == "ai_focus";
   const bool ai_scope = editor == "ai_scope" || editor == "ai_scope_narrow";
   const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope || ai_focus;
-  const int canvas_width = editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ? 760 : 1280;
+  const int canvas_width = editor == "workspace_narrow" ? 560 :
+      editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions bo;
@@ -120,7 +122,7 @@ int main(int argc, char **argv)
     ok = ok && state.loaded() && state.project()->revision == 1;
     if (ok) {
       auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
-      area->set_tab_type(0, editor == "python" ? app::kEditorPython : ai ? app::kEditorAI : app::kEditorProject);
+      area->set_tab_type(0, workspace ? app::kEditorWorkspace : editor == "python" ? app::kEditorPython : ai ? app::kEditorAI : app::kEditorProject);
       if (editor == "python") {
         auto &scripts = shell.store().scripts();
         const std::string source =
@@ -598,6 +600,13 @@ int main(int argc, char **argv)
              state.saved_review().empty() && !state.review() &&
              io::get_string(state.discussion().exchange_edit_proposal().at("draft"), "status") == "pending" &&
              client->stats().schema_violations == 0;
+      }
+      if (workspace) {
+        for (const auto *page : {"conversation", "files", "workflows", "analysis_runs", "simulation_runs", "data", "project"}) {
+          const auto *widget = screen.ui()->find(std::string("workspace_") + page);
+          ok = ok && widget && widget->enabled && widget->rect.w > 0;
+        }
+        ok = ok && state.project()->revision == 1 && client->stats().schema_violations == 0;
       }
       if (ai_focus) {
         const auto *view = screen.ui()->find("view");
