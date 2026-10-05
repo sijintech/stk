@@ -50,7 +50,15 @@ def test_builtin_catalog_is_valid_bilingual_and_pinned():
                  *(d["purpose"] for d in skill["dependencies"]["python"] + skill["dependencies"]["runtime"])]
         assert all(set(text) == {"en", "zh_CN"} for text in texts), skill["ref"]
         assert skill["guide"]["pack"] == "stk-visualize" and skill["entry"]["operation"] == "graph.evaluate"
-        assert skill["availability"]["status"] == "available", skill["availability"]
+        # Availability depends on this environment (the Windows client CI has no VTK): derive it.
+        python = skill["dependencies"]["python"]
+        assert all(d["available"] == skill_catalog.module_available(d["module"]) for d in python)
+        missing = [d for d in python if not d["available"]]
+        assert [(i["code"], i["subject"]) for i in skill["availability"]["issues"]] == [
+            ("missing_module", d["module"]) for d in missing], skill["availability"]
+        expected = ("available" if not missing else "unavailable" if any(not d["outputs"] for d in missing)
+                    else "limited")
+        assert skill["availability"]["status"] == expected, skill["availability"]
         assert skill["dependencies"]["runtime"] == [] or all(not item["checked"]
                                                              for item in skill["dependencies"]["runtime"])
     domains = load_catalog().get("stk.muferro.domains")
