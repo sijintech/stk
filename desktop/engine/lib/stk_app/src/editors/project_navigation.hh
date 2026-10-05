@@ -23,6 +23,21 @@ inline std::function<void()> project_navigation_action(EditorContext &ctx, std::
   };
 }
 
+/** Global navigation (no project scope), e.g. the shared skill library. */
+inline std::function<void()> editor_navigation_action(EditorContext &ctx, std::string editor_id)
+{
+  auto *area = &ctx.area;
+  auto *editor = &area->editor();
+  const auto weak = editor->lifetime();
+  const auto shell_weak = area->shell().lifetime();
+  return [weak, shell_weak, area, editor, editor_id = std::move(editor_id)] {
+    if (shell_weak.expired() || weak.expired() || &area->editor() != editor) { return; }
+    area->shell().activate_editor_later(area->screen(), editor_id, true, [weak, area, editor] {
+      return !weak.expired() && &area->editor() == editor;
+    });
+  };
+}
+
 inline void workspace_link(ui::Layout &row, EditorContext &ctx)
 {
   // Widget callbacks can be retained by a menu or an integration after this frame.

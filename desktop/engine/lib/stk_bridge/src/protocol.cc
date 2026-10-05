@@ -322,7 +322,7 @@ bool method_is_retry_safe(const std::string_view method, const Json &params)
       "task.artifacts",  "hub.devices",      "hub.templates",     "hub.actions",
       "hub.action",      "hub.policy",       "transfer.list",     "transfer.get",      "graph.catalog",
       "graph.presets",   "graph.validate",   "blob.ensure",       "probe",
-      "colormaps.list",
+      "colormaps.list",  "skills.list",      "skills.get",
   };
   if (reads.count(method)) {
     return true;

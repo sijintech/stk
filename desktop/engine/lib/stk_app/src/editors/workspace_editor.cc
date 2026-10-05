@@ -40,6 +40,10 @@ class WorkspaceEditor final : public Editor {
           project_navigation_action(ctx, page)).disable(!available);
     }
     action("data", "workspace.data", "workspace.data_hint", available);
+    // The skill library is shared across projects: reachable with or without one.
+    auto &library = layout.box();
+    library.button("workspace_skills", ctx.tr("workspace.skills"), editor_navigation_action(ctx, kEditorSkills));
+    library.paragraph(ctx.tr("workspace.skills_hint"));
     action("project", "project.location", "workspace.project_hint", !project.busy());
   }
 };

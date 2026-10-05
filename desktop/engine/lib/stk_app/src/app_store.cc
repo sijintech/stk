@@ -5,6 +5,7 @@
 #include "stk/app/jobs_state.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
+#include "stk/app/skill_catalog.hh"
 #include "stk/app/viewer_state.hh"
 
 #include <algorithm>
@@ -32,6 +33,7 @@ AppStore::~AppStore()
   /* The editors' states call changed() from their callbacks and refer to this store: drop them
    * (jobs first: its subscriptions may feed the viewer) before the rest of the store. */
   on_change = nullptr;
+  skills_.reset();
   scripts_.reset();
   project_.reset();
   jobs_.reset();
@@ -44,6 +46,14 @@ ProjectState &AppStore::project()
     project_ = std::make_unique<ProjectState>(*this);
   }
   return *project_;
+}
+
+SkillCatalogState &AppStore::skills()
+{
+  if (!skills_) {
+    skills_ = std::make_unique<SkillCatalogState>(*this);
+  }
+  return *skills_;
 }
 
 ScriptState &AppStore::scripts()

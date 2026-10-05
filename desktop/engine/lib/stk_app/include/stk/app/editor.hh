@@ -167,6 +167,7 @@ inline constexpr const char *kEditorPython = "python";
 inline constexpr const char *kEditorAI = "ai";
 inline constexpr const char *kEditorAnalysisGraph = "analysis_graph";
 inline constexpr const char *kEditorWorkspace = "workspace";
+inline constexpr const char *kEditorSkills = "skills";
 
 /** Registers the built-in desktop editors. */
 void register_builtin_editors(EditorRegistry &registry);

@@ -22,6 +22,7 @@ add_library(stk_app STATIC
   src/analysis_table_grid.cc
   src/analysis_parameter_draft.cc
   src/app_store.cc
+  src/skill_catalog.cc
   src/bridge_status.cc
   src/editor.cc
   src/editor_area.cc
@@ -39,6 +40,7 @@ add_library(stk_app STATIC
   src/editors/python_editor.cc
   src/editors/ai_editor.cc
   src/editors/workspace_editor.cc
+  src/editors/skills_editor.cc
   src/editors/analysis_graph_editor.cc
   src/analysis_graph_state.cc
   src/editors/project_context_picker.cc

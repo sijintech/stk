@@ -1,6 +1,6 @@
 # 技能目录（首版，实验性）
 
-更新：2026-10-05。状态：**只读内置目录已实现**；契约 `stk.skill/1` 仍是实验格式，未冻结。
+更新：2026-10-05。状态：**只读内置目录及原生浏览页已实现**；契约 `stk.skill/1` 仍是实验格式，未冻结。
 产品方向见[项目工作台设计](design/project-workbench.md)，存储边界见[项目数据模型](design/project-model.md)。
 
 ## 三类内容不要混用
@@ -63,9 +63,10 @@ print(skill["ref"], skill["content_sha256"], skill["availability"]["status"])
 桌面桥方法和字段见[桥协议 §16](specs/stk-desktop-bridge-v1.md#16-versioned-skill-catalog-additive-extension-experimental)。
 旧版桥没有这两个方法时，客户端应显示“不提供技能目录”，不能猜测。
 
+原生桌面从 **文件 → 技能** 或工作台“技能库”打开同一目录，用法见[桌面指南](desktop.md#技能目录)。
+
 ## 尚未实现
 
-- 原生“技能”浏览页（下一步，与本节契约共用桥方法）；
 - 项目采用技能的持久引用、版本固定、迁移与备份；
 - 从技能直接准备或运行、对话附件、工作流封装为技能；
 - 用户或第三方技能目录、更多入口类型（批次模板、Python 操作等）。

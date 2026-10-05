@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** Real local project bridge -> shared model -> native editor -> offscreen PNG. */
 #include "stk/app/project_state.hh"
+#include "stk/app/skill_catalog.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
@@ -32,11 +33,12 @@ int main(int argc, char **argv)
   if (output.empty()) { return 2; }
   const bool ai_stream = editor == "ai_stream";
   const bool workspace = editor == "workspace" || editor == "workspace_narrow";
+  const bool skills = editor == "skills" || editor == "skills_narrow";
   const bool ai_proposal = editor == "ai_proposal" || editor == "ai_proposal_narrow";
   const bool ai_focus = editor == "ai_focus";
   const bool ai_scope = editor == "ai_scope" || editor == "ai_scope_narrow";
   const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope || ai_focus;
-  const int canvas_width = editor == "workspace_narrow" ? 560 :
+  const int canvas_width = editor == "workspace_narrow" || editor == "skills_narrow" ? 560 :
       editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
@@ -122,7 +124,8 @@ int main(int argc, char **argv)
     ok = ok && state.loaded() && state.project()->revision == 1;
     if (ok) {
       auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
-      area->set_tab_type(0, workspace ? app::kEditorWorkspace : editor == "python" ? app::kEditorPython : ai ? app::kEditorAI : app::kEditorProject);
+      area->set_tab_type(0, workspace ? app::kEditorWorkspace : skills ? app::kEditorSkills : editor == "python" ? app::kEditorPython :
+                         ai ? app::kEditorAI : app::kEditorProject);
       if (editor == "python") {
         auto &scripts = shell.store().scripts();
         const std::string source =
@@ -535,6 +538,15 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
+      if (skills) {
+        // The first draw requests the catalog; show one skill's full contract once it arrives.
+        auto &catalog = shell.store().skills();
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && loop.pump_until([&] { return catalog.loaded() && !catalog.loading(); }, 30);
+        ok = ok && catalog.select("stk.visualize.scalar_volume@1") &&
+             loop.pump_until([&] { return !catalog.detail_loading(); }, 30) && catalog.detail().is_object();
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+      }
       ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
       if (ai_scope) {
         // Enter the real picker and inspect the next scope without capturing or replacing history.
@@ -607,6 +619,15 @@ int main(int argc, char **argv)
           ok = ok && widget && widget->enabled && widget->rect.w > 0;
         }
         ok = ok && state.project()->revision == 1 && client->stats().schema_violations == 0;
+      }
+      if (skills) {
+        const auto &catalog = shell.store().skills();
+        const auto *list = screen.ui()->find("skills_list");
+        const auto *parameters = screen.ui()->find("skills_parameters");
+        ok = ok && list && list->list && list->list->count == 3 && list->list->selected.value() == 2 &&
+             parameters && parameters->rect.w > 0 && catalog.problem_count() == 0 && catalog.error().empty() &&
+             state.project()->revision == 1 && shell.store().viewer().evaluations_started() == 0 &&
+             client->stats().schema_violations == 0;
       }
       if (ai_focus) {
         const auto *view = screen.ui()->find("view");

@@ -17,6 +17,7 @@ std::unique_ptr<Editor> make_python_editor(const EditorType &type);
 std::unique_ptr<Editor> make_ai_editor(const EditorType &type);
 std::unique_ptr<Editor> make_analysis_graph_editor(const EditorType &type);
 std::unique_ptr<Editor> make_workspace_editor(const EditorType &type);
+std::unique_ptr<Editor> make_skills_editor(const EditorType &type);
 
 void register_builtin_editors(EditorRegistry &registry)
 {
@@ -32,6 +33,7 @@ void register_builtin_editors(EditorRegistry &registry)
   registry.add({kEditorAI, "editor.ai.title", make_ai_editor});
   registry.add({kEditorAnalysisGraph, "editor.analysis_graph.title", make_analysis_graph_editor});
   registry.add({kEditorWorkspace, "editor.workspace.title", make_workspace_editor});
+  registry.add({kEditorSkills, "editor.skills.title", make_skills_editor});
 }
 
 }  // namespace stk::app

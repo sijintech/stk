@@ -30,6 +30,7 @@ class ViewerState;
 class JobsState;
 class ProjectState;
 class ScriptState;
+class SkillCatalogState;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -112,6 +113,8 @@ class AppStore {
   ProjectState &project();
   /** Shared isolated Python session and main-thread desktop control. */
   ScriptState &scripts();
+  /** Read-only versioned skill catalog of the bridge (skill_catalog.hh). */
+  SkillCatalogState &skills();
 
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
@@ -161,6 +164,7 @@ class AppStore {
   std::unique_ptr<JobsState> jobs_;
   std::unique_ptr<ProjectState> project_;
   std::unique_ptr<ScriptState> scripts_;
+  std::unique_ptr<SkillCatalogState> skills_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

@@ -841,6 +841,9 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
   m.push_back({std::string(store_.tr("editor.workspace.title")), [this, weak, s] {
     if (weak.lock()) { activate_editor_later(s, kEditorWorkspace, true); }
   }});
+  m.push_back({std::string(store_.tr("editor.skills.title")), [this, weak, s] {
+    if (weak.lock()) { activate_editor_later(s, kEditorSkills, true); }
+  }});
   m.push_back({std::string(store_.tr("editor.ai.title")), [show_editor] { show_editor(kEditorAI); }});
   m.push_back({std::string(store_.tr("editor.project.title")), [show_editor] { show_editor(kEditorProject); }});
   m.push_back({std::string(store_.tr("editor.python.title")), [show_editor] { show_editor(kEditorPython); }});

@@ -48,7 +48,24 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 文件入口需要切换共享表格时，还会检查所有窗口及隐藏标签的单元格及表/字段名称草稿；先在原编辑器应用或重新载入，避免隐式切表丢失输入。
 进入页面本身不发送模型请求或启动计算，不改变历史运行和 Viewer。文件入口会改变共享表格选择。
 布局可保存 `workspace` 编辑器，也可用 Python `stk.ui.activate_editor("workspace")` 打开。
-默认启动布局尚未变更，技能库、文件/技能对话附件和具体对象深链接仍按开发计划推进。
+**技能库**是跨项目的全局入口，没有打开项目时也可进入，见下节。
+默认启动布局尚未变更，文件/技能对话附件和具体对象深链接仍按开发计划推进。
+
+## 技能目录
+
+从 **文件 → 技能**、工作台的“技能库”或任一区域的编辑器类型菜单打开只读的版本化技能目录
+（实验契约 `stk.skill/1`，见[技能目录](skills.md)）。首次显示时读取一页（最多 50 项）；搜索按 ID、标题、说明或预设过滤，
+按回车或“搜索”后才发送；“重新读取”刷新当前页及已选技能的可用性。
+
+- 左侧（窄窗口为上方）列出名称、`id@version` 和可用性：可用、部分可用（列出无法交付的输出）或不可用。
+- 选择技能后显示内容 SHA-256、说明、执行入口（预设与 `graph.evaluate`）、给模型的 SKILL.md 说明包、
+  输入绑定、参数（类型与默认值保持原 JSON 类型）、输出、节点/Python 依赖、未检测的运行能力及例子。
+- 定义文件无法使用时，“未载入的定义”列出文件、代码、JSON 指针和原因；其他技能照常显示。
+- 旧版 Python 桥没有 `skills.list/get` 时显示“不提供技能目录”，不猜测内容。桥重启或更换后清空并重新读取。
+
+浏览只读取定义：不运行技能、不准备运行、不改变项目、Viewer 或布局，也不调用模型。
+需要运行时，在 Viewer、保存的分析或 Python 中明确执行对应预设。Python 可用 `stk.skills.list/get` 读取同一目录，
+用 `stk.ui.activate_editor("skills", maximize=True)` 打开此页。项目采用固定技能版本尚未实现。
 
 ## AI 准备工作区
 
@@ -401,6 +418,18 @@ sequence export) and **Transfers / Logs / Bridge log**. The D1 acceptance run is
 [runtime-validation.md](runtime-validation.md#2026-09-25-桌面里程碑-d1自有引擎桌面端).
 
 ![STK desktop: Jobs, Viewer (muFerro domains), Properties, Probe](images/desktop/overview-en.png)
+
+### Skill catalog
+
+**File → Skills**, the workspace's *Skill library* button (available without a project) or any area's editor
+menu opens the read-only catalog of versioned skills (experimental `stk.skill/1`, see the
+[skill guide](skills.md), Chinese). It lists `id@version`, availability (available, limited with the outputs
+that cannot be delivered, or unavailable) and, for the selected skill, its content SHA-256, entry (graph preset
+run by `graph.evaluate`), SKILL.md method guide, inputs, typed parameters, outputs, dependencies, unchecked
+runtime capabilities and examples. Unusable definition files are listed with their code, JSON pointer and
+reason. Search and reload are explicit; an older bridge without `skills.list/get` shows the catalog as
+unavailable. Browsing never runs a skill, prepares a run, changes a project or the Viewer, or calls a model.
+Python reads the same catalog with `stk.skills.list/get`.
 
 ### AI preparation workspace
 

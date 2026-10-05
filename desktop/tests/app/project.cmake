@@ -8,7 +8,7 @@ add_executable(stk-project-tests project_test.cc script_test.cc project_table_vi
   analysis_graph_run_state_test.cc analysis_graph_run_editor_test.cc analysis_outputs_editor_test.cc
   analysis_input_reuse_test.cc analysis_input_reuse_editor_test.cc
   analysis_result_inspection_test.cc analysis_result_inspection_editor_test.cc
-  analysis_table_grid_test.cc analysis_table_grid_editor_test.cc)
+  analysis_table_grid_test.cc analysis_table_grid_editor_test.cc skills_catalog_test.cc)
 target_link_libraries(stk-project-tests PRIVATE stk_jobs_test_support GTest::gtest_main)
 if(MSVC)
   target_compile_options(stk-project-tests PRIVATE /W3 /utf-8 /bigobj)
@@ -24,7 +24,7 @@ set_target_properties(stk-project-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 # Reuse the software-GPU environment and supported backends established in jobs.cmake.
 foreach(_lang en zh)
   foreach(_be ${_jobs_backends})
-    foreach(_review review review_errors drafts discussion requests filter simulation batches ai ai_narrow ai_stream ai_proposal ai_proposal_narrow ai_scope ai_scope_narrow ai_focus workspace workspace_narrow)
+    foreach(_review review review_errors drafts discussion requests filter simulation batches ai ai_narrow ai_stream ai_proposal ai_proposal_narrow ai_scope ai_scope_narrow ai_focus workspace workspace_narrow skills skills_narrow)
       add_test(NAME project_${_review}_render_${_be}_${_lang} COMMAND stk-project-render --editor ${_review}
         --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_${_review}_${_be}_${_lang}.png")
       set_tests_properties(project_${_review}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120

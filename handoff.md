@@ -1,7 +1,7 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-05。**功能代码基线：`b2e5632c244db356c42e6c7f7eb1045ea116f9cc`，已推送 `main`。**
-本次交接只更新文档；接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
+更新：2026-10-05。**最近功能交付：技能目录首版**（`5a12d5a` 契约与查询、`526608a` 测试修正、随后的原生浏览页提交），已推送 `main`。
+接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 
 ## 先读什么，先做什么
 
@@ -47,11 +47,36 @@ git log --oneline HEAD..origin/main
 | AI | 阿里 Token Plan、明确捕获上下文、准备/发送、临时流式回复、持久问答、标量参数建议与修改检查 | 不等于通用自主 Agent、文件/技能附件或完整 AI 批量模拟编排 |
 | 分析 | 节点图检查；保存定义；参数和有序输出联合草稿；冻结输入与独立运行；结果归档、精确内联表格与源坐标定位 | 节点连线编辑仍未实现；多层图、子图及大表 blob 有界读取仍待开发 |
 | Python / Runtime | 持久 Python 会话，项目/图/Viewer/布局等 API；Linux Runtime、MuFerro 流程、SSH 管理 | 不是所有 UI 操作都已覆盖；Runtime 服务端仍限 Linux；通用对等通信待开发 |
-| 技能 | `stk-visualize`、`stk-monitor` 说明包及 `suan skills list/export`；实验契约 `stk.skill/1` 的三个内置技能，桥 `skills.list/get`、`stk.skills`、`suan skills catalog/show`（[技能目录](docs/skills.md)） | 原生技能浏览页随后交付；项目引用/版本固定、从技能直接运行、用户技能目录 **未实现**；节点目录不是技能库 |
+| 技能 | `stk-visualize`、`stk-monitor` 说明包及 `suan skills list/export`；实验契约 `stk.skill/1` 的三个内置技能，桥 `skills.list/get`、`stk.skills`、`suan skills catalog/show` 与原生只读“技能”页（[技能目录](docs/skills.md)） | 项目引用/版本固定、从技能直接准备或运行、技能附件、用户技能目录 **未实现**；节点目录不是技能库 |
 
 用户此前在 macOS 和 Windows 真机上确认过能启动并看到 3D；这不是对后续每个交互、IME、GPU 驱动或安装包的全面验收。
 
-## 最近一次交付：项目工作台
+## 最近一次交付：技能目录首版
+
+实验契约 `stk.skill/1`（[技能目录](docs/skills.md)）区分 SKILL.md 说明包、节点目录与版本化技能。
+三个内置技能包装可离线验证的图预设；身份为 `id@version` 加定义与模板的 `content_sha256`，
+[锁文件](tests/data/skill-catalog.lock.json)使同版本内容漂移在 CI 中失败（刷新方法与规则见技能目录文档）。
+桥 `skills.list/get`（[协议 §16](docs/specs/stk-desktop-bridge-v1.md#16-versioned-skill-catalog-additive-extension-experimental)）、
+Python `stk.skills`、`suan skills catalog/show` 与原生 **文件 → 技能** / 工作台“技能库”共用一次解析。
+
+继续开发时须保留这些边界：
+
+- 目录只读：不执行入口、不启动图工作进程、不准备运行、不改项目/Viewer/布局、不调用模型。
+- 可用性来自已安装节点与 `find_spec`，不导入模块；离屏渲染等运行能力只声明 `checked: false`。
+  依赖范围已用屏蔽模块的实际求值核对（例如畴占比不需要 VTK）；修改定义时同步该回归。
+- 坏定义逐文件进入 `problems`，不隐藏其他技能；未知 ID/版本为 `not_found` 并给出已知版本。
+- 原生状态按请求代次、桥客户端与进程会话过滤回复；来自其他桥的当前回复会清空目录并重新读取，不会卡在“读取中”。
+  搜索按 UTF-8 边界截断到 200 字节；旧桥缺方法时显示“不提供技能目录”。
+- 未改数据库格式。项目采用固定版本、从技能直接运行、附件与用户技能目录仍待设计。
+
+| 从哪里改 | 入口 |
+|---|---|
+| 契约、解析、可用性、锁 | [suan/skills/catalog.py](suan/skills/catalog.py)、[definitions](suan/skills/definitions/)、[skill-catalog.lock.json](tests/data/skill-catalog.lock.json) |
+| 桥 / Python / CLI | [server.py](suan/desktop_bridge/server.py)、[桥 schema](suan/contracts/schemas/desktop-bridge-1.schema.json)、[scripting/skills.py](suan/scripting/skills.py)、[skills/cli.py](suan/skills/cli.py) |
+| 原生状态与页面 | [skill_catalog.hh](desktop/engine/lib/stk_app/include/stk/app/skill_catalog.hh)、[skill_catalog.cc](desktop/engine/lib/stk_app/src/skill_catalog.cc)、[skills_editor.cc](desktop/engine/lib/stk_app/src/editors/skills_editor.cc) |
+| 回归 / 截图 | [test_skill_catalog.py](tests/test_skill_catalog.py)、[skills_catalog_test.cc](desktop/tests/app/skills_catalog_test.cc)、[skills_bridge.py](desktop/tests/bridge/skills_bridge.py)、[project_render.cc](desktop/tests/app/project_render.cc) |
+
+## 上一项交付：项目工作台
 
 `b2e5632` 新增 `workspace` 编辑器：从 **文件 → 工作台**，或项目、AI、分析图的页头进入。
 工作台显示当前项目，定位对话、文件、保存分析、分析运行、仿真运行、项目表格及创建/打开项目。
@@ -67,7 +92,7 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
   此保护仅覆盖新工作台入口，不代表所有既有手工切表动作都已统一改造。
 - 回调固定项目打开句柄与来源编辑器/外壳寿命；切换、关闭/重开项目、销毁编辑器/窗口后旧动作失效。
 - 标签容量满时不替换用户编辑器。导航不创建另一份项目状态；文件页切表也不会自动保存一份“上一张表”的工作区状态。
-- 本轮没有数据库迁移；技能按钮、对象深链接、对话附件和完整新主页尚未实现。
+- 本轮没有数据库迁移；对象深链接、对话附件和完整新主页尚未实现（技能库入口已由技能目录首版补上）。
 
 | 从哪里改 | 入口 |
 |---|---|
@@ -79,23 +104,7 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 
 ## 建议接下来的开发包
 
-### 1. 内置技能目录首版（下一项功能）
-
-按当前计划，先交付一个小而可用的技能目录，再进入受限连线编辑。以下为实施建议，接口与模块名尚未冻结：
-
-1. 盘点已有 [suan/skills](suan/skills/)、[节点目录](suan/graph/catalog.py)、[节点注册](suan/graph/registry.py)、
-   [图预设](suan/graph/presets/) 和 [Python API](suan/scripting/)。区分“给模型的方法说明”“可执行节点/操作”“已绑定参数的工作流”。
-2. 在设计文档中明确最小技能契约：稳定 ID、版本、说明、输入/输出、参数、执行入口、依赖和例子。
-   全局可复用定义与项目采用的固定版本分开；旧运行不得随技能升级而改变。
-3. 选择少量已有、可离线验证的能力作为样例，复用 Python 服务语义，提供有界的查询/详情及原生浏览入口。
-   可先做只读目录；新增桥能力应可发现，旧桥缺失时明确显示不可用。不能在 C++ 中再实现一套科学算法。
-4. 验收目录查询不启动计算或模型调用；坏定义、未知版本、缺少可选依赖可解释；UI/Python 得到一致身份和契约。
-   补齐中英文界面、相应测试与 CI 必跑检查，再在文档中标记实际交付范围。
-
-已有 `suan skills export` 是公开入口，扩展时保留兼容与打包资源；不要删除它或将新的产品技能体系冒充为已经完成。
-不必为了第一版浏览界面立刻增加项目数据库版本；如果要持久保存项目技能引用，先确定迁移、备份和恢复规则。
-
-### 2. 保存分析的受限连线编辑（技能目录之后）
+### 1. 保存分析的受限连线编辑（下一项功能）
 
 范围已经写在[开发计划](docs/development-plan.md#工作台与技能目录之后的工作流增量保存分析的单输入连线)：
 只编辑已有节点的已知单输入端口、选择已有上游输出，可选端口可明确断开；首版不含增删节点、多输入列表、拖线或子图。
@@ -103,11 +112,16 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 旧校验回复绑定项目、文档、候选及桥/目录会话，不能应用到新状态。未知/多输入端口保持只读。
 无效参数原文保留，不把空、缺省、`null` 互换；保存失败/不确定时不自动重放。历史运行与当前 Viewer 不受编辑影响。
 
+### 2. 技能目录的后续（按需排期，不与连线首版混做）
+
+- 项目采用固定技能版本：先定迁移、备份与恢复规则，把解析后的技能内容随项目保存，而非依赖全局目录保留旧版本。
+- 从技能明确准备/运行（复用 `graph.evaluate` 或保存分析）、对话附件、更多入口类型（批次模板、Python 操作）及用户技能目录。
+
 ### 3. 持续跟进的稳定性与平台工作
 
 - Weston 偶发退出故障仍未定位，见下节。新一次 CI 通过不能替代根因修复。
 - macOS/Windows 按[真机验收清单](docs/workbench-acceptance.md)复核交互、IME、实际模型调用；Windows CI 没有 GPU 真机验收。
-- 完整 AI 编排、通用 P2P、文档预览与 toolkits 迁移按主计划分批推进，避免与技能首版混成一个大改动。
+- 完整 AI 编排、通用 P2P、文档预览与 toolkits 迁移按主计划分批推进，避免与连线首版混成一个大改动。
 
 ## 验证状态与未解决问题
 
@@ -162,19 +176,19 @@ STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemora/opt/stk-build/merge-check
   --output-junit /tmp/stk-claude-full.xml
 ```
 
-工作台/布局/分析草稿定向回归（相关修改时使用；不需要每次文档修改都跑完整套件）：
+工作台/技能/布局/分析草稿定向回归（相关修改时使用；不需要每次文档修改都跑完整套件）：
 
 ```bash
 STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemora/opt/stk-build/merge-check \
-  -R '^(WorkspaceNavigation(Python)?\.|AnalysisParametersEditorPython\.|FocusNavigation\.|ScriptPython\.)' \
+  -R '^(SkillCatalog\.|SkillsCatalogPython\.|project_skills|WorkspaceNavigation(Python)?\.|AnalysisParametersEditorPython\.|FocusNavigation\.|ScriptPython\.)' \
   --parallel 4 --output-on-failure --output-junit /tmp/stk-claude-focused.xml
-python3 desktop/tests/check_required_tests.py /tmp/stk-claude-focused.xml \
+python3 desktop/tests/check_required_tests.py /tmp/stk-claude-focused.xml 'SkillCatalog\..*' 'SkillsCatalogPython\..*' \
   'WorkspaceNavigation(Python)?\..*' 'AnalysisParametersEditorPython\..*' 'FocusNavigation\..*' 'ScriptPython\..*'
 python3 desktop/app/i18n/check_i18n.py
 git diff --check
 ```
 
-Python 测试按改动选取，例如技能相关可从 `tests/test_skills.py` 与 `tests/test_graph_schema.py` 开始，
+Python 测试按改动选取，例如技能相关可从 `tests/test_skill_catalog.py`、`tests/test_skills.py` 与 `tests/test_graph_schema.py` 开始，
 用上述 venv 的 `python -m pytest`；完整平台组合与依赖以 [desktop.yml](.github/workflows/desktop.yml)
 和 [runtime.yml](.github/workflows/runtime.yml) 为准。新必跑场景要接入 `check_required_tests.py`，跳过不算验收成功。
 
@@ -236,6 +250,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --
 ## 可直接给 Claude 的起始指令
 
 > 请先读仓库根目录的 CLAUDE.md、AGENTS.md 和 handoff.md，再按 docs/development-plan.md 最新顺序继续。
-> 核对 Git/CI 后，从内置技能目录的最小契约与首版浏览入口开始，复用已有 suan/skills、节点目录和共享 Python 服务。
+> 核对 Git/CI 后，从保存分析的受限单输入连线编辑开始（开发计划中的范围），复用 graph.validate 与分析更新接口。
 > 日常直接在 main 工作，不新建分支或合并无关 PR；每个关键节点做 critical review，修复问题、测试并更新文档后提交推送。
 > 保留用户草稿、项目身份、冻结运行和明确执行边界，区分已实现能力与设计目标。
