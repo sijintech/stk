@@ -17,7 +17,14 @@
 
 契约提交 `5a12d5a` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/37354729828) 成功，
 [Runtime CI](https://github.com/sijintech/stk/actions/runs/37354729736) 的两个 Windows 客户端任务因测试假定 VTK 已安装而失败（1 项），
-其余任务成功；`526608a` 修正测试期望。本提交及修正提交的 CI 结果在推送后补记。macOS/Windows 原生页面仅由 CI 覆盖，未做真机检查。
+其余任务成功；`526608a` 修正测试期望后 [Runtime CI](https://github.com/sijintech/stk/actions/runs/37357825198) **7/7** 成功
+（Linux 3.10/3.12 各 2214 passed，Windows 客户端 3.10/3.12 各 1800 passed）。
+
+浏览页提交 `df4729d` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/37358644895) **7/7** 成功；
+[桌面 CI](https://github.com/sijintech/stk/actions/runs/37358644803) Linux **1131/1131**、macOS CPU **758/758** / Metal **142/142**
+（含 Metal 中英文技能截图）通过，Windows CPU **716/717**：`ListsSelectsAndShowsTheContractWithoutRunningAnything`
+在两帧重建控件后仍通过旧指针设置列表选择，Linux 上偶然可用，属未定义行为。修正为帧后重新查找控件，本机 9 项重复 3 次通过；
+修正提交的 CI 见下一条记录。macOS/Windows 原生页面仅由 CI 覆盖，未做真机检查。
 
 ## 2026-10-05：技能目录契约与查询入口
 

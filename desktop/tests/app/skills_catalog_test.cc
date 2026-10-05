@@ -143,6 +143,8 @@ TEST_F(SkillsCatalogPython, ListsSelectsAndShowsTheContractWithoutRunningAnythin
   f.drv->frame(); f.drv->frame();
   EXPECT_EQ(client->stats().calls_sent, sent);  // drawing never re-requests a loaded page
 
+  list = widget("skills_list");  // frames rebuild widgets: never reuse a pointer across them
+  ASSERT_NE(list, nullptr); ASSERT_TRUE(list->list);
   list->list->selected.assign(2);  // the list binding selects by ref
   EXPECT_EQ(skills().selected(), "stk.visualize.scalar_volume@1");
   ASSERT_NO_FATAL_FAILURE(settle());
