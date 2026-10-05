@@ -24,7 +24,11 @@
 [桌面 CI](https://github.com/sijintech/stk/actions/runs/37358644803) Linux **1131/1131**、macOS CPU **758/758** / Metal **142/142**
 （含 Metal 中英文技能截图）通过，Windows CPU **716/717**：`ListsSelectsAndShowsTheContractWithoutRunningAnything`
 在两帧重建控件后仍通过旧指针设置列表选择，Linux 上偶然可用，属未定义行为。修正为帧后重新查找控件，本机 9 项重复 3 次通过；
-修正提交的 CI 见下一条记录。macOS/Windows 原生页面仅由 CI 覆盖，未做真机检查。
+修正提交 `08de943` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/37362435293) **7/7** 成功，
+[桌面 CI](https://github.com/sijintech/stk/actions/runs/37362435377) Linux **1131/1131**、macOS CPU **758** / Metal **142** 通过；
+Windows CPU 任务首次及重跑均在编译阶段因 “The hosted runner lost communication with the server” 中断，与同时段
+GitHub Actions 状态页的事件吻合，**未执行任何测试**，不能计为 Windows 通过。修正只涉及测试代码，Windows 结果以后续提交的 CI 为准。
+macOS/Windows 原生页面仅由 CI 覆盖，未做真机检查。
 
 ## 2026-10-05：技能目录契约与查询入口
 

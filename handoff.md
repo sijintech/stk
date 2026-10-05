@@ -1,6 +1,6 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-05。**最近功能交付：技能目录首版**（`5a12d5a` 契约与查询、`526608a` 测试修正、随后的原生浏览页提交），已推送 `main`。
+更新：2026-10-05。**最近功能交付：技能目录首版**（`5a12d5a` 契约与查询、`df4729d` 原生浏览页，`526608a`/`08de943` 为测试修正），已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 
 ## 先读什么，先做什么
@@ -125,15 +125,17 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 
 ## 验证状态与未解决问题
 
-截至 2026-10-05 核对的是功能提交 **`b2e5632`**：
+截至 2026-10-05 核对技能目录首版（`5a12d5a` 契约/查询、`df4729d` 原生浏览页及两个测试修正 `526608a`、`08de943`）：
 
 | 证据 | 结果 |
 |---|---|
-| 本机 Linux | 重点 **61/61**；完整 CTest **1114/1114**，无失败或跳过；新增 **10 项交互 + 8 项 GL/Vulkan 渲染** |
-| [桌面 CI](https://github.com/sijintech/stk/actions/runs/37289712961) | **5/5 任务成功**；Linux **1114**、macOS CPU **749** / Metal **138**、Windows CPU **708**；新增 10 项交互在三平台通过 |
-| [Runtime CI](https://github.com/sijintech/stk/actions/runs/37289713009) | **7/7 任务成功**；包括 Linux/Windows Python 组合、控制协议、旧桌面/MCP 与 Web 检查 |
-| [文档部署](https://github.com/sijintech/stk/actions/runs/37289713165) / [Secret scan](https://github.com/sijintech/stk/actions/runs/37289712959) | 均成功 |
-| 人工截图检查 | 本机新增八张中英文宽/窄工作台图已检查；另复查 AI/分析图窄页头。交接时未另行逐张检查这次 macOS CI 截图 |
+| 本机 Linux | Python 完整 `pytest -m "not perf"` **2199 passed / 24 环境跳过**；技能 Python **13/13**；原生定向 **95/95**；完整 CTest **1131/1131**，无失败或跳过；新增 **9 项交互 + 8 项 GL/Vulkan 截图** |
+| `df4729d` [桌面 CI](https://github.com/sijintech/stk/actions/runs/37358644803) | Linux **1131/1131**、macOS CPU **758** / Metal **142** 通过；Windows CPU **716/717**（测试帧后复用旧控件指针，`08de943` 修正） |
+| `df4729d` [Runtime CI](https://github.com/sijintech/stk/actions/runs/37358644895) | **7/7 任务成功**；`5a12d5a` 的 Windows 客户端失败因测试假定 VTK 已安装，`526608a` 修正后 7/7 |
+| `08de943` CI | [Runtime](https://github.com/sijintech/stk/actions/runs/37362435293) **7/7**；[桌面](https://github.com/sijintech/stk/actions/runs/37362435377) Linux **1131/1131**、macOS **758** / **142** 通过；Windows CPU 两次在编译阶段因“runner lost communication”中断（同时段 GitHub Actions 事件），**未运行测试**，以后续提交的 Windows CI 为准 |
+| 人工截图检查 | 本机八张技能页（GL/Vulkan × 中英 × 宽/窄）逐张检查；未逐张检查 macOS CI 截图 |
+
+上一轮工作台交付（`b2e5632`）的证据见[验收记录](docs/runtime-validation.md#2026-10-05项目工作台与跨页草稿保护)。
 
 已知 Weston 问题：旧提交 `17ea194` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36737424406)
 有一项 `wm_app_window_weston_csd` 在窗口检查/布局重载之后 **SIGSEGV (11)**；更早非 CSD 用例也曾异常退出。
@@ -144,12 +146,9 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 [窗口用例](desktop/tests/wm/CMakeLists.txt)、[应用窗口冒烟](desktop/tests/wm/app_smoke.cc)。
 需要定位时保留原始 `LastTest.log`、Weston 日志和信号/调用栈；不要通过取消测试、放宽判据或反复重跑覆盖原始失败。
 
-`/tmp` 中有上一轮本机证据，但不属于 Git、其他机器不一定存在：
-
-- `/tmp/stk-workspace-focused-final.{log,xml}`、`/tmp/stk-workspace-full-final.{log,xml}`。
-- `/tmp/stk-workspace-build-reviewed.log`、`/tmp/stk-workspace-test-reviewed-build.log`。
-- `/tmp/stk-project-navigation-baseline-linux.log`、`/tmp/stk-workspace-baseline-weston.log`。
-- 本次 CI 日志副本 `/tmp/stk-handoff-b2e5632-{linux,macos,windows}.log`；远端 CI 链接是可共享的证据入口。
+本轮本机证据在会话临时目录（不属于 Git，可能已被清理）：
+`/tmp/claude-1000/-home-mnemora-xcheng-sijin-stk/07437944-4ce3-4414-bbc7-e80a0698ca9c/scratchpad/` 下的
+`pytest-full-A.log`、`skills-focused.{log,xml}`、`skills-full.{log,xml}` 与 `build-B*.log`。远端 CI 链接是可共享的证据入口。
 
 ## 构建、启动和测试
 
