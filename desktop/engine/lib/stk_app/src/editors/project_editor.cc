@@ -21,6 +21,8 @@ namespace {
 
 using io::Json;
 const std::vector<std::string> field_types = {"text", "integer", "number", "boolean", "json"};
+/* Saved analyses (suan.project.analyses.TABLE_ID); the project writes this table itself. */
+constexpr const char *kAnalysesTable = "a32844df-b03d-576b-a200-c7080ae8e97e";
 
 class ProjectEditor final : public Editor {
  public:
@@ -151,6 +153,7 @@ class ProjectEditor final : public Editor {
       return;
     }
     field_controls(layout, ctx, state, editable);
+    sweep_controls(layout, ctx, state, editable);
     draw_table(layout, ctx, state);
     if (selected_visible(state)) { draw_cell(layout, ctx, state, editable); }
     else if (!state.record_id().empty()) { layout.paragraph(ctx.tr("project.filter.hidden_selection")); }
@@ -615,6 +618,168 @@ class ProjectEditor final : public Editor {
     }).disable(!editable || field_name_.empty());
   }
 
+  /* Parameter sweep: per-field ranges or value lists become new rows in one edit
+   * (suan.project.sweep). The project's own tables (analyses, file index) are never swept. */
+  struct SweepInput {
+    std::string field_id, start, stop, count = "5", list;
+    int kind = 0;  // 0: range (start, stop, points), 1: value list
+  };
+  static constexpr size_t kSweepAxes = 4;
+
+  ui::Binding<std::string> sweep_text(const size_t index, std::string SweepInput::*member)
+  {
+    return {[this, index, member] { return index < sweep_.size() ? sweep_[index].*member : std::string(); },
+            [this, index, member](std::string text) { if (index < sweep_.size()) { sweep_[index].*member = std::move(text); } }};
+  }
+
+  void sweep_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  {
+    const auto &table = *state.table();
+    if (table.id == kAnalysesTable || table.id == io::get_string(state.file_index(), "table_id")) { return; }
+    const auto identity = state.project()->handle + table.id;
+    if (sweep_identity_ != identity) {
+      sweep_identity_ = identity;
+      sweep_.assign(1, {});
+      sweep_zip_ = sweep_waiting_ = false;
+      sweep_result_.clear();
+    }
+    auto *panel = layout.panel("project_sweep", ctx.tr("project.sweep.title"), false);
+    if (!panel) { return; }
+    if (!state.supports_sweep()) {
+      panel->paragraph(ctx.tr("project.sweep.unavailable"));
+      return;
+    }
+    panel->paragraph(ctx.tr("project.sweep.hint"));
+    std::vector<std::string> names, ids, types;
+    for (const auto &field : table.fields) {
+      if (field.type == "integer" || field.type == "number" || field.type == "text" || field.type == "boolean") {
+        names.push_back(field.name + (field.unit.empty() ? "" : " (" + field.unit + ")"));
+        ids.push_back(field.id);
+        types.push_back(field.type);
+      }
+    }
+    if (ids.empty()) {
+      panel->paragraph(ctx.tr("project.sweep.no_fields"));
+      return;
+    }
+    Json axes = Json::array();
+    std::vector<size_t> counts;
+    std::string error;
+    for (size_t i = 0; i < sweep_.size(); ++i) {
+      auto &input = sweep_[i];
+      auto found = std::find(ids.begin(), ids.end(), input.field_id);
+      if (found == ids.end()) {
+        // A new axis (or one whose field was removed) takes the first field no other axis uses.
+        found = std::find_if(ids.begin(), ids.end(), [this](const std::string &id) {
+          return std::none_of(sweep_.begin(), sweep_.end(), [&id](const SweepInput &axis) { return axis.field_id == id; });
+        });
+        input.field_id = found == ids.end() ? ids.front() : *found;
+        found = std::find(ids.begin(), ids.end(), input.field_id);
+      }
+      const auto &type = types[size_t(found - ids.begin())];
+      const bool numeric = type == "integer" || type == "number";
+      if (!numeric) { input.kind = 1; }
+      auto &box = panel->scope("axis" + std::to_string(i)).box();
+      auto &head = box.row();
+      head.label(ctx.store.catalog().format("project.sweep.axis", {{"n", std::to_string(i + 1)}}));
+      head.button("remove", ctx.tr("project.sweep.remove"), [this, i] {
+        if (i < sweep_.size() && sweep_.size() > 1) { sweep_.erase(sweep_.begin() + std::ptrdiff_t(i)); }
+      }).width(6).disable(sweep_.size() < 2);
+      box.prop(ctx.tr("project.sweep.field")).dropdown("field", names, {
+        [this, i, ids] {
+          if (i >= sweep_.size()) { return -1; }
+          const auto it = std::find(ids.begin(), ids.end(), sweep_[i].field_id);
+          return it == ids.end() ? -1 : int(it - ids.begin());
+        },
+        [this, i, ids](int index) { if (i < sweep_.size() && index >= 0 && size_t(index) < ids.size()) { sweep_[i].field_id = ids[size_t(index)]; } }
+      });
+      box.prop(ctx.tr("project.sweep.kind")).dropdown("kind", {std::string(ctx.tr("project.sweep.kind_range")),
+                                                                std::string(ctx.tr("project.sweep.kind_list"))}, {
+        [this, i] { return i < sweep_.size() ? sweep_[i].kind : 0; },
+        [this, i](int kind) { if (i < sweep_.size()) { sweep_[i].kind = kind; } }
+      }).disable(!numeric);
+      if (input.kind == 0) {
+        auto &range = box.prop(ctx.tr("project.sweep.range")).row(true);
+        range.text_field("start", sweep_text(i, &SweepInput::start), {.placeholder = std::string(ctx.tr("project.sweep.start")), .max_length = 64});
+        range.text_field("stop", sweep_text(i, &SweepInput::stop), {.placeholder = std::string(ctx.tr("project.sweep.stop")), .max_length = 64});
+        range.text_field("count", sweep_text(i, &SweepInput::count), {.placeholder = std::string(ctx.tr("project.sweep.count")), .max_length = 8});
+      }
+      else {
+        box.prop(ctx.tr("project.sweep.values")).text_field("values", sweep_text(i, &SweepInput::list), {
+            .placeholder = std::string(ctx.tr(type == "text" ? "project.sweep.values_text" :
+                                              type == "boolean" ? "project.sweep.values_boolean" : "project.sweep.values_number")),
+            .max_length = 65536});
+      }
+      std::string key;
+      auto axis = project_sweep_axis(type, input.kind == 0, input.start, input.stop, input.count, input.list, key);
+      if (std::any_of(sweep_.begin(), sweep_.begin() + std::ptrdiff_t(i), [&input](const SweepInput &other) { return other.field_id == input.field_id; })) {
+        axis.reset();
+        key = "project.sweep.error.duplicate";
+      }
+      if (!axis) {
+        if (error.empty()) { error = ctx.store.catalog().format(key, {{"n", std::to_string(i + 1)}}); }
+        continue;
+      }
+      axis->axis["field_id"] = input.field_id;
+      axes.push_back(std::move(axis->axis));
+      counts.push_back(axis->values);
+    }
+    auto &more = panel->row();
+    more.button("add_axis", ctx.tr("project.sweep.add"), [this] { if (sweep_.size() < kSweepAxes) { sweep_.emplace_back(); } })
+        .width(10).disable(sweep_.size() >= kSweepAxes || sweep_.size() >= ids.size());
+    if (sweep_.size() > 1) {
+      panel->prop(ctx.tr("project.sweep.combine")).dropdown("combine", {std::string(ctx.tr("project.sweep.product")),
+                                                                         std::string(ctx.tr("project.sweep.zip"))}, {
+        [this] { return sweep_zip_ ? 1 : 0; }, [this](int index) { sweep_zip_ = index == 1; }
+      });
+    }
+    const bool zip = sweep_zip_ && sweep_.size() > 1;
+    const bool has_base = state.selected_record() >= 0;
+    panel->checkbox("copy_selected", ctx.tr("project.sweep.copy_selected"), ui::bind(sweep_copy_))
+        .tip(ctx.tr("project.sweep.copy_tip")).disable(!has_base);
+    const std::string base = sweep_copy_ && has_base ? state.record_id() : std::string();
+    size_t rows = 0;
+    if (error.empty()) {
+      rows = zip ? counts.front() : 1;
+      for (const auto count : counts) {
+        if (zip && count != counts.front()) { error = std::string(ctx.tr("project.sweep.error.zip")); break; }
+        if (!zip) { rows = std::min<size_t>(rows * count, 1001); }
+      }
+    }
+    if (error.empty()) {
+      // One edit holds at most 1000 commands (suan.project.sweep.MAX_COMMANDS): a new row, its swept
+      // cells and each copied cell of the base row are one command each.
+      size_t per_row = 1 + counts.size();
+      if (!base.empty()) {
+        const auto &record = table.records[size_t(state.selected_record())];
+        for (const auto &field : table.fields) {
+          if (std::any_of(sweep_.begin(), sweep_.end(), [&field](const SweepInput &axis) { return axis.field_id == field.id; })) { continue; }
+          const auto *definition = record.definitions.is_object() && record.definitions.contains(field.id) ? &record.definitions.at(field.id) : nullptr;
+          const auto kind = definition ? io::get_string(*definition, "kind") : std::string();
+          per_row += kind == "expression" || kind == "reference" || (record.values.is_object() && record.values.contains(field.id)) ? 1 : 0;
+        }
+      }
+      if (rows * per_row > 1000) {
+        error = ctx.store.catalog().format("project.sweep.error.rows", {{"rows", std::to_string(1000 / per_row)}});
+      }
+    }
+    if (!error.empty()) { panel->paragraph(error); }
+    if (sweep_waiting_ && !state.busy()) {
+      sweep_waiting_ = false;
+      sweep_result_ = state.error().empty() ? state.notice() : state.error();
+    }
+    const std::string table_id = table.id;
+    panel->button("apply_sweep", error.empty() ? ctx.store.catalog().format("project.sweep.apply", {{"rows", std::to_string(rows)}}) :
+                                                 std::string(ctx.tr("project.sweep.apply_blocked")),
+                  [this, &state, table_id, axes, base, zip] {
+                    sweep_result_.clear();
+                    sweep_waiting_ = state.sweep(table_id, axes, base, zip ? "zip" : "product");
+                  })
+        .disable(!editable || !error.empty());
+    // The outcome next to the button as well as at the top of the page, which may be scrolled away.
+    if (!sweep_result_.empty()) { panel->paragraph(sweep_result_); }
+  }
+
   bool selected_visible(const ProjectState &state) const
   {
     return query_.text == query_cached_text_ && query_.errors_only == query_cached_errors_ &&
@@ -1072,6 +1237,9 @@ class ProjectEditor final : public Editor {
   int64_t draft_revision_ = -1;
   bool draft_dirty_ = false;
   bool pending_cell_ = false;
+  std::vector<SweepInput> sweep_ = std::vector<SweepInput>(1);
+  std::string sweep_identity_, sweep_result_;
+  bool sweep_zip_ = false, sweep_copy_ = true, sweep_waiting_ = false;
   std::string manage_identity_, rename_table_, rename_field_;
   int64_t manage_revision_ = -1;
   bool manage_dirty_ = false, pending_manage_ = false;

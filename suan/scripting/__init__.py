@@ -51,6 +51,24 @@ class Project:
         return self._call("project.apply", {"handle": self.handle, "commands": commands,
                                             "expected_revision": expected_revision})
 
+    def sweep(self, table_id, axes, *, expected_revision, base_record_id=None, mode="product", dry_run=False):
+        """Add one row per combination of axis values (see ``suan.project.sweep``) in one revision.
+
+        ``axes`` are ``{"field_id", "values": [...]}`` or ranges ``{"field_id", "start", "stop", "count"|"step"}``.
+        With ``base_record_id`` every other cell of that row is copied. ``dry_run`` only returns the plan.
+        """
+        params = {"handle": self.handle, "table_id": table_id, "axes": axes, "mode": mode}
+        if base_record_id is not None:
+            params["base_record_id"] = base_record_id
+        planned = self._call("project.sweep.plan", params)
+        if planned["revision"] != expected_revision:
+            raise ScriptError({"code": "conflict", "message": f"Expected revision {expected_revision}, "
+                               f"current revision is {planned['revision']}"})
+        if dry_run:
+            return planned["plan"]
+        result = self.apply(planned["plan"]["commands"], expected_revision=expected_revision)
+        return {**result, "rows": planned["plan"]["rows"], "record_ids": planned["plan"]["record_ids"]}
+
     def preview(self, commands, *, expected_revision):
         """Evaluate a hypothetical edit without saving; apply its normalized commands explicitly."""
         return self._call("project.preview", {"handle": self.handle, "commands": commands,

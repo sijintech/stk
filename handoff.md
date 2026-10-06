@@ -1,7 +1,8 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-06。**最近功能交付：保存分析的单输入连线编辑**（`3cbaa36`）；
-之前为技能目录首版（`5a12d5a` 契约与查询、`df4729d` 原生浏览页，`526608a`/`08de943` 为测试修正）。均已推送 `main`。
+更新：2026-10-06。**进行中：可用性开发包**（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
+[开发计划](docs/development-plan.md)开头）：标量体范围（`96152bf`）、启动即工作台（`1d1c338`）、参数扫描生成已交付；
+之前为保存分析的单输入连线编辑（`3cbaa36`）与技能目录首版（`5a12d5a`、`df4729d`）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 
 ## 先读什么，先做什么
@@ -44,13 +45,22 @@ git log --oneline HEAD..origin/main
 | 范围 | 已交付基线 | 尚未交付或需区分 |
 |---|---|---|
 | 原生桌面 | C++ / GHOST / OpenGL、Vulkan、Metal；分栏/标签、3D、Python、项目、AI、分析图；默认布局以分步引导工作台开始 | 不是完整的五类内容全局侧栏；各模式独立布局未实现 |
-| 项目与表格 | SQLite 格式 **9**；原子修订、撤销、类型化值、引用/公式、文件索引、输入快照、预览/草案 | 富内容通用插件框架与完整项目打包尚未完成；格式升级必须显式备份 |
+| 项目与表格 | SQLite 格式 **9**；原子修订、撤销、类型化值、引用/公式、文件索引、输入快照、预览/草案；按范围/列表一次生成参数行（[参数扫描](docs/project-sweeps.md)） | 富内容通用插件框架与完整项目打包尚未完成；格式升级必须显式备份 |
 | AI | 阿里 Token Plan、明确捕获上下文、准备/发送、临时流式回复、持久问答、标量参数建议与修改检查 | 不等于通用自主 Agent、文件/技能附件或完整 AI 批量模拟编排 |
 | 分析 | 节点图检查；保存定义；参数、有序输出与单输入连线联合草稿（连线须校验后保存）；冻结输入与独立运行；结果归档、精确内联表格与源坐标定位 | 增删节点、多输入列表、拖线与位置保存未实现；多层图、子图及大表 blob 有界读取仍待开发 |
 | Python / Runtime | 持久 Python 会话，项目/图/Viewer/布局等 API；Linux Runtime、MuFerro 流程、SSH 管理 | 不是所有 UI 操作都已覆盖；Runtime 服务端仍限 Linux；通用对等通信待开发 |
 | 技能 | `stk-visualize`、`stk-monitor` 说明包及 `suan skills list/export`；实验契约 `stk.skill/1` 的三个内置技能，桥 `skills.list/get`、`stk.skills`、`suan skills catalog/show` 与原生只读“技能”页（[技能目录](docs/skills.md)） | 项目引用/版本固定、从技能直接准备或运行、技能附件、用户技能目录 **未实现**；节点目录不是技能库 |
 
 用户此前在 macOS 和 Windows 真机上确认过能启动并看到 3D；这不是对后续每个交互、IME、GPU 驱动或安装包的全面验收。
+
+## 可用性开发包：参数扫描生成
+
+规划在 [suan/project/sweep.py](suan/project/sweep.py)（只读，输出普通命令；按 `project.apply` 的 1000 条命令上限检查），
+桥 `project.sweep.plan`（[projects.py](suan/desktop_bridge/projects.py)）、控制台 `stk.project.sweep`、
+CLI `suan project sweep`；原生 `ProjectState::sweep` 先取计划再以同一修订提交，修订变化即丢弃。
+面板在 [project_editor.cc](desktop/engine/lib/stk_app/src/editors/project_editor.cc) 的 `sweep_controls`，
+输入解析为纯函数 `project_sweep_axis`。测试：`tests/test_project_sweep.py`、`ProjectTable.SweepAxes*`、
+`ProjectPython.SweepPanel*`、截图 `project_sweep_render_*`。下一步按计划做浏览按钮与“运行选中行”。
 
 ## 最近一次交付：保存分析的单输入连线
 

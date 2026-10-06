@@ -503,6 +503,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.close` | `{handle}` | `{closed: boolean}` |
 | `project.csv.import` | `{handle, source, name, expected_revision, types?, units?, delimiter?}` | `{revision, table_id, field_ids, record_ids, rows, columns, source_sha256}` |
 | `project.csv.export` | `{handle, table_id, destination, expected_revision, delimiter?}` | `{revision, table_id, path, rows, columns, size, sha256}` |
+| `project.sweep.plan` | `{handle, table_id, axes, base_record_id?, mode?}` | `{plan: {table_id, rows, record_ids, commands}, revision}` |
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
 | `project.preview` | `{handle, expected_revision, commands}` | `{persisted: false, base_revision, proposed_revision, commands, snapshot}` |
@@ -985,6 +986,15 @@ columns. Export materializes a consistent revision and rejects evaluation errors
 an existing destination and does not change project revision. Both files are bounded to 8 MiB and 64
 columns; import also observes the 1000-command transaction limit, export a 10000-row limit. See
 [CSV exchange](../project-csv.md) for null/empty handling and the exclusive file-publication requirement.
+
+`project.sweep.plan` is read-only: it turns 1–8 axes (`{field_id, values}` or a range
+`{field_id, start, stop, count|step}`) into `add_record`/`set_cell`/`set_reference`/`set_expression`
+commands with new record UUIDs, combined as a product (first axis slowest) or `zip`. A
+`base_record_id` copies that row's other cells; bindings to the base row move to each new row. The
+result names the snapshot `revision` it was planned against; callers apply `plan.commands` with
+`project.apply` at exactly that revision and never retarget a plan to a newer one. Plans hold at most
+1000 rows and 1000 commands (one `project.apply`); the managed analyses and file-index tables are
+refused. See [parameter sweeps](../project-sweeps.md).
 
 Recent locations are bridge preferences (`recent-projects.json`, version 1), at most 20 entries in
 most-recently-opened order. Creating/opening successfully remembers canonical directory, project UUID,

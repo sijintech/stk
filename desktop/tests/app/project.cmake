@@ -71,6 +71,11 @@ foreach(_lang en zh)
     set_tests_properties(project_csv_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
       ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
       FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
+    add_test(NAME project_sweep_render_${_be}_${_lang} COMMAND stk-project-render --editor sweep
+      --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_sweep_${_be}_${_lang}.png")
+    set_tests_properties(project_sweep_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
+      ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
+      FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
     add_test(NAME project_recent_render_${_be}_${_lang} COMMAND stk-project-render --editor recent
       --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_recent_${_be}_${_lang}.png")
     set_tests_properties(project_recent_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120

@@ -133,6 +133,14 @@ class ProjectSessions:
             store = self._get(params["handle"])
             return store.apply(params["commands"], expected_revision=params["expected_revision"])
 
+    def sweep_plan(self, params):
+        from suan.project.sweep import plan_sweep
+        with self._operation():
+            snapshot = self._get(params["handle"]).snapshot()
+            plan = plan_sweep(snapshot, params["table_id"], params["axes"], params.get("base_record_id"),
+                              params.get("mode", "product"))
+            return {"plan": plan, "revision": snapshot["project"]["revision"]}
+
     def preview(self, params):
         with self._operation():
             return self._get(params["handle"]).preview(params["commands"], expected_revision=params["expected_revision"])

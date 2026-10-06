@@ -130,6 +130,72 @@ std::optional<Json> project_literal(const std::string_view type, const std::stri
   return std::nullopt;
 }
 
+namespace {
+std::string_view trimmed(std::string_view text)
+{
+  const auto begin = text.find_first_not_of(" \t\r\n");
+  if (begin == std::string_view::npos) { return {}; }
+  return text.substr(begin, text.find_last_not_of(" \t\r\n") - begin + 1);
+}
+}  // namespace
+
+std::optional<ProjectSweepAxis> project_sweep_axis(const std::string_view type, const bool range,
+                                                   const std::string_view start, const std::string_view stop,
+                                                   const std::string_view count, const std::string_view list,
+                                                   std::string &error_key)
+{
+  constexpr size_t kMaxValues = 1000;  // suan.project.sweep.MAX_VALUES
+  error_key.clear();
+  if (type != "integer" && type != "number" && type != "text" && type != "boolean") {
+    error_key = "project.sweep.error.type";
+    return std::nullopt;
+  }
+  ProjectSweepAxis result;
+  if (range) {
+    if (type != "integer" && type != "number") {
+      error_key = "project.sweep.error.range_type";
+      return std::nullopt;
+    }
+    std::string ignored;
+    const auto first = project_literal(type, trimmed(start), ignored);
+    const auto last = project_literal(type, trimmed(stop), ignored);
+    const auto points = project_literal("integer", trimmed(count), ignored);
+    if (!first || !last || first->is_null() || last->is_null()) {
+      error_key = "project.sweep.error.range";
+      return std::nullopt;
+    }
+    if (!points || !points->is_number_integer() || points->get<int64_t>() < 1 ||
+        points->get<int64_t>() > int64_t(kMaxValues)) {
+      error_key = "project.sweep.error.count";
+      return std::nullopt;
+    }
+    result.values = size_t(points->get<int64_t>());
+    result.axis = {{"start", *first}, {"stop", *last}, {"count", *points}};
+    return result;
+  }
+  Json values = Json::array();
+  size_t begin = 0;
+  while (begin <= list.size()) {
+    const auto end = std::min(list.find(',', begin), list.size());
+    const auto item = trimmed(list.substr(begin, end - begin));
+    std::string ignored;
+    const auto value = item.empty() ? std::nullopt : project_literal(type, item, ignored);
+    if (!value || value->is_null()) {
+      error_key = "project.sweep.error.list";
+      return std::nullopt;
+    }
+    if (values.size() == kMaxValues) {
+      error_key = "project.sweep.error.count";
+      return std::nullopt;
+    }
+    values.push_back(*value);
+    begin = end + 1;
+  }
+  result.values = values.size();
+  result.axis = {{"values", std::move(values)}};
+  return result;
+}
+
 ProjectState::ProjectState(AppStore &store) : store_(store)
 {
   discussion_ = std::make_unique<ProjectDiscussion>(store, *this);
@@ -485,6 +551,61 @@ bool ProjectState::apply(Json commands, const std::optional<int64_t> expected_re
     }
     dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
     refresh();
+  });
+  changed();
+  return true;
+}
+
+bool ProjectState::supports_sweep() const
+{
+  const auto hello = client_ ? client_->hello_info() : std::nullopt;
+  return ready() && hello && hello->has_method("project.sweep.plan");
+}
+
+bool ProjectState::sweep(const std::string &table_id, Json axes, const std::string &base_record_id, const std::string &mode)
+{
+  if (!supports_sweep() || busy() || !loaded() || project_->handle.empty()) {
+    return false;
+  }
+  busy_ = true;
+  error_.clear();
+  notice_.clear();
+  const auto handle = project_->handle;
+  const auto revision = project_->revision;
+  Json params = {{"handle", handle}, {"table_id", table_id}, {"axes", std::move(axes)}, {"mode", mode}};
+  if (!base_record_id.empty()) { params["base_record_id"] = base_record_id; }
+  on(client_->call("project.sweep.plan", std::move(params)), [this, handle, revision](const bridge::Result<Json> &result) {
+    if (!result.ok()) {
+      busy_ = false;
+      fail(result.error());
+      return;
+    }
+    const auto &value = result.value();
+    // Write exactly what was planned against the revision on screen; never retarget a plan.
+    if (!project_ || project_->handle != handle || project_->revision != revision ||
+        io::get_int(value, "revision", -1) != revision) {
+      busy_ = false;
+      error_ = std::string(store_.tr("project.sweep.stale"));
+      changed();
+      refresh();
+      return;
+    }
+    const auto &plan = value.at("plan");
+    const auto rows = io::get_int(plan, "rows", 0);
+    const auto &ids = plan.at("record_ids");
+    const std::string first = ids.empty() || !ids.front().is_string() ? std::string() : ids.front().get<std::string>();
+    on(client_->project_apply(handle, revision, plan.at("commands")), [this, rows, first](const bridge::Result<Json> &applied) {
+      busy_ = false;
+      if (!applied.ok()) {
+        fail(applied.error());
+        refresh();
+        return;
+      }
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(applied.value(), "revision", -1));
+      notice_ = store_.catalog().format("project.sweep.done", {{"rows", std::to_string(rows)}});
+      if (!first.empty()) { record_id_ = first; }
+      refresh();
+    });
   });
   changed();
   return true;

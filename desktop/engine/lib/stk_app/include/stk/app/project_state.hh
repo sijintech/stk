@@ -37,6 +37,19 @@ struct ProjectTable {
  * On failure returns nullopt and a catalog key, leaving the persisted cell untouched. */
 std::optional<io::Json> project_literal(std::string_view type, std::string_view text, std::string &error_key);
 
+/** One parameter-sweep axis typed into the project editor, without its field_id. A range takes
+ * `start`, `stop` and a point count (integer and number fields only); a list takes comma-separated
+ * values parsed like #project_literal (text items are trimmed and cannot contain commas). Null and
+ * empty items are refused. `values` is the axis' value count. On failure returns nullopt and a
+ * catalog key; suan.project.sweep checks the axis again when it plans the rows. */
+struct ProjectSweepAxis {
+  io::Json axis;
+  size_t values = 0;
+};
+std::optional<ProjectSweepAxis> project_sweep_axis(std::string_view type, bool range, std::string_view start,
+                                                   std::string_view stop, std::string_view count,
+                                                   std::string_view list, std::string &error_key);
+
 /** Main-thread project controller shared by editors. Bridge callbacks must use the UI executor.
  * All edits use revisioned project commands; snapshots are replaced together. Stale callbacks are discarded after
  * a switch, close or bridge restart. Restart reopens by path/UUID but never replays a mutation. */
@@ -71,6 +84,12 @@ class ProjectState {
   bool close(std::function<void(bridge::Result<bool>)> complete = {});
   void refresh();
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
+  /** Whether the bridge plans parameter sweeps (project.sweep.plan). */
+  bool supports_sweep() const;
+  /** Plan rows from `axes` (suan.project.sweep) and apply them in one edit at the revision shown now.
+   * A plan made against another revision or project is dropped with an error, never retargeted.
+   * The first new row is selected. An empty `base_record_id` copies no other cells. */
+  bool sweep(const std::string &table_id, io::Json axes, const std::string &base_record_id, const std::string &mode);
   const std::string &review_source() const { return review_source_; }
   const std::string &review_error() const { return review_error_; }
   const std::shared_ptr<const ProjectReview> &review() const { return review_; }

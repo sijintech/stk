@@ -113,6 +113,7 @@ print(p.selection())
 | 明确选择的上下文、文字讨论与草案来源 | `stk.project.contexts.capture/get/list`、`stk.project.discussion.add/get/list/link_draft/proposals`，格式 7；不调用模型或执行消息内容，见[上下文指南](project-contexts.md) |
 | 请求意图、固定输入与执行观察 | `stk.project.requests.create/get/list/cancel/provider/start/recover`，格式 8；`start` 明确发送，普通查询不发送，取消不保证远端已停止，见[请求指南](project-requests.md) |
 | CSV/TSV 表格导入与当前值导出 | `stk.project.csv` 共用类型校验、修订和撤销，见[CSV 交换](project-csv.md) |
+| 参数扫描生成 | `stk.project.sweep(table_id, axes, expected_revision=...)` 按范围/列表生成新行，`dry_run=True` 只返回计划，见[参数扫描](project-sweeps.md) |
 | 文件索引登记、刷新、列表、路径检查 | `stk.project.files` 已实现；不复制、删除、打开或执行文件，见[文件指南](project-files.md) |
 | 不可变输入副本、历史清单和 SHA-256 校验 | `stk.project.snapshots` 已实现，格式 4；显式复制选中文件，表格撤销不删除历史，见[输入快照](project-snapshots.md) |
 | 参数行、输入版本、执行规格和远端任务关联 | `stk.project.runs` 已实现，格式 5；显式准备/提交/刷新/取消，见[运行记录](project-runs.md) |

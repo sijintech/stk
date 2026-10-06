@@ -538,6 +538,40 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
+      if (editor == "sweep") {
+        // Open the collapsed panel through a real click after scrolling it into view, fill a range
+        // and a list, then scroll its preview and button into the screenshot. Nothing is added.
+        const auto scroll_to = [&](const char *key) {
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+          const auto main = area->find_region(app::EditorArea::kMain)->ui_rect();  // Laid out by the first draw.
+          const auto *widget = screen.ui()->find(key);
+          for (int step = 0; ok && widget && step < 80 && widget->rect.intersect(main) != widget->rect; ++step) {
+            screen.ui()->handle_event(ui::Event::wheel({main.cx(), main.cy()}, widget->rect.cy() > main.cy() ? -1.0f : 1.0f));
+            ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+            widget = screen.ui()->find(key);
+          }
+          ok = ok && widget && widget->rect.intersect(main) == widget->rect;
+          return ok ? widget : nullptr;
+        };
+        if (const auto *header = scroll_to("a2/main/project_sweep")) {
+          const ui::Vec2 center{header->rect.cx(), header->rect.cy()};
+          screen.ui()->handle_event(ui::Event::mouse_down(center));
+          screen.ui()->handle_event(ui::Event::mouse_up(center));
+        }
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        const auto set = [&](const std::string &key, const std::string &value) {
+          if (const auto *widget = screen.ui()->find("a2/main/project_sweep/" + key)) { widget->string.assign(value); }
+          else { ok = false; }
+        };
+        set("axis0/start", "300"); set("axis0/stop", "400"); set("axis0/count", "5");
+        if (const auto *add = screen.ui()->find("a2/main/project_sweep/add_axis")) { add->on_click(); } else { ok = false; }
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        set("axis1/values", "bulk, film / 薄膜");
+        ok = ok && scroll_to("a2/main/project_sweep/apply_sweep");
+        const auto *apply = screen.ui()->find("a2/main/project_sweep/apply_sweep");
+        ok = ok && apply && apply->enabled && apply->text == shell.store().catalog().format("project.sweep.apply", {{"rows", "10"}}) &&
+             state.project()->revision == 1 && client->stats().schema_violations == 0;
+      }
       if (skills) {
         // The first draw requests the catalog; show one skill's full contract once it arrives.
         auto &catalog = shell.store().skills();

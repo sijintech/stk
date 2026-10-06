@@ -39,6 +39,7 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 
 1. **项目**：显示已打开的项目；“打开或新建项目”进入创建、打开与最近项目入口。
 2. **参数**：显示参数表数与总行数（不含文件索引与分析定义等托管表）；“编辑参数”打开项目表格。
+   表格页的 **生成参数扫描** 按每个字段的范围或取值列表一次添加多行，可一次撤销，见[参数扫描](project-sweeps.md)。
 3. **运行环境**：显示当前连接及其状态；“选择运行环境”切到“任务”标签配置 Runtime 或 SSH。
    仿真在 Linux 的 STK 运行服务上执行；本机分析不需要服务器。
 4. **运行**：分别进入仿真运行与分析运行页面，再明确刷新列表。
@@ -428,6 +429,9 @@ The default layout opens on the **Workspace** (left, with Jobs as its second tab
 Project → Parameters → Where to run → Run → Results, shows what is already known for each step (open
 project, parameter tables and rows, current connection and its health, whether a result is shown) and
 marks the next step. Buttons only open the matching page; nothing runs, sends or changes data from here.
+On the project page, **Generate a parameter scan** turns per-field ranges or value lists into new rows
+as one undoable edit (every combination, or values paired in order; optionally copying the selected row's
+other cells and row-relative formulas). See [parameter sweeps](project-sweeps.md) (Chinese).
 Users with a saved layout keep it; File > Reset layout switches to the new default.
 
 ### Skill catalog

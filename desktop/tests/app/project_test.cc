@@ -70,6 +70,41 @@ TEST(ProjectTable, LiteralTypesPreservePrecisionAndRejectInvalidInput)
   EXPECT_TRUE(error.empty());
 }
 
+TEST(ProjectTable, SweepAxesParseTypedRangesAndListsLikeLiterals)
+{
+  std::string error;
+  const auto range = project_sweep_axis("number", true, " 300 ", "400", "3", "", error);
+  ASSERT_TRUE(range);
+  EXPECT_EQ(range->values, 3u);
+  EXPECT_EQ(range->axis, Json({{"start", 300}, {"stop", 400}, {"count", 3}}));
+  EXPECT_FALSE(project_sweep_axis("integer", true, "1.5", "4", "3", "", error));
+  EXPECT_EQ(error, "project.sweep.error.range");
+  EXPECT_FALSE(project_sweep_axis("number", true, "null", "4", "3", "", error));
+  EXPECT_EQ(error, "project.sweep.error.range");
+  for (const char *count : {"0", "1001", "2.5", ""}) {
+    EXPECT_FALSE(project_sweep_axis("number", true, "1", "2", count, "", error)) << count;
+    EXPECT_EQ(error, "project.sweep.error.count");
+  }
+  EXPECT_FALSE(project_sweep_axis("text", true, "a", "b", "2", "", error));
+  EXPECT_EQ(error, "project.sweep.error.range_type");
+  EXPECT_FALSE(project_sweep_axis("json", false, "", "", "", "[1]", error));
+  EXPECT_EQ(error, "project.sweep.error.type");
+  const auto text = project_sweep_axis("text", false, "", "", "", " bulk , 薄膜 ", error);
+  ASSERT_TRUE(text);
+  EXPECT_EQ(text->axis, Json({{"values", {"bulk", "薄膜"}}}));
+  const auto flags = project_sweep_axis("boolean", false, "", "", "", "true,false", error);
+  ASSERT_TRUE(flags);
+  EXPECT_EQ(flags->values, 2u);
+  const auto big = project_sweep_axis("integer", false, "", "", "", "9223372036854775807, -1", error);
+  ASSERT_TRUE(big);
+  EXPECT_EQ(big->axis.at("values").at(0).get<int64_t>(), INT64_MAX);
+  EXPECT_TRUE(error.empty());
+  for (const char *list : {"", "1,", "1,,2", "1, null", "1, x", "true"}) {
+    EXPECT_FALSE(project_sweep_axis("number", false, "", "", "", list, error)) << list;
+    EXPECT_EQ(error, "project.sweep.error.list");
+  }
+}
+
 TEST(ProjectTable, NumericOrderingUsesEvaluatedValuesAndPreservesInt64Precision)
 {
   ProjectTable table;
@@ -1498,6 +1533,95 @@ TEST_F(ProjectPython, TableFilterSortAndEditKeepRecordIdentityAcrossEqualSizeQue
   EXPECT_EQ(widget(records)->table->rows, 0);
   EXPECT_EQ(state().record_id(), chosen);
   EXPECT_EQ(widget("save_cell"), nullptr);
+}
+
+TEST_F(ProjectPython, SweepPanelAddsTypedRowsAsOneUndoableEditAndNeverRetargetsAPlan)
+{
+  populated();
+  const std::string steps = "44444444-4444-4444-8444-000000000001", derived = "44444444-4444-4444-8444-000000000002";
+  ASSERT_TRUE(state().apply(Json::array({
+      {{"op", "add_field"}, {"table_id", table_id}, {"id", steps}, {"name", "Steps"}, {"type", "integer"}},
+      {{"op", "add_field"}, {"table_id", table_id}, {"id", derived}, {"name", "Derived"}, {"type", "number"}, {"unit", "K"}},
+      {{"op", "set_expression"}, {"table_id", table_id}, {"record_id", record_id}, {"field_id", derived},
+       {"expression", "base + quantity(10, \"K\")"}, {"bindings", {{"base", {{"record_id", record_id}, {"field_id", field_id}}}}}},
+  })));
+  settled();
+  ASSERT_EQ(state().project()->revision, 2);
+  ASSERT_TRUE(state().supports_sweep());
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject)); f.screen.set_maximized(&area);
+  auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_sweep/" + key); };
+  frame();
+  ASSERT_EQ(widget("axis0/start"), nullptr);  // Collapsed until asked for.
+  const auto [x, y] = f.widget_center("a2/main/project_sweep");
+  f.drv->click(x, y); frame();
+  ASSERT_NE(widget("axis0/start"), nullptr);
+  EXPECT_EQ(widget("axis0/field")->index.value(), 0);  // Temperature (number): an evenly spaced range.
+  EXPECT_FALSE(widget("apply_sweep")->enabled);
+  widget("axis0/start")->string.assign("300");
+  widget("axis0/stop")->string.assign("400");
+  widget("axis0/count")->string.assign("3");
+  frame();
+  ASSERT_TRUE(widget("apply_sweep")->enabled);
+  EXPECT_EQ(widget("apply_sweep")->text, "Add 3 rows");
+  widget("add_axis")->on_click(); frame();
+  ASSERT_NE(widget("axis1/field"), nullptr);
+  EXPECT_EQ(widget("axis1/field")->index.value(), 1);  // The next field no other parameter uses: Steps.
+  widget("axis1/field")->index.assign(0); frame();  // The same field twice is refused before asking Python.
+  EXPECT_FALSE(widget("apply_sweep")->enabled);
+  widget("axis1/field")->index.assign(1); frame();
+  widget("axis1/kind")->index.assign(1); frame();
+  widget("axis1/values")->string.assign("10, 2.5"); frame();  // Not integers.
+  EXPECT_FALSE(widget("apply_sweep")->enabled);
+  widget("axis1/values")->string.assign("10, 20"); frame();
+  EXPECT_EQ(widget("apply_sweep")->text, "Add 6 rows");
+  widget("combine")->index.assign(1); frame();  // Pairing 3 with 2 values is refused before asking Python.
+  EXPECT_FALSE(widget("apply_sweep")->enabled);
+  widget("combine")->index.assign(0); frame();
+  state().select_record(record_id); frame();
+  ASSERT_TRUE(widget("copy_selected")->enabled);
+  EXPECT_TRUE(widget("copy_selected")->boolean.value());
+  // One edit holds 1000 commands: 150 x 2 rows need 3 each, or 4 with the copied formula.
+  widget("axis0/count")->string.assign("150"); frame();
+  EXPECT_FALSE(widget("apply_sweep")->enabled);
+  widget("copy_selected")->boolean.assign(false); frame();
+  EXPECT_TRUE(widget("apply_sweep")->enabled);
+  EXPECT_EQ(widget("apply_sweep")->text, "Add 300 rows");
+  widget("copy_selected")->boolean.assign(true);
+  widget("axis0/count")->string.assign("3"); frame();
+  widget("apply_sweep")->on_click(); frame();
+  ASSERT_TRUE(state().error().empty()) << state().error();
+  EXPECT_EQ(state().project()->revision, 3);
+  EXPECT_EQ(state().notice(), "Added 6 rows.");
+  const auto *table = state().table();
+  ASSERT_EQ(table->records.size(), 7u);
+  EXPECT_EQ(state().record_id(), table->records[1].id);  // The first new row is selected.
+  EXPECT_EQ(table->text(1, 0), "300");
+  EXPECT_EQ(table->text(1, 1), "10");
+  EXPECT_EQ(table->text(6, 0), "400");
+  EXPECT_EQ(table->text(6, 1), "20");
+  for (size_t row = 1; row < 7; ++row) {
+    // The copied formula reads each new row's own temperature, not the base row's.
+    const auto *definition = table->definition(int(row), 2);
+    ASSERT_NE(definition, nullptr);
+    EXPECT_EQ(definition->at("bindings").at("base").at("record_id"), table->records[row].id);
+  }
+  ASSERT_TRUE(state().undo()); settled();
+  EXPECT_EQ(state().table()->records.size(), 1u);
+
+  // A plan made before another writer's edit is dropped, never applied at the newer revision.
+  const auto revision = state().project()->revision;
+  ASSERT_TRUE(state().sweep(table_id, Json::array({{{"field_id", field_id}, {"values", {1, 2}}}}), "", "product"));
+  EXPECT_FALSE(state().sweep(table_id, Json::array({{{"field_id", field_id}, {"values", {3}}}}), "", "product"));  // Busy.
+  std::optional<bridge::Result<Json>> other;
+  client->project_apply(state().project()->handle, revision, set_cell(500)).then([&](auto result) { other = result; });
+  ASSERT_TRUE(loop.pump_until([&] { return other.has_value(); }));
+  settled();
+  ASSERT_TRUE(other->ok()) << other->error().message;
+  EXPECT_FALSE(state().error().empty());
+  EXPECT_EQ(state().table()->records.size(), 1u);
+  EXPECT_EQ(state().project()->revision, revision + 1);
+  EXPECT_EQ(state().table()->text(0, 0), "500");
 }
 
 TEST_F(ProjectPython, TableFiltersBelongToEachAreaWhileSelectionRemainsShared)

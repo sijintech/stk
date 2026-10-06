@@ -46,6 +46,58 @@ def apply(directory, commands, expected_revision):
     _run(lambda: ProjectStore(directory).apply(json.load(commands), expected_revision=expected_revision))
 
 
+def _by_name(items, key, what):
+    found = [item for item in items if item["id"] == key] or [item for item in items if item.get("name") == key]
+    if len(found) != 1:
+        raise ValueError(f"No single {what} named or identified {key!r}")
+    return found[0]
+
+
+def _number_text(text, kind):
+    try:
+        return int(text) if kind == "integer" else (int(text) if text.lstrip("+-").isdigit() else float(text))
+    except ValueError:
+        raise ValueError(f"{text!r} is not a number") from None
+
+
+@project.command("sweep")
+@click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--table", "table_key", required=True, help="Table name or ID.")
+@click.option("--range", "ranges", multiple=True, nargs=4, metavar="FIELD START STOP COUNT",
+              help="Evenly spaced values, both ends included (repeatable).")
+@click.option("--values", "lists", multiple=True, nargs=2, metavar="FIELD JSON_LIST",
+              help='Listed values, e.g. --values Label \'["a","b"]\' (repeatable).')
+@click.option("--base", "base_record", default=None, help="Copy the other cells of this row ID into every new row.")
+@click.option("--mode", type=click.Choice(["product", "zip"]), default="product", show_default=True)
+@click.option("--expected-revision", type=click.IntRange(min=0), default=None,
+              help="Required to write; omit with --dry-run.")
+@click.option("--dry-run", is_flag=True, help="Print the planned commands without writing.")
+def sweep(directory, table_key, ranges, lists, base_record, mode, expected_revision, dry_run):
+    """Add one row per combination of field values (a parameter scan) in one revision."""
+    from .sweep import plan_sweep
+
+    def action():
+        store = ProjectStore(directory)
+        snapshot = store.snapshot()
+        table = _by_name(snapshot["tables"], table_key, "table")
+        axes = []
+        for field_key, start, stop, count in ranges:
+            field = _by_name(table["fields"], field_key, "field")
+            axes.append({"field_id": field["id"], "start": _number_text(start, field["type"]),
+                         "stop": _number_text(stop, field["type"]), "count": int(count)})
+        for field_key, text in lists:
+            field = _by_name(table["fields"], field_key, "field")
+            axes.append({"field_id": field["id"], "values": json.loads(text)})
+        plan = plan_sweep(snapshot, table["id"], axes, base_record, mode)
+        if dry_run:
+            return {"revision": snapshot["project"]["revision"], **plan}
+        if expected_revision is None:
+            raise ValueError("--expected-revision is required to write (or use --dry-run)")
+        result = store.apply(plan["commands"], expected_revision=expected_revision)
+        return {**result, "rows": plan["rows"], "record_ids": plan["record_ids"]}
+    _run(action)
+
+
 @project.command("preview")
 @click.argument("directory", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--commands", required=True, type=click.File("r", encoding="utf-8"),
