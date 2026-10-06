@@ -95,7 +95,7 @@ PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真�
 原生 AI 工作区已接入明确准备/发送、流式文字回复，以及捕获范围内的[模型参数建议](docs/project-parameter-edits.md)。
 建议须另行保存、预览并明确应用；保存和恢复讨论不会执行代码或提交计算，通用 AI 工具执行仍待开发。
 分析图可保存定义、精确编辑参数与请求输出，并通过[本机分析运行](docs/project-analysis-runs.md)冻结输入、明确执行和校验归档。
-历史图独立保留，内联科学表格可分页或按源坐标定位，查看类型、单位和精确值；节点连线编辑与大表 blob 读取仍待开发。
+历史图独立保留，内联科学表格可分页或按源坐标定位，查看类型、单位和精确值；保存分析可明确替换单输入连线并经校验后保存；增删节点、多输入编辑与大表 blob 读取仍待开发。
 macOS / Windows 可从 Python 面板运行[离线分析验收](examples/project_analysis/README.md)，创建新的合成数据项目完成这一流程。
 
 远程计算经控制服务：所有者用 `suan-control pair --role client --profile desktop` 签发配对码，在桌面程序

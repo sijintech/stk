@@ -9,10 +9,12 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace stk::app {
 
-/** Detached editor-local edits to one saved analysis's submitted parameters and requested outputs. No I/O, evaluation,
+/** Detached editor-local edits to one saved analysis's submitted parameters, requested outputs and
+ * single-input links. No I/O, evaluation,
  * implicit defaults, rebasing or live-project observation occurs here. Call current() against the
  * live opening handle/revision before editing or saving. Backend structural validation remains
  * authoritative; pin() accepts an already-read document and checks its shape and storage bounds. */
@@ -50,7 +52,7 @@ class AnalysisParameterDraft {
    * A text editor may submit multiple edits against the same generation before being rebuilt. */
   uint64_t generation() const { return generation_; }
   uint64_t version() const { return version_; }
-  bool dirty() const { return !edits_.empty() || outputs_override_.has_value(); }
+  bool dirty() const { return !edits_.empty() || outputs_override_.has_value() || !link_edits_.empty(); }
 
   bool has_override(const std::string &name) const;
   /** Disengaged means no override; an engaged JSON null is an explicit submitted null. */
@@ -74,7 +76,25 @@ class AnalysisParameterDraft {
    * Toggle-on appends; toggle-off removes only that name. Unknown names always fail, even off. */
   EditResult set_outputs(const io::Json &outputs, uint64_t expected_generation);
   EditResult set_output(const std::string &name, bool selected, uint64_t expected_generation);
-  /** Discard both accepted parameter and output edits; unaccepted text belongs to the caller. */
+  /** Single-input link edits, keyed by (node id, input port). A value is the source "node.port";
+   * nullopt means the input key is removed (disconnected). Only differences from the baseline are kept. */
+  using LinkKey = std::pair<std::string, std::string>;
+  const std::map<LinkKey, std::optional<std::string>> &link_edits() const { return link_edits_; }
+  bool has_link_edits() const { return !link_edits_.empty(); }
+  /** Structural editability without a catalog: the node id occurs exactly once and its input is
+   * absent or exactly {"from": "node.port"}. Lists (multi inputs), aliases and unknown keys stay
+   * read-only so untouched fields keep their exact JSON. Catalog rules belong to the caller. */
+  bool link_editable(const std::string &node, const std::string &port) const;
+  /** The candidate source of an input ("node.port"), or nullopt when it has no single link. */
+  std::optional<std::string> link(const std::string &node, const std::string &port) const;
+  std::optional<std::string> baseline_link(const std::string &node, const std::string &port) const;
+  /** Replace (source engaged) or remove (nullopt) one editable input link. The source node must
+   * exist once and differ from the target; port compatibility and cycles are left to graph
+   * validation. Setting the baseline value again drops the edit. No parameters/outputs change. */
+  EditResult set_link(const std::string &node, const std::string &port,
+                      const std::optional<std::string> &source, uint64_t expected_generation);
+
+  /** Discard accepted parameter, output and link edits; unaccepted text belongs to the caller. */
   bool revert(uint64_t expected_generation);
 
   /** Current-state observation only, never a transaction receipt or automatic adoption.
@@ -92,6 +112,43 @@ class AnalysisParameterDraft {
   // Disengaged optional removes a key; engaged JSON null is an explicit override.
   std::map<std::string, std::optional<io::Json>> edits_;
   std::optional<io::Json> outputs_override_;
+  std::map<LinkKey, std::optional<std::string>> link_edits_;
+};
+
+/** Everything a graph validation reply about a candidate is bound to. A reply applies only while
+ * every field still matches: the project opening, the analysis and the revision it was read at,
+ * the exact draft content (generation and version) and the bridge process that checked it. */
+struct AnalysisCandidateKey {
+  std::string handle, analysis_id, session;
+  int64_t revision = -1;
+  uint64_t generation = 0, version = 0;
+  bool operator==(const AnalysisCandidateKey &) const = default;
+};
+
+/** The latest explicit graph.validate of a saved-analysis candidate. Pure state: the caller sends
+ * the request; replies for an older ticket are ignored, and a result only counts for its key. */
+class AnalysisCandidateValidation {
+ public:
+  /** Starts a check, dropping any earlier result or pending ticket. */
+  uint64_t begin(AnalysisCandidateKey key);
+  /** Applies {ok: bool, issues: [...]} for the latest ticket; false when stale or malformed. */
+  bool finish(uint64_t ticket, const io::Json &response);
+  bool fail(uint64_t ticket, std::string error);
+  void reset();
+  bool pending() const { return pending_; }
+  /** The response for exactly this key, else null (no check, another key, or failure). */
+  const io::Json *result(const AnalysisCandidateKey &key) const;
+  /** Whether this exact candidate was checked and reported ok. */
+  bool passed(const AnalysisCandidateKey &key) const;
+  /** The failure of the latest check for this key, else empty. */
+  std::string error(const AnalysisCandidateKey &key) const;
+
+ private:
+  AnalysisCandidateKey key_;
+  uint64_t ticket_ = 0;
+  bool pending_ = false;
+  io::Json response_;
+  std::string error_;
 };
 
 }  // namespace stk::app

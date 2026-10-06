@@ -1,6 +1,7 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-05。**最近功能交付：技能目录首版**（`5a12d5a` 契约与查询、`df4729d` 原生浏览页，`526608a`/`08de943` 为测试修正），已推送 `main`。
+更新：2026-10-06。**最近功能交付：保存分析的单输入连线编辑**（本轮提交见 `git log`）；
+之前为技能目录首版（`5a12d5a` 契约与查询、`df4729d` 原生浏览页，`526608a`/`08de943` 为测试修正）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 
 ## 先读什么，先做什么
@@ -45,13 +46,36 @@ git log --oneline HEAD..origin/main
 | 原生桌面 | C++ / GHOST / OpenGL、Vulkan、Metal；分栏/标签、3D、Python、项目、AI、分析图 | 默认启动仍是已有分栏；不是完整的五类内容全局侧栏 |
 | 项目与表格 | SQLite 格式 **9**；原子修订、撤销、类型化值、引用/公式、文件索引、输入快照、预览/草案 | 富内容通用插件框架与完整项目打包尚未完成；格式升级必须显式备份 |
 | AI | 阿里 Token Plan、明确捕获上下文、准备/发送、临时流式回复、持久问答、标量参数建议与修改检查 | 不等于通用自主 Agent、文件/技能附件或完整 AI 批量模拟编排 |
-| 分析 | 节点图检查；保存定义；参数和有序输出联合草稿；冻结输入与独立运行；结果归档、精确内联表格与源坐标定位 | 节点连线编辑仍未实现；多层图、子图及大表 blob 有界读取仍待开发 |
+| 分析 | 节点图检查；保存定义；参数、有序输出与单输入连线联合草稿（连线须校验后保存）；冻结输入与独立运行；结果归档、精确内联表格与源坐标定位 | 增删节点、多输入列表、拖线与位置保存未实现；多层图、子图及大表 blob 有界读取仍待开发 |
 | Python / Runtime | 持久 Python 会话，项目/图/Viewer/布局等 API；Linux Runtime、MuFerro 流程、SSH 管理 | 不是所有 UI 操作都已覆盖；Runtime 服务端仍限 Linux；通用对等通信待开发 |
 | 技能 | `stk-visualize`、`stk-monitor` 说明包及 `suan skills list/export`；实验契约 `stk.skill/1` 的三个内置技能，桥 `skills.list/get`、`stk.skills`、`suan skills catalog/show` 与原生只读“技能”页（[技能目录](docs/skills.md)） | 项目引用/版本固定、从技能直接准备或运行、技能附件、用户技能目录 **未实现**；节点目录不是技能库 |
 
 用户此前在 macOS 和 Windows 真机上确认过能启动并看到 3D；这不是对后续每个交互、IME、GPU 驱动或安装包的全面验收。
 
-## 最近一次交付：技能目录首版
+## 最近一次交付：保存分析的单输入连线
+
+在“保存的分析”草稿面板新增 **连线 / Links**：选中节点的已知单输入端口可从全部已声明的上游输出中改接，
+可选输入可断开；多输入、未知类型、未声明端口、重复节点 ID、带别名/额外字段的连线保持只读并说明原因。
+含连线修改的草稿须点击“校验候选”，用 `graph.validate` 检查完整候选（图、参数、输出），通过后才能保存；
+保存用 `ProjectAnalyses::replace_definition` 按读取修订一次写入整个定义。只有参数/输出修改的草稿行为不变。
+用法见[保存分析指南](docs/project-analyses.md#编辑单输入连线)。
+
+继续开发时须保留这些边界：
+
+- 校验结果绑定 `AnalysisCandidateKey`（打开句柄、分析 UUID、读取修订、草稿代次与版本、桥进程会话），
+  任何后续编辑、修订或桥变化都使旧通过失效；迟到回复按票据丢弃。目录读取前/失败时输入只读。
+- 连线编辑只改原始 JSON 中目标输入，未触碰的连线、别名、标签与参数类型逐字保留；设回原值即撤销该项修改。
+- 有未应用或无效的参数文字（如 `1e`）时，连线选择、校验与保存暂停，文字不被重置。
+- 画布与“校验”面板仍显示已保存定义；校验、保存、读回不运行节点、不准备运行、不改 Viewer；
+  保存回复丢失时按 UUID 核对，不重发。
+
+| 从哪里改 | 入口 |
+|---|---|
+| 连线草稿与校验绑定 | [analysis_parameter_draft.hh](desktop/engine/lib/stk_app/include/stk/app/analysis_parameter_draft.hh)、[analysis_parameter_draft.cc](desktop/engine/lib/stk_app/src/analysis_parameter_draft.cc) |
+| 保存与界面 | [project_analyses.cc](desktop/engine/lib/stk_app/src/project_analyses.cc)、[analysis_graph_editor.cc](desktop/engine/lib/stk_app/src/editors/analysis_graph_editor.cc) 中 `links_panel` |
+| 回归 / 截图 | [analysis_parameter_draft_test.cc](desktop/tests/app/analysis_parameter_draft_test.cc)、[analysis_links_editor_test.cc](desktop/tests/app/analysis_links_editor_test.cc)、[analysis_links_render.cc](desktop/tests/app/analysis_links_render.cc) |
+
+## 上一项交付：技能目录首版
 
 实验契约 `stk.skill/1`（[技能目录](docs/skills.md)）区分 SKILL.md 说明包、节点目录与版本化技能。
 三个内置技能包装可离线验证的图预设；身份为 `id@version` 加定义与模板的 `content_sha256`，
@@ -104,15 +128,16 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 
 ## 建议接下来的开发包
 
-### 1. 保存分析的受限连线编辑（下一项功能）
+### 1. 可审查的工作流提案（下一项功能）
 
-范围已经写在[开发计划](docs/development-plan.md#工作台与技能目录之后的工作流增量保存分析的单输入连线)：
-只编辑已有节点的已知单输入端口、选择已有上游输出，可选端口可明确断开；首版不含增删节点、多输入列表、拖线或子图。
-连线、参数、有序输出共同构成完整候选，显式 `graph.validate` 后按原修订原子保存；
-旧校验回复绑定项目、文档、候选及桥/目录会话，不能应用到新状态。未知/多输入端口保持只读。
-无效参数原文保留，不把空、缺省、`null` 互换；保存失败/不确定时不自动重放。历史运行与当前 Viewer 不受编辑影响。
+按[开发计划](docs/development-plan.md)第 3 项：在已有“参数建议 → 草案 → 检查 → 明确应用”的模式上，
+让 AI 或 Python 提出保存分析的修改（参数、输出、单输入连线），以同一 `AnalysisParameterDraft` 候选承载，
+走同一 `graph.validate` 校验与按修订保存；提案、校验、保存、准备和执行保持分离，不自动采纳或重放。
+先确定提案的持久形式（是否沿用格式 6 草案或新增记录）与迁移/备份规则，再接界面。
 
-### 2. 技能目录的后续（按需排期，不与连线首版混做）
+其他与连线首版相邻、但需单独设计验收的工作：多输入列表编辑、增删节点、拖线与位置保存、子图。
+
+### 2. 技能目录的后续（按需排期，不与其他包混做）
 
 - 项目采用固定技能版本：先定迁移、备份与恢复规则，把解析后的技能内容随项目保存，而非依赖全局目录保留旧版本。
 - 从技能明确准备/运行（复用 `graph.evaluate` 或保存分析）、对话附件、更多入口类型（批次模板、Python 操作）及用户技能目录。
@@ -121,19 +146,18 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 
 - Weston 偶发退出故障仍未定位，见下节。新一次 CI 通过不能替代根因修复。
 - macOS/Windows 按[真机验收清单](docs/workbench-acceptance.md)复核交互、IME、实际模型调用；Windows CI 没有 GPU 真机验收。
-- 完整 AI 编排、通用 P2P、文档预览与 toolkits 迁移按主计划分批推进，避免与连线首版混成一个大改动。
+- 完整 AI 编排、通用 P2P、文档预览与 toolkits 迁移按主计划分批推进，避免混成一个大改动。
 
 ## 验证状态与未解决问题
 
-截至 2026-10-05 核对技能目录首版（`5a12d5a` 契约/查询、`df4729d` 原生浏览页及两个测试修正 `526608a`、`08de943`）：
+截至 2026-10-06：
 
 | 证据 | 结果 |
 |---|---|
-| 本机 Linux | Python 完整 `pytest -m "not perf"` **2199 passed / 24 环境跳过**；技能 Python **13/13**；原生定向 **95/95**；完整 CTest **1131/1131**，无失败或跳过；新增 **9 项交互 + 8 项 GL/Vulkan 截图** |
-| `df4729d` [桌面 CI](https://github.com/sijintech/stk/actions/runs/37358644803) | Linux **1131/1131**、macOS CPU **758** / Metal **142** 通过；Windows CPU **716/717**（测试帧后复用旧控件指针，`08de943` 修正） |
-| `df4729d` [Runtime CI](https://github.com/sijintech/stk/actions/runs/37358644895) | **7/7 任务成功**；`5a12d5a` 的 Windows 客户端失败因测试假定 VTK 已安装，`526608a` 修正后 7/7 |
-| `08de943` CI | [Runtime](https://github.com/sijintech/stk/actions/runs/37362435293) **7/7**；[桌面](https://github.com/sijintech/stk/actions/runs/37362435377) Linux **1131/1131**、macOS **758** / **142** 通过；Windows CPU 两次在编译阶段因“runner lost communication”中断（同时段 GitHub Actions 事件），**未运行测试**，以后续提交的 Windows CI 为准 |
-| 人工截图检查 | 本机八张技能页（GL/Vulkan × 中英 × 宽/窄）逐张检查；未逐张检查 macOS CI 截图 |
+| 连线编辑（本轮）本机 Linux | 草稿/校验单元 5 项、交互 **7/7**、截图 **8**；定向 **175/175**；完整 CTest **1151/1151**，0 失败/跳过。跨平台 CI 见[验收记录](docs/runtime-validation.md#2026-10-06保存分析的单输入连线编辑) |
+| 技能目录首版本机 | Python 完整 **2199 passed / 24 环境跳过**；技能 Python **13/13**；原生定向 **95/95**；完整 CTest **1131/1131** |
+| 技能目录 CI | `df4729d` [桌面](https://github.com/sijintech/stk/actions/runs/37358644803) Linux **1131**、macOS **758** / Metal **142**；`08de943` Windows CPU 重跑 **717/717**；[Runtime](https://github.com/sijintech/stk/actions/runs/37362435293) **7/7** |
+| 人工截图检查 | 本机技能页 8 张、连线 8 张及旧保存分析英文窄窗口逐张检查；未逐张检查 macOS CI 截图 |
 
 上一轮工作台交付（`b2e5632`）的证据见[验收记录](docs/runtime-validation.md#2026-10-05项目工作台与跨页草稿保护)。
 
@@ -148,7 +172,7 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 
 本轮本机证据在会话临时目录（不属于 Git，可能已被清理）：
 `/tmp/claude-1000/-home-mnemora-xcheng-sijin-stk/07437944-4ce3-4414-bbc7-e80a0698ca9c/scratchpad/` 下的
-`pytest-full-A.log`、`skills-focused.{log,xml}`、`skills-full.{log,xml}` 与 `build-B*.log`。远端 CI 链接是可共享的证据入口。
+`pytest-full-A.log`、`skills-{focused,full}.{log,xml}`、`links-{focused,full2}.{log,xml}` 与 `build-*.log`。远端 CI 链接是可共享的证据入口。
 
 ## 构建、启动和测试
 
@@ -249,6 +273,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --
 ## 可直接给 Claude 的起始指令
 
 > 请先读仓库根目录的 CLAUDE.md、AGENTS.md 和 handoff.md，再按 docs/development-plan.md 最新顺序继续。
-> 核对 Git/CI 后，从保存分析的受限单输入连线编辑开始（开发计划中的范围），复用 graph.validate 与分析更新接口。
+> 核对 Git/CI 后，从可审查的工作流提案开始（开发计划第 3 项），复用分析草稿候选、graph.validate 与按修订保存。
 > 日常直接在 main 工作，不新建分支或合并无关 PR；每个关键节点做 critical review，修复问题、测试并更新文档后提交推送。
 > 保留用户草稿、项目身份、冻结运行和明确执行边界，区分已实现能力与设计目标。

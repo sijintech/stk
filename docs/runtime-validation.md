@@ -2,6 +2,24 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-06：保存分析的单输入连线编辑
+
+本机 Linux 验证（未调用模型，未运行任何节点）：
+
+- 连线草稿与校验绑定单元测试 **5 项**（与原草稿测试合计 34/34）：只改目标输入且其余字节不变、断开/新接只增删该键、
+  多输入/别名/额外字段/重复 ID/非法来源/自连拒绝且不改版本、与参数/输出共同组成候选并随复原/重新固定清空、
+  校验票据与键（句柄、UUID、会话、修订、代次、版本）任一不同即不计入。
+- 交互回归 **7/7**：校验通过后一次 CAS 保存只改 `box.in` 并可撤销回原文档；`port_mismatch` 与 `cycle` 报告后保存保持禁用；
+  通过后再编辑、迟到回复（桥端扣住后再改候选）、外部修订均使旧结果失效；`scene.layers` 只读、`scene.camera` 可断开并保存、
+  `volume.in` 无断开项；未知类型只读；无效参数原文 `1e` 保留且暂停连线与校验；保存回复丢失时按 UUID 读回采用，只发送一次更新。
+  全部用例结束时确认没有 `graph.evaluate`、运行准备/开始或 Viewer 求值。
+- 新增 **8 张** GL/Vulkan 中英文宽/窄连线截图并逐张检查四种组合；夹具同时核对保存后只有一条连线改变、未准备运行。
+- 旧的保存分析截图夹具因新增面板标题首轮 8 项失败，修正后与 8 张新图一起通过（见开发日志）。
+- 定向回归 **175/175**；完整 Linux CTest **1151/1151**，JUnit 0 失败、0 跳过；中英文目录各 **1446** 项校验通过。
+  日志 `/tmp/claude-1000/-home-mnemora-xcheng-sijin-stk/07437944-4ce3-4414-bbc7-e80a0698ca9c/scratchpad/links-{focused,full2}.{log,xml}`。
+
+跨平台 CI 结果在推送后补记；macOS/Windows 真机按[工作台验收清单](workbench-acceptance.md#保存分析的单输入连线)复核。
+
 ## 2026-10-05：原生技能目录浏览页
 
 新增原生 `skills` 编辑器与共享只读状态；工作台“技能库”和文件菜单无需项目即可进入。本机 Linux：
@@ -27,7 +45,9 @@
 修正提交 `08de943` 的 [Runtime CI](https://github.com/sijintech/stk/actions/runs/37362435293) **7/7** 成功，
 [桌面 CI](https://github.com/sijintech/stk/actions/runs/37362435377) Linux **1131/1131**、macOS CPU **758** / Metal **142** 通过；
 Windows CPU 任务首次及重跑均在编译阶段因 “The hosted runner lost communication with the server” 中断，与同时段
-GitHub Actions 状态页的事件吻合，**未执行任何测试**，不能计为 Windows 通过。修正只涉及测试代码，Windows 结果以后续提交的 CI 为准。
+GitHub Actions 状态页的事件吻合，当时未执行任何测试。事件结束后第三次重跑
+[Windows CPU](https://github.com/sijintech/stk/actions/runs/37362435377/job/112242323951) **717/717** 通过（必跑 466 项实际运行），
+技能目录首版至此三平台 CI 全部通过。
 macOS/Windows 原生页面仅由 CI 覆盖，未做真机检查。
 
 ## 2026-10-05：技能目录契约与查询入口

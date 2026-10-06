@@ -45,6 +45,9 @@ class ProjectAnalyses {
    * selected graph, name and identity. Explicit empty outputs remain empty. */
   bool replace_submission(const io::Json &parameters, const io::Json &outputs,
                           uint64_t expected_selected_version);
+  /** Replace the selected definition's whole document (graph links included) in one CAS write at
+   * its read revision, preserving its name and identity. The caller owns semantic validation. */
+  bool replace_definition(const io::Json &document, uint64_t expected_selected_version);
   /** Observe the existing identity after an ambiguous reply; never sends the mutation again. */
   bool check_pending();
 

@@ -560,3 +560,168 @@ TEST(AnalysisOutputDraft, ReadBackMatchingIncludesOutputOrderAndAllAcceptedParam
 
 }  // namespace
 }  // namespace stk::app
+
+namespace stk::app {
+namespace {
+using io::Json;
+using Draft = AnalysisParameterDraft;
+
+Json linked_definition()
+{
+  // a -> f1 -> f2, a scene with a multi input, an aliased link and an extra link key.
+  return {{"format", "stk.analysis-document/1"},
+      {"graph", {{"schema", "stk.graph/1"},
+          {"nodes", Json::array({
+              {{"id", "a"}, {"type", "fixture.source.grid@1"}},
+              {{"id", "f1"}, {"type", "fixture.filter.pass@1"}, {"inputs", {{"in", {{"from", "a.out"}}}}}},
+              {{"id", "f2"}, {"type", "fixture.filter.pass@1"}, {"inputs", {{"in", {{"from", "f1.out"}}}}}, {"label", "keep"}},
+              {{"id", "cam"}, {"type", "fixture.view.camera@1"}},
+              {{"id", "scene"}, {"type", "fixture.view.scene@1"},
+               {"inputs", {{"layers", Json::array({{{"from", "f2.out"}}})}, {"camera", {{"from", "cam.camera"}}},
+                           {"aliased", {{"from", "f1.out"}, {"as", "x"}}}}}}})},
+          {"outputs", {{"view", "scene.scene"}}}}},
+      {"parameters", {{"gain", 1.0}}}, {"outputs", Json::array({"view"})}};
+}
+Draft linked()
+{
+  Draft result;
+  result.pin("project-opening", identity, 9, "Linked", linked_definition());
+  return result;
+}
+
+TEST(AnalysisLinkDraft, ReplacingOneLinkChangesOnlyThatInputAndKeepsEveryOtherByte)
+{
+  auto model = linked();
+  EXPECT_FALSE(model.dirty()); EXPECT_FALSE(model.has_link_edits());
+  EXPECT_EQ(model.link("f2", "in"), "f1.out"); EXPECT_EQ(model.baseline_link("f2", "in"), "f1.out");
+  const auto version = model.version(), generation = model.generation();
+  ASSERT_TRUE(model.set_link("f2", "in", std::string("a.out"), generation).accepted);
+  EXPECT_TRUE(model.dirty()); EXPECT_TRUE(model.has_link_edits());
+  EXPECT_EQ(model.version(), version + 1); EXPECT_EQ(model.generation(), generation);
+  EXPECT_EQ(model.link("f2", "in"), "a.out"); EXPECT_EQ(model.baseline_link("f2", "in"), "f1.out");
+  auto expected = linked_definition();
+  expected["graph"]["nodes"][2]["inputs"]["in"] = {{"from", "a.out"}};
+  EXPECT_EQ(exact(model.candidate_document()), exact(expected));
+  EXPECT_EQ(exact(model.parameters()), exact(Json{{"gain", 1.0}}));  // the float stays a float
+  EXPECT_EQ(model.outputs(), Json::array({"view"}));
+  // Same value again is a no-op; the baseline value drops the edit.
+  ASSERT_TRUE(model.set_link("f2", "in", std::string("a.out"), generation).accepted);
+  EXPECT_EQ(model.version(), version + 1);
+  ASSERT_TRUE(model.set_link("f2", "in", std::string("f1.out"), generation).accepted);
+  EXPECT_FALSE(model.has_link_edits()); EXPECT_FALSE(model.dirty());
+  EXPECT_EQ(exact(model.candidate_document()), exact(linked_definition()));
+}
+
+TEST(AnalysisLinkDraft, DisconnectRemovesOnlyTheInputKeyAndUnlinkedInputsCanBeConnected)
+{
+  auto model = linked();
+  ASSERT_TRUE(model.set_link("scene", "camera", std::nullopt, model.generation()).accepted);
+  EXPECT_EQ(model.link("scene", "camera"), std::nullopt);
+  auto expected = linked_definition();
+  expected["graph"]["nodes"][4]["inputs"].erase("camera");
+  EXPECT_EQ(exact(model.candidate_document()), exact(expected));
+  // A node without an inputs object gains exactly one link; removing it restores the absence.
+  EXPECT_TRUE(model.link_editable("cam", "extra"));
+  ASSERT_TRUE(model.set_link("cam", "extra", std::string("a.out"), model.generation()).accepted);
+  expected["graph"]["nodes"][3]["inputs"] = {{"extra", {{"from", "a.out"}}}};
+  EXPECT_EQ(exact(model.candidate_document()), exact(expected));
+  ASSERT_TRUE(model.set_link("cam", "extra", std::nullopt, model.generation()).accepted);
+  EXPECT_EQ(model.link_edits().size(), 1u);
+  EXPECT_FALSE(model.candidate_document()["graph"]["nodes"][3].contains("inputs"));
+}
+
+TEST(AnalysisLinkDraft, MultiAliasedUnknownShapeDuplicateAndMalformedTargetsStayReadOnly)
+{
+  auto document = linked_definition();
+  document["graph"]["nodes"].push_back({{"id", "dup"}, {"type", "fixture.filter.pass@1"}});
+  document["graph"]["nodes"].push_back({{"id", "dup"}, {"type", "fixture.filter.pass@1"}});
+  document["graph"]["nodes"].push_back({{"id", "odd"}, {"type", "fixture.filter.pass@1"}, {"inputs", {{"in", {{"from", "a.out"}, {"note", 1}}}}}});
+  Draft model; model.pin("project-opening", identity, 9, "Linked", document);
+  const auto before = exact(model.candidate_document());
+  const auto version = model.version(), generation = model.generation();
+  EXPECT_FALSE(model.link_editable("scene", "layers"));   // a list (multi input)
+  EXPECT_FALSE(model.link_editable("scene", "aliased"));  // "as" would be lost
+  EXPECT_FALSE(model.link_editable("odd", "in"));         // unknown link key
+  EXPECT_FALSE(model.link_editable("dup", "in"));         // ambiguous node id
+  EXPECT_FALSE(model.link_editable("missing", "in"));
+  EXPECT_FALSE(model.link_editable("f2", "Bad-Port"));
+  for (const auto &[node, port] : std::vector<std::pair<std::string, std::string>>{
+           {"scene", "layers"}, {"scene", "aliased"}, {"odd", "in"}, {"dup", "in"}, {"missing", "in"}, {"f2", "Bad-Port"}}) {
+    EXPECT_FALSE(model.set_link(node, port, std::string("a.out"), generation).accepted) << node << "." << port;
+    EXPECT_FALSE(model.set_link(node, port, std::nullopt, generation).accepted) << node << "." << port;
+  }
+  // Sources: malformed, unknown, ambiguous and self links are refused before validation.
+  for (const auto *source : {"a", "a.", ".out", "a.out.x", "A.out", "missing.out", "dup.out", "f2.out"}) {
+    EXPECT_FALSE(model.set_link("f2", "in", std::string(source), generation).accepted) << source;
+  }
+  EXPECT_EQ(model.version(), version); EXPECT_FALSE(model.dirty());
+  EXPECT_EQ(exact(model.candidate_document()), before);
+  // Port compatibility and cycles are not judged here: graph validation decides.
+  EXPECT_TRUE(model.set_link("f1", "in", std::string("f2.out"), generation).accepted);
+}
+
+TEST(AnalysisLinkDraft, LinkEditsJoinParameterAndOutputEditsAndClearWithRevertPinAndStaleGenerations)
+{
+  auto model = linked();
+  const auto generation = model.generation();
+  ASSERT_TRUE(model.set_text("gain", "1e", Draft::TextMode::Json, generation).accepted == false);
+  ASSERT_TRUE(model.set("gain", 3, generation).accepted);
+  ASSERT_TRUE(model.set_output("view", false, generation).accepted);
+  ASSERT_TRUE(model.set_link("f2", "in", std::string("a.out"), generation).accepted);
+  const auto candidate = model.candidate_document();
+  EXPECT_EQ(candidate.at("parameters").at("gain"), 3);
+  EXPECT_TRUE(candidate.at("parameters").at("gain").is_number_integer());
+  EXPECT_EQ(candidate.at("outputs"), Json::array());
+  EXPECT_EQ(candidate.at("graph").at("nodes")[2].at("inputs").at("in"), Json({{"from", "a.out"}}));
+  EXPECT_TRUE(model.matches(identity, "Linked", candidate));
+  auto other = candidate; other["graph"]["nodes"][2]["inputs"]["in"] = {{"from", "f1.out"}};
+  EXPECT_FALSE(model.matches(identity, "Linked", other));
+  // A callback from before a re-pin cannot edit; revert clears every kind of edit.
+  ASSERT_TRUE(model.revert(generation));
+  EXPECT_FALSE(model.dirty()); EXPECT_FALSE(model.has_link_edits());
+  ASSERT_TRUE(model.set_link("f2", "in", std::string("a.out"), generation).accepted);
+  model.pin("project-opening", identity, 10, "Linked", linked_definition());
+  EXPECT_FALSE(model.has_link_edits());
+  EXPECT_FALSE(model.set_link("f2", "in", std::string("a.out"), generation).accepted);
+  model.reset();
+  EXPECT_FALSE(model.link_editable("f2", "in")); EXPECT_EQ(model.link("f2", "in"), std::nullopt);
+}
+
+TEST(AnalysisCandidateValidation, RepliesBindToTheLatestTicketAndCountOnlyForTheirExactKey)
+{
+  AnalysisCandidateValidation check;
+  const AnalysisCandidateKey key{"opening", identity, "42:1", 9, 3, 5};
+  EXPECT_FALSE(check.passed(key)); EXPECT_EQ(check.result(key), nullptr); EXPECT_FALSE(check.pending());
+  const auto first = check.begin(key);
+  EXPECT_TRUE(check.pending()); EXPECT_EQ(check.result(key), nullptr);
+  const auto second = check.begin(key);
+  EXPECT_FALSE(check.finish(first, {{"ok", true}, {"issues", Json::array()}}));  // stale ticket
+  EXPECT_TRUE(check.pending());
+  ASSERT_TRUE(check.finish(second, {{"ok", false}, {"issues", Json::array({{{"code", "cycle"}}})}}));
+  ASSERT_NE(check.result(key), nullptr); EXPECT_FALSE(check.passed(key));
+  EXPECT_EQ(check.result(key)->at("issues")[0].at("code"), "cycle");
+  const auto third = check.begin(key);
+  ASSERT_TRUE(check.finish(third, {{"ok", true}, {"issues", Json::array()}}));
+  EXPECT_TRUE(check.passed(key));
+  for (auto changed : {AnalysisCandidateKey{"other", identity, "42:1", 9, 3, 5},
+                       AnalysisCandidateKey{"opening", "11111111-1111-4111-8111-111111111111", "42:1", 9, 3, 5},
+                       AnalysisCandidateKey{"opening", identity, "43:2", 9, 3, 5},
+                       AnalysisCandidateKey{"opening", identity, "42:1", 10, 3, 5},
+                       AnalysisCandidateKey{"opening", identity, "42:1", 9, 4, 5},
+                       AnalysisCandidateKey{"opening", identity, "42:1", 9, 3, 6}}) {
+    EXPECT_FALSE(check.passed(changed)); EXPECT_EQ(check.result(changed), nullptr);
+  }
+  const auto fourth = check.begin(key);
+  EXPECT_FALSE(check.passed(key));  // a new check replaces the old verdict
+  EXPECT_FALSE(check.finish(fourth, {{"ok", "yes"}, {"issues", Json::array()}}));
+  EXPECT_FALSE(check.passed(key)); EXPECT_FALSE(check.error(key).empty());
+  const auto fifth = check.begin(key);
+  ASSERT_TRUE(check.fail(fifth, "unavailable: restarted"));
+  EXPECT_EQ(check.error(key), "unavailable: restarted"); EXPECT_FALSE(check.passed(key));
+  check.reset();
+  EXPECT_FALSE(check.finish(fifth, {{"ok", true}, {"issues", Json::array()}}));
+  EXPECT_TRUE(check.error(key).empty());
+}
+
+}  // namespace
+}  // namespace stk::app

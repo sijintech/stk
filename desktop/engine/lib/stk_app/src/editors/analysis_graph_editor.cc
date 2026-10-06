@@ -32,6 +32,12 @@ void omitted(ui::Layout &layout, EditorContext &ctx, const size_t count)
   if (count) { layout.paragraph(ctx.store.catalog().format("analysis_graph.omitted_count", {{"count", std::to_string(count)}})); }
 }
 
+std::string bridge_session(const bridge::Client *client)
+{
+  return client && client->state() == bridge::BridgeState::Ready ?
+      std::to_string(client->bridge_pid()) + ":" + std::to_string(client->stats().spawned) : std::string();
+}
+
 void table(ui::Layout &layout, std::string_view key, std::vector<ui::TableColumn> columns,
            Rows rows, const uint64_t version, float visible = 5)
 {
@@ -279,6 +285,9 @@ class AnalysisGraphEditor final : public Editor {
   uint64_t navigation_generation_ = 0, document_navigation_ = 0;
   std::string document_name_;
   AnalysisParameterDraft parameter_draft_;
+  AnalysisCandidateValidation candidate_check_;
+  std::optional<bridge::Future<Json>> candidate_future_;
+  std::string link_error_;
   std::optional<std::string> parameter_key_;
   std::optional<std::string> draft_output_key_;
   size_t draft_output_page_ = 0;
@@ -351,7 +360,17 @@ class AnalysisGraphEditor final : public Editor {
     draft_output_page_ = 0;
     ++draft_output_page_generation_;
     parameter_error_.clear(); parameter_buffer_changed_ = parameter_detached_ = parameter_saving_ = false;
-    parameter_input_id_ = 0;
+    parameter_input_id_ = 0; link_error_.clear(); candidate_check_.reset();
+  }
+  AnalysisCandidateKey candidate_key() const
+  {
+    return {parameter_draft_.handle(), parameter_draft_.analysis_id(), bridge_session(store_ ? store_->bridge() : nullptr),
+        parameter_draft_.revision(), parameter_draft_.generation(), parameter_draft_.version()};
+  }
+  /** Saving a link change needs a passing graph.validate of exactly this candidate. */
+  bool candidate_checked() const
+  {
+    return !parameter_draft_.has_link_edits() || candidate_check_.passed(candidate_key());
   }
   Json parameter_declaration(const std::string &name) const
   {
@@ -432,6 +451,7 @@ class AnalysisGraphEditor final : public Editor {
     const bool blocked = busy || unavailable;
     panel->paragraph(ctx.tr("analysis_parameters.hint"));
     if (parameter_edits()) { panel->paragraph(ctx.tr("analysis_parameters.dirty")); }
+    if (!candidate_checked()) { panel->paragraph(ctx.tr("analysis_links.validate_first")); }
     if (unavailable) {
       panel->paragraph(ctx.tr("analysis_parameters.stale"));
       panel->paragraph(text(parameter_draft_.analysis_id()));
@@ -443,12 +463,16 @@ class AnalysisGraphEditor final : public Editor {
       if (!valid() || !parameter_current() || (parameter_ui_ && parameter_ui_->text_input_active()) || parameter_buffer_changed_ ||
           state_->source() == AnalysisGraphState::Source::Run ||
           parameter_draft_.version() != version || !parameter_draft_.dirty() ||
-          documents_->selected_version() != selection) { return; }
-      if (documents_->replace_submission(parameter_draft_.parameters(), parameter_draft_.outputs(), selection)) {
+          documents_->selected_version() != selection || !candidate_checked()) { return; }
+      const bool sent = parameter_draft_.has_link_edits() ?
+          documents_->replace_definition(parameter_draft_.candidate_document(), selection) :
+          documents_->replace_submission(parameter_draft_.parameters(), parameter_draft_.outputs(), selection);
+      if (sent) {
         parameter_saving_ = true; parameter_save_generation_ = parameter_draft_.generation();
         parameter_save_version_ = parameter_draft_.version(); document_navigation_ = navigation_generation_;
       }
-    }).disable(blocked || !parameter_draft_.dirty() || parameter_buffer_changed_ || (parameter_ui_ && parameter_ui_->text_input_active()));
+    }).disable(blocked || !parameter_draft_.dirty() || parameter_buffer_changed_ || (parameter_ui_ && parameter_ui_->text_input_active()) ||
+               !candidate_checked());
     actions.button("analysis_parameters_discard", ctx.tr("analysis_parameters.discard"), [this, valid] {
       if (!valid() || documents_->busy() || documents_->uncertain() || parameter_text_active() ||
           state_->source() == AnalysisGraphState::Source::Run) { return; }
@@ -463,6 +487,142 @@ class AnalysisGraphEditor final : public Editor {
       parameter_values_panel(*parameters, ctx, valid, generation, version, blocked);
     }
     draft_outputs_panel(*panel, ctx, valid, generation, version, blocked);
+    links_panel(*panel, ctx, valid, version, blocked);
+  }
+
+  void links_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
+                   const uint64_t version, const bool blocked)
+  {
+    // Collapsed by default: most saved analyses are inspected or re-parameterized, not rewired.
+    auto &catalog = ctx.store.catalog();
+    const auto changes = parameter_draft_.link_edits().size();
+    auto *panel = layout.panel("analysis_links_panel", changes ? catalog.format("analysis_links.title_count",
+        {{"count", std::to_string(changes)}}) : std::string(ctx.tr("analysis_links.title")), false);
+    if (!panel) { return; }
+    panel->paragraph(ctx.tr("analysis_links.hint"));
+    panel->paragraph(ctx.tr("analysis_links.canvas_note"));
+    if (!link_error_.empty()) { panel->paragraph(text(link_error_)); }
+    const auto &edits = parameter_draft_.link_edits();
+    if (!edits.empty()) {
+      panel->label(catalog.format("analysis_links.pending", {{"count", std::to_string(edits.size())}}));
+      size_t shown = 0;
+      for (const auto &[key, source] : edits) {
+        if (++shown > 32) { break; }
+        const auto before = parameter_draft_.baseline_link(key.first, key.second);
+        panel->paragraph(catalog.format("analysis_links.change", {{"target", text(key.first + "." + key.second)},
+            {"from", before ? text(*before) : std::string(ctx.tr("analysis_links.not_connected"))},
+            {"to", source ? text(*source) : std::string(ctx.tr("analysis_links.not_connected"))}}));
+      }
+      omitted(*panel, ctx, edits.size() > 32 ? edits.size() - 32 : 0);
+    }
+    const bool editing = parameter_text_active() || parameter_buffer_changed_;
+    const auto view = state_->view();
+    // The canvas, ports and catalog hints must describe the very definition this draft edits.
+    const bool same = view && state_->saved() && !state_->document_stale() &&
+        state_->document_id() == parameter_draft_.analysis_id() && state_->document_revision() == parameter_draft_.revision();
+    // Without the node catalog every type would look unknown: say why nothing is editable yet.
+    if (state_->catalog_loading()) { panel->paragraph(ctx.tr("analysis_links.catalog_loading")); }
+    else if (!state_->catalog_error().empty()) { panel->paragraph(ctx.tr("analysis_links.catalog_needed")); }
+    else if (!same || !selected_ || *selected_ >= view->nodes.size()) {
+      panel->paragraph(ctx.tr("analysis_links.select_node"));
+    }
+    else {
+      const auto &node = view->nodes[*selected_];
+      panel->label(text(node.id) + " · " + text(node.type));
+      for (const auto &port : node.inputs) {
+        const auto current = parameter_draft_.link(node.id, port.name);
+        const bool edited = edits.count({node.id, port.name}) != 0;
+        panel->label(catalog.format("analysis_links.port", {{"port", text(port.name)}, {"type", port.type_text},
+            {"source", current ? text(*current) : std::string(ctx.tr("analysis_links.not_connected"))}}) +
+            (edited ? "  · " + std::string(ctx.tr("analysis_links.edited")) : std::string()));
+        const char *reason = !node.known_type ? "analysis_links.readonly_unknown_type" :
+            node.ambiguous_id ? "analysis_links.readonly_duplicate" :
+            !port.declared ? "analysis_links.readonly_undeclared" :
+            port.multi ? "analysis_links.readonly_multi" :
+            !parameter_draft_.link_editable(node.id, port.name) ? "analysis_links.readonly_shape" : nullptr;
+        if (reason) { panel->paragraph(ctx.tr(reason)); continue; }
+        // Catalog types are only hints: every declared upstream output is offered and
+        // graph.validate alone decides compatibility, kinds and cycles.
+        std::vector<std::optional<std::string>> values;
+        std::vector<std::string> labels;
+        if (!port.required || !current) {
+          values.push_back(std::nullopt);
+          labels.push_back(std::string(ctx.tr(port.required ? "analysis_links.not_connected" : "analysis_links.disconnect")));
+        }
+        for (const auto &other : view->nodes) {
+          if (other.id == node.id || other.ambiguous_id) { continue; }
+          for (const auto &output : other.outputs) {
+            if (!output.declared) { continue; }
+            values.push_back(other.id + "." + output.name);
+            labels.push_back(text(other.id + "." + output.name) + "  (" + output.type_text + ")");
+          }
+        }
+        if (current && std::find(values.begin(), values.end(), current) == values.end()) {
+          values.push_back(current);
+          labels.push_back(text(*current) + "  · " + std::string(ctx.tr("analysis_links.unlisted")));
+        }
+        const auto found = std::find(values.begin(), values.end(), current);
+        const int index = found == values.end() ? -1 : int(found - values.begin());
+        auto &scope = panel->scope("analysis_link/" + node.id + "/" + port.name);
+        scope.dropdown("analysis_link_source", std::move(labels), {[index] { return index; },
+            [this, valid, values, target = node.id, input = port.name](const int choice) {
+          if (!valid() || !parameter_current() || documents_->busy() || documents_->uncertain() || parameter_text_active() ||
+              parameter_buffer_changed_ || choice < 0 || size_t(choice) >= values.size()) { return; }
+          const auto result = parameter_draft_.set_link(target, input, values[size_t(choice)], parameter_draft_.generation());
+          link_error_ = result.accepted ? std::string() : result.error;
+          redraw();
+        }}).disable(blocked || editing);
+      }
+      omitted(*panel, ctx, node.omitted_inputs);
+    }
+
+    const auto key = candidate_key();
+    const bool pending = candidate_check_.pending();
+    auto *client = store_->bridge();
+    const auto hello = client ? client->hello_info() : std::nullopt;
+    const bool can_validate = hello && hello->has_method("graph.validate") && !key.session.empty();
+    panel->button("analysis_links_validate", ctx.tr(pending ? "analysis_links.validating" : "analysis_links.validate"),
+        [this, valid, version] {
+      if (!valid() || !parameter_current() || candidate_check_.pending() || parameter_draft_.version() != version ||
+          parameter_text_active() || parameter_buffer_changed_ || !parameter_draft_.dirty()) { return; }
+      auto *bridge = store_->bridge();
+      const auto check = candidate_key();
+      const auto ready = bridge ? bridge->hello_info() : std::nullopt;
+      if (!ready || !ready->has_method("graph.validate") || check.session.empty()) { return; }
+      const auto candidate = parameter_draft_.candidate_document();
+      const auto ticket = candidate_check_.begin(check);
+      const std::weak_ptr<bool> weak = alive_;
+      // Static validation only: it never evaluates nodes, prepares a run or touches the Viewer.
+      candidate_future_ = bridge->graph_validate(candidate.at("graph"), candidate.at("parameters"));
+      candidate_future_->then([this, weak, ticket](bridge::Result<Json> result) {
+        const auto live = weak.lock();
+        if (!live || !*live) { return; }
+        candidate_future_.reset();
+        if (!result) { candidate_check_.fail(ticket, result.error().describe()); }
+        else { candidate_check_.finish(ticket, result.value()); }
+        redraw();
+      });
+      redraw();
+    }).disable(blocked || pending || editing || !parameter_draft_.dirty() || !can_validate);
+    if (const auto *response = candidate_check_.result(key)) {
+      const bool ok = response->at("ok").get<bool>();
+      panel->paragraph(ctx.tr(ok ? "analysis_links.valid" : "analysis_links.invalid"));
+      Rows issues;
+      const auto &reported = response->at("issues");
+      for (size_t index = 0; index < std::min<size_t>(reported.size(), 256); ++index) {
+        const auto &issue = reported[index];
+        if (!issue.is_object()) { continue; }
+        issues.push_back({text(io::get_string(issue, "node")), text(io::get_string(issue, "code")),
+            text(io::get_string(issue, "path")), text(io::get_string(issue, "message"))});
+      }
+      if (!issues.empty()) {
+        table(*panel, "analysis_links_issues", {{std::string(ctx.tr("analysis_graph.node")), 6},
+            {std::string(ctx.tr("analysis_graph.issue")), 8}, {std::string(ctx.tr("analysis_graph.path")), 12},
+            {std::string(ctx.tr("analysis_graph.message")), 20}}, std::move(issues), parameter_draft_.version(), 4);
+      }
+      omitted(*panel, ctx, reported.size() > 256 ? reported.size() - 256 : 0);
+    }
+    else if (const auto error = candidate_check_.error(key); !error.empty()) { panel->paragraph(text(error)); }
   }
 
   void parameter_values_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,

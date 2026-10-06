@@ -122,8 +122,16 @@ int main(int argc, char **argv)
         return false;
       };
       auto toggle_panel = [&](const char *key) {
+        // Panels above may grow as the editor gains sections: scroll the header into the
+        // sidebar through the real wheel path before clicking it, never click off-screen.
+        const auto sidebar = area->find_region(app::EditorArea::kSidebar)->ui_rect();
         const auto *panel = screen.ui()->find(key);
-        if (!panel) { return false; }
+        for (int step = 0; panel && step < 60 && panel->rect.intersect(sidebar) != panel->rect; ++step) {
+          screen.ui()->handle_event(ui::Event::wheel({sidebar.x1() - 2, sidebar.cy()}, panel->rect.cy() > sidebar.cy() ? -1.0f : 1.0f));
+          if (!frame()) { return false; }
+          panel = screen.ui()->find(key);
+        }
+        if (!panel || panel->rect.intersect(sidebar) != panel->rect) { return false; }
         const ui::Vec2 center{panel->rect.x + panel->rect.w / 2, panel->rect.y + panel->rect.h / 2};
         screen.ui()->handle_event(ui::Event::mouse_down(center));
         screen.ui()->handle_event(ui::Event::mouse_up(center));

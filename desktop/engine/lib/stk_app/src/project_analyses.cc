@@ -5,6 +5,7 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/jobs_spec.hh"
 #include "stk/app/project_state.hh"
+#include "stk/io/graph.hh"
 
 #include <stdexcept>
 #include <limits>
@@ -247,6 +248,23 @@ bool ProjectAnalyses::replace_submission(const Json &parameters, const Json &out
     document["parameters"] = parameters;
     document["outputs"] = outputs;
     check_analysis_document_bounds(document);
+  }
+  catch (const std::exception &) { return false; }
+  return write("project.analyses.update", selected_.at("id").get<std::string>(),
+               selected_.at("name").get<std::string>(), document, selected_revision_);
+}
+
+bool ProjectAnalyses::replace_definition(const Json &document, const uint64_t expected_selected_version)
+{
+  sync();
+  if (!document.is_object() || selected_version_ != expected_selected_version || selected_.is_null() ||
+      io::get_string(selected_, "state") != "readable" || stale() || busy_ || uncertain_ || project_.busy()) {
+    return false;
+  }
+  try {
+    check_analysis_document_bounds(document);
+    (void)io::Graph::from_json(document.at("graph"));
+    if (document.at("format") != selected_.at("document").at("format")) { return false; }
   }
   catch (const std::exception &) { return false; }
   return write("project.analyses.update", selected_.at("id").get<std::string>(),

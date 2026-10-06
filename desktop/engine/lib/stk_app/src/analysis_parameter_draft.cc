@@ -142,6 +142,37 @@ void parameter_key(const std::string &name)
   require(name.size() <= Draft::max_parameters_bytes && core::utf8::is_valid(name),
           "Parameter keys must be bounded valid UTF-8 strings");
 }
+
+/** Index of the node object whose id occurs exactly once in the raw graph, else -1. */
+int unique_node(const Json &graph, const std::string &id)
+{
+  const auto nodes = graph.find("nodes");
+  if (nodes == graph.end() || !nodes->is_array()) { return -1; }
+  int found = -1;
+  for (size_t index = 0; index < nodes->size(); ++index) {
+    const auto &node = (*nodes)[index];
+    if (!node.is_object() || io::get_string(node, "id") != id) { continue; }
+    if (found >= 0) { return -1; }
+    found = int(index);
+  }
+  return found;
+}
+
+/** A raw input value that is absent or exactly {"from": "..."}; anything else stays read-only. */
+struct SingleLink {
+  bool editable = false;
+  std::optional<std::string> source;
+};
+SingleLink single_link(const Json &node, const std::string &port)
+{
+  const auto inputs = node.find("inputs");
+  if (inputs == node.end()) { return {true, std::nullopt}; }
+  if (!inputs->is_object()) { return {}; }
+  const auto value = inputs->find(port);
+  if (value == inputs->end()) { return {true, std::nullopt}; }
+  if (!value->is_object() || value->size() != 1 || !value->contains("from") || !value->at("from").is_string()) { return {}; }
+  return {true, value->at("from").get<std::string>()};
+}
 }  // namespace
 
 void AnalysisParameterDraft::pin(std::string handle, std::string analysis_id, int64_t revision,
@@ -158,13 +189,13 @@ void AnalysisParameterDraft::pin(std::string handle, std::string analysis_id, in
   Json detached = document;
   handle_ = std::move(handle); analysis_id_ = std::move(analysis_id); revision_ = revision;
   name_ = std::move(name); baseline_ = std::move(detached); edits_.clear(); outputs_override_.reset();
-  ++generation_; ++version_;
+  link_edits_.clear(); ++generation_; ++version_;
 }
 
 void AnalysisParameterDraft::reset()
 {
   handle_.clear(); analysis_id_.clear(); name_.clear(); revision_ = -1;
-  baseline_ = nullptr; edits_.clear(); outputs_override_.reset(); ++generation_; ++version_;
+  baseline_ = nullptr; edits_.clear(); outputs_override_.reset(); link_edits_.clear(); ++generation_; ++version_;
 }
 
 bool AnalysisParameterDraft::current(const std::string &handle, int64_t revision) const
@@ -208,6 +239,18 @@ Json AnalysisParameterDraft::document_with(const Json &parameters) const
   if (!pinned()) { return nullptr; }
   Json result = baseline_; result["parameters"] = parameters;
   if (outputs_override_) { result["outputs"] = *outputs_override_; }
+  if (!link_edits_.empty()) {
+    auto &graph = result["graph"];
+    for (const auto &[key, source] : link_edits_) {
+      // set_link admitted only unique nodes, and nodes are never added, removed or reordered.
+      auto &node = graph["nodes"][size_t(unique_node(graph, key.first))];
+      if (source) {
+        if (!node.contains("inputs")) { node["inputs"] = Json::object(); }
+        node["inputs"][key.second] = Json{{"from", *source}};
+      }
+      else if (node.contains("inputs")) { node["inputs"].erase(key.second); }
+    }
+  }
   return result;
 }
 
@@ -314,10 +357,60 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::set_output(const std:
   return set_outputs(values, generation);
 }
 
+bool AnalysisParameterDraft::link_editable(const std::string &node, const std::string &port) const
+{
+  if (!pinned() || !io::is_graph_id(node) || !io::is_graph_id(port)) { return false; }
+  const auto &graph = baseline_.at("graph");
+  const int index = unique_node(graph, node);
+  return index >= 0 && single_link(graph.at("nodes")[size_t(index)], port).editable;
+}
+
+std::optional<std::string> AnalysisParameterDraft::baseline_link(const std::string &node, const std::string &port) const
+{
+  if (!pinned()) { return std::nullopt; }
+  const auto &graph = baseline_.at("graph");
+  const int index = unique_node(graph, node);
+  return index < 0 ? std::nullopt : single_link(graph.at("nodes")[size_t(index)], port).source;
+}
+
+std::optional<std::string> AnalysisParameterDraft::link(const std::string &node, const std::string &port) const
+{
+  if (const auto found = link_edits_.find({node, port}); found != link_edits_.end()) { return found->second; }
+  return baseline_link(node, port);
+}
+
+AnalysisParameterDraft::EditResult AnalysisParameterDraft::set_link(const std::string &node, const std::string &port,
+                                                                    const std::optional<std::string> &source,
+                                                                    uint64_t generation)
+{
+  if (!accepts(generation)) { return {false, "The analysis draft has changed or is unavailable"}; }
+  if (!link_editable(node, port)) {
+    return {false, "Only an input with no link or exactly one {\"from\"} link of a uniquely named node can be edited"};
+  }
+  if (source) {
+    const auto reference = io::parse_port_ref(*source);
+    if (!reference || !io::is_graph_id(reference->first) || !io::is_graph_id(reference->second)) {
+      return {false, "A link source is \"node.port\" with graph identifiers"};
+    }
+    if (reference->first == node) { return {false, "A node cannot take its own output as an input"}; }
+    if (unique_node(baseline_.at("graph"), reference->first) < 0) {
+      return {false, "The source node must occur exactly once in the graph"};
+    }
+  }
+  if (link(node, port) == source) { return {true, {}}; }
+  const LinkKey key{node, port};
+  const auto previous = link_edits_;
+  if (baseline_link(node, port) == source) { link_edits_.erase(key); }
+  else { link_edits_[key] = source; }
+  try { check_analysis_document_bounds(candidate_document()); }
+  catch (const std::invalid_argument &error) { link_edits_ = previous; return {false, error.what()}; }
+  ++version_; return {true, {}};
+}
+
 bool AnalysisParameterDraft::revert(uint64_t generation)
 {
   if (!accepts(generation)) { return false; }
-  if (dirty()) { edits_.clear(); outputs_override_.reset(); ++version_; }
+  if (dirty()) { edits_.clear(); outputs_override_.reset(); link_edits_.clear(); ++version_; }
   return true;
 }
 
@@ -327,6 +420,53 @@ bool AnalysisParameterDraft::matches(const std::string &analysis_id, const std::
   if (!pinned() || analysis_id != analysis_id_ || name != name_) { return false; }
   try { check_analysis_document_bounds(document); return same_json(candidate_document(), document); }
   catch (const std::invalid_argument &) { return false; }
+}
+
+uint64_t AnalysisCandidateValidation::begin(AnalysisCandidateKey key)
+{
+  key_ = std::move(key); response_ = nullptr; error_.clear(); pending_ = true;
+  return ++ticket_;
+}
+
+bool AnalysisCandidateValidation::finish(const uint64_t ticket, const Json &response)
+{
+  if (!pending_ || ticket != ticket_) { return false; }
+  pending_ = false;
+  if (!response.is_object() || !response.contains("ok") || !response.at("ok").is_boolean() ||
+      !response.contains("issues") || !response.at("issues").is_array()) {
+    error_ = "Invalid graph validation response";
+    return false;
+  }
+  response_ = response;
+  return true;
+}
+
+bool AnalysisCandidateValidation::fail(const uint64_t ticket, std::string error)
+{
+  if (!pending_ || ticket != ticket_) { return false; }
+  pending_ = false; response_ = nullptr; error_ = std::move(error);
+  return true;
+}
+
+void AnalysisCandidateValidation::reset()
+{
+  key_ = {}; response_ = nullptr; error_.clear(); pending_ = false; ++ticket_;
+}
+
+const Json *AnalysisCandidateValidation::result(const AnalysisCandidateKey &key) const
+{
+  return !pending_ && !response_.is_null() && key == key_ ? &response_ : nullptr;
+}
+
+bool AnalysisCandidateValidation::passed(const AnalysisCandidateKey &key) const
+{
+  const auto *response = result(key);
+  return response && response->at("ok").get<bool>();
+}
+
+std::string AnalysisCandidateValidation::error(const AnalysisCandidateKey &key) const
+{
+  return !pending_ && key == key_ ? error_ : std::string();
 }
 
 }  // namespace stk::app
