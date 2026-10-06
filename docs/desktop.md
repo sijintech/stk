@@ -41,6 +41,9 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 2. **参数**：显示参数表数与总行数（不含文件索引与分析定义等托管表）；“编辑参数”打开项目表格。
    表格页的 **生成参数扫描** 按每个字段的范围或取值列表一次添加多行，可一次撤销，见[参数扫描](project-sweeps.md)。
 
+分析图“运行”页的**运行并显示**一次完成准备、开始、等待、读取校验与在查看器显示，可随时停止且不取消运行，
+见[分析运行](project-analysis-runs.md#准备执行与查看)。
+
 MuFerro 仿真与仿真批次面板可直接选择**运行环境**并用字段设置运行方式与资源（原 JSON 折叠为高级选项）；
 仿真批次的**在 … 上运行所选 N 行**一次完成保存、准备与提交，见[仿真批次](simulation-batches.md)。
 
@@ -439,6 +442,8 @@ marks the next step. Buttons only open the matching page; nothing runs, sends or
 On the project page, **Generate a parameter scan** turns per-field ranges or value lists into new rows
 as one undoable edit (every combination, or values paired in order; optionally copying the selected row's
 other cells and row-relative formulas). See [parameter sweeps](project-sweeps.md) (Chinese).
+In the analysis graph's Runs page, **Run and show** prepares, starts, waits for, reads and verifies a run, then shows
+its first payload output in the Viewer; **Stop** ends the automatic steps without cancelling the run.
 The MuFerro and simulation-batch panels pick the Runtime directly and set how and with which resources
 to run through fields (the raw JSON is folded under advanced options). **Run N selected rows on …** saves
 the batch, prepares every row and submits the prepared ones in one click; repeating it submits nothing twice.

@@ -211,6 +211,15 @@ class ProjectAnalysisRunsPython : public ::testing::Test {
     return runs->decode_payload("view");
   }
   const ui::Widget *widget(const char *key) { return f.screen.ui()->find(key); }
+  std::string runs_status()
+  {
+    // Status of the run the editor last started, read from the project (never from the held reads).
+    const auto started = calls("project.analysis_runs.start");
+    if (started.empty()) { return ""; }
+    Json result;
+    call("project.analysis_runs.get", {{"handle", handle()}, {"run_id", started.back().at("run_id")}}, result);
+    return io::get_string(result.at("run"), "status");
+  }
   void toggle(const char *key)
   {
     const auto *value = widget(key); ASSERT_NE(value, nullptr);
@@ -576,6 +585,74 @@ TEST_F(ProjectAnalysisRunsPython, SavedRunsUiPreparesInspectableMappingsAndCance
   EXPECT_EQ(parameters.cell(string_row, 2), "null");
   ASSERT_NE(widget("analysis_run_frozen_outputs"), nullptr);
   EXPECT_EQ(widget("analysis_run_frozen_outputs")->table->cell(0, 0), "view");
+}
+
+TEST_F(ProjectAnalysisRunsPython, RunAndShowMakesEachCallOnceAndShowsTheFirstPayload)
+{
+  ASSERT_NO_FATAL_FAILURE(open_runs_ui());
+  ASSERT_NO_FATAL_FAILURE(map_file_ui());
+  ASSERT_NE(widget("analysis_run_and_show"), nullptr);
+  ASSERT_TRUE(widget("analysis_run_and_show")->enabled);
+  widget("analysis_run_and_show")->on_click();
+  f.drv->frame();
+  ASSERT_NE(widget("analysis_run_and_show_stop"), nullptr);  // Progress with a way out.
+  EXPECT_FALSE(widget("analysis_run_and_show")->enabled);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame(); f.screen.run_deferred(); return bool(viewer().payload());
+  }, 60)) << client->bridge_log().text();
+  EXPECT_EQ(calls("project.analysis_runs.prepare").size(), 1u);
+  EXPECT_EQ(calls("project.analysis_runs.prepare")[0].at("bindings"), bindings);
+  EXPECT_EQ(calls("project.analysis_runs.start").size(), 1u);
+  EXPECT_EQ(calls("project.analysis_runs.result").size(), 1u);
+  EXPECT_EQ(viewer().source().kind, SourceKind::Payload);
+  EXPECT_EQ(runs_status(), "succeeded");
+  EXPECT_FALSE(viewer().graph_inspection()->shown_configuration);  // A verified archive, not a re-evaluation.
+}
+
+TEST_F(ProjectAnalysisRunsPython, RunAndShowStopsAtAFailedRunWithoutReadingOrShowing)
+{
+  document["parameters"]["path"] = "absent.dat";  // Not among the frozen inputs: the graph fails.
+  ASSERT_NO_FATAL_FAILURE(update_document());
+  ASSERT_NO_FATAL_FAILURE(open_runs_ui());
+  ASSERT_NO_FATAL_FAILURE(map_file_ui());
+  widget("analysis_run_and_show")->on_click();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame(); f.screen.run_deferred(); return widget("analysis_run_and_show_stop") == nullptr && !runs_status().empty() &&
+        runs_status() != "prepared" && runs_status() != "running";
+  }, 60)) << client->bridge_log().text();
+  EXPECT_EQ(calls("project.analysis_runs.start").size(), 1u);
+  EXPECT_FALSE(viewer().payload());
+  EXPECT_EQ(runs_status(), "failed");
+  EXPECT_TRUE(calls("project.analysis_runs.result").empty()) << calls("project.analysis_runs.result").dump();
+}
+
+TEST_F(ProjectAnalysisRunsPython, RunAndShowStopLeavesTheRunAndALostPrepareStopsBeforeStart)
+{
+  ASSERT_NO_FATAL_FAILURE(open_runs_ui());
+  ASSERT_NO_FATAL_FAILURE(map_file_ui());
+  ASSERT_NO_FATAL_FAILURE(mode("lost"));  // The prepare reply never arrives: nothing is started.
+  widget("analysis_run_and_show")->on_click();
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("analysis_run_and_show_stop") == nullptr; }, 30));
+  EXPECT_TRUE(calls("project.analysis_runs.start").empty());
+  EXPECT_FALSE(viewer().payload());
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NE(widget("analysis_run_check"), nullptr); widget("analysis_run_check")->on_click();
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("analysis_run_and_show") && widget("analysis_run_and_show")->enabled; }, 30));
+  ASSERT_NO_FATAL_FAILURE(mode("hold"));  // Status reads wait: stop while the run is followed.
+  widget("analysis_run_and_show")->on_click();
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return calls("project.analysis_runs.start").size() == 1; }, 30));
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return fs::exists(directory.path() / "held") || widget("analysis_run_and_show_stop") == nullptr; }, 30));
+  ASSERT_NE(widget("analysis_run_and_show_stop"), nullptr) << runs_status();
+  widget("analysis_run_and_show_stop")->on_click(); f.drv->frame();
+  EXPECT_EQ(widget("analysis_run_and_show_stop"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(write(directory.path() / "release", "go"));
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  Json barrier;
+  ASSERT_NO_FATAL_FAILURE(call("graph.catalog", Json::object(), barrier));
+  for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); f.screen.run_deferred(); }
+  EXPECT_TRUE(calls("project.analysis_runs.result").empty());
+  EXPECT_TRUE(calls("project.analysis_runs.cancel").empty());  // Stopping the steps never cancels the run.
+  EXPECT_FALSE(viewer().payload());
 }
 
 TEST_F(ProjectAnalysisRunsPython, RetainedPrepareButtonRejectsChangedMappingsAndProjectRevision)

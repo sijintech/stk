@@ -309,6 +309,20 @@ class AnalysisGraphEditor final : public Editor {
   };
   std::optional<InputReusePending> input_reuse_pending_;
   std::string input_reuse_notice_;
+  /* "Run and show": one explicit click walks prepare -> start -> wait -> read the result -> show
+   * the first payload output, making the same calls as the separate buttons, each bound to the
+   * run this click created. A changed project, bridge or definition, another selected run or an
+   * error ends the chain without cancelling durable work; waiting is bounded by the run budget. */
+  struct RunAndShow {
+    enum class Stage { Preparing, Starting, Waiting, Reading } stage = Stage::Preparing;
+    std::function<bool()> valid;
+    std::string run_id, plan;
+    uint64_t selection = 0;
+    double deadline = 0;
+  };
+  std::optional<RunAndShow> run_and_show_;
+  std::string run_and_show_key_, run_and_show_detail_;
+  uint64_t run_and_show_generation_ = 0;
   std::shared_ptr<const AnalysisResultInspection> result_view_;
   uint64_t result_generation_ = 0, result_browser_generation_ = 0;
   int result_output_ = -1, result_property_ = -1;
@@ -882,6 +896,7 @@ class AnalysisGraphEditor final : public Editor {
       result_scalar_description_.reset(); result_scalar_text_ = {}; result_path_text_ = {};
       result_path_page_ = result_scalar_page_ = 0; result_browser_error_.clear(); clear_table_grid(); ++result_browser_generation_;
     }
+    advance_run_and_show(ctx);
     if (canvas_view_ != state_->view()) {
       canvas_view_ = state_->view();
       canvas_.set_view(canvas_view_);
@@ -913,6 +928,114 @@ class AnalysisGraphEditor final : public Editor {
     });
   }
 
+  static double steady_seconds()
+  {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
+
+  void finish_run_and_show(std::string key, std::string detail = {})
+  {
+    run_and_show_.reset(); ++run_and_show_generation_;
+    run_and_show_key_ = std::move(key); run_and_show_detail_ = std::move(detail); redraw();
+  }
+
+  /** Shows one verified payload output in the Viewer (the Show button and the end of Run and show). */
+  void show_output(AppShell *shell, wm::Screen *screen, const std::string &output, const std::function<bool()> &same_archive,
+                   std::function<void(const bridge::Error &)> failed)
+  {
+    const auto target = shell->analysis_payload_target(screen);
+    if (!target) { failed(target.error()); return; }
+    const auto payload = runs_->decode_payload(output);
+    if (!payload || !same_archive()) { return; }
+    const auto id = io::get_string(runs_->run(), "id");
+    const auto label = io::get_string(runs_->run(), "analysis_name") + " · " + id.substr(0, 8) + " / " + output;
+    shell->open_analysis_payload(screen, runs_->handle(), target.value(), payload, label, same_archive,
+        [same_archive, failed = std::move(failed)](bridge::Result<Json> result) {
+      if (same_archive() && !result) { failed(result.error()); }
+    });
+  }
+
+  void advance_run_and_show(EditorContext &ctx)
+  {
+    if (!run_and_show_) { return; }
+    auto &chain = *run_and_show_;
+    if (!chain.valid()) { finish_run_and_show("analysis_runs.auto.abandoned"); return; }
+    poll_runs(ctx);  // Keep following while the run section is not shown.
+    if (runs_->busy()) { return; }
+    if (runs_->uncertain()) { finish_run_and_show("analysis_runs.auto.uncertain"); return; }
+    if (!runs_->error().empty()) { finish_run_and_show("analysis_runs.auto.failed", runs_->error()); return; }
+    const auto &run = runs_->run();
+    const auto id = io::get_string(run, "id"), status = io::get_string(run, "status");
+    if (chain.stage == RunAndShow::Stage::Preparing) {
+      if (run.is_null() || id != chain.run_id || status != "prepared") { finish_run_and_show("analysis_runs.auto.abandoned"); return; }
+      chain.plan = io::get_string(run, "plan_sha256"); chain.selection = runs_->selection_generation();
+      if (!runs_->start()) { finish_run_and_show("analysis_runs.auto.abandoned"); return; }
+      chain.stage = RunAndShow::Stage::Starting; redraw();
+      return;
+    }
+    if (run.is_null() || id != chain.run_id || io::get_string(run, "plan_sha256") != chain.plan ||
+        runs_->selection_generation() != chain.selection) {
+      finish_run_and_show("analysis_runs.auto.abandoned"); return;
+    }
+    if (chain.stage == RunAndShow::Stage::Reading) {
+      if (runs_->result().is_null()) { finish_run_and_show("analysis_runs.auto.failed"); return; }
+      const auto outputs = runs_->payload_outputs();
+      if (outputs.empty()) { finish_run_and_show("analysis_runs.auto.no_payload"); return; }
+      output_index_ = 0;
+      const bool partial = !run.at("result").is_null() && run.at("result").value("has_errors", false);
+      const auto archive = runs_->result_generation();
+      const std::weak_ptr<bool> weak = alive_;
+      const auto valid = chain.valid;
+      const auto same_archive = [this, weak, valid, archive, id] {
+        const auto live = weak.lock();
+        return live && *live && valid() && runs_->result_generation() == archive && io::get_string(runs_->run(), "id") == id;
+      };
+      const auto generation = run_and_show_generation_ + 1;
+      finish_run_and_show(partial ? "analysis_runs.auto.shown_partial" : "analysis_runs.auto.shown", outputs.front());
+      show_output(&ctx.area.shell(), ctx.area.screen(), outputs.front(), same_archive, [this, weak, generation](const bridge::Error &error) {
+        const auto live = weak.lock();
+        if (live && *live && run_and_show_generation_ == generation) { finish_run_and_show("analysis_runs.auto.viewer_failed", error.message); }
+      });
+      return;
+    }
+    if (status == "prepared") { finish_run_and_show("analysis_runs.auto.abandoned"); return; }  // Start was refused.
+    if (status == "running" || status == "cancel_requested") {
+      chain.stage = RunAndShow::Stage::Waiting;
+      if (!runs_->following()) {
+        // Reads stop after 90 s; keep observing this run up to its own budget, then hand back.
+        if (steady_seconds() >= chain.deadline || !runs_->load(chain.run_id)) {
+          finish_run_and_show("analysis_runs.auto.still_running"); return;
+        }
+        chain.selection = runs_->selection_generation();
+      }
+      return;
+    }
+    if (status == "succeeded" || (status == "failed" && !run.at("result").is_null())) {
+      if (run.at("result").is_null() || !runs_->read_result()) { finish_run_and_show("analysis_runs.auto.no_payload"); return; }
+      chain.stage = RunAndShow::Stage::Reading; redraw();
+      return;
+    }
+    finish_run_and_show("analysis_runs.auto.ended", std::string(ctx.tr("analysis_runs.status." + status)));
+  }
+
+  void run_and_show_status(ui::Layout &layout, EditorContext &ctx)
+  {
+    if (run_and_show_) {
+      const char *key = run_and_show_->stage == RunAndShow::Stage::Preparing ? "analysis_runs.auto.preparing" :
+                        run_and_show_->stage == RunAndShow::Stage::Reading ? "analysis_runs.auto.reading" : "analysis_runs.auto.running";
+      auto &row = layout.row();
+      row.label(ctx.tr(key));
+      const std::weak_ptr<bool> weak = alive_;
+      row.button("analysis_run_and_show_stop", ctx.tr("analysis_runs.auto.stop"), [this, weak] {
+        const auto live = weak.lock();
+        if (live && *live && run_and_show_) { finish_run_and_show("analysis_runs.auto.stopped"); }
+      }).width(6);
+      return;
+    }
+    if (run_and_show_key_.empty()) { return; }
+    layout.paragraph(ctx.store.catalog().format(run_and_show_key_, {{"detail", text(run_and_show_detail_)}}));
+  }
+
   void runs_panel(ui::Layout &layout, EditorContext &ctx)
   {
     poll_runs(ctx);
@@ -932,6 +1055,7 @@ class AnalysisGraphEditor final : public Editor {
       runs_->sync(); return runs_->epoch() == epoch;
     };
     const bool blocked = runs_->busy() || ctx.store.project().busy();
+    run_and_show_status(layout, ctx);
     if (!runs_->error().empty()) { layout.paragraph(text(runs_->error())); }
     if (!input_reuse_notice_.empty()) { layout.paragraph(ctx.tr(input_reuse_notice_)); }
     if (input_reuse_pending_) { layout.paragraph(ctx.tr("analysis_inputs.reading")); }
@@ -955,6 +1079,29 @@ class AnalysisGraphEditor final : public Editor {
         prepare->label(ctx.store.catalog().format("analysis_documents.revision", {{"revision", std::to_string(revision)}}));
         if (state_->document_stale()) { prepare->paragraph(ctx.tr("analysis_runs.stale_definition")); }
       }
+      prepare->button("analysis_run_and_show", ctx.tr("analysis_runs.auto.button"),
+          [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
+        if (!valid() || parameter_edits() || run_and_show_) { return; }
+        state_->sync();
+        if (!state_->saved() || state_->generation() != generation || bindings_generation_ != bindings_generation ||
+            state_->document_id() != id || state_->document_stale() || !runs_->prepare(id, revision, snapshot, bindings)) { return; }
+        const std::weak_ptr<bool> weak = alive_;
+        const auto epoch = runs_->epoch();
+        const auto handle = runs_->handle();
+        RunAndShow chain;
+        chain.valid = [this, weak, epoch, handle, id] {
+          const auto live = weak.lock();
+          return live && *live && runs_->epoch() == epoch && runs_->handle() == handle &&
+                 state_->saved() && state_->document_id() == id && !state_->document_stale();
+        };
+        chain.run_id = runs_->pending_id();
+        chain.selection = runs_->selection_generation();
+        chain.deadline = steady_seconds() + 330;  // The frozen budget allows 300 s of execution.
+        run_and_show_ = std::move(chain); run_and_show_key_.clear(); run_and_show_detail_.clear(); ++run_and_show_generation_;
+        redraw();
+      }).disable(blocked || parameter_edits() || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() ||
+                 bindings.empty() || run_and_show_.has_value());
+      prepare->paragraph(ctx.tr("analysis_runs.auto.hint"));
       prepare->button("analysis_run_prepare", ctx.tr("analysis_runs.prepare"),
           [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
         if (!valid() || parameter_edits()) { return; }
@@ -1273,17 +1420,10 @@ class AnalysisGraphEditor final : public Editor {
     }}).disable(blocked);
     auto *screen = ctx.area.screen();
     box.paragraph(ctx.tr("analysis_runs.viewer_hint"));
-    box.button("analysis_run_show", ctx.tr("analysis_runs.show"), [this, same_archive, shell, screen, outputs, id] {
+    box.button("analysis_run_show", ctx.tr("analysis_runs.show"), [this, same_archive, shell, screen, outputs] {
       if (!same_archive() || output_index_ < 0 || size_t(output_index_) >= outputs.size()) { return; }
-      const auto target = shell->analysis_payload_target(screen);
-      if (!target) { if (store_->toast) { store_->toast(target.error().message, ui::ToastKind::Warning); } return; }
-      const auto output = outputs[size_t(output_index_)];
-      const auto payload = runs_->decode_payload(output);
-      if (!payload || !same_archive()) { return; }
-      const auto label = io::get_string(runs_->run(), "analysis_name") + " · " + id.substr(0, 8) + " / " + output;
-      shell->open_analysis_payload(screen, runs_->handle(), target.value(), payload, label, same_archive,
-          [this, same_archive](bridge::Result<Json> result) {
-        if (same_archive() && !result && store_->toast) { store_->toast(result.error().message, ui::ToastKind::Warning); }
+      show_output(shell, screen, outputs[size_t(output_index_)], same_archive, [this](const bridge::Error &error) {
+        if (store_->toast) { store_->toast(error.message, ui::ToastKind::Warning); }
       });
     }).disable(blocked || output_index_ < 0 || size_t(output_index_) >= outputs.size());
   }
