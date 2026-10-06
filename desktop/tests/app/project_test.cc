@@ -888,7 +888,11 @@ TEST_F(ProjectPython, HomeCreatesTheOfflineExampleProjectAndOpensIt)
       << state().error() << client->bridge_log().text();
   EXPECT_TRUE(state().error().empty()) << state().error();
   EXPECT_EQ(state().project()->name, "STK example / 示例项目");
-  EXPECT_EQ(state().project()->directory.rfind(dir.str() + "/projects/stk-example-", 0), 0u) << state().project()->directory;
+  // Resolved by the service (/private/var on macOS, backslashes on Windows): compare paths, not strings.
+  const auto made = core::path_from_utf8(state().project()->directory);
+  EXPECT_TRUE(std::filesystem::equivalent(made.parent_path(), core::path_from_utf8(dir.str() + "/projects")))
+      << state().project()->directory;
+  EXPECT_EQ(core::path_to_utf8(made.filename()).rfind("stk-example-", 0), 0u) << state().project()->directory;
   size_t parameter_rows = 0;
   for (const auto &table : state().tables()) {
     if (table.name == "Cases / 算例" || table.name == "Results / 结果") { parameter_rows += table.records.size(); }
