@@ -11,6 +11,7 @@
 #include "project_discussion_view.hh"
 #include "project_simulation_view.hh"
 #include "project_navigation.hh"
+#include "path_picker.hh"
 
 #include <algorithm>
 #include <filesystem>
@@ -85,7 +86,11 @@ class ProjectEditor final : public Editor {
     if (location_only) { layout.label(ctx.tr("project.location")); }
     if (auto *panel = location_only ? &layout.scope("project_location") :
         layout.panel("project_location", ctx.tr("project.location"), !state.project())) {
-      panel->prop(ctx.tr("project.directory")).text_field("directory", ui::bind(directory_));
+      auto &location = panel->prop(ctx.tr("project.directory")).row(true);
+      location.text_field("directory", ui::bind(directory_));
+      directory_picker_.button(location, ctx, "browse_directory", &directory_,
+                               {.mode = platform::FileDialogMode::OpenFolder, .title_key = "project.directory_dialog"});
+      directory_picker_.draw_error(*panel);
       panel->prop(ctx.tr("project.name")).text_field("name", ui::bind(name_));
       auto &buttons = panel->row();
       buttons.button("open", ctx.tr("project.open"), [this, &state] {
@@ -217,7 +222,10 @@ class ProjectEditor final : public Editor {
     if (!panel) { return; }
     panel->paragraph(ctx.tr("project.files.hint"));
     panel->text_area("paths", ui::bind(file_paths_), {.max_length = 65536, .mono = true, .visible_lines = 3});
+    files_picker_.draw_error(*panel);
     auto &actions = panel->row();
+    files_picker_.button(actions, ctx, "browse_files", &file_paths_,
+                         {.title_key = "project.files.dialog", .multiple = true, .still_current = same_project(state)});
     actions.button("index", ctx.tr("project.files.index"), [this, &state] {
       state.index_files(platform::split_path_list(file_paths_));
     }).disable(!editable || state.project()->format_version < 3 || file_paths_.empty());
@@ -310,6 +318,13 @@ class ProjectEditor final : public Editor {
   std::string run_consent_id_;
   bool allow_stale_run_ = false;
 
+  /** A chosen path belongs to the project shown when the dialog was opened. */
+  static std::function<bool()> same_project(ProjectState &state)
+  {
+    const std::string id = state.project() ? state.project()->id : std::string();
+    return [&state, id] { return state.project() && state.project()->id == id; };
+  }
+
   void csv_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
   {
     if (csv_project_ != state.project()->id) {
@@ -320,7 +335,11 @@ class ProjectEditor final : public Editor {
     auto *panel = layout.panel("project_csv", ctx.tr("project.csv.title"), false);
     if (!panel) { return; }
     panel->paragraph(ctx.tr("project.csv.import_hint"));
-    panel->prop(ctx.tr("project.csv.source")).text_field("source", ui::bind(csv_source_));
+    auto &source = panel->prop(ctx.tr("project.csv.source")).row(true);
+    source.text_field("source", ui::bind(csv_source_));
+    csv_source_picker_.button(source, ctx, "browse_source", &csv_source_,
+                              {.title_key = "project.csv.source_dialog", .still_current = same_project(state)});
+    csv_source_picker_.draw_error(*panel);
     panel->prop(ctx.tr("project.csv.name")).text_field("name", ui::bind(csv_name_));
     panel->checkbox("tsv", ctx.tr("project.csv.tsv"), ui::bind(csv_tsv_));
     if (auto *types = panel->panel("types", ctx.tr("project.csv.types"), false)) {
@@ -341,7 +360,13 @@ class ProjectEditor final : public Editor {
     }).disable(!editable || csv_source_.empty() || csv_name_.empty());
     panel->paragraph(ctx.tr("project.csv.export_hint"));
     if (state.table()) { panel->label(state.table()->name); }
-    panel->prop(ctx.tr("project.csv.destination")).text_field("destination", ui::bind(csv_destination_));
+    auto &destination = panel->prop(ctx.tr("project.csv.destination")).row(true);
+    destination.text_field("destination", ui::bind(csv_destination_));
+    csv_destination_picker_.button(destination, ctx, "browse_destination", &csv_destination_, {
+        .mode = platform::FileDialogMode::SaveFile, .title_key = "project.csv.destination_dialog",
+        .file_name = (state.table() ? state.table()->name : std::string("table")) + (csv_tsv_ ? ".tsv" : ".csv"),
+        .still_current = same_project(state)});
+    csv_destination_picker_.draw_error(*panel);
     panel->button("export", ctx.tr("project.csv.export"), [this, &state] {
       const auto paths = platform::split_path_list(csv_destination_);
       state.export_csv(paths.size() == 1 ? paths.front() : csv_destination_, csv_tsv_ ? "\t" : ",");
@@ -1225,6 +1250,7 @@ class ProjectEditor final : public Editor {
   std::string directory_, name_, table_name_, field_name_, unit_, cell_field_, recent_directory_;
   std::string file_project_, file_paths_;
   std::string csv_project_, csv_source_, csv_destination_, csv_name_, csv_error_, csv_types_ = "{}", csv_units_ = "{}";
+  PathPicker directory_picker_, files_picker_, csv_source_picker_, csv_destination_picker_;
   bool csv_tsv_ = false;
   std::string input_snapshot_;
   std::string cell_text_, draft_identity_, literal_error_;

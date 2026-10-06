@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 #include "stk/io/json.hh"
+#include "path_picker.hh"
 #include <string>
 #include <vector>
 
@@ -17,6 +18,7 @@ class ProjectSimulationView {
  private:
   std::string source_, options_ = R"({"backend":"local","ranks":1,"threads_per_rank":1})";
   std::string project_, error_;
+  PathPicker source_picker_;
   std::vector<std::string> batch_selection_;
   std::string batch_id_, batch_member_;
 };

@@ -40,6 +40,10 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 1. **项目**：显示已打开的项目；“打开或新建项目”进入创建、打开与最近项目入口。
 2. **参数**：显示参数表数与总行数（不含文件索引与分析定义等托管表）；“编辑参数”打开项目表格。
    表格页的 **生成参数扫描** 按每个字段的范围或取值列表一次添加多行，可一次撤销，见[参数扫描](project-sweeps.md)。
+
+项目目录、CSV 输入/输出、项目文件、MuFerro 案例目录与 Python 文件的路径框旁有 **浏览…**，用系统文件对话框
+（Linux 为 zenity 或 kdialog）选择后只填入路径，导入、登记、导出或运行仍需另行点击。没有系统对话框时（目前 macOS、Windows）
+不显示该按钮，继续手工输入或拖入；对话框无法打开时在路径框下说明原因。打开对话框期间若切换了项目，返回的路径被丢弃。
 3. **运行环境**：显示当前连接及其状态；“选择运行环境”切到“任务”标签配置 Runtime 或 SSH。
    仿真在 Linux 的 STK 运行服务上执行；本机分析不需要服务器。
 4. **运行**：分别进入仿真运行与分析运行页面，再明确刷新列表。
@@ -432,6 +436,10 @@ marks the next step. Buttons only open the matching page; nothing runs, sends or
 On the project page, **Generate a parameter scan** turns per-field ranges or value lists into new rows
 as one undoable edit (every combination, or values paired in order; optionally copying the selected row's
 other cells and row-relative formulas). See [parameter sweeps](project-sweeps.md) (Chinese).
+Path fields for the project folder, CSV input/output, project files, the MuFerro case folder and Python
+files have a **Browse…** button when a native file dialog exists (Linux: zenity or kdialog). It only fills
+the field; importing, indexing, exporting or running stays a separate click. Answers arriving after another
+project was opened are dropped.
 Users with a saved layout keep it; File > Reset layout switches to the new default.
 
 ### Skill catalog

@@ -46,7 +46,12 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
   panel->paragraph(ctx.tr("simulation.hint"));
   if (!error_.empty()) { panel->paragraph(error_); }
   if (!scripts.error().empty()) { panel->paragraph(scripts.error()); }
-  panel->prop(ctx.tr("simulation.directory")).text_field("simulation_source", ui::bind(source_));
+  auto &source = panel->prop(ctx.tr("simulation.directory")).row(true);
+  source.text_field("simulation_source", ui::bind(source_));
+  source_picker_.button(source, ctx, "simulation_browse", &source_, {
+      .mode = platform::FileDialogMode::OpenFolder, .title_key = "simulation.directory_dialog",
+      .still_current = [&state, project] { return state.project() && state.project()->id == project; }});
+  source_picker_.draw_error(*panel);
   panel->button("simulation_import", ctx.tr("simulation.import"), [this, &scripts, project, revision] {
     const auto paths = platform::split_path_list(source_);
     if (paths.size() != 1) { error_ = "Choose one case directory"; return; }

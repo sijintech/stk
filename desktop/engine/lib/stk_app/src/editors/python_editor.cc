@@ -6,6 +6,7 @@
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
 #include "stk/platform/file_dialog.hh"
+#include "path_picker.hh"
 
 namespace stk::app {
 namespace {
@@ -66,7 +67,10 @@ class PythonEditor final : public Editor {
     history.button("python_help", ctx.tr("script.api_help"), [&state] { state.execute("stk.help()"); })
         .disable(!state.ready() || state.busy());
     if (auto *file = layout.panel("python_file", ctx.tr("script.file"), !path_.empty())) {
-      file->text_field("python_path", ui::bind(path_), {.placeholder = std::string(ctx.tr("script.path_hint"))});
+      auto &choose = file->row(true);
+      choose.text_field("python_path", ui::bind(path_), {.placeholder = std::string(ctx.tr("script.path_hint"))});
+      path_picker_.button(choose, ctx, "python_browse", &path_, {.title_key = "script.file_dialog"});
+      path_picker_.draw_error(*file);
       file->button("python_run_file", ctx.tr("script.run_file"), [this, &state] {
         const auto paths = platform::split_path_list(path_);
         if (paths.size() == 1) { state.execute_file(paths.front()); }
@@ -101,6 +105,7 @@ class PythonEditor final : public Editor {
  private:
   std::string source_ = "print('Hello, STK')\n2 + 2";
   std::string path_;
+  PathPicker path_picker_;
   int history_ = -1;
 };
 

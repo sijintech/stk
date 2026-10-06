@@ -1504,5 +1504,13 @@
   "workspace.service.starting": "Starting the background service (Python)…",
   "workspace.service.restarting": "The background service is restarting…",
   "workspace.service.not_started": "The background service is not running; projects and runs are unavailable until it starts.",
-  "workspace.service.failed": "The background service could not start: {error}. See the Bridge log tab for details."
+  "workspace.service.failed": "The background service could not start: {error}. See the Bridge log tab for details.",
+  "path.browse": "Browse…",
+  "path.browse_failed": "The file dialog could not open ({error}); type the path instead.",
+  "project.directory_dialog": "Choose the project folder",
+  "project.csv.source_dialog": "Choose a CSV or TSV file",
+  "project.csv.destination_dialog": "Export the table to",
+  "project.files.dialog": "Choose files to index",
+  "simulation.directory_dialog": "Choose a MuFerro case folder",
+  "script.file_dialog": "Choose a Python script"
 }

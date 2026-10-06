@@ -1624,6 +1624,102 @@ TEST_F(ProjectPython, SweepPanelAddsTypedRowsAsOneUndoableEditAndNeverRetargetsA
   EXPECT_EQ(state().table()->text(0, 0), "500");
 }
 
+/** A native dialog stand-in: keeps each request and answers only when the test says so. */
+class HeldDialog final : public platform::FileDialog {
+ public:
+  std::string name() const override { return "held"; }
+  void open(const platform::FileDialogRequest &request, std::function<void(platform::FileDialogResult)> done) override
+  {
+    requests.push_back(request);
+    pending = std::move(done);
+  }
+  void answer(std::vector<std::string> paths, std::string error = {})
+  {
+    auto done = std::move(pending);
+    pending = {};
+    ASSERT_TRUE(done);
+    done({std::move(paths), std::move(error)});
+  }
+  std::vector<platform::FileDialogRequest> requests;
+  std::function<void(platform::FileDialogResult)> pending;
+};
+
+TEST_F(ProjectPython, BrowseButtonsOnlyFillPathFieldsAndDropAnswersForAnotherProject)
+{
+  auto &jobs = f.shell->store().jobs();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject)); f.screen.set_maximized(&area);
+  auto frame = [&] { f.drv->frame(); settled(); f.drv->frame(); };
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  auto open_panel = [&](const std::string &key) {
+    const auto [x, y] = f.widget_center("a2/main/" + key);
+    f.drv->click(x, y);
+    frame();
+  };
+  frame();
+  ASSERT_NE(widget("project_location/directory"), nullptr);
+  EXPECT_EQ(widget("project_location/browse_directory"), nullptr);  // No native dialog: typing only.
+  HeldDialog dialog;
+  jobs.file_dialog = &dialog;
+  struct Reset { app::JobsState &jobs; ~Reset() { jobs.file_dialog = nullptr; } } reset{jobs};
+  frame();
+  ASSERT_NE(widget("project_location/browse_directory"), nullptr);
+  widget("project_location/browse_directory")->on_click();
+  ASSERT_EQ(dialog.requests.size(), 1u);
+  EXPECT_EQ(dialog.requests[0].mode, platform::FileDialogMode::OpenFolder);
+  EXPECT_EQ(dialog.requests[0].title, "Choose the project folder");
+  dialog.answer({dir.str() + "/chosen"}); frame();
+  EXPECT_EQ(widget("project_location/directory")->string.value(), dir.str() + "/chosen");
+  EXPECT_FALSE(state().project());  // Choosing a folder neither opens nor creates a project.
+  widget("project_location/browse_directory")->on_click();
+  dialog.answer({}, "zenity: exited with status 255"); frame();  // The field stays; the reason is shown.
+  EXPECT_EQ(widget("project_location/directory")->string.value(), dir.str() + "/chosen");
+
+  populated(); frame();
+  const auto revision = state().project()->revision;
+  open_panel("project_csv");
+  ASSERT_NE(widget("project_csv/browse_source"), nullptr);
+  widget("project_csv/browse_source")->on_click();
+  EXPECT_EQ(dialog.requests.back().mode, platform::FileDialogMode::OpenFiles);
+  dialog.answer({"/data/a.csv", "/data/b.csv"}); frame();
+  EXPECT_EQ(widget("project_csv/source")->string.value(), "/data/a.csv");  // One input file.
+  widget("project_csv/browse_destination")->on_click();
+  EXPECT_EQ(dialog.requests.back().mode, platform::FileDialogMode::SaveFile);
+  EXPECT_EQ(dialog.requests.back().file_name, "Cases.csv");
+  dialog.answer({"/data/out.csv"}); frame();
+  EXPECT_EQ(widget("project_csv/destination")->string.value(), "/data/out.csv");
+
+  open_panel("project_files");
+  ASSERT_NE(widget("project_files/browse_files"), nullptr);
+  widget("project_files/browse_files")->on_click();
+  dialog.answer({"/x/1.dat", "/x/2.dat"}); frame();
+  widget("project_files/browse_files")->on_click();
+  dialog.answer({"/x/3.dat"}); frame();
+  EXPECT_EQ(widget("project_files/paths")->string.value(), "/x/1.dat\n/x/2.dat\n/x/3.dat");  // Files add up.
+
+  open_panel("project_simulation");
+  ASSERT_NE(widget("project_simulation/simulation_browse"), nullptr);
+  widget("project_simulation/simulation_browse")->on_click();
+  EXPECT_EQ(dialog.requests.back().mode, platform::FileDialogMode::OpenFolder);
+  dialog.answer({"/cases/one"}); frame();
+  EXPECT_EQ(widget("project_simulation/simulation_source")->string.value(), "/cases/one");
+  EXPECT_EQ(state().project()->revision, revision);  // Nothing was imported, indexed or exported.
+
+  // An answer that arrives after another project was opened is dropped, not written into its fields.
+  widget("project_csv/browse_source")->on_click();
+  ASSERT_TRUE(state().create(dir.str() + "/other", "Other")); settled(); frame();
+  EXPECT_EQ(widget("project_csv/source")->string.value(), "");
+  dialog.answer({"/data/late.csv"}); frame();
+  EXPECT_EQ(widget("project_csv/source")->string.value(), "");
+
+  ASSERT_TRUE(area.set_tab_type(0, kEditorPython)); frame();
+  open_panel("python_file");
+  ASSERT_NE(widget("python_file/python_browse"), nullptr);
+  widget("python_file/python_browse")->on_click();
+  dialog.answer({"/scripts/a.py"}); frame();
+  EXPECT_EQ(widget("python_file/python_path")->string.value(), "/scripts/a.py");
+  EXPECT_TRUE(f.shell->store().scripts().history().empty());  // Choosing a script does not run it.
+}
+
 TEST_F(ProjectPython, TableFiltersBelongToEachAreaWhileSelectionRemainsShared)
 {
   populated();

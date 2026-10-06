@@ -11,6 +11,8 @@
 #include "stk/gfx/gpu.hh"
 #include "stk/gfx/image.hh"
 #include "stk/gfx/offscreen.hh"
+#include "stk/app/jobs_state.hh"
+#include "stk/platform/file_dialog.hh"
 #include "../bridge/support.hh"
 
 #include <cstdio>
@@ -18,6 +20,15 @@
 #include <fstream>
 
 using namespace stk;
+
+namespace {
+/** Shows the "Browse…" buttons a native dialog adds; never answers (nothing is chosen in a screenshot). */
+class SilentDialog final : public stk::platform::FileDialog {
+ public:
+  std::string name() const override { return "silent"; }
+  void open(const stk::platform::FileDialogRequest &, std::function<void(stk::platform::FileDialogResult)>) override {}
+};
+}  // namespace
 
 int main(int argc, char **argv)
 {
@@ -350,6 +361,8 @@ int main(int argc, char **argv)
         }
       }
       if (editor == "csv") {
+        static SilentDialog dialog;
+        shell.store().jobs().file_dialog = &dialog;
         const auto source = dir.str() + "/project/parameters.csv";
         { std::ofstream file(core::path_from_utf8(source)); file << "Temperature,Note\n300,Prepared / 待运行\n350,Comparison / 对比\n"; }
         ok = ok && state.import_csv(source, "Imported parameters / 导入参数", {{"Temperature", "number"}},

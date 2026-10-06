@@ -1504,5 +1504,13 @@
   "workspace.service.starting": "正在启动后台服务（Python）……",
   "workspace.service.restarting": "后台服务正在重启……",
   "workspace.service.not_started": "后台服务未运行；启动前无法使用项目和运行。",
-  "workspace.service.failed": "后台服务未能启动：{error}。详情见“桥接日志”标签。"
+  "workspace.service.failed": "后台服务未能启动：{error}。详情见“桥接日志”标签。",
+  "path.browse": "浏览…",
+  "path.browse_failed": "无法打开文件选择窗口（{error}），请直接输入路径。",
+  "project.directory_dialog": "选择项目文件夹",
+  "project.csv.source_dialog": "选择 CSV 或 TSV 文件",
+  "project.csv.destination_dialog": "将表格导出到",
+  "project.files.dialog": "选择要登记的文件",
+  "simulation.directory_dialog": "选择 MuFerro 算例文件夹",
+  "script.file_dialog": "选择 Python 脚本"
 }
