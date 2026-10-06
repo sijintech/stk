@@ -215,6 +215,7 @@ class Bridge:
             "project.apply": self.apply_project,
             "project.preview": lambda p, c: self.projects.preview(p),
             "project.sweep.plan": lambda p, c: self.projects.sweep_plan(p),
+            "demo.create": lambda p, c: self.demo_create(p),
             "project.drafts.save": lambda p, c: self.projects.drafts("save", p),
             "project.drafts.get": lambda p, c: self.projects.drafts("get", p),
             "project.drafts.list": lambda p, c: self.projects.drafts("list", p),
@@ -479,6 +480,17 @@ class Bridge:
                  "task.submit", "task.list", "task.get", "task.cancel", "task.artifacts", "task.logs")
         return {"operations": {name: bridge_schema.method_contract(name) for name in names},
                 "ui_operations": list(UI_OPERATIONS)}
+
+    def demo_create(self, params):
+        """Build the offline example project through the console's own operations (suan.workflows.demo)."""
+        from suan.scripting import API
+        from suan.workflows.demo import create_demo
+        cancelled = threading.Event()
+        directory = params.get("directory")
+        try:
+            return create_demo(API(lambda operation, values: self.script_call(operation, values, cancelled)), directory)
+        except ValueError as exc:
+            raise BridgeError("invalid_params", str(exc)) from None
 
     def script_call(self, operation, params, cancelled):
         if self.closing.is_set():

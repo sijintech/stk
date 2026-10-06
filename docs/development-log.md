@@ -1,5 +1,21 @@
 # 开发交接记录
 
+## 2026-10-06：可用性开发包 5——无需服务器的试用路径
+
+- **示例项目**（`suan.workflows.demo.create_demo`）：用控制台同一套操作，在新目录中依次完成参数扫描生成三行算例、
+  本机合成求解器写出场文件与指标（不是物理模拟）、结果表（首列引用算例行）、文件登记与输入快照、保存“温度场”分析
+  并启动、观察一次本机运行。入口：工作台“创建示例项目”（仅未打开项目时；后台服务 `demo.create`，完成后打开该项目）、
+  `suan demo [目录]`、控制台 `create_demo(stk)`。默认位置 `$STK_PROJECTS_DIR`，否则 `~/STK Projects`。
+- **无头 `stk`**（`suan.scripting.headless`）：在当前进程内启动私有后台服务，直接调用桌面控制台的 `script_call`，
+  因此操作范围与参数校验完全相同；窗口、查看器等桌面操作明确返回 `unavailable`。默认状态目录 `~/.stk/headless`，
+  可与桌面同时运行；同一目录第二个会话给出改用 `state_dir` 的提示。`python -m suan.scripting.headless [项目]` 为交互控制台。
+- **Linux 快速上手**（`docs/quickstart-linux.md`）一页覆盖安装、示例项目、终端/Jupyter 与接入真实运行；
+  文档站改名 STK，首页与侧栏指向快速上手（直接引用同一文件）与 GitHub 完整文档，旧 PyQt 页面归入“旧版（已停止维护）”。
+
+critical review：示例项目默认写入用户目录，原生测试改用 `STK_PROJECTS_DIR` 指向临时目录；站点首次构建因 MDX 中
+`Content` 与页面自身导出同名而失败，改名后本地 `pnpm run build` 通过（含 Pagefind 索引）。
+已知限制：示例分析运行需要本机科学/VTK 依赖，缺少时运行记为失败但项目其余部分可用；`demo.create` 不在脚本目录中。
+
 ## 2026-10-06：可用性开发包 4b——默认收起内部细节，说明压缩为一行
 
 - 项目表格第一列由记录 UUID 前缀改为行号（按表内顺序排序），UUID 移到单元格编辑标题的悬停提示；公式错误显示为本地化名称

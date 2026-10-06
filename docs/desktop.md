@@ -41,7 +41,9 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 新的默认布局以 **工作台** 开始（左栏，与“任务”同组标签），也可从 **文件 → 工作台** 或项目表格、AI 助手、
 分析图页头的“工作台”按钮进入。工作台按步骤引导，并根据已知状态标出“下一步”：
 
-1. **项目**：显示已打开的项目；“打开或新建项目”进入创建、打开与最近项目入口。
+1. **项目**：显示已打开的项目；“打开或新建项目”进入创建、打开与最近项目入口。尚未打开项目时另有
+   **创建示例项目**：用合成数据（不是物理模拟）在 `~/STK Projects` 新建并打开一个走完主流程的项目，
+   不连接服务器或模型，见 [Linux 快速上手](quickstart-linux.md#2-用示例项目看一遍主流程)。
 2. **参数**：显示参数表数与总行数（不含文件索引与分析定义等托管表）；“编辑参数”打开项目表格。
    表格页的 **生成参数扫描** 按每个字段的范围或取值列表一次添加多行，可一次撤销，见[参数扫描](project-sweeps.md)。
 
@@ -440,7 +442,8 @@ sequence export) and **Transfers / Logs / Service log**. The D1 acceptance run i
 ### Home (start page)
 
 The default layout opens on **Home** (left, with Jobs as its second tab). It walks through
-Project → Parameters → Where to run → Run → Results, shows what is already known for each step (open
+Project → Parameters → Where to run → Run → Results (with **Create example project**, synthetic data and no
+server, while no project is open), shows what is already known for each step (open
 project, parameter tables and rows, current connection and its health, whether a result is shown) and
 marks the next step. Buttons only open the matching page; nothing runs, sends or changes data from here.
 On the project page, **Generate a parameter scan** turns per-field ranges or value lists into new rows

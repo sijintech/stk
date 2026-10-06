@@ -9,7 +9,7 @@ export default defineConfig({
   output: "static",
   integrations: [
     starlight({
-        title: "Suan Toolkit",
+        title: "STK",
         // 为此网站设置中文为默认语言。
         defaultLocale: "root",
         customCss: [
@@ -36,10 +36,25 @@ export default defineConfig({
       },
         sidebar: [
         {
-          label: "开发者指南",
+          label: "Linux 快速上手",
           translations: {
-            en: "Developer Guide",
+            en: "Linux quickstart",
           },
+          link: "/quickstart/",
+        },
+        {
+          label: "完整文档（GitHub）",
+          translations: {
+            en: "Full documentation (GitHub)",
+          },
+          link: "https://github.com/sijintech/stk/tree/main/docs",
+        },
+        {
+          label: "旧版 PyQt 开发者指南（已停止维护）",
+          translations: {
+            en: "Legacy PyQt developer guide (unmaintained)",
+          },
+          collapsed: true,
           items: [
             // Each item here is one entry in the navigation menu.
             {
@@ -82,10 +97,11 @@ export default defineConfig({
           ],
         },
         {
-          label: "用户指南",
+          label: "旧版 PyQt 用户指南（已停止维护）",
           translations: {
-            en: "User Guide",
+            en: "Legacy PyQt user guide (unmaintained)",
           },
+          collapsed: true,
           items: [
               // Each item here is one entry in the navigation menu.
               // {

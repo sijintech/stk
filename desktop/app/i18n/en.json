@@ -1570,5 +1570,9 @@
   "formula.error.unsupported": "not supported",
   "project.row": "Row {n}",
   "project.review.json": "Advanced: edit the commands as JSON",
-  "project.row_column": "Row"
+  "project.row_column": "Row",
+  "workspace.demo": "Create example project",
+  "workspace.demo.tip": "Makes a new project under ~/STK Projects with synthetic data: a parameter scan, solver outputs, a results table and one finished analysis run. Contacts no server or model.",
+  "project.demo.creating": "Creating the example project (synthetic data, about 10 seconds)…",
+  "project.demo.created": "Created and opened the example project: {path}"
 }

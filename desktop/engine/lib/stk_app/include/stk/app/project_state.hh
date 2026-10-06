@@ -84,6 +84,11 @@ class ProjectState {
   bool close(std::function<void(bridge::Result<bool>)> complete = {});
   void refresh();
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
+  /** Whether the Python service builds the offline example project (demo.create). */
+  bool supports_demo() const;
+  /** Build the example project in a new folder under ~/STK Projects (suan.workflows.demo: synthetic
+   * data, nothing contacts a Runtime, server or model) and open it. Only while no project is open. */
+  bool create_demo();
   /** Whether the bridge plans parameter sweeps (project.sweep.plan). */
   bool supports_sweep() const;
   /** Plan rows from `axes` (suan.project.sweep) and apply them in one edit at the revision shown now.

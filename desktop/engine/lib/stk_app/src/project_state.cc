@@ -556,6 +556,35 @@ bool ProjectState::apply(Json commands, const std::optional<int64_t> expected_re
   return true;
 }
 
+bool ProjectState::supports_demo() const
+{
+  const auto hello = client_ ? client_->hello_info() : std::nullopt;
+  return ready() && hello && hello->has_method("demo.create");
+}
+
+bool ProjectState::create_demo()
+{
+  if (!supports_demo() || busy() || project_) { return false; }
+  busy_ = true;
+  error_.clear();
+  notice_ = std::string(store_.tr("project.demo.creating"));
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;  // Never build a second example on a restart.
+  options.timeout_s = 300;  // It includes one local analysis run.
+  on(client_->call("demo.create", Json::object(), options), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    notice_.clear();
+    if (!result.ok()) { fail(result.error()); return; }
+    const auto directory = io::get_string(result.value(), "directory");
+    if (!project_ && open(directory)) {
+      notice_ = store_.catalog().format("project.demo.created", {{"path", directory}});
+    }
+    changed();
+  });
+  changed();
+  return true;
+}
+
 bool ProjectState::supports_sweep() const
 {
   const auto hello = client_ ? client_->hello_info() : std::nullopt;

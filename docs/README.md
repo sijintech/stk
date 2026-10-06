@@ -2,6 +2,7 @@
 
 本目录同时保存开发设计文档和 Astro/Starlight 文档站。
 
+- 第一次使用：[Linux 快速上手](quickstart-linux.md)（文档站同名页面直接引用该文件）。
 - 当前开发方向：[开发计划](development-plan.md)、[项目工作台设计](design/project-workbench.md)。
 - 可测试能力：[项目表格指南](project.md)、[验收记录](runtime-validation.md)、[开发交接记录](development-log.md)。
 - 版本化技能目录（实验契约 `stk.skill/1`）：[技能目录](skills.md)。

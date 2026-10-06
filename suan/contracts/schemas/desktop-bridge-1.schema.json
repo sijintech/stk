@@ -6246,6 +6246,51 @@
           ],
           "additionalProperties": false
         }
+      },
+      "demo.create": {
+        "description": "Create the offline example project (synthetic data, not a simulation): a swept parameter table, synthetic solver outputs, a results table, indexed and frozen files, and a saved analysis with one local run. Contacts no Runtime, server or model.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string"
+            },
+            "cases_table": {
+              "type": "string"
+            },
+            "results_table": {
+              "type": "string"
+            },
+            "analysis_id": {
+              "type": "string"
+            },
+            "run_id": {
+              "type": "string"
+            },
+            "run_status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "directory",
+            "project_id",
+            "analysis_id",
+            "run_id",
+            "run_status"
+          ]
+        }
       }
     },
     "events": {

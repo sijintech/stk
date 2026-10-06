@@ -503,6 +503,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.close` | `{handle}` | `{closed: boolean}` |
 | `project.csv.import` | `{handle, source, name, expected_revision, types?, units?, delimiter?}` | `{revision, table_id, field_ids, record_ids, rows, columns, source_sha256}` |
 | `project.csv.export` | `{handle, table_id, destination, expected_revision, delimiter?}` | `{revision, table_id, path, rows, columns, size, sha256}` |
+| `demo.create` | `{directory?}` | `{directory, project_id, cases_table, results_table, analysis_id, run_id, run_status}` |
 | `ai.credentials.set` | `{key, remember?}` | `{provider}` (presence and `key_source` only, never the key) |
 | `ai.credentials.clear` | `{}` | `{provider}` |
 | `project.sweep.plan` | `{handle, table_id, axes, base_record_id?, mode?}` | `{plan: {table_id, rows, record_ids, commands}, revision}` |
@@ -997,6 +998,13 @@ result names the snapshot `revision` it was planned against; callers apply `plan
 `project.apply` at exactly that revision and never retarget a plan to a newer one. Plans hold at most
 1000 rows and 1000 commands (one `project.apply`); the managed analyses and file-index tables are
 refused. See [parameter sweeps](../project-sweeps.md).
+
+`demo.create` builds the offline example project (`suan.workflows.demo`) through the same operations
+the script catalog exposes: a swept parameter table, synthetic solver outputs (not a simulation), a results
+table with references, indexed and frozen field files, and a saved analysis with one local run that it
+starts and observes for up to 120 s. The directory must be new or empty (default
+`$STK_PROJECTS_DIR/stk-example-<time>`, else `~/STK Projects`). It contacts no Runtime, server or model and
+is not in the script catalog; the console calls `suan.workflows.demo.create_demo(stk)` instead.
 
 `ai.credentials.set` hands the Alibaba Token Plan key to this bridge process for its session; with
 `remember: true` it is instead written to `<state_dir>/token-plan-key.json` (0600, atomic) and read back

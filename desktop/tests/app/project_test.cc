@@ -274,6 +274,7 @@ class ProjectPython : public ::testing::Test {
     options.env["STK_STATE_DIR"] = dir.str() + "/runtime";
     options.env["STK_TOKEN_PLAN_API_KEY"] = "";
     options.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
+    options.env["STK_PROJECTS_DIR"] = dir.str() + "/projects";  // The example project never lands in $HOME.
     options.executor = loop.executor();
     options.strict = options.validate = true;
     configure_bridge(options, python);
@@ -870,6 +871,32 @@ TEST_F(ProjectScope, PaginatedSelectionRejectsOversizeProductThenAllowsExplicitS
   EXPECT_EQ(state().discussion().context().at("selection").at("record_ids").size(), 17u);
   EXPECT_EQ(state().discussion().context().at("selection").at("field_ids").size(), 58u);
   EXPECT_EQ(state().project()->revision, 2);
+}
+
+TEST_F(ProjectPython, HomeCreatesTheOfflineExampleProjectAndOpensIt)
+{
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorWorkspace));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  ASSERT_NE(widget("workspace_demo"), nullptr);
+  ASSERT_TRUE(widget("workspace_demo")->enabled);
+  widget("workspace_demo")->on_click();
+  f.drv->frame();
+  EXPECT_FALSE(widget("workspace_demo")->enabled);  // One example at a time.
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return state().loaded() && !state().busy(); }, 300))
+      << state().error() << client->bridge_log().text();
+  EXPECT_TRUE(state().error().empty()) << state().error();
+  EXPECT_EQ(state().project()->name, "STK example / 示例项目");
+  EXPECT_EQ(state().project()->directory.rfind(dir.str() + "/projects/stk-example-", 0), 0u) << state().project()->directory;
+  size_t parameter_rows = 0;
+  for (const auto &table : state().tables()) {
+    if (table.name == "Cases / 算例" || table.name == "Results / 结果") { parameter_rows += table.records.size(); }
+  }
+  EXPECT_EQ(parameter_rows, 6u);
+  f.drv->frame();
+  EXPECT_EQ(widget("workspace_demo"), nullptr);  // Offered only while no project is open.
+  EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
 TEST_F(ProjectPython, AIKeySetInTheAppIsUsedForTheSessionOrRememberedAndNeverShownOrLogged)

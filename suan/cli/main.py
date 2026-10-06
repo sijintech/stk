@@ -35,7 +35,23 @@ from suan.graph.cli import graph
 from suan.skills.cli import skills
 from suan.project.cli import project
 
-for command in (server, jobs, workspaces, connect, mupro, graph, skills, project):
+
+@click.command("demo")
+@click.argument("directory", required=False, type=click.Path(path_type=Path, file_okay=False))
+@click.option("--state-dir", type=click.Path(path_type=Path, file_okay=False), default=None,
+              help="Private service state folder (default ~/.stk/headless).")
+def demo(directory, state_dir):
+    """Create the offline example project (synthetic data, no server) and print where it is."""
+    import json
+    from suan.scripting.headless import connect
+    from suan.workflows.demo import create_demo
+    with connect(state_dir) as stk:
+        result = create_demo(stk, directory)
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    click.echo(f"Open it in STK: File → Project → {result['directory']}", err=True)
+
+
+for command in (server, jobs, workspaces, connect, mupro, graph, skills, project, demo):
     cli.add_command(command)
 
 

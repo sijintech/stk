@@ -35,6 +35,7 @@ class WorkspaceEditor final : public Editor {
     layout.paragraph(ctx.tr("workspace.intro"));
     service(layout, ctx);
     if (!project.error().empty()) { layout.paragraph(project.error()); }
+    if (project.busy() && !project.notice().empty()) { layout.paragraph(project.notice()); }
 
     const auto &info = project.project();
     const bool available = project.ready() && project.loaded() && !project.busy();
@@ -56,6 +57,12 @@ class WorkspaceEditor final : public Editor {
       box.paragraph(info ? catalog.format("workspace.status.project", {{"name", info->name}}) :
                            std::string(ctx.tr("workspace.status.no_project")));
       button(box, ctx, "project", "workspace.open_project_button", !project.busy());
+      if (!info && project.supports_demo()) {
+        // A first look without a server: synthetic data walking the same steps (suan.workflows.demo).
+        auto &row = box.row();
+        row.button("workspace_demo", ctx.tr("workspace.demo"), [&project] { project.create_demo(); })
+            .tip(ctx.tr("workspace.demo.tip")).disable(project.busy());
+      }
     }
     {
       auto &box = step(layout, ctx, 2, "workspace.step.parameters", next);

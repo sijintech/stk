@@ -7,7 +7,10 @@
 分析“运行并显示”（`analysis_graph_editor.cc` 的 `RunAndShow` 链条，`7e64ece`）已交付，第 3 项完成；
 第 4 项已交付[术语表](docs/design/glossary.md)与 AI 助手内的 API 密钥（`TokenPlanCredentials`，`ai.credentials.*`），
 以及收起内部细节（[project_labels.hh](desktop/engine/lib/stk_app/src/editors/project_labels.hh)）与一行说明
-（[editor_text.hh](desktop/engine/lib/stk_app/src/editors/editor_text.hh) 的 `hint()`），第 4 项完成；下一步第 5 项（可试跑路径）；
+（[editor_text.hh](desktop/engine/lib/stk_app/src/editors/editor_text.hh) 的 `hint()`），第 4 项完成；
+第 5 项：示例项目（[suan/workflows/demo.py](suan/workflows/demo.py)，工作台按钮与 `suan demo`）、
+无头 `stk`（[suan/scripting/headless.py](suan/scripting/headless.py)）、[Linux 快速上手](docs/quickstart-linux.md) 与文档站。
+**可用性开发包已全部交付；下一步：工作流提案（复用格式 6 草案）**；
 之前为保存分析的单输入连线编辑（`3cbaa36`）与技能目录首版（`5a12d5a`、`df4729d`）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 

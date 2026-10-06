@@ -2,6 +2,16 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-06：示例项目、无头 stk 与文档站
+
+- Python：无头会话 2 项（目录与桌面一致、扫描与提交、桌面操作 `unavailable`、同目录 `busy` 提示、关闭后拒绝与重开、
+  `python -m` 控制台）；示例项目 3 项（扫描生成的 300/325/350 K、结果引用、指标、README、本机分析运行成功、
+  非空目录拒绝、`suan demo` 输出、后台服务 `demo.create` 与无协议违规）。完整 `pytest -m "not perf"` **2216 passed / 24 环境跳过**。
+- 原生：工作台“创建示例项目” 1 项（按钮在创建期间禁用、完成后打开项目且两表共 6 行、位置在 `STK_PROJECTS_DIR`、
+  打开项目后按钮消失）。完整 Linux CTest **1167/1167**。
+- 文档站：在临时副本中 `pnpm install --frozen-lockfile` 与 `pnpm run build` 通过（本机 Node 24 高于 `engines` 声明，仅警告），
+  生成 `/quickstart/`、`/en/quickstart/` 与 Pagefind 索引。
+
 ## 2026-10-06：收起内部细节与一行说明
 
 - 完整 Linux CTest **1166/1166**（含折叠 JSON 编辑器后更新的 7 处交互测试）；分析运行相关定向 **131/131**。

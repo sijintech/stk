@@ -1570,5 +1570,9 @@
   "formula.error.unsupported": "不支持",
   "project.row": "第 {n} 行",
   "project.review.json": "高级：以 JSON 编辑命令",
-  "project.row_column": "行"
+  "project.row_column": "行",
+  "workspace.demo": "创建示例项目",
+  "workspace.demo.tip": "在 ~/STK Projects 中新建一个使用合成数据的项目：参数扫描、求解输出、结果表和一次已完成的分析运行。不连接服务器或模型。",
+  "project.demo.creating": "正在创建示例项目（合成数据，约 10 秒）…",
+  "project.demo.created": "已创建并打开示例项目：{path}"
 }

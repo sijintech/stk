@@ -6,6 +6,22 @@
 `stk.muferro` 提供案例导入、选行准备、结果收集和三维打开，复用项目/Runtime/Viewer API，
 与原生 MuFerro 面板使用同一实现。步骤和参数见[完整仿真指南](simulation-muferro.md)。
 
+## 不打开桌面：终端、脚本与 Jupyter
+
+`suan.scripting.headless` 在当前 Python 进程内启动一个私有后台服务，提供与桌面控制台相同的 `stk`
+（同一份操作目录与协议校验）；窗口、查看器与修改检查等桌面操作返回 `ScriptError`（代码 `unavailable`）。
+
+```python
+from suan.scripting.headless import connect
+stk = connect()                                        # 状态目录默认 ~/.stk/headless，可与桌面同时运行
+p = stk.use(stk.projects.open("~/STK Projects/demo"))  # 之后 stk.project、stk.batches 等都作用于该项目
+print(p.snapshot()["project"]["revision"])
+stk.close()                                            # 结束服务；已提交的运行环境任务继续
+```
+
+`python -m suan.scripting.headless [项目目录]` 打开预先定义 `stk` 的交互控制台；`suan demo [目录]` 只创建
+[示例项目](quickstart-linux.md#2-用示例项目看一遍主流程)。运行环境连接配置与桌面和 `suan connect` 共用。
+
 ## 在界面中运行
 
 更新源码并用[启动脚本](../desktop/QUICKSTART.md)增量编译，选择 **文件 → Python**。
