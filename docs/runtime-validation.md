@@ -18,7 +18,7 @@
 - 定向回归 **175/175**；完整 Linux CTest **1151/1151**，JUnit 0 失败、0 跳过；中英文目录各 **1446** 项校验通过。
   日志 `/tmp/claude-1000/-home-mnemora-xcheng-sijin-stk/07437944-4ce3-4414-bbc7-e80a0698ca9c/scratchpad/links-{focused,full2}.{log,xml}`。
 
-跨平台 CI 结果在推送后补记；macOS/Windows 真机按[工作台验收清单](workbench-acceptance.md#保存分析的单输入连线)复核。
+`3cbaa36` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/37459650536) **5/5 任务成功**：Linux **1151/1151**（必跑 502）、macOS CPU **770** / Metal **146**（必跑 484，含 Metal 连线与保存分析截图）、Windows CPU **729/729**（必跑 478）；[Runtime CI](https://github.com/sijintech/stk/actions/runs/37459650588) **7/7**，文档部署与 Secret scan 成功。macOS/Windows 真机按[工作台验收清单](workbench-acceptance.md#保存分析的单输入连线)复核，未做真机检查。
 
 ## 2026-10-05：原生技能目录浏览页
 

@@ -1,6 +1,6 @@
 # STK 开发计划
 
-更新：2026-10-05。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
+更新：2026-10-06。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
 存储与求值方案见[项目数据模型](design/project-model.md)。设计目标不代表当前版本已经实现。
 当前模块职责、归档清单与新增代码放置原则见[仓库结构说明](repository-structure.md)。
 

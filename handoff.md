@@ -1,6 +1,6 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-06。**最近功能交付：保存分析的单输入连线编辑**（本轮提交见 `git log`）；
+更新：2026-10-06。**最近功能交付：保存分析的单输入连线编辑**（`3cbaa36`）；
 之前为技能目录首版（`5a12d5a` 契约与查询、`df4729d` 原生浏览页，`526608a`/`08de943` 为测试修正）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 
@@ -100,7 +100,7 @@ Python `stk.skills`、`suan skills catalog/show` 与原生 **文件 → 技能**
 | 原生状态与页面 | [skill_catalog.hh](desktop/engine/lib/stk_app/include/stk/app/skill_catalog.hh)、[skill_catalog.cc](desktop/engine/lib/stk_app/src/skill_catalog.cc)、[skills_editor.cc](desktop/engine/lib/stk_app/src/editors/skills_editor.cc) |
 | 回归 / 截图 | [test_skill_catalog.py](tests/test_skill_catalog.py)、[skills_catalog_test.cc](desktop/tests/app/skills_catalog_test.cc)、[skills_bridge.py](desktop/tests/bridge/skills_bridge.py)、[project_render.cc](desktop/tests/app/project_render.cc) |
 
-## 上一项交付：项目工作台
+## 更早交付：项目工作台
 
 `b2e5632` 新增 `workspace` 编辑器：从 **文件 → 工作台**，或项目、AI、分析图的页头进入。
 工作台显示当前项目，定位对话、文件、保存分析、分析运行、仿真运行、项目表格及创建/打开项目。
@@ -133,7 +133,8 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 按[开发计划](docs/development-plan.md)第 3 项：在已有“参数建议 → 草案 → 检查 → 明确应用”的模式上，
 让 AI 或 Python 提出保存分析的修改（参数、输出、单输入连线），以同一 `AnalysisParameterDraft` 候选承载，
 走同一 `graph.validate` 校验与按修订保存；提案、校验、保存、准备和执行保持分离，不自动采纳或重放。
-先确定提案的持久形式（是否沿用格式 6 草案或新增记录）与迁移/备份规则，再接界面。
+先由所有者确认提案的持久形式：建议复用格式 6 草案与格式 7 来源关联、不升级数据库格式，
+理由与边界见[决定建议](docs/design/review-drafts-and-conversations.md#保存分析修改提案的持久形式建议待所有者确认2026-10-06)。确认前不实现。
 
 其他与连线首版相邻、但需单独设计验收的工作：多输入列表编辑、增删节点、拖线与位置保存、子图。
 
@@ -154,7 +155,7 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 
 | 证据 | 结果 |
 |---|---|
-| 连线编辑（本轮）本机 Linux | 草稿/校验单元 5 项、交互 **7/7**、截图 **8**；定向 **175/175**；完整 CTest **1151/1151**，0 失败/跳过。跨平台 CI 见[验收记录](docs/runtime-validation.md#2026-10-06保存分析的单输入连线编辑) |
+| 连线编辑 `3cbaa36` | 本机：草稿/校验单元 5 项、交互 **7/7**、截图 **8**；定向 **175/175**；完整 CTest **1151/1151**，0 失败/跳过。[桌面 CI](https://github.com/sijintech/stk/actions/runs/37459650536) Linux **1151**、macOS **770** / Metal **146**、Windows **729** 全部通过；[Runtime](https://github.com/sijintech/stk/actions/runs/37459650588) **7/7** |
 | 技能目录首版本机 | Python 完整 **2199 passed / 24 环境跳过**；技能 Python **13/13**；原生定向 **95/95**；完整 CTest **1131/1131** |
 | 技能目录 CI | `df4729d` [桌面](https://github.com/sijintech/stk/actions/runs/37358644803) Linux **1131**、macOS **758** / Metal **142**；`08de943` Windows CPU 重跑 **717/717**；[Runtime](https://github.com/sijintech/stk/actions/runs/37362435293) **7/7** |
 | 人工截图检查 | 本机技能页 8 张、连线 8 张及旧保存分析英文窄窗口逐张检查；未逐张检查 macOS CI 截图 |
