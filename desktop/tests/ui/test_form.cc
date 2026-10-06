@@ -414,6 +414,35 @@ TEST(FormBuilder, NodeFormNullableVectorsAndExclusiveLimits)
   EXPECT_GT(cm.get("zoom").num, 0.0);
 }
 
+TEST(FormBuilder, AutomaticRangeEndpointsShowTheirResolvedValueNeverAPlaceholder)
+{
+  const auto preset = ordered_json::parse(test::read_text(std::string(STK_REPO_ROOT) + "/suan/graph/presets/volume.json"));
+  const SchemaNode all = preset_schema(preset, catalog());
+  SchemaNode schema;
+  schema.type = SchemaType::Object;
+  schema.properties = {*all.property("range")};
+  Harness h;
+  FormModel model;
+  std::optional<double> low;  // unknown until a result exists
+  FormOptions options;
+  options.resolved = [&](const std::string &name, const size_t index) -> std::optional<double> {
+    if (name != "range") { return std::nullopt; }
+    return index == 0 ? low : std::optional<double>(66.0);
+  };
+  h.ui = [&](Context &ctx) { build_form(ctx.block("form", {0, 0, 400, 500}).layout(), schema, model, options); };
+  h.frame();
+  EXPECT_FALSE(h.w("range/0").enabled);
+  // Unknown: a word saying the data decides it (any language), never a number such as 0.000.
+  EXPECT_EQ(h.w("range/0").text.find_first_of("0123456789"), std::string::npos) << h.w("range/0").text;
+  EXPECT_NE(h.w("range/1").text.find("66.000"), std::string::npos) << h.w("range/1").text;
+  low = -66.0; h.frame();
+  EXPECT_NE(h.w("range/0").text.find("-66.000"), std::string::npos) << h.w("range/0").text;
+  // Showing the resolved value never writes it: the wire value stays automatic.
+  EXPECT_EQ(form_values_to_json(model, schema)["range"], ordered_json::parse("[null,null]"));
+  h.click("range/0/auto");
+  EXPECT_TRUE(h.w("range/0").enabled);
+}
+
 TEST(FormBuilder, AutomaticRangeEndpointsStayNullOnTheWire)
 {
   const auto preset = ordered_json::parse(test::read_text(std::string(STK_REPO_ROOT) + "/suan/graph/presets/volume.json"));

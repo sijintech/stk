@@ -218,6 +218,9 @@ Common shapes:
   sampling). `orientation` uses `stk:orientation-hsl` (`domain-classifiers.md` §6.2) with the
   maximum magnitude of the layer. `global` combines per-frame stats when available (M1 may treat it
   as `data`).
+- **volume range** (`stk.render.volume@1`, additive 2026-10-06): `range_mode` `"data"` (default) or
+  `"symmetric"` fills only the `null` ends of `range` — the finite data min..max, or ±max|v| so a
+  diverging colormap is centred on 0. Explicit ends are kept; the payload still carries both resolved ends.
 
 ### 4.3 Registration API (Python)
 
@@ -1034,6 +1037,7 @@ Dense volume texture with colour and opacity transfer functions (client-side).
 | `encoding` | enum "auto" \| "u8" \| "u16" \| "f32" | `"auto"` | data |
 | `colormap` | string | `"viridis"` | client |
 | `range` | [number \| null, number \| null] | `[null, null]` | client |
+| `range_mode` | enum "data" \| "symmetric" | `"data"` | client |
 | `opacity` | [number (>=0, <=1), number (>=0, <=1)][2..64] \| null | `null` | client |
 | `sampling` | enum "linear" \| "nearest" | `"linear"` | client |
 | `shade` | boolean | `false` | client |

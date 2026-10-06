@@ -10,9 +10,11 @@
 #include "stk/io/payload.hh"
 #include "../bridge/support.hh"
 #include "scalar_volume_support.hh"
+#include <cmath>
 
 #include <algorithm>
 #include <cstdlib>
+#include <cmath>
 #include <limits>
 
 namespace stk::app {
@@ -102,9 +104,11 @@ class ScalarVolumePython : public ::testing::Test {
     }
     EXPECT_LT(low, 0);
     EXPECT_EQ(layer->at("value_range"), Json::array({low, high}));
-    EXPECT_EQ(layer->at("transfer_function").at("range"), Json::array({low, high}));
+    // The signed preset centres the colormap on 0: transfer function and colour bar span ±max|v|.
+    const double bound = std::max(std::abs(low), std::abs(high));
+    EXPECT_EQ(layer->at("transfer_function").at("range"), Json::array({-bound, bound}));
     const auto *bar = payload->layer("bar"); ASSERT_NE(bar, nullptr);
-    EXPECT_EQ(bar->at("range"), Json::array({low, high}));
+    EXPECT_EQ(bar->at("range"), Json::array({-bound, bound}));
     const auto inspection = viewer().graph_inspection();
     EXPECT_EQ(inspection->shown_graph_verified, true);
     EXPECT_EQ(inspection->shown_matches_desired, true);

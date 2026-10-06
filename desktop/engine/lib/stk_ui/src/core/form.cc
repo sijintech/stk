@@ -419,6 +419,14 @@ struct Builder {
                             m->set(name, value);
                           }}).width(3.0f).tip(tip);
           }
+          if (auto_item) {
+            // An automatic end has no stored number: show what it currently resolves to (for
+            // example the data range of the shown result), never the placeholder 0.
+            const std::optional<double> resolved = opts.resolved ? opts.resolved(name, size_t(i)) : std::nullopt;
+            row.button(key, axis + "  " + (resolved ? format_number(*resolved, p) : tr_or("form.auto_value", "from data")),
+                       [] {}).disable().tip(tip);
+            continue;
+          }
           row.number(key, axis,
                      {[m, name, i, fallback]() {
                         const FormValue fv = m->get(name);

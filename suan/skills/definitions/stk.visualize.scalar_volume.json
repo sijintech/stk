@@ -1,11 +1,11 @@
 {
  "schema": "stk.skill/1",
  "id": "stk.visualize.scalar_volume",
- "version": 1,
+ "version": 2,
  "title": {"en": "Signed scalar volume", "zh_CN": "带符号标量体渲染"},
  "summary": {
-  "en": "Volume-render one explicitly named point field and zero-based component of a field file, keeping negative and positive values. A result unit only relabels the field; values are never converted and no magnitude is computed.",
-  "zh_CN": "对场文件中明确指定的点场及零起始分量做体渲染，保留正负值。结果单位只改写标签，不换算数值，也不计算模长。"
+  "en": "Volume-render one explicitly named point field and zero-based component of a field file, keeping negative and positive values; by default the diverging colormap is centred on 0. A result unit only relabels the field; values are never converted and no magnitude is computed.",
+  "zh_CN": "对场文件中明确指定的点场及零起始分量做体渲染，保留正负值；默认发散色图以 0 为中心。结果单位只改写标签，不换算数值，也不计算模长。"
  },
  "guide": {"pack": "stk-visualize"},
  "entry": {"kind": "graph.preset", "preset": "scalar-volume"},

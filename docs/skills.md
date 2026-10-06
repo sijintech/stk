@@ -15,7 +15,7 @@
 
 | 技能 | 执行入口 | 选择原因 |
 |---|---|---|
-| `stk.visualize.scalar_volume@1` | 预设 `scalar-volume` | 绑定普通场文件，可在无服务器时检查带符号标量与单位标签 |
+| `stk.visualize.scalar_volume@2` | 预设 `scalar-volume` | 绑定普通场文件，可在无服务器时检查带符号标量与单位标签 |
 | `stk.muferro.domains@1` | 预设 `muferro-domains` | 真实 MuFerro 结果的主要分析：畴变体、占比与能量曲线 |
 | `stk.muferro.energy_trace@1` | 预设 `energy-plot` | 只读解析能量表，示范不需绘图库的输出与需要绘图库的输出 |
 

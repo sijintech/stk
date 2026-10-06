@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 #include "viewer_common.hh"
 
@@ -22,6 +23,38 @@ namespace stk::app {
 namespace {
 
 using namespace viewer_ui;
+
+/** What a null end of a range parameter resolved to in the result on screen: the colour range of
+ * the layers whose nodes take the parameter directly. Only while that result matches the current
+ * configuration exactly; otherwise the form says the data decides it. */
+std::optional<double> shown_range_end(const ViewerState &vs, const std::string &name, const size_t index)
+{
+  const auto inspection = vs.graph_inspection();
+  const auto payload = vs.payload();
+  if (!inspection || !payload || index > 1 || !inspection->shown_configuration ||
+      inspection->shown_matches_desired != true) { return std::nullopt; }
+  const io::Json reference = {{"$param", name}};
+  const auto nodes = inspection->shown_configuration->graph.find("nodes");
+  if (nodes == inspection->shown_configuration->graph.end() || !nodes->is_array()) { return std::nullopt; }
+  for (const auto &node : *nodes) {
+    const auto params = node.find("params");
+    if (!node.is_object() || params == node.end() || !params->is_object()) { continue; }
+    if (std::none_of(params->begin(), params->end(), [&](const io::Json &value) { return value == reference; })) { continue; }
+    const auto *layer = payload->layer(io::get_string(node, "id"));
+    if (!layer) { continue; }
+    const io::Json *range = nullptr;
+    if (const auto tf = layer->find("transfer_function"); tf != layer->end() && tf->is_object() && tf->contains("range")) {
+      range = &tf->at("range");
+    }
+    else if (const auto color = layer->find("color"); color != layer->end() && color->is_object() && color->contains("range")) {
+      range = &color->at("range");
+    }
+    if (range && range->is_array() && range->size() == 2 && (*range)[index].is_number()) {
+      return (*range)[index].get<double>();
+    }
+  }
+  return std::nullopt;
+}
 
 bool is_colormap_member(const ui::SchemaNode &n)
 {
@@ -175,6 +208,7 @@ class PropertiesEditor final : public Editor {
     opts.group_panels = true;
     opts.lang = ctx.store.language();
     opts.colormaps = cms;
+    opts.resolved = [&vs](const std::string &name, const size_t index) { return shown_range_end(vs, name, index); };
     /* Data stage: changing it re-runs the data nodes. */
     const ui::SchemaNode data = stage_schema(schema, true, nullptr, false);
     if (!data.properties.empty()) {

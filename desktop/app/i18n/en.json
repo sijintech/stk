@@ -1445,5 +1445,9 @@
   "analysis_links.invalid": "The candidate is invalid; resolve the issues below before saving.",
   "analysis_links.catalog_loading": "Reading the node catalog; inputs become editable once it arrives…",
   "analysis_links.catalog_needed": "Inputs stay read-only without the node catalog.",
-  "analysis_links.title_count": "Links ({count} changed)"
+  "analysis_links.title_count": "Links ({count} changed)",
+  "form.auto_value": "from data",
+  "param.range_mode": "Automatic range",
+  "enum.symmetric": "symmetric about 0",
+  "enum.data": "data min–max"
 }

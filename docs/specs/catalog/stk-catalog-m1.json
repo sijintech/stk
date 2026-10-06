@@ -3775,6 +3775,15 @@
       ],
       "x-stk-stage": "client"
      },
+     "range_mode": {
+      "enum": [
+       "data",
+       "symmetric"
+      ],
+      "title": "Automatic range: data min..max, or symmetric about 0 (±max|v|)",
+      "default": "data",
+      "x-stk-stage": "client"
+     },
      "opacity": {
       "anyOf": [
        {

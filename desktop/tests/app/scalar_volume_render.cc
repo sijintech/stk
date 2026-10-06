@@ -141,8 +141,8 @@ int main(int argc, char **argv)
     if (ok) {
       const auto *volume = viewer.payload()->layer("volume"), *bar = viewer.payload()->layer("bar");
       ok = volume && bar && volume->at("value_range") == io::Json::array({-66.0, 22.0}) &&
-          volume->at("transfer_function").at("range") == io::Json::array({-66.0, 22.0}) &&
-          bar->at("range") == io::Json::array({-66.0, 22.0}) && bar->at("unit") == "K";
+          volume->at("transfer_function").at("range") == io::Json::array({-66.0, 66.0}) &&
+          bar->at("range") == io::Json::array({-66.0, 66.0}) && bar->at("unit") == "K";
       if (volume) {
         const auto values = viewer.payload()->view<float>(volume->at("data").get<std::string>());
         ok = ok && values.size() == 1728 && values.front() == 11.0f && values.back() == -55.0f;

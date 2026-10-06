@@ -317,6 +317,8 @@ def glyphs(ctx, inputs, params):
           "encoding": enum(["auto", "u8", "u16", "f32"], "auto"),
           "colormap": string("viridis", min_length=1, stage="client", widget="colormap"),
           "range": interval([None, None], stage="client"),
+          "range_mode": enum(["data", "symmetric"], "data", stage="client",
+                             title="Automatic range: data min..max, or symmetric about 0 (±max|v|)"),
           "opacity": json_param({"type": "array", "minItems": 2, "maxItems": 64,
                                  "items": {"type": "array", "prefixItems": [
                                      {"type": "number", "minimum": 0, "maximum": 1},

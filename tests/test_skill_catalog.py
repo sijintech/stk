@@ -20,7 +20,7 @@ from test_desktop_scripts import execute, scripts  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / "tests" / "data" / "skill-catalog.lock.json"
-BUILTIN = ["stk.muferro.domains@1", "stk.muferro.energy_trace@1", "stk.visualize.scalar_volume@1"]
+BUILTIN = ["stk.muferro.domains@1", "stk.muferro.energy_trace@1", "stk.visualize.scalar_volume@2"]
 
 
 def builtin_definition(name):
@@ -335,7 +335,7 @@ def test_cli_catalog_and_show():
     assert listed.exit_code == 0, listed.output
     assert [line.split()[0] for line in listed.output.splitlines()] == BUILTIN
     page = json.loads(runner.invoke(cli, ["skills", "catalog", "--json", "--query", "volume"]).output)
-    assert [s["ref"] for s in page["skills"]] == ["stk.visualize.scalar_volume@1"]
+    assert [s["ref"] for s in page["skills"]] == ["stk.visualize.scalar_volume@2"]
     shown = runner.invoke(cli, ["skills", "show", "stk.muferro.domains@1"])
     assert shown.exit_code == 0 and "graph.preset muferro-domains via graph.evaluate" in shown.output
     assert "not checked: offscreen_rendering for image" in shown.output

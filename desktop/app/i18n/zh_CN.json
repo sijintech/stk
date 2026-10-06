@@ -1445,5 +1445,9 @@
   "analysis_links.invalid": "候选无效；请先解决下列问题再保存。",
   "analysis_links.catalog_loading": "正在读取节点目录，读取完成后才能编辑输入……",
   "analysis_links.catalog_needed": "没有节点目录时，输入保持只读。",
-  "analysis_links.title_count": "连线（已修改 {count} 处）"
+  "analysis_links.title_count": "连线（已修改 {count} 处）",
+  "form.auto_value": "由数据决定",
+  "param.range_mode": "自动值域",
+  "enum.symmetric": "以 0 为中心对称",
+  "enum.data": "数据最小–最大"
 }

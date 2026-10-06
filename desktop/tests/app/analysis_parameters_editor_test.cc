@@ -395,7 +395,7 @@ TEST_F(AnalysisParametersEditorPython, TableShowsTypedNullStringAndFloatWithoutI
   EXPECT_NE(cell("precision_record", 1).find("1.0"), std::string::npos);
   EXPECT_NE(cell("precision_record", 1).find("18446744073709551615"), std::string::npos);
   EXPECT_EQ(cell("colormap", 3), store().tr("analysis_parameters.default"));
-  EXPECT_EQ(cell("colormap", 1), "\"viridis\"");
+  EXPECT_EQ(cell("colormap", 1), "\"coolwarm\"");  // the signed preset's diverging default
   EXPECT_TRUE(calls("project.analyses.update").empty());
 }
 

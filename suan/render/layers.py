@@ -274,7 +274,9 @@ class Layer:
                                       values=[int(v) for v in _np().unique(g["data"])])
             return {"by": "attribute", "attribute": g.get("field"), "component": None, "categorical": True,
                     "entries": entries, "palette": g.get("palette") or "stk:categorical", "unit": g.get("unit")}
-        value_range = resolve_range(g["data"], a.get("range"), "fixed")
+        # "symmetric" centres a diverging colormap on 0; explicit range ends still win.
+        mode = "symmetric" if a.get("range_mode") == "symmetric" else "fixed"
+        value_range = resolve_range(g["data"], a.get("range"), mode)
         return {"by": "attribute", "attribute": g.get("field"), "component": None, "categorical": False,
                 "colormap": canonical_name(a.get("colormap") or "viridis"), "range": value_range,
                 "unit": g.get("unit"), "quantity": g.get("quantity")}

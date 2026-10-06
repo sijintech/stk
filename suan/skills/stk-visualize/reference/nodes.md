@@ -403,6 +403,7 @@ Dense volume texture with colour and opacity transfer functions (client-side).
 | `encoding` | "auto" \| "u8" \| "u16" \| "f32" | "auto" | data |  |
 | `colormap` | string | "viridis" | client |  |
 | `range` | [number \| null, number \| null] | [null, null] | client |  |
+| `range_mode` | "data" \| "symmetric" | "data" | client | Automatic range: data min..max, or symmetric about 0 (±max\|v\|) |
 | `opacity` | array of [number (≥0, ≤1), number (≥0, ≤1)] \| null | null | client | Opacity points [x, alpha], x normalized over range |
 | `sampling` | "linear" \| "nearest" | "linear" | client |  |
 | `shade` | boolean | false | client |  |

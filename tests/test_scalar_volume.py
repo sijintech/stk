@@ -63,7 +63,9 @@ def test_scalar_selection_keeps_signed_samples_and_xyz_orientation(tmp_path, reg
     layers = scene(tmp_path, registry, {"path": path})
     np.testing.assert_array_equal(layers["volume"].geometry["data"], values.transpose(2, 1, 0))
     assert layers["volume"].geometry["field"] == "field_0"
-    assert layers["bar"].props["range"] == [values.min(), values.max()]
+    # The signed preset centres its diverging colormap on 0 by default.
+    bound = max(abs(values.min()), abs(values.max()))
+    assert layers["bar"].props["range"] == [-bound, bound]
     assert layers["bar"].props["title"] == "field_0 [unspecified]"
 
 
@@ -232,7 +234,8 @@ def test_complete_service_payload_preserves_signed_range_with_documented_precisi
     elif case == "nonfinite":
         values.reshape(-1)[:3] = [np.nan, np.inf, -np.inf]
     write_field(tmp_path, values)
-    _, payload = delivered(tmp_path, registry, profile=profile)
+    # Precision is checked against the data range; the default symmetric range is tested separately.
+    _, payload = delivered(tmp_path, registry, {"range_mode": "data"}, profile=profile)
     volume, bar = payload.layer("volume"), payload.layer("bar")
     expected = values.transpose(2, 1, 0).reshape(-1)
     finite = np.isfinite(expected)
@@ -253,12 +256,44 @@ def test_complete_service_payload_preserves_signed_range_with_documented_precisi
         assert restored[finite].max() == pytest.approx(hi)
 
 
+def test_signed_preset_centres_its_diverging_colormap_on_zero_unless_asked_otherwise(tmp_path, registry):
+    values = signed_values()  # -7.25 .. 10.0
+    write_field(tmp_path, values)
+    graph = catalog.load_preset("scalar-volume")
+    defaults = {p["name"]: p["default"] for p in graph["parameters"]}
+    assert defaults["colormap"] == "coolwarm" and defaults["range_mode"] == "symmetric"
+    _, payload = delivered(tmp_path, registry)
+    volume, bar = payload.layer("volume"), payload.layer("bar")
+    assert volume["value_range"] == [-7.25, 10.0]  # stored samples keep the exact data range
+    assert volume["transfer_function"]["range"] == bar["range"] == [-10.0, 10.0]
+    # Explicit ends win over the automatic mode; the other end stays symmetric.
+    _, payload = delivered(tmp_path, registry, {"range": [None, 4.0]})
+    assert payload.layer("volume")["transfer_function"]["range"] == [-10.0, 4.0]
+    _, payload = delivered(tmp_path, registry, {"range_mode": "data"})
+    assert payload.layer("volume")["transfer_function"]["range"] == payload.layer("bar")["range"] == [-7.25, 10.0]
+    write_field(tmp_path, np.abs(values) + 1.0)  # all positive: still centred on 0 when asked
+    _, payload = delivered(tmp_path, registry)
+    assert payload.layer("volume")["transfer_function"]["range"] == [-11.0, 11.0]
+
+
+def test_volume_node_keeps_the_data_range_by_default(tmp_path, registry):
+    """range_mode is additive: graphs that do not set it keep the data min..max."""
+    values = signed_values()
+    write_field(tmp_path, values)
+    graph = catalog.load_preset("scalar-volume")
+    for node in graph["nodes"]:
+        if node["id"] == "volume":
+            node["params"].pop("range_mode")
+    layers = scene(tmp_path, registry, graph=graph)
+    assert layers["bar"].props["range"] == [values.min(), values.max()]
+
+
 @pytest.mark.parametrize("profile,top", [("desktop", None), ("phone", 255), ("web", 65535)])
 @pytest.mark.parametrize("has_finite", [False, True], ids=["all-missing", "constant-with-missing"])
 def test_degenerate_range_keeps_existing_nonfinite_encoding_policy(tmp_path, registry, profile, top, has_finite):
     values = np.array([np.nan, np.inf, -np.inf, -2.5 if has_finite else np.nan]).reshape(1, 1, 4)
     write_field(tmp_path, values)
-    _, payload = delivered(tmp_path, registry, profile=profile)
+    _, payload = delivered(tmp_path, registry, {"range_mode": "data"}, profile=profile)
     volume = payload.layer("volume")
     lo = -2.5 if has_finite else 0.0
     assert volume["value_range"] == [lo, lo]

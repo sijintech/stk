@@ -1,7 +1,7 @@
 {
  "id": "scalar-volume",
  "name": "Signed scalar / component volume",
- "description": "Volume rendering of one explicitly named point field and zero-based component, preserving signed values. Optional result-unit metadata relabeling does not convert values.",
+ "description": "Volume rendering of one explicitly named point field and zero-based component, preserving signed values. By default the diverging coolwarm colormap is centred on 0 (range ±max|v|). Optional result-unit metadata relabeling does not convert values.",
  "bindings": [
   {
    "name": "data",
@@ -57,7 +57,7 @@
      "turbo",
      "gray"
     ],
-    "default": "viridis",
+    "default": "coolwarm",
     "label": "Colormap"
    },
    {
@@ -68,7 +68,18 @@
      null
     ],
     "label": "Value range",
-    "description": "[min, max] of the transfer functions (null = the data range)."
+    "description": "[min, max] of the transfer functions; null ends follow the range mode."
+   },
+   {
+    "name": "range_mode",
+    "type": "enum",
+    "choices": [
+     "symmetric",
+     "data"
+    ],
+    "default": "symmetric",
+    "label": "Automatic range",
+    "description": "symmetric: ±max|v| so the diverging colormap's centre is 0; data: the data min..max."
    },
    {
     "name": "opacity",
@@ -155,6 +166,9 @@
      },
      "opacity": {
       "$param": "opacity"
+     },
+     "range_mode": {
+      "$param": "range_mode"
      }
     }
    },

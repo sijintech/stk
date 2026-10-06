@@ -543,7 +543,7 @@ int main(int argc, char **argv)
         auto &catalog = shell.store().skills();
         ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         ok = ok && loop.pump_until([&] { return catalog.loaded() && !catalog.loading(); }, 30);
-        ok = ok && catalog.select("stk.visualize.scalar_volume@1") &&
+        ok = ok && catalog.select("stk.visualize.scalar_volume@2") &&
              loop.pump_until([&] { return !catalog.detail_loading(); }, 30) && catalog.detail().is_object();
         ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
       }

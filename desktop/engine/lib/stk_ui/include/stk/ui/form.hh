@@ -120,6 +120,9 @@ struct FormOptions {
   std::shared_ptr<const std::vector<ColormapItem>> colormaps;
   /** Browse button for x-stk-widget "path"/"file" fields (WP9 wires native file dialogs). */
   std::function<void(const std::string &name)> on_browse;
+  /** The value an automatic (null) array item currently resolves to, e.g. the data range of the
+   * result on screen; shown read-only. Unset or nullopt shows that the data decides it. */
+  std::function<std::optional<double>(const std::string &name, size_t index)> resolved;
 };
 
 /** Localized label of a schema member (title, x-stk-title-zh, or the prettified name). */

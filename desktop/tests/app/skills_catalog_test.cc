@@ -146,11 +146,11 @@ TEST_F(SkillsCatalogPython, ListsSelectsAndShowsTheContractWithoutRunningAnythin
   list = widget("skills_list");  // frames rebuild widgets: never reuse a pointer across them
   ASSERT_NE(list, nullptr); ASSERT_TRUE(list->list);
   list->list->selected.assign(2);  // the list binding selects by ref
-  EXPECT_EQ(skills().selected(), "stk.visualize.scalar_volume@1");
+  EXPECT_EQ(skills().selected(), "stk.visualize.scalar_volume@2");
   ASSERT_NO_FATAL_FAILURE(settle());
   ASSERT_TRUE(skills().detail().is_object()) << skills().detail_error();
   const auto &skill = skills().detail();
-  EXPECT_EQ(io::get_string(skill, "ref"), "stk.visualize.scalar_volume@1");
+  EXPECT_EQ(io::get_string(skill, "ref"), "stk.visualize.scalar_volume@2");
   EXPECT_EQ(io::get_string(skill.at("entry"), "operation"), "graph.evaluate");
   EXPECT_EQ(skill.at("inputs").at(0).at("name"), "data");
   EXPECT_EQ(skill.at("parameters").at(2).at("default"), 0);  // the component default stays an integer
@@ -161,7 +161,7 @@ TEST_F(SkillsCatalogPython, ListsSelectsAndShowsTheContractWithoutRunningAnythin
     EXPECT_NE(widget(key), nullptr) << key;
   }
   // Selecting the shown skill again does not resend; a new selection replaces the detail.
-  EXPECT_FALSE(skills().select("stk.visualize.scalar_volume@1"));
+  EXPECT_FALSE(skills().select("stk.visualize.scalar_volume@2"));
   EXPECT_FALSE(skills().select("stk.no.such@1"));
   ASSERT_TRUE(skills().select("stk.muferro.domains@1"));
   EXPECT_TRUE(skills().detail().is_null());
