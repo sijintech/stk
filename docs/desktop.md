@@ -4,7 +4,7 @@
 
 macOS / Windows 真机测试可使用[快速编译与启动脚本](../desktop/QUICKSTART.md)。
 
-本文介绍当前可用功能。AI 工作区的进一步集成、分层节点与共享多维表格安排见
+本文介绍当前可用功能。AI 助手的进一步集成、分层节点与共享多维表格安排见
 [开发计划](development-plan.md)和[工作台设计](design/project-workbench.md)。用户已反馈 macOS / Windows
 均能打开窗口并看到 3D 渲染，范围见[补充验收记录](runtime-validation.md#desktop-mac-windows-smoke)。
 
@@ -21,7 +21,7 @@ GHOST，绘制用 Blender 的 GPU 模块（Linux 上 OpenGL 或 Vulkan，macOS �
 - **查看器（Viewer）、属性（Properties）、探针（Probe）**：打开渲染数据包、结果目录或运行目录，用节点图
   预设（如 `muferro-domains`）在数据旁求值，GPU 显示、拾取并查询原始值，导出 PNG 与逐步序列。
 - **传输、日志、桥日志**：上传下载进度与续传、程序日志、桥的 stderr 与重启。
-- **AI 工作区**：在同一页检查捕获数据、准备和明确发送保存的问题、查看请求状态与普通文字回复；
+- **AI 助手**：在同一页检查捕获数据、准备和明确发送保存的问题、查看请求状态与普通文字回复；
   首版本机及跨平台 CI 已通过。
 
 ![STK 桌面程序：左为任务，中为查看器（muFerro 畴结构），右为属性，下方为探针](images/desktop/overview-zh.png)
@@ -34,7 +34,9 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 
 ## 项目工作台
 
-新的默认布局以 **工作台** 开始（左栏，与“任务”同组标签），也可从 **文件 → 工作台** 或项目表格、AI 工作区、
+界面中文/英文术语见[术语表](design/glossary.md)。
+
+新的默认布局以 **工作台** 开始（左栏，与“任务”同组标签），也可从 **文件 → 工作台** 或项目表格、AI 助手、
 分析图页头的“工作台”按钮进入。工作台按步骤引导，并根据已知状态标出“下一步”：
 
 1. **项目**：显示已打开的项目；“打开或新建项目”进入创建、打开与最近项目入口。
@@ -81,7 +83,7 @@ MuFerro 仿真与仿真批次面板可直接选择**运行环境**并用字段�
 需要运行时，在 Viewer、保存的分析或 Python 中明确执行对应预设。Python 可用 `stk.skills.list/get` 读取同一目录，
 用 `stk.ui.activate_editor("skills", maximize=True)` 打开此页。项目采用固定技能版本尚未实现。
 
-## AI 准备工作区
+## AI 助手
 
 **视图 → 分析图** 打开当前 Viewer 预设的只读图检查，端口、参数、引用及输出使用通用表格。
 可在“当前参数”和“已显示结果”间对比提交配置，显式校验不运行节点；完整用法与来源核对边界见[分析节点图](analysis-graphs.md)。
@@ -96,8 +98,8 @@ MuFerro 仿真与仿真批次面板可直接选择**运行环境**并用字段�
 这是当前窗口的聚焦导航；每种模式独立保存整套工作区、以及启动默认 AI 主页仍按设计继续开发。
 切换本身不发送问题或启动求值，未发送的 AI 问题和 Python 草稿保留在原编辑器对象中。
 
-打开格式 8 的项目，从项目页头或 **文件 → AI 工作区** 进入；旧项目先明确备份升级。
-用 **项目表格** 返回数据页选择一条记录，再在 AI 工作区点击 **捕获选中记录**，保存该记录全部字段
+打开格式 8 的项目，从项目页头或 **文件 → AI 助手** 进入；旧项目先明确备份升级。
+用 **项目表格** 返回数据页选择一条记录，再在 AI 助手点击 **捕获选中记录**，保存该记录全部字段
 （首版最多 64 个）的当前值与定义。检查捕获值及修订；后续参数变化不会更新这份上下文。
 
 需要比较多条记录或只提供部分字段时，点击 **选择多行与字段…**。在 **行 / 字段** 中勾选，
@@ -126,7 +128,7 @@ MuFerro 仿真与仿真批次面板可直接选择**运行环境**并用字段�
 
 当前是单条问题与选定上下文的文字请求，不自动附带其他问答、文件或未保存输入；没有
 工具调用、自动修改/模拟、Markdown 渲染或默认 AI 主页切换。各增量的本机与跨平台验证见[验收记录](runtime-validation.md)。
-双平台真实模型和输入设备验收见[工作台清单](workbench-acceptance.md#ai-准备工作区)。
+双平台真实模型和输入设备验收见[工作台清单](workbench-acceptance.md#ai-助手)。
 
 ## 安装
 
@@ -428,14 +430,14 @@ GPU module (OpenGL or Vulkan on Linux, Metal on macOS) and BLF (FreeType text wi
 workbench: **Jobs** (local Runtime, `suan connect` profiles, paired hubs; workspaces, uploads, submit, logs,
 cancel, verified downloads, PNG preview), **Viewer / Properties / Probe** (payloads, result folders and run
 folders evaluated with graph presets next to the data; GPU view, picking and original-value probes; PNG and
-sequence export) and **Transfers / Logs / Bridge log**. The D1 acceptance run is recorded in
+sequence export) and **Transfers / Logs / Service log**. The D1 acceptance run is recorded in
 [runtime-validation.md](runtime-validation.md#2026-09-25-桌面里程碑-d1自有引擎桌面端).
 
 ![STK desktop: Jobs, Viewer (muFerro domains), Properties, Probe](images/desktop/overview-en.png)
 
-### Workspace (start page)
+### Home (start page)
 
-The default layout opens on the **Workspace** (left, with Jobs as its second tab). It walks through
+The default layout opens on **Home** (left, with Jobs as its second tab). It walks through
 Project → Parameters → Where to run → Run → Results, shows what is already known for each step (open
 project, parameter tables and rows, current connection and its health, whether a result is shown) and
 marks the next step. Buttons only open the matching page; nothing runs, sends or changes data from here.
@@ -455,7 +457,7 @@ Users with a saved layout keep it; File > Reset layout switches to the new defau
 
 ### Skill catalog
 
-**File → Skills**, the workspace's *Skill library* button (available without a project) or any area's editor
+**File → Skills**, Home's *Skill library* button (available without a project) or any area's editor
 menu opens the read-only catalog of versioned skills (experimental `stk.skill/1`, see the
 [skill guide](skills.md), Chinese). It lists `id@version`, availability (available, limited with the outputs
 that cannot be delivered, or unavailable) and, for the selected skill, its content SHA-256, entry (graph preset
@@ -465,9 +467,9 @@ reason. Search and reload are explicit; an older bridge without `skills.list/get
 unavailable. Browsing never runs a skill, prepares a run, changes a project or the Viewer, or calls a model.
 Python reads the same catalog with `stk.skills.list/get`.
 
-### AI preparation workspace
+### AI Assistant
 
-Open a format-8 project, then use the Project header or **File → AI Workspace**. Capture the selected record,
+Open a format-8 project, then use the Project header or **File → AI Assistant**. Capture the selected record,
 or explicitly choose multiple rows and fields at a fixed revision, and review the saved values.
 **Prepare question (no send)** saves the question and request;
 **Send this saved question** is the separate provider action. See [provider setup](project-requests.md).
@@ -591,7 +593,7 @@ preedit is built in; Pinyin acceptance on a real Mac pending. Windows: M-D2.
 
 ### Troubleshooting
 
-- **Bridge log** tab: the bridge's stderr, state and Restart. "Bridge not running" usually means the wrong
+- **Service log** tab: the bridge's stderr, state and Restart. "Python service not running" usually means the wrong
   interpreter: check `"$STK_PYTHON" -c 'import suan.desktop_bridge'`. `STK_BRIDGE_VALIDATE=1` validates every
   message against the protocol schema.
 - **Local evaluation fails**: the interpreter needs `science,visualization`; run `python -m suan.graph doctor`.

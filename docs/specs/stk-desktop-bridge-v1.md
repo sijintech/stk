@@ -503,6 +503,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.close` | `{handle}` | `{closed: boolean}` |
 | `project.csv.import` | `{handle, source, name, expected_revision, types?, units?, delimiter?}` | `{revision, table_id, field_ids, record_ids, rows, columns, source_sha256}` |
 | `project.csv.export` | `{handle, table_id, destination, expected_revision, delimiter?}` | `{revision, table_id, path, rows, columns, size, sha256}` |
+| `ai.credentials.set` | `{key, remember?}` | `{provider}` (presence and `key_source` only, never the key) |
+| `ai.credentials.clear` | `{}` | `{provider}` |
 | `project.sweep.plan` | `{handle, table_id, axes, base_record_id?, mode?}` | `{plan: {table_id, rows, record_ids, commands}, revision}` |
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
@@ -995,6 +997,14 @@ result names the snapshot `revision` it was planned against; callers apply `plan
 `project.apply` at exactly that revision and never retarget a plan to a newer one. Plans hold at most
 1000 rows and 1000 commands (one `project.apply`); the managed analyses and file-index tables are
 refused. See [parameter sweeps](../project-sweeps.md).
+
+`ai.credentials.set` hands the Alibaba Token Plan key to this bridge process for its session; with
+`remember: true` it is instead written to `<state_dir>/token-plan-key.json` (0600, atomic) and read back
+when needed, and `remember: false` deletes such a file. `ai.credentials.clear` forgets both. The
+`STK_TOKEN_PLAN_API_KEY` environment variable always takes precedence. Replies carry
+`provider.key_source` (`environment`, `session`, `saved` or empty) and `can_remember`; no reply, error
+message or log line contains the key, and neither method contacts the provider. Both are absent from
+the script catalog.
 
 Recent locations are bridge preferences (`recent-projects.json`, version 1), at most 20 entries in
 most-recently-opened order. Creating/opening successfully remembers canonical directory, project UUID,

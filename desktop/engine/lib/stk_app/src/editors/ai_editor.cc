@@ -14,6 +14,7 @@
 #include <cmath>
 #include <limits>
 #include <unordered_map>
+#include <utility>
 
 namespace stk::app {
 namespace {
@@ -271,12 +272,34 @@ class AIEditor final : public Editor {
     }, {.max_length = 128});
     model_has_text_ = ctx.ui && ctx.ui->editing() == model.id && ctx.ui->edit_state() ?
         !ctx.ui->edit_state()->text().empty() : !draft.model.empty();
-    const bool configured = discussion.provider().value("configured", false);
-    box.paragraph(ctx.tr(configured ? "ai.configured" : "ai.missing_key"));
+    const auto &provider = discussion.provider();
+    const bool configured = provider.value("configured", false);
+    const auto source = io::get_string(provider, "key_source");
+    box.paragraph(ctx.tr(!configured ? "ai.missing_key" : source == "environment" ? "ai.key.environment" :
+                         source == "saved" ? "ai.key.saved" : source == "session" ? "ai.key.session" : "ai.configured"));
     box.button("ai_provider_refresh", ctx.tr("discussion.requests.provider_refresh"), [&discussion, &state, handle = state.project()->handle] {
       if (state.project() && state.project()->handle == handle) { discussion.load_provider(); }
     })
         .disable(state.busy() || discussion.busy());
+    if (!discussion.key_settings_supported() || provider.empty()) { return; }
+    if (auto *keys = box.panel("ai_key_settings", ctx.tr("ai.key.title"), !configured)) {
+      // The key goes to the local Python service only and is cleared from this field once handed over.
+      auto &field = keys->text_field("ai_key", ui::bind(key_text_), {
+          .placeholder = std::string(ctx.tr("ai.key.placeholder")), .max_length = 4096, .password = true});
+      const bool key_typed = ctx.ui && ctx.ui->editing() == field.id && ctx.ui->edit_state() ?
+          !ctx.ui->edit_state()->text().empty() : !key_text_.empty();
+      keys->checkbox("ai_key_remember", ctx.tr("ai.key.remember"), ui::bind(key_remember_))
+          .disable(!provider.value("can_remember", false));
+      auto &row = keys->row();
+      row.button("ai_key_save", ctx.tr("ai.key.save"), [this, &discussion] {
+        const auto key = std::exchange(key_text_, std::string());
+        if (!key.empty()) { discussion.set_key(key, key_remember_); }
+      }).disable(discussion.busy() || !key_typed);
+      row.button("ai_key_clear", ctx.tr("ai.key.clear"), [&discussion] { discussion.clear_key(); })
+          .disable(discussion.busy() || (source != "session" && source != "saved"));
+      if (source == "environment") { keys->paragraph(ctx.tr("ai.key.environment_wins")); }
+      keys->paragraph(ctx.tr("ai.key.hint"));
+    }
   }
 
   void conversation(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
@@ -481,6 +504,8 @@ class AIEditor final : public Editor {
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
   bool model_has_text_ = false;
+  std::string key_text_;
+  bool key_remember_ = false;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::string proposal_navigation_error_, proposal_navigation_request_;
   std::shared_ptr<const CapturedProjectTable> captured_;

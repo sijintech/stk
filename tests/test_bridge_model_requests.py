@@ -165,7 +165,8 @@ def test_missing_credentials_status_and_closed_handles_never_claim(inproc, model
     store, _ = model
     before, history = store.snapshot(), store.history()
     assert p.requests.provider() == {'adapter': ALIYUN_ADAPTER, 'base_url': BASE_URL,
-        'key_env': API_KEY_ENV, 'model_env': MODEL_ENV, 'configured': False, 'model': 'fixture-model'}
+        'key_env': API_KEY_ENV, 'model_env': MODEL_ENV, 'configured': False, 'model': 'fixture-model',
+        'key_source': '', 'can_remember': True}
     error = h.error('project.requests.start', {'handle': p.handle, 'request_id': saved['id']})
     assert error['code'] == 'invalid_params'
     assert p.requests.get(saved['id']) == saved
@@ -254,7 +255,7 @@ from suan.scripting import ScriptError
 p = stk.project
 provider = p.requests.provider()
 assert provider['adapter'] == 'aliyun-token-plan/1'
-assert set(provider) == {'adapter','base_url','key_env','model_env','configured','model'}
+assert set(provider) == {'adapter','base_url','key_env','model_env','configured','model','key_source','can_remember'}
 s = p.snapshot()
 t = s['tables'][0]
 c = p.contexts.capture(t['id'], [t['records'][0]['id']], [t['fields'][0]['id']],

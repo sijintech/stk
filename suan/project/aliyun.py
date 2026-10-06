@@ -10,9 +10,12 @@ import hashlib
 import http.client
 import json
 import os
+from pathlib import Path
 import re
 import ssl
+import threading
 import time
+import uuid
 
 from .contexts import _encode
 from .discussion import MAX_TEXT_BYTES, _message_text
@@ -68,26 +71,102 @@ _PARAMETER_EDITS_SYSTEM = (
 _SYSTEMS = {PROMPT_VERSION: _SYSTEM, PARAMETER_EDITS_PROMPT_VERSION: _PARAMETER_EDITS_SYSTEM}
 
 
+class TokenPlanCredentials:
+    """Where the Token Plan key comes from, in order: the ``STK_TOKEN_PLAN_API_KEY`` environment
+    variable (always wins), a key set in the app for this service session, or a key the user asked
+    this computer to remember (``token-plan-key.json``, mode 0600, in the service's private state
+    folder). The key leaves this object only to authorize a prepared request; reports, reprs,
+    errors and logs never contain it. Without a state folder nothing can be remembered.
+    """
+
+    FILE = "token-plan-key.json"
+
+    def __init__(self, state_dir=None):
+        self._path = Path(state_dir) / self.FILE if state_dir else None
+        self._session = ""
+        self._lock = threading.Lock()
+
+    def __repr__(self):
+        return "TokenPlanCredentials(<redacted>)"
+
+    def _saved(self):
+        if self._path is None:
+            return ""
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        value = data.get("key") if isinstance(data, dict) else None
+        return value if isinstance(value, str) and _KEY.fullmatch(value) else ""
+
+    def _resolve(self):
+        environment = os.environ.get(API_KEY_ENV, "")
+        if environment:
+            return "environment", environment
+        with self._lock:
+            if self._session:
+                return "session", self._session
+        saved = self._saved()
+        return ("saved", saved) if saved else ("", "")
+
+    def get(self):
+        _, value = self._resolve()
+        if not _KEY.fullmatch(value):
+            raise ProjectError(f"Set the Alibaba Token Plan key in the AI Assistant, or {API_KEY_ENV} before starting STK")
+        return value
+
+    def info(self):
+        source, value = self._resolve()
+        return {"configured": bool(_KEY.fullmatch(value)), "source": source, "can_remember": self._path is not None}
+
+    def set(self, key, remember=False):
+        if not isinstance(key, str) or not _KEY.fullmatch(key):
+            raise ProjectError("The key must be 16 to 4096 letters, digits or the characters . _ ~ -")
+        if remember and self._path is None:
+            raise ProjectError("This service has no private state folder in which to remember the key")
+        with self._lock:
+            self._session = "" if remember else key  # A remembered key is read back from its file.
+            if remember:
+                self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                tmp = self._path.with_name(f"{self.FILE}.{uuid.uuid4().hex}.tmp")
+                try:
+                    descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+                    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                        json.dump({"format": 1, "key": key}, stream)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(tmp, self._path)
+                finally:
+                    tmp.unlink(missing_ok=True)
+            elif self._path is not None:
+                self._path.unlink(missing_ok=True)  # Not remembering also forgets an older saved key.
+        return self.info()
+
+    def clear(self):
+        with self._lock:
+            self._session = ""
+            if self._path is not None:
+                self._path.unlink(missing_ok=True)
+        return self.info()
+
+
+_ENVIRONMENT_ONLY = TokenPlanCredentials()
+
+
 def _credential():
-    value = os.environ.get(API_KEY_ENV, "")
-    if not _KEY.fullmatch(value):
-        raise ProjectError(f"Configure a valid {API_KEY_ENV} before starting a model request")
-    return value
+    return _ENVIRONMENT_ONLY.get()
 
 
-def provider_info():
+def provider_info(credentials=None):
     """Report local configuration presence, never authentication or network health."""
-    try:
-        _credential()
-        configured = True
-    except ProjectError:
-        configured = False
+    key = (credentials or _ENVIRONMENT_ONLY).info()
     try:
         model = _identifier(os.environ.get(MODEL_ENV, ""), "model")
     except ProjectError:
         model = ""
     return {"adapter": ALIYUN_ADAPTER, "base_url": BASE_URL, "key_env": API_KEY_ENV,
-            "model_env": MODEL_ENV, "configured": configured, "model": model}
+            "model_env": MODEL_ENV, "configured": key["configured"], "model": model,
+            "key_source": key["source"], "can_remember": key["can_remember"]}
 
 
 def _payload(frozen_input):
@@ -430,10 +509,13 @@ class _Prepared:
 
 
 class AliyunTokenPlanAdapter:
+    def __init__(self, credentials=None):
+        self._credentials = credentials or _ENVIRONMENT_ONLY
+
     def prepare(self, frozen_input):
         """Validate locally and bind credentials before the durable claim."""
         payload, stream_payload, digest = _payload(frozen_input)
-        return _Prepared(_credential(), payload, stream_payload, digest)
+        return _Prepared(self._credentials.get(), payload, stream_payload, digest)
 
     def send(self, frozen_input, cancel_event):
         return self.prepare(frozen_input).send(frozen_input, cancel_event)

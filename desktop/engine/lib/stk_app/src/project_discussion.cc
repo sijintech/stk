@@ -145,6 +145,43 @@ bool ProjectDiscussion::load_provider()
   return accepted;
 }
 
+bool ProjectDiscussion::key_settings_supported() const
+{
+  const auto *client = store_.bridge();
+  const auto hello = client ? client->hello_info() : std::nullopt;
+  return hello && hello->has_method("ai.credentials.set") && hello->has_method("ai.credentials.clear");
+}
+
+bool ProjectDiscussion::set_key(std::string key, const bool remember)
+{
+  return credentials("ai.credentials.set", {{"key", std::move(key)}, {"remember", remember}});
+}
+
+bool ProjectDiscussion::clear_key() { return credentials("ai.credentials.clear", Json::object()); }
+
+bool ProjectDiscussion::credentials(const std::string &method, Json params)
+{
+  if (!key_settings_supported() || busy_) { return false; }
+  busy_ = true;
+  error_.clear();
+  std::weak_ptr<bool> weak = alive_;
+  const auto epoch = epoch_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  store_.bridge()->call(method, std::move(params), options).then([this, weak, epoch](bridge::Result<Json> result) {
+    if (!weak.lock() || epoch != epoch_) { return; }
+    busy_ = false;
+    // The service's replies and messages never contain the key, so they can be shown and logged.
+    if (!result.ok()) { error_ = result.error().message; store_.log(error_); }
+    else { provider_ = result.value().at("provider"); provider_loaded_ = true; }
+    ++version_;
+    store_.changed();
+  });
+  ++version_;
+  store_.changed();
+  return true;
+}
+
 bool ProjectDiscussion::create_request(const std::string &model)
 {
   if (!generation_supported() || busy_ || project_.busy() || provider_.empty() || message_.empty() ||

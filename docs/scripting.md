@@ -272,7 +272,7 @@ next_offset = chunk["next_offset"]
 
 - Python `print`、异常堆栈进入最多 1 Mi 个 Unicode 字符的输出环；`script.read` 使用**字符偏移**，
   与 Runtime 日志的字节偏移不同。落后于环头会返回 `truncated=true` 和可用起点。
-- 原生扩展的文件描述符输出、子进程输出进入 Bridge log；协议使用私有管道，不被这些输出占用。
+- 原生扩展的文件描述符输出、子进程输出进入 Service log；协议使用私有管道，不被这些输出占用。
 - worker 中断或崩溃会丢失变量；下一次执行创建新 worker。`script.interrupt` 在空闲时也可用于重置。
   桥重启后整个 Python 会话失效，不重放源码。显式关闭会话也不会关闭项目或取消 Runtime 任务。
 - 中断会停止脚本 worker 及其普通子进程。已经交给桥/UI 的操作可能已完成或仍在收尾，

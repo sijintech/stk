@@ -18,6 +18,9 @@ legacy = sys.argv.pop(1) == "legacy"
 
 
 class ControlledAdapter:
+    def __init__(self, credentials=None):
+        self.credentials = credentials  # The real adapter's key source; this fake never reads it.
+
     def send_stream(self, frozen_input, cancel, on_text):
         def wait(step):
             deadline = time.monotonic() + 45
@@ -44,7 +47,7 @@ class ControlledAdapter:
 
 projects.AliyunTokenPlanAdapter = ControlledAdapter
 original_provider = projects.provider_info
-projects.provider_info = lambda: {**original_provider(), "configured": True}
+projects.provider_info = lambda credentials=None: {**original_provider(credentials), "configured": True}
 
 if legacy:
     from suan.desktop_bridge import server

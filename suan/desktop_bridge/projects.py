@@ -13,7 +13,7 @@ from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 from suan.project.analyses import AnalysisNotFound
 from suan.project.analysis_runs import AnalysisRunNotFound
-from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, provider_info
+from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, TokenPlanCredentials, provider_info
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
 from .protocol import BridgeError
@@ -26,7 +26,8 @@ class ProjectSessions:
         self._lock = threading.RLock()
         self._stores = {}
         self._closed = False
-        self._executor = RequestExecutor({ALIYUN_ADAPTER: AliyunTokenPlanAdapter()})
+        self._credentials = TokenPlanCredentials(state_dir)
+        self._executor = RequestExecutor({ALIYUN_ADAPTER: AliyunTokenPlanAdapter(self._credentials)})
         self._analysis_executor = analysis_executor
 
     @contextmanager
@@ -133,6 +134,15 @@ class ProjectSessions:
             store = self._get(params["handle"])
             return store.apply(params["commands"], expected_revision=params["expected_revision"])
 
+    def credentials(self, action, params):
+        """Set or forget the Token Plan key; replies report only where a key comes from."""
+        with self._errors():
+            if action == "set":
+                self._credentials.set(params["key"], remember=params.get("remember", False))
+            else:
+                self._credentials.clear()
+            return {"provider": provider_info(self._credentials)}
+
     def sweep_plan(self, params):
         from suan.project.sweep import plan_sweep
         with self._operation():
@@ -229,7 +239,7 @@ class ProjectSessions:
             if action == "provider":
                 if store.info()["format_version"] < 8:
                     raise UnsupportedProjectFormat("Upgrade this project before using model requests")
-                return {"provider": provider_info()}
+                return {"provider": provider_info(self._credentials)}
             if action in {"start", "cancel", "recover"}:
                 return {"request": getattr(self._executor, action)(store, params["request_id"])}
             if action == "progress":

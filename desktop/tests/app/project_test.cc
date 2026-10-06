@@ -872,6 +872,62 @@ TEST_F(ProjectScope, PaginatedSelectionRejectsOversizeProductThenAllowsExplicitS
   EXPECT_EQ(state().project()->revision, 2);
 }
 
+TEST_F(ProjectPython, AIKeySetInTheAppIsUsedForTheSessionOrRememberedAndNeverShownOrLogged)
+{
+  populated();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area);
+  ai_frame();
+  auto &discussion = state().discussion();
+  const auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  ASSERT_TRUE(discussion.key_settings_supported());
+  ASSERT_TRUE(loop.pump_until([&] { ai_frame(); return discussion.provider_loaded() && !discussion.busy(); }, 30));
+  EXPECT_FALSE(discussion.provider().value("configured", true));
+  ASSERT_NE(widget("ai_key_settings/ai_key"), nullptr) << "The key panel opens while no key is set.";
+  EXPECT_FALSE(widget("ai_key_settings/ai_key_save")->enabled);
+  EXPECT_FALSE(widget("ai_key_settings/ai_key_clear")->enabled);
+  const std::string session_key = "placeholder-session-key-0101", saved_key = "placeholder-saved-key-0202";
+  widget("ai_key_settings/ai_key")->string.assign(session_key); ai_frame();
+  ASSERT_TRUE(widget("ai_key_settings/ai_key_save")->enabled);
+  widget("ai_key_settings/ai_key_save")->on_click(); ai_frame();
+  ASSERT_TRUE(loop.pump_until([&] { ai_frame(); return !discussion.busy(); }, 30));
+  EXPECT_TRUE(discussion.error().empty()) << discussion.error();
+  EXPECT_TRUE(discussion.provider().value("configured", false));
+  EXPECT_EQ(discussion.provider().value("key_source", ""), "session");
+  ASSERT_NE(widget("ai_key_settings/ai_key"), nullptr);
+  EXPECT_TRUE(widget("ai_key_settings/ai_key")->string.value().empty());  // Handed over, not kept in the field.
+  const auto key_file = core::path_from_utf8(dir.str() + "/bridge/token-plan-key.json");
+  EXPECT_FALSE(std::filesystem::exists(key_file));
+
+  widget("ai_key_settings/ai_key_remember")->boolean.assign(true);
+  widget("ai_key_settings/ai_key")->string.assign(saved_key); ai_frame();
+  widget("ai_key_settings/ai_key_save")->on_click();
+  ASSERT_TRUE(loop.pump_until([&] { ai_frame(); return !discussion.busy(); }, 30));
+  EXPECT_EQ(discussion.provider().value("key_source", ""), "saved");
+  ASSERT_TRUE(std::filesystem::exists(key_file));
+#ifndef _WIN32
+  EXPECT_EQ(std::filesystem::status(key_file).permissions() & std::filesystem::perms::all,
+            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+#endif
+  ASSERT_TRUE(widget("ai_key_settings/ai_key_clear")->enabled);
+  widget("ai_key_settings/ai_key_clear")->on_click();
+  ASSERT_TRUE(loop.pump_until([&] { ai_frame(); return !discussion.busy(); }, 30));
+  EXPECT_FALSE(discussion.provider().value("configured", true));
+  EXPECT_FALSE(std::filesystem::exists(key_file));
+  // Neither key appears in the service log, the app log or anything the bridge replied.
+  const auto log = client->bridge_log().text();
+  EXPECT_EQ(log.find(session_key), std::string::npos);
+  EXPECT_EQ(log.find(saved_key), std::string::npos);
+  for (auto *buffer : {&f.shell->store().app_log(), &f.shell->store().bridge_log()}) {
+    for (size_t i = 0; i < buffer->line_count(); ++i) {
+      const std::string line(buffer->line(i));
+      EXPECT_EQ(line.find("placeholder-"), std::string::npos) << line;
+    }
+  }
+  EXPECT_EQ(discussion.provider().dump().find("placeholder-"), std::string::npos);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
 {
   populated();

@@ -32,7 +32,7 @@
 
 ```mermaid
 flowchart TD
-    AI[AI 工作区] --> API[统一项目查询与修改接口]
+    AI[AI 助手] --> API[统一项目查询与修改接口]
     Table[表格与参数面板] --> API
     Graph[分层节点编辑器] --> API
     View[结果与文档视图] --> API

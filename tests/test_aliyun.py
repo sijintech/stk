@@ -156,7 +156,8 @@ def test_factory_uses_fixed_verified_https_endpoint_and_disables_debug(monkeypat
 def test_provider_info_is_presence_only_with_no_credential_or_model_guess(monkeypatch):
     assert aliyun.provider_info() == {"adapter": aliyun.ALIYUN_ADAPTER, "base_url": aliyun.BASE_URL,
                                      "key_env": aliyun.API_KEY_ENV, "model_env": aliyun.MODEL_ENV,
-                                     "configured": True, "model": ""}
+                                     "configured": True, "model": "", "key_source": "environment",
+                                     "can_remember": False}
     monkeypatch.setenv(aliyun.MODEL_ENV, "provider/model-v1")
     assert aliyun.provider_info()["model"] == "provider/model-v1"
     monkeypatch.setenv(aliyun.MODEL_ENV, "https://bad-model/")

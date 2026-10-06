@@ -10,7 +10,7 @@ The scripts prepare dependencies and a Python venv, compile the main executable 
 
 The [development plan](../docs/development-plan.md), [project workbench design](../docs/design/project-workbench.md)
 and [project model proposal](../docs/design/project-model.md) define the next development stages (Chinese).
-They distinguish shipped features from the planned workbench. **File → Workspace** opens project
+They distinguish shipped features from the planned workbench. **File → Home** opens project
 navigation to the existing AI, file, table, saved-analysis and run views. SQLite tables, formulas,
 AI requests and saved analysis runs are implemented; hierarchical workflows, the unified skill
 catalog and rich document previews remain planned. See [the desktop guide](../docs/desktop.md)
@@ -27,9 +27,9 @@ Legacy M-D2 references below map to the platform and distribution work in that p
 | `engine/lib/stk_core`, `stk_io`, `stk_viewer_model` | CPU-only libraries (no GHOST/GPU headers): UTF-8, paths, logging, payload/JSON/schema models, PNG I/O, viewer maths. |
 | `engine/lib/stk_gfx` | GPU bootstrap: process runtime (guardedalloc leak detection), backend selection, main GPU context, font stack, UI scale, offscreen render to PNG. |
 | `engine/lib/stk_wm` | GHOST glue: window manager, windows, on-demand event loop, events (keys, mouse, wheel, IME preedit, drag and drop), DPI, clipboard, cursors; `WindowManager::post` / `executor()` (thread-safe work for the main loop, wakes an idle wait). Screen model (`screen.hh`): a tree of areas with draggable splitters and minimum sizes, split / join / maximize, docked regions (header, toolbar, sidebar, main) and global bars; one `stk_ui` context per window (a block per region, overlays on top, IME placement, wake-up timers); `ui_bridge.hh` (event adapter, clipboard, `UiRegion`); `layout_store.hh` (versioned layout JSON); `csd.hh` (GNOME client-side decorations). |
-| `engine/lib/stk_bridge` | Client of the Python bridge (`python -m suan.desktop_bridge --stdio`, `docs/specs/stk-desktop-bridge-v1.md`): spawn (posix_spawn + process group; CreateProcessW + job object), strict NDJSON framing, futures with timeout / cancel, typed wrappers, RAII subscriptions, restart with replay, stderr ring for the "Bridge log". CPU only. |
+| `engine/lib/stk_bridge` | Client of the Python bridge (`python -m suan.desktop_bridge --stdio`, `docs/specs/stk-desktop-bridge-v1.md`): spawn (posix_spawn + process group; CreateProcessW + job object), strict NDJSON framing, futures with timeout / cancel, typed wrappers, RAII subscriptions, restart with replay, stderr ring for the "Service log". CPU only. |
 | `engine/lib/stk_viewer_gpu` | Payload-v2 viewer on the GPU module: lit LUT-coloured triangles, slices, instanced glyphs, lines, points and sphere impostors, ray-marched volumes; overlays through BLF (scalar bar, legend, orientation sphere, triad, text); GPU id-pass picking refined in float64; tiled PNG export x1-x8; GPU budget, LOD and timestep prefetch. |
-| `engine/lib/stk_app` | Application shell (`shell.hh`: top bar with File / View / Language / UI scale menus, status bar, default layout, layout files, shortcuts), `AppStore`, editor registry and `EditorArea` (tabs, header, toolbar / sidebar, area menu); the WP9 editors Jobs, Transfers, Logs and Bridge log (`jobs_state.hh`: `JobsState`, the model and controller behind them, `AppStore::jobs()`; `jobs_spec.hh`: the submit form with the Runtime `TaskSpec` rules; `src/editors/jobs_*.cc`); the WP10 Viewer, Properties and Probe editors (`src/editors/viewer_*.cc`) on `ViewerState` (`viewer_state.hh`: the shown result, shared by them) and `viewer_export.hh` (PNG / sequence export). |
+| `engine/lib/stk_app` | Application shell (`shell.hh`: top bar with File / View / Language / UI scale menus, status bar, default layout, layout files, shortcuts), `AppStore`, editor registry and `EditorArea` (tabs, header, toolbar / sidebar, area menu); the WP9 editors Jobs, Transfers, Logs and Service log (`jobs_state.hh`: `JobsState`, the model and controller behind them, `AppStore::jobs()`; `jobs_spec.hh`: the submit form with the Runtime `TaskSpec` rules; `src/editors/jobs_*.cc`); the WP10 Viewer, Properties and Probe editors (`src/editors/viewer_*.cc`) on `ViewerState` (`viewer_state.hh`: the shown result, shared by them) and `viewer_export.hh` (PNG / sequence export). |
 | `engine/lib/stk_platform` | File dialogs (`file_dialog.hh`: native through `zenity` / `kdialog` on Linux, none yet on macOS / Windows, where editors fall back to an in-app path field; `split_path_list` parses what is typed or pasted there) and `open_with_system` (xdg-open / open in its own session). CPU only. |
 | `engine/lib/stk_ui` | Blender-style UI toolkit. `stk_ui_core` (no GPU/GHOST headers): blocks rebuilt per frame, layouts in UI units, widgets bound by getter/setter closures, Blender dark theme, CJK line breaking, text editing with IME preedit, i18n catalogs, JSON Schema forms, draw lists. `stk_ui_gpu`: painter on the GPU module's widget shader + BLF. Also adds `tests/ui` and `tools/widget_gallery`. |
 | `app/` | `stk-desktop` (GUI and `--headless` export of the application screen; `--sample` renders the WP1 sample frame). `app/i18n/`: `zh_CN.json` (default) / `en.json` message catalogs and `check_i18n.py` (fails on missing keys). |
@@ -90,8 +90,8 @@ stk-desktop --version | --help
 
 The window shows a top bar (menus File / View / Language / UI scale, title), a tree of areas and a
 status bar (bridge state, connection, hints). The default layout is Jobs | Viewer | Properties over
-a bottom strip with the tabs Logs / Probe / Transfers / Bridge log (WP9: Jobs, Logs, Transfers and
-Bridge log; WP10: Viewer, Properties and Probe; see below).
+a bottom strip with the tabs Logs / Probe / Transfers / Service log (WP9: Jobs, Logs, Transfers and
+Service log; WP10: Viewer, Properties and Probe; see below).
 
 - Areas: drag a splitter to resize (minimum sizes hold, the other areas keep their size),
   double-click it to join the two areas beside it (the larger stays). The area menu (header button
@@ -120,7 +120,7 @@ Bridge log; WP10: Viewer, Properties and Probe; see below).
   disables saving; `--save-layout FILE` writes the (headless: rendered) layout.
 - Bridge: the GUI starts the Python bridge (stk_bridge; `--no-bridge` disables it, `--python PATH`
   or `STK_PYTHON` picks the interpreter; development builds add the source tree to its
-  `PYTHONPATH`). `stk::app::BridgeStatus` mirrors the client into the status bar and the Bridge log
+  `PYTHONPATH`). `stk::app::BridgeStatus` mirrors the client into the status bar and the Service log
   editor: state changes arrive through `WindowManager::executor()` on the main loop, the stderr ring
   is copied by a main-loop timer.
 - Client-side decorations: GNOME on Wayland draws no title bars. Blender 5.2's GHOST no longer uses
@@ -174,7 +174,7 @@ client's executor and are dropped once the connection, workspace or task changed
 - Hub review: actions in review; Inspect (full request) before Approve; the hub's `review_policy`
   refusal is explained; after a bridge restart the action is read again before approving.
 - Transfers: every journaled transfer with progress, resume and cancel. Logs: the application log.
-  Bridge log: the bridge's stderr, its state and a Restart after it failed.
+  Service log: the bridge's stderr, its state and a Restart after it failed.
 - Closing the app never stops jobs: detaching drops subscriptions; the bridge gets EOF (no cancel).
 
 ### Viewer, Properties and Probe (WP10)

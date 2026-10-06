@@ -84,7 +84,7 @@ PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真�
 [桌面程序指南](docs/desktop.md)，验收见 [验收记录](docs/runtime-validation.md)，开发与打包见
 [`desktop/README.md`](desktop/README.md)。
 
-后续方向与阶段验收见[开发计划](docs/development-plan.md)：AI 工作区、分层节点编辑器和通用多维表格
+后续方向与阶段验收见[开发计划](docs/development-plan.md)：AI 助手、分层节点编辑器和通用多维表格
 共用 SQLite 项目模型。产品约定见[项目工作台设计](docs/design/project-workbench.md)，
 技术提案见[项目数据模型](docs/design/project-model.md)；已交付基础与后续目标以开发计划中的状态为准。
 用户已反馈 macOS / Windows 均能打开窗口并看到 3D 渲染，范围见[补充验收记录](docs/runtime-validation.md#desktop-mac-windows-smoke)。
@@ -92,7 +92,7 @@ PNG／序列导出）在 Linux（X11、Wayland；OpenGL、Vulkan）上通过真�
 进行增量编译。Python 面板支持多行运行、中断、文件执行以及项目/Runtime/布局 API；其他功能的统一脚本覆盖仍在推进。
 项目文件可登记、跳转 VSCode，并显式保存和校验[不可变输入副本](docs/project-snapshots.md)。
 项目编辑器的[讨论页](docs/project-contexts.md)可保存选定数据的上下文、文字消息及修改草案来源；
-原生 AI 工作区已接入明确准备/发送、流式文字回复，以及捕获范围内的[模型参数建议](docs/project-parameter-edits.md)。
+原生 AI 助手已接入明确准备/发送、流式文字回复，以及捕获范围内的[模型参数建议](docs/project-parameter-edits.md)。
 建议须另行保存、预览并明确应用；保存和恢复讨论不会执行代码或提交计算，通用 AI 工具执行仍待开发。
 分析图可保存定义、精确编辑参数与请求输出，并通过[本机分析运行](docs/project-analysis-runs.md)冻结输入、明确执行和校验归档。
 历史图独立保留，内联科学表格可分页或按源坐标定位，查看类型、单位和精确值；保存分析可明确替换单输入连线并经校验后保存；增删节点、多输入编辑与大表 blob 读取仍待开发。

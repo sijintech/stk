@@ -5394,6 +5394,17 @@
                 },
                 "configured": {
                   "type": "boolean"
+                },
+                "key_source": {
+                  "enum": [
+                    "",
+                    "environment",
+                    "session",
+                    "saved"
+                  ]
+                },
+                "can_remember": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -6104,6 +6115,136 @@
             "plan",
             "revision"
           ]
+        }
+      },
+      "ai.credentials.set": {
+        "description": "Set the Alibaba Token Plan key for this service session, optionally remembered in a private (0600) file in the service state folder. The STK_TOKEN_PLAN_API_KEY environment variable still takes precedence. Replies and errors never contain the key; nothing is sent to the provider.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "remember": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "object",
+              "properties": {
+                "adapter": {
+                  "type": "string"
+                },
+                "base_url": {
+                  "type": "string"
+                },
+                "key_env": {
+                  "type": "string"
+                },
+                "model_env": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "configured": {
+                  "type": "boolean"
+                },
+                "key_source": {
+                  "enum": [
+                    "",
+                    "environment",
+                    "session",
+                    "saved"
+                  ]
+                },
+                "can_remember": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "adapter",
+                "base_url",
+                "key_env",
+                "model_env",
+                "model",
+                "configured"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "ai.credentials.clear": {
+        "description": "Forget the key set in the app for this session and any remembered key file. A key from the environment is unaffected.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "object",
+              "properties": {
+                "adapter": {
+                  "type": "string"
+                },
+                "base_url": {
+                  "type": "string"
+                },
+                "key_env": {
+                  "type": "string"
+                },
+                "model_env": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "configured": {
+                  "type": "boolean"
+                },
+                "key_source": {
+                  "enum": [
+                    "",
+                    "environment",
+                    "session",
+                    "saved"
+                  ]
+                },
+                "can_remember": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "adapter",
+                "base_url",
+                "key_env",
+                "model_env",
+                "model",
+                "configured"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "additionalProperties": false
         }
       }
     },

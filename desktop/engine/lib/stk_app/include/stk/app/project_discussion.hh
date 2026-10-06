@@ -41,6 +41,14 @@ class ProjectDiscussion {
   bool load_request(const std::string &id);
   bool cancel_request(const std::string &id);
   bool load_provider();
+  /** Whether the Python service accepts a Token Plan key from the app (ai.credentials.*). */
+  bool key_settings_supported() const;
+  /** Hand the key to the Python service for its session, or remember it on this computer (a
+   * private file in the service's state folder). The key travels only in this request and is not
+   * kept here; the reply, errors and logs only say where a key comes from. Never sends to the provider. */
+  bool set_key(std::string key, bool remember);
+  /** Forget the key set in the app and any remembered key; an environment key is unaffected. */
+  bool clear_key();
   bool create_request(const std::string &model);
   bool start_request(const std::string &id);
   bool recover_request(const std::string &id);
@@ -100,6 +108,7 @@ class ProjectDiscussion {
   io::Json generation_request_ = io::Json::object();
   io::Json provider_ = io::Json::object();
   bool provider_loaded_ = false;
+  bool credentials(const std::string &method, io::Json params);
   io::Json exchange_request_ = io::Json::object(), exchange_context_ = io::Json::object();
   io::Json exchange_question_ = io::Json::object(), exchange_reply_ = io::Json::object();
   io::Json exchange_progress_ = io::Json::object();

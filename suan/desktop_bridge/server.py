@@ -236,6 +236,8 @@ class Bridge:
             "project.requests.list": lambda p, c: self.projects.requests("list", p),
             "project.requests.cancel": lambda p, c: self.projects.requests("cancel", p),
             "project.requests.provider": lambda p, c: self.projects.requests("provider", p),
+            "ai.credentials.set": lambda p, c: self.projects.credentials("set", p),
+            "ai.credentials.clear": lambda p, c: self.projects.credentials("clear", p),
             "project.requests.start": lambda p, c: self.projects.requests("start", p),
             "project.requests.recover": lambda p, c: self.projects.requests("recover", p),
             "project.history": lambda p, c: self.projects.history(p),
