@@ -5,6 +5,7 @@ from conftest import finish
 from mupro_fake import make_fake_sdk, write_case
 from suan.workflows.batches import TABLE_ID as BATCH_TABLE, FIELD_IDS as BATCH_FIELDS
 from suan.workflows.muferro import TABLE_ID, FIELD_IDS, RESULT_TABLE_ID, native_action
+from suan.workflows.templates import TEMPLATES
 from test_workflow_muferro import project, scripts, bridge_env, revision, edit  # noqa: F401
 from test_desktop_bridge_runtime import add_profile
 
@@ -115,6 +116,41 @@ def test_batch_partial_preparation_reopen_submit_cancel_retry_and_collect(batch_
     assert len(client.tasks()) == 4
     assert len(next(t for t in p.snapshot()['tables'] if t['id'] == RESULT_TABLE_ID)['records']) == 3
     assert api.batches.inspect(batch)['items'] != api.batches.inspect(retry)['items']
+
+
+@pytest.mark.server
+def test_run_creates_prepares_and_submits_only_prepared_rows_once(batch_runtime, monkeypatch):
+    api, p, client, supervisor, connection, members = batch_runtime
+    adapter = TEMPLATES['muferro/1']
+    original = type(adapter).prepare
+
+    def prepare(self, stk, project, record_id, *args):
+        if record_id == members[2]:
+            raise ValueError('input generation failed')
+        return original(self, stk, project, record_id, *args)
+
+    monkeypatch.setattr(type(adapter), 'prepare', prepare)
+    with pytest.raises(ValueError, match='Project changed'):
+        api.batches.run('muferro/1', members, connection, expected_revision=revision(p) - 1, options={'launcher': 'none'})
+    assert not client.tasks() and p.runs.list()['runs'] == []
+    result = native_action(api, 'batch_run', {'project_id': p.snapshot()['project']['id'], 'template_id': 'muferro/1',
+                                              'record_ids': members, 'connection': connection,
+                                              'expected_revision': revision(p), 'options': {'launcher': 'none'}})
+    assert not result['ok']
+    assert sum(i['ok'] for i in result['prepare']['items']) == 2
+    assert sorted(i['record_id'] for i in result['submit']['items']) == sorted(members[:2])
+    assert all(i['ok'] for i in result['submit']['items'])
+    assert len(client.tasks()) == 2
+    items = {i['record_id']: i for i in api.batches.inspect(result['id'])['items']}
+    assert items[members[2]]['state'] == 'unprepared'
+    assert 'input generation failed' in items[members[2]]['last_operation']['error']
+    # Running the same rows again reuses the batch, its plans and accepted tasks: nothing is duplicated.
+    monkeypatch.setattr(type(adapter), 'prepare', original)
+    again = api.batches.run('muferro/1', members, connection, expected_revision=revision(p), options={'launcher': 'none'})
+    assert again['ok'] and again['id'] == result['id']
+    assert len(client.tasks()) == 3 and len(p.runs.list()['runs']) == 3
+    for item in api.batches.inspect(again['id'])['items']:
+        assert finish(client, supervisor, item['task_id'])['state'] == 'succeeded'
 
 
 @pytest.mark.server

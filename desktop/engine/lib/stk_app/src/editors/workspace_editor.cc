@@ -17,18 +17,6 @@ namespace {
 constexpr const char *kAnalysesTable = "a32844df-b03d-576b-a200-c7080ae8e97e";
 constexpr const char *kFilesTable = "becb9ec9-1a27-5d31-8aa3-5402f09f43a9";
 
-const char *health_key(const Health health)
-{
-  switch (health) {
-    case Health::Online: return "workspace.health.online";
-    case Health::Checking: return "workspace.health.checking";
-    case Health::Degraded: return "workspace.health.degraded";
-    case Health::Offline: return "workspace.health.offline";
-    case Health::Unknown: break;
-  }
-  return "workspace.health.unknown";
-}
-
 class WorkspaceEditor final : public Editor {
  public:
   explicit WorkspaceEditor(const EditorType &type) : Editor(type) {}

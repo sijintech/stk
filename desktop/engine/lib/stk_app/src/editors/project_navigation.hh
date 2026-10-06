@@ -2,6 +2,7 @@
 #pragma once
 
 #include "stk/app/editor_area.hh"
+#include "stk/app/jobs_state.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/shell.hh"
 
@@ -36,6 +37,19 @@ inline std::function<void()> editor_navigation_action(EditorContext &ctx, std::s
       return !weak.expired() && &area->editor() == editor;
     });
   };
+}
+
+/** Catalog key for a connection's health in plain words (workspace.health.*). */
+inline const char *health_key(const Health health)
+{
+  switch (health) {
+    case Health::Online: return "workspace.health.online";
+    case Health::Checking: return "workspace.health.checking";
+    case Health::Degraded: return "workspace.health.degraded";
+    case Health::Offline: return "workspace.health.offline";
+    case Health::Unknown: break;
+  }
+  return "workspace.health.unknown";
 }
 
 inline void workspace_link(ui::Layout &row, EditorContext &ctx)

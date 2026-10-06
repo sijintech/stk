@@ -196,7 +196,33 @@ class Batches:
                 "ok": all(item["ok"] for item in results)}
 
 
+    def run(self, template_id, record_ids, connection, *, expected_revision, options=None, project=None):
+        """One explicit "run these rows": save (or reuse) the batch, prepare every member, submit the prepared ones.
+
+        The batch is created at ``expected_revision`` and prepared at the revision that creation
+        returned. Submission then follows at the revision preparation left: every member is checked
+        against the frozen batch intent, so later edits of its parameters are refused, never adopted.
+        Members that failed to prepare are not submitted; their errors stay in the batch outcomes.
+        Accepted tasks are not waited for, refreshed or collected here.
+        """
+        p = project or self.stk.project
+        created = self.create(template_id, record_ids, connection, expected_revision=expected_revision,
+                              options=options, project=p)
+        prepared = self.execute(created["id"], "prepare", expected_revision=created["revision"], project=p)
+        ready = [item["record_id"] for item in prepared["items"] if item["ok"]]
+        submitted = None
+        if ready:
+            submitted = self.execute(created["id"], "submit", expected_revision=p.snapshot()["project"]["revision"],
+                                     record_ids=ready, project=p)
+        accepted = sum(item["ok"] for item in submitted["items"]) if submitted else 0
+        print(f"Batch run: {accepted} of {len(prepared['items'])} rows submitted to {connection}", flush=True)
+        return {"id": created["id"], "prepare": prepared, "submit": submitted,
+                "ok": prepared["ok"] and bool(submitted) and submitted["ok"]}
+
+
 def native_action(stk, action, params, *, project):
     if action == "create":
         return stk.batches.create(project=project, **params)
+    if action == "run":
+        return stk.batches.run(project=project, **params)
     return stk.batches.execute(operation=action, project=project, **params)

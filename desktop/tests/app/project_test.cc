@@ -3490,6 +3490,80 @@ TEST_F(SimulationPython, NativeBatchButtonsPersistAndSubmitEachMemberOnce)
   EXPECT_EQ(state().table()->records.size(), 3u);
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
+TEST_F(SimulationPython, RunSelectedRowsUsesThePickedRuntimeAndSubmitsEachRowOnce)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  auto &jobs = f.shell->store().jobs();
+  auto done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 90));
+    std::string output;
+    for (size_t i = 0; i < scripts.output().line_count(); ++i) { output += scripts.output().line(i); output += '\n'; }
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded") << output;
+  };
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  ASSERT_TRUE(scripts.execute("import sys, time\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom simulation_fixture import SimulationRuntime\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "_simulation_runtime = SimulationRuntime(" + Json(dir.str() + "/run-runtime").dump() + ")\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('run-test', _simulation_runtime.url, _simulation_runtime.config['token'], check=False)\n"
+      "p = stk.project\nfirst = stk.muferro.import_case(_simulation_runtime.source, expected_revision=p.snapshot()['project']['revision'])['record_id']\n"
+      "for _ in range(2):\n    stk.muferro.clone_case(first, expected_revision=p.snapshot()['project']['revision'])"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  jobs.sync();
+  jobs.refresh_connections();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &item) { return item.info.id == "runtime:run-test"; });
+  }, 30));
+  ASSERT_TRUE(jobs.active_id().empty());
+  state().select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_batches");
+  f.drv->click(x, y);
+  auto widget = [&](const std::string &id) {
+    f.screen.run_deferred(); f.drv->frame();
+    return f.screen.ui()->find("a2/main/project_batches/" + id);
+  };
+  auto click = [&](const std::string &id) {
+    ASSERT_TRUE(loop.pump_until([&] { const auto *w = widget(id); return w && w->enabled; }, 30)) << id;
+    widget(id)->on_click();
+  };
+  ASSERT_NO_FATAL_FAILURE(click("all"));
+  ASSERT_NE(widget("runtime"), nullptr);
+  EXPECT_FALSE(widget("run_selected")->enabled);  // No Runtime chosen yet.
+  widget("runtime")->index.assign(0);  // Only saved direct/SSH Runtimes are offered.
+  EXPECT_EQ(jobs.active_id(), "runtime:run-test");
+  ASSERT_TRUE(loop.pump_until([&] { const auto *w = widget("run_selected"); return w && w->enabled; }, 30));
+  EXPECT_EQ(widget("run_selected")->text, "Run 3 selected rows on run-test");
+  // A cluster backend needs a time limit before anything can be run; the fields edit the same JSON.
+  widget("backend")->index.assign(1);
+  ASSERT_NE(widget("walltime"), nullptr);
+  EXPECT_FALSE(widget("run_selected")->enabled);
+  widget("backend")->index.assign(0);
+  EXPECT_EQ(widget("walltime"), nullptr);
+  widget("threads_per_rank")->number.assign(2);
+  ASSERT_TRUE(widget("run_selected")->enabled);
+  EXPECT_EQ(widget("threads_per_rank")->number.value(), 2);
+  ASSERT_NO_FATAL_FAILURE(click("run_selected"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("from suan.workflows.batches import TABLE_ID as BT\nbatches = next(t for t in p.snapshot()['tables'] if t['id']==BT)\n"
+      "assert len(batches['records'])==1\nbatch = batches['records'][0]['id']\nintent = stk.batches.inspect(batch)\n"
+      "assert intent['connection']=='runtime:run-test'\n"
+      "assert batches['records'][0]['values']['" + std::string("1c728eb5-5c6d-505d-bed4-914def1c4dac") + "']['options']=={'backend':'local','ranks':1,'threads_per_rank':2}\n"
+      "assert len(_simulation_runtime.client.tasks())==3 and len(p.runs.list()['runs'])==3"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("run_selected"));  // Same rows and options: the same batch, plans and tasks.
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("assert len(_simulation_runtime.client.tasks())==3 and len(p.runs.list()['runs'])==3\n"
+      "deadline=time.monotonic()+60\n"
+      "while any(t['state'] not in {'succeeded','failed','cancelled'} for t in _simulation_runtime.client.tasks()) and time.monotonic()<deadline:\n    time.sleep(.05)\n"
+      "_simulation_runtime.close()"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
 
 #endif
 

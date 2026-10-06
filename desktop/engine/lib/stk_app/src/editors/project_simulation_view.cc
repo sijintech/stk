@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "project_simulation_view.hh"
+#include "project_navigation.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/jobs_state.hh"
@@ -20,7 +21,81 @@ bool execute(ScriptState &scripts, const std::string &action, const Json &params
       "from suan.workflows.muferro import native_action as _stk_muferro\n"
       "_stk_muferro(stk, " + Json(action).dump() + ", _stk_json.loads(" + Json(params.dump()).dump() + ")); None");
 }
+const std::vector<std::string> kSimulationBackends = {"local", "slurm", "pbs"};
 }  // namespace
+
+std::string ProjectSimulationView::runtime_controls(ui::Layout &panel, EditorContext &ctx)
+{
+  auto &jobs = ctx.store.jobs();
+  std::vector<std::string> names, ids;
+  std::string active;
+  for (const auto &row : jobs.connections()) {
+    if (row.info.kind != "runtime") { continue; }  // Batches and plans name a saved direct or SSH Runtime.
+    ids.push_back(row.info.id);
+    names.push_back((row.info.name.empty() ? row.info.id : row.info.name) + "  ·  " + std::string(ctx.tr(health_key(row.health))));
+    if (row.info.id == jobs.active_id() && row.health != Health::Offline) { active = row.info.id; }
+  }
+  auto &line = panel.prop(ctx.tr("simulation.runtime")).row(true);
+  if (ids.empty()) { line.label(ctx.tr("simulation.no_runtime")); }
+  else {
+    line.dropdown("runtime", std::move(names), {
+      [&jobs, ids] { const auto it = std::find(ids.begin(), ids.end(), jobs.active_id()); return it == ids.end() ? -1 : int(it - ids.begin()); },
+      [&jobs, ids](int i) { if (i >= 0 && size_t(i) < ids.size() && ids[size_t(i)] != jobs.active_id()) { jobs.select_connection(ids[size_t(i)]); } }
+    });
+  }
+  line.button("manage_runtimes", ctx.tr("simulation.manage_runtimes"), editor_navigation_action(ctx, kEditorJobs, true)).width(6);
+  return active;
+}
+
+std::optional<Json> ProjectSimulationView::options_controls(ui::Layout &panel, EditorContext &ctx)
+{
+  const Json options = Json::parse(options_, nullptr, false);
+  const bool valid = options.is_object();
+  // Each field edits one key of the same JSON object, so keys only the advanced text sets are kept.
+  const auto set = [this](const std::string &key, Json value) {
+    Json edited = Json::parse(options_, nullptr, false);
+    if (!edited.is_object()) { return; }
+    if (value.is_null()) { edited.erase(key); }
+    else { edited[key] = std::move(value); }
+    options_ = edited.dump();
+  };
+  const auto number = [this](const char *key, const double fallback) {
+    const Json current = Json::parse(options_, nullptr, false);
+    return current.is_object() && current.contains(key) && current.at(key).is_number() ? current.at(key).get<double>() : fallback;
+  };
+  const std::string backend = valid && options.value("backend", Json("local")).is_string() ? options.value("backend", std::string("local")) : "local";
+  std::vector<std::string> backend_names;
+  for (const auto &name : kSimulationBackends) { backend_names.emplace_back(ctx.tr("simulation.backend." + name)); }
+  panel.prop(ctx.tr("simulation.backend")).dropdown("backend", std::move(backend_names), {
+    [backend] { const auto it = std::find(kSimulationBackends.begin(), kSimulationBackends.end(), backend); return it == kSimulationBackends.end() ? -1 : int(it - kSimulationBackends.begin()); },
+    [set](int i) { if (i >= 0 && size_t(i) < kSimulationBackends.size()) { set("backend", kSimulationBackends[size_t(i)]); } }
+  }).disable(!valid);
+  const ui::NumberProps count{.min = 1, .max = 65536, .step = 1, .integer = true};
+  panel.prop(ctx.tr("simulation.ranks")).number("ranks", "", {
+    [number] { return number("ranks", 1); }, [set](double value) { set("ranks", int64_t(value)); }}, count).disable(!valid);
+  panel.prop(ctx.tr("simulation.threads")).number("threads_per_rank", "", {
+    [number] { return number("threads_per_rank", 1); }, [set](double value) { set("threads_per_rank", int64_t(value)); }}, count).disable(!valid);
+  const bool cluster = backend != "local";
+  if (cluster) {
+    panel.prop(ctx.tr("simulation.walltime")).number("walltime", "", {
+      [number] { return std::max(1.0, number("walltime_seconds", 0) / 60.0); },
+      [set](double minutes) { set("walltime_seconds", int64_t(minutes) * 60); }},
+      {.min = 1, .max = 60 * 24 * 30, .step = 10, .integer = true}).disable(!valid);
+  }
+  if (auto *advanced = panel.panel("advanced_options", ctx.tr("simulation.options_advanced"), false)) {
+    advanced->paragraph(ctx.tr("simulation.options_hint"));
+    advanced->text_field("options", ui::bind(options_), {.max_length = 65536, .mono = true});
+  }
+  if (!valid) {
+    panel.paragraph(ctx.tr("simulation.options_invalid"));
+    return std::nullopt;
+  }
+  if (cluster && !options.contains("walltime_seconds")) {
+    panel.paragraph(ctx.tr("simulation.walltime_required"));
+    return std::nullopt;
+  }
+  return options;
+}
 
 void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
 {
@@ -52,23 +127,21 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
       .mode = platform::FileDialogMode::OpenFolder, .title_key = "simulation.directory_dialog",
       .still_current = [&state, project] { return state.project() && state.project()->id == project; }});
   source_picker_.draw_error(*panel);
-  panel->button("simulation_import", ctx.tr("simulation.import"), [this, &scripts, project, revision] {
+  panel->button("simulation_import", ctx.tr("simulation.import"),
+                [this, &scripts, project, revision, one = std::string(ctx.tr("simulation.one_directory"))] {
     const auto paths = platform::split_path_list(source_);
-    if (paths.size() != 1) { error_ = "Choose one case directory"; return; }
+    if (paths.size() != 1) { error_ = one; return; }
     error_.clear();
     execute(scripts, "import", {{"project_id", project}, {"expected_revision", revision}, {"source", paths.front()}});
   }).disable(!enabled || source_.empty());
   panel->paragraph(ctx.tr("simulation.connection_hint"));
-  panel->label(jobs.active_id().empty() ? std::string(ctx.tr("simulation.no_connection")) : jobs.active_id());
-  panel->prop(ctx.tr("simulation.options")).text_field("simulation_options", ui::bind(options_));
-  const auto connection = jobs.active_id();
-  panel->button("simulation_prepare", ctx.tr("simulation.prepare"), [this, &scripts, project, revision, record, connection] {
-    Json options = Json::parse(options_, nullptr, false);
-    if (!options.is_object()) { error_ = "Execution options must be a JSON object"; return; }
+  const auto connection = runtime_controls(*panel, ctx);
+  const auto options = options_controls(*panel, ctx);
+  panel->button("simulation_prepare", ctx.tr("simulation.prepare"), [this, &scripts, project, revision, record, connection, options] {
     error_.clear();
     execute(scripts, "prepare", {{"project_id", project}, {"expected_revision", revision},
-        {"record_id", record}, {"connection", connection}, {"options", options}});
-  }).disable(!enabled || state.table_id() != cases_id || record.empty() || connection.empty() || jobs.hub());
+        {"record_id", record}, {"connection", connection}, {"options", *options}});
+  }).disable(!enabled || state.table_id() != cases_id || record.empty() || connection.empty() || !options || jobs.hub());
   panel->paragraph(ctx.tr("simulation.run_hint"));
   const bool selected = !run.empty() && !state.run().empty() && io::get_string(state.run(), "id") == run;
   bool accepted = false, succeeded = false, muferro = false;
@@ -155,17 +228,28 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
     selection_table.cell = [selected_cells](int row, int col) { return selected_cells.at(row).at(col); };
     panel->table("selection", std::move(selection_table));
   }
-  panel->prop(ctx.tr("simulation.options")).text_field("options", ui::bind(options_));
-  const auto connection = jobs.active_id();
-  panel->label(connection.empty() ? std::string(ctx.tr("simulation.no_connection")) : connection);
+  const auto connection = runtime_controls(*panel, ctx);
+  const auto options = options_controls(*panel, ctx);
   const auto members = batch_selection_;
-  panel->button("create", ctx.tr("batch.create"), [this, &scripts, project, revision, members, connection] {
-    Json options = Json::parse(options_, nullptr, false);
-    if (!options.is_object()) { error_ = "Execution options must be a JSON object"; return; }
+  const bool can_run = enabled && !members.empty() && !connection.empty() && options && !jobs.hub();
+  const auto batch_params = [project, revision, members, connection, options] {
+    return Json{{"project_id", project}, {"expected_revision", revision}, {"template_id", "muferro/1"},
+                {"record_ids", members}, {"connection", connection}, {"options", options ? *options : Json::object()}};
+  };
+  std::string runtime_name = connection;
+  for (const auto &row : jobs.connections()) {
+    if (row.info.id == connection && !row.info.name.empty()) { runtime_name = row.info.name; }
+  }
+  auto &run_row = panel->row();
+  // One explicit click saves the batch, prepares its inputs and submits the prepared rows.
+  run_row.button("run_selected", can_run ? ctx.store.catalog().format("batch.run_selected", {
+                 {"rows", std::to_string(members.size())}, {"runtime", runtime_name}}) : std::string(ctx.tr("batch.run_selected_blocked")),
+             [this, &scripts, batch_params] { error_.clear(); execute(scripts, "batch_run", batch_params()); })
+      .disable(!can_run);
+  run_row.button("create", ctx.tr("batch.create"), [this, &scripts, batch_params] {
     error_.clear();
-    execute(scripts, "batch_create", {{"project_id", project}, {"expected_revision", revision}, {"template_id", "muferro/1"},
-        {"record_ids", members}, {"connection", connection}, {"options", options}});
-  }).disable(!enabled || members.empty() || connection.empty() || jobs.hub());
+    execute(scripts, "batch_create", batch_params());
+  }).width(10).disable(!can_run);
   if (!error_.empty()) { panel->paragraph(error_); }
 
   std::vector<std::string> ids, names;

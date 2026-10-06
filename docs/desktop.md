@@ -41,6 +41,9 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 2. **参数**：显示参数表数与总行数（不含文件索引与分析定义等托管表）；“编辑参数”打开项目表格。
    表格页的 **生成参数扫描** 按每个字段的范围或取值列表一次添加多行，可一次撤销，见[参数扫描](project-sweeps.md)。
 
+MuFerro 仿真与仿真批次面板可直接选择**运行环境**并用字段设置运行方式与资源（原 JSON 折叠为高级选项）；
+仿真批次的**在 … 上运行所选 N 行**一次完成保存、准备与提交，见[仿真批次](simulation-batches.md)。
+
 项目目录、CSV 输入/输出、项目文件、MuFerro 案例目录与 Python 文件的路径框旁有 **浏览…**，用系统文件对话框
 （Linux 为 zenity 或 kdialog）选择后只填入路径，导入、登记、导出或运行仍需另行点击。没有系统对话框时（目前 macOS、Windows）
 不显示该按钮，继续手工输入或拖入；对话框无法打开时在路径框下说明原因。打开对话框期间若切换了项目，返回的路径被丢弃。
@@ -436,6 +439,9 @@ marks the next step. Buttons only open the matching page; nothing runs, sends or
 On the project page, **Generate a parameter scan** turns per-field ranges or value lists into new rows
 as one undoable edit (every combination, or values paired in order; optionally copying the selected row's
 other cells and row-relative formulas). See [parameter sweeps](project-sweeps.md) (Chinese).
+The MuFerro and simulation-batch panels pick the Runtime directly and set how and with which resources
+to run through fields (the raw JSON is folded under advanced options). **Run N selected rows on …** saves
+the batch, prepares every row and submits the prepared ones in one click; repeating it submits nothing twice.
 Path fields for the project folder, CSV input/output, project files, the MuFerro case folder and Python
 files have a **Browse…** button when a native file dialog exists (Linux: zenity or kdialog). It only fills
 the field; importing, indexing, exporting or running stays a separate click. Answers arriving after another
