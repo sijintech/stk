@@ -158,6 +158,16 @@ app::EditorArea &AppFixture::area(const std::string &id)
   return *dynamic_cast<app::EditorArea *>(a);
 }
 
+app::EditorArea &AppFixture::tab(const std::string &id, const std::string &editor)
+{
+  app::EditorArea &a = area(id);
+  for (int i = 0; i < a.tab_count(); ++i) {
+    if (a.tab(i).type().id == editor) { a.set_active_tab(i); return a; }
+  }
+  ADD_FAILURE() << id << " has no " << editor << " tab";
+  return a;
+}
+
 std::pair<int, int> AppFixture::widget_center(const std::string &key) const
 {
   const ui::Widget *w = screen.ui() ? screen.ui()->find(key) : nullptr;

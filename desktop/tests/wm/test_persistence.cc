@@ -124,7 +124,7 @@ TEST(Persistence, CorruptFilesFallBackToTheDefault)
       {"wrong_format", replace("stk.desktop.layout", "something.else")},
       {"newer_version", replace("\"version\":1", "\"version\":99")},
       {"bad_scale", replace("\"ui_scale\":1.0", "\"ui_scale\":50")},
-      {"negative_factor", replace("\"factor\":0.22", "\"factor\":-1")},
+      {"negative_factor", replace("\"factor\":0.3", "\"factor\":-1")},
       {"duplicate_id", replace("\"id\":\"a2\"", "\"id\":\"a1\"")},
       {"unknown_editor", replace("\"type\":\"probe\"", "\"type\":\"nonsense\"")},
       {"bad_split", replace("\"split\":\"vertical\"", "\"split\":\"diagonal\"")},

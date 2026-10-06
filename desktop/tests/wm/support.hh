@@ -57,6 +57,9 @@ struct AppFixture {
 
   AppFixture(const std::string &lang = "en", float scale = 1.0f, int width = 1280, int height = 800);
   app::EditorArea &area(const std::string &id);
+  /** The area after making its tab of `editor` current, like clicking that tab (the default
+   * layout starts on the Workspace tab, with Jobs as the second tab of "a1"). */
+  app::EditorArea &tab(const std::string &id, const std::string &editor);
   /** Center of a rectangle (window pixels). */
   static std::pair<int, int> center(const wm::Rect &r)
   {

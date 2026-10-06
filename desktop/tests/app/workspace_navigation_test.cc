@@ -37,6 +37,39 @@ TEST(WorkspaceNavigation, EmptyWorkspaceHasOnlyProjectManagementAndSurvivesShell
   action(); back(); // Screens may outlive the shell in headless integrations.
 }
 
+bool shows(const wmtest::AppFixture &f, const std::string &text)
+{
+  for (const auto &block : f.screen.ui()->blocks()) {
+    for (const auto &widget : block->widgets()) { if (widget.text == text) { return true; } }
+  }
+  return false;
+}
+
+TEST(WorkspaceNavigation, StartsOnTheGuidedWorkspaceAndOpensJobsAndViewerWithoutAProject)
+{
+  wmtest::AppFixture f;
+  auto &home = f.area("a1");
+  ASSERT_EQ(home.editor().type().id, kEditorWorkspace);  // the default layout's start page
+  f.drv->frame();
+  EXPECT_TRUE(shows(f, "1. Project  ·  next"));
+  EXPECT_TRUE(shows(f, "3. Where to run"));
+  EXPECT_FALSE(f.screen.ui()->find("workspace_data")->enabled);
+  ASSERT_TRUE(f.screen.ui()->find("workspace_runtime")->enabled);
+  auto [x, y] = f.widget_center("workspace_runtime");
+  f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame();
+  auto *target = dynamic_cast<EditorArea *>(f.screen.maximized());
+  ASSERT_NE(target, nullptr);
+  EXPECT_EQ(target, &home);  // Jobs is the Workspace's neighbour tab: reused, not duplicated
+  EXPECT_EQ(target->editor().type().id, kEditorJobs);
+  EXPECT_EQ(home.tab_count(), 2);
+  f.shell->restore_split_layout(&f.screen); home.set_active_tab(0); f.drv->frame();
+  std::tie(x, y) = f.widget_center("workspace_viewer");
+  f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame();
+  EXPECT_EQ(f.screen.maximized(), nullptr);  // the Viewer keeps its Properties beside it
+  EXPECT_EQ(f.area("a2").editor().type().id, kEditorViewer);
+  EXPECT_EQ(home.editor().type().id, kEditorWorkspace);
+}
+
 class WorkspaceNavigationPython : public ::testing::Test {
  protected:
   bridge::test::TempDir dir{"workspace-navigation"};
@@ -93,6 +126,21 @@ class WorkspaceNavigationPython : public ::testing::Test {
     loop.run_ready();
   }
 };
+
+TEST_F(WorkspaceNavigationPython, TheNextStepFollowsTheProjectAndItsParameters)
+{
+  // A fresh project has no parameter rows yet: parameters come next.
+  EXPECT_TRUE(shows(f, "2. Parameters  ·  next"));
+  EXPECT_TRUE(shows(f, "Open: Workspace navigation"));
+  const std::string table = "11111111-1111-4111-8111-111111111111", record = "22222222-2222-4222-8222-222222222222";
+  ASSERT_TRUE(project().apply(Json::array({
+      {{"op", "create_table"}, {"id", table}, {"name", "Cases"}},
+      {{"op", "add_record"}, {"id", record}, {"table_id", table}}})));
+  ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_TRUE(shows(f, "Parameter tables: 1 · rows: 1"));
+  EXPECT_TRUE(shows(f, "3. Where to run  ·  next"));  // no Runtime in this test environment
+  EXPECT_FALSE(shows(f, "2. Parameters  ·  next"));
+}
 
 TEST_F(WorkspaceNavigationPython, VisibleButtonsReuseEditorsAndRevealFilesAndBothRunHistories)
 {

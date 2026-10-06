@@ -24,15 +24,15 @@ inline std::function<void()> project_navigation_action(EditorContext &ctx, std::
 }
 
 /** Global navigation (no project scope), e.g. the shared skill library. */
-inline std::function<void()> editor_navigation_action(EditorContext &ctx, std::string editor_id)
+inline std::function<void()> editor_navigation_action(EditorContext &ctx, std::string editor_id, const bool maximize = true)
 {
   auto *area = &ctx.area;
   auto *editor = &area->editor();
   const auto weak = editor->lifetime();
   const auto shell_weak = area->shell().lifetime();
-  return [weak, shell_weak, area, editor, editor_id = std::move(editor_id)] {
+  return [weak, shell_weak, area, editor, editor_id = std::move(editor_id), maximize] {
     if (shell_weak.expired() || weak.expired() || &area->editor() != editor) { return; }
-    area->shell().activate_editor_later(area->screen(), editor_id, true, [weak, area, editor] {
+    area->shell().activate_editor_later(area->screen(), editor_id, maximize, [weak, area, editor] {
       return !weak.expired() && &area->editor() == editor;
     });
   };

@@ -204,7 +204,7 @@ TEST(ProjectLayout, OpenResultCreatesAViewerTabWhenTheLayoutHasNone)
   auto *shown = dynamic_cast<EditorArea *>(f.screen.maximized());
   ASSERT_NE(shown, nullptr);
   EXPECT_EQ(shown->editor().type().id, kEditorViewer);
-  EXPECT_EQ(shown->tab_count(), 2);
+  EXPECT_EQ(shown->tab_count(), 3);  // Workspace and Jobs keep their tabs
   EXPECT_EQ(f.area("a2").editor().type().id, kEditorProject);
 }
 

@@ -158,6 +158,12 @@ int run(const gfx::Backend backend, const std::string &fake, const std::string &
         if (!jobs.workspace().empty() && jobs.snapshot_time() > 0) {
           check(shell.store().connection().find("lab") != std::string::npos, "status bar connection",
                 shell.store().connection());
+          if (auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a1"))) {
+            // The default layout opens on the Workspace tab; show the Jobs tab like a user would.
+            for (int i = 0; i < area->tab_count(); ++i) {
+              if (area->tab(i).type().id == app::kEditorJobs) { area->set_active_tab(i); }
+            }
+          }
           screen.set_maximized(screen.find_area("a1"));
           win->request_redraw();
           next();

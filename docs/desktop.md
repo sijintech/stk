@@ -22,7 +22,7 @@ GHOST，绘制用 Blender 的 GPU 模块（Linux 上 OpenGL 或 Vulkan，macOS �
   预设（如 `muferro-domains`）在数据旁求值，GPU 显示、拾取并查询原始值，导出 PNG 与逐步序列。
 - **传输、日志、桥日志**：上传下载进度与续传、程序日志、桥的 stderr 与重启。
 - **AI 工作区**：在同一页检查捕获数据、准备和明确发送保存的问题、查看请求状态与普通文字回复；
-  首版本机及跨平台 CI 已通过，不改变默认启动布局。
+  首版本机及跨平台 CI 已通过。
 
 ![STK 桌面程序：左为任务，中为查看器（muFerro 畴结构），右为属性，下方为探针](images/desktop/overview-zh.png)
 
@@ -34,22 +34,25 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 
 ## 项目工作台
 
-从 **文件 → 工作台** 打开统一入口；项目表格、AI 工作区、分析图的页头也有“工作台”按钮。
-没有项目时选择“打开或新建项目”，使用原有创建/打开和最近项目入口。打开项目后，可选择：
+新的默认布局以 **工作台** 开始（左栏，与“任务”同组标签），也可从 **文件 → 工作台** 或项目表格、AI 工作区、
+分析图页头的“工作台”按钮进入。工作台按步骤引导，并根据已知状态标出“下一步”：
 
-- **对话**：进入现有 AI 工作区，保留未发送问题。
-- **文件**：打开独立文件页并选中文件索引表，登记、检查文件或跳转 VSCode；尚无文件索引时仍可登记新文件。
-- **分析工作流**：打开节点图中的“保存的分析”，检查已有定义、参数与输出。
-- **分析运行 / 仿真运行**：分别进入对应运行页面，再明确刷新列表。
-- **项目表格 / 打开或新建项目**：返回数据编辑或项目创建、打开与切换入口。
+1. **项目**：显示已打开的项目；“打开或新建项目”进入创建、打开与最近项目入口。
+2. **参数**：显示参数表数与总行数（不含文件索引与分析定义等托管表）；“编辑参数”打开项目表格。
+3. **运行环境**：显示当前连接及其状态；“选择运行环境”切到“任务”标签配置 Runtime 或 SSH。
+   仿真在 Linux 的 STK 运行服务上执行；本机分析不需要服务器。
+4. **运行**：分别进入仿真运行与分析运行页面，再明确刷新列表。
+5. **结果**：进入“保存的分析”，或切到查看器（不最大化，保留属性面板）。
 
-导航最大化目标区域并复用已有标签；可通过 **视图 → 恢复分栏布局** 返回原分栏。
+“其他”中有 AI 对话、文件页与跨项目的技能库。后台 Python 服务未就绪时，工作台顶部用一句话说明原因。
+已保存布局的用户继续使用自己的布局；**文件 → 恢复默认布局** 可换成新的默认布局。
+导航复用已有标签；最大化的目标可通过 **视图 → 恢复分栏布局** 返回原分栏。
 工作台的项目入口会检查所有窗口的活动文本编辑；先完成或取消输入再导航。未发送问题和分析参数草稿保留。
 文件入口需要切换共享表格时，还会检查所有窗口及隐藏标签的单元格及表/字段名称草稿；先在原编辑器应用或重新载入，避免隐式切表丢失输入。
 进入页面本身不发送模型请求或启动计算，不改变历史运行和 Viewer。文件入口会改变共享表格选择。
 布局可保存 `workspace` 编辑器，也可用 Python `stk.ui.activate_editor("workspace")` 打开。
 **技能库**是跨项目的全局入口，没有打开项目时也可进入，见下节。
-默认启动布局尚未变更，文件/技能对话附件和具体对象深链接仍按开发计划推进。
+文件/技能对话附件和具体对象深链接仍按开发计划推进。
 
 ## 技能目录
 
@@ -351,7 +354,7 @@ Windows 为 `%APPDATA%\stk\desktop\`。内容包括窗口大小与位置、语�
 
 - 文件损坏、无效或来自更新的版本时，改名为 `layout.json.corrupt`，记录日志并使用默认布局。
 - `--layout FILE` 使用指定布局且不写回；`--no-save-layout` 不保存；`--save-layout FILE` 写出布局。
-- 文件 > 恢复默认布局（或删除 `layout.json`）回到默认布局：任务｜查看器｜属性，下方为日志、探针、传输、桥日志标签页。
+- 文件 > 恢复默认布局（或删除 `layout.json`）回到默认布局：工作台（与任务同组）｜查看器｜属性，下方为日志、探针、传输、桥日志标签页。
 
 ## 输入法
 
@@ -418,6 +421,14 @@ sequence export) and **Transfers / Logs / Bridge log**. The D1 acceptance run is
 [runtime-validation.md](runtime-validation.md#2026-09-25-桌面里程碑-d1自有引擎桌面端).
 
 ![STK desktop: Jobs, Viewer (muFerro domains), Properties, Probe](images/desktop/overview-en.png)
+
+### Workspace (start page)
+
+The default layout opens on the **Workspace** (left, with Jobs as its second tab). It walks through
+Project → Parameters → Where to run → Run → Results, shows what is already known for each step (open
+project, parameter tables and rows, current connection and its health, whether a result is shown) and
+marks the next step. Buttons only open the matching page; nothing runs, sends or changes data from here.
+Users with a saved layout keep it; File > Reset layout switches to the new default.
 
 ### Skill catalog
 
@@ -546,7 +557,7 @@ Saved on close and with Ctrl+S to `$XDG_CONFIG_HOME/stk/desktop/layout.json` (`~
 Support/stk/desktop/`, `%APPDATA%\stk\desktop\`): window geometry, language, UI scale and the area tree. A
 corrupt, invalid or newer file is moved to `layout.json.corrupt` and the default layout is used.
 `--layout FILE` (not written back), `--no-save-layout`, `--save-layout FILE`; File > Reset layout (or
-deleting `layout.json`) restores the default Jobs | Viewer | Properties layout.
+deleting `layout.json`) restores the default layout: the guided Workspace (with Jobs as a second tab) | Viewer | Properties.
 
 ### IME
 

@@ -73,7 +73,8 @@ TEST_F(FocusNavigation, SwitchingKeepsLiveEditorsCustomSplitsAndPythonSource)
   }
   auto first = f.shell->activate_editor(&f.screen, kEditorAI, true);
   ASSERT_TRUE(first.ok());
-  EXPECT_EQ(first.value(), (Json{{"area_id", "a1"}, {"editor_id", "ai"}, {"tab_index", 1}, {"maximized", true}}));
+  // a1 starts with Workspace and Jobs, so the added AI tab is the third.
+  EXPECT_EQ(first.value(), (Json{{"area_id", "a1"}, {"editor_id", "ai"}, {"tab_index", 2}, {"maximized", true}}));
   EXPECT_EQ(f.screen.maximized(), &preparation);
   for (int i = 0; i < 3; ++i) {
     ASSERT_TRUE(f.shell->activate_editor(&f.screen, kEditorViewer, true).ok());
@@ -109,9 +110,9 @@ TEST_F(FocusNavigation, PrefersMaximizedActiveThenOtherActiveThenAnExistingHidde
   EXPECT_EQ(f.screen.maximized(), &second); // Active matching tab beats the first area's hidden AI.
   second.set_active_tab(0); third.set_active_tab(0);
   ASSERT_TRUE(f.shell->activate_editor(&f.screen, kEditorAI, false).ok());
-  EXPECT_EQ(first.active_tab(), 1);
+  EXPECT_EQ(first.active_tab(), 2);  // after the default Workspace and Jobs tabs
   EXPECT_EQ(f.screen.maximized(), nullptr); // False explicitly restores the split layout.
-  EXPECT_EQ(first.tab_count(), 2); EXPECT_EQ(second.tab_count(), 2); EXPECT_EQ(third.tab_count(), 2);
+  EXPECT_EQ(first.tab_count(), 3); EXPECT_EQ(second.tab_count(), 2); EXPECT_EQ(third.tab_count(), 2);
 }
 
 TEST_F(FocusNavigation, FullFirstAreasUseTheRemainingCapacityWithoutReplacingAnyTab)

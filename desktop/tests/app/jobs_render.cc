@@ -94,6 +94,10 @@ int main(int argc, char **argv)
       app::JobsState &jobs = shell.store().jobs();
       app::use_gpu_textures(jobs);
       auto *jobs_area = dynamic_cast<app::EditorArea *>(screen.find_area("a1"));
+      // The default layout opens on the Workspace tab; Jobs is the second tab of the same area.
+      for (int i = 0; i < jobs_area->tab_count(); ++i) {
+        if (jobs_area->tab(i).type().id == app::kEditorJobs) { jobs_area->set_active_tab(i); }
+      }
       screen.set_maximized(jobs_area);
       jobs_area->editor().load_state(nlohmann::json{{"detail_tab", 2}});
       wm::DrawContext ctx;

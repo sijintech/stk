@@ -76,7 +76,10 @@ TEST(App, DefaultLayout)
   AppFixture f("en");
   const auto areas = f.screen.areas();
   ASSERT_EQ(areas.size(), 4u);
-  EXPECT_EQ(areas[0]->type(), app::kEditorJobs);
+  /* A new user starts on the guided Workspace; Jobs is the second tab of the same area. */
+  EXPECT_EQ(areas[0]->type(), app::kEditorWorkspace);
+  ASSERT_EQ(f.area("a1").tab_count(), 2);
+  EXPECT_EQ(f.area("a1").tab(1).type().id, app::kEditorJobs);
   EXPECT_EQ(areas[1]->type(), app::kEditorViewer);
   EXPECT_EQ(areas[2]->type(), app::kEditorProperties);
   EXPECT_EQ(areas[3]->type(), app::kEditorLogs);
@@ -85,7 +88,7 @@ TEST(App, DefaultLayout)
   EXPECT_EQ(bottom.tab(1).type().id, app::kEditorProbe);
   EXPECT_EQ(bottom.tab(2).type().id, app::kEditorTransfers);
   EXPECT_EQ(bottom.tab(3).type().id, app::kEditorBridgeLog);
-  /* Jobs | Viewer | Properties side by side over the full-width bottom strip. */
+  /* Workspace | Viewer | Properties side by side over the full-width bottom strip. */
   const wm::Rect jobs = areas[0]->rect(), viewer = areas[1]->rect(), props = areas[2]->rect(),
                  strip = areas[3]->rect();
   EXPECT_EQ(jobs.xmin, 0);
@@ -95,8 +98,8 @@ TEST(App, DefaultLayout)
   EXPECT_EQ(strip.xmin, 0);
   EXPECT_EQ(strip.xmax, 1280);
   EXPECT_LT(strip.ymax, jobs.ymin);
-  EXPECT_NEAR(double(jobs.width()) / 1276.0, 0.22, 0.01);
-  EXPECT_NEAR(double(viewer.width()) / 1276.0, 0.53, 0.01);
+  EXPECT_NEAR(double(jobs.width()) / 1276.0, 0.30, 0.01);
+  EXPECT_NEAR(double(viewer.width()) / 1276.0, 0.45, 0.01);
   /* Top bar and status bar are global areas of one bar height each. */
   const int bar = wm::ui_bar_height_px(1.0f);
   ASSERT_NE(f.screen.global_area(wm::RegionAlign::Top), nullptr);
@@ -237,14 +240,15 @@ TEST(App, TabsAndEditorSwitching)
   EXPECT_EQ(bottom.active_tab(), 2);
   EXPECT_EQ(bottom.type(), app::kEditorTransfers);
 
-  /* The editor-type dropdown replaces the jobs editor (deferred until after the event). */
+  /* The editor-type dropdown replaces the active (Workspace) tab only (deferred until after the event). */
   app::EditorArea &jobs = f.area("a1");
   const auto [dx, dy] = f.widget_center("a1/header/editor_type");
   f.drv->click(dx, dy);
   ASSERT_TRUE(f.screen.ui()->popup_open());
   ASSERT_TRUE(click_popup_item(f, f.shell->store().tr("editor.properties.title").data()));
   EXPECT_EQ(jobs.type(), app::kEditorProperties);
-  EXPECT_EQ(jobs.tab_count(), 1);
+  EXPECT_EQ(jobs.tab_count(), 2);
+  EXPECT_EQ(jobs.tab(1).type().id, app::kEditorJobs);
 }
 
 TEST(App, AreaMenuFromHeaderRightClick)
@@ -316,7 +320,7 @@ TEST(App, DropsRouteToTheAreaUnderThePointer)
   EXPECT_EQ(t->table->rows, 2);
   EXPECT_EQ(t->table->cell(0, 0), "phi.bin");
   /* Jobs lists pending uploads; Properties does not take files (logged). */
-  EXPECT_TRUE(drop(f.area("a1"), {"/x/a.dat"}));
+  EXPECT_TRUE(drop(f.tab("a1", app::kEditorJobs), {"/x/a.dat"}));
   EXPECT_NE(f.screen.ui()->find("a1/main/workspace/pending"), nullptr);
   const size_t lines = f.shell->store().app_log().line_count();
   EXPECT_TRUE(drop(f.area("a3"), {"/x/b.dat"}));

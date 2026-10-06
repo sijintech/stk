@@ -45,7 +45,7 @@ TEST_P(JobsLayoutGolden, MaximizedJobsEditorWithDemoContent)
   AppFixture f(lang, 1.0f, 1280, 800);
   app::JobsState &jobs = f.shell->store().jobs();
   populate_demo(jobs);
-  f.screen.set_maximized(&f.area("a1"));
+  f.screen.set_maximized(&f.tab("a1", app::kEditorJobs));
   f.drv->frame();
   const std::string got = wmtest::dump_screen(f.screen);
   /* The demo content is on screen. */
@@ -83,7 +83,7 @@ TEST(JobsLayout, DropsOnJobsAndTransfersQueueUploads)
     f.drv->frame();
     return r;
   };
-  EXPECT_TRUE(drop(f.area("a1"), {"/data/run1/phi.bin"}));
+  EXPECT_TRUE(drop(f.tab("a1", app::kEditorJobs), {"/data/run1/phi.bin"}));
   EXPECT_TRUE(drop(bottom, {"/data/run1/input.toml"}));
   const app::JobsState &jobs = f.shell->store().jobs();
   ASSERT_EQ(jobs.pending_uploads().size(), 2u);
@@ -109,7 +109,7 @@ struct UiOnFake {
     jobs().open_external = [](const std::string &, std::string *) { return true; };
     jobs().attach(client.get());
     client->start();
-    f.screen.set_maximized(&f.area("a1"));
+    f.screen.set_maximized(&f.tab("a1", app::kEditorJobs));
   }
   ~UiOnFake()
   {

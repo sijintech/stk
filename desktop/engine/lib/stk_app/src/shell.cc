@@ -692,19 +692,20 @@ static nlohmann::json leaf_json(const char *id, const std::vector<const char *> 
 
 void AppShell::build_default_layout(wm::Screen &screen)
 {
-  /* Jobs | Viewer | Properties over a strip of Logs / Probe / Transfers / Bridge log tabs. */
+  /* Workspace (start page; Jobs as its second tab) | Viewer | Properties over a strip of Logs /
+   * Probe / Transfers / Bridge log tabs. A new user starts from the guided workspace. */
   const nlohmann::json top = {
-      {"factor", 0.72},
+      {"factor", 0.80},
       {"split", "horizontal"},
       {"children",
-       {leaf_json("a1", {kEditorJobs}, 0.22), leaf_json("a2", {kEditorViewer}, 0.53),
+       {leaf_json("a1", {kEditorWorkspace, kEditorJobs}, 0.30), leaf_json("a2", {kEditorViewer}, 0.45),
         leaf_json("a3", {kEditorProperties}, 0.25)}}};
   const nlohmann::json layout = {
       {"maximized", nullptr},
       {"root",
        {{"factor", 1.0},
         {"split", "vertical"},
-        {"children", {top, leaf_json("a4", {kEditorLogs, kEditorProbe, kEditorTransfers, kEditorBridgeLog}, 0.28)}}}}};
+        {"children", {top, leaf_json("a4", {kEditorLogs, kEditorProbe, kEditorTransfers, kEditorBridgeLog}, 0.20)}}}}};
   std::string err;
   if (!screen.from_json(layout, &err)) {
     /* Only reachable when an editor type was unregistered: fall back to one area. */
