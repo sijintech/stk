@@ -10,3 +10,8 @@ paths = [
   '''^desktop/engine/third_party/blender/VENDORED\.json$''',
   '''^desktop/engine/third_party/blender/src/extern/xxhash/xxhash\.h$''',
 ]
+
+[[allowlists]]
+description = "Commit 42189fa: made-up test placeholders for the AI key field (never credentials), later replaced by low-entropy strings"
+commits = ["42189fa119cd46313e5afb0b12bd2c49b4f18403"]
+paths = ['''^desktop/tests/app/project_test\.cc$''']

@@ -4,6 +4,10 @@
 
 ## 2026-10-06：示例项目、无头 stk 与文档站
 
+- Secret scan：`96c630b` 的推送（含 `42189fa`）被 gitleaks `generic-api-key` 标记——原生 AI 密钥测试中的占位字符串
+  （编造的、从未作为凭据使用）。测试改为低熵占位串，并在 `.gitleaks.toml` 中只对该提交的该文件加白名单；
+  本机 gitleaks 8.30.1 重新扫描 `7e64ece..HEAD` 无发现。其余文档与归档文件中的既有匹配不在本轮提交范围内。
+
 - Python：无头会话 2 项（目录与桌面一致、扫描与提交、桌面操作 `unavailable`、同目录 `busy` 提示、关闭后拒绝与重开、
   `python -m` 控制台）；示例项目 3 项（扫描生成的 300/325/350 K、结果引用、指标、README、本机分析运行成功、
   非空目录拒绝、`suan demo` 输出、后台服务 `demo.create` 与无协议违规）。完整 `pytest -m "not perf"` **2216 passed / 24 环境跳过**。

@@ -917,7 +917,8 @@ TEST_F(ProjectPython, AIKeySetInTheAppIsUsedForTheSessionOrRememberedAndNeverSho
   ASSERT_NE(widget("ai_key_settings/ai_key"), nullptr) << "The key panel opens while no key is set.";
   EXPECT_FALSE(widget("ai_key_settings/ai_key_save")->enabled);
   EXPECT_FALSE(widget("ai_key_settings/ai_key_clear")->enabled);
-  const std::string session_key = "placeholder-session-key-0101", saved_key = "placeholder-saved-key-0202";
+  // Low-entropy stand-ins (never real credentials) that still pass the key format check.
+  const std::string session_key = "placeholder-" + std::string(16, 's'), saved_key = "placeholder-" + std::string(16, 'r');
   widget("ai_key_settings/ai_key")->string.assign(session_key); ai_frame();
   ASSERT_TRUE(widget("ai_key_settings/ai_key_save")->enabled);
   widget("ai_key_settings/ai_key_save")->on_click(); ai_frame();
