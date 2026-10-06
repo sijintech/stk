@@ -273,7 +273,11 @@ TEST_F(AnalysisGraphRunEditorPython, RetainedModeAndInspectCallbacksPreserveActi
   auto *target = dynamic_cast<EditorArea *>(extra.screen.find_area("a2")); ASSERT_NE(target, nullptr);
   ASSERT_TRUE(target->set_tab_type(0, kEditorProject)); ASSERT_TRUE(target->editor().show_view("review"));
   extra.screen.set_maximized(target); extra.driver.frame(); loop.run_ready(); extra.driver.frame();
-  const auto *input = extra.screen.ui()->find("a2/main/review_source"); ASSERT_NE(input, nullptr);
+  if (const auto *json = extra.screen.ui()->find("a2/main/review_json")) {  // The JSON editor is folded away.
+    const auto header = json->rect;
+    extra.driver.click(int(header.cx()), extra.screen.rect().ymax - 1 - int(header.cy())); extra.driver.frame();
+  }
+  const auto *input = extra.screen.ui()->find("a2/main/review_json/review_source"); ASSERT_NE(input, nullptr);
   const auto rect = input->rect;
   extra.driver.click(int(rect.cx()), extra.screen.rect().ymax - 1 - int(rect.cy()));
   extra.driver.key(wm::Key::Unknown, wm::ModNone, " active input");

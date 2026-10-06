@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "project_simulation_view.hh"
 #include "project_navigation.hh"
+#include "project_labels.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
 #include "stk/platform/file_dialog.hh"
+#include "editor_text.hh"
 #include <algorithm>
 
 namespace stk::app {
@@ -83,7 +85,7 @@ std::optional<Json> ProjectSimulationView::options_controls(ui::Layout &panel, E
       {.min = 1, .max = 60 * 24 * 30, .step = 10, .integer = true}).disable(!valid);
   }
   if (auto *advanced = panel.panel("advanced_options", ctx.tr("simulation.options_advanced"), false)) {
-    advanced->paragraph(ctx.tr("simulation.options_hint"));
+    hint(*advanced, ctx, "simulation.options_hint");
     advanced->text_field("options", ui::bind(options_), {.max_length = 65536, .mono = true});
   }
   if (!valid) {
@@ -118,7 +120,7 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
   const auto revision = state.project()->revision;
   const auto record = state.record_id();
   const auto run = state.run_id();
-  panel->paragraph(ctx.tr("simulation.hint"));
+  hint(*panel, ctx, "simulation.hint");
   if (!error_.empty()) { panel->paragraph(error_); }
   if (!scripts.error().empty()) { panel->paragraph(scripts.error()); }
   auto &source = panel->prop(ctx.tr("simulation.directory")).row(true);
@@ -134,7 +136,7 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
     error_.clear();
     execute(scripts, "import", {{"project_id", project}, {"expected_revision", revision}, {"source", paths.front()}});
   }).disable(!enabled || source_.empty());
-  panel->paragraph(ctx.tr("simulation.connection_hint"));
+  hint(*panel, ctx, "simulation.connection_hint");
   const auto connection = runtime_controls(*panel, ctx);
   const auto options = options_controls(*panel, ctx);
   panel->button("simulation_prepare", ctx.tr("simulation.prepare"), [this, &scripts, project, revision, record, connection, options] {
@@ -142,7 +144,7 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
     execute(scripts, "prepare", {{"project_id", project}, {"expected_revision", revision},
         {"record_id", record}, {"connection", connection}, {"options", *options}});
   }).disable(!enabled || state.table_id() != cases_id || record.empty() || connection.empty() || !options || jobs.hub());
-  panel->paragraph(ctx.tr("simulation.run_hint"));
+  hint(*panel, ctx, "simulation.run_hint");
   const bool selected = !run.empty() && !state.run().empty() && io::get_string(state.run(), "id") == run;
   bool accepted = false, succeeded = false, muferro = false;
   if (selected) {
@@ -187,7 +189,7 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
   const auto revision = state.project()->revision;
   const bool case_selected = state.table_id() == cases_id && !state.record_id().empty();
   const auto record = state.record_id();
-  panel->paragraph(ctx.tr("batch.hint"));
+  hint(*panel, ctx, "batch.hint");
   auto &selection = panel->row();
   selection.button("add", ctx.tr("batch.add"), [this, record] {
     if (batch_selection_.size() < 100 && std::find(batch_selection_.begin(), batch_selection_.end(), record) == batch_selection_.end()) {
@@ -211,11 +213,12 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
   }).disable(!enabled || !case_selected);
   panel->label(std::string(ctx.tr("batch.selection")) + " " + std::to_string(batch_selection_.size()));
   std::vector<std::vector<std::string>> selected_cells;
-  for (const auto &table : state.tables()) {
-    if (table.id != cases_id) { continue; }
-    for (const auto &row : table.records) {
+  const ProjectTable *cases = nullptr;
+  for (const auto &table : state.tables()) { if (table.id == cases_id) { cases = &table; } }
+  if (cases) {
+    for (const auto &row : cases->records) {
       if (std::find(batch_selection_.begin(), batch_selection_.end(), row.id) != batch_selection_.end()) {
-        selected_cells.push_back({io::get_string(row.values, "b29f3eda-8426-50f5-a6d8-c2e6307f28a4") + " · " + row.id.substr(0, 8),
+        selected_cells.push_back({row_label(ctx.store, cases, row.id) + " · " + io::get_string(row.values, "b29f3eda-8426-50f5-a6d8-c2e6307f28a4"),
             row.values.value("7e96da82-9b05-5f99-981e-8bf38a2028d2", Json()).dump()});
       }
     }
@@ -272,7 +275,14 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
         std::all_of(intent["entries"].begin(), intent["entries"].end(), [](const Json &entry) { return entry.is_object(); }) &&
         std::all_of(outcomes.begin(), outcomes.end(), [](const Json &entry) { return entry.is_object(); })) {
       const auto entries = intent["entries"];
-      panel->label(io::get_string(intent, "template") + " · " + io::get_string(intent, "connection"));
+      // The template and the saved Runtime by name; their ids stay in the frozen intent.
+      const auto connection_id = io::get_string(intent, "connection");
+      std::string runtime_name = connection_id.rfind("runtime:", 0) == 0 ? connection_id.substr(8) : connection_id;
+      for (const auto &row : jobs.connections()) {
+        if (row.info.id == connection_id && !row.info.name.empty()) { runtime_name = row.info.name; }
+      }
+      panel->label((io::get_string(intent, "template") == "muferro/1" ? std::string("MuFerro") : io::get_string(intent, "template")) +
+                   "  ·  " + std::string(ctx.tr("simulation.runtime")) + ": " + runtime_name);
       ui::TableSpec table;
       table.columns = {{std::string(ctx.tr("batch.case")), 12.0f}, {std::string(ctx.tr("batch.status")), 8.0f},
                        {std::string(ctx.tr("batch.outcome")), 16.0f}};
@@ -290,12 +300,15 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
       for (const auto *key : {"prepare", "submit", "refresh", "cancel", "collect"}) {
         names[key] = std::string(ctx.tr(std::string("batch.operation_") + key));
       }
-      table.cell = [entries, outcomes, names](int row, int column) {
+      std::vector<std::string> member_rows;
+      for (const auto &entry : entries) { member_rows.push_back(row_label(ctx.store, cases, io::get_string(entry, "record_id"))); }
+      table.cell = [entries, outcomes, names, member_rows](int row, int column) {
         const auto id = io::get_string(entries.at(row), "record_id");
         const auto result = outcomes.value(id, Json::object());
         if (column == 0) {
           const auto values = entries.at(row).value("values", Json::object());
-          return values.is_object() ? io::get_string(values, "name") + " · " + values.value("temperature", Json()).dump() + " K · " + id.substr(0, 8) : id;
+          return values.is_object() ? member_rows.at(size_t(row)) + " · " + io::get_string(values, "name") + " · " +
+                                      values.value("temperature", Json()).dump() + " K" : id;
         }
         if (column == 1) {
           const auto phase = io::get_string(result, "state", "unprepared");
@@ -330,7 +343,7 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
       panel->button("run", ctx.tr("batch.run"), [&state, run] { state.select_run(run); }).disable(!enabled || run.empty());
     }
   }
-  panel->paragraph(ctx.tr("batch.retry_hint"));
+  hint(*panel, ctx, "batch.retry_hint");
   panel->log_view("output", scripts.output(), 4);
 }
 }  // namespace stk::app

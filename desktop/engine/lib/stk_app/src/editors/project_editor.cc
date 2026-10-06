@@ -12,6 +12,8 @@
 #include "project_simulation_view.hh"
 #include "project_navigation.hh"
 #include "path_picker.hh"
+#include "project_labels.hh"
+#include "editor_text.hh"
 
 #include <algorithm>
 #include <filesystem>
@@ -128,7 +130,7 @@ class ProjectEditor final : public Editor {
       return;
     }
     if (state.project()->format_version < 9) {
-      layout.paragraph(ctx.tr("project.upgrade_hint"));
+      hint(layout, ctx, "project.upgrade_hint");
       layout.button("upgrade_project", ctx.tr("project.upgrade"), [&state] { state.upgrade(); }).disable(!editable);
     }
     layout.tabs("project_view", {std::string(ctx.tr("project.review.data")), std::string(ctx.tr("project.review.title")),
@@ -220,7 +222,7 @@ class ProjectEditor final : public Editor {
     }
     auto *panel = standalone ? &layout.scope("project_files") : layout.panel("project_files", ctx.tr("project.files.title"), false);
     if (!panel) { return; }
-    panel->paragraph(ctx.tr("project.files.hint"));
+    hint(*panel, ctx, "project.files.hint");
     panel->text_area("paths", ui::bind(file_paths_), {.max_length = 65536, .mono = true, .visible_lines = 3});
     files_picker_.draw_error(*panel);
     auto &actions = panel->row();
@@ -269,7 +271,7 @@ class ProjectEditor final : public Editor {
         [this, ids](int i) { if (i >= 0 && size_t(i) < ids.size()) { file_preset_ = ids[i]; } }
       });
       panel->button("view", ctx.tr("project.files.view"), [this, &state] { state.view_file(file_preset_); }).disable(!editable);
-      panel->paragraph(ctx.tr("project.files.viewer_hint"));
+      hint(*panel, ctx, "project.files.viewer_hint");
     }
   }
 
@@ -277,7 +279,7 @@ class ProjectEditor final : public Editor {
   {
     auto *panel = layout.panel("input_snapshots", ctx.tr("project.snapshots.title"), false);
     if (!panel) { return; }
-    panel->paragraph(ctx.tr("project.snapshots.hint"));
+    hint(*panel, ctx, "project.snapshots.hint");
     const bool enabled = editable && state.project()->format_version >= 4;
     auto &actions = panel->row();
     actions.button("capture", ctx.tr("project.snapshots.capture"), [&state] { state.capture_file(); })
@@ -418,7 +420,7 @@ class ProjectEditor final : public Editor {
   {
     auto *panel = standalone ? &layout.scope("project_runs") : layout.panel("project_runs", ctx.tr("project.runs.title"), false);
     if (!panel) { return; }
-    panel->paragraph(ctx.tr("project.runs.hint"));
+    hint(*panel, ctx, "project.runs.hint");
     const bool enabled = editable && state.project()->format_version >= 5;
     auto &pages = panel->row();
     pages.button("list", ctx.tr("project.runs.list"), [&state] { state.load_runs(); }).disable(!enabled);
@@ -572,7 +574,7 @@ class ProjectEditor final : public Editor {
     }
     panel->button("reload_names", ctx.tr("project.reload_names"), [this] { manage_identity_.clear(); });
     if (state.project()->format_version >= 3) {
-      panel->paragraph(ctx.tr("project.delete_hint"));
+      hint(*panel, ctx, "project.delete_hint");
       auto &buttons = panel->row();
       const std::string record_id = state.record_id(), field_id = cell_field_;
       buttons.button("delete_record", ctx.tr("project.delete_record"), [this, &state, record_id, table_id, handle = state.project()->handle, query_version = query_version_] {
@@ -855,7 +857,7 @@ class ProjectEditor final : public Editor {
       return query_version_ == query_version && query_.text == query_cached_text_ && query_.errors_only == query_cached_errors_ && state.project() && state.project()->handle == handle && state.table_id() == id && state.project()->revision == revision;
     };
     ui::TableSpec spec;
-    spec.columns.push_back({std::string(ctx.tr("project.record")), 6.0f});
+    spec.columns.push_back({std::string(ctx.tr("project.row_column")), 4.0f, true, true});
     const bool file_table = table.id == io::get_string(state.file_index(), "table_id");
     const Json file_fields = file_table ? state.file_index().value("fields", Json::object()) : Json::object();
     for (const auto &field : table.fields) {
@@ -867,9 +869,10 @@ class ProjectEditor final : public Editor {
     spec.rows = int(rows->size());
     spec.visible_rows = float(std::clamp(spec.rows, 3, 9));
     spec.data_version = query_version_;
-    spec.cell = [&state, rows, ids, cells, matches](int row, int col) {
+    spec.cell = [&state, rows, ids, cells, matches, store = &ctx.store](int row, int col) {
       if (!matches() || row < 0 || col < 0 || size_t(row) >= rows->size() || size_t(col) > state.table()->fields.size()) { return std::string(); }
-      if (col == 0) { return (*ids)[size_t(row)].substr(0, 8); }
+      // Rows are numbered by their place in the table; the UUID is in the cell editor's tooltip and searchable.
+      if (col == 0) { return std::to_string((*rows)[size_t(row)] + 1); }
       const uint64_t key = (uint64_t(uint32_t(row)) << 32) | uint32_t(col);
       if (const auto found = cells->find(key); found != cells->end()) { return found->second; }
       const auto &table = *state.table();
@@ -877,7 +880,7 @@ class ProjectEditor final : public Editor {
       const auto *evaluation = table.evaluation(original, column);
       std::string summary;
       if (evaluation && io::get_string(*evaluation, "state") == "error") {
-        summary = "#" + io::get_string(evaluation->at("error"), "code");
+        summary = formula_error_label(*store, io::get_string(evaluation->at("error"), "code"));
       }
       else {
         const auto *value = table.cell(original, column);
@@ -896,10 +899,10 @@ class ProjectEditor final : public Editor {
     }, [&state, ids, matches](int row) {
       if (matches() && row >= 0 && size_t(row) < ids->size()) { state.select_record((*ids)[size_t(row)]); }
     }};
-    spec.compare = [&state, rows, ids, matches](int a, int b, int column) {
+    spec.compare = [&state, rows, matches](int a, int b, int column) {
       if (!matches() || a < 0 || b < 0 || size_t(a) >= rows->size() || size_t(b) >= rows->size()) { return 0; }
       if (column > 0) { return state.table()->compare((*rows)[size_t(a)], (*rows)[size_t(b)], column - 1); }
-      const auto &left = (*ids)[size_t(a)], &right = (*ids)[size_t(b)];
+      const int left = (*rows)[size_t(a)], right = (*rows)[size_t(b)];  // Row number: table order.
       return int(left > right) - int(left < right);
     };
     spec.cell_color = [&state, rows, matches](int row, int column) -> ui::Color {
@@ -1103,7 +1106,8 @@ class ProjectEditor final : public Editor {
       }
     }
     auto &box = layout.box();
-    box.label(ctx.tr("project.cell_editor"));
+    box.label(std::string(ctx.tr("project.cell_editor")) + "  ·  " + row_label(ctx.store, &table, state.record_id()))
+        .tip(state.record_id());
     box.prop(ctx.tr("project.field")).dropdown("cell_field", std::move(names), {
       [this, ids] { return int(std::find(ids.begin(), ids.end(), cell_field_) - ids.begin()); },
       [this, ids](int i) { if (i >= 0 && size_t(i) < ids.size()) { cell_field_ = ids[i]; } }

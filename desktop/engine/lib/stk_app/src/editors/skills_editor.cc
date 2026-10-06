@@ -7,6 +7,7 @@
 #include "project_navigation.hh"
 
 #include "stk/app/skill_catalog.hh"
+#include "editor_text.hh"
 
 #include <algorithm>
 
@@ -44,7 +45,7 @@ class SkillsEditor final : public Editor {
     auto &top = layout.row();
     workspace_link(top, ctx);
     top.label(ctx.tr("skills.title"));
-    layout.paragraph(ctx.tr("skills.intro"));
+    hint(layout, ctx, "skills.intro");
     if (!skills.bridge_ready()) {
       layout.paragraph(ctx.tr("skills.bridge_wait"));
       return;

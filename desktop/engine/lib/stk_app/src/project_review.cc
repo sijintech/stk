@@ -15,16 +15,17 @@ Objects objects(const std::vector<ProjectTable> &tables)
   Objects result;
   for (const auto &table : tables) {
     const std::string root = table.id + "/";
-    result[root] = {"table", table.id, {}, {}, table.name, {}, Json{{"name", table.name}}};
+    result[root] = {"table", table.id, {}, {}, table.name, 0, {}, Json{{"name", table.name}}};
     std::map<std::string, std::string> names;
     for (const auto &field : table.fields) {
       names[field.id] = field.name;
       result[root + "f/" + field.id] = {"field", table.id, {}, field.id, table.name + " / " + field.name,
-          {}, Json{{"name", field.name}, {"type", field.type}, {"unit", field.unit}}};
+          0, {}, Json{{"name", field.name}, {"type", field.type}, {"unit", field.unit}}};
     }
+    int64_t row = 0;
     for (const auto &record : table.records) {
-      const std::string path = table.name + " / " + record.id;
-      result[root + "r/" + record.id] = {"record", table.id, record.id, {}, path, {}, Json{{"id", record.id}}};
+      ++row;
+      result[root + "r/" + record.id] = {"record", table.id, record.id, {}, table.name, row, {}, Json{{"id", record.id}}};
       // Visit populated cells only, including failed expressions with no effective value.
       std::map<std::string, Json> cells;
       for (const auto &[id, value] : record.values.items()) { cells[id]["value"] = value; }
@@ -36,8 +37,7 @@ Objects objects(const std::vector<ProjectTable> &tables)
       }
       for (auto &[id, cell] : cells) {
         result[root + "c/" + record.id + "/" + id] = {
-            "cell", table.id, record.id, id,
-            table.name + " / " + names[id] + " / " + record.id.substr(0, 8), {}, std::move(cell)};
+            "cell", table.id, record.id, id, table.name + " / " + names[id], row, {}, std::move(cell)};
       }
     }
   }

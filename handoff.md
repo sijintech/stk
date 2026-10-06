@@ -6,7 +6,8 @@
 运行环境选择与“运行所选行”（`stk.batches.run`、[project_simulation_view.cc](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)，`ed5bb29`）、
 分析“运行并显示”（`analysis_graph_editor.cc` 的 `RunAndShow` 链条，`7e64ece`）已交付，第 3 项完成；
 第 4 项已交付[术语表](docs/design/glossary.md)与 AI 助手内的 API 密钥（`TokenPlanCredentials`，`ai.credentials.*`），
-其余为隐藏内部细节与压缩免责说明；
+以及收起内部细节（[project_labels.hh](desktop/engine/lib/stk_app/src/editors/project_labels.hh)）与一行说明
+（[editor_text.hh](desktop/engine/lib/stk_app/src/editors/editor_text.hh) 的 `hint()`），第 4 项完成；下一步第 5 项（可试跑路径）；
 之前为保存分析的单输入连线编辑（`3cbaa36`）与技能目录首版（`5a12d5a`、`df4729d`）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 

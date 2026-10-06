@@ -402,8 +402,9 @@ int main(int argc, char **argv)
         }
         if (editor == "drafts") {
           // Use normal panel hit targets so the capture includes the real saved
-          // list and controls, while keeping the candidate table on the same page.
-          for (const auto *key : {"a2/main/review_details", "a2/main/saved_reviews"}) {
+          // list and controls, while keeping the candidate table on the same page
+          // (the technical details stay folded by default).
+          for (const auto *key : {"a2/main/saved_reviews"}) {
             if (const auto *widget = screen.ui()->find(key)) {
               const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
               screen.ui()->handle_event(ui::Event::mouse_down(center));

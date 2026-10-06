@@ -2438,7 +2438,11 @@ TEST_F(ProjectPython, ReviewCellUIShowsDiffInvalidatesEditedDraftAndAppliesExpli
   ASSERT_TRUE(widget("review_apply")->enabled);
   // Even a callback retained from a prior frame must recheck the current draft.
   const auto apply = widget("review_apply")->on_click;
-  widget("review_source")->string.assign(set_cell(425).dump());
+  if (!f.screen.ui()->find("a2/main/review_json/review_source")) {  // The JSON editor is folded away.
+    const auto [json_x, json_y] = f.widget_center("a2/main/review_json");
+    f.drv->click(json_x, json_y); f.drv->frame();
+  }
+  widget("review_json/review_source")->string.assign(set_cell(425).dump());
   apply();
   EXPECT_FALSE(state().busy());
   EXPECT_FALSE(state().review());
@@ -2473,7 +2477,11 @@ TEST_F(ProjectPython, ReviewApplyClickCommitsPendingTextAndCannotApplyTheOldCand
   f.drv->frame();
   f.screen.ui()->find("a2/main/project_view")->index.assign(1);
   f.drv->frame();
-  const auto [x, y] = f.widget_center("a2/main/review_source");
+  if (!f.screen.ui()->find("a2/main/review_json/review_source")) {  // The JSON editor is folded away.
+    const auto [json_x, json_y] = f.widget_center("a2/main/review_json");
+    f.drv->click(json_x, json_y); f.drv->frame();
+  }
+  const auto [x, y] = f.widget_center("a2/main/review_json/review_source");
   f.drv->click(x, y);
 #ifdef __APPLE__
   constexpr auto primary = wm::ModOS;

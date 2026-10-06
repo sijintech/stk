@@ -8,6 +8,8 @@
 #include "stk/wm/window.hh"
 #include "project_context_picker.hh"
 #include "project_navigation.hh"
+#include "project_labels.hh"
+#include "editor_text.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -195,7 +197,7 @@ class AIEditor final : public Editor {
     box.label(ctx.tr("ai.context_title"));
     const auto *table = state.table();
     if (table) {
-      box.paragraph(table->name + " · " + state.record_id().substr(0, 8));
+      box.paragraph(table->name + " · " + row_label(ctx.store, table, state.record_id()));
       box.paragraph(ctx.store.catalog().format("ai.selection", {{"fields", std::to_string(table->fields.size())}}));
     }
     else { box.paragraph(ctx.tr("ai.select_record")); }
@@ -249,9 +251,20 @@ class AIEditor final : public Editor {
                     {std::string(ctx.tr("discussion.cells.status")), 9}};
     spec.rows = int(captured->cells.size()); spec.visible_rows = float(std::min(spec.rows, 4));
     spec.data_version = uint64_t(std::hash<std::string>{}(identity));
-    spec.cell = [captured, store = &ctx.store](int row, int col) {
+    // Captured rows by their current position (the UUID start when the row is gone or moved tables).
+    auto row_names = std::make_shared<std::unordered_map<std::string, std::string>>();
+    for (const auto &cell : captured->cells) {
+      if (row_names->count(cell.record_id)) { continue; }
+      std::string label = cell.record_id.substr(0, 8);
+      for (const auto &table : state.tables()) {
+        const auto found = std::find_if(table.records.begin(), table.records.end(), [&cell](const auto &r) { return r.id == cell.record_id; });
+        if (found != table.records.end()) { label = row_label(ctx.store, &table, cell.record_id); break; }
+      }
+      row_names->emplace(cell.record_id, std::move(label));
+    }
+    spec.cell = [captured, row_names, store = &ctx.store](int row, int col) {
       const auto &cell = captured->cells[size_t(row)];
-      if (col == 0) { return cell.record_id.substr(0, 8); }
+      if (col == 0) { return row_names->at(cell.record_id); }
       if (col == 1) { return cell.field_name + (cell.unit.empty() ? "" : " / " + cell.unit); }
       if (col == 2) { return cell.value_text; }
       return std::string(store->tr("discussion.cells." + (cell.status == "omitted" ? std::string("omitted_value") : cell.status)));
@@ -259,7 +272,7 @@ class AIEditor final : public Editor {
     if (auto *preview = box.panel("ai_context_preview", ctx.tr("discussion.cells.title"), !compact)) {
       preview->table("ai_context_cells", std::move(spec));
     }
-    box.paragraph(ctx.tr("ai.context_hint"));
+    hint(box, ctx, "ai.context_hint");
   }
 
   void configuration(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft)
@@ -298,7 +311,7 @@ class AIEditor final : public Editor {
       row.button("ai_key_clear", ctx.tr("ai.key.clear"), [&discussion] { discussion.clear_key(); })
           .disable(discussion.busy() || (source != "session" && source != "saved"));
       if (source == "environment") { keys->paragraph(ctx.tr("ai.key.environment_wins")); }
-      keys->paragraph(ctx.tr("ai.key.hint"));
+      hint(*keys, ctx, "ai.key.hint");
     }
   }
 
@@ -442,7 +455,7 @@ class AIEditor final : public Editor {
     }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || !has_question || !model_has_text_ || discussion.provider().empty() ||
                (draft.intent == 1 && !discussion.edit_proposals_supported()));
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
-      details->paragraph(ctx.tr("ai.single_turn"));
+      hint(*details, ctx, "ai.single_turn");
       if (!id.empty()) { details->paragraph(id); details->paragraph(io::get_string(request, "context_id")); }
       if (parameter_request && !reply.empty()) {
         details->label(ctx.tr("ai.raw_reply"));

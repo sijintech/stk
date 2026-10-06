@@ -13,6 +13,7 @@
 #include "stk/ui/gpu_painter.hh"
 #include "stk/wm/window.hh"
 #include "project_navigation.hh"
+#include "editor_text.hh"
 
 #include <algorithm>
 #include <charconv>
@@ -463,7 +464,7 @@ class AnalysisGraphEditor final : public Editor {
     const bool unavailable = !parameter_current();
     const bool busy = documents_->busy() || documents_->uncertain() || ctx.store.project().busy();
     const bool blocked = busy || unavailable;
-    panel->paragraph(ctx.tr("analysis_parameters.hint"));
+    hint(*panel, ctx, "analysis_parameters.hint");
     if (parameter_edits()) { panel->paragraph(ctx.tr("analysis_parameters.dirty")); }
     if (!candidate_checked()) { panel->paragraph(ctx.tr("analysis_links.validate_first")); }
     if (unavailable) {
@@ -513,7 +514,7 @@ class AnalysisGraphEditor final : public Editor {
     auto *panel = layout.panel("analysis_links_panel", changes ? catalog.format("analysis_links.title_count",
         {{"count", std::to_string(changes)}}) : std::string(ctx.tr("analysis_links.title")), false);
     if (!panel) { return; }
-    panel->paragraph(ctx.tr("analysis_links.hint"));
+    hint(*panel, ctx, "analysis_links.hint");
     panel->paragraph(ctx.tr("analysis_links.canvas_note"));
     if (!link_error_.empty()) { panel->paragraph(text(link_error_)); }
     const auto &edits = parameter_draft_.link_edits();
@@ -729,7 +730,7 @@ class AnalysisGraphEditor final : public Editor {
     if (!panel) { return; }
     const auto requested = parameter_draft_.outputs();
     const auto &declared = parameter_draft_.baseline_document().at("graph").at("outputs");
-    panel->paragraph(ctx.tr("analysis_outputs.hint"));
+    hint(*panel, ctx, "analysis_outputs.hint");
     panel->label(ctx.store.catalog().format("analysis_outputs.count", {{"selected", std::to_string(requested.size())},
         {"total", std::to_string(declared.size())}}));
     if (requested.empty()) { panel->paragraph(ctx.tr("analysis_outputs.empty")); }
@@ -1044,9 +1045,11 @@ class AnalysisGraphEditor final : public Editor {
           "analysis_runs.upgrade" : "analysis_runs.unavailable"));
       return;
     }
-    layout.paragraph(ctx.tr("analysis_runs.canvas_hint"));
+    hint(layout, ctx, "analysis_runs.canvas_hint");
     if (parameter_edits()) { layout.paragraph(ctx.tr("analysis_parameters.run_guard")); }
-    if (!state_->document_id().empty()) { layout.label(text(state_->document_id())); }
+    if (!state_->document_id().empty()) {
+      layout.label(text(document_name_.empty() ? state_->document_id() : document_name_)).tip(state_->document_id());
+    }
     const std::weak_ptr<bool> weak = alive_;
     const auto epoch = runs_->epoch();
     const auto valid = [this, weak, epoch] {
@@ -1072,10 +1075,10 @@ class AnalysisGraphEditor final : public Editor {
       const auto id = state_->document_id(), snapshot = selected_snapshot_id();
       const auto revision = state_->document_revision();
       const auto bindings = bindings_;
-      prepare->paragraph(ctx.tr("analysis_runs.prepare_hint"));
+      hint(*prepare, ctx, "analysis_runs.prepare_hint");
       if (id.empty()) { prepare->paragraph(ctx.tr("analysis_runs.select_definition")); }
       else {
-        prepare->label(text(id));
+        prepare->label(text(document_name_.empty() ? id : document_name_)).tip(id);
         prepare->label(ctx.store.catalog().format("analysis_documents.revision", {{"revision", std::to_string(revision)}}));
         if (state_->document_stale()) { prepare->paragraph(ctx.tr("analysis_runs.stale_definition")); }
       }
@@ -1101,7 +1104,7 @@ class AnalysisGraphEditor final : public Editor {
         redraw();
       }).disable(blocked || parameter_edits() || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() ||
                  bindings.empty() || run_and_show_.has_value());
-      prepare->paragraph(ctx.tr("analysis_runs.auto.hint"));
+      hint(*prepare, ctx, "analysis_runs.auto.hint");
       prepare->button("analysis_run_prepare", ctx.tr("analysis_runs.prepare"),
           [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
         if (!valid() || parameter_edits()) { return; }
@@ -1212,7 +1215,7 @@ class AnalysisGraphEditor final : public Editor {
            {std::string(ctx.tr("analysis_runs.snapshot_hash")), reused_inputs_->snapshot_sha256}}, bindings_generation_, 3);
       layout.paragraph(ctx.tr("analysis_inputs.metadata_only"));
     }
-    layout.paragraph(ctx.tr("analysis_runs.snapshot_hint"));
+    hint(layout, ctx, "analysis_runs.snapshot_hint");
     layout.button("analysis_run_snapshots", ctx.tr("analysis_runs.load_snapshots"), [this, form_valid] {
       if (form_valid() && input_preparation_pristine() && runs_->load_snapshots()) {
         // A refreshed list can have a different ordering; retain explicit mappings only by
@@ -1315,8 +1318,6 @@ class AnalysisGraphEditor final : public Editor {
     auto &box = layout.box();
     box.label(text(io::get_string(run, "analysis_name")));
     box.label(ctx.tr("analysis_runs.status." + status));
-    box.paragraph(id);
-    box.label(ctx.store.catalog().format("analysis_documents.revision", {{"revision", std::to_string(io::get_int(run, "source_revision", -1))}}));
     if (!run.at("error").is_null()) { box.paragraph(text(io::get_string(run.at("error"), "message"))); }
     const bool partial = !run.at("result").is_null() && run.at("result").at("has_errors").get<bool>();
     if (partial) { box.paragraph(ctx.tr("analysis_runs.partial")); }
@@ -1367,6 +1368,8 @@ class AnalysisGraphEditor final : public Editor {
     }).disable(blocked || runs_->uncertain() || (status != "running" && status != "cancel_requested"))
       .tip(ctx.tr("analysis_runs.recover_hint"));
     if (auto *frozen = box.panel("analysis_run_frozen", ctx.tr("analysis_runs.frozen"), false)) {
+      frozen->paragraph(id);
+      frozen->label(ctx.store.catalog().format("analysis_documents.revision", {{"revision", std::to_string(io::get_int(run, "source_revision", -1))}}));
       frozen->paragraph(io::get_string(run, "snapshot_id"));
       frozen->paragraph(io::get_string(run, "plan_sha256"));
       Rows rows;
@@ -1732,7 +1735,7 @@ class AnalysisGraphEditor final : public Editor {
       if (table_grid_page_ && table_grid_page_->row_offset == *row && table_grid_page_->column_offset == *column) { select_table_grid_cell(*row, *column); }
     }).disable(disabled || input_blocked);
     if (!table_grid_jump_error_.empty()) { layout.paragraph(table_grid_jump_error_); }
-    layout.paragraph(ctx.tr("analysis_table_grid.hint"));
+    hint(layout, ctx, "analysis_table_grid.hint");
     layout.paragraph(ctx.store.catalog().format("analysis_table_grid.range", {
         {"first", page->rows.empty() ? "—" : std::to_string(page->row_offset)},
         {"last", page->rows.empty() ? "—" : std::to_string(page->row_offset + page->rows.size() - 1)},
@@ -1886,7 +1889,7 @@ class AnalysisGraphEditor final : public Editor {
         panel->paragraph(text(io::get_string(documents_->selected(), "error")));
       }
     }
-    panel->paragraph(ctx.tr("analysis_documents.save_hint"));
+    hint(*panel, ctx, "analysis_documents.save_hint");
     const auto offset = documents_->page().is_null() ? 0 : io::get_int(documents_->page(), "offset", 0);
     panel->button("analysis_list", ctx.tr("analysis_documents.refresh"), [this, valid, offset] {
       if (valid()) { documents_->load_page(offset); }

@@ -224,7 +224,11 @@ TEST_F(SavedReviewPython, DeferredOpenPreservesUncommittedTextInAnotherInstalled
   extra.driver.frame();
   ASSERT_NO_FATAL_FAILURE(settled());
   extra.driver.frame();
-  const auto *input = extra.screen.ui()->find("a2/main/review_source");
+  if (const auto *json = extra.screen.ui()->find("a2/main/review_json")) {  // The JSON editor is folded away.
+    const auto header = json->rect;
+    extra.driver.click(int(header.cx()), extra.screen.rect().ymax - 1 - int(header.cy())); extra.driver.frame();
+  }
+  const auto *input = extra.screen.ui()->find("a2/main/review_json/review_source");
   ASSERT_NE(input, nullptr);
   const auto rect = input->rect;
   const auto layout = f.screen.to_json();

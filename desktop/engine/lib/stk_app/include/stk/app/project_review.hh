@@ -11,6 +11,8 @@ struct ProjectTable;
 /** One stable-identity object or sparse cell. Missing is distinct from an explicit JSON null. */
 struct ProjectDifference {
   std::string kind, table_id, record_id, field_id, label;
+  /** 1-based position of the record in its table (in the snapshot it was read from); 0 for tables and fields. */
+  int64_t row = 0;
   std::optional<io::Json> before, after;
 };
 

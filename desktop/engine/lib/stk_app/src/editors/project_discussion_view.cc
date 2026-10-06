@@ -4,6 +4,7 @@
 #include "stk/app/editor.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
+#include "editor_text.hh"
 #include <algorithm>
 #include <limits>
 
@@ -29,7 +30,7 @@ void ProjectDiscussionView::capture_controls(ui::Layout &layout, EditorContext &
   auto *panel = layout.panel("context_capture", ctx.tr("discussion.capture_title"), discussion.context().empty());
   if (!panel) { return; }
   const bool enabled = !state.busy() && !discussion.busy();
-  panel->paragraph(ctx.tr("discussion.capture_hint"));
+  hint(*panel, ctx, "discussion.capture_hint");
   panel->prop(ctx.tr("discussion.name")).text_field("title", ui::bind(title_), {.max_length = 1024});
   const auto *current = state.table();
   panel->button("use_selection", ctx.tr("discussion.use_selection"), [this, &state] {
@@ -158,7 +159,7 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
   if (category_ == 3 && !discussion.requests_supported()) { layout.paragraph(ctx.tr("discussion.requests.unsupported")); return; }
   const std::string kind = category_ == 0 ? "contexts" : category_ == 1 ? "messages" : category_ == 2 ? "proposals" : "requests";
   if (category_ == 3) {
-    layout.paragraph(ctx.tr("discussion.requests.hint"));
+    hint(layout, ctx, "discussion.requests.hint");
     request_controls(layout, ctx, state);
   }
   const auto &page = discussion.page(kind);

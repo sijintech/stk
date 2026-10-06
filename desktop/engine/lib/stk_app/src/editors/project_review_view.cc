@@ -4,16 +4,18 @@
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/project_discussion.hh"
+#include "project_labels.hh"
+#include "editor_text.hh"
 #include <algorithm>
 #include <limits>
 
 namespace stk::app {
 namespace {
-std::string summary(const std::optional<io::Json> &value)
+std::string summary(const AppStore &store, const std::optional<io::Json> &value)
 {
   if (!value) { return "—"; }
   if (value->contains("evaluation") && io::get_string(value->at("evaluation"), "state") == "error") {
-    return "#" + io::get_string(value->at("evaluation").at("error"), "code");
+    return formula_error_label(store, io::get_string(value->at("evaluation").at("error"), "code"));
   }
   if (value->contains("value")) {
     return (value->contains("definition") ? "= " : "") + value->at("value").dump();
@@ -66,7 +68,7 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
   if (!panel) { return; }
   if (!state.drafts_supported()) { panel->paragraph(ctx.tr("project.drafts.unsupported")); return; }
   if (!state.drafts_loaded() && !state.busy()) { state.load_drafts(0, true); }
-  panel->paragraph(ctx.tr("project.drafts.hint"));
+  hint(*panel, ctx, "project.drafts.hint");
   panel->prop(ctx.tr("project.drafts.name")).text_field("draft_title", ui::bind(draft_title_), {.max_length = 1024});
   auto &save = panel->row();
   save.button("save_review", ctx.tr("project.drafts.save"), [this, &state, review = state.review()] {
@@ -126,21 +128,24 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
 
 void ProjectReviewView::draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
 {
-  layout.paragraph(ctx.tr("project.review.hint"));
+  hint(layout, ctx, "project.review.hint");
   saved_drafts(layout, ctx, state);
   if (!state.preview_supported()) { layout.paragraph(ctx.tr("project.review.unsupported")); }
-  layout.text_area("review_source", {
-    [&state] { return state.review_source(); },
-    [&state, handle = state.project()->handle](std::string source) {
-      if (state.project() && state.project()->handle == handle) { state.set_review_source(std::move(source)); }
-    }
-  }, {.max_length = 256 * 1024, .mono = true, .visible_lines = 3});
+  // Edits normally arrive from the cell editor, a saved draft or the AI Assistant; the JSON is for experts.
+  if (auto *json = layout.panel("review_json", ctx.tr("project.review.json"), false)) {
+    json->text_area("review_source", {
+      [&state] { return state.review_source(); },
+      [&state, handle = state.project()->handle](std::string source) {
+        if (state.project() && state.project()->handle == handle) { state.set_review_source(std::move(source)); }
+      }
+    }, {.max_length = 256 * 1024, .mono = true, .visible_lines = 3});
+    json->button("review_example", ctx.tr("project.review.example"), [&state] {
+      state.set_review_source(io::Json::array({{{"op", "create_table"}, {"name", "Proposed table"}}}).dump(2));
+    }).disable(state.busy());
+  }
   auto &input = layout.row();
   input.button("review_preview", ctx.tr("project.review.preview"), [&state] { state.preview(); })
       .disable(!state.preview_supported() || state.busy());
-  input.button("review_example", ctx.tr("project.review.example"), [&state] {
-    state.set_review_source(io::Json::array({{{"op", "create_table"}, {"name", "Proposed table"}}}).dump(2));
-  }).disable(state.busy());
   input.button("review_discard", ctx.tr("project.review.discard"), [&state] { state.discard_review(); });
   if (!state.review_error().empty()) { layout.paragraph(state.review_error()); }
   const auto review = state.review();
@@ -185,8 +190,10 @@ void ProjectReviewView::draw(ui::Layout &layout, EditorContext &ctx, ProjectStat
     spec.cell = [review, category = category_, store = &ctx.store](int row, int col) {
       const auto &entry = (category == 1 ? review->errors : review->differences)[size_t(row)];
       if (col == 0) { return std::string(store->tr("project.review." + entry.kind)); }
-      if (col == 1) { return entry.label; }
-      return summary(col == 2 ? entry.before : entry.after);
+      if (col == 1) {
+        return entry.row > 0 ? entry.label + " / " + store->catalog().format("project.row", {{"n", std::to_string(entry.row)}}) : entry.label;
+      }
+      return summary(*store, col == 2 ? entry.before : entry.after);
     };
     layout.table("review_rows", std::move(spec));
     if (details_row_ != selected_ || details_category_ != category_) {
@@ -198,7 +205,7 @@ void ProjectReviewView::draw(ui::Layout &layout, EditorContext &ctx, ProjectStat
       details_.clear();
       details_.append(detail.dump(2));
     }
-    if (auto *panel = layout.panel("review_details", ctx.tr("project.review.details"), true)) {
+    if (auto *panel = layout.panel("review_details", ctx.tr("project.review.details"), false)) {
       panel->log_view("value", details_, 8);
     }
   }
