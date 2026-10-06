@@ -10,7 +10,7 @@
 （[editor_text.hh](desktop/engine/lib/stk_app/src/editors/editor_text.hh) 的 `hint()`），第 4 项完成；
 第 5 项：示例项目（[suan/workflows/demo.py](suan/workflows/demo.py)，工作台按钮与 `suan demo`）、
 无头 `stk`（[suan/scripting/headless.py](suan/scripting/headless.py)）、[Linux 快速上手](docs/quickstart-linux.md) 与文档站。
-**可用性开发包已全部交付；下一步：工作流提案（复用格式 6 草案）**；
+**可用性开发包已全部交付（最终状态 `3fd0c17`，桌面 CI 5/5 通过）；下一步：工作流提案（复用格式 6 草案），待所有者确认开始**；
 之前为保存分析的单输入连线编辑（`3cbaa36`）与技能目录首版（`5a12d5a`、`df4729d`）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 

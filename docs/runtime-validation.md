@@ -7,6 +7,10 @@
 - Secret scan：`96c630b` 的推送（含 `42189fa`）被 gitleaks `generic-api-key` 标记——原生 AI 密钥测试中的占位字符串
   （编造的、从未作为凭据使用）。测试改为低熵占位串，并在 `.gitleaks.toml` 中只对该提交的该文件加白名单；
   本机 gitleaks 8.30.1 重新扫描 `7e64ece..HEAD` 无发现。其余文档与归档文件中的既有匹配不在本轮提交范围内。
+- CI：`3fd0c17`（可用性开发包的最终累积状态，含 `42189fa`、`96c630b`、`d8f9133`、`406c042`）
+  [桌面 5/5 任务成功](https://github.com/sijintech/stk/actions/runs/37510938774)（Linux GL+Vulkan、macOS Metal、Windows CPU、
+  Linux 包与全新系统冒烟），Runtime CI、Secret scan 与文档站部署均成功；`7e64ece` 桌面 5/5 成功。
+  `96c630b`、`d8f9133`、`406c042` 的桌面运行被后续推送取消，由 `3fd0c17` 覆盖；`d8f9133` 起文档站在 CI（Node 22）构建并部署成功。
 
 - Python：无头会话 2 项（目录与桌面一致、扫描与提交、桌面操作 `unavailable`、同目录 `busy` 提示、关闭后拒绝与重开、
   `python -m` 控制台）；示例项目 3 项（扫描生成的 300/325/350 K、结果引用、指标、README、本机分析运行成功、
