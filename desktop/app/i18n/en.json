@@ -1508,7 +1508,7 @@
   "analysis_links.change": "{target}: {from} → {to}",
   "analysis_links.validate": "Validate candidate",
   "analysis_links.validating": "Validating…",
-  "analysis_links.validate_first": "Saving link changes needs a passing validation of this exact candidate.",
+  "analysis_links.validate_first": "Saving graph changes needs a passing validation of this exact candidate.",
   "analysis_links.valid": "The candidate passed static validation. Data kinds that cannot be known in advance are still checked against the actual data at run time.",
   "analysis_links.invalid": "The candidate is invalid; resolve the issues below before saving.",
   "analysis_links.catalog_loading": "Reading the node catalog; inputs become editable once it arrives…",
@@ -1598,5 +1598,14 @@
   "analysis_links.list_add": "Add a source…",
   "analysis_links.up": "Up",
   "analysis_links.down": "Down",
-  "analysis_links.remove_link": "Remove"
+  "analysis_links.remove_link": "Remove",
+  "analysis_node_params.title": "Params of {node}",
+  "analysis_node_params.hint": "Each change sets the node param in the unsaved candidate; empty fields use the catalog default. Params bound to analysis parameters are edited under Graph parameters.",
+  "analysis_node_params.unknown_type": "This node type is not in the catalog, so its params cannot be edited here.",
+  "analysis_node_params.referenced": "{param} = {value} (an analysis parameter)",
+  "analysis_node_params.undeclared": "not declared by the node type",
+  "analysis_node_params.use_default": "Use default",
+  "analysis_node_params.remove": "Remove value",
+  "analysis_node_params.issue": "{code}: {message}",
+  "analysis_graph_edit.change.positions": "Moved {count} nodes: {nodes}"
 }

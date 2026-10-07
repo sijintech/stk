@@ -11,6 +11,7 @@
 #include "stk/app/shell.hh"
 #include "stk/bridge/client.hh"
 #include "stk/io/catalog.hh"
+#include "stk/ui/form_json.hh"
 #include "stk/ui/gpu_painter.hh"
 #include "stk/wm/window.hh"
 #include "project_navigation.hh"
@@ -356,6 +357,9 @@ class AnalysisGraphEditor final : public Editor {
   std::shared_ptr<const io::Catalog> catalog_types_;
   std::string canvas_document_, selected_id_, graph_edit_error_;
   int add_type_index_ = 0;
+  // Form values of the selected node's params, rebuilt from the draft whenever it changes.
+  ui::FormModel node_form_;
+  std::string node_form_key_;
   std::optional<size_t> selected_;
   int selected_parameter_ = 0;
   bool fit_ = true, focus_selected_ = false, dragging_ = false, initial_displayed_ = false, initial_saved_ = false, initial_run_ = false;
@@ -625,6 +629,93 @@ class AnalysisGraphEditor final : public Editor {
     }}).disable(disabled || current.size() >= 256);
   }
 
+  /** The selected node's params as a form built from its catalog schema. Every widget change
+   * becomes one explicit param edit of the candidate; params that reference graph parameters
+   * ({"$param": name}) stay read-only (their value is the analysis parameter). Client-side checks
+   * (validate_node_params) show missing or invalid params at once; graph.validate stays authoritative. */
+  void node_params_editor(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
+                          const AnalysisGraphNode &node, const bool disabled)
+  {
+    auto &catalog = ctx.store.catalog();
+    const auto *types = catalog_types();
+    const auto *type = types ? types->find(node.type) : nullptr;
+    if (!type) { layout.paragraph(ctx.tr("analysis_node_params.unknown_type")); return; }
+    auto *panel = layout.panel("analysis_node_params_panel", catalog.format("analysis_node_params.title", {{"node", text(node.id)}}), true);
+    if (!panel) { return; }
+    hint(*panel, ctx, "analysis_node_params.hint");
+    const ui::SchemaNode schema = ui::node_params_schema(*type);
+    Json params = Json::object();
+    if (const auto index = std::find_if(parameter_draft_.graph().at("nodes").begin(), parameter_draft_.graph().at("nodes").end(),
+            [&node](const Json &value) { return value.is_object() && io::get_string(value, "id") == node.id; });
+        index != parameter_draft_.graph().at("nodes").end() && index->contains("params") && index->at("params").is_object()) {
+      params = index->at("params");
+    }
+    ui::SchemaNode editable = schema;
+    editable.properties.clear();
+    std::vector<std::string> referenced;
+    for (const auto &member : schema.properties) {
+      const auto value = params.find(member.name);
+      if (value != params.end() && !io::find_param_refs(*value).empty()) { referenced.push_back(member.name); continue; }
+      editable.properties.push_back(member);
+    }
+    const auto key = node.id + "#" + std::to_string(parameter_draft_.generation()) + "." + std::to_string(parameter_draft_.version());
+    if (node_form_key_ != key) {
+      node_form_ = ui::FormModel();
+      for (const auto &member : editable.properties) {
+        if (params.contains(member.name)) { node_form_.set(member.name, ui::form_value_from_json(params.at(member.name))); }
+      }
+      node_form_.init_defaults(editable);
+      node_form_key_ = key;
+    }
+    node_form_.on_change = [this, valid, id = node.id, editable](const std::string &name, const ui::FormValue &value) {
+      const auto *member = editable.property(name);
+      if (!member || !graph_edit_ready(valid)) { return; }
+      Json json;
+      try { json = ui::form_value_to_json(value, *member); }
+      catch (const std::exception &error) { graph_edit_error_ = error.what(); redraw(); return; }
+      const auto result = parameter_draft_.set_node_param(id, name, json, parameter_draft_.generation());
+      graph_edit_error_ = result.accepted ? std::string() : result.error;
+      redraw();
+    };
+    ui::FormOptions options;
+    options.group_panels = false;
+    options.lang = ctx.store.language();
+    options.colormaps = ctx.store.viewer().colormaps();
+    auto &body = panel->scope("analysis_node_params/" + node.id);
+    body.enabled(!disabled);
+    if (!editable.properties.empty()) { ui::build_form(body, editable, node_form_, options); }
+    for (const auto &name : referenced) {
+      panel->paragraph(catalog.format("analysis_node_params.referenced", {{"param", text(name)},
+          {"value", summary(params.at(name))}}));
+    }
+    // Explicit values can return to the catalog default (the param is removed from the node).
+    for (const auto &[name, value] : params.items()) {
+      if (std::find(referenced.begin(), referenced.end(), name) != referenced.end()) { continue; }
+      const auto *spec = type->param(name);
+      auto &row = panel->scope("analysis_node_param_reset/" + node.id + "/" + name).row();
+      row.label(text(name) + " = " + summary(value) + (spec ? "" : "  · " + std::string(ctx.tr("analysis_node_params.undeclared"))));
+      row.button("reset", ctx.tr(spec && spec->has_default ? "analysis_node_params.use_default" : "analysis_node_params.remove"),
+          [this, valid, id = node.id, name = name] {
+        if (!graph_edit_ready(valid)) { return; }
+        const auto result = parameter_draft_.set_node_param(id, name, std::nullopt, parameter_draft_.generation());
+        graph_edit_error_ = result.accepted ? std::string() : result.error;
+        redraw();
+      }).width(7).disable(disabled);
+    }
+    // Immediate local feedback; graph.validate on the whole candidate still decides.
+    std::vector<std::string> named;
+    for (const auto &declaration : parameter_draft_.graph().value("parameters", Json::array())) {
+      if (declaration.is_object()) { named.push_back(io::get_string(declaration, "name")); }
+    }
+    Json declared = Json::object();
+    try { declared = io::parameter_values(parameter_draft_.graph(), parameter_draft_.parameters()); }
+    catch (const std::exception &) {}
+    const auto issues = io::validate_node_params(*type, node.id, params, declared, named, "/nodes/" + node.id + "/params");
+    for (size_t i = 0; i < std::min<size_t>(issues.size(), 16); ++i) {
+      panel->paragraph(catalog.format("analysis_node_params.issue", {{"code", issues[i].code}, {"message", text(issues[i].message)}}));
+    }
+  }
+
   /** Add or remove nodes, expose outputs and review every pending graph change. Collapsed by default. */
   void graph_edit_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
                         const uint64_t version, const bool blocked)
@@ -636,13 +727,23 @@ class AnalysisGraphEditor final : public Editor {
     if (!panel) { return; }
     hint(*panel, ctx, "analysis_graph_edit.hint");
     if (!graph_edit_error_.empty()) { panel->paragraph(text(graph_edit_error_)); }
-    size_t shown = 0;
+    // Moves (including the layout fixed on the first node change) are summarized in one line.
+    size_t shown = 0, listed = 0;
+    std::vector<std::string> moved;
     for (const auto &change : changes) {
-      if (++shown > 32) { break; }
+      if (change.kind == "position") { moved.push_back(change.node); continue; }
+      ++listed;
+      if (++shown > 32) { continue; }
       panel->paragraph(catalog.format("analysis_graph_edit.change." + change.kind,
           {{"node", text(change.node)}, {"key", text(change.key)}}));
     }
-    omitted(*panel, ctx, changes.size() > 32 ? changes.size() - 32 : 0);
+    omitted(*panel, ctx, listed > 32 ? listed - 32 : 0);
+    if (!moved.empty()) {
+      std::string names;
+      for (size_t i = 0; i < std::min<size_t>(moved.size(), 6); ++i) { names += (i ? ", " : "") + text(moved[i]); }
+      if (moved.size() > 6) { names += ", …"; }
+      panel->paragraph(catalog.format("analysis_graph_edit.change.positions", {{"count", std::to_string(moved.size())}, {"nodes", names}}));
+    }
     const bool editing = parameter_text_active() || parameter_buffer_changed_;
     const bool disabled = blocked || editing || !draft_matches_view();
     const auto *types = catalog_types();
@@ -667,13 +768,24 @@ class AnalysisGraphEditor final : public Editor {
       add.dropdown("analysis_graph_add_type", std::move(labels), ui::bind(add_type_index_)).disable(disabled || ids.empty());
       add.button("analysis_graph_add_node", ctx.tr("analysis_graph_edit.add_node"), [this, valid, ids] {
         if (!graph_edit_ready(valid) || add_type_index_ < 0 || size_t(add_type_index_) >= ids.size() || !freeze_layout()) { return; }
-        // Next to the selected node, else to the right of the whole graph.
+        // Right of the selected node (else of the whole graph), moved down past any node it would cover.
         std::pair<double, double> at{0, 0};
         if (selected_ && canvas_view_ && *selected_ < canvas_view_->nodes.size()) {
           const auto &rect = canvas_view_->nodes[*selected_].rect;
           at = {rect.x + rect.width + 70, rect.y};
         }
         else if (canvas_view_) { at = {canvas_view_->bounds.x + canvas_view_->bounds.width + 70, canvas_view_->bounds.y}; }
+        if (canvas_view_) {
+          const double width = AnalysisGraphView::node_width, height = 100;
+          for (int attempt = 0; attempt < 200; ++attempt) {
+            const bool covered = std::any_of(canvas_view_->nodes.begin(), canvas_view_->nodes.end(), [&](const auto &other) {
+              return at.first < other.rect.x + other.rect.width + 20 && other.rect.x < at.first + width + 20 &&
+                     at.second < other.rect.y + other.rect.height + 20 && other.rect.y < at.second + height + 20;
+            });
+            if (!covered) { break; }
+            at.second += 116;
+          }
+        }
         const auto result = parameter_draft_.add_node(ids[size_t(add_type_index_)], at, parameter_draft_.generation());
         graph_edit_error_ = result.accepted ? std::string() : result.error;
         if (result.accepted) { selected_id_ = result.id; selected_parameter_ = 0; }
@@ -692,6 +804,7 @@ class AnalysisGraphEditor final : public Editor {
         if (result.accepted) { selected_.reset(); }
         redraw();
       }).disable(disabled || node.ambiguous_id);
+      if (!node.ambiguous_id) { node_params_editor(*panel, ctx, valid, node, disabled); }
       // Outputs of this node: expose one as a graph output so analyses can request it, or withdraw it.
       const auto &exposed = parameter_draft_.graph().at("outputs");
       for (const auto &output : node.outputs) {

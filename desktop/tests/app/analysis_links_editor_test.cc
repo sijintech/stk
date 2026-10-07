@@ -395,6 +395,32 @@ TEST_F(AnalysisLinksEditorPython, AddedNodeIsShownSelectedAndMustPassValidationB
   EXPECT_FALSE(shows("Unsaved candidate"));
 }
 
+TEST_F(AnalysisLinksEditorPython, NodeParamsAreEditedThroughTheCatalogFormAndCheckedAtOnce)
+{
+  ASSERT_NO_FATAL_FAILURE(open_panel("analysis_graph_edit_panel"));
+  ASSERT_NO_FATAL_FAILURE(select_node("component"));
+  ASSERT_NO_FATAL_FAILURE(choose("analysis_graph_add_type", "(stk.filter.contour@1)"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_graph_add_node"));
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(link("contour", "in", "component.out"));
+  EXPECT_TRUE(shows("missing_param"));  // the required field is reported before any validation call
+  const auto *field = widget("analysis_node_params/contour/field");
+  ASSERT_NE(field, nullptr) << dump();
+  field->string.assign("input"); f.drv->frame();
+  EXPECT_FALSE(shows("missing_param"));
+  EXPECT_TRUE(shows("contour: param field changed"));
+  ASSERT_NE(widget("analysis_node_param_reset/contour/field/reset"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(validate("analysis_graph_validate"));
+  ASSERT_TRUE(save_enabled()) << issues("analysis_graph_issues").dump();
+  ASSERT_NO_FATAL_FAILURE(save());
+  Json current;
+  ASSERT_NO_FATAL_FAILURE(read(current));
+  const auto &added = current.at("analysis").at("document").at("graph").at("nodes").back();
+  EXPECT_EQ(added.at("id"), "contour");
+  EXPECT_EQ(added.at("params").at("field"), "input");
+  EXPECT_EQ(added.at("params").size(), 1u);  // only what was set; other params keep their catalog defaults
+}
+
 TEST_F(AnalysisLinksEditorPython, RemovingANodeDropsItsLinksListEntriesAndOutputs)
 {
   ASSERT_NO_FATAL_FAILURE(open_panel("analysis_graph_edit_panel"));

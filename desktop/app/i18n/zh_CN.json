@@ -1508,7 +1508,7 @@
   "analysis_links.change": "{target}：{from} → {to}",
   "analysis_links.validate": "校验候选",
   "analysis_links.validating": "正在校验……",
-  "analysis_links.validate_first": "保存连线修改需要当前候选的校验通过。",
+  "analysis_links.validate_first": "保存图改动需要当前候选的校验通过。",
   "analysis_links.valid": "候选通过静态校验；无法预先确定的数据种类仍会在运行时按实际数据核对。",
   "analysis_links.invalid": "候选无效；请先解决下列问题再保存。",
   "analysis_links.catalog_loading": "正在读取节点目录，读取完成后才能编辑输入……",
@@ -1598,5 +1598,14 @@
   "analysis_links.list_add": "添加来源…",
   "analysis_links.up": "上移",
   "analysis_links.down": "下移",
-  "analysis_links.remove_link": "移除"
+  "analysis_links.remove_link": "移除",
+  "analysis_node_params.title": "{node} 的参数",
+  "analysis_node_params.hint": "每次修改都会在未保存的候选图中设置节点参数；留空的字段使用目录默认值。绑定到分析参数的参数在“图参数”中编辑。",
+  "analysis_node_params.unknown_type": "该节点类型不在目录中，无法在此编辑参数。",
+  "analysis_node_params.referenced": "{param} = {value}（分析参数）",
+  "analysis_node_params.undeclared": "节点类型未声明此参数",
+  "analysis_node_params.use_default": "恢复默认",
+  "analysis_node_params.remove": "移除取值",
+  "analysis_node_params.issue": "{code}：{message}",
+  "analysis_graph_edit.change.positions": "移动了 {count} 个节点：{nodes}"
 }

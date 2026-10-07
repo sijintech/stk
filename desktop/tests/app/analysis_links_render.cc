@@ -20,15 +20,17 @@ using io::Json;
 int main(int argc, char **argv)
 {
   std::string backend_name, language = "en", output, mode = "wide";
+  std::string scenario = "links";
   for (int i = 1; i + 1 < argc; i += 2) {
     const std::string arg = argv[i];
     if (arg == "--gpu-backend") { backend_name = argv[i + 1]; }
     else if (arg == "--lang") { language = argv[i + 1]; }
     else if (arg == "--export") { output = argv[i + 1]; }
     else if (arg == "--mode") { mode = argv[i + 1]; }
+    else if (arg == "--scenario") { scenario = argv[i + 1]; }
     else { return 2; }
   }
-  if (output.empty() || (mode != "wide" && mode != "narrow")) { return 2; }
+  if (output.empty() || (mode != "wide" && mode != "narrow") || (scenario != "links" && scenario != "edit")) { return 2; }
   const bool narrow = mode == "narrow";
   const int width = narrow ? 760 : 1440, height = 1200;
   bridge::test::TempDir directory{"analysis-links-render"};
@@ -138,6 +140,29 @@ int main(int argc, char **argv)
       // Bring the links panel into view; the parameter and output editors stay intact.
       collapse("analysis_parameter_values_panel");
       collapse("analysis_output_panel");
+      if (scenario == "edit") {
+        // Graph structure: add an iso-surface next to "component", then fill its required field.
+        collapse("analysis_graph_edit_panel");  // starts collapsed: this opens it
+        choose("graph_node_select", "component / ");
+        const auto *types = widget("analysis_graph_add_type");
+        require(types && types->enabled, "node types");
+        const auto found = std::find_if(types->items.begin(), types->items.end(),
+            [](const std::string &item) { return item.find("(stk.filter.contour@1)") != std::string::npos; });
+        require(found != types->items.end(), "contour type listed");
+        types->index.assign(int(found - types->items.begin())); frame();
+        click("analysis_graph_add_node");
+        frame();
+        require(widget("analysis_node_params/contour/field") != nullptr, "contour params form");
+        widget("analysis_node_params/contour/field")->string.assign("input"); frame();
+        require(!widget("analysis_parameters_save")->enabled, "a structural change needs validation before saving");
+        const auto unchanged = call("project.analyses.get", {{"handle", handle}, {"analysis_id", analysis_id}});
+        require(unchanged.at("revision") == revision, "local graph edits must not persist");
+        frame(); require(gfx::png_write(output, image), "write screenshot");
+        require(!viewer.payload() && viewer.evaluations_started() == 0, "editing must not configure or evaluate the Viewer");
+        require(client->stats().schema_violations == 0, "bridge schema violations");
+        printf("wrote %s\n", output.c_str());
+      }
+      else {
       collapse("analysis_links_panel");  // starts collapsed: this opens it
       require(widget("analysis_links_validate") != nullptr, "links panel open");
       choose("graph_node_select", "box / ");
@@ -162,6 +187,7 @@ int main(int argc, char **argv)
       require(!viewer.payload() && viewer.evaluations_started() == 0, "editing must not configure or evaluate the Viewer");
       require(client->stats().schema_violations == 0, "bridge schema violations");
       printf("wrote %s\n", output.c_str());
+      }
     }
     catch (const std::exception &exception) {
       fprintf(stderr, "FAIL: %s\n%s", exception.what(), client->bridge_log().text().c_str()); rc = 1;

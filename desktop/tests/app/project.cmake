@@ -193,6 +193,12 @@ endif()
 foreach(_mode wide narrow)
   foreach(_lang en zh)
     foreach(_be ${_jobs_backends})
+      add_test(NAME analysis_graph_edit_${_mode}_render_${_be}_${_lang} COMMAND stk-analysis-links-render
+        --scenario edit --mode ${_mode} --gpu-backend ${_be} --lang ${_lang}
+        --export "${_jobs_out}/analysis_graph_edit_${_mode}_${_be}_${_lang}.png")
+      set_tests_properties(analysis_graph_edit_${_mode}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
+        ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
+        FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
       add_test(NAME analysis_links_${_mode}_render_${_be}_${_lang} COMMAND stk-analysis-links-render
         --mode ${_mode} --gpu-backend ${_be} --lang ${_lang}
         --export "${_jobs_out}/analysis_links_${_mode}_${_be}_${_lang}.png")
