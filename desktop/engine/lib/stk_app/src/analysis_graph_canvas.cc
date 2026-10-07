@@ -131,6 +131,25 @@ bool AnalysisGraphCanvas::fit(double width, double height, double ui_scale)
   return true;
 }
 
+bool AnalysisGraphCanvas::look_at(const AnalysisGraphPoint center, const double zoom, const double width,
+                                  const double height, const double ui_scale)
+{
+  if (!view_ || !viewport(width, height, ui_scale) || !finite(center) || std::abs(center.x) > 1e8 ||
+      std::abs(center.y) > 1e8 || !std::isfinite(zoom) || zoom <= 0) { return false; }
+  const double clamped = std::clamp(zoom, min_zoom, max_zoom), scale = clamped * ui_scale;
+  const double x = width / 2 - center.x * scale, y = height / 2 - center.y * scale;
+  if (!safe_pan(x, y)) { return false; }
+  zoom_ = clamped; pan_x_ = x; pan_y_ = y; ui_scale_ = ui_scale;
+  width_ = width; height_ = height;
+  return true;
+}
+
+std::optional<AnalysisGraphPoint> AnalysisGraphCanvas::center() const
+{
+  if (!view_ || width_ <= 0 || height_ <= 0) { return std::nullopt; }
+  return to_graph({width_ / 2, height_ / 2});
+}
+
 bool AnalysisGraphCanvas::pan(double dx, double dy)
 {
   if (!std::isfinite(dx) || !std::isfinite(dy) || !safe_pan(pan_x_ + dx, pan_y_ + dy)) { return false; }

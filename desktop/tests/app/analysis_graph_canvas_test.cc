@@ -177,6 +177,42 @@ TEST(AnalysisGraphCanvas, ResizePreservesNavigationAndDpiChangeKeepsCenterWorldA
   EXPECT_NEAR(after.y, anchor.y, 1e-9);
 }
 
+TEST(AnalysisGraphCanvas, RememberedCenterAndZoomRestoreAtAnotherSizeAndScale)
+{
+  AnalysisGraphCanvas canvas;
+  EXPECT_FALSE(canvas.center());  // nothing shown
+  canvas.set_view(linked());
+  EXPECT_FALSE(canvas.center());  // not placed yet
+  ASSERT_TRUE(canvas.fit(900, 600));
+  ASSERT_TRUE(canvas.zoom_at(1.7, 200, 150));
+  ASSERT_TRUE(canvas.pan(-40, 25));
+  const auto center = *canvas.center();
+  const double zoom = canvas.zoom();
+  // Another viewport size and UI scale show the same graph point in the middle at the same zoom.
+  AnalysisGraphCanvas other;
+  other.set_view(linked());
+  ASSERT_TRUE(other.look_at(center, zoom, 1400, 700, 2));
+  EXPECT_EQ(other.zoom(), zoom);
+  EXPECT_EQ(other.ui_scale(), 2);
+  const auto middle = other.to_graph({700, 350});
+  EXPECT_NEAR(middle.x, center.x, 1e-9);
+  EXPECT_NEAR(middle.y, center.y, 1e-9);
+  EXPECT_NEAR(other.center()->x, center.x, 1e-9);
+  // Zoom is clamped; invalid input keeps the transform.
+  ASSERT_TRUE(other.look_at(center, 1e9, 1400, 700));
+  EXPECT_EQ(other.zoom(), AnalysisGraphCanvas::max_zoom);
+  const double x = other.pan_x();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(other.look_at({nan, 0}, 1, 1400, 700));
+  EXPECT_FALSE(other.look_at(center, 0, 1400, 700));
+  EXPECT_FALSE(other.look_at(center, 1, 0, 700));
+  EXPECT_FALSE(other.look_at(center, 1, 1400, 700, 100));
+  EXPECT_FALSE(other.look_at({1e12, 0}, 1, 1400, 700));
+  EXPECT_EQ(other.pan_x(), x);
+  AnalysisGraphCanvas empty;
+  EXPECT_FALSE(empty.look_at(center, 1, 1400, 700));
+}
+
 TEST(AnalysisGraphCanvas, SameViewRetainsNavigationAndReplacementResetsWithoutRestoringOldSelection)
 {
   const auto view = single();

@@ -26,6 +26,12 @@ class AnalysisGraphCanvas {
    * views or invalid bounds return false and retain the existing transform. */
   bool fit(double width, double height, double ui_scale = 1);
   bool pan(double dx, double dy);
+  /** Show graph point `center` in the middle of a width x height viewport at `zoom` (clamped to the
+   * limits), independent of the previous transform: restores a remembered view at any window size or
+   * UI scale. Invalid input or an empty view returns false and retains the transform. */
+  bool look_at(AnalysisGraphPoint center, double zoom, double width, double height, double ui_scale = 1);
+  /** The graph point in the middle of the last fitted or drawn viewport, if there was one. */
+  std::optional<AnalysisGraphPoint> center() const;
   /** Preserve the world point under the physical-pixel anchor; invalid inputs return false. */
   bool zoom_at(double factor, double x, double y);
   /** Last drawn node wins for overlap; points outside the last fit/draw viewport cannot hit. */

@@ -55,6 +55,16 @@ const char *ref_key(const std::string &kind)
 
 constexpr const char *kKinds[] = {"table", "files", "simulation", "analysis"};
 
+/** What a workflow showed when it was last on screen (UX package U4): the graph point in the middle of
+ * the canvas and the zoom (independent of window size and UI scale), the selected step and the shown run. */
+struct ViewMemory {
+  std::string project, workflow;
+  bool placed = false;  // x, y and zoom are known (the canvas was drawn)
+  double x = 0, y = 0, zoom = 1;
+  std::string step, run;
+};
+constexpr size_t kMemoryLimit = 50;
+
 class WorkflowEditor final : public Editor {
  public:
   explicit WorkflowEditor(const EditorType &type) : Editor(type) {}
@@ -74,6 +84,8 @@ class WorkflowEditor final : public Editor {
       reason = "workflow.navigate_unsaved";
       return false;
     }
+    reopen_.reset();  // an explicit target wins over the workflow the layout last showed
+    if (workflows_ && io::get_string(workflows_->selected(), "id") != id) { leave(); }
     want_step_ = io::get_string(target, "step");
     want_run_ = io::get_string(target, "run_id");  // for example from a Home attention item
     want_run_workflow_ = id;
@@ -164,6 +176,62 @@ class WorkflowEditor final : public Editor {
     ui::gpu::GpuPainter painter(*ctx.draw->fonts);
     painter.set_pixel_size(ctx.draw->ui_scale);
     painter.paint(list, {float(width), float(height)});
+  }
+
+  /** Remembered views and the workflow shown last, saved with the layout (U4). */
+  nlohmann::json save_state() const override
+  {
+    auto memories = memory_;
+    if (auto memory = snapshot()) { keep(memories, std::move(*memory)); }
+    Json views = Json::array();
+    for (const auto &memory : memories) {
+      Json view = {{"project", memory.project}, {"workflow", memory.workflow}, {"step", memory.step}, {"run", memory.run}};
+      if (memory.placed) { view["x"] = memory.x; view["y"] = memory.y; view["zoom"] = memory.zoom; }
+      views.push_back(std::move(view));
+    }
+    Json state = {{"views", std::move(views)}};
+    const auto shown = workflows_ ? io::get_string(workflows_->selected(), "id") : std::string();
+    if (store_ && store_->project().project() && !shown.empty()) {
+      state["shown"] = {{"project", store_->project().project()->id}, {"workflow", shown}};
+    }
+    else if (reopen_) { state["shown"] = {{"project", reopen_->first}, {"workflow", reopen_->second}}; }
+    return state;
+  }
+
+  bool load_state(const nlohmann::json &state) override
+  {
+    if (!state.is_object()) { return false; }
+    const auto text = [](const Json &value, const char *key, const size_t limit) {
+      return value.contains(key) && value.at(key).is_string() && value.at(key).get_ref<const std::string &>().size() <= limit;
+    };
+    const auto number = [](const Json &value, const char *key) {
+      return value.contains(key) && value.at(key).is_number() && std::isfinite(value.at(key).get<double>());
+    };
+    std::vector<ViewMemory> loaded;
+    if (state.contains("views")) {
+      const auto &views = state.at("views");
+      if (!views.is_array() || views.size() > kMemoryLimit) { return false; }
+      for (const auto &view : views) {
+        const bool placed = view.is_object() && (view.contains("x") || view.contains("y") || view.contains("zoom"));
+        if (!view.is_object() || !text(view, "project", 64) || !text(view, "workflow", 64) || !text(view, "step", 256) ||
+            !text(view, "run", 64) || (placed && (!number(view, "x") || !number(view, "y") || !number(view, "zoom") ||
+                                                  view.at("zoom").get<double>() <= 0))) { return false; }
+        ViewMemory memory{view.at("project").get<std::string>(), view.at("workflow").get<std::string>(), placed};
+        if (placed) { memory.x = view.at("x").get<double>(); memory.y = view.at("y").get<double>(); memory.zoom = view.at("zoom").get<double>(); }
+        memory.step = view.at("step").get<std::string>();
+        memory.run = view.at("run").get<std::string>();
+        loaded.push_back(std::move(memory));
+      }
+    }
+    std::optional<std::pair<std::string, std::string>> shown;
+    if (state.contains("shown")) {
+      const auto &value = state.at("shown");
+      if (!value.is_object() || !text(value, "project", 64) || !text(value, "workflow", 64)) { return false; }
+      shown = std::pair{value.at("project").get<std::string>(), value.at("workflow").get<std::string>()};
+    }
+    memory_ = std::move(loaded);
+    reopen_ = std::move(shown);
+    return true;
   }
 
   bool handle_gpu_event(const wm::Event &event, EditorContext &ctx) override
@@ -261,6 +329,7 @@ class WorkflowEditor final : public Editor {
   {
     store_ = &ctx.store;
     if (!workflows_) { workflows_ = std::make_unique<ProjectWorkflows>(ctx.store); }
+    remember();  // before a project change resets what is shown
     workflows_->sync();
     if (epoch_ != workflows_->epoch()) {
       epoch_ = workflows_->epoch();
@@ -334,7 +403,12 @@ class WorkflowEditor final : public Editor {
       // Show the first workflow right away; most projects have one.
       auto_selected_ = true;
       const auto &rows = member(workflows_->page(), "workflows");
-      if (!rows.empty()) { workflows_->load(io::get_string(rows.at(0), "id")); }
+      std::string first = rows.empty() ? std::string() : io::get_string(rows.at(0), "id");
+      if (reopen_ && reopen_->first == project_id(ctx)) {
+        for (const auto &row : rows) { if (io::get_string(row, "id") == reopen_->second) { first = reopen_->second; } }
+      }
+      reopen_.reset();
+      if (!first.empty()) { workflows_->load(first); }
     }
   }
 
@@ -447,10 +521,19 @@ class WorkflowEditor final : public Editor {
       const auto edited = candidate_shown_ ? draft_.edited_steps() : std::set<std::string>{};
       for (auto &node : view->nodes) { node.edited = edited.count(node.id) != 0; }
       view->id = io::get_string(selected, "id");
-      const bool same = view->id == previous;
+      const bool same = view->id == previous && view_project_ == project_id(ctx);
+      view_project_ = project_id(ctx);
       view_ = std::move(view);
       if (drag_ == Drag::None) { canvas_.set_view(view_, same); }
-      if (!same) { fit_ = true; }
+      if (!same) {
+        fit_ = true;
+        restore_.reset();
+        if (const auto *memory = remembered(project_id(ctx), view_->id)) {
+          restore_ = *memory;  // applied instead of fitting once the canvas size is known
+          if (want_step_.empty()) { selected_id_ = memory->step; }
+          if (want_run_.empty() && !memory->run.empty()) { want_run_ = memory->run; want_run_workflow_ = view_->id; }
+        }
+      }
       if (!want_step_.empty()) { selected_id_ = want_step_; want_step_.clear(); }
     }
     catch (const std::exception &error) {
@@ -461,8 +544,70 @@ class WorkflowEditor final : public Editor {
 
   void place_canvas(const double width, const double height)
   {
+    if (restore_ && view_ && restore_->workflow == view_->id) {
+      const auto memory = *restore_;
+      restore_.reset();
+      if (memory.placed && canvas_.look_at({memory.x, memory.y}, memory.zoom, width, height, ui_scale_)) { fit_ = false; return; }
+    }
     if (!fit_ || !canvas_.fit(width, height, ui_scale_)) { return; }
     fit_ = false;
+  }
+
+  static std::string project_id(const EditorContext &ctx)
+  {
+    const auto &project = ctx.store.project().project();
+    return project ? project->id : std::string();
+  }
+
+  const ViewMemory *remembered(const std::string &project, const std::string &workflow) const
+  {
+    for (const auto &memory : memory_) {
+      if (memory.project == project && memory.workflow == workflow) { return &memory; }
+    }
+    return nullptr;
+  }
+
+  /** What the shown workflow shows now (U4), once it is settled: read, not being dragged, and no other
+   * workflow on its way. The canvas part is known once it was placed; until then the restored or
+   * remembered one is kept. */
+  std::optional<ViewMemory> snapshot() const
+  {
+    if (!view_ || !workflows_ || drag_ != Drag::None || pending_ || workflows_->busy() ||
+        io::get_string(workflows_->selected(), "id") != view_->id || view_project_.empty()) { return std::nullopt; }
+    ViewMemory memory{view_project_, view_->id};
+    memory.step = selected_id_;
+    const auto &run = workflows_->run();
+    if (!want_run_.empty() && want_run_workflow_ == view_->id) { memory.run = want_run_; }  // still being read
+    else if (!run.is_null() && io::get_string(run, "workflow_id") == view_->id) { memory.run = io::get_string(run, "id"); }
+    const auto center = canvas_.center();
+    const ViewMemory *known = restore_ && restore_->workflow == view_->id ? &*restore_ : remembered(view_project_, view_->id);
+    if (!fit_ && !restore_ && center) {
+      memory.placed = true; memory.x = center->x; memory.y = center->y; memory.zoom = canvas_.zoom();
+    }
+    else if (known && known->placed) {
+      memory.placed = true; memory.x = known->x; memory.y = known->y; memory.zoom = known->zoom;
+    }
+    return memory;
+  }
+
+  static void keep(std::vector<ViewMemory> &memories, ViewMemory memory)
+  {
+    std::erase_if(memories, [&](const ViewMemory &old) { return old.project == memory.project && old.workflow == memory.workflow; });
+    memories.push_back(std::move(memory));
+    if (memories.size() > kMemoryLimit) { memories.erase(memories.begin()); }
+  }
+
+  /** Keep the shown workflow's view among the most recent kMemoryLimit (every frame and before leaving it). */
+  void remember()
+  {
+    if (auto memory = snapshot()) { keep(memory_, std::move(*memory)); }
+  }
+
+  /** The shown workflow is about to be replaced by another: keep its view first. */
+  void leave()
+  {
+    remember();
+    restore_.reset();
   }
 
   std::function<bool()> valid() const
@@ -605,6 +750,7 @@ class WorkflowEditor final : public Editor {
         spec.selected = {[selected_row] { return selected_row; }, [this, ok, rows, revision](const int row) {
           if (ok() && !draft_.dirty() && row >= 0 && size_t(row) < rows.size() &&
               io::get_int(workflows_->page(), "revision", -1) == revision) {
+            if (io::get_string(rows[size_t(row)], "id") != io::get_string(workflows_->selected(), "id")) { leave(); }
             auto_selected_ = true; selected_id_.clear();
             workflows_->load(io::get_string(rows[size_t(row)], "id"));
           }
@@ -1399,6 +1545,10 @@ class WorkflowEditor final : public Editor {
   int run_row_ = -1;
   std::chrono::steady_clock::time_point last_poll_{};
   bool auto_selected_ = false, fit_ = true, dragging_ = false;
+  std::vector<ViewMemory> memory_;  // most recent last
+  std::string view_project_;
+  std::optional<ViewMemory> restore_;
+  std::optional<std::pair<std::string, std::string>> reopen_;  // (project, workflow) the layout last showed
   Drag drag_ = Drag::None;
   bool drag_moved_ = false;
   size_t drag_node_ = 0;

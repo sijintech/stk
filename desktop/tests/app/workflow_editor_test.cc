@@ -407,6 +407,72 @@ TEST_F(WorkflowEditorPython, MissingReferencesAreListedAndTheBreadcrumbEndsWithT
   EXPECT_EQ(widget("analysis_breadcrumb_workflow"), nullptr);
 }
 
+TEST_F(WorkflowEditorPython, EachWorkflowKeepsItsViewAndStepAndTheLayoutReopensTheLastOne)
+{
+  const auto memory = [&](const std::string &id) -> nlohmann::json {
+    const auto state = area().editor().save_state();  // kept alive while its views are searched
+    for (const auto &view : state.at("views")) { if (view.at("workflow") == id) { return view; } }
+    return nullptr;
+  };
+  // The canvas is placed when it is drawn or receives pointer events (these tests draw no GPU frames).
+  const auto rect = area().find_region(EditorArea::kMain)->rect();
+  // Shown views are kept once the editor has settled (no read in flight).
+  const auto hover = [&] {
+    f.drv->move(rect.xmin + rect.width() / 3, rect.ymin + rect.height() / 2); f.drv->frame();
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
+  };
+  // Temperature scan: a step selected and the canvas zoomed in away from the fitted view.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(select("fields"));
+  ASSERT_NO_FATAL_FAILURE(hover());
+  const auto fitted = memory(workflow_id);
+  ASSERT_FALSE(fitted.is_null());
+  wm::Event wheel;
+  wheel.type = wm::EventType::Wheel; wheel.x = rect.xmin + rect.width() / 3; wheel.y = rect.ymin + rect.height() / 2; wheel.wheel_y = 3;
+  f.drv->send(wheel); f.drv->frame();
+  const auto zoomed = memory(workflow_id);
+  EXPECT_EQ(zoomed.at("step"), "fields");
+  ASSERT_GT(zoomed.at("zoom").get<double>(), fitted.at("zoom").get<double>() * 1.2);
+  // Another workflow is fitted on its own; coming back restores the zoom, the centre and the step.
+  widget("workflow_list")->table->selected.assign(1);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("1 problems found"); }));
+  ASSERT_NO_FATAL_FAILURE(hover());
+  EXPECT_FALSE(memory(broken_id).is_null());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
+  widget("workflow_list")->table->selected.assign(0);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("All references and links are valid."); }));
+  ASSERT_NO_FATAL_FAILURE(hover());
+  const auto back = memory(workflow_id);
+  EXPECT_NEAR(back.at("zoom").get<double>(), zoomed.at("zoom").get<double>(), 1e-9);
+  EXPECT_NEAR(back.at("x").get<double>(), zoomed.at("x").get<double>(), 1e-6);
+  EXPECT_NEAR(back.at("y").get<double>(), zoomed.at("y").get<double>(), 1e-6);
+  EXPECT_EQ(back.at("step"), "fields");
+  EXPECT_TRUE(shows("Selected step")) << sidebar();
+  // The layout keeps the views and the workflow shown last: a new editor reopens Broken (not the first
+  // workflow) and later shows Temperature scan as it was left.
+  widget("workflow_list")->table->selected.assign(1);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("1 problems found"); }));
+  ASSERT_NO_FATAL_FAILURE(hover());
+  const auto state = area().editor().save_state();
+  EXPECT_EQ(state.at("shown").at("workflow"), broken_id);
+  EXPECT_EQ(state.at("shown").at("project"), project().project()->id);
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkflow));
+  ASSERT_TRUE(area().editor().load_state(state));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("1 problems found"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
+  widget("workflow_list")->table->selected.assign(0);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("All references and links are valid."); }));
+  ASSERT_NO_FATAL_FAILURE(hover());
+  EXPECT_NEAR(memory(workflow_id).at("zoom").get<double>(), zoomed.at("zoom").get<double>(), 1e-9);
+  EXPECT_EQ(memory(workflow_id).at("step"), "fields");
+  // Malformed layout state is refused (the application falls back to the default layout).
+  EXPECT_FALSE(area().editor().load_state({{"views", "none"}}));
+  EXPECT_FALSE(area().editor().load_state({{"views", {{{"project", "p"}, {"workflow", "w"}, {"x", 0}, {"y", 0}, {"zoom", -1},
+                                                       {"step", ""}, {"run", ""}}}}}));
+  EXPECT_TRUE(area().editor().load_state(Json::object()));
+}
+
 TEST_F(WorkflowEditorPython, ClosingTheProjectBeforeTheAnalysisIsReadLeavesNoWayBack)
 {
   ASSERT_NO_FATAL_FAILURE(select("temperature"));
@@ -775,6 +841,13 @@ TEST_F(WorkflowEditorPython, HomeListsAFailedRunFirstAndOpensItInTheWorkflowEdit
   }));
   EXPECT_EQ(widget("status_attention"), nullptr);
   EXPECT_EQ(calls("project.attention.viewed"), 1u);
+  // The shown run belongs to this workflow's view (U4): another workflow and back shows it again.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
+  widget("workflow_list")->table->selected.assign(1);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("1 problems found") && !shows("1/2 done · 1 failed"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
+  widget("workflow_list")->table->selected.assign(0);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Stopped · 1/2 done · 1 failed"); }));
   EXPECT_EQ(calls("project.workflow_runs.prepare"), 1u);  // browsing never prepares or starts another run
   EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
