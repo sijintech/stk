@@ -549,6 +549,9 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.workflows.get` | `{handle, workflow_id}` | `{revision, table_id, compatible, error, workflow: workflowSummary + {document}}` |
 | `project.workflows.validate` | `{handle, document}` | `{revision, ok, issues, omitted_issues, steps: [workflowStepSummary]}` |
 | `project.workflows.choices` | `{handle}` | `{revision, tables, omitted_tables, snapshots, analyses, templates}` |
+| `project.workflow_runs.prepare` | `{handle, workflow_id, rows, run_id, expected_revision}` | `{run: workflowRun}` |
+| `project.workflow_runs.get` / `start` / `cancel` / `recover` | `{handle, run_id}` | `{run: workflowRun}` |
+| `project.workflow_runs.list` | `{handle, offset?, limit?, workflow_id?}` | `{runs: [workflowRunSummary], next_offset}` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -628,6 +631,20 @@ declared parameters, which bind like an analysis's (`$field` type and unit check
 Optional `parameter_overrides` (1–64 declared graph parameter names, at most 64 KiB) set values for this run only,
 for example a workflow row's: they are frozen in the plan as `parameter_overrides` and evaluated over the frozen
 document's submitted parameters, which stay the saved analysis verbatim; they are part of the request identity.
+
+The optional `project.workflow_runs.*` methods (experimental, design in `docs/design/workflow-runs.md`) require project
+format 10. `prepare` freezes a valid saved workflow over 1–100 explicit rows of its single parameter table: the rows'
+numbers and the field values the run uses, each step x row's parameters, the referenced analyses (documents and
+SHA-256), snapshot files and the step order; it refuses steps it cannot execute here (`muferro/1` simulations, analysis
+inputs from more than one source, repeated snapshot file names, rows with formula errors) and changes no editable
+revision. `start` executes the unfinished tasks in the background, row by row: a local template (`demo-synthetic/1`)
+writes its declared outputs under `results/workflow-runs/<run>/row-<n>/<step>/attempt-<k>/`, which are registered and
+captured as that row's snapshot (ordinary undoable edits, announced with `project.changed`); an analysis step prepares
+and executes one analysis run with the row's `parameter_overrides`, refused when the saved analysis changed since the
+workflow run was frozen. A failed task stops only its row; starting a stopped run again retries the tasks that did not
+succeed with new numbered attempts, and only the latest attempt can finish a task. `cancel` stops after the current task
+and cancels an analysis in flight; `recover` marks attempts without a live executor (after a restart) as interrupted.
+Tasks report `{step, row, attempt, status, produced, error, updated_at}`; nothing runs implicitly or calls a model.
 
 The optional `project.analysis_runs.*` methods require project format 9, with an explicit backup-first
 upgrade for older projects. They add an immutable analysis plan and an append-only execution journal,

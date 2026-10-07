@@ -11,8 +11,9 @@ Entry points: ``suan demo [DIRECTORY]``, Home → "Create example project" in th
 4. the three field files are registered in the file index and frozen as one input snapshot;
 5. the saved analysis "Temperature field / 温度场" (the volume preset) gets one local run of the
    hottest case, started and observed here, so Analysis → Runs can show it right away;
-6. the workflow "Temperature scan / 温度扫描" links the cases table, the input snapshot and the saved
-   analysis (experimental ``stk.workflow/1``), a definition only: it runs nothing.
+6. the workflow "Temperature scan / 温度扫描" (experimental ``stk.workflow/1``) links the cases table,
+   the synthetic solver as a local step (``demo-synthetic/1``, temperature from each row) and the saved
+   analysis; it is only defined here, and runs per row when started explicitly (``stk.project.workflow_runs``).
 
 Nothing contacts a Runtime, a server or a model. Real simulations run on a Linux Runtime
 (see docs/quickstart-linux.md).
@@ -56,14 +57,15 @@ def _volume_document():
             "parameters": {"path": "field.vtk"}, "outputs": ["view"]}
 
 
-def workflow_document(cases_table, snapshot_id, analysis_id):
-    """Cases → field files → Temperature field, laid out left to right."""
+def workflow_document(cases_table, temperature_field, analysis_id):
+    """Cases → synthetic solver (each row's temperature) → Temperature field, laid out left to right."""
     return {"format": "stk.workflow/1", "steps": [
         {"id": "cases", "kind": "table", "ref": {"table": cases_table}},
-        {"id": "fields", "kind": "files", "ref": {"snapshot": snapshot_id}, "after": ["cases"]},
+        {"id": "simulate", "kind": "simulation", "ref": {"template": "demo-synthetic/1"},
+         "inputs": {"rows": {"from": "cases.rows"}}, "parameters": {"temperature": {"$field": temperature_field}}},
         {"id": "temperature", "kind": "analysis", "ref": {"analysis": analysis_id},
-         "inputs": {"data": {"from": "fields.files"}}},
-    ], "ui": {"positions": {"cases": [0, 0], "fields": [260, 0], "temperature": [520, 0]}}}
+         "inputs": {"data": {"from": "simulate.files"}}},
+    ], "ui": {"positions": {"cases": [0, 0], "simulate": [260, 0], "temperature": [520, 0]}}}
 
 
 def _cell(table, record, field, value):
@@ -119,7 +121,7 @@ def create_demo(stk, directory=None, *, wait_seconds=120):
                                 expected_revision=saved["revision"])
         workflow_id = str(uuid4())
         p.workflows.create("Temperature scan / 温度扫描",
-                           workflow_document(cases, captured["snapshot"]["id"], analysis_id),
+                           workflow_document(cases, temperature, analysis_id),
                            workflow_id=workflow_id, expected_revision=saved["revision"])
         run = p.analysis_runs.start(run_id)
         deadline = time.monotonic() + wait_seconds
@@ -134,8 +136,8 @@ def create_demo(stk, directory=None, *, wait_seconds=120):
             "- Results / 结果: mean and maximum per case; the first column references the case row.\n"
             "- Node Graph → Saved analysis → Temperature field → Runs: a finished run of case-3; "
             "*Read and verify result*, then *Show selected output*, or *Run and show* for another file.\n"
-            "- Home → Workflows: *Temperature scan* links the cases, the field files and the analysis "
-            "(a definition only; *Open analysis* enters it, the breadcrumb leads back).\n",
+            "- Home → Workflows: *Temperature scan* links the cases, the synthetic solver and the analysis; "
+            "*Open analysis* enters it and the breadcrumb leads back. Started explicitly, it runs per row.\n",
             encoding="utf-8")
         return {"directory": str(directory), "project_id": p.snapshot()["project"]["id"], "cases_table": cases,
                 "results_table": results, "analysis_id": analysis_id, "run_id": run_id, "run_status": run["status"],

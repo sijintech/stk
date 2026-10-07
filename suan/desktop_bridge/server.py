@@ -26,6 +26,7 @@ from .connections import ConnectionStore
 from .graphs import GraphService
 from .projects import ProjectSessions
 from .analysis_runs import AnalysisRunExecutor
+from .workflow_runs import WorkflowRunExecutor
 from .project_runs import ProjectRuns
 from .scripts import ScriptSessions
 from .ui_requests import UIRequests, UI_OPERATIONS
@@ -151,7 +152,10 @@ class Bridge:
         self.connections = ConnectionStore(self.state_dir)
         self.graphs = GraphService(self.cache_dir, self.connections, self.emit)
         self.analysis_executor = AnalysisRunExecutor(self.graphs.worker, self.graphs.blobs.root)
-        self.projects = ProjectSessions(self.state_dir, analysis_executor=self.analysis_executor)
+        # Workflow runs register outputs as ordinary edits in the background; open handles hear about them.
+        self.workflow_executor = WorkflowRunExecutor(self.analysis_executor, changed=self._announce)
+        self.projects = ProjectSessions(self.state_dir, analysis_executor=self.analysis_executor,
+                                        workflow_executor=self.workflow_executor)
         self.project_runs = ProjectRuns(self.projects, self.connections.backend)
         self.ui = UIRequests(self.emit)
         self.scripts = ScriptSessions(self.emit, self.script_call)
@@ -262,6 +266,12 @@ class Bridge:
             "project.workflows.list": lambda p, c: self.projects.workflows("list", p),
             "project.workflows.validate": lambda p, c: self.projects.workflows("validate", p),
             "project.workflows.choices": lambda p, c: self.projects.workflows("choices", p),
+            "project.workflow_runs.prepare": lambda p, c: self.projects.workflow_runs("prepare", p),
+            "project.workflow_runs.get": lambda p, c: self.projects.workflow_runs("get", p),
+            "project.workflow_runs.list": lambda p, c: self.projects.workflow_runs("list", p),
+            "project.workflow_runs.start": lambda p, c: self.projects.workflow_runs("start", p),
+            "project.workflow_runs.cancel": lambda p, c: self.projects.workflow_runs("cancel", p),
+            "project.workflow_runs.recover": lambda p, c: self.projects.workflow_runs("recover", p),
             "project.analysis_runs.prepare": lambda p, c: self.projects.analysis_runs("prepare", p),
             "project.analysis_runs.get": lambda p, c: self.projects.analysis_runs("get", p),
             "project.analysis_runs.list": lambda p, c: self.projects.analysis_runs("list", p),
@@ -331,6 +341,15 @@ class Bridge:
 
     def emit(self, event, data):
         self.send({"event": event, "data": data})
+
+    def _announce(self, store):
+        """A background edit (a workflow run registering outputs) as project.changed for each open handle."""
+        try:
+            revision = store.info()["revision"]
+        except Exception:  # noqa: BLE001 - a closed or replaced project needs no announcement
+            return
+        for handle in self.projects.handles_of(store):
+            self.emit("project.changed", {"handle": handle, "revision": revision})
 
     def respond_error(self, identity, error, method=None):
         self.send({"id": identity, "error": error.to_json()}, method)
@@ -420,6 +439,7 @@ class Bridge:
         if self.closed.is_set():
             return
         self.closing.set()
+        self.workflow_executor.shutdown(wait=False)
         self.analysis_executor.shutdown(wait=False)
         self.ui.close()
         self.scripts.shutdown()
@@ -473,6 +493,8 @@ class Bridge:
                  "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
                  "project.workflows.create", "project.workflows.update", "project.workflows.get",
                  "project.workflows.list", "project.workflows.validate", "project.workflows.choices",
+                 "project.workflow_runs.prepare", "project.workflow_runs.get", "project.workflow_runs.list",
+                 "project.workflow_runs.start", "project.workflow_runs.cancel", "project.workflow_runs.recover",
                  "project.analysis_runs.prepare", "project.analysis_runs.get", "project.analysis_runs.list",
                  "project.analysis_runs.start", "project.analysis_runs.cancel", "project.analysis_runs.recover", "project.analysis_runs.result",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",

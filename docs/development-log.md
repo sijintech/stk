@@ -1,5 +1,16 @@
 # 开发交接记录
 
+## 2026-10-07：P3 W4a-2 工作流运行执行器
+
+`WorkflowRunExecutor`（后台服务，每次运行一个线程，最多 4 个）：认领后逐行、按冻结的步骤顺序执行未成功的任务；上游未成功的任务保持等待，
+不影响其他行。本机模板写入每次尝试独立的目录，登记输出并捕获为该行快照（普通编辑，修订冲突时有限重试，并以 `project.changed`
+通知已打开的句柄——新增 `ProjectSessions.handles_of` 与服务的 `_announce`）；分析步骤用该快照与行的参数覆盖值准备分析运行，
+`expected_document_sha256` 保证保存的分析未变（否则 `AnalysisChanged`，任务码 `analysis_changed`，不重试），交给本机分析执行器并等待结束。
+取消在当前任务后停止并取消进行中的分析；`recover` 在没有存活执行器时把运行中的尝试标为中断。后台服务方法 `project.workflow_runs.*`、
+schema、协议说明与 `stk.project.workflow_runs`。示例工作流改为“算例 → 合成求解 → 温度场”（旧的“场文件”快照三个文件同名，不能按行运行）。
+
+critical review：分析已改的拒绝起初是修订冲突，被当作并发编辑重试 8 次后报“项目持续变化”，改为独立的不可重试错误。
+
 ## 2026-10-07：P3 W4a-1 工作流运行存储（格式 10）
 
 所有者按推荐确认 W4 方案四问。实现：项目格式 10（`workflow_run_plans`、`workflow_run_events`，可从 1–9 备份后显式升级）；

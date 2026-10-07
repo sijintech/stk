@@ -41,6 +41,10 @@ class AnalysisRunNotFound(ProjectError):
     """The selected immutable analysis run does not exist."""
 
 
+class AnalysisChanged(ProjectError):
+    """The saved analysis is no longer the document a frozen workflow run expects (not retryable)."""
+
+
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -393,7 +397,10 @@ class AnalysisRuns:
                    (plan["id"], state["status"], _pack(state, MAX_EVENT_BYTES), previous_hash, digest))
         return self._public(plan, state)
 
-    def prepare(self, analysis_id, snapshot_id, bindings, *, run_id, expected_revision, parameter_overrides=None):
+    def prepare(self, analysis_id, snapshot_id, bindings, *, run_id, expected_revision, parameter_overrides=None,
+                expected_document_sha256=None):
+        """``expected_document_sha256`` (for a frozen workflow run) refuses the preparation when the saved
+        analysis is no longer the document that run froze."""
         for identity in (analysis_id, snapshot_id, run_id):
             _id(identity)
         _revision(expected_revision)
@@ -422,6 +429,9 @@ class AnalysisRuns:
             analysis = analyses._record(db, analysis_id, compatible, error)
             if analysis["state"] != "readable":
                 raise ProjectError("Analysis definition is not readable: " + analysis["error"])
+            if (expected_document_sha256 is not None and
+                    hashlib.sha256(canonical_json(analysis["document"])).hexdigest() != expected_document_sha256):
+                raise AnalysisChanged("The saved analysis changed after the workflow run was prepared; prepare a new run")
             snapshot = self._snapshot(db, snapshot_id)
             if snapshot["revision"] > revision:
                 raise ProjectError("Analysis input snapshot comes from a later project revision")

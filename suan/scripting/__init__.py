@@ -126,6 +126,10 @@ class Project:
         return ProjectWorkflows(self._call, self.handle)
 
     @property
+    def workflow_runs(self):
+        return ProjectWorkflowRuns(self._call, self.handle)
+
+    @property
     def runs(self):
         return ProjectRuns(self._call, self.handle)
 
@@ -396,6 +400,38 @@ class ProjectWorkflows:
     def choices(self):
         """Parameter tables, input snapshots, readable saved analyses and templates a step can reference."""
         return self._call("project.workflows.choices", {"handle": self.handle})
+
+
+class ProjectWorkflowRuns:
+    """Per-row workflow runs (format 10): freeze, then explicitly start; nothing runs implicitly."""
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def prepare(self, workflow_id, rows, *, run_id, expected_revision):
+        """Freeze the workflow, these rows' values and the referenced analyses; executes nothing."""
+        return self._call("project.workflow_runs.prepare", {"handle": self.handle, "workflow_id": workflow_id,
+            "rows": rows, "run_id": run_id, "expected_revision": expected_revision})["run"]
+
+    def start(self, run_id):
+        """Execute the run's unfinished tasks in the background (also retries failed or cancelled ones)."""
+        return self._call("project.workflow_runs.start", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def get(self, run_id):
+        return self._call("project.workflow_runs.get", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def list(self, *, offset=0, limit=50, workflow_id=None):
+        params = {"handle": self.handle, "offset": offset, "limit": limit}
+        if workflow_id:
+            params["workflow_id"] = workflow_id
+        return self._call("project.workflow_runs.list", params)
+
+    def cancel(self, run_id):
+        return self._call("project.workflow_runs.cancel", {"handle": self.handle, "run_id": run_id})["run"]
+
+    def recover(self, run_id):
+        """After a service restart: mark attempts nobody executes as interrupted so the run can start again."""
+        return self._call("project.workflow_runs.recover", {"handle": self.handle, "run_id": run_id})["run"]
 
 
 class ProjectAnalysisRuns:

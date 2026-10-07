@@ -5872,6 +5872,233 @@
           "$ref": "#/$defs/projectWorkflowChoicesResult"
         }
       },
+      "project.workflow_runs.prepare": {
+        "description": "Freeze one run of a saved, valid workflow over explicit rows of its parameter table (project format 10). Executes nothing and does not change the editable revision; the same UUID and request returns the frozen run.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "workflow_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "rows": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              }
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "workflow_id",
+            "rows",
+            "run_id",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectWorkflowRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.workflow_runs.get": {
+        "description": "Read one workflow run, its frozen plan and the latest attempt of every task.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectWorkflowRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.workflow_runs.list": {
+        "description": "Newest workflow runs first, optionally of one workflow.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "workflow_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "runs": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/projectWorkflowRunSummary"
+              }
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "runs",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.workflow_runs.start": {
+        "description": "Explicitly execute the run's unfinished tasks in the background (row by row; a failed task stops only its row). Starting a stopped run retries failed, cancelled or interrupted tasks with new attempts over the same frozen plan.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectWorkflowRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.workflow_runs.cancel": {
+        "description": "Stop after the current task and cancel an analysis in flight; finished tasks stay.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectWorkflowRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.workflow_runs.recover": {
+        "description": "After a service restart, mark attempts no live executor owns as interrupted and stop the run so it can start again.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/projectWorkflowRun"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
       "project.analysis_runs.prepare": {
         "description": "Freeze a saved analysis and explicit file-snapshot mapping at a project revision, without executing nodes or changing editable revision/history. Same UUID and original request return the frozen run.",
         "params": {
@@ -11276,6 +11503,287 @@
       ],
       "additionalProperties": false,
       "description": "What a workflow step can reference at this revision: parameter tables (not the managed analysis, workflow or file-index tables; at most 500, then omitted_tables), input snapshots newest first (at most 200), readable saved analyses and registered simulation templates (table_id null: rows of any parameter table; local templates such as demo-synthetic/1 run on this computer)."
+    },
+    "projectWorkflowRunTask": {
+      "type": "object",
+      "properties": {
+        "step": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "row": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "produced": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "error": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "message": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "step",
+        "row",
+        "attempt",
+        "status",
+        "produced",
+        "error",
+        "updated_at"
+      ],
+      "additionalProperties": false
+    },
+    "projectWorkflowRun": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "workflow_name": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "document": {
+          "$ref": "#/$defs/projectWorkflowDocument"
+        },
+        "document_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "values": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "values"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "order": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+          }
+        },
+        "steps": {
+          "type": "object",
+          "maxProperties": 200
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 200
+        },
+        "directory": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "plan_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "status": {
+          "enum": [
+            "prepared",
+            "running",
+            "cancel_requested",
+            "stopped"
+          ]
+        },
+        "executor_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tasks": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/projectWorkflowRunTask"
+          }
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "workflow_id",
+        "workflow_name",
+        "document",
+        "document_sha256",
+        "source_revision",
+        "created_at",
+        "table_id",
+        "rows",
+        "order",
+        "steps",
+        "parameters",
+        "directory",
+        "plan_sha256",
+        "status",
+        "executor_id",
+        "tasks",
+        "counts",
+        "complete"
+      ],
+      "additionalProperties": false,
+      "description": "A frozen per-row workflow run (project format 10) and its state: one task per row x executed step in row order, each the latest numbered attempt. steps/parameters hold the frozen per-step plan (analysis documents and hashes, template ids, snapshot files) and per-row values."
+    },
+    "projectWorkflowRunSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "workflow_name": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "status": {
+          "enum": [
+            "prepared",
+            "running",
+            "cancel_requested",
+            "stopped"
+          ]
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "workflow_id",
+        "workflow_name",
+        "created_at",
+        "source_revision",
+        "rows",
+        "status",
+        "counts",
+        "complete"
+      ],
+      "additionalProperties": false
     }
   }
 }

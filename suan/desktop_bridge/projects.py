@@ -14,6 +14,7 @@ from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 from suan.project.analyses import AnalysisNotFound
 from suan.project.analysis_runs import AnalysisRunNotFound
 from suan.project.workflows import WorkflowNotFound
+from suan.project.workflow_runs import WorkflowRunNotFound
 from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, TokenPlanCredentials, provider_info
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
@@ -22,7 +23,7 @@ from .recent_projects import RecentProjects
 
 
 class ProjectSessions:
-    def __init__(self, state_dir=None, *, analysis_executor=None):
+    def __init__(self, state_dir=None, *, analysis_executor=None, workflow_executor=None):
         self._recent = RecentProjects(state_dir)
         self._lock = threading.RLock()
         self._stores = {}
@@ -30,6 +31,7 @@ class ProjectSessions:
         self._credentials = TokenPlanCredentials(state_dir)
         self._executor = RequestExecutor({ALIYUN_ADAPTER: AliyunTokenPlanAdapter(self._credentials)})
         self._analysis_executor = analysis_executor
+        self._workflow_executor = workflow_executor
 
     @contextmanager
     def _operation(self):
@@ -45,7 +47,7 @@ class ProjectSessions:
             yield
         except RevisionConflict as exc:
             raise BridgeError("conflict", str(exc)) from None
-        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound) as exc:
+        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound) as exc:
             raise BridgeError("not_found", str(exc)) from None
         except RequestBusy:
             raise BridgeError("busy", "A live executor owns this request or the local executor has reached its 8-request limit") from None
@@ -122,6 +124,8 @@ class ProjectSessions:
     def close(self, params):
         with self._operation():
             store = self._stores.pop(params["handle"], None)
+            if store is not None and self._workflow_executor is not None:
+                self._workflow_executor.close_project(store)
             if store is not None and self._analysis_executor is not None:
                 self._analysis_executor.close_project(store)
             return {"closed": store is not None}
@@ -229,6 +233,27 @@ class ProjectSessions:
             if action == "choices":
                 return workflows.choices()
             return workflows.get(params["workflow_id"])
+
+    def handles_of(self, store):
+        """Open handles of this exact store (for announcing background project edits)."""
+        with self._lock:
+            return [handle for handle, candidate in self._stores.items() if candidate is store]
+
+    def workflow_runs(self, action, params):
+        with self._operation():
+            store = self._get(params["handle"])
+            runs = store.workflow_runs
+            if action == "prepare":
+                return {"run": runs.prepare(params["workflow_id"], params["rows"], run_id=params["run_id"],
+                                            expected_revision=params["expected_revision"])}
+            if action == "get":
+                return {"run": runs.get(params["run_id"])}
+            if action == "list":
+                return runs.list(offset=params.get("offset", 0), limit=params.get("limit", 50),
+                                 workflow_id=params.get("workflow_id"))
+            if self._workflow_executor is None:
+                raise BridgeError("unsupported", "No local workflow executor is installed")
+            return {"run": getattr(self._workflow_executor, action)(store, params["run_id"])}
 
     def analysis_runs(self, action, params):
         with self._operation():
@@ -340,6 +365,8 @@ class ProjectSessions:
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.
         self._closed = True
+        if self._workflow_executor is not None:
+            self._workflow_executor.shutdown(wait=False)
         if self._analysis_executor is not None:
             self._analysis_executor.shutdown(wait=False)
         self._executor.shutdown(wait=False)

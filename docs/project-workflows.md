@@ -1,7 +1,7 @@
 # 项目工作流（实验，W3a）
 
 更新：2026-10-07。状态：**保存、读取与校验（Python 与后台服务，W3a）、桌面“工作流”编辑器与进入分析/面包屑返回（W3b）
-和图形编辑（W3c）已实现；按行运行与过期标记属于 W4，尚未实现**。设计与所有者确认的决定见
+和图形编辑（W3c）已实现；按行运行的存储与执行（W4a，Python 与后台服务）已实现，桌面运行区（W4b）与过期标记（W4c）尚未实现**。设计与所有者确认的决定见
 [项目工作流与子图导航](design/project-workflows.md)。文档格式 `stk.workflow/1` 是实验格式，未写入 `docs/specs/` 的已发布协议。
 
 工作流把项目里已有的对象串成一条过程：参数表 → 输入文件或仿真 → 保存的分析。它只保存引用和连线，
@@ -77,6 +77,20 @@
 校验结果的 `steps` 按文档顺序给出每个步骤引用的对象名称、保存分析的内容哈希（规范 JSON 的 SHA-256）、
 快照文件数、带类型的输入/输出端口与分析图参数，供界面显示；引用无法解析时端口为空。
 
+## 按行运行（W4a）
+
+选中参数表的行，明确准备并开始运行（项目格式 10，旧项目先“备份并升级项目”）。准备时冻结工作流、这些行用到的字段值、
+被引用分析的完整内容与执行顺序，之后的编辑不影响这次运行；运行在后台逐行执行，一行内按步骤顺序：
+
+- 本机模板 `demo-synthetic/1`（示例的合成求解器，不是物理模拟）按行的温度写出 `field.vtk`、`metrics.json`，
+  位于 `results/workflow-runs/<运行 ID>/row-<行号>/<步骤>/attempt-<尝试>/`，随即登记并捕获为该行的输入快照（普通可撤销编辑）；
+- 分析步骤为每行准备并执行一次[分析运行](project-analysis-runs.md)，图参数按行取值（冻结在该分析运行中）；
+  保存的分析在工作流运行准备后被修改时，该任务失败（`analysis_changed`），需重新准备运行；
+- 某行某步失败只停止该行，其他行继续；再次开始只重做未成功的任务（新的编号尝试，同一冻结计划）；
+  取消在当前任务后停止，已完成的保留；服务重启后用 `recover` 把无人执行的尝试标为中断，再开始。
+
+`muferro/1` 的按行运行尚未支持（准备时说明），继续使用[仿真批次](simulation-batches.md)。
+
 ## Python
 
 桌面 Python 控制台、终端或 Jupyter（`suan.scripting.headless`）中：
@@ -96,7 +110,14 @@ revision = p.snapshot()["project"]["revision"]
 p.workflows.update(listed["workflows"][0]["id"], "Temperature scan / 温度扫描", doc, expected_revision=revision)
 p.workflows.create("Copy", doc, workflow_id=str(uuid4()), expected_revision=revision + 1)
 p.workflows.choices()  # 可引用的参数表、输入快照（新的在前）、可读的保存分析与已注册仿真模板
+
+# 按行运行：准备（冻结）→ 明确开始 → 读取进度；再次 start 重做未成功的任务
+rows = [r["id"] for r in next(t for t in p.snapshot()["tables"] if t["name"] == "Cases / 算例")["records"]]
+run = p.workflow_runs.prepare(listed["workflows"][0]["id"], rows, run_id=str(uuid4()),
+                              expected_revision=p.snapshot()["project"]["revision"])
+p.workflow_runs.start(run["id"])
+state = p.workflow_runs.get(run["id"])   # status、每个任务的 attempt/status/produced/error
 ```
 
-后台服务方法为 `project.workflows.create/update/get/list/validate/choices`，见
+后台服务方法为 `project.workflows.create/update/get/list/validate/choices` 与 `project.workflow_runs.prepare/get/list/start/cancel/recover`，见
 [桌面桥协议](specs/stk-desktop-bridge-v1.md)的可选扩展说明。

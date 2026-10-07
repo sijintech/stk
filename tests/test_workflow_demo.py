@@ -2,6 +2,8 @@
 import json
 import subprocess
 import sys
+import time
+from uuid import uuid4
 
 import pytest
 
@@ -34,15 +36,36 @@ def test_example_project_walks_the_main_path_offline(bridge_env, tmp_path):
         assert metrics["synthetic"] and metrics["max_K"] == pytest.approx(temperature)  # The grid centre peaks at T.
     assert (tmp_path / "example" / "README.md").exists()
     workflow = store.workflows.get(made["workflow_id"])["workflow"]
-    assert workflow["state"] == "readable" and [s["id"] for s in workflow["document"]["steps"]] == ["cases", "fields", "temperature"]
+    assert workflow["state"] == "readable" and [s["id"] for s in workflow["document"]["steps"]] == ["cases", "simulate", "temperature"]
     checked = store.workflows.validate(workflow["document"])
     assert checked["ok"], checked["issues"]
-    assert [s["name"] for s in checked["steps"]] == ["Cases / 算例", None, "Temperature field / 温度场"]
+    assert [s["name"] for s in checked["steps"]] == ["Cases / 算例", "Synthetic demo solver", "Temperature field / 温度场"]
     expected = "succeeded" if _vtk_reader_available() else made["run_status"]
     assert made["run_status"] == expected, made
     with pytest.raises(ValueError, match="empty folder"):
         with connect(tmp_path / "state") as stk:
             create_demo(stk, tmp_path / "example")
+
+
+def test_the_example_workflow_runs_every_case_offline(bridge_env, tmp_path):
+    """Acceptance for W4a: the example's workflow runs per row with no server, through the same API."""
+    pytest.importorskip("vtkmodules")
+    with connect(tmp_path / "state") as stk:
+        made = create_demo(stk, tmp_path / "example")
+        p = stk.projects.open(made["directory"])
+        rows = next(t for t in p.snapshot()["tables"] if t["id"] == made["cases_table"])["records"]
+        revision = p.snapshot()["project"]["revision"]
+        run = p.workflow_runs.prepare(made["workflow_id"], [row["id"] for row in rows], run_id=str(uuid4()),
+                                      expected_revision=revision)
+        p.workflow_runs.start(run["id"])
+        deadline = time.monotonic() + 240
+        while (current := p.workflow_runs.get(run["id"]))["status"] != "stopped" or not current["complete"]:
+            assert time.monotonic() < deadline and not any(t["status"] == "failed" for t in current["tasks"]), current["tasks"]
+            time.sleep(0.2)
+    temperatures = [json.loads((tmp_path / "example" / t["produced"]["directory"] / "metrics.json").read_text())["temperature_K"]
+                    for t in current["tasks"] if t["step"] == "simulate"]
+    assert temperatures == list(TEMPERATURES)
+    assert ProjectStore(tmp_path / "example").info()["revision"] == revision + 2 * len(TEMPERATURES)
 
 
 def test_suan_demo_command_prints_the_project(bridge_env, tmp_path):
