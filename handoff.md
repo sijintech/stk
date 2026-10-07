@@ -1,6 +1,6 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-06。**进行中：可用性开发包**（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
+更新：2026-10-06。**进行中：P3 工作流编辑（W3 方案待所有者确认）**；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
 [开发计划](docs/development-plan.md)开头）：标量体范围（`96152bf`）、启动即工作台（`1d1c338`）、参数扫描生成（`ca8a8b3`）、
 路径框“浏览…”（共用 [path_picker.hh](desktop/engine/lib/stk_app/src/editors/path_picker.hh)，`b1badce`）、
 运行环境选择与“运行所选行”（`stk.batches.run`、[project_simulation_view.cc](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)，`ed5bb29`）、
