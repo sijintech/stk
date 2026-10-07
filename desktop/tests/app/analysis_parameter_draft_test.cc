@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -685,6 +686,143 @@ TEST(AnalysisLinkDraft, LinkEditsJoinParameterAndOutputEditsAndClearWithRevertPi
   EXPECT_FALSE(model.set_link("f2", "in", std::string("a.out"), generation).accepted);
   model.reset();
   EXPECT_FALSE(model.link_editable("f2", "in")); EXPECT_EQ(model.link("f2", "in"), std::nullopt);
+}
+
+TEST(AnalysisGraphDraft, UntouchedGraphIsTheSavedOneAndAddedNodesGetFreshSanitizedIds)
+{
+  auto model = linked();
+  EXPECT_EQ(exact(model.graph()), exact(linked_definition().at("graph")));
+  EXPECT_FALSE(model.graph_edited()); EXPECT_TRUE(model.graph_changes().empty());
+  const auto generation = model.generation();
+  auto added = model.add_node("fixture.filter.pass@1", std::pair{120.4, -30.6}, generation);
+  ASSERT_TRUE(added.accepted) << added.error;
+  EXPECT_EQ(added.id, "pass");
+  EXPECT_EQ(model.add_node("fixture.filter.pass@1", std::nullopt, generation).id, "pass_2");
+  EXPECT_EQ(model.add_node("fixture.view.scene@2", std::nullopt, generation).id, "scene_2");  // "scene" is taken
+  EXPECT_FALSE(model.add_node("fixture.view.Scene-X@2", std::nullopt, generation).accepted);  // not a type id
+  EXPECT_FALSE(model.add_node("not a type", std::nullopt, generation).accepted);
+  const auto &graph = model.graph();
+  EXPECT_EQ(graph.at("nodes").size(), 8u);
+  EXPECT_EQ(graph.at("nodes")[5], Json({{"id", "pass"}, {"type", "fixture.filter.pass@1"}}));  // No params: defaults apply.
+  EXPECT_EQ(graph.at("ui").at("positions").at("pass"), Json::array({120, -31}));
+  EXPECT_TRUE(model.evaluative_graph_edits());
+  size_t added_nodes = 0;
+  for (const auto &change : model.graph_changes()) { added_nodes += change.kind == "node_added"; }
+  EXPECT_EQ(added_nodes, 3u);
+  EXPECT_TRUE(model.link_edits().empty());  // New nodes are listed as nodes, not as link edits.
+  // New nodes take part in links like saved ones.
+  ASSERT_TRUE(model.set_link("pass", "in", std::string("a.out"), generation).accepted);
+  EXPECT_EQ(model.link("pass", "in"), "a.out");
+  // Removing everything that was added restores the saved graph exactly.
+  for (const auto *id : {"pass", "pass_2", "scene_2"}) { ASSERT_TRUE(model.remove_node(id, generation).accepted) << id; }
+  EXPECT_FALSE(model.graph_edited()); EXPECT_FALSE(model.dirty());
+  EXPECT_EQ(exact(model.candidate_document()), exact(linked_definition()));
+}
+
+TEST(AnalysisGraphDraft, RemovingANodeCascadesToLinksOutputsRequestedOutputsAndItsPosition)
+{
+  auto document = linked_definition();
+  document["graph"]["ui"] = {{"positions", {{"f1", {10, 20}}, {"scene", {300, 0}}}}, {"theme", "keep"}};
+  document["graph"]["outputs"]["middle"] = "f1.out";
+  document["outputs"] = Json::array({"view", "middle"});
+  Draft model; model.pin("project-opening", identity, 9, "Linked", document);
+  const auto generation = model.generation();
+  ASSERT_TRUE(model.remove_node("f1", generation).accepted);
+  const auto &graph = model.graph();
+  for (const auto &node : graph.at("nodes")) { EXPECT_NE(node.at("id"), "f1"); }
+  EXPECT_EQ(graph.at("nodes")[1].at("inputs"), Json::object());     // f2.in came from f1; f2 had an inputs object
+  EXPECT_FALSE(graph.at("nodes")[3].at("inputs").contains("aliased"));  // aliased links from f1 go too
+  EXPECT_EQ(graph.at("nodes")[3].at("inputs").at("layers"), Json::array({{{"from", "f2.out"}}}));
+  EXPECT_FALSE(graph.at("outputs").contains("middle"));
+  EXPECT_EQ(model.outputs(), Json::array({"view"}));                 // withdrawn from the requested list
+  EXPECT_FALSE(graph.at("ui").at("positions").contains("f1"));
+  EXPECT_EQ(graph.at("ui").at("theme"), "keep");                     // untouched ui keys keep their JSON
+  // List entries that name the removed node disappear; an emptied list removes the input.
+  ASSERT_TRUE(model.remove_node("f2", generation).accepted);
+  EXPECT_FALSE(model.graph().at("nodes")[2].at("inputs").contains("layers"));
+  EXPECT_FALSE(model.remove_node("f2", generation).accepted);       // already gone
+  EXPECT_FALSE(model.remove_node("Bad-Id", generation).accepted);
+  // Revert restores the whole document, requested outputs included.
+  ASSERT_TRUE(model.revert(generation));
+  EXPECT_EQ(exact(model.candidate_document()), exact(document));
+}
+
+TEST(AnalysisGraphDraft, ListInputsAreOrderedPlainLinksAndAliasedListsStayReadOnly)
+{
+  auto document = linked_definition();
+  document["graph"]["nodes"].push_back({{"id", "other"}, {"type", "fixture.view.scene@1"},
+      {"inputs", {{"layers", Json::array({{{"from", "a.out"}, {"as", "first"}}})}}}});
+  Draft model; model.pin("project-opening", identity, 9, "Linked", document);
+  const auto generation = model.generation();
+  EXPECT_TRUE(model.links_editable("scene", "layers"));
+  EXPECT_EQ(model.links("scene", "layers"), (std::vector<std::string>{"f2.out"}));
+  EXPECT_FALSE(model.links_editable("other", "layers"));
+  EXPECT_FALSE(model.set_links("other", "layers", {"a.out"}, generation).accepted);
+  ASSERT_TRUE(model.set_links("scene", "layers", {"f1.out", "f2.out"}, generation).accepted);
+  EXPECT_EQ(model.graph().at("nodes")[4].at("inputs").at("layers"),
+            Json::array({{{"from", "f1.out"}}, {{"from", "f2.out"}}}));
+  ASSERT_TRUE(model.set_links("scene", "layers", {"f2.out", "f1.out"}, generation).accepted);  // order is meaning
+  EXPECT_EQ(model.links("scene", "layers"), (std::vector<std::string>{"f2.out", "f1.out"}));
+  EXPECT_FALSE(model.set_links("scene", "layers", {"scene.scene"}, generation).accepted);  // no self links
+  EXPECT_FALSE(model.set_links("scene", "layers", {"missing.out"}, generation).accepted);
+  ASSERT_TRUE(model.set_links("scene", "layers", {}, generation).accepted);
+  EXPECT_FALSE(model.graph().at("nodes")[4].at("inputs").contains("layers"));
+  // A port with one plain {"from"} object can become a list (the caller knows it is multi).
+  ASSERT_TRUE(model.set_links("scene", "camera", {"cam.camera", "a.out"}, generation).accepted);
+  EXPECT_TRUE(model.graph().at("nodes")[4].at("inputs").at("camera").is_array());
+}
+
+TEST(AnalysisGraphDraft, NodeParamsPositionsAndExposedOutputsFollowTheSameRules)
+{
+  auto model = linked();
+  const auto generation = model.generation();
+  ASSERT_TRUE(model.set_node_param("f1", "level", Json(0.5), generation).accepted);
+  EXPECT_EQ(model.node_param("f1", "level"), Json(0.5));
+  EXPECT_TRUE(model.evaluative_graph_edits());
+  ASSERT_TRUE(model.set_node_param("f1", "level", Json{{"$param", "gain"}}, generation).accepted);  // references are values
+  ASSERT_TRUE(model.set_node_param("f1", "level", std::nullopt, generation).accepted);
+  EXPECT_FALSE(model.graph().at("nodes")[1].contains("params"));  // f1 had none: the empty object goes
+  EXPECT_FALSE(model.graph_edited());
+  // Positions alone are an edit, but not one that changes evaluation.
+  ASSERT_TRUE(model.move_nodes({{"a", {0, 0}}, {"f1", {200.6, 40}}}, generation).accepted);
+  EXPECT_TRUE(model.graph_edited()); EXPECT_FALSE(model.evaluative_graph_edits());
+  EXPECT_EQ(model.graph().at("ui").at("positions").at("f1"), Json::array({201, 40}));
+  EXPECT_FALSE(model.move_nodes({{"f1", {std::numeric_limits<double>::infinity(), 0}}}, generation).accepted);
+  EXPECT_FALSE(model.move_nodes({{"missing", {0, 0}}}, generation).accepted);
+  // Exposed outputs become selectable; withdrawing one removes it from the request too.
+  EXPECT_FALSE(model.set_output("first", true, generation).accepted);
+  ASSERT_TRUE(model.set_graph_output("first", std::string("f1.out"), generation).accepted);
+  ASSERT_TRUE(model.set_output("first", true, generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array({"view", "first"}));
+  ASSERT_TRUE(model.set_graph_output("first", std::nullopt, generation).accepted);
+  EXPECT_EQ(model.outputs(), Json::array({"view"}));
+  EXPECT_FALSE(model.set_graph_output("view", std::nullopt, generation).accepted);  // the last output stays
+  EXPECT_FALSE(model.set_graph_output("bad", std::string("missing.out"), generation).accepted);
+  // Every kind of change is listed for review.
+  std::set<std::string> kinds;
+  ASSERT_TRUE(model.set_node_param("f1", "level", Json(1), generation).accepted);
+  ASSERT_TRUE(model.set_graph_output("second", std::string("f2.out"), generation).accepted);
+  for (const auto &change : model.graph_changes()) { kinds.insert(change.kind); }
+  EXPECT_EQ(kinds, (std::set<std::string>{"param", "position", "output_added"}));
+}
+
+TEST(AnalysisGraphDraft, NodeLimitStaleGenerationsAndRepinGuardEveryGraphEdit)
+{
+  auto model = linked();
+  const auto generation = model.generation();
+  size_t added = 0;
+  while (model.add_node("fixture.filter.pass@1", std::nullopt, generation).accepted) { ++added; }
+  EXPECT_EQ(model.graph().at("nodes").size(), Draft::max_nodes);
+  EXPECT_EQ(added, Draft::max_nodes - 5);
+  model.pin("project-opening", identity, 10, "Linked", linked_definition());
+  EXPECT_FALSE(model.graph_edited());
+  EXPECT_FALSE(model.add_node("fixture.filter.pass@1", std::nullopt, generation).accepted);
+  EXPECT_FALSE(model.remove_node("f1", generation).accepted);
+  EXPECT_FALSE(model.set_links("scene", "layers", {}, generation).accepted);
+  EXPECT_FALSE(model.set_node_param("f1", "x", Json(1), generation).accepted);
+  EXPECT_FALSE(model.move_nodes({{"f1", {0, 0}}}, generation).accepted);
+  EXPECT_FALSE(model.set_graph_output("x", std::string("f1.out"), generation).accepted);
+  EXPECT_FALSE(model.dirty());
 }
 
 TEST(AnalysisCandidateValidation, RepliesBindToTheLatestTicketAndCountOnlyForTheirExactKey)

@@ -385,7 +385,8 @@ class AnalysisGraphEditor final : public Editor {
   /** Saving a link change needs a passing graph.validate of exactly this candidate. */
   bool candidate_checked() const
   {
-    return !parameter_draft_.has_link_edits() || candidate_check_.passed(candidate_key());
+    // Positions alone never change evaluation; every other graph edit needs a passing check.
+    return !parameter_draft_.evaluative_graph_edits() || candidate_check_.passed(candidate_key());
   }
   Json parameter_declaration(const std::string &name) const
   {
@@ -479,7 +480,7 @@ class AnalysisGraphEditor final : public Editor {
           state_->source() == AnalysisGraphState::Source::Run ||
           parameter_draft_.version() != version || !parameter_draft_.dirty() ||
           documents_->selected_version() != selection || !candidate_checked()) { return; }
-      const bool sent = parameter_draft_.has_link_edits() ?
+      const bool sent = parameter_draft_.graph_edited() ?
           documents_->replace_definition(parameter_draft_.candidate_document(), selection) :
           documents_->replace_submission(parameter_draft_.parameters(), parameter_draft_.outputs(), selection);
       if (sent) {
