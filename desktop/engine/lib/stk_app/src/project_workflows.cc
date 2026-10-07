@@ -37,7 +37,7 @@ void ProjectWorkflows::reset()
   ++epoch_; ++selected_version_;
   busy_ = uncertain_ = false;
   selected_revision_ = -1;
-  page_ = selected_ = validation_ = choices_ = nullptr;
+  page_ = selected_ = validation_ = choices_ = runs_ = run_ = nullptr; ++run_version_;
   error_.clear(); notice_.clear();
   candidate_.reset();
   auto old = std::move(future_); future_.reset();
@@ -146,6 +146,7 @@ bool ProjectWorkflows::load(const std::string &id)
         (response.at("workflow").at("state") == "readable") != response.at("workflow").at("document").is_object()) {
       throw std::runtime_error("Invalid workflow response");
     }
+    if (io::get_string(selected_, "id") != id) { runs_ = run_ = nullptr; ++run_version_; }  // another workflow's runs
     selected_ = response.at("workflow");
     selected_revision_ = response.at("revision").get<int64_t>();
     validation_ = nullptr; uncertain_ = false;
@@ -182,7 +183,7 @@ bool ProjectWorkflows::reload()
 }
 void ProjectWorkflows::clear_selection()
 {
-  selected_ = validation_ = nullptr; selected_revision_ = -1;
+  selected_ = validation_ = runs_ = run_ = nullptr; selected_revision_ = -1; ++run_version_;
   candidate_.reset(); page_ = nullptr;
   ++selected_version_;
   changed();
@@ -272,5 +273,79 @@ bool ProjectWorkflows::check(const Json &document, AnalysisCandidateKey key)
   });
   changed();
   return true;
+}
+bool ProjectWorkflows::runs_supported() const
+{
+  if (!supported() || project_.project()->format_version < 10) { return false; }
+  const auto hello = client_->hello_info();
+  for (const auto *method : {"project.workflow_runs.prepare", "project.workflow_runs.get", "project.workflow_runs.list",
+                             "project.workflow_runs.start", "project.workflow_runs.cancel", "project.workflow_runs.recover"}) {
+    if (!hello || !hello->has_method(method)) { return false; }
+  }
+  return true;
+}
+
+void ProjectWorkflows::accept_run(const Json &result)
+{
+  if (!result.is_object() || !result.contains("run") || !result.at("run").is_object() ||
+      !result.at("run").contains("tasks") || !result.at("run").at("tasks").is_array()) {
+    throw std::runtime_error("Invalid workflow run response");
+  }
+  run_ = result.at("run");
+  ++run_version_;
+}
+
+bool ProjectWorkflows::run_call(const std::string &method, Json params)
+{
+  if (!runs_supported()) { return false; }
+  return call(method, std::move(params), [this](const Json &result) { accept_run(result); });
+}
+
+bool ProjectWorkflows::load_runs()
+{
+  if (!runs_supported() || selected_.is_null()) { return false; }
+  const auto workflow = io::get_string(selected_, "id");
+  return call("project.workflow_runs.list", {{"workflow_id", workflow}, {"limit", 20}}, [this, workflow](const Json &result) {
+    if (!result.is_object() || !result.contains("runs") || !result.at("runs").is_array()) {
+      throw std::runtime_error("Invalid workflow run list response");
+    }
+    if (io::get_string(selected_, "id") != workflow) { return; }
+    runs_ = result; ++run_version_;
+  });
+}
+
+bool ProjectWorkflows::load_run(const std::string &run_id)
+{
+  return !run_id.empty() && run_call("project.workflow_runs.get", {{"run_id", run_id}});
+}
+
+bool ProjectWorkflows::run_rows(const std::vector<std::string> &rows)
+{
+  sync();
+  if (!runs_supported() || selected_.is_null() || rows.empty() || stale() || busy_ || project_.busy()) { return false; }
+  const auto hex = new_idempotency_key();
+  const auto run_id = hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) + "-" + hex.substr(16, 4) + "-" + hex.substr(20);
+  // Prepared at the revision the workflow was read at: a later edit refuses instead of running something else.
+  return call("project.workflow_runs.prepare", {{"workflow_id", io::get_string(selected_, "id")}, {"rows", rows},
+      {"run_id", run_id}, {"expected_revision", selected_revision_}}, [this, run_id](const Json &result) {
+    accept_run(result);
+    runs_ = nullptr;  // the list gains this run when read again
+    call("project.workflow_runs.start", {{"run_id", run_id}}, [this](const Json &started) { accept_run(started); });
+  });
+}
+
+bool ProjectWorkflows::start_run()
+{
+  return !run_.is_null() && run_call("project.workflow_runs.start", {{"run_id", io::get_string(run_, "id")}});
+}
+
+bool ProjectWorkflows::cancel_run()
+{
+  return !run_.is_null() && run_call("project.workflow_runs.cancel", {{"run_id", io::get_string(run_, "id")}});
+}
+
+bool ProjectWorkflows::recover_run()
+{
+  return !run_.is_null() && run_call("project.workflow_runs.recover", {{"run_id", io::get_string(run_, "id")}});
 }
 }  // namespace stk::app

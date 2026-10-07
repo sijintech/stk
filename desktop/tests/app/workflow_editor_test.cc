@@ -548,6 +548,8 @@ TEST_F(WorkflowEditorPython, CanvasGesturesRefuseMismatchedTypesOrderStepsAndMov
   probe->canvas.set_view(std::make_shared<const AnalysisGraphView>(probe->view));
   ASSERT_TRUE(probe->canvas.fit(probe->rect.width(), probe->rect.height() - probe->top, 1));
   ASSERT_GE(probe->canvas.zoom(), 0.5);  // sockets are hit only when labels are shown
+  // Canvas edits wait for the editor's reads (choices, runs) to finish, like the panel buttons.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_add_step") && widget("workflow_add_step")->enabled; }));
   // rows into a files input is refused locally and changes nothing.
   auto [sx, sy] = probe->port("cases", "rows", true);
   auto [tx, ty] = probe->port("temperature", "data", false);
@@ -641,6 +643,48 @@ TEST_F(WorkflowEditorPython, NewAndDeletedWorkflowsAreOrdinaryUndoableEdits)
   ASSERT_TRUE(project().undo());
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->table &&
       widget("workflow_list")->table->rows == 3; }));
+}
+
+TEST_F(WorkflowEditorPython, RunPanelRunsChosenRowsAndOpensTheirAnalysisRuns)
+{
+  // A runnable version: cases (temperature per row) -> synthetic solver -> the temperature analysis.
+  const std::string temperature = "14141414-1414-4141-8141-141414141414";
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
+      {{"op", "add_field"}, {"id", temperature}, {"table_id", table_id}, {"name", "T"}, {"type", "number"}, {"unit", "K"}},
+      {{"op", "add_record"}, {"id", "15151515-1515-4151-8151-151515151515"}, {"table_id", table_id}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", "15151515-1515-4151-8151-151515151515"}, {"field_id", temperature}, {"value", 300}},
+      {{"op", "add_record"}, {"id", "16161616-1616-4161-8161-161616161616"}, {"table_id", table_id}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", "16161616-1616-4161-8161-161616161616"}, {"field_id", temperature}, {"value", 340}}}}}, out));
+  const Json runnable = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+      {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", table_id}}}},
+      {{"id", "simulate"}, {"kind", "simulation"}, {"ref", {{"template", "demo-synthetic/1"}}},
+       {"inputs", {{"rows", {{"from", "cases.rows"}}}}}, {"parameters", {{"temperature", {{"$field", temperature}}}}}},
+      {{"id", "temperature"}, {"kind", "analysis"}, {"ref", {{"analysis", analysis_id}}},
+       {"inputs", {{"data", {{"from", "simulate.files"}}}}}}}}};
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id}, {"name", "Temperature scan"},
+      {"document", runnable}, {"expected_revision", revision}}, out));
+  project().refresh();
+  for (int i = 0; i < 300 && !(widget("workflow_run_start") && widget("workflow_run_start")->enabled); ++i) {
+    loop.run_ready(); f.screen.run_deferred(); f.drv->frame();
+  }
+  ASSERT_TRUE(widget("workflow_run_start") && widget("workflow_run_start")->enabled) << sidebar();
+  EXPECT_EQ(widget("workflow_run_start")->text, "Run the 2 selected rows");
+  ASSERT_NE(widget("workflow_run_row/2"), nullptr);
+  EXPECT_NE(widget("workflow_run_row/2")->text.find("T 340 K"), std::string::npos);
+  ASSERT_NO_FATAL_FAILURE(click("workflow_run_start"));
+  // The service executes it; the panel follows until both rows are done.
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return shows("All done · 4/4 done"); }, 120))
+      << sidebar();
+  const auto *grid = widget("workflow_run_tasks"); ASSERT_NE(grid, nullptr); ASSERT_EQ(grid->table->rows, 2);
+  EXPECT_EQ(grid->table->cell(1, 1), "Done"); EXPECT_EQ(grid->table->cell(1, 2), "Done");
+  grid->table->selected.assign(1); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("workflow_run_open/temperature"));
+  // The analysis graph opens that analysis run on its Runs side.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return area().editor().type().id == kEditorAnalysisGraph &&
+      widget("analysis_saved_section") && widget("analysis_saved_section")->index.value() == 1; }));
+  EXPECT_EQ(calls("project.workflow_runs.prepare"), 1u);
+  EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
 
 }  // namespace

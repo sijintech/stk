@@ -19,6 +19,7 @@
 #include "editor_text.hh"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <optional>
 #include <set>
@@ -132,6 +133,7 @@ class WorkflowEditor final : public Editor {
     if (workflows_->selected().is_null()) { return; }
     status(layout, ctx);
     edit_panel(layout, ctx);
+    run_panel(layout, ctx);
     issues_panel(layout, ctx);
     step_panel(layout, ctx);
   }
@@ -261,7 +263,8 @@ class WorkflowEditor final : public Editor {
     if (epoch_ != workflows_->epoch()) {
       epoch_ = workflows_->epoch();
       view_.reset(); canvas_.set_view(nullptr); selected_id_.clear(); view_error_.clear(); shown_ = {};
-      auto_selected_ = false; refreshed_revision_ = page_revision_ = choices_revision_ = listed_revision_ = -1;
+      auto_selected_ = false; refreshed_revision_ = page_revision_ = choices_revision_ = listed_revision_ = runs_listed_ = -1;
+      run_unchecked_.clear(); run_rows_table_.clear(); run_row_ = -1;
       checked_document_ = checked_validation_ = nullptr;
       draft_.reset(); requested_.reset(); cancel_drag();
     }
@@ -302,6 +305,16 @@ class WorkflowEditor final : public Editor {
     else if (workflows_->page_stale() && page_revision_ != revision && !ctx.store.project().busy()) {
       page_revision_ = revision;
       workflows_->load_page(io::get_int(workflows_->page(), "offset", 0));
+    }
+    else if (run_due()) {
+      // A run in progress is followed by reading it again (the service executes it; nothing runs here).
+      last_poll_ = std::chrono::steady_clock::now();
+      workflows_->load_run(io::get_string(workflows_->run(), "id"));
+    }
+    else if (workflows_->runs_supported() && !workflows_->selected().is_null() && workflows_->runs().is_null() &&
+             runs_listed_ != revision && !ctx.store.project().busy()) {
+      runs_listed_ = revision;
+      workflows_->load_runs();
     }
     else if (editable(ctx) && choices_revision_ != revision && !ctx.store.project().busy()) {
       choices_revision_ = revision;
@@ -407,6 +420,17 @@ class WorkflowEditor final : public Editor {
       if (workflows_->validation().is_null()) { return; }  // the saved workflow is shown once checked
       shown_document_ = selected.at("document");
       shown_validation_ = workflows_->validation();
+    }
+    // Registered templates have catalog names (the service reports their English name).
+    for (auto &summary : shown_validation_["steps"]) {
+      if (io::get_string(summary, "kind") != "simulation") { continue; }
+      const auto &steps = shown_document_.at("steps");
+      for (const auto &step : steps) {
+        if (io::get_string(step, "id") != io::get_string(summary, "id")) { continue; }
+        auto key = "workflow.template." + io::get_string(member(step, "ref"), "template");  // demo-synthetic/1 -> demo_synthetic_1
+        std::replace_if(key.begin() + 18, key.end(), [](const char c) { return !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')); }, '_');
+        if (ctx.store.catalog().has(std::string(ctx.store.language()), key)) { summary["name"] = std::string(ctx.tr(key)); }
+      }
     }
     try {
       auto view = std::make_shared<AnalysisGraphView>(workflow_graph_view(shown_document_, shown_validation_, words(ctx)));
@@ -782,6 +806,226 @@ class WorkflowEditor final : public Editor {
     return std::pair{x, y};
   }
 
+  /** Read the shown run again while the service executes it (at most twice a second); once it stops, the
+   * run list is read again for its final counts. */
+  bool run_due()
+  {
+    const auto &run = workflows_->run();
+    if (run.is_null() || !workflows_->runs_supported()) { return false; }
+    const auto status = io::get_string(run, "status");
+    if (status != "running" && status != "cancel_requested") {
+      // Retried until the read is accepted (the project is often busy while a run registers outputs).
+      if (status == "stopped" && run_finished_ != io::get_string(run, "id") && workflows_->load_runs()) {
+        run_finished_ = io::get_string(run, "id");
+      }
+      return false;
+    }
+    run_finished_.clear();
+    return std::chrono::steady_clock::now() - last_poll_ > std::chrono::milliseconds(500);
+  }
+
+  /** The parameter table of the saved workflow's single table step (runs take their rows from it). */
+  const ProjectTable *run_table(EditorContext &ctx) const
+  {
+    const auto &document = member(workflows_->selected(), "document");
+    const Json *only = nullptr;
+    int count = 0;
+    for (const auto &step : member(document, "steps")) {
+      if (io::get_string(step, "kind") == "table") { only = &step; ++count; }
+    }
+    if (count != 1) { return nullptr; }
+    const auto id = io::get_string(member(*only, "ref"), "table");
+    for (const auto &table : ctx.store.project().tables()) { if (table.id == id) { return &table; } }
+    return nullptr;
+  }
+
+  std::string row_text(EditorContext &ctx, const ProjectTable &table, const ProjectRecord &record, size_t number) const
+  {
+    // The values this workflow takes from the row, so rows are recognizable (for example "T 325 K").
+    std::set<std::string> used;
+    for (const auto &step : member(member(workflows_->selected(), "document"), "steps")) {
+      for (const auto &[name, value] : member(step, "parameters").items()) {
+        (void)name;
+        if (value.is_object() && value.contains("$field") && value.at("$field").is_string()) { used.insert(value.at("$field").get<std::string>()); }
+      }
+    }
+    std::string values;
+    for (const auto &field : table.fields) {
+      if (!used.count(field.id) || !record.values.is_object() || !record.values.contains(field.id)) { continue; }
+      const auto &value = record.values.at(field.id);
+      values += "  · " + field.name + " " + (value.is_string() ? value.get<std::string>() : value.dump()) +
+          (field.unit.empty() ? std::string() : " " + field.unit);
+    }
+    return ctx.store.catalog().format("workflow.run.row", {{"n", std::to_string(number)}, {"values", values}});
+  }
+
+  void run_panel(ui::Layout &layout, EditorContext &ctx)
+  {
+    if (io::get_string(workflows_->selected(), "state") != "readable") { return; }
+    auto *panel = layout.panel("workflow_run_panel", ctx.tr("workflow.run.title"), true);
+    if (!panel) { return; }
+    const auto &project = ctx.store.project().project();
+    if (!project) { return; }
+    if (project->format_version < kProjectFormatVersion) { panel->paragraph(ctx.tr("workflow.run.needs_upgrade")); return; }
+    if (!workflows_->runs_supported()) { panel->paragraph(ctx.tr("workflow.run.unsupported")); return; }
+    hint(*panel, ctx, "workflow.run.intro");
+    auto &catalog = ctx.store.catalog();
+    auto ok = valid();
+    const bool idle = !workflows_->busy() && !ctx.store.project().busy() && !workflows_->stale();
+    const auto *table = run_table(ctx);
+    std::string blocked;
+    if (draft_.dirty()) { blocked = "workflow.run.save_first"; }
+    else if (!io::get_bool(workflows_->validation(), "ok", false)) { blocked = "workflow.run.fix_first"; }
+    else if (!table) { blocked = "workflow.run.no_table"; }
+    if (!blocked.empty()) { panel->paragraph(ctx.tr(blocked)); }
+    if (table) {
+      // Rows are chosen unless unchecked here, so rows added later are included too.
+      if (run_rows_table_ != table->id) { run_rows_table_ = table->id; run_unchecked_.clear(); }
+      for (size_t i = 0; i < table->records.size() && i < 100; ++i) {
+        const auto id = table->records[i].id;
+        panel->checkbox("workflow_run_row/" + std::to_string(i + 1), row_text(ctx, *table, table->records[i], i + 1),
+            {[this, id] { return run_unchecked_.count(id) == 0; }, [this, id](const bool on) {
+              if (on) { run_unchecked_.erase(id); } else { run_unchecked_.insert(id); }
+              redraw();
+            }});
+      }
+      if (table->records.size() > 100) { panel->paragraph(ctx.tr("workflow.run.row_limit")); }
+      auto &choose = panel->row();
+      choose.button("workflow_run_all", ctx.tr("workflow.run.all"), [this] { run_unchecked_.clear(); redraw(); }).width(4);
+      std::vector<std::string> all;
+      for (const auto &record : table->records) { all.push_back(record.id); }
+      choose.button("workflow_run_none", ctx.tr("workflow.run.none"), [this, all] {
+        run_unchecked_.insert(all.begin(), all.end()); redraw();
+      }).width(4);
+      std::vector<std::string> rows;
+      for (size_t i = 0; i < table->records.size() && i < 100; ++i) {
+        if (!run_unchecked_.count(table->records[i].id)) { rows.push_back(table->records[i].id); }
+      }
+      panel->button("workflow_run_start", catalog.format("workflow.run.start", {{"count", std::to_string(rows.size())}}),
+          [this, ok, rows] {
+        if (ok() && !draft_.dirty()) { run_row_ = -1; workflows_->run_rows(rows); }
+      }).disable(!blocked.empty() || rows.empty() || !idle);
+    }
+    runs_list(*panel, ctx);
+    run_detail(*panel, ctx);
+  }
+
+  void runs_list(ui::Layout &panel, EditorContext &ctx)
+  {
+    const auto &runs = member(workflows_->runs(), "runs");
+    if (runs.empty()) { return; }
+    panel.label(ctx.tr("workflow.run.runs"));
+    std::vector<std::vector<std::string>> cells;
+    int selected = -1;
+    for (size_t i = 0; i < runs.size(); ++i) {
+      const auto &entry = runs[i];
+      if (io::get_string(entry, "id") == io::get_string(workflows_->run(), "id")) { selected = int(i); }
+      const auto status = io::get_string(entry, "status");
+      const auto done = io::get_int(member(entry, "counts"), "succeeded", 0);
+      int64_t total = 0;
+      for (const auto &[name, value] : member(entry, "counts").items()) { (void)name; total += value.get<int64_t>(); }
+      cells.push_back({io::get_string(entry, "created_at").substr(0, 19), std::to_string(io::get_int(entry, "rows", 0)),
+                       std::string(ctx.tr(io::get_bool(entry, "complete", false) ? "workflow.run.complete" : "workflow.run.status." + status)),
+                       std::to_string(done) + "/" + std::to_string(total)});
+    }
+    ui::TableSpec spec;
+    spec.columns = {{std::string(ctx.tr("workflow.run.column.time")), 9}, {std::string(ctx.tr("workflow.run.column.rows")), 3},
+                    {std::string(ctx.tr("workflow.run.column.status")), 5}, {std::string(ctx.tr("workflow.run.column.done")), 4}};
+    spec.rows = int(runs.size()); spec.visible_rows = float(std::min(4, spec.rows));
+    spec.data_version = workflows_->run_version();
+    spec.cell = [cells](const int row, const int column) { return cells.at(size_t(row)).at(size_t(column)); };
+    auto ok = valid();
+    spec.selected = {[selected] { return selected; }, [this, ok, runs](const int row) {
+      if (ok() && row >= 0 && size_t(row) < runs.size()) { run_row_ = -1; workflows_->load_run(io::get_string(runs[size_t(row)], "id")); }
+    }};
+    panel.table("workflow_runs", std::move(spec)).disable(workflows_->busy());
+  }
+
+  void run_detail(ui::Layout &panel, EditorContext &ctx)
+  {
+    const auto &run = workflows_->run();
+    if (run.is_null() || io::get_string(run, "workflow_id") != io::get_string(workflows_->selected(), "id")) { return; }
+    auto &catalog = ctx.store.catalog();
+    const auto status = io::get_string(run, "status");
+    const auto &counts = member(run, "counts");
+    int64_t total = 0;
+    for (const auto &[name, value] : counts.items()) { (void)name; total += value.get<int64_t>(); }
+    const auto failed = io::get_int(counts, "failed", 0) + io::get_int(counts, "interrupted", 0);
+    panel.paragraph(catalog.format("workflow.run.summary", {
+        {"status", std::string(ctx.tr(io::get_bool(run, "complete", false) ? "workflow.run.complete" : "workflow.run.status." + status))},
+        {"done", std::to_string(io::get_int(counts, "succeeded", 0))}, {"total", std::to_string(total)},
+        {"failed", failed ? catalog.format("workflow.run.failed_count", {{"count", std::to_string(failed)}}) : std::string()}}));
+    // Rows x steps: each cell is the task's latest attempt (ADE pattern 1: a step is a task, each execution an attempt).
+    const auto &order = member(run, "order");
+    const auto &rows = member(run, "rows");
+    std::map<std::pair<std::string, std::string>, const Json *> tasks;
+    for (const auto &task : member(run, "tasks")) { tasks[{io::get_string(task, "step"), io::get_string(task, "row")}] = &task; }
+    std::vector<std::vector<std::string>> cells;
+    std::vector<std::vector<std::string>> states;
+    for (const auto &row : rows) {
+      std::vector<std::string> line{std::to_string(io::get_int(row, "number", 0))}, state{""};
+      for (const auto &step : order) {
+        const auto found = tasks.find({step.get<std::string>(), io::get_string(row, "id")});
+        const auto task_status = found == tasks.end() ? std::string("pending") : io::get_string(*found->second, "status");
+        const auto attempt = found == tasks.end() ? int64_t(0) : io::get_int(*found->second, "attempt", 0);
+        line.push_back(std::string(ctx.tr("workflow.run.task." + task_status)) + (attempt > 1 ? " #" + std::to_string(attempt) : std::string()));
+        state.push_back(task_status);
+      }
+      cells.push_back(std::move(line)); states.push_back(std::move(state));
+    }
+    ui::TableSpec spec;
+    spec.columns = {{std::string(ctx.tr("workflow.run.row_column")), 2}};
+    for (const auto &step : order) { spec.columns.push_back({step.get<std::string>(), 6}); }
+    spec.rows = int(rows.size()); spec.visible_rows = float(std::min(8, spec.rows));
+    spec.data_version = workflows_->run_version();
+    spec.cell = [cells](const int row, const int column) { return cells.at(size_t(row)).at(size_t(column)); };
+    spec.cell_color = [states](const int row, const int column) -> ui::Color {
+      const auto &value = states.at(size_t(row)).at(size_t(column));
+      if (value == "failed" || value == "interrupted") { return ui::Color::rgb(0xE07A7A); }
+      if (value == "succeeded") { return ui::Color::rgb(0x8FCB9B); }
+      if (value == "running") { return ui::Color::rgb(0xE8C46A); }
+      return {0, 0, 0, 0};
+    };
+    const int chosen = run_row_;
+    spec.selected = {[chosen] { return chosen; }, [this](const int row) { run_row_ = row; redraw(); }};
+    panel.table("workflow_run_tasks", std::move(spec));
+    if (run_row_ >= 0 && size_t(run_row_) < rows.size()) {
+      const auto row_id = io::get_string(rows[size_t(run_row_)], "id");
+      for (const auto &step : order) {
+        const auto found = tasks.find({step.get<std::string>(), row_id});
+        if (found == tasks.end()) { continue; }
+        const auto &task = *found->second;
+        const auto &error = member(task, "error");
+        if (error.is_object()) {
+          panel.paragraph(catalog.format("workflow.run.task_error", {{"step", step.get<std::string>()},
+              {"message", clipped(io::get_string(error, "message"), 300)}}));
+        }
+        const auto analysis_run = io::get_string(member(task, "produced"), "analysis_run_id");
+        const auto &frozen = member(member(run, "steps"), step.get_ref<const std::string &>().c_str());
+        if (!analysis_run.empty()) {
+          auto *shell = &ctx.area.shell();
+          auto *area = &ctx.area;
+          const auto self = lifetime();
+          const Json target = {{"analysis_id", io::get_string(frozen, "analysis_id")}, {"analysis_run_id", analysis_run}};
+          panel.button("workflow_run_open/" + step.get<std::string>(),
+              catalog.format("workflow.run.open_analysis", {{"step", step.get<std::string>()}}), [shell, area, self, target] {
+            shell->open_in_area_later(area, self, kEditorAnalysisGraph, target);
+          }).disable(shell->text_input_active());
+        }
+      }
+    }
+    else { panel.paragraph(ctx.tr("workflow.run.pick_row")); }
+    auto ok = valid();
+    auto &actions = panel.row();
+    actions.button("workflow_run_retry", ctx.tr("workflow.run.retry"), [this, ok] { if (ok()) { workflows_->start_run(); } })
+        .disable(status != "stopped" || io::get_bool(run, "complete", false) || workflows_->busy());
+    actions.button("workflow_run_cancel", ctx.tr("workflow.run.cancel"), [this, ok] { if (ok()) { workflows_->cancel_run(); } })
+        .disable(status != "running" || workflows_->busy());
+    actions.button("workflow_run_recover", ctx.tr("workflow.run.recover"), [this, ok] { if (ok()) { workflows_->recover_run(); } })
+        .disable((status != "running" && status != "cancel_requested") || workflows_->busy())
+        .tip(ctx.tr("workflow.run.recover.tip"));
+  }
+
   void issues_panel(ui::Layout &layout, EditorContext &ctx)
   {
     const auto &issues = member(shown_validation_, "issues");
@@ -1088,7 +1332,11 @@ class WorkflowEditor final : public Editor {
   std::map<std::string, std::tuple<std::string, uint64_t, uint64_t>> literal_source_;
   int add_kind_ = 3, add_object_ = 0;
   uint64_t epoch_ = 0;
-  int64_t refreshed_revision_ = -1, page_revision_ = -1, choices_revision_ = -1, listed_revision_ = -1;
+  int64_t refreshed_revision_ = -1, page_revision_ = -1, choices_revision_ = -1, listed_revision_ = -1, runs_listed_ = -1;
+  std::set<std::string> run_unchecked_;
+  std::string run_rows_table_, run_finished_;
+  int run_row_ = -1;
+  std::chrono::steady_clock::time_point last_poll_{};
   bool auto_selected_ = false, fit_ = true, dragging_ = false;
   Drag drag_ = Drag::None;
   bool drag_moved_ = false;

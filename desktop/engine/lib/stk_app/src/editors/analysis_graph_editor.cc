@@ -84,13 +84,16 @@ class AnalysisGraphEditor final : public Editor {
     }
     // The same analysis with pending edits is only revealed: reading it again would detach the draft.
     if (!parameter_edits()) { pending_open_ = id; }
+    // A workflow run's analysis run opens on the Runs side, selected.
+    pending_run_.reset();
+    if (target.contains("analysis_run_id") && target.at("analysis_run_id").is_string()) { pending_run_ = target.at("analysis_run_id").get<std::string>(); }
     breadcrumb_.reset();
     if (const auto crumb = target.find("breadcrumb"); crumb != target.end() && crumb->is_object()) {
       breadcrumb_ = Breadcrumb{io::get_string(*crumb, "handle"), id, io::get_string(*crumb, "workflow_id"),
           io::get_string(*crumb, "workflow_name"), io::get_string(*crumb, "step"), io::get_string(*crumb, "step_label"), from};
     }
     ++navigation_generation_;
-    initial_saved_ = true; initial_run_ = false; initial_displayed_ = false; saved_section_ = 0;
+    initial_saved_ = true; initial_run_ = false; initial_displayed_ = false; saved_section_ = pending_run_ ? 1 : 0;
     if (state_) { state_->show_saved(); }
     redraw();
     return true;
@@ -351,7 +354,7 @@ class AnalysisGraphEditor final : public Editor {
     std::weak_ptr<void> origin;
   };
   std::optional<Breadcrumb> breadcrumb_;
-  std::optional<std::string> pending_open_;
+  std::optional<std::string> pending_open_, pending_run_;
   std::string document_name_;
   AnalysisParameterDraft parameter_draft_;
   AnalysisCandidateValidation candidate_check_;
@@ -1369,6 +1372,7 @@ class AnalysisGraphEditor final : public Editor {
       pending_open_.reset();
       document_navigation_ = navigation_generation_;
     }
+    if (pending_run_ && !pending_open_ && runs_ && !runs_->busy() && runs_->load(*pending_run_)) { pending_run_.reset(); }
     if (document_version_ != documents_->selected_version()) {
       document_version_ = documents_->selected_version();
       const auto &selected = documents_->selected();

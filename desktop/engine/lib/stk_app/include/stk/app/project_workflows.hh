@@ -66,6 +66,24 @@ class ProjectWorkflows {
   bool check(const io::Json &document, AnalysisCandidateKey key);
   const AnalysisCandidateValidation &candidate() const { return candidate_; }
 
+  /* ---- Per-row runs (project format 10, project.workflow_runs.*) ---- */
+
+  /** Whether the bridge offers workflow runs and the project is at format 10. */
+  bool runs_supported() const;
+  /** The selected workflow's runs, newest first (null until read). */
+  const io::Json &runs() const { return runs_; }
+  /** The shown run with its tasks (null until read). */
+  const io::Json &run() const { return run_; }
+  uint64_t run_version() const { return run_version_; }
+  bool load_runs();
+  bool load_run(const std::string &run_id);
+  /** Freeze a run of the selected (saved, valid) workflow over these rows, then start it. Explicit; returns at once. */
+  bool run_rows(const std::vector<std::string> &rows);
+  /** Start the shown run again (retries tasks that did not succeed), cancel it, or recover it after a restart. */
+  bool start_run();
+  bool cancel_run();
+  bool recover_run();
+
  private:
   void reset();
   void changed();
@@ -73,6 +91,8 @@ class ProjectWorkflows {
             std::function<void(const bridge::Error &)> failed = {});
   bool write(const std::string &method, const std::string &id, const std::string &name, const io::Json &document,
              int64_t revision);
+  bool run_call(const std::string &method, io::Json params);
+  void accept_run(const io::Json &result);
 
   AppStore &store_;
   ProjectState &project_;
@@ -82,7 +102,8 @@ class ProjectWorkflows {
   uint64_t epoch_ = 0, version_ = 0, selected_version_ = 0;
   bool busy_ = false, uncertain_ = false;
   int64_t selected_revision_ = -1;
-  io::Json page_, selected_, validation_, choices_;
+  io::Json page_, selected_, validation_, choices_, runs_, run_;
+  uint64_t run_version_ = 0;
   std::optional<bridge::Future<io::Json>> future_, check_future_;
   AnalysisCandidateValidation candidate_;
 };
