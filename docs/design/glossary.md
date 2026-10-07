@@ -14,6 +14,8 @@
 | 项目中一次仿真的冻结方案与提交 | 仿真运行（记录） | Simulation runs | 项目页“仿真运行记录” |
 | 分析图的一次独立执行 | 分析运行 | Analysis runs | 分析图侧栏“运行”页 |
 | 多行仿真的冻结范围 | 仿真批次 | Simulation batches | |
+| 项目层的步骤组合 | 工作流 | Workflow | W3 方案，界面实现后启用；见[项目工作流](project-workflows.md) |
+| 工作流中的一项 | 步骤 | Step | 分析步骤可进入子图（保存分析） |
 | 桌面与 Python 之间的后台进程 | 后台服务 | Python service | 原“桥接 / bridge”；日志标签为“后台服务日志 / Service log” |
 | 三维结果视图 | 查看器 | Viewer | |
 | 参数表中的一行 | 行 / 参数行 | row | 记录 ID 属于技术详情 |

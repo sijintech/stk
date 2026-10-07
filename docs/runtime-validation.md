@@ -4,6 +4,8 @@
 
 ## 2026-10-06：P3 工作流编辑 W1c/W2
 
+- CI：W2 `94cf5ee` 的 desktop（21 分 57 秒）、Runtime and scientific workflow checks、Secret scan、Cloudflare Pages 全部通过；
+  `c3a71dc`（W1b）与 `22c83ab`（W1c）的 desktop 运行被随后推送按并发规则取消，其余三项通过，桌面覆盖由 `94cf5ee` 的通过运行代表。
 - W1c（`22c83ab`）：等值面节点缺 `field` 时表单下即时提示 `missing_param`，填写后校验通过并只保存该参数；
   新增“编辑图结构”中英文宽/窄 GL/Vulkan 截图 8 张并检查（据此修正改动清单、节点重叠与提示文字）。完整 CTest **1185/1185**。
 - W2：真实窗口鼠标事件拖动 `axes` 120 像素后无需校验即可保存，位置与画布换算一致；从 `component.out` 拖到 `box.in`
