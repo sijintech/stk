@@ -1,0 +1,340 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+#include <gtest/gtest.h>
+#include "stk/app/project_state.hh"
+#include "stk/app/viewer_state.hh"
+#include "stk/app/workflow_view.hh"
+#include "stk/bridge/process.hh"
+#include "stk/core/paths.hh"
+#include "../bridge/support.hh"
+#include "../wm/support.hh"
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+
+namespace stk::app {
+namespace {
+using io::Json;
+using Reply = bridge::Result<Json>;
+namespace fs = std::filesystem;
+
+Json port(const std::string &name, const std::string &type, const bool required = false)
+{
+  Json value = {{"name", name}, {"type", type}};
+  if (required) { value["required"] = true; }
+  return value;
+}
+
+Json summary(const std::string &id, const std::string &kind, Json name, Json inputs, Json outputs)
+{
+  return {{"id", id}, {"kind", kind}, {"name", std::move(name)}, {"content_sha256", nullptr}, {"file_count", nullptr},
+          {"inputs", std::move(inputs)}, {"outputs", std::move(outputs)}, {"parameters", Json::array()}};
+}
+
+WorkflowViewText words()
+{
+  WorkflowViewText text;
+  text.kinds = {{"table", "Table"}, {"files", "Files"}, {"analysis", "Analysis"}};
+  return text;
+}
+
+TEST(WorkflowView, StepsBecomeTypedNodesWithOrderLinksPositionsAndFlags)
+{
+  const Json document = {{"format", "stk.workflow/1"}, {"steps", {
+      {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", "t"}}}},
+      {{"id", "fields"}, {"kind", "files"}, {"ref", {{"snapshot", "s"}}}, {"after", {"cases"}}},
+      {{"id", "view"}, {"kind", "analysis"}, {"ref", {{"analysis", "a"}}}, {"label", "Field view"},
+       {"inputs", {{"data", {{"from", "fields.files"}}}}}},
+      {{"id", "gone"}, {"kind", "analysis"}, {"ref", {{"analysis", "b"}}}, {"inputs", {{"data", {{"from", "fields.files"}}}}}}}},
+      {"ui", {{"positions", {{"cases", {0, 0}}, {"view", {600, 40}}}}}}};
+  auto files = summary("fields", "files", nullptr, Json::array(), Json::array({port("files", "files")}));
+  files["file_count"] = 3;
+  const Json validation = {{"revision", 4}, {"ok", false}, {"omitted_issues", 0},
+      {"issues", {{{"code", "missing_reference"}, {"step", "gone"}, {"path", "steps/3/ref"}, {"message", "m"}}}},
+      {"steps", {summary("cases", "table", "Cases", Json::array(), Json::array({port("rows", "rows")})), files,
+                 summary("view", "analysis", "Temperature", Json::array({port("data", "files", true)}),
+                         Json::array({port("image", "result"), port("view", "result")})),
+                 summary("gone", "analysis", nullptr, Json::array(), Json::array())}}};
+  const auto view = workflow_graph_view(document, validation, words());
+  ASSERT_EQ(view.nodes.size(), 4u);
+  EXPECT_EQ(view.nodes[0].label, "Table · Cases");
+  EXPECT_EQ(view.nodes[1].label, "Files · 3 files");
+  EXPECT_EQ(view.nodes[2].label, "Analysis · Field view");  // a step label wins over the referenced name
+  EXPECT_EQ(view.nodes[3].label, "Analysis · gone");
+  EXPECT_EQ(view.nodes[2].stage, "analysis");
+  EXPECT_TRUE(view.nodes[2].known_type);
+  EXPECT_FALSE(view.nodes[3].known_type);  // unresolved: only the ports its links name
+  EXPECT_TRUE(view.nodes[3].flagged); EXPECT_FALSE(view.nodes[2].flagged);
+  ASSERT_EQ(view.nodes[2].outputs.size(), 2u);
+  EXPECT_EQ(view.nodes[2].inputs.at(0).type_text, "files"); EXPECT_TRUE(view.nodes[2].inputs.at(0).required);
+  // The execution order is a link from the done socket to the after socket.
+  ASSERT_EQ(view.nodes[0].outputs.back().name, "(done)");
+  ASSERT_EQ(view.nodes[1].inputs.back().name, "(after)");
+  int order = 0, data = 0;
+  for (const auto &edge : view.edges) {
+    if (edge.source_port == "(done)" && edge.target_node == "fields" && edge.diagnostic.empty()) { ++order; }
+    if (edge.source_node == "fields" && edge.target_node == "view" && edge.diagnostic.empty()) { ++data; }
+  }
+  EXPECT_EQ(order, 1); EXPECT_EQ(data, 1);
+  EXPECT_EQ(view.nodes[0].rect.x, 0); EXPECT_EQ(view.nodes[2].rect.x, 600); EXPECT_EQ(view.nodes[2].rect.y, 40);
+  EXPECT_TRUE(view.issues.empty());  // synthetic types are not reported; the reply carries the issues
+
+  auto other = validation;
+  other["steps"].erase(1);
+  EXPECT_THROW(workflow_graph_view(document, other, words()), std::invalid_argument);
+  other = validation; other["steps"][0]["id"] = "renamed";
+  EXPECT_THROW(workflow_graph_view(document, other, words()), std::invalid_argument);
+}
+
+TEST(WorkflowView, OrderCyclesAreMarkedOnTheCanvas)
+{
+  const Json document = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+      {{"id", "a"}, {"kind", "table"}, {"ref", {{"table", "t"}}}, {"after", {"b"}}},
+      {{"id", "b"}, {"kind", "table"}, {"ref", {{"table", "t"}}}, {"after", {"a"}}}}}};
+  const Json validation = {{"revision", 1}, {"ok", false}, {"omitted_issues", 0}, {"issues", Json::array()},
+      {"steps", {summary("a", "table", "T", Json::array(), Json::array({port("rows", "rows")})),
+                 summary("b", "table", "T", Json::array(), Json::array({port("rows", "rows")}))}}};
+  const auto view = workflow_graph_view(document, validation, words());
+  EXPECT_TRUE(view.nodes[0].cyclic); EXPECT_TRUE(view.nodes[1].cyclic);
+}
+
+constexpr const char *kRecordingBridge = R"PY(
+import json
+from pathlib import Path
+import sys
+import threading
+from suan.desktop_bridge.server import Bridge
+from suan.desktop_bridge.__main__ import main
+
+control = Path(sys.argv.pop(1))
+lock = threading.Lock()
+original_run = Bridge._run
+
+def run(self, identity, method, params):
+    with lock, (control / 'calls.jsonl').open('a', encoding='utf-8') as stream:
+        stream.write(json.dumps({'method': method}, ensure_ascii=True) + '\n')
+    return original_run(self, identity, method, params)
+
+Bridge._run = run
+main()
+)PY";
+
+constexpr const char *table_id = "11111111-1111-4111-8111-111111111111";
+constexpr const char *analysis_id = "6b0f5c3e-2d1a-4c9e-9f7b-3a8e5d4c2b10";
+constexpr const char *other_analysis = "7c1f6d4f-3e2b-4d0f-8a8c-4b9f6e5d3c21";
+constexpr const char *workflow_id = "8d2a7e50-4f3c-4e1a-9b9d-5cae7f6e4d32";
+constexpr const char *broken_id = "9e3b8f61-5a4d-4f2b-8cae-6dbf8a7f5e43";
+
+class WorkflowEditorPython : public ::testing::Test {
+ protected:
+  bridge::test::TempDir directory{"workflow-ui"};
+  bridge::test::ManualLoop loop;
+  wmtest::AppFixture f{"en", 1, 1440, 2200};
+  std::unique_ptr<bridge::Client> client;
+  int64_t revision = 0;
+  AppStore &store() { return f.shell->store(); }
+  ProjectState &project() { return store().project(); }
+  EditorArea &area() { return f.area("a2"); }
+  std::string handle() { return project().project()->handle; }
+  const ui::Widget *widget(const std::string &key) { return f.screen.ui()->find(key); }
+  bool shows(const std::string &text)
+  {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  }
+  size_t calls(const std::string &method)
+  {
+    size_t count = 0; std::ifstream file(directory.path() / "calls.jsonl"); std::string line;
+    while (std::getline(file, line)) { if (io::parse_json(line).at("method") == method) { ++count; } }
+    return count;
+  }
+  void call(const std::string &method, Json params, Json &out)
+  {
+    auto reply = std::make_shared<std::optional<Reply>>(); auto future = client->call(method, std::move(params));
+    future.then([reply](auto value) { *reply = std::move(value); });
+    const bool done = loop.pump_until([&] { return reply->has_value(); }, 30);
+    if (!done) { future.cancel(); }
+    ASSERT_TRUE(done) << client->bridge_log().text();
+    ASSERT_TRUE(reply->value().ok()) << method << ": " << reply->value().error().describe(); out = reply->value().value();
+    if (out.contains("revision") && out.at("revision").is_number_integer()) { revision = out.at("revision").get<int64_t>(); }
+  }
+  void frames_until(const std::function<bool()> &condition)
+  {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return condition(); }, 30))
+        << client->bridge_log().text();
+  }
+  void click(const std::string &key)
+  {
+    const auto *value = widget(key); ASSERT_NE(value, nullptr) << key; ASSERT_TRUE(value->enabled) << key;
+    ASSERT_TRUE(value->on_click); value->on_click(); f.screen.run_deferred(); f.drv->frame();
+  }
+  Json analysis_document()
+  {
+    return {{"format", "stk.analysis-document/1"},
+        {"graph", io::read_json_file(fs::path(STK_REPO_ROOT) / "suan/graph/presets/volume.json").at("graph")},
+        {"parameters", {{"path", "field.vtk"}}}, {"outputs", Json::array({"view"})}};
+  }
+  void SetUp() override
+  {
+    std::string python = STK_BRIDGE_TEST_PYTHON_DEFAULT;
+    if (const auto *value = std::getenv("STK_BRIDGE_TEST_PYTHON"); value && *value) { python = value; }
+    if (python.empty()) { python = bridge::find_executable("python3").value_or(""); }
+    if (python.empty()) { GTEST_SKIP() << "Set STK_BRIDGE_TEST_PYTHON for workflows"; }
+    { std::ofstream file(directory.path() / "bridge.py"); file << kRecordingBridge; ASSERT_TRUE(file.good()); }
+    bridge::ClientOptions options;
+    options.python.configured = python; options.state_dir = directory.str() + "/bridge"; options.cache_dir = directory.str() + "/cache";
+    options.env["PYTHONPATH"] = STK_REPO_ROOT; options.env["STK_PROFILES_FILE"] = directory.str() + "/profiles.json";
+    options.env["STK_STATE_DIR"] = directory.str() + "/runtime"; options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+    options.command = {python, "-u", core::path_to_utf8(directory.path() / "bridge.py"), directory.str(), "--stdio",
+        "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+    options.executor = loop.executor(); options.strict = options.validate = true; options.call_timeout_s = 10;
+    client = bridge::Client::create(options); ASSERT_TRUE(client->start()); ASSERT_TRUE(client->wait_ready(60));
+    loop.run_ready(); store().set_bridge(client.get()); project().sync();
+    store().viewer().set_auto_evaluate(false); store().viewer().prefetch_neighbours = false;
+    const auto root = directory.str() + "/project";
+    ASSERT_TRUE(project().create(root, "Workflow navigation"));
+    ASSERT_TRUE(loop.pump_until([&] { return project().loaded() && !project().busy(); }, 30));
+    Json out;
+    ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", 0}, {"commands", {
+        {{"op", "create_table"}, {"id", table_id}, {"name", "Cases"}}}}}, out));
+    { std::ofstream file(fs::path(root) / "field.vtk"); file << "not read\n"; }
+    ASSERT_NO_FATAL_FAILURE(call("project.files.index", {{"handle", handle()}, {"expected_revision", revision},
+        {"paths", {root + "/field.vtk"}}}, out));
+    const auto record = out.at("record_ids").at(0).get<std::string>();
+    ASSERT_NO_FATAL_FAILURE(call("project.snapshots.capture", {{"handle", handle()}, {"expected_revision", revision},
+        {"record_ids", {record}}}, out));
+    const auto snapshot = out.at("snapshot").at("id").get<std::string>();
+    ASSERT_NO_FATAL_FAILURE(call("project.analyses.create", {{"handle", handle()}, {"analysis_id", analysis_id},
+        {"name", "Temperature field"}, {"document", analysis_document()}, {"expected_revision", revision}}, out));
+    ASSERT_NO_FATAL_FAILURE(call("project.analyses.create", {{"handle", handle()}, {"analysis_id", other_analysis},
+        {"name", "Other analysis"}, {"document", analysis_document()}, {"expected_revision", revision}}, out));
+    const Json workflow = {{"format", "stk.workflow/1"}, {"steps", {
+        {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", table_id}}}},
+        {{"id", "fields"}, {"kind", "files"}, {"ref", {{"snapshot", snapshot}}}, {"after", {"cases"}}},
+        {{"id", "temperature"}, {"kind", "analysis"}, {"ref", {{"analysis", analysis_id}}},
+         {"inputs", {{"data", {{"from", "fields.files"}}}}}}}},
+        {"ui", {{"positions", {{"cases", {0, 0}}, {"fields", {260, 0}}, {"temperature", {520, 0}}}}}}};
+    ASSERT_NO_FATAL_FAILURE(call("project.workflows.create", {{"handle", handle()}, {"workflow_id", workflow_id},
+        {"name", "Temperature scan"}, {"document", workflow}, {"expected_revision", revision}}, out));
+    const Json broken = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+        {{"id", "lost"}, {"kind", "analysis"}, {"ref", {{"analysis", "00000000-0000-4000-8000-000000000000"}}}}}}};
+    ASSERT_NO_FATAL_FAILURE(call("project.workflows.create", {{"handle", handle()}, {"workflow_id", broken_id},
+        {"name", "Broken"}, {"document", broken}, {"expected_revision", revision}}, out));
+    project().refresh();
+    ASSERT_TRUE(loop.pump_until([&] { return !project().busy() && project().project()->revision == revision; }, 30));
+    ASSERT_TRUE(area().set_tab_type(0, kEditorWorkflow));
+    f.screen.set_maximized(&area()); area().find_region(EditorArea::kSidebar)->set_size_1x(560); f.drv->frame();
+    // The first workflow is shown and checked without a click.
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("All references and links are valid."); }));
+  }
+  void TearDown() override
+  {
+    EXPECT_EQ(calls("graph.evaluate"), 0u); EXPECT_EQ(calls("project.analysis_runs.prepare"), 0u);
+    EXPECT_EQ(store().viewer().evaluations_started(), 0);
+    project().attach(nullptr); store().set_bridge(nullptr);
+    if (client) { client->close(); EXPECT_EQ(client->stats().schema_violations, 0u); }
+    loop.run_ready();
+  }
+  void activate(const std::string &type)
+  {
+    for (int i = 0; i < area().tab_count(); ++i) {
+      if (area().tab(i).type().id == type) { area().set_active_tab(i); f.drv->frame(); return; }
+    }
+    FAIL() << "no " << type << " tab";
+  }
+  /** Select a step through the editor's own navigation (the canvas click is covered by the view tests). */
+  void select(const std::string &step)
+  {
+    std::string reason;
+    ASSERT_TRUE(area().editor().navigate({{"workflow_id", workflow_id}, {"step", step}}, {}, reason));
+    f.drv->frame();
+  }
+};
+
+TEST_F(WorkflowEditorPython, ShowsStepsAndEntersAndLeavesTheAnalysisInTheSameArea)
+{
+  EXPECT_TRUE(shows("Temperature scan · 3 steps"));
+  auto *workflow_editor = &area().editor();
+  const int tabs = area().tab_count();
+  ASSERT_NO_FATAL_FAILURE(select("cases"));
+  EXPECT_TRUE(shows("Parameter table · Cases"));
+  ASSERT_NE(widget("workflow_open_table"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  EXPECT_TRUE(shows("Analysis · Temperature field"));
+  EXPECT_TRUE(shows("Input data (files) ← fields.files"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_enter_analysis"));
+  // The analysis opens in a new analysis-graph tab of the same area, read on its next sync.
+  ASSERT_EQ(area().tab_count(), tabs + 1);
+  EXPECT_EQ(area().editor().type().id, kEditorAnalysisGraph);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_breadcrumb_workflow") != nullptr &&
+      widget("graph_mode") && widget("graph_mode")->index.value() == 2 && shows("Temperature field"); }));
+  EXPECT_EQ(widget("analysis_breadcrumb_workflow")->text, "‹ Temperature scan");
+  EXPECT_TRUE(shows("› Temperature field"));
+  auto *analysis_editor = &area().editor();
+
+  ASSERT_NO_FATAL_FAILURE(click("analysis_breadcrumb_workflow"));
+  f.screen.run_deferred(); f.drv->frame();
+  EXPECT_EQ(&area().editor(), workflow_editor);
+  EXPECT_TRUE(shows("Analysis · Temperature field"));  // the step is still selected
+  // Entering again reuses the analysis tab.
+  ASSERT_NO_FATAL_FAILURE(click("workflow_enter_analysis"));
+  EXPECT_EQ(&area().editor(), analysis_editor); EXPECT_EQ(area().tab_count(), tabs + 1);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_breadcrumb_workflow") != nullptr; }));
+}
+
+TEST_F(WorkflowEditorPython, UnsavedEditsOfAnotherAnalysisAreNeverReplaced)
+{
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_enter_analysis"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_breadcrumb_workflow") != nullptr; }));
+  auto *analysis_editor = &area().editor();
+  ASSERT_NO_FATAL_FAILURE(click("analysis_list"));  // the saved-analysis list is read explicitly
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_documents") != nullptr; }));
+  // Open the other analysis from the list and leave an unsaved change in it.
+  const auto *list = widget("analysis_documents");
+  int row = -1;
+  for (int i = 0; i < list->table->rows; ++i) { if (list->table->cell(i, 0) == "Other analysis") { row = i; } }
+  ASSERT_GE(row, 0); list->table->selected.assign(row);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_outputs_clear") && widget("analysis_outputs_clear")->enabled &&
+      widget("analysis_breadcrumb_workflow") == nullptr; }));  // the breadcrumb no longer describes the shown analysis
+  ASSERT_NO_FATAL_FAILURE(click("analysis_outputs_clear"));
+  ASSERT_TRUE(widget("analysis_parameters_save") && widget("analysis_parameters_save")->enabled);
+  // Back to the workflow through its tab, then try to enter the step's analysis.
+  ASSERT_NO_FATAL_FAILURE(activate(kEditorWorkflow));
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_enter_analysis"));
+  EXPECT_EQ(area().editor().type().id, kEditorWorkflow);  // refused: the area stays on the workflow
+  ASSERT_NO_FATAL_FAILURE(activate(kEditorAnalysisGraph));
+  EXPECT_EQ(&area().editor(), analysis_editor);
+  ASSERT_TRUE(widget("analysis_parameters_save") && widget("analysis_parameters_save")->enabled);  // the draft is intact
+  const auto *documents = widget("analysis_documents"); ASSERT_NE(documents, nullptr);
+  const int shown = documents->table->selected.value();
+  ASSERT_GE(shown, 0); EXPECT_EQ(documents->table->cell(shown, 0), "Other analysis");
+}
+
+TEST_F(WorkflowEditorPython, MissingReferencesAreListedAndTheBreadcrumbEndsWithTheProject)
+{
+  const auto *list = widget("workflow_list"); ASSERT_NE(list, nullptr); ASSERT_EQ(list->table->rows, 2);
+  list->table->selected.assign(1);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("1 problems found"); }));
+  ASSERT_NE(widget("workflow_issue/0"), nullptr);
+  EXPECT_EQ(widget("workflow_issue/0")->text, "lost · Referenced object not found");
+  ASSERT_NO_FATAL_FAILURE(click("workflow_issue/0"));
+  EXPECT_TRUE(shows("Analysis · lost"));
+  ASSERT_NE(widget("workflow_enter_analysis"), nullptr);
+  EXPECT_FALSE(widget("workflow_enter_analysis")->enabled);  // nothing to open
+
+  list = widget("workflow_list"); list->table->selected.assign(0);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("All references and links are valid."); }));
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_enter_analysis"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_breadcrumb_workflow") != nullptr; }));
+  ASSERT_TRUE(project().close());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
+  EXPECT_EQ(widget("analysis_breadcrumb_workflow"), nullptr);
+}
+
+}  // namespace
+}  // namespace stk::app

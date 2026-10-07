@@ -662,7 +662,7 @@ int main(int argc, char **argv)
              client->stats().schema_violations == 0;
       }
       if (workspace) {
-        for (const auto *page : {"conversation", "files", "workflows", "analysis_runs", "simulation_runs", "data", "project"}) {
+        for (const auto *page : {"conversation", "files", "workflows", "analyses", "analysis_runs", "simulation_runs", "data", "project"}) {
           const auto *widget = screen.ui()->find(std::string("workspace_") + page);
           ok = ok && widget && widget->enabled && widget->rect.w > 0;
         }

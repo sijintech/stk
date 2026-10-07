@@ -20,7 +20,7 @@ TEST(WorkspaceNavigation, EmptyWorkspaceHasOnlyProjectManagementAndSurvivesShell
   auto &area = f.area("a2");
   ASSERT_TRUE(area.set_tab_type(0, kEditorWorkspace));
   f.screen.set_maximized(&area); f.drv->frame();
-  for (const auto *page : {"conversation", "files", "workflows", "analysis_runs", "simulation_runs", "data"}) {
+  for (const auto *page : {"conversation", "files", "workflows", "analyses", "analysis_runs", "simulation_runs", "data"}) {
     const auto *w = f.screen.ui()->find(std::string("workspace_") + page);
     ASSERT_NE(w, nullptr); EXPECT_FALSE(w->enabled);
   }
@@ -165,7 +165,7 @@ TEST_F(WorkspaceNavigationPython, VisibleButtonsReuseEditorsAndRevealFilesAndBot
   go("workspace"); ASSERT_NO_FATAL_FAILURE(click("analysis_runs"));
   EXPECT_EQ(&destination().editor(), graph); ASSERT_NE(widget("analysis_saved_section"), nullptr);
   EXPECT_EQ(widget("analysis_saved_section")->index.value(), 1); EXPECT_NE(widget("analysis_run_list"), nullptr);
-  go("workspace"); ASSERT_NO_FATAL_FAILURE(click("workflows"));
+  go("workspace"); ASSERT_NO_FATAL_FAILURE(click("analyses"));
   EXPECT_EQ(&destination().editor(), graph); EXPECT_EQ(widget("graph_mode")->index.value(), 2);
   EXPECT_EQ(widget("analysis_saved_section")->index.value(), 0); EXPECT_NE(widget("analysis_list"), nullptr);
   go("workspace"); ASSERT_NO_FATAL_FAILURE(click("conversation"));

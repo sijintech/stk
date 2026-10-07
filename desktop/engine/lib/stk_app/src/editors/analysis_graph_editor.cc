@@ -21,6 +21,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <set>
 #include <tuple>
 
@@ -67,6 +68,31 @@ class AnalysisGraphEditor final : public Editor {
     initial_saved_ = true; initial_run_ = false; initial_displayed_ = false;
     saved_section_ = view == "runs" ? 1 : 0;
     if (state_) { state_->show_saved(); redraw(); }
+    return true;
+  }
+  /** {"analysis_id", "breadcrumb"?: {"handle", "workflow_id", "workflow_name", "step", "step_label"}}:
+   * open that saved analysis (read on the next sync) and offer a way back to the requesting editor.
+   * Refused while edits of another analysis are pending, so a draft is never replaced. */
+  bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &from, std::string &reason) override
+  {
+    if (!target.is_object() || !target.contains("analysis_id") || !target.at("analysis_id").is_string() ||
+        target.at("analysis_id").get_ref<const std::string &>().empty()) { return false; }
+    const auto id = target.at("analysis_id").get<std::string>();
+    if (parameter_edits() && parameter_draft_.analysis_id() != id) {
+      reason = "analysis_graph.navigate_unsaved";
+      return false;
+    }
+    // The same analysis with pending edits is only revealed: reading it again would detach the draft.
+    if (!parameter_edits()) { pending_open_ = id; }
+    breadcrumb_.reset();
+    if (const auto crumb = target.find("breadcrumb"); crumb != target.end() && crumb->is_object()) {
+      breadcrumb_ = Breadcrumb{io::get_string(*crumb, "handle"), id, io::get_string(*crumb, "workflow_id"),
+          io::get_string(*crumb, "workflow_name"), io::get_string(*crumb, "step"), io::get_string(*crumb, "step_label"), from};
+    }
+    ++navigation_generation_;
+    initial_saved_ = true; initial_run_ = false; initial_displayed_ = false; saved_section_ = 0;
+    if (state_) { state_->show_saved(); }
+    redraw();
     return true;
   }
   ~AnalysisGraphEditor() override { *alive_ = false; }
@@ -118,6 +144,8 @@ class AnalysisGraphEditor final : public Editor {
     auto &selector = narrow ? layout.dropdown("graph_mode", std::move(modes), std::move(mode_binding)) :
         layout.tabs("graph_mode", std::move(modes), std::move(mode_binding));
     selector.disable(shell->text_input_active());
+    // A workflow step's analysis shares the caption row with the way back, so the canvas offset stays two rows.
+    auto *caption_row = breadcrumb(layout, ctx);
     if (!state_->view()) {
       layout.paragraph(ctx.tr(mode == AnalysisGraphState::Source::Run ? "analysis_runs.no_frozen_graph" :
           state_->saved() ? "analysis_documents.no_document" :
@@ -129,7 +157,7 @@ class AnalysisGraphEditor final : public Editor {
     const bool candidate = canvas_view_ && canvas_view_ != state_->view();
     const std::string caption = ctx.store.catalog().format(candidate ? "analysis_graph.candidate_caption" : "analysis_graph.canvas_caption",
         {{"nodes", std::to_string(view.nodes.size())}, {"edges", std::to_string(view.edges.size())}});
-    layout.label(caption).tip(ctx.tr("analysis_graph.navigation"));
+    (caption_row ? *caption_row : layout).label(caption).tip(ctx.tr("analysis_graph.navigation"));
     // Two fixed-height UI rows occupy this band; drawing and pointer coordinates use the same offset.
     canvas_top_ = 3.0f * (ctx.ui ? ctx.ui->style().unit : 20.0f);
   }
@@ -317,6 +345,13 @@ class AnalysisGraphEditor final : public Editor {
   std::unique_ptr<ProjectAnalysisRuns> runs_;
   uint64_t document_epoch_ = 0, document_version_ = 0;
   uint64_t navigation_generation_ = 0, document_navigation_ = 0;
+  /** Where an opened analysis came from (a workflow step), shown as a breadcrumb with a way back. */
+  struct Breadcrumb {
+    std::string handle, analysis_id, workflow_id, workflow_name, step, step_label;
+    std::weak_ptr<void> origin;
+  };
+  std::optional<Breadcrumb> breadcrumb_;
+  std::optional<std::string> pending_open_;
   std::string document_name_;
   AnalysisParameterDraft parameter_draft_;
   AnalysisCandidateValidation candidate_check_;
@@ -1258,6 +1293,32 @@ class AnalysisGraphEditor final : public Editor {
     }).disable(disabled || requested.empty());
   }
 
+  /** The row holding the breadcrumb back to a workflow, or null when this analysis was not opened from one. */
+  ui::Layout *breadcrumb(ui::Layout &layout, EditorContext &ctx)
+  {
+    if (!breadcrumb_) { return nullptr; }
+    const auto &project = ctx.store.project().project();
+    const auto shown = io::get_string(documents_->selected(), "id");
+    // Only while the same project is open and the analysis shown is the one the step opened.
+    if (!project || project->handle != breadcrumb_->handle ||
+        (shown != breadcrumb_->analysis_id && pending_open_ != breadcrumb_->analysis_id)) {
+      if (!documents_->busy()) { breadcrumb_.reset(); }
+      return nullptr;
+    }
+    const auto crumb = *breadcrumb_;
+    auto &row = layout.row();
+    auto *shell = &ctx.area.shell();
+    auto *area = &ctx.area;
+    const auto self = lifetime();
+    row.button("analysis_breadcrumb_workflow", ctx.store.catalog().format("analysis_graph.breadcrumb_back",
+        {{"workflow", crumb.workflow_name}}), [shell, area, self, crumb] {
+      shell->return_in_area_later(area, self, crumb.origin, kEditorWorkflow,
+                                  {{"workflow_id", crumb.workflow_id}, {"step", crumb.step}});
+    }).width(6).tip(ctx.tr("analysis_graph.breadcrumb_back.tip"));
+    const bool narrow = ctx.draw && ctx.draw->rect.width() < 560 * ctx.draw->ui_scale;
+    row.label("› " + (crumb.step_label.empty() ? crumb.step : crumb.step_label)).width(narrow ? 5 : 9);
+    return &row;
+  }
   void place_canvas(const double width, const double height)
   {
     if (!fit_ && !focus_selected_) { return; }
@@ -1294,6 +1355,11 @@ class AnalysisGraphEditor final : public Editor {
       else { clear_parameter_draft(); }
       document_epoch_ = documents_->epoch(); document_name_.clear();
       state_->clear_document();
+    }
+    if (pending_open_ && documents_->supported() && !documents_->busy() && !documents_->uncertain() &&
+        !parameter_edits() && documents_->load(*pending_open_)) {
+      pending_open_.reset();
+      document_navigation_ = navigation_generation_;
     }
     if (document_version_ != documents_->selected_version()) {
       document_version_ = documents_->selected_version();

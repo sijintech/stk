@@ -23,6 +23,7 @@ add_library(stk_app STATIC
   src/analysis_parameter_draft.cc
   src/app_store.cc
   src/skill_catalog.cc
+  src/workflow_view.cc
   src/bridge_status.cc
   src/editor.cc
   src/editor_area.cc
@@ -41,6 +42,7 @@ add_library(stk_app STATIC
   src/editors/ai_editor.cc
   src/editors/workspace_editor.cc
   src/editors/skills_editor.cc
+  src/editors/workflow_editor.cc
   src/editors/analysis_graph_editor.cc
   src/analysis_graph_state.cc
   src/editors/project_context_picker.cc
@@ -49,6 +51,7 @@ add_library(stk_app STATIC
   src/jobs_state.cc
   src/project_state.cc
   src/project_analyses.cc
+  src/project_workflows.cc
   src/project_analysis_runs.cc
   src/project_table_view.cc
   src/project_context_selection.cc

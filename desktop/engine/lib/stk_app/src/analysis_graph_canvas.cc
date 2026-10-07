@@ -243,8 +243,8 @@ ui::DrawList AnalysisGraphCanvas::draw_list(double width, double height, double 
     const Rect box{origin.x, origin.y, node.rect.width * scale, node.rect.height * scale};
     if (!visible(box, width, height, 8 * ui_scale_)) { continue; }
     const bool chosen = selected && *selected == i;
-    const bool problem = node.cyclic || node.ambiguous_id || !node.known_type;
-    const auto accent = node.cyclic || node.ambiguous_id ? ui::Color::rgb(0xCC7C7C) :
+    const bool problem = node.cyclic || node.ambiguous_id || !node.known_type || node.flagged;
+    const auto accent = node.cyclic || node.ambiguous_id || node.flagged ? ui::Color::rgb(0xCC7C7C) :
         !node.known_type ? ui::Color::rgb(0xD3AB70) : stage_color(node.stage);
     // Unsaved candidate changes are outlined in amber until saved or discarded.
     const auto outline = chosen ? ui::Color::rgb(0xBBDCF2) : node.edited ? ui::Color::rgb(0xE8C46A) : accent;

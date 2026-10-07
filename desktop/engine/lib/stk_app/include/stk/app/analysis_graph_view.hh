@@ -48,6 +48,8 @@ struct AnalysisGraphNode {
   bool known_type = false, cyclic = false, ambiguous_id = false, supplied_position = false;
   /** Set by an editor showing an unsaved candidate: the node is new or its inputs/params changed. */
   bool edited = false;
+  /** Set by an editor that found a problem with this node elsewhere (for example a validation issue). */
+  bool flagged = false;
   AnalysisGraphRect rect;
   std::vector<AnalysisGraphPort> inputs, outputs;
   std::vector<AnalysisGraphParameter> parameters;

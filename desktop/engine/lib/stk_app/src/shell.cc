@@ -237,11 +237,12 @@ void AppShell::activate_editor_later(wm::Screen *screen, std::string editor_id, 
 }
 
 void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
-                                      std::function<bool()> valid)
+                                      std::function<bool()> valid, std::string table_id)
 {
   if (!screen || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
   const std::weak_ptr<bool> weak = alive_;
-  screen->defer([this, weak, screen, page = std::move(page), handle = std::move(handle), valid = std::move(valid)] {
+  screen->defer([this, weak, screen, page = std::move(page), handle = std::move(handle), valid = std::move(valid),
+                 table_id = std::move(table_id)] {
     if (!weak.lock() || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
     auto &project = store_.project();
     project.sync();
@@ -260,12 +261,15 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
       editor = kEditorProject;
       view = page == "files" ? "files" : page == "simulation_runs" ? "runs" : page == "project" ? "location" : "data";
     }
-    else if (page == "workflows" || page == "analysis_runs") {
+    else if (page == "analyses" || page == "analysis_runs") {
       editor = kEditorAnalysisGraph;
-      view = page == "workflows" ? "saved" : "runs";
+      view = page == "analyses" ? "saved" : "runs";
     }
+    else if (page == "workflows") { editor = kEditorWorkflow; }
     else { return; }
-    const auto file_table = page == "files" ? io::get_string(project.file_index(), "table_id") : std::string();
+    // Files select the file index table; the data page may name a table to select (a workflow step).
+    const auto file_table = page == "files" ? io::get_string(project.file_index(), "table_id") :
+        page == "data" ? table_id : std::string();
     if (!file_table.empty() && file_table != project.table_id()) {
       for (const auto *target : screens_) {
         for (const auto *base : target->areas()) {
@@ -289,8 +293,83 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
     if (!area) { return; }
     if (!view.empty()) { area->editor().show_view(view); }
     if (!file_table.empty()) { project.select_table(file_table); }
-    if (page == "workflows" || page == "analysis_runs") { area->set_sidebar_open(true); }
+    if (page == "analyses" || page == "analysis_runs" || page == "workflows") { area->set_sidebar_open(true); }
     store_.changed();
+  });
+}
+
+namespace {
+int area_tab(const EditorArea &area, const std::weak_ptr<void> &editor)
+{
+  const auto live = editor.lock();
+  for (int i = 0; live && i < area.tab_count(); ++i) {
+    if (area.tab(i).lifetime().lock() == live) { return i; }
+  }
+  return -1;
+}
+}  // namespace
+
+bool AppShell::has_area(const EditorArea *area) const
+{
+  for (const auto *screen : screens_) {
+    for (const auto *base : screen->areas()) {
+      if (base == area) { return true; }
+    }
+  }
+  return false;
+}
+
+void AppShell::open_in_area_later(EditorArea *area, std::weak_ptr<void> origin, std::string editor_id, io::Json target)
+{
+  if (!area || !has_area(area) || !area->screen()) { return; }
+  const std::weak_ptr<bool> weak = alive_;
+  area->screen()->defer([this, weak, area, origin = std::move(origin), editor_id = std::move(editor_id),
+                         target = std::move(target)] {
+    if (!weak.lock() || !has_area(area) || origin.expired() || area_tab(*area, origin) != area->active_tab()) { return; }
+    if (text_input_active()) {
+      if (store_.toast) { store_.toast(std::string(store_.tr("app.focus.busy")), ui::ToastKind::Warning); }
+      return;
+    }
+    int index = -1;
+    for (int i = 0; i < area->tab_count() && index < 0; ++i) {
+      if (area->tab(i).type().id == editor_id) { index = i; }
+    }
+    const bool added = index < 0;
+    if (added) {
+      if (!area->add_tab(editor_id, false)) {
+        if (store_.toast) { store_.toast(std::string(store_.tr("app.tabs.full")), ui::ToastKind::Warning); }
+        return;
+      }
+      index = area->tab_count() - 1;
+    }
+    std::string reason;
+    if (!area->tab(index).navigate(target, origin, reason)) {
+      if (added) { area->close_tab(index); }
+      if (store_.toast) {
+        store_.toast(std::string(store_.tr(reason.empty() ? "app.navigate.refused" : reason)), ui::ToastKind::Warning);
+      }
+      return;
+    }
+    area->set_active_tab(index);
+    area->set_sidebar_open(true);
+    store_.changed();
+  });
+}
+
+void AppShell::return_in_area_later(EditorArea *area, std::weak_ptr<void> from, std::weak_ptr<void> origin,
+                                    std::string editor_id, io::Json fallback)
+{
+  if (!area || !has_area(area) || !area->screen()) { return; }
+  const std::weak_ptr<bool> weak = alive_;
+  area->screen()->defer([this, weak, area, from = std::move(from), origin = std::move(origin),
+                         editor_id = std::move(editor_id), fallback = std::move(fallback)] {
+    if (!weak.lock() || !has_area(area) || from.expired() || area_tab(*area, from) != area->active_tab()) { return; }
+    if (const int index = area_tab(*area, origin); index >= 0) {
+      area->set_active_tab(index);
+      store_.changed();
+      return;
+    }
+    open_in_area_later(area, from, editor_id, fallback);
   });
 }
 

@@ -97,7 +97,7 @@ class WorkspaceEditor final : public Editor {
       box.paragraph(viewer.payload() ? std::string(ctx.tr("workspace.status.result_shown")) :
                                        std::string(ctx.tr("workspace.status.no_result")));
       auto &row = box.row();
-      row.button("workspace_workflows", ctx.tr("workspace.workflows"), project_navigation_action(ctx, "workflows"))
+      row.button("workspace_analyses", ctx.tr("workspace.analyses"), project_navigation_action(ctx, "analyses"))
           .disable(!available);
       row.button("workspace_viewer", ctx.tr("workspace.viewer"), editor_navigation_action(ctx, kEditorViewer, false));
     }
@@ -109,6 +109,8 @@ class WorkspaceEditor final : public Editor {
     tools.button("workspace_conversation", ctx.tr("workspace.conversation"), project_navigation_action(ctx, "conversation"))
         .disable(!available);
     tools.button("workspace_files", ctx.tr("workspace.files"), project_navigation_action(ctx, "files")).disable(!available);
+    tools.button("workspace_workflows", ctx.tr("workspace.workflows"), project_navigation_action(ctx, "workflows"))
+        .disable(!available);
     // The skill library is shared across projects: reachable with or without one.
     tools.button("workspace_skills", ctx.tr("workspace.skills"), editor_navigation_action(ctx, kEditorSkills));
   }

@@ -117,6 +117,14 @@ class Editor {
 
   /** Reveal a named subview on the UI thread; false means this editor has no such view. */
   virtual bool show_view(std::string_view view) { return false; }
+  /** Open one object on the UI thread, for example {"analysis_id": ...} in the analysis graph.
+   * `from` is the requesting editor (for a way back). False refuses (an unsupported target, or one
+   * that would replace unsaved work) and may set `reason` to a catalog key; a refusing editor keeps
+   * its state. */
+  virtual bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &from, std::string &reason)
+  {
+    return false;
+  }
   /** Whether navigation may change a project's table/record selection without losing a draft. */
   virtual bool can_change_project_selection(std::string_view project_id) const { return true; }
 
@@ -168,6 +176,7 @@ inline constexpr const char *kEditorAI = "ai";
 inline constexpr const char *kEditorAnalysisGraph = "analysis_graph";
 inline constexpr const char *kEditorWorkspace = "workspace";
 inline constexpr const char *kEditorSkills = "skills";
+inline constexpr const char *kEditorWorkflow = "workflow";
 
 /** Registers the built-in desktop editors. */
 void register_builtin_editors(EditorRegistry &registry);

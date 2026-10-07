@@ -256,8 +256,8 @@ TEST_F(AnalysisParametersEditorPython, WorkspaceRoundTripKeepsInvalidTextAndAcce
   EXPECT_EQ(widget("analysis_saved_section")->index.value(), 1);
   ASSERT_NE(widget("project_workspace"), nullptr);
   widget("project_workspace")->on_click(); f.screen.run_deferred(); f.drv->frame();
-  ASSERT_NE(widget("workspace_workflows"), nullptr);
-  widget("workspace_workflows")->on_click(); f.screen.run_deferred(); f.drv->frame();
+  ASSERT_NE(widget("workspace_analyses"), nullptr);
+  widget("workspace_analyses")->on_click(); f.screen.run_deferred(); f.drv->frame();
   EXPECT_EQ(&area().editor(), editor);
   ASSERT_NE(widget("analysis_parameter_value"), nullptr);
   EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "1e");

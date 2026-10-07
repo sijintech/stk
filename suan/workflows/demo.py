@@ -133,7 +133,9 @@ def create_demo(stk, directory=None, *, wait_seconds=120):
             "- results/demo/case-N: field.vtk and metrics.json from a synthetic solver on this computer.\n"
             "- Results / 结果: mean and maximum per case; the first column references the case row.\n"
             "- Node Graph → Saved analysis → Temperature field → Runs: a finished run of case-3; "
-            "*Read and verify result*, then *Show selected output*, or *Run and show* for another file.\n",
+            "*Read and verify result*, then *Show selected output*, or *Run and show* for another file.\n"
+            "- Home → Workflows: *Temperature scan* links the cases, the field files and the analysis "
+            "(a definition only; *Open analysis* enters it, the breadcrumb leads back).\n",
             encoding="utf-8")
         return {"directory": str(directory), "project_id": p.snapshot()["project"]["id"], "cases_table": cases,
                 "results_table": results, "analysis_id": analysis_id, "run_id": run_id, "run_status": run["status"],

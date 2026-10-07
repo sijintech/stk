@@ -37,6 +37,7 @@ class WindowManager;
 }  // namespace stk::wm
 
 namespace stk::app {
+class EditorArea;
 
 /**
  * Directory of the message catalogs: `override_dir`, $STK_I18N_DIR, next to the executable
@@ -138,7 +139,18 @@ class AppShell {
   /** Project-scoped navigation; never executes work or replaces existing editors. Empty handle
    * is allowed only for workspace/project management. Checks all windows for active input. */
   void open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
-                               std::function<bool()> valid = {});
+                               std::function<bool()> valid = {}, std::string table_id = {});
+  /** Deferred: show `target` (Editor::navigate) in an `editor_id` tab of the same area while
+   * `origin` is still that area's active editor, reusing such a tab or adding one. A refusing
+   * editor leaves the area as it was and its reason is shown as a toast. */
+  void open_in_area_later(EditorArea *area, std::weak_ptr<void> origin, std::string editor_id,
+                          io::Json target);
+  /** Deferred: from the active editor `from`, activate the tab of `area` whose editor is `origin`;
+   * when that tab is gone, show `fallback` in an `editor_id` tab instead. */
+  void return_in_area_later(EditorArea *area, std::weak_ptr<void> from, std::weak_ptr<void> origin,
+                            std::string editor_id, io::Json fallback);
+  /** Whether `area` belongs to an installed screen (pointers held by deferred work may be stale). */
+  bool has_area(const EditorArea *area) const;
 
   /** Defer saved-draft adoption and Review navigation into the originating screen.
    * `valid` must fence the caller's lifetime and selected request. Expired callers

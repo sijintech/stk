@@ -50,7 +50,9 @@ python3 -m venv ~/.venvs/stk
    `results/demo/case-N/` 中的 `field.vtk` 与 `metrics.json` 由本机的合成求解器写出（不是物理模拟）。
 3. **分析**：工作台“保存的分析”→“温度场”→ 侧栏“运行”页。历史中已有一次完成的运行：选中后
    **读取并校验结果**，再 **在查看器中显示**；也可以在“准备运行”中映射另一个场文件，点 **运行并显示** 一步完成。
-4. **AI 助手**（可选）：在“API 密钥”中填写阿里 Token Plan 密钥即可提问；密钥只交给本机后台服务。
+4. **工作流**：工作台“其他”→“工作流”显示示例的“温度扫描”：算例 → 场文件 → 温度场；选中分析步骤点 **进入分析**，
+   再用画布上方的“‹ 温度扫描”返回。这里只显示和检查，不运行。
+5. **AI 助手**（可选）：在“API 密钥”中填写阿里 Token Plan 密钥即可提问；密钥只交给本机后台服务。
 
 ## 3. 在终端或 Jupyter 中使用
 
@@ -92,7 +94,9 @@ stk.close()
    start `stk-desktop` with `STK_PYTHON` pointing at the venv's Python.
 2. On **Home**, click **Create example project** (synthetic data, no server). Browse Parameters (a scan made by
    *Generate a parameter scan*), Results (means and maxima referencing their cases), and the saved analysis
-   *Temperature field* whose finished run can be read and shown, or use *Run and show*.
+   *Temperature field* whose finished run can be read and shown, or use *Run and show*. Home → *Workflows* shows the
+   example's workflow *Temperature scan* (cases → field files → analysis); *Open analysis* enters its analysis and
+   the breadcrumb above the canvas leads back. Nothing runs from there.
 3. Without the desktop: `suan demo`, `python -m suan.scripting.headless [PROJECT]`, or
    `from suan.scripting.headless import connect` in Jupyter — the console's `stk`, minus window and Viewer control.
 4. Real runs need a Linux Runtime (local or over SSH); MuFerro also needs its SDK and licence.
