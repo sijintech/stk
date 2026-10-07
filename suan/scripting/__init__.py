@@ -393,6 +393,10 @@ class ProjectWorkflows:
         """Resolve references and typed links against the current project; reports issues, saves nothing."""
         return self._call("project.workflows.validate", {"handle": self.handle, "document": document})
 
+    def choices(self):
+        """Parameter tables, input snapshots, readable saved analyses and templates a step can reference."""
+        return self._call("project.workflows.choices", {"handle": self.handle})
+
 
 class ProjectAnalysisRuns:
     """Snapshot-bound local analysis runs, separate from Runtime simulation tasks.

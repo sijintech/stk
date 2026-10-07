@@ -5852,6 +5852,24 @@
           "$ref": "#/$defs/projectWorkflowValidateResult"
         }
       },
+      "project.workflows.choices": {
+        "description": "List what a workflow step can reference now; read-only, creates nothing and evaluates nothing.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectWorkflowChoicesResult"
+        }
+      },
       "project.analysis_runs.prepare": {
         "description": "Freeze a saved analysis and explicit file-snapshot mapping at a project revision, without executing nodes or changing editable revision/history. Same UUID and original request return the frozen run.",
         "params": {
@@ -11110,6 +11128,130 @@
         "examples",
         "availability"
       ]
+    },
+    "projectWorkflowChoicesResult": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "tables": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "omitted_tables": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "snapshots": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "created_at": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "file_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            },
+            "required": [
+              "id",
+              "created_at",
+              "file_count"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "analyses": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "templates": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "table_id": {
+                "$ref": "#/$defs/projectUuid"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "table_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "revision",
+        "tables",
+        "omitted_tables",
+        "snapshots",
+        "analyses",
+        "templates"
+      ],
+      "additionalProperties": false,
+      "description": "What a workflow step can reference at this revision: parameter tables (not the managed analysis, workflow or file-index tables; at most 500, then omitted_tables), input snapshots newest first (at most 200), readable saved analyses and registered simulation templates."
     }
   }
 }

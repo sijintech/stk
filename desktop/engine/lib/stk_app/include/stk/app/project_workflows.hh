@@ -1,16 +1,19 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include "stk/app/analysis_parameter_draft.hh"
 #include "stk/bridge/client.hh"
 
 namespace stk::app {
 class AppStore;
 class ProjectState;
 
-/** Editor-local, read-only browser of project workflows (project.workflows.list/get/validate).
+/** Editor-local browser and explicit writer of project workflows (project.workflows.*).
  * Selecting a workflow reads it and then validates the document read, so the step summaries
- * (referenced names, ports) always describe the shown document. Nothing here writes, runs or
- * prepares anything. Closing/reopening a project or replacing the bridge fences callbacks. */
+ * (referenced names, ports) always describe the shown document. Writes are explicit CAS saves;
+ * a lost write reply marks the state uncertain until the workflow is read again (never replayed).
+ * Candidate checks of an unsaved document have their own slot and never block reads. Nothing here
+ * runs or prepares anything. Closing/reopening a project or replacing the bridge fences callbacks. */
 class ProjectWorkflows {
  public:
   explicit ProjectWorkflows(AppStore &store);
@@ -36,27 +39,49 @@ class ProjectWorkflows {
   /** The project changed after the selected workflow was read and checked. */
   bool stale() const;
   bool page_stale() const;
+  /** The bridge process this state talks to ("pid:spawn"), part of candidate check keys. */
+  const std::string &session() const { return session_; }
+  /** A write was sent and its reply was lost: read the workflow again before saving. */
+  bool uncertain() const { return uncertain_; }
+  /** Saved/created/not-found notices as catalog keys (empty when none). */
+  const std::string &notice() const { return notice_; }
+  /** The latest project.workflows.choices reply (null until read). */
+  const io::Json &choices() const { return choices_; }
 
   bool load_page(int64_t offset = 0);
   /** Read one workflow, then validate the document read. */
   bool load(const std::string &id);
   /** Read (and check) the selected workflow again, or the current page when none is selected. */
   bool reload();
+  /** Check the shown workflow when it has no check yet (after a read or a save); false when not needed or busy. */
+  bool validate_selected();
+  bool load_choices();
+  /** Save a new workflow under a fresh UUID at the current revision, then select it. */
+  bool create(const std::string &name, const io::Json &document);
+  /** Replace the selected workflow's name and document at the revision it was read at, then read it again. */
+  bool update(const std::string &name, const io::Json &document, uint64_t expected_selected_version);
+  /** Validate an unsaved candidate; the reply counts only for `key` (see AnalysisCandidateKey). */
+  bool check(const io::Json &document, AnalysisCandidateKey key);
+  const AnalysisCandidateValidation &candidate() const { return candidate_; }
 
  private:
   void reset();
   void changed();
-  bool call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done);
+  bool call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done,
+            std::function<void(const bridge::Error &)> failed = {});
+  bool write(const std::string &method, const std::string &id, const std::string &name, const io::Json &document,
+             int64_t revision);
 
   AppStore &store_;
   ProjectState &project_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   bridge::Client *client_ = nullptr;
-  std::string handle_, session_, error_;
+  std::string handle_, session_, error_, notice_;
   uint64_t epoch_ = 0, version_ = 0, selected_version_ = 0;
-  bool busy_ = false;
+  bool busy_ = false, uncertain_ = false;
   int64_t selected_revision_ = -1;
-  io::Json page_, selected_, validation_;
-  std::optional<bridge::Future<io::Json>> future_;
+  io::Json page_, selected_, validation_, choices_;
+  std::optional<bridge::Future<io::Json>> future_, check_future_;
+  AnalysisCandidateValidation candidate_;
 };
 }  // namespace stk::app

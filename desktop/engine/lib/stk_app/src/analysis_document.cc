@@ -15,7 +15,39 @@ void require(bool condition, const char *message)
 {
   if (!condition) { throw std::invalid_argument(message); }
 }
+
+bool space(char32_t c)
+{
+  // Python str.isspace(), also used by the backend's name.strip() check.
+  return (c >= 9 && c <= 13) || (c >= 28 && c <= 32) || c == 0x85 || c == 0xa0 ||
+      c == 0x1680 || (c >= 0x2000 && c <= 0x200a) || c == 0x2028 || c == 0x2029 ||
+      c == 0x202f || c == 0x205f || c == 0x3000;
+}
 }  // namespace
+
+bool canonical_uuid(std::string_view value)
+{
+  if (value.size() != 36) { return false; }
+  for (size_t i = 0; i < value.size(); ++i) {
+    if (i == 8 || i == 13 || i == 18 || i == 23) {
+      if (value[i] != '-') { return false; }
+    }
+    else if (!((value[i] >= '0' && value[i] <= '9') || (value[i] >= 'a' && value[i] <= 'f'))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool visible_text(std::string_view text)
+{
+  for (size_t i = 0; i < text.size();) {
+    const auto c = core::utf8::decode(text, i);
+    if (!space(c.code_point)) { return true; }
+    i += c.length;
+  }
+  return false;
+}
 
 /** Match the storage clone's raw budget/depth before copying or recursively serializing JSON.
  * Object keys count as values at depth+1. The raw budget deliberately precedes canonical bytes. */

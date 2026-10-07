@@ -1,5 +1,18 @@
 # 开发交接记录
 
+## 2026-10-07：P3 W3c-1 工作流编辑模型
+
+按复查建议把 W3c 拆为模型（本次）与界面。`project.workflows.choices` 列出步骤可引用的对象：参数表（不含分析、工作流、文件索引三张托管表，
+最多 500）、输入快照（新的在前，最多 200）、可读的保存分析与已注册仿真模板。C++ `WorkflowDraft` 是保存工作流的候选副本，
+`check_workflow_document` 与 Python `_step`/`_document` 的形状规则逐条一致（标识符、`x-` 键、引用/标签/参数/先完成的上限、位置、256 KiB），
+因此界面做出的文档不会在保存时被拒；编辑清掉的 `inputs`/`parameters`/`after` 在已保存步骤原本没有时一并去掉，改回原样即丢弃副本。
+`check_version()` 不随位置与名称变化，候选检查在拖动后仍有效。`ProjectWorkflows` 新增 `create/update`（回执确认后直接采用写入的文档，
+项目刷新完成后由 `validate_selected()` 补做检查；回复丢失时标记不确定，重读前不再保存）、`load_choices` 与独立的候选检查槽
+（复用 `AnalysisCandidateKey`/`AnalysisCandidateValidation`，不占用读取通道）。`canonical_uuid`/`visible_text` 移到 `analysis_document`
+供两种草稿共用。
+
+critical review：保存成功后链式读取会因项目正在刷新而被拒，改为采用回执确认的文档并稍后补做检查（与保存分析一致）。
+
 ## 2026-10-07：P3 W3b 工作流画布与进入分析
 
 新增原生“工作流”编辑器（`kEditorWorkflow`，工作台“其他”入口）：`ProjectWorkflows` 读取列表、读取所选工作流后立即校验同一份文档

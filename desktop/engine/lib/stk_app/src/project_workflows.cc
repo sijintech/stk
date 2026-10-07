@@ -2,6 +2,8 @@
 #include "stk/app/project_workflows.hh"
 
 #include "stk/app/app_store.hh"
+#include "stk/app/jobs_spec.hh"
+#include "stk/app/workflow_draft.hh"
 #include "stk/app/project_state.hh"
 
 #include <stdexcept>
@@ -25,6 +27,7 @@ ProjectWorkflows::~ProjectWorkflows()
 {
   *alive_ = false;
   if (future_) { future_->cancel(); }
+  if (check_future_) { check_future_->cancel(); }
 }
 
 void ProjectWorkflows::changed() { ++version_; store_.changed(); }
@@ -32,12 +35,15 @@ void ProjectWorkflows::changed() { ++version_; store_.changed(); }
 void ProjectWorkflows::reset()
 {
   ++epoch_; ++selected_version_;
-  busy_ = false;
+  busy_ = uncertain_ = false;
   selected_revision_ = -1;
-  page_ = selected_ = validation_ = nullptr;
-  error_.clear();
+  page_ = selected_ = validation_ = choices_ = nullptr;
+  error_.clear(); notice_.clear();
+  candidate_.reset();
   auto old = std::move(future_); future_.reset();
   if (old) { old->cancel(); }
+  auto check = std::move(check_future_); check_future_.reset();
+  if (check) { check->cancel(); }
   changed();
 }
 
@@ -80,7 +86,8 @@ bool ProjectWorkflows::page_stale() const
       project_.project()->revision != io::get_int(page_, "revision", -1));
 }
 
-bool ProjectWorkflows::call(const std::string &method, Json params, std::function<void(const Json &)> done)
+bool ProjectWorkflows::call(const std::string &method, Json params, std::function<void(const Json &)> done,
+                            std::function<void(const bridge::Error &)> failed)
 {
   sync();
   if (!supported() || busy_ || project_.busy()) { return false; }
@@ -91,13 +98,17 @@ bool ProjectWorkflows::call(const std::string &method, Json params, std::functio
   bridge::CallOptions options;
   options.retry = bridge::CallOptions::Retry::Never;
   future_ = client_->call(method, params, options);
-  future_->then([this, weak, epoch, done = std::move(done)](bridge::Result<Json> result) {
+  future_->then([this, weak, epoch, done = std::move(done), failed = std::move(failed)](bridge::Result<Json> result) {
     const auto alive = weak.lock();
     if (!alive || !*alive) { return; }
     sync();
     if (epoch != epoch_) { return; }
     busy_ = false; future_.reset();
-    if (!result) { error_ = result.error().describe(); }
+    if (!result) {
+      error_ = result.error().describe();
+      if (failed) { failed(result.error()); }
+      if (result.error().code == bridge::ErrorCode::Conflict) { project_.refresh(); }
+    }
     else {
       try { done(result.value()); }
       catch (const std::exception &error) { error_ = error.what(); }
@@ -137,23 +148,29 @@ bool ProjectWorkflows::load(const std::string &id)
     }
     selected_ = response.at("workflow");
     selected_revision_ = response.at("revision").get<int64_t>();
-    validation_ = nullptr;
+    validation_ = nullptr; uncertain_ = false;
     ++selected_version_;
-    if (selected_.at("state") != "readable") { return; }
-    const auto document = selected_.at("document");
-    const auto epoch = epoch_;
-    // The check describes exactly the document just read; a newer read replaces both.
-    call("project.workflows.validate", {{"document", document}}, [this, id, epoch, document](const Json &result) {
-      if (epoch != epoch_ || io::get_string(selected_, "id") != id || selected_.at("document") != document) { return; }
-      if (!result.is_object() || io::get_int(result, "revision", -1) < 0 || !result.contains("ok") ||
-          !result.at("ok").is_boolean() || !result.contains("issues") || !result.at("issues").is_array() ||
-          !result.contains("steps") || !result.at("steps").is_array() ||
-          result.at("steps").size() != document.at("steps").size()) {
-        throw std::runtime_error("Invalid workflow validation response");
-      }
-      validation_ = result;
-      ++selected_version_;
-    });
+    validate_selected();
+  });
+}
+
+bool ProjectWorkflows::validate_selected()
+{
+  if (selected_.is_null() || !validation_.is_null() || io::get_string(selected_, "state") != "readable") { return false; }
+  const auto id = io::get_string(selected_, "id");
+  const auto document = selected_.at("document");
+  const auto epoch = epoch_;
+  // The check describes exactly the document shown; a newer read replaces both.
+  return call("project.workflows.validate", {{"document", document}}, [this, id, epoch, document](const Json &result) {
+    if (epoch != epoch_ || io::get_string(selected_, "id") != id || selected_.at("document") != document) { return; }
+    if (!result.is_object() || io::get_int(result, "revision", -1) < 0 || !result.contains("ok") ||
+        !result.at("ok").is_boolean() || !result.contains("issues") || !result.at("issues").is_array() ||
+        !result.contains("steps") || !result.at("steps").is_array() ||
+        result.at("steps").size() != document.at("steps").size()) {
+      throw std::runtime_error("Invalid workflow validation response");
+    }
+    validation_ = result;
+    ++selected_version_;
   });
 }
 
@@ -162,5 +179,90 @@ bool ProjectWorkflows::reload()
   sync();
   if (selected_.is_null()) { return load_page(page_.is_null() ? 0 : io::get_int(page_, "offset", 0)); }
   return load(io::get_string(selected_, "id"));
+}
+bool ProjectWorkflows::load_choices()
+{
+  return call("project.workflows.choices", Json::object(), [this](const Json &result) {
+    if (!result.is_object() || io::get_int(result, "revision", -1) < 0) { throw std::runtime_error("Invalid workflow choices response"); }
+    for (const auto *key : {"tables", "snapshots", "analyses", "templates"}) {
+      if (!result.contains(key) || !result.at(key).is_array()) { throw std::runtime_error("Invalid workflow choices response"); }
+    }
+    choices_ = result;
+  });
+}
+
+bool ProjectWorkflows::write(const std::string &method, const std::string &id, const std::string &name,
+                             const Json &document, const int64_t revision)
+{
+  sync();
+  if (!supported() || busy_ || project_.busy() || uncertain_ || revision < 0) { return false; }
+  try { check_workflow_document(document); }
+  catch (const std::exception &) { return false; }
+  const auto hello = client_->hello_info();
+  if (!hello || !hello->has_method(method)) { return false; }
+  // From dispatch until a receipt or a definite rejection the write may have happened.
+  uncertain_ = true;
+  const bool sent = call(method, {{"workflow_id", id}, {"name", name}, {"document", document}, {"expected_revision", revision}},
+      [this, id, name, document, revision](const Json &result) {
+    if (!result.is_object() || io::get_int(result, "revision", -1) != revision + 1 || io::get_string(result, "record_id") != id) {
+      throw std::runtime_error("Invalid workflow save receipt; read the workflow again before saving");
+    }
+    // The receipt confirms exactly this document; it is checked again by validate_selected().
+    selected_ = {{"id", id}, {"name", name}, {"format", "stk.workflow/1"}, {"state", "readable"}, {"error", ""},
+                 {"document", document}};
+    selected_revision_ = result.at("revision").get<int64_t>();
+    validation_ = nullptr; ++selected_version_;
+    uncertain_ = false; notice_ = "workflow.saved"; page_ = nullptr;
+    project_.refresh();
+  }, [this](const bridge::Error &error) {
+    // A definite rejection means nothing was written; anything else (a lost reply) stays uncertain.
+    if (!error.local && (error.code == bridge::ErrorCode::InvalidParams || error.code == bridge::ErrorCode::Conflict ||
+        error.code == bridge::ErrorCode::NotFound || error.code == bridge::ErrorCode::Unsupported)) {
+      uncertain_ = false;
+    }
+  });
+  if (!sent) { uncertain_ = false; }
+  return sent;
+}
+
+bool ProjectWorkflows::create(const std::string &name, const Json &document)
+{
+  sync();
+  if (!supported() || !project_.project()) { return false; }
+  const auto hex = new_idempotency_key();
+  const auto id = hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) + "-" + hex.substr(16, 4) + "-" + hex.substr(20);
+  return write("project.workflows.create", id, name, document, project_.project()->revision);
+}
+
+bool ProjectWorkflows::update(const std::string &name, const Json &document, const uint64_t expected_selected_version)
+{
+  sync();
+  if (selected_.is_null() || selected_version_ != expected_selected_version || io::get_string(selected_, "state") != "readable" ||
+      stale()) { return false; }
+  return write("project.workflows.update", io::get_string(selected_, "id"), name, document, selected_revision_);
+}
+
+bool ProjectWorkflows::check(const Json &document, AnalysisCandidateKey key)
+{
+  sync();
+  if (!supported() || key.handle != handle_ || key.session != session_) { return false; }
+  const auto ticket = candidate_.begin(std::move(key));
+  const auto epoch = epoch_;
+  const std::weak_ptr<bool> weak = alive_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  if (check_future_) { check_future_->cancel(); }
+  check_future_ = client_->call("project.workflows.validate", {{"handle", handle_}, {"document", document}}, options);
+  check_future_->then([this, weak, epoch, ticket](bridge::Result<Json> result) {
+    const auto alive = weak.lock();
+    if (!alive || !*alive) { return; }
+    sync();
+    if (epoch != epoch_) { return; }
+    if (result) { candidate_.finish(ticket, result.value()); }
+    else { candidate_.fail(ticket, result.error().describe()); }
+    changed();
+  });
+  changed();
+  return true;
 }
 }  // namespace stk::app

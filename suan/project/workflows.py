@@ -31,6 +31,8 @@ MAX_WORKFLOWS = 128
 MAX_COLLECTION_BYTES = 4 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 12 * 1024 * 1024
 MAX_ISSUES = 256
+MAX_CHOICE_TABLES = 500
+MAX_CHOICE_SNAPSHOTS = 200
 KINDS = ("table", "files", "simulation", "analysis")
 # Step kind -> the single key its `ref` object holds.
 REF_KEYS = {"table": "table", "files": "snapshot", "simulation": "template", "analysis": "analysis"}
@@ -335,6 +337,36 @@ class Workflows:
             _require(db)
             return _TABLE.write(self.store, db, identity, {"name": name, **document}, revision,
                                 create=create, document_format=DOCUMENT_FORMAT)
+
+    def choices(self):
+        """What a step can reference now, for an editor: parameter tables (not the managed analysis,
+        workflow or file-index tables), input snapshots (newest first), readable saved analyses and
+        registered simulation templates. Read-only; nothing is evaluated or created."""
+        from suan.workflows.templates import TEMPLATES  # Registered versions only; never loads project code.
+        managed = {TABLE_ID, analyses.TABLE_ID, files.TABLE_ID}
+        with self.store._connect() as db:
+            revision = db.execute("SELECT revision FROM project").fetchone()[0]
+            tables = [{"id": row["id"], "name": row["name"]}
+                      for row in db.execute("SELECT id,name FROM tables ORDER BY rowid") if row["id"] not in managed]
+            snapshots = []
+            if _version(db) >= 4:
+                for row in db.execute("SELECT id,created_at,manifest FROM project_snapshots ORDER BY rowid DESC LIMIT ?",
+                                      (MAX_CHOICE_SNAPSHOTS,)):
+                    try:
+                        count = len(json.loads(row["manifest"])["files"])
+                    except (ValueError, KeyError, TypeError):
+                        count = None
+                    snapshots.append({"id": row["id"], "created_at": row["created_at"], "file_count": count})
+            readable = []
+            _, compatible, error = analyses._schema(db)
+            for row in db.execute("SELECT id FROM records WHERE table_id=? ORDER BY rowid", (analyses.TABLE_ID,)):
+                entry = analyses._record(db, row[0], compatible, error)
+                if entry["state"] == "readable":
+                    readable.append({"id": entry["id"], "name": entry["name"]})
+        return {"revision": revision, "tables": tables[:MAX_CHOICE_TABLES], "omitted_tables": max(0, len(tables) - MAX_CHOICE_TABLES),
+                "snapshots": snapshots, "analyses": readable,
+                "templates": [{"id": template.id, "name": template.name, "table_id": template.table_id}
+                              for template in TEMPLATES.values()]}
 
     def validate(self, document):
         """Resolve a (possibly unsaved) document against the current project, read-only.

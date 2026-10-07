@@ -226,6 +226,8 @@ class ProjectSessions:
                 return workflows.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
             if action == "validate":
                 return workflows.validate(params["document"])
+            if action == "choices":
+                return workflows.choices()
             return workflows.get(params["workflow_id"])
 
     def analysis_runs(self, action, params):

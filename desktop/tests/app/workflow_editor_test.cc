@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
 #include "stk/app/project_state.hh"
+#include "stk/app/project_workflows.hh"
+#include "stk/app/workflow_draft.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/app/workflow_view.hh"
 #include "stk/bridge/process.hh"
@@ -354,6 +356,63 @@ TEST_F(WorkflowEditorPython, ClosingTheProjectBeforeTheAnalysisIsReadLeavesNoWay
   for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
   EXPECT_EQ(widget("analysis_breadcrumb_workflow"), nullptr);
   EXPECT_EQ(calls("project.analyses.get"), reads);
+}
+
+TEST_F(WorkflowEditorPython, DraftEditsSaveExactlyAndCandidateChecksAreKeyed)
+{
+  ProjectWorkflows workflows(store());
+  ASSERT_TRUE(workflows.load(workflow_id));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !workflows.validation().is_null(); }));
+  const auto &selected = workflows.selected();
+  WorkflowDraft draft;
+  draft.pin(handle(), workflow_id, workflows.selected_revision(), selected.at("name").get<std::string>(), selected.at("document"));
+  const auto generation = draft.generation();
+  const auto added = draft.add_step("analysis", "analysis", other_analysis, std::pair{780.0, 0.0}, generation);
+  ASSERT_TRUE(added.accepted) << added.error;
+  ASSERT_TRUE(draft.set_after(added.id, {"temperature"}, generation).accepted);
+  ASSERT_TRUE(draft.set_parameter("temperature", "colormap", Json("cividis"), generation).accepted);
+  ASSERT_TRUE(draft.set_label("temperature", std::string("Field view"), generation).accepted);
+  ASSERT_TRUE(draft.move_steps({{"cases", {0, 120}}}, generation).accepted);
+  ASSERT_TRUE(draft.set_name("Temperature scan v2", generation).accepted);
+
+  // The candidate check describes this candidate only; the new analysis step still lacks its input.
+  AnalysisCandidateKey key{handle(), workflow_id, workflows.session(), workflows.selected_revision(),
+                           draft.generation(), draft.check_version()};
+  ASSERT_TRUE(workflows.check(draft.document(), key));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.candidate().pending(); }));
+  const auto *checked = workflows.candidate().result(key);
+  ASSERT_NE(checked, nullptr) << workflows.candidate().error(key);
+  ASSERT_EQ(checked->at("issues").size(), 1u);
+  EXPECT_EQ(checked->at("issues")[0].at("code"), "missing_input");
+  EXPECT_EQ(checked->at("steps")[3].at("name"), "Other analysis");
+  auto other = key; ++other.version;
+  EXPECT_EQ(workflows.candidate().result(other), nullptr);
+
+  // Saving stores exactly the candidate (name included) at the read revision.
+  ASSERT_TRUE(workflows.update(draft.name(), draft.document(), workflows.selected_version()));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !workflows.uncertain() &&
+      io::get_string(workflows.selected(), "name") == "Temperature scan v2"; }));
+  Json stored;
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.get", {{"handle", handle()}, {"workflow_id", workflow_id}}, stored));
+  EXPECT_EQ(io::python_json_dumps(stored.at("workflow").at("document"), true, true), io::python_json_dumps(draft.document(), true, true));
+  EXPECT_EQ(stored.at("workflow").at("name"), "Temperature scan v2");
+  EXPECT_EQ(workflows.notice(), "workflow.saved");
+  // A stale read revision is refused by storage and nothing is written.
+  const auto after = project().project()->revision;
+  WorkflowDraft stale; stale.pin(handle(), workflow_id, after - 1, "Stale", draft.document());
+  EXPECT_FALSE(workflows.update("Stale", stale.document(), workflows.selected_version() + 1));  // not the read selection
+
+  // A new, empty workflow under a fresh UUID.
+  const Json empty = {{"format", "stk.workflow/1"}, {"steps", Json::array()}, {"ui", Json::object()}};
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy(); }));
+  ASSERT_TRUE(workflows.create("Empty workflow", empty));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && io::get_string(workflows.selected(), "name") == "Empty workflow"; }));
+  EXPECT_NE(io::get_string(workflows.selected(), "id"), workflow_id);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy(); }));  // reads wait for the project refresh
+  ASSERT_TRUE(workflows.load_choices());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !workflows.choices().is_null(); }));
+  EXPECT_EQ(workflows.choices().at("analyses").size(), 2u);
+  EXPECT_EQ(workflows.choices().at("tables").size(), 1u);  // the managed tables are not parameter tables
 }
 
 }  // namespace

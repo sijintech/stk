@@ -256,11 +256,28 @@ def test_validation_reports_unreadable_analyses_and_bounds_issues(store, project
     assert len(answer["issues"]) == 2 and answer["omitted_issues"] == 3 and not answer["ok"]
 
 
+def test_choices_list_referencable_objects_only(store, project):
+    create(store, flow(project))
+    before, history = store.snapshot(), store.history()
+    answer = store.workflows.choices()
+    assert answer["revision"] == store.info()["revision"] and answer["omitted_tables"] == 0
+    # Parameter tables only: never the managed analysis, workflow or file-index tables.
+    assert answer["tables"] == [{"id": project["cases"], "name": "Cases"}, {"id": project["other"], "name": "Other"}]
+    assert [(s["id"], s["file_count"]) for s in answer["snapshots"]] == [(project["snapshot"], 1)]
+    assert answer["analyses"] == [{"id": project["volume"], "name": "Volume"}, {"id": project["threshold"], "name": "Threshold"},
+                                  {"id": project["dynamic"], "name": "Dynamic"}]
+    assert answer["templates"] == [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID}]
+    assert store.snapshot() == before and store.history() == history  # read-only
+    store.apply([{"op": "set_cell", "table_id": analyses.TABLE_ID, "record_id": project["dynamic"],
+                  "field_id": analyses.FIELD_IDS["graph"], "value": {"broken": True}}], expected_revision=store.info()["revision"])
+    assert [a["id"] for a in store.workflows.choices()["analyses"]] == [project["volume"], project["threshold"]]
+
+
 def test_bridge_methods_scripting_api_and_events(inproc, tmp_path):
     h = inproc()
     info = h.call("project.create", {"directory": str(tmp_path / "project"), "name": "Bridge"})["project"]
     p = Project(lambda method, params: h.call(method, params), info["handle"])
-    methods = {"project.workflows." + action for action in ("create", "update", "get", "list", "validate")}
+    methods = {"project.workflows." + action for action in ("create", "update", "get", "list", "validate", "choices")}
     assert methods <= set(h.call("hello", {"protocol": 1})["methods"])
     assert methods <= h.call("script.catalog")["operations"].keys()
     empty = document()
@@ -274,6 +291,9 @@ def test_bridge_methods_scripting_api_and_events(inproc, tmp_path):
     assert p.workflows.get(identity)["workflow"]["document"] == document(step)
     assert p.workflows.list()["workflows"][0]["name"] == "One step"
     assert p.workflows.validate(document(step))["issues"][0]["code"] == "missing_reference"
+    assert p.workflows.choices() == {"revision": p.snapshot()["project"]["revision"], "tables": [], "omitted_tables": 0,
+                                     "snapshots": [], "analyses": [],
+                                     "templates": [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID}]}
     error = h.error("project.workflows.get", {"handle": info["handle"], "workflow_id": str(uuid4())})
     assert error["code"] == "not_found"
     error = h.error("project.workflows.create", {"handle": info["handle"], "workflow_id": identity, "name": "Again",

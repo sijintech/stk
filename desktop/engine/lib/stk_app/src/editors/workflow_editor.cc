@@ -205,6 +205,10 @@ class WorkflowEditor final : public Editor {
       refreshed_revision_ = revision;
       workflows_->reload();
     }
+    else if (workflows_->validation().is_null() && io::get_string(workflows_->selected(), "state") == "readable" &&
+             !ctx.store.project().busy()) {
+      workflows_->validate_selected();  // after a save, once the project has settled
+    }
     else if (workflows_->page_stale() && page_revision_ != revision) {
       page_revision_ = revision;
       workflows_->load_page(io::get_int(workflows_->page(), "offset", 0));

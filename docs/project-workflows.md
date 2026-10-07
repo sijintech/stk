@@ -83,7 +83,8 @@ doc["steps"][2]["label"] = "温度场（体绘制）"
 revision = p.snapshot()["project"]["revision"]
 p.workflows.update(listed["workflows"][0]["id"], "Temperature scan / 温度扫描", doc, expected_revision=revision)
 p.workflows.create("Copy", doc, workflow_id=str(uuid4()), expected_revision=revision + 1)
+p.workflows.choices()  # 可引用的参数表、输入快照（新的在前）、可读的保存分析与已注册仿真模板
 ```
 
-后台服务方法为 `project.workflows.create/update/get/list/validate`，见
+后台服务方法为 `project.workflows.create/update/get/list/validate/choices`，见
 [桌面桥协议](specs/stk-desktop-bridge-v1.md)的可选扩展说明。

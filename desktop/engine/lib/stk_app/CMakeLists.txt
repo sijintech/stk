@@ -24,6 +24,7 @@ add_library(stk_app STATIC
   src/app_store.cc
   src/skill_catalog.cc
   src/workflow_view.cc
+  src/workflow_draft.cc
   src/bridge_status.cc
   src/editor.cc
   src/editor_area.cc
