@@ -321,6 +321,8 @@ class ProjectSessions:
                 return requests.edit_proposal(params["request_id"])
             if action == "list":
                 return requests.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+            if action == "usage":
+                return requests.usage()
             return {"request": requests.get(params["request_id"])}
 
     def backup(self, params):

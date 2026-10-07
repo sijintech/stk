@@ -142,6 +142,7 @@ print(p.selection())
 | 版本化技能目录（实验性 `stk.skill/1`） | `stk.skills.list(offset=, limit=, query=)`、`stk.skills.get(id, version=)` 只读查询；不执行入口、不准备运行或调用模型，见[技能目录](skills.md) |
 | 项目分析定义保存、替换、分页查询与纯 Viewer 配置捕获 | `stk.project.analyses`、`stk.viewer.graph_configuration()`，不运行节点，见[分析文档指南](project-analyses.md) |
 | 项目工作流（实验）保存、分页查询与只读校验 | `stk.project.workflows`，不运行任何步骤，见[项目工作流](project-workflows.md) |
+| AI 请求用量（实验） | `stk.project.requests.usage()` 只读合计已完成回复的服务商 token 回执（总计与按模型），不估算金额，见[请求指南](project-requests.md) |
 | 项目“需要处理”汇总（实验） | `stk.project.attention()` 只读列出失败、待审、运行中与已完成的事项，`stk.project.mark_viewed(keys)` 只记本人的“已查看”（不改项目），见[体验包](design/ux-package-2026-10.md) |
 | 快照绑定的本机分析执行与结果归档 | `stk.project.analysis_runs.prepare/get/list/start/cancel/recover/result`，格式 9；准备、开始与读取结果分开，普通读取不重跑，见[分析运行指南](project-analysis-runs.md) |
 | 相机完整变换、原生图编辑、完整项目打包与文档 | 统一操作与界面仍待逐步接入 |

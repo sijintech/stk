@@ -139,6 +139,8 @@ if current['status'] == 'completed':
 # 只在确实要取消时执行：p.requests.cancel(request['id'])
 # 只在需核对遗留执行时执行：p.requests.recover(request['id'])
 print(p.requests.list(limit=20))
+# 已完成回复的服务商回执合计（只读；失败/取消/不确定的请求不计入，以服务商控制台为准）
+print(p.requests.usage())
 ```
 
 这些可选桥方法通过 `hello.methods` / `stk.operations()` 发现；`p` 固定原打开句柄。

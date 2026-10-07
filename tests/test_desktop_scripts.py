@@ -84,7 +84,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.discussion.link_draft", "project.discussion.proposals",
         "project.requests.create", "project.requests.get", "project.requests.list", "project.requests.cancel",
         "project.requests.provider", "project.requests.start", "project.requests.recover", "project.requests.progress",
-        "project.requests.propose_edits", "project.requests.edit_proposal",
+        "project.requests.propose_edits", "project.requests.edit_proposal", "project.requests.usage",
         "project.analysis_runs.prepare", "project.analysis_runs.get", "project.analysis_runs.list",
         "project.analysis_runs.start", "project.analysis_runs.cancel", "project.analysis_runs.recover", "project.analysis_runs.result",
         "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",

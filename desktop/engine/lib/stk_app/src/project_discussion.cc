@@ -39,6 +39,7 @@ void ProjectDiscussion::reset()
   contexts_ = messages_ = proposals_ = request_page_ = {};
   context_ = message_ = origin_ = requests_ = generation_request_ = Json::object();
   provider_ = Json::object(); provider_loaded_ = false;
+  usage_ = Json::object(); usage_loaded_ = usage_reading_ = false; usage_completed_.clear();
   ++exchange_generation_; ++exchange_flight_;
   exchange_request_ = exchange_context_ = exchange_question_ = exchange_reply_ = exchange_progress_ = Json::object();
   exchange_edit_proposal_ = Json::object();
@@ -143,6 +144,36 @@ bool ProjectDiscussion::load_provider()
   }, true);
   if (accepted) { provider_loaded_ = true; }
   return accepted;
+}
+
+bool ProjectDiscussion::usage_supported() const
+{
+  if (!requests_supported()) { return false; }
+  const auto hello = store_.bridge()->hello_info();
+  return hello && hello->has_method("project.requests.usage");
+}
+
+bool ProjectDiscussion::load_usage()
+{
+  // A passive read with its own flight: it never makes the conversation busy or disables its buttons.
+  if (!usage_supported() || usage_reading_ || project_.busy()) { return false; }
+  const auto handle = project_.project()->handle;
+  usage_reading_ = usage_loaded_ = true;
+  std::weak_ptr<bool> weak = alive_;
+  const auto epoch = epoch_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  store_.bridge()->call("project.requests.usage", {{"handle", handle}}, options).then(
+      [this, weak, epoch, handle](bridge::Result<Json> result) {
+    if (!weak.lock() || epoch != epoch_ || !project_.project() || project_.project()->handle != handle) { return; }
+    usage_reading_ = false;
+    if (!result.ok()) { store_.log(result.error().message); }
+    else if (const auto &value = result.value(); value.is_object() && value.contains("completed") &&
+             value.contains("models") && value.at("models").is_array()) { usage_ = value; }
+    ++version_;
+    store_.changed();
+  });
+  return true;
 }
 
 bool ProjectDiscussion::key_settings_supported() const
@@ -592,6 +623,10 @@ void ProjectDiscussion::publish_exchange(const Json &bundle)
   exchange_reading_ = exchange_preparing_ = exchange_pending_ = false;
   exchange_error_.clear();
   const auto status = io::get_string(record, "status");
+  if (status == "completed" && io::get_string(record, "id") != usage_completed_) {
+    usage_completed_ = io::get_string(record, "id");
+    usage_loaded_ = false;  // a newly completed reply may carry a receipt
+  }
   exchange_following_ = (status == "running" || status == "uncertain") &&
       (exchange_deadline_ < 0 || !exchange_clock_seen_ || exchange_now_ < exchange_deadline_);
   exchange_due_ = exchange_now_ + 1;

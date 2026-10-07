@@ -1,5 +1,16 @@
 # 开发交接记录
 
+## 2026-10-07：体验包 U2 用量可见
+
+`Requests.usage()` 直接读取请求记录（不逐条校验哈希链，记录读不出时只是不计入），合计状态为“已完成”且结果带服务商回执
+（`input_tokens`/`output_tokens`）的请求，按服务商报告的模型（没有则用请求冻结的模型）分列；后台服务 `project.requests.usage`、schema、
+协议说明与 `stk.project.requests.usage()`。桌面 `ProjectDiscussion::load_usage`：读取有自己的在途标记，不设置对话的 `busy`
+（否则读取期间“发送”“取消”等按钮会被禁用）；展示过的已完成回复变化时重读。AI 助手配置区一行“本项目已用 … token（N 次完成的请求，服务商回执）”，
+无回执的完成数另注，悬停按模型分列；发送按钮写明“（模型）”。
+
+critical review（截图）：首版读取经由对话的通用调用，读取期间界面按钮被禁用，AI 截图脚本的按钮检查失败，改为独立读取；
+截图脚本在绘制后才发出读取，需在最后一帧前等待回复（窄布局折叠配置区，不发出读取，不等待）。
+
 ## 2026-10-07：体验包 U4 工作流记住视图
 
 `AnalysisGraphCanvas::look_at(center, zoom, width, height, ui_scale)` 与 `center()`：以画布中心的图坐标和缩放表示视图，

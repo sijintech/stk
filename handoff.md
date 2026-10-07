@@ -3,7 +3,7 @@
 更新：2026-10-07。**P3 工作流（W1–W4）已交付；体验包（[ux-package-2026-10.md](docs/design/ux-package-2026-10.md)）进行中：U1“需要处理”已交付
 （[suan/project/attention.py](suan/project/attention.py)、`project.attention.*`、[project_attention.hh](desktop/engine/lib/stk_app/include/stk/app/project_attention.hh)、
 工作台“需要关注”与状态栏计数）；U4 工作流记住视图已交付（`workflow_editor.cc` 的 `ViewMemory`/`save_state`、`AnalysisGraphCanvas::look_at`）；
-下一步 U2 用量可见，再 U3 项目内搜索**；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
+U2 用量可见已交付（`Requests.usage`、`project.requests.usage`、AI 助手“本项目已用”与发送按钮模型）；下一步 U3 项目内搜索**；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
 [开发计划](docs/development-plan.md)开头）：标量体范围（`96152bf`）、启动即工作台（`1d1c338`）、参数扫描生成（`ca8a8b3`）、
 路径框“浏览…”（共用 [path_picker.hh](desktop/engine/lib/stk_app/src/editors/path_picker.hh)，`b1badce`）、
 运行环境选择与“运行所选行”（`stk.batches.run`、[project_simulation_view.cc](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)，`ed5bb29`）、

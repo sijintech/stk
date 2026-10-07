@@ -407,3 +407,18 @@ def test_bridge_capacity_error_leaves_ninth_request_pending(inproc, model):
         adapter.release.set()
     eventually(lambda: idle(executor))
     assert not h.violations
+
+
+def test_usage_reads_receipts_through_the_bridge_and_scripting(inproc, model):
+    h = inproc()
+    p, saved = prepare(h, model)
+    store, _ = model
+    owner = str(uuid4())
+    assert store.requests._claim(saved['id'], executor_id=owner)[1]
+    store.requests._complete(saved['id'], executor_id=owner, text='ok',
+                             metadata={'model': 'fixture-model', 'input_tokens': 42, 'output_tokens': 7})
+    before = store.snapshot()
+    usage = p.requests.usage()
+    assert usage == {'requests': 1, 'completed': 1, 'reported': 1, 'input_tokens': 42, 'output_tokens': 7,
+                     'models': [{'model': 'fixture-model', 'requests': 1, 'input_tokens': 42, 'output_tokens': 7}]}
+    assert store.snapshot() == before and not h.violations

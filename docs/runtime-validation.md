@@ -2,6 +2,16 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-07：体验包 U2 用量可见
+
+- Python 2 项：用量只合计已完成且带回执的请求（3/4 次有回执，输入 200、输出 45），按服务商报告的模型（没有则按请求冻结的模型）分列，
+  失败与等待中的请求不计入，读取不改项目；经后台服务与 `stk.project.requests.usage()` 读取一致、无 schema 违例。
+- 真实后台服务的界面测试 1 项：发送按钮显示“Send this saved question (fixture-model)”（空密钥时不可用），无完成请求时显示“尚无完成的请求”；
+  经脚本以回执完成后显示“This project used 1,840 input · 212 output tokens (1 completed requests, provider receipts)”，悬停按模型分列；项目修订不变。
+- AI 截图 32 张（含回执的受控完成）检查：配置区显示“本项目已用”，发送按钮注明模型；读取不使对话忙碌，按钮检查通过。
+- 完整 pytest（`-m "not perf"`）**2265 passed、24 skipped**；完整 Linux CTest **1251/1251**。
+- CI `63cdc0b` 的 desktop（Linux、macOS Metal、Windows、打包）全部通过：上次 macOS 的 `MTLSafeFreeList` 未释放没有再现。
+
 ## 2026-10-07：体验包 U4 工作流记住视图
 
 - 画布单元测试 1 项：缩放、平移后的中心与缩放在另一视口大小与 2 倍界面缩放下恢复（中心图坐标误差 < 1e-9），缩放被限制在上限，非法输入不改变视图。
@@ -9,7 +19,7 @@
   布局状态记录最后显示的工作流，新编辑器载入后先显示“Broken”（不是列表第一份），再切到“温度扫描”时仍是离开时的视图；格式错误的布局状态被拒绝；
   从工作台打开的失败运行在切到另一工作流再回来后仍显示。
 - Python 未改动（沿用 U1 的完整 pytest 2263 passed、24 skipped）；完整 Linux CTest **1250/1250**。
-- CI `63cdc0b`（含 `ac82660`）：Runtime（含 client-windows）、Secret scan、Cloudflare Pages 通过；desktop 结果见下一次记录。
+- CI `63cdc0b`（含 `ac82660`）：Runtime（含 client-windows）、Secret scan、Cloudflare Pages、desktop 全部通过。
 
 ## 2026-10-07：体验包 U1 需要处理；6fc18a4 CI 修复
 

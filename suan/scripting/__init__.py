@@ -193,6 +193,11 @@ class ProjectRequests:
         """Read the request's saved draft and provenance, or two nulls; never create or rebase."""
         return self._call("project.requests.edit_proposal", {"handle": self.handle, "request_id": request_id})
 
+    def usage(self):
+        """Provider-reported token counts of completed requests, in total and per model; reads only.
+        The provider's console is authoritative; failed or uncertain requests are not counted."""
+        return self._call("project.requests.usage", {"handle": self.handle})
+
     def list(self, *, offset=0, limit=100):
         return self._call("project.requests.list", {"handle": self.handle, "offset": offset, "limit": limit})
 

@@ -1804,5 +1804,11 @@
   "workspace.attention.state.accepted": "已提交",
   "workspace.attention.state.succeeded": "成功",
   "workspace.attention.state.completed": "已完成",
-  "workspace.attention.state.cancelled": "已取消"
+  "workspace.attention.state.cancelled": "已取消",
+  "ai.usage.none": "本项目尚无完成的请求。",
+  "ai.usage": "本项目已用：输入 {input} · 输出 {output} token（{completed} 次完成的请求，服务商回执）",
+  "ai.usage.model": "{model}：{requests} 次 · 输入 {input} · 输出 {output}",
+  "ai.send_saved_model": "发送这条已保存的问题（{model}）",
+  "ai.usage.tip": "按服务商随每次回复返回的 token 数统计；失败、取消或结果不确定的请求不计入。费用与额度以服务商控制台为准。",
+  "ai.usage.unreported": "；其中 {count} 次没有回执"
 }

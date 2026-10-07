@@ -340,7 +340,8 @@ int main(int argc, char **argv)
           ok = ok && scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
               "s=ProjectStore(" + io::Json(dir.str() + "/project").dump() + ")\nowner=str(uuid4())\n"
               "s.requests._claim('" + pending + "', executor_id=owner)\n"
-              "s.requests._complete('" + pending + "', executor_id=owner, text=" + io::Json(answer).dump() + ")");
+              "s.requests._complete('" + pending + "', executor_id=owner, text=" + io::Json(answer).dump() +
+              ", metadata={'model': 'fixture-v1', 'input_tokens': 1840, 'output_tokens': 212})");  // a provider receipt (U2)
           ok = ok && loop.pump_until([&] { return !scripts.busy(); }, 30) &&
               scripts.status().at("run").at("state") == "succeeded";
           ok = ok && discussion.load_exchange(pending) &&
@@ -596,6 +597,14 @@ int main(int argc, char **argv)
         ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
       }
       ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+      if (ai) {
+        // The token usage line comes from a passive read that drawing the provider box starts (U2; the
+        // narrow layouts keep that box collapsed and start none); show it once read.
+        ok = ok && loop.pump_until([&] {
+          return !state.discussion().usage_loaded() || state.discussion().usage().contains("completed");
+        }, 30);
+        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+      }
       if (ai_scope) {
         // Enter the real picker and inspect the next scope without capturing or replacing history.
         if (editor == "ai_scope_narrow") {

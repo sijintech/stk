@@ -41,6 +41,12 @@ class ProjectDiscussion {
   bool load_request(const std::string &id);
   bool cancel_request(const std::string &id);
   bool load_provider();
+  /** Provider-reported token counts of this project's completed requests (project.requests.usage,
+   * UX package U2); read again after a reply completes. Informational: the provider's console counts. */
+  bool usage_supported() const;
+  bool usage_loaded() const { return usage_loaded_; }
+  const io::Json &usage() const { return usage_; }
+  bool load_usage();
   /** Whether the Python service accepts a Token Plan key from the app (ai.credentials.*). */
   bool key_settings_supported() const;
   /** Hand the key to the Python service for its session, or remember it on this computer (a
@@ -108,6 +114,9 @@ class ProjectDiscussion {
   io::Json generation_request_ = io::Json::object();
   io::Json provider_ = io::Json::object();
   bool provider_loaded_ = false;
+  io::Json usage_ = io::Json::object();
+  bool usage_loaded_ = false, usage_reading_ = false;
+  std::string usage_completed_;  // the completed exchange the shown usage already includes
   bool credentials(const std::string &method, io::Json params);
   io::Json exchange_request_ = io::Json::object(), exchange_context_ = io::Json::object();
   io::Json exchange_question_ = io::Json::object(), exchange_reply_ = io::Json::object();

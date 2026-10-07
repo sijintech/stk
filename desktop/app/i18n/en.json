@@ -1804,5 +1804,11 @@
   "workspace.attention.state.accepted": "Submitted",
   "workspace.attention.state.succeeded": "Succeeded",
   "workspace.attention.state.completed": "Completed",
-  "workspace.attention.state.cancelled": "Cancelled"
+  "workspace.attention.state.cancelled": "Cancelled",
+  "ai.usage.none": "No completed requests in this project yet.",
+  "ai.usage": "This project used {input} input · {output} output tokens ({completed} completed requests, provider receipts)",
+  "ai.usage.model": "{model}: {requests} requests · {input} input · {output} output",
+  "ai.send_saved_model": "Send this saved question ({model})",
+  "ai.usage.tip": "Counted from the token numbers the provider returned with each reply; failed, cancelled or uncertain requests are not counted. The provider's console is authoritative for cost and limits.",
+  "ai.usage.unreported": "; {count} without a receipt"
 }

@@ -290,6 +290,7 @@ class AIEditor final : public Editor {
     const auto source = io::get_string(provider, "key_source");
     box.paragraph(ctx.tr(!configured ? "ai.missing_key" : source == "environment" ? "ai.key.environment" :
                          source == "saved" ? "ai.key.saved" : source == "session" ? "ai.key.session" : "ai.configured"));
+    usage(box, ctx, state);
     box.button("ai_provider_refresh", ctx.tr("discussion.requests.provider_refresh"), [&discussion, &state, handle = state.project()->handle] {
       if (state.project() && state.project()->handle == handle) { discussion.load_provider(); }
     })
@@ -313,6 +314,42 @@ class AIEditor final : public Editor {
       if (source == "environment") { keys->paragraph(ctx.tr("ai.key.environment_wins")); }
       hint(*keys, ctx, "ai.key.hint");
     }
+  }
+
+  /** Tokens this project used, from the provider's receipts with completed replies (UX package U2).
+   * Never an amount of money; the provider's console is authoritative. */
+  static void usage(ui::Layout &box, EditorContext &ctx, ProjectState &state)
+  {
+    auto &discussion = state.discussion();
+    if (!discussion.usage_supported()) { return; }
+    if (!discussion.usage_loaded() && !state.busy()) { discussion.load_usage(); }
+    const auto &usage = discussion.usage();
+    if (!usage.contains("completed")) { return; }
+    auto &catalog = ctx.store.catalog();
+    const auto count = [&](const Json &value, const char *key) { return grouped(io::get_int(value, key, 0)); };
+    if (io::get_int(usage, "completed", 0) == 0) {
+      box.paragraph(ctx.tr("ai.usage.none")).tip(ctx.tr("ai.usage.tip"));
+      return;
+    }
+    std::string text = catalog.format("ai.usage", {{"input", count(usage, "input_tokens")}, {"output", count(usage, "output_tokens")},
+                                                   {"completed", count(usage, "completed")}});
+    if (const auto missing = io::get_int(usage, "completed", 0) - io::get_int(usage, "reported", 0); missing > 0) {
+      text += catalog.format("ai.usage.unreported", {{"count", grouped(missing)}});
+    }
+    std::string tip(ctx.tr("ai.usage.tip"));
+    for (const auto &model : usage.at("models")) {
+      tip += "\n" + catalog.format("ai.usage.model", {{"model", io::get_string(model, "model")}, {"requests", count(model, "requests")},
+                                                      {"input", count(model, "input_tokens")}, {"output", count(model, "output_tokens")}});
+    }
+    box.paragraph(text).tip(tip);
+  }
+
+  /** 1234567 -> "1,234,567". */
+  static std::string grouped(const int64_t value)
+  {
+    auto digits = std::to_string(value < 0 ? 0 : value);
+    for (auto at = digits.size(); at > 3; at -= 3) { digits.insert(at - 3, ","); }
+    return digits;
   }
 
   void conversation(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft,
@@ -407,7 +444,11 @@ class AIEditor final : public Editor {
         settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
     layout.log_view("ai_transcript", transcript_, transcript_units);
     auto &actions = layout.row();
-    actions.button("ai_send_saved", ctx.tr("ai.send_saved"), [&discussion, &state, handle, id] {
+    // The saved question goes to the model frozen in it, named on the button.
+    const auto send_model = io::get_string(request.value("configuration", Json::object()), "model");
+    const auto send_text = send_model.empty() ? std::string(ctx.tr("ai.send_saved")) :
+        ctx.store.catalog().format("ai.send_saved_model", {{"model", send_model}});
+    actions.button("ai_send_saved", send_text, [&discussion, &state, handle, id] {
       if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
         discussion.start_request(id);
       }

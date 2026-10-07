@@ -383,3 +383,33 @@ def test_maximum_utf8_response_is_stored_whole_and_metadata_cannot_mutate_after_
     assert store.discussion.get(item["assistant_message_id"])["text"] == text
     assert completed["result"]["metadata"] == {"input_tokens": 2**63 - 1}
     assert store.requests.get(item["id"]) == completed
+
+
+def test_usage_sums_provider_receipts_of_completed_requests_only(journal):
+    store, ids, context, _ = journal
+    assert store.requests.usage() == {"requests": 0, "completed": 0, "reported": 0, "input_tokens": 0,
+                                      "output_tokens": 0, "models": []}
+
+    def ask(model):
+        message = store.discussion.add("check", message_id=str(uuid4()), context_id=context["id"])
+        return store.requests.create(message["id"], request_id=str(uuid4()),
+                                     configuration={"adapter": "controlled/1", "model": model})
+
+    receipts = [("text-a", {"model": "text-a-2026", "input_tokens": 120, "output_tokens": 30}),
+                ("text-a", {"input_tokens": 80, "output_tokens": 10}),  # no reported model: the configured one
+                ("text-b", {"output_tokens": 5}), ("text-b", None)]  # the last has no receipt
+    for model, metadata in receipts:
+        item = ask(model)
+        owner = claim(store, item)
+        store.requests._complete(item["id"], executor_id=owner, text="ok", metadata=metadata)
+    failed = ask("text-a")
+    owner = claim(store, failed)
+    store.requests._settle(failed["id"], executor_id=owner, status="failed", code="adapter_failed")
+    ask("text-a")  # pending
+    before, history = store.snapshot(), store.history()
+    usage = store.requests.usage()
+    assert store.snapshot() == before and store.history() == history  # reads only
+    assert usage == {"requests": 6, "completed": 4, "reported": 3, "input_tokens": 200, "output_tokens": 45, "models": [
+        {"model": "text-a", "requests": 1, "input_tokens": 80, "output_tokens": 10},
+        {"model": "text-a-2026", "requests": 1, "input_tokens": 120, "output_tokens": 30},
+        {"model": "text-b", "requests": 1, "input_tokens": 0, "output_tokens": 5}]}

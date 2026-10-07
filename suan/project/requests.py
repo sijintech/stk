@@ -270,6 +270,40 @@ class Requests:
             return {"requests": [self._public(*self._decode(db, row, ancestors)) for row in rows[:limit]],
                     "next_offset": offset + limit if len(rows) > limit else None}
 
+    def usage(self):
+        """Token counts the provider reported with completed requests, in total and per model (UX package U2).
+
+        Read-only and informational: only completed requests carry a provider receipt; failed, cancelled or
+        uncertain ones are not counted, and the provider's console stays authoritative. No amounts of money.
+        """
+        with self.store._connect() as db:
+            _require(db)
+            rows = db.execute("SELECT status, payload, state FROM project_requests").fetchall()
+        totals = {"requests": 0, "completed": 0, "reported": 0, "input_tokens": 0, "output_tokens": 0}
+        models = {}
+        for row in rows:
+            totals["requests"] += 1
+            if row["status"] != "completed":
+                continue
+            totals["completed"] += 1
+            try:
+                metadata = (json.loads(row["state"]).get("result") or {}).get("metadata") or {}
+                configured = json.loads(row["payload"])["configuration"]["model"]
+            except (KeyError, TypeError, ValueError, AttributeError, RecursionError):
+                continue  # an unreadable record only goes uncounted; reading it reports the problem
+            counts = {key: metadata.get(key) for key in ("input_tokens", "output_tokens")}
+            if not any(type(value) is int and value >= 0 for value in counts.values()):
+                continue
+            totals["reported"] += 1
+            model = metadata.get("model") if isinstance(metadata.get("model"), str) else configured
+            entry = models.setdefault(str(model), {"model": str(model), "requests": 0, "input_tokens": 0, "output_tokens": 0})
+            entry["requests"] += 1
+            for key, value in counts.items():
+                if type(value) is int and value >= 0:
+                    totals[key] += value
+                    entry[key] += value
+        return {**totals, "models": sorted(models.values(), key=lambda entry: entry["model"])}
+
     def input(self, request_id):
         _id(request_id)
         with self.store._connect() as db:

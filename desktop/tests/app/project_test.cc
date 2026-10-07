@@ -1003,6 +1003,48 @@ TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
   EXPECT_EQ(state().table()->text(0, 0), "300");
 }
 
+TEST_F(ProjectPython, AIUsageShowsProviderReceiptsAndTheSendButtonNamesTheModel)
+{
+  populated();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Usage scope")); settled();
+  ASSERT_TRUE(discussion.load_provider()); settled();
+  ASSERT_TRUE(discussion.prepare_question(discussion.context().at("id"), "Explain the saved values", "fixture-model")); settled();
+  const std::string id = discussion.exchange_request().at("id");
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area); ai_frame();
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text == text) { return &item; } }
+    }
+    return static_cast<const ui::Widget *>(nullptr);
+  };
+  // The saved question goes to the model frozen in it (U2); nothing is sent here.
+  const auto *send = f.screen.ui()->find("a2/main/ai_send_saved");
+  ASSERT_NE(send, nullptr);
+  EXPECT_EQ(send->text, "Send this saved question (fixture-model)");
+  EXPECT_FALSE(send->enabled);  // empty fixture key
+  // The usage read is passive (it never makes the conversation busy), so wait for what it shows.
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return shows("No completed requests in this project yet.") != nullptr; }, 30));
+  // A reply completed with the provider's receipt is counted once the exchange is read again.
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }));
+  ASSERT_TRUE(scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+      "s = ProjectStore(" + Json(dir.str() + "/project").dump() + ")\nowner = str(uuid4())\n"
+      "s.requests._claim('" + id + "', executor_id=owner)\n"
+      "s.requests._complete('" + id + "', executor_id=owner, text='ok', "
+      "metadata={'model': 'fixture-model-2026', 'input_tokens': 1840, 'output_tokens': 212})"));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  ASSERT_TRUE(discussion.refresh_exchange());
+  const std::string used = "This project used 1,840 input · 212 output tokens (1 completed requests, provider receipts)";
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return shows(used) != nullptr; }, 30));
+  const auto *usage = shows(used);
+  ASSERT_NE(usage, nullptr);
+  EXPECT_NE(usage->tooltip.find("fixture-model-2026: 1 requests · 1,840 input · 212 output"), std::string::npos) << usage->tooltip;
+  EXPECT_EQ(state().project()->revision, 1);  // reading usage changes nothing
+}
+
 TEST_F(ProjectPython, AIWorkspaceActiveDraftAndStaleButtonsStayWithTheirProject)
 {
   populated();

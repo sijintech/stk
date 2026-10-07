@@ -529,6 +529,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.requests.list` | `{handle, offset?, limit?}` | `{requests: [request], next_offset: integer|null}` |
 | `project.requests.cancel` | `{handle, request_id}` | `{request}` |
 | `project.requests.provider` | `{handle}` | `{provider}` (local configuration presence only) |
+| `project.requests.usage` | `{handle}` | `{requests, completed, reported, input_tokens, output_tokens, models: [{model, requests, input_tokens, output_tokens}]}` (read-only sum of provider receipts with completed replies; failed, cancelled and uncertain requests are not counted; no amounts of money) |
 | `project.requests.start` | `{handle, request_id}` | `{request}` (durable claim or existing state) |
 | `project.requests.recover` | `{handle, request_id}` | `{request}` (local abandoned-owner reconciliation only) |
 | `project.requests.propose_edits` | `{handle, request_id, expected_revision}` | `{request_id, draft, proposal, replayed: boolean}` (save a review draft; no apply) |
