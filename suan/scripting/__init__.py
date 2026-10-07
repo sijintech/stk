@@ -134,6 +134,11 @@ class Project:
         Read-only: {revision, items: [{key, kind, id, group, severity, name, status, at, target, viewed, ...}], counts}."""
         return self._call("project.attention.list", {"handle": self.handle})
 
+    def search(self, query, *, limit=100):
+        """Tables, fields, text cells, workflows, analyses, files, drafts and messages matching `query`
+        (case-insensitive); reads only: {revision, query, results: [{kind, id, name, target, ...}], counts, truncated}."""
+        return self._call("project.search", {"handle": self.handle, "query": query, "limit": limit})
+
     def mark_viewed(self, keys):
         """Mark attention items as viewed (kept for this person only, outside the project)."""
         return self._call("project.attention.viewed", {"handle": self.handle, "keys": list(keys)})

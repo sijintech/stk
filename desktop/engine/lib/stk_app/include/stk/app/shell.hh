@@ -139,7 +139,7 @@ class AppShell {
   /** Project-scoped navigation; never executes work or replaces existing editors. Empty handle
    * is allowed only for workspace/project management. Checks all windows for active input. */
   void open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
-                               std::function<bool()> valid = {}, std::string table_id = {});
+                               std::function<bool()> valid = {}, std::string table_id = {}, std::string record_id = {});
   /** Deferred: show `target` (Editor::navigate) in an `editor_id` tab of the same area while
    * `origin` is still that area's active editor, reusing such a tab or adding one. A refusing
    * editor leaves the area as it was and its reason is shown as a toast. */

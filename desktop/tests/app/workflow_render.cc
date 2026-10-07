@@ -3,7 +3,8 @@
  * (--scenario enter) its analysis opened in the same area with the breadcrumb back, or
  * (--scenario workflow_edit) an unsaved candidate with an added, linked and field-bound step, or
  * (--scenario workflow_run) a finished per-row run of cases -> synthetic solver -> analysis with its task grid, or
- * (--scenario home_attention) Home's "needs attention" box after a run with a failed row and a finished run. */
+ * (--scenario home_attention) Home's "needs attention" box after a run with a failed row and a finished run, or
+ * (--scenario home_search) Home's project search with workflow, analysis and file results. */
 #include "stk/app/bridge_status.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_state.hh"
@@ -36,7 +37,7 @@ int main(int argc, char **argv)
   }
   if (output.empty() || (mode != "wide" && mode != "narrow") ||
       (scenario != "workflow" && scenario != "enter" && scenario != "workflow_edit" && scenario != "workflow_run" &&
-       scenario != "home_attention")) { return 2; }
+       scenario != "home_attention" && scenario != "home_search")) { return 2; }
   const bool narrow = mode == "narrow", zh = language == "zh";
   const int width = narrow ? 760 : 1440, height = 900;
   bridge::test::TempDir directory{"workflow-render"};
@@ -232,6 +233,20 @@ int main(int argc, char **argv)
         require(area->set_tab_type(0, app::kEditorWorkspace), "home");
         wait([&] { return shows(zh ? "失败 · 工作流运行 · 温度扫描 · 完成 4/6" : "Failed · Workflow run · Temperature scan · 4/6 done") &&
                           shows(zh ? "已完成未查看（1）" : "Finished, not viewed (1)"); }, "attention listed");
+      }
+      if (scenario == "home_search") {
+        // A search that finds the workflow, the analysis and the indexed field files.
+        require(area->set_tab_type(0, app::kEditorWorkspace), "home");
+        wait([&] { return widget("workspace_search") && widget("workspace_search")->enabled; }, "search box");
+        widget("workspace_search_text")->string.assign(zh ? "温度" : "temperature");
+        widget("workspace_search")->on_click();
+        wait([&] { return shows(zh ? "工作流（1）" : "Workflows (1)"); }, "search results");
+        widget("workspace_search_text")->string.assign("field.vtk");
+        widget("workspace_search")->on_click();
+        wait([&] { return shows(zh ? "文件（3）" : "Files (3)"); }, "file results");
+        widget("workspace_search_text")->string.assign(zh ? "温度" : "temperature");
+        widget("workspace_search")->on_click();
+        wait([&] { return shows(zh ? "工作流（1）" : "Workflows (1)") && !shows(zh ? "文件（3）" : "Files (3)"); }, "search again");
       }
       if (scenario == "enter") {
         widget("workflow_enter_analysis")->on_click();

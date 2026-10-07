@@ -473,6 +473,52 @@ TEST_F(WorkflowEditorPython, EachWorkflowKeepsItsViewAndStepAndTheLayoutReopensT
   EXPECT_TRUE(area().editor().load_state(Json::object()));
 }
 
+TEST_F(WorkflowEditorPython, HomeSearchFindsWorkflowsAnalysesAndFilesAndOpensThem)
+{
+  f.shell->restore_split_layout(&f.screen);
+  ASSERT_EQ(f.area("a1").editor().type().id, kEditorWorkspace);
+  const auto find = [&](const std::string &query) {
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workspace_search") && widget("workspace_search")->enabled; }));
+    widget("workspace_search_text")->string.assign(query);
+    ASSERT_NO_FATAL_FAILURE(click("workspace_search"));
+  };
+  ASSERT_NO_FATAL_FAILURE(find("TEMPERATURE"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Workflows (1)") && shows("Saved analyses (1)"); }));
+  ASSERT_NO_FATAL_FAILURE(click("workspace_search_open/0"));  // the workflow comes first
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] {
+    auto *maximized = dynamic_cast<EditorArea *>(f.screen.maximized());
+    return maximized && maximized->editor().type().id == kEditorWorkflow && shows("Temperature scan · 3 steps");
+  }));
+  // A file opens the file page with its row selected.
+  f.shell->restore_split_layout(&f.screen);
+  ASSERT_NO_FATAL_FAILURE(find("field.vtk"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Files (1)"); }));
+  EXPECT_FALSE(shows("Nothing found"));
+  ASSERT_NO_FATAL_FAILURE(click("workspace_search_open/0"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] {
+    auto *maximized = dynamic_cast<EditorArea *>(f.screen.maximized());
+    return maximized && maximized->editor().type().id == kEditorProject && !project().record_id().empty();
+  }));
+  EXPECT_EQ(project().table_id(), "becb9ec9-1a27-5d31-8aa3-5402f09f43a9");  // the file index
+  ASSERT_NE(project().table(), nullptr);
+  EXPECT_EQ(project().table()->text(project().selected_record(), 0), "field.vtk");
+  // Nothing found is said plainly; searching never changes the project.
+  f.shell->restore_split_layout(&f.screen);
+  f.tab("a1", kEditorWorkspace); f.drv->frame();  // the file page took Home's area
+  const auto before = project().project()->revision;
+  ASSERT_NO_FATAL_FAILURE(find("no such words"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Nothing found for “no such words”."); }));
+  EXPECT_EQ(project().project()->revision, before);
+  EXPECT_FALSE(shows("The project changed after this search"));
+  // A later edit marks the shown results as possibly out of date (they are not re-read by themselves).
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", before},
+      {"commands", {{{"op", "add_record"}, {"id", "18181818-1818-4181-8181-181818181818"}, {"table_id", table_id}}}}}, out));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("The project changed after this search; search again to update the results."); }));
+  EXPECT_EQ(calls("project.search"), 3u);
+}
+
 TEST_F(WorkflowEditorPython, ClosingTheProjectBeforeTheAnalysisIsReadLeavesNoWayBack)
 {
   ASSERT_NO_FATAL_FAILURE(select("temperature"));

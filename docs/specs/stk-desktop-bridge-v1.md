@@ -556,6 +556,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.workflow_runs.stale` | `{handle, run_id}` | `{run_id, revision, rows: [{id, number, stale, steps}], stale_rows}` |
 | `project.attention.list` | `{handle}` | `{revision, items: [projectAttentionItem], counts: {needs_you, running, unviewed_done}}` |
 | `project.attention.viewed` | `{handle, keys}` | `{viewed}` |
+| `project.search` | `{handle, query, limit?}` | `{revision, query, results: [projectSearchItem], counts, truncated}` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -666,6 +667,16 @@ with `analysis_id`/`analysis_run_id`) or `{page, ...}` (`simulation_runs`, `revi
 the item's status and counts, so an item marked viewed appears again when its state changes. `viewed` stores 1–500 keys
 per call as this person's local marks under the service state directory (at most 2000 per project); it never changes the
 project or its revision.
+
+The optional `project.search` (experimental, UX package U3) finds a trimmed, case-insensitive substring (1–200
+characters) in parameter table names, field names and text cells (managed tables excluded), saved workflow and analysis
+names, indexed file names and paths, AI draft titles and discussion messages. Results come grouped in that order, at
+most 50 of each kind and `limit` (1–200, default 100) in all; `counts` has every kind's full count and `truncated` says
+whether some were left out. Each item is `{kind, id, target, name?, table?, row?, text?, status?, role?, at?}`: `text`
+is the matching cell or message cut to about 80 characters around the match (or a file's path); `target` is a page
+(`data` with `table_id`/`record_id`, `files` with `record_id`, `review` with `draft_id`, `conversation` with
+`message_id`) or an editor (`workflow` with `workflow_id`, `analysis_graph` with `analysis_id`). It reads only; it
+scans every message and runs under the project session lock, so other project operations wait meanwhile.
 
 The optional `project.analysis_runs.*` methods require project format 9, with an explicit backup-first
 upgrade for older projects. They add an immutable analysis plan and an append-only execution journal,

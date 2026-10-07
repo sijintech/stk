@@ -236,6 +236,12 @@ class ProjectSessions:
                 return workflows.choices()
             return workflows.get(params["workflow_id"])
 
+    def search(self, params):
+        """Names and text of the project matching a query; reads only (UX package U3)."""
+        from suan.project.search import search
+        with self._operation():
+            return search(self._get(params["handle"]), params["query"], limit=params.get("limit", 100))
+
     def attention(self, action, params):
         """The project's attention items with this person's viewed marks, or mark some as viewed."""
         from suan.project.attention import collect

@@ -238,12 +238,12 @@ void AppShell::activate_editor_later(wm::Screen *screen, std::string editor_id, 
 }
 
 void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std::string handle,
-                                      std::function<bool()> valid, std::string table_id)
+                                      std::function<bool()> valid, std::string table_id, std::string record_id)
 {
   if (!screen || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
   const std::weak_ptr<bool> weak = alive_;
   screen->defer([this, weak, screen, page = std::move(page), handle = std::move(handle), valid = std::move(valid),
-                 table_id = std::move(table_id)] {
+                 table_id = std::move(table_id), record_id = std::move(record_id)] {
     if (!weak.lock() || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
     auto &project = store_.project();
     project.sync();
@@ -272,7 +272,9 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
     // Files select the file index table; the data page may name a table to select (a workflow step).
     const auto file_table = page == "files" ? io::get_string(project.file_index(), "table_id") :
         page == "data" ? table_id : std::string();
-    if (!file_table.empty() && file_table != project.table_id()) {
+    // A search result may also name its row (in the data table or the file index).
+    const auto record = file_table.empty() ? std::string() : record_id;
+    if ((!file_table.empty() && file_table != project.table_id()) || (!record.empty() && record != project.record_id())) {
       for (const auto *target : screens_) {
         for (const auto *base : target->areas()) {
           const auto *area = dynamic_cast<const EditorArea *>(base);
@@ -295,6 +297,7 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
     if (!area) { return; }
     if (!view.empty()) { area->editor().show_view(view); }
     if (!file_table.empty()) { project.select_table(file_table); }
+    if (!record.empty()) { project.select_record(record); }
     if (page == "analyses" || page == "analysis_runs" || page == "workflows") { area->set_sidebar_open(true); }
     store_.changed();
   });

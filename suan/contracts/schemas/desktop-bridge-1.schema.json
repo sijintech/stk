@@ -6268,6 +6268,72 @@
           "additionalProperties": false
         }
       },
+      "project.search": {
+        "description": "Case-insensitive search of one project's table and field names, text cells, workflow and analysis names, indexed files, AI draft titles and messages; reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 800
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          "required": [
+            "handle",
+            "query"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "query": {
+              "type": "string",
+              "maxLength": 800
+            },
+            "results": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "$ref": "#/$defs/projectSearchItem"
+              }
+            },
+            "counts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "revision",
+            "query",
+            "results",
+            "counts",
+            "truncated"
+          ],
+          "additionalProperties": false
+        }
+      },
       "project.analysis_runs.prepare": {
         "description": "Freeze a saved analysis and explicit file-snapshot mapping at a project revision, without executing nodes or changing editable revision/history. Same UUID and original request return the frozen run.",
         "params": {
@@ -12246,6 +12312,84 @@
       ],
       "additionalProperties": false,
       "description": "Failures, items to review, running and finished work across workflow, analysis and simulation runs, AI drafts and requests; newest 50 per source. Read-only; viewed marks belong to this person (bridge state directory)."
+    },
+    "projectSearchItem": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "table",
+            "field",
+            "cell",
+            "workflow",
+            "analysis",
+            "file",
+            "draft",
+            "message"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "table": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "row": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant",
+            null
+          ]
+        },
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "target"
+      ],
+      "additionalProperties": false
     }
   }
 }

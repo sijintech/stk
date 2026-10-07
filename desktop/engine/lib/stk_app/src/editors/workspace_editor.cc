@@ -9,6 +9,7 @@
 #include "../app_theme.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/app/project_attention.hh"
+#include "stk/app/project_search.hh"
 #include "stk/app/viewer_state.hh"
 
 namespace stk::app {
@@ -39,6 +40,7 @@ class WorkspaceEditor final : public Editor {
     if (!project.error().empty()) { layout.paragraph(project.error()); }
     if (project.busy() && !project.notice().empty()) { layout.paragraph(project.notice()); }
     attention(layout, ctx);
+    search(layout, ctx);
 
     const auto &info = project.project();
     const bool available = project.ready() && project.loaded() && !project.busy();
@@ -119,6 +121,85 @@ class WorkspaceEditor final : public Editor {
   }
 
  private:
+  /** Find names and text in the open project (UX package U3): searching starts on Enter or the
+   * button, results are grouped by kind and open where they live. Reads only. */
+  void search(ui::Layout &layout, EditorContext &ctx)
+  {
+    if (!search_) { search_ = std::make_unique<ProjectSearch>(ctx.store); }
+    search_->sync();
+    if (!search_->supported()) { return; }
+    auto &catalog = ctx.store.catalog();
+    auto &box = layout.box();
+    box.label(ctx.tr("workspace.search.title"));
+    auto *state = search_.get();
+    const auto weak = lifetime();
+    auto start = [this, weak, state] {
+      if (!weak.expired()) { state->search(search_text_); }
+    };
+    auto &row = box.row();
+    row.text_field("workspace_search_text", ui::bind(search_text_), {
+        .placeholder = std::string(ctx.tr("workspace.search.placeholder")), .max_length = 200, .on_submit = start});
+    row.button("workspace_search", ctx.tr("workspace.search.button"), start).width(4).disable(state->busy());
+    if (state->busy()) { box.paragraph(ctx.tr("workspace.search.searching")); }
+    if (!state->error().empty()) { box.paragraph(state->error()); }
+    const auto &result = state->result();
+    if (!result.is_object()) { return; }
+    const auto &results = result.at("results");
+    const auto *info = ctx.store.project().project() ? &*ctx.store.project().project() : nullptr;
+    if (info && io::get_int(result, "revision", -1) != info->revision) {
+      box.paragraph(ctx.tr("workspace.search.stale"));  // results are not followed by themselves
+    }
+    if (results.empty()) {
+      box.paragraph(catalog.format("workspace.search.none", {{"query", io::get_string(result, "query")}}));
+      return;
+    }
+    std::string kind;
+    for (size_t i = 0; i < results.size(); ++i) {
+      const auto &item = results[i];
+      if (io::get_string(item, "kind") != kind) {
+        kind = io::get_string(item, "kind");
+        box.label(catalog.format("workspace.search.group", {
+            {"kind", std::string(catalog.tr_or("workspace.search.kind." + kind, kind))},
+            {"count", std::to_string(io::get_int(member(result, "counts"), kind.c_str(), 0))}}));
+      }
+      auto &line = box.row();
+      line.label(result_text(ctx, item)).tip(io::get_string(item, "text"));
+      const auto open = navigation(ctx, item.value("target", io::Json::object()));
+      line.button("workspace_search_open/" + std::to_string(i), ctx.tr("workspace.search.open"), [open] {
+        if (open) { open(); }
+      }).width(3).disable(!open);
+    }
+    if (io::get_bool(result, "truncated", false)) { box.paragraph(ctx.tr("workspace.search.truncated")); }
+  }
+
+  static const io::Json &member(const io::Json &value, const char *key)
+  {
+    static const io::Json kNull;
+    return value.is_object() && value.contains(key) ? value.at(key) : kNull;
+  }
+
+  /** "Cases · note · row 2: thin film …", "Scan", "field.vtk · /data/case-1/field.vtk", ... */
+  static std::string result_text(EditorContext &ctx, const io::Json &item)
+  {
+    auto &catalog = ctx.store.catalog();
+    const auto kind = io::get_string(item, "kind"), name = io::get_string(item, "name"), text = io::get_string(item, "text");
+    if (kind == "field") { return io::get_string(item, "table") + " · " + name; }
+    if (kind == "cell") {
+      return catalog.format("workspace.search.cell", {{"table", io::get_string(item, "table")}, {"field", name},
+          {"row", std::to_string(io::get_int(item, "row", 0))}, {"text", text}});
+    }
+    if (kind == "file") { return name.empty() ? text : name + " · " + text; }
+    if (kind == "draft") {
+      const auto status = io::get_string(item, "status");
+      return name + " · " + std::string(catalog.tr_or("workspace.search.draft." + status, status));
+    }
+    if (kind == "message") {
+      return std::string(ctx.tr(io::get_string(item, "role") == "assistant" ? "workspace.search.assistant" : "workspace.search.you")) +
+          "：" + text;
+    }
+    return name;
+  }
+
   /** What needs a person, what runs and what finished (UX package U1); failures first. Opening an item
    * navigates to it and marks it viewed; nothing here runs or changes the project. */
   void attention(ui::Layout &layout, EditorContext &ctx)
@@ -202,6 +283,20 @@ class WorkspaceEditor final : public Editor {
   std::function<void()> navigation(EditorContext &ctx, const io::Json &target)
   {
     const auto page = io::get_string(target, "page");
+    if (page == "data" || page == "files") {
+      // A search result names its table and row; open the page with them selected.
+      const auto handle = ctx.store.project().project() ? ctx.store.project().project()->handle : std::string();
+      auto *area = &ctx.area;
+      auto *editor = &area->editor();
+      const auto weak = editor->lifetime();
+      const auto table = io::get_string(target, "table_id"), record = io::get_string(target, "record_id");
+      return [area, editor, weak, handle, page, table, record] {
+        if (weak.expired() || &area->editor() != editor) { return; }
+        area->shell().open_project_page_later(area->screen(), page, handle, [weak, area, editor] {
+          return !weak.expired() && &area->editor() == editor;
+        }, table, record);
+      };
+    }
     if (!page.empty()) { return project_navigation_action(ctx, page); }
     const auto editor = io::get_string(target, "editor");
     if (editor != kEditorWorkflow && editor != kEditorAnalysisGraph) { return {}; }
@@ -245,6 +340,9 @@ class WorkspaceEditor final : public Editor {
     auto &row = box.row();
     row.button(std::string("workspace_") + page, ctx.tr(text), project_navigation_action(ctx, page)).disable(!enabled);
   }
+
+  std::unique_ptr<ProjectSearch> search_;
+  std::string search_text_;
 };
 
 }  // namespace

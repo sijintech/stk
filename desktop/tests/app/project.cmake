@@ -216,7 +216,7 @@ set_target_properties(stk-workflow-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$
 if(MSVC)
   target_compile_options(stk-workflow-render PRIVATE /W3 /utf-8 /bigobj)
 endif()
-foreach(_scenario workflow enter workflow_edit workflow_run home_attention)
+foreach(_scenario workflow enter workflow_edit workflow_run home_attention home_search)
   foreach(_mode wide narrow)
     foreach(_lang en zh)
       foreach(_be ${_jobs_backends})
