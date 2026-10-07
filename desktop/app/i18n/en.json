@@ -1701,7 +1701,6 @@
   "workflow.edit.delete.tip": "Deleting is an ordinary project edit; project undo restores it.",
   "workflow.edit.deleted": "Workflow deleted; project undo restores it.",
   "workflow.edit.cannot_link": "That step cannot be linked.",
-  "workflow.edit.order_only": "(done) can only be dropped on (after).",
   "workflow.edit.type_mismatch": "Port types differ: {source} → {target}",
   "workflow.edit.choices_loading": "Reading what can be referenced…",
   "workflow.edit.no_objects": "The project has none of these",
@@ -1719,5 +1718,7 @@
   "workflow.edit.mode_field": "Parameter table field (per row)",
   "workflow.edit.no_fields": "The workflow has no parameter table step to take fields from.",
   "workflow.edit.bad_json": "A fixed value is JSON, for example 1.5, \"text\" or [0, 1].",
-  "workflow.edit.remove_step": "Remove step"
+  "workflow.edit.remove_step": "Remove step",
+  "workflow.edit.finish_text": "Finish the text edit before saving or editing further.",
+  "workflow.edit.rereading": "Reading the workflow again; editing and saving resume when done, and the changes are kept."
 }

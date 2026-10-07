@@ -516,7 +516,7 @@ class WorkflowEditor final : public Editor {
       if (port && !port->output) {
         const auto &target = view_->nodes[port->node];
         const auto &input = target.inputs[port->port];
-        const auto after = std::string(ctx.tr("workflow.port.after")), done = std::string(ctx.tr("workflow.port.done"));
+        const auto after = std::string(ctx.tr("workflow.port.after"));
         if (target.ambiguous_id) { refuse(std::string(ctx.tr("workflow.edit.cannot_link"))); }
         else if (input.name == after) {
           // Any output dropped on the after socket orders the steps.
@@ -528,7 +528,6 @@ class WorkflowEditor final : public Editor {
           edited(draft_.set_after(target.id, steps, draft_.generation()));
           if (draft_.step(target.id)) { selected_id_ = target.id; }
         }
-        else if (link_port_ == done) { refuse(std::string(ctx.tr("workflow.edit.order_only"))); }
         else if (!input.declared || input.type_text != link_type_) {
           refuse(ctx.store.catalog().format("workflow.edit.type_mismatch", {{"source", link_type_}, {"target", input.type_text}}));
         }
@@ -678,6 +677,10 @@ class WorkflowEditor final : public Editor {
       }
     }
     if (!edit_error_.empty()) { panel->paragraph(clipped(edit_error_, 256)); }
+    if (draft_.dirty() && !can) {
+      // Why Save is unavailable for a moment (detached edits have their own message above).
+      panel->paragraph(ctx.tr(ctx.area.shell().text_input_active() ? "workflow.edit.finish_text" : "workflow.edit.rereading"));
+    }
     auto &actions = panel->row();
     const auto version = workflows_->selected_version();
     // Drafts may be saved with issues (they stay listed); only the check of this candidate must be in.

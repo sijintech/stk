@@ -603,6 +603,8 @@ TEST_F(WorkflowEditorPython, OtherEditsKeepUnsavedChangesButAChangedWorkflowDeta
   ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
       {{"op", "add_record"}, {"id", "13131313-1313-4131-8131-131313131313"}, {"table_id", table_id}}}}}, out));
   project().refresh();
+  f.drv->frame();
+  EXPECT_TRUE(shows("Reading the workflow again")) << sidebar();  // Save is unavailable for a reason the panel states
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision == revision &&
       widget("workflow_save") && widget("workflow_save")->enabled; }));
   EXPECT_TRUE(shows("Renamed to Renamed scan"));

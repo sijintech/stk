@@ -1701,7 +1701,6 @@
   "workflow.edit.delete.tip": "删除是普通项目编辑，可用项目撤销恢复。",
   "workflow.edit.deleted": "已删除工作流；可用项目撤销恢复。",
   "workflow.edit.cannot_link": "无法连到这个步骤。",
-  "workflow.edit.order_only": "（完成）只能连到（等待）。",
   "workflow.edit.type_mismatch": "端口类型不一致：{source} → {target}",
   "workflow.edit.choices_loading": "正在读取可选对象…",
   "workflow.edit.no_objects": "项目中没有这类对象",
@@ -1719,5 +1718,7 @@
   "workflow.edit.mode_field": "参数表字段（按行取值）",
   "workflow.edit.no_fields": "工作流中没有参数表步骤，没有可选字段。",
   "workflow.edit.bad_json": "固定值须为 JSON，例如 1.5、\"text\" 或 [0, 1]。",
-  "workflow.edit.remove_step": "删除步骤"
+  "workflow.edit.remove_step": "删除步骤",
+  "workflow.edit.finish_text": "请先完成文字输入，再保存或继续编辑。",
+  "workflow.edit.rereading": "正在重新读取工作流，完成后可继续编辑和保存；修改保留。"
 }
