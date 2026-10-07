@@ -544,6 +544,10 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.analyses.create` / `project.analyses.update` | `{handle, analysis_id, name, document, expected_revision}` | `{revision, commands, table_id, record_id}` |
 | `project.analyses.list` | `{handle, offset?, limit?}` | `{revision, table_id, compatible, error, offset, total, analyses: [analysisSummary]}` |
 | `project.analyses.get` | `{handle, analysis_id}` | `{revision, table_id, compatible, error, analysis: analysisSummary + {document}}` |
+| `project.workflows.create` / `project.workflows.update` | `{handle, workflow_id, name, document, expected_revision}` | `{revision, commands, table_id, record_id}` |
+| `project.workflows.list` | `{handle, offset?, limit?}` | `{revision, table_id, compatible, error, offset, total, workflows: [workflowSummary]}` |
+| `project.workflows.get` | `{handle, workflow_id}` | `{revision, table_id, compatible, error, workflow: workflowSummary + {document}}` |
+| `project.workflows.validate` | `{handle, document}` | `{revision, ok, issues, omitted_issues, steps: [workflowStepSummary]}` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -588,6 +592,31 @@ are `invalid_params` on writes, and stale revisions or occupied create IDs are `
 List defaults to offset 0 and limit 50 (1–100), reports the full count, and continues to page collections
 enlarged through generic project edits. Neither read emits project events. The original handle stays pinned
 through close/reopen and project replacement checks, like other project operations.
+
+The optional `project.workflows.*` methods (experimental, design in `docs/design/project-workflows.md`) store
+`{format: "stk.workflow/1", steps, ui}` documents the same way, in a second managed table: same revision,
+create/update, `not_found`/`conflict`/`unsupported` and summary/state rules, at most 128 records and 4 MiB.
+A step is `{id, kind, ref, label?, inputs?, parameters?, after?}` plus `x-` keys that are kept verbatim; ids,
+kinds, ports and parameter names match `^[a-z][a-z0-9_]{0,63}$`. Inputs are exactly `{"from": "step.port"}`;
+`after` lists execution dependencies; parameters hold literals or `{"$field": field UUID}`. At most 200 steps,
+64 KiB of parameters per step, 256 KiB per document; `ui.positions` maps step ids to finite `[x, y]` within 1e6.
+Storage checks only this shape: unknown kinds, missing references and bad links stay editable.
+
+`project.workflows.validate` resolves a possibly unsaved document at the current revision without writing,
+evaluating graphs, preparing runs or reading data files. Kinds and references are `table` `{table: UUID}`
+(output `rows`), `files` `{snapshot: UUID}` (output `files`), `simulation` `{template: "muferro/1"}`
+(input `rows` from the template's own case table, output `files`) and `analysis` `{analysis: UUID}`, whose
+inputs are the literal `binding` names of the saved graph's source nodes (type `files`), whose parameters
+are the graph's declared `parameters` and whose outputs are its declared outputs (type `result`).
+Issues are `{code, step, path, message}` (at most 256, then `omitted_issues`), with codes `duplicate_step`,
+`unknown_kind`, `invalid_reference`, `missing_reference`, `unreadable_reference`, `unknown_template`,
+`dynamic_binding`, `unknown_port`, `missing_step`, `ambiguous_step`, `missing_port`, `type_mismatch`,
+`template_table`, `missing_input`, `unknown_parameter`, `field_not_in_workflow`, `parameter_type`,
+`unit_mismatch` and `cycle` (over links and `after`). `ok` is true only with no issues. Each
+`workflowStepSummary` reports, in document order, the referenced object's `name`, a saved analysis's
+`content_sha256` (canonical JSON), a snapshot's `file_count`, typed `inputs`/`outputs` and the graph
+`parameters` (`{name, type, label, unit, default}`); empty ports mean the reference did not resolve.
+Literal parameter values are checked by graph validation when a run is prepared, not here.
 
 The optional `project.analysis_runs.*` methods require project format 9, with an explicit backup-first
 upgrade for older projects. They add an immutable analysis plan and an append-only execution journal,

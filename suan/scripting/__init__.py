@@ -122,6 +122,10 @@ class Project:
         return ProjectAnalysisRuns(self._call, self.handle)
 
     @property
+    def workflows(self):
+        return ProjectWorkflows(self._call, self.handle)
+
+    @property
     def runs(self):
         return ProjectRuns(self._call, self.handle)
 
@@ -360,6 +364,34 @@ class ProjectAnalyses:
 
     def list(self, *, offset=0, limit=50):
         return self._call("project.analyses.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+
+class ProjectWorkflows:
+    """Project workflows (experimental stk.workflow/1). Reading, writing and validating never run anything."""
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def create(self, name, document, *, workflow_id, expected_revision):
+        """Save one caller-owned UUID as an ordinary undoable project edit; never retry implicitly."""
+        return self._call("project.workflows.create", {"handle": self.handle, "workflow_id": workflow_id,
+            "name": name, "document": document, "expected_revision": expected_revision})
+
+    def update(self, workflow_id, name, document, *, expected_revision):
+        """Replace the complete document at an explicit project revision; preserve its record UUID."""
+        return self._call("project.workflows.update", {"handle": self.handle, "workflow_id": workflow_id,
+            "name": name, "document": document, "expected_revision": expected_revision})
+
+    def get(self, workflow_id):
+        """Return the observed revision and readable/invalid/unsupported document state."""
+        return self._call("project.workflows.get", {"handle": self.handle, "workflow_id": workflow_id})
+
+    def list(self, *, offset=0, limit=50):
+        return self._call("project.workflows.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def validate(self, document):
+        """Resolve references and typed links against the current project; reports issues, saves nothing."""
+        return self._call("project.workflows.validate", {"handle": self.handle, "document": document})
 
 
 class ProjectAnalysisRuns:

@@ -256,6 +256,11 @@ class Bridge:
             "project.analyses.update": lambda p, c: self.edit_project_analyses("update", p, c),
             "project.analyses.get": lambda p, c: self.projects.analyses("get", p),
             "project.analyses.list": lambda p, c: self.projects.analyses("list", p),
+            "project.workflows.create": lambda p, c: self.edit_project_workflows("create", p, c),
+            "project.workflows.update": lambda p, c: self.edit_project_workflows("update", p, c),
+            "project.workflows.get": lambda p, c: self.projects.workflows("get", p),
+            "project.workflows.list": lambda p, c: self.projects.workflows("list", p),
+            "project.workflows.validate": lambda p, c: self.projects.workflows("validate", p),
             "project.analysis_runs.prepare": lambda p, c: self.projects.analysis_runs("prepare", p),
             "project.analysis_runs.get": lambda p, c: self.projects.analysis_runs("get", p),
             "project.analysis_runs.list": lambda p, c: self.projects.analysis_runs("list", p),
@@ -465,6 +470,8 @@ class Bridge:
                  "project.csv.import", "project.csv.export",
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
                  "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
+                 "project.workflows.create", "project.workflows.update", "project.workflows.get",
+                 "project.workflows.list", "project.workflows.validate",
                  "project.analysis_runs.prepare", "project.analysis_runs.get", "project.analysis_runs.list",
                  "project.analysis_runs.start", "project.analysis_runs.cancel", "project.analysis_runs.recover", "project.analysis_runs.result",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
@@ -614,6 +621,12 @@ class Bridge:
 
     def edit_project_analyses(self, action, params, context):
         result = self.projects.analyses(action, params)
+        context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                            "revision": result["revision"]}))
+        return result
+
+    def edit_project_workflows(self, action, params, context):
+        result = self.projects.workflows(action, params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
         return result

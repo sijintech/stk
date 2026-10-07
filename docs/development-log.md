@@ -1,5 +1,21 @@
 # 开发交接记录
 
+## 2026-10-07：P3 W3a 项目工作流存储与校验
+
+所有者确认 W3 方案的四项推荐（新文档 `stk.workflow/1` 存为受管表格、编辑跟随当前修订并在执行时冻结、两层范围、
+示例求解器在 W4 注册为本机模板）。实现：
+
+- 受管表格抽到 [suan/project/managed.py](../suan/project/managed.py)（`ManagedTable` 与 JSON 拷贝/严格解码/快照上限），
+  保存分析改用它，错误文字与限额不变（限额在写入时读取模块常量，原测试的 monkeypatch 仍然生效）。
+- [suan/project/workflows.py](../suan/project/workflows.py)：形状检查（ID/端口/参数名为小写标识符，`x-` 键保留，位置有限且 ≤1e6，
+  256 KiB/200 步/每步 64 KiB 参数）、list/get/create/update 与只读 `validate`。校验在一次读事务中解析表格、快照、保存分析与已注册模板，
+  分析步骤的端口取自源节点的字面量 `binding`、图 `parameters` 与 `outputs`；`$field` 须属于本工作流的参数表步骤，
+  类型兼容表见模块常量 `FIELD_PARAMETER_TYPES`，单位须相同；数据流与 `after` 合并做 Tarjan 环检测；问题上限 256 条。
+- 后台服务 `project.workflows.*`（写入后发 `project.changed`）、桥 schema 与协议文档、`stk.project.workflows`、示例项目的“温度扫描”。
+
+critical review：保存的 JSON 按规范顺序存储，对象键顺序不保留，因此分析步骤的输出端口顺序跟随存储后的图（字母序），
+测试据此断言；`dynamic_binding` 消息最多列 5 个节点，避免超出协议的消息长度上限。
+
 ## 2026-10-06：P3 W3 项目工作流方案（待所有者确认）
 
 新增[项目工作流与子图导航](design/project-workflows.md)方案草案，不含代码。要点：工作流是新的实验文档 `stk.workflow/1`，

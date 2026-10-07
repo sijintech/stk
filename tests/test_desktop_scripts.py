@@ -88,7 +88,9 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.analysis_runs.prepare", "project.analysis_runs.get", "project.analysis_runs.list",
         "project.analysis_runs.start", "project.analysis_runs.cancel", "project.analysis_runs.recover", "project.analysis_runs.result",
         "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
-        "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list"}
+        "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
+        "project.workflows.create", "project.workflows.update", "project.workflows.get", "project.workflows.list",
+        "project.workflows.validate"}
     assert {"workspace.create", "task.submit", "task.logs", "upload.start", "transfer.get", "connections.ssh"} <= operations
     assert not operations & {"shutdown", "script.execute", "ui.attach", "watch", "logs.subscribe", "hub.review"}
     assert scripts.call("script.close", {"session": session})["closed"]

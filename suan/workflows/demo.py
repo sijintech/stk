@@ -10,7 +10,9 @@ Entry points: ``suan demo [DIRECTORY]``, Home → "Create example project" in th
 3. "Results / 结果" records each case's mean and maximum, its first cell a reference to the case;
 4. the three field files are registered in the file index and frozen as one input snapshot;
 5. the saved analysis "Temperature field / 温度场" (the volume preset) gets one local run of the
-   hottest case, started and observed here, so Analysis → Runs can show it right away.
+   hottest case, started and observed here, so Analysis → Runs can show it right away;
+6. the workflow "Temperature scan / 温度扫描" links the cases table, the input snapshot and the saved
+   analysis (experimental ``stk.workflow/1``), a definition only: it runs nothing.
 
 Nothing contacts a Runtime, a server or a model. Real simulations run on a Linux Runtime
 (see docs/quickstart-linux.md).
@@ -23,7 +25,7 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
-__all__ = ["TEMPERATURES", "create_demo", "synthetic_field"]
+__all__ = ["TEMPERATURES", "create_demo", "synthetic_field", "workflow_document"]
 
 TEMPERATURES = (300, 325, 350)
 GRID = 17
@@ -52,6 +54,16 @@ def _volume_document():
     preset = json.loads((Path(__file__).resolve().parents[1] / "graph" / "presets" / "volume.json").read_text(encoding="utf-8"))
     return {"format": "stk.analysis-document/1", "graph": preset["graph"],
             "parameters": {"path": "field.vtk"}, "outputs": ["view"]}
+
+
+def workflow_document(cases_table, snapshot_id, analysis_id):
+    """Cases → field files → Temperature field, laid out left to right."""
+    return {"format": "stk.workflow/1", "steps": [
+        {"id": "cases", "kind": "table", "ref": {"table": cases_table}},
+        {"id": "fields", "kind": "files", "ref": {"snapshot": snapshot_id}, "after": ["cases"]},
+        {"id": "temperature", "kind": "analysis", "ref": {"analysis": analysis_id},
+         "inputs": {"data": {"from": "fields.files"}}},
+    ], "ui": {"positions": {"cases": [0, 0], "fields": [260, 0], "temperature": [520, 0]}}}
 
 
 def _cell(table, record, field, value):
@@ -105,6 +117,10 @@ def create_demo(stk, directory=None, *, wait_seconds=120):
         bindings = {"data": {"field.vtk": indexed["record_ids"][-1]}}
         p.analysis_runs.prepare(analysis_id, captured["snapshot"]["id"], bindings, run_id=run_id,
                                 expected_revision=saved["revision"])
+        workflow_id = str(uuid4())
+        p.workflows.create("Temperature scan / 温度扫描",
+                           workflow_document(cases, captured["snapshot"]["id"], analysis_id),
+                           workflow_id=workflow_id, expected_revision=saved["revision"])
         run = p.analysis_runs.start(run_id)
         deadline = time.monotonic() + wait_seconds
         while run["status"] in _ACTIVE and time.monotonic() < deadline:
@@ -120,7 +136,8 @@ def create_demo(stk, directory=None, *, wait_seconds=120):
             "*Read and verify result*, then *Show selected output*, or *Run and show* for another file.\n",
             encoding="utf-8")
         return {"directory": str(directory), "project_id": p.snapshot()["project"]["id"], "cases_table": cases,
-                "results_table": results, "analysis_id": analysis_id, "run_id": run_id, "run_status": run["status"]}
+                "results_table": results, "analysis_id": analysis_id, "run_id": run_id, "run_status": run["status"],
+                "workflow_id": workflow_id}
     finally:
         try:
             stk.call("project.close", handle=p.handle)

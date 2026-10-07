@@ -2,6 +2,18 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-07：P3 W3a 项目工作流存储与校验
+
+- 新增 `tests/test_project_workflows.py` 20 项：往返保留 `x-` 键与 `ui` 内容、更新/撤销/冲突/重复 UUID/不存在；
+  13 种不合规形状被拒绝且不改修订；示例式工作流校验通过并给出名称、端口、内容哈希且不改项目；
+  19 种问题代码各自定位到步骤与路径（含环、单位、类型、模板案例表、动态绑定）；受管表格不能作参数表、同一分析只解码一次；
+  问题上限；后台服务方法、`script.catalog`、`project.changed`、`not_found`/`conflict` 与协议无违规。
+  示例项目测试新增“温度扫描”工作流校验通过。保存分析相关 167 项在抽出 `managed.py` 后不改通过。
+- 完整 pytest（`-m "not perf"`）：**2234 passed、1 failed、24 skipped**。失败的是控制台操作清单测试（按设计固定全部
+  `project.*` 操作，需加入 5 个新方法），更新后单独通过；之后新增的“受管表格/只解码一次”1 项与相关 168 项一起通过。
+  重新编译（桥 schema 变更）后完整 Linux CTest **1187/1187**。
+- CI：W3 方案文档 `e574368`、`63d10ab` 的 Runtime、Secret scan、Cloudflare Pages 均通过（只改文档，不触发 desktop）。
+
 ## 2026-10-06：P3 工作流编辑 W1c/W2
 
 - CI：W2 `94cf5ee` 的 desktop（21 分 57 秒）、Runtime and scientific workflow checks、Secret scan、Cloudflare Pages 全部通过；

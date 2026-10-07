@@ -13,6 +13,7 @@ from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 from suan.project.analyses import AnalysisNotFound
 from suan.project.analysis_runs import AnalysisRunNotFound
+from suan.project.workflows import WorkflowNotFound
 from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, TokenPlanCredentials, provider_info
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
@@ -44,7 +45,7 @@ class ProjectSessions:
             yield
         except RevisionConflict as exc:
             raise BridgeError("conflict", str(exc)) from None
-        except (AnalysisNotFound, AnalysisRunNotFound) as exc:
+        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound) as exc:
             raise BridgeError("not_found", str(exc)) from None
         except RequestBusy:
             raise BridgeError("busy", "A live executor owns this request or the local executor has reached its 8-request limit") from None
@@ -211,6 +212,21 @@ class ProjectSessions:
             if action == "list":
                 return analyses.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
             return analyses.get(params["analysis_id"])
+
+    def workflows(self, action, params):
+        with self._operation():
+            workflows = self._get(params["handle"]).workflows
+            if action == "create":
+                return workflows.create(params["name"], params["document"], workflow_id=params["workflow_id"],
+                                        expected_revision=params["expected_revision"])
+            if action == "update":
+                return workflows.update(params["workflow_id"], params["name"], params["document"],
+                                        expected_revision=params["expected_revision"])
+            if action == "list":
+                return workflows.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
+            if action == "validate":
+                return workflows.validate(params["document"])
+            return workflows.get(params["workflow_id"])
 
     def analysis_runs(self, action, params):
         with self._operation():

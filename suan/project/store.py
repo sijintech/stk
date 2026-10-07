@@ -300,6 +300,11 @@ class ProjectStore:
         return AnalysisRuns(self)
 
     @property
+    def workflows(self):
+        from .workflows import Workflows
+        return Workflows(self)
+
+    @property
     def snapshots(self):
         from .snapshots import Snapshots
         return Snapshots(self)

@@ -6,6 +6,7 @@
 - 当前开发方向：[开发计划](development-plan.md)、[项目工作台设计](design/project-workbench.md)。
 - 可测试能力：[项目表格指南](project.md)、[验收记录](runtime-validation.md)、[开发交接记录](development-log.md)。
 - 版本化技能目录（实验契约 `stk.skill/1`）：[技能目录](skills.md)。
+- 项目工作流（实验格式 `stk.workflow/1`）：[项目工作流](project-workflows.md)。
 - 文档站页面在 `src/content/docs/`，英文页面在其 `en/` 子目录；根目录设计文档不会自动成为站点页面。
 - 图片在 `src/assets/`，静态文件在 `public/`；`dist/` 为生成文件，不提交。
 

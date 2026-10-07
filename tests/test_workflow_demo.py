@@ -33,6 +33,11 @@ def test_example_project_walks_the_main_path_offline(bridge_env, tmp_path):
         metrics = json.loads((tmp_path / "example" / "results" / "demo" / f"case-{i + 1}" / "metrics.json").read_text())
         assert metrics["synthetic"] and metrics["max_K"] == pytest.approx(temperature)  # The grid centre peaks at T.
     assert (tmp_path / "example" / "README.md").exists()
+    workflow = store.workflows.get(made["workflow_id"])["workflow"]
+    assert workflow["state"] == "readable" and [s["id"] for s in workflow["document"]["steps"]] == ["cases", "fields", "temperature"]
+    checked = store.workflows.validate(workflow["document"])
+    assert checked["ok"], checked["issues"]
+    assert [s["name"] for s in checked["steps"]] == ["Cases / 算例", None, "Temperature field / 温度场"]
     expected = "succeeded" if _vtk_reader_available() else made["run_status"]
     assert made["run_status"] == expected, made
     with pytest.raises(ValueError, match="empty folder"):

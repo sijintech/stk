@@ -141,6 +141,7 @@ print(p.selection())
 | 分析图目录、连接校验、求值/取消、blob 与原场探针 | `stk.graph` 已接入现有图服务，保留 Hub 审核和结果，见[分析图 Python 指南](scripting-graphs.md) |
 | 版本化技能目录（实验性 `stk.skill/1`） | `stk.skills.list(offset=, limit=, query=)`、`stk.skills.get(id, version=)` 只读查询；不执行入口、不准备运行或调用模型，见[技能目录](skills.md) |
 | 项目分析定义保存、替换、分页查询与纯 Viewer 配置捕获 | `stk.project.analyses`、`stk.viewer.graph_configuration()`，不运行节点，见[分析文档指南](project-analyses.md) |
+| 项目工作流（实验）保存、分页查询与只读校验 | `stk.project.workflows`，不运行任何步骤，见[项目工作流](project-workflows.md) |
 | 快照绑定的本机分析执行与结果归档 | `stk.project.analysis_runs.prepare/get/list/start/cancel/recover/result`，格式 9；准备、开始与读取结果分开，普通读取不重跑，见[分析运行指南](project-analysis-runs.md) |
 | 相机完整变换、原生图编辑、完整项目打包与文档 | 统一操作与界面仍待逐步接入 |
 | 自动补全、操作记录成脚本、脚本持久历史 | 待开发 |
