@@ -10,6 +10,7 @@
 #include <filesystem>
 
 #include "stk/app/editor_area.hh"
+#include "stk/app/project_attention.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
@@ -257,9 +258,10 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
     std::string view;
     if (page == "workspace") { editor = kEditorWorkspace; }
     else if (page == "conversation") { editor = kEditorAI; }
-    else if (page == "project" || page == "data" || page == "files" || page == "simulation_runs") {
+    else if (page == "project" || page == "data" || page == "files" || page == "simulation_runs" || page == "review") {
       editor = kEditorProject;
-      view = page == "files" ? "files" : page == "simulation_runs" ? "runs" : page == "project" ? "location" : "data";
+      view = page == "files" ? "files" : page == "simulation_runs" ? "runs" : page == "project" ? "location" :
+          page == "review" ? "review" : "data";
     }
     else if (page == "analyses" || page == "analysis_runs") {
       editor = kEditorAnalysisGraph;
@@ -317,6 +319,32 @@ bool AppShell::has_area(const EditorArea *area) const
     }
   }
   return false;
+}
+
+void AppShell::open_target_later(wm::Screen *screen, std::string editor_id, io::Json target, std::function<bool()> valid)
+{
+  if (!screen || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
+  const std::weak_ptr<bool> weak = alive_;
+  screen->defer([this, weak, screen, editor_id = std::move(editor_id), target = std::move(target), valid = std::move(valid)] {
+    if (!weak.lock() || (valid && !valid()) || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return; }
+    if (text_input_active()) {
+      if (store_.toast) { store_.toast(std::string(store_.tr("app.focus.busy")), ui::ToastKind::Warning); }
+      return;
+    }
+    const auto result = activate_editor(screen, editor_id, true);
+    if (!result) {
+      if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
+      return;
+    }
+    auto *area = dynamic_cast<EditorArea *>(screen->find_area(io::get_string(result.value(), "area_id")));
+    if (!area) { return; }
+    std::string reason;
+    if (!area->editor().navigate(target, {}, reason) && store_.toast) {
+      store_.toast(std::string(store_.tr(reason.empty() ? "app.navigate.refused" : reason)), ui::ToastKind::Warning);
+    }
+    area->set_sidebar_open(true);
+    store_.changed();
+  });
 }
 
 void AppShell::open_in_area_later(EditorArea *area, std::weak_ptr<void> origin, std::string editor_id, io::Json target)
@@ -624,6 +652,23 @@ class AppShell::StatusBar final : public wm::Region {
                                  std::string(store.tr("app.status.connection.none")) :
                                  store.catalog().format("app.status.connection", {{"name", store.connection()}});
     row.label(conn).width(fit_units(ui, conn));
+    // Unviewed items that need a person (Home lists them); a click opens Home.
+    auto &attention = store.attention();
+    attention.sync();
+    if (attention.polling() && !attention.wake_scheduled) {
+      if (auto *wm = shell_.window_manager()) {
+        attention.wake_scheduled = true;
+        auto *app = &store;
+        wm->add_timer(ProjectAttention::kPollMs + 50, 0, [app] { app->attention().wake_scheduled = false; app->changed(); });
+      }
+    }
+    if (const auto count = attention.needs_you(); count > 0) {
+      const auto text = store.catalog().format("app.status.attention", {{"count", std::to_string(count)}});
+      auto *shell = &shell_;
+      auto *screen = &screen_;
+      row.button("status_attention", text, [shell, screen] { shell->activate_editor_later(screen, kEditorWorkspace, true); })
+          .width(fit_units(ui, text) + 1).tip(store.tr("app.status.attention.tip"));
+    }
     std::string hint(store.tr("app.status.hint"));
     if (screen_.maximized()) {
       hint = std::string(store.tr("app.status.maximized"));

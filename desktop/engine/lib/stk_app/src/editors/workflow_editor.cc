@@ -75,6 +75,8 @@ class WorkflowEditor final : public Editor {
       return false;
     }
     want_step_ = io::get_string(target, "step");
+    want_run_ = io::get_string(target, "run_id");  // for example from a Home attention item
+    want_run_workflow_ = id;
     if (!workflows_ || io::get_string(workflows_->selected(), "id") != id) { pending_ = id; }
     else { selected_id_ = want_step_; want_step_.clear(); shown_ = {}; }
     redraw();
@@ -305,6 +307,9 @@ class WorkflowEditor final : public Editor {
     else if (workflows_->page_stale() && page_revision_ != revision && !ctx.store.project().busy()) {
       page_revision_ = revision;
       workflows_->load_page(io::get_int(workflows_->page(), "offset", 0));
+    }
+    else if (!want_run_.empty() && workflows_->runs_supported() && io::get_string(workflows_->selected(), "id") == want_run_workflow_) {
+      if (workflows_->load_run(want_run_)) { want_run_.clear(); run_row_ = -1; }
     }
     else if (run_due()) {
       // A run in progress is followed by reading it again (the service executes it; nothing runs here).
@@ -1379,7 +1384,7 @@ class WorkflowEditor final : public Editor {
   Json shown_document_, shown_validation_, checked_document_, checked_validation_;
   bool candidate_shown_ = false;
   std::optional<std::tuple<uint64_t, uint64_t, uint64_t, bool, std::string>> shown_;
-  std::string selected_id_, want_step_, view_error_, edit_error_;
+  std::string selected_id_, want_step_, want_run_, want_run_workflow_, view_error_, edit_error_;
   std::optional<std::string> pending_;
   std::string name_text_, label_text_;
   std::pair<uint64_t, uint64_t> name_source_{~uint64_t(0), 0};

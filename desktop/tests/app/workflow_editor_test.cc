@@ -724,5 +724,60 @@ TEST_F(WorkflowEditorPython, ChangedValuesMarkRowsStaleAndOnlyThoseRunAgain)
   EXPECT_EQ(calls("project.workflow_runs.prepare"), 2u);
 }
 
+TEST_F(WorkflowEditorPython, HomeListsAFailedRunFirstAndOpensItInTheWorkflowEditor)
+{
+  // Row 2 asks the synthetic solver for -5 K, which it refuses: the run stops with one failed task.
+  const std::string temperature = "14141414-1414-4141-8141-141414141414", first = "15151515-1515-4151-8151-151515151515",
+                    second = "16161616-1616-4161-8161-161616161616", run_id = "17171717-1717-4171-8171-171717171717";
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
+      {{"op", "add_field"}, {"id", temperature}, {"table_id", table_id}, {"name", "T"}, {"type", "number"}, {"unit", "K"}},
+      {{"op", "add_record"}, {"id", first}, {"table_id", table_id}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", first}, {"field_id", temperature}, {"value", 300}},
+      {{"op", "add_record"}, {"id", second}, {"table_id", table_id}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", second}, {"field_id", temperature}, {"value", -5}}}}}, out));
+  const Json runnable = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+      {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", table_id}}}},
+      {{"id", "simulate"}, {"kind", "simulation"}, {"ref", {{"template", "demo-synthetic/1"}}},
+       {"inputs", {{"rows", {{"from", "cases.rows"}}}}}, {"parameters", {{"temperature", {{"$field", temperature}}}}}}}}};
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id}, {"name", "Temperature scan"},
+      {"document", runnable}, {"expected_revision", revision}}, out));
+  ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.prepare", {{"handle", handle()}, {"workflow_id", workflow_id},
+      {"rows", {first, second}}, {"run_id", run_id}, {"expected_revision", revision}}, out));
+  ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.start", {{"handle", handle()}, {"run_id", run_id}}, out));
+  for (int i = 0; i < 600 && io::get_string(out.value("run", Json::object()), "status") != "stopped"; ++i) {
+    loop.pump_until([] { return false; }, 0.05);
+    ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.get", {{"handle", handle()}, {"run_id", run_id}}, out));
+  }
+  ASSERT_EQ(io::get_string(out.at("run"), "status"), "stopped");
+  project().refresh();
+  // Home lists it under "Needs you" and the status bar counts it.
+  f.shell->restore_split_layout(&f.screen);
+  ASSERT_EQ(f.area("a1").editor().type().id, kEditorWorkspace);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Failed · Workflow run · Temperature scan · 1/2 done"); }));
+  EXPECT_TRUE(shows("Needs you (1)"));
+  ASSERT_NE(widget("status_attention"), nullptr);
+  EXPECT_EQ(widget("status_attention")->text, "Needs you: 1");
+  std::string open;
+  for (const auto &block : f.screen.ui()->blocks()) {
+    for (const auto &item : block->widgets()) {
+      if (const auto at = item.key.find("workspace_attention_open/workflow_run:" + run_id); at != std::string::npos) {
+        open = item.key.substr(at);
+      }
+    }
+  }
+  ASSERT_FALSE(open.empty());
+  ASSERT_NO_FATAL_FAILURE(click(open));
+  // The workflow editor opens that run; opening it marked the item viewed, so the count is gone.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] {
+    auto *maximized = dynamic_cast<EditorArea *>(f.screen.maximized());
+    return maximized && maximized->editor().type().id == kEditorWorkflow && shows("Stopped · 1/2 done · 1 failed");
+  }));
+  EXPECT_EQ(widget("status_attention"), nullptr);
+  EXPECT_EQ(calls("project.attention.viewed"), 1u);
+  EXPECT_EQ(calls("project.workflow_runs.prepare"), 1u);  // browsing never prepares or starts another run
+  EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
+}
+
 }  // namespace
 }  // namespace stk::app

@@ -1,5 +1,23 @@
 # 开发交接记录
 
+## 2026-10-07：体验包 U1 需要处理；6fc18a4 CI 修复
+
+U1：`suan/project/attention.py` 的 `collect(store)` 只读汇总各来源（每类最近 50 条），每项带结构化字段、导航目标与随状态变化的 `key`；
+`suan/desktop_bridge/attention.py` 把“已查看”写入服务状态目录的 `attention-viewed.json`（每项目最多 2000 个）；
+后台服务 `project.attention.list/viewed`、schema、协议说明与 `stk.project.attention()/mark_viewed()`。桌面 `ProjectAttention`
+（项目修订变化、仿真运行变化事件或标记已看后重读；有运行中事项时每 3 秒重读，状态栏负责定时唤醒）；工作台“需要关注”方框与状态栏“需要处理 N”；
+`AppShell::open_target_later` 打开编辑器并导航到目标，工作流编辑器 `navigate` 支持 `run_id`，项目页面新增 `review`。
+工作台参数表计数不再包含工作流托管表。
+
+critical review：仿真运行的状态判定原先用了不存在的状态名（`lost`/`completed`），改为 Runtime 实际状态（失败/待核实 → 需要处理，成功/已取消 → 已完成，
+提交中/已提交/排队/运行 → 运行中）；标记已看时进行中的读取可能把旧状态写回，改为丢弃该读取并在标记保存后重读；方框标题与分组同名，改为“需要关注”。
+
+6fc18a4 的 CI 失败（三处）：Windows 上 `_owner_alive` 用 `os.kill(pid, 0)` 检查进程，而 Windows 的信号 0 是 `CTRL_C_EVENT`，
+会向控制台进程组发送 Ctrl+C（测试进程收到 KeyboardInterrupt；桌面中可能中断服务本身），改用基础依赖 `psutil.pid_exists`；
+Windows 上两个工作流编辑器测试用固定帧数等待后台回复，慢机器上不够，改为 `frames_until`（最多 30 秒）；
+macOS 上 `workflow_run_wide_render_metal_en` 退出时报告一个 `MTLSafeFreeList` 未释放（Blender Metal 后端的命令缓冲完成回调与缓冲池释放的时序），
+168 个 Metal 测试中仅此一例，与本次改动无关，暂记为间歇问题，观察下一次 CI。
+
 ## 2026-10-07：W4 复查补丁
 
 复查发现：`recover` 只看本进程的执行器，另一个桌面或无头会话的服务仍在执行时也会把其尝试标为中断，原执行器随后结束尝试被当作过期拒绝；

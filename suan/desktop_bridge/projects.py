@@ -19,12 +19,14 @@ from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, TokenPla
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
 from .protocol import BridgeError
+from .attention import AttentionViews
 from .recent_projects import RecentProjects
 
 
 class ProjectSessions:
     def __init__(self, state_dir=None, *, analysis_executor=None, workflow_executor=None):
         self._recent = RecentProjects(state_dir)
+        self._viewed = AttentionViews(state_dir)
         self._lock = threading.RLock()
         self._stores = {}
         self._closed = False
@@ -233,6 +235,23 @@ class ProjectSessions:
             if action == "choices":
                 return workflows.choices()
             return workflows.get(params["workflow_id"])
+
+    def attention(self, action, params):
+        """The project's attention items with this person's viewed marks, or mark some as viewed."""
+        from suan.project.attention import collect
+        with self._operation():
+            store = self._get(params["handle"])
+            project_id = store._project_id
+            if action == "viewed":
+                return {"viewed": self._viewed.mark(project_id, list(dict.fromkeys(params["keys"])))}
+            result = collect(store)
+            viewed = self._viewed.viewed(project_id)
+            for item in result["items"]:
+                item["viewed"] = item["key"] in viewed
+            counts = {"needs_you": sum(1 for i in result["items"] if i["group"] == "needs_you" and not i["viewed"]),
+                      "running": sum(1 for i in result["items"] if i["group"] == "running"),
+                      "unviewed_done": sum(1 for i in result["items"] if i["group"] == "done" and not i["viewed"])}
+            return {**result, "counts": counts}
 
     def handles_of(self, store):
         """Open handles of this exact store (for announcing background project edits)."""

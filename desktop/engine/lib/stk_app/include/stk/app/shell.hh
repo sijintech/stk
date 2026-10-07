@@ -149,6 +149,9 @@ class AppShell {
    * when that tab is gone, show `fallback` in an `editor_id` tab instead. */
   void return_in_area_later(EditorArea *area, std::weak_ptr<void> from, std::weak_ptr<void> origin,
                             std::string editor_id, io::Json fallback);
+  /** Deferred: activate an `editor_id` tab (as activate_editor) and show `target` in it (Editor::navigate),
+   * for links from Home such as an attention item. A refusal is shown as a toast. */
+  void open_target_later(wm::Screen *screen, std::string editor_id, io::Json target, std::function<bool()> valid = {});
   /** Whether `area` belongs to an installed screen (pointers held by deferred work may be stale). */
   bool has_area(const EditorArea *area) const;
 

@@ -129,6 +129,15 @@ class Project:
     def workflow_runs(self):
         return ProjectWorkflowRuns(self._call, self.handle)
 
+    def attention(self):
+        """Failures, items to review, running work and finished items, with this person's viewed marks.
+        Read-only: {revision, items: [{key, kind, id, group, severity, name, status, at, target, viewed, ...}], counts}."""
+        return self._call("project.attention.list", {"handle": self.handle})
+
+    def mark_viewed(self, keys):
+        """Mark attention items as viewed (kept for this person only, outside the project)."""
+        return self._call("project.attention.viewed", {"handle": self.handle, "keys": list(keys)})
+
     @property
     def runs(self):
         return ProjectRuns(self._call, self.handle)

@@ -553,6 +553,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.workflow_runs.get` / `start` / `cancel` / `recover` | `{handle, run_id}` | `{run: workflowRun}` |
 | `project.workflow_runs.list` | `{handle, offset?, limit?, workflow_id?}` | `{runs: [workflowRunSummary], next_offset}` |
 | `project.workflow_runs.stale` | `{handle, run_id}` | `{run_id, revision, rows: [{id, number, stale, steps}], stale_rows}` |
+| `project.attention.list` | `{handle}` | `{revision, items: [projectAttentionItem], counts: {needs_you, running, unviewed_done}}` |
+| `project.attention.viewed` | `{handle, keys}` | `{viewed}` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -652,6 +654,17 @@ Tasks report `{step, row, attempt, status, produced, error, updated_at}`; nothin
 aside), `analysis_changed`/`analysis_missing`, `template_unavailable`, `value_changed` (a field the step takes from the
 row, with `before`/`after`), `value_error`, `row_removed`, `workflow_missing`, and `upstream_changed` downstream of a
 stale step. It reads only; old runs never change, and re-running `stale_rows` is a new `prepare`.
+
+The optional `project.attention.*` methods (experimental, design in `docs/design/ux-package-2026-10.md`) summarize what
+needs a person across workflow runs (format 10), analysis runs not started by a workflow run (format 9), simulation runs,
+pending AI drafts and AI requests, at most the 50 newest of each source. `list` reads only. Each item is `{key, kind, id,
+group, severity, name, status, at, target, viewed, error?, counts?, rows?}`: `group` is `needs_you` (failed, interrupted,
+unknown or uncertain work and drafts to review), `running` or `done`; items are ordered by group, then `failure` before
+`review`, then newest first. `target` is either `{editor, ...}` (`workflow` with `workflow_id`/`run_id`, `analysis_graph`
+with `analysis_id`/`analysis_run_id`) or `{page, ...}` (`simulation_runs`, `review`, `conversation`). The `key` includes
+the item's status and counts, so an item marked viewed appears again when its state changes. `viewed` stores 1–500 keys
+per call as this person's local marks under the service state directory (at most 2000 per project); it never changes the
+project or its revision.
 
 The optional `project.analysis_runs.*` methods require project format 9, with an explicit backup-first
 upgrade for older projects. They add an immutable analysis plan and an append-only execution journal,

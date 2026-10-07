@@ -2,7 +2,8 @@
 /** A project workflow (cases -> field files -> saved analysis) on the canvas with a step selected,
  * (--scenario enter) its analysis opened in the same area with the breadcrumb back, or
  * (--scenario workflow_edit) an unsaved candidate with an added, linked and field-bound step, or
- * (--scenario workflow_run) a finished per-row run of cases -> synthetic solver -> analysis with its task grid. */
+ * (--scenario workflow_run) a finished per-row run of cases -> synthetic solver -> analysis with its task grid, or
+ * (--scenario home_attention) Home's "needs attention" box after a run with a failed row and a finished run. */
 #include "stk/app/bridge_status.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_state.hh"
@@ -34,7 +35,8 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (output.empty() || (mode != "wide" && mode != "narrow") ||
-      (scenario != "workflow" && scenario != "enter" && scenario != "workflow_edit" && scenario != "workflow_run")) { return 2; }
+      (scenario != "workflow" && scenario != "enter" && scenario != "workflow_edit" && scenario != "workflow_run" &&
+       scenario != "home_attention")) { return 2; }
   const bool narrow = mode == "narrow", zh = language == "zh";
   const int width = narrow ? 760 : 1440, height = 900;
   bridge::test::TempDir directory{"workflow-render"};
@@ -121,7 +123,8 @@ int main(int argc, char **argv)
                {"inputs", {{"data", {{"from", "fields.files"}}}}}}}},
               {"ui", {{"positions", {{"cases", {0, 0}}, {"fields", {260, 0}}, {"temperature", {520, 0}}}}}}}},
           {"expected_revision", revision}});
-      if (scenario == "workflow_run") {
+      const bool runs = scenario == "workflow_run" || scenario == "home_attention";
+      if (runs) {
         // Three temperatures and the runnable form of the workflow: the synthetic solver per row, then the analysis.
         const std::string temperature = "17171717-1717-4171-8171-171717171717";
         Json commands = Json::array({{{"op", "add_field"}, {"id", temperature}, {"table_id", table},
@@ -131,7 +134,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < 3; ++i) {
           commands.push_back({{"op", "add_record"}, {"id", rows[i]}, {"table_id", table}});
           commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", rows[i]}, {"field_id", temperature},
-                              {"value", 300 + 25 * i}});
+                              {"value", scenario == "home_attention" && i == 2 ? -5 : 300 + 25 * i}});  // -5 K fails
         }
         call("project.apply", {{"handle", handle}, {"expected_revision", revision}, {"commands", commands}});
         call("project.workflows.update", {{"handle", handle}, {"workflow_id", workflow}, {"name", zh ? "温度扫描" : "Temperature scan"},
@@ -212,6 +215,24 @@ int main(int argc, char **argv)
           screen.ui()->handle_event(ui::Event::mouse_down(center)); screen.ui()->handle_event(ui::Event::mouse_up(center)); frame();
         }
       }
+      if (scenario == "home_attention") {
+        // All three rows (the third fails in the synthetic solver), then row 1 alone (finishes); Home lists both.
+        const auto run = [&](const std::string &id, const Json &rows) {
+          const auto saved = call("project.workflows.get", {{"handle", handle}, {"workflow_id", workflow}});
+          call("project.workflow_runs.prepare", {{"handle", handle}, {"workflow_id", workflow}, {"rows", rows}, {"run_id", id},
+              {"expected_revision", saved.at("revision")}});
+          call("project.workflow_runs.start", {{"handle", handle}, {"run_id", id}});
+          wait([&] { return call("project.workflow_runs.get", {{"handle", handle}, {"run_id", id}}).at("run").at("status") == "stopped"; },
+               "run stopped");
+        };
+        run("19191919-1919-4191-8191-191919191901", Json::array({"18181818-1818-4181-8181-181818181801",
+            "18181818-1818-4181-8181-181818181802", "18181818-1818-4181-8181-181818181803"}));
+        run("19191919-1919-4191-8191-191919191902", Json::array({"18181818-1818-4181-8181-181818181801"}));
+        project.refresh();
+        require(area->set_tab_type(0, app::kEditorWorkspace), "home");
+        wait([&] { return shows(zh ? "失败 · 工作流运行 · 温度扫描 · 完成 4/6" : "Failed · Workflow run · Temperature scan · 4/6 done") &&
+                          shows(zh ? "已完成未查看（1）" : "Finished, not viewed (1)"); }, "attention listed");
+      }
       if (scenario == "enter") {
         widget("workflow_enter_analysis")->on_click();
         // Wait for the node catalog too, so nodes are drawn with their types rather than as unknown.
@@ -220,8 +241,8 @@ int main(int argc, char **argv)
             !shows(zh ? "正在读取节点说明" : "Reading node descriptions"); }, "analysis with breadcrumb");
       }
       frame(); require(gfx::png_write(output, image), "write screenshot");
-      // Only the run scenario prepares analysis runs, through its explicit click.
-      require(scenario == "workflow_run" || call("project.analysis_runs.list", {{"handle", handle}}).at("runs").empty(),
+      // Only the run scenarios prepare analysis runs, through an explicit start.
+      require(runs || call("project.analysis_runs.list", {{"handle", handle}}).at("runs").empty(),
               "browsing must not prepare a run");
       require(!viewer.payload() && viewer.evaluations_started() == 0, "browsing must not configure or evaluate the Viewer");
       require(client->stats().schema_violations == 0, "bridge schema violations");

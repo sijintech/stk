@@ -2,6 +2,22 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-07：体验包 U1 需要处理；6fc18a4 CI 修复
+
+- CI `6fc18a4`（覆盖 `47507b8`、`3a3bd22`）：Secret scan、Cloudflare Pages 通过；Runtime 的 Linux 作业通过，**client-windows（3.10/3.12）失败**：
+  测试全部通过后 `test_bridge_workflow_runs.py` 收到 KeyboardInterrupt（`os.kill(pid, 0)` 在 Windows 上发送 CTRL_C_EVENT）；
+  desktop 的 Linux 与打包作业通过，**Windows** 两项工作流编辑器测试以固定帧数等待后台回复而失败，**macOS** 的
+  `workflow_run_wide_render_metal_en` 退出时报告 1 个 `MTLSafeFreeList` 未释放（Blender Metal 后端时序，168 项中仅此一例，未改动，待下一次 CI 观察）。
+  修复：`psutil.pid_exists`（新增只看不发信号的存活检查测试）、测试改为 `frames_until`。
+- U1 Python 4 项：失败的工作流运行排第一（名称、完成数、导航目标），待审草案其次，运行中与已完成随后；列表只读不改修订；
+  标记已看不改项目，状态再变化（再次中断）的运行重新出现；工作流运行产生的分析运行不重复列出；空项目与旧格式无事项；
+  仿真运行（失败/排队/成功）与 AI 请求（失败/等待/完成）按状态分组。
+- 真实后台服务的界面测试 1 项：第 2 行 -5 K 使合成求解失败，工作台列出“Failed · Workflow run · Temperature scan · 1/2 done”，
+  状态栏“Needs you: 1”；点“打开”后工作流编辑器最大化并选中该运行（“Stopped · 1/2 done · 1 failed”），状态栏计数消失，只发出一次 viewed，
+  未再准备或开始运行。其他“打开”目标（分析运行 → 分析图“运行”页，草案 → 审阅页，仿真运行、AI 请求 → 对应页面）未做界面测试。截图 8 张（工作台“需要关注”：失败的运行与已完成的运行 × 宽/窄 × 中/英 × GL/Vulkan）检查后把方框标题改为“需要关注”。
+- 完整 pytest（`-m "not perf"`）**2263 passed、24 skipped**；完整 Linux CTest **1248/1248**（之后只改了测试等待方式与两处读取健壮性，
+  相关的工作流编辑器、工作台导航与截图测试 20 项重跑通过）。
+
 ## 2026-10-07：W4 复查补丁（另一服务进程持有的运行）
 
 - 后台服务测试 3 项：同机仍存活的另一服务进程持有的运行，`recover` 以 `busy` 拒绝且任务不变，`force` 后中断；

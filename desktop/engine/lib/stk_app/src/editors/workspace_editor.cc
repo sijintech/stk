@@ -8,6 +8,7 @@
 
 #include "../app_theme.hh"
 #include "stk/app/jobs_state.hh"
+#include "stk/app/project_attention.hh"
 #include "stk/app/viewer_state.hh"
 
 namespace stk::app {
@@ -16,6 +17,7 @@ namespace {
 /* Tables the project manages itself (suan.project.analyses / suan.project.files). */
 constexpr const char *kAnalysesTable = "a32844df-b03d-576b-a200-c7080ae8e97e";
 constexpr const char *kFilesTable = "becb9ec9-1a27-5d31-8aa3-5402f09f43a9";
+constexpr const char *kWorkflowsTable = "88c4e1a0-7427-5d9d-a8f7-49ff00175f26";  // suan/project/workflows.py TABLE_ID
 
 class WorkspaceEditor final : public Editor {
  public:
@@ -36,13 +38,14 @@ class WorkspaceEditor final : public Editor {
     service(layout, ctx);
     if (!project.error().empty()) { layout.paragraph(project.error()); }
     if (project.busy() && !project.notice().empty()) { layout.paragraph(project.notice()); }
+    attention(layout, ctx);
 
     const auto &info = project.project();
     const bool available = project.ready() && project.loaded() && !project.busy();
     size_t tables = 0, records = 0;
     if (info) {
       for (const auto &table : project.tables()) {
-        if (table.id == kAnalysesTable || table.id == kFilesTable) { continue; }
+        if (table.id == kAnalysesTable || table.id == kFilesTable || table.id == kWorkflowsTable) { continue; }
         ++tables;
         records += table.records.size();
       }
@@ -116,6 +119,101 @@ class WorkspaceEditor final : public Editor {
   }
 
  private:
+  /** What needs a person, what runs and what finished (UX package U1); failures first. Opening an item
+   * navigates to it and marks it viewed; nothing here runs or changes the project. */
+  void attention(ui::Layout &layout, EditorContext &ctx)
+  {
+    auto &state = ctx.store.attention();
+    state.sync();
+    if (!state.supported()) { return; }
+    auto &box = layout.box();
+    box.label(ctx.tr("workspace.attention.title"));
+    static const io::Json kNone = io::Json::array();
+    const auto &items = state.result().is_object() ? state.result().at("items") : kNone;
+    if (!state.error().empty()) { box.paragraph(state.error()); }
+    std::vector<const io::Json *> needs, running, done;
+    for (const auto &item : items) {
+      const auto group = io::get_string(item, "group");
+      if (group == "needs_you" && !io::get_bool(item, "viewed", false)) { needs.push_back(&item); }
+      else if (group == "running") { running.push_back(&item); }
+      else if (group == "done" && !io::get_bool(item, "viewed", false)) { done.push_back(&item); }
+    }
+    if (needs.empty() && running.empty() && done.empty()) {
+      box.paragraph(ctx.tr(state.result().is_null() ? "workspace.attention.loading" : "workspace.attention.none"));
+      return;
+    }
+    auto &catalog = ctx.store.catalog();
+    const auto group = [&](const char *title, const std::vector<const io::Json *> &list, size_t limit, bool seen) {
+      if (list.empty()) { return; }
+      box.label(catalog.format(title, {{"count", std::to_string(list.size())}}));
+      for (size_t i = 0; i < list.size() && i < limit; ++i) { entry(box, ctx, *list[i], seen); }
+      if (list.size() > limit) {
+        box.paragraph(catalog.format("workspace.attention.more", {{"count", std::to_string(list.size() - limit)}}));
+      }
+    };
+    group("workspace.attention.needs_you", needs, 6, true);
+    group("workspace.attention.running", running, 4, false);
+    group("workspace.attention.done", done, 4, true);
+    if (!done.empty()) {
+      std::vector<std::string> keys;
+      for (const auto *item : done) { keys.push_back(io::get_string(*item, "key")); }
+      auto *attention = &state;
+      box.button("workspace_attention_seen_all", ctx.tr("workspace.attention.seen_all"), [attention, keys] {
+        attention->mark_viewed(keys);
+      });
+    }
+  }
+
+  /** One line ("失败 · 工作流运行 · 温度扫描 · 完成 1/2") with Open and, unless running, Seen. */
+  void entry(ui::Layout &box, EditorContext &ctx, const io::Json &item, const bool seen)
+  {
+    auto &catalog = ctx.store.catalog();
+    const auto kind = io::get_string(item, "kind"), status = io::get_string(item, "status"), key = io::get_string(item, "key");
+    std::string detail;
+    if (item.contains("counts") && item.at("counts").is_object()) {
+      int64_t total = 0;
+      for (const auto &[name, value] : item.at("counts").items()) {
+        (void)name;
+        if (value.is_number_integer()) { total += value.get<int64_t>(); }
+      }
+      detail = " · " + catalog.format("workspace.attention.counts", {{"done", std::to_string(io::get_int(item.at("counts"), "succeeded", 0))},
+                                                                   {"total", std::to_string(total)}});
+    }
+    const auto name = io::get_string(item, "name");
+    const std::string text = std::string(catalog.tr_or("workspace.attention.state." + status, status)) + " · " +
+        std::string(catalog.tr_or("workspace.attention.kind." + kind, kind)) + (name.empty() ? std::string() : " · " + name) + detail;
+    auto &row = box.row();
+    auto &label = row.label(text);
+    if (const auto error = io::get_string(item, "error"); !error.empty()) { label.tip(error); }
+    auto *attention = &ctx.store.attention();
+    const auto open = navigation(ctx, item.value("target", io::Json::object()));
+    row.button("workspace_attention_open/" + key, ctx.tr("workspace.attention.open"), [attention, key, open, seen] {
+      if (seen) { attention->mark_viewed({key}); }
+      if (open) { open(); }
+    }).width(3).disable(!open);
+    if (seen) {
+      row.button("workspace_attention_seen/" + key, ctx.tr("workspace.attention.seen"), [attention, key] {
+        attention->mark_viewed({key});
+      }).width(3);
+    }
+  }
+
+  /** Where an attention item lives: an editor with a target, or a project page. */
+  std::function<void()> navigation(EditorContext &ctx, const io::Json &target)
+  {
+    const auto page = io::get_string(target, "page");
+    if (!page.empty()) { return project_navigation_action(ctx, page); }
+    const auto editor = io::get_string(target, "editor");
+    if (editor != kEditorWorkflow && editor != kEditorAnalysisGraph) { return {}; }
+    auto *shell = &ctx.area.shell();
+    auto *screen = ctx.area.screen();
+    const auto weak = lifetime();
+    return [shell, screen, weak, editor, target] {
+      if (weak.expired()) { return; }
+      shell->open_target_later(screen, editor, target, [weak] { return !weak.expired(); });
+    };
+  }
+
   static void service(ui::Layout &layout, EditorContext &ctx)
   {
     // The background Python service in plain words; nothing to say once it is ready.
