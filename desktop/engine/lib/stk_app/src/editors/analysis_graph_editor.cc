@@ -10,6 +10,7 @@
 #include "stk/app/project_state.hh"
 #include "stk/app/shell.hh"
 #include "stk/bridge/client.hh"
+#include "stk/io/catalog.hh"
 #include "stk/ui/gpu_painter.hh"
 #include "stk/wm/window.hh"
 #include "project_navigation.hh"
@@ -20,6 +21,7 @@
 #include <chrono>
 #include <cmath>
 #include <set>
+#include <tuple>
 
 namespace stk::app {
 namespace {
@@ -122,8 +124,9 @@ class AnalysisGraphEditor final : public Editor {
       if (!state_->error().empty()) { layout.paragraph(text(state_->error())); }
       return;
     }
-    const auto &view = *state_->view();
-    const std::string caption = ctx.store.catalog().format("analysis_graph.canvas_caption",
+    const auto &view = canvas_view_ ? *canvas_view_ : *state_->view();
+    const bool candidate = canvas_view_ && canvas_view_ != state_->view();
+    const std::string caption = ctx.store.catalog().format(candidate ? "analysis_graph.candidate_caption" : "analysis_graph.canvas_caption",
         {{"nodes", std::to_string(view.nodes.size())}, {"edges", std::to_string(view.edges.size())}});
     layout.label(caption).tip(ctx.tr("analysis_graph.navigation"));
     // Two fixed-height UI rows occupy this band; drawing and pointer coordinates use the same offset.
@@ -183,7 +186,7 @@ class AnalysisGraphEditor final : public Editor {
     ui_scale_ = ctx.draw->ui_scale;
     ui::DrawList list;
     list.rect({0, 0, float(width), float(height)}, ui::Color::rgb(0x202328));
-    if (state_->view()) {
+    if (canvas_view_) {
       place_canvas(width, height - top);
       ui::gpu::BlfTextMeasurer measure(*ctx.draw->fonts);
       auto content = canvas_.draw_list(width, height - top, ui_scale_, measure, ctx.store.language(), selected_);
@@ -203,7 +206,7 @@ class AnalysisGraphEditor final : public Editor {
   bool handle_gpu_event(const wm::Event &event, EditorContext &ctx) override
   {
     attach(ctx);
-    if (!ctx.draw || !state_->view()) { return false; }
+    if (!ctx.draw || !canvas_view_) { return false; }
     const auto rect = ctx.draw->rect;
     ui_scale_ = ctx.draw->ui_scale;
     place_canvas(rect.width(), rect.height() - canvas_top_);
@@ -346,6 +349,13 @@ class AnalysisGraphEditor final : public Editor {
   AnalysisGraphCanvas canvas_;
   AppStore *store_ = nullptr;
   std::shared_ptr<const AnalysisGraphView> canvas_view_;
+  // The unsaved candidate's presentation, rebuilt when the draft changes (see shown_view()).
+  std::shared_ptr<const AnalysisGraphView> candidate_view_;
+  uint64_t candidate_view_version_ = 0, candidate_view_generation_ = 0;
+  const AnalysisGraphView *catalog_view_ = nullptr;
+  std::shared_ptr<const io::Catalog> catalog_types_;
+  std::string canvas_document_, selected_id_, graph_edit_error_;
+  int add_type_index_ = 0;
   std::optional<size_t> selected_;
   int selected_parameter_ = 0;
   bool fit_ = true, focus_selected_ = false, dragging_ = false, initial_displayed_ = false, initial_saved_ = false, initial_run_ = false;
@@ -503,7 +513,225 @@ class AnalysisGraphEditor final : public Editor {
       parameter_values_panel(*parameters, ctx, valid, generation, version, blocked);
     }
     draft_outputs_panel(*panel, ctx, valid, generation, version, blocked);
+    graph_edit_panel(*panel, ctx, valid, version, blocked);
     links_panel(*panel, ctx, valid, version, blocked);
+  }
+
+  /** The node catalog, parsed once per catalog-bearing view (null until the catalog is read). */
+  const io::Catalog *catalog_types()
+  {
+    if (state_->catalog().is_null()) { catalog_types_.reset(); return nullptr; }
+    if (!catalog_types_ || catalog_view_ != state_->view().get()) {
+      try { catalog_types_ = std::make_shared<const io::Catalog>(io::Catalog::from_json(state_->catalog())); }
+      catch (const std::exception &) { catalog_types_.reset(); }
+      catalog_view_ = state_->view().get();
+    }
+    return catalog_types_.get();
+  }
+
+  /** Whether the draft edits exactly the saved definition being inspected. */
+  bool draft_matches_view() const
+  {
+    return parameter_draft_.pinned() && state_->saved() && !state_->document_stale() && state_->view() &&
+        state_->document_id() == parameter_draft_.analysis_id() && state_->document_revision() == parameter_draft_.revision();
+  }
+
+  /** What the canvas and panels show: the unsaved candidate while the draft has graph edits of the
+   * inspected definition (changed nodes marked), otherwise the inspected graph itself. */
+  std::shared_ptr<const AnalysisGraphView> shown_view()
+  {
+    if (!parameter_draft_.graph_edited() || !draft_matches_view()) { return state_->view(); }
+    if (!candidate_view_ || candidate_view_version_ != parameter_draft_.version() ||
+        candidate_view_generation_ != parameter_draft_.generation()) {
+      try {
+        auto view = analysis_graph_view(io::Graph::from_json(parameter_draft_.graph()), catalog_types());
+        std::set<std::string> edited;
+        for (const auto &change : parameter_draft_.graph_changes()) {
+          if (change.kind == "node_added" || change.kind == "input" || change.kind == "param") { edited.insert(change.node); }
+        }
+        for (auto &node : view.nodes) { node.edited = edited.count(node.id) != 0; }
+        candidate_view_ = std::make_shared<const AnalysisGraphView>(std::move(view));
+      }
+      catch (const std::exception &) { return state_->view(); }
+      candidate_view_version_ = parameter_draft_.version(); candidate_view_generation_ = parameter_draft_.generation();
+    }
+    return candidate_view_;
+  }
+  uint64_t shown_generation() const
+  {
+    return state_->generation() * 1000003 + (canvas_view_ && canvas_view_ != state_->view() ? parameter_draft_.version() + 1 : 0);
+  }
+
+  bool graph_edit_ready(const std::function<bool()> &valid) const
+  {
+    return valid() && parameter_current() && !documents_->busy() && !documents_->uncertain() && !parameter_text_active() &&
+        !parameter_buffer_changed_ && draft_matches_view();
+  }
+
+  /** Before adding or removing a node, write the shown layout of every unplaced node so the
+   * automatic layout of the rest cannot rearrange under the user (positions never affect evaluation). */
+  bool freeze_layout()
+  {
+    if (!canvas_view_) { return false; }
+    std::map<std::string, std::pair<double, double>> positions;
+    for (const auto &node : canvas_view_->nodes) {
+      if (!node.supplied_position && !node.ambiguous_id) { positions[node.id] = {node.rect.x, node.rect.y}; }
+    }
+    if (positions.empty()) { return true; }
+    const auto result = parameter_draft_.move_nodes(positions, parameter_draft_.generation());
+    if (!result.accepted) { graph_edit_error_ = result.error; }
+    return result.accepted;
+  }
+
+  /** An ordered list input (multi port): each link can be moved or removed, and any declared
+   * upstream output appended. Order is meaning (for example scene layer order). */
+  void list_input(ui::Layout &panel, EditorContext &ctx, const std::function<bool()> &valid, const AnalysisGraphView &view,
+                  const AnalysisGraphNode &node, const AnalysisGraphPort &port, const bool disabled)
+  {
+    const auto current = parameter_draft_.links(node.id, port.name);
+    auto &scope = panel.scope("analysis_link_list/" + node.id + "/" + port.name);
+    const auto apply = [this, valid, target = node.id, input = port.name](std::vector<std::string> sources) {
+      if (!graph_edit_ready(valid)) { return; }
+      const auto result = parameter_draft_.set_links(target, input, sources, parameter_draft_.generation());
+      link_error_ = result.accepted ? std::string() : result.error;
+      redraw();
+    };
+    for (size_t i = 0; i < current.size(); ++i) {
+      auto &row = scope.row();
+      row.label(std::to_string(i + 1) + ". " + text(current[i]));
+      const auto index = std::to_string(i);
+      row.button("up/" + index, ctx.tr("analysis_links.up"), [apply, current, i] {
+        auto next = current; std::swap(next[i - 1], next[i]); apply(next);
+      }).width(4).disable(disabled || i == 0);
+      row.button("down/" + index, ctx.tr("analysis_links.down"), [apply, current, i] {
+        auto next = current; std::swap(next[i], next[i + 1]); apply(next);
+      }).width(4).disable(disabled || i + 1 == current.size());
+      row.button("remove/" + index, ctx.tr("analysis_links.remove_link"), [apply, current, i] {
+        auto next = current; next.erase(next.begin() + std::ptrdiff_t(i)); apply(next);
+      }).width(5).disable(disabled);
+    }
+    std::vector<std::string> values, labels{std::string(ctx.tr("analysis_links.list_add"))};
+    for (const auto &other : view.nodes) {
+      if (other.id == node.id || other.ambiguous_id) { continue; }
+      for (const auto &output : other.outputs) {
+        if (!output.declared) { continue; }
+        values.push_back(other.id + "." + output.name);
+        labels.push_back(text(other.id + "." + output.name) + "  (" + output.type_text + ")");
+      }
+    }
+    scope.dropdown("analysis_link_add", std::move(labels), {[] { return 0; }, [apply, current, values](const int choice) {
+      if (choice <= 0 || size_t(choice) > values.size()) { return; }
+      auto next = current; next.push_back(values[size_t(choice - 1)]); apply(next);
+    }}).disable(disabled || current.size() >= 256);
+  }
+
+  /** Add or remove nodes, expose outputs and review every pending graph change. Collapsed by default. */
+  void graph_edit_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
+                        const uint64_t version, const bool blocked)
+  {
+    auto &catalog = ctx.store.catalog();
+    const auto changes = parameter_draft_.graph_changes();
+    auto *panel = layout.panel("analysis_graph_edit_panel", changes.empty() ? std::string(ctx.tr("analysis_graph_edit.title")) :
+        catalog.format("analysis_graph_edit.title_count", {{"count", std::to_string(changes.size())}}), false);
+    if (!panel) { return; }
+    hint(*panel, ctx, "analysis_graph_edit.hint");
+    if (!graph_edit_error_.empty()) { panel->paragraph(text(graph_edit_error_)); }
+    size_t shown = 0;
+    for (const auto &change : changes) {
+      if (++shown > 32) { break; }
+      panel->paragraph(catalog.format("analysis_graph_edit.change." + change.kind,
+          {{"node", text(change.node)}, {"key", text(change.key)}}));
+    }
+    omitted(*panel, ctx, changes.size() > 32 ? changes.size() - 32 : 0);
+    const bool editing = parameter_text_active() || parameter_buffer_changed_;
+    const bool disabled = blocked || editing || !draft_matches_view();
+    const auto *types = catalog_types();
+    if (!types) {
+      panel->paragraph(ctx.tr(state_->catalog_loading() ? "analysis_links.catalog_loading" : "analysis_links.catalog_needed"));
+    }
+    else {
+      // Every catalog node type, by stage then title, in the interface language.
+      std::vector<const io::NodeType *> sorted;
+      for (const auto &type : types->nodes) { sorted.push_back(&type); }
+      const bool chinese = ctx.store.language().rfind("zh", 0) == 0;
+      const auto title = [chinese](const io::NodeType *type) {
+        return chinese && !type->title_zh.empty() ? type->title_zh : type->title_en.empty() ? type->id : type->title_en;
+      };
+      std::stable_sort(sorted.begin(), sorted.end(), [&title](const auto *a, const auto *b) {
+        return std::make_tuple(a->stage, a->family(), title(a)) < std::make_tuple(b->stage, b->family(), title(b));
+      });
+      std::vector<std::string> labels, ids;
+      for (const auto *type : sorted) { labels.push_back(type->family() + " · " + title(type) + "  (" + type->id + ")"); ids.push_back(type->id); }
+      add_type_index_ = std::clamp(add_type_index_, 0, std::max(0, int(ids.size()) - 1));
+      auto &add = panel->prop(ctx.tr("analysis_graph_edit.add_type")).row(true);
+      add.dropdown("analysis_graph_add_type", std::move(labels), ui::bind(add_type_index_)).disable(disabled || ids.empty());
+      add.button("analysis_graph_add_node", ctx.tr("analysis_graph_edit.add_node"), [this, valid, ids] {
+        if (!graph_edit_ready(valid) || add_type_index_ < 0 || size_t(add_type_index_) >= ids.size() || !freeze_layout()) { return; }
+        // Next to the selected node, else to the right of the whole graph.
+        std::pair<double, double> at{0, 0};
+        if (selected_ && canvas_view_ && *selected_ < canvas_view_->nodes.size()) {
+          const auto &rect = canvas_view_->nodes[*selected_].rect;
+          at = {rect.x + rect.width + 70, rect.y};
+        }
+        else if (canvas_view_) { at = {canvas_view_->bounds.x + canvas_view_->bounds.width + 70, canvas_view_->bounds.y}; }
+        const auto result = parameter_draft_.add_node(ids[size_t(add_type_index_)], at, parameter_draft_.generation());
+        graph_edit_error_ = result.accepted ? std::string() : result.error;
+        if (result.accepted) { selected_id_ = result.id; selected_parameter_ = 0; }
+        redraw();
+      }).width(6).disable(disabled || ids.empty());
+    }
+    const auto view = canvas_view_;
+    if (!view || !selected_ || *selected_ >= view->nodes.size()) { panel->paragraph(ctx.tr("analysis_graph_edit.select_node")); }
+    else {
+      const auto &node = view->nodes[*selected_];
+      panel->label(catalog.format("analysis_graph_edit.selected", {{"node", text(node.id)}}));
+      panel->button("analysis_graph_remove_node", ctx.tr("analysis_graph_edit.remove_node"), [this, valid, id = node.id] {
+        if (!graph_edit_ready(valid) || !freeze_layout()) { return; }
+        const auto result = parameter_draft_.remove_node(id, parameter_draft_.generation());
+        graph_edit_error_ = result.accepted ? std::string() : result.error;
+        if (result.accepted) { selected_.reset(); }
+        redraw();
+      }).disable(disabled || node.ambiguous_id);
+      // Outputs of this node: expose one as a graph output so analyses can request it, or withdraw it.
+      const auto &exposed = parameter_draft_.graph().at("outputs");
+      for (const auto &output : node.outputs) {
+        if (!output.declared) { continue; }
+        const auto endpoint = node.id + "." + output.name;
+        std::vector<std::string> names;
+        for (const auto &[name, value] : exposed.items()) {
+          if (value.is_string() && value.get<std::string>() == endpoint) { names.push_back(name); }
+        }
+        auto &row = panel->scope("analysis_graph_output/" + endpoint).row();
+        if (names.empty()) {
+          row.label(text(output.name) + "  (" + output.type_text + ")");
+          row.button("expose", ctx.tr("analysis_graph_edit.expose"), [this, valid, endpoint, exposed] {
+            if (!graph_edit_ready(valid)) { return; }
+            std::string base = endpoint;
+            std::replace(base.begin(), base.end(), '.', '_');
+            base = base.substr(0, 60);
+            std::string name = base;
+            for (int suffix = 2; exposed.contains(name); ++suffix) { name = base + "_" + std::to_string(suffix); }
+            const auto result = parameter_draft_.set_graph_output(name, endpoint, parameter_draft_.generation());
+            graph_edit_error_ = result.accepted ? std::string() : result.error;
+            redraw();
+          }).width(7).disable(disabled);
+        }
+        else {
+          for (const auto &name : names) {
+            row.label(catalog.format("analysis_graph_edit.exposed", {{"port", text(output.name)}, {"name", text(name)}}));
+            row.button("withdraw/" + name, ctx.tr("analysis_graph_edit.withdraw"), [this, valid, name] {
+              if (!graph_edit_ready(valid)) { return; }
+              const auto result = parameter_draft_.set_graph_output(name, std::nullopt, parameter_draft_.generation());
+              graph_edit_error_ = result.accepted ? std::string() : result.error;
+              redraw();
+            }).width(5).disable(disabled);
+          }
+        }
+      }
+    }
+    if (parameter_draft_.evaluative_graph_edits()) {
+      candidate_validation(*panel, ctx, valid, version, blocked, "analysis_graph_validate", "analysis_graph_issues");
+    }
   }
 
   void links_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
@@ -532,10 +760,9 @@ class AnalysisGraphEditor final : public Editor {
       omitted(*panel, ctx, edits.size() > 32 ? edits.size() - 32 : 0);
     }
     const bool editing = parameter_text_active() || parameter_buffer_changed_;
-    const auto view = state_->view();
+    const auto view = canvas_view_;
     // The canvas, ports and catalog hints must describe the very definition this draft edits.
-    const bool same = view && state_->saved() && !state_->document_stale() &&
-        state_->document_id() == parameter_draft_.analysis_id() && state_->document_revision() == parameter_draft_.revision();
+    const bool same = view && draft_matches_view();
     // Without the node catalog every type would look unknown: say why nothing is editable yet.
     if (state_->catalog_loading()) { panel->paragraph(ctx.tr("analysis_links.catalog_loading")); }
     else if (!state_->catalog_error().empty()) { panel->paragraph(ctx.tr("analysis_links.catalog_needed")); }
@@ -554,9 +781,10 @@ class AnalysisGraphEditor final : public Editor {
         const char *reason = !node.known_type ? "analysis_links.readonly_unknown_type" :
             node.ambiguous_id ? "analysis_links.readonly_duplicate" :
             !port.declared ? "analysis_links.readonly_undeclared" :
-            port.multi ? "analysis_links.readonly_multi" :
+            port.multi ? (parameter_draft_.links_editable(node.id, port.name) ? nullptr : "analysis_links.readonly_multi") :
             !parameter_draft_.link_editable(node.id, port.name) ? "analysis_links.readonly_shape" : nullptr;
         if (reason) { panel->paragraph(ctx.tr(reason)); continue; }
+        if (port.multi) { list_input(*panel, ctx, valid, *view, node, port, blocked || editing); continue; }
         // Catalog types are only hints: every declared upstream output is offered and
         // graph.validate alone decides compatibility, kinds and cycles.
         std::vector<std::optional<std::string>> values;
@@ -592,12 +820,21 @@ class AnalysisGraphEditor final : public Editor {
       omitted(*panel, ctx, node.omitted_inputs);
     }
 
+    candidate_validation(*panel, ctx, valid, version, blocked, "analysis_links_validate", "analysis_links_issues");
+  }
+
+  /** Explicit graph.validate of the whole candidate (graph, parameters, outputs) and its result;
+   * shown wherever the candidate is edited. Never evaluates, prepares or touches the Viewer. */
+  void candidate_validation(ui::Layout &panel, EditorContext &ctx, const std::function<bool()> &valid,
+                            const uint64_t version, const bool blocked, const char *button_key, const char *issues_key)
+  {
+    const bool editing = parameter_text_active() || parameter_buffer_changed_;
     const auto key = candidate_key();
     const bool pending = candidate_check_.pending();
     auto *client = store_->bridge();
     const auto hello = client ? client->hello_info() : std::nullopt;
     const bool can_validate = hello && hello->has_method("graph.validate") && !key.session.empty();
-    panel->button("analysis_links_validate", ctx.tr(pending ? "analysis_links.validating" : "analysis_links.validate"),
+    panel.button(button_key, ctx.tr(pending ? "analysis_links.validating" : "analysis_links.validate"),
         [this, valid, version] {
       if (!valid() || !parameter_current() || candidate_check_.pending() || parameter_draft_.version() != version ||
           parameter_text_active() || parameter_buffer_changed_ || !parameter_draft_.dirty()) { return; }
@@ -622,7 +859,7 @@ class AnalysisGraphEditor final : public Editor {
     }).disable(blocked || pending || editing || !parameter_draft_.dirty() || !can_validate);
     if (const auto *response = candidate_check_.result(key)) {
       const bool ok = response->at("ok").get<bool>();
-      panel->paragraph(ctx.tr(ok ? "analysis_links.valid" : "analysis_links.invalid"));
+      panel.paragraph(ctx.tr(ok ? "analysis_links.valid" : "analysis_links.invalid"));
       Rows issues;
       const auto &reported = response->at("issues");
       for (size_t index = 0; index < std::min<size_t>(reported.size(), 256); ++index) {
@@ -632,13 +869,13 @@ class AnalysisGraphEditor final : public Editor {
             text(io::get_string(issue, "path")), text(io::get_string(issue, "message"))});
       }
       if (!issues.empty()) {
-        table(*panel, "analysis_links_issues", {{std::string(ctx.tr("analysis_graph.node")), 6},
+        table(panel, issues_key, {{std::string(ctx.tr("analysis_graph.node")), 6},
             {std::string(ctx.tr("analysis_graph.issue")), 8}, {std::string(ctx.tr("analysis_graph.path")), 12},
             {std::string(ctx.tr("analysis_graph.message")), 20}}, std::move(issues), parameter_draft_.version(), 4);
       }
-      omitted(*panel, ctx, reported.size() > 256 ? reported.size() - 256 : 0);
+      omitted(panel, ctx, reported.size() > 256 ? reported.size() - 256 : 0);
     }
-    else if (const auto error = candidate_check_.error(key); !error.empty()) { panel->paragraph(text(error)); }
+    else if (const auto error = candidate_check_.error(key); !error.empty()) { panel.paragraph(text(error)); }
   }
 
   void parameter_values_panel(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &valid,
@@ -899,11 +1136,27 @@ class AnalysisGraphEditor final : public Editor {
       result_path_page_ = result_scalar_page_ = 0; result_browser_error_.clear(); clear_table_grid(); ++result_browser_generation_;
     }
     advance_run_and_show(ctx);
-    if (canvas_view_ != state_->view()) {
-      canvas_view_ = state_->view();
+    if (const auto shown = shown_view(); canvas_view_ != shown) {
+      const auto document = state_->document_id() + "@" + std::to_string(state_->document_revision()) + "/" +
+          std::to_string(int(state_->source()));
+      // Saved view <-> its candidate, or one candidate edit after another: same place, same node.
+      const bool same_graph = canvas_view_ && shown && state_->saved() && document == canvas_document_;
+      std::string keep = selected_ && canvas_view_ && *selected_ < canvas_view_->nodes.size() ?
+          canvas_view_->nodes[*selected_].id : std::string();
+      if (!selected_id_.empty()) { keep = std::exchange(selected_id_, std::string()); }
+      canvas_view_ = shown; canvas_document_ = document;
       canvas_.set_view(canvas_view_);
-      selected_ = canvas_view_ && !canvas_view_->nodes.empty() ? std::optional<size_t>(0) : std::nullopt;
-      selected_parameter_ = 0; fit_ = true; focus_selected_ = false; dragging_ = false;
+      dragging_ = false;
+      if (same_graph) {
+        selected_.reset();
+        for (size_t i = 0; i < canvas_view_->nodes.size(); ++i) {
+          if (canvas_view_->nodes[i].id == keep) { selected_ = i; break; }
+        }
+      }
+      else {
+        selected_ = canvas_view_ && !canvas_view_->nodes.empty() ? std::optional<size_t>(0) : std::nullopt;
+        selected_parameter_ = 0; fit_ = true; focus_selected_ = false;
+      }
     }
   }
 
@@ -2003,15 +2256,16 @@ class AnalysisGraphEditor final : public Editor {
   void node_panel(ui::Layout &layout, EditorContext &ctx)
   {
     auto *panel = layout.panel("graph_node", ctx.tr("analysis_graph.node"), true);
-    if (!panel) { return; }
-    const auto view = state_->view();
+    if (!panel || !canvas_view_) { return; }
+    const auto view = canvas_view_;
+    const uint64_t shown = shown_generation();
     std::vector<std::string> labels;
     for (const auto &node : view->nodes) { labels.push_back(text(node.id) + " / " + node.label); }
     const int selected = selected_ ? int(*selected_) : -1;
     const std::weak_ptr<bool> weak = alive_;
     panel->dropdown("graph_node_select", std::move(labels), {[selected] { return selected; },
         [this, weak, view](const int value) {
-          if (const auto live = weak.lock(); live && *live && view == state_->view() && value >= 0 && size_t(value) < view->nodes.size()) {
+          if (const auto live = weak.lock(); live && *live && view == canvas_view_ && value >= 0 && size_t(value) < view->nodes.size()) {
             selected_ = size_t(value); selected_parameter_ = 0; focus_selected_ = true; redraw();
           }
         }});
@@ -2036,7 +2290,7 @@ class AnalysisGraphEditor final : public Editor {
     }
     table(*panel, "graph_ports", {{std::string(ctx.tr("analysis_graph.direction")), 4},
           {std::string(ctx.tr("analysis_graph.port")), 6}, {std::string(ctx.tr("analysis_graph.type")), 12},
-          {std::string(ctx.tr("analysis_graph.cardinality")), 5}}, std::move(ports), state_->generation() * 201 + *selected_, 5);
+          {std::string(ctx.tr("analysis_graph.cardinality")), 5}}, std::move(ports), shown * 201 + *selected_, 5);
     omitted(*panel, ctx, node.omitted_inputs + node.omitted_outputs);
     Rows links;
     size_t link_count = 0;
@@ -2050,7 +2304,7 @@ class AnalysisGraphEditor final : public Editor {
     if (!links.empty()) {
       table(*panel, "graph_links", {{std::string(ctx.tr("analysis_graph.from")), 9}, {std::string(ctx.tr("analysis_graph.to")), 9},
           {"#", 2}, {std::string(ctx.tr("analysis_graph.alias")), 6}, {std::string(ctx.tr("analysis_graph.issue")), 9}},
-          std::move(links), state_->generation() * 201 + *selected_, 4);
+          std::move(links), shown * 201 + *selected_, 4);
     }
     if (link_count > 128) { omitted(*panel, ctx, link_count - 128); }
     if (node.parameters.empty()) { return; }
@@ -2058,11 +2312,11 @@ class AnalysisGraphEditor final : public Editor {
     parameters.columns = {{std::string(ctx.tr("analysis_graph.parameter")), 7}, {std::string(ctx.tr("analysis_graph.value")), 12},
         {std::string(ctx.tr("analysis_graph.origin")), 6}};
     parameters.rows = int(node.parameters.size()); parameters.visible_rows = float(std::min(5, parameters.rows));
-    parameters.data_version = state_->generation() * 201 + *selected_;
+    parameters.data_version = shown * 201 + *selected_;
     const auto node_index = *selected_;
     parameters.selected = {[selected = selected_parameter_] { return selected; },
         [this, weak, view, node_index](const int value) {
-          if (const auto live = weak.lock(); live && *live && view == state_->view() && selected_ == node_index &&
+          if (const auto live = weak.lock(); live && *live && view == canvas_view_ && selected_ == node_index &&
               value >= 0 && size_t(value) < view->nodes[node_index].parameters.size()) { selected_parameter_ = value; redraw(); }
         }};
     std::vector<std::string> origins;

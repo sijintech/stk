@@ -133,12 +133,27 @@ class AnalysisLinksEditorPython : public ::testing::Test {
     ASSERT_NE(found, dropdown->items.end()) << label << listed << dump();
     dropdown->index.assign(int(found - dropdown->items.begin())); f.drv->frame();
   }
-  void validate()
+  void validate(const std::string &button = "analysis_links_validate")
   {
     const auto before = calls("graph.validate").size();
-    ASSERT_NO_FATAL_FAILURE(click("analysis_links_validate"));
+    ASSERT_NO_FATAL_FAILURE(click(button));
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return calls("graph.validate").size() == before + 1 &&
-        widget("analysis_links_validate") && widget("analysis_links_validate")->enabled; }));
+        widget(button) && widget(button)->enabled; }));
+  }
+  void open_panel(const std::string &key)
+  {
+    const auto *header = widget(key); ASSERT_NE(header, nullptr) << key;
+    const auto [x, y] = f.widget_center(header->key);
+    f.drv->click(x, y); f.drv->frame();
+  }
+  /** Choose a dropdown entry containing `label`. */
+  void choose(const std::string &key, const std::string &label)
+  {
+    const auto *dropdown = widget(key); ASSERT_NE(dropdown, nullptr) << key; ASSERT_TRUE(dropdown->enabled) << key;
+    const auto found = std::find_if(dropdown->items.begin(), dropdown->items.end(),
+        [&](const std::string &item) { return item.find(label) != std::string::npos; });
+    ASSERT_NE(found, dropdown->items.end()) << label;
+    dropdown->index.assign(int(found - dropdown->items.begin())); f.drv->frame();
   }
   bool save_enabled()
   {
@@ -151,10 +166,10 @@ class AnalysisLinksEditorPython : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision > revision &&
         widget("analysis_parameters_save") && !widget("analysis_parameters_save")->enabled; }));
   }
-  Json issues()
+  Json issues(const std::string &key = "analysis_links_issues")
   {
     // The issue table is the candidate validation reply as shown.
-    const auto *table = widget("analysis_links_issues");
+    const auto *table = widget(key);
     Json codes = Json::array();
     if (table && table->table) {
       for (int row = 0; row < table->table->rows; ++row) { codes.push_back(table->table->cell(row, 1)); }
@@ -322,11 +337,12 @@ TEST_F(AnalysisLinksEditorPython, LateRepliesAndLaterEditsOrRevisionsInvalidateA
   EXPECT_TRUE(calls("project.analyses.update").empty());
 }
 
-TEST_F(AnalysisLinksEditorPython, MultiInputsAreReadOnlyRequiredInputsKeepALinkAndOptionalOnesDisconnect)
+TEST_F(AnalysisLinksEditorPython, MultiInputsAreOrderedListsRequiredInputsKeepALinkAndOptionalOnesDisconnect)
 {
   ASSERT_NO_FATAL_FAILURE(select_node("scene"));
-  EXPECT_EQ(source("scene", "layers"), nullptr);
-  EXPECT_TRUE(shows("multi-input lists are not edited"));
+  EXPECT_EQ(source("scene", "layers"), nullptr);  // a list, not a single-source choice
+  ASSERT_NE(widget("analysis_link_list/scene/layers/analysis_link_add"), nullptr);
+  EXPECT_NE(widget("analysis_link_list/scene/layers/remove/0"), nullptr);
   const auto *camera = source("scene", "camera"); ASSERT_NE(camera, nullptr);
   EXPECT_EQ(camera->items.front(), "Disconnect (optional input)");
   ASSERT_NO_FATAL_FAILURE(select_node("volume"));
@@ -345,6 +361,101 @@ TEST_F(AnalysisLinksEditorPython, MultiInputsAreReadOnlyRequiredInputsKeepALinkA
   auto expected = document;
   for (auto &node : expected["graph"]["nodes"]) { if (node.at("id") == "scene") { node["inputs"].erase("camera"); } }
   EXPECT_EQ(exact(current.at("analysis").at("document")), exact(expected));
+}
+
+TEST_F(AnalysisLinksEditorPython, AddedNodeIsShownSelectedAndMustPassValidationBeforeSaving)
+{
+  ASSERT_NO_FATAL_FAILURE(open_panel("analysis_graph_edit_panel"));
+  ASSERT_NO_FATAL_FAILURE(select_node("component"));
+  ASSERT_NO_FATAL_FAILURE(choose("analysis_graph_add_type", "(stk.filter.slice@1)"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_graph_add_node"));
+  f.drv->frame();
+  const auto *nodes = widget("graph_node_select"); ASSERT_NE(nodes, nullptr);
+  ASSERT_GE(nodes->index.value(), 0);
+  EXPECT_EQ(nodes->items[size_t(nodes->index.value())].rfind("slice / ", 0), 0u);  // the new node is selected
+  EXPECT_TRUE(shows("Unsaved candidate"));
+  EXPECT_TRUE(shows("Added node slice (stk.filter.slice@1)"));
+  EXPECT_FALSE(save_enabled());  // a structural edit needs a passing check first
+  // Its required input is unconnected: the check says so and saving stays off.
+  ASSERT_NO_FATAL_FAILURE(validate("analysis_graph_validate"));
+  EXPECT_FALSE(save_enabled()) << issues("analysis_graph_issues").dump();
+  EXPECT_FALSE(issues("analysis_graph_issues").empty());
+  // Connect it; the candidate passes and is saved as one definition with a frozen layout.
+  ASSERT_NO_FATAL_FAILURE(link("slice", "in", "component.out"));
+  ASSERT_NO_FATAL_FAILURE(validate("analysis_graph_validate"));
+  ASSERT_TRUE(save_enabled()) << issues("analysis_graph_issues").dump();
+  ASSERT_NO_FATAL_FAILURE(save());
+  Json current;
+  ASSERT_NO_FATAL_FAILURE(read(current));
+  const auto &graph = current.at("analysis").at("document").at("graph");
+  const auto &added = graph.at("nodes").back();
+  EXPECT_EQ(added.at("id"), "slice");
+  EXPECT_EQ(added.at("inputs").at("in"), Json({{"from", "component.out"}}));
+  EXPECT_EQ(graph.at("ui").at("positions").size(), graph.at("nodes").size());  // every node keeps its place
+  EXPECT_FALSE(shows("Unsaved candidate"));
+}
+
+TEST_F(AnalysisLinksEditorPython, RemovingANodeDropsItsLinksListEntriesAndOutputs)
+{
+  ASSERT_NO_FATAL_FAILURE(open_panel("analysis_graph_edit_panel"));
+  ASSERT_NO_FATAL_FAILURE(select_node("png"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_graph_remove_node"));
+  ASSERT_NO_FATAL_FAILURE(select_node("bar"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_graph_remove_node"));
+  EXPECT_TRUE(shows("Removed node png")); EXPECT_TRUE(shows("Removed node bar"));
+  EXPECT_TRUE(shows("Withdrew graph output image"));
+  ASSERT_NO_FATAL_FAILURE(validate("analysis_graph_validate"));
+  ASSERT_TRUE(save_enabled()) << issues("analysis_graph_issues").dump();
+  ASSERT_NO_FATAL_FAILURE(save());
+  Json current;
+  ASSERT_NO_FATAL_FAILURE(read(current));
+  const auto &saved = current.at("analysis").at("document");
+  for (const auto &node : saved.at("graph").at("nodes")) { EXPECT_NE(node.at("id"), "png"); EXPECT_NE(node.at("id"), "bar"); }
+  EXPECT_FALSE(saved.at("graph").at("outputs").contains("image"));
+  EXPECT_EQ(saved.at("outputs"), Json::array({"view"}));
+  for (const auto &node : saved.at("graph").at("nodes")) {
+    if (node.at("id") != "scene") { continue; }
+    for (const auto &entry : node.at("inputs").at("layers")) { EXPECT_NE(entry.at("from"), "bar.layer"); }
+  }
+}
+
+TEST_F(AnalysisLinksEditorPython, ListInputsReorderAndDiscardingReturnsToTheSavedGraph)
+{
+  ASSERT_NO_FATAL_FAILURE(select_node("scene"));  // SetUp opened the Links panel
+  const auto *first = widget("analysis_link_list/scene/layers/down/0"); ASSERT_NE(first, nullptr);
+  const auto before = document.at("graph");
+  std::vector<std::string> layers;
+  for (const auto &node : before.at("nodes")) {
+    if (node.at("id") == "scene") { for (const auto &entry : node.at("inputs").at("layers")) { layers.push_back(entry.at("from")); } }
+  }
+  ASSERT_GE(layers.size(), 2u);
+  ASSERT_NO_FATAL_FAILURE(click("analysis_link_list/scene/layers/down/0"));
+  EXPECT_TRUE(shows("1. " + layers[1])); EXPECT_TRUE(shows("2. " + layers[0]));
+  EXPECT_TRUE(shows("Unsaved candidate"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_parameters_discard"));
+  f.drv->frame();
+  EXPECT_FALSE(shows("Unsaved candidate"));
+  ASSERT_NO_FATAL_FAILURE(select_node("scene"));
+  EXPECT_TRUE(shows("1. " + layers[0]));
+}
+
+TEST_F(AnalysisLinksEditorPython, ExposedOutputsCanBeRequestedAndWithdrawn)
+{
+  ASSERT_NO_FATAL_FAILURE(open_panel("analysis_graph_edit_panel"));
+  ASSERT_NO_FATAL_FAILURE(select_node("png"));
+  EXPECT_TRUE(shows("image is graph output image"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_graph_output/png.image/withdraw/image"));
+  EXPECT_TRUE(shows("Withdrew graph output image"));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_graph_output/png.image/expose"));
+  EXPECT_TRUE(shows("image is graph output png_image"));
+  ASSERT_NO_FATAL_FAILURE(validate("analysis_graph_validate"));
+  ASSERT_TRUE(save_enabled()) << issues("analysis_graph_issues").dump();
+  ASSERT_NO_FATAL_FAILURE(save());
+  Json current;
+  ASSERT_NO_FATAL_FAILURE(read(current));
+  const auto &outputs = current.at("analysis").at("document").at("graph").at("outputs");
+  EXPECT_FALSE(outputs.contains("image"));
+  EXPECT_EQ(outputs.at("png_image"), "png.image");
 }
 
 TEST_F(AnalysisLinksEditorPython, UnknownNodeTypesStayReadOnly)

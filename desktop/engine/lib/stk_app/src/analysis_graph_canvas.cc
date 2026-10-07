@@ -225,9 +225,10 @@ ui::DrawList AnalysisGraphCanvas::draw_list(double width, double height, double 
     const bool problem = node.cyclic || node.ambiguous_id || !node.known_type;
     const auto accent = node.cyclic || node.ambiguous_id ? ui::Color::rgb(0xCC7C7C) :
         !node.known_type ? ui::Color::rgb(0xD3AB70) : stage_color(node.stage);
-    const auto outline = chosen ? ui::Color::rgb(0xBBDCF2) : accent;
+    // Unsaved candidate changes are outlined in amber until saved or discarded.
+    const auto outline = chosen ? ui::Color::rgb(0xBBDCF2) : node.edited ? ui::Color::rgb(0xE8C46A) : accent;
     auto &body = draw.round_box(pixels(box), float(5 * scale), ui::CORNER_ALL, ui::Color::rgb(0x343C47), outline);
-    body.line_width = float((chosen ? 2 : 1) * ui_scale_);
+    body.line_width = float((chosen || node.edited ? 2 : 1) * ui_scale_);
     draw.round_box({float(box.x + scale), float(box.y + scale), float(std::max(0.0, box.width - 2 * scale)), float(34 * scale)},
                    float(4 * scale), ui::CORNER_TOP, ui::Color::rgb(0x424D5A), {0, 0, 0, 0});
     draw.clip_push(pixels({box.x - 4 * scale, box.y, box.width + 8 * scale, box.height}).intersect(clip));

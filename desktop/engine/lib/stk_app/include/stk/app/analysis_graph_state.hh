@@ -41,6 +41,8 @@ class AnalysisGraphState {
    * An already available Viewer catalog is reused. No redraw-driven retries after an error. */
   bool ensure_catalog();
   bool catalog_loading() const { return catalog_loading_; }
+  /** The node catalog document once read (null before). */
+  const io::Json &catalog() const { return catalog_; }
   const std::string &catalog_error() const { return catalog_error_; }
   Source source() const { return source_; }
   void show_displayed(bool displayed);

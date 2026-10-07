@@ -12,7 +12,8 @@
 无头 `stk`（[suan/scripting/headless.py](suan/scripting/headless.py)）、[Linux 快速上手](docs/quickstart-linux.md) 与文档站。
 **可用性开发包已全部交付（最终状态 `3fd0c17`，桌面 CI 5/5 通过）。所有者决定 AI 批量模拟闭环交给团队后续完成，
 当前进行 P3 工作流编辑（计划见[开发计划](docs/development-plan.md)“P3 工作流编辑”）：W1a 候选图模型已交付**
-（`AnalysisParameterDraft` 的 `graph()`/`graph_changes()` 与 `add_node`、`remove_node`、`set_links`、`set_node_param`、`move_nodes`、`set_graph_output`）；
+（`AnalysisParameterDraft` 的 `graph()`/`graph_changes()` 与 `add_node`、`remove_node`、`set_links`、`set_node_param`、`move_nodes`、`set_graph_output`），
+W1b 候选视图与“编辑图结构”面板已交付（`analysis_graph_editor.cc` 的 `shown_view()`、`graph_edit_panel()`、`list_input()`）；下一步 W1c 节点参数；
 之前为保存分析的单输入连线编辑（`3cbaa36`）与技能目录首版（`5a12d5a`、`df4729d`）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 
@@ -79,7 +80,7 @@ CLI `suan project sweep`；原生 `ProjectState::sweep` 先取计划再以同一
 可选输入可断开；多输入、未知类型、未声明端口、重复节点 ID、带别名/额外字段的连线保持只读并说明原因。
 含连线修改的草稿须点击“校验候选”，用 `graph.validate` 检查完整候选（图、参数、输出），通过后才能保存；
 保存用 `ProjectAnalyses::replace_definition` 按读取修订一次写入整个定义。只有参数/输出修改的草稿行为不变。
-用法见[保存分析指南](docs/project-analyses.md#编辑单输入连线)。
+用法见[保存分析指南](docs/project-analyses.md#编辑连线与图结构)。
 
 继续开发时须保留这些边界：
 

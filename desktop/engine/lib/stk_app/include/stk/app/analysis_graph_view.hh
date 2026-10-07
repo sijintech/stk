@@ -46,6 +46,8 @@ struct AnalysisGraphParameter {
 struct AnalysisGraphNode {
   std::string id, type, label, title_en, title_zh, stage;
   bool known_type = false, cyclic = false, ambiguous_id = false, supplied_position = false;
+  /** Set by an editor showing an unsaved candidate: the node is new or its inputs/params changed. */
+  bool edited = false;
   AnalysisGraphRect rect;
   std::vector<AnalysisGraphPort> inputs, outputs;
   std::vector<AnalysisGraphParameter> parameters;
