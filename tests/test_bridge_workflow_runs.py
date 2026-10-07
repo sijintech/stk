@@ -1,6 +1,8 @@
 """Workflow runs through the service: explicit start, rows in order, per-row values, retry, cancel, recover."""
 import json
+import os
 from pathlib import Path
+import socket
 import threading
 import time
 from uuid import uuid4
@@ -206,3 +208,45 @@ def test_the_real_volume_analysis_runs_on_the_synthetic_field(inproc, tmp_path):
     assert done["complete"], done["tasks"]
     result = store.analysis_runs.get(tasks(done)[("temperature", 1)]["produced"]["analysis_run_id"])
     assert result["status"] == "succeeded" and result["result"]["has_payload"]
+
+
+def test_a_run_owned_by_another_live_service_is_not_recovered_without_force(setup):
+    h, store, ids, handle, worker = setup
+    run = prepare(h, store, ids, handle, rows=[ids["rows"][0]])
+    other = str(uuid4())  # another service process on this computer that is still alive (our parent)
+    store.workflow_runs.start(run["id"], executor_id=other, owner={"host": socket.gethostname(), "pid": os.getppid()})
+    store.workflow_runs.begin_attempt(run["id"], "simulate", ids["rows"][0], executor_id=other)
+    error = h.error("project.workflow_runs.recover", {"handle": handle, "run_id": run["id"]})
+    assert error["code"] == "busy" and str(os.getppid()) in error["message"]
+    assert store.workflow_runs.get(run["id"])["tasks"][0]["status"] == "running"  # untouched
+    forced = h.call("project.workflow_runs.recover", {"handle": handle, "run_id": run["id"], "force": True})["run"]
+    assert forced["status"] == "stopped" and forced["tasks"][0]["status"] == "interrupted"
+
+
+def test_a_cancel_stored_by_another_process_stops_the_run_between_tasks(setup):
+    h, store, ids, handle, worker = setup
+    gate = threading.Event()
+    worker.gate = gate
+    run = prepare(h, store, ids, handle)
+    h.call("project.workflow_runs.start", {"handle": handle, "run_id": run["id"]})
+    deadline = time.monotonic() + 10
+    while not any(t["step"] == "measure" and t["status"] == "running" for t in store.workflow_runs.get(run["id"])["tasks"]):
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    store.workflow_runs.request_cancel(run["id"])  # written by another process: no in-memory signal here
+    gate.set()
+    stopped = settled(h, handle, run["id"])
+    assert tasks(stopped)[("simulate", 2)]["status"] == "pending" and stopped["stop_error"] is None
+
+
+def test_an_unexpected_executor_failure_is_recorded_on_the_run(setup, monkeypatch):
+    h, store, ids, handle, worker = setup
+    run = prepare(h, store, ids, handle)
+
+    def broken(plan):
+        raise KeyError("future_field")
+    monkeypatch.setattr(h.bridge.workflow_executor, "_needs", broken)
+    h.call("project.workflow_runs.start", {"handle": handle, "run_id": run["id"]})
+    stopped = settled(h, handle, run["id"])
+    assert stopped["stop_error"]["code"] == "executor_failed" and "future_field" in stopped["stop_error"]["message"]
+    assert not h.violations

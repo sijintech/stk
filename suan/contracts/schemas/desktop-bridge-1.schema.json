@@ -6069,7 +6069,7 @@
         }
       },
       "project.workflow_runs.recover": {
-        "description": "After a service restart, mark attempts no live executor owns as interrupted and stop the run so it can start again.",
+        "description": "After a service restart, mark attempts no live executor owns as interrupted and stop the run so it can start again. Refused (busy) while the run's recorded service process still exists, unless force.",
         "params": {
           "type": "object",
           "properties": {
@@ -6078,6 +6078,9 @@
             },
             "run_id": {
               "$ref": "#/$defs/projectUuid"
+            },
+            "force": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -11720,6 +11723,55 @@
         },
         "complete": {
           "type": "boolean"
+        },
+        "owner": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "host": {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                "pid": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "host",
+                "pid"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop_error": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "message": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -11742,7 +11794,9 @@
         "executor_id",
         "tasks",
         "counts",
-        "complete"
+        "complete",
+        "owner",
+        "stop_error"
       ],
       "additionalProperties": false,
       "description": "A frozen per-row workflow run (project format 10) and its state: one task per row x executed step in row order, each the latest numbered attempt. steps/parameters hold the frozen per-step plan (analysis documents and hashes, template ids, snapshot files) and per-row values."

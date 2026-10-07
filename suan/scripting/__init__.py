@@ -429,9 +429,13 @@ class ProjectWorkflowRuns:
     def cancel(self, run_id):
         return self._call("project.workflow_runs.cancel", {"handle": self.handle, "run_id": run_id})["run"]
 
-    def recover(self, run_id):
-        """After a service restart: mark attempts nobody executes as interrupted so the run can start again."""
-        return self._call("project.workflow_runs.recover", {"handle": self.handle, "run_id": run_id})["run"]
+    def recover(self, run_id, *, force=False):
+        """After a service restart: mark attempts nobody executes as interrupted so the run can start again.
+        Refused while the recorded service process still exists, unless ``force``."""
+        params = {"handle": self.handle, "run_id": run_id}
+        if force:
+            params["force"] = True
+        return self._call("project.workflow_runs.recover", params)["run"]
 
     def stale(self, run_id):
         """Rows whose results no longer match the current definitions, with reasons per step (read-only).

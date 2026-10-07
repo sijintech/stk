@@ -255,6 +255,8 @@ class ProjectSessions:
                 return runs.stale(params["run_id"])
             if self._workflow_executor is None:
                 raise BridgeError("unsupported", "No local workflow executor is installed")
+            if action == "recover":
+                return {"run": self._workflow_executor.recover(store, params["run_id"], force=params.get("force", False))}
             return {"run": getattr(self._workflow_executor, action)(store, params["run_id"])}
 
     def analysis_runs(self, action, params):

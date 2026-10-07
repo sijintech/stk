@@ -1013,6 +1013,9 @@ class WorkflowEditor final : public Editor {
     if (!outdated.empty()) {
       panel.paragraph(catalog.format("workflow.run.stale_summary", {{"count", std::to_string(outdated.size())}}));
     }
+    if (const auto &stopped = member(run, "stop_error"); stopped.is_object()) {
+      panel.paragraph(catalog.format("workflow.run.stopped_error", {{"message", clipped(io::get_string(stopped, "message"), 300)}}));
+    }
     ui::TableSpec spec;
     spec.columns = {{std::string(ctx.tr("workflow.run.row_column")), 4}};
     for (const auto &step : order) { spec.columns.push_back({step.get<std::string>(), 6}); }

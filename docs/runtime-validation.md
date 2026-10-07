@@ -2,7 +2,13 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
-## 2026-10-07：P3 W4c 过期与按行重算
+## 2026-10-07：W4 复查补丁（另一服务进程持有的运行）
+
+- 后台服务测试 3 项：同机仍存活的另一服务进程持有的运行，`recover` 以 `busy` 拒绝且任务不变，`force` 后中断；
+  另一进程写入的取消请求使执行器在任务之间停止；执行器意外异常记录为运行的 `stop_error`（`executor_failed`）。
+- 完整 pytest（`-m "not perf"`）**2258 passed、24 skipped**；重新编译后完整 Linux CTest **1239/1239**。
+- CI：W4a-2 `6049fea` 的 desktop、Runtime、Secret scan、Cloudflare Pages 全部通过；W4b `47507b8`、W4c `3a3bd22` 与本补丁同次推送，由最后一次的 desktop 运行覆盖。
+
 
 - Python 1 项：未改动时无过期；改一行温度只该行过期（`value_changed` 325→330，下游 `upstream_changed`）；改分析使各行分析步骤过期；
   只改步骤名称不算过期，改步骤参数为 `step_changed`；删除行为 `row_removed`；运行本身不变。

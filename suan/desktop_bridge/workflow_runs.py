@@ -10,8 +10,10 @@ refusing if the saved analysis changed after the workflow run was frozen, and ex
 the local analysis executor. A failed task stops only its row. Starting again (retry) runs the tasks
 that have not succeeded. Nothing here calls a model or contacts a Runtime.
 """
+import logging
 import os
 from pathlib import Path
+import socket
 import threading
 import time
 from uuid import uuid4
@@ -28,6 +30,24 @@ _EDIT_RETRIES = 8
 
 class _Cancelled(Exception):
     pass
+
+
+def _owner_alive(owner):
+    """Whether the service process recorded as a run's owner may still be running (same host, pid exists)."""
+    if not owner:
+        return False
+    if owner.get("host") != socket.gethostname():
+        return True  # cannot tell from here: assume it runs
+    pid = owner.get("pid")
+    if pid == os.getpid():
+        return False  # this process: its live jobs are known to the executor
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return True
+    return True
 
 
 class _Job:
@@ -73,7 +93,8 @@ class WorkflowRunExecutor:
                 return store.workflow_runs.get(run_id)
             if len(self._jobs) >= MAX_ACTIVE_RUNS:
                 raise BridgeError("busy", "The local executor has reached its 4-workflow-run limit")
-            record = store.workflow_runs.start(run_id, executor_id=self.executor_id)
+            record = store.workflow_runs.start(run_id, executor_id=self.executor_id,
+                                               owner={"host": socket.gethostname(), "pid": os.getpid()})
             job = _Job(store, run_id)
             job.thread = threading.Thread(target=self._run, args=(job,), daemon=True, name="stk-workflow-" + run_id)
             self._jobs[key] = job
@@ -99,11 +120,19 @@ class WorkflowRunExecutor:
                         pass
             return record
 
-    def recover(self, store, run_id):
-        """After a service restart: attempts no live executor owns become interrupted and the run stops."""
+    def recover(self, store, run_id, *, force=False):
+        """After a service restart: attempts no live executor owns become interrupted and the run stops.
+        A run whose recorded service process still exists (another desktop or a headless session) is
+        refused unless ``force``: interrupting it would orphan attempts that are still being written."""
         with self._lock:
             if self._key(store, run_id) in self._jobs:
                 return store.workflow_runs.get(run_id)
+            run = store.workflow_runs.get(run_id)
+            if (not force and run["status"] in ("running", "cancel_requested")
+                    and run["executor_id"] != self.executor_id and _owner_alive(run.get("owner"))):
+                owner = run["owner"]
+                raise BridgeError("busy", f"Another STK service (pid {owner.get('pid')} on {owner.get('host')}) may still be "
+                                          "running this workflow run; cancel it there, or recover once it has stopped")
             return store.workflow_runs.interrupt(run_id)
 
     def active(self, store, run_id):
@@ -135,6 +164,7 @@ class WorkflowRunExecutor:
 
     def _run(self, job):
         store, runs = job.store, job.store.workflow_runs
+        failure = None
         try:
             plan = runs.get(job.run_id)
             needs = self._needs(plan)
@@ -143,17 +173,20 @@ class WorkflowRunExecutor:
                     if job.cancel.is_set() or self._closing.is_set():
                         return
                     state = runs.get(job.run_id)
+                    if state["status"] == "cancel_requested":
+                        return  # requested here or by another service process sharing the project
                     tasks = {(t["step"], t["row"]): t for t in state["tasks"]}
                     if tasks[(step, row["id"])]["status"] == "succeeded":
                         continue
                     if any(tasks[(before, row["id"])]["status"] != "succeeded" for before in needs[step]):
                         continue  # an earlier step of this row did not succeed: leave this one pending
                     self._attempt(job, plan, step, row, tasks)
-        except Exception:  # noqa: BLE001 - the run must stop and stay readable whatever went wrong
-            pass
+        except Exception as error:  # noqa: BLE001 - the run must stop and stay readable whatever went wrong
+            logging.getLogger(__name__).exception("Workflow run %s stopped unexpectedly", job.run_id)
+            failure = {"code": "executor_failed", "message": f"{type(error).__name__}: {error}"[:2000]}
         finally:
             try:
-                runs.stop(job.run_id, executor_id=self.executor_id)
+                runs.stop(job.run_id, executor_id=self.executor_id, error=failure)
             except (ProjectError, BridgeError):
                 pass
             with self._lock:

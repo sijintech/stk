@@ -644,7 +644,9 @@ captured as that row's snapshot (ordinary undoable edits, announced with `projec
 and executes one analysis run with the row's `parameter_overrides`, refused when the saved analysis changed since the
 workflow run was frozen. A failed task stops only its row; starting a stopped run again retries the tasks that did not
 succeed with new numbered attempts, and only the latest attempt can finish a task. `cancel` stops after the current task
-and cancels an analysis in flight; `recover` marks attempts without a live executor (after a restart) as interrupted.
+and cancels an analysis in flight, also when another service process owns the run (it stops between tasks); `recover`
+marks attempts without a live executor (after a restart) as interrupted, refused with `busy` while the run's recorded
+service process (`owner`: host and pid) still exists unless `force`. A run that stopped unexpectedly reports `stop_error`.
 Tasks report `{step, row, attempt, status, produced, error, updated_at}`; nothing runs implicitly or calls a model.
 `stale` compares the frozen plan with the current definitions per executed step and row: `step_changed` (labels
 aside), `analysis_changed`/`analysis_missing`, `template_unavailable`, `value_changed` (a field the step takes from the

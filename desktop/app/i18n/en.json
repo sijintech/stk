@@ -1758,7 +1758,7 @@
   "workflow.run.retry": "Retry unfinished tasks",
   "workflow.run.cancel": "Cancel run",
   "workflow.run.recover": "Recover interrupted run",
-  "workflow.run.recover.tip": "After the Python service restarted, marks attempts nobody executes as interrupted so they can be retried; a run still in progress is left alone.",
+  "workflow.run.recover.tip": "After the Python service restarted, marks attempts nobody executes as interrupted so they can be retried. Refused while another STK service (for example a headless session) still runs it; cancel it there.",
   "workflow.template.demo_synthetic_1": "Synthetic demo solver",
   "workflow.template.muferro_1": "MuFerro",
   "workflow.run.stale_mark": "stale",
@@ -1773,5 +1773,6 @@
   "workflow.run.reason.template_unavailable": "{step}: the template is no longer available",
   "workflow.run.reason.row_removed": "{step}: the row was deleted",
   "workflow.run.reason.workflow_missing": "{step}: the workflow is gone or unreadable",
-  "workflow.run.reason.upstream_changed": "{step}: upstream step {upstream} is stale"
+  "workflow.run.reason.upstream_changed": "{step}: upstream step {upstream} is stale",
+  "workflow.run.stopped_error": "The run stopped unexpectedly: {message}. Retrying the unfinished tasks is possible."
 }

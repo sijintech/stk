@@ -260,7 +260,9 @@ class WorkflowRuns:
         last = run_events[-1] if run_events else {"status": "prepared"}
         status = {"prepared": "prepared", "started": "running", "cancel_requested": "cancel_requested",
                   "stopped": "stopped"}[last["status"]]
-        executor = next((event.get("executor_id") for event in reversed(run_events) if event["status"] == "started"), None)
+        started = next((event for event in reversed(run_events) if event["status"] == "started"), {})
+        executor = started.get("executor_id")
+        stop_error = last.get("error") if last["status"] == "stopped" else None
         tasks = {}
         for event in events:
             if event["step"] == "":
@@ -279,7 +281,9 @@ class WorkflowRuns:
         for task in listed:
             counts[task["status"]] = counts.get(task["status"], 0) + 1
         return {"status": status, "executor_id": executor if status in ("running", "cancel_requested") else None,
-                "tasks": listed, "counts": counts, "complete": counts.get("succeeded", 0) == len(listed)}
+                "owner": started.get("owner") if status in ("running", "cancel_requested") else None,
+                "stop_error": stop_error, "tasks": listed, "counts": counts,
+                "complete": counts.get("succeeded", 0) == len(listed)}
 
     def get(self, run_id):
         with self.store._connect() as db:
@@ -398,8 +402,9 @@ class WorkflowRuns:
 
     # ---- execution bookkeeping (used by the explicit executor) ----
 
-    def start(self, run_id, *, executor_id):
-        """Claim a prepared or stopped run for one executor; a running run is refused (see interrupt)."""
+    def start(self, run_id, *, executor_id, owner=None):
+        """Claim a prepared or stopped run for one executor; a running run is refused (see interrupt).
+        ``owner`` ({host, pid}) identifies the service process, so another one can tell whether it still runs."""
         _id(executor_id)
         with self.store._connect(write=True) as db:
             plan, events = self._read(db, run_id)
@@ -408,7 +413,10 @@ class WorkflowRuns:
                 raise RevisionConflict("This workflow run already has an executor")
             if state["complete"]:
                 raise ProjectError("Every task of this workflow run has succeeded")
-            self._append(db, run_id, "", "", 0, "started", {"at": _now(), "executor_id": executor_id})
+            payload = {"at": _now(), "executor_id": executor_id}
+            if owner is not None:
+                payload["owner"] = {"host": str(owner["host"])[:255], "pid": int(owner["pid"])}
+            self._append(db, run_id, "", "", 0, "started", payload)
         return self.get(run_id)
 
     def request_cancel(self, run_id):
@@ -418,13 +426,15 @@ class WorkflowRuns:
                 self._append(db, run_id, "", "", 0, "cancel_requested", {"at": _now()})
         return self.get(run_id)
 
-    def stop(self, run_id, *, executor_id):
+    def stop(self, run_id, *, executor_id, error=None):
+        """Release the run; ``error`` says why it stopped unexpectedly (shown with the run)."""
+        error = _error(error)
         with self.store._connect(write=True) as db:
             plan, events = self._read(db, run_id)
             state = self._state(plan, events)
             if state["status"] not in ("running", "cancel_requested") or state["executor_id"] != executor_id:
                 raise RevisionConflict("This executor does not own the workflow run")
-            self._append(db, run_id, "", "", 0, "stopped", {"at": _now(), "executor_id": executor_id})
+            self._append(db, run_id, "", "", 0, "stopped", {"at": _now(), "executor_id": executor_id, "error": error})
         return self.get(run_id)
 
     def begin_attempt(self, run_id, step, row, *, executor_id):
