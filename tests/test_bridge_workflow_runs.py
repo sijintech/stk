@@ -223,6 +223,21 @@ def test_a_run_owned_by_another_live_service_is_not_recovered_without_force(setu
     assert forced["status"] == "stopped" and forced["tasks"][0]["status"] == "interrupted"
 
 
+def test_owner_liveness_never_signals_the_process():
+    # os.kill(pid, 0) would send CTRL_C_EVENT on Windows; the check must only look.
+    import subprocess
+    import sys
+    from suan.desktop_bridge.workflow_runs import _owner_alive
+    host = socket.gethostname()
+    child = subprocess.Popen([sys.executable, "-c", "pass"])  # noqa: S603
+    child.wait()
+    assert _owner_alive({"host": host, "pid": child.pid}) is False
+    assert _owner_alive({"host": host, "pid": os.getppid()}) is True
+    assert _owner_alive({"host": host, "pid": os.getpid()}) is False  # its own jobs are known
+    assert _owner_alive({"host": host + "-elsewhere", "pid": 1}) is True  # cannot tell
+    assert _owner_alive({"host": host, "pid": "1"}) is True and _owner_alive(None) is False
+
+
 def test_a_cancel_stored_by_another_process_stops_the_run_between_tasks(setup):
     h, store, ids, handle, worker = setup
     gate = threading.Event()

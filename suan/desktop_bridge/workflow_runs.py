@@ -39,15 +39,26 @@ def _owner_alive(owner):
     if owner.get("host") != socket.gethostname():
         return True  # cannot tell from here: assume it runs
     pid = owner.get("pid")
+    if type(pid) is not int or pid <= 0:
+        return True  # unreadable: assume it runs (recover can still be forced)
     if pid == os.getpid():
         return False  # this process: its live jobs are known to the executor
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except (PermissionError, OSError):
+        import psutil  # a base dependency
+    except ImportError:  # pragma: no cover
+        if os.name == "nt":
+            return True  # os.kill(pid, 0) would send CTRL_C_EVENT on Windows
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
         return True
-    return True
+    try:
+        return psutil.pid_exists(pid)
+    except Exception:  # noqa: BLE001 - when in doubt, the run is not recovered implicitly
+        return True
 
 
 class _Job:

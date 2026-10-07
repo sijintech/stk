@@ -568,9 +568,8 @@ TEST_F(WorkflowEditorPython, CanvasGesturesRefuseMismatchedTypesOrderStepsAndMov
   f.drv->drag(x0, y0, x0, y0 + 90, 6);
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
   ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
-  for (int i = 0; i < 200 && !(widget("workflow_list") && widget("workflow_list")->enabled); ++i) {
-    loop.run_ready(); f.screen.run_deferred(); f.drv->frame();
-  }
+  // Waits for the bridge's replies (a fixed number of frames is too short on slow runners).
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
   ASSERT_TRUE(widget("workflow_list") && widget("workflow_list")->enabled) << sidebar();
   const auto saved = stored().at("document");
   EXPECT_EQ(saved.at("steps")[1].at("after"), Json::array({"cases", "temperature"}));
@@ -665,9 +664,8 @@ TEST_F(WorkflowEditorPython, RunPanelRunsChosenRowsAndOpensTheirAnalysisRuns)
   ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id}, {"name", "Temperature scan"},
       {"document", runnable}, {"expected_revision", revision}}, out));
   project().refresh();
-  for (int i = 0; i < 300 && !(widget("workflow_run_start") && widget("workflow_run_start")->enabled); ++i) {
-    loop.run_ready(); f.screen.run_deferred(); f.drv->frame();
-  }
+  // Waits for the bridge's replies (a fixed number of frames is too short on slow runners).
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_run_start") && widget("workflow_run_start")->enabled; }));
   ASSERT_TRUE(widget("workflow_run_start") && widget("workflow_run_start")->enabled) << sidebar();
   EXPECT_EQ(widget("workflow_run_start")->text, "Run the 2 selected rows");
   ASSERT_NE(widget("workflow_run_row/2"), nullptr);
@@ -705,9 +703,8 @@ TEST_F(WorkflowEditorPython, ChangedValuesMarkRowsStaleAndOnlyThoseRunAgain)
   ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id}, {"name", "Temperature scan"},
       {"document", runnable}, {"expected_revision", revision}}, out));
   project().refresh();
-  for (int i = 0; i < 300 && !(widget("workflow_run_start") && widget("workflow_run_start")->enabled); ++i) {
-    loop.run_ready(); f.screen.run_deferred(); f.drv->frame();
-  }
+  // Waits for the bridge's replies (a fixed number of frames is too short on slow runners).
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_run_start") && widget("workflow_run_start")->enabled; }));
   ASSERT_NO_FATAL_FAILURE(click("workflow_run_start"));
   ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return shows("All done · 2/2 done"); }, 60)) << sidebar();
   // The second row's temperature changes: only that row is stale, with the reason, and it alone runs again.
@@ -720,9 +717,8 @@ TEST_F(WorkflowEditorPython, ChangedValuesMarkRowsStaleAndOnlyThoseRunAgain)
   EXPECT_EQ(grid->table->cell(0, 0), "1"); EXPECT_EQ(grid->table->cell(1, 0), "2 · stale");
   grid->table->selected.assign(1); f.drv->frame();
   EXPECT_TRUE(shows("simulate: T 340 → 345")) << sidebar();
-  for (int i = 0; i < 300 && !(widget("workflow_run_stale") && widget("workflow_run_stale")->enabled); ++i) {
-    loop.run_ready(); f.screen.run_deferred(); f.drv->frame();
-  }
+  // Waits for the bridge's replies (a fixed number of frames is too short on slow runners).
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_run_stale") && widget("workflow_run_stale")->enabled; }));
   ASSERT_NO_FATAL_FAILURE(click("workflow_run_stale"));
   ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return shows("All done · 1/1 done"); }, 60)) << sidebar();
   EXPECT_EQ(calls("project.workflow_runs.prepare"), 2u);
