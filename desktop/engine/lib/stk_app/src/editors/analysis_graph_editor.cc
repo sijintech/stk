@@ -1356,8 +1356,16 @@ class AnalysisGraphEditor final : public Editor {
       document_epoch_ = documents_->epoch(); document_name_.clear();
       state_->clear_document();
     }
+    if (pending_open_) {
+      // A request that can no longer apply is dropped with its way back: the project it came from closed,
+      // or edits started here before the read (they are never replaced).
+      const auto &open = ctx.store.project().project();
+      if (parameter_edits() || (breadcrumb_ && (!open || open->handle != breadcrumb_->handle))) {
+        pending_open_.reset(); breadcrumb_.reset();
+      }
+    }
     if (pending_open_ && documents_->supported() && !documents_->busy() && !documents_->uncertain() &&
-        !parameter_edits() && documents_->load(*pending_open_)) {
+        documents_->load(*pending_open_)) {
       pending_open_.reset();
       document_navigation_ = navigation_generation_;
     }

@@ -193,15 +193,16 @@ class WorkflowEditorPython : public ::testing::Test {
     client = bridge::Client::create(options); ASSERT_TRUE(client->start()); ASSERT_TRUE(client->wait_ready(60));
     loop.run_ready(); store().set_bridge(client.get()); project().sync();
     store().viewer().set_auto_evaluate(false); store().viewer().prefetch_neighbours = false;
-    const auto root = directory.str() + "/project";
+    const auto root = core::path_to_utf8(directory.path() / "project");
     ASSERT_TRUE(project().create(root, "Workflow navigation"));
     ASSERT_TRUE(loop.pump_until([&] { return project().loaded() && !project().busy(); }, 30));
     Json out;
     ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", 0}, {"commands", {
         {{"op", "create_table"}, {"id", table_id}, {"name", "Cases"}}}}}, out));
-    { std::ofstream file(fs::path(root) / "field.vtk"); file << "not read\n"; }
+    const auto field = directory.path() / "project" / "field.vtk";  // native separators on every platform
+    { std::ofstream file(field); file << "not read\n"; }
     ASSERT_NO_FATAL_FAILURE(call("project.files.index", {{"handle", handle()}, {"expected_revision", revision},
-        {"paths", {root + "/field.vtk"}}}, out));
+        {"paths", {core::path_to_utf8(field)}}}, out));
     const auto record = out.at("record_ids").at(0).get<std::string>();
     ASSERT_NO_FATAL_FAILURE(call("project.snapshots.capture", {{"handle", handle()}, {"expected_revision", revision},
         {"record_ids", {record}}}, out));
@@ -334,6 +335,25 @@ TEST_F(WorkflowEditorPython, MissingReferencesAreListedAndTheBreadcrumbEndsWithT
   ASSERT_TRUE(project().close());
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
   EXPECT_EQ(widget("analysis_breadcrumb_workflow"), nullptr);
+}
+
+TEST_F(WorkflowEditorPython, ClosingTheProjectBeforeTheAnalysisIsReadLeavesNoWayBack)
+{
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  const auto reads = calls("project.analyses.get");
+  const auto *enter = widget("workflow_enter_analysis"); ASSERT_TRUE(enter && enter->enabled);
+  enter->on_click(); f.screen.run_deferred();  // accepted; the analysis is read on the next frame
+  ASSERT_EQ(area().editor().type().id, kEditorAnalysisGraph);
+  ASSERT_TRUE(project().close());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
+  f.drv->frame();
+  EXPECT_EQ(widget("analysis_breadcrumb_workflow"), nullptr);
+  // The next project never receives the old request.
+  ASSERT_TRUE(project().create(core::path_to_utf8(directory.path() / "next"), "Next project"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().loaded() && !project().busy(); }));
+  for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
+  EXPECT_EQ(widget("analysis_breadcrumb_workflow"), nullptr);
+  EXPECT_EQ(calls("project.analyses.get"), reads);
 }
 
 }  // namespace
