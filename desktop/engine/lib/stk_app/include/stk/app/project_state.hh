@@ -10,6 +10,10 @@ class AppStore;
 class ProjectDiscussion;
 
 /** Shared table data. Views select by UUID, never by the sorted display row. */
+/** The newest project format the Python service creates; older projects are offered an explicit,
+ * backup-first upgrade (suan/project/store.py FORMAT_VERSION). */
+inline constexpr int kProjectFormatVersion = 10;
+
 struct ProjectField {
   std::string id, name, type, unit;
 };

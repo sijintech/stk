@@ -549,7 +549,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.workflows.get` | `{handle, workflow_id}` | `{revision, table_id, compatible, error, workflow: workflowSummary + {document}}` |
 | `project.workflows.validate` | `{handle, document}` | `{revision, ok, issues, omitted_issues, steps: [workflowStepSummary]}` |
 | `project.workflows.choices` | `{handle}` | `{revision, tables, omitted_tables, snapshots, analyses, templates}` |
-| `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision}` | `{run: analysisRun}` |
+| `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
 | `project.analysis_runs.result` | `{handle, run_id}` | `{run: analysisRun, result: graphResult, blob_dir: absolute-local-path}` |
@@ -621,7 +621,13 @@ Literal parameter values are checked by graph validation when a run is prepared,
 `project.workflows.choices` lists what a step can reference at the current revision, for editors: parameter tables
 `{id, name}` (never the managed analysis, workflow or file-index tables; at most 500, then `omitted_tables`), input
 snapshots `{id, created_at, file_count}` newest first (at most 200), readable saved analyses `{id, name}` and
-registered simulation templates `{id, name, table_id}`. It reads only and creates nothing.
+registered simulation templates `{id, name, table_id}` (`table_id` null: rows of any parameter table, as for the
+local `demo-synthetic/1`). It reads only and creates nothing. A simulation step's summary lists its template's
+declared parameters, which bind like an analysis's (`$field` type and unit checks; undeclared names are `unknown_parameter`).
+
+Optional `parameter_overrides` (1–64 declared graph parameter names, at most 64 KiB) set values for this run only,
+for example a workflow row's: they are frozen in the plan as `parameter_overrides` and evaluated over the frozen
+document's submitted parameters, which stay the saved analysis verbatim; they are part of the request identity.
 
 The optional `project.analysis_runs.*` methods require project format 9, with an explicit backup-first
 upgrade for older projects. They add an immutable analysis plan and an append-only execution journal,

@@ -17,6 +17,7 @@ import threading
 import time
 from uuid import uuid4
 
+from suan.project.analysis_runs import effective_parameters
 from suan.project.snapshots import _reader, _signature, _sync_directory
 from suan.project.store import ProjectError, _id
 from .protocol import BridgeError
@@ -397,7 +398,7 @@ class AnalysisRunExecutor:
             observer.start()
             stage, local = self._stage(job)
             frozen = job.run["document"]
-            work = {"request": {"graph": frozen["graph"], "parameters": frozen["parameters"],
+            work = {"request": {"graph": frozen["graph"], "parameters": effective_parameters(job.run),
                                  "outputs": frozen["outputs"], "profile": job.run["profile"],
                                  "budget": job.run["budget"]}, "local_bindings": local}
             _check(job.cancel)

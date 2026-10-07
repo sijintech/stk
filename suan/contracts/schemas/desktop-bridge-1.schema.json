@@ -2713,7 +2713,8 @@
                                 5,
                                 6,
                                 7,
-                                8
+                                8,
+                                9
                               ]
                             },
                             "to_version": {
@@ -2725,7 +2726,8 @@
                                 6,
                                 7,
                                 8,
-                                9
+                                9,
+                                10
                               ]
                             }
                           },
@@ -5894,6 +5896,15 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9223372036854775807
+            },
+            "parameter_overrides": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 64,
+              "propertyNames": {
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              "description": "Values for declared graph parameters for this run only (for example a workflow row's values); frozen with the plan. Storage bounds them to 64 KiB."
             }
           },
           "required": [
@@ -9788,6 +9799,12 @@
           ],
           "additionalProperties": false
         },
+        "parameter_overrides": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "description": "Present only when the run was prepared with per-run parameter values; evaluated over the frozen document's parameters."
+        },
         "plan_sha256": {
           "$ref": "#/$defs/sha256"
         },
@@ -11230,7 +11247,14 @@
                 "maxLength": 256
               },
               "table_id": {
-                "$ref": "#/$defs/projectUuid"
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -11251,7 +11275,7 @@
         "templates"
       ],
       "additionalProperties": false,
-      "description": "What a workflow step can reference at this revision: parameter tables (not the managed analysis, workflow or file-index tables; at most 500, then omitted_tables), input snapshots newest first (at most 200), readable saved analyses and registered simulation templates."
+      "description": "What a workflow step can reference at this revision: parameter tables (not the managed analysis, workflow or file-index tables; at most 500, then omitted_tables), input snapshots newest first (at most 200), readable saved analyses and registered simulation templates (table_id null: rows of any parameter table; local templates such as demo-synthetic/1 run on this computer)."
     }
   }
 }

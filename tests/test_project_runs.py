@@ -124,6 +124,8 @@ def test_format_four_upgrade_keeps_snapshots_and_preupgrade_backup(model):
     file_id = store.files.index([str(path)], expected_revision=1)["record_ids"][0]
     snapshot = store.snapshots.capture([file_id], expected_revision=2)["snapshot"]
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE IF EXISTS workflow_run_events")
+        db.execute("DROP TABLE IF EXISTS workflow_run_plans")
         db.execute("DROP TABLE IF EXISTS analysis_run_events")
         db.execute("DROP TABLE IF EXISTS analysis_run_plans")
         db.execute("DROP TABLE IF EXISTS project_requests")

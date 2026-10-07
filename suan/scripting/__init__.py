@@ -408,12 +408,14 @@ class ProjectAnalysisRuns:
     def __init__(self, call, handle):
         self._call, self.handle = call, handle
 
-    def prepare(self, analysis_id, snapshot_id, bindings, *, run_id, expected_revision):
-        """Freeze an explicit file-snapshot mapping at this revision, without executing nodes."""
-        return self._call("project.analysis_runs.prepare", {
-            "handle": self.handle, "analysis_id": analysis_id, "snapshot_id": snapshot_id,
-            "bindings": bindings, "run_id": run_id, "expected_revision": expected_revision,
-        })["run"]
+    def prepare(self, analysis_id, snapshot_id, bindings, *, run_id, expected_revision, parameter_overrides=None):
+        """Freeze an explicit file-snapshot mapping at this revision, without executing nodes.
+        ``parameter_overrides`` sets declared graph parameters for this run only (frozen with it)."""
+        params = {"handle": self.handle, "analysis_id": analysis_id, "snapshot_id": snapshot_id,
+                  "bindings": bindings, "run_id": run_id, "expected_revision": expected_revision}
+        if parameter_overrides:
+            params["parameter_overrides"] = parameter_overrides
+        return self._call("project.analysis_runs.prepare", params)["run"]
 
     def get(self, run_id):
         return self._call("project.analysis_runs.get", {"handle": self.handle, "run_id": run_id})["run"]

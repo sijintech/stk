@@ -20,7 +20,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 9
+FORMAT_VERSION = 10
 DATABASE_NAME = "project.sqlite3"
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
@@ -132,6 +132,21 @@ _DDL_V9 = (
     "CREATE INDEX analysis_run_events_by_run ON analysis_run_events(run_id, id)",
 )
 
+_DDL_V10 = (
+    """CREATE TABLE workflow_run_plans (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id), workflow_id TEXT NOT NULL,
+        payload TEXT NOT NULL, request_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL)""",
+    """CREATE TABLE workflow_run_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL REFERENCES workflow_run_plans(id),
+        step TEXT NOT NULL, row TEXT NOT NULL, attempt INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK(status IN
+            ('prepared','started','cancel_requested','stopped',
+             'running','succeeded','failed','cancelled','interrupted')),
+        payload TEXT NOT NULL, previous_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL)""",
+    "CREATE INDEX workflow_run_events_by_run ON workflow_run_events(run_id, id)",
+)
+
 
 class ProjectError(ValueError):
     """Invalid project, unsupported format or rejected mutation."""
@@ -233,7 +248,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -303,6 +318,11 @@ class ProjectStore:
     def workflows(self):
         from .workflows import Workflows
         return Workflows(self)
+
+    @property
+    def workflow_runs(self):
+        from .workflow_runs import WorkflowRuns
+        return WorkflowRuns(self)
 
     @property
     def snapshots(self):
@@ -399,7 +419,8 @@ class ProjectStore:
                     raise ProjectError("Project changed while preparing the migration backup")
                 backup = self._backup(source)
             for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5),
-                                               (5, _DDL_V6), (6, _DDL_V7), (7, _DDL_V8), (8, _DDL_V9)):
+                                               (5, _DDL_V6), (6, _DDL_V7), (7, _DDL_V8), (8, _DDL_V9),
+                                               (9, _DDL_V10)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)

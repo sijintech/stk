@@ -1,4 +1,6 @@
 """Explicitly registered, versioned workflow templates. Project data never imports code."""
+import math
+
 from . import muferro
 from suan.runtime.models import TaskSpec
 from suan.mupro.spec import muferro_spec
@@ -34,6 +36,35 @@ class MuFerroTemplate:
 
 
 TEMPLATES = {MuFerroTemplate.id: MuFerroTemplate()}
+
+
+class DemoSyntheticTemplate:
+    """The example project's synthetic solver as a local workflow step (no Runtime, not physics).
+
+    Workflow runs execute it on this computer for each row: ``temperature`` (K) scales a smooth 3D
+    field written as ``field.vtk`` plus ``metrics.json``. Batches cannot prepare it, so it is not in
+    TEMPLATES (``stk.batches.templates()``)."""
+    id = "demo-synthetic/1"
+    name = "Synthetic demo solver"
+    table_id = None  # rows of any parameter table
+    local = True
+    parameters = [{"name": "temperature", "type": "number", "unit": "K", "label": "Temperature", "default": 300}]
+    outputs = ["field.vtk", "metrics.json"]
+
+    def run(self, parameters, directory):
+        from .demo import synthetic_field
+        temperature = parameters.get("temperature")
+        if type(temperature) not in (int, float) or not math.isfinite(temperature) or not 0 < temperature <= 1e6:
+            raise ValueError("The synthetic solver needs a finite positive temperature in K")
+        return synthetic_field(temperature, directory)
+
+
+LOCAL_TEMPLATES = {DemoSyntheticTemplate.id: DemoSyntheticTemplate()}
+
+
+def workflow_templates():
+    """Every template a workflow step can name: batch templates and local ones."""
+    return {**TEMPLATES, **LOCAL_TEMPLATES}
 
 
 def template(identity):

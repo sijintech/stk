@@ -14,6 +14,7 @@ Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科�
 格式 7 增加明确选行、选列的[上下文快照与讨论记录](project-contexts.md)，并可记录消息与草案的来源关联；文字不执行操作。
 格式 8 增加[请求记录](project-requests.md)，固定输入来源并保存执行观察；阿里 Token Plan 可由用户明确发起文字请求。
 格式 9 增加[分析执行记录](project-analysis-runs.md)，冻结分析定义与输入快照映射，明确运行后归档校验过的结果。
+格式 10 增加[工作流按行运行](design/workflow-runs.md)的冻结计划与尝试记录（实验，执行与界面开发中）。
 
 表格超出面板宽度时，可以拖动底部横向滚动条、使用触控板横向滚动，或按住 Shift 滚动鼠标滚轮。
 列标题和数据一起移动；滚动后仍可点击列标题排序或拖动列边界调整宽度。
@@ -202,13 +203,14 @@ assert store.snapshot()["tables"][0]["records"][0]["values"][derived] == 310
 
 ## 数据库备份与显式升级
 
-新建项目使用格式 9；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
+新建项目使用格式 10；格式 1 仍可执行原有字面量命令，格式 2 仍可使用引用/公式，格式 3 保留撤销，不会因为打开而迁移。
 引用、公式、清除和删除命令需要至少格式 2，持久撤销/重做需要格式 3；桌面删除入口要求格式 3。
 格式 4 增加只追加的[输入快照](project-snapshots.md)，内容副本按 SHA-256 保存在项目内。格式 5 增加[运行方案与状态](project-runs.md)。
 格式 6 增加[持久修改草案及应用回执](project-drafts.md)，保存和放弃草案不提升编辑修订。
 格式 7 增加[上下文、消息与草案来源关联](project-contexts.md)，这些记录不提升编辑修订，不进入表格撤销栈。
 格式 8 增加[请求意图、取消和结果关联](project-requests.md)，同样不提升编辑修订或进入撤销栈。
 格式 9 增加[不可变分析计划与执行状态](project-analysis-runs.md)，准备与状态变化不提升编辑修订或进入撤销栈。
+格式 10 增加工作流运行计划与按（步骤、行）编号的尝试记录，同样不提升编辑修订或进入撤销栈。
 桌面提供“备份并升级项目”；CLI 使用 `project upgrade`，
 Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(expected_revision=...)`。
 
@@ -222,12 +224,13 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 ## 实验格式与事务边界
 
-目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=9`。
+目录中的 `project.sqlite3` 使用 SQLite application ID `STKP`，当前 `user_version=10`。
 原物理表为 `project`、`tables`、`fields`、`records`、`cells`、`changes`；格式 2 新增
 `definitions` 和可重建的 `evaluations`，格式 3 增加 `edit_journal`，格式 4 增加 `project_snapshots`，格式 5 增加 `run_plans` / `run_observations`，格式 6 增加 `project_drafts`。
 格式 7 增加 `project_contexts`、`project_messages` 和 `project_proposals`；消息关联不可变上下文，提案关联消息与同一基础修订的草案。
 格式 8 增加 `project_requests`；请求引用固定上下文和用户消息，完成标记与助手消息原子保存。
 格式 9 增加 `analysis_run_plans` 和 `analysis_run_events`；计划冻结完整分析、输入快照及文件映射，事件保存领取、取消与终态。
+格式 10 增加 `workflow_run_plans` 和 `workflow_run_events`；计划冻结工作流、所选行与所用参数值、被引用的分析与快照，事件是带哈希链的运行与尝试记录。
 字面量与定义分开。每次有效编辑批次在一个
 `BEGIN IMMEDIATE` 事务中校验修订、写值/定义、更新受影响缓存、提升一次修订并保存命令历史。
 并发修改同一修订时仅一个批次能成功；读取快照在单一读事务中完成。
@@ -235,7 +238,7 @@ Python 使用 `store.upgrade(expected_revision=...)` 或 `stk.project.upgrade(ex
 
 显式创建不会覆盖已有数据库；普通打开不会隐式初始化。打开检查 application ID、格式版本、
 SQLite 完整性与外键关系。陌生、损坏或不支持版本的文件报告错误，不自动重建或降级。
-当前提供格式 1–8 → 9 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
+当前提供格式 1–9 → 10 的显式、备份优先迁移；更新的未知格式仍拒绝打开，不自动降级。
 数据库之外的输入、程序与资源仍可存为普通文件；文件索引与输入副本已实现，一致性项目打包备份尚待实现。
 
 该内部数据库格式未冻结为 `docs/specs/` 的公开协议，不改变 `stk.graph/1`。

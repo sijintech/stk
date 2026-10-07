@@ -129,7 +129,7 @@ class ProjectEditor final : public Editor {
       run_controls(layout, ctx, state, editable, true);
       return;
     }
-    if (state.project()->format_version < 9) {
+    if (state.project()->format_version < kProjectFormatVersion) {
       hint(layout, ctx, "project.upgrade_hint");
       layout.button("upgrade_project", ctx.tr("project.upgrade"), [&state] { state.upgrade(); }).disable(!editable);
     }

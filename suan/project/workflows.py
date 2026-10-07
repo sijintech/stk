@@ -208,7 +208,10 @@ def _resolve(db, step, model, templates, read_analysis):
         template = templates.get(target)
         if template is None:
             return summary, ("unknown_template", f"Simulation template {target!r} is not registered")
-        summary.update(name=template.name, inputs=[{"name": "rows", "type": "rows", "required": True}],
+        # A template's declared parameters (graph-parameter vocabulary) can be bound like an analysis's.
+        parameters = [{"name": p["name"], "type": p["type"], "label": p.get("label"), "unit": p.get("unit"),
+                       "default": p.get("default")} for p in getattr(template, "parameters", [])]
+        summary.update(name=template.name, parameters=parameters, inputs=[{"name": "rows", "type": "rows", "required": True}],
                        outputs=[{"name": "files", "type": "files"}])
         return summary, None
     try:
@@ -342,7 +345,7 @@ class Workflows:
         """What a step can reference now, for an editor: parameter tables (not the managed analysis,
         workflow or file-index tables), input snapshots (newest first), readable saved analyses and
         registered simulation templates. Read-only; nothing is evaluated or created."""
-        from suan.workflows.templates import TEMPLATES  # Registered versions only; never loads project code.
+        from suan.workflows.templates import workflow_templates  # Registered versions only; never loads project code.
         managed = {TABLE_ID, analyses.TABLE_ID, files.TABLE_ID}
         with self.store._connect() as db:
             revision = db.execute("SELECT revision FROM project").fetchone()[0]
@@ -366,7 +369,7 @@ class Workflows:
         return {"revision": revision, "tables": tables[:MAX_CHOICE_TABLES], "omitted_tables": max(0, len(tables) - MAX_CHOICE_TABLES),
                 "snapshots": snapshots, "analyses": readable,
                 "templates": [{"id": template.id, "name": template.name, "table_id": template.table_id}
-                              for template in TEMPLATES.values()]}
+                              for template in workflow_templates().values()]}
 
     def validate(self, document):
         """Resolve a (possibly unsaved) document against the current project, read-only.
@@ -374,7 +377,8 @@ class Workflows:
         Returns {revision, ok, issues, omitted_issues, steps}: one summary per step in document order
         (referenced object name, analysis content hash, typed ports and graph parameters)."""
         document = _document(document)
-        from suan.workflows.templates import TEMPLATES  # Registered versions only; never loads project code.
+        from suan.workflows.templates import workflow_templates  # Registered versions only; never loads project code.
+        templates = workflow_templates()
         with self.store._connect() as db:
             revision = db.execute("SELECT revision FROM project").fetchone()[0]
             model = {"tables": {row["id"]: {"name": row["name"], "fields": {}}
@@ -403,7 +407,7 @@ class Workflows:
                 counts[step["id"]] = counts.get(step["id"], 0) + 1
             summaries = []
             for i, step in enumerate(steps):
-                summary, problem = _resolve(db, step, model, TEMPLATES, read_analysis)
+                summary, problem = _resolve(db, step, model, templates, read_analysis)
                 summaries.append(summary)
                 if counts[step["id"]] > 1:
                     issues.add("duplicate_step", step["id"], f"steps/{i}/id", "Step id is used more than once")
@@ -442,9 +446,9 @@ class Workflows:
                     issues.add("type_mismatch", here, path,
                                f"{source}.{out} gives {outputs[out]['type']}, input {port!r} takes {declared[port]['type']}")
                 elif step["kind"] == "simulation" and port == "rows":
-                    template = TEMPLATES.get(step["ref"].get("template"))
+                    template = templates.get(step["ref"].get("template"))
                     source_step = steps[unique[source][0]]
-                    if template is not None and source_step["ref"].get("table") != template.table_id:
+                    if template is not None and template.table_id is not None and source_step["ref"].get("table") != template.table_id:
                         issues.add("template_table", here, path,
                                    f"Template {template.id} runs rows of its own case table only")
             for port in declared.values():
@@ -456,10 +460,11 @@ class Workflows:
                 path = f"steps/{i}/parameters/{name}"
                 parameter = graph_parameters.get(name)
                 if parameter is None:
-                    if step["kind"] == "analysis" and not summary["outputs"]:
-                        continue  # Unreadable analysis, already reported.
+                    if step["kind"] in ("analysis", "simulation") and not summary["outputs"]:
+                        continue  # Unresolved analysis or template, already reported.
                     issues.add("unknown_parameter", here, path,
                                "Only parameters a saved analysis declares can be set" if step["kind"] == "analysis"
+                               else "Only parameters the template declares can be set" if step["kind"] == "simulation"
                                else f"A {step['kind']} step takes no parameters")
                     continue
                 if type(value) is not dict or set(value) != {"$field"}:

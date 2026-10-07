@@ -11,7 +11,7 @@ import math
 import re
 import unicodedata
 
-from suan.graph.schema import graph_hash
+from suan.graph.schema import canonical_json, graph_hash
 
 from . import analyses
 from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _id, _version
@@ -213,8 +213,34 @@ def _selection(plan):
 
 
 def _request(plan):
-    return {"analysis_id": plan["analysis_id"], "snapshot_id": plan["snapshot_id"],
-            "bindings": _selection(plan), "expected_revision": plan["source_revision"]}
+    request = {"analysis_id": plan["analysis_id"], "snapshot_id": plan["snapshot_id"],
+               "bindings": _selection(plan), "expected_revision": plan["source_revision"]}
+    if "parameter_overrides" in plan:
+        request["parameter_overrides"] = plan["parameter_overrides"]
+    return request
+
+
+def _overrides(value, document):
+    """Per-run values for declared graph parameters (a workflow row's values), bounded plain JSON.
+    Empty means none; the frozen document keeps the saved analysis exactly."""
+    if value is None:
+        return {}
+    value = _clone_overrides(value)
+    declared = {item["name"] for item in document["graph"].get("parameters", [])}
+    if (type(value) is not dict or len(value) > 64 or len(canonical_json(value)) > 64 * 1024
+            or any(type(name) is not str or name not in declared for name in value)):
+        raise ProjectError("Parameter overrides name at most 64 declared graph parameters within 64 KiB")
+    return value
+
+
+def _clone_overrides(value):
+    from .managed import clone
+    return clone(value, "Analysis")
+
+
+def effective_parameters(plan):
+    """The submitted parameters a run evaluates: the frozen document's, then its per-run overrides."""
+    return {**plan["document"]["parameters"], **plan.get("parameter_overrides", {})}
 
 
 def _error(value):
@@ -271,7 +297,7 @@ class AnalysisRuns:
         if row is None:
             raise AnalysisRunNotFound("Analysis run not found")
         plan = _unpack(row["payload"], MAX_PLAN_BYTES)
-        if type(plan) is not dict or set(plan) != _PLAN_KEYS:
+        if type(plan) is not dict or set(plan) not in (_PLAN_KEYS, _PLAN_KEYS | {"parameter_overrides"}):
             raise ProjectError("Invalid frozen analysis plan fields")
         for key in ("id", "project_id", "analysis_id", "snapshot_id"):
             _id(plan[key])
@@ -279,6 +305,9 @@ class AnalysisRuns:
         _time(plan["created_at"])
         analyses._name(plan["analysis_name"])
         analyses._document(plan["document"])
+        if "parameter_overrides" in plan and (not plan["parameter_overrides"] or
+                _overrides(plan["parameter_overrides"], plan["document"]) != plan["parameter_overrides"]):
+            raise ProjectError("Invalid frozen analysis parameter overrides")
         if (plan["id"] != row["id"] or plan["project_id"] != row["project_id"]
                 or plan["project_id"] != self.store._project_id or plan["snapshot_id"] != row["snapshot_id"]
                 or plan["profile"] != PROFILE or type(plan["budget"]) is not dict
@@ -364,13 +393,18 @@ class AnalysisRuns:
                    (plan["id"], state["status"], _pack(state, MAX_EVENT_BYTES), previous_hash, digest))
         return self._public(plan, state)
 
-    def prepare(self, analysis_id, snapshot_id, bindings, *, run_id, expected_revision):
+    def prepare(self, analysis_id, snapshot_id, bindings, *, run_id, expected_revision, parameter_overrides=None):
         for identity in (analysis_id, snapshot_id, run_id):
             _id(identity)
         _revision(expected_revision)
         bindings = _bindings(bindings)
-        request_hash = _hash({"analysis_id": analysis_id, "snapshot_id": snapshot_id,
-                              "bindings": bindings, "expected_revision": expected_revision})
+        if parameter_overrides is not None and type(parameter_overrides) is not dict:
+            raise ProjectError("Parameter overrides must be an object")
+        request = {"analysis_id": analysis_id, "snapshot_id": snapshot_id,
+                   "bindings": bindings, "expected_revision": expected_revision}
+        if parameter_overrides:
+            request["parameter_overrides"] = parameter_overrides
+        request_hash = _hash(request)
         with self.store._connect(write=True) as db:
             _require(db)
             existing = db.execute("SELECT request_sha256 FROM analysis_run_plans WHERE id=?", (run_id,)).fetchone()
@@ -396,6 +430,9 @@ class AnalysisRuns:
                     "created_at": now, "analysis_id": analysis_id, "analysis_name": analysis["name"],
                     "document": analysis["document"], "snapshot_id": snapshot_id, "snapshot_sha256": snapshot["sha256"],
                     "bindings": _freeze_bindings(bindings, snapshot), "profile": PROFILE, "budget": dict(BUDGET)}
+            overrides = _overrides(parameter_overrides, analysis["document"])
+            if overrides:
+                plan["parameter_overrides"] = overrides
             db.execute("INSERT INTO analysis_run_plans VALUES (?,?,?,?,?,?)",
                        (run_id, self.store._project_id, snapshot_id, _pack(plan, MAX_PLAN_BYTES), request_hash, _hash(plan)))
             state = {"status": "prepared", "updated_at": now, "started_at": None, "finished_at": None,

@@ -779,7 +779,7 @@
   "project.backup_hint": "Save a consistent database copy under backups/. External files are separate.",
   "project.backup_saved": "Database backup saved: {path}",
   "project.upgrade": "Back up and upgrade project",
-  "project.upgrade_hint": "Upgrade this older project to use the latest tables, input snapshots, simulation and analysis runs, and saved drafts. A verified database backup is created first.",
+  "project.upgrade_hint": "Upgrade this older project to use the latest tables, input snapshots, simulation and analysis runs, workflow runs, and saved drafts. A verified database backup is created first.",
   "project.definition": "Definition",
   "project.mode.literal": "Literal value",
   "project.mode.reference": "Cell reference",

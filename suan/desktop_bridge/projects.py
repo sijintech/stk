@@ -236,7 +236,8 @@ class ProjectSessions:
             runs = store.analysis_runs
             if action == "prepare":
                 return {"run": runs.prepare(params["analysis_id"], params["snapshot_id"], params["bindings"],
-                    run_id=params["run_id"], expected_revision=params["expected_revision"])}
+                    run_id=params["run_id"], expected_revision=params["expected_revision"],
+                    parameter_overrides=params.get("parameter_overrides"))}
             if action == "get":
                 return {"run": runs.get(params["run_id"])}
             if action == "list":

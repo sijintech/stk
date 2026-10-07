@@ -266,7 +266,8 @@ def test_choices_list_referencable_objects_only(store, project):
     assert [(s["id"], s["file_count"]) for s in answer["snapshots"]] == [(project["snapshot"], 1)]
     assert answer["analyses"] == [{"id": project["volume"], "name": "Volume"}, {"id": project["threshold"], "name": "Threshold"},
                                   {"id": project["dynamic"], "name": "Dynamic"}]
-    assert answer["templates"] == [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID}]
+    assert answer["templates"] == [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID},
+                                   {"id": "demo-synthetic/1", "name": "Synthetic demo solver", "table_id": None}]
     assert store.snapshot() == before and store.history() == history  # read-only
     store.apply([{"op": "set_cell", "table_id": analyses.TABLE_ID, "record_id": project["dynamic"],
                   "field_id": analyses.FIELD_IDS["graph"], "value": {"broken": True}}], expected_revision=store.info()["revision"])
@@ -293,7 +294,8 @@ def test_bridge_methods_scripting_api_and_events(inproc, tmp_path):
     assert p.workflows.validate(document(step))["issues"][0]["code"] == "missing_reference"
     assert p.workflows.choices() == {"revision": p.snapshot()["project"]["revision"], "tables": [], "omitted_tables": 0,
                                      "snapshots": [], "analyses": [],
-                                     "templates": [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID}]}
+                                     "templates": [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID},
+                                                   {"id": "demo-synthetic/1", "name": "Synthetic demo solver", "table_id": None}]}
     error = h.error("project.workflows.get", {"handle": info["handle"], "workflow_id": str(uuid4())})
     assert error["code"] == "not_found"
     error = h.error("project.workflows.create", {"handle": info["handle"], "workflow_id": identity, "name": "Again",
