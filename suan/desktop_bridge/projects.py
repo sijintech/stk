@@ -251,6 +251,8 @@ class ProjectSessions:
             if action == "list":
                 return runs.list(offset=params.get("offset", 0), limit=params.get("limit", 50),
                                  workflow_id=params.get("workflow_id"))
+            if action == "stale":
+                return runs.stale(params["run_id"])
             if self._workflow_executor is None:
                 raise BridgeError("unsupported", "No local workflow executor is installed")
             return {"run": getattr(self._workflow_executor, action)(store, params["run_id"])}

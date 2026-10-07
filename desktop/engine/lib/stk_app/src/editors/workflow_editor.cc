@@ -311,6 +311,11 @@ class WorkflowEditor final : public Editor {
       last_poll_ = std::chrono::steady_clock::now();
       workflows_->load_run(io::get_string(workflows_->run(), "id"));
     }
+    else if (stale_due(revision)) {
+      // Once a run has stopped, compare it with the current definitions (again after every project change).
+      stale_key_ = io::get_string(workflows_->run(), "id") + "@" + std::to_string(revision);
+      workflows_->load_run_staleness();
+    }
     else if (workflows_->runs_supported() && !workflows_->selected().is_null() && workflows_->runs().is_null() &&
              runs_listed_ != revision && !ctx.store.project().busy()) {
       runs_listed_ = revision;
@@ -824,6 +829,24 @@ class WorkflowEditor final : public Editor {
     return std::chrono::steady_clock::now() - last_poll_ > std::chrono::milliseconds(500);
   }
 
+  bool stale_due(const int64_t revision) const
+  {
+    const auto &run = workflows_->run();
+    return !run.is_null() && io::get_string(run, "status") == "stopped" && workflows_->runs_supported() &&
+        stale_key_ != io::get_string(run, "id") + "@" + std::to_string(revision) && !store_->project().busy();
+  }
+
+  /** "simulate: T 325 → 330 K" and the like, for a stale task. */
+  std::string reason_text(EditorContext &ctx, const std::string &step, const Json &reason) const
+  {
+    auto &catalog = ctx.store.catalog();
+    const auto code = io::get_string(reason, "code");
+    const auto value = [](const Json &v) { return v.is_string() ? v.get<std::string>() : v.dump(); };
+    return catalog.format("workflow.run.reason." + code, {{"step", step}, {"name", io::get_string(reason, "name")},
+        {"before", value(member(reason, "before"))}, {"after", value(member(reason, "after"))},
+        {"upstream", io::get_string(reason, "step")}});
+  }
+
   /** The parameter table of the saved workflow's single table step (runs take their rows from it). */
   const ProjectTable *run_table(EditorContext &ctx) const
   {
@@ -960,21 +983,38 @@ class WorkflowEditor final : public Editor {
     const auto &rows = member(run, "rows");
     std::map<std::pair<std::string, std::string>, const Json *> tasks;
     for (const auto &task : member(run, "tasks")) { tasks[{io::get_string(task, "step"), io::get_string(task, "row")}] = &task; }
+    // Staleness of this run against the current definitions (W4c), when read for this run.
+    const auto &stale = workflows_->run_staleness();
+    std::map<std::string, const Json *> stale_rows;
+    if (io::get_string(stale, "run_id") == io::get_string(run, "id")) {
+      for (const auto &row : member(stale, "rows")) { stale_rows[io::get_string(row, "id")] = &row; }
+    }
     std::vector<std::vector<std::string>> cells;
     std::vector<std::vector<std::string>> states;
+    std::vector<std::string> outdated;
     for (const auto &row : rows) {
-      std::vector<std::string> line{std::to_string(io::get_int(row, "number", 0))}, state{""};
+      const auto row_id = io::get_string(row, "id");
+      const auto found_row = stale_rows.find(row_id);
+      const bool row_stale = found_row != stale_rows.end() && io::get_bool(*found_row->second, "stale", false);
+      if (row_stale) { outdated.push_back(row_id); }
+      std::vector<std::string> line{std::to_string(io::get_int(row, "number", 0)) +
+                                    (row_stale ? " · " + std::string(ctx.tr("workflow.run.stale_mark")) : std::string())}, state{""};
       for (const auto &step : order) {
-        const auto found = tasks.find({step.get<std::string>(), io::get_string(row, "id")});
+        const auto found = tasks.find({step.get<std::string>(), row_id});
         const auto task_status = found == tasks.end() ? std::string("pending") : io::get_string(*found->second, "status");
         const auto attempt = found == tasks.end() ? int64_t(0) : io::get_int(*found->second, "attempt", 0);
-        line.push_back(std::string(ctx.tr("workflow.run.task." + task_status)) + (attempt > 1 ? " #" + std::to_string(attempt) : std::string()));
-        state.push_back(task_status);
+        const bool step_stale = row_stale && !member(member(*found_row->second, "steps"), step.get_ref<const std::string &>().c_str()).empty();
+        line.push_back(std::string(ctx.tr("workflow.run.task." + task_status)) + (attempt > 1 ? " #" + std::to_string(attempt) : std::string()) +
+                       (step_stale ? " · " + std::string(ctx.tr("workflow.run.stale_mark")) : std::string()));
+        state.push_back(step_stale && task_status == "succeeded" ? "stale" : task_status);
       }
       cells.push_back(std::move(line)); states.push_back(std::move(state));
     }
+    if (!outdated.empty()) {
+      panel.paragraph(catalog.format("workflow.run.stale_summary", {{"count", std::to_string(outdated.size())}}));
+    }
     ui::TableSpec spec;
-    spec.columns = {{std::string(ctx.tr("workflow.run.row_column")), 2}};
+    spec.columns = {{std::string(ctx.tr("workflow.run.row_column")), 4}};
     for (const auto &step : order) { spec.columns.push_back({step.get<std::string>(), 6}); }
     spec.rows = int(rows.size()); spec.visible_rows = float(std::min(8, spec.rows));
     spec.data_version = workflows_->run_version();
@@ -983,7 +1023,7 @@ class WorkflowEditor final : public Editor {
       const auto &value = states.at(size_t(row)).at(size_t(column));
       if (value == "failed" || value == "interrupted") { return ui::Color::rgb(0xE07A7A); }
       if (value == "succeeded") { return ui::Color::rgb(0x8FCB9B); }
-      if (value == "running") { return ui::Color::rgb(0xE8C46A); }
+      if (value == "running" || value == "stale") { return ui::Color::rgb(0xE8C46A); }
       return {0, 0, 0, 0};
     };
     const int chosen = run_row_;
@@ -991,6 +1031,13 @@ class WorkflowEditor final : public Editor {
     panel.table("workflow_run_tasks", std::move(spec));
     if (run_row_ >= 0 && size_t(run_row_) < rows.size()) {
       const auto row_id = io::get_string(rows[size_t(run_row_)], "id");
+      if (const auto found = stale_rows.find(row_id); found != stale_rows.end()) {
+        for (const auto &step : order) {
+          for (const auto &reason : member(member(*found->second, "steps"), step.get_ref<const std::string &>().c_str())) {
+            panel.paragraph(reason_text(ctx, step.get<std::string>(), reason));
+          }
+        }
+      }
       for (const auto &step : order) {
         const auto found = tasks.find({step.get<std::string>(), row_id});
         if (found == tasks.end()) { continue; }
@@ -1016,6 +1063,12 @@ class WorkflowEditor final : public Editor {
     }
     else { panel.paragraph(ctx.tr("workflow.run.pick_row")); }
     auto ok = valid();
+    // Old results stay; stale rows run again as a new run over the current definitions (never rewriting this one).
+    const bool can_run = !draft_.dirty() && io::get_bool(workflows_->validation(), "ok", false) && !workflows_->stale() &&
+        !workflows_->busy() && !ctx.store.project().busy();
+    panel.button("workflow_run_stale", catalog.format("workflow.run.rerun_stale", {{"count", std::to_string(outdated.size())}}),
+        [this, ok, outdated] { if (ok()) { run_row_ = -1; workflows_->run_rows(outdated); } })
+        .disable(outdated.empty() || status != "stopped" || !can_run).tip(ctx.tr("workflow.run.rerun_stale.tip"));
     auto &actions = panel.row();
     actions.button("workflow_run_retry", ctx.tr("workflow.run.retry"), [this, ok] { if (ok()) { workflows_->start_run(); } })
         .disable(status != "stopped" || io::get_bool(run, "complete", false) || workflows_->busy());
@@ -1334,7 +1387,7 @@ class WorkflowEditor final : public Editor {
   uint64_t epoch_ = 0;
   int64_t refreshed_revision_ = -1, page_revision_ = -1, choices_revision_ = -1, listed_revision_ = -1, runs_listed_ = -1;
   std::set<std::string> run_unchecked_;
-  std::string run_rows_table_, run_finished_;
+  std::string run_rows_table_, run_finished_, stale_key_;
   int run_row_ = -1;
   std::chrono::steady_clock::time_point last_poll_{};
   bool auto_selected_ = false, fit_ = true, dragging_ = false;

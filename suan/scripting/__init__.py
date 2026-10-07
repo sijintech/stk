@@ -433,6 +433,11 @@ class ProjectWorkflowRuns:
         """After a service restart: mark attempts nobody executes as interrupted so the run can start again."""
         return self._call("project.workflow_runs.recover", {"handle": self.handle, "run_id": run_id})["run"]
 
+    def stale(self, run_id):
+        """Rows whose results no longer match the current definitions, with reasons per step (read-only).
+        Re-run them with a new ``prepare`` over ``stale(...)["stale_rows"]``; old runs never change."""
+        return self._call("project.workflow_runs.stale", {"handle": self.handle, "run_id": run_id})
+
 
 class ProjectAnalysisRuns:
     """Snapshot-bound local analysis runs, separate from Runtime simulation tasks.

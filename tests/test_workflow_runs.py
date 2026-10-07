@@ -230,3 +230,40 @@ def test_analysis_runs_freeze_per_run_parameter_overrides(project, tmp_path):
     with pytest.raises(ProjectError, match="declared graph parameters"):
         store.analysis_runs.prepare(ids["analysis"], snapshot, bindings, run_id=str(uuid4()), expected_revision=revision(store),
                                     parameter_overrides={"undeclared": 1})
+
+
+def codes_by_step(row):
+    return {step: [reason["code"] for reason in reasons] for step, reasons in row["steps"].items() if reasons}
+
+
+def test_staleness_names_the_changed_value_step_or_analysis_and_flows_downstream(project):
+    store, ids = project
+    run = prepare(store, ids)
+    fresh = store.workflow_runs.stale(run["id"])
+    assert fresh["stale_rows"] == [] and all(not row["stale"] for row in fresh["rows"])
+    # One row's temperature: only that row, its simulation and (downstream) its analysis.
+    store.apply([{"op": "set_cell", "table_id": ids["cases"], "record_id": ids["rows"][1], "field_id": ids["temperature"],
+                  "value": 330}], expected_revision=revision(store))
+    state = store.workflow_runs.stale(run["id"])
+    assert state["stale_rows"] == [ids["rows"][1]]
+    row = state["rows"][1]
+    assert codes_by_step(row) == {"simulate": ["value_changed"], "temperature": ["upstream_changed"]}
+    change = row["steps"]["simulate"][0]
+    assert (change["name"], change["before"], change["after"]) == ("T", 325, 330)
+    # The analysis changes: every row's analysis step, nothing upstream.
+    document = store.analyses.get(ids["analysis"])["analysis"]["document"]
+    document["parameters"]["path"] = "other.vtk"
+    store.analyses.update(ids["analysis"], "Temperature field", document, expected_revision=revision(store))
+    state = store.workflow_runs.stale(run["id"])
+    assert codes_by_step(state["rows"][0]) == {"temperature": ["analysis_changed"]}
+    # A changed step definition (not just its label) and a removed row.
+    labelled = workflow(ids, temperature={"label": "Field view"})
+    store.workflows.update(ids["workflow"], "Scan", labelled, expected_revision=revision(store))
+    assert codes_by_step(store.workflow_runs.stale(run["id"])["rows"][0]) == {"temperature": ["analysis_changed"]}
+    changed = workflow(ids, simulate={"parameters": {"temperature": 400}})
+    store.workflows.update(ids["workflow"], "Scan", changed, expected_revision=revision(store))
+    store.apply([{"op": "delete_record", "id": ids["rows"][2]}], expected_revision=revision(store))
+    state = store.workflow_runs.stale(run["id"])
+    assert codes_by_step(state["rows"][0]) == {"simulate": ["step_changed"], "temperature": ["analysis_changed", "upstream_changed"]}
+    assert "row_removed" in [reason["code"] for reason in state["rows"][2]["steps"]["simulate"]]
+    assert store.workflow_runs.get(run["id"])["rows"] == run["rows"]  # the run itself never changes

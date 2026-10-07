@@ -1,7 +1,7 @@
 # 项目工作流（实验，W3a）
 
 更新：2026-10-07。状态：**保存、读取与校验（Python 与后台服务，W3a）、桌面“工作流”编辑器与进入分析/面包屑返回（W3b）
-和图形编辑（W3c）已实现；按行运行（W4a 存储与执行、W4b 桌面运行区）已实现，过期标记与按行重算（W4c）尚未实现**。设计与所有者确认的决定见
+和图形编辑（W3c）已实现；按行运行（W4a 存储与执行、W4b 桌面运行区、W4c 过期与按行重算）已实现**。设计与所有者确认的决定见
 [项目工作流与子图导航](design/project-workflows.md)。文档格式 `stk.workflow/1` 是实验格式，未写入 `docs/specs/` 的已发布协议。
 
 工作流把项目里已有的对象串成一条过程：参数表 → 输入文件或仿真 → 保存的分析。它只保存引用和连线，
@@ -84,6 +84,10 @@
 选中一行显示失败原因，并可 **打开该行的分析运行**（在同一区域的分析图“运行”页）；**重试未成功的任务**、**取消运行**、
 **恢复中断的运行**（服务重启后）。运行记录列出这份工作流的最近 20 次运行。有未保存修改或校验问题时不能运行。
 
+运行结束后，面板把当前定义与这次运行冻结的内容比较：某行用到的字段值改变、步骤定义改变（名称除外）、分析被修改、模板不可用、
+行被删除时，该行标为 **过期**，选中后列出原因（例如“simulate：温度 325 → 330”），下游步骤标为“上游已过期”；旧结果保留。
+**重算过期的 N 行** 用当前定义为这些行准备并开始一次新运行，原运行不变。
+
 也可在 Python 中准备并开始运行（项目格式 10，旧项目先“备份并升级项目”）。准备时冻结工作流、这些行用到的字段值、
 被引用分析的完整内容与执行顺序，之后的编辑不影响这次运行；运行在后台逐行执行，一行内按步骤顺序：
 
@@ -122,7 +126,8 @@ run = p.workflow_runs.prepare(listed["workflows"][0]["id"], rows, run_id=str(uui
                               expected_revision=p.snapshot()["project"]["revision"])
 p.workflow_runs.start(run["id"])
 state = p.workflow_runs.get(run["id"])   # status、每个任务的 attempt/status/produced/error
+stale = p.workflow_runs.stale(run["id"])  # 过期的行与原因；重算 = 对 stale["stale_rows"] 再 prepare + start
 ```
 
-后台服务方法为 `project.workflows.create/update/get/list/validate/choices` 与 `project.workflow_runs.prepare/get/list/start/cancel/recover`，见
+后台服务方法为 `project.workflows.create/update/get/list/validate/choices` 与 `project.workflow_runs.prepare/get/list/start/cancel/recover/stale`，见
 [桌面桥协议](specs/stk-desktop-bridge-v1.md)的可选扩展说明。

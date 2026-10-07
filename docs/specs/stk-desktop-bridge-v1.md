@@ -552,6 +552,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.workflow_runs.prepare` | `{handle, workflow_id, rows, run_id, expected_revision}` | `{run: workflowRun}` |
 | `project.workflow_runs.get` / `start` / `cancel` / `recover` | `{handle, run_id}` | `{run: workflowRun}` |
 | `project.workflow_runs.list` | `{handle, offset?, limit?, workflow_id?}` | `{runs: [workflowRunSummary], next_offset}` |
+| `project.workflow_runs.stale` | `{handle, run_id}` | `{run_id, revision, rows: [{id, number, stale, steps}], stale_rows}` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -645,6 +646,10 @@ workflow run was frozen. A failed task stops only its row; starting a stopped ru
 succeed with new numbered attempts, and only the latest attempt can finish a task. `cancel` stops after the current task
 and cancels an analysis in flight; `recover` marks attempts without a live executor (after a restart) as interrupted.
 Tasks report `{step, row, attempt, status, produced, error, updated_at}`; nothing runs implicitly or calls a model.
+`stale` compares the frozen plan with the current definitions per executed step and row: `step_changed` (labels
+aside), `analysis_changed`/`analysis_missing`, `template_unavailable`, `value_changed` (a field the step takes from the
+row, with `before`/`after`), `value_error`, `row_removed`, `workflow_missing`, and `upstream_changed` downstream of a
+stale step. It reads only; old runs never change, and re-running `stale_rows` is a new `prepare`.
 
 The optional `project.analysis_runs.*` methods require project format 9, with an explicit backup-first
 upgrade for older projects. They add an immutable analysis plan and an append-only execution journal,

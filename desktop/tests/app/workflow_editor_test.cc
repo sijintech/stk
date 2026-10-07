@@ -687,5 +687,46 @@ TEST_F(WorkflowEditorPython, RunPanelRunsChosenRowsAndOpensTheirAnalysisRuns)
   EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
 
+TEST_F(WorkflowEditorPython, ChangedValuesMarkRowsStaleAndOnlyThoseRunAgain)
+{
+  const std::string temperature = "14141414-1414-4141-8141-141414141414", first = "15151515-1515-4151-8151-151515151515",
+                    second = "16161616-1616-4161-8161-161616161616";
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
+      {{"op", "add_field"}, {"id", temperature}, {"table_id", table_id}, {"name", "T"}, {"type", "number"}, {"unit", "K"}},
+      {{"op", "add_record"}, {"id", first}, {"table_id", table_id}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", first}, {"field_id", temperature}, {"value", 300}},
+      {{"op", "add_record"}, {"id", second}, {"table_id", table_id}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", second}, {"field_id", temperature}, {"value", 340}}}}}, out));
+  const Json runnable = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+      {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", table_id}}}},
+      {{"id", "simulate"}, {"kind", "simulation"}, {"ref", {{"template", "demo-synthetic/1"}}},
+       {"inputs", {{"rows", {{"from", "cases.rows"}}}}}, {"parameters", {{"temperature", {{"$field", temperature}}}}}}}}};
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id}, {"name", "Temperature scan"},
+      {"document", runnable}, {"expected_revision", revision}}, out));
+  project().refresh();
+  for (int i = 0; i < 300 && !(widget("workflow_run_start") && widget("workflow_run_start")->enabled); ++i) {
+    loop.run_ready(); f.screen.run_deferred(); f.drv->frame();
+  }
+  ASSERT_NO_FATAL_FAILURE(click("workflow_run_start"));
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return shows("All done · 2/2 done"); }, 60)) << sidebar();
+  // The second row's temperature changes: only that row is stale, with the reason, and it alone runs again.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy(); }));
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", project().project()->revision},
+      {"commands", {{{"op", "set_cell"}, {"table_id", table_id}, {"record_id", second}, {"field_id", temperature}, {"value", 345}}}}}, out));
+  project().refresh();
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return shows("1 rows have stale results"); }, 30)) << sidebar();
+  const auto *grid = widget("workflow_run_tasks"); ASSERT_NE(grid, nullptr);
+  EXPECT_EQ(grid->table->cell(0, 0), "1"); EXPECT_EQ(grid->table->cell(1, 0), "2 · stale");
+  grid->table->selected.assign(1); f.drv->frame();
+  EXPECT_TRUE(shows("simulate: T 340 → 345")) << sidebar();
+  for (int i = 0; i < 300 && !(widget("workflow_run_stale") && widget("workflow_run_stale")->enabled); ++i) {
+    loop.run_ready(); f.screen.run_deferred(); f.drv->frame();
+  }
+  ASSERT_NO_FATAL_FAILURE(click("workflow_run_stale"));
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return shows("All done · 1/1 done"); }, 60)) << sidebar();
+  EXPECT_EQ(calls("project.workflow_runs.prepare"), 2u);
+}
+
 }  // namespace
 }  // namespace stk::app

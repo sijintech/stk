@@ -83,6 +83,9 @@ class ProjectWorkflows {
   bool start_run();
   bool cancel_run();
   bool recover_run();
+  /** Which rows of the shown run no longer match the current definitions (null until read; read-only). */
+  const io::Json &run_staleness() const { return stale_; }
+  bool load_run_staleness();
 
  private:
   void reset();
@@ -102,7 +105,7 @@ class ProjectWorkflows {
   uint64_t epoch_ = 0, version_ = 0, selected_version_ = 0;
   bool busy_ = false, uncertain_ = false;
   int64_t selected_revision_ = -1;
-  io::Json page_, selected_, validation_, choices_, runs_, run_;
+  io::Json page_, selected_, validation_, choices_, runs_, run_, stale_;
   uint64_t run_version_ = 0;
   std::optional<bridge::Future<io::Json>> future_, check_future_;
   AnalysisCandidateValidation candidate_;

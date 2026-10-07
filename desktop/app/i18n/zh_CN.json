@@ -1760,5 +1760,18 @@
   "workflow.run.recover": "恢复中断的运行",
   "workflow.run.recover.tip": "后台服务重启后，把没有执行者的尝试标为中断，之后可重试；运行仍在进行时不改变任何东西。",
   "workflow.template.demo_synthetic_1": "合成求解器（示例，非物理模拟）",
-  "workflow.template.muferro_1": "MuFerro"
+  "workflow.template.muferro_1": "MuFerro",
+  "workflow.run.stale_mark": "过期",
+  "workflow.run.stale_summary": "{count} 行的结果已过期：运行后定义或参数有改变；旧结果保留。",
+  "workflow.run.rerun_stale": "重算过期的 {count} 行",
+  "workflow.run.rerun_stale.tip": "用当前的工作流、分析与行参数为这些行准备并开始一次新运行；这次运行保持不变。",
+  "workflow.run.reason.value_changed": "{step}：{name} {before} → {after}",
+  "workflow.run.reason.value_error": "{step}：{name} 现在有公式错误",
+  "workflow.run.reason.step_changed": "{step}：步骤定义已修改",
+  "workflow.run.reason.analysis_changed": "{step}：分析已修改",
+  "workflow.run.reason.analysis_missing": "{step}：分析已不存在或无法读取",
+  "workflow.run.reason.template_unavailable": "{step}：模板已不可用",
+  "workflow.run.reason.row_removed": "{step}：该行已删除",
+  "workflow.run.reason.workflow_missing": "{step}：工作流已不存在或无法读取",
+  "workflow.run.reason.upstream_changed": "{step}：上游步骤 {upstream} 已过期"
 }

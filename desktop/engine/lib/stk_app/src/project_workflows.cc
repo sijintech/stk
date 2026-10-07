@@ -37,7 +37,7 @@ void ProjectWorkflows::reset()
   ++epoch_; ++selected_version_;
   busy_ = uncertain_ = false;
   selected_revision_ = -1;
-  page_ = selected_ = validation_ = choices_ = runs_ = run_ = nullptr; ++run_version_;
+  page_ = selected_ = validation_ = choices_ = runs_ = run_ = stale_ = nullptr; ++run_version_;
   error_.clear(); notice_.clear();
   candidate_.reset();
   auto old = std::move(future_); future_.reset();
@@ -146,7 +146,7 @@ bool ProjectWorkflows::load(const std::string &id)
         (response.at("workflow").at("state") == "readable") != response.at("workflow").at("document").is_object()) {
       throw std::runtime_error("Invalid workflow response");
     }
-    if (io::get_string(selected_, "id") != id) { runs_ = run_ = nullptr; ++run_version_; }  // another workflow's runs
+    if (io::get_string(selected_, "id") != id) { runs_ = run_ = stale_ = nullptr; ++run_version_; }  // another workflow's runs
     selected_ = response.at("workflow");
     selected_revision_ = response.at("revision").get<int64_t>();
     validation_ = nullptr; uncertain_ = false;
@@ -183,7 +183,7 @@ bool ProjectWorkflows::reload()
 }
 void ProjectWorkflows::clear_selection()
 {
-  selected_ = validation_ = runs_ = run_ = nullptr; selected_revision_ = -1; ++run_version_;
+  selected_ = validation_ = runs_ = run_ = stale_ = nullptr; selected_revision_ = -1; ++run_version_;
   candidate_.reset(); page_ = nullptr;
   ++selected_version_;
   changed();
@@ -331,6 +331,20 @@ bool ProjectWorkflows::run_rows(const std::vector<std::string> &rows)
     accept_run(result);
     runs_ = nullptr;  // the list gains this run when read again
     call("project.workflow_runs.start", {{"run_id", run_id}}, [this](const Json &started) { accept_run(started); });
+  });
+}
+
+bool ProjectWorkflows::load_run_staleness()
+{
+  if (run_.is_null() || !runs_supported()) { return false; }
+  const auto hello = client_->hello_info();
+  if (!hello || !hello->has_method("project.workflow_runs.stale")) { return false; }
+  const auto run_id = io::get_string(run_, "id");
+  return call("project.workflow_runs.stale", {{"run_id", run_id}}, [this, run_id](const Json &result) {
+    if (!result.is_object() || io::get_string(result, "run_id") != run_id || !result.contains("rows") || !result.at("rows").is_array()) {
+      throw std::runtime_error("Invalid workflow run staleness response");
+    }
+    stale_ = result; ++run_version_;
   });
 }
 

@@ -1760,5 +1760,18 @@
   "workflow.run.recover": "Recover interrupted run",
   "workflow.run.recover.tip": "After the Python service restarted, marks attempts nobody executes as interrupted so they can be retried; a run still in progress is left alone.",
   "workflow.template.demo_synthetic_1": "Synthetic demo solver",
-  "workflow.template.muferro_1": "MuFerro"
+  "workflow.template.muferro_1": "MuFerro",
+  "workflow.run.stale_mark": "stale",
+  "workflow.run.stale_summary": "{count} rows have stale results: definitions or values changed after the run; the old results stay.",
+  "workflow.run.rerun_stale": "Re-run the {count} stale rows",
+  "workflow.run.rerun_stale.tip": "Prepare and start a new run of these rows with the current workflow, analyses and row values; this run stays as it is.",
+  "workflow.run.reason.value_changed": "{step}: {name} {before} → {after}",
+  "workflow.run.reason.value_error": "{step}: {name} now has a formula error",
+  "workflow.run.reason.step_changed": "{step}: the step definition changed",
+  "workflow.run.reason.analysis_changed": "{step}: the analysis changed",
+  "workflow.run.reason.analysis_missing": "{step}: the analysis is gone or unreadable",
+  "workflow.run.reason.template_unavailable": "{step}: the template is no longer available",
+  "workflow.run.reason.row_removed": "{step}: the row was deleted",
+  "workflow.run.reason.workflow_missing": "{step}: the workflow is gone or unreadable",
+  "workflow.run.reason.upstream_changed": "{step}: upstream step {upstream} is stale"
 }

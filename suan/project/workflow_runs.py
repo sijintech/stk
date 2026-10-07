@@ -306,6 +306,96 @@ class WorkflowRuns:
                              "complete": state["complete"]})
         return {"runs": runs, "next_offset": offset + limit if len(ids) > limit else None}
 
+    # ---- staleness (W4c) ----
+
+    def stale(self, run_id):
+        """Which rows' results no longer match the current definitions, and why. Read-only.
+
+        Per executed step and row: ``step_changed`` (the step's definition, labels aside),
+        ``analysis_changed`` / ``analysis_missing``, ``template_unavailable``, ``value_changed`` (a field the
+        step takes from the row, with before/after), ``value_error``, ``row_removed``, ``workflow_missing``,
+        and ``upstream_changed`` when an earlier step of the row is stale. Old results stay as they are."""
+        from suan.workflows.templates import workflow_templates
+        plan = self.get(run_id)
+        model = self.store.snapshot()
+        try:
+            current = self.store.workflows.get(plan["workflow_id"])["workflow"]
+            current_steps = ({step["id"]: step for step in current["document"]["steps"]}
+                             if current["state"] == "readable" else None)
+        except workflows.WorkflowNotFound:
+            current_steps = None
+        frozen_steps = {step["id"]: step for step in plan["document"]["steps"]}
+        table = next((t for t in model["tables"] if t["id"] == plan["table_id"]), None)
+        records = {record["id"]: record for record in table["records"]} if table else {}
+        names = {field["id"]: field["name"] for field in table["fields"]} if table else {}
+        templates = workflow_templates()
+        hashes = {}
+
+        def analysis_hash(identity):
+            if identity not in hashes:
+                try:
+                    entry = self.store.analyses.get(identity)["analysis"]
+                    hashes[identity] = (hashlib.sha256(canonical_json(entry["document"])).hexdigest()
+                                        if entry["state"] == "readable" else None)
+                except analyses.AnalysisNotFound:
+                    hashes[identity] = None
+            return hashes[identity]
+
+        def comparable(step):
+            return {key: value for key, value in step.items() if key != "label"}
+
+        def fields_of(step):
+            return [value["$field"] for value in step.get("parameters", {}).values()
+                    if type(value) is dict and set(value) == {"$field"}]
+
+        step_reasons = {}
+        for identity in plan["order"]:
+            frozen = frozen_steps[identity]
+            reasons = []
+            if current_steps is None:
+                reasons.append({"code": "workflow_missing"})
+            elif identity not in current_steps or comparable(current_steps[identity]) != comparable(frozen):
+                reasons.append({"code": "step_changed"})
+            kind = plan["steps"][identity]["kind"]
+            if kind == "analysis":
+                now = analysis_hash(plan["steps"][identity]["analysis_id"])
+                if now is None:
+                    reasons.append({"code": "analysis_missing"})
+                elif now != plan["steps"][identity]["sha256"]:
+                    reasons.append({"code": "analysis_changed"})
+            if kind == "simulation" and plan["steps"][identity]["template"] not in templates:
+                reasons.append({"code": "template_unavailable"})
+            step_reasons[identity] = reasons
+        rows = []
+        needs = {}
+        for step in plan["document"]["steps"]:
+            needs[step["id"]] = ({link["from"].split(".", 1)[0] for link in step.get("inputs", {}).values()}
+                                 | set(step.get("after", []))) & set(plan["order"])
+        for row in plan["rows"]:
+            record = records.get(row["id"])
+            steps = {}
+            for identity in plan["order"]:
+                reasons = list(step_reasons[identity])
+                if record is None:
+                    reasons.append({"code": "row_removed"})
+                else:
+                    for field in fields_of(frozen_steps[identity]):
+                        state = record.get("evaluations", {}).get(field, {"state": "ok"})["state"]
+                        if state != "ok":
+                            reasons.append({"code": "value_error", "field": field, "name": names.get(field, field)})
+                            continue
+                        before, after = row["values"].get(field), record["values"].get(field)
+                        if canonical_json(before) != canonical_json(after):
+                            reasons.append({"code": "value_changed", "field": field, "name": names.get(field, field),
+                                            "before": before, "after": after})
+                for upstream in sorted(needs.get(identity, ())):
+                    if steps.get(upstream):
+                        reasons.append({"code": "upstream_changed", "step": upstream})
+                steps[identity] = reasons
+            rows.append({"id": row["id"], "number": row["number"], "stale": any(steps.values()), "steps": steps})
+        return {"run_id": run_id, "revision": model["project"]["revision"], "rows": rows,
+                "stale_rows": [row["id"] for row in rows if row["stale"]]}
+
     # ---- execution bookkeeping (used by the explicit executor) ----
 
     def start(self, run_id, *, executor_id):

@@ -6099,6 +6099,28 @@
           "additionalProperties": false
         }
       },
+      "project.workflow_runs.stale": {
+        "description": "Compare a run's frozen plan with the current workflow, analyses and row values: which rows are stale and why. Reads only; re-running stale rows is a new prepare.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "run_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "run_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectWorkflowRunStaleResult"
+        }
+      },
       "project.analysis_runs.prepare": {
         "description": "Freeze a saved analysis and explicit file-snapshot mapping at a project revision, without executing nodes or changing editable revision/history. Same UUID and original request return the frozen run.",
         "params": {
@@ -11784,6 +11806,102 @@
         "complete"
       ],
       "additionalProperties": false
+    },
+    "projectWorkflowRunStaleResult": {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rows": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "stale": {
+                "type": "boolean"
+              },
+              "steps": {
+                "type": "object",
+                "maxProperties": 200,
+                "additionalProperties": {
+                  "type": "array",
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "workflow_missing",
+                          "step_changed",
+                          "analysis_changed",
+                          "analysis_missing",
+                          "template_unavailable",
+                          "row_removed",
+                          "value_error",
+                          "value_changed",
+                          "upstream_changed"
+                        ]
+                      },
+                      "field": {
+                        "$ref": "#/$defs/projectUuid"
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 1024
+                      },
+                      "before": true,
+                      "after": true,
+                      "step": {
+                        "type": "string",
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "code"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            },
+            "required": [
+              "id",
+              "number",
+              "stale",
+              "steps"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "stale_rows": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/projectUuid"
+          }
+        }
+      },
+      "required": [
+        "run_id",
+        "revision",
+        "rows",
+        "stale_rows"
+      ],
+      "additionalProperties": false,
+      "description": "Which rows of a workflow run no longer match the current definitions, with reasons per executed step; read-only."
     }
   }
 }

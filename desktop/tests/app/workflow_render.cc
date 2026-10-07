@@ -198,6 +198,12 @@ int main(int argc, char **argv)
         // The run list is read again once the run stops.
         wait([&] { const auto *runs = widget("workflow_runs");
                    return runs && runs->table && runs->table->rows == 1 && runs->table->cell(0, 3) == "6/6"; }, "run list updated");
+        // Row 2's temperature changes afterwards: it is marked stale with the reason (W4c); its old result stays.
+        call("project.apply", {{"handle", handle}, {"expected_revision", project.project()->revision}, {"commands", {
+            {{"op", "set_cell"}, {"table_id", table}, {"record_id", "18181818-1818-4181-8181-181818181802"},
+             {"field_id", "17171717-1717-4171-8171-171717171717"}, {"value", 330}}}}});
+        project.refresh();
+        wait([&] { return shows(zh ? "1 行的结果已过期" : "1 rows have stale results"); }, "stale rows");
         widget("workflow_run_tasks")->table->selected.assign(1); frame();
         // Bring the run panel into view (the sidebar is long); the canvas keeps the selected step.
         const auto *header = widget("workflow_edit_panel");
