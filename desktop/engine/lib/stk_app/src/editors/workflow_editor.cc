@@ -1,15 +1,18 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** \file
- * Workflow editor (P3 W3b, docs/design/project-workflows.md): shows a project workflow on the
- * analysis graph canvas, lists its validation issues and the selected step, and navigates to the
- * object a step references. An analysis step opens in an analysis graph tab of the same area with a
- * breadcrumb back here. Read-only: nothing here edits a workflow, runs or prepares anything.
+ * Workflow editor (P3 W3b/W3c, docs/design/project-workflows.md): shows a project workflow on the
+ * analysis graph canvas, lists its validation issues and the selected step, navigates to the
+ * object a step references, and edits the workflow as an unsaved candidate (WorkflowDraft) that is
+ * checked with project.workflows.validate and saved explicitly. An analysis step opens in an
+ * analysis graph tab of the same area with a breadcrumb back here. Nothing here runs or prepares
+ * a step, changes the Viewer or calls a model.
  */
 #include "stk/app/analysis_graph_canvas.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/project_workflows.hh"
 #include "stk/app/shell.hh"
+#include "stk/app/workflow_draft.hh"
 #include "stk/app/workflow_view.hh"
 #include "stk/ui/gpu_painter.hh"
 #include "project_navigation.hh"
@@ -18,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <set>
 
 namespace stk::app {
 namespace {
@@ -39,6 +43,17 @@ std::string clipped(std::string value, const size_t limit = 120)
   return value.substr(0, cut) + "…";
 }
 
+/** The reference key each step kind holds (suan/project/workflows.py REF_KEYS). */
+const char *ref_key(const std::string &kind)
+{
+  if (kind == "table") { return "table"; }
+  if (kind == "files") { return "snapshot"; }
+  if (kind == "simulation") { return "template"; }
+  return "analysis";
+}
+
+constexpr const char *kKinds[] = {"table", "files", "simulation", "analysis"};
+
 class WorkflowEditor final : public Editor {
  public:
   explicit WorkflowEditor(const EditorType &type) : Editor(type) {}
@@ -47,15 +62,20 @@ class WorkflowEditor final : public Editor {
   bool has_sidebar() const override { return true; }
   ui::Color main_background(const ui::Theme &) const override { return {0, 0, 0, 0}; }
 
-  /** {"workflow_id", "step"?}: show that workflow (read on the next sync) and select the step. */
-  bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &, std::string &) override
+  /** {"workflow_id", "step"?}: show that workflow (read on the next sync) and select the step.
+   * Refused while unsaved edits of another workflow are pending. */
+  bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &, std::string &reason) override
   {
     if (!target.is_object() || !target.contains("workflow_id") || !target.at("workflow_id").is_string() ||
         target.at("workflow_id").get_ref<const std::string &>().empty()) { return false; }
     const auto id = target.at("workflow_id").get<std::string>();
+    if (draft_.dirty() && draft_.workflow_id() != id) {
+      reason = "workflow.navigate_unsaved";
+      return false;
+    }
     want_step_ = io::get_string(target, "step");
     if (!workflows_ || io::get_string(workflows_->selected(), "id") != id) { pending_ = id; }
-    else { select_step(want_step_); want_step_.clear(); }
+    else { selected_id_ = want_step_; want_step_.clear(); shown_ = {}; }
     redraw();
     return true;
   }
@@ -69,8 +89,8 @@ class WorkflowEditor final : public Editor {
       if (const auto live = weak.lock(); live && *live) { fit_ = true; redraw(); }
     }).width(3).disable(!view_);
     row.button("workflow_reload", ctx.tr("workflow.reload"), [this, weak] {
-      if (const auto live = weak.lock(); live && *live) { workflows_->reload(); }
-    }).width(4).disable(!workflows_->supported() || workflows_->busy());
+      if (const auto live = weak.lock(); live && *live && !draft_.dirty()) { workflows_->reload(); }
+    }).width(4).disable(!workflows_->supported() || workflows_->busy() || draft_.dirty());
   }
 
   void draw_main(ui::Layout &layout, EditorContext &ctx) override
@@ -96,8 +116,10 @@ class WorkflowEditor final : public Editor {
       if (!view_error_.empty()) { layout.paragraph(view_error_); }
       return;
     }
-    layout.label(ctx.store.catalog().format("workflow.caption", {{"name", io::get_string(selected, "name")},
-        {"steps", std::to_string(view_->nodes.size())}})).tip(ctx.tr("workflow.navigation"));
+    const bool candidate = candidate_shown_;
+    layout.label(ctx.store.catalog().format(candidate ? "workflow.caption_candidate" : "workflow.caption",
+        {{"name", candidate ? draft_.name() : io::get_string(selected, "name")}, {"steps", std::to_string(view_->nodes.size())}}))
+        .tip(ctx.tr(editable(ctx) ? "workflow.navigation_edit" : "workflow.navigation"));
     canvas_top_ = 1.5f * (ctx.ui ? ctx.ui->style().unit : 20.0f);
   }
 
@@ -107,9 +129,9 @@ class WorkflowEditor final : public Editor {
     hint(layout, ctx, "workflow.intro");
     if (!ctx.store.project().project() || !workflows_->supported()) { return; }
     list_panel(layout, ctx);
-    const auto &selected = workflows_->selected();
-    if (selected.is_null()) { return; }
+    if (workflows_->selected().is_null()) { return; }
     status(layout, ctx);
+    edit_panel(layout, ctx);
     issues_panel(layout, ctx);
     step_panel(layout, ctx);
   }
@@ -126,7 +148,7 @@ class WorkflowEditor final : public Editor {
     if (view_) {
       place_canvas(width, height - top);
       ui::gpu::BlfTextMeasurer measure(*ctx.draw->fonts);
-      auto content = canvas_.draw_list(width, height - top, ui_scale_, measure, ctx.store.language(), selected_);
+      auto content = canvas_.draw_list(width, height - top, ui_scale_, measure, ctx.store.language(), selected_index());
       for (auto &command : content.cmds) {
         command.rect.y += float(top);
         command.pos.y += float(top);
@@ -149,14 +171,37 @@ class WorkflowEditor final : public Editor {
     place_canvas(rect.width(), rect.height() - canvas_top_);
     const double x = event.x - rect.xmin + 0.5;
     const double y = rect.ymax - 1 - event.y + 0.5 - canvas_top_;
-    if (event.type == wm::EventType::FocusOut) { dragging_ = false; return false; }
+    if (event.type == wm::EventType::FocusOut) { dragging_ = false; cancel_drag(); return false; }
     if (event.type == wm::EventType::MouseMove && dragging_) {
       canvas_.pan(x - last_x_, y - last_y_); last_x_ = x; last_y_ = y; redraw(); return true;
     }
+    if (event.type == wm::EventType::MouseMove && drag_ != Drag::None) { drag_move(x, y); return true; }
     if (event.type == wm::EventType::MouseUp && dragging_) { dragging_ = false; return true; }
+    if (event.type == wm::EventType::MouseUp && drag_ != Drag::None) { drag_finish(ctx, x, y); return true; }
     if (y < 0 || y >= rect.height() - canvas_top_) { return false; }
     if (event.type == wm::EventType::MouseDown) {
-      if (event.button == wm::MouseButton::Left) { selected_ = canvas_.hit(x, y); redraw(); return true; }
+      if (event.button == wm::MouseButton::Left) {
+        // Editing: drag from an output socket to an input to link, or drag a step to move it.
+        if (editable(ctx)) {
+          if (const auto port = canvas_.hit_port(x, y); port && port->output) {
+            const auto &node = view_->nodes[port->node];
+            if (!node.ambiguous_id) {
+              const auto &output = node.outputs[port->port];
+              drag_ = Drag::Link; link_node_ = node.id; link_port_ = output.name; link_type_ = output.type_text;
+              link_from_ = output.point;
+              canvas_.set_pending_link(std::pair{canvas_.to_screen(link_from_), AnalysisGraphPoint{x, y}});
+              redraw(); return true;
+            }
+          }
+        }
+        const auto hit = canvas_.hit(x, y);
+        selected_id_ = hit ? view_->nodes[*hit].id : std::string();
+        if (hit && editable(ctx) && !view_->nodes[*hit].ambiguous_id) {
+          drag_ = Drag::Node; drag_node_ = *hit; drag_moved_ = false;
+          press_x_ = x; press_y_ = y; drag_dx_ = drag_dy_ = 0;
+        }
+        redraw(); return true;
+      }
       if (event.button == wm::MouseButton::Middle || event.button == wm::MouseButton::Right) {
         dragging_ = true; last_x_ = x; last_y_ = y; return true;
       }
@@ -176,13 +221,37 @@ class WorkflowEditor final : public Editor {
 
   bool on_key(const wm::Event &event, EditorContext &ctx) override
   {
-    if (event.type != wm::EventType::KeyDown || event.key != wm::Key::Home) { return false; }
+    if (event.type != wm::EventType::KeyDown) { return false; }
     attach(ctx);
+    if (event.key == wm::Key::Delete) {
+      // Delete removes the selected step of the candidate (same as the panel button).
+      if (!editable(ctx) || selected_id_.empty()) { return false; }
+      remove_step(selected_id_);
+      return true;
+    }
+    if (event.key != wm::Key::Home) { return false; }
     fit_ = true; redraw(); return true;
   }
 
  private:
+  enum class Drag { None, Node, Link };
+
   void redraw() { if (store_) { store_->changed(); } }
+  void refuse(const std::string &message)
+  {
+    edit_error_ = message;
+    if (store_ && store_->toast) { store_->toast(message, ui::ToastKind::Warning); }
+    redraw();
+  }
+
+  std::optional<size_t> selected_index() const
+  {
+    if (!view_ || selected_id_.empty()) { return std::nullopt; }
+    for (size_t i = 0; i < view_->nodes.size(); ++i) {
+      if (view_->nodes[i].id == selected_id_) { return i; }
+    }
+    return std::nullopt;
+  }
 
   void attach(EditorContext &ctx)
   {
@@ -191,17 +260,38 @@ class WorkflowEditor final : public Editor {
     workflows_->sync();
     if (epoch_ != workflows_->epoch()) {
       epoch_ = workflows_->epoch();
-      view_.reset(); canvas_.set_view(nullptr); selected_.reset(); view_error_.clear();
-      shown_version_ = 0; listed_ = auto_selected_ = false; refreshed_revision_ = page_revision_ = -1;
+      view_.reset(); canvas_.set_view(nullptr); selected_id_.clear(); view_error_.clear(); shown_ = {};
+      auto_selected_ = false; refreshed_revision_ = page_revision_ = choices_revision_ = listed_revision_ = -1;
+      checked_document_ = checked_validation_ = nullptr;
+      draft_.reset(); requested_.reset(); cancel_drag();
     }
-    if (!workflows_->supported() || workflows_->busy()) { rebuild(ctx); return; }
+    if (workflows_->supported() && !workflows_->busy()) { request(ctx); }
+    sync_draft(ctx);
+    if (editable(ctx) && candidate_edits()) {
+      // Every candidate is checked as soon as it changes (latest only); positions and the name keep a check valid.
+      const auto key = candidate_key(ctx);
+      if (!requested_ || *requested_ != key) {
+        if (workflows_->check(draft_.document(), key)) { requested_ = key; }
+      }
+    }
+    rebuild(ctx);
+  }
+
+  /** At most one read per frame: a navigation target, the first page, re-reading after project
+   * changes (never under unsaved edits), a pending check, choices for adding steps, the first workflow. */
+  void request(EditorContext &ctx)
+  {
     const auto revision = ctx.store.project().project() ? ctx.store.project().project()->revision : -1;
     if (pending_) {
       if (workflows_->load(*pending_)) { pending_.reset(); auto_selected_ = true; }
     }
-    else if (!listed_) { listed_ = workflows_->load_page(0); }
-    else if (workflows_->stale() && refreshed_revision_ != revision) {
+    else if (workflows_->page().is_null() && listed_revision_ != revision && !ctx.store.project().busy()) {
+      // The first page, and again after a save or delete dropped it (once per revision).
+      if (workflows_->load_page(0)) { listed_revision_ = revision; }
+    }
+    else if (workflows_->stale() && refreshed_revision_ != revision && !ctx.store.project().busy()) {
       // Referenced analyses, tables or snapshots may have changed: read and check again, once per revision.
+      // Unsaved edits survive when the workflow itself did not change (see sync_draft).
       refreshed_revision_ = revision;
       workflows_->reload();
     }
@@ -209,9 +299,13 @@ class WorkflowEditor final : public Editor {
              !ctx.store.project().busy()) {
       workflows_->validate_selected();  // after a save, once the project has settled
     }
-    else if (workflows_->page_stale() && page_revision_ != revision) {
+    else if (workflows_->page_stale() && page_revision_ != revision && !ctx.store.project().busy()) {
       page_revision_ = revision;
       workflows_->load_page(io::get_int(workflows_->page(), "offset", 0));
+    }
+    else if (editable(ctx) && choices_revision_ != revision && !ctx.store.project().busy()) {
+      choices_revision_ = revision;
+      workflows_->load_choices();
     }
     else if (!auto_selected_ && workflows_->selected().is_null() && !workflows_->page().is_null()) {
       // Show the first workflow right away; most projects have one.
@@ -219,52 +313,115 @@ class WorkflowEditor final : public Editor {
       const auto &rows = member(workflows_->page(), "workflows");
       if (!rows.empty()) { workflows_->load(io::get_string(rows.at(0), "id")); }
     }
-    rebuild(ctx);
   }
 
-  void rebuild(EditorContext &ctx)
+  /** Pin the draft to the shown workflow while it has no edits; after a save the stored document
+   * equals the candidate and the draft moves to the new revision. Edits survive a newer read of the
+   * same, unchanged workflow; edits of a workflow changed elsewhere stay detached until discarded. */
+  void sync_draft(EditorContext &ctx)
   {
-    const auto language = ctx.store.language();
-    if (shown_version_ == workflows_->selected_version() && language == view_language_) { return; }
-    shown_version_ = workflows_->selected_version(); view_language_ = language;
     const auto &selected = workflows_->selected();
-    const auto &validation = workflows_->validation();
-    const auto previous = view_ ? view_->id : std::string();
-    const auto previous_step = selected_ && view_ && *selected_ < view_->nodes.size() ? view_->nodes[*selected_].id : std::string();
-    view_error_.clear();
-    if (selected.is_null() || validation.is_null() || io::get_string(selected, "state") != "readable") {
-      if (selected.is_null()) { view_.reset(); canvas_.set_view(nullptr); selected_.reset(); }
+    const auto &project = ctx.store.project().project();
+    if (selected.is_null() || io::get_string(selected, "state") != "readable" || !project) {
+      if (!draft_.dirty() && draft_.pinned()) { draft_.reset(); }
       return;
     }
-    WorkflowViewText words;
-    for (const auto *kind : {"table", "files", "simulation", "analysis"}) {
-      words.kinds[kind] = std::string(ctx.tr(std::string("workflow.kind.") + kind));
+    const auto id = io::get_string(selected, "id"), name = io::get_string(selected, "name");
+    const auto revision = workflows_->selected_revision();
+    const bool here = draft_.pinned() && draft_.workflow_id() == id && draft_.revision() == revision &&
+        draft_.handle() == project->handle;
+    if (here) { return; }
+    // A newer read of an unchanged workflow keeps the edits; a changed one leaves them detached.
+    if (draft_.dirty() && draft_.workflow_id() == id && draft_.handle() == project->handle &&
+        draft_.rebase(revision, name, selected.at("document"))) { requested_.reset(); return; }
+    if (!draft_.dirty() || draft_.matches(id, name, selected.at("document"))) {
+      try { draft_.pin(project->handle, id, revision, name, selected.at("document")); requested_.reset(); }
+      catch (const std::exception &error) { draft_.reset(); edit_error_ = error.what(); }
     }
-    words.after = std::string(ctx.tr("workflow.port.after"));
-    words.done = std::string(ctx.tr("workflow.port.done"));
-    words.files = std::string(ctx.tr("workflow.files_count"));
+  }
+
+  bool candidate_edits() const { return draft_.dirty() && !draft_.matches(draft_.workflow_id(), draft_.name(), draft_.baseline()); }
+
+  /** The draft edits exactly the workflow shown, at the revision it was read at. */
+  bool draft_current() const
+  {
+    const auto &selected = workflows_->selected();
+    return draft_.pinned() && !selected.is_null() && draft_.workflow_id() == io::get_string(selected, "id") &&
+        draft_.revision() == workflows_->selected_revision();
+  }
+  bool detached() const { return draft_.dirty() && !draft_current(); }
+  bool editable(EditorContext &ctx) const
+  {
+    return draft_current() && !workflows_->stale() && !workflows_->busy() && !workflows_->uncertain() &&
+        !ctx.store.project().busy() && !ctx.area.shell().text_input_active();
+  }
+
+  AnalysisCandidateKey candidate_key(EditorContext &ctx) const
+  {
+    const auto &project = ctx.store.project().project();
+    return {project ? project->handle : std::string(), draft_.workflow_id(), workflows_->session(),
+            draft_.revision(), draft_.generation(), draft_.check_version()};
+  }
+  const Json *checked(EditorContext &ctx) const
+  {
+    return candidate_edits() && draft_current() ? workflows_->candidate().result(candidate_key(ctx)) : nullptr;
+  }
+
+  WorkflowViewText words(EditorContext &ctx) const
+  {
+    WorkflowViewText text;
+    for (const auto *kind : kKinds) { text.kinds[kind] = std::string(ctx.tr(std::string("workflow.kind.") + kind)); }
+    text.after = std::string(ctx.tr("workflow.port.after"));
+    text.done = std::string(ctx.tr("workflow.port.done"));
+    text.files = std::string(ctx.tr("workflow.files_count"));
+    return text;
+  }
+
+  /** What the canvas and panels show: the unsaved candidate (with its check, or provisional
+   * summaries until the check arrives; changed steps marked) or the saved workflow. */
+  void rebuild(EditorContext &ctx)
+  {
+    const auto *result = checked(ctx);
+    const auto key = std::make_tuple(workflows_->selected_version(), draft_.generation(), draft_.version(),
+                                     result != nullptr, std::string(ctx.store.language()));
+    if (shown_ && *shown_ == key) { return; }
+    shown_ = key;
+    const auto &selected = workflows_->selected();
+    const auto previous = view_ ? view_->id : std::string();
+    view_error_.clear();
+    if (selected.is_null() || io::get_string(selected, "state") != "readable") {
+      view_.reset(); canvas_.set_view(nullptr); shown_document_ = shown_validation_ = nullptr; candidate_shown_ = false;
+      return;
+    }
+    candidate_shown_ = candidate_edits() && draft_current();
+    if (candidate_shown_) {
+      shown_document_ = draft_.document();
+      if (result) { checked_document_ = shown_document_; checked_validation_ = *result; shown_validation_ = *result; }
+      else {
+        // Until this candidate's check arrives, steps keep the summaries of the last checked candidate or the saved workflow.
+        shown_validation_ = workflow_provisional_validation(shown_document_, {{&checked_document_, &checked_validation_},
+            {&selected.at("document"), &workflows_->validation()}});
+      }
+    }
+    else {
+      if (workflows_->validation().is_null()) { return; }  // the saved workflow is shown once checked
+      shown_document_ = selected.at("document");
+      shown_validation_ = workflows_->validation();
+    }
     try {
-      auto view = std::make_shared<AnalysisGraphView>(workflow_graph_view(selected.at("document"), validation, words));
+      auto view = std::make_shared<AnalysisGraphView>(workflow_graph_view(shown_document_, shown_validation_, words(ctx)));
+      const auto edited = candidate_shown_ ? draft_.edited_steps() : std::set<std::string>{};
+      for (auto &node : view->nodes) { node.edited = edited.count(node.id) != 0; }
       view->id = io::get_string(selected, "id");
       const bool same = view->id == previous;
       view_ = std::move(view);
-      canvas_.set_view(view_, same);
+      if (drag_ == Drag::None) { canvas_.set_view(view_, same); }
       if (!same) { fit_ = true; }
-      selected_.reset();
-      select_step(want_step_.empty() ? previous_step : want_step_);
-      if (!want_step_.empty()) { want_step_.clear(); }
+      if (!want_step_.empty()) { selected_id_ = want_step_; want_step_.clear(); }
     }
     catch (const std::exception &error) {
-      view_.reset(); canvas_.set_view(nullptr); selected_.reset();
+      view_.reset(); canvas_.set_view(nullptr);
       view_error_ = error.what();
-    }
-  }
-
-  void select_step(const std::string &id)
-  {
-    if (!view_ || id.empty()) { return; }
-    for (size_t i = 0; i < view_->nodes.size(); ++i) {
-      if (view_->nodes[i].id == id) { selected_ = i; return; }
     }
   }
 
@@ -284,48 +441,162 @@ class WorkflowEditor final : public Editor {
       return live && *live && workflows->epoch() == epoch;
     };
   }
+  /** A deferred edit applies only while this editor, its project opening and the draft generation are unchanged. */
+  std::function<bool()> edit_guard(EditorContext &ctx)
+  {
+    auto ok = valid();
+    const auto generation = draft_.generation();
+    auto *shell = &ctx.area.shell();
+    return [this, ok, generation, shell] {
+      return ok() && draft_.generation() == generation && draft_current() && !workflows_->busy() &&
+          !workflows_->uncertain() && !workflows_->stale() && !shell->text_input_active();
+    };
+  }
+  void edited(const WorkflowDraft::EditResult &result)
+  {
+    if (result.accepted) { edit_error_.clear(); redraw(); }
+    else { refuse(result.error); }
+  }
+
+  /** Place steps that have no saved position where they are drawn, so adding or removing a step
+   * does not rearrange the others. */
+  bool freeze_layout()
+  {
+    if (!view_) { return true; }
+    std::map<std::string, std::pair<double, double>> positions;
+    for (const auto &node : view_->nodes) {
+      if (!node.supplied_position && !node.ambiguous_id) { positions[node.id] = {node.rect.x, node.rect.y}; }
+    }
+    if (positions.empty()) { return true; }
+    const auto result = draft_.move_steps(positions, draft_.generation());
+    if (!result.accepted) { refuse(result.error); }
+    return result.accepted;
+  }
+
+  void remove_step(const std::string &id)
+  {
+    if (!freeze_layout()) { return; }
+    const auto result = draft_.remove_step(id, draft_.generation());
+    if (result.accepted) { selected_id_.clear(); }
+    edited(result);
+  }
+
+  void cancel_drag()
+  {
+    if (drag_ == Drag::Node && view_) { canvas_.set_view(view_, true); }
+    drag_ = Drag::None; drag_moved_ = false;
+    canvas_.set_pending_link(std::nullopt);
+  }
+  void drag_move(const double x, const double y)
+  {
+    if (drag_ == Drag::Link) {
+      canvas_.set_pending_link(std::pair{canvas_.to_screen(link_from_), AnalysisGraphPoint{x, y}});
+      redraw(); return;
+    }
+    if (!drag_moved_ && std::hypot(x - press_x_, y - press_y_) < 4 * ui_scale_) { return; }
+    const double scale = canvas_.zoom() * canvas_.ui_scale();
+    if (!view_ || drag_node_ >= view_->nodes.size() || !(scale > 0)) { cancel_drag(); return; }
+    drag_moved_ = true; drag_dx_ = (x - press_x_) / scale; drag_dy_ = (y - press_y_) / scale;
+    // Only the picture moves while dragging; the candidate changes once, on release.
+    canvas_.set_view(std::make_shared<const AnalysisGraphView>(analysis_graph_view_moved(*view_, drag_node_, drag_dx_, drag_dy_)), true);
+    redraw();
+  }
+  void drag_finish(EditorContext &ctx, const double x, const double y)
+  {
+    const auto drag = std::exchange(drag_, Drag::None);
+    canvas_.set_pending_link(std::nullopt);
+    if (view_) { canvas_.set_view(view_, true); }
+    if (!view_ || !editable(ctx)) { drag_moved_ = false; redraw(); return; }
+    if (drag == Drag::Node && drag_moved_ && drag_node_ < view_->nodes.size()) {
+      const auto &node = view_->nodes[drag_node_];
+      edited(draft_.move_steps({{node.id, {node.rect.x + drag_dx_, node.rect.y + drag_dy_}}}, draft_.generation()));
+    }
+    if (drag == Drag::Link) {
+      const auto port = canvas_.hit_port(x, y);
+      if (port && !port->output) {
+        const auto &target = view_->nodes[port->node];
+        const auto &input = target.inputs[port->port];
+        const auto after = std::string(ctx.tr("workflow.port.after")), done = std::string(ctx.tr("workflow.port.done"));
+        if (target.ambiguous_id) { refuse(std::string(ctx.tr("workflow.edit.cannot_link"))); }
+        else if (input.name == after) {
+          // Any output dropped on the after socket orders the steps.
+          std::vector<std::string> steps;
+          if (const auto *step = draft_.step(target.id)) {
+            for (const auto &before : member(*step, "after")) { steps.push_back(before.get<std::string>()); }
+          }
+          if (std::find(steps.begin(), steps.end(), link_node_) == steps.end()) { steps.push_back(link_node_); }
+          edited(draft_.set_after(target.id, steps, draft_.generation()));
+          if (draft_.step(target.id)) { selected_id_ = target.id; }
+        }
+        else if (link_port_ == done) { refuse(std::string(ctx.tr("workflow.edit.order_only"))); }
+        else if (!input.declared || input.type_text != link_type_) {
+          refuse(ctx.store.catalog().format("workflow.edit.type_mismatch", {{"source", link_type_}, {"target", input.type_text}}));
+        }
+        else {
+          edited(draft_.set_link(target.id, input.name, link_node_ + "." + link_port_, draft_.generation()));
+          selected_id_ = target.id;
+        }
+      }
+    }
+    drag_moved_ = false;
+    redraw();
+  }
 
   void list_panel(ui::Layout &layout, EditorContext &ctx)
   {
     auto *panel = layout.panel("workflow_list_panel", ctx.tr("workflow.list"), true);
     if (!panel) { return; }
-    const auto page = workflows_->page();
-    if (page.is_null()) { panel->paragraph(ctx.tr(workflows_->busy() ? "workflow.loading" : "workflow.choose")); return; }
-    if (!io::get_string(page, "error").empty()) { panel->paragraph(clipped(io::get_string(page, "error"))); }
-    const auto &rows = member(page, "workflows");
-    if (rows.empty()) { panel->paragraph(ctx.tr("workflow.empty")); return; }
-    std::vector<std::vector<std::string>> cells;
-    int selected_row = -1;
-    for (size_t i = 0; i < rows.size(); ++i) {
-      const auto &item = rows[i];
-      if (io::get_string(workflows_->selected(), "id") == io::get_string(item, "id")) { selected_row = int(i); }
-      cells.push_back({clipped(io::get_string(item, "name", "—")),
-                       std::string(ctx.tr("analysis_documents.state." + io::get_string(item, "state")))});
-    }
-    ui::TableSpec spec;
-    spec.columns = {{std::string(ctx.tr("analysis_documents.name")), 12}, {std::string(ctx.tr("analysis_documents.state")), 6}};
-    spec.rows = int(rows.size()); spec.visible_rows = float(std::min(5, spec.rows));
-    spec.data_version = workflows_->version();
-    spec.cell = [cells](const int row, const int column) { return cells.at(size_t(row)).at(size_t(column)); };
-    const auto revision = io::get_int(page, "revision", -1);
     auto ok = valid();
-    spec.selected = {[selected_row] { return selected_row; }, [this, ok, rows, revision](const int row) {
-      if (ok() && row >= 0 && size_t(row) < rows.size() && io::get_int(workflows_->page(), "revision", -1) == revision) {
-        auto_selected_ = true;
-        workflows_->load(io::get_string(rows[size_t(row)], "id"));
+    const bool locked = draft_.dirty() || workflows_->uncertain();
+    const auto page = workflows_->page();
+    if (page.is_null()) { panel->paragraph(ctx.tr(workflows_->busy() ? "workflow.loading" : "workflow.choose")); }
+    else {
+      if (!io::get_string(page, "error").empty()) { panel->paragraph(clipped(io::get_string(page, "error"))); }
+      const auto &rows = member(page, "workflows");
+      if (rows.empty()) { panel->paragraph(ctx.tr("workflow.empty")); }
+      else {
+        std::vector<std::vector<std::string>> cells;
+        int selected_row = -1;
+        for (size_t i = 0; i < rows.size(); ++i) {
+          const auto &item = rows[i];
+          if (io::get_string(workflows_->selected(), "id") == io::get_string(item, "id")) { selected_row = int(i); }
+          cells.push_back({clipped(io::get_string(item, "name", "—")),
+                           std::string(ctx.tr("analysis_documents.state." + io::get_string(item, "state")))});
+        }
+        ui::TableSpec spec;
+        spec.columns = {{std::string(ctx.tr("analysis_documents.name")), 12}, {std::string(ctx.tr("analysis_documents.state")), 6}};
+        spec.rows = int(rows.size()); spec.visible_rows = float(std::min(5, spec.rows));
+        spec.data_version = workflows_->version();
+        spec.cell = [cells](const int row, const int column) { return cells.at(size_t(row)).at(size_t(column)); };
+        const auto revision = io::get_int(page, "revision", -1);
+        spec.selected = {[selected_row] { return selected_row; }, [this, ok, rows, revision](const int row) {
+          if (ok() && !draft_.dirty() && row >= 0 && size_t(row) < rows.size() &&
+              io::get_int(workflows_->page(), "revision", -1) == revision) {
+            auto_selected_ = true; selected_id_.clear();
+            workflows_->load(io::get_string(rows[size_t(row)], "id"));
+          }
+        }};
+        panel->table("workflow_list", std::move(spec)).disable(workflows_->busy() || locked);
+        const auto offset = io::get_int(page, "offset", 0), total = io::get_int(page, "total", 0);
+        if (total > 50) {
+          auto &buttons = panel->row();
+          buttons.button("workflow_previous", ctx.tr("analysis_documents.previous"), [this, ok, offset] {
+            if (ok()) { workflows_->load_page(std::max<int64_t>(0, offset - 50)); }
+          }).disable(workflows_->busy() || offset == 0);
+          buttons.button("workflow_next", ctx.tr("analysis_documents.next"), [this, ok, offset] {
+            if (ok()) { workflows_->load_page(offset + 50); }
+          }).disable(workflows_->busy() || offset + 50 >= total);
+        }
       }
-    }};
-    panel->table("workflow_list", std::move(spec)).disable(workflows_->busy());
-    const auto offset = io::get_int(page, "offset", 0), total = io::get_int(page, "total", 0);
-    if (total > 50) {
-      auto &buttons = panel->row();
-      buttons.button("workflow_previous", ctx.tr("analysis_documents.previous"), [this, ok, offset] {
-        if (ok()) { workflows_->load_page(std::max<int64_t>(0, offset - 50)); }
-      }).disable(workflows_->busy() || offset == 0);
-      buttons.button("workflow_next", ctx.tr("analysis_documents.next"), [this, ok, offset] {
-        if (ok()) { workflows_->load_page(offset + 50); }
-      }).disable(workflows_->busy() || offset + 50 >= total);
     }
+    // A new, empty workflow; the name can be changed before or after saving its first steps.
+    const auto total = page.is_null() ? int64_t(0) : io::get_int(page, "total", 0);
+    const auto name = ctx.store.catalog().format("workflow.new_name", {{"n", std::to_string(total + 1)}});
+    panel->button("workflow_new", ctx.tr("workflow.new"), [this, ok, name] {
+      if (!ok() || draft_.dirty()) { return; }
+      selected_id_.clear();
+      workflows_->create(name, Json{{"format", "stk.workflow/1"}, {"steps", Json::array()}, {"ui", Json::object()}});
+    }).disable(workflows_->busy() || locked || ctx.store.project().busy());
   }
 
   void status(ui::Layout &layout, EditorContext &ctx)
@@ -343,15 +614,176 @@ class WorkflowEditor final : public Editor {
       const auto count = member(validation, "issues").size() + size_t(io::get_int(validation, "omitted_issues", 0));
       layout.paragraph(ctx.store.catalog().format("workflow.invalid", {{"count", std::to_string(count)}}));
     }
-    if (workflows_->stale()) { layout.paragraph(ctx.tr("workflow.stale")); }
+    if (workflows_->stale() && !draft_.dirty()) { layout.paragraph(ctx.tr("workflow.stale")); }
+    if (workflows_->uncertain()) { layout.paragraph(ctx.tr("workflow.uncertain")); }
+    if (!workflows_->notice().empty() && !draft_.dirty()) { layout.paragraph(ctx.tr(workflows_->notice())); }
     if (!workflows_->error().empty()) { layout.paragraph(clipped(workflows_->error(), 512)); }
+  }
+
+  /** Name, adding steps, the pending changes, their check, Save/Discard and Delete. */
+  void edit_panel(ui::Layout &layout, EditorContext &ctx)
+  {
+    if (io::get_string(workflows_->selected(), "state") != "readable") { return; }
+    const auto count = change_count();
+    auto *panel = layout.panel("workflow_edit_panel", count ? ctx.store.catalog().format("workflow.edit.title_count",
+        {{"count", std::to_string(count)}}) : std::string(ctx.tr("workflow.edit.title")), true);
+    if (!panel) { return; }
+    auto &catalog = ctx.store.catalog();
+    auto guard = edit_guard(ctx);
+    const bool can = editable(ctx);
+    if (detached()) {
+      panel->paragraph(ctx.tr("workflow.edit.detached"));
+      panel->button("workflow_discard", ctx.tr("workflow.edit.discard"), [this, ok = valid()] {
+        if (ok() && draft_.revert(draft_.generation())) { draft_.reset(); requested_.reset(); redraw(); }
+      });
+      return;
+    }
+    // The name is a field of the stored record, saved with the document.
+    if (!ctx.area.shell().text_input_active() && name_source_ != std::make_pair(draft_.generation(), draft_.version())) {
+      name_text_ = draft_.name(); name_source_ = {draft_.generation(), draft_.version()};
+    }
+    auto &name = panel->row();
+    ui::TextFieldOptions options; options.max_length = 1024;
+    name.text_field("workflow_name", ui::bind(name_text_), options);
+    name.button("workflow_rename", ctx.tr("workflow.edit.rename"), [this, guard] {
+      if (guard()) { edited(draft_.set_name(name_text_, draft_.generation())); }
+    }).width(4).disable(!can || name_text_ == draft_.name());
+
+    add_step(*panel, ctx, guard, can);
+
+    if (draft_.dirty()) {
+      for (const auto &id : draft_.edited_steps()) {
+        panel->paragraph(catalog.format(draft_.baseline().is_null() || !step_in(draft_.baseline(), id) ?
+            "workflow.edit.change_added" : "workflow.edit.change_step", {{"step", id}}));
+      }
+      for (const auto &step : member(draft_.baseline(), "steps")) {
+        const auto id = io::get_string(step, "id");
+        if (!draft_.step(id)) { panel->paragraph(catalog.format("workflow.edit.change_removed", {{"step", id}})); }
+      }
+      if (draft_.name() != draft_.baseline_name()) {
+        panel->paragraph(catalog.format("workflow.edit.change_name", {{"name", clipped(draft_.name(), 80)}}));
+      }
+    }
+    const auto *result = checked(ctx);
+    const bool checking = candidate_edits() && !result && workflows_->candidate().pending();
+    if (candidate_edits()) {
+      if (checking) { panel->paragraph(ctx.tr("workflow.edit.checking")); }
+      else if (result) {
+        const auto issues = member(*result, "issues").size() + size_t(io::get_int(*result, "omitted_issues", 0));
+        panel->paragraph(issues ? catalog.format("workflow.edit.candidate_issues", {{"count", std::to_string(issues)}}) :
+                                  std::string(ctx.tr("workflow.edit.candidate_valid")));
+      }
+      else if (const auto error = workflows_->candidate().error(candidate_key(ctx)); !error.empty()) {
+        panel->paragraph(clipped(error, 256));
+      }
+    }
+    if (!edit_error_.empty()) { panel->paragraph(clipped(edit_error_, 256)); }
+    auto &actions = panel->row();
+    const auto version = workflows_->selected_version();
+    // Drafts may be saved with issues (they stay listed); only the check of this candidate must be in.
+    const bool ready = !candidate_edits() || result || !workflows_->candidate().error(candidate_key(ctx)).empty();
+    actions.button("workflow_save", ctx.tr("workflow.edit.save"), [this, guard, version] {
+      if (guard() && draft_.dirty()) { workflows_->update(draft_.name(), draft_.document(), version); }
+    }).disable(!can || !draft_.dirty() || !ready);
+    actions.button("workflow_discard", ctx.tr("workflow.edit.discard"), [this, ok = valid()] {
+      if (ok() && draft_.revert(draft_.generation())) { requested_.reset(); edit_error_.clear(); redraw(); }
+    }).disable(!draft_.dirty() || !draft_.pinned());
+    // Deleting is an ordinary undoable table edit of the managed workflow table.
+    const auto id = io::get_string(workflows_->selected(), "id");
+    auto *project = &ctx.store.project();
+    actions.button("workflow_delete", ctx.tr("workflow.edit.delete"), [this, guard, project, id] {
+      if (!guard() || draft_.dirty()) { return; }
+      if (project->apply(Json::array({{{"op", "delete_record"}, {"id", id}}}))) {
+        workflows_->clear_selection(); draft_.reset(); selected_id_.clear(); auto_selected_ = false; shown_ = {};
+        if (store_ && store_->toast) { store_->toast(std::string(store_->tr("workflow.edit.deleted")), ui::ToastKind::Info); }
+      }
+    }).disable(!can || draft_.dirty()).tip(ctx.tr("workflow.edit.delete.tip"));
+  }
+
+  /** Added or changed steps, removed steps and a renamed workflow. */
+  size_t change_count() const
+  {
+    if (!draft_.dirty()) { return 0; }
+    size_t count = draft_.edited_steps().size() + (draft_.name() != draft_.baseline_name());
+    for (const auto &step : member(draft_.baseline(), "steps")) { count += draft_.step(io::get_string(step, "id")) ? 0 : 1; }
+    return std::max<size_t>(count, 1);  // moves alone count as one change
+  }
+
+  static bool step_in(const Json &document, const std::string &id)
+  {
+    for (const auto &step : member(document, "steps")) { if (io::get_string(step, "id") == id) { return true; } }
+    return false;
+  }
+
+  /** Kind and object dropdowns from project.workflows.choices, placed right of the selection. */
+  void add_step(ui::Layout &panel, EditorContext &ctx, const std::function<bool()> &guard, const bool can)
+  {
+    const auto &choices = workflows_->choices();
+    std::vector<std::string> kinds;
+    for (const auto *kind : kKinds) { kinds.push_back(std::string(ctx.tr(std::string("workflow.kind.") + kind))); }
+    add_kind_ = std::clamp(add_kind_, 0, int(std::size(kKinds)) - 1);
+    const std::string kind = kKinds[add_kind_];
+    std::vector<std::string> labels, values;
+    const auto list = [&](const char *key) -> const Json & { return member(choices, key); };
+    if (kind == "table") {
+      for (const auto &table : list("tables")) { labels.push_back(clipped(io::get_string(table, "name"), 60)); values.push_back(io::get_string(table, "id")); }
+    }
+    else if (kind == "files") {
+      for (const auto &snapshot : list("snapshots")) {
+        const auto files = member(snapshot, "file_count");
+        labels.push_back(io::get_string(snapshot, "created_at").substr(0, 19) +
+            (files.is_number_integer() ? "  · " + ctx.store.catalog().format("workflow.files_count", {{"count", std::to_string(files.get<int64_t>())}}) : std::string()));
+        values.push_back(io::get_string(snapshot, "id"));
+      }
+    }
+    else if (kind == "simulation") {
+      for (const auto &item : list("templates")) {
+        labels.push_back(io::get_string(item, "name") + " (" + io::get_string(item, "id") + ")"); values.push_back(io::get_string(item, "id"));
+      }
+    }
+    else {
+      for (const auto &analysis : list("analyses")) { labels.push_back(clipped(io::get_string(analysis, "name"), 60)); values.push_back(io::get_string(analysis, "id")); }
+    }
+    add_object_ = values.empty() ? 0 : std::clamp(add_object_, 0, int(values.size()) - 1);
+    auto &row = panel.row();
+    row.dropdown("workflow_add_kind", std::move(kinds), ui::bind(add_kind_)).width(5).disable(!can);
+    const bool empty = values.empty();
+    if (empty) { labels.push_back(std::string(ctx.tr(choices.is_null() ? "workflow.edit.choices_loading" : "workflow.edit.no_objects"))); }
+    row.dropdown("workflow_add_object", std::move(labels), ui::bind(add_object_)).disable(!can || empty);
+    panel.button("workflow_add_step", ctx.tr("workflow.edit.add_step"), [this, guard, kind, values] {
+      if (!guard() || values.empty() || add_object_ < 0 || size_t(add_object_) >= values.size() || !freeze_layout()) { return; }
+      const auto result = draft_.add_step(kind, ref_key(kind), values[size_t(add_object_)], place(), draft_.generation());
+      if (result.accepted) { selected_id_ = result.id; fit_ = true; }  // refit so the new step is in view
+      edited(result);
+    }).disable(!can || empty);
+  }
+
+  /** Right of the selected step (or of the rightmost one), moved down past steps already there. */
+  std::optional<std::pair<double, double>> place() const
+  {
+    if (!view_ || view_->nodes.empty()) { return std::pair{0.0, 0.0}; }
+    const AnalysisGraphRect *anchor = nullptr;
+    if (const auto index = selected_index()) { anchor = &view_->nodes[*index].rect; }
+    else {
+      for (const auto &node : view_->nodes) { if (!anchor || node.rect.x > anchor->x) { anchor = &node.rect; } }
+    }
+    double x = anchor->x + anchor->width + 80, y = anchor->y;
+    for (bool moved = true; moved;) {
+      moved = false;
+      for (const auto &node : view_->nodes) {
+        if (std::abs(node.rect.x - x) < anchor->width && std::abs(node.rect.y - y) < node.rect.height + 20) {
+          y = node.rect.y + node.rect.height + 30; moved = true;
+        }
+      }
+    }
+    return std::pair{x, y};
   }
 
   void issues_panel(ui::Layout &layout, EditorContext &ctx)
   {
-    const auto &issues = member(workflows_->validation(), "issues");
+    const auto &issues = member(shown_validation_, "issues");
     if (issues.empty()) { return; }
-    auto *panel = layout.panel("workflow_issues_panel", ctx.tr("workflow.issues"), true);
+    auto *panel = layout.panel("workflow_issues_panel", ctx.tr(candidate_shown_ ? "workflow.issues_candidate" : "workflow.issues"), true);
     if (!panel) { return; }
     const std::weak_ptr<bool> weak = alive_;
     for (size_t i = 0; i < issues.size() && i < 64; ++i) {
@@ -360,12 +792,27 @@ class WorkflowEditor final : public Editor {
       const auto title = ctx.store.catalog().tr_or("workflow.issue." + code, code);
       panel->button("workflow_issue/" + std::to_string(i), clipped(step + " · " + std::string(title), 80),
                     [this, weak, step] {
-        if (const auto live = weak.lock(); live && *live) { select_step(step); redraw(); }
+        if (const auto live = weak.lock(); live && *live) { selected_id_ = step; redraw(); }
       }).tip(clipped(io::get_string(issue, "message"), 512) + "\n" + io::get_string(issue, "path"));
     }
     if (issues.size() > 64) {
       panel->paragraph(ctx.store.catalog().format("workflow.more_issues", {{"count", std::to_string(issues.size() - 64)}}));
     }
+  }
+
+  /** The fields of the parameter tables this workflow's table steps reference, in table order. */
+  std::vector<std::pair<std::string, std::string>> workflow_fields(EditorContext &ctx) const
+  {
+    std::set<std::string> tables;
+    for (const auto &step : member(shown_document_, "steps")) {
+      if (io::get_string(step, "kind") == "table") { tables.insert(io::get_string(member(step, "ref"), "table")); }
+    }
+    std::vector<std::pair<std::string, std::string>> fields;
+    for (const auto &table : ctx.store.project().tables()) {
+      if (!tables.count(table.id)) { continue; }
+      for (const auto &field : table.fields) { fields.push_back({field.id, table.name + " · " + field.name}); }
+    }
+    return fields;
   }
 
   std::string field_name(EditorContext &ctx, const std::string &field_id) const
@@ -382,17 +829,17 @@ class WorkflowEditor final : public Editor {
   {
     auto *panel = layout.panel("workflow_step_panel", ctx.tr("workflow.step"), true);
     if (!panel) { return; }
-    if (!view_ || !selected_ || *selected_ >= view_->nodes.size()) { panel->paragraph(ctx.tr("workflow.pick_step")); return; }
-    const auto &document = workflows_->selected().at("document");
-    const auto &steps = document.at("steps");
-    const auto &summaries = member(workflows_->validation(), "steps");
-    const size_t index = *selected_;
-    if (index >= steps.size() || index >= summaries.size()) { return; }
-    const auto &step = steps[index];
-    const auto &summary = summaries[index];
+    const auto index = selected_index();
+    const auto &steps = member(shown_document_, "steps");
+    const auto &summaries = member(shown_validation_, "steps");
+    if (!index || *index >= steps.size() || *index >= summaries.size()) { panel->paragraph(ctx.tr("workflow.pick_step")); return; }
+    const auto &step = steps[*index];
+    const auto &summary = summaries[*index];
     const auto kind = io::get_string(step, "kind"), id = io::get_string(step, "id");
     auto &catalog = ctx.store.catalog();
-    panel->label(view_->nodes[index].label);
+    const bool can = editable(ctx) && !view_->nodes[*index].ambiguous_id;
+    auto guard = edit_guard(ctx);
+    panel->label(view_->nodes[*index].label);
     panel->paragraph(catalog.format("workflow.step_id", {{"id", id}, {"kind", std::string(catalog.tr_or("workflow.kind." + kind, kind))}}));
     const auto name = io::get_string(summary, "name");
     if (!name.empty()) { panel->paragraph(catalog.format("workflow.references", {{"name", clipped(name)}})); }
@@ -401,30 +848,179 @@ class WorkflowEditor final : public Editor {
     }
     const auto hash = io::get_string(summary, "content_sha256");
     if (!hash.empty()) { panel->paragraph(catalog.format("workflow.content_hash", {{"hash", hash.substr(0, 12)}})); }
-    const auto &links = member(step, "inputs");
-    for (const auto &port : member(summary, "inputs")) {
-      const auto port_name = io::get_string(port, "name");
-      const auto &link = member(links, port_name.c_str());
-      panel->paragraph(link.is_object() ?
-          catalog.format("workflow.input_linked", {{"port", port_name}, {"type", io::get_string(port, "type")},
-                                                   {"source", io::get_string(link, "from")}}) :
-          catalog.format("workflow.input_open", {{"port", port_name}, {"type", io::get_string(port, "type")}}));
-    }
+    if (can) { label_editor(*panel, ctx, guard, step); }
+    inputs(*panel, ctx, guard, step, summary, can);
     for (const auto &port : member(summary, "outputs")) {
       panel->paragraph(catalog.format("workflow.output", {{"port", io::get_string(port, "name")}, {"type", io::get_string(port, "type")}}));
     }
-    std::string after;
-    for (const auto &before : member(step, "after")) {
-      if (before.is_string()) { after += (after.empty() ? "" : ", ") + before.get<std::string>(); }
-    }
-    if (!after.empty()) { panel->paragraph(catalog.format("workflow.after", {{"steps", after}})); }
-    for (const auto &[parameter, value] : member(step, "parameters").items()) {
-      const bool field = value.is_object() && value.size() == 1 && value.contains("$field") && value.at("$field").is_string();
-      panel->paragraph(field ? catalog.format("workflow.parameter_field", {{"name", parameter},
-                                   {"field", field_name(ctx, value.at("$field").get<std::string>())}}) :
-                               catalog.format("workflow.parameter_value", {{"name", parameter}, {"value", clipped(value.dump(), 80)}}));
+    after_editor(*panel, ctx, guard, step, can);
+    parameters(*panel, ctx, guard, step, summary, can);
+    if (can) {
+      panel->button("workflow_remove_step", ctx.tr("workflow.edit.remove_step"), [this, guard, id] {
+        if (guard()) { remove_step(id); }
+      });
     }
     action(*panel, ctx, step, summary);
+  }
+
+  void label_editor(ui::Layout &panel, EditorContext &ctx, const std::function<bool()> &guard, const Json &step)
+  {
+    const auto id = io::get_string(step, "id");
+    const auto source = std::make_tuple(id, draft_.generation(), draft_.version());
+    if (!ctx.area.shell().text_input_active() && label_source_ != source) { label_text_ = io::get_string(step, "label"); label_source_ = source; }
+    auto &row = panel.row();
+    ui::TextFieldOptions options; options.max_length = 1024; options.placeholder = std::string(ctx.tr("workflow.edit.label"));
+    row.text_field("workflow_step_label", ui::bind(label_text_), options);
+    row.button("workflow_step_label_apply", ctx.tr("workflow.edit.apply"), [this, guard, id] {
+      if (guard()) { edited(draft_.set_label(id, label_text_.empty() ? std::nullopt : std::optional<std::string>(label_text_), draft_.generation())); }
+    }).width(4).disable(label_text_ == io::get_string(step, "label"));
+  }
+
+  void inputs(ui::Layout &panel, EditorContext &ctx, const std::function<bool()> &guard, const Json &step, const Json &summary,
+              const bool can)
+  {
+    auto &catalog = ctx.store.catalog();
+    const auto id = io::get_string(step, "id");
+    const auto &links = member(step, "inputs");
+    const auto &summaries = member(shown_validation_, "steps");
+    for (const auto &port : member(summary, "inputs")) {
+      const auto port_name = io::get_string(port, "name"), type = io::get_string(port, "type");
+      const auto &link = member(links, port_name.c_str());
+      const auto current = link.is_object() ? io::get_string(link, "from") : std::string();
+      if (!can) {
+        panel.paragraph(link.is_object() ?
+            catalog.format("workflow.input_linked", {{"port", port_name}, {"type", type}, {"source", current}}) :
+            catalog.format("workflow.input_open", {{"port", port_name}, {"type", type}}));
+        continue;
+      }
+      // Same-type outputs of other steps; an unlisted current link stays visible.
+      std::vector<std::string> values{std::string()}, labels{std::string(ctx.tr("workflow.edit.not_linked"))};
+      for (const auto &other : summaries) {
+        const auto other_id = io::get_string(other, "id");
+        if (other_id == id) { continue; }
+        for (const auto &output : member(other, "outputs")) {
+          if (io::get_string(output, "type") != type) { continue; }
+          values.push_back(other_id + "." + io::get_string(output, "name"));
+          labels.push_back(values.back());
+        }
+      }
+      if (!current.empty() && std::find(values.begin(), values.end(), current) == values.end()) {
+        values.push_back(current); labels.push_back(current + "  · " + std::string(ctx.tr("analysis_links.unlisted")));
+      }
+      const int index = int(std::find(values.begin(), values.end(), current) - values.begin());
+      auto &scope = panel.scope("workflow_input/" + port_name);
+      scope.label(catalog.format("workflow.edit.input", {{"port", port_name}, {"type", type}}));
+      scope.dropdown("source", std::move(labels), {[index] { return index; }, [this, guard, values, id, port_name](const int choice) {
+        if (!guard() || choice < 0 || size_t(choice) >= values.size()) { return; }
+        const auto &value = values[size_t(choice)];
+        edited(draft_.set_link(id, port_name, value.empty() ? std::nullopt : std::optional<std::string>(value), draft_.generation()));
+      }});
+    }
+  }
+
+  void after_editor(ui::Layout &panel, EditorContext &ctx, const std::function<bool()> &guard, const Json &step, const bool can)
+  {
+    auto &catalog = ctx.store.catalog();
+    const auto id = io::get_string(step, "id");
+    std::vector<std::string> after;
+    for (const auto &before : member(step, "after")) { if (before.is_string()) { after.push_back(before.get<std::string>()); } }
+    if (!can) {
+      std::string text;
+      for (const auto &before : after) { text += (text.empty() ? "" : ", ") + before; }
+      if (!text.empty()) { panel.paragraph(catalog.format("workflow.after", {{"steps", text}})); }
+      return;
+    }
+    for (const auto &before : after) {
+      auto &scope = panel.scope("workflow_after/" + before);
+      auto &row = scope.row();
+      row.label(catalog.format("workflow.after", {{"steps", before}}));
+      row.button("remove", ctx.tr("workflow.edit.remove"), [this, guard, id, after, before] {
+        if (!guard()) { return; }
+        auto next = after;
+        next.erase(std::remove(next.begin(), next.end(), before), next.end());
+        edited(draft_.set_after(id, next, draft_.generation()));
+      }).width(4);
+    }
+    std::vector<std::string> others{std::string(ctx.tr("workflow.edit.add_after"))};
+    for (const auto &other : member(shown_document_, "steps")) {
+      const auto other_id = io::get_string(other, "id");
+      if (other_id != id && std::find(after.begin(), after.end(), other_id) == after.end()) { others.push_back(other_id); }
+    }
+    if (others.size() > 1) {
+      panel.dropdown("workflow_after_add", others, {[] { return 0; }, [this, guard, id, after, others](const int choice) {
+        if (!guard() || choice <= 0 || size_t(choice) >= others.size()) { return; }
+        auto next = after; next.push_back(others[size_t(choice)]);
+        edited(draft_.set_after(id, next, draft_.generation()));
+      }});
+    }
+  }
+
+  /** Each graph parameter of an analysis step: the saved analysis value (no entry), a literal JSON
+   * value, or a field of this workflow's parameter tables taken per row. */
+  void parameters(ui::Layout &panel, EditorContext &ctx, const std::function<bool()> &guard, const Json &step, const Json &summary,
+                  const bool can)
+  {
+    auto &catalog = ctx.store.catalog();
+    const auto id = io::get_string(step, "id");
+    const auto &values = member(step, "parameters");
+    if (!can) {
+      for (const auto &[name, value] : values.items()) {
+        const bool field = value.is_object() && value.size() == 1 && value.contains("$field") && value.at("$field").is_string();
+        panel.paragraph(field ? catalog.format("workflow.parameter_field", {{"name", name}, {"field", field_name(ctx, value.at("$field").get<std::string>())}}) :
+                                catalog.format("workflow.parameter_value", {{"name", name}, {"value", clipped(value.dump(), 80)}}));
+      }
+      return;
+    }
+    const auto fields = workflow_fields(ctx);
+    for (const auto &parameter : member(summary, "parameters")) {
+      const auto name = io::get_string(parameter, "name");
+      const auto &value = member(values, name.c_str());
+      const bool bound = values.is_object() && values.contains(name);
+      const bool field = bound && value.is_object() && value.size() == 1 && value.contains("$field") && value.at("$field").is_string();
+      const int mode = !bound ? 0 : field ? 2 : 1;
+      auto &scope = panel.scope("workflow_param/" + name);
+      const auto label = io::get_string(parameter, "label");
+      scope.label(catalog.format("workflow.edit.parameter", {{"name", name}, {"type", io::get_string(parameter, "type")},
+                                                             {"label", label.empty() ? name : clipped(label, 40)}}));
+      std::vector<std::string> modes{std::string(ctx.tr("workflow.edit.mode_default")), std::string(ctx.tr("workflow.edit.mode_literal")),
+                                     std::string(ctx.tr("workflow.edit.mode_field"))};
+      const auto fallback = member(parameter, "default");
+      scope.dropdown("mode", std::move(modes), {[mode] { return mode; }, [this, guard, id, name, fallback, fields, mode](const int choice) {
+        if (!guard() || choice == mode) { return; }
+        if (choice == 0) { edited(draft_.set_parameter(id, name, std::nullopt, draft_.generation())); }
+        else if (choice == 1) { edited(draft_.set_parameter(id, name, fallback, draft_.generation())); }
+        else if (fields.empty()) { refuse(std::string(store_->tr("workflow.edit.no_fields"))); }
+        else { edited(draft_.set_parameter(id, name, Json{{"$field", fields.front().first}}, draft_.generation())); }
+      }});
+      if (mode == 1) {
+        auto &buffer = literal_text_[id + "/" + name];
+        const auto source = std::make_tuple(id + "/" + name, draft_.generation(), draft_.version());
+        if (!ctx.area.shell().text_input_active() && literal_source_[id + "/" + name] != source) {
+          buffer = value.dump(); literal_source_[id + "/" + name] = source;
+        }
+        auto &row = scope.row();
+        ui::TextFieldOptions options; options.max_length = 64 * 1024; options.mono = true;
+        row.text_field("value", ui::bind(buffer), options);
+        row.button("apply", ctx.tr("workflow.edit.apply"), [this, guard, id, name, &buffer] {
+          if (!guard()) { return; }
+          try { edited(draft_.set_parameter(id, name, io::parse_json(buffer), draft_.generation())); }
+          catch (const std::exception &) { refuse(std::string(store_->tr("workflow.edit.bad_json"))); }
+        }).width(4).disable(buffer == value.dump());
+      }
+      else if (mode == 2) {
+        std::vector<std::string> labels;
+        int selected = -1;
+        for (size_t i = 0; i < fields.size(); ++i) {
+          labels.push_back(clipped(fields[i].second, 60));
+          if (fields[i].first == value.at("$field").get<std::string>()) { selected = int(i); }
+        }
+        if (selected < 0) { labels.push_back(field_name(ctx, value.at("$field").get<std::string>()) + "  · " + std::string(ctx.tr("analysis_links.unlisted"))); selected = int(labels.size()) - 1; }
+        scope.dropdown("field", std::move(labels), {[selected] { return selected; }, [this, guard, id, name, fields](const int choice) {
+          if (!guard() || choice < 0 || size_t(choice) >= fields.size()) { return; }
+          edited(draft_.set_parameter(id, name, Json{{"$field", fields[size_t(choice)].first}}, draft_.generation()));
+        }});
+      }
+    }
   }
 
   void action(ui::Layout &panel, EditorContext &ctx, const Json &step, const Json &summary)
@@ -473,14 +1069,30 @@ class WorkflowEditor final : public Editor {
   AppStore *store_ = nullptr;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::unique_ptr<ProjectWorkflows> workflows_;
+  WorkflowDraft draft_;
+  std::optional<AnalysisCandidateKey> requested_;
   AnalysisGraphCanvas canvas_;
   std::shared_ptr<AnalysisGraphView> view_;
-  std::optional<size_t> selected_;
+  Json shown_document_, shown_validation_, checked_document_, checked_validation_;
+  bool candidate_shown_ = false;
+  std::optional<std::tuple<uint64_t, uint64_t, uint64_t, bool, std::string>> shown_;
+  std::string selected_id_, want_step_, view_error_, edit_error_;
   std::optional<std::string> pending_;
-  std::string want_step_, view_language_, view_error_;
-  uint64_t epoch_ = 0, shown_version_ = 0;
-  int64_t refreshed_revision_ = -1, page_revision_ = -1;
-  bool listed_ = false, auto_selected_ = false, fit_ = true, dragging_ = false;
+  std::string name_text_, label_text_;
+  std::pair<uint64_t, uint64_t> name_source_{~uint64_t(0), 0};
+  std::tuple<std::string, uint64_t, uint64_t> label_source_;
+  std::map<std::string, std::string> literal_text_;
+  std::map<std::string, std::tuple<std::string, uint64_t, uint64_t>> literal_source_;
+  int add_kind_ = 3, add_object_ = 0;
+  uint64_t epoch_ = 0;
+  int64_t refreshed_revision_ = -1, page_revision_ = -1, choices_revision_ = -1, listed_revision_ = -1;
+  bool auto_selected_ = false, fit_ = true, dragging_ = false;
+  Drag drag_ = Drag::None;
+  bool drag_moved_ = false;
+  size_t drag_node_ = 0;
+  double press_x_ = 0, press_y_ = 0, drag_dx_ = 0, drag_dy_ = 0;
+  std::string link_node_, link_port_, link_type_;
+  AnalysisGraphPoint link_from_;
   double last_x_ = 0, last_y_ = 0, ui_scale_ = 1;
   float canvas_top_ = 0;
 };

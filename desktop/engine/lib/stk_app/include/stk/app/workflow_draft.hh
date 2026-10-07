@@ -94,6 +94,10 @@ class WorkflowDraft {
   /** Write ui.positions for unique steps (finite, |value| <= 1e6, rounded to whole units). */
   EditResult move_steps(const std::map<std::string, std::pair<double, double>> &positions, uint64_t generation);
 
+  /** Keep the edits on a newer read of the same workflow: allowed only when that read's name and
+   * document equal this draft's saved baseline (other project edits moved the revision, nobody
+   * changed this workflow). The candidate check is invalidated because its key names the revision. */
+  bool rebase(int64_t revision, const std::string &name, const io::Json &document);
   /** Discard every accepted edit. */
   bool revert(uint64_t expected_generation);
   /** Current-state observation: whether this saved workflow is exactly the candidate. */

@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
+#include "stk/app/analysis_graph_canvas.hh"
+#include "stk/app/editor_area.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/project_workflows.hh"
 #include "stk/app/workflow_draft.hh"
@@ -10,6 +12,8 @@
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
 #include <algorithm>
+#include <cmath>
+#include <tuple>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -100,6 +104,37 @@ TEST(WorkflowView, OrderCyclesAreMarkedOnTheCanvas)
   EXPECT_TRUE(view.nodes[0].cyclic); EXPECT_TRUE(view.nodes[1].cyclic);
 }
 
+TEST(WorkflowView, ProvisionalSummariesKeepUnchangedStepsUntilTheCandidateIsChecked)
+{
+  const Json saved = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+      {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", "t"}}}},
+      {{"id", "view"}, {"kind", "analysis"}, {"ref", {{"analysis", "a"}}}}}}};
+  const Json checked = {{"revision", 7}, {"ok", true}, {"omitted_issues", 0}, {"issues", Json::array()},
+      {"steps", {summary("cases", "table", "Cases", Json::array(), Json::array({port("rows", "rows")})),
+                 summary("view", "analysis", "View", Json::array({port("data", "files", true)}), Json::array({port("view", "result")}))}}};
+  auto candidate = saved;
+  candidate["steps"][1]["ref"]["analysis"] = "b";  // a changed reference is unresolved until checked
+  candidate["steps"].push_back({{"id", "added"}, {"kind", "files"}, {"ref", {{"snapshot", "s"}}}});
+  const auto provisional = workflow_provisional_validation(candidate, {{&saved, &checked}});
+  ASSERT_EQ(provisional.at("steps").size(), 3u);
+  EXPECT_EQ(provisional.at("steps")[0], checked.at("steps")[0]);
+  EXPECT_TRUE(provisional.at("steps")[1].at("outputs").empty());
+  EXPECT_EQ(provisional.at("steps")[2].at("id"), "added");
+  EXPECT_TRUE(provisional.at("issues").empty());
+  const auto view = workflow_graph_view(candidate, provisional, words());
+  EXPECT_TRUE(view.nodes[0].known_type); EXPECT_FALSE(view.nodes[1].known_type); EXPECT_FALSE(view.nodes[2].known_type);
+  // A later candidate check comes first: the added step keeps its summary through the next edit.
+  Json checked_candidate = {{"revision", 8}, {"steps", {checked.at("steps")[0],
+      summary("view", "analysis", "B", Json::array(), Json::array({port("view", "result")})),
+      summary("added", "files", nullptr, Json::array(), Json::array({port("files", "files")}))}}};
+  auto next = candidate;
+  next["steps"][2]["label"] = "Inputs";
+  const auto merged = workflow_provisional_validation(next, {{&candidate, &checked_candidate}, {&saved, &checked}});
+  EXPECT_EQ(merged.at("steps")[1].at("name"), "B");
+  EXPECT_EQ(merged.at("steps")[2].at("outputs").size(), 1u);
+  EXPECT_EQ(merged.at("revision"), 8);
+}
+
 constexpr const char *kRecordingBridge = R"PY(
 import json
 from pathlib import Path
@@ -122,6 +157,7 @@ main()
 )PY";
 
 constexpr const char *table_id = "11111111-1111-4111-8111-111111111111";
+constexpr const char *field_id = "12121212-1212-4121-8121-121212121212";
 constexpr const char *analysis_id = "6b0f5c3e-2d1a-4c9e-9f7b-3a8e5d4c2b10";
 constexpr const char *other_analysis = "7c1f6d4f-3e2b-4d0f-8a8c-4b9f6e5d3c21";
 constexpr const char *workflow_id = "8d2a7e50-4f3c-4e1a-9b9d-5cae7f6e4d32";
@@ -200,7 +236,8 @@ class WorkflowEditorPython : public ::testing::Test {
     ASSERT_TRUE(loop.pump_until([&] { return project().loaded() && !project().busy(); }, 30));
     Json out;
     ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", 0}, {"commands", {
-        {{"op", "create_table"}, {"id", table_id}, {"name", "Cases"}}}}}, out));
+        {{"op", "create_table"}, {"id", table_id}, {"name", "Cases"}},
+        {{"op", "add_field"}, {"id", field_id}, {"table_id", table_id}, {"name", "Colormap"}, {"type", "text"}}}}}, out));
     const auto field = directory.path() / "project" / "field.vtk";  // native separators on every platform
     { std::ofstream file(field); file << "not read\n"; }
     ASSERT_NO_FATAL_FAILURE(call("project.files.index", {{"handle", handle()}, {"expected_revision", revision},
@@ -246,6 +283,35 @@ class WorkflowEditorPython : public ::testing::Test {
       if (area().tab(i).type().id == type) { area().set_active_tab(i); f.drv->frame(); return; }
     }
     FAIL() << "no " << type << " tab";
+  }
+  /** Choose the dropdown entry containing `label`. */
+  void choose(const std::string &key, const std::string &label)
+  {
+    const auto *dropdown = widget(key); ASSERT_NE(dropdown, nullptr) << key; ASSERT_TRUE(dropdown->enabled) << key;
+    const auto found = std::find_if(dropdown->items.begin(), dropdown->items.end(),
+        [&](const std::string &item) { return item.find(label) != std::string::npos; });
+    std::string listed;
+    for (const auto &item : dropdown->items) { listed += "\n  " + item; }
+    ASSERT_NE(found, dropdown->items.end()) << label << listed;
+    dropdown->index.assign(int(found - dropdown->items.begin())); f.drv->frame();
+  }
+  std::string sidebar()
+  {
+    std::string out;
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) {
+        if (!item.text.empty() && (item.key.find("workflow") != std::string::npos || item.key.find('#') != std::string::npos)) {
+          out += "\n" + item.key + " | " + item.text + (item.enabled ? "" : " (disabled)");
+        }
+      }
+    }
+    return out;
+  }
+  Json stored()
+  {
+    Json out;
+    call("project.workflows.get", {{"handle", handle()}, {"workflow_id", workflow_id}}, out);
+    return out.at("workflow");
   }
   /** Select a step through the editor's own navigation (the canvas click is covered by the view tests). */
   void select(const std::string &step)
@@ -319,7 +385,8 @@ TEST_F(WorkflowEditorPython, UnsavedEditsOfAnotherAnalysisAreNeverReplaced)
 
 TEST_F(WorkflowEditorPython, MissingReferencesAreListedAndTheBreadcrumbEndsWithTheProject)
 {
-  const auto *list = widget("workflow_list"); ASSERT_NE(list, nullptr); ASSERT_EQ(list->table->rows, 2);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
+  const auto *list = widget("workflow_list"); ASSERT_EQ(list->table->rows, 2);
   list->table->selected.assign(1);
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("1 problems found"); }));
   ASSERT_NE(widget("workflow_issue/0"), nullptr);
@@ -329,6 +396,7 @@ TEST_F(WorkflowEditorPython, MissingReferencesAreListedAndTheBreadcrumbEndsWithT
   ASSERT_NE(widget("workflow_enter_analysis"), nullptr);
   EXPECT_FALSE(widget("workflow_enter_analysis")->enabled);  // nothing to open
 
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
   list = widget("workflow_list"); list->table->selected.assign(0);
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("All references and links are valid."); }));
   ASSERT_NO_FATAL_FAILURE(select("temperature"));
@@ -413,6 +481,164 @@ TEST_F(WorkflowEditorPython, DraftEditsSaveExactlyAndCandidateChecksAreKeyed)
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !workflows.choices().is_null(); }));
   EXPECT_EQ(workflows.choices().at("analyses").size(), 2u);
   EXPECT_EQ(workflows.choices().at("tables").size(), 1u);  // the managed tables are not parameter tables
+}
+
+struct WorkflowCanvasProbe {
+  AnalysisGraphView view;
+  AnalysisGraphCanvas canvas;
+  wm::Rect rect;
+  double top = 0;
+  std::pair<int, int> window(AnalysisGraphPoint point) const
+  {
+    const auto screen = canvas.to_screen(point);
+    return {rect.xmin + int(std::lround(screen.x)), rect.ymax - 1 - int(std::lround(screen.y + top))};
+  }
+  const AnalysisGraphNode &node(const std::string &id) const
+  {
+    return *std::find_if(view.nodes.begin(), view.nodes.end(), [&](const auto &n) { return n.id == id; });
+  }
+  std::pair<int, int> port(const std::string &id, const std::string &name, bool output) const
+  {
+    const auto &ports = output ? node(id).outputs : node(id).inputs;
+    return window(std::find_if(ports.begin(), ports.end(), [&](const auto &p) { return p.name == name; })->point);
+  }
+};
+
+TEST_F(WorkflowEditorPython, EditsAddLinkBindAndSaveTheCandidate)
+{
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_add_object") && widget("workflow_add_object")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_add_kind", "Analysis"));
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_add_object", "Other analysis"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_add_step"));
+  // The candidate shows at once; its check reports the new step's open input.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Temperature scan · 4 steps (unsaved)") &&
+      shows("1 problems after the changes"); }));
+  EXPECT_TRUE(shows("Added step analysis"));
+  EXPECT_TRUE(shows("Analysis · Other analysis"));  // the new step is selected
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_input/data/source", "fields.files"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("After the changes all references and links are valid."); }));
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_param/colormap/mode", "Parameter table field"));
+  ASSERT_NE(widget("workflow_param/colormap/field"), nullptr) << sidebar();
+  EXPECT_EQ(widget("workflow_param/colormap/field")->items.at(0), "Cases · Colormap");
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+  const auto before = project().project()->revision;
+  ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().project()->revision == before + 1 &&
+      shows("Temperature scan · 4 steps") && !shows("(unsaved)") && shows("All references and links are valid."); }));
+  const auto saved = stored();
+  const auto &step = saved.at("document").at("steps")[3];
+  EXPECT_EQ(step.at("id"), "analysis");
+  EXPECT_EQ(step.at("ref").at("analysis"), other_analysis);
+  EXPECT_EQ(step.at("inputs").at("data").at("from"), "fields.files");
+  EXPECT_EQ(step.at("parameters").at("colormap"), Json({{"$field", field_id}}));
+  EXPECT_TRUE(saved.at("document").at("ui").at("positions").contains("analysis"));
+}
+
+TEST_F(WorkflowEditorPython, CanvasGesturesRefuseMismatchedTypesOrderStepsAndMove)
+{
+  const auto document = stored().at("document");
+  Json validation;
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.validate", {{"handle", handle()}, {"document", document}}, validation));
+  WorkflowViewText text;
+  text.kinds = {{"table", "Parameter table"}, {"files", "Input files"}, {"simulation", "Simulation"}, {"analysis", "Analysis"}};
+  auto probe = std::make_shared<WorkflowCanvasProbe>();
+  probe->view = workflow_graph_view(document, validation, text);
+  probe->rect = area().find_region(EditorArea::kMain)->rect();
+  probe->top = 1.5 * f.screen.ui()->style().unit;
+  probe->canvas.set_view(std::make_shared<const AnalysisGraphView>(probe->view));
+  ASSERT_TRUE(probe->canvas.fit(probe->rect.width(), probe->rect.height() - probe->top, 1));
+  ASSERT_GE(probe->canvas.zoom(), 0.5);  // sockets are hit only when labels are shown
+  // rows into a files input is refused locally and changes nothing.
+  auto [sx, sy] = probe->port("cases", "rows", true);
+  auto [tx, ty] = probe->port("temperature", "data", false);
+  f.drv->drag(sx, sy, tx, ty, 6);
+  EXPECT_TRUE(shows("Port types differ: rows → files"));
+  EXPECT_FALSE(shows("(unsaved)"));
+  // Any output dropped on (after) orders the steps: fields after temperature closes a cycle.
+  std::tie(sx, sy) = probe->port("temperature", "view", true);
+  std::tie(tx, ty) = probe->port("fields", "(after)", false);
+  f.drv->drag(sx, sy, tx, ty, 6);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("(unsaved)") && shows("problems after the changes"); }));
+  EXPECT_TRUE(shows("Dependency cycle"));
+  // Moving a step writes its position once, on release.
+  const auto &cases = probe->node("cases").rect;
+  const auto [x0, y0] = probe->window({cases.x + cases.width / 2, cases.y + 20});
+  f.drv->drag(x0, y0, x0, y0 + 90, 6);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
+  for (int i = 0; i < 200 && !(widget("workflow_list") && widget("workflow_list")->enabled); ++i) {
+    loop.run_ready(); f.screen.run_deferred(); f.drv->frame();
+  }
+  ASSERT_TRUE(widget("workflow_list") && widget("workflow_list")->enabled) << sidebar();
+  const auto saved = stored().at("document");
+  EXPECT_EQ(saved.at("steps")[1].at("after"), Json::array({"cases", "temperature"}));
+  // Window y grows upwards, so +90 window pixels is up the canvas.
+  EXPECT_NEAR(saved.at("ui").at("positions").at("cases")[1].get<double>(), cases.y - 90 / probe->canvas.zoom(), 2.0);
+}
+
+TEST_F(WorkflowEditorPython, DeleteRemovesTheSelectedStepAndDiscardRestores)
+{
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(select("fields"));
+  const auto [cx, cy] = wmtest::AppFixture::center(area().find_region(EditorArea::kMain)->rect());
+  f.drv->move(cx, cy);
+  f.drv->key(wm::Key::Delete);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Temperature scan · 2 steps (unsaved)") && shows("Removed step fields"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("problems after the changes"); }));  // temperature lost its input
+  EXPECT_TRUE(shows("Required input not linked"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_discard"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Temperature scan · 3 steps") && !shows("(unsaved)"); }));
+  EXPECT_EQ(stored().at("document").at("steps").size(), 3u);
+}
+
+TEST_F(WorkflowEditorPython, OtherEditsKeepUnsavedChangesButAChangedWorkflowDetachesThem)
+{
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_name") && widget("workflow_rename"); }));
+  widget("workflow_name")->string.assign("Renamed scan"); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_rename") && widget("workflow_rename")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_rename"));
+  EXPECT_TRUE(shows("Renamed to Renamed scan"));
+  // An unrelated project edit moves the revision; the unchanged workflow keeps the edits.
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
+      {{"op", "add_record"}, {"id", "13131313-1313-4131-8131-131313131313"}, {"table_id", table_id}}}}}, out));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision == revision &&
+      widget("workflow_save") && widget("workflow_save")->enabled; }));
+  EXPECT_TRUE(shows("Renamed to Renamed scan"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return stored().at("name") == "Renamed scan" && !shows("Renamed to"); }));
+  revision = project().project()->revision;
+  // Edits of a workflow that then changes elsewhere cannot be saved; discarding shows the current one.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_name") && widget("workflow_rename"); }));
+  widget("workflow_name")->string.assign("Local name"); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_rename") && widget("workflow_rename")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_rename"));
+  auto other = stored();
+  other["document"]["steps"].erase(1);
+  other["document"]["steps"][1].erase("inputs");
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy(); }));
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id},
+      {"name", "Changed elsewhere"}, {"document", other.at("document")}, {"expected_revision", project().project()->revision}}, out));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("changed elsewhere and the local edits"); }));
+  EXPECT_EQ(widget("workflow_save"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("workflow_discard"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Changed elsewhere · 2 steps"); }));
+}
+
+TEST_F(WorkflowEditorPython, NewAndDeletedWorkflowsAreOrdinaryUndoableEdits)
+{
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_new") && widget("workflow_new")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_new"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Workflow 3 · 0 steps"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_delete") && widget("workflow_delete")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_delete"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->table &&
+      widget("workflow_list")->table->rows == 2 && !project().busy(); }));
+  ASSERT_TRUE(project().undo());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->table &&
+      widget("workflow_list")->table->rows == 3; }));
 }
 
 }  // namespace

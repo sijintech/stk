@@ -1,6 +1,6 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-07。**进行中：P3 工作流编辑（W3a、W3b、W3c-1 已交付，下一步 W3c-2）**；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
+更新：2026-10-07。**进行中：P3 工作流编辑（W3 全部交付，下一步 W4 按行运行）**；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
 [开发计划](docs/development-plan.md)开头）：标量体范围（`96152bf`）、启动即工作台（`1d1c338`）、参数扫描生成（`ca8a8b3`）、
 路径框“浏览…”（共用 [path_picker.hh](desktop/engine/lib/stk_app/src/editors/path_picker.hh)，`b1badce`）、
 运行环境选择与“运行所选行”（`stk.batches.run`、[project_simulation_view.cc](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)，`ed5bb29`）、
@@ -15,7 +15,7 @@
 （`AnalysisParameterDraft` 的 `graph()`/`graph_changes()` 与 `add_node`、`remove_node`、`set_links`、`set_node_param`、`move_nodes`、`set_graph_output`），
 W1b 候选视图与“编辑图结构”面板、W1c 节点参数表单已交付（`analysis_graph_editor.cc` 的 `shown_view()`、`graph_edit_panel()`、
 `list_input()`、`node_params_editor()`），W2 画布拖动与拖线已交付（`canvas_drag_*`、`AnalysisGraphCanvas::hit_port`）；
-W3 方案（[项目工作流与子图导航](docs/design/project-workflows.md)）已由所有者确认；W3a 已交付：[suan/project/workflows.py](suan/project/workflows.py)（存储与 `validate`）、共用受管表格 [suan/project/managed.py](suan/project/managed.py)、`stk.project.workflows`、`project.workflows.*`，用户说明见 [docs/project-workflows.md](docs/project-workflows.md)；W3b 已交付：[workflow_editor.cc](desktop/engine/lib/stk_app/src/editors/workflow_editor.cc)、[workflow_view.hh](desktop/engine/lib/stk_app/include/stk/app/workflow_view.hh)、[project_workflows.hh](desktop/engine/lib/stk_app/include/stk/app/project_workflows.hh)，分析图 `navigate()`/面包屑，`AppShell::open_in_area_later/return_in_area_later`；W3c-1 编辑模型已交付（[workflow_draft.hh](desktop/engine/lib/stk_app/include/stk/app/workflow_draft.hh)、`project.workflows.choices`、`ProjectWorkflows::create/update/check`）；**下一步 W3c-2** 编辑界面；ADE 参考提案见 [ade-references-2026-10.md](docs/design/ade-references-2026-10.md)（待所有者决定）；
+W3 方案（[项目工作流与子图导航](docs/design/project-workflows.md)）已由所有者确认；W3a 已交付：[suan/project/workflows.py](suan/project/workflows.py)（存储与 `validate`）、共用受管表格 [suan/project/managed.py](suan/project/managed.py)、`stk.project.workflows`、`project.workflows.*`，用户说明见 [docs/project-workflows.md](docs/project-workflows.md)；W3b 已交付：[workflow_editor.cc](desktop/engine/lib/stk_app/src/editors/workflow_editor.cc)、[workflow_view.hh](desktop/engine/lib/stk_app/include/stk/app/workflow_view.hh)、[project_workflows.hh](desktop/engine/lib/stk_app/include/stk/app/project_workflows.hh)，分析图 `navigate()`/面包屑，`AppShell::open_in_area_later/return_in_area_later`；W3c-1 编辑模型已交付（[workflow_draft.hh](desktop/engine/lib/stk_app/include/stk/app/workflow_draft.hh)、`project.workflows.choices`、`ProjectWorkflows::create/update/check`）；W3c-2 编辑界面已交付（`workflow_editor.cc` 的 `edit_panel`/`step_panel`/`drag_finish`）；**下一步 W4** 按行运行与过期（先写运行记录方案，参考 ADE 提案做法 1、3、14）；ADE 参考提案见 [ade-references-2026-10.md](docs/design/ade-references-2026-10.md)（待所有者决定）；
 之前为保存分析的单输入连线编辑（`3cbaa36`）与技能目录首版（`5a12d5a`、`df4729d`）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 

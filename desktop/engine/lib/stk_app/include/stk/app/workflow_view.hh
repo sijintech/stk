@@ -5,6 +5,8 @@
 
 #include <map>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace stk::app {
 
@@ -29,5 +31,14 @@ struct WorkflowViewText {
  * Pure presentation: throws invalid_argument when the reply does not describe the document. */
 AnalysisGraphView workflow_graph_view(const io::Json &document, const io::Json &validation,
                                       const WorkflowViewText &text);
+
+/** A (document, its validation reply) pair whose step summaries can stand in for another document's. */
+using WorkflowKnownSummaries = std::pair<const io::Json *, const io::Json *>;
+
+/** A stand-in validation reply for an unsaved candidate until its own check arrives: each step keeps
+ * the summary of the first known document (in order, e.g. the last checked candidate, then the saved
+ * workflow) that has a step with the same id, kind and ref; other steps get empty summaries (shown
+ * as unresolved). No issues. */
+io::Json workflow_provisional_validation(const io::Json &document, const std::vector<WorkflowKnownSummaries> &known);
 
 }  // namespace stk::app

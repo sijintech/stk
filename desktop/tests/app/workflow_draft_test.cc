@@ -135,6 +135,16 @@ TEST(WorkflowDraft, PositionsAndTheNameDoNotInvalidateACheck)
   EXPECT_EQ(draft.document().at("ui").at("positions").at("view"), Json::array({600, 40}));
   ASSERT_TRUE(draft.set_link("view", "data", std::nullopt, generation).accepted);
   EXPECT_GT(draft.check_version(), check);
+  // A newer read of the unchanged workflow keeps the edits; a changed one does not.
+  const auto edited = io::python_json_dumps(draft.document(), true, true);
+  EXPECT_FALSE(draft.rebase(5, "Other name", saved()));
+  auto changed = saved(); changed["steps"].erase(0);
+  EXPECT_FALSE(draft.rebase(5, "Temperature scan", changed));
+  const auto before = draft.check_version();
+  ASSERT_TRUE(draft.rebase(5, "Temperature scan", saved()));
+  EXPECT_EQ(draft.revision(), 5); EXPECT_GT(draft.check_version(), before);
+  EXPECT_EQ(io::python_json_dumps(draft.document(), true, true), edited);
+  EXPECT_FALSE(draft.rebase(3, "Temperature scan", saved()));  // never backwards
   EXPECT_THROW(draft.pin("handle", "not-a-uuid", 1, "x", saved()), std::invalid_argument);
   auto bad = saved(); bad["extra"] = 1;
   EXPECT_THROW(draft.pin("handle", id, 1, "x", bad), std::invalid_argument);

@@ -180,6 +180,14 @@ bool ProjectWorkflows::reload()
   if (selected_.is_null()) { return load_page(page_.is_null() ? 0 : io::get_int(page_, "offset", 0)); }
   return load(io::get_string(selected_, "id"));
 }
+void ProjectWorkflows::clear_selection()
+{
+  selected_ = validation_ = nullptr; selected_revision_ = -1;
+  candidate_.reset(); page_ = nullptr;
+  ++selected_version_;
+  changed();
+}
+
 bool ProjectWorkflows::load_choices()
 {
   return call("project.workflows.choices", Json::object(), [this](const Json &result) {

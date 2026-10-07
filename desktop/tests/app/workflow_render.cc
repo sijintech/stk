@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** A project workflow (cases -> field files -> saved analysis) on the canvas with a step selected,
- * or (--scenario enter) its analysis opened in the same area with the breadcrumb back; nothing runs. */
+ * (--scenario enter) its analysis opened in the same area with the breadcrumb back, or
+ * (--scenario workflow_edit) an unsaved candidate with an added, linked and field-bound step; nothing runs. */
 #include "stk/app/bridge_status.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_state.hh"
@@ -11,6 +12,7 @@
 #include "stk/gfx/offscreen.hh"
 #include "../bridge/support.hh"
 
+#include <algorithm>
 #include <cstdio>
 #include <fstream>
 #include <stdexcept>
@@ -30,7 +32,8 @@ int main(int argc, char **argv)
     else if (arg == "--scenario") { scenario = argv[i + 1]; }
     else { return 2; }
   }
-  if (output.empty() || (mode != "wide" && mode != "narrow") || (scenario != "workflow" && scenario != "enter")) { return 2; }
+  if (output.empty() || (mode != "wide" && mode != "narrow") ||
+      (scenario != "workflow" && scenario != "enter" && scenario != "workflow_edit")) { return 2; }
   const bool narrow = mode == "narrow", zh = language == "zh";
   const int width = narrow ? 760 : 1440, height = 900;
   bridge::test::TempDir directory{"workflow-render"};
@@ -93,7 +96,9 @@ int main(int argc, char **argv)
       const std::string table = "11111111-1111-4111-8111-111111111111", analysis = "2f4c8a1e-5b3d-4e6f-8a9b-0c1d2e3f4a5b";
       const std::string workflow = "3a5d9b2f-6c4e-4f70-9bac-1d2e3f4a5b6c";
       call("project.apply", {{"handle", handle}, {"expected_revision", 0}, {"commands", {
-          {{"op", "create_table"}, {"id", table}, {"name", zh ? "算例" : "Cases"}}}}});
+          {{"op", "create_table"}, {"id", table}, {"name", zh ? "算例" : "Cases"}},
+          {{"op", "add_field"}, {"id", "12121212-1212-4121-8121-121212121212"}, {"table_id", table},
+           {"name", zh ? "色图" : "Colormap"}, {"type", "text"}}}}});
       for (const auto *name : {"case-1", "case-2", "case-3"}) {
         std::filesystem::create_directories(std::filesystem::path(root) / name);
         std::ofstream(std::filesystem::path(root) / name / "field.vtk") << "not read\n";
@@ -140,6 +145,28 @@ int main(int argc, char **argv)
       require(area->editor().navigate({{"workflow_id", workflow}, {"step", "temperature"}}, {}, reason), "select step");
       frame();
       require(widget("workflow_enter_analysis") && widget("workflow_enter_analysis")->enabled, "enter button");
+      auto choose = [&](const std::string &key, const std::string &label) {
+        const auto *dropdown = widget(key);
+        require(dropdown && dropdown->enabled, "dropdown unavailable: " + key);
+        const auto found = std::find_if(dropdown->items.begin(), dropdown->items.end(),
+            [&](const std::string &item) { return item.find(label) != std::string::npos; });
+        require(found != dropdown->items.end(), "no entry " + label + " in " + key);
+        dropdown->index.assign(int(found - dropdown->items.begin())); frame();
+      };
+      if (scenario == "workflow_edit") {
+        // A second analysis step: added, linked to the field files, its colormap taken per row; not saved.
+        wait([&] { return widget("workflow_add_object") && widget("workflow_add_object")->enabled; }, "choices");
+        choose("workflow_add_kind", zh ? "分析" : "Analysis");
+        choose("workflow_add_object", zh ? "温度场" : "Temperature field");
+        widget("workflow_add_step")->on_click(); frame();
+        wait([&] { return widget("workflow_input/data/source") != nullptr; }, "added step selected");
+        choose("workflow_input/data/source", "fields.files");
+        wait([&] { return widget("workflow_param/colormap/mode") != nullptr; }, "parameters");
+        choose("workflow_param/colormap/mode", zh ? "参数表字段" : "Parameter table field");
+        wait([&] { return shows(zh ? "修改后所有引用与连线都有效。" : "After the changes all references and links are valid."); }, "candidate check");
+        const auto unchanged = call("project.workflows.get", {{"handle", handle}, {"workflow_id", workflow}});
+        require(unchanged.at("workflow").at("document").at("steps").size() == 3, "editing must not save");
+      }
       if (scenario == "enter") {
         widget("workflow_enter_analysis")->on_click();
         // Wait for the node catalog too, so nodes are drawn with their types rather than as unknown.

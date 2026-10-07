@@ -372,6 +372,13 @@ WorkflowDraft::EditResult WorkflowDraft::move_steps(const std::map<std::string, 
   });
 }
 
+bool WorkflowDraft::rebase(const int64_t revision, const std::string &name, const Json &document)
+{
+  if (!pinned() || revision < revision_ || name != baseline_name_ || !same_json(document, baseline_)) { return false; }
+  if (revision != revision_) { revision_ = revision; ++version_; ++check_version_; }
+  return true;
+}
+
 bool WorkflowDraft::revert(const uint64_t expected_generation)
 {
   if (!accepts(expected_generation)) { return false; }

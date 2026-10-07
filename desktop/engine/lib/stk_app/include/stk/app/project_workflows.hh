@@ -56,6 +56,8 @@ class ProjectWorkflows {
   /** Check the shown workflow when it has no check yet (after a read or a save); false when not needed or busy. */
   bool validate_selected();
   bool load_choices();
+  /** Forget the shown workflow (for example after deleting it) without a read. */
+  void clear_selection();
   /** Save a new workflow under a fresh UUID at the current revision, then select it. */
   bool create(const std::string &name, const io::Json &document);
   /** Replace the selected workflow's name and document at the revision it was read at, then read it again. */

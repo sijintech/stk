@@ -4,6 +4,7 @@
 #include "stk/io/catalog.hh"
 #include "stk/io/graph.hh"
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -140,6 +141,38 @@ AnalysisGraphView workflow_graph_view(const Json &document, const Json &validati
   view.issues = std::move(kept);
   for (auto &node : view.nodes) { node.flagged = flagged.count(node.id) > 0; }
   return view;
+}
+
+Json workflow_provisional_validation(const Json &document, const std::vector<WorkflowKnownSummaries> &known)
+{
+  const auto lookup = [&](const Json &step) -> const Json * {
+    const auto id = io::get_string(step, "id");
+    for (const auto &[source, validation] : known) {
+      if (!source || !validation) { continue; }
+      const auto &steps = member(*source, "steps");
+      const auto &summaries = member(*validation, "steps");
+      if (!steps.is_array() || !summaries.is_array() || steps.size() != summaries.size()) { continue; }
+      const Json *match = nullptr;
+      int count = 0;
+      for (size_t i = 0; i < steps.size(); ++i) {
+        if (io::get_string(steps[i], "id") != id) { continue; }
+        ++count;
+        if (member(steps[i], "kind") == member(step, "kind") && member(steps[i], "ref") == member(step, "ref")) { match = &summaries[i]; }
+      }
+      if (count == 1 && match) { return match; }
+    }
+    return nullptr;
+  };
+  Json steps = Json::array();
+  for (const auto &step : member(document, "steps")) {
+    if (const auto *summary = lookup(step)) { steps.push_back(*summary); continue; }
+    steps.push_back({{"id", io::get_string(step, "id")}, {"kind", io::get_string(step, "kind")}, {"name", nullptr},
+                     {"content_sha256", nullptr}, {"file_count", nullptr}, {"inputs", Json::array()},
+                     {"outputs", Json::array()}, {"parameters", Json::array()}});
+  }
+  int64_t revision = 0;
+  for (const auto &[source, validation] : known) { if (validation) { revision = std::max(revision, io::get_int(*validation, "revision", 0)); } }
+  return {{"revision", revision}, {"ok", false}, {"issues", Json::array()}, {"omitted_issues", 0}, {"steps", std::move(steps)}};
 }
 
 }  // namespace stk::app
