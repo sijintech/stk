@@ -106,10 +106,11 @@ void curve(ui::DrawList &draw, Point from, Point to, double width, double height
 }
 }  // namespace
 
-void AnalysisGraphCanvas::set_view(std::shared_ptr<const AnalysisGraphView> view)
+void AnalysisGraphCanvas::set_view(std::shared_ptr<const AnalysisGraphView> view, const bool keep_transform)
 {
   if (view_ == view) { return; }
   view_ = std::move(view);
+  if (keep_transform) { return; }
   zoom_ = 1;
   pan_x_ = pan_y_ = 0;
   width_ = height_ = 0;
@@ -171,6 +172,26 @@ std::optional<size_t> AnalysisGraphCanvas::hit(double x, double y) const
         point.y >= rect.y && point.y < rect.y + rect.height) { return i - 1; }
   }
   return {};
+}
+
+std::optional<AnalysisGraphCanvas::PortHit> AnalysisGraphCanvas::hit_port(double x, double y) const
+{
+  if (!view_ || !std::isfinite(x) || !std::isfinite(y) || x < 0 || y < 0 || x >= width_ || y >= height_ || zoom_ < .5) { return {}; }
+  std::optional<PortHit> best;
+  double nearest = 8 * ui_scale_;
+  const size_t count = std::min(view_->nodes.size(), AnalysisGraphView::max_nodes);
+  for (size_t i = 0; i < count; ++i) {
+    const auto &node = view_->nodes[i];
+    for (const bool output : {false, true}) {
+      const auto &ports = output ? node.outputs : node.inputs;
+      for (size_t p = 0; p < std::min(ports.size(), AnalysisGraphView::max_ports); ++p) {
+        const auto point = to_screen(ports[p].point);
+        const double distance = std::hypot(point.x - x, point.y - y);
+        if (finite(point) && distance <= nearest) { nearest = distance; best = PortHit{i, p, output}; }
+      }
+    }
+  }
+  return best;
 }
 
 ui::DrawList AnalysisGraphCanvas::draw_list(double width, double height, double ui_scale,
@@ -266,6 +287,9 @@ ui::DrawList AnalysisGraphCanvas::draw_list(double width, double height, double 
     sockets(node.inputs, true);
     sockets(node.outputs, false);
     draw.clip_pop();
+  }
+  if (pending_link_) {
+    curve(draw, pending_link_->first, pending_link_->second, width, height, scale, 2 * ui_scale_, ui::Color::rgb(0xE8C46A));
   }
   draw.clip_pop();
   return draw;

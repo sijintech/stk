@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace stk::app {
 
@@ -16,7 +17,8 @@ namespace stk::app {
 class AnalysisGraphCanvas {
  public:
   static constexpr double min_zoom = 0.00001, max_zoom = 2.5;
-  void set_view(std::shared_ptr<const AnalysisGraphView> view);
+  /** A different view resets pan/zoom unless `keep_transform` (an edited version of the same graph). */
+  void set_view(std::shared_ptr<const AnalysisGraphView> view, bool keep_transform = false);
   const std::shared_ptr<const AnalysisGraphView> &view() const { return view_; }
 
   /** Fit the immutable bounds with 32*ui_scale pixel padding, reduced for tiny viewports.
@@ -28,6 +30,14 @@ class AnalysisGraphCanvas {
   bool zoom_at(double factor, double x, double y);
   /** Last drawn node wins for overlap; points outside the last fit/draw viewport cannot hit. */
   std::optional<size_t> hit(double x, double y) const;
+  struct PortHit {
+    size_t node = 0, port = 0;
+    bool output = false;
+  };
+  /** The declared or referenced port whose socket is nearest within 8 UI pixels, if any. */
+  std::optional<PortHit> hit_port(double x, double y) const;
+  /** A link being dragged, in viewport pixels (drawn over the graph until cleared). */
+  void set_pending_link(std::optional<std::pair<AnalysisGraphPoint, AnalysisGraphPoint>> link) { pending_link_ = link; }
 
   /** Clipped background/grid, curves, nodes and typed ports. Fine labels are hidden at overview
    * zooms. A DPI change preserves the world point at the viewport center without implicitly
@@ -47,6 +57,7 @@ class AnalysisGraphCanvas {
 
  private:
   std::shared_ptr<const AnalysisGraphView> view_;
+  std::optional<std::pair<AnalysisGraphPoint, AnalysisGraphPoint>> pending_link_;
   double zoom_ = 1, pan_x_ = 0, pan_y_ = 0, ui_scale_ = 1;
   double width_ = 0, height_ = 0;
 };

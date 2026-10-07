@@ -107,4 +107,8 @@ struct AnalysisGraphView {
  */
 AnalysisGraphView analysis_graph_view(const io::Graph &graph, const io::Catalog *catalog = nullptr);
 
+/** A copy with one node (its rect, sockets and the ends of its links) shifted by (dx, dy) logical
+ * units, for showing a node while it is dragged; out-of-range indices return an unchanged copy. */
+AnalysisGraphView analysis_graph_view_moved(const AnalysisGraphView &view, size_t node, double dx, double dy);
+
 }  // namespace stk::app

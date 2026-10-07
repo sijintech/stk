@@ -14,7 +14,8 @@
 当前进行 P3 工作流编辑（计划见[开发计划](docs/development-plan.md)“P3 工作流编辑”）：W1a 候选图模型已交付**
 （`AnalysisParameterDraft` 的 `graph()`/`graph_changes()` 与 `add_node`、`remove_node`、`set_links`、`set_node_param`、`move_nodes`、`set_graph_output`），
 W1b 候选视图与“编辑图结构”面板、W1c 节点参数表单已交付（`analysis_graph_editor.cc` 的 `shown_view()`、`graph_edit_panel()`、
-`list_input()`、`node_params_editor()`）；下一步 W2 画布拖动与拖线；
+`list_input()`、`node_params_editor()`），W2 画布拖动与拖线已交付（`canvas_drag_*`、`AnalysisGraphCanvas::hit_port`）；
+下一步 W3：先写项目流程层设计供所有者确认；
 之前为保存分析的单输入连线编辑（`3cbaa36`）与技能目录首版（`5a12d5a`、`df4729d`）。均已推送 `main`。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
 

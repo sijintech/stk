@@ -189,13 +189,13 @@ void AnalysisParameterDraft::pin(std::string handle, std::string analysis_id, in
   Json detached = document;
   handle_ = std::move(handle); analysis_id_ = std::move(analysis_id); revision_ = revision;
   name_ = std::move(name); baseline_ = std::move(detached); edits_.clear(); outputs_override_.reset();
-  graph_.reset(); ++generation_; ++version_;
+  graph_.reset(); ++generation_; ++version_; ++evaluation_version_;
 }
 
 void AnalysisParameterDraft::reset()
 {
   handle_.clear(); analysis_id_.clear(); name_.clear(); revision_ = -1;
-  baseline_ = nullptr; edits_.clear(); outputs_override_.reset(); graph_.reset(); ++generation_; ++version_;
+  baseline_ = nullptr; edits_.clear(); outputs_override_.reset(); graph_.reset(); ++generation_; ++version_; ++evaluation_version_;
 }
 
 bool AnalysisParameterDraft::current(const std::string &handle, int64_t revision) const
@@ -273,7 +273,7 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::set(const std::string
     const auto &base = baseline_.at("parameters");
     if (base.contains(name) && same_json(base.at(name), value)) { edits_.erase(name); }
     else { edits_[name] = value; }
-    ++version_; return {true, {}};
+    ++version_; ++evaluation_version_; return {true, {}};
   }
   catch (const std::invalid_argument &error) { return {false, error.what()}; }
 }
@@ -299,7 +299,7 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::remove(const std::str
     if (!has_override(name)) { return {true, {}}; }
     if (baseline_.at("parameters").contains(name)) { edits_[name] = std::nullopt; }
     else { edits_.erase(name); }
-    ++version_; return {true, {}};
+    ++version_; ++evaluation_version_; return {true, {}};
   }
   catch (const std::invalid_argument &error) { return {false, error.what()}; }
 }
@@ -325,7 +325,7 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::set_outputs(const Jso
     if (values == outputs()) { return {true, {}}; }
     if (values == baseline_.at("outputs")) { outputs_override_.reset(); }
     else { outputs_override_ = values; }
-    ++version_; return {true, {}};
+    ++version_; ++evaluation_version_; return {true, {}};
   }
   catch (const std::invalid_argument &error) { return {false, error.what()}; }
 }
@@ -408,11 +408,16 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::edit_graph(
     catch (const std::exception &error) { return {false, error.what()}; }
     const bool graph_same = same_json(next, graph()), outputs_same = same_json(requested, outputs());
     if (graph_same && outputs_same) { return {true, {}}; }
+    Json before = graph(), after = next;
+    before.erase("ui"); after.erase("ui");
+    const bool evaluative = !outputs_same || !same_json(before, after);
     if (same_json(next, baseline_.at("graph"))) { graph_.reset(); }
     else { graph_ = std::move(next); }
     if (same_json(requested, baseline_.at("outputs"))) { outputs_override_.reset(); }
     else { outputs_override_ = std::move(requested); }
-    ++version_; return {true, {}};
+    ++version_;
+    if (evaluative) { ++evaluation_version_; }
+    return {true, {}};
   }
   catch (const std::invalid_argument &error) { return {false, error.what()}; }
 }
@@ -793,7 +798,7 @@ std::map<AnalysisParameterDraft::LinkKey, std::optional<std::string>> AnalysisPa
 bool AnalysisParameterDraft::revert(uint64_t generation)
 {
   if (!accepts(generation)) { return false; }
-  if (dirty()) { edits_.clear(); outputs_override_.reset(); graph_.reset(); ++version_; }
+  if (dirty()) { edits_.clear(); outputs_override_.reset(); graph_.reset(); ++version_; ++evaluation_version_; }
   return true;
 }
 

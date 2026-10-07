@@ -213,15 +213,34 @@ class AnalysisGraphEditor final : public Editor {
     place_canvas(rect.width(), rect.height() - canvas_top_);
     const double x = event.x - rect.xmin + 0.5;
     const double y = rect.ymax - 1 - event.y + 0.5 - canvas_top_;
-    if (event.type == wm::EventType::FocusOut) { dragging_ = false; return false; }
+    if (event.type == wm::EventType::FocusOut) { dragging_ = false; cancel_canvas_drag(); return false; }
     if (event.type == wm::EventType::MouseMove && dragging_) {
       canvas_.pan(x - last_x_, y - last_y_); last_x_ = x; last_y_ = y; redraw(); return true;
     }
+    if (event.type == wm::EventType::MouseMove && canvas_drag_ != CanvasDrag::None) { canvas_drag_move(x, y); return true; }
     if (event.type == wm::EventType::MouseUp && dragging_) { dragging_ = false; return true; }
+    if (event.type == wm::EventType::MouseUp && canvas_drag_ != CanvasDrag::None) { canvas_drag_finish(x, y); return true; }
     if (y < 0 || y >= rect.height() - canvas_top_) { return false; }
     if (event.type == wm::EventType::MouseDown) {
       if (event.button == wm::MouseButton::Left) {
-        selected_ = canvas_.hit(x, y); selected_parameter_ = 0; redraw(); return true;
+        // Editing a saved analysis: drag from an output socket to an input to link, or drag a node to move it.
+        if (canvas_editable()) {
+          if (const auto port = canvas_.hit_port(x, y); port && port->output) {
+            const auto &node = canvas_view_->nodes[port->node];
+            if (!node.ambiguous_id) {
+              const auto &output = node.outputs[port->port];
+              canvas_drag_ = CanvasDrag::Link; link_source_ = node.id + "." + output.name; link_from_ = output.point;
+              canvas_.set_pending_link(std::pair{canvas_.to_screen(link_from_), AnalysisGraphPoint{x, y}});
+              redraw(); return true;
+            }
+          }
+        }
+        selected_ = canvas_.hit(x, y); selected_parameter_ = 0;
+        if (selected_ && canvas_editable() && !canvas_view_->nodes[*selected_].ambiguous_id) {
+          canvas_drag_ = CanvasDrag::Node; drag_node_ = *selected_; drag_moved_ = false;
+          press_x_ = x; press_y_ = y; drag_dx_ = drag_dy_ = 0;
+        }
+        redraw(); return true;
       }
       if (event.button == wm::MouseButton::Middle || event.button == wm::MouseButton::Right) {
         dragging_ = true; last_x_ = x; last_y_ = y; return true;
@@ -249,6 +268,16 @@ class AnalysisGraphEditor final : public Editor {
 
   bool on_key(const wm::Event &event, EditorContext &ctx) override
   {
+    if (event.type == wm::EventType::KeyDown && event.key == wm::Key::Delete) {
+      attach(ctx);
+      // Delete removes the selected node of an edited saved analysis (same as the panel button).
+      if (!canvas_editable() || !selected_ || !canvas_view_ || *selected_ >= canvas_view_->nodes.size() ||
+          canvas_view_->nodes[*selected_].ambiguous_id || !freeze_layout()) { return false; }
+      const auto result = parameter_draft_.remove_node(canvas_view_->nodes[*selected_].id, parameter_draft_.generation());
+      if (result.accepted) { selected_.reset(); }
+      else { refuse(result.error); }
+      redraw(); return true;
+    }
     if (event.type != wm::EventType::KeyDown || (event.key != wm::Key::Home && event.key != wm::Key::F)) { return false; }
     attach(ctx);
     focus_selected_ = event.key == wm::Key::F;
@@ -357,6 +386,14 @@ class AnalysisGraphEditor final : public Editor {
   std::shared_ptr<const io::Catalog> catalog_types_;
   std::string canvas_document_, selected_id_, graph_edit_error_;
   int add_type_index_ = 0;
+  // A node being moved or a link being dragged on the canvas (see handle_gpu_event).
+  enum class CanvasDrag { None, Node, Link };
+  CanvasDrag canvas_drag_ = CanvasDrag::None;
+  bool drag_moved_ = false;
+  size_t drag_node_ = 0;
+  double press_x_ = 0, press_y_ = 0, drag_dx_ = 0, drag_dy_ = 0;
+  std::string link_source_;
+  AnalysisGraphPoint link_from_;
   // Form values of the selected node's params, rebuilt from the draft whenever it changes.
   ui::FormModel node_form_;
   std::string node_form_key_;
@@ -394,7 +431,7 @@ class AnalysisGraphEditor final : public Editor {
   AnalysisCandidateKey candidate_key() const
   {
     return {parameter_draft_.handle(), parameter_draft_.analysis_id(), bridge_session(store_ ? store_->bridge() : nullptr),
-        parameter_draft_.revision(), parameter_draft_.generation(), parameter_draft_.version()};
+        parameter_draft_.revision(), parameter_draft_.generation(), parameter_draft_.evaluation_version()};
   }
   /** Saving a link change needs a passing graph.validate of exactly this candidate. */
   bool candidate_checked() const
@@ -519,6 +556,70 @@ class AnalysisGraphEditor final : public Editor {
     draft_outputs_panel(*panel, ctx, valid, generation, version, blocked);
     graph_edit_panel(*panel, ctx, valid, version, blocked);
     links_panel(*panel, ctx, valid, version, blocked);
+  }
+
+  /** Canvas gestures may edit the candidate: a saved analysis being edited with nothing pending. */
+  bool canvas_editable() const
+  {
+    return state_ && state_->saved() && canvas_view_ && draft_matches_view() && parameter_current() &&
+        !documents_->busy() && !documents_->uncertain() && !parameter_text_active() && !parameter_buffer_changed_;
+  }
+  void refuse(const std::string &message)
+  {
+    graph_edit_error_ = message;
+    if (store_ && store_->toast) { store_->toast(message, ui::ToastKind::Warning); }
+  }
+  void cancel_canvas_drag()
+  {
+    if (canvas_drag_ == CanvasDrag::Node && canvas_view_) { canvas_.set_view(canvas_view_, true); }
+    canvas_drag_ = CanvasDrag::None; drag_moved_ = false;
+    canvas_.set_pending_link(std::nullopt);
+  }
+  void canvas_drag_move(const double x, const double y)
+  {
+    if (canvas_drag_ == CanvasDrag::Link) {
+      canvas_.set_pending_link(std::pair{canvas_.to_screen(link_from_), AnalysisGraphPoint{x, y}});
+      redraw(); return;
+    }
+    if (!drag_moved_ && std::hypot(x - press_x_, y - press_y_) < 4 * ui_scale_) { return; }
+    const double scale = canvas_.zoom() * canvas_.ui_scale();
+    if (!canvas_view_ || drag_node_ >= canvas_view_->nodes.size() || !(scale > 0)) { cancel_canvas_drag(); return; }
+    drag_moved_ = true; drag_dx_ = (x - press_x_) / scale; drag_dy_ = (y - press_y_) / scale;
+    // Only the picture moves while dragging; the candidate changes once, on release.
+    canvas_.set_view(std::make_shared<const AnalysisGraphView>(analysis_graph_view_moved(*canvas_view_, drag_node_, drag_dx_, drag_dy_)), true);
+    redraw();
+  }
+  void canvas_drag_finish(const double x, const double y)
+  {
+    const auto drag = std::exchange(canvas_drag_, CanvasDrag::None);
+    canvas_.set_pending_link(std::nullopt);
+    if (canvas_view_) { canvas_.set_view(canvas_view_, true); }
+    if (!canvas_view_ || !canvas_editable()) { redraw(); return; }
+    if (drag == CanvasDrag::Node && drag_moved_ && drag_node_ < canvas_view_->nodes.size()) {
+      const auto &node = canvas_view_->nodes[drag_node_];
+      const auto result = parameter_draft_.move_nodes({{node.id, {node.rect.x + drag_dx_, node.rect.y + drag_dy_}}},
+                                                       parameter_draft_.generation());
+      if (!result.accepted) { refuse(result.error); }
+    }
+    if (drag == CanvasDrag::Link) {
+      const auto port = canvas_.hit_port(x, y);
+      if (port && !port->output) {
+        const auto &target = canvas_view_->nodes[port->node];
+        const auto &input = target.inputs[port->port];
+        AnalysisParameterDraft::EditResult result;
+        if (target.ambiguous_id || !input.declared) { result.error = std::string(store_->tr("analysis_graph_edit.cannot_link")); }
+        else if (input.multi) {
+          auto sources = parameter_draft_.links(target.id, input.name);
+          sources.push_back(link_source_);
+          result = parameter_draft_.set_links(target.id, input.name, sources, parameter_draft_.generation());
+        }
+        else { result = parameter_draft_.set_link(target.id, input.name, link_source_, parameter_draft_.generation()); }
+        if (!result.accepted) { refuse(result.error); }
+        else { graph_edit_error_.clear(); selected_id_ = target.id; }
+      }
+    }
+    drag_moved_ = false;
+    redraw();
   }
 
   /** The node catalog, parsed once per catalog-bearing view (null until the catalog is read). */
@@ -1258,8 +1359,9 @@ class AnalysisGraphEditor final : public Editor {
           canvas_view_->nodes[*selected_].id : std::string();
       if (!selected_id_.empty()) { keep = std::exchange(selected_id_, std::string()); }
       canvas_view_ = shown; canvas_document_ = document;
-      canvas_.set_view(canvas_view_);
+      canvas_.set_view(canvas_view_, same_graph);
       dragging_ = false;
+      if (!same_graph) { cancel_canvas_drag(); }
       if (same_graph) {
         selected_.reset();
         for (size_t i = 0; i < canvas_view_->nodes.size(); ++i) {

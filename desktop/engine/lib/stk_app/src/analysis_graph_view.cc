@@ -441,4 +441,20 @@ AnalysisGraphView analysis_graph_view(const io::Graph &graph, const io::Catalog 
   return Builder(graph, catalog).build();
 }
 
+AnalysisGraphView analysis_graph_view_moved(const AnalysisGraphView &view, const size_t node, const double dx, const double dy)
+{
+  AnalysisGraphView result = view;
+  if (node >= result.nodes.size() || !std::isfinite(dx) || !std::isfinite(dy)) { return result; }
+  auto &moved = result.nodes[node];
+  moved.rect.x += dx; moved.rect.y += dy;
+  for (auto *ports : {&moved.inputs, &moved.outputs}) {
+    for (auto &port : *ports) { port.point.x += dx; port.point.y += dy; }
+  }
+  for (auto &edge : result.edges) {
+    if (edge.source == int(node)) { edge.from.x += dx; edge.from.y += dy; }
+    if (edge.target == int(node)) { edge.to.x += dx; edge.to.y += dy; }
+  }
+  return result;
+}
+
 }  // namespace stk::app

@@ -73,6 +73,9 @@ class AnalysisParameterDraft {
    * A text editor may submit multiple edits against the same generation before being rebuilt. */
   uint64_t generation() const { return generation_; }
   uint64_t version() const { return version_; }
+  /** Like version(), but unchanged by edits that never affect evaluation (node positions), so a
+   * validation of the candidate stays valid while nodes are only moved. */
+  uint64_t evaluation_version() const { return evaluation_version_; }
   bool dirty() const { return !edits_.empty() || outputs_override_.has_value() || graph_.has_value(); }
 
   bool has_override(const std::string &name) const;
@@ -163,7 +166,7 @@ class AnalysisParameterDraft {
   EditResult edit_graph(uint64_t generation, const std::function<std::string(io::Json &graph, io::Json &outputs)> &change);
   std::string handle_, analysis_id_, name_;
   int64_t revision_ = -1;
-  uint64_t generation_ = 0, version_ = 0;
+  uint64_t generation_ = 0, version_ = 0, evaluation_version_ = 0;
   io::Json baseline_;
   // Disengaged optional removes a key; engaged JSON null is an explicit override.
   std::map<std::string, std::optional<io::Json>> edits_;

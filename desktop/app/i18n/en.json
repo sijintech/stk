@@ -1578,7 +1578,7 @@
   "analysis_graph.candidate_caption": "Unsaved candidate · {nodes} nodes · {edges} links (changed nodes outlined)",
   "analysis_graph_edit.title": "Edit graph structure",
   "analysis_graph_edit.title_count": "Edit graph structure · {count} changes",
-  "analysis_graph_edit.hint": "Add nodes from the catalog, remove the selected node or expose its outputs. The canvas shows the unsaved candidate; validate it before saving. Nothing runs.",
+  "analysis_graph_edit.hint": "Add nodes from the catalog, remove the selected node or expose its outputs. On the canvas, drag a node to move it, drag from an output socket to an input to link, and press Delete to remove the selected node. The canvas shows the unsaved candidate; validate it before saving. Nothing runs.",
   "analysis_graph_edit.add_type": "Node type",
   "analysis_graph_edit.add_node": "Add node",
   "analysis_graph_edit.select_node": "Select a node on the canvas or in the Node panel to remove it or expose its outputs.",
@@ -1607,5 +1607,6 @@
   "analysis_node_params.use_default": "Use default",
   "analysis_node_params.remove": "Remove value",
   "analysis_node_params.issue": "{code}: {message}",
-  "analysis_graph_edit.change.positions": "Moved {count} nodes: {nodes}"
+  "analysis_graph_edit.change.positions": "Moved {count} nodes: {nodes}",
+  "analysis_graph_edit.cannot_link": "This input cannot take a link here (unknown, undeclared or duplicated)."
 }

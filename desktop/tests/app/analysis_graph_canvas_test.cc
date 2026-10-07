@@ -199,6 +199,40 @@ TEST(AnalysisGraphCanvas, SameViewRetainsNavigationAndReplacementResetsWithoutRe
   EXPECT_FALSE(canvas.hit(100, 80));
 }
 
+TEST(AnalysisGraphCanvas, EditedVersionsKeepNavigationSocketsHitAndDraggedNodesMoveWithTheirLinks)
+{
+  AnalysisGraphCanvas canvas;
+  canvas.set_view(linked());
+  ASSERT_TRUE(canvas.fit(900, 600));
+  ASSERT_TRUE(canvas.pan(12, -8));
+  const double zoom = canvas.zoom(), x = canvas.pan_x(), y = canvas.pan_y();
+  canvas.set_view(linked(), true);  // an edited version of the same graph keeps the camera
+  EXPECT_EQ(canvas.zoom(), zoom); EXPECT_EQ(canvas.pan_x(), x); EXPECT_EQ(canvas.pan_y(), y);
+  ui::FakeTextMeasurer measurer;
+  canvas.draw_list(900, 600, 1, measurer, "en");
+  const auto output = canvas.to_screen({230, 84}), input = canvas.to_screen({500, 224});
+  const auto hit_out = canvas.hit_port(output.x + 3, output.y - 2);
+  ASSERT_TRUE(hit_out); EXPECT_TRUE(hit_out->output); EXPECT_EQ(hit_out->node, 0u); EXPECT_EQ(hit_out->port, 0u);
+  const auto hit_in = canvas.hit_port(input.x, input.y);
+  ASSERT_TRUE(hit_in); EXPECT_FALSE(hit_in->output); EXPECT_EQ(hit_in->node, 1u);
+  EXPECT_FALSE(canvas.hit_port(input.x + 40, input.y + 40));
+  // A pending link adds drawing on top; clearing it removes it again.
+  const auto plain = canvas.draw_list(900, 600, 1, measurer, "en").cmds.size();
+  canvas.set_pending_link(std::pair{output, AnalysisGraphPoint{output.x + 200, output.y + 100}});
+  const auto pending = canvas.draw_list(900, 600, 1, measurer, "en");
+  EXPECT_GT(pending.cmds.size(), plain);
+  finite_commands(pending);
+  canvas.set_pending_link(std::nullopt);
+  EXPECT_EQ(canvas.draw_list(900, 600, 1, measurer, "en").cmds.size(), plain);
+  // Moving the target shifts its rect, sockets and the end of its link only.
+  const auto moved = analysis_graph_view_moved(*linked(), 1, 30, -10);
+  EXPECT_EQ(moved.nodes[1].rect.x, 530); EXPECT_EQ(moved.nodes[1].rect.y, 170);
+  EXPECT_EQ(moved.nodes[1].inputs[0].point.x, 530);
+  EXPECT_EQ(moved.edges[0].to.x, 530); EXPECT_EQ(moved.edges[0].from.x, 230);
+  EXPECT_EQ(moved.nodes[0].rect.x, 50);
+  EXPECT_EQ(analysis_graph_view_moved(*linked(), 9, 1, 1).nodes[1].rect.x, 500);  // out of range: unchanged
+}
+
 TEST(AnalysisGraphCanvas, HitTestingUsesReverseDrawOrderAndViewportClipping)
 {
   auto view = single();

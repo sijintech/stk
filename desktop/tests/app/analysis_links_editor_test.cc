@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
+#include "stk/app/analysis_graph_canvas.hh"
+#include "stk/app/analysis_graph_view.hh"
 #include "stk/app/project_state.hh"
+#include "stk/io/catalog.hh"
+#include "stk/io/graph.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
 #include "stk/core/paths.hh"
@@ -419,6 +423,71 @@ TEST_F(AnalysisLinksEditorPython, NodeParamsAreEditedThroughTheCatalogFormAndChe
   EXPECT_EQ(added.at("id"), "contour");
   EXPECT_EQ(added.at("params").at("field"), "input");
   EXPECT_EQ(added.at("params").size(), 1u);  // only what was set; other params keep their catalog defaults
+}
+
+/** Window coordinates of graph points as the editor's canvas draws them: the same saved view and
+ * catalog, fitted to the same viewport (the editor fits on its first draw). */
+struct CanvasProbe {
+  AnalysisGraphView view;
+  AnalysisGraphCanvas canvas;
+  wm::Rect rect;
+  double top = 0;
+  std::pair<int, int> window(AnalysisGraphPoint point) const
+  {
+    const auto screen = canvas.to_screen(point);
+    return {rect.xmin + int(std::lround(screen.x)), rect.ymax - 1 - int(std::lround(screen.y + top))};
+  }
+  const AnalysisGraphNode &node(const std::string &id) const
+  {
+    return *std::find_if(view.nodes.begin(), view.nodes.end(), [&](const auto &n) { return n.id == id; });
+  }
+  AnalysisGraphPoint port(const std::string &id, const std::string &name, bool output) const
+  {
+    const auto &ports = output ? node(id).outputs : node(id).inputs;
+    return std::find_if(ports.begin(), ports.end(), [&](const auto &p) { return p.name == name; })->point;
+  }
+};
+
+TEST_F(AnalysisLinksEditorPython, DraggingANodeMovesItWithoutNeedingValidationAndDraggingASocketLinks)
+{
+  Json catalog;
+  ASSERT_NO_FATAL_FAILURE(call("graph.catalog", Json::object(), catalog));
+  const auto types = io::Catalog::from_json(catalog.contains("catalog") ? catalog.at("catalog") : catalog);
+  auto probe = std::make_shared<CanvasProbe>();
+  probe->view = analysis_graph_view(io::Graph::from_json(document.at("graph")), &types);
+  probe->rect = area().find_region(EditorArea::kMain)->rect();
+  probe->top = 3.0 * f.screen.ui()->style().unit;
+  probe->canvas.set_view(std::make_shared<const AnalysisGraphView>(probe->view));
+  ASSERT_TRUE(probe->canvas.fit(probe->rect.width(), probe->rect.height() - probe->top, 1));
+  ASSERT_GE(probe->canvas.zoom(), 0.5);  // sockets are hit only when labels are shown
+  // Move "axes" 120 pixels right: one position edit, saved without a graph check.
+  const auto &axes = probe->node("axes").rect;
+  const auto [x0, y0] = probe->window({axes.x + axes.width / 2, axes.y + 20});
+  f.drv->drag(x0, y0, x0 + 120, y0, 6);
+  EXPECT_TRUE(shows("Unsaved candidate"));
+  ASSERT_TRUE(save_enabled()) << "moving alone needs no validation";
+  ASSERT_NO_FATAL_FAILURE(save());
+  Json current;
+  ASSERT_NO_FATAL_FAILURE(read(current));
+  const auto &graph = current.at("analysis").at("document").at("graph");
+  const double moved = 120 / probe->canvas.zoom();
+  ASSERT_TRUE(graph.contains("ui")) << graph.dump();
+  EXPECT_NEAR(graph.at("ui").at("positions").at("axes")[0].get<double>(), axes.x + moved, 2.0);
+  EXPECT_NEAR(graph.at("ui").at("positions").at("axes")[1].get<double>(), axes.y, 1.0);
+  revision = current.at("revision").get<int64_t>();
+  // Drag from component.out to box.in: one link edit, which does need the check.
+  const auto [sx, sy] = probe->window(probe->port("component", "out", true));
+  const auto [tx, ty] = probe->window(probe->port("box", "in", false));
+  f.drv->drag(sx, sy, tx, ty, 6);
+  EXPECT_TRUE(shows("box.in: links changed") || shows("box.in: src.out")) << dump();
+  EXPECT_FALSE(save_enabled());
+  ASSERT_NO_FATAL_FAILURE(validate());
+  ASSERT_TRUE(save_enabled()) << issues().dump();
+  ASSERT_NO_FATAL_FAILURE(save());
+  ASSERT_NO_FATAL_FAILURE(read(current));
+  for (const auto &node : current.at("analysis").at("document").at("graph").at("nodes")) {
+    if (node.at("id") == "box") { EXPECT_EQ(node.at("inputs").at("in"), Json({{"from", "component.out"}})); }
+  }
 }
 
 TEST_F(AnalysisLinksEditorPython, RemovingANodeDropsItsLinksListEntriesAndOutputs)

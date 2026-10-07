@@ -1578,7 +1578,7 @@
   "analysis_graph.candidate_caption": "未保存的候选图 · {nodes} 个节点 · {edges} 条连接（改动的节点有描边）",
   "analysis_graph_edit.title": "编辑图结构",
   "analysis_graph_edit.title_count": "编辑图结构 · {count} 项改动",
-  "analysis_graph_edit.hint": "从节点目录添加节点、删除所选节点或公开它的输出。画布显示未保存的候选图；保存前需先校验。不会运行任何节点。",
+  "analysis_graph_edit.hint": "从节点目录添加节点、删除所选节点或公开它的输出。在画布上拖动节点可移动，从输出端口拖到输入端口可连线，按 Delete 删除所选节点。画布显示未保存的候选图；保存前需先校验。不会运行任何节点。",
   "analysis_graph_edit.add_type": "节点类型",
   "analysis_graph_edit.add_node": "添加节点",
   "analysis_graph_edit.select_node": "在画布或“节点”面板中选择一个节点，才能删除它或公开它的输出。",
@@ -1607,5 +1607,6 @@
   "analysis_node_params.use_default": "恢复默认",
   "analysis_node_params.remove": "移除取值",
   "analysis_node_params.issue": "{code}：{message}",
-  "analysis_graph_edit.change.positions": "移动了 {count} 个节点：{nodes}"
+  "analysis_graph_edit.change.positions": "移动了 {count} 个节点：{nodes}",
+  "analysis_graph_edit.cannot_link": "该输入无法在此连接（类型未知、未声明或节点重复）。"
 }
