@@ -23,27 +23,33 @@ inline std::optional<bool> archive_filter(EditorContext &ctx, const bool show)
 
 /** "Show archived (N)" switching a list to only its archived objects, drawn once something of `kind` is
  * archived (or while switched on). `counted` false leaves N out, for lists showing part of a kind. */
-inline void archive_switch(ui::Layout &layout, EditorContext &ctx, const std::string &kind, bool &show,
+inline void archive_switch(ui::Layout &layout, EditorContext &ctx, const std::string &kind, ui::Binding<bool> show,
                            const std::string &key, const bool counted = true)
 {
   auto &archive = ctx.store.archive();
   archive.sync();
-  if (!archive.supported() || (!show && archive.count(kind) == 0)) { return; }
+  if (!archive.supported() || (!show.value() && archive.count(kind) == 0)) { return; }
   layout.checkbox(key, counted ? ctx.store.catalog().format("archive.show", {{"count", std::to_string(archive.count(kind))}}) :
-                                 std::string(ctx.tr("archive.show_plain")), ui::bind(show));
+                                 std::string(ctx.tr("archive.show_plain")), std::move(show));
+}
+inline void archive_switch(ui::Layout &layout, EditorContext &ctx, const std::string &kind, bool &show,
+                           const std::string &key, const bool counted = true)
+{
+  archive_switch(layout, ctx, kind, ui::bind(show), key, counted);
 }
 
-/** "Archive" or "Restore" for one object; ``include_runs`` also covers a workflow's runs that are not running. */
-inline void archive_button(ui::Layout &layout, EditorContext &ctx, const std::string &kind, const std::string &id,
-                           const std::string &key, const bool include_runs = false, const bool enabled = true)
+/** "Archive" or "Restore" for one object; ``include_runs`` also covers a workflow's runs that are not running.
+ * Returns the button (nullptr when nothing can be archived here). */
+inline ui::Widget *archive_button(ui::Layout &layout, EditorContext &ctx, const std::string &kind, const std::string &id,
+                                  const std::string &key, const bool include_runs = false, const bool enabled = true)
 {
   auto &archive = ctx.store.archive();
   archive.sync();
-  if (!archive.supported() || id.empty()) { return; }
+  if (!archive.supported() || id.empty()) { return nullptr; }
   const bool archived = archive.archived(kind, id);
   auto *state = &archive;
   const std::string tip = std::string(archived ? "archive.restore" : "archive.archive") + (include_runs ? ".runs_tip" : ".tip");
-  layout.button(key, ctx.tr(archived ? "archive.restore" : "archive.archive"), [state, kind, id, archived, include_runs] {
+  return &layout.button(key, ctx.tr(archived ? "archive.restore" : "archive.archive"), [state, kind, id, archived, include_runs] {
     state->set(kind, {id}, !archived, include_runs);
   }).disable(archive.busy() || !enabled).tip(ctx.tr(tip));
 }

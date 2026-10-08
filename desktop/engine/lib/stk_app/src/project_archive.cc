@@ -22,7 +22,7 @@ void ProjectArchive::reset()
 {
   ++epoch_;
   if (!ids_.empty()) { ids_.clear(); ++version_; }
-  error_.clear(); stale_ = true;
+  error_.clear(); stale_ = true; read_once_ = noticed_ = false;
   for (auto *future : {&read_, &write_}) {
     auto old = std::move(*future); future->reset();
     if (old) { old->cancel(); }
@@ -50,7 +50,9 @@ void ProjectArchive::sync()
       const std::weak_ptr<bool> weak = alive_;
       if (client) {
         listener_ = client->on_event("project.archive.changed", [this, weak](const auto &, const Json &data) {
-          if (const auto alive = weak.lock(); alive && *alive && io::get_string(data, "handle") == handle_) { stale_ = true; store_.changed(); }
+          if (const auto alive = weak.lock(); alive && *alive && io::get_string(data, "handle") == handle_) {
+            stale_ = noticed_ = true; store_.changed();
+          }
         });
       }
     }
@@ -78,7 +80,10 @@ bool ProjectArchive::read()
       ids[io::get_string(item, "kind")].insert(io::get_string(item, "id"));
     }
     error_.clear();
-    if (ids != ids_) { ids_ = std::move(ids); ++version_; }
+    const bool differ = ids != ids_;
+    if (differ) { ids_ = std::move(ids); }
+    if ((differ && read_once_) || noticed_) { ++version_; }
+    read_once_ = true; noticed_ = false;
     changed();
   });
   return true;
@@ -118,6 +123,7 @@ bool ProjectArchive::set(const std::string &kind, const std::vector<std::string>
       error_ = result.error().describe();
       if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
     }
+    else { noticed_ = true; }
     stale_ = true;  // read again: the event may also arrive, reading twice is harmless
     changed();
   });

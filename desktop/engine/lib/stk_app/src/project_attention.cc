@@ -2,6 +2,7 @@
 #include "stk/app/project_attention.hh"
 
 #include "stk/app/app_store.hh"
+#include "stk/app/project_archive.hh"
 #include "stk/app/project_state.hh"
 
 #include <algorithm>
@@ -54,9 +55,12 @@ void ProjectAttention::sync()
     client_ = client; session_ = session; handle_ = handle;
     reset();
   }
+  auto &archive = store_.archive();
+  archive.sync();
   if (!supported() || future_ || project_.busy()) { return; }
   const auto revision = project_.project()->revision;
-  const bool due = result_.is_null() || revision != read_revision_ || stale_ ||
+  // Archiving never changes the revision: a changed archived set reads again too.
+  const bool due = result_.is_null() || revision != read_revision_ || stale_ || archive.version() != read_archive_ ||
       (polling() && std::chrono::steady_clock::now() - read_at_ >= std::chrono::milliseconds(kPollMs));
   if (due) { refresh(); }
 }
@@ -78,7 +82,7 @@ bool ProjectAttention::refresh()
   const auto revision = project_.project()->revision;
   const std::weak_ptr<bool> weak = alive_;
   read_at_ = std::chrono::steady_clock::now();
-  read_revision_ = revision;
+  read_revision_ = revision; read_archive_ = store_.archive().version();
   stale_ = false;
   bridge::CallOptions options;
   options.retry = bridge::CallOptions::Retry::Never;

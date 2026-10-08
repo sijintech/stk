@@ -2,6 +2,10 @@
 #pragma once
 #include "stk/bridge/client.hh"
 
+#include <map>
+#include <optional>
+#include <set>
+
 namespace stk::app {
 class AppStore;
 class ProjectState;
@@ -39,6 +43,13 @@ class ProjectDiscussion {
   const io::Json &generation_request() const { return generation_request_; }
   const std::string &origin_draft() const { return origin_draft_; }
   bool load_page(const std::string &kind, int64_t offset = 0, bool preserve_error = false);
+  /** The contexts and requests lists show only active entries (the default) or only archived ones once the
+   * service archives (format 11; project_archive.hh); one choice per project, shared by every view of them. */
+  bool show_archived(const std::string &kind) const { return show_archived_.count(kind) != 0; }
+  void set_show_archived(const std::string &kind, bool show);
+  /** Views call this every frame: a page read with another archive filter or archived set is read again
+   * (archiving never changes the revision); from the start when the filter itself changed. */
+  void sync_archive();
   bool load_context(const std::string &id);
   bool load_message(const std::string &id);
   bool load_request(const std::string &id);
@@ -112,6 +123,10 @@ class ProjectDiscussion {
   bool busy_ = false;
   std::string error_, origin_draft_;
   ProjectDiscussionPage contexts_, messages_, proposals_, request_page_;
+  std::set<std::string> show_archived_;
+  std::map<std::string, std::string> listed_archive_;  // kind -> the archive filter and version its page was read with
+  std::optional<bool> archive_filter(const std::string &kind) const;
+  std::string archive_key(const std::string &kind) const;
   io::Json context_ = io::Json::object(), message_ = io::Json::object(), origin_ = io::Json::object();
   io::Json requests_ = io::Json::object();
   io::Json generation_request_ = io::Json::object();

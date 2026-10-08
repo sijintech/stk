@@ -122,6 +122,14 @@ class ProjectState {
   void discard_review();
   bool drafts_supported() const;
   bool load_drafts(int64_t offset = 0, bool preserve_error = false);
+  /** The saved drafts and simulation runs lists show only active entries (the default) or only archived ones once
+   * the service archives (format 11; project_archive.hh). A changed choice or archived set reads a listed page again
+   * (sync() checks; archiving never changes the revision). */
+  bool show_archived_drafts() const { return show_archived_drafts_; }
+  void set_show_archived_drafts(bool show) { show_archived_drafts_ = show; sync_archive(); }
+  bool show_archived_runs() const { return show_archived_runs_; }
+  void set_show_archived_runs(bool show) { show_archived_runs_ = show; sync_archive(); }
+  void sync_archive();
   bool drafts_loaded() const { return drafts_loaded_; }
   const io::Json &drafts() const { return drafts_; }
   const io::Json &saved_review() const { return saved_review_; }
@@ -210,6 +218,10 @@ class ProjectState {
   io::Json drafts_ = io::Json::array(), saved_review_ = io::Json::object(), save_request_ = io::Json::object();
   std::string drafts_error_;
   bool drafts_loaded_ = false;
+  bool show_archived_drafts_ = false, show_archived_runs_ = false;
+  std::string drafts_archive_, runs_archive_;  // the filter and archive version each list was read with
+  std::optional<bool> archive_filter(bool show) const;
+  std::string archive_key(bool show) const;
   int64_t drafts_offset_ = 0, drafts_next_offset_ = -1;
   io::Json file_index_ = io::Json::object();
   io::Json input_snapshots_ = io::Json::array(), input_verification_ = io::Json::object();

@@ -2,6 +2,7 @@
 #include "stk/app/project_discussion.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/jobs_spec.hh"
+#include "stk/app/project_archive.hh"
 #include "stk/app/project_state.hh"
 #include <algorithm>
 #include <cmath>
@@ -43,6 +44,7 @@ void ProjectDiscussion::reset()
   error_.clear();
   origin_draft_.clear();
   contexts_ = messages_ = proposals_ = request_page_ = {};
+  show_archived_.clear(); listed_archive_.clear();
   context_ = message_ = origin_ = requests_ = generation_request_ = Json::object();
   provider_ = Json::object(); provider_loaded_ = false;
   usage_ = Json::object(); usage_loaded_ = usage_reading_ = false; usage_completed_.clear();
@@ -262,7 +264,11 @@ bool ProjectDiscussion::load_page(const std::string &kind, const int64_t offset,
   if ((kind != "contexts" && kind != "messages" && kind != "proposals" && kind != "requests") || offset < 0) { return false; }
   const auto method = kind == "contexts" ? "project.contexts.list" :
                       kind == "messages" ? "project.discussion.list" : kind == "requests" ? "project.requests.list" : "project.discussion.proposals";
-  const bool accepted = call(method, {{"offset", offset}, {"limit", 100}}, [this, kind, offset](const Json &result) {
+  Json params = {{"offset", offset}, {"limit", 100}};
+  const auto filter = archive_filter(kind);
+  if (filter) { params["archived"] = *filter; }
+  const auto archive = archive_key(kind);
+  const bool accepted = call(method, std::move(params), [this, kind, offset](const Json &result) {
     auto &page = kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : kind == "requests" ? request_page_ : proposals_;
     page.items = result.at(kind);
     page.offset = offset;
@@ -270,8 +276,49 @@ bool ProjectDiscussion::load_page(const std::string &kind, const int64_t offset,
     page.loaded = true;
   }, preserve_error);
   // A failed read remains inspectable until explicit refresh, instead of retrying every frame.
-  if (accepted) { (kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : kind == "requests" ? request_page_ : proposals_).loaded = true; }
+  if (accepted) {
+    (kind == "contexts" ? contexts_ : kind == "messages" ? messages_ : kind == "requests" ? request_page_ : proposals_).loaded = true;
+    listed_archive_[kind] = archive;
+  }
   return accepted;
+}
+
+std::optional<bool> ProjectDiscussion::archive_filter(const std::string &kind) const
+{
+  if (kind != "contexts" && kind != "requests") { return std::nullopt; }
+  auto &archive = store_.archive();
+  archive.sync();  // the first read already knows whether this project archives
+  return archive.supported() ? std::optional<bool>(show_archived(kind)) : std::nullopt;
+}
+
+std::string ProjectDiscussion::archive_key(const std::string &kind) const
+{
+  const auto filter = archive_filter(kind);
+  return std::string(!filter ? "-" : *filter ? "1" : "0") + ":" + std::to_string(store_.archive().version());
+}
+
+void ProjectDiscussion::set_show_archived(const std::string &kind, const bool show)
+{
+  if (kind != "contexts" && kind != "requests") { return; }
+  if (show) { show_archived_.insert(kind); }
+  else { show_archived_.erase(kind); }
+  sync_archive();
+  ++version_;
+  store_.changed();
+}
+
+void ProjectDiscussion::sync_archive()
+{
+  store_.archive().sync();
+  for (const std::string kind : {"contexts", "requests"}) {
+    auto &page = kind == "contexts" ? contexts_ : request_page_;
+    const auto key = archive_key(kind);
+    const auto found = listed_archive_.find(kind);
+    if (!page.loaded || found == listed_archive_.end() || found->second == key) { continue; }
+    if (found->second.front() != key.front()) { page.offset = 0; }  // another filter: its first page
+    page.loaded = false;
+    listed_archive_.erase(found);
+  }
 }
 
 bool ProjectDiscussion::load_context(const std::string &id)

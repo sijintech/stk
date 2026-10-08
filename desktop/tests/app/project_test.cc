@@ -3,6 +3,7 @@
 
 #include "stk/app/project_state.hh"
 #include "stk/app/project_discussion.hh"
+#include "stk/app/project_archive.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/app/script_state.hh"
@@ -3870,6 +3871,206 @@ TEST_F(WorkflowSimulationPython, MuFerroWorkflowRunsEveryRowOnThePickedRuntime)
 }
 
 #endif
+
+
+/** Pumps frames until `condition` holds (archive reads finish on their own, outside the project's busy flag). */
+#define STK_UNTIL(condition) \
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return (condition); }, 30)) << client->bridge_log().text()
+
+TEST_F(ProjectPython, ArchivedDraftsLeaveTheSavedListUntilRestored)
+{
+  populated();
+  state().set_review_source(set_cell(350).dump());
+  ASSERT_TRUE(state().preview()); settled();
+  ASSERT_TRUE(state().save_review("Kept for later")); settled();
+  state().discard_review();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("review"));
+  f.screen.set_maximized(&area); f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/saved_reviews");
+  f.drv->click(x, y);
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/saved_reviews/" + key); };
+  STK_UNTIL(widget("draft_rows") && widget("draft_archive") && widget("draft_archive")->enabled);
+  EXPECT_TRUE(widget("load_draft")->enabled);
+  EXPECT_EQ(widget("drafts_show_archived"), nullptr);
+  widget("draft_archive")->on_click();
+  STK_UNTIL(!widget("draft_rows") && widget("drafts_show_archived"));
+  EXPECT_EQ(widget("drafts_show_archived")->text, "Show archived (1)");
+  widget("drafts_show_archived")->boolean.assign(true);
+  // Only archived drafts: read-only (not loaded for review or discarded) until restored.
+  STK_UNTIL(widget("draft_rows") && widget("draft_archive") && widget("draft_archive")->text == "Restore" &&
+            widget("draft_archive")->enabled);
+  EXPECT_FALSE(widget("load_draft")->enabled);
+  EXPECT_FALSE(widget("discard_saved_draft")->enabled);
+  widget("draft_archive")->on_click();
+  STK_UNTIL(!widget("draft_rows"));
+  widget("drafts_show_archived")->boolean.assign(false);
+  STK_UNTIL(widget("draft_rows") && widget("load_draft") && widget("load_draft")->enabled && !widget("drafts_show_archived"));
+  EXPECT_EQ(state().project()->revision, 1);  // archiving is not an edit
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ArchivedQuestionsLeaveTheAIHistoryAndArchivedContextsCannotBeAsked)
+{
+  populated();
+  const std::string first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  ASSERT_NO_FATAL_FAILURE(saved_request(first));
+  ASSERT_NO_FATAL_FAILURE(saved_request(second));
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area);
+  ai_frame();
+  auto &discussion = state().discussion();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  ASSERT_NE(widget("ai_history"), nullptr);
+  EXPECT_EQ(widget("ai_history")->items.size(), 2u);
+  ASSERT_TRUE(discussion.load_exchange(first)); ai_frame();
+  STK_UNTIL(widget("ai_archive") && widget("ai_archive")->enabled);
+  widget("ai_archive")->on_click();
+  // The shown question stays, marked read-only; the history leaves it out until switched to archived ones.
+  STK_UNTIL(widget("ai_history") && widget("ai_history")->items.size() == 1 && shows("Archived: read-only until restored."));
+  EXPECT_EQ(discussion.page("requests").items.front().at("id"), second);
+  EXPECT_EQ(widget("ai_archive")->text, "Restore");
+  ASSERT_NE(widget("ai_history_show_archived"), nullptr);
+  widget("ai_history_show_archived")->boolean.assign(true);
+  STK_UNTIL(discussion.page("requests").loaded && !discussion.busy() && discussion.page("requests").items.size() == 1 &&
+            discussion.page("requests").items.front().at("id") == first);
+  widget("ai_history_show_archived")->boolean.assign(false);
+  STK_UNTIL(discussion.page("requests").loaded && !discussion.busy() && discussion.page("requests").items.size() == 1 &&
+            discussion.page("requests").items.front().at("id") == second);
+  // An archived context cannot be asked about until restored.
+  const auto context = io::get_string(discussion.context(), "id");
+  ASSERT_FALSE(context.empty());
+  EXPECT_FALSE(shows("The chosen context is archived"));
+  ASSERT_TRUE(f.shell->store().archive().set("context", {context}, true));
+  STK_UNTIL(shows("The chosen context is archived"));
+  ASSERT_NE(widget("ai_prepare"), nullptr);
+  EXPECT_FALSE(widget("ai_prepare")->enabled);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ArchivedSimulationRunsLeaveTheRunListAndCannotBeSubmitted)
+{
+  populated();
+  std::optional<bridge::Result<Json>> response;
+  client->call("connections.add_runtime", {{"name", "offline"}, {"url", "http://127.0.0.1:1"},
+                                            {"token", "test-only"}, {"check", false}})
+      .then([&](auto result) { response = result; });
+  ASSERT_TRUE(loop.pump_until([&] { return response.has_value(); }));
+  ASSERT_TRUE(response->ok()) << response->error().message;
+  response.reset();
+  client->call("project.runs.prepare", {{"handle", state().project()->handle}, {"connection", "runtime:offline"},
+      {"expected_revision", 1}, {"entries", Json::array({{
+        {"table_id", table_id}, {"record_id", record_id}, {"label", "300 K"},
+        {"spec", {{"workspace_id", std::string(32, 'a')}, {"argv", Json::array({"solver", "--temperature", "300"})}}}
+      }})}}).then([&](auto result) { response = result; });
+  ASSERT_TRUE(loop.pump_until([&] { return response.has_value(); }));
+  ASSERT_TRUE(response->ok()) << response->error().message;
+  state().refresh(); settled();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_runs");
+  f.drv->click(x, y);
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_runs/" + key); };
+  STK_UNTIL(widget("list") && widget("list")->enabled);
+  widget("list")->on_click();
+  STK_UNTIL(state().runs().size() == 1 && widget("archive") && widget("archive")->enabled && widget("submit")->enabled);
+  const auto revision = state().project()->revision;
+  widget("archive")->on_click();
+  STK_UNTIL(state().runs().empty() && !state().busy() && widget("runs_show_archived"));
+  widget("runs_show_archived")->boolean.assign(true);
+  STK_UNTIL(state().runs().size() == 1 && !state().busy() && widget("archive") && widget("archive")->text == "Restore");
+  EXPECT_FALSE(widget("submit")->enabled);
+  STK_UNTIL(widget("archive")->enabled);
+  widget("archive")->on_click();
+  STK_UNTIL(state().runs().empty() && !state().busy());
+  widget("runs_show_archived")->boolean.assign(false);
+  STK_UNTIL(state().runs().size() == 1 && !state().busy() && widget("submit") && widget("submit")->enabled);
+  EXPECT_EQ(state().project()->revision, revision);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ArchivedBatchesLeaveTheSavedBatchesUntilRestored)
+{
+  populated();
+  // A saved batch is a row of the batches table (suan/workflows/batches.py); only its name is read here.
+  const std::string batches = "9ab21772-9bc4-56ab-94e1-f3f1049fb398", name = "4c8c8e0b-e625-54b9-aa39-cfbddef20d7c";
+  const std::string kept = "44444444-4444-4444-8444-444444444444", shelved = "55555555-5555-4555-8555-555555555555";
+  ASSERT_TRUE(state().apply(Json::array({
+      {{"op", "create_table"}, {"id", batches}, {"name", "Simulation batches"}},
+      {{"op", "add_field"}, {"table_id", batches}, {"id", name}, {"name", "Name"}, {"type", "text"}},
+      {{"op", "add_record"}, {"table_id", batches}, {"id", kept}},
+      {{"op", "set_cell"}, {"table_id", batches}, {"record_id", kept}, {"field_id", name}, {"value", "Kept batch"}},
+      {{"op", "add_record"}, {"table_id", batches}, {"id", shelved}},
+      {{"op", "set_cell"}, {"table_id", batches}, {"record_id", shelved}, {"field_id", name}, {"value", "Old batch"}}})));
+  settled();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_batches");
+  f.drv->click(x, y);
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_batches/" + key); };
+  // The last batch is shown first.
+  STK_UNTIL(widget("saved") && widget("saved")->items.size() == 2 && widget("batch_archive") && widget("batch_archive")->enabled);
+  ASSERT_EQ(widget("saved")->index.value(), 1);
+  widget("batch_archive")->on_click();
+  STK_UNTIL(widget("saved") && widget("saved")->items.size() == 1 && widget("batches_show_archived"));
+  EXPECT_EQ(widget("saved")->items.front(), "Kept batch");
+  widget("batches_show_archived")->boolean.assign(true);
+  STK_UNTIL(widget("saved")->items.size() == 1 && widget("saved")->items.front() == "Old batch" &&
+            widget("batch_archive") && widget("batch_archive")->text == "Restore" && widget("batch_archive")->enabled);
+  widget("batch_archive")->on_click();
+  STK_UNTIL(widget("saved") && widget("saved")->items.empty());
+  widget("batches_show_archived")->boolean.assign(false);
+  STK_UNTIL(widget("saved") && widget("saved")->items.size() == 2 && !widget("batches_show_archived"));
+  EXPECT_EQ(state().project()->revision, 2);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, ArchivedContextsLeaveTheDiscussionListAndTakeNoMessages)
+{
+  populated();
+  ASSERT_NO_FATAL_FAILURE(saved_request("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+  auto &discussion = state().discussion();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(area.editor().show_view("discussion")); f.screen.set_maximized(&area);
+  const auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  STK_UNTIL(discussion.page("contexts").loaded && !discussion.busy() && discussion.page("contexts").items.size() == 1 &&
+            widget("discussion_context_archive") && widget("discussion_context_archive")->enabled);
+  widget("message_composer/text")->string.assign("A note about these values");
+  STK_UNTIL(widget("message_composer/save_message") && widget("message_composer/save_message")->enabled);
+  widget("discussion_context_archive")->on_click();
+  // The shown context stays, read-only: no messages are added to it until it is restored.
+  STK_UNTIL(discussion.page("contexts").loaded && !discussion.busy() && discussion.page("contexts").items.empty() &&
+            widget("discussion_show_archived/contexts") && widget("discussion_context_archive")->text == "Restore");
+  EXPECT_FALSE(widget("message_composer/save_message")->enabled);
+  widget("discussion_show_archived/contexts")->boolean.assign(true);
+  STK_UNTIL(discussion.page("contexts").loaded && !discussion.busy() && discussion.page("contexts").items.size() == 1 &&
+            widget("discussion_context_archive")->enabled);
+  widget("discussion_context_archive")->on_click();
+  STK_UNTIL(discussion.page("contexts").loaded && !discussion.busy() && discussion.page("contexts").items.empty() &&
+            widget("discussion_context_archive")->text == "Archive");
+  widget("discussion_show_archived/contexts")->boolean.assign(false);
+  STK_UNTIL(discussion.page("contexts").loaded && !discussion.busy() && discussion.page("contexts").items.size() == 1 &&
+            widget("message_composer/save_message")->enabled);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+#undef STK_UNTIL
 
 }  // namespace
 }  // namespace stk::app

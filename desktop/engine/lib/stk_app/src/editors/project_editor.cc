@@ -7,6 +7,7 @@
 #include "stk/app/viewer_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/platform/file_dialog.hh"
+#include "archive_controls.hh"
 #include "project_review_view.hh"
 #include "project_discussion_view.hh"
 #include "project_simulation_view.hh"
@@ -421,6 +422,7 @@ class ProjectEditor final : public Editor {
     auto *panel = standalone ? &layout.scope("project_runs") : layout.panel("project_runs", ctx.tr("project.runs.title"), false);
     if (!panel) { return; }
     hint(*panel, ctx, "project.runs.hint");
+    state.sync_archive();  // archived runs leave the list unless switched to them (format 11)
     const bool enabled = editable && state.project()->format_version >= 5;
     auto &pages = panel->row();
     pages.button("list", ctx.tr("project.runs.list"), [&state] { state.load_runs(); }).disable(!enabled);
@@ -429,6 +431,8 @@ class ProjectEditor final : public Editor {
     }).disable(!enabled || state.runs_offset() == 0);
     pages.button("next", ctx.tr("project.runs.next"), [&state] { state.load_runs(state.runs_next_offset()); })
         .disable(!enabled || state.runs_next_offset() < 0);
+    archive_switch(*panel, ctx, "simulation_run", {[&state] { return state.show_archived_runs(); },
+        [&state](const bool show) { state.set_show_archived_runs(show); }}, "runs_show_archived");
     if (state.runs().empty()) { panel->paragraph(ctx.tr("project.runs.empty")); return; }
     const auto status_text = [&ctx](const Json &run) {
       const std::string task = io::get_string(run, "task_state");
@@ -476,16 +480,20 @@ class ProjectEditor final : public Editor {
     if (run_consent_id_ != state.run_id()) { run_consent_id_ = state.run_id(); allow_stale_run_ = false; }
     const bool first = io::get_string(status, "submission") == "prepared";
     const bool stale = io::get_string(run, "parameter_state") != "current";
+    const bool archived = archived_notice(*panel, ctx, "simulation_run", state.run_id());
     if (first && stale) { panel->checkbox("allow_stale", ctx.tr("project.runs.allow_stale"), ui::bind(allow_stale_run_)); }
     auto &actions = panel->row();
     actions.button("submit", ctx.tr(first ? "project.runs.submit" : "project.runs.recover"), [this, &state] {
       state.submit_run(allow_stale_run_);
-    }).disable(!enabled || !task.empty() || (first && stale && !allow_stale_run_));
+    }).disable(!enabled || !task.empty() || (first && stale && !allow_stale_run_) || archived);
     actions.button("refresh", ctx.tr("project.runs.refresh"), [&state] { state.refresh_run(); }).disable(!enabled);
     const auto task_state = io::get_string(task, "state");
     const bool terminal = task_state == "succeeded" || task_state == "failed" || task_state == "cancelled";
     actions.button("cancel", ctx.tr("project.runs.cancel"), [&state] { state.cancel_run(); })
         .disable(!enabled || task.empty() || terminal);
+    // Only once nothing runs on the Runtime (a task in an unknown state may be archived too).
+    archive_button(actions, ctx, "simulation_run", state.run_id(), "archive", false,
+                   enabled && (task.empty() || terminal || task_state == "unknown"));
     panel->button("source", ctx.tr("project.runs.source"), [&state, parameters] {
       state.select_table(io::get_string(parameters, "table_id"));
       state.select_record(io::get_string(parameters, "record_id"));

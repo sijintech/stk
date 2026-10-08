@@ -4,6 +4,7 @@
  * where to run → run → results), shows each step's state from what the app already knows and
  * marks the next step. Buttons only navigate; nothing here runs, sends or changes data.
  */
+#include "archive_controls.hh"
 #include "project_navigation.hh"
 
 #include "../app_theme.hh"
@@ -276,6 +277,10 @@ class WorkspaceEditor final : public Editor {
       row.button("workspace_attention_seen/" + key, ctx.tr("workspace.attention.seen"), [attention, key] {
         attention->mark_viewed({key});
       }).width(3);
+      // Put away for good (format 11): it leaves this list and its own list until restored there.
+      if (auto *shelve = archive_button(row, ctx, kind, io::get_string(item, "id"), "workspace_attention_archive/" + key)) {
+        shelve->width(3);
+      }
     }
   }
 

@@ -46,6 +46,13 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 （工作流运行在工作流编辑器中选中该运行，分析运行打开分析图的“运行”页，草案、请求与仿真运行打开对应项目页面）与“已看”；
 打开即标为已看。“已查看”只记在本机的后台服务状态目录，不改项目；事项状态再变化（例如再次失败）会重新出现。
 状态栏的 **需要处理 N** 显示未查看的需要处理数，点击回到工作台。有事项运行时每 3 秒重读一次；汇总只读，不运行任何内容。
+不在运行中的事项还有 **归档**：长期收起（项目格式 11），不再列出，见下文“归档”。
+
+**归档**（项目格式 11，[方案](design/project-archive.md)）：工作流、保存的分析、仿真批次、工作流/分析/仿真运行、AI 问答、上下文与草案
+都可以在各自的列表或详情处 **归档**，收起而不删除；默认列表不再显示，列表上的 **显示已归档（N）** 切换到只看已归档的对象，**恢复** 放回。
+归档不是项目编辑，不改变修订、不进入撤销。已归档的对象仍可查看，但恢复前只读：不能保存修改、准备或开始运行、提交、应用或放弃草案、
+向其上下文提问；运行中的对象要先取消或等它结束才能归档。归档工作流时同时归档它不在运行中的运行，恢复时一并恢复；
+工作流的步骤引用已归档的分析时，检查会列出问题“引用的分析已归档”（仍可保存，恢复分析前不能运行）。搜索仍会找到已归档的对象并加以标注。
 
 其下的 **搜索项目** 在当前项目中查找文字（不区分大小写，按回车或“搜索”开始）：参数表与字段名称、单元格文字、工作流与保存分析的名称、
 文件名与路径、AI 草案标题和对话消息。结果按类别列出（每类最多 50 项、共 100 项），“打开”到所在位置：单元格打开参数表并选中该行，
@@ -508,6 +515,11 @@ files have a **Browse…** button when a native file dialog exists (Linux: zenit
 the field; importing, indexing, exporting or running stays a separate click. Answers arriving after another
 project was opened are dropped.
 Users with a saved layout keep it; File > Reset layout switches to the new default.
+**Archive** (project format 11): workflows, saved analyses, simulation batches, workflow/analysis/simulation runs,
+AI questions, contexts and drafts can be archived where they are listed or shown. Archived objects leave the default
+lists (**Show archived (N)** lists only them, **Restore** brings one back), stay readable, and are read-only until
+restored; archiving is not a project edit (no new revision, no undo). Archiving a workflow also archives its runs that
+are not running, and restoring it restores them. Home's "Needs you" items that are not running can be archived too.
 
 ### Skill catalog
 

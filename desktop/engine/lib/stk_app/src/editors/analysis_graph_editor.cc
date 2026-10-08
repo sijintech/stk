@@ -14,6 +14,7 @@
 #include "stk/ui/form_json.hh"
 #include "stk/ui/gpu_painter.hh"
 #include "stk/wm/window.hh"
+#include "archive_controls.hh"
 #include "project_navigation.hh"
 #include "editor_text.hh"
 
@@ -416,6 +417,8 @@ class AnalysisGraphEditor final : public Editor {
   size_t table_grid_name_page_ = 0, table_grid_unit_page_ = 0, table_grid_value_page_ = 0;
   AnalysisGraphCanvas canvas_;
   AppStore *store_ = nullptr;
+  bool show_archived_ = false, show_archived_runs_ = false;  // the lists show only archived analyses / runs
+  std::string documents_archive_, runs_archive_;  // the archive filter and version each list was read with
   std::shared_ptr<const AnalysisGraphView> canvas_view_;
   // The unsaved candidate's presentation, rebuilt when the draft changes (see shown_view()).
   std::shared_ptr<const AnalysisGraphView> candidate_view_;
@@ -553,8 +556,9 @@ class AnalysisGraphEditor final : public Editor {
     };
     const bool unavailable = !parameter_current();
     const bool busy = documents_->busy() || documents_->uncertain() || ctx.store.project().busy();
-    const bool blocked = busy || unavailable;
+    const bool blocked = busy || unavailable || analysis_archived();
     hint(*panel, ctx, "analysis_parameters.hint");
+    archived_notice(*panel, ctx, "analysis", io::get_string(documents_->selected(), "id"));
     if (parameter_edits()) { panel->paragraph(ctx.tr("analysis_parameters.dirty")); }
     if (!candidate_checked()) { panel->paragraph(ctx.tr("analysis_links.validate_first")); }
     if (unavailable) {
@@ -600,7 +604,8 @@ class AnalysisGraphEditor final : public Editor {
   bool canvas_editable() const
   {
     return state_ && state_->saved() && canvas_view_ && draft_matches_view() && parameter_current() &&
-        !documents_->busy() && !documents_->uncertain() && !parameter_text_active() && !parameter_buffer_changed_;
+        !documents_->busy() && !documents_->uncertain() && !parameter_text_active() && !parameter_buffer_changed_ &&
+        !analysis_archived();
   }
   void refuse(const std::string &message)
   {
@@ -1402,6 +1407,7 @@ class AnalysisGraphEditor final : public Editor {
     state_->sync();
     state_->ensure_catalog();
     runs_->sync();
+    sync_archive(ctx);
     if (runs_epoch_ != runs_->epoch()) {
       runs_epoch_ = runs_->epoch(); output_index_ = -1; clear_input_preparation();
     }
@@ -1584,6 +1590,29 @@ class AnalysisGraphEditor final : public Editor {
     layout.paragraph(ctx.store.catalog().format(run_and_show_key_, {{"detail", text(run_and_show_detail_)}}));
   }
 
+  /** Lists leave archived analyses and runs out unless switched to them (format 11). Archiving never changes
+   * the revision, so a listed page is read again (from the start) when the archived set or the filter changes. */
+  void sync_archive(EditorContext &ctx)
+  {
+    const auto documents_filter = archive_filter(ctx, show_archived_), runs_filter = archive_filter(ctx, show_archived_runs_);
+    documents_->set_archive_filter(documents_filter); runs_->set_archive_filter(runs_filter);
+    const auto key = [&ctx](const std::optional<bool> &filter) {
+      return std::string(!filter ? "-" : *filter ? "1" : "0") + ":" + std::to_string(ctx.store.archive().version());
+    };
+    const bool idle = !ctx.store.project().busy();
+    if (documents_->page().is_null()) { documents_archive_ = key(documents_filter); }  // the first read uses the current filter
+    else if (documents_archive_ != key(documents_filter) && idle && !documents_->busy() && documents_->load_page(0)) {
+      documents_archive_ = key(documents_filter);
+    }
+    if (runs_->page().is_null()) { runs_archive_ = key(runs_filter); }
+    else if (runs_archive_ != key(runs_filter) && idle && !runs_->busy() && runs_->load_page(0)) { runs_archive_ = key(runs_filter); }
+  }
+  /** The shown saved analysis is archived: read-only and not runnable until restored. */
+  bool analysis_archived() const
+  {
+    return store_ && store_->archive().archived("analysis", io::get_string(documents_->selected(), "id"));
+  }
+
   void runs_panel(ui::Layout &layout, EditorContext &ctx)
   {
     poll_runs(ctx);
@@ -1628,7 +1657,9 @@ class AnalysisGraphEditor final : public Editor {
         prepare->label(text(document_name_.empty() ? id : document_name_)).tip(id);
         prepare->label(ctx.store.catalog().format("analysis_documents.revision", {{"revision", std::to_string(revision)}}));
         if (state_->document_stale()) { prepare->paragraph(ctx.tr("analysis_runs.stale_definition")); }
+        if (ctx.store.archive().archived("analysis", id)) { prepare->paragraph(ctx.tr("analysis_runs.archived")); }
       }
+      const bool archived = !id.empty() && ctx.store.archive().archived("analysis", id);
       prepare->button("analysis_run_and_show", ctx.tr("analysis_runs.auto.button"),
           [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
         if (!valid() || parameter_edits() || run_and_show_) { return; }
@@ -1650,7 +1681,7 @@ class AnalysisGraphEditor final : public Editor {
         run_and_show_ = std::move(chain); run_and_show_key_.clear(); run_and_show_detail_.clear(); ++run_and_show_generation_;
         redraw();
       }).disable(blocked || parameter_edits() || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() ||
-                 bindings.empty() || run_and_show_.has_value());
+                 bindings.empty() || run_and_show_.has_value() || archived);
       hint(*prepare, ctx, "analysis_runs.auto.hint");
       prepare->button("analysis_run_prepare", ctx.tr("analysis_runs.prepare"),
           [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
@@ -1660,12 +1691,14 @@ class AnalysisGraphEditor final : public Editor {
             state_->document_id() == id && !state_->document_stale()) {
           runs_->prepare(id, revision, snapshot, bindings);
         }
-      }).disable(blocked || parameter_edits() || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() || bindings.empty());
+      }).disable(blocked || parameter_edits() || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() ||
+                 bindings.empty() || archived);
     }
     if (auto *history = layout.panel("analysis_run_history", ctx.tr("analysis_runs.history"), runs_->run().is_null())) {
       history->button("analysis_run_list", ctx.tr("analysis_runs.refresh"), [this, valid] {
         if (valid()) { runs_->load_page(runs_->offset()); }
       }).disable(blocked);
+      archive_switch(*history, ctx, "analysis_run", show_archived_runs_, "analysis_runs_show_archived");
       if (!runs_->page().is_null()) {
         const auto rows = runs_->page().at("runs");
         if (rows.empty()) { history->paragraph(ctx.tr("analysis_runs.empty")); }
@@ -1865,6 +1898,9 @@ class AnalysisGraphEditor final : public Editor {
     auto &box = layout.box();
     box.label(text(io::get_string(run, "analysis_name")));
     box.label(ctx.tr("analysis_runs.status." + status));
+    archived_notice(box, ctx, "analysis_run", id);
+    archive_button(box, ctx, "analysis_run", id, "analysis_run_archive", false,
+                   status != "running" && status != "cancel_requested" && !blocked);
     if (!run.at("error").is_null()) { box.paragraph(text(io::get_string(run.at("error"), "message"))); }
     const bool partial = !run.at("result").is_null() && run.at("result").at("has_errors").get<bool>();
     if (partial) { box.paragraph(ctx.tr("analysis_runs.partial")); }
@@ -2431,7 +2467,8 @@ class AnalysisGraphEditor final : public Editor {
           document_navigation_ = navigation_generation_;
         }
       }).disable(blocked || parameter_edits() || documents_->uncertain() || documents_->stale() ||
-          io::get_string(documents_->selected(), "state") != "readable");
+          io::get_string(documents_->selected(), "state") != "readable" || analysis_archived());
+      archive_button(*panel, ctx, "analysis", selected_id, "analysis_archive", false, !blocked && !parameter_edits());
       if (!io::get_string(documents_->selected(), "error").empty()) {
         panel->paragraph(text(io::get_string(documents_->selected(), "error")));
       }
@@ -2441,6 +2478,7 @@ class AnalysisGraphEditor final : public Editor {
     panel->button("analysis_list", ctx.tr("analysis_documents.refresh"), [this, valid, offset] {
       if (valid()) { documents_->load_page(offset); }
     }).disable(blocked);
+    archive_switch(*panel, ctx, "analysis", show_archived_, "analysis_show_archived");
     const auto page = documents_->page();
     if (page.is_null()) { return; }
     if (!io::get_string(page, "error").empty()) { panel->paragraph(text(io::get_string(page, "error"))); }

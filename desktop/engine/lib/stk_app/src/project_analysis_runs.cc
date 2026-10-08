@@ -232,7 +232,9 @@ bool ProjectAnalysisRuns::load_snapshots()
 bool ProjectAnalysisRuns::load_page(const int64_t offset)
 {
   if (offset < 0) { return false; }
-  return call("project.analysis_runs.list", {{"offset", offset}, {"limit", 50}}, [this, offset](const Json &result) {
+  Json params = {{"offset", offset}, {"limit", 50}};
+  if (list_archived_) { params["archived"] = *list_archived_; }
+  return call("project.analysis_runs.list", std::move(params), [this, offset](const Json &result) {
     const auto &rows = result.at("runs"), &next = result.at("next_offset");
     if (!rows.is_array() || rows.size() > 50 ||
         (!next.is_null() && (!next.is_number_integer() || next.get<int64_t>() <= offset))) {

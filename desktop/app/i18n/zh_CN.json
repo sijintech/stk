@@ -1869,5 +1869,8 @@
   "archive.archive.runs_tip": "归档此工作流及其未在运行的运行记录；恢复前只读。",
   "archive.restore.runs_tip": "恢复此工作流及其运行记录。",
   "archive.read_only": "已归档：恢复前只读。",
-  "workflow.run.archived": "此工作流已归档，恢复后才能运行。"
+  "workflow.run.archived": "此工作流已归档，恢复后才能运行。",
+  "analysis_runs.archived": "此分析已归档，恢复后才能运行。",
+  "ai.context_archived": "所选上下文已归档：恢复它或另选一个后再提问。",
+  "workflow.issue.archived_reference": "引用的分析已归档"
 }

@@ -131,7 +131,9 @@ bool ProjectAnalyses::call(const std::string &method, Json params,
 bool ProjectAnalyses::load_page(const int64_t offset)
 {
   if (offset < 0) { return false; }
-  return call("project.analyses.list", {{"offset", offset}, {"limit", 50}}, [this, offset](const Json &result) {
+  Json params = {{"offset", offset}, {"limit", 50}};
+  if (list_archived_) { params["archived"] = *list_archived_; }
+  return call("project.analyses.list", std::move(params), [this, offset](const Json &result) {
     if (!result.is_object() || io::get_int(result, "revision", -1) < 0 ||
         io::get_int(result, "offset", -1) != offset || io::get_int(result, "total", -1) < 0 ||
         !result.contains("compatible") || !result.at("compatible").is_boolean() ||

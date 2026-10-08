@@ -1869,5 +1869,8 @@
   "archive.archive.runs_tip": "Archive this workflow and its runs that are not running; read-only until restored.",
   "archive.restore.runs_tip": "Restore this workflow and its runs.",
   "archive.read_only": "Archived: read-only until restored.",
-  "workflow.run.archived": "This workflow is archived; restore it to run it."
+  "workflow.run.archived": "This workflow is archived; restore it to run it.",
+  "analysis_runs.archived": "This analysis is archived; restore it to run it.",
+  "ai.context_archived": "The chosen context is archived; restore it or choose another to ask.",
+  "workflow.issue.archived_reference": "Referenced analysis is archived"
 }

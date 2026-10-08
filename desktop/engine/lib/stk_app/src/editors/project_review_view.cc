@@ -4,6 +4,7 @@
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/project_discussion.hh"
+#include "archive_controls.hh"
 #include "project_labels.hh"
 #include "editor_text.hh"
 #include <algorithm>
@@ -67,8 +68,12 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
   auto *panel = layout.panel("saved_reviews", ctx.tr("project.drafts.title"), false);
   if (!panel) { return; }
   if (!state.drafts_supported()) { panel->paragraph(ctx.tr("project.drafts.unsupported")); return; }
+  // Archived drafts leave the list unless switched to them (format 11).
+  state.sync_archive();
   if (!state.drafts_loaded() && !state.busy()) { state.load_drafts(0, true); }
   hint(*panel, ctx, "project.drafts.hint");
+  archive_switch(*panel, ctx, "draft", {[&state] { return state.show_archived_drafts(); },
+      [&state](const bool show) { state.set_show_archived_drafts(show); }}, "drafts_show_archived");
   panel->prop(ctx.tr("project.drafts.name")).text_field("draft_title", ui::bind(draft_title_), {.max_length = 1024});
   auto &save = panel->row();
   save.button("save_review", ctx.tr("project.drafts.save"), [this, &state, review = state.review()] {
@@ -107,7 +112,9 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
     };
     panel->table("draft_rows", std::move(spec));
     const auto chosen = std::find_if(drafts.begin(), drafts.end(), [&](const auto &draft) { return draft.at("id") == selected_draft_; });
-    const bool pending = chosen != drafts.end() && io::get_string(*chosen, "status") == "pending";
+    const bool archived = ctx.store.archive().archived("draft", selected_draft_);
+    const bool pending = chosen != drafts.end() && io::get_string(*chosen, "status") == "pending" && !archived;
+    archived_notice(*panel, ctx, "draft", selected_draft_);
     auto &actions = panel->row();
     const auto handle = state.project()->handle;
     actions.button("load_draft", ctx.tr("project.drafts.load"), [&state, handle, id = selected_draft_] {
@@ -116,6 +123,7 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
     actions.button("discard_saved_draft", ctx.tr("project.drafts.discard"), [&state, handle, id = selected_draft_] {
       if (state.project() && state.project()->handle == handle) { state.discard_saved_draft(id); }
     }).disable(state.busy() || !pending);
+    if (chosen != drafts.end()) { archive_button(actions, ctx, "draft", selected_draft_, "draft_archive", false, !state.busy()); }
   }
   auto &pages = panel->row();
   pages.button("drafts_previous", ctx.tr("project.drafts.previous"), [&state] {

@@ -2,6 +2,24 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-08：归档 A2（桌面）与 A3
+
+- 原生交互 8 项（真实 Python 后台服务）：工作流归档后离开列表、仍显示且只读（“添加步骤”不可用）、运行区提示先恢复，连带的运行离开运行列表，
+  “显示已归档（1）”切换后只列已归档，恢复后可编辑、修订不变（A2a）；分析归档后离开列表、参数表不可用，分析运行单独归档与恢复；
+  草案、AI 问答历史、所选上下文已归档时不能提问、仿真运行（已归档不能提交）、仿真批次（界面过滤）、“讨论”页上下文（已归档不能添加消息）；
+  引用已归档分析时工作流显示“引用的分析已归档”问题、恢复后通过，Home“需要关注”中失败的运行直接归档后离开列表与状态栏计数（不计为“已看”）。
+- Python：`test_archive.py` 增加校验 `archived_reference`（恢复后通过；准备运行仍以“uses an archived analysis”拒绝）。
+- 完整 pytest（`-m "not perf"`）**2292 passed、24 skipped**。完整 Linux CTest 首次 **1273/1278**：AI 请求截图 4 项与
+  `RunButtonsSubmitRefreshAndCancelOneTaskWithoutChangingTableRevision` 失败（列表在归档状态同步前读取、首帧重读使按钮短暂不可用，见开发记录）；
+  修正后这 5 项及全部归档测试重跑通过，完整 CTest **1278/1278**。
+- A2a 单独提交前完整 CTest 1269/1271（仅两项 i18n 检查因尚未提交的 A2b 源码缺少文案而失败，A2a 本身无失败），工作流编辑器 16 项通过。
+- CI：`54be45d`（A1a）[桌面](https://github.com/sijintech/stk/actions/runs/37751721483) 5/5 通过；[Runtime](https://github.com/sijintech/stk/actions/runs/37751721471)
+  client-windows 两项失败于 `test_serve_handles_oversized_lines_and_eof`（Windows 临时路径较长，`hello` 回复超过测试的 4096 行长上限），
+  `2fa87b4` 改为 8192 后 [Runtime](https://github.com/sijintech/stk/actions/runs/37756034855) 7/7、[桌面](https://github.com/sijintech/stk/actions/runs/37756034787) 5/5 通过（覆盖 A1b `841d4ba`）。
+  `f1e97a7`（A2a）[Runtime](https://github.com/sijintech/stk/actions/runs/37759548427) client-windows (3.10) 一项失败：
+  `test_request_executor.py::test_capacity_limit_preserves_pending_and_cancelled_live_workers_keep_their_slot` 在 5 秒内未到达受控边界
+  （A2a 未改 Python，3.12 同一测试通过；此前无记录），已重跑失败作业，结果见下一次记录；桌面 CI 进行中。
+
 ## 2026-10-08：归档 A1b（列表过滤、只读、需要关注与搜索）
 
 - Python 5 项：5 份草案归档第 2、4 份后，未归档列表按页为 [1,3]、[5]（`next_offset` 正确），已归档列表为 [2,4]，不过滤时仍为全部；

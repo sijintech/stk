@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "stk/app/app_store.hh"
+#include "stk/app/project_archive.hh"
 #include "stk/app/jobs_spec.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/platform/file_dialog.hh"
@@ -250,6 +251,7 @@ void ProjectState::sync()
   if (client_ != store_.bridge()) {
     attach(store_.bridge());
   }
+  sync_archive();
   if (runs_loaded_ && runs_dirty_ && ready() && loaded() && !busy()) {
     load_runs(runs_offset_);
   }
@@ -932,12 +934,44 @@ bool ProjectState::drafts_supported() const
   return true;
 }
 
+std::optional<bool> ProjectState::archive_filter(const bool show) const
+{
+  auto &archive = store_.archive();
+  archive.sync();  // the first read already knows whether this project archives
+  return archive.supported() ? std::optional<bool>(show) : std::nullopt;
+}
+
+std::string ProjectState::archive_key(const bool show) const
+{
+  const auto filter = archive_filter(show);
+  return std::string(!filter ? "-" : *filter ? "1" : "0") + ":" + std::to_string(store_.archive().version());
+}
+
+// Archiving never changes the revision: a list read with another filter or archived set is read again.
+void ProjectState::sync_archive()
+{
+  if (!loaded()) { return; }
+  if (drafts_loaded_ && !drafts_archive_.empty() && drafts_archive_ != archive_key(show_archived_drafts_)) {
+    drafts_loaded_ = false; drafts_archive_.clear(); changed();
+  }
+  if (runs_loaded_ && !runs_archive_.empty()) {
+    const auto key = archive_key(show_archived_runs_);
+    if (runs_archive_ != key) {
+      if (runs_archive_.front() != key.front()) { runs_offset_ = 0; }  // another filter: its first page
+      runs_dirty_ = true; runs_archive_.clear(); changed();
+    }
+  }
+}
+
 bool ProjectState::load_drafts(const int64_t offset, const bool preserve_error)
 {
   if (!drafts_supported() || busy() || offset < 0) { return false; }
   busy_ = true;
   if (!preserve_error) { drafts_error_.clear(); }
-  on(client_->call("project.drafts.list", {{"handle", project_->handle}, {"offset", offset}, {"limit", 100}}),
+  Json params = {{"handle", project_->handle}, {"offset", offset}, {"limit", 100}};
+  if (const auto filter = archive_filter(show_archived_drafts_)) { params["archived"] = *filter; }
+  drafts_archive_ = archive_key(show_archived_drafts_);
+  on(client_->call("project.drafts.list", std::move(params)),
      [this, offset](const bridge::Result<Json> &result) {
     busy_ = false;
     drafts_loaded_ = true;
@@ -1366,7 +1400,10 @@ bool ProjectState::load_runs(const int64_t offset)
   busy_ = true;
   runs_dirty_ = false;
   error_.clear();
-  on(client_->project_runs_list(project_->handle, offset), [this, offset](const bridge::Result<Json> &result) {
+  Json params = {{"handle", project_->handle}, {"offset", offset}, {"limit", 100}};
+  if (const auto filter = archive_filter(show_archived_runs_)) { params["archived"] = *filter; }
+  runs_archive_ = archive_key(show_archived_runs_);
+  on(client_->call("project.runs.list", std::move(params)), [this, offset](const bridge::Result<Json> &result) {
     busy_ = false;
     if (!result) { fail(result.error()); return; }
     runs_ = result.value().at("runs");

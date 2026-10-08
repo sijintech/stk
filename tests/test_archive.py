@@ -163,12 +163,20 @@ def test_archived_objects_are_read_only_until_restored(setup):
 
 def test_an_archived_analysis_cannot_be_run_directly_or_through_a_workflow(setup):
     h, store, ids, handle, worker = setup
+    document = store.workflows.get(ids["workflow"])["workflow"]["document"]
+    assert store.workflows.validate(document)["ok"]
     store.archive.set([{"kind": "analysis", "id": ids["analysis"]}], archived=True)
+    # Checking the workflow says so before a run is refused.
+    checked = store.workflows.validate(document)
+    assert not checked["ok"] and [issue["code"] for issue in checked["issues"]] == ["archived_reference"]
+    assert "restore it to run this workflow" in checked["issues"][0]["message"]
     with pytest.raises(Exception, match="uses an archived analysis"):
         store.workflow_runs.prepare(ids["workflow"], ids["rows"][:1], run_id=str(uuid4()), expected_revision=store.info()["revision"])
     with pytest.raises(Exception, match="archived; restore it to run it"):
         store.analysis_runs.prepare(ids["analysis"], str(uuid4()), {"data": {"field.vtk": str(uuid4())}}, run_id=str(uuid4()),
                                     expected_revision=store.info()["revision"])
+    store.archive.set([{"kind": "analysis", "id": ids["analysis"]}], archived=False)
+    assert store.workflows.validate(document)["ok"]
 
 
 def test_archived_objects_leave_attention_and_are_marked_in_search(setup):

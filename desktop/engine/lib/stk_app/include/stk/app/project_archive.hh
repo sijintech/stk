@@ -31,7 +31,8 @@ class ProjectArchive {
   bool busy() const { return read_.has_value() || write_.has_value(); }
   bool archived(const std::string &kind, const std::string &id) const;
   int64_t count(const std::string &kind) const;
-  /** Changes whenever the archived set does: lists filtered by it read again. */
+  /** Changes whenever the archived set changes after it was first read for the project opening (lists read before
+   * that were already filtered by the service), and after every change notice or own write: lists filtered by it read again. */
   uint64_t version() const { return version_; }
   const std::string &error() const { return error_; }
   /** Archive (or restore) objects of one kind; ``include_runs`` also covers a workflow's runs that are not running. */
@@ -49,7 +50,7 @@ class ProjectArchive {
   bridge::ListenerHandle listener_;
   std::string handle_, session_, error_;
   uint64_t epoch_ = 0, version_ = 0;
-  bool stale_ = true;
+  bool stale_ = true, read_once_ = false, noticed_ = false;
   std::map<std::string, std::set<std::string>> ids_;
   std::optional<bridge::Future<io::Json>> read_, write_;
 };

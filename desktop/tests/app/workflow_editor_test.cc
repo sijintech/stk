@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include "stk/app/analysis_graph_canvas.hh"
 #include "stk/app/editor_area.hh"
+#include "stk/app/project_archive.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/project_workflows.hh"
 #include "stk/app/workflow_draft.hh"
@@ -949,6 +950,61 @@ TEST_F(WorkflowEditorPython, ArchivedWorkflowsLeaveTheListAndStayReadOnlyUntilRe
   EXPECT_EQ(project().project()->revision, before);
   EXPECT_EQ(calls("project.archive.set"), 2u);
   EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, ArchivedAnalysesAreProblemsAndHomeArchivesAFailedRun)
+{
+  // A step whose analysis is archived is a problem until the analysis is restored (nothing is saved meanwhile).
+  ASSERT_TRUE(store().archive().set("analysis", {analysis_id}, true));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Referenced analysis is archived") && shows("1 problems found"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !store().archive().busy(); }));
+  ASSERT_TRUE(store().archive().set("analysis", {analysis_id}, false));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("All references and links are valid."); }));
+  // A failed run listed under "Needs you" is archived from Home: it leaves the list and the status bar count.
+  const std::string temperature = "14141414-1414-4141-8141-141414141414", first = "15151515-1515-4151-8151-151515151515",
+                    second = "16161616-1616-4161-8161-161616161616", run_id = "17171717-1717-4171-8171-171717171717";
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy(); }));
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", project().project()->revision}, {"commands", {
+      {{"op", "add_field"}, {"id", temperature}, {"table_id", table_id}, {"name", "T"}, {"type", "number"}, {"unit", "K"}},
+      {{"op", "add_record"}, {"id", first}, {"table_id", table_id}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", first}, {"field_id", temperature}, {"value", 300}},
+      {{"op", "add_record"}, {"id", second}, {"table_id", table_id}},
+      {{"op", "set_cell"}, {"table_id", table_id}, {"record_id", second}, {"field_id", temperature}, {"value", -5}}}}}, out));
+  const Json runnable = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+      {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", table_id}}}},
+      {{"id", "simulate"}, {"kind", "simulation"}, {"ref", {{"template", "demo-synthetic/1"}}},
+       {"inputs", {{"rows", {{"from", "cases.rows"}}}}}, {"parameters", {{"temperature", {{"$field", temperature}}}}}}}}};
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id}, {"name", "Temperature scan"},
+      {"document", runnable}, {"expected_revision", revision}}, out));
+  ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.prepare", {{"handle", handle()}, {"workflow_id", workflow_id},
+      {"rows", {first, second}}, {"run_id", run_id}, {"expected_revision", revision}}, out));
+  ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.start", {{"handle", handle()}, {"run_id", run_id}}, out));
+  for (int i = 0; i < 600 && io::get_string(out.value("run", Json::object()), "status") != "stopped"; ++i) {
+    loop.pump_until([] { return false; }, 0.05);
+    ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.get", {{"handle", handle()}, {"run_id", run_id}}, out));
+  }
+  ASSERT_EQ(io::get_string(out.at("run"), "status"), "stopped");
+  project().refresh();
+  f.shell->restore_split_layout(&f.screen);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Failed · Workflow run · Temperature scan · 1/2 done"); }));
+  ASSERT_NE(widget("status_attention"), nullptr);
+  std::string shelve;
+  for (const auto &block : f.screen.ui()->blocks()) {
+    for (const auto &item : block->widgets()) {
+      if (const auto at = item.key.find("workspace_attention_archive/workflow_run:" + run_id); at != std::string::npos) {
+        shelve = item.key.substr(at);
+      }
+    }
+  }
+  ASSERT_FALSE(shelve.empty());
+  EXPECT_EQ(widget(shelve)->text, "Archive");
+  const auto before = project().project()->revision;
+  ASSERT_NO_FATAL_FAILURE(click(shelve));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !shows("Failed · Workflow run") && !widget("status_attention"); }));
+  EXPECT_EQ(project().project()->revision, before);
+  EXPECT_EQ(calls("project.attention.viewed"), 0u);  // archived, not merely seen
+  EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
 
 }  // namespace

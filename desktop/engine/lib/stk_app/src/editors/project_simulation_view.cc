@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "project_simulation_view.hh"
+#include "archive_controls.hh"
 #include "project_navigation.hh"
 #include "project_labels.hh"
 #include "stk/app/app_store.hh"
@@ -182,10 +183,19 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
   if (!error_.empty()) { panel->paragraph(error_); }
 
   std::vector<std::string> ids, names;
+  std::vector<size_t> rows;  // each listed batch's record index
   const ProjectTable *batches = nullptr;
   for (const auto &table : state.tables()) { if (table.id == batches_id) { batches = &table; break; } }
+  // Archived batches leave the list unless switched to them (format 11); batches are table rows, filtered here.
+  auto &archive = ctx.store.archive();
+  const auto filter = archive_filter(ctx, show_archived_batches_);
+  archive_switch(*panel, ctx, "batch", show_archived_batches_, "batches_show_archived");
   if (batches) {
-    for (const auto &row : batches->records) { ids.push_back(row.id); names.push_back(io::get_string(row.values, name_id, row.id)); }
+    for (size_t i = 0; i < batches->records.size(); ++i) {
+      const auto &row = batches->records[i];
+      if (filter && archive.archived("batch", row.id) != *filter) { continue; }
+      ids.push_back(row.id); names.push_back(io::get_string(row.values, name_id, row.id)); rows.push_back(i);
+    }
   }
   if (!ids.empty() && std::find(ids.begin(), ids.end(), batch_id_) == ids.end()) { batch_id_ = ids.back(); batch_member_.clear(); }
   panel->prop(ctx.tr("batch.saved")).dropdown("saved", std::move(names), {
@@ -193,8 +203,10 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
     [this, ids](int row) { if (row >= 0 && size_t(row) < ids.size()) { batch_id_ = ids[row]; batch_member_.clear(); } }
   });
   if (batches && std::find(ids.begin(), ids.end(), batch_id_) != ids.end()) {
-    const auto index = std::find(ids.begin(), ids.end(), batch_id_) - ids.begin();
+    const auto index = rows.at(size_t(std::find(ids.begin(), ids.end(), batch_id_) - ids.begin()));
     const auto &values = batches->records[index].values;
+    const bool archived = archived_notice(*panel, ctx, "batch", batch_id_);
+    archive_button(*panel, ctx, "batch", batch_id_, "batch_archive", false, enabled);
     const Json intent = values.value(intent_id, Json());
     const Json outcomes = values.value(outcomes_id, Json());
     if (intent.is_object() && intent.contains("entries") && intent["entries"].is_array() && outcomes.is_object() &&
@@ -259,7 +271,7 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
               Json params = {{"project_id", project}, {"expected_revision", revision}, {"batch_id", batch}};
               if (single) { params["record_ids"] = selected; }
               execute(scripts, "batch_" + operation, params);
-            }).disable(!enabled || (single && batch_member_.empty()));
+            }).disable(!enabled || (single && batch_member_.empty()) || (archived && (operation == "prepare" || operation == "submit")));
         }
       };
       actions(false);

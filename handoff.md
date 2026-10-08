@@ -1,13 +1,13 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-07。**P3 工作流（W1–W4）已交付；体验包（[ux-package-2026-10.md](docs/design/ux-package-2026-10.md)）进行中：U1“需要处理”已交付
+更新：2026-10-08。**P3 工作流（W1–W4）已交付；体验包（[ux-package-2026-10.md](docs/design/ux-package-2026-10.md)）进行中：U1“需要处理”已交付
 （[suan/project/attention.py](suan/project/attention.py)、`project.attention.*`、[project_attention.hh](desktop/engine/lib/stk_app/include/stk/app/project_attention.hh)、
 工作台“需要关注”与状态栏计数）；U4 工作流记住视图已交付（`workflow_editor.cc` 的 `ViewMemory`/`save_state`、`AnalysisGraphCanvas::look_at`）；
 U2 用量可见已交付（`Requests.usage`、`project.requests.usage`、AI 助手“本项目已用”与发送按钮模型）；U3 项目内搜索已交付
-（[suan/project/search.py](suan/project/search.py)、`project.search`、工作台“搜索项目”）；**体验包四项完成**；所有者决定的后续顺序：归档方案（[project-archive.md](docs/design/project-archive.md)，已写，待确认）→
+（[suan/project/search.py](suan/project/search.py)、`project.search`、工作台“搜索项目”）；**体验包四项完成**；所有者决定的后续顺序：归档方案（[project-archive.md](docs/design/project-archive.md)，已确认并实现）→
 MuFerro 按行工作流运行（W5a 服务与脚本已交付：[suan/desktop_bridge/workflow_runs.py](suan/desktop_bridge/workflow_runs.py) 的远程步骤、
 `muferro.final_state`；W5b 桌面运行区已交付：`simulation_target.hh`、`workflow_editor.cc` 的 `remote_steps()`）→ AI 批量模拟闭环（[方案](docs/design/ai-batch-loop.md)；L1 AI 扫描提议已交付：[suan/project/parameter_sweep.py](suan/project/parameter_sweep.py)、
-AI 助手“提议参数扫描”；L2“用工作流运行新增的 N 行”、L3“就这 N 行的结果提问”已交付；P2 闭环完成）；**归档实现中**（所有者 2026-10-08 确认方案；A1a 格式 11 与 `suan/project/archive.py` 已交付，A1b 进行中）；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
+AI 助手“提议参数扫描”；L2“用工作流运行新增的 N 行”、L3“就这 N 行的结果提问”已交付；P2 闭环完成）；**归档 A1–A3 已交付**（所有者 2026-10-08 确认方案：格式 11 与 [suan/project/archive.py](suan/project/archive.py)、各列表 `archived` 过滤与只读检查；桌面 [project_archive.hh](desktop/engine/lib/stk_app/include/stk/app/project_archive.hh) 与共用控件 `src/editors/archive_controls.hh`，九类对象在各自列表中归档/恢复，Home“需要关注”可归档，工作流校验 `archived_reference`；限制见方案“已知限制”；下一步由所有者决定）；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
 [开发计划](docs/development-plan.md)开头）：标量体范围（`96152bf`）、启动即工作台（`1d1c338`）、参数扫描生成（`ca8a8b3`）、
 路径框“浏览…”（共用 [path_picker.hh](desktop/engine/lib/stk_app/src/editors/path_picker.hh)，`b1badce`）、
 运行环境选择与“运行所选行”（`stk.batches.run`、[project_simulation_view.cc](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)，`ed5bb29`）、

@@ -34,6 +34,9 @@ class ProjectAnalyses {
   bool uncertain() const { return uncertain_; }
   std::string pending_id() const;
 
+  /** Archive filter sent with later list reads: false lists only active objects, true only archived ones,
+   * nullopt everything (projects before format 11; see project_archive.hh). */
+  void set_archive_filter(std::optional<bool> archived) { list_archived_ = archived; }
   bool load_page(int64_t offset = 0);
   bool load(const std::string &id);
   bool save_new(const std::string &name, const io::Json &document);
@@ -70,6 +73,7 @@ class ProjectAnalyses {
   bool busy_ = false, uncertain_ = false;
   int64_t selected_revision_ = -1;
   io::Json page_, selected_, pending_;
+  std::optional<bool> list_archived_;
   std::optional<bridge::Future<io::Json>> future_;
 };
 }  // namespace stk::app

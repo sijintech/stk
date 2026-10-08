@@ -620,7 +620,8 @@ evaluating graphs, preparing runs or reading data files. Kinds and references ar
 inputs are the literal `binding` names of the saved graph's source nodes (type `files`), whose parameters
 are the graph's declared `parameters` and whose outputs are its declared outputs (type `result`).
 Issues are `{code, step, path, message}` (at most 256, then `omitted_issues`), with codes `duplicate_step`,
-`unknown_kind`, `invalid_reference`, `missing_reference`, `unreadable_reference`, `unknown_template`,
+`unknown_kind`, `invalid_reference`, `missing_reference`, `unreadable_reference`, `archived_reference`
+(an `analysis` step whose saved analysis is archived, project format 11), `unknown_template`,
 `dynamic_binding`, `unknown_port`, `missing_step`, `ambiguous_step`, `missing_port`, `type_mismatch`,
 `template_table`, `missing_input`, `unknown_parameter`, `field_not_in_workflow`, `parameter_type`,
 `unit_mismatch` and `cycle` (over links and `after`). `ok` is true only with no issues. Each

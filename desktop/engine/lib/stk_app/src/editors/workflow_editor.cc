@@ -404,6 +404,12 @@ class WorkflowEditor final : public Editor {
       refreshed_revision_ = revision;
       workflows_->reload();
     }
+    else if (checked_archive_ != ctx.store.archive().version() && !workflows_->selected().is_null() && !draft_.dirty() &&
+             !ctx.store.project().busy()) {
+      // Archiving never changes the revision: read and check again (a step's analysis may be archived or restored).
+      checked_archive_ = ctx.store.archive().version();
+      workflows_->reload();
+    }
     else if (workflows_->validation().is_null() && io::get_string(workflows_->selected(), "state") == "readable" &&
              !ctx.store.project().busy()) {
       workflows_->validate_selected();  // after a save, once the project has settled
@@ -1704,6 +1710,7 @@ class WorkflowEditor final : public Editor {
   std::string runs_listed_;  // "workflow@revision" the runs list was last read for
   bool show_archived_ = false, show_archived_runs_ = false;  // the lists show only archived objects
   std::string page_archive_, runs_archive_;  // the archive filter and version each list was read with
+  uint64_t checked_archive_ = 0;  // the archive version the shown workflow was last read and checked with
   std::set<std::string> run_unchecked_;
   std::string run_rows_table_, run_finished_, stale_key_;
   int run_row_ = -1;

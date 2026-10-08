@@ -53,6 +53,7 @@ class ProjectAttention {
   bridge::Client *client_ = nullptr;
   std::string handle_, session_, error_;
   int64_t read_revision_ = -1;
+  uint64_t read_archive_ = 0;  // ProjectArchive::version() of the last read (archived objects leave the list)
   bool stale_ = false;  // a simulation run changed, or viewed marks were stored after the last read
   bridge::ListenerHandle runs_listener_;
   uint64_t epoch_ = 0, version_ = 0;

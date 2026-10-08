@@ -155,6 +155,9 @@ class WorkflowRuns:
         if checked["revision"] != revision:
             raise RevisionConflict(f"Expected revision {revision}, current revision is {checked['revision']}")
         if not checked["ok"]:
+            shelved = [issue["step"] for issue in checked["issues"] if issue["code"] == "archived_reference"]
+            if shelved:  # read-only until restored, refused like other archived objects
+                raise archive.Archived(f"Step {shelved[0]} uses an archived analysis; restore it to run this workflow")
             codes = ", ".join(sorted({issue["code"] for issue in checked["issues"]}))
             raise ProjectError(f"The workflow has problems ({codes}); fix them before running it")
         model = self.store.snapshot()

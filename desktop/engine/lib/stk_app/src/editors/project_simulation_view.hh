@@ -24,5 +24,6 @@ class ProjectSimulationView {
   PathPicker source_picker_;
   std::vector<std::string> batch_selection_;
   std::string batch_id_, batch_member_;
+  bool show_archived_batches_ = false;  // the saved batches show only archived ones
 };
 }  // namespace stk::app

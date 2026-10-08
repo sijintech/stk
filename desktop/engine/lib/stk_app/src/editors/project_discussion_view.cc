@@ -4,6 +4,7 @@
 #include "stk/app/editor.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
+#include "archive_controls.hh"
 #include "editor_text.hh"
 #include <algorithm>
 #include <limits>
@@ -162,6 +163,12 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
     hint(layout, ctx, "discussion.requests.hint");
     request_controls(layout, ctx, state);
   }
+  discussion.sync_archive();
+  if (kind == "contexts" || kind == "requests") {
+    // Archived contexts and questions leave these lists unless switched to them (shared with the AI assistant).
+    archive_switch(layout, ctx, kind == "contexts" ? "context" : "request", {[&discussion, kind] { return discussion.show_archived(kind); },
+        [&discussion, kind](const bool show) { discussion.set_show_archived(kind, show); }}, "discussion_show_archived/" + kind);
+  }
   const auto &page = discussion.page(kind);
   if (!page.loaded && enabled) { discussion.load_page(kind, page.offset, true); }
   const auto items = page.items;
@@ -225,6 +232,8 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
     layout.paragraph(ctx.store.catalog().format("discussion.context_summary", {{"title", io::get_string(context, "title")},
         {"revision", std::to_string(io::get_int(context, "source_revision", -1))}, {"id", io::get_string(context, "id")}}));
     if (io::get_int(context, "source_revision", -1) != state.project()->revision) { layout.paragraph(ctx.tr("discussion.stale")); }
+    archived_notice(layout, ctx, "context", io::get_string(context, "id"));
+    archive_button(layout, ctx, "context", io::get_string(context, "id"), "discussion_context_archive", false, enabled);
     if (context.value("omitted_values", 0) > 0 || io::get_string(context.at("content"), "state") == "omitted" ||
         context.at("diagnostics").value("table_missing", false) || !context.at("diagnostics").at("record_ids").empty() ||
         !context.at("diagnostics").at("field_ids").empty()) { layout.paragraph(ctx.tr("discussion.incomplete")); }
@@ -251,7 +260,7 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
         discussion.add_message(text_);
       }
     })
-        .disable(!enabled || context.empty() || text_.empty());
+        .disable(!enabled || context.empty() || text_.empty() || ctx.store.archive().archived("context", io::get_string(context, "id")));
   }
   const auto &message = discussion.message();
   if (!message.empty()) {
@@ -292,6 +301,7 @@ void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &c
       {"context", io::get_string(request, "context_id")}}));
   if (request.value("cancel_requested", false)) { layout.paragraph(ctx.tr("discussion.requests.cancel_requested")); }
   if (status == "running" || status == "uncertain") { layout.paragraph(ctx.tr("discussion.requests.verify")); }
+  const bool archived = archived_notice(layout, ctx, "request", id);
   const auto serialized = request.dump(2);
   if (shown_request_ != serialized) {
     shown_request_ = serialized;
@@ -308,7 +318,7 @@ void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &c
   auto &actions = layout.row();
   actions.button("request_start", ctx.tr("discussion.requests.start"), [&discussion, current, id] {
     if (current()) { discussion.start_request(id); }
-  }).disable(!enabled || status != "pending" || !discussion.generation_supported() ||
+  }).disable(!enabled || status != "pending" || !discussion.generation_supported() || archived ||
       !discussion.provider().value("configured", false) ||
       io::get_string(request.at("configuration"), "adapter") != io::get_string(discussion.provider(), "adapter"));
   actions.button("request_reload", ctx.tr("discussion.requests.refresh"), [&discussion, current, id] {
@@ -320,6 +330,7 @@ void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &c
   actions.button("request_recover", ctx.tr("discussion.requests.recover"), [&discussion, current, id] {
     if (current()) { discussion.recover_request(id); }
   }).disable(!enabled || status != "running" || !discussion.generation_supported());
+  archive_button(actions, ctx, "request", id, "request_archive", false, enabled && status != "running" && status != "uncertain");
   auto &links = layout.row();
   links.button("request_message", ctx.tr("discussion.requests.message"),
       [this, &discussion, current, message = io::get_string(request, "message_id")] {
