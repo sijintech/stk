@@ -562,6 +562,25 @@ class AIEditor final : public Editor {
     if (!saved.is_null()) {
       layout.label(ctx.tr("project.drafts." + io::get_string(saved, "status")));
     }
+    // An applied sweep added rows: run them with a workflow over that table (P2 L2). Navigation only;
+    // the run panel shows only these rows checked and running still needs its own click.
+    if (saved_status == "applied" && io::get_string(discussion.exchange_request(), "prompt_version") == "stk.parameter-sweep/1") {
+      Json rows = Json::array();
+      std::string table;
+      for (const auto &command : saved.value("commands", Json::array())) {
+        if (io::get_string(command, "op") == "add_record") { rows.push_back(io::get_string(command, "id")); table = io::get_string(command, "table_id"); }
+      }
+      if (!rows.empty()) {
+        auto *shell = &ctx.area.shell();
+        auto *screen = ctx.area.screen();
+        const auto self = lifetime();
+        const Json target = {{"table_id", table}, {"rows", rows}};
+        layout.button("ai_run_rows", ctx.store.catalog().format("ai.run_new_rows", {{"count", std::to_string(rows.size())}}),
+            [shell, screen, self, target] {
+          shell->open_target_later(screen, kEditorWorkflow, target, [self] { return !self.expired(); });
+        }).disable(!enabled || shell->text_input_active()).tip(ctx.tr("ai.run_new_rows.tip"));
+      }
+    }
     const auto generation = discussion.exchange_generation();
     std::weak_ptr<bool> weak = alive_;
     const auto valid = [weak, &state, &discussion, handle, id, generation] {

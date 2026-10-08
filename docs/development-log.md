@@ -1,5 +1,15 @@
 # 开发交接记录
 
+## 2026-10-07：P2 L2 运行新增的行、L3 结果回到对话
+
+L2：工作流摘要（列表与读取）增加单一参数表步骤的 `table_id`；工作流编辑器 `navigate` 接受 `{table_id, rows}`（无 `workflow_id`）：
+保留正在显示且使用该表的工作流，否则在列表中选第一份可读且使用该表的工作流，表格读到这些行后只勾选它们；没有适用工作流时在列表下说明。
+AI 助手对已应用的 `stk.parameter-sweep/1` 草案显示“用工作流运行新增的 N 行”（从草案的 `add_record` 命令得到行与表），经 `AppShell::open_target_later` 导航。
+L3：运行区对有 MuFerro 结果行（`produced.result_record_id`）的成功任务显示“就这 N 行的结果提问”，以 `ProjectDiscussion::capture` 捕获结果表中这些行的数值字段，
+成功后打开 AI 助手（该上下文即为下一问题使用的数据）。
+
+critical review：上下文只含一张表，结果上下文不能作为下一轮扫描的基准（扫描基准行须在所捕获的选择中），写入方案与桌面说明。
+
 ## 2026-10-07：P2 L1 AI 扫描提议
 
 方案 [ai-batch-loop.md](design/ai-batch-loop.md)（按推荐执行）。`suan/project/parameter_sweep.py`：严格解析 `stk.parameter-sweep/1` 回复

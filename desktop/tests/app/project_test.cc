@@ -585,6 +585,30 @@ TEST_F(ProjectProposal, SweepSuggestionBecomesADraftOfNewRowsThatAppliesLikeAMan
   ASSERT_EQ(state().table()->records.size(), 4u);
   EXPECT_EQ(state().table()->text(1, 0), "310");
   EXPECT_EQ(state().table()->text(3, 0), "330");
+  // L2: the applied sweep's rows open in a workflow over this table, only they checked; nothing runs by itself.
+  std::optional<bridge::Result<Json>> created;
+  client->call("project.workflows.create", {{"handle", state().project()->handle}, {"workflow_id", "44444444-4444-4444-8444-444444444444"},
+      {"name", "Scan"}, {"expected_revision", state().project()->revision}, {"document", {{"format", "stk.workflow/1"}, {"ui", Json::object()},
+       {"steps", {{{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", table_id}}}},
+                  {{"id", "simulate"}, {"kind", "simulation"}, {"ref", {{"template", "demo-synthetic/1"}}},
+                   {"inputs", {{"rows", {{"from", "cases.rows"}}}}}, {"parameters", {{"temperature", {{"$field", field_id}}}}}}}}}}})
+      .then([&](auto result) { created = result; });
+  ASSERT_TRUE(loop.pump_until([&] { return created.has_value(); }));
+  ASSERT_TRUE(created->ok()) << created->error().describe();
+  state().refresh(); settled();
+  f.screen.set_maximized(&area); ai_frame();
+  click("ai_run_rows");
+  auto *workflow = dynamic_cast<EditorArea *>(f.screen.maximized());
+  ASSERT_NE(workflow, nullptr);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    const auto *start = f.screen.ui()->find("workflow_run_start");
+    return workflow->editor().type().id == kEditorWorkflow && start && start->text == "Run the 3 selected rows";
+  }, 30));
+  EXPECT_FALSE(f.screen.ui()->find("workflow_run_row/1")->boolean.value());  // the base row stays out
+  for (const auto *row : {"workflow_run_row/2", "workflow_run_row/3", "workflow_run_row/4"}) {
+    EXPECT_TRUE(f.screen.ui()->find(row)->boolean.value()) << row;
+  }
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
@@ -3823,6 +3847,20 @@ TEST_F(WorkflowSimulationPython, MuFerroWorkflowRunsEveryRowOnThePickedRuntime)
   f.drv->frame();
   EXPECT_TRUE(shows("simulate: simulation run "));  // the row's simulation run and Runtime task
   EXPECT_TRUE(shows(" · Done"));
+  // P2 L3: the run's MuFerro result rows become a new conversation context and the AI assistant opens on it.
+  ASSERT_NE(widget("workflow_run_ask_results"), nullptr);
+  EXPECT_EQ(widget("workflow_run_ask_results")->text, "Ask about the results of these 3 rows");
+  auto &discussion = state().discussion();
+  widget("workflow_run_ask_results")->on_click();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    auto *maximized = dynamic_cast<EditorArea *>(f.screen.maximized());
+    return !discussion.busy() && maximized && maximized->editor().type().id == kEditorAI && !discussion.context().empty();
+  }, 30));
+  const auto context = discussion.context();
+  EXPECT_EQ(context.at("title"), "Results of MuFerro scan (3 rows)");
+  EXPECT_EQ(context.at("selection").at("record_ids").size(), 3u);
+  EXPECT_EQ(context.at("selection").at("field_ids").size(), 3u);  // temperature, final step, energy
   ASSERT_TRUE(scripts.execute("assert len(_simulation_runtime.client.tasks()) == 3, _simulation_runtime.client.tasks()\n"
       "results = next(t for t in p.snapshot()['tables'] if t['id'] == RESULT_TABLE_ID)\nassert len(results['records']) == 3\n"
       "run = p.workflow_runs.list()['runs'][0]\nassert p.workflow_runs.get(run['id'])['simulation']['connection'] == 'runtime:run-test'\n"

@@ -9,6 +9,7 @@
  */
 #include "stk/app/analysis_graph_canvas.hh"
 #include "stk/app/editor_area.hh"
+#include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/project_workflows.hh"
 #include "stk/app/shell.hh"
@@ -74,12 +75,29 @@ class WorkflowEditor final : public Editor {
   bool has_sidebar() const override { return true; }
   ui::Color main_background(const ui::Theme &) const override { return {0, 0, 0, 0}; }
 
-  /** {"workflow_id", "step"?}: show that workflow (read on the next sync) and select the step.
-   * Refused while unsaved edits of another workflow are pending. */
+  /** {"workflow_id", "step"?, "run_id"?}: show that workflow (read on the next sync) and select the step;
+   * or {"table_id", "rows"} (P2 L2, rows an AI sweep added): show a workflow over that table with only those rows
+   * checked to run. Refused while unsaved edits of another workflow are pending. Never starts a run. */
   bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &, std::string &reason) override
   {
-    if (!target.is_object() || !target.contains("workflow_id") || !target.at("workflow_id").is_string() ||
-        target.at("workflow_id").get_ref<const std::string &>().empty()) { return false; }
+    if (!target.is_object()) { return false; }
+    std::set<std::string> rows;
+    if (const auto found = target.find("rows"); found != target.end() && found->is_array()) {
+      for (const auto &row : *found) { if (row.is_string() && rows.size() < 100) { rows.insert(row.get<std::string>()); } }
+    }
+    const auto rows_table = io::get_string(target, "table_id");
+    if (!target.contains("workflow_id")) {
+      if (rows_table.empty() || rows.empty()) { return false; }
+      if (draft_.dirty() && io::get_string(workflows_ ? workflows_->selected() : Json(), "table_id") != rows_table) {
+        reason = "workflow.navigate_unsaved";
+        return false;
+      }
+      reopen_.reset();
+      want_rows_table_ = rows_table; want_rows_ = std::move(rows); want_table_ = rows_table; rows_notice_.clear();
+      redraw();
+      return true;
+    }
+    if (!target.at("workflow_id").is_string() || target.at("workflow_id").get_ref<const std::string &>().empty()) { return false; }
     const auto id = target.at("workflow_id").get<std::string>();
     if (draft_.dirty() && draft_.workflow_id() != id) {
       reason = "workflow.navigate_unsaved";
@@ -145,6 +163,7 @@ class WorkflowEditor final : public Editor {
     hint(layout, ctx, "workflow.intro");
     if (!ctx.store.project().project() || !workflows_->supported()) { return; }
     list_panel(layout, ctx);
+    if (!rows_notice_.empty()) { layout.paragraph(ctx.tr(rows_notice_)); }
     if (workflows_->selected().is_null()) { return; }
     status(layout, ctx);
     edit_panel(layout, ctx);
@@ -399,6 +418,18 @@ class WorkflowEditor final : public Editor {
     else if (editable(ctx) && choices_revision_ != revision && !ctx.store.project().busy()) {
       choices_revision_ = revision;
       workflows_->load_choices();
+    }
+    else if (!want_table_.empty() && !workflows_->page().is_null() && !ctx.store.project().busy()) {
+      // Rows from an AI sweep: keep the shown workflow when it runs that table, else the first one that does.
+      const auto table = std::exchange(want_table_, std::string());
+      if (io::get_string(workflows_->selected(), "table_id") != table) {
+        std::string found;
+        for (const auto &row : member(workflows_->page(), "workflows")) {
+          if (io::get_string(row, "table_id") == table && io::get_string(row, "state") == "readable") { found = io::get_string(row, "id"); break; }
+        }
+        if (found.empty()) { rows_notice_ = "workflow.run.no_workflow_for_rows"; want_rows_.clear(); }
+        else { leave(); auto_selected_ = true; selected_id_.clear(); workflows_->load(found); }
+      }
     }
     else if (!auto_selected_ && workflows_->selected().is_null() && !workflows_->page().is_null()) {
       // Show the first workflow right away; most projects have one.
@@ -1062,6 +1093,18 @@ class WorkflowEditor final : public Editor {
     if (table) {
       // Rows are chosen unless unchecked here, so rows added later are included too.
       if (run_rows_table_ != table->id) { run_rows_table_ = table->id; run_unchecked_.clear(); }
+      if (!want_rows_.empty() && table->id == want_rows_table_ && want_table_.empty()) {
+        // Only the rows an AI sweep added are checked (rows not yet read stay unchecked until they are).
+        bool all_known = true;
+        for (const auto &row : want_rows_) {
+          all_known &= std::any_of(table->records.begin(), table->records.end(), [&](const auto &record) { return record.id == row; });
+        }
+        if (all_known) {
+          run_unchecked_.clear();
+          for (const auto &record : table->records) { if (!want_rows_.count(record.id)) { run_unchecked_.insert(record.id); } }
+          want_rows_.clear();
+        }
+      }
       for (size_t i = 0; i < table->records.size() && i < 100; ++i) {
         const auto id = table->records[i].id;
         panel->checkbox("workflow_run_row/" + std::to_string(i + 1), row_text(ctx, *table, table->records[i], i + 1),
@@ -1104,6 +1147,41 @@ class WorkflowEditor final : public Editor {
     }
     runs_list(*panel, ctx);
     run_detail(*panel, ctx);
+  }
+
+  /** The run's results back to the conversation (P2 L3): its MuFerro result rows (temperature, final step,
+   * energy) captured as a new context, then the AI assistant opens on it. Reads and captures only. */
+  void results_question(ui::Layout &panel, EditorContext &ctx, const Json &run)
+  {
+    std::vector<std::string> results;
+    for (const auto &task : member(run, "tasks")) {
+      const auto record = io::get_string(member(task, "produced"), "result_record_id");
+      if (io::get_string(task, "status") == "succeeded" && !record.empty()) { results.push_back(record); }
+    }
+    if (results.empty() || results.size() > 100) { return; }
+    const ProjectTable *table = nullptr;
+    for (const auto &candidate : ctx.store.project().tables()) {
+      if (std::any_of(candidate.records.begin(), candidate.records.end(), [&](const auto &record) { return record.id == results.front(); })) {
+        table = &candidate;
+      }
+    }
+    if (!table) { return; }
+    std::vector<std::string> fields;
+    for (const auto &field : table->fields) {
+      if (field.type == "number" || field.type == "integer") { fields.push_back(field.id); }  // not file lists or IDs
+    }
+    auto &discussion = ctx.store.project().discussion();
+    const auto title = ctx.store.catalog().format("workflow.run.results_title", {{"name", io::get_string(run, "workflow_name")},
+                                                                                 {"count", std::to_string(results.size())}});
+    auto open = project_navigation_action(ctx, "conversation");
+    auto ok = valid();
+    const auto table_id = table->id;
+    panel.button("workflow_run_ask_results", ctx.store.catalog().format("workflow.run.ask_results", {{"count", std::to_string(results.size())}}),
+        [ok, &discussion, table_id, results, fields, title, open] {
+      if (!ok()) { return; }
+      discussion.capture(table_id, results, fields, title, [ok, open](const bool captured) { if (captured && ok() && open) { open(); } });
+    }).disable(fields.empty() || discussion.busy() || ctx.store.project().busy() || !discussion.supported())
+        .tip(ctx.tr("workflow.run.ask_results.tip"));
   }
 
   /** Whether the shown workflow has a simulation step that runs on a Runtime (muferro/1;
@@ -1219,6 +1297,7 @@ class WorkflowEditor final : public Editor {
     const int chosen = run_row_;
     spec.selected = {[chosen] { return chosen; }, [this](const int row) { run_row_ = row; redraw(); }};
     panel.table("workflow_run_tasks", std::move(spec));
+    results_question(panel, ctx, run);
     if (run_row_ >= 0 && size_t(run_row_) < rows.size()) {
       const auto row_id = io::get_string(rows[size_t(run_row_)], "id");
       if (const auto found = stale_rows.find(row_id); found != stale_rows.end()) {
@@ -1595,6 +1674,8 @@ class WorkflowEditor final : public Editor {
   std::chrono::steady_clock::time_point last_poll_{};
   bool auto_selected_ = false, fit_ = true, dragging_ = false;
   SimulationTarget target_;  // where MuFerro steps run (W5)
+  std::string want_table_, want_rows_table_, rows_notice_;  // rows to run from an AI sweep (P2 L2)
+  std::set<std::string> want_rows_;
   std::vector<ViewMemory> memory_;  // most recent last
   std::string view_project_;
   std::optional<ViewMemory> restore_;

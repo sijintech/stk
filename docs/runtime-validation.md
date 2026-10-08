@@ -2,6 +2,18 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-07：P2 L2 运行新增的行、L3 结果回到对话；Metal 释放修复
+
+- 真实后台服务的界面测试（扩展 L1 测试）：应用扫描草案后在 AI 助手点击“用工作流运行新增的 N 行”，工作流编辑器选中使用该表的工作流，
+  运行区按钮为“Run the 3 selected rows”，基准行未勾选、3 个新行已勾选，没有开始运行。
+- MuFerro 工作流界面测试（扩展 W5b 测试）：运行完成后“Ask about the results of these 3 rows”捕获上下文（标题“Results of MuFerro scan (3 rows)”，
+  3 行 × 温度/最终步数/能量 3 个字段）并打开 AI 助手。
+- Python：工作流摘要的 `table_id`（精确形状测试更新）。完整 pytest（`-m "not perf"`）**2283 passed、24 skipped**；完整 Linux CTest **1270/1270**。
+- CI `8857d0b`（W5b）：Linux、Windows、打包与冒烟通过；**macOS 的 `workflow_run_wide_render_metal_en` 再次报告 1 个 `MTLSafeFreeList`（65624 字节）未释放**。
+  原因：Blender Metal 的 `MTLBufferPool::free()` 只删除各安全释放列表的首块，没有删除溢出时串联的块（`update_memory_pools()` 会遍历）；
+  绘制较多的截图在退出时释放的缓冲超过一块（8192 个）就会漏掉一块。供应商补丁 `0002-metal-free-safe-list-chains.patch` 修复，`vendor.py` 重新生成并 `--check` 通过；
+  Linux 不编译 Metal 代码，需以下一次 macOS CI 验证。
+
 ## 2026-10-07：P2 L1 AI 扫描提议
 
 - Python 9 项：受控回复的扫描规格转换为草案（5 个新行，行 ID 为请求派生，与同参数的手工 `plan_sweep` 命令完全相同，基准行公式移到各新行），

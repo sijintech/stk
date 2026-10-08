@@ -88,12 +88,13 @@ def test_round_trip_keeps_exact_json_and_shares_project_undo(store, project):
     identity, written = create(store, value)
     assert written["table_id"] == TABLE_ID and written["record_id"] == identity
     got = store.workflows.get(identity)
+    table = next(step["ref"]["table"] for step in value["steps"] if step["kind"] == "table")  # the rows a run takes
     assert got["workflow"] == {"id": identity, "name": "流程", "format": DOCUMENT_FORMAT, "state": "readable",
-                               "error": "", "document": value}
+                               "error": "", "document": value, "table_id": table}
     assert canonical_json(got["workflow"]["document"]) == canonical_json(value)
     listed = store.workflows.list()
     assert listed["total"] == 1 and listed["workflows"] == [{"id": identity, "name": "流程", "format": DOCUMENT_FORMAT,
-                                                             "state": "readable", "error": ""}]
+                                                             "state": "readable", "error": "", "table_id": table}]
     changed = deepcopy(value)
     changed["steps"].pop(0)
     revision = store.workflows.update(identity, "Renamed", changed, expected_revision=written["revision"])["revision"]

@@ -1853,5 +1853,11 @@
   "ai.sweep_zip": "values paired in order",
   "ai.sweep_range_count": "{start} → {stop}, {count} values",
   "ai.sweep_range_step": "{start} → {stop}, step {step}",
-  "ai.sweep_axis": "· {field}: {values}"
+  "ai.sweep_axis": "· {field}: {values}",
+  "ai.run_new_rows": "Run the {count} new rows with a workflow",
+  "ai.run_new_rows.tip": "Opens a workflow over this parameter table with only these new rows checked; choose where to run in its run panel and click to run.",
+  "workflow.run.no_workflow_for_rows": "No workflow uses the parameter table of these rows; create one with that table as its parameter table step, then run them.",
+  "workflow.run.ask_results": "Ask about the results of these {count} rows",
+  "workflow.run.ask_results.tip": "Captures this run's MuFerro result rows (temperature, final step, energy) as a new conversation context and opens the AI assistant; it only reads and captures.",
+  "workflow.run.results_title": "Results of {name} ({count} rows)"
 }

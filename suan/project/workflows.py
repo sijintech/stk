@@ -133,7 +133,7 @@ def _require(db):
 
 
 def _record(db, identity, compatible, schema_error):
-    entry = {"id": identity, "name": None, "format": None, "state": "invalid", "error": "", "document": None}
+    entry = {"id": identity, "name": None, "format": None, "state": "invalid", "error": "", "document": None, "table_id": None}
     try:
         entry["name"] = _valid_name(_TABLE.literal(db, identity, "name"), "Workflow")
     except ProjectError:
@@ -157,6 +157,9 @@ def _record(db, identity, compatible, schema_error):
             entry["document"] = _document({"format": entry["format"],
                 **{key: _TABLE.literal(db, identity, key) for key in ("steps", "ui")}})
             entry["state"] = "readable"
+            # The parameter table its rows come from, when it has exactly one (what a run takes rows of).
+            tables = [step["ref"].get("table") for step in entry["document"]["steps"] if step["kind"] == "table"]
+            entry["table_id"] = tables[0] if len(tables) == 1 and isinstance(tables[0], str) else None
         except ProjectError as exc:
             entry["error"] = str(exc)
     return entry

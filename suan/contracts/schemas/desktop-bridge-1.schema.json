@@ -10762,6 +10762,17 @@
         "error": {
           "type": "string",
           "maxLength": 512
+        },
+        "table_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The workflow's single parameter table (what a run takes rows of), or null."
         }
       },
       "required": [
@@ -10814,6 +10825,17 @@
               "type": "null"
             }
           ]
+        },
+        "table_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The workflow's single parameter table (what a run takes rows of), or null."
         }
       },
       "required": [

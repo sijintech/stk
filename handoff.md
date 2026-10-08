@@ -7,7 +7,7 @@ U2 用量可见已交付（`Requests.usage`、`project.requests.usage`、AI 助�
 （[suan/project/search.py](suan/project/search.py)、`project.search`、工作台“搜索项目”）；**体验包四项完成**；所有者决定的后续顺序：归档方案（[project-archive.md](docs/design/project-archive.md)，已写，待确认）→
 MuFerro 按行工作流运行（W5a 服务与脚本已交付：[suan/desktop_bridge/workflow_runs.py](suan/desktop_bridge/workflow_runs.py) 的远程步骤、
 `muferro.final_state`；W5b 桌面运行区已交付：`simulation_target.hh`、`workflow_editor.cc` 的 `remote_steps()`）→ AI 批量模拟闭环（[方案](docs/design/ai-batch-loop.md)；L1 AI 扫描提议已交付：[suan/project/parameter_sweep.py](suan/project/parameter_sweep.py)、
-AI 助手“提议参数扫描”；**下一步 L2 运行新增的行、L3 结果回到对话**）；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
+AI 助手“提议参数扫描”；L2“用工作流运行新增的 N 行”、L3“就这 N 行的结果提问”已交付；**P2 闭环完成，下一步待所有者决定（含归档方案确认）**）；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
 [开发计划](docs/development-plan.md)开头）：标量体范围（`96152bf`）、启动即工作台（`1d1c338`）、参数扫描生成（`ca8a8b3`）、
 路径框“浏览…”（共用 [path_picker.hh](desktop/engine/lib/stk_app/src/editors/path_picker.hh)，`b1badce`）、
 运行环境选择与“运行所选行”（`stk.batches.run`、[project_simulation_view.cc](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)，`ed5bb29`）、
