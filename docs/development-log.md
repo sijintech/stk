@@ -1,5 +1,17 @@
 # 开发交接记录
 
+## 2026-10-07：P2 L1 AI 扫描提议
+
+方案 [ai-batch-loop.md](design/ai-batch-loop.md)（按推荐执行）。`suan/project/parameter_sweep.py`：严格解析 `stk.parameter-sweep/1` 回复
+（基准行与扫描字段必须在上下文所选范围内、标量字段、1–8 轴、`product`/`zip`），在等于上下文修订的当前快照上用 `plan_sweep` 展开
+（`new_id` 派生 `uuid5(请求, 项目:sweep:i)`，最多 100 行），经预览保存为草案并链接到助手消息；已保存的草案以回复文本摘要、标题与基准修订核对，
+不重新编译（扫描读取基准行的当前其他单元格，之后的编辑会让重新编译得到不同结果）。`Requests.propose_edits/edit_proposal` 按用途分派；
+提示 `_PARAMETER_SWEEP_SYSTEM`；schema 的提问用途枚举。桌面：`structured_proposal()` 统一参数修改与扫描两种用途的保存/打开检查，
+AI 助手“用途”第三项与扫描回复的文字呈现。
+
+critical review：顾问指出若沿用参数修改的“重新编译后比较”核对已保存草案，任何后续编辑（包括运行登记输出）都会让已保存的扫描草案无法读取，
+改为摘要核对；草案的预览经测试确认能处理同批新增行的赋值与公式复制。
+
 ## 2026-10-07：W5b MuFerro 工作流的桌面运行区
 
 仿真批次面板的运行环境选择与执行选项提取为共用的 `SimulationTarget`（`src/editors/simulation_target.*`，批次行为不变）。工作流编辑器的运行区在工作流含

@@ -39,6 +39,41 @@ void show_tables(EditorContext ctx)
   });
 }
 
+/** A sweep reply in words: its summary, the base row and each axis ("Temperature / K: 300 → 400, 5 values").
+ * Display only; the backend validates the saved text before any draft exists. */
+std::string sweep_reply(const Json &content, const Json &context, EditorContext &ctx, const std::string &original)
+{
+  if (!content.at("summary").is_string() || !content.at("axes").is_array() || content.at("axes").empty() ||
+      content.at("axes").size() > 8) { return original; }
+  auto &catalog = ctx.store.catalog();
+  const auto &fields = context.at("content").at("value").at("fields");
+  const auto &records = context.at("selection").at("record_ids");
+  const auto record = std::find(records.begin(), records.end(), content.at("base_record_id"));
+  std::string text = content.at("summary").get<std::string>() + "\n\n" + catalog.format("ai.sweep_base", {
+      {"row", record == records.end() ? std::string("?") : std::to_string(std::distance(records.begin(), record) + 1)},
+      {"mode", std::string(ctx.tr(content.value("mode", std::string()) == "zip" ? "ai.sweep_zip" : "ai.sweep_product"))}});
+  for (const auto &axis : content.at("axes")) {
+    if (!axis.is_object() || !axis.contains("field_id")) { return original; }
+    const auto field = std::find_if(fields.begin(), fields.end(), [&](const auto &item) { return item.at("id") == axis.at("field_id"); });
+    const auto name = field == fields.end() ? std::string("?") : io::get_string(*field, "name");
+    std::string values;
+    if (axis.contains("values") && axis.at("values").is_array()) {
+      for (size_t i = 0; i < axis.at("values").size() && i < 12; ++i) { values += (i ? ", " : "") + axis.at("values")[i].dump(); }
+      if (axis.at("values").size() > 12) { values += ", …"; }
+    }
+    else if (axis.contains("count")) {
+      values = catalog.format("ai.sweep_range_count", {{"start", axis.value("start", Json()).dump()},
+          {"stop", axis.value("stop", Json()).dump()}, {"count", axis.value("count", Json()).dump()}});
+    }
+    else {
+      values = catalog.format("ai.sweep_range_step", {{"start", axis.value("start", Json()).dump()},
+          {"stop", axis.value("stop", Json()).dump()}, {"step", axis.value("step", Json()).dump()}});
+    }
+    text += "\n" + catalog.format("ai.sweep_axis", {{"field", name}, {"values", values}});
+  }
+  return text;
+}
+
 std::string parameter_reply(const Json &reply, const Json &context, EditorContext &ctx)
 {
   const auto original = io::get_string(reply, "text");
@@ -56,6 +91,7 @@ std::string parameter_reply(const Json &reply, const Json &context, EditorContex
   }
   try {
     const auto content = Json::parse(original);
+    if (content.at("format") == "stk.parameter-sweep/1") { return sweep_reply(content, context, ctx, original); }
     if (content.at("format") != "stk.parameter-edits/1" || !content.at("summary").is_string() ||
         !content.at("edits").is_array() || content.at("edits").empty() || content.at("edits").size() > 1000) { return original; }
     std::string text = content.at("summary").get<std::string>() + "\n\n" +
@@ -404,7 +440,8 @@ class AIEditor final : public Editor {
     const auto progress = discussion.exchange_progress();
     const auto context = discussion.exchange_context();
     const std::string id = io::get_string(request, "id"), status = io::get_string(request, "status");
-    const bool parameter_request = io::get_string(request, "prompt_version") == "stk.parameter-edits/1";
+    const bool parameter_request = request.contains("prompt_version") && structured_proposal(request.at("prompt_version"));
+    const bool sweep_request = io::get_string(request, "prompt_version") == "stk.parameter-sweep/1";
     const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
     const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
     // Reserve region padding, the split gutter and the log scrollbar. Use the same
@@ -417,7 +454,7 @@ class AIEditor final : public Editor {
       std::string text;
       if (!question.empty()) { text += std::string(ctx.tr("ai.you")) + "\n" + io::get_string(question, "text") + "\n\n"; }
       if (!reply.empty()) {
-        text += std::string(ctx.tr(parameter_request ? "ai.parameter_reply" : "ai.assistant")) + "\n" +
+        text += std::string(ctx.tr(sweep_request ? "ai.sweep_reply" : parameter_request ? "ai.parameter_reply" : "ai.assistant")) + "\n" +
             (parameter_request ? parameter_reply(reply, context, ctx) : io::get_string(reply, "text"));
       }
       else if (!progress.empty() && !io::get_string(progress, "text").empty()) {
@@ -476,8 +513,10 @@ class AIEditor final : public Editor {
     layout.separator();
     layout.label(ctx.tr("ai.compose"));
     layout.prop(ctx.tr("ai.intent")).dropdown("ai_intent/" + handle,
-        {std::string(ctx.tr("ai.intent_discuss")), std::string(ctx.tr("ai.intent_edits"))}, ui::bind(draft.intent));
-    if (draft.intent == 1 && !discussion.edit_proposals_supported()) { layout.paragraph(ctx.tr("ai.edits_unavailable")); }
+        {std::string(ctx.tr("ai.intent_discuss")), std::string(ctx.tr("ai.intent_edits")), std::string(ctx.tr("ai.intent_sweep"))},
+        ui::bind(draft.intent));
+    if (draft.intent >= 1 && !discussion.edit_proposals_supported()) { layout.paragraph(ctx.tr("ai.edits_unavailable")); }
+    if (draft.intent == 2) { hint(layout, ctx, "ai.intent_sweep.hint"); }
     // Active toolkit edits must disappear on project switch before a new binding is installed.
     auto &input = layout.text_area("ai_question/" + handle, ui::bind(draft.text), {.max_length = 65536, .visible_lines = 4});
     const bool has_question = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
@@ -489,12 +528,12 @@ class AIEditor final : public Editor {
       if (!state.project() || state.project()->handle != handle || active_draft_ != key || picker_.active()) { return; }
       const auto &current = drafts_.at(key);
       if (discussion.prepare_question(context_id, current.text, current.model,
-          current.intent == 1 ? "stk.parameter-edits/1" : "stk.text/1")) {
+          current.intent == 1 ? "stk.parameter-edits/1" : current.intent == 2 ? "stk.parameter-sweep/1" : "stk.text/1")) {
         opened_history_ = true;
         proposal_navigation_error_.clear();
       }
     }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || !has_question || !model_has_text_ || discussion.provider().empty() ||
-               (draft.intent == 1 && !discussion.edit_proposals_supported()));
+               (draft.intent >= 1 && !discussion.edit_proposals_supported()));
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
       hint(*details, ctx, "ai.single_turn");
       if (!id.empty()) { details->paragraph(id); details->paragraph(io::get_string(request, "context_id")); }

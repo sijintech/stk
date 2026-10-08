@@ -929,7 +929,8 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   It binds that message's saved context and source revision; it does not select the current table,
   add other conversation history or reread live data. `assistant_message_id` is derived from the
   project/request UUIDs and reserved against manual message insertion. Optional `prompt_version`
-  defaults to `stk.text/1`; the only other supported value is `stk.parameter-edits/1`.
+  defaults to `stk.text/1`; the other supported values are `stk.parameter-edits/1` and (P2 L1)
+  `stk.parameter-sweep/1`.
   Storage remains format 8, but older readers that recognize only `stk.text/1` may reject a
   structured request or a request list containing one. Forward compatibility with those readers
   is not promised; use a reader supporting both prompt versions for projects containing this mode.
@@ -969,6 +970,14 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   commands. A bounded preview validates these commands against the current project. Saving then
   rechecks original request/result identity, current target type/unit/membership and revision in
   the same transaction that inserts both the draft and provenance. A failure saves neither.
+- A completed `stk.parameter-sweep/1` request converts the same way into a draft of **new rows**. Its text must be
+  one strict JSON object with exactly `{format: "stk.parameter-sweep/1", context_id, base_revision, summary,
+  base_record_id, axes, mode}`: `base_record_id` is a selected, included record whose other cells each new row
+  copies; `axes` are 1–8 `{field_id, values}`, `{field_id, start, stop, count}` or `{field_id, start, stop, step}`
+  over distinct selected scalar fields; `mode` is `product` or `zip`. The project's sweep generator expands it at the
+  current (= source) revision into at most 100 rows and 1000 commands (`add_record`, the swept `set_cell`s and the
+  base row's copied cells, formulas and references), with new record IDs derived from the request and project.
+  A saved sweep draft is later verified by the reply digest, title and base revision, not recompiled.
 - On first conversion, `expected_revision` must equal both the request's original source revision
   and the current project revision. Stale data returns `conflict`; conversion never rebases.
   Returned `draft` is the full canonical `projectDraft` (including normalized commands and status);

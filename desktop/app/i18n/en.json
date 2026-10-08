@@ -1844,5 +1844,14 @@
   "workflow.run.stage.running": "Running on Runtime",
   "workflow.run.stage.collecting": "Collecting",
   "workflow.run.stage.adopted": "Adopted",
-  "workflow.run.remote_detail": "{step}: simulation run {run} · Runtime task {task} · {state}"
+  "workflow.run.remote_detail": "{step}: simulation run {run} · Runtime task {task} · {state}",
+  "ai.intent_sweep": "Propose a parameter sweep (new rows)",
+  "ai.intent_sweep.hint": "The AI proposes which selected fields to sweep, and over which values, from one selected base row; STK expands it with the same rules as Generate parameter sweep into new rows, saved as a draft for review before applying. At most 100 rows; nothing runs by itself.",
+  "ai.sweep_reply": "AI · Sweep proposal (not added or run by itself)",
+  "ai.sweep_base": "Based on selected row {row}, {mode}:",
+  "ai.sweep_product": "every combination of the values",
+  "ai.sweep_zip": "values paired in order",
+  "ai.sweep_range_count": "{start} → {stop}, {count} values",
+  "ai.sweep_range_step": "{start} → {stop}, step {step}",
+  "ai.sweep_axis": "· {field}: {values}"
 }

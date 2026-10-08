@@ -106,8 +106,9 @@ def _rebase(binding, base, record):
     return binding
 
 
-def plan_sweep(snapshot, table_id, axes, base_record_id=None, mode="product"):
-    """``{"table_id", "rows", "record_ids", "commands"}`` that add one row per combination."""
+def plan_sweep(snapshot, table_id, axes, base_record_id=None, mode="product", new_id=None):
+    """``{"table_id", "rows", "record_ids", "commands"}`` that add one row per combination.
+    ``new_id(index)`` names the new rows (random UUIDs by default; an AI proposal derives them)."""
     tables = {table["id"]: table for table in snapshot.get("tables") or ()}
     if table_id not in tables:
         raise ProjectError("Unknown table")
@@ -144,8 +145,8 @@ def plan_sweep(snapshot, table_id, axes, base_record_id=None, mode="product"):
             raise ProjectError("The base row is not in this table")
     swept = {field_id for field_id, _ in columns}
     commands, record_ids = [], []
-    for combo in combos:
-        record = str(uuid.uuid4())
+    for index, combo in enumerate(combos):
+        record = str(new_id(index)) if new_id is not None else str(uuid.uuid4())
         record_ids.append(record)
         commands.append({"op": "add_record", "id": record, "table_id": table_id})
         if base is not None:

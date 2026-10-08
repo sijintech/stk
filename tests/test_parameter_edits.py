@@ -15,7 +15,8 @@ from suan.project.store import FORMAT_VERSION
 from suan.project.contexts import _digest, _encode
 from suan.project.discussion import Discussion
 from suan.project.parameter_edits import _identities
-from suan.project.requests import PARAMETER_EDITS_PROMPT_VERSION, PROMPT_VERSION, SUPPORTED_PROMPT_VERSIONS
+from suan.project.requests import (PARAMETER_EDITS_PROMPT_VERSION, PARAMETER_SWEEP_PROMPT_VERSION, PROMPT_VERSION,
+                                   SUPPORTED_PROMPT_VERSIONS)
 
 
 @pytest.fixture
@@ -366,7 +367,7 @@ def test_request_modes_preserve_text_hashes_and_are_immutable_under_retries(case
     store, _, _, message = case
     ordinary = request(case, prompt_version=PROMPT_VERSION)
     structured = request(case)
-    assert SUPPORTED_PROMPT_VERSIONS == {PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VERSION}
+    assert SUPPORTED_PROMPT_VERSIONS == {PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VERSION, PARAMETER_SWEEP_PROMPT_VERSION}
     with sqlite3.connect(store.path) as db:
         old_hash = db.execute("SELECT request_sha256 FROM project_requests WHERE id=?", (ordinary["id"],)).fetchone()[0]
         new_hash = db.execute("SELECT request_sha256 FROM project_requests WHERE id=?", (structured["id"],)).fetchone()[0]

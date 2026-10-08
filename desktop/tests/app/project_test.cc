@@ -538,6 +538,56 @@ class ProjectProposal : public ProjectPython {
   }
 };
 
+TEST_F(ProjectProposal, SweepSuggestionBecomesADraftOfNewRowsThatAppliesLikeAManualSweep)
+{
+  // The third purpose asks for a sweep shape; STK expands it into new rows only when saved as a draft (P2 L1).
+  populated();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area); ai_frame();
+  auto &discussion = state().discussion();
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Sweep scope")); settled();
+  f.drv->frame();
+  const auto handle = state().project()->handle;
+  f.screen.ui()->find("a2/main/ai_intent/" + handle)->index.assign(2);
+  f.screen.ui()->find("a2/main/ai_question/" + handle)->string.assign("Try 310, 320 and 330 K.");
+  f.drv->frame();
+  click("ai_prepare");
+  const auto request = discussion.exchange_request();
+  ASSERT_EQ(request.at("prompt_version"), "stk.parameter-sweep/1");
+  const Json response = {{"format", "stk.parameter-sweep/1"}, {"context_id", request.at("context_id")}, {"base_revision", 1},
+      {"summary", "Three temperatures around the current case."}, {"base_record_id", record_id},
+      {"axes", Json::array({{{"field_id", field_id}, {"values", {310, 320, 330}}}})}, {"mode", "product"}};
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }));
+  ASSERT_TRUE(scripts.execute("from suan.project import ProjectStore\nfrom uuid import uuid4\n"
+      "s=ProjectStore(" + Json(dir.str() + "/project").dump() + ")\nowner=str(uuid4())\n"
+      "s.requests._claim(" + request.at("id").dump() + ", executor_id=owner)\n"
+      "s.requests._complete(" + request.at("id").dump() + ", executor_id=owner, text=" + Json(response.dump()).dump() + ")"));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  ASSERT_TRUE(discussion.refresh_exchange()); ai_frame();
+  const auto *log = f.screen.ui()->find("a2/main/ai_transcript")->log;
+  std::string shown;
+  for (size_t i = 0; i < log->line_count(); ++i) { shown += std::string(log->line(i)) + "\n"; }
+  EXPECT_NE(shown.find("AI · Sweep proposal"), std::string::npos) << shown;
+  EXPECT_NE(shown.find("Based on selected row 1, every combination of the values:"), std::string::npos) << shown;
+  EXPECT_NE(shown.find("· Temperature: 310, 320, 330"), std::string::npos) << shown;
+  click("ai_save_edits");
+  const auto draft = discussion.exchange_edit_proposal().at("draft");
+  ASSERT_EQ(draft.at("status"), "pending");
+  size_t added = 0;
+  for (const auto &command : draft.at("commands")) { added += command.at("op") == "add_record"; }
+  EXPECT_EQ(added, 3u);
+  EXPECT_EQ(state().table()->records.size(), 1u);  // nothing added before applying
+  click("ai_open_edits");
+  ASSERT_TRUE(state().preview()); settled();
+  ASSERT_TRUE(state().apply_review()); settled();
+  ASSERT_EQ(state().table()->records.size(), 4u);
+  EXPECT_EQ(state().table()->text(1, 0), "310");
+  EXPECT_EQ(state().table()->text(3, 0), "330");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 TEST_F(ProjectProposal, PreparedPurposeIsFrozenAndTextModeKeepsItsDefaultContract)
 {
   prepare_suggestion();

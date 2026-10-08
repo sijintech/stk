@@ -18,7 +18,8 @@ from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _id
 
 PROMPT_VERSION = "stk.text/1"
 PARAMETER_EDITS_PROMPT_VERSION = "stk.parameter-edits/1"
-SUPPORTED_PROMPT_VERSIONS = frozenset({PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VERSION})
+PARAMETER_SWEEP_PROMPT_VERSION = "stk.parameter-sweep/1"
+SUPPORTED_PROMPT_VERSIONS = frozenset({PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VERSION, PARAMETER_SWEEP_PROMPT_VERSION})
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8192
 _SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
@@ -312,15 +313,20 @@ class Requests:
             identity, _ = self._read(db, request_id, ancestors)
             return self._input(db, identity, ancestors)
 
+    def _sweep(self, request_id):
+        return self.get(request_id)["prompt_version"] == PARAMETER_SWEEP_PROMPT_VERSION
+
     def propose_edits(self, request_id, *, expected_revision):
-        """Explicitly validate and save one parameter draft; never apply or send."""
+        """Explicitly validate and save one parameter or sweep (P2 L1) draft; never apply or send."""
         from .parameter_edits import propose_edits
-        return propose_edits(self, request_id, expected_revision=expected_revision)
+        from .parameter_sweep import propose_sweep
+        convert = propose_sweep if self._sweep(request_id) else propose_edits
+        return convert(self, request_id, expected_revision=expected_revision)
 
     def edit_proposal(self, request_id):
         """Read an existing conversion without creating, previewing or applying it."""
-        from .parameter_edits import edit_proposal
-        return edit_proposal(self, request_id)
+        from . import parameter_edits, parameter_sweep
+        return (parameter_sweep if self._sweep(request_id) else parameter_edits).edit_proposal(self, request_id)
 
     def _claim(self, request_id, *, executor_id):
         _id(request_id)

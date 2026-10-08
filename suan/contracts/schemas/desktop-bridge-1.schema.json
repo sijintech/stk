@@ -5145,7 +5145,7 @@
         }
       },
       "project.requests.create": {
-        "description": "Save immutable model-request intent (format 8) for a saved user message and its context. No adapter is invoked; keep the caller UUID for retries. prompt_version defaults to stk.text/1; stk.parameter-edits/1 permits explicit later conversion to a saved review draft.",
+        "description": "Save immutable model-request intent (format 8) for a saved user message and its context. No adapter is invoked; keep the caller UUID for retries. prompt_version defaults to stk.text/1; stk.parameter-edits/1 and stk.parameter-sweep/1 permit explicit later conversion to a saved review draft.",
         "params": {
           "type": "object",
           "properties": {
@@ -5557,7 +5557,7 @@
         }
       },
       "project.requests.propose_edits": {
-        "description": "Explicitly validate a completed stk.parameter-edits/1 reply against its frozen selection and original revision, then atomically save a deterministic review draft and assistant provenance. No edit, send, task or event. Identical retries recover the original pair including terminal draft status.",
+        "description": "Explicitly validate a completed stk.parameter-edits/1 reply (or stk.parameter-sweep/1, compiled as new rows by the sweep generator) against its frozen selection and original revision, then atomically save a deterministic review draft and assistant provenance. No edit, send, task or event. Identical retries recover the original pair including terminal draft status.",
         "params": {
           "type": "object",
           "properties": {
@@ -9388,7 +9388,8 @@
     "projectRequestPromptVersion": {
       "enum": [
         "stk.text/1",
-        "stk.parameter-edits/1"
+        "stk.parameter-edits/1",
+        "stk.parameter-sweep/1"
       ]
     },
     "uiEditorActivationParams": {

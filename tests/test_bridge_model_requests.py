@@ -422,3 +422,19 @@ def test_usage_reads_receipts_through_the_bridge_and_scripting(inproc, model):
     assert usage == {'requests': 1, 'completed': 1, 'reported': 1, 'input_tokens': 42, 'output_tokens': 7,
                      'models': [{'model': 'fixture-model', 'requests': 1, 'input_tokens': 42, 'output_tokens': 7}]}
     assert store.snapshot() == before and not h.violations
+
+
+def test_sweep_proposals_convert_through_the_bridge(inproc, model):
+    h = inproc()
+    p, saved = prepare(h, model, prompt_version='stk.parameter-sweep/1')
+    store, ids = model
+    owner = str(uuid4())
+    assert store.requests._claim(saved['id'], executor_id=owner)[1]
+    reply = {'format': 'stk.parameter-sweep/1', 'context_id': saved['context_id'], 'base_revision': saved['source_revision'],
+             'summary': 'Three temperatures.', 'base_record_id': ids['first'],
+             'axes': [{'field_id': ids['temperature'], 'values': [300, 320, 340]}], 'mode': 'product'}
+    store.requests._complete(saved['id'], executor_id=owner, text=json.dumps(reply))
+    converted = p.requests.propose_edits(saved['id'], expected_revision=saved['source_revision'])
+    assert sum(command['op'] == 'add_record' for command in converted['draft']['commands']) == 3
+    assert p.requests.edit_proposal(saved['id'])['draft']['id'] == converted['draft']['id']
+    assert not h.violations

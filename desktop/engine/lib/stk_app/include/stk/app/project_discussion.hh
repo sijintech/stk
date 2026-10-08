@@ -12,6 +12,9 @@ struct ProjectDiscussionPage {
   bool loaded = false;
 };
 
+/** Whether a request's prompt version asks for a reply converted to a review draft (parameter edits or a sweep). */
+bool structured_proposal(const io::Json &prompt_version);
+
 /** Saved project discussion and explicitly started text requests. Never applies commands/tasks.
  * Requests are never replayed after a bridge restart; results are tied to the opening handle. */
 class ProjectDiscussion {

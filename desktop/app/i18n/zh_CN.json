@@ -1844,5 +1844,14 @@
   "workflow.run.stage.running": "Runtime 运行中",
   "workflow.run.stage.collecting": "收集结果",
   "workflow.run.stage.adopted": "接管中",
-  "workflow.run.remote_detail": "{step}：仿真运行 {run} · Runtime 任务 {task} · {state}"
+  "workflow.run.remote_detail": "{step}：仿真运行 {run} · Runtime 任务 {task} · {state}",
+  "ai.intent_sweep": "提议参数扫描（新增行）",
+  "ai.intent_sweep.hint": "AI 以所选的一行为基准，提出要扫描的字段与取值；STK 用“生成参数扫描”同样的规则展开为新行，保存为草案供检查后再应用。最多 100 行，不会自动运行。",
+  "ai.sweep_reply": "AI · 参数扫描建议（不会自动添加或运行）",
+  "ai.sweep_base": "以所选第 {row} 行为基准，{mode}：",
+  "ai.sweep_product": "各取值的全部组合",
+  "ai.sweep_zip": "按序配对取值",
+  "ai.sweep_range_count": "{start} → {stop}，共 {count} 个值",
+  "ai.sweep_range_step": "{start} → {stop}，步长 {step}",
+  "ai.sweep_axis": "· {field}：{values}"
 }

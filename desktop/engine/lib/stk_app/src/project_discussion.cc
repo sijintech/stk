@@ -11,6 +11,12 @@
 namespace stk::app {
 using io::Json;
 
+bool structured_proposal(const Json &prompt_version)
+{
+  // Replies converted to a review draft: parameter edits, or a sweep of new rows (P2 L1).
+  return prompt_version == "stk.parameter-edits/1" || prompt_version == "stk.parameter-sweep/1";
+}
+
 namespace {
 void validate_edit_proposal(const Json &result, const Json &request)
 {
@@ -18,7 +24,7 @@ void validate_edit_proposal(const Json &result, const Json &request)
   const auto &draft = result.at("draft"), &proposal = result.at("proposal");
   if (draft.is_null() && proposal.is_null()) { return; }
   if (draft.is_null() || proposal.is_null() || request.at("status") != "completed" ||
-      request.at("prompt_version") != "stk.parameter-edits/1" ||
+      !structured_proposal(request.at("prompt_version")) ||
       draft.at("project_id") != request.at("project_id") || proposal.at("project_id") != request.at("project_id") ||
       draft.at("id") != proposal.at("draft_id") || draft.at("base_revision") != request.at("source_revision") ||
       proposal.at("base_revision") != request.at("source_revision") ||
@@ -340,7 +346,7 @@ bool ProjectDiscussion::prepare_question(const std::string &context_id, const st
                                          const std::string &model, const std::string &prompt_version)
 {
   if (prompt_version != "stk.text/1" &&
-      (prompt_version != "stk.parameter-edits/1" || !edit_proposals_supported())) { return false; }
+      (!structured_proposal(prompt_version) || !edit_proposals_supported())) { return false; }
   if (!generation_supported() || busy_ || project_.busy() || exchange_reading_ || provider_.empty() || context_.empty() ||
       io::get_string(context_, "id") != context_id || text.empty() || model.empty()) { return false; }
   const Json saved_context = context_;
@@ -401,7 +407,7 @@ bool ProjectDiscussion::prepare_question(const std::string &context_id, const st
 bool ProjectDiscussion::propose_exchange_edits()
 {
   if (!edit_proposals_supported() || exchange_busy() || exchange_request_.empty() ||
-      exchange_request_.at("status") != "completed" || exchange_request_.at("prompt_version") != "stk.parameter-edits/1") {
+      exchange_request_.at("status") != "completed" || !structured_proposal(exchange_request_.at("prompt_version"))) {
     return false;
   }
   const auto id = exchange_id_;
@@ -419,7 +425,7 @@ bool ProjectDiscussion::propose_exchange_edits()
 bool ProjectDiscussion::read_exchange_edit_proposal(std::function<void(const Json &)> done)
 {
   if (!edit_proposals_supported() || exchange_busy() || exchange_request_.empty() ||
-      exchange_request_.at("status") != "completed" || exchange_request_.at("prompt_version") != "stk.parameter-edits/1") {
+      exchange_request_.at("status") != "completed" || !structured_proposal(exchange_request_.at("prompt_version"))) {
     return false;
   }
   const auto id = exchange_id_;
@@ -560,7 +566,7 @@ void ProjectDiscussion::read_exchange_parts(std::shared_ptr<Json> bundle, const 
   }
   if (!bundle->contains("reply")) { (*bundle)["reply"] = Json::object(); }
   if (!bundle->contains("edit_proposal") && io::get_string(record, "status") == "completed" &&
-      io::get_string(record, "prompt_version") == "stk.parameter-edits/1" && edit_proposals_supported()) {
+      structured_proposal(record.at("prompt_version")) && edit_proposals_supported()) {
     exchange_read("project.requests.edit_proposal", {{"request_id", record.at("id")}}, generation, flight,
         [this, bundle, generation, flight](const Json &result) {
       (*bundle)["edit_proposal"] = result;

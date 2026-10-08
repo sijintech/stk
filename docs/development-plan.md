@@ -28,7 +28,9 @@
   最终状态作为分析输入；`stk.project.workflow_runs.prepare(connection=, options=)`。**W5b 桌面运行区（已交付）**：含 MuFerro 步骤时运行区显示运行环境与运行方式/资源
 （与仿真批次共用 `SimulationTarget`），按钮注明 Runtime；任务格显示远程阶段，选中行列出仿真运行与 Runtime 任务；重算过期行沿用原运行的环境；
 `STK_WORKFLOW_POLL_SECONDS` 调整读取间隔。**W5 完成**。
-  之后：AI 批量模拟闭环。
+- **P2 AI 批量模拟闭环**（方案：[AI 批量模拟闭环](design/ai-batch-loop.md)，按推荐执行）：**L1 AI 扫描提议（已交付）**——新的提问用途
+  `stk.parameter-sweep/1`，回复为基准行与扫描轴，转换时由手工扫描同样的 `plan_sweep` 展开为最多 100 个新行的草案（行 ID 由请求派生，已保存的草案以回复摘要核对、不重新编译）；
+  AI 助手“提议参数扫描（新增行）”。L2 运行新增的行、L3 结果回到对话：待做。
 
 ## 2026-10-06：独立使用者审视
 
