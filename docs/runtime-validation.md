@@ -18,7 +18,10 @@
   `2fa87b4` 改为 8192 后 [Runtime](https://github.com/sijintech/stk/actions/runs/37756034855) 7/7、[桌面](https://github.com/sijintech/stk/actions/runs/37756034787) 5/5 通过（覆盖 A1b `841d4ba`）。
   `f1e97a7`（A2a）[Runtime](https://github.com/sijintech/stk/actions/runs/37759548427) client-windows (3.10) 一项失败：
   `test_request_executor.py::test_capacity_limit_preserves_pending_and_cancelled_live_workers_keep_their_slot` 在 5 秒内未到达受控边界
-  （A2a 未改 Python，3.12 同一测试通过；此前无记录），已重跑失败作业，结果见下一次记录；桌面 CI 进行中。
+  （A2a 未改 Python，3.12 同一测试通过；此前无记录），重跑失败作业后通过，Runtime 7/7；记为 Windows 上的计时偶发失败，未修改测试，再出现时需查看；
+  [桌面](https://github.com/sijintech/stk/actions/runs/37759548495) 5/5 通过。
+  `9f03540`（A2b、A3）[桌面](https://github.com/sijintech/stk/actions/runs/37762694960) 5/5（Linux、Linux 打包与冒烟、macOS Metal、Windows）、
+  [Runtime](https://github.com/sijintech/stk/actions/runs/37762694990) 7/7 通过。
 
 ## 2026-10-08：归档 A1b（列表过滤、只读、需要关注与搜索）
 
