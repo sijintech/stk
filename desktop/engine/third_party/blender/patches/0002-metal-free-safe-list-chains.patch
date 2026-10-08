@@ -1,0 +1,40 @@
+--- a/source/blender/gpu/metal/mtl_memory.mm
++++ b/source/blender/gpu/metal/mtl_memory.mm
+@@ -69,22 +69,28 @@
+   /* Delete all existing allocations. */
+   allocations_list_delete_all();
+ 
+-  /* Release safe free lists. */
++  /* STK: delete each list together with the overflow chunks chained to it, as
++   * update_memory_pools() does; deleting only the head leaked a chunk whenever a list
++   * overflowed MAX_NUM_BUFFERS_ before teardown (one MTLSafeFreeList, 65624 bytes). */
++  blender::Vector<MTLSafeFreeList *> lists;
+   for (int safe_pool_free_index = 0; safe_pool_free_index < completed_safelist_queue_.size();
+        safe_pool_free_index++)
+   {
+-    delete completed_safelist_queue_[safe_pool_free_index];
++    lists.append(completed_safelist_queue_[safe_pool_free_index]);
+   }
+   completed_safelist_queue_.clear();
+ 
+   safelist_lock_.lock();
+-  if (current_free_list_ != nullptr) {
+-    delete current_free_list_;
+-    current_free_list_ = nullptr;
+-  }
+-  if (prev_free_buffer_list_ != nullptr) {
+-    delete prev_free_buffer_list_;
+-    prev_free_buffer_list_ = nullptr;
++  lists.append(current_free_list_);
++  lists.append(prev_free_buffer_list_);
++  current_free_list_ = nullptr;
++  prev_free_buffer_list_ = nullptr;
++  for (MTLSafeFreeList *list : lists) {
++    while (list != nullptr) {
++      MTLSafeFreeList *next = list->next_.load();
++      delete list;
++      list = next;
++    }
+   }
+   safelist_lock_.unlock();
+ 

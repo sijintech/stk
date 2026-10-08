@@ -10,6 +10,10 @@
   {
    "file": "0001-vk-shader-compiler-optional-max-id-bound.patch",
    "sha256": "d23e12be408be79ac32442f6cec3e1532365c56e2d96e7efa8eaf704abed6bbf"
+  },
+  {
+   "file": "0002-metal-free-safe-list-chains.patch",
+   "sha256": "436ed6905e3c4e81710d352e671ff04b8e7bc1871244ea06047c5e28e333ad37"
   }
  ],
  "shims_used": [
@@ -773,7 +777,7 @@
   "source/blender/gpu/metal/mtl_index_buffer.hh": "3482be8b988a813882000e06b95cde6a0db27fa376e5d02471c948b966838cd5",
   "source/blender/gpu/metal/mtl_index_buffer.mm": "9b1834c16b35f351d551730725d0933f4cf2abdbfe59168da3d471b4b63c8b49",
   "source/blender/gpu/metal/mtl_memory.hh": "7a7b5fb64f89a81761a8bde598351241a40897c678d74084ca9cbcd2fa3206fd",
-  "source/blender/gpu/metal/mtl_memory.mm": "a01c8ed004b738c4f8ed401b553318caad6670b373c06a67d4fbb54098cd965f",
+  "source/blender/gpu/metal/mtl_memory.mm": "6b3477d1f060e6c16dd030a59ef222eefa8d3bd79e24c1c8868a47bad3bb3466",
   "source/blender/gpu/metal/mtl_primitive.hh": "38525405c6b91c7c6f04911011268e2353d0bc5cc7ae49ab90b52554ef1157dc",
   "source/blender/gpu/metal/mtl_pso_descriptor_state.hh": "e05e177e9fef2d6b5c1c259298ebfdee1b86587db6370936612e6d8d3b0bd412",
   "source/blender/gpu/metal/mtl_push_constant.cc": "1a9835cd281ba460b53a3aa05a59e0c11c92e5bd284a9254ed4328149c93aa6b",
