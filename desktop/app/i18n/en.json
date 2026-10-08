@@ -1833,5 +1833,16 @@
   "workspace.search.draft.pending": "pending",
   "workspace.search.draft.applied": "applied",
   "workspace.search.draft.discarded": "discarded",
-  "workspace.search.stale": "The project changed after this search; search again to update the results."
+  "workspace.search.stale": "The project changed after this search; search again to update the results.",
+  "workflow.run.remote_intro": "This workflow's MuFerro steps run on the chosen Runtime. The connection and execution options are frozen with the run; each row is prepared and submitted before the next, so all rows queue at once, and each finished row is collected and continues to its analyses. Closing STK does not stop the Runtime tasks; starting the run again follows them.",
+  "workflow.run.start_on": "Run the {count} selected rows on {runtime}",
+  "workflow.run.choose_runtime": "Choose an available Runtime connection and execution options to run.",
+  "workflow.run.stage.preparing": "Preparing",
+  "workflow.run.stage.prepared": "Prepared",
+  "workflow.run.stage.submitted": "Submitted",
+  "workflow.run.stage.queued": "Queued",
+  "workflow.run.stage.running": "Running on Runtime",
+  "workflow.run.stage.collecting": "Collecting",
+  "workflow.run.stage.adopted": "Adopted",
+  "workflow.run.remote_detail": "{step}: simulation run {run} · Runtime task {task} · {state}"
 }

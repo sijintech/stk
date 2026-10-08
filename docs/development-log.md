@@ -1,5 +1,15 @@
 # 开发交接记录
 
+## 2026-10-07：W5b MuFerro 工作流的桌面运行区
+
+仿真批次面板的运行环境选择与执行选项提取为共用的 `SimulationTarget`（`src/editors/simulation_target.*`，批次行为不变）。工作流编辑器的运行区在工作流含
+`muferro/1` 步骤时显示它们，“运行所选 N 行”改为“在 … 上运行所选 N 行”，未选可用 Runtime 时不可运行；`ProjectWorkflows::run_rows` 带上
+`simulation`；重算过期行沿用原运行冻结的连接与选项。任务格在尝试运行中显示远程阶段（已提交/排队中/Runtime 运行中/收集结果/接管中），
+选中行列出各步骤的仿真运行与 Runtime 任务；MuFerro 行在勾选框中显示案例名与带单位的字段。服务读取间隔可用 `STK_WORKFLOW_POLL_SECONDS` 调整（0.02–3600 秒）。
+
+critical review（截图）：首张截图截在切换工作流的中间状态（画布仍是上一份），截图脚本改为等候新工作流检查完成；行勾选框只显示“行 1”，补上案例名与温度；
+成功后的行详情仍写“收集结果”，改为只在运行中显示阶段。
+
 ## 2026-10-07：W5a MuFerro 按行工作流运行（服务与脚本）
 
 所有者决定：归档方案（已写）→ MuFerro 按行工作流运行 → AI 批量模拟闭环。W5a：`WorkflowRuns.prepare(..., simulation=)` 冻结连接、

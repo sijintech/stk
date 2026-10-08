@@ -2,6 +2,14 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-07：W5b MuFerro 工作流的桌面运行区
+
+- 真实后台服务、本机回环 Runtime 与合成求解器的界面测试 1 项：含 MuFerro 步骤的工作流在未选 Runtime 时不可运行并说明；选择后按钮为
+  “Run the 3 selected rows on run-test”，点击后三行全部提交、跟踪并收集（“All done · 3/3 done”，Runtime 3 个任务、MuFerro 结果表 3 行，
+  运行冻结的连接为 runtime:run-test），选中行列出仿真运行与 Runtime 任务；仿真批次的“运行所选行”测试（共用的运行环境组件）通过。
+- 截图 8 张（MuFerro 工作流运行区：运行环境、运行方式与资源、案例行 × 宽/窄 × 中/英 × GL/Vulkan）检查后修正截取时机与行标签。
+- 完整 pytest（`-m "not perf"`）**2274 passed、24 skipped**；完整 Linux CTest **1269/1269**。
+
 ## 2026-10-07：W5a MuFerro 按行工作流运行（服务与脚本）
 
 - 真实本机 Runtime 与 CI 合成 MuFerro 求解器（`tests/mupro_fake.py`）的后台服务测试 6 项：两行在调度器运行前都已提交（Runtime 中 2 个排队任务）；

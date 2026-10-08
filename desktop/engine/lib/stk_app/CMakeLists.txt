@@ -39,6 +39,7 @@ add_library(stk_app STATIC
   src/editors/project_review_view.cc
   src/editors/project_discussion_view.cc
   src/editors/project_simulation_view.cc
+  src/editors/simulation_target.cc
   src/editors/python_editor.cc
   src/editors/ai_editor.cc
   src/editors/workspace_editor.cc

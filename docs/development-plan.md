@@ -25,7 +25,9 @@
 - **W5 MuFerro 按行工作流运行**（[工作流按行运行 · W5](design/workflow-runs.md#w5muferro-按行运行2026-10-07所有者决定实现)）：
   **W5a 服务与脚本（已交付）**：准备时冻结 Runtime 连接、端点指纹与运行选项及每行案例字段；执行器提交不阻塞（各行同时排队，
   完成的行收集并继续下游分析）、行在冻结后被改则 `row_changed`、每次尝试一个任务、进度记录与停止跟踪后的接管、取消传到 Runtime、
-  最终状态作为分析输入；`stk.project.workflow_runs.prepare(connection=, options=)`。**W5b 桌面运行区**（运行环境与资源选择、阶段显示）：进行中。
+  最终状态作为分析输入；`stk.project.workflow_runs.prepare(connection=, options=)`。**W5b 桌面运行区（已交付）**：含 MuFerro 步骤时运行区显示运行环境与运行方式/资源
+（与仿真批次共用 `SimulationTarget`），按钮注明 Runtime；任务格显示远程阶段，选中行列出仿真运行与 Runtime 任务；重算过期行沿用原运行的环境；
+`STK_WORKFLOW_POLL_SECONDS` 调整读取间隔。**W5 完成**。
   之后：AI 批量模拟闭环。
 
 ## 2026-10-06：独立使用者审视

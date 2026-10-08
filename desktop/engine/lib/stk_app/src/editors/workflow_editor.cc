@@ -17,6 +17,7 @@
 #include "stk/ui/gpu_painter.hh"
 #include "project_navigation.hh"
 #include "editor_text.hh"
+#include "simulation_target.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -1023,6 +1024,12 @@ class WorkflowEditor final : public Editor {
         if (value.is_object() && value.contains("$field") && value.at("$field").is_string()) { used.insert(value.at("$field").get<std::string>()); }
       }
     }
+    if (remote_steps()) {
+      // A MuFerro step takes the whole case row: name it by its text and unit-bearing fields (case, temperature).
+      for (const auto &field : table.fields) {
+        if (field.type == "text" || !field.unit.empty()) { used.insert(field.id); }
+      }
+    }
     std::string values;
     for (const auto &field : table.fields) {
       if (!used.count(field.id) || !record.values.is_object() || !record.values.contains(field.id)) { continue; }
@@ -1075,13 +1082,38 @@ class WorkflowEditor final : public Editor {
       for (size_t i = 0; i < table->records.size() && i < 100; ++i) {
         if (!run_unchecked_.count(table->records[i].id)) { rows.push_back(table->records[i].id); }
       }
-      panel->button("workflow_run_start", catalog.format("workflow.run.start", {{"count", std::to_string(rows.size())}}),
-          [this, ok, rows] {
-        if (ok() && !draft_.dirty()) { run_row_ = -1; workflows_->run_rows(rows); }
-      }).disable(!blocked.empty() || rows.empty() || !idle);
+      // MuFerro steps run on a Runtime connection chosen here and frozen in the run (W5).
+      Json simulation;
+      bool target_ready = true;
+      std::string start_text = catalog.format("workflow.run.start", {{"count", std::to_string(rows.size())}});
+      if (remote_steps()) {
+        hint(*panel, ctx, "workflow.run.remote_intro");
+        const auto connection = target_.runtime_controls(*panel, ctx);
+        const auto options = target_.options_controls(*panel, ctx);
+        target_ready = !connection.empty() && options.has_value() && !ctx.store.jobs().hub();
+        if (target_ready) {
+          simulation = {{"connection", connection}, {"options", *options}};
+          start_text = catalog.format("workflow.run.start_on", {{"count", std::to_string(rows.size())},
+                                                                {"runtime", SimulationTarget::runtime_name(ctx, connection)}});
+        }
+        else { panel->paragraph(ctx.tr("workflow.run.choose_runtime")); }
+      }
+      panel->button("workflow_run_start", start_text, [this, ok, rows, simulation] {
+        if (ok() && !draft_.dirty()) { run_row_ = -1; workflows_->run_rows(rows, simulation); }
+      }).disable(!blocked.empty() || rows.empty() || !idle || !target_ready);
     }
     runs_list(*panel, ctx);
     run_detail(*panel, ctx);
+  }
+
+  /** Whether the shown workflow has a simulation step that runs on a Runtime (muferro/1;
+   * suan/workflows/templates.py marks such templates ``remote``). */
+  bool remote_steps() const
+  {
+    for (const auto &step : member(member(workflows_->selected(), "document"), "steps")) {
+      if (io::get_string(step, "kind") == "simulation" && io::get_string(member(step, "ref"), "template") == "muferro/1") { return true; }
+    }
+    return false;
   }
 
   void runs_list(ui::Layout &panel, EditorContext &ctx)
@@ -1155,7 +1187,11 @@ class WorkflowEditor final : public Editor {
         const auto task_status = found == tasks.end() ? std::string("pending") : io::get_string(*found->second, "status");
         const auto attempt = found == tasks.end() ? int64_t(0) : io::get_int(*found->second, "attempt", 0);
         const bool step_stale = row_stale && !member(member(*found_row->second, "steps"), step.get_ref<const std::string &>().c_str()).empty();
-        line.push_back(std::string(ctx.tr("workflow.run.task." + task_status)) + (attempt > 1 ? " #" + std::to_string(attempt) : std::string()) +
+        // A remote attempt shows where its Runtime task is (submitted, queued, running, collecting).
+        const auto &progress = found == tasks.end() ? Json() : member(*found->second, "progress");
+        const bool remote = task_status == "running" && progress.is_object() && io::get_int(progress, "attempt", 0) == attempt;
+        line.push_back(std::string(ctx.tr(remote ? "workflow.run.stage." + io::get_string(progress, "stage") : "workflow.run.task." + task_status)) +
+                       (attempt > 1 ? " #" + std::to_string(attempt) : std::string()) +
                        (step_stale ? " · " + std::string(ctx.tr("workflow.run.stale_mark")) : std::string()));
         state.push_back(step_stale && task_status == "succeeded" ? "stale" : task_status);
       }
@@ -1201,6 +1237,14 @@ class WorkflowEditor final : public Editor {
           panel.paragraph(catalog.format("workflow.run.task_error", {{"step", step.get<std::string>()},
               {"message", clipped(io::get_string(error, "message"), 300)}}));
         }
+        if (const auto &progress = member(task, "progress"); progress.is_object() && !io::get_string(progress, "simulation_run_id").empty()) {
+          const auto task_id = io::get_string(progress, "task_id");
+          panel.paragraph(catalog.format("workflow.run.remote_detail", {{"step", step.get<std::string>()},
+              {"run", io::get_string(progress, "simulation_run_id").substr(0, 8)},
+              {"task", task_id.empty() ? std::string("—") : task_id.substr(0, 12)},
+              {"state", std::string(ctx.tr(io::get_string(task, "status") == "running" ? "workflow.run.stage." + io::get_string(progress, "stage")
+                                                                                      : "workflow.run.task." + io::get_string(task, "status")))}}));
+        }
         const auto analysis_run = io::get_string(member(task, "produced"), "analysis_run_id");
         const auto &frozen = member(member(run, "steps"), step.get_ref<const std::string &>().c_str());
         if (!analysis_run.empty()) {
@@ -1220,8 +1264,13 @@ class WorkflowEditor final : public Editor {
     // Old results stay; stale rows run again as a new run over the current definitions (never rewriting this one).
     const bool can_run = !draft_.dirty() && io::get_bool(workflows_->validation(), "ok", false) && !workflows_->stale() &&
         !workflows_->busy() && !ctx.store.project().busy();
+    // Stale rows run again where this run ran (its frozen Runtime connection and options, if any).
+    Json simulation;
+    if (const auto &frozen = member(run, "simulation"); frozen.is_object()) {
+      simulation = {{"connection", io::get_string(frozen, "connection")}, {"options", member(frozen, "options")}};
+    }
     panel.button("workflow_run_stale", catalog.format("workflow.run.rerun_stale", {{"count", std::to_string(outdated.size())}}),
-        [this, ok, outdated] { if (ok()) { run_row_ = -1; workflows_->run_rows(outdated); } })
+        [this, ok, outdated, simulation] { if (ok()) { run_row_ = -1; workflows_->run_rows(outdated, simulation); } })
         .disable(outdated.empty() || status != "stopped" || !can_run).tip(ctx.tr("workflow.run.rerun_stale.tip"));
     auto &actions = panel.row();
     actions.button("workflow_run_retry", ctx.tr("workflow.run.retry"), [this, ok] { if (ok()) { workflows_->start_run(); } })
@@ -1545,6 +1594,7 @@ class WorkflowEditor final : public Editor {
   int run_row_ = -1;
   std::chrono::steady_clock::time_point last_poll_{};
   bool auto_selected_ = false, fit_ = true, dragging_ = false;
+  SimulationTarget target_;  // where MuFerro steps run (W5)
   std::vector<ViewMemory> memory_;  // most recent last
   std::string view_project_;
   std::optional<ViewMemory> restore_;

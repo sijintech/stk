@@ -101,7 +101,7 @@
 
 ### MuFerro 步骤（W5）
 
-参数表步骤引用 MuFerro 案例表、仿真步骤为 `muferro/1` 的工作流也可按行运行：准备时选择一个已保存的 Runtime 连接
+参数表步骤引用 MuFerro 案例表、仿真步骤为 `muferro/1` 的工作流也可按行运行：在运行区（或 Python 的 `connection=`、`options=`）选择一个已保存的 Runtime 连接
 （直连或 SSH，不支持 Hub 节点）和运行方式/资源（与[仿真批次](simulation-batches.md)相同的选项），它们与每行的全部案例字段一起冻结。
 开始后每行准备 MuFerro 输入并提交，然后立即转到下一行，所有行的任务同时在 Runtime 排队；之后每 15 秒读取状态，
 某行成功后收集结果（写入 MuFerro 结果表，文件在 `results/muferro/<仿真运行>/`），把最终状态（输入、`stk-mupro.json`、

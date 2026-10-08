@@ -3703,6 +3703,84 @@ TEST_F(SimulationPython, RunSelectedRowsUsesThePickedRuntimeAndSubmitsEachRowOnc
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
+class WorkflowSimulationPython : public SimulationPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &) override
+  {
+    options.env["STK_WORKFLOW_POLL_SECONDS"] = "0.05";  // follow the loopback Runtime's tasks quickly
+  }
+};
+
+TEST_F(WorkflowSimulationPython, MuFerroWorkflowRunsEveryRowOnThePickedRuntime)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  auto &jobs = f.shell->store().jobs();
+  auto done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 90));
+    std::string output;
+    for (size_t i = 0; i < scripts.output().line_count(); ++i) { output += scripts.output().line(i); output += '\n'; }
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded") << output;
+  };
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  // Three MuFerro case rows and a workflow cases -> MuFerro on a loopback Runtime with the synthetic solver.
+  ASSERT_TRUE(scripts.execute("import sys, time, uuid\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom simulation_fixture import SimulationRuntime\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "from suan.workflows.muferro import TABLE_ID, RESULT_TABLE_ID\n"
+      "_simulation_runtime = SimulationRuntime(" + Json(dir.str() + "/workflow-runtime").dump() + ")\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('run-test', _simulation_runtime.url, _simulation_runtime.config['token'], check=False)\n"
+      "p = stk.project\nfirst = stk.muferro.import_case(_simulation_runtime.source, expected_revision=p.snapshot()['project']['revision'])['record_id']\n"
+      "for _ in range(2):\n    stk.muferro.clone_case(first, expected_revision=p.snapshot()['project']['revision'])\n"
+      "p.workflows.create('MuFerro scan', {'format': 'stk.workflow/1', 'ui': {}, 'steps': ["
+      "{'id': 'cases', 'kind': 'table', 'ref': {'table': TABLE_ID}}, {'id': 'simulate', 'kind': 'simulation', "
+      "'ref': {'template': 'muferro/1'}, 'inputs': {'rows': {'from': 'cases.rows'}}}]}, workflow_id=str(uuid.uuid4()), "
+      "expected_revision=p.snapshot()['project']['revision'])"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  jobs.sync();
+  jobs.refresh_connections();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &item) { return item.info.id == "runtime:run-test"; });
+  }, 30));
+  state().refresh();
+  ASSERT_TRUE(loop.pump_until([&] { return !state().busy(); }, 30));
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorWorkflow));
+  f.screen.set_maximized(&area);
+  area.find_region(EditorArea::kSidebar)->set_size_1x(560);
+  auto widget = [&](const std::string &id) { f.screen.run_deferred(); f.drv->frame(); return f.screen.ui()->find(id); };
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  ASSERT_TRUE(loop.pump_until([&] { const auto *w = widget("workflow_run_start"); return w && shows("All references and links are valid."); }, 60));
+  // A MuFerro step needs a Runtime: nothing can be run until one is picked here.
+  EXPECT_FALSE(widget("workflow_run_start")->enabled);
+  EXPECT_TRUE(shows("Choose an available Runtime connection"));
+  ASSERT_NE(widget("workflow_run_panel/runtime"), nullptr);
+  widget("workflow_run_panel/runtime")->index.assign(0);
+  EXPECT_EQ(jobs.active_id(), "runtime:run-test");
+  ASSERT_TRUE(loop.pump_until([&] { const auto *w = widget("workflow_run_start"); return w && w->enabled; }, 30));
+  EXPECT_EQ(widget("workflow_run_start")->text, "Run the 3 selected rows on run-test");
+  widget("workflow_run_start")->on_click();
+  // Every row is submitted, followed and collected by the service; the panel follows the run.
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return shows("All done · 3/3 done"); }, 120));
+  const auto *grid = widget("workflow_run_tasks");
+  ASSERT_NE(grid, nullptr); ASSERT_EQ(grid->table->rows, 3);
+  grid->table->selected.assign(0);
+  f.drv->frame();
+  EXPECT_TRUE(shows("simulate: simulation run "));  // the row's simulation run and Runtime task
+  EXPECT_TRUE(shows(" · Done"));
+  ASSERT_TRUE(scripts.execute("assert len(_simulation_runtime.client.tasks()) == 3, _simulation_runtime.client.tasks()\n"
+      "results = next(t for t in p.snapshot()['tables'] if t['id'] == RESULT_TABLE_ID)\nassert len(results['records']) == 3\n"
+      "run = p.workflow_runs.list()['runs'][0]\nassert p.workflow_runs.get(run['id'])['simulation']['connection'] == 'runtime:run-test'\n"
+      "_simulation_runtime.close()"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 #endif
 
 }  // namespace

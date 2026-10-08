@@ -10,6 +10,7 @@ non-blocking OS lock on ``<state_dir>/bridge.lock`` (``fcntl.flock`` on POSIX, `
 on Windows; the OS drops it when the process dies). A second bridge raises ``busy``; run as a
 process it answers every request with that error (:func:`refuse`) and exits with status 3.
 """
+import math
 import os
 from pathlib import Path
 import platform
@@ -130,6 +131,15 @@ class _Context:
         self.callbacks.append(callback)
 
 
+def _poll_seconds():
+    """How often workflow runs read their Runtime tasks: 15 s, or STK_WORKFLOW_POLL_SECONDS (0.02-3600)."""
+    try:
+        value = float(os.environ.get("STK_WORKFLOW_POLL_SECONDS", "15"))
+    except ValueError:
+        return 15.0
+    return min(max(value, 0.02), 3600.0) if math.isfinite(value) else 15.0
+
+
 class Bridge:
     def __init__(self, state_dir=None, cache_dir=None, *, writer, strict=False, max_line=MAX_LINE_BYTES,
                  on_exit=None):
@@ -154,7 +164,7 @@ class Bridge:
         self.analysis_executor = AnalysisRunExecutor(self.graphs.worker, self.graphs.blobs.root)
         # Workflow runs register outputs as ordinary edits in the background; open handles hear about them.
         self.workflow_executor = WorkflowRunExecutor(self.analysis_executor, changed=self._announce,
-                                                     scripting=self._workflow_scripting)
+                                                     scripting=self._workflow_scripting, poll_seconds=_poll_seconds())
         self.projects = ProjectSessions(self.state_dir, analysis_executor=self.analysis_executor,
                                         workflow_executor=self.workflow_executor)
         self.project_runs = ProjectRuns(self.projects, self.connections.backend)

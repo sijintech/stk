@@ -2,6 +2,7 @@
 #pragma once
 #include "stk/io/json.hh"
 #include "path_picker.hh"
+#include "simulation_target.hh"
 #include <optional>
 #include <string>
 #include <vector>
@@ -17,13 +18,8 @@ class ProjectSimulationView {
   void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void draw_batches(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
  private:
-  /** Runtime picker (direct or SSH Runtime profiles; choosing one makes it the active connection).
-   * Returns the active Runtime's id when it is one of them and not offline, else "". */
-  std::string runtime_controls(ui::Layout &panel, EditorContext &ctx);
-  /** Execution options as fields over the shared JSON object, with the raw JSON folded away.
-   * Returns the options to send, or nullopt (with the reason shown) when they cannot be used. */
-  std::optional<io::Json> options_controls(ui::Layout &panel, EditorContext &ctx);
-  std::string source_, options_ = R"({"backend":"local","ranks":1,"threads_per_rank":1})";
+  SimulationTarget target_;
+  std::string source_;
   std::string project_, error_;
   PathPicker source_picker_;
   std::vector<std::string> batch_selection_;

@@ -319,15 +319,17 @@ bool ProjectWorkflows::load_run(const std::string &run_id)
   return !run_id.empty() && run_call("project.workflow_runs.get", {{"run_id", run_id}});
 }
 
-bool ProjectWorkflows::run_rows(const std::vector<std::string> &rows)
+bool ProjectWorkflows::run_rows(const std::vector<std::string> &rows, Json simulation)
 {
   sync();
   if (!runs_supported() || selected_.is_null() || rows.empty() || stale() || busy_ || project_.busy()) { return false; }
   const auto hex = new_idempotency_key();
   const auto run_id = hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) + "-" + hex.substr(16, 4) + "-" + hex.substr(20);
   // Prepared at the revision the workflow was read at: a later edit refuses instead of running something else.
-  return call("project.workflow_runs.prepare", {{"workflow_id", io::get_string(selected_, "id")}, {"rows", rows},
-      {"run_id", run_id}, {"expected_revision", selected_revision_}}, [this, run_id](const Json &result) {
+  Json params = {{"workflow_id", io::get_string(selected_, "id")}, {"rows", rows}, {"run_id", run_id},
+                 {"expected_revision", selected_revision_}};
+  if (simulation.is_object()) { params["simulation"] = std::move(simulation); }  // {connection, options} for MuFerro steps
+  return call("project.workflow_runs.prepare", std::move(params), [this, run_id](const Json &result) {
     accept_run(result);
     runs_ = nullptr;  // the list gains this run when read again
     call("project.workflow_runs.start", {{"run_id", run_id}}, [this](const Json &started) { accept_run(started); });

@@ -1833,5 +1833,16 @@
   "workspace.search.draft.pending": "待审",
   "workspace.search.draft.applied": "已应用",
   "workspace.search.draft.discarded": "已放弃",
-  "workspace.search.stale": "项目在搜索后有变化，结果可能已过时；再次搜索可更新。"
+  "workspace.search.stale": "项目在搜索后有变化，结果可能已过时；再次搜索可更新。",
+  "workflow.run.remote_intro": "这份工作流的 MuFerro 步骤在所选的 Runtime 上运行。连接与运行方式随运行冻结；每行准备并提交后即处理下一行，所有行同时排队，完成后自动收集结果并继续该行的分析。关闭 STK 不会停止 Runtime 上的任务，再次开始运行会接管它们。",
+  "workflow.run.start_on": "在 {runtime} 上运行所选 {count} 行",
+  "workflow.run.choose_runtime": "选择可用的 Runtime 连接并填好运行方式后才能运行。",
+  "workflow.run.stage.preparing": "准备中",
+  "workflow.run.stage.prepared": "已准备",
+  "workflow.run.stage.submitted": "已提交",
+  "workflow.run.stage.queued": "排队中",
+  "workflow.run.stage.running": "Runtime 运行中",
+  "workflow.run.stage.collecting": "收集结果",
+  "workflow.run.stage.adopted": "接管中",
+  "workflow.run.remote_detail": "{step}：仿真运行 {run} · Runtime 任务 {task} · {state}"
 }

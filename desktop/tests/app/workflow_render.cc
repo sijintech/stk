@@ -4,9 +4,11 @@
  * (--scenario workflow_edit) an unsaved candidate with an added, linked and field-bound step, or
  * (--scenario workflow_run) a finished per-row run of cases -> synthetic solver -> analysis with its task grid, or
  * (--scenario home_attention) Home's "needs attention" box after a run with a failed row and a finished run, or
- * (--scenario home_search) Home's project search with workflow, analysis and file results. */
+ * (--scenario home_search) Home's project search with workflow, analysis and file results, or
+ * (--scenario workflow_muferro) a MuFerro workflow's run panel with the Runtime picker and execution options. */
 #include "stk/app/bridge_status.hh"
 #include "stk/app/editor_area.hh"
+#include "stk/app/jobs_state.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/shell.hh"
 #include "stk/app/viewer_state.hh"
@@ -37,7 +39,7 @@ int main(int argc, char **argv)
   }
   if (output.empty() || (mode != "wide" && mode != "narrow") ||
       (scenario != "workflow" && scenario != "enter" && scenario != "workflow_edit" && scenario != "workflow_run" &&
-       scenario != "home_attention" && scenario != "home_search")) { return 2; }
+       scenario != "home_attention" && scenario != "home_search" && scenario != "workflow_muferro")) { return 2; }
   const bool narrow = mode == "narrow", zh = language == "zh";
   const int width = narrow ? 760 : 1440, height = 900;
   bridge::test::TempDir directory{"workflow-render"};
@@ -233,6 +235,40 @@ int main(int argc, char **argv)
         require(area->set_tab_type(0, app::kEditorWorkspace), "home");
         wait([&] { return shows(zh ? "失败 · 工作流运行 · 温度扫描 · 完成 4/6" : "Failed · Workflow run · Temperature scan · 4/6 done") &&
                           shows(zh ? "已完成未查看（1）" : "Finished, not viewed (1)"); }, "attention listed");
+      }
+      if (scenario == "workflow_muferro") {
+        // Two MuFerro case rows (a synthetic case), a workflow cases -> MuFerro and a saved Runtime profile.
+        const std::string muferro_workflow = "4b6e0c3a-7d5f-4081-9cbd-2e3f4a5b6c7d";
+        const auto session = call("script.open", Json::object()).at("session").get<std::string>();
+        call("script.execute", {{"session", session}, {"project_handle", handle}, {"source",
+            "import sys, tempfile\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/tests").dump() + ")\n"
+            "from mupro_fake import write_case\nfrom suan.workflows.muferro import TABLE_ID\n"
+            "case = tempfile.mkdtemp() + '/case'\nwrite_case(case)\np = stk.project\n"
+            "first = stk.muferro.import_case(case, expected_revision=p.snapshot()['project']['revision'])['record_id']\n"
+            "stk.muferro.clone_case(first, expected_revision=p.snapshot()['project']['revision'])\n"
+            "p.workflows.create(" + Json(zh ? "MuFerro 温度扫描" : "MuFerro temperature scan").dump() + ", {'format': 'stk.workflow/1', "
+            "'ui': {'positions': {'cases': [0, 0], 'simulate': [260, 0]}}, 'steps': [{'id': 'cases', 'kind': 'table', 'ref': {'table': TABLE_ID}}, "
+            "{'id': 'simulate', 'kind': 'simulation', 'ref': {'template': 'muferro/1'}, 'inputs': {'rows': {'from': 'cases.rows'}}}]}, "
+            "workflow_id=" + Json(muferro_workflow).dump() + ", expected_revision=p.snapshot()['project']['revision'])"}});
+        wait([&] { return call("script.status", {{"session", session}}).at("state") == "ready"; }, "script");
+        require(call("script.status", {{"session", session}}).at("run").at("state") == "succeeded",
+                "script failed: " + call("script.read", {{"session", session}}).dump());
+        call("connections.add_runtime", {{"name", "cluster-a"}, {"url", "http://127.0.0.1:1"}, {"token", "test-only"}, {"check", false}});
+        auto &jobs = shell.store().jobs();
+        jobs.sync(); jobs.refresh_connections();
+        project.refresh();
+        require(area->editor().navigate({{"workflow_id", muferro_workflow}, {"step", "simulate"}}, {}, reason), "muferro workflow");
+        wait([&] { return shows(zh ? "MuFerro 温度扫描 · 2 个步骤" : "MuFerro temperature scan · 2 steps") &&
+                          shows(zh ? "所有引用与连线都有效。" : "All references and links are valid.") &&
+                          widget("workflow_run_panel/runtime") != nullptr && widget("workflow_run_start") &&
+                          widget("workflow_list") && widget("workflow_list")->table && widget("workflow_list")->table->rows == 2; },
+             "checked MuFerro workflow with the Runtime picker");
+        widget("workflow_run_panel/runtime")->index.assign(0); frame();
+        // Bring the run panel into view (the sidebar is long).
+        if (const auto *header = widget("workflow_edit_panel")) {
+          const ui::Vec2 center{header->rect.x + 8, header->rect.cy()};
+          screen.ui()->handle_event(ui::Event::mouse_down(center)); screen.ui()->handle_event(ui::Event::mouse_up(center)); frame();
+        }
       }
       if (scenario == "home_search") {
         // A search that finds the workflow, the analysis and the indexed field files.

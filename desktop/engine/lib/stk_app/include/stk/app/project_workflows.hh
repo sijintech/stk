@@ -78,7 +78,7 @@ class ProjectWorkflows {
   bool load_runs();
   bool load_run(const std::string &run_id);
   /** Freeze a run of the selected (saved, valid) workflow over these rows, then start it. Explicit; returns at once. */
-  bool run_rows(const std::vector<std::string> &rows);
+  bool run_rows(const std::vector<std::string> &rows, io::Json simulation = nullptr);
   /** Start the shown run again (retries tasks that did not succeed), cancel it, or recover it after a restart. */
   bool start_run();
   bool cancel_run();
