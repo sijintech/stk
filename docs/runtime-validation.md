@@ -12,7 +12,8 @@
 - CI `8857d0b`（W5b）：Linux、Windows、打包与冒烟通过；**macOS 的 `workflow_run_wide_render_metal_en` 再次报告 1 个 `MTLSafeFreeList`（65624 字节）未释放**。
   原因：Blender Metal 的 `MTLBufferPool::free()` 只删除各安全释放列表的首块，没有删除溢出时串联的块（`update_memory_pools()` 会遍历）；
   绘制较多的截图在退出时释放的缓冲超过一块（8192 个）就会漏掉一块。供应商补丁 `0002-metal-free-safe-list-chains.patch` 修复，`vendor.py` 重新生成并 `--check` 通过；
-  Linux 不编译 Metal 代码，需以下一次 macOS CI 验证。
+  Linux 不编译 Metal 代码。CI `20c8570`（含 L1、本修复与 L2/L3）：desktop 全部作业（Linux GL/Vulkan、macOS Metal、Windows、打包与冒烟）、Runtime、
+  Secret scan、Cloudflare Pages 通过——macOS 编译补丁成功，`workflow_run_wide_render_metal_en` 通过（此前是间歇失败，需继续观察后续运行）。
 
 ## 2026-10-07：P2 L1 AI 扫描提议
 
