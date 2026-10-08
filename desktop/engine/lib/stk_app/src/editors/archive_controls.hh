@@ -54,13 +54,16 @@ inline ui::Widget *archive_button(ui::Layout &layout, EditorContext &ctx, const 
   }).disable(archive.busy() || !enabled).tip(ctx.tr(tip));
 }
 
-/** Whether the object is archived; if so, says it is read-only until restored. */
+/** Whether the object is archived; if so, says what that means for this kind. Archived objects are frozen: they
+ * cannot be changed (nor retried, sent, applied or discarded in place) but can be used as they are; changes go
+ * through restoring or a copy (owner decision 2026-10-08). */
 inline bool archived_notice(ui::Layout &layout, EditorContext &ctx, const std::string &kind, const std::string &id)
 {
   auto &archive = ctx.store.archive();
   archive.sync();
   if (!archive.supported() || id.empty() || !archive.archived(kind, id)) { return false; }
-  layout.paragraph(ctx.tr("archive.read_only"));
+  const bool record = kind == "workflow_run" || kind == "analysis_run" || kind == "simulation_run";
+  layout.paragraph(ctx.tr("archive.notice." + std::string(record ? "run" : kind)));
   return true;
 }
 

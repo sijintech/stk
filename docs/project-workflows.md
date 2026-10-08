@@ -69,7 +69,6 @@
 | `duplicate_step`、`ambiguous_step` | 步骤 ID 重复；连线指向重复的 ID |
 | `unknown_kind`、`invalid_reference` | 不认识的种类；`ref` 的键或 UUID 不合规 |
 | `missing_reference`、`unreadable_reference` | 引用的表格、快照或分析不存在或无法读取 |
-| `archived_reference` | 引用的分析已归档（格式 11）：恢复前不能运行这个工作流 |
 | `unknown_template`、`template_table` | 仿真模板未注册；仿真的行不来自该模板的案例表 |
 | `dynamic_binding` | 分析的源节点用图参数给出绑定名，工作流无法确定输入端口 |
 | `unknown_port`、`missing_step`、`missing_port`、`type_mismatch`、`missing_input` | 输入端口、来源步骤或端口不存在；类型不一致；必需输入未连接 |

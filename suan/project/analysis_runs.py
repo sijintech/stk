@@ -405,7 +405,6 @@ class AnalysisRuns:
         for identity in (analysis_id, snapshot_id, run_id):
             _id(identity)
         _revision(expected_revision)
-        self.store.archive.require_active("analysis", analysis_id, "run it")
         bindings = _bindings(bindings)
         if parameter_overrides is not None and type(parameter_overrides) is not dict:
             raise ProjectError("Parameter overrides must be an object")

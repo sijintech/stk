@@ -1657,9 +1657,7 @@ class AnalysisGraphEditor final : public Editor {
         prepare->label(text(document_name_.empty() ? id : document_name_)).tip(id);
         prepare->label(ctx.store.catalog().format("analysis_documents.revision", {{"revision", std::to_string(revision)}}));
         if (state_->document_stale()) { prepare->paragraph(ctx.tr("analysis_runs.stale_definition")); }
-        if (ctx.store.archive().archived("analysis", id)) { prepare->paragraph(ctx.tr("analysis_runs.archived")); }
       }
-      const bool archived = !id.empty() && ctx.store.archive().archived("analysis", id);
       prepare->button("analysis_run_and_show", ctx.tr("analysis_runs.auto.button"),
           [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
         if (!valid() || parameter_edits() || run_and_show_) { return; }
@@ -1681,7 +1679,7 @@ class AnalysisGraphEditor final : public Editor {
         run_and_show_ = std::move(chain); run_and_show_key_.clear(); run_and_show_detail_.clear(); ++run_and_show_generation_;
         redraw();
       }).disable(blocked || parameter_edits() || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() ||
-                 bindings.empty() || run_and_show_.has_value() || archived);
+                 bindings.empty() || run_and_show_.has_value());
       hint(*prepare, ctx, "analysis_runs.auto.hint");
       prepare->button("analysis_run_prepare", ctx.tr("analysis_runs.prepare"),
           [this, valid, generation, bindings_generation, id, revision, snapshot, bindings] {
@@ -1692,7 +1690,7 @@ class AnalysisGraphEditor final : public Editor {
           runs_->prepare(id, revision, snapshot, bindings);
         }
       }).disable(blocked || parameter_edits() || runs_->uncertain() || id.empty() || state_->document_stale() || snapshot.empty() ||
-                 bindings.empty() || archived);
+                 bindings.empty());
     }
     if (auto *history = layout.panel("analysis_run_history", ctx.tr("analysis_runs.history"), runs_->run().is_null())) {
       history->button("analysis_run_list", ctx.tr("analysis_runs.refresh"), [this, valid] {
@@ -1939,7 +1937,7 @@ class AnalysisGraphEditor final : public Editor {
     auto &actions = box.row();
     actions.button("analysis_run_start", ctx.tr("analysis_runs.start"), [this, same_run] {
       if (same_run()) { runs_->start(); }
-    }).disable(blocked || runs_->uncertain() || status != "prepared");
+    }).disable(blocked || runs_->uncertain() || status != "prepared" || ctx.store.archive().archived("analysis_run", id));
     actions.button("analysis_run_cancel", ctx.tr("analysis_runs.cancel"), [this, same_run] {
       if (same_run()) { runs_->cancel(); }
     }).disable(blocked || runs_->uncertain() || (status != "prepared" && status != "running" && status != "cancel_requested"));

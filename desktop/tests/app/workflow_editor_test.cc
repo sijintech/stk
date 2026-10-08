@@ -899,7 +899,7 @@ TEST_F(WorkflowEditorPython, HomeListsAFailedRunFirstAndOpensItInTheWorkflowEdit
   EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
 
-TEST_F(WorkflowEditorPython, ArchivedWorkflowsLeaveTheListAndStayReadOnlyUntilRestored)
+TEST_F(WorkflowEditorPython, ArchivedWorkflowsLeaveTheListCannotChangeButRunAndCopy)
 {
   // A prepared (never started) run, archived together with its workflow.
   const std::string row = "15151515-1515-4151-8151-151515151515", run_id = "17171717-1717-4171-8171-171717171717";
@@ -922,44 +922,47 @@ TEST_F(WorkflowEditorPython, ArchivedWorkflowsLeaveTheListAndStayReadOnlyUntilRe
   EXPECT_EQ(widget("workflow_archive")->text, "Archive");
   EXPECT_EQ(widget("workflow_show_archived"), nullptr);  // nothing archived yet
   ASSERT_NO_FATAL_FAILURE(click("workflow_archive"));
-  // Left out of the list but still shown, read-only and not runnable; its run went with it.
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Archived: read-only until restored.") && widget("workflow_list") &&
+  // Left out of the list but still shown: it cannot be changed, yet it still runs as it is; its run went with it.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Archived: it cannot be changed but runs as it is.") && widget("workflow_list") &&
       widget("workflow_list")->table->rows == 1 && !widget("workflow_runs"); }));
-  EXPECT_TRUE(shows("This workflow is archived; restore it to run it.")) << sidebar();
   ASSERT_NE(widget("workflow_add_step"), nullptr); EXPECT_FALSE(widget("workflow_add_step")->enabled);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_run_start") && widget("workflow_run_start")->enabled; }));
   EXPECT_EQ(widget("workflow_archive")->text, "Restore");
   ASSERT_NE(widget("workflow_show_archived"), nullptr);
   EXPECT_EQ(widget("workflow_show_archived")->text, "Show archived (1)");
-  // Switched, the lists show only what is archived.
+  EXPECT_EQ(project().project()->revision, before);  // archiving is not an edit
+  // A copy is a new, active workflow that can be changed.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_copy") && widget("workflow_copy")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_copy"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Temperature scan (copy) · 3 steps") && !shows("Archived: it cannot") &&
+      widget("workflow_add_step") && widget("workflow_add_step")->enabled && widget("workflow_list") &&
+      widget("workflow_list")->table->rows == 2; }));
+  const auto copied = project().project()->revision;
+  // Switched, the lists show only what is archived; the archived workflow is restored from there with its run.
   widget("workflow_show_archived")->boolean.assign(true);
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->table->rows == 1 &&
-      widget("workflow_list")->table->cell(0, 0) == "Temperature scan"; }));
-  ASSERT_NE(widget("workflow_runs_show_archived"), nullptr);
+      widget("workflow_list")->table->cell(0, 0) == "Temperature scan" && widget("workflow_list")->enabled && !project().busy(); }));
+  widget("workflow_list")->table->selected.assign(0);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Temperature scan · 3 steps") && shows("Archived: it cannot be changed"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_runs_show_archived") != nullptr; }));
   widget("workflow_runs_show_archived")->boolean.assign(true);
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_runs") && widget("workflow_runs")->table->rows == 1; }));
-  // Restored with its run: editable again, and archiving never changed the project's revision.
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_archive") && widget("workflow_archive")->enabled; }));
   ASSERT_NO_FATAL_FAILURE(click("workflow_archive"));
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !shows("Archived: read-only") && !widget("workflow_list") && !widget("workflow_runs"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !shows("Archived: it cannot") && !widget("workflow_list") && !widget("workflow_runs"); }));
   widget("workflow_show_archived")->boolean.assign(false);
   widget("workflow_runs_show_archived")->boolean.assign(false);
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->table->rows == 2 &&
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->table->rows == 3 &&
       widget("workflow_runs") && widget("workflow_runs")->table->rows == 1 && widget("workflow_add_step")->enabled; }));
   EXPECT_EQ(widget("workflow_show_archived"), nullptr);
   EXPECT_EQ(widget("workflow_archive")->text, "Archive");
-  EXPECT_EQ(project().project()->revision, before);
+  EXPECT_EQ(project().project()->revision, copied);
   EXPECT_EQ(calls("project.archive.set"), 2u);
   EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
 }
 
-TEST_F(WorkflowEditorPython, ArchivedAnalysesAreProblemsAndHomeArchivesAFailedRun)
+TEST_F(WorkflowEditorPython, HomeArchivesAFailedRun)
 {
-  // A step whose analysis is archived is a problem until the analysis is restored (nothing is saved meanwhile).
-  ASSERT_TRUE(store().archive().set("analysis", {analysis_id}, true));
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Referenced analysis is archived") && shows("1 problems found"); }));
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !store().archive().busy(); }));
-  ASSERT_TRUE(store().archive().set("analysis", {analysis_id}, false));
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("All references and links are valid."); }));
   // A failed run listed under "Needs you" is archived from Home: it leaves the list and the status bar count.
   const std::string temperature = "14141414-1414-4141-8141-141414141414", first = "15151515-1515-4151-8151-151515151515",
                     second = "16161616-1616-4161-8161-161616161616", run_id = "17171717-1717-4171-8171-171717171717";

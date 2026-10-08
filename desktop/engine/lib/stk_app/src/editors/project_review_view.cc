@@ -58,8 +58,9 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
       layout.label(ctx.store.catalog().format("project.drafts.applied_at", {
         {"revision", std::to_string(io::get_int(saved, "applied_revision", -1))}}));
     }
-    if (status != "pending" || io::get_int(saved, "base_revision", -1) != state.project()->revision) {
-      layout.paragraph(ctx.tr("project.drafts.stale"));
+    const bool shelved = archived_notice(layout, ctx, "draft", saved_id);
+    if (status != "pending" || io::get_int(saved, "base_revision", -1) != state.project()->revision || shelved) {
+      if (!shelved) { layout.paragraph(ctx.tr("project.drafts.stale")); }
       layout.button("review_copy_saved", ctx.tr("project.drafts.copy"), [&state, id = saved.at("id")] {
         if (!state.saved_review().empty() && state.saved_review().at("id") == id) { state.copy_saved_review(); }
       }).disable(state.busy());
@@ -113,7 +114,7 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
     panel->table("draft_rows", std::move(spec));
     const auto chosen = std::find_if(drafts.begin(), drafts.end(), [&](const auto &draft) { return draft.at("id") == selected_draft_; });
     const bool archived = ctx.store.archive().archived("draft", selected_draft_);
-    const bool pending = chosen != drafts.end() && io::get_string(*chosen, "status") == "pending" && !archived;
+    const bool pending = chosen != drafts.end() && io::get_string(*chosen, "status") == "pending";
     archived_notice(*panel, ctx, "draft", selected_draft_);
     auto &actions = panel->row();
     const auto handle = state.project()->handle;
@@ -122,7 +123,7 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
     }).disable(state.busy() || !pending);
     actions.button("discard_saved_draft", ctx.tr("project.drafts.discard"), [&state, handle, id = selected_draft_] {
       if (state.project() && state.project()->handle == handle) { state.discard_saved_draft(id); }
-    }).disable(state.busy() || !pending);
+    }).disable(state.busy() || !pending || archived);
     if (chosen != drafts.end()) { archive_button(actions, ctx, "draft", selected_draft_, "draft_archive", false, !state.busy()); }
   }
   auto &pages = panel->row();
@@ -177,7 +178,8 @@ void ProjectReviewView::draw(ui::Layout &layout, EditorContext &ctx, ProjectStat
   layout.button("review_apply", ctx.tr("project.review.apply"), [&state, review] {
     if (state.review() == review) { state.apply_review(); }
   })
-      .disable(!state.can_apply_review());
+      .disable(!state.can_apply_review() ||
+               (!state.saved_review().empty() && ctx.store.archive().archived("draft", io::get_string(state.saved_review(), "id"))));
   layout.tabs("review_category", {std::string(ctx.tr("project.review.changes")),
                                    std::string(ctx.tr("project.review.errors"))}, {
     [this] { return category_; }, [this](int category) { category_ = category; selected_ = 0; }

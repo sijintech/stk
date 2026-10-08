@@ -260,7 +260,7 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
         discussion.add_message(text_);
       }
     })
-        .disable(!enabled || context.empty() || text_.empty() || ctx.store.archive().archived("context", io::get_string(context, "id")));
+        .disable(!enabled || context.empty() || text_.empty());
   }
   const auto &message = discussion.message();
   if (!message.empty()) {

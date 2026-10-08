@@ -232,8 +232,6 @@ class Requests:
                     raise RevisionConflict("Request ID already belongs to a different input")
                 return self._public(identity, state)
             message = self.store.discussion._get_message(db, message_id)
-            if archive.Archive._archived(db, "context", message["context_id"]):
-                raise archive.Archived("This context is archived; restore it to ask about it")
             if message["role"] != "user":
                 raise ProjectError("A text request must reference a user message")
             context = self.store.contexts._get(db, message["context_id"])
@@ -321,8 +319,8 @@ class Requests:
         return self.get(request_id)["prompt_version"] == PARAMETER_SWEEP_PROMPT_VERSION
 
     def propose_edits(self, request_id, *, expected_revision):
-        """Explicitly validate and save one parameter or sweep (P2 L1) draft; never apply or send."""
-        self.store.archive.require_active("request", request_id, "save its proposal")
+        """Explicitly validate and save one parameter or sweep (P2 L1) draft; never apply or send.
+        An archived request may be converted too: the draft is a new object and the request is unchanged."""
         from .parameter_edits import propose_edits
         from .parameter_sweep import propose_sweep
         convert = propose_sweep if self._sweep(request_id) else propose_edits

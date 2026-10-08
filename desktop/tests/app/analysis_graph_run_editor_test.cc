@@ -434,7 +434,7 @@ TEST_F(AnalysisGraphRunEditorPython, RetainedInspectionAndReturnButtonsCannotOve
   EXPECT_EQ(widget("analysis_saved_section")->index.value(), 0);
 }
 
-TEST_F(AnalysisGraphRunEditorPython, ArchivedAnalysesAndRunsAreReadOnlyAndLeaveTheirLists)
+TEST_F(AnalysisGraphRunEditorPython, ArchivedAnalysesAndRunsLeaveTheirListsAndDoNotChange)
 {
   const auto shows = [&](const std::string &text) {
     for (const auto &block : f.screen.ui()->blocks()) {
@@ -442,14 +442,14 @@ TEST_F(AnalysisGraphRunEditorPython, ArchivedAnalysesAndRunsAreReadOnlyAndLeaveT
     }
     return false;
   };
-  // The shown analysis: archived, it leaves the list and stays shown read-only until restored.
+  // The shown analysis: archived, it leaves the list and stays shown; it cannot be changed until restored (it still runs).
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_archive") && widget("analysis_archive")->enabled; }));
   EXPECT_EQ(widget("analysis_archive")->text, "Archive");
   EXPECT_EQ(widget("analysis_show_archived"), nullptr);
   ASSERT_TRUE(widget("analysis_parameters")->enabled);
   ASSERT_NO_FATAL_FAILURE(click("analysis_archive"));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_archive") && widget("analysis_archive")->text == "Restore" &&
-      !widget("analysis_documents") && shows("Archived: read-only until restored."); }));
+      !widget("analysis_documents") && shows("Archived: it cannot be changed but runs as it is."); }));
   ASSERT_NE(widget("analysis_parameters"), nullptr); EXPECT_FALSE(widget("analysis_parameters")->enabled);
   ASSERT_NE(widget("analysis_show_archived"), nullptr);
   EXPECT_EQ(widget("analysis_show_archived")->text, "Show archived (1)");
@@ -457,24 +457,27 @@ TEST_F(AnalysisGraphRunEditorPython, ArchivedAnalysesAndRunsAreReadOnlyAndLeaveT
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_documents") && widget("analysis_documents")->table->rows == 1; }));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_archive") && widget("analysis_archive")->enabled; }));
   ASSERT_NO_FATAL_FAILURE(click("analysis_archive"));
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !widget("analysis_documents") && !shows("Archived: read-only") &&
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !widget("analysis_documents") && !shows("Archived: it cannot") &&
       widget("analysis_parameters") && widget("analysis_parameters")->enabled; }));
   widget("analysis_show_archived")->boolean.assign(false);
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_documents") && widget("analysis_documents")->table->rows == 1 &&
       !widget("analysis_show_archived"); }));
-  // A run that is not running: archived on its own, it leaves the history until switched to it.
+  // A prepared run that is not running: archived on its own, it leaves the history and is not started in place.
   ASSERT_NO_FATAL_FAILURE(run_list());
   ASSERT_NO_FATAL_FAILURE(select_run(run_id));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_run_archive") && widget("analysis_run_archive")->enabled; }));
+  EXPECT_TRUE(widget("analysis_run_start")->enabled);
   ASSERT_NO_FATAL_FAILURE(click("analysis_run_archive"));
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !widget("analysis_run_rows") && shows("Archived: read-only until restored.") &&
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !widget("analysis_run_rows") && shows("Archived: this run is not retried or continued.") &&
       widget("analysis_run_archive") && widget("analysis_run_archive")->text == "Restore"; }));
+  EXPECT_FALSE(widget("analysis_run_start")->enabled);
   ASSERT_NE(widget("analysis_runs_show_archived"), nullptr);
   widget("analysis_runs_show_archived")->boolean.assign(true);
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_run_rows") && widget("analysis_run_rows")->table->rows == 1; }));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_run_archive") && widget("analysis_run_archive")->enabled; }));
   ASSERT_NO_FATAL_FAILURE(click("analysis_run_archive"));
-  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !widget("analysis_run_rows") && !shows("Archived: read-only"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !widget("analysis_run_rows") && !shows("Archived: this run") &&
+      widget("analysis_run_start")->enabled; }));
   EXPECT_EQ(calls("project.archive.set").size(), 4u);
   EXPECT_EQ(calls("project.analysis_runs.start").size(), 0u);
 }

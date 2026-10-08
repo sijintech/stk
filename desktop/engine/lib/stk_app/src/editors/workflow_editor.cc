@@ -404,12 +404,6 @@ class WorkflowEditor final : public Editor {
       refreshed_revision_ = revision;
       workflows_->reload();
     }
-    else if (checked_archive_ != ctx.store.archive().version() && !workflows_->selected().is_null() && !draft_.dirty() &&
-             !ctx.store.project().busy()) {
-      // Archiving never changes the revision: read and check again (a step's analysis may be archived or restored).
-      checked_archive_ = ctx.store.archive().version();
-      workflows_->reload();
-    }
     else if (workflows_->validation().is_null() && io::get_string(workflows_->selected(), "state") == "readable" &&
              !ctx.store.project().busy()) {
       workflows_->validate_selected();  // after a save, once the project has settled
@@ -508,7 +502,7 @@ class WorkflowEditor final : public Editor {
     return draft_current() && !workflows_->stale() && !workflows_->busy() && !workflows_->uncertain() &&
         !ctx.store.project().busy() && !ctx.area.shell().text_input_active() && !archived(ctx);
   }
-  /** The shown workflow is archived: read-only until restored. */
+  /** The shown workflow is archived: it cannot be changed (it still runs as it is) until restored or copied. */
   bool archived(EditorContext &ctx) const
   {
     return ctx.store.archive().archived("workflow", io::get_string(workflows_->selected(), "id"));
@@ -860,8 +854,18 @@ class WorkflowEditor final : public Editor {
     if (!workflows_->notice().empty() && !draft_.dirty()) { layout.paragraph(ctx.tr(workflows_->notice())); }
     if (!workflows_->error().empty()) { layout.paragraph(clipped(workflows_->error(), 512)); }
     archived_notice(layout, ctx, "workflow", io::get_string(selected, "id"));
-    archive_button(layout, ctx, "workflow", io::get_string(selected, "id"), "workflow_archive", true,
+    auto &shelf = layout.row();
+    archive_button(shelf, ctx, "workflow", io::get_string(selected, "id"), "workflow_archive", true,
                    !draft_.dirty() && !workflows_->busy() && !workflows_->uncertain());
+    if (io::get_string(selected, "state") == "readable") {
+      // A copy is a new, active workflow: the way to change an archived one without restoring it.
+      const auto name = ctx.store.catalog().format("workflow.copy_name", {{"name", io::get_string(selected, "name")}});
+      const auto document = selected.at("document");
+      shelf.button("workflow_copy", ctx.tr("workflow.copy"), [this, ok = valid(), name, document] {
+        if (ok() && !draft_.dirty()) { selected_id_.clear(); workflows_->create(name, document); }
+      }).disable(draft_.dirty() || workflows_->busy() || workflows_->uncertain() || ctx.store.project().busy())
+          .tip(ctx.tr("workflow.copy.tip"));
+    }
   }
 
   /** Name, adding steps, the pending changes, their check, Save/Discard and Delete. */
@@ -1120,7 +1124,6 @@ class WorkflowEditor final : public Editor {
     const auto *table = run_table(ctx);
     std::string blocked;
     if (draft_.dirty()) { blocked = "workflow.run.save_first"; }
-    else if (archived(ctx)) { blocked = "workflow.run.archived"; }
     else if (!io::get_bool(workflows_->validation(), "ok", false)) { blocked = "workflow.run.fix_first"; }
     else if (!table) { blocked = "workflow.run.no_table"; }
     if (!blocked.empty()) { panel->paragraph(ctx.tr(blocked)); }
@@ -1379,7 +1382,7 @@ class WorkflowEditor final : public Editor {
     auto ok = valid();
     // Old results stay; stale rows run again as a new run over the current definitions (never rewriting this one).
     const bool can_run = !draft_.dirty() && io::get_bool(workflows_->validation(), "ok", false) && !workflows_->stale() &&
-        !workflows_->busy() && !ctx.store.project().busy() && !archived(ctx);
+        !workflows_->busy() && !ctx.store.project().busy();
     // Stale rows run again where this run ran (its frozen Runtime connection and options, if any).
     Json simulation;
     if (const auto &frozen = member(run, "simulation"); frozen.is_object()) {
@@ -1390,7 +1393,7 @@ class WorkflowEditor final : public Editor {
         .disable(outdated.empty() || status != "stopped" || !can_run).tip(ctx.tr("workflow.run.rerun_stale.tip"));
     auto &actions = panel.row();
     actions.button("workflow_run_retry", ctx.tr("workflow.run.retry"), [this, ok] { if (ok()) { workflows_->start_run(); } })
-        .disable(status != "stopped" || io::get_bool(run, "complete", false) || workflows_->busy() || run_archived || archived(ctx));
+        .disable(status != "stopped" || io::get_bool(run, "complete", false) || workflows_->busy() || run_archived);
     actions.button("workflow_run_cancel", ctx.tr("workflow.run.cancel"), [this, ok] { if (ok()) { workflows_->cancel_run(); } })
         .disable(status != "running" || workflows_->busy());
     actions.button("workflow_run_recover", ctx.tr("workflow.run.recover"), [this, ok] { if (ok()) { workflows_->recover_run(); } })
@@ -1710,7 +1713,6 @@ class WorkflowEditor final : public Editor {
   std::string runs_listed_;  // "workflow@revision" the runs list was last read for
   bool show_archived_ = false, show_archived_runs_ = false;  // the lists show only archived objects
   std::string page_archive_, runs_archive_;  // the archive filter and version each list was read with
-  uint64_t checked_archive_ = 0;  // the archive version the shown workflow was last read and checked with
   std::set<std::string> run_unchecked_;
   std::string run_rows_table_, run_finished_, stale_key_;
   int run_row_ = -1;

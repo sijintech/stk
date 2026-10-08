@@ -15,7 +15,7 @@ Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科�
 格式 8 增加[请求记录](project-requests.md)，固定输入来源并保存执行观察；阿里 Token Plan 可由用户明确发起文字请求。
 格式 9 增加[分析执行记录](project-analysis-runs.md)，冻结分析定义与输入快照映射，明确运行后归档校验过的结果。
 格式 10 增加[工作流按行运行](design/workflow-runs.md)的冻结计划与尝试记录。
-格式 11 增加[对象归档](design/project-archive.md)记录：归档的对象从默认列表收起、恢复前只读，数据不删除。
+格式 11 增加[对象归档](design/project-archive.md)记录：归档的对象从默认列表收起、不能修改但可照原样使用（运行、提问），数据不删除。
 
 表格超出面板宽度时，可以拖动底部横向滚动条、使用触控板横向滚动，或按住 Shift 滚动鼠标滚轮。
 列标题和数据一起移动；滚动后仍可点击列标题排序或拖动列边界调整宽度。

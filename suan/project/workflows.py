@@ -420,10 +420,6 @@ class Workflows:
                     issues.add("duplicate_step", step["id"], f"steps/{i}/id", "Step id is used more than once")
                 if problem:
                     issues.add(problem[0], step["id"], f"steps/{i}/ref", problem[1])
-                elif step["kind"] == "analysis" and archive.Archive._archived(db, "analysis", step["ref"].get("analysis")):
-                    # Archived analyses are read-only until restored and never run (format 11).
-                    issues.add("archived_reference", step["id"], f"steps/{i}/ref",
-                               "The referenced saved analysis is archived; restore it to run this workflow")
         unique = {step["id"]: (i, summaries[i]) for i, step in enumerate(steps) if counts[step["id"]] == 1}
         table_fields = {}
         for step in steps:

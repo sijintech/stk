@@ -205,7 +205,7 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
   if (batches && std::find(ids.begin(), ids.end(), batch_id_) != ids.end()) {
     const auto index = rows.at(size_t(std::find(ids.begin(), ids.end(), batch_id_) - ids.begin()));
     const auto &values = batches->records[index].values;
-    const bool archived = archived_notice(*panel, ctx, "batch", batch_id_);
+    archived_notice(*panel, ctx, "batch", batch_id_);
     archive_button(*panel, ctx, "batch", batch_id_, "batch_archive", false, enabled);
     const Json intent = values.value(intent_id, Json());
     const Json outcomes = values.value(outcomes_id, Json());
@@ -271,7 +271,7 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
               Json params = {{"project_id", project}, {"expected_revision", revision}, {"batch_id", batch}};
               if (single) { params["record_ids"] = selected; }
               execute(scripts, "batch_" + operation, params);
-            }).disable(!enabled || (single && batch_member_.empty()) || (archived && (operation == "prepare" || operation == "submit")));
+            }).disable(!enabled || (single && batch_member_.empty()));
         }
       };
       actions(false);

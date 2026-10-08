@@ -516,7 +516,7 @@ class AIEditor final : public Editor {
       }).disable(!enabled);
     }
     archive_button(actions, ctx, "request", id, "ai_archive", false, enabled && status != "running" && status != "uncertain");
-    if (parameter_request && status == "completed") { proposal_actions(layout, ctx, state, handle, id, enabled && !archived); }
+    if (parameter_request && status == "completed") { proposal_actions(layout, ctx, state, handle, id, enabled); }
     layout.separator();
     layout.label(ctx.tr("ai.compose"));
     layout.prop(ctx.tr("ai.intent")).dropdown("ai_intent/" + handle,
@@ -531,8 +531,6 @@ class AIEditor final : public Editor {
     layout.paragraph(ctx.tr("ai.prepare_hint"));
     if (picker_.active()) { layout.paragraph(ctx.tr("ai.scope.finish_first")); }
     const auto context_id = io::get_string(discussion.context(), "id");
-    const bool context_archived = ctx.store.archive().archived("context", context_id);
-    if (context_archived) { layout.paragraph(ctx.tr("ai.context_archived")); }
     layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id] {
       if (!state.project() || state.project()->handle != handle || active_draft_ != key || picker_.active()) { return; }
       const auto &current = drafts_.at(key);
@@ -541,7 +539,7 @@ class AIEditor final : public Editor {
         opened_history_ = true;
         proposal_navigation_error_.clear();
       }
-    }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || context_archived || !has_question ||
+    }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || !has_question ||
                !model_has_text_ || discussion.provider().empty() ||
                (draft.intent >= 1 && !discussion.edit_proposals_supported()));
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {

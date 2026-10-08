@@ -3877,7 +3877,7 @@ TEST_F(WorkflowSimulationPython, MuFerroWorkflowRunsEveryRowOnThePickedRuntime)
 #define STK_UNTIL(condition) \
   ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return (condition); }, 30)) << client->bridge_log().text()
 
-TEST_F(ProjectPython, ArchivedDraftsLeaveTheSavedListUntilRestored)
+TEST_F(ProjectPython, ArchivedDraftsLeaveTheSavedListAndApplyOnlyAsCopies)
 {
   populated();
   state().set_review_source(set_cell(350).dump());
@@ -3898,20 +3898,37 @@ TEST_F(ProjectPython, ArchivedDraftsLeaveTheSavedListUntilRestored)
   STK_UNTIL(!widget("draft_rows") && widget("drafts_show_archived"));
   EXPECT_EQ(widget("drafts_show_archived")->text, "Show archived (1)");
   widget("drafts_show_archived")->boolean.assign(true);
-  // Only archived drafts: read-only (not loaded for review or discarded) until restored.
+  // Only archived drafts. One can be loaded to look at but is neither discarded nor applied as it is; a copy can be.
   STK_UNTIL(widget("draft_rows") && widget("draft_archive") && widget("draft_archive")->text == "Restore" &&
-            widget("draft_archive")->enabled);
-  EXPECT_FALSE(widget("load_draft")->enabled);
+            widget("draft_archive")->enabled && widget("load_draft")->enabled);
   EXPECT_FALSE(widget("discard_saved_draft")->enabled);
+  EXPECT_EQ(state().project()->revision, 1);  // archiving is not an edit
+  widget("load_draft")->on_click();
+  auto page = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  STK_UNTIL(!state().saved_review().empty() && !state().busy() && page("review_copy_saved") && page("review_copy_saved")->enabled);
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  EXPECT_TRUE(shows("Archived: it is not applied or discarded as it is."));
+  page("review_copy_saved")->on_click();
+  STK_UNTIL(state().saved_review().empty() && !state().busy() && page("review_apply") && page("review_apply")->enabled);
+  page("review_apply")->on_click();
+  STK_UNTIL(!state().busy() && state().project()->revision == 2);
+  EXPECT_EQ(state().table()->text(0, 0), "350");
+  // The archived draft itself is unchanged; restored, it is listed again.
+  STK_UNTIL(widget("draft_rows") && widget("draft_archive") && widget("draft_archive")->enabled);
   widget("draft_archive")->on_click();
   STK_UNTIL(!widget("draft_rows"));
   widget("drafts_show_archived")->boolean.assign(false);
   STK_UNTIL(widget("draft_rows") && widget("load_draft") && widget("load_draft")->enabled && !widget("drafts_show_archived"));
-  EXPECT_EQ(state().project()->revision, 1);  // archiving is not an edit
+  EXPECT_EQ(state().drafts().at(0).at("status"), "pending");
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
-TEST_F(ProjectPython, ArchivedQuestionsLeaveTheAIHistoryAndArchivedContextsCannotBeAsked)
+TEST_F(ProjectPython, ArchivedQuestionsLeaveTheAIHistoryAndArchivedContextsCanStillBeAsked)
 {
   populated();
   const std::string first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -3934,8 +3951,9 @@ TEST_F(ProjectPython, ArchivedQuestionsLeaveTheAIHistoryAndArchivedContextsCanno
   ASSERT_TRUE(discussion.load_exchange(first)); ai_frame();
   STK_UNTIL(widget("ai_archive") && widget("ai_archive")->enabled);
   widget("ai_archive")->on_click();
-  // The shown question stays, marked read-only; the history leaves it out until switched to archived ones.
-  STK_UNTIL(widget("ai_history") && widget("ai_history")->items.size() == 1 && shows("Archived: read-only until restored."));
+  // The shown question stays, marked as not to be sent; the history leaves it out until switched to archived ones.
+  STK_UNTIL(widget("ai_history") && widget("ai_history")->items.size() == 1 && shows("Archived: this question is not sent."));
+  EXPECT_FALSE(widget("ai_send_saved")->enabled);
   EXPECT_EQ(discussion.page("requests").items.front().at("id"), second);
   EXPECT_EQ(widget("ai_archive")->text, "Restore");
   ASSERT_NE(widget("ai_history_show_archived"), nullptr);
@@ -3945,14 +3963,15 @@ TEST_F(ProjectPython, ArchivedQuestionsLeaveTheAIHistoryAndArchivedContextsCanno
   widget("ai_history_show_archived")->boolean.assign(false);
   STK_UNTIL(discussion.page("requests").loaded && !discussion.busy() && discussion.page("requests").items.size() == 1 &&
             discussion.page("requests").items.front().at("id") == second);
-  // An archived context cannot be asked about until restored.
+  // An archived context can still be asked about: a new message and question are new objects.
   const auto context = io::get_string(discussion.context(), "id");
   ASSERT_FALSE(context.empty());
-  EXPECT_FALSE(shows("The chosen context is archived"));
   ASSERT_TRUE(f.shell->store().archive().set("context", {context}, true));
-  STK_UNTIL(shows("The chosen context is archived"));
-  ASSERT_NE(widget("ai_prepare"), nullptr);
-  EXPECT_FALSE(widget("ai_prepare")->enabled);
+  STK_UNTIL(f.shell->store().archive().archived("context", context) && !f.shell->store().archive().busy() &&
+            !discussion.busy() && !state().busy());
+  ASSERT_TRUE(discussion.add_message("A follow-up about the archived context")); settled();
+  EXPECT_TRUE(discussion.error().empty()) << discussion.error();
+  ASSERT_NO_FATAL_FAILURE(saved_request("cccccccc-cccc-4ccc-8ccc-cccccccccccc"));
   EXPECT_EQ(state().project()->revision, 1);
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
@@ -4040,7 +4059,7 @@ TEST_F(ProjectPython, ArchivedBatchesLeaveTheSavedBatchesUntilRestored)
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
-TEST_F(ProjectPython, ArchivedContextsLeaveTheDiscussionListAndTakeNoMessages)
+TEST_F(ProjectPython, ArchivedContextsLeaveTheDiscussionListAndStillTakeMessages)
 {
   populated();
   ASSERT_NO_FATAL_FAILURE(saved_request("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
@@ -4053,10 +4072,20 @@ TEST_F(ProjectPython, ArchivedContextsLeaveTheDiscussionListAndTakeNoMessages)
   widget("message_composer/text")->string.assign("A note about these values");
   STK_UNTIL(widget("message_composer/save_message") && widget("message_composer/save_message")->enabled);
   widget("discussion_context_archive")->on_click();
-  // The shown context stays, read-only: no messages are added to it until it is restored.
+  // The shown context stays and can still be discussed: a message is a new object, the context itself never changes.
   STK_UNTIL(discussion.page("contexts").loaded && !discussion.busy() && discussion.page("contexts").items.empty() &&
             widget("discussion_show_archived/contexts") && widget("discussion_context_archive")->text == "Restore");
-  EXPECT_FALSE(widget("message_composer/save_message")->enabled);
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  EXPECT_TRUE(shows("Archived: it still can be asked about"));
+  ASSERT_TRUE(widget("message_composer/save_message")->enabled);
+  widget("message_composer/save_message")->on_click();
+  STK_UNTIL(!discussion.busy() && discussion.error().empty() &&
+            io::get_string(discussion.message(), "text") == "A note about these values");
   widget("discussion_show_archived/contexts")->boolean.assign(true);
   STK_UNTIL(discussion.page("contexts").loaded && !discussion.busy() && discussion.page("contexts").items.size() == 1 &&
             widget("discussion_context_archive")->enabled);

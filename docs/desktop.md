@@ -50,9 +50,10 @@ D1 里程碑的真实验收（经控制服务提交 muFerro、日志、下载、
 
 **归档**（项目格式 11，[方案](design/project-archive.md)）：工作流、保存的分析、仿真批次、工作流/分析/仿真运行、AI 问答、上下文与草案
 都可以在各自的列表或详情处 **归档**，收起而不删除；默认列表不再显示，列表上的 **显示已归档（N）** 切换到只看已归档的对象，**恢复** 放回。
-归档不是项目编辑，不改变修订、不进入撤销。已归档的对象仍可查看，但恢复前只读：不能保存修改、准备或开始运行、提交、应用或放弃草案、
-向其上下文提问；运行中的对象要先取消或等它结束才能归档。归档工作流时同时归档它不在运行中的运行，恢复时一并恢复；
-工作流的步骤引用已归档的分析时，检查会列出问题“引用的分析已归档”（仍可保存，恢复分析前不能运行）。搜索仍会找到已归档的对象并加以标注。
+归档不是项目编辑，不改变修订、不进入撤销。已归档的对象是冻结的：不能修改，但可以照原样使用——工作流和分析照常运行（也可作为工作流步骤），
+批次照原设置准备和提交，上下文照常提问，问题的回复仍可生成草案。原记录本身不再改动：运行记录不重试，问题不再发送，草案不直接应用或放弃。
+要修改时 **恢复**，或复制出新版本：工作流用 **复制为新工作流**，分析用 **保存为新分析**，草案用 **以当前修订另起草案并检查**。
+运行中的对象要先取消或等它结束才能归档。归档工作流时同时归档它不在运行中的运行，恢复时一并恢复。搜索仍会找到已归档的对象并加以标注。
 
 其下的 **搜索项目** 在当前项目中查找文字（不区分大小写，按回车或“搜索”开始）：参数表与字段名称、单元格文字、工作流与保存分析的名称、
 文件名与路径、AI 草案标题和对话消息。结果按类别列出（每类最多 50 项、共 100 项），“打开”到所在位置：单元格打开参数表并选中该行，
@@ -517,8 +518,10 @@ project was opened are dropped.
 Users with a saved layout keep it; File > Reset layout switches to the new default.
 **Archive** (project format 11): workflows, saved analyses, simulation batches, workflow/analysis/simulation runs,
 AI questions, contexts and drafts can be archived where they are listed or shown. Archived objects leave the default
-lists (**Show archived (N)** lists only them, **Restore** brings one back), stay readable, and are read-only until
-restored; archiving is not a project edit (no new revision, no undo). Archiving a workflow also archives its runs that
+lists (**Show archived (N)** lists only them, **Restore** brings one back), stay readable, and are frozen: they cannot be changed but can be used as they are (workflows and analyses
+still run, batches still prepare and submit, contexts can still be asked about), while runs are not retried, questions
+not sent and drafts not applied in place. To change one, restore it or copy it (**Copy as new workflow**, **Save as
+new analysis**, **Review as a new draft at current revision**); archiving is not a project edit (no new revision, no undo). Archiving a workflow also archives its runs that
 are not running, and restoring it restores them. Home's "Needs you" items that are not running can be archived too.
 
 ### Skill catalog

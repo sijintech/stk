@@ -620,8 +620,7 @@ evaluating graphs, preparing runs or reading data files. Kinds and references ar
 inputs are the literal `binding` names of the saved graph's source nodes (type `files`), whose parameters
 are the graph's declared `parameters` and whose outputs are its declared outputs (type `result`).
 Issues are `{code, step, path, message}` (at most 256, then `omitted_issues`), with codes `duplicate_step`,
-`unknown_kind`, `invalid_reference`, `missing_reference`, `unreadable_reference`, `archived_reference`
-(an `analysis` step whose saved analysis is archived, project format 11), `unknown_template`,
+`unknown_kind`, `invalid_reference`, `missing_reference`, `unreadable_reference`, `unknown_template`,
 `dynamic_binding`, `unknown_port`, `missing_step`, `ambiguous_step`, `missing_port`, `type_mismatch`,
 `template_table`, `missing_input`, `unknown_parameter`, `field_not_in_workflow`, `parameter_type`,
 `unit_mismatch` and `cycle` (over links and `after`). `ok` is true only with no issues. Each
@@ -699,12 +698,12 @@ List methods `project.workflows.list`, `project.analyses.list`, `project.workflo
 `project.runs.list`, `project.requests.list`, `project.drafts.list` and `project.contexts.list` take an optional
 `archived` boolean: `false` lists only objects that are not archived, `true` only archived ones (filtered in the query,
 so pages, `next_offset` and `total` follow the filter); omitted lists everything as before. Archived objects are
-read-only until restored, refused with `conflict` ("archived; restore it to …"): saving a workflow or analysis,
-preparing a workflow run of an archived workflow or one whose analysis step references an archived analysis,
-preparing an analysis run of an archived analysis, starting an archived workflow or analysis run, submitting an
-archived simulation run, preparing or submitting an archived batch (`stk.batches`), applying or discarding an archived
-draft, adding a message to an archived context or a request on one of its messages, and starting or converting an
-archived request. Reading is unaffected. These checks cover the dedicated operations, not raw `project.apply` edits of
+frozen: changing one is refused with `conflict` ("archived; restore it to …") — saving a workflow or analysis,
+starting or retrying an archived workflow or analysis run, submitting an archived simulation run, starting (sending) an
+archived request, and applying or discarding an archived draft. Using one as it is stays allowed and creates new
+objects: preparing and running a new run of an archived workflow or analysis (also as a workflow step), preparing and
+submitting an archived batch, adding messages and requests to an archived context, and converting an archived
+request's reply into a draft. Reading is unaffected. These checks cover the dedicated operations, not raw `project.apply` edits of
 the managed tables (deleting stays an ordinary table edit). `project.attention.list` leaves archived objects out;
 `project.search` includes them with `archived: true` after the others of their kind (messages of an archived context
 count as archived).

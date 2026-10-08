@@ -6,7 +6,7 @@ import pytest
 
 from suan.project import ProjectError, ProjectStore
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
-from test_bridge_workflow_runs import analysis_document, setup  # noqa: F401
+from test_bridge_workflow_runs import analysis_document, prepare, settled, setup  # noqa: F401
 from test_desktop_bridge import bridge_env, inproc  # noqa: F401
 
 
@@ -123,7 +123,7 @@ def test_lists_filter_archived_objects_with_correct_paging(setup):
     assert not h.violations
 
 
-def test_archived_objects_are_read_only_until_restored(setup):
+def test_archived_objects_cannot_change_but_can_still_be_used(setup):
     h, store, ids, handle, worker = setup
     saved = store.workflows.get(ids["workflow"])["workflow"]
     context = store.contexts.capture(table_id=ids["cases"], record_ids=ids["rows"][:1], field_ids=[ids["temperature"]],
@@ -136,47 +136,51 @@ def test_archived_objects_are_read_only_until_restored(setup):
              {"kind": "request", "id": request["id"]}, {"kind": "workflow_run", "id": run}]
     store.archive.set(items, archived=True)
     revision = store.info()["revision"]
+    # Changing an archived object itself is refused: saving, retrying its record, applying or discarding, sending.
     refused = [
         lambda: h.call("project.workflows.update", {"handle": handle, "workflow_id": ids["workflow"], "name": "Renamed",
                                                      "document": saved["document"], "expected_revision": revision}),
-        lambda: h.call("project.workflow_runs.prepare", {"handle": handle, "workflow_id": ids["workflow"], "rows": ids["rows"][:1],
-                                                          "run_id": str(uuid4()), "expected_revision": revision}),
         lambda: h.call("project.workflow_runs.start", {"handle": handle, "run_id": run}),
         lambda: h.call("project.drafts.apply", {"handle": handle, "draft_id": pending, "expected_revision": revision}),
         lambda: h.call("project.drafts.discard", {"handle": handle, "draft_id": pending}),
-        lambda: h.call("project.discussion.add", {"handle": handle, "message_id": str(uuid4()), "context_id": context["id"],
-                                                   "text": "More?"}),
-        lambda: h.call("project.requests.create", {"handle": handle, "message_id": message["id"], "request_id": str(uuid4()),
-                                                    "configuration": {"adapter": "controlled/1", "model": "m"}}),
         lambda: h.call("project.requests.start", {"handle": handle, "request_id": request["id"]}),
     ]
     for call in refused:
         with pytest.raises(Exception, match="archived; restore it"):
             call()
     assert store.info()["revision"] == revision and store.drafts.get(pending)["status"] == "pending"
-    # Reading stays possible; restoring makes them usable again.
+    # Using it as it is makes new objects: a new run of the workflow, a new message and question about the context.
+    fresh = h.call("project.workflow_runs.prepare", {"handle": handle, "workflow_id": ids["workflow"], "rows": ids["rows"][:1],
+                                                      "run_id": str(uuid4()), "expected_revision": revision})["run"]
+    h.call("project.workflow_runs.start", {"handle": handle, "run_id": fresh["id"]})
+    assert settled(h, handle, fresh["id"])["complete"]
+    assert not store.archive.is_archived("workflow_run", fresh["id"])
+    again = h.call("project.discussion.add", {"handle": handle, "message_id": str(uuid4()), "context_id": context["id"],
+                                              "text": "More?"})["message"]
+    h.call("project.requests.create", {"handle": handle, "message_id": again["id"], "request_id": str(uuid4()),
+                                       "configuration": {"adapter": "controlled/1", "model": "m"}})
     assert h.call("project.workflows.get", {"handle": handle, "workflow_id": ids["workflow"]})["workflow"]["id"] == ids["workflow"]
+    # Restoring makes them changeable again.
     store.archive.set(items, archived=False)
     assert h.call("project.drafts.discard", {"handle": handle, "draft_id": pending})["draft"]["status"] == "discarded"
-    h.call("project.discussion.add", {"handle": handle, "message_id": str(uuid4()), "context_id": context["id"], "text": "More?"})
 
 
-def test_an_archived_analysis_cannot_be_run_directly_or_through_a_workflow(setup):
+def test_an_archived_analysis_still_runs_directly_and_through_a_workflow(setup):
     h, store, ids, handle, worker = setup
     document = store.workflows.get(ids["workflow"])["workflow"]["document"]
-    assert store.workflows.validate(document)["ok"]
     store.archive.set([{"kind": "analysis", "id": ids["analysis"]}], archived=True)
-    # Checking the workflow says so before a run is refused.
-    checked = store.workflows.validate(document)
-    assert not checked["ok"] and [issue["code"] for issue in checked["issues"]] == ["archived_reference"]
-    assert "restore it to run this workflow" in checked["issues"][0]["message"]
-    with pytest.raises(Exception, match="uses an archived analysis"):
-        store.workflow_runs.prepare(ids["workflow"], ids["rows"][:1], run_id=str(uuid4()), expected_revision=store.info()["revision"])
-    with pytest.raises(Exception, match="archived; restore it to run it"):
+    assert store.workflows.validate(document)["ok"]  # referencing an archived analysis is no problem
+    with pytest.raises(Exception, match="archived; restore it"):
+        store.analyses.update(ids["analysis"], "Renamed", store.analyses.get(ids["analysis"])["analysis"]["document"],
+                              expected_revision=store.info()["revision"])
+    run = prepare(h, store, ids, handle, rows=ids["rows"][:1])
+    h.call("project.workflow_runs.start", {"handle": handle, "run_id": run["id"]})
+    assert settled(h, handle, run["id"])["counts"] == {"succeeded": 2}  # its analysis step ran
+    # A direct run is not refused for being archived (this one fails later, on its made-up snapshot).
+    with pytest.raises(Exception) as refused:
         store.analysis_runs.prepare(ids["analysis"], str(uuid4()), {"data": {"field.vtk": str(uuid4())}}, run_id=str(uuid4()),
                                     expected_revision=store.info()["revision"])
-    store.archive.set([{"kind": "analysis", "id": ids["analysis"]}], archived=False)
-    assert store.workflows.validate(document)["ok"]
+    assert "archived" not in str(refused.value)
 
 
 def test_archived_objects_leave_attention_and_are_marked_in_search(setup):
@@ -198,20 +202,3 @@ def test_archived_objects_leave_attention_and_are_marked_in_search(setup):
     found = h.call("project.search", {"handle": handle, "query": "scan"})["results"]
     assert [(item["id"], item.get("archived", False)) for item in found] == [(second, False), (ids["workflow"], True)]
     assert not h.violations
-
-
-def test_batches_check_the_archive_through_the_console():
-    from suan.workflows.batches import _archived
-
-    class Project:
-        def __init__(self, items=None, error=None):
-            self.items, self.error = items, error
-
-        def archived(self, kind):
-            if self.error:
-                raise self.error
-            return {"items": self.items, "counts": {}}
-    batch = str(uuid4())
-    assert _archived(Project([{"kind": "batch", "id": batch}]), batch)
-    assert not _archived(Project([]), batch)
-    assert not _archived(Project(error=RuntimeError("unknown method")), batch)  # an older service archives nothing

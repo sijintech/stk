@@ -127,7 +127,6 @@ class WorkflowRuns:
             if existing[0] != request_hash:
                 raise RevisionConflict("Workflow run UUID is already used by a different preparation request")
             return self.get(run_id)
-        self.store.archive.require_active("workflow", workflow_id, "run it")
         plan = self._plan(workflow_id, rows, run_id, expected_revision, simulation)
         with self.store._connect(write=True) as db:
             _require(db)
@@ -155,9 +154,6 @@ class WorkflowRuns:
         if checked["revision"] != revision:
             raise RevisionConflict(f"Expected revision {revision}, current revision is {checked['revision']}")
         if not checked["ok"]:
-            shelved = [issue["step"] for issue in checked["issues"] if issue["code"] == "archived_reference"]
-            if shelved:  # read-only until restored, refused like other archived objects
-                raise archive.Archived(f"Step {shelved[0]} uses an archived analysis; restore it to run this workflow")
             codes = ", ".join(sorted({issue["code"] for issue in checked["issues"]}))
             raise ProjectError(f"The workflow has problems ({codes}); fix them before running it")
         model = self.store.snapshot()
@@ -235,8 +231,6 @@ class WorkflowRuns:
                                           "duplicates": sorted(name for name, ids in names.items() if len(ids) > 1)}
             elif kind == "analysis":
                 analysis = self.store.analyses.get(step["ref"]["analysis"])["analysis"]
-                if self.store.archive.is_archived("analysis", analysis["id"]):
-                    raise archive.Archived(f"Step {identity} uses an archived analysis; restore it to run this workflow")
                 sources = {link["from"].split(".", 1)[0] for link in step.get("inputs", {}).values()}
                 if len(sources) > 1:
                     raise ProjectError(f"Step {identity}: all inputs of an analysis must come from one simulation or files step")
