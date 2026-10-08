@@ -427,10 +427,14 @@ class ProjectWorkflowRuns:
     def __init__(self, call, handle):
         self._call, self.handle = call, handle
 
-    def prepare(self, workflow_id, rows, *, run_id, expected_revision):
-        """Freeze the workflow, these rows' values and the referenced analyses; executes nothing."""
-        return self._call("project.workflow_runs.prepare", {"handle": self.handle, "workflow_id": workflow_id,
-            "rows": rows, "run_id": run_id, "expected_revision": expected_revision})["run"]
+    def prepare(self, workflow_id, rows, *, run_id, expected_revision, connection=None, options=None):
+        """Freeze the workflow, these rows' values and the referenced analyses; executes nothing.
+        MuFerro steps run on ``connection`` (a saved direct/SSH Runtime profile) with muferro_spec ``options``."""
+        params = {"handle": self.handle, "workflow_id": workflow_id, "rows": rows, "run_id": run_id,
+                  "expected_revision": expected_revision}
+        if connection is not None:
+            params["simulation"] = {"connection": connection, "options": dict(options or {})}
+        return self._call("project.workflow_runs.prepare", params)["run"]
 
     def start(self, run_id):
         """Execute the run's unfinished tasks in the background (also retries failed or cancelled ones)."""

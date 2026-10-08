@@ -103,7 +103,7 @@ def test_preparing_freezes_rows_values_analyses_and_order(project):
 
 
 def muferro_workflow(ids):
-    """A valid workflow over the MuFerro case table; its simulation step needs a Runtime."""
+    """A valid workflow over the MuFerro case table; its simulation step needs a Runtime connection."""
     return {"format": "stk.workflow/1", "ui": {}, "steps": [
         {"id": "cases", "kind": "table", "ref": {"table": muferro.TABLE_ID}},
         {"id": "simulate", "kind": "simulation", "ref": {"template": "muferro/1"}, "inputs": {"rows": {"from": "cases.rows"}}},
@@ -111,7 +111,7 @@ def muferro_workflow(ids):
 
 
 @pytest.mark.parametrize("change, message", [
-    (muferro_workflow, "not supported yet"),
+    (muferro_workflow, "Choose where to run"),  # MuFerro steps need a Runtime connection (W5)
     (lambda ids: workflow(ids, temperature={"parameters": {"nope": 1}}), "problems"),
     (lambda ids: {**workflow(ids), "steps": workflow(ids)["steps"] + [
         {"id": "other", "kind": "table", "ref": {"table": ids["cases"]}}]}, "exactly one parameter table"),

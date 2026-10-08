@@ -270,7 +270,8 @@ class ProjectSessions:
             runs = store.workflow_runs
             if action == "prepare":
                 return {"run": runs.prepare(params["workflow_id"], params["rows"], run_id=params["run_id"],
-                                            expected_revision=params["expected_revision"])}
+                                            expected_revision=params["expected_revision"],
+                                            simulation=params.get("simulation"))}
             if action == "get":
                 return {"run": runs.get(params["run_id"])}
             if action == "list":

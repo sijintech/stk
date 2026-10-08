@@ -153,7 +153,8 @@ class Bridge:
         self.graphs = GraphService(self.cache_dir, self.connections, self.emit)
         self.analysis_executor = AnalysisRunExecutor(self.graphs.worker, self.graphs.blobs.root)
         # Workflow runs register outputs as ordinary edits in the background; open handles hear about them.
-        self.workflow_executor = WorkflowRunExecutor(self.analysis_executor, changed=self._announce)
+        self.workflow_executor = WorkflowRunExecutor(self.analysis_executor, changed=self._announce,
+                                                     scripting=self._workflow_scripting)
         self.projects = ProjectSessions(self.state_dir, analysis_executor=self.analysis_executor,
                                         workflow_executor=self.workflow_executor)
         self.project_runs = ProjectRuns(self.projects, self.connections.backend)
@@ -267,7 +268,7 @@ class Bridge:
             "project.workflows.list": lambda p, c: self.projects.workflows("list", p),
             "project.workflows.validate": lambda p, c: self.projects.workflows("validate", p),
             "project.workflows.choices": lambda p, c: self.projects.workflows("choices", p),
-            "project.workflow_runs.prepare": lambda p, c: self.projects.workflow_runs("prepare", p),
+            "project.workflow_runs.prepare": lambda p, c: self.projects.workflow_runs("prepare", self._simulation_identity(p)),
             "project.workflow_runs.get": lambda p, c: self.projects.workflow_runs("get", p),
             "project.workflow_runs.list": lambda p, c: self.projects.workflow_runs("list", p),
             "project.workflow_runs.start": lambda p, c: self.projects.workflow_runs("start", p),
@@ -346,6 +347,25 @@ class Bridge:
 
     def emit(self, event, data):
         self.send({"event": event, "data": data})
+
+    def _simulation_identity(self, params):
+        """A workflow run's simulation settings with the Runtime endpoint fingerprint frozen beside the profile."""
+        if "simulation" not in params:
+            return params
+        simulation = params["simulation"]
+        backend = self.connections.backend(simulation["connection"], None)
+        return {**params, "simulation": {"connection": simulation["connection"], "connection_identity": backend.server_key,
+                                         "options": simulation.get("options", {})}}
+
+    def _workflow_scripting(self, store, cancelled):
+        """The console's stk API on an open handle of ``store`` (remote workflow steps, W5)."""
+        from suan.scripting import API
+        handles = self.projects.handles_of(store)
+        if not handles:
+            raise BridgeError("not_found", "The project is no longer open")
+        api = API(lambda operation, values: self.script_call(operation, values, cancelled))
+        api._project_handle = sorted(handles)[0]
+        return api
 
     def _announce(self, store):
         """A background edit (a workflow run registering outputs) as project.changed for each open handle."""

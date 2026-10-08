@@ -1,5 +1,18 @@
 # 开发交接记录
 
+## 2026-10-07：W5a MuFerro 按行工作流运行（服务与脚本）
+
+所有者决定：归档方案（已写）→ MuFerro 按行工作流运行 → AI 批量模拟闭环。W5a：`WorkflowRuns.prepare(..., simulation=)` 冻结连接、
+端点指纹（`server_key`）、`muferro_spec` 选项与每行全部案例字段（准备时逐行 `describe_case` 校验，不提交任何东西）；MuFerro 模板标记 `remote`。
+执行器经服务内的 `stk` 接口（`Bridge.script_call`，与控制台相同的操作）调用 `stk.muferro.prepare/collect` 与 `p.runs.submit/refresh/cancel`：
+主循环改为多轮——远程步骤提交后即返回，后续每轮（`poll_seconds`，默认 15 秒）读取任务，成功则收集、按 `muferro.final_state` 选出最终状态
+登记并捕获为该行快照，再运行下游分析。`describe_case/prepare` 新增可选 `identity`（工作流运行/步骤/行/尝试），批次标签不变。
+进度保存为同一尝试的又一条 `running` 事件（格式 10 的表有状态 CHECK 约束，不能加新状态），任务的 `progress` 跨尝试保留；
+停止跟踪时尝试记为中断（`detached`），下次开始接管未失败的仿真运行；用户取消时以不可中断的接口取消 Runtime 任务。
+
+critical review：首版把进度写成新状态 `progress`，被表的 CHECK 约束拒绝（测试发现），改为 `running` 事件；一次补丁脚本漏写文件导致执行器改动缺失，
+重做并核对；控制台调用在取消后全部报 `cancelled`，取消 Runtime 任务改用单独、永不取消的接口；MuFerro 准备读取当前行，执行前比较冻结值。
+
 ## 2026-10-07：体验包 U3 项目内搜索
 
 `suan/project/search.py` 的 `search(store, query, limit)`：从项目快照查找参数表（不含受管的分析、工作流与文件表）的表名、字段名与文本单元格，

@@ -10,6 +10,7 @@ class MuFerroTemplate:
     id = "muferro/1"
     table_id = muferro.TABLE_ID
     name = "MuFerro"
+    remote = True  # workflow runs execute it on a Runtime connection frozen in the run (W5)
 
     def describe(self, model, record_id, connection, options):
         values, _, label = muferro.describe_case(model, record_id, connection, options)

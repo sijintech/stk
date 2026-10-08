@@ -209,7 +209,25 @@ def _folder(root, *parts):
     return path
 
 
-def describe_case(model, record_id, connection, options):
+def final_state(names):
+    """The collected files a downstream analysis needs for a run's final state: inputs, the launcher
+    report, the energy/progress/completion records and the last frame of every dataset. Bounded,
+    unlike all frames (analysis inputs take at most 100 files and 256 MiB)."""
+    frames, chosen = {}, []
+    for name in names:
+        parts = name.split("/")
+        stem = parts[-1].split(".")
+        if len(parts) == 2 and parts[0] == "case" and len(stem) == 3 and stem[2] == "dat" and stem[1].isdigit():
+            if int(stem[1]) >= frames.get(stem[0], (-1, ""))[0]:
+                frames[stem[0]] = (int(stem[1]), name)
+        elif name == "stk-mupro.json" or (len(parts) >= 2 and parts[0] == "case"):
+            chosen.append(name)
+    return sorted(chosen + [name for _, name in frames.values()])
+
+
+def describe_case(model, record_id, connection, options, identity=None):
+    """Validated row values, the task template and the plan label. ``identity`` (for example a workflow
+    run's task and attempt) gives that execution its own plan, workspace and task; batches pass none."""
     table = _table(model, TABLE_ID, FIELDS, FIELD_IDS)
     row = next((r for r in table["records"] if r["id"] == record_id), None) if table else None
     if row is None or any(e.get("state") != "ok" for e in row.get("evaluations", {}).values()):
@@ -223,10 +241,15 @@ def describe_case(model, record_id, connection, options):
     # Validate execution options before creating files or making network requests.
     template = muferro_spec("0" * 32, case_dir="case", name="MuFerro", **options)
     TaskSpec(**template)
-    fingerprint = hashlib.sha256(_canonical({"project": model["project"]["id"], "record": record_id,
-        "values": row["values"], "definitions": row.get("definitions", {}),
-        "fields": {f["id"]: [f["type"], f.get("unit")] for f in table["fields"]},
-        "connection": connection, "spec": template}).encode("utf-8")).hexdigest()
+    if identity is not None and (type(identity) is not str or not 1 <= len(identity) <= 256):
+        raise ValueError("A preparation identity is a short string")
+    basis = {"project": model["project"]["id"], "record": record_id,
+             "values": row["values"], "definitions": row.get("definitions", {}),
+             "fields": {f["id"]: [f["type"], f.get("unit")] for f in table["fields"]},
+             "connection": connection, "spec": template}
+    if identity is not None:
+        basis["identity"] = identity  # absent for batches, so their existing labels stay the same
+    fingerprint = hashlib.sha256(_canonical(basis).encode("utf-8")).hexdigest()
     label = LABEL + str(values["name"])[:40] + f" · {values['temperature']:g} K / " + fingerprint
     return values, template, label
 
@@ -281,15 +304,16 @@ class MuFerro:
         print("Copied MuFerro parameters:", row_id, flush=True)
         return {"record_id": row_id, "revision": result["revision"]}
 
-    def prepare(self, record_id, connection, *, expected_revision, project=None, **options):
+    def prepare(self, record_id, connection, *, expected_revision, project=None, identity=None, **options):
         """Freeze inputs and prepare one plan. Repeating the same row/options reuses that plan.
 
         Options are muferro_spec resource/node-environment options; workspace/input/name are owned
         by this workflow. Increment the row's Attempt field to request an independent rerun.
+        ``identity`` separates executions of the same row (a workflow run's task attempt).
         """
         p = project or self.stk.project
         model = _revision(p, expected_revision)
-        values, template, label = describe_case(model, record_id, connection, options)
+        values, template, label = describe_case(model, record_id, connection, options, identity)
         fingerprint = label.rsplit(" / ", 1)[1]
         offset = 0
         while True:

@@ -5987,6 +5987,24 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9223372036854775807
+            },
+            "simulation": {
+              "type": "object",
+              "properties": {
+                "connection": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "options": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "connection"
+              ],
+              "additionalProperties": false,
+              "description": "Where remote simulation steps (muferro/1) run: a saved direct or SSH Runtime profile and muferro_spec options."
             }
           },
           "required": [
@@ -11801,6 +11819,57 @@
             "null"
           ],
           "maxLength": 64
+        },
+        "progress": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                },
+                "stage": {
+                  "enum": [
+                    "preparing",
+                    "prepared",
+                    "submitted",
+                    "queued",
+                    "running",
+                    "collecting",
+                    "adopted"
+                  ]
+                },
+                "simulation_run_id": {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                "task_id": {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                "state": {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                "adopted_from": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9223372036854775807
+                }
+              },
+              "required": [
+                "attempt",
+                "stage"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Remote work (W5) of the latest attempt that recorded any: its simulation run, Runtime task and stage."
         }
       },
       "required": [
@@ -11810,7 +11879,8 @@
         "status",
         "produced",
         "error",
-        "updated_at"
+        "updated_at",
+        "progress"
       ],
       "additionalProperties": false
     },
@@ -11982,6 +12052,29 @@
               "type": "null"
             }
           ]
+        },
+        "simulation": {
+          "type": "object",
+          "properties": {
+            "connection": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "connection_identity": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "options": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "connection",
+            "connection_identity",
+            "options"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

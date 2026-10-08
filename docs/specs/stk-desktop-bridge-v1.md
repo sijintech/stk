@@ -640,9 +640,11 @@ document's submitted parameters, which stay the saved analysis verbatim; they ar
 The optional `project.workflow_runs.*` methods (experimental, design in `docs/design/workflow-runs.md`) require project
 format 10. `prepare` freezes a valid saved workflow over 1–100 explicit rows of its single parameter table: the rows'
 numbers and the field values the run uses, each step x row's parameters, the referenced analyses (documents and
-SHA-256), snapshot files and the step order; it refuses steps it cannot execute here (`muferro/1` simulations, analysis
-inputs from more than one source, repeated snapshot file names, rows with formula errors) and changes no editable
-revision. `start` executes the unfinished tasks in the background, row by row: a local template (`demo-synthetic/1`)
+SHA-256), snapshot files and the step order; it refuses steps it cannot execute here (analysis inputs from more than
+one source, repeated snapshot file names, rows with formula errors) and changes no editable revision. A workflow with a
+`muferro/1` step needs `simulation: {connection, options?}` (a saved direct or SSH Runtime profile, not a Hub node, and
+`muferro_spec` options); the plan freezes it as `simulation` with the profile's endpoint fingerprint
+(`connection_identity`) and each row's MuFerro case values, validated before anything is submitted. `start` executes the unfinished tasks in the background, row by row: a local template (`demo-synthetic/1`)
 writes its declared outputs under `results/workflow-runs/<run>/row-<n>/<step>/attempt-<k>/`, which are registered and
 captured as that row's snapshot (ordinary undoable edits, announced with `project.changed`); an analysis step prepares
 and executes one analysis run with the row's `parameter_overrides`, refused when the saved analysis changed since the
@@ -651,11 +653,22 @@ succeed with new numbered attempts, and only the latest attempt can finish a tas
 and cancels an analysis in flight, also when another service process owns the run (it stops between tasks); `recover`
 marks attempts without a live executor (after a restart) as interrupted, refused with `busy` while the run's recorded
 service process (`owner`: host and pid) still exists unless `force`. A run that stopped unexpectedly reports `stop_error`.
-Tasks report `{step, row, attempt, status, produced, error, updated_at}`; nothing runs implicitly or calls a model.
+Tasks report `{step, row, attempt, status, produced, error, updated_at, progress}`; nothing runs implicitly or calls a model.
+A `muferro/1` step (W5) prepares the row's MuFerro plan, refused with `row_changed` when the case row no longer has its
+frozen values, submits it to the frozen connection and moves on, so every row's task is queued at once; the run then reads
+the tasks (every 15 s) and, as each succeeds, collects it (MuFerro results table) and freezes its final state (inputs,
+`stk-mupro.json`, energy/progress/completion records, the last frame of each dataset) as the row's snapshot for
+downstream analyses. `progress` is `{attempt, stage, simulation_run_id?, task_id?, state?, adopted_from?}` of the latest
+attempt that recorded remote work (stages `prepared`, `submitted`, `queued`, `running`, `collecting`, `adopted`); it is
+stored as a further `running` event of that attempt. When the service stops following a remote attempt (project closed,
+service stopped; `recover` after a restart) the attempt becomes `interrupted` (`detached`) while the Runtime task keeps
+running, and the next `start` adopts it instead of submitting again; a failed or cancelled task is retried as a new task.
+`cancel` also cancels the followed Runtime tasks. Errors include `runtime_failed`, `runtime_cancelled` and
+`runtime_unreachable` (10 consecutive failed reads).
 `stale` compares the frozen plan with the current definitions per executed step and row: `step_changed` (labels
 aside), `analysis_changed`/`analysis_missing`, `template_unavailable`, `value_changed` (a field the step takes from the
-row, with `before`/`after`), `value_error`, `row_removed`, `workflow_missing`, and `upstream_changed` downstream of a
-stale step. It reads only; old runs never change, and re-running `stale_rows` is a new `prepare`.
+row, with `before`/`after`; for `muferro/1` every case field), `value_error`, `row_removed`, `workflow_missing`, and
+`upstream_changed` downstream of a stale step. It reads only; old runs never change, and re-running `stale_rows` is a new `prepare`.
 
 The optional `project.attention.*` methods (experimental, design in `docs/design/ux-package-2026-10.md`) summarize what
 needs a person across workflow runs (format 10), analysis runs not started by a workflow run (format 9), simulation runs,

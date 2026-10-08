@@ -24,6 +24,7 @@ MAX_EVENT_BYTES = 64 * 1024
 RUN_EVENTS = ("prepared", "started", "cancel_requested", "stopped")
 TASK_TERMINAL = ("succeeded", "failed", "cancelled", "interrupted")
 TASK_EVENTS = ("running", *TASK_TERMINAL)
+PROGRESS_STAGES = ("preparing", "prepared", "submitted", "queued", "running", "collecting", "adopted")
 RESULTS_DIRECTORY = "results/workflow-runs"
 
 
@@ -97,8 +98,11 @@ class WorkflowRuns:
 
     # ---- preparation ----
 
-    def prepare(self, workflow_id, rows, *, run_id, expected_revision):
-        """Freeze one run of a saved workflow over explicit rows of its parameter table (1-100)."""
+    def prepare(self, workflow_id, rows, *, run_id, expected_revision, simulation=None):
+        """Freeze one run of a saved workflow over explicit rows of its parameter table (1-100).
+
+        ``simulation`` ({connection, connection_identity, options}) is where remote simulation steps
+        (``muferro/1``) run: a saved Runtime profile, its endpoint fingerprint and resource options."""
         for identity in (workflow_id, run_id):
             _id(identity)
         _expected_revision(expected_revision)
@@ -106,7 +110,14 @@ class WorkflowRuns:
             raise ProjectError(f"A workflow run takes 1 to {MAX_ROWS} distinct row IDs")
         for row in rows:
             _id(row)
+        if simulation is not None and (type(simulation) is not dict or set(simulation) != {"connection", "connection_identity", "options"}
+                                       or type(simulation["connection"]) is not str or not 1 <= len(simulation["connection"]) <= 256
+                                       or type(simulation["connection_identity"]) is not str or len(simulation["connection_identity"]) > 256
+                                       or type(simulation["options"]) is not dict):
+            raise ProjectError("A run's simulation settings are {connection, connection_identity, options}")
         request = {"workflow_id": workflow_id, "rows": rows, "expected_revision": expected_revision}
+        if simulation is not None:
+            request["simulation"] = simulation
         request_hash = _hash(request)
         with self.store._connect() as db:
             _require(db)
@@ -115,7 +126,7 @@ class WorkflowRuns:
             if existing[0] != request_hash:
                 raise RevisionConflict("Workflow run UUID is already used by a different preparation request")
             return self.get(run_id)
-        plan = self._plan(workflow_id, rows, run_id, expected_revision)
+        plan = self._plan(workflow_id, rows, run_id, expected_revision, simulation)
         with self.store._connect(write=True) as db:
             _require(db)
             revision = db.execute("SELECT revision FROM project").fetchone()[0]
@@ -128,7 +139,8 @@ class WorkflowRuns:
             self._append(db, run_id, "", "", 0, "prepared", {"at": plan["created_at"]})
         return self.get(run_id)
 
-    def _plan(self, workflow_id, rows, run_id, revision):
+    def _plan(self, workflow_id, rows, run_id, revision, simulation=None):
+        from suan.workflows import muferro
         from suan.workflows.templates import workflow_templates  # Registered versions only.
         saved = self.store.workflows.get(workflow_id)
         record = saved["workflow"]
@@ -151,15 +163,23 @@ class WorkflowRuns:
         if len(tables) != 1:
             raise ProjectError("A workflow run needs exactly one parameter table step to take its rows from")
         templates = workflow_templates()
+        remote = [step for step in steps if step["kind"] == "simulation" and getattr(templates[step["ref"]["template"]], "remote", False)]
         for step in steps:
             # Whatever rows are chosen, a step that cannot run here refuses the whole run.
-            if step["kind"] == "simulation" and not getattr(templates[step["ref"]["template"]], "local", False):
+            template = templates[step["ref"]["template"]] if step["kind"] == "simulation" else None
+            if template is not None and not getattr(template, "local", False) and not getattr(template, "remote", False):
                 raise ProjectError(f"Per-row runs of {step['ref']['template']} are not supported yet; use simulation batches")
+        if remote and simulation is None:
+            raise ProjectError("Choose where to run: this workflow's simulation steps need a Runtime connection")
+        if remote and simulation["connection"].startswith("hub:"):
+            raise ProjectError("Workflow runs submit MuFerro through direct or SSH Runtime connections; Hub nodes are not supported")
         table_id = tables[0]["ref"]["table"]
         table = next(table for table in model["tables"] if table["id"] == table_id)
         records = {entry["id"]: (number, entry) for number, entry in enumerate(table["records"], start=1)}
         fields = {value["$field"] for step in steps for value in step.get("parameters", {}).values()
                   if type(value) is dict and set(value) == {"$field"}}
+        if remote:
+            fields |= set(muferro.FIELD_IDS.values())  # a MuFerro step takes every case field of its row
         frozen_rows = []
         for row in rows:
             if row not in records:
@@ -172,7 +192,17 @@ class WorkflowRuns:
         frozen_steps, parameters = {}, {}
         for step in steps:
             kind, identity = step["kind"], step["id"]
-            if kind == "simulation":
+            if kind == "simulation" and getattr(templates[step["ref"]["template"]], "remote", False):
+                template = templates[step["ref"]["template"]]
+                frozen_steps[identity] = {"kind": kind, "template": template.id, "outputs": [], "remote": True}
+                parameters[identity] = {}
+                for row in frozen_rows:
+                    try:
+                        values, _, _ = muferro.describe_case(model, row["id"], simulation["connection"], simulation["options"])
+                    except (ValueError, TypeError) as exc:
+                        raise ProjectError(f"Row {row['number']}: {exc}") from None
+                    parameters[identity][row["id"]] = values
+            elif kind == "simulation":
                 template = templates[step["ref"]["template"]]
                 frozen_steps[identity] = {"kind": kind, "template": template.id, "outputs": list(template.outputs)}
                 declared = {item["name"]: item for item in template.parameters}
@@ -214,12 +244,15 @@ class WorkflowRuns:
             if frozen["kind"] == "analysis" and frozen["source"] and frozen_steps.get(frozen["source"], {}).get("duplicates"):
                 raise ProjectError(f"Step {identity}: the input files of step {frozen['source']} repeat the names "
                                    + ", ".join(frozen_steps[frozen["source"]]["duplicates"][:5]))
-        return {"id": run_id, "project_id": self.store._project_id, "workflow_id": workflow_id,
+        plan = {"id": run_id, "project_id": self.store._project_id, "workflow_id": workflow_id,
                 "workflow_name": record["name"], "document": document,
                 "document_sha256": hashlib.sha256(canonical_json(document)).hexdigest(),
                 "source_revision": revision, "created_at": _now(), "table_id": table_id, "rows": frozen_rows,
                 "order": _order(steps), "steps": frozen_steps, "parameters": parameters,
                 "directory": f"{RESULTS_DIRECTORY}/{run_id}"}
+        if remote:
+            plan["simulation"] = simulation
+        return plan
 
     # ---- the log ----
 
@@ -269,14 +302,20 @@ class WorkflowRuns:
                 continue
             key = (event["step"], event["row"])
             task = tasks.setdefault(key, {"step": event["step"], "row": event["row"], "attempt": 0, "status": "pending",
-                                          "produced": None, "error": None, "updated_at": None})
+                                          "produced": None, "error": None, "updated_at": None, "progress": None})
+            if event["status"] == "running" and "progress" in event:
+                # Remote work of a running attempt (W5), stored as a further "running" event of that attempt
+                # (the format-10 table allows no other status); kept across attempts so a later one can adopt it.
+                task.update(progress={"attempt": event["attempt"], **event["progress"]}, updated_at=event.get("at"))
+                continue
             task.update(attempt=event["attempt"], status=event["status"], updated_at=event.get("at"),
                         produced=event.get("produced"), error=event.get("error"))
         listed = []
         for row in plan["rows"]:
             for step in plan["order"]:
                 listed.append(tasks.get((step, row["id"]), {"step": step, "row": row["id"], "attempt": 0, "status": "pending",
-                                                             "produced": None, "error": None, "updated_at": None}))
+                                                             "produced": None, "error": None, "updated_at": None,
+                                                             "progress": None}))
         counts = {}
         for task in listed:
             counts[task["status"]] = counts.get(task["status"], 0) + 1
@@ -349,6 +388,9 @@ class WorkflowRuns:
             return {key: value for key, value in step.items() if key != "label"}
 
         def fields_of(step):
+            if plan["steps"].get(step["id"], {}).get("remote"):
+                from suan.workflows import muferro
+                return list(muferro.FIELD_IDS.values())  # every case field of the row
             return [value["$field"] for value in step.get("parameters", {}).values()
                     if type(value) is dict and set(value) == {"$field"}]
 
@@ -468,6 +510,28 @@ class WorkflowRuns:
                 raise RevisionConflict("This executor does not own the workflow run")
             self._append(db, run_id, step, row, attempt, status,
                          {"at": _now(), "executor_id": executor_id, "produced": produced, "error": error})
+        return self.get(run_id)
+
+    def progress_attempt(self, run_id, step, row, attempt, *, executor_id, progress):
+        """Record remote work of the latest running attempt (W5): its simulation run, Runtime task and stage.
+        Not a result: the task stays running, and a later attempt may adopt the same remote work."""
+        if (type(progress) is not dict or progress.get("stage") not in PROGRESS_STAGES
+                or set(progress) - {"stage", "simulation_run_id", "task_id", "state", "adopted_from"}):
+            raise ProjectError("Workflow run progress is {stage, simulation_run_id?, task_id?, state?, adopted_from?}")
+        for key in ("simulation_run_id", "task_id", "state"):
+            if key in progress and (type(progress[key]) is not str or len(progress[key]) > 128):
+                raise ProjectError(f"Workflow run progress {key} must be a short string")
+        if "adopted_from" in progress and type(progress["adopted_from"]) is not int:
+            raise ProjectError("Workflow run progress adopted_from is an attempt number")
+        with self.store._connect(write=True) as db:
+            plan, events = self._read(db, run_id)
+            state = self._state(plan, events)
+            task = next((t for t in state["tasks"] if t["step"] == step and t["row"] == row), None)
+            if task is None or task["attempt"] != attempt or task["status"] != "running":
+                raise RevisionConflict("Only the running attempt of a task can record progress")
+            if state["executor_id"] != executor_id:
+                raise RevisionConflict("This executor does not own the workflow run")
+            self._append(db, run_id, step, row, attempt, "running", {"at": _now(), "executor_id": executor_id, "progress": progress})
         return self.get(run_id)
 
     def interrupt(self, run_id):

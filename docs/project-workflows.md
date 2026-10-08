@@ -99,7 +99,18 @@
 - 某行某步失败只停止该行，其他行继续；再次开始只重做未成功的任务（新的编号尝试，同一冻结计划）；
   取消在当前任务后停止，已完成的保留；服务重启后用 `recover` 把无人执行的尝试标为中断，再开始。
 
-`muferro/1` 的按行运行尚未支持（准备时说明），继续使用[仿真批次](simulation-batches.md)。
+### MuFerro 步骤（W5）
+
+参数表步骤引用 MuFerro 案例表、仿真步骤为 `muferro/1` 的工作流也可按行运行：准备时选择一个已保存的 Runtime 连接
+（直连或 SSH，不支持 Hub 节点）和运行方式/资源（与[仿真批次](simulation-batches.md)相同的选项），它们与每行的全部案例字段一起冻结。
+开始后每行准备 MuFerro 输入并提交，然后立即转到下一行，所有行的任务同时在 Runtime 排队；之后每 15 秒读取状态，
+某行成功后收集结果（写入 MuFerro 结果表，文件在 `results/muferro/<仿真运行>/`），把最终状态（输入、`stk-mupro.json`、
+能量/进度/完成记录与每个数据集的最后一帧）捕获为该行的输入快照，再运行该行的下游分析。
+
+- 案例行在准备后被修改时，该行的仿真任务失败（`row_changed`）而不提交；用“重算过期的行”开始新运行。
+- 失败或被取消的 Runtime 任务在重试时提交新任务；取消工作流运行会取消正在跟踪的 Runtime 任务。
+- 关闭项目或退出 STK 时，正在运行的尝试记为“中断”，但 Runtime 上的任务继续；再次开始运行会接管这些任务，不重复提交。
+- 需要全部帧的分析（例如能量随时间变化之外的时间序列）请在 MuFerro 结果上单独运行；工作流只把最终状态交给下游分析。
 
 ## Python
 
@@ -125,6 +136,7 @@ p.workflows.choices()  # 可引用的参数表、输入快照（新的在前）�
 rows = [r["id"] for r in next(t for t in p.snapshot()["tables"] if t["name"] == "Cases / 算例")["records"]]
 run = p.workflow_runs.prepare(listed["workflows"][0]["id"], rows, run_id=str(uuid4()),
                               expected_revision=p.snapshot()["project"]["revision"])
+# 含 MuFerro 步骤时：connection="runtime:…"（已保存的 Runtime），options={"backend": "slurm", "ranks": 4, ...}
 p.workflow_runs.start(run["id"])
 state = p.workflow_runs.get(run["id"])   # status、每个任务的 attempt/status/produced/error
 stale = p.workflow_runs.stale(run["id"])  # 过期的行与原因；重算 = 对 stale["stale_rows"] 再 prepare + start
