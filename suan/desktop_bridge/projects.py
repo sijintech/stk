@@ -18,6 +18,8 @@ from suan.project.workflow_runs import WorkflowRunNotFound
 from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, TokenPlanCredentials, provider_info
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
+from suan.project.archive import Archived
+
 from .protocol import BridgeError
 from .attention import AttentionViews
 from .recent_projects import RecentProjects
@@ -47,7 +49,7 @@ class ProjectSessions:
     def _errors(self):
         try:
             yield
-        except RevisionConflict as exc:
+        except (RevisionConflict, Archived) as exc:
             raise BridgeError("conflict", str(exc)) from None
         except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound) as exc:
             raise BridgeError("not_found", str(exc)) from None
@@ -169,7 +171,8 @@ class ProjectSessions:
                 return {"draft": drafts.save(params["commands"], expected_revision=params["expected_revision"],
                                              title=params["title"], draft_id=params["draft_id"])}
             if action == "list":
-                return drafts.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+                return drafts.list(offset=params.get("offset", 0), limit=params.get("limit", 100),
+                                  archived=params.get("archived"))
             if action == "apply":
                 return drafts.apply(params["draft_id"], expected_revision=params["expected_revision"])
             if action == "discard":
@@ -183,7 +186,8 @@ class ProjectSessions:
                 return {"context": contexts.capture(params["table_id"], params["record_ids"], params["field_ids"],
                     expected_revision=params["expected_revision"], title=params["title"], context_id=params["context_id"])}
             if action == "list":
-                return contexts.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+                return contexts.list(offset=params.get("offset", 0), limit=params.get("limit", 100),
+                                  archived=params.get("archived"))
             return {"context": contexts.get(params["context_id"])}
 
     def discussion(self, action, params):
@@ -216,7 +220,8 @@ class ProjectSessions:
                 return analyses.update(params["analysis_id"], params["name"], params["document"],
                                        expected_revision=params["expected_revision"])
             if action == "list":
-                return analyses.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
+                return analyses.list(offset=params.get("offset", 0), limit=params.get("limit", 50),
+                                  archived=params.get("archived"))
             return analyses.get(params["analysis_id"])
 
     def workflows(self, action, params):
@@ -229,7 +234,8 @@ class ProjectSessions:
                 return workflows.update(params["workflow_id"], params["name"], params["document"],
                                         expected_revision=params["expected_revision"])
             if action == "list":
-                return workflows.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
+                return workflows.list(offset=params.get("offset", 0), limit=params.get("limit", 50),
+                                  archived=params.get("archived"))
             if action == "validate":
                 return workflows.validate(params["document"])
             if action == "choices":
@@ -285,7 +291,7 @@ class ProjectSessions:
                 return {"run": runs.get(params["run_id"])}
             if action == "list":
                 return runs.list(offset=params.get("offset", 0), limit=params.get("limit", 50),
-                                 workflow_id=params.get("workflow_id"))
+                                 workflow_id=params.get("workflow_id"), archived=params.get("archived"))
             if action == "stale":
                 return runs.stale(params["run_id"])
             if self._workflow_executor is None:
@@ -305,10 +311,12 @@ class ProjectSessions:
             if action == "get":
                 return {"run": runs.get(params["run_id"])}
             if action == "list":
-                return runs.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
+                return runs.list(offset=params.get("offset", 0), limit=params.get("limit", 50), archived=params.get("archived"))
             if self._analysis_executor is None:
                 raise BridgeError("unsupported", "No local analysis executor is installed")
             if action in {"start", "cancel", "recover"}:
+                if action == "start":
+                    store.archive.require_active("analysis_run", params["run_id"], "start it")
                 return {"run": getattr(self._analysis_executor, action)(store, params["run_id"])}
         # Reading a potentially large artifact must not block close or unrelated project edits.
         # Its original store remains pinned; a closed handle is never rebound to another project.
@@ -324,6 +332,8 @@ class ProjectSessions:
                     raise UnsupportedProjectFormat("Upgrade this project before using model requests")
                 return {"provider": provider_info(self._credentials)}
             if action in {"start", "cancel", "recover"}:
+                if action == "start":
+                    store.archive.require_active("request", params["request_id"], "send it")
                 return {"request": getattr(self._executor, action)(store, params["request_id"])}
             if action == "progress":
                 return self._executor.progress(store, params["request_id"])
@@ -336,7 +346,8 @@ class ProjectSessions:
             if action == "edit_proposal":
                 return requests.edit_proposal(params["request_id"])
             if action == "list":
-                return requests.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+                return requests.list(offset=params.get("offset", 0), limit=params.get("limit", 100),
+                                  archived=params.get("archived"))
             if action == "usage":
                 return requests.usage()
             return {"request": requests.get(params["request_id"])}

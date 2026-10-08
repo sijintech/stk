@@ -12,6 +12,7 @@ from suan.graph.schema import canonical_json, check_value
 
 from .managed import MAX_DEPTH, ManagedTable, clone, name  # noqa: F401 - MAX_DEPTH stays importable here
 from .store import ProjectError, UnsupportedProjectFormat, _expected_revision, _id
+from . import archive
 
 
 DOCUMENT_FORMAT = "stk.analysis-document/1"
@@ -142,16 +143,18 @@ class Analyses:
     def __init__(self, store):
         self.store = store
 
-    def list(self, *, offset=0, limit=50):
+    def list(self, *, offset=0, limit=50, archived=None):
         if type(offset) is not int or not 0 <= offset < 2**63 or type(limit) is not int or not 1 <= limit <= 100:
             raise ProjectError("Analysis pagination requires offset >= 0 and limit between 1 and 100")
         with self.store._connect() as db:
             _require(db)
             revision = db.execute("SELECT revision FROM project").fetchone()[0]
             _, compatible, error = _schema(db)
-            total = db.execute("SELECT count(*) FROM records WHERE table_id=?", (TABLE_ID,)).fetchone()[0]
+            # archived: True lists only archived ones, False only the others, None all (format 11, archive.py).
+            where, extra = archive.where(db, "analysis", archived, existing="table_id=?")
+            total = db.execute("SELECT count(*) FROM records" + where, (TABLE_ID, *extra)).fetchone()[0]
             records = []
-            for row in db.execute("SELECT id FROM records WHERE table_id=? ORDER BY rowid LIMIT ? OFFSET ?", (TABLE_ID, limit, offset)):
+            for row in db.execute("SELECT id FROM records" + where + " ORDER BY rowid LIMIT ? OFFSET ?", (TABLE_ID, *extra, limit, offset)):
                 entry = _record(db, row[0], compatible, error)
                 del entry["document"]
                 records.append(entry)
@@ -173,6 +176,7 @@ class Analyses:
         return self._write(analysis_id, name, document, expected_revision, create=True)
 
     def update(self, analysis_id, name, document, *, expected_revision):
+        self.store.archive.require_active("analysis", analysis_id, "save changes to it")
         return self._write(analysis_id, name, document, expected_revision, create=False)
 
     def _write(self, identity, name, document, revision, *, create):

@@ -69,7 +69,8 @@
 （按所有者决定实现，进度随交付更新。）
 
 1. **A1 存储与服务**（A1a 已交付：格式 11、`suan/project/archive.py`、`project.archive.set/list` 与事件、`stk.project.archive/unarchive/archived`；
-   A1b 列表过滤、只读检查、“需要关注”与搜索：进行中）：格式 11 升级（先备份）、`suan/project/archive.py`、服务方法与事件、各列表的 `archived` 标记与过滤、
+   A1b 已交付：八个列表方法的 `archived` 过滤、只读检查、“需要关注”排除、搜索标注；只读检查覆盖专门的保存/准备/开始/应用/放弃/提问操作，
+   不拦截直接对受管表格的 `project.apply` 编辑）：格式 11 升级（先备份）、`suan/project/archive.py`、服务方法与事件、各列表的 `archived` 标记与过滤、
    “需要处理”排除、搜索标注。
 2. **A2 桌面**：各列表的归档/恢复与“显示已归档”、已归档对象的横幅、“需要处理”中的“归档”。
 3. **A3**：归档工作流时连带其运行；工作流校验对已归档分析的提示。

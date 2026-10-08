@@ -36,7 +36,8 @@
 - **归档（[项目对象归档](design/project-archive.md)，所有者 2026-10-08 确认：独立记录/格式 11、恢复前只读、搜索包含并标注、九类含草案与上下文）**：
   **A1a（已交付）**：格式 11 的 `project_archive`（只追加、不带哈希链）、`suan/project/archive.py`（归档/恢复、进行中的对象拒绝、`include_runs`、
   旧格式下读取为空）、`project.archive.set/list` 与 `project.archive.changed`、`stk.project.archive/unarchive/archived`。
-  A1b（列表 `archived` 过滤、只读检查、“需要关注”排除、搜索标注）进行中；之后 A2 桌面、A3 连带运行与引用提示。
+  **A1b（已交付）**：八个列表方法的 `archived` 过滤（SQL 内过滤，分页与总数正确）、专门操作上的只读检查（`conflict`）、“需要关注”排除、搜索标注。
+  之后 A2 桌面（A2a 工作流与分析，A2b AI 请求、上下文、草案、仿真运行与批次）、A3“需要关注”中归档与引用提示。
 
 ## 2026-10-06：独立使用者审视
 

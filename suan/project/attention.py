@@ -40,7 +40,7 @@ def collect(store):
         revision = db.execute("SELECT revision FROM project").fetchone()[0]
     items, workflow_analysis_runs = [], set()
     if version >= 10:
-        for summary in store.workflow_runs.list(limit=MAX_PER_SOURCE)["runs"]:
+        for summary in store.workflow_runs.list(limit=MAX_PER_SOURCE, archived=False)["runs"]:  # archived ones are set aside
             run = store.workflow_runs.get(summary["id"])
             for task in run["tasks"]:
                 produced = task.get("produced") or {}
@@ -59,7 +59,7 @@ def collect(store):
             elif run["complete"]:
                 items.append(_item("workflow_run", run["id"], "done", "info", status="succeeded", **common))
     if version >= 9:
-        for run in _newest(lambda offset: store.analysis_runs.list(offset=offset, limit=100), "runs"):
+        for run in _newest(lambda offset: store.analysis_runs.list(offset=offset, limit=100, archived=False), "runs"):
             if run["id"] in workflow_analysis_runs:
                 continue  # shown through its workflow run
             common = {"name": run["analysis_name"], "at": run["updated_at"],
@@ -73,7 +73,7 @@ def collect(store):
             elif status in ("succeeded", "cancelled"):
                 items.append(_item("analysis_run", run["id"], "done", "info", status=status, **common))
     if version >= 5:
-        for run in _newest(lambda offset: store.runs.list(offset=offset, limit=100), "runs"):
+        for run in _newest(lambda offset: store.runs.list(offset=offset, limit=100, archived=False), "runs"):
             task = run.get("task_state")
             common = {"name": run.get("label"), "at": None, "target": {"page": "simulation_runs", "run_id": run["id"]}}
             submission = run.get("submission")
@@ -85,12 +85,12 @@ def collect(store):
             elif task or submission in ("submitting", "accepted"):
                 items.append(_item("simulation_run", run["id"], "running", "progress", status=task or submission, **common))
     if version >= 6:
-        for draft in _newest(lambda offset: store.drafts.list(offset=offset, limit=100), "drafts"):
+        for draft in _newest(lambda offset: store.drafts.list(offset=offset, limit=100, archived=False), "drafts"):
             if draft.get("status") == "pending":
                 items.append(_item("draft", draft["id"], "needs_you", "review", name=draft.get("title"), status="pending",
                                    at=draft.get("created_at"), target={"page": "review", "draft_id": draft["id"]}))
     if version >= 8:
-        for request in _newest(lambda offset: store.requests.list(offset=offset, limit=100), "requests"):
+        for request in _newest(lambda offset: store.requests.list(offset=offset, limit=100, archived=False), "requests"):
             status = request.get("status")
             common = {"name": None, "at": request.get("updated_at"), "target": {"page": "conversation", "request_id": request["id"]}}
             if status in ("failed", "uncertain"):

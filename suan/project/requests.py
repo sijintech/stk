@@ -14,6 +14,7 @@ from uuid import UUID, uuid5
 from .contexts import _digest, _encode, _pagination
 from .discussion import _message_text
 from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _id, _version
+from . import archive
 
 
 PROMPT_VERSION = "stk.text/1"
@@ -231,6 +232,8 @@ class Requests:
                     raise RevisionConflict("Request ID already belongs to a different input")
                 return self._public(identity, state)
             message = self.store.discussion._get_message(db, message_id)
+            if archive.Archive._archived(db, "context", message["context_id"]):
+                raise archive.Archived("This context is archived; restore it to ask about it")
             if message["role"] != "user":
                 raise ProjectError("A text request must reference a user message")
             context = self.store.contexts._get(db, message["context_id"])
@@ -262,11 +265,12 @@ class Requests:
             _require(db)
             return self._public(*self._read(db, request_id))
 
-    def list(self, *, offset=0, limit=100):
+    def list(self, *, offset=0, limit=100, archived=None):
         _pagination(offset, limit)
         with self.store._connect() as db:
             _require(db)
-            rows = db.execute("SELECT * FROM project_requests ORDER BY rowid LIMIT ? OFFSET ?", (limit + 1, offset)).fetchall()
+            where, extra = archive.where(db, "request", archived)
+            rows = db.execute("SELECT * FROM project_requests" + where + " ORDER BY rowid LIMIT ? OFFSET ?", (*extra, limit + 1, offset)).fetchall()
             ancestors = {}
             return {"requests": [self._public(*self._decode(db, row, ancestors)) for row in rows[:limit]],
                     "next_offset": offset + limit if len(rows) > limit else None}
@@ -318,6 +322,7 @@ class Requests:
 
     def propose_edits(self, request_id, *, expected_revision):
         """Explicitly validate and save one parameter or sweep (P2 L1) draft; never apply or send."""
+        self.store.archive.require_active("request", request_id, "save its proposal")
         from .parameter_edits import propose_edits
         from .parameter_sweep import propose_sweep
         convert = propose_sweep if self._sweep(request_id) else propose_edits

@@ -45,6 +45,7 @@ class Discussion:
         return self._decode_message(db.execute("SELECT * FROM project_messages WHERE id=?", (message_id,)).fetchone())
 
     def add(self, text, *, message_id, context_id, role="user"):
+        self.store.archive.require_active("context", context_id, "add messages to it")
         with self.store._connect(write=True) as db:
             _require(db)
             return self._add(db, text, message_id=message_id, context_id=context_id, role=role)

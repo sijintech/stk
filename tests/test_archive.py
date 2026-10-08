@@ -91,3 +91,119 @@ def test_older_projects_have_nothing_archived_until_upgraded(tmp_path):
     assert upgraded["format_version"] == 11 and upgraded["backup"]
     with pytest.raises(ProjectError, match="No workflow"):
         store.archive.set([{"kind": "workflow", "id": str(uuid4())}], archived=True)
+
+
+def draft(store, ids, value, title):
+    return store.drafts.save([{"op": "set_cell", "table_id": ids["cases"], "record_id": ids["rows"][0],
+                               "field_id": ids["temperature"], "value": value}],
+                             expected_revision=store.info()["revision"], title=title, draft_id=str(uuid4()))["id"]
+
+
+def test_lists_filter_archived_objects_with_correct_paging(setup):
+    h, store, ids, handle, worker = setup
+    drafts = [draft(store, ids, 300 + i, f"Draft {i}") for i in range(5)]
+    store.archive.set([{"kind": "draft", "id": drafts[1]}, {"kind": "draft", "id": drafts[3]}], archived=True)
+    first = h.call("project.drafts.list", {"handle": handle, "limit": 2, "archived": False})
+    assert [d["id"] for d in first["drafts"]] == [drafts[0], drafts[2]] and first["next_offset"] == 2
+    second = h.call("project.drafts.list", {"handle": handle, "offset": 2, "limit": 2, "archived": False})
+    assert [d["id"] for d in second["drafts"]] == [drafts[4]] and second["next_offset"] is None
+    assert [d["id"] for d in h.call("project.drafts.list", {"handle": handle, "archived": True})["drafts"]] == [drafts[1], drafts[3]]
+    assert len(h.call("project.drafts.list", {"handle": handle})["drafts"]) == 5  # unfiltered: everything, as before
+    # Managed tables count with the filter too.
+    other = str(uuid4())
+    store.analyses.create("Other", analysis_document(), analysis_id=other, expected_revision=store.info()["revision"])
+    store.archive.set([{"kind": "analysis", "id": other}], archived=True)
+    live = h.call("project.analyses.list", {"handle": handle, "archived": False})
+    assert live["total"] == 1 and [a["id"] for a in live["analyses"]] == [ids["analysis"]]
+    assert h.call("project.analyses.list", {"handle": handle, "archived": True})["total"] == 1
+    run = finished_run(store, ids, ids["rows"][:1])
+    store.archive.set([{"kind": "workflow_run", "id": run}], archived=True)
+    assert h.call("project.workflow_runs.list", {"handle": handle, "workflow_id": ids["workflow"], "archived": False})["runs"] == []
+    assert [r["id"] for r in h.call("project.workflow_runs.list", {"handle": handle, "archived": True})["runs"]] == [run]
+    assert not h.violations
+
+
+def test_archived_objects_are_read_only_until_restored(setup):
+    h, store, ids, handle, worker = setup
+    saved = store.workflows.get(ids["workflow"])["workflow"]
+    context = store.contexts.capture(table_id=ids["cases"], record_ids=ids["rows"][:1], field_ids=[ids["temperature"]],
+                                     expected_revision=store.info()["revision"], title="Scope", context_id=str(uuid4()))
+    message = store.discussion.add("Why?", message_id=str(uuid4()), context_id=context["id"])
+    request = store.requests.create(message["id"], request_id=str(uuid4()), configuration={"adapter": "controlled/1", "model": "m"})
+    pending = draft(store, ids, 305, "Pending")
+    run = finished_run(store, ids, ids["rows"][:1])
+    items = [{"kind": "workflow", "id": ids["workflow"]}, {"kind": "draft", "id": pending}, {"kind": "context", "id": context["id"]},
+             {"kind": "request", "id": request["id"]}, {"kind": "workflow_run", "id": run}]
+    store.archive.set(items, archived=True)
+    revision = store.info()["revision"]
+    refused = [
+        lambda: h.call("project.workflows.update", {"handle": handle, "workflow_id": ids["workflow"], "name": "Renamed",
+                                                     "document": saved["document"], "expected_revision": revision}),
+        lambda: h.call("project.workflow_runs.prepare", {"handle": handle, "workflow_id": ids["workflow"], "rows": ids["rows"][:1],
+                                                          "run_id": str(uuid4()), "expected_revision": revision}),
+        lambda: h.call("project.workflow_runs.start", {"handle": handle, "run_id": run}),
+        lambda: h.call("project.drafts.apply", {"handle": handle, "draft_id": pending, "expected_revision": revision}),
+        lambda: h.call("project.drafts.discard", {"handle": handle, "draft_id": pending}),
+        lambda: h.call("project.discussion.add", {"handle": handle, "message_id": str(uuid4()), "context_id": context["id"],
+                                                   "text": "More?"}),
+        lambda: h.call("project.requests.create", {"handle": handle, "message_id": message["id"], "request_id": str(uuid4()),
+                                                    "configuration": {"adapter": "controlled/1", "model": "m"}}),
+        lambda: h.call("project.requests.start", {"handle": handle, "request_id": request["id"]}),
+    ]
+    for call in refused:
+        with pytest.raises(Exception, match="archived; restore it"):
+            call()
+    assert store.info()["revision"] == revision and store.drafts.get(pending)["status"] == "pending"
+    # Reading stays possible; restoring makes them usable again.
+    assert h.call("project.workflows.get", {"handle": handle, "workflow_id": ids["workflow"]})["workflow"]["id"] == ids["workflow"]
+    store.archive.set(items, archived=False)
+    assert h.call("project.drafts.discard", {"handle": handle, "draft_id": pending})["draft"]["status"] == "discarded"
+    h.call("project.discussion.add", {"handle": handle, "message_id": str(uuid4()), "context_id": context["id"], "text": "More?"})
+
+
+def test_an_archived_analysis_cannot_be_run_directly_or_through_a_workflow(setup):
+    h, store, ids, handle, worker = setup
+    store.archive.set([{"kind": "analysis", "id": ids["analysis"]}], archived=True)
+    with pytest.raises(Exception, match="uses an archived analysis"):
+        store.workflow_runs.prepare(ids["workflow"], ids["rows"][:1], run_id=str(uuid4()), expected_revision=store.info()["revision"])
+    with pytest.raises(Exception, match="archived; restore it to run it"):
+        store.analysis_runs.prepare(ids["analysis"], str(uuid4()), {"data": {"field.vtk": str(uuid4())}}, run_id=str(uuid4()),
+                                    expected_revision=store.info()["revision"])
+
+
+def test_archived_objects_leave_attention_and_are_marked_in_search(setup):
+    h, store, ids, handle, worker = setup
+    executor = str(uuid4())
+    failed = store.workflow_runs.prepare(ids["workflow"], ids["rows"][:1], run_id=str(uuid4()), expected_revision=store.info()["revision"])
+    store.workflow_runs.start(failed["id"], executor_id=executor)
+    attempt = store.workflow_runs.begin_attempt(failed["id"], "simulate", ids["rows"][0], executor_id=executor)
+    store.workflow_runs.finish_attempt(failed["id"], "simulate", ids["rows"][0], attempt, "failed", executor_id=executor,
+                                       error={"code": "x", "message": "No field"})
+    store.workflow_runs.stop(failed["id"], executor_id=executor)
+    assert [item["id"] for item in h.call("project.attention.list", {"handle": handle})["items"]] == [failed["id"]]
+    store.archive.set([{"kind": "workflow_run", "id": failed["id"]}], archived=True)
+    assert h.call("project.attention.list", {"handle": handle})["items"] == []
+    second = str(uuid4())
+    store.workflows.create("Scan B", store.workflows.get(ids["workflow"])["workflow"]["document"], workflow_id=second,
+                           expected_revision=store.info()["revision"])
+    store.archive.set([{"kind": "workflow", "id": ids["workflow"]}], archived=True)
+    found = h.call("project.search", {"handle": handle, "query": "scan"})["results"]
+    assert [(item["id"], item.get("archived", False)) for item in found] == [(second, False), (ids["workflow"], True)]
+    assert not h.violations
+
+
+def test_batches_check_the_archive_through_the_console():
+    from suan.workflows.batches import _archived
+
+    class Project:
+        def __init__(self, items=None, error=None):
+            self.items, self.error = items, error
+
+        def archived(self, kind):
+            if self.error:
+                raise self.error
+            return {"items": self.items, "counts": {}}
+    batch = str(uuid4())
+    assert _archived(Project([{"kind": "batch", "id": batch}]), batch)
+    assert not _archived(Project([]), batch)
+    assert not _archived(Project(error=RuntimeError("unknown method")), batch)  # an older service archives nothing

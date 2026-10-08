@@ -15,6 +15,7 @@ from suan.graph.schema import canonical_json, graph_hash
 
 from . import analyses
 from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _id, _version
+from . import archive
 
 
 MAX_INPUT_BYTES = 256 * 1024 * 1024
@@ -404,6 +405,7 @@ class AnalysisRuns:
         for identity in (analysis_id, snapshot_id, run_id):
             _id(identity)
         _revision(expected_revision)
+        self.store.archive.require_active("analysis", analysis_id, "run it")
         bindings = _bindings(bindings)
         if parameter_overrides is not None and type(parameter_overrides) is not dict:
             raise ProjectError("Parameter overrides must be an object")
@@ -456,12 +458,14 @@ class AnalysisRuns:
             plan, state, _ = self._read(db, run_id)
             return self._public(plan, state)
 
-    def list(self, *, offset=0, limit=50):
+    def list(self, *, offset=0, limit=50, archived=None):
         if type(offset) is not int or not 0 <= offset < 2**63 or type(limit) is not int or not 1 <= limit <= 100:
             raise ProjectError("Analysis run pagination requires offset >= 0 and limit between 1 and 100")
         with self.store._connect() as db:
             _require(db)
-            rows = db.execute("SELECT id FROM analysis_run_plans ORDER BY rowid LIMIT ? OFFSET ?", (limit + 1, offset)).fetchall()
+            where, extra = archive.where(db, "analysis_run", archived)
+            rows = db.execute("SELECT id FROM analysis_run_plans" + where + " ORDER BY rowid LIMIT ? OFFSET ?",
+                              (*extra, limit + 1, offset)).fetchall()
             result, cache = [], {}
             for row in rows[:limit]:
                 plan, state, _ = self._read(db, row[0], cache)

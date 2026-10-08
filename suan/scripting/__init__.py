@@ -11,6 +11,14 @@ from .graph import Graph
 from .skills import Skills
 
 
+
+def _listing(handle, offset, limit, archived):
+    """List parameters; ``archived`` is sent only when filtering, so older services see the same request."""
+    params = {"handle": handle, "offset": offset, "limit": limit}
+    if archived is not None:
+        params["archived"] = bool(archived)
+    return params
+
 class ScriptError(RuntimeError):
     """An operation failed; ``code`` and ``data`` retain its structured bridge error."""
 
@@ -227,8 +235,9 @@ class ProjectRequests:
         The provider's console is authoritative; failed or uncertain requests are not counted."""
         return self._call("project.requests.usage", {"handle": self.handle})
 
-    def list(self, *, offset=0, limit=100):
-        return self._call("project.requests.list", {"handle": self.handle, "offset": offset, "limit": limit})
+    def list(self, *, offset=0, limit=100, archived=None):
+        """archived: True lists only archived objects, False only the others (format 11); None lists all."""
+        return self._call("project.requests.list", _listing(self.handle, offset, limit, archived))
 
     def cancel(self, request_id):
         """Record cancellation intent; this alone cannot prove a running remote call stopped."""
@@ -260,8 +269,9 @@ class ProjectContexts:
     def get(self, context_id):
         return self._call("project.contexts.get", {"handle": self.handle, "context_id": context_id})["context"]
 
-    def list(self, *, offset=0, limit=100):
-        return self._call("project.contexts.list", {"handle": self.handle, "offset": offset, "limit": limit})
+    def list(self, *, offset=0, limit=100, archived=None):
+        """archived: True lists only archived objects, False only the others (format 11); None lists all."""
+        return self._call("project.contexts.list", _listing(self.handle, offset, limit, archived))
 
 
 class ProjectDiscussion:
@@ -303,8 +313,9 @@ class ProjectDrafts:
     def get(self, draft_id):
         return self._call("project.drafts.get", {"handle": self.handle, "draft_id": draft_id})["draft"]
 
-    def list(self, *, offset=0, limit=100):
-        return self._call("project.drafts.list", {"handle": self.handle, "offset": offset, "limit": limit})
+    def list(self, *, offset=0, limit=100, archived=None):
+        """archived: True lists only archived objects, False only the others (format 11); None lists all."""
+        return self._call("project.drafts.list", _listing(self.handle, offset, limit, archived))
 
     def apply(self, draft_id, *, expected_revision):
         """Explicitly apply once at the saved revision; later retries return the durable receipt."""
@@ -347,8 +358,9 @@ class ProjectRuns:
             params["node"] = node
         return self._call("project.runs.prepare", params)
 
-    def list(self, *, offset=0, limit=100):
-        return self._call("project.runs.list", {"handle": self.handle, "offset": offset, "limit": limit})
+    def list(self, *, offset=0, limit=100, archived=None):
+        """archived: True lists only archived objects, False only the others (format 11); None lists all."""
+        return self._call("project.runs.list", _listing(self.handle, offset, limit, archived))
 
     def get(self, run_id):
         return self._call("project.runs.get", {"handle": self.handle, "run_id": run_id})["run"]
@@ -409,8 +421,9 @@ class ProjectAnalyses:
         """Return the observed revision and readable/invalid/unsupported document state."""
         return self._call("project.analyses.get", {"handle": self.handle, "analysis_id": analysis_id})
 
-    def list(self, *, offset=0, limit=50):
-        return self._call("project.analyses.list", {"handle": self.handle, "offset": offset, "limit": limit})
+    def list(self, *, offset=0, limit=50, archived=None):
+        """archived: True lists only archived objects, False only the others (format 11); None lists all."""
+        return self._call("project.analyses.list", _listing(self.handle, offset, limit, archived))
 
 
 class ProjectWorkflows:
@@ -433,8 +446,9 @@ class ProjectWorkflows:
         """Return the observed revision and readable/invalid/unsupported document state."""
         return self._call("project.workflows.get", {"handle": self.handle, "workflow_id": workflow_id})
 
-    def list(self, *, offset=0, limit=50):
-        return self._call("project.workflows.list", {"handle": self.handle, "offset": offset, "limit": limit})
+    def list(self, *, offset=0, limit=50, archived=None):
+        """archived: True lists only archived objects, False only the others (format 11); None lists all."""
+        return self._call("project.workflows.list", _listing(self.handle, offset, limit, archived))
 
     def validate(self, document):
         """Resolve references and typed links against the current project; reports issues, saves nothing."""
@@ -467,8 +481,8 @@ class ProjectWorkflowRuns:
     def get(self, run_id):
         return self._call("project.workflow_runs.get", {"handle": self.handle, "run_id": run_id})["run"]
 
-    def list(self, *, offset=0, limit=50, workflow_id=None):
-        params = {"handle": self.handle, "offset": offset, "limit": limit}
+    def list(self, *, offset=0, limit=50, workflow_id=None, archived=None):
+        params = _listing(self.handle, offset, limit, archived)
         if workflow_id:
             params["workflow_id"] = workflow_id
         return self._call("project.workflow_runs.list", params)
@@ -512,8 +526,9 @@ class ProjectAnalysisRuns:
     def get(self, run_id):
         return self._call("project.analysis_runs.get", {"handle": self.handle, "run_id": run_id})["run"]
 
-    def list(self, *, offset=0, limit=50):
-        return self._call("project.analysis_runs.list", {"handle": self.handle, "offset": offset, "limit": limit})
+    def list(self, *, offset=0, limit=50, archived=None):
+        """archived: True lists only archived objects, False only the others (format 11); None lists all."""
+        return self._call("project.analysis_runs.list", _listing(self.handle, offset, limit, archived))
 
     def start(self, run_id):
         """Explicitly claim prepared work once; terminal or unknown runs are never replayed."""

@@ -11,6 +11,7 @@ import re
 
 from .expressions import ENGINE_VERSION, EvaluationError, Value, check_target
 from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _expected_revision, _id, _text, _version
+from . import archive
 
 
 MAX_VALUE_BYTES = 16 * 1024
@@ -228,11 +229,12 @@ class Contexts:
             _require(db)
             return self._get(db, context_id)
 
-    def list(self, *, offset=0, limit=100):
+    def list(self, *, offset=0, limit=100, archived=None):
         _pagination(offset, limit)
         with self.store._connect() as db:
             _require(db)
-            rows = db.execute("SELECT * FROM project_contexts ORDER BY rowid LIMIT ? OFFSET ?", (limit + 1, offset)).fetchall()
+            where, extra = archive.where(db, "context", archived)
+            rows = db.execute("SELECT * FROM project_contexts" + where + " ORDER BY rowid LIMIT ? OFFSET ?", (*extra, limit + 1, offset)).fetchall()
             contexts = []
             for row in rows[:limit]:
                 context = self._decode(row)

@@ -16,6 +16,7 @@ from suan.graph.schema import canonical_json
 
 from . import analyses, workflows
 from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _expected_revision, _id, _version
+from . import archive
 
 
 MAX_ROWS = 100
@@ -126,6 +127,7 @@ class WorkflowRuns:
             if existing[0] != request_hash:
                 raise RevisionConflict("Workflow run UUID is already used by a different preparation request")
             return self.get(run_id)
+        self.store.archive.require_active("workflow", workflow_id, "run it")
         plan = self._plan(workflow_id, rows, run_id, expected_revision, simulation)
         with self.store._connect(write=True) as db:
             _require(db)
@@ -230,6 +232,8 @@ class WorkflowRuns:
                                           "duplicates": sorted(name for name, ids in names.items() if len(ids) > 1)}
             elif kind == "analysis":
                 analysis = self.store.analyses.get(step["ref"]["analysis"])["analysis"]
+                if self.store.archive.is_archived("analysis", analysis["id"]):
+                    raise archive.Archived(f"Step {identity} uses an archived analysis; restore it to run this workflow")
                 sources = {link["from"].split(".", 1)[0] for link in step.get("inputs", {}).values()}
                 if len(sources) > 1:
                     raise ProjectError(f"Step {identity}: all inputs of an analysis must come from one simulation or files step")
@@ -329,16 +333,16 @@ class WorkflowRuns:
             plan, events = self._read(db, run_id)
         return {**plan, "plan_sha256": _hash(plan), **self._state(plan, events)}
 
-    def list(self, *, offset=0, limit=50, workflow_id=None):
+    def list(self, *, offset=0, limit=50, workflow_id=None, archived=None):
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
             raise ProjectError("Workflow run pagination requires offset >= 0 and limit between 1 and 100")
         if workflow_id is not None:
             _id(workflow_id)
         with self.store._connect() as db:
             _require(db)
-            query = "SELECT id FROM workflow_run_plans" + (" WHERE workflow_id=?" if workflow_id else "") + \
-                " ORDER BY rowid DESC LIMIT ? OFFSET ?"
-            ids = [row[0] for row in db.execute(query, ((workflow_id,) if workflow_id else ()) + (limit + 1, offset))]
+            where, extra = archive.where(db, "workflow_run", archived, existing="workflow_id=?" if workflow_id else "")
+            query = "SELECT id FROM workflow_run_plans" + where + " ORDER BY rowid DESC LIMIT ? OFFSET ?"
+            ids = [row[0] for row in db.execute(query, ((workflow_id,) if workflow_id else ()) + tuple(extra) + (limit + 1, offset))]
             runs = []
             for identity in ids[:limit]:
                 plan, events = self._read(db, identity)
@@ -448,6 +452,7 @@ class WorkflowRuns:
         """Claim a prepared or stopped run for one executor; a running run is refused (see interrupt).
         ``owner`` ({host, pid}) identifies the service process, so another one can tell whether it still runs."""
         _id(executor_id)
+        self.store.archive.require_active("workflow_run", run_id, "start or retry it")
         with self.store._connect(write=True) as db:
             plan, events = self._read(db, run_id)
             state = self._state(plan, events)

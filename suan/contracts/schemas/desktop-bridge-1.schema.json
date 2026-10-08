@@ -4088,6 +4088,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "archived": {
+              "type": "boolean",
+              "description": "Format 11: true lists only archived objects, false only the others; omitted lists all."
             }
           },
           "required": [
@@ -4674,6 +4678,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "archived": {
+              "type": "boolean",
+              "description": "Format 11: true lists only archived objects, false only the others; omitted lists all."
             }
           },
           "required": [
@@ -4895,6 +4903,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "archived": {
+              "type": "boolean",
+              "description": "Format 11: true lists only archived objects, false only the others; omitted lists all."
             }
           },
           "required": [
@@ -5236,6 +5248,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "archived": {
+              "type": "boolean",
+              "description": "Format 11: true lists only archived objects, false only the others; omitted lists all."
             }
           },
           "required": [
@@ -5785,6 +5801,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "archived": {
+              "type": "boolean",
+              "description": "Format 11: true lists only archived objects, false only the others; omitted lists all."
             }
           },
           "required": [
@@ -5911,6 +5931,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "archived": {
+              "type": "boolean",
+              "description": "Format 11: true lists only archived objects, false only the others; omitted lists all."
             }
           },
           "required": [
@@ -6082,6 +6106,10 @@
             },
             "workflow_id": {
               "$ref": "#/$defs/projectUuid"
+            },
+            "archived": {
+              "type": "boolean",
+              "description": "Format 11: true lists only archived objects, false only the others; omitted lists all."
             }
           },
           "required": [
@@ -6698,6 +6726,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "archived": {
+              "type": "boolean",
+              "description": "Format 11: true lists only archived objects, false only the others; omitted lists all."
             }
           },
           "required": [
@@ -12671,6 +12703,10 @@
             "type": "string",
             "maxLength": 256
           }
+        },
+        "archived": {
+          "const": true,
+          "description": "Present on archived objects (format 11)."
         }
       },
       "required": [

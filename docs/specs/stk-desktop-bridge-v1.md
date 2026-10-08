@@ -694,6 +694,20 @@ and not counted. `include_runs` also covers each listed workflow's runs that are
 `project.archive.changed {handle, kinds}`. `list` returns the currently archived objects with time and note and the
 count per kind; below format 11 it is empty and `set` is `unsupported`.
 
+List methods `project.workflows.list`, `project.analyses.list`, `project.workflow_runs.list`, `project.analysis_runs.list`,
+`project.runs.list`, `project.requests.list`, `project.drafts.list` and `project.contexts.list` take an optional
+`archived` boolean: `false` lists only objects that are not archived, `true` only archived ones (filtered in the query,
+so pages, `next_offset` and `total` follow the filter); omitted lists everything as before. Archived objects are
+read-only until restored, refused with `conflict` ("archived; restore it to …"): saving a workflow or analysis,
+preparing a workflow run of an archived workflow or one whose analysis step references an archived analysis,
+preparing an analysis run of an archived analysis, starting an archived workflow or analysis run, submitting an
+archived simulation run, preparing or submitting an archived batch (`stk.batches`), applying or discarding an archived
+draft, adding a message to an archived context or a request on one of its messages, and starting or converting an
+archived request. Reading is unaffected. These checks cover the dedicated operations, not raw `project.apply` edits of
+the managed tables (deleting stays an ordinary table edit). `project.attention.list` leaves archived objects out;
+`project.search` includes them with `archived: true` after the others of their kind (messages of an archived context
+count as archived).
+
 The optional `project.search` (experimental, UX package U3) finds a trimmed, case-insensitive substring (1–200
 characters) in parameter table names, field names and text cells (managed tables excluded), saved workflow and analysis
 names, indexed file names and paths, AI draft titles and discussion messages. Results come grouped in that order, at

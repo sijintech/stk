@@ -12,6 +12,7 @@ import json
 import re
 
 from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _expected_revision, _id, _text, _version
+from . import archive
 
 
 MAX_COMMAND_BYTES = 256 * 1024
@@ -172,12 +173,13 @@ class Drafts:
             self._require(db)
             return self._decode(db.execute("SELECT * FROM project_drafts WHERE id=?", (draft_id,)).fetchone())
 
-    def list(self, *, offset=0, limit=100):
+    def list(self, *, offset=0, limit=100, archived=None):
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
             raise ProjectError("Draft pagination requires offset >= 0 and limit between 1 and 100")
         with self.store._connect() as db:
             self._require(db)
-            rows = db.execute("SELECT * FROM project_drafts ORDER BY rowid LIMIT ? OFFSET ?", (limit + 1, offset)).fetchall()
+            where, extra = archive.where(db, "draft", archived)
+            rows = db.execute("SELECT * FROM project_drafts" + where + " ORDER BY rowid LIMIT ? OFFSET ?", (*extra, limit + 1, offset)).fetchall()
             drafts = [{key: value for key, value in self._decode(row).items() if key != "commands"} for row in rows[:limit]]
             return {"drafts": drafts, "next_offset": offset + limit if len(rows) > limit else None}
 
@@ -185,6 +187,7 @@ class Drafts:
         """Apply once at the frozen base; retries report the original committed revision."""
         _id(draft_id)
         _expected_revision(expected_revision)
+        self.store.archive.require_active("draft", draft_id, "apply it")
         with self.store._connect(write=True) as db:
             self._require(db)
             draft = self._decode(db.execute("SELECT * FROM project_drafts WHERE id=?", (draft_id,)).fetchone())
@@ -203,6 +206,7 @@ class Drafts:
 
     def discard(self, draft_id):
         _id(draft_id)
+        self.store.archive.require_active("draft", draft_id, "discard it")
         with self.store._connect(write=True) as db:
             self._require(db)
             draft = self._decode(db.execute("SELECT * FROM project_drafts WHERE id=?", (draft_id,)).fetchone())

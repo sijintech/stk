@@ -77,6 +77,15 @@ def _plans(project, intent):
         offset = page["next_offset"]
 
 
+def _archived(p, batch_id):
+    """Whether the batch is archived (project format 11); services without archiving have none."""
+    try:
+        listed = p.archived("batch")
+    except Exception:  # noqa: BLE001 - an older service or project simply archives nothing
+        return False
+    return any(item["id"] == batch_id for item in listed["items"])
+
+
 class Batches:
     def __init__(self, stk):
         self.stk = stk
@@ -140,6 +149,8 @@ class Batches:
         """
         if operation not in {"prepare", "submit", "refresh", "cancel", "collect"}:
             raise ValueError("Unknown batch operation")
+        if operation in {"prepare", "submit"} and _archived(project or self.stk.project, batch_id):
+            raise ValueError("This batch is archived; restore it to prepare or submit it")
         p = project or self.stk.project
         model = _revision(p, expected_revision)
         intent, _, _ = _batch(model, batch_id)

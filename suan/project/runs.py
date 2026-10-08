@@ -12,6 +12,7 @@ from uuid import uuid4
 from suan.runtime.models import TaskSpec, relative_path, TERMINAL
 from .snapshots import _canonical
 from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _expected_revision, _id, _version
+from . import archive
 
 MAX_PLAN_BYTES = 256 * 1024
 MAX_BATCH_BYTES = 4 * 1024 * 1024
@@ -196,13 +197,14 @@ class Runs:
         result["parameter_revision"] = model["project"]["revision"]
         return result
 
-    def list(self, *, offset=0, limit=100):
+    def list(self, *, offset=0, limit=100, archived=None):
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
             raise ProjectError("Run list requires offset >= 0 and limit between 1 and 100")
         model = self.store.snapshot()
         with self.store._connect() as db:
             self._require(db)
-            rows = db.execute("SELECT * FROM run_plans ORDER BY rowid LIMIT ? OFFSET ?", (limit + 1, offset)).fetchall()
+            where, extra = archive.where(db, "simulation_run", archived)
+            rows = db.execute("SELECT * FROM run_plans" + where + " ORDER BY rowid LIMIT ? OFFSET ?", (*extra, limit + 1, offset)).fetchall()
             results = []
             for row in rows[:limit]:
                 result = self._decode(row)

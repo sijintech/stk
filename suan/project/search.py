@@ -41,11 +41,12 @@ def search(store, query, *, limit=100):
         version = _version(db)
     found = {kind: [] for kind in KINDS}
     counts = dict.fromkeys(KINDS, 0)
+    # Archived objects are found too, marked and listed after the others of their kind (format 11).
+    archived = {kind: store.archive.ids(kind) for kind in ("workflow", "analysis", "draft", "context")}
 
-    def add(kind, identity, **fields):
+    def add(kind, identity, *, shelved=False, **fields):
         counts[kind] += 1
-        if len(found[kind]) < PER_KIND:
-            found[kind].append({"kind": kind, "id": identity, **fields})
+        found[kind].append({"kind": kind, "id": identity, **fields, **({"archived": True} if shelved else {})})
 
     def matches(value):
         return isinstance(value, str) and needle in value.casefold()
@@ -72,7 +73,8 @@ def search(store, query, *, limit=100):
         for record in table["records"] if table else ():
             name = record["values"].get(module.FIELD_IDS["name"])
             if matches(name):
-                add(kind, record["id"], name=name, target={"editor": editor, key: record["id"]})
+                add(kind, record["id"], name=name, target={"editor": editor, key: record["id"]},
+                    shelved=record["id"] in archived[kind])
     table = tables.get(files.TABLE_ID)
     for record in table["records"] if table else ():
         name, path = (record["values"].get(files.FIELD_IDS[key]) for key in ("name", "path"))
@@ -86,11 +88,11 @@ def search(store, query, *, limit=100):
             for draft in page["drafts"]:
                 if matches(draft.get("title")):
                     add("draft", draft["id"], name=draft["title"], status=draft.get("status"),
-                        target={"page": "review", "draft_id": draft["id"]})
+                        target={"page": "review", "draft_id": draft["id"]}, shelved=draft["id"] in archived["draft"])
             offset = page["next_offset"]
     if version >= 7:
         with store._connect() as db:
-            rows = db.execute("SELECT id, payload FROM project_messages ORDER BY rowid").fetchall()
+            rows = db.execute("SELECT id, context_id, payload FROM project_messages ORDER BY rowid").fetchall()
         for row in rows:
             try:
                 message = json.loads(row["payload"])
@@ -100,8 +102,9 @@ def search(store, query, *, limit=100):
             if matches(text):
                 add("message", row["id"], role=role if role in ("user", "assistant") else None,
                     text=_snippet(text, needle), at=message.get("created_at"),
-                    target={"page": "conversation", "message_id": row["id"]})
-    results = [item for kind in KINDS for item in found[kind]]
+                    target={"page": "conversation", "message_id": row["id"]}, shelved=row["context_id"] in archived["context"])
+    results = [item for kind in KINDS
+               for item in sorted(found[kind], key=lambda entry: entry.get("archived", False))[:PER_KIND]]
     return {"revision": model["project"]["revision"], "query": query.strip(), "results": results[:limit],
             "counts": counts, "truncated": sum(counts.values()) > min(len(results), limit)}
 

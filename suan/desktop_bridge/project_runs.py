@@ -19,7 +19,7 @@ class ProjectRuns:
                 return runs.prepare(params["entries"], connection=params["connection"], node=params.get("node"),
                                     connection_identity=backend.server_key, expected_revision=params["expected_revision"])
             if action == "list":
-                return runs.list(offset=params.get("offset", 0), limit=params.get("limit", 100))
+                return runs.list(offset=params.get("offset", 0), limit=params.get("limit", 100), archived=params.get("archived"))
             run_id = params["run_id"]
             run = runs.get(run_id)
             if action == "get":
@@ -32,6 +32,8 @@ class ProjectRuns:
             if action == "submit":
                 if task:
                     return {"run": run}
+                if store.archive.is_archived("simulation_run", run_id):
+                    raise BridgeError("conflict", "This simulation run is archived; restore it to submit it")
                 # An interrupted submission already accepted the frozen plan. An explicit retry
                 # recovers that intent even if the editable parameter row has since changed.
                 if status["submission"] == "prepared" and run["parameter_state"] != "current" and not params.get("allow_stale", False):
