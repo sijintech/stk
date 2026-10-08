@@ -20,7 +20,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 10
+FORMAT_VERSION = 11
 DATABASE_NAME = "project.sqlite3"
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
@@ -147,6 +147,18 @@ _DDL_V10 = (
     "CREATE INDEX workflow_run_events_by_run ON workflow_run_events(run_id, id)",
 )
 
+# Archived objects (format 11, docs/design/project-archive.md): an append-only record per change; an object's
+# current state is its last row. Not part of the editable revision, undo or hash-chained journals.
+_DDL_V11 = (
+    """CREATE TABLE project_archive (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL CHECK(kind IN ('workflow','analysis','batch','workflow_run','analysis_run',
+                                         'simulation_run','request','draft','context')),
+        object_id TEXT NOT NULL, archived INTEGER NOT NULL CHECK(archived IN (0, 1)),
+        at TEXT NOT NULL, note TEXT)""",
+    "CREATE INDEX project_archive_by_object ON project_archive(kind, object_id, id)",
+)
+
 
 class ProjectError(ValueError):
     """Invalid project, unsupported format or rejected mutation."""
@@ -248,7 +260,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -323,6 +335,11 @@ class ProjectStore:
     def workflow_runs(self):
         from .workflow_runs import WorkflowRuns
         return WorkflowRuns(self)
+
+    @property
+    def archive(self):
+        from .archive import Archive
+        return Archive(self)
 
     @property
     def snapshots(self):
@@ -420,7 +437,7 @@ class ProjectStore:
                 backup = self._backup(source)
             for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5),
                                                (5, _DDL_V6), (6, _DDL_V7), (7, _DDL_V8), (8, _DDL_V9),
-                                               (9, _DDL_V10)):
+                                               (9, _DDL_V10), (10, _DDL_V11)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)

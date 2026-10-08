@@ -366,7 +366,7 @@ TEST_F(PythonBridge, ProjectLifecycleAndRevisionedEdits)
   ASSERT_TRUE(created.ok()) << created.error().describe();
   const ProjectInfo project = created.value();
   EXPECT_EQ(project.revision, 0);
-  EXPECT_EQ(project.format_version, 10);
+  EXPECT_EQ(project.format_version, 11);
   EXPECT_EQ(project.name, "Parameter scan");
   const auto opened = client->project_open(project.directory).get();
   ASSERT_TRUE(opened.ok());

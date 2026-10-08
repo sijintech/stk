@@ -557,6 +557,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.attention.list` | `{handle}` | `{revision, items: [projectAttentionItem], counts: {needs_you, running, unviewed_done}}` |
 | `project.attention.viewed` | `{handle, keys}` | `{viewed}` |
 | `project.search` | `{handle, query, limit?}` | `{revision, query, results: [projectSearchItem], counts, truncated}` |
+| `project.archive.set` | `{handle, items: [{kind, id}], archived, note?, include_runs?}` | `{changed, items}` |
+| `project.archive.list` | `{handle, kind?}` | `{items: [{kind, id, archived_at, note}], counts}` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -680,6 +682,17 @@ with `analysis_id`/`analysis_run_id`) or `{page, ...}` (`simulation_runs`, `revi
 the item's status and counts, so an item marked viewed appears again when its state changes. `viewed` stores 1–500 keys
 per call as this person's local marks under the service state directory (at most 2000 per project); it never changes the
 project or its revision.
+
+The optional `project.archive.*` methods (design in `docs/design/project-archive.md`) require project format 11. `set`
+archives (`archived: true`) or restores 1–100 objects of the kinds `workflow`, `analysis`, `batch`, `workflow_run`,
+`analysis_run`, `simulation_run`, `request`, `draft` and `context`; each change appends one row (kind, object, state,
+time, optional note of at most 1000 characters) and an object's state is its last row. Unlike the run and request
+journals these rows are not hash-chained. Archiving never changes the editable revision or the undo history. Unknown
+objects, and objects in progress (a running or cancelling workflow or analysis run, a simulation task still on the
+Runtime, an AI request being answered), refuse the whole call; objects already in the requested state are left alone
+and not counted. `include_runs` also covers each listed workflow's runs that are not running. A change emits
+`project.archive.changed {handle, kinds}`. `list` returns the currently archived objects with time and note and the
+count per kind; below format 11 it is empty and `set` is `unsupported`.
 
 The optional `project.search` (experimental, UX package U3) finds a trimmed, case-insensitive substring (1–200
 characters) in parameter table names, field names and text cells (managed tables excluded), saved workflow and analysis

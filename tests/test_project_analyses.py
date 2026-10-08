@@ -62,7 +62,7 @@ def test_create_uses_fixed_fields_and_one_revision_and_undo_batch(store):
     assert answer["revision"] == 1 and answer["record_id"] == identity and answer["table_id"] == TABLE_ID
     assert {c["op"] for c in answer["commands"]} == {"create_table", "add_field", "add_record", "set_cell"}
     snapshot = store.snapshot()
-    assert snapshot["format_version"] == 10
+    assert snapshot["format_version"] == 11
     assert "analysis_index" not in snapshot
     table = snapshot["tables"][0]
     assert table["id"] == TABLE_ID and {f["id"] for f in table["fields"]} == set(FIELD_IDS.values())

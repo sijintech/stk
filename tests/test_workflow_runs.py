@@ -198,13 +198,13 @@ def test_the_log_is_an_unbroken_chain(project):
 def test_older_projects_need_an_explicit_upgrade(project):
     store, ids = project
     with sqlite3.connect(store.path) as db:
-        for table in ("workflow_run_events", "workflow_run_plans"):
+        for table in ("project_archive", "workflow_run_events", "workflow_run_plans"):
             db.execute(f"DROP TABLE {table}")
         db.execute("PRAGMA user_version=9")
     with pytest.raises(UnsupportedProjectFormat, match="format 10"):
         prepare(store, ids)
     upgraded = store.upgrade(expected_revision=revision(store))
-    assert upgraded["format_version"] == 10 and upgraded["backup"]
+    assert upgraded["format_version"] == 11 and upgraded["backup"]
     assert prepare(store, ids)["status"] == "prepared"
 
 

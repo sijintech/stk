@@ -2714,7 +2714,8 @@
                                 6,
                                 7,
                                 8,
-                                9
+                                9,
+                                10
                               ]
                             },
                             "to_version": {
@@ -2727,7 +2728,8 @@
                                 7,
                                 8,
                                 9,
-                                10
+                                10,
+                                11
                               ]
                             }
                           },
@@ -6352,6 +6354,156 @@
           "additionalProperties": false
         }
       },
+      "project.archive.set": {
+        "description": "Archive (or restore) 1-100 objects (project format 11): hidden from default lists and read-only until restored; nothing is deleted and the editable revision does not change. Objects in progress are refused; include_runs also covers a workflow's runs that are not running.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/projectArchiveKind"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "archived": {
+              "type": "boolean"
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "include_runs": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "handle",
+            "items",
+            "archived"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "changed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/projectArchiveKind"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "changed",
+            "items"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.archive.list": {
+        "description": "Currently archived objects of the project (optionally one kind) with when and why, and counts per kind; reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "kind": {
+              "$ref": "#/$defs/projectArchiveKind"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/projectArchiveKind"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "archived_at": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id",
+                  "archived_at",
+                  "note"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "counts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              }
+            }
+          },
+          "required": [
+            "items",
+            "counts"
+          ],
+          "additionalProperties": false
+        }
+      },
       "project.analysis_runs.prepare": {
         "description": "Freeze a saved analysis and explicit file-snapshot mapping at a project revision, without executing nodes or changing editable revision/history. Same UUID and original request return the frozen run.",
         "params": {
@@ -7250,6 +7402,27 @@
           "handle",
           "run_id",
           "observation_id"
+        ],
+        "additionalProperties": false
+      },
+      "project.archive.changed": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "$ref": "#/$defs/hex32"
+          },
+          "kinds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 9,
+            "items": {
+              "$ref": "#/$defs/projectArchiveKind"
+            }
+          }
+        },
+        "required": [
+          "handle",
+          "kinds"
         ],
         "additionalProperties": false
       }
@@ -12506,6 +12679,19 @@
         "target"
       ],
       "additionalProperties": false
+    },
+    "projectArchiveKind": {
+      "enum": [
+        "workflow",
+        "analysis",
+        "batch",
+        "workflow_run",
+        "analysis_run",
+        "simulation_run",
+        "request",
+        "draft",
+        "context"
+      ]
     }
   }
 }

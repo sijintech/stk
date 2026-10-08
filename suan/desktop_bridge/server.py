@@ -287,6 +287,8 @@ class Bridge:
             "project.workflow_runs.stale": lambda p, c: self.projects.workflow_runs("stale", p),
             "project.attention.list": lambda p, c: self.projects.attention("list", p),
             "project.search": lambda p, c: self.projects.search(p),
+            "project.archive.set": self.archive_set,
+            "project.archive.list": lambda p, c: self.projects.archive("list", p),
             "project.attention.viewed": lambda p, c: self.projects.attention("viewed", p),
             "project.analysis_runs.prepare": lambda p, c: self.projects.analysis_runs("prepare", p),
             "project.analysis_runs.get": lambda p, c: self.projects.analysis_runs("get", p),
@@ -531,6 +533,7 @@ class Bridge:
                  "project.workflow_runs.prepare", "project.workflow_runs.get", "project.workflow_runs.list",
                  "project.workflow_runs.start", "project.workflow_runs.cancel", "project.workflow_runs.recover",
                  "project.workflow_runs.stale", "project.attention.list", "project.attention.viewed", "project.search",
+                 "project.archive.set", "project.archive.list",
                  "project.analysis_runs.prepare", "project.analysis_runs.get", "project.analysis_runs.list",
                  "project.analysis_runs.start", "project.analysis_runs.cancel", "project.analysis_runs.recover", "project.analysis_runs.result",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
@@ -614,6 +617,13 @@ class Bridge:
         data = result["data"][:limit]
         return {"data": base64.b64encode(data).decode("ascii"), "offset": result["offset"],
                 "next_offset": result["offset"] + len(data), "terminal": result["terminal"]}
+
+    def archive_set(self, params, context):
+        result = self.projects.archive("set", params)
+        if result["changed"]:
+            kinds = sorted({item["kind"] for item in result["items"]})
+            context.after(lambda: self.emit("project.archive.changed", {"handle": params["handle"], "kinds": kinds}))
+        return result
 
     def run_project(self, action, params, context):
         observing = action in ("submit", "refresh", "cancel")

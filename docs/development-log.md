@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-10-08：归档 A1a（格式 11 与归档记录）
+
+所有者确认归档方案：B（独立记录，格式 11）、恢复前只读、搜索包含已归档并标注、首版九类（含草案与上下文，按“我认为需要包含”理解）。
+A1a：`_DDL_V11` 的 `project_archive`（类别 CHECK、按对象索引），新建与 10→11 升级；`suan/project/archive.py` 的 `Archive.set/list/ids/is_archived/require_active`
+与供列表使用的 `clause/where`（以每个对象最后一行为当前状态）；归档前检查对象存在、进行中则拒绝（整次调用不写入），已在目标状态的对象不计；
+`include_runs` 连带工作流的非运行中运行。后台服务 `project.archive.set/list`（`set` 有变化时发 `project.archive.changed`）、schema、
+`stk.project.archive/unarchive/archived`。格式提升连带：伪造旧格式的测试补删 `project_archive`，固定为 10 的断言改为 11，桌面 `kProjectFormatVersion = 11`。
+
 ## 2026-10-07：P2 L2 运行新增的行、L3 结果回到对话
 
 L2：工作流摘要（列表与读取）增加单一参数表步骤的 `table_id`；工作流编辑器 `navigate` 接受 `{table_id, rows}`（无 `workflow_id`）：

@@ -236,6 +236,15 @@ class ProjectSessions:
                 return workflows.choices()
             return workflows.get(params["workflow_id"])
 
+    def archive(self, action, params):
+        """Archive or restore objects, or list what is archived (format 11); never changes the revision."""
+        with self._operation():
+            store = self._get(params["handle"])
+            if action == "set":
+                return store.archive.set(params["items"], archived=params["archived"], note=params.get("note"),
+                                         include_runs=params.get("include_runs", False))
+            return store.archive.list(params.get("kind"))
+
     def search(self, params):
         """Names and text of the project matching a query; reads only (UX package U3)."""
         from suan.project.search import search

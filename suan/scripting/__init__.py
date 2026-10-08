@@ -139,6 +139,30 @@ class Project:
         (case-insensitive); reads only: {revision, query, results: [{kind, id, name, target, ...}], counts, truncated}."""
         return self._call("project.search", {"handle": self.handle, "query": query, "limit": limit})
 
+    def archive(self, kind, ids, *, note=None, include_runs=False):
+        """Archive objects of one kind (format 11): hidden from default lists and read-only until restored;
+        nothing is deleted. ``include_runs`` also archives a workflow's runs that are not running."""
+        return self._archive(kind, ids, True, note, include_runs)
+
+    def unarchive(self, kind, ids, *, include_runs=False):
+        """Restore archived objects of one kind."""
+        return self._archive(kind, ids, False, None, include_runs)
+
+    def _archive(self, kind, ids, archived, note, include_runs):
+        params = {"handle": self.handle, "items": [{"kind": kind, "id": identity} for identity in ids], "archived": archived}
+        if note is not None:
+            params["note"] = note
+        if include_runs:
+            params["include_runs"] = True
+        return self._call("project.archive.set", params)
+
+    def archived(self, kind=None):
+        """Currently archived objects ({kind, id, archived_at, note}) and counts per kind."""
+        params = {"handle": self.handle}
+        if kind is not None:
+            params["kind"] = kind
+        return self._call("project.archive.list", params)
+
     def mark_viewed(self, keys):
         """Mark attention items as viewed (kept for this person only, outside the project)."""
         return self._call("project.attention.viewed", {"handle": self.handle, "keys": list(keys)})
