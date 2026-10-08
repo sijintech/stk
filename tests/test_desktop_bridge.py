@@ -449,7 +449,8 @@ def test_serve_handles_oversized_lines_and_eof(bridge_env):
     output = io.BytesIO()
     lines = [b'{"id": 1, "method": "hello", "params": {"protocol": 1}}\n',
              b'{"id": 2, "pad": "' + b"x" * 10000 + b'"}\n', b'{"id": 3, "method": "connections.list"}\n']
-    bridge = Bridge(bridge_env / "bridge", writer=output, strict=True, max_line=4096)
+    # The limit leaves room for hello's reply (its method list and Windows' long temporary paths), not the 10 KB line.
+    bridge = Bridge(bridge_env / "bridge", writer=output, strict=True, max_line=8192)
     bridge.serve(io.BytesIO(b"".join(lines)))  # EOF: returns after a graceful shutdown
     assert bridge.closed.is_set()
     deadline = time.monotonic() + 10
