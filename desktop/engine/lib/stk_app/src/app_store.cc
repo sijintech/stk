@@ -5,6 +5,7 @@
 #include "stk/app/jobs_state.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
+#include "stk/app/project_archive.hh"
 #include "stk/app/project_attention.hh"
 #include "stk/app/skill_catalog.hh"
 #include "stk/app/viewer_state.hh"
@@ -35,6 +36,7 @@ AppStore::~AppStore()
    * (jobs first: its subscriptions may feed the viewer) before the rest of the store. */
   on_change = nullptr;
   attention_.reset();
+  archive_.reset();
   skills_.reset();
   scripts_.reset();
   project_.reset();
@@ -48,6 +50,14 @@ ProjectState &AppStore::project()
     project_ = std::make_unique<ProjectState>(*this);
   }
   return *project_;
+}
+
+ProjectArchive &AppStore::archive()
+{
+  if (!archive_) {
+    archive_ = std::make_unique<ProjectArchive>(*this);
+  }
+  return *archive_;
 }
 
 ProjectAttention &AppStore::attention()

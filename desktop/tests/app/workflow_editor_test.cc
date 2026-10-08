@@ -898,5 +898,58 @@ TEST_F(WorkflowEditorPython, HomeListsAFailedRunFirstAndOpensItInTheWorkflowEdit
   EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
 
+TEST_F(WorkflowEditorPython, ArchivedWorkflowsLeaveTheListAndStayReadOnlyUntilRestored)
+{
+  // A prepared (never started) run, archived together with its workflow.
+  const std::string row = "15151515-1515-4151-8151-151515151515", run_id = "17171717-1717-4171-8171-171717171717";
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
+      {{"op", "add_record"}, {"id", row}, {"table_id", table_id}}}}}, out));
+  ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.prepare", {{"handle", handle()}, {"workflow_id", workflow_id},
+      {"rows", {row}}, {"run_id", run_id}, {"expected_revision", revision}}, out));
+  project().refresh();
+  // Another workflow and back lists the run prepared outside the editor.
+  const auto idle = [&] { return widget("workflow_list") && widget("workflow_list")->enabled && !project().busy(); };
+  ASSERT_NO_FATAL_FAILURE(frames_until(idle));
+  widget("workflow_list")->table->selected.assign(1);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("1 problems found"); }));
+  ASSERT_NO_FATAL_FAILURE(frames_until(idle));
+  widget("workflow_list")->table->selected.assign(0);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_runs") && widget("workflow_runs")->table->rows == 1 &&
+      widget("workflow_archive") && widget("workflow_archive")->enabled && !project().busy(); }));
+  const auto before = project().project()->revision;
+  EXPECT_EQ(widget("workflow_archive")->text, "Archive");
+  EXPECT_EQ(widget("workflow_show_archived"), nullptr);  // nothing archived yet
+  ASSERT_NO_FATAL_FAILURE(click("workflow_archive"));
+  // Left out of the list but still shown, read-only and not runnable; its run went with it.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Archived: read-only until restored.") && widget("workflow_list") &&
+      widget("workflow_list")->table->rows == 1 && !widget("workflow_runs"); }));
+  EXPECT_TRUE(shows("This workflow is archived; restore it to run it.")) << sidebar();
+  ASSERT_NE(widget("workflow_add_step"), nullptr); EXPECT_FALSE(widget("workflow_add_step")->enabled);
+  EXPECT_EQ(widget("workflow_archive")->text, "Restore");
+  ASSERT_NE(widget("workflow_show_archived"), nullptr);
+  EXPECT_EQ(widget("workflow_show_archived")->text, "Show archived (1)");
+  // Switched, the lists show only what is archived.
+  widget("workflow_show_archived")->boolean.assign(true);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->table->rows == 1 &&
+      widget("workflow_list")->table->cell(0, 0) == "Temperature scan"; }));
+  ASSERT_NE(widget("workflow_runs_show_archived"), nullptr);
+  widget("workflow_runs_show_archived")->boolean.assign(true);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_runs") && widget("workflow_runs")->table->rows == 1; }));
+  // Restored with its run: editable again, and archiving never changed the project's revision.
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_archive") && widget("workflow_archive")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_archive"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !shows("Archived: read-only") && !widget("workflow_list") && !widget("workflow_runs"); }));
+  widget("workflow_show_archived")->boolean.assign(false);
+  widget("workflow_runs_show_archived")->boolean.assign(false);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_list") && widget("workflow_list")->table->rows == 2 &&
+      widget("workflow_runs") && widget("workflow_runs")->table->rows == 1 && widget("workflow_add_step")->enabled; }));
+  EXPECT_EQ(widget("workflow_show_archived"), nullptr);
+  EXPECT_EQ(widget("workflow_archive")->text, "Archive");
+  EXPECT_EQ(project().project()->revision, before);
+  EXPECT_EQ(calls("project.archive.set"), 2u);
+  EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
 }  // namespace
 }  // namespace stk::app

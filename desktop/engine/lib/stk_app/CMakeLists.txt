@@ -54,6 +54,7 @@ add_library(stk_app STATIC
   src/project_state.cc
   src/project_analyses.cc
   src/project_workflows.cc
+  src/project_archive.cc
   src/project_attention.cc
   src/project_search.cc
   src/project_analysis_runs.cc

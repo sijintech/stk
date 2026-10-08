@@ -122,7 +122,9 @@ bool ProjectWorkflows::call(const std::string &method, Json params, std::functio
 bool ProjectWorkflows::load_page(const int64_t offset)
 {
   if (offset < 0) { return false; }
-  return call("project.workflows.list", {{"offset", offset}, {"limit", 50}}, [this, offset](const Json &result) {
+  Json params = {{"offset", offset}, {"limit", 50}};
+  if (list_archived_) { params["archived"] = *list_archived_; }
+  return call("project.workflows.list", std::move(params), [this, offset](const Json &result) {
     if (!result.is_object() || io::get_int(result, "revision", -1) < 0 ||
         io::get_int(result, "offset", -1) != offset || io::get_int(result, "total", -1) < 0 ||
         !result.contains("workflows") || !result.at("workflows").is_array() || result.at("workflows").size() > 50) {
@@ -305,7 +307,9 @@ bool ProjectWorkflows::load_runs()
 {
   if (!runs_supported() || selected_.is_null()) { return false; }
   const auto workflow = io::get_string(selected_, "id");
-  return call("project.workflow_runs.list", {{"workflow_id", workflow}, {"limit", 20}}, [this, workflow](const Json &result) {
+  Json params = {{"workflow_id", workflow}, {"limit", 20}};
+  if (runs_archived_) { params["archived"] = *runs_archived_; }
+  return call("project.workflow_runs.list", std::move(params), [this, workflow](const Json &result) {
     if (!result.is_object() || !result.contains("runs") || !result.at("runs").is_array()) {
       throw std::runtime_error("Invalid workflow run list response");
     }

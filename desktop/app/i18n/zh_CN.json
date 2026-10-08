@@ -1859,5 +1859,15 @@
   "workflow.run.no_workflow_for_rows": "没有工作流使用这些行所在的参数表；新建一份以该表为参数表步骤的工作流后再运行。",
   "workflow.run.ask_results": "就这 {count} 行的结果提问",
   "workflow.run.ask_results.tip": "把这次运行各行的 MuFerro 结果（温度、最终步数、能量）捕获为新的对话上下文，并打开 AI 助手；只读取与捕获，不运行任何内容。",
-  "workflow.run.results_title": "{name} 的运行结果（{count} 行）"
+  "workflow.run.results_title": "{name} 的运行结果（{count} 行）",
+  "archive.show": "显示已归档（{count}）",
+  "archive.show_plain": "显示已归档",
+  "archive.archive": "归档",
+  "archive.restore": "恢复",
+  "archive.archive.tip": "收起：列表中不再显示，仍可查看；恢复前只读。",
+  "archive.restore.tip": "重新显示在列表中，并允许修改。",
+  "archive.archive.runs_tip": "归档此工作流及其未在运行的运行记录；恢复前只读。",
+  "archive.restore.runs_tip": "恢复此工作流及其运行记录。",
+  "archive.read_only": "已归档：恢复前只读。",
+  "workflow.run.archived": "此工作流已归档，恢复后才能运行。"
 }

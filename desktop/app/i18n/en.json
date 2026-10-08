@@ -1859,5 +1859,15 @@
   "workflow.run.no_workflow_for_rows": "No workflow uses the parameter table of these rows; create one with that table as its parameter table step, then run them.",
   "workflow.run.ask_results": "Ask about the results of these {count} rows",
   "workflow.run.ask_results.tip": "Captures this run's MuFerro result rows (temperature, final step, energy) as a new conversation context and opens the AI assistant; it only reads and captures.",
-  "workflow.run.results_title": "Results of {name} ({count} rows)"
+  "workflow.run.results_title": "Results of {name} ({count} rows)",
+  "archive.show": "Show archived ({count})",
+  "archive.show_plain": "Show archived",
+  "archive.archive": "Archive",
+  "archive.restore": "Restore",
+  "archive.archive.tip": "Put it away: lists leave it out, it stays readable and read-only until restored.",
+  "archive.restore.tip": "Show it in lists again and allow changes.",
+  "archive.archive.runs_tip": "Archive this workflow and its runs that are not running; read-only until restored.",
+  "archive.restore.runs_tip": "Restore this workflow and its runs.",
+  "archive.read_only": "Archived: read-only until restored.",
+  "workflow.run.archived": "This workflow is archived; restore it to run it."
 }

@@ -48,6 +48,9 @@ class ProjectWorkflows {
   /** The latest project.workflows.choices reply (null until read). */
   const io::Json &choices() const { return choices_; }
 
+  /** Archive filters sent with later list reads: false lists only active objects, true only archived ones,
+   * nullopt everything (projects before format 11; see project_archive.hh). */
+  void set_archive_filters(std::optional<bool> workflows, std::optional<bool> runs) { list_archived_ = workflows; runs_archived_ = runs; }
   bool load_page(int64_t offset = 0);
   /** Read one workflow, then validate the document read. */
   bool load(const std::string &id);
@@ -107,6 +110,7 @@ class ProjectWorkflows {
   int64_t selected_revision_ = -1;
   io::Json page_, selected_, validation_, choices_, runs_, run_, stale_;
   uint64_t run_version_ = 0;
+  std::optional<bool> list_archived_, runs_archived_;
   std::optional<bridge::Future<io::Json>> future_, check_future_;
   AnalysisCandidateValidation candidate_;
 };
