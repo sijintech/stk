@@ -11,6 +11,8 @@
   已归档的已准备分析运行不能开始，恢复后可以；已归档草案可载入查看，“应用/放弃”不可用，经“以当前修订另起草案并检查”复制后应用（修订 1→2，原草案仍待审）；
   已归档问题不能发送，已归档上下文可添加消息与提问；“讨论”页可在已归档上下文中记消息。
 - 完整 pytest（`-m "not perf"`）**2291 passed、24 skipped**（少一项为删除的批次控制台测试）；完整 Linux CTest **1278/1278**。
+- CI：`a7b91cf` [桌面](https://github.com/sijintech/stk/actions/runs/37811715874) 5/5（Linux、Linux 打包与冒烟、macOS Metal、Windows）、
+  [Runtime](https://github.com/sijintech/stk/actions/runs/37811716006) 7/7、密钥扫描通过。
 
 ## 2026-10-08：归档 A2（桌面）与 A3
 
