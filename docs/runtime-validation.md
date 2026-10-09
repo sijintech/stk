@@ -8,6 +8,7 @@
   Python 3.14.4 首次 **2 failed**（`test_listing_prefixes_links_and_loops`、`test_symlinked_case_directory_and_link_loops`：3.13 起符号链接环在打开文件时才以 ELOOP 报错），
   修正后 **2325 passed、22 skipped**，相关文件在 3.11、3.12、3.14 上均通过。Python 3.12.14 完整 pytest（`-m "not perf"`）**2325 passed、24 skipped**。
 - 完整 Linux CTest **1281/1281**。
+- CI：`e4c0160` [Runtime](https://github.com/sijintech/stk/actions/runs/37912673513) 8/8（Linux 3.11、3.12、3.14，Windows 客户端 3.11、3.12，以及桌面、控制服务、网页），[桌面](https://github.com/sijintech/stk/actions/runs/37912673412) 5/5，密钥扫描通过。
 
 ## 2026-10-09：思劲平台 S1c（本机一键部署）
 
