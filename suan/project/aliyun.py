@@ -7,6 +7,7 @@ in the process environment and in a prepared request's memory; they are never
 part of project configuration, request payloads, reprs or error messages.
 """
 
+import _socket
 from dataclasses import dataclass, field
 import hashlib
 import http.client
@@ -257,6 +258,11 @@ def _close_on_cancel(transport_socket, cancel_event, finished):
                 socket.socket.shutdown(transport_socket, socket.SHUT_RDWR)
             except OSError:
                 pass
+            if os.name == "nt":  # Windows does not wake a blocked receive on shutdown; closing the handle does
+                try:
+                    _socket.socket.close(transport_socket)
+                except OSError:
+                    pass
             return
 
 

@@ -26,6 +26,8 @@
   2.7 GB 用 220 秒并核对哈希，llama.cpp b11429 运行时自动下载解包；启动 5.2 秒就绪并登记为本机端点；网络设置为离线时私有数据的问题发往该端点。
   首次提问在 60 秒时成为“不确定”（网关期限过短，已修正）；修正后带思考 188.6 秒完成（生成 2,335 个 token，13 token/秒）；
   `--reasoning off` 后 14.9 秒完成（提示 1,108 个 token 用 11 秒，回答 52 个 token）。不带密钥访问 `/v1/chat/completions` 与 `/slots` 均返回 401。
+  审查修正后以提交 `caffb4a` 再跑一次（服务器环境已去掉密钥类变量、不再指定 `-ngl`、受管密钥）：启动 5.2 秒，提问 15.7 秒完成，不带密钥仍返回 401，停止后不再自动启动。
+- CI：`caffb4a` [桌面](https://github.com/sijintech/stk/actions/runs/37889597094) 4/5——macOS 的 `LocalModelsPython` 在 30 秒内未见服务器就绪，日志没有原因；Linux、Windows 与两个打包任务通过。[Runtime](https://github.com/sijintech/stk/actions/runs/37889597053) 4/7——Windows 3.10/3.12 的在途取消测试失败（Windows 上从另一线程 shutdown 不会唤醒阻塞的接收，改为随后关闭句柄，在 Linux 上模拟 Windows 分支通过）；Windows 3.12 的 `test_servers_stop_with_the_service_and_start_again_with_the_next` 失败（测试里“被杀掉的服务”仍有监护线程，它把被回收的服务器记为失败并关掉了共享状态中的自动启动，测试改为同时清掉其内存记录）；Linux 3.10 的 MuFerro 排队计时测试失败，与本次改动无关。密钥扫描通过。修正：两个测试 HTTP 服务器不再做反向 DNS 查询（macOS 上可能很慢，未证实为原因），原生测试超时时打印服务端看到的状态、错误与服务器日志、等待改为 60 秒。本机修正后完整 pytest **2325 passed、24 skipped**、完整 Linux CTest **1281/1281**。
 
 ## 2026-10-08：思劲平台 S1a/S1b（模型网关与数据边界）
 

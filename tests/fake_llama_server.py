@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
 from pathlib import Path
+import socketserver
 import sys
 
 args = sys.argv[1:]
@@ -61,4 +62,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, data, "application/json")
 
 
-HTTPServer((value.get("--host", "127.0.0.1"), int(value["--port"])), Handler).serve_forever()
+class Server(HTTPServer):
+    def server_bind(self):  # without HTTPServer's reverse DNS lookup of the host, which can stall on macOS
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
+Server((value.get("--host", "127.0.0.1"), int(value["--port"])), Handler).serve_forever()

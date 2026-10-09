@@ -105,7 +105,7 @@
 - **S1b（已交付）**：桌面 `ModelSettings`、`ProjectDataLabels`；数据页“公开数据”；AI 助手选择端点与模型、添加端点的密钥、
   “模型与网络”（网络设置、添加与移除端点）；AI 助手与“讨论”页说明不能发送的原因（`model_gate.hh`）。
 - **S1c（已交付）**：`suan/models/local.py`（目录读取与校验、硬件探测、评估与推荐、可续传并核对的下载、安全解包、`LocalModels`
-  安装/导入/取消/启动/停止/移除、服务器监护与自动启动、遗留进程回收）、`suan/models/catalog.json`（13 项与 5 个平台的 llama.cpp 构建）；
+  安装/导入/取消/启动/停止/移除、服务器监护与自动启动、遗留进程回收）、`suan/models/catalog.json`（14 项与 5 个平台的 llama.cpp 构建）；
   后台服务 `models.local.list/recommendations/install/import/cancel/start/stop/remove` 与事件 `models.local.progress`，脚本只有 `models.local.list`；
   发往受管本机端点前检查其服务器在运行。桌面“模型与网络”页的“本机模型”：硬件概况、各项能否放下与推荐、安装进度、启动/停止/移除/取消、
   从本地文件导入。

@@ -486,8 +486,9 @@ def test_servers_stop_with_the_service_and_start_again_with_the_next(tmp_path, f
     second = make(state, managers)
     second.autostart()
     eventually(lambda: second.list()["installed"][0]["server"]["state"] == "running", timeout=30)
-    # A service killed alone leaves its server running; the next service stops it before starting its own.
-    leftover = second._servers["tiny-q4"]["process"]
+    # A service killed alone leaves its server running; the next service stops it before starting its own. (The killed
+    # service's memory and threads are gone with it: its supervisor must not report the reaped server.)
+    leftover = second._servers.pop("tiny-q4")["process"]
     third = make(state, managers)
     assert leftover.wait(10) is not None  # stopped by the new service
     third.autostart()

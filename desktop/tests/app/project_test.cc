@@ -20,6 +20,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include "stk/platform/file_dialog.hh"
 
 namespace stk::app {
@@ -4232,7 +4233,18 @@ TEST_F(LocalModelsPython, AModelIsInstalledStartedAndOfferedAsALocalEndpointFrom
   widget(scope + "ai_local_install/tiny-q4")->on_click();
   STK_UNTIL(widget(scope + "ai_local_start/tiny-q4") && widget(scope + "ai_local_start/tiny-q4")->enabled);
   widget(scope + "ai_local_start/tiny-q4")->on_click();
-  STK_UNTIL(models.endpoint("local-tiny-q4") != nullptr && widget(scope + "ai_local_stop/tiny-q4") != nullptr);
+  // On failure, say why: the service's view of the server and the server's own log.
+  const auto server_report = [&] {
+    std::ifstream log(dir.str() + "/bridge/models/local/logs/tiny-q4.log");
+    const std::string text((std::istreambuf_iterator<char>(log)), std::istreambuf_iterator<char>());
+    const auto *progress = models.progress("tiny-q4");
+    return "local: " + models.local().dump() + "\nprogress: " + (progress ? progress->dump() : std::string("none")) +
+           "\nserver log: " + text + "\n" + client->bridge_log().text();
+  };
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    return models.endpoint("local-tiny-q4") != nullptr && widget(scope + "ai_local_stop/tiny-q4") != nullptr; }, 60))
+      << server_report();
   EXPECT_EQ(io::get_string(*models.endpoint("local-tiny-q4"), "location"), "local");
   // STK manages its key, and the endpoint is removed with the model, not on its own.
   EXPECT_TRUE(io::get_bool(*models.endpoint("local-tiny-q4"), "managed", false));

@@ -5,12 +5,21 @@ import io
 import json
 import os
 from pathlib import Path
+import socketserver
 import threading
 import zipfile
 
 from suan.models.local import platform_key
 
 FAKE_SERVER = Path(__file__).with_name("fake_llama_server.py")
+
+
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def server_bind(self):  # without HTTPServer's reverse DNS lookup of the host, which can stall on macOS
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Files:
@@ -66,7 +75,7 @@ class Files:
                 self.wfile.write(body if cut is None else body[:cut])
                 self.close_connection = True
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = _Server(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
