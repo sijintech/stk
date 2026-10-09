@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import tomllib
 
 import pytest
 
@@ -14,11 +15,6 @@ from suan.connectors.mupro import MuFerroConnector, frame_rows, stem_field  # no
 from suan.connectors.mupro.inputs import MINIMAL_SCHEMA, MuFerroInputs, dump_toml  # noqa: E402
 from suan.connectors.mupro.tables import ENERGY_COLUMNS, energy_columns, read_energy, read_progress  # noqa: E402
 from suan.data.manifest import validate_result  # noqa: E402
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python < 3.11
-    import tomli as tomllib
 
 
 def run_dir(root, *, mode="ok", case_dir=None, grid=(4, 3, 2), steps=4, interval=2):

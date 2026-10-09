@@ -1,4 +1,4 @@
-"""Light half of the muFerro connector: case files <-> stk.case/1. Standard library (+ tomllib/tomli) only.
+"""Light half of the muFerro connector: case files <-> stk.case/1. Standard library only.
 
 Public STK ships a *minimal* parameter schema for the keys STK itself reads
 (``[system].simulation_grid``, ``timestep_start``, ``timestep_total``,
@@ -13,11 +13,7 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import posixpath
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python < 3.11
-    import tomli as tomllib
+import tomllib
 
 from ..api import API_VERSION, ConnectorError
 

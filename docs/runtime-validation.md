@@ -2,6 +2,13 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-09：Python 下限升到 3.11
+
+- 本机各版本全量非桌面测试（`-m "not desktop and not perf"`，与 CI 相同的 extras，可编辑安装）：Python 3.11.16 **2325 passed、22 skipped**；
+  Python 3.14.4 首次 **2 failed**（`test_listing_prefixes_links_and_loops`、`test_symlinked_case_directory_and_link_loops`：3.13 起符号链接环在打开文件时才以 ELOOP 报错），
+  修正后 **2325 passed、22 skipped**，相关文件在 3.11、3.12、3.14 上均通过。Python 3.12.14 完整 pytest（`-m "not perf"`）**2325 passed、24 skipped**。
+- 完整 Linux CTest **1281/1281**。
+
 ## 2026-10-09：思劲平台 S1c（本机一键部署）
 
 - Python：`test_local_models.py` 17 项（推荐规则、硬件探测、目录必须给出大小与哈希、**随 STK 发布的目录**完整且每项符合桌面协议、

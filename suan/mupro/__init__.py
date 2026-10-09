@@ -1,6 +1,6 @@
 """STK-owned MuPRO (muFerro) task support: client TaskSpec builder, compute-side
-launcher and per-run verifier. Stdlib + TOML reader (tomllib, or tomli before
-Python 3.11) only; muprosdk is called as a native program, never imported."""
+launcher and per-run verifier. Standard library only (tomllib reads TOML);
+muprosdk is called as a native program, never imported."""
 
 from .spec import muferro_spec
 

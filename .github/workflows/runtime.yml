@@ -9,7 +9,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.12']
+        # 3.11 is the lower bound (Flower needs it), 3.12 the recommended and reference version, 3.14 the upper bound.
+        python: ['3.11', '3.12', '3.14']
     runs-on: ubuntu-latest
     # A hung test fails the job instead of running to GitHub's 6-hour default.
     timeout-minutes: 30
@@ -38,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.12']
+        python: ['3.11', '3.12']
     runs-on: windows-latest
     timeout-minutes: 30
     steps:

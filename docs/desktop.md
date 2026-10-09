@@ -243,7 +243,7 @@ AppImage 暂不提供（后续工作）。
 
 ### Python 部分
 
-在 Python 3.10–3.14 的虚拟环境中从仓库安装 STK（包名 `suan_toolkits`，尚未发布到 PyPI）：
+在 Python 3.11–3.14（推荐 3.12）的虚拟环境中从仓库安装 STK（包名 `suan_toolkits`，尚未发布到 PyPI）：
 
 ```bash
 python3 -m venv ~/.venvs/stk

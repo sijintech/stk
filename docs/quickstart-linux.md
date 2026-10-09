@@ -8,7 +8,7 @@
 
 需要 x86_64 Linux（glibc ≥ 2.39，例如 Ubuntu 24.04）、X11 或 Wayland 桌面，以及 OpenGL 4.3 或 Vulkan 1.2 驱动。
 
-先准备 Python 部分（3.10–3.14 的虚拟环境，含本机分析与三维显示所需的科学依赖）：
+先准备 Python 部分（3.11–3.14 的虚拟环境，推荐 3.12，含本机分析与三维显示所需的科学依赖）：
 
 ```bash
 git clone https://github.com/sijintech/stk.git ~/stk
@@ -89,7 +89,7 @@ stk.close()
 
 ## English summary
 
-1. Install the Python part (`pip install '~/stk[science,visualization]'` in a 3.10–3.14 venv) and either the
+1. Install the Python part (`pip install '~/stk[science,visualization]'` in a 3.11–3.14 venv, 3.12 recommended) and either the
    prebuilt Linux tarball from the `desktop` workflow's `desktop-linux-package` artifact or a source build;
    start `stk-desktop` with `STK_PYTHON` pointing at the venv's Python.
 2. On **Home**, click **Create example project** (synthetic data, no server). Browse Parameters (a scan made by

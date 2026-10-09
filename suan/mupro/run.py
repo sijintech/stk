@@ -29,11 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python < 3.11
-    import tomli as tomllib
+import tomllib
 
 from suan.monitor.events import ENV_PATH as MONITOR_ENV
 from suan.runtime.common import atomic_json, now, sha256

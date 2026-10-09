@@ -38,6 +38,7 @@ bound to an evaluation (:meth:`RuntimeFiles.with_check`) call the evaluation's
 """
 import atexit
 from contextlib import closing
+import errno
 import hashlib
 import inspect
 import os
@@ -242,7 +243,7 @@ class LocalFiles:
             return self.root
         try:
             target = (self.root / relative).resolve()
-        except (OSError, RuntimeError):  # a symbolic link loop
+        except (OSError, RuntimeError):  # a symbolic link loop (Python < 3.13)
             raise self._missing(path) from None
         if not self._inside(target):
             raise self.path_error(f"Path {path!r} leaves the binding directory (symbolic link)")
@@ -309,6 +310,10 @@ class LocalFiles:
             raise MissingFile(f"Not a regular file: {path}{self._where()}") from None
         except (FileNotFoundError, NotADirectoryError):
             raise self._missing(path) from None
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:  # a link loop; Python 3.13+ no longer refuses it in resolve()
+                raise self._missing(path) from None
+            raise
 
     def local_path(self, path):
         """The confined local path (``""``/``"."`` = the directory itself), or ``None`` if it does not exist

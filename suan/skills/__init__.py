@@ -102,7 +102,7 @@ def export_skills(dest, names=None, *, force=False, catalog=None):
                 path.write_text(nodes_markdown(catalog), encoding="utf-8")
             else:
                 entry = source
-                for part in relative.split("/"):  # Traversable.joinpath takes one part on Python 3.10
+                for part in relative.split("/"):  # one part at a time: older Traversable.joinpath takes a single part
                     entry = entry.joinpath(part)
                 path.write_bytes(entry.read_bytes())
             written.append(path)

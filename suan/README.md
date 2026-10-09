@@ -4,7 +4,7 @@
 依赖及版本范围以仓库根目录 `pyproject.toml` 为准（旧 Qt 桌面使用 `desktop` 可选组件，打包使用 `build`）。
 
 ## 开发环境
-- Python 3.10–3.14
+- Python 3.11–3.14 (3.12 recommended)
 - Qt 桌面为旧客户端，兼容 Windows/Linux/MacOS；服务器 Runtime 仅支持 Linux；桌面主线为 [桌面程序 stk-desktop](../docs/desktop.md)（Blender 原生工作台已归档于标签 `archive/blender-workbench-2026-09`）
 
 ## 如何运行

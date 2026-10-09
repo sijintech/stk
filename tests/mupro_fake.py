@@ -107,10 +107,7 @@ def read_toml(path, depth=0):
     """MuPRO's reader, written apart from STK's: `include` is a path or a list relative to
     the naming file, the including file and earlier includes win, sub-tables merge per key,
     at most 16 deep (muprosdk library/L0_Base/toml.f90:125-238)."""
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib
+    import tomllib
 
     def merge(destination, included):
         for key, value in included.items():

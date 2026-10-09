@@ -268,8 +268,8 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.jobs < 1:
         p.error("--jobs must be positive")
-    if not (3, 10) <= sys.version_info[:2] < (3, 15):
-        p.error("Use Python 3.10–3.14 (Python 3.12 recommended).")
+    if not (3, 11) <= sys.version_info[:2] < (3, 15):
+        p.error("Use Python 3.11–3.14 (Python 3.12 recommended).")
     try:
         setup(args)
     except (SetupError, OSError) as exc:

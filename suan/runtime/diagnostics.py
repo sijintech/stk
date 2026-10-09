@@ -218,7 +218,7 @@ def database_check(state, timeout):
 def python_check(config, science, timeout):
     script = (
         "import json, sys, psutil\n"
-        "if not (3, 10) <= sys.version_info[:2] < (3, 15):\n"
+        "if not (3, 11) <= sys.version_info[:2] < (3, 15):\n"
         "    raise RuntimeError('Unsupported Python')\n"
         "result = {'python': sys.version.split()[0], 'psutil': psutil.__version__}\n"
     )

@@ -1,5 +1,13 @@
 # 开发交接记录
 
+## 2026-10-09：Python 下限升到 3.11
+
+按所有者决定（最低 3.11、默认 3.12；Flower 单独环境，因此不放宽 Web 栈）：`pyproject.toml` 改为 `>=3.11,<3.15` 并去掉 tomli；
+Runtime CI 的 Linux 矩阵改为 3.11、3.12、3.14，Windows 客户端为 3.11、3.12；Runtime 自检、`suan graph doctor` 与 `desktop/setup.py` 的版本门槛改为 3.11；
+四处 `tomli` 回退改为直接 `import tomllib`；用户文档改为“3.11–3.14（推荐 3.12）”。历史验收记录中的 3.10 不改。
+首次在 3.14 上跑全量测试，发现 2 项失败：Python 3.13 起 `Path.resolve()` 遇到符号链接环不再抛 `RuntimeError`，
+环一直到打开文件时才以 ELOOP 报错，`LocalFiles.open` 没有接住；改为把 ELOOP 当作文件不存在（与 3.12 的结果一致）。
+
 ## 2026-10-09：所有者第三轮决定
 
 所有者答复第二轮评估：Flower 单独环境；内网穿透用思劲服务器辅助打通、之后直连（即 WebRTC/ICE；查看了 GL.iNet KVM 的开源固件，

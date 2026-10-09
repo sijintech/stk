@@ -146,7 +146,7 @@ supervisor 重启后的核对能力下降。`sinfo` 不在必需命令中，缺�
 ### C. 环境
 
 - module 初始化路径（`source /public?/soft/modules/module.sh`）与 `module avail intel mpi anaconda`。
-- 共享文件系统上的 Python 3.10–3.14 环境，安装 `psutil` 与 STK `.[server,science]`，计算节点能运行它。
+- 共享文件系统上的 Python 3.11–3.14 环境（推荐 3.12），安装 `psutil` 与 STK `.[server,science]`，计算节点能运行它。
 - `df -hT` 查看家目录、`/public*` 与候选 state 目录，记录文件系统类型与配额。为 SQLite 选择本地
   非网络磁盘并了解其清理策略；doctor 的 `state_filesystem` 在 lustre、gpfs、nfs 等上报告失败。
 - 计算节点上的共享目录可见性与 flock，由 E 项确认 worker 能写 `finished.json`。

@@ -466,7 +466,7 @@ def doctor_command(as_json, timeout):
         checks.append({"check": name, "status": status, "detail": detail, **({"hint": hint} if hint else {})})
 
     version = ".".join(map(str, sys.version_info[:3]))
-    add("python", "ok" if sys.version_info >= (3, 10) else "fail", version)
+    add("python", "ok" if sys.version_info >= (3, 11) else "fail", version)
     for label, module, hint in (("numpy", "numpy", "pip install 'suan_toolkits[visualization]'"),
                                 ("vtk", "vtkmodules.vtkCommonCore", "pip install 'suan_toolkits[visualization]'"),
                                 ("h5py", "h5py", "pip install 'suan_toolkits[visualization]'"),

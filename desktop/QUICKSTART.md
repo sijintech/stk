@@ -6,7 +6,7 @@
 ## macOS
 
 准备 **完整 Xcode 16+**（打开一次并完成组件安装）、Git 和 Python 3.12。
-确认 `xcode-select -p` 指向所用 Xcode，`python3 --version` 为 3.10–3.14。
+确认 `xcode-select -p` 指向所用 Xcode，`python3 --version` 为 3.11–3.14（推荐 3.12）。
 支持当前 Python 进程的架构：Apple Silicon arm64 或 Intel x64，最低 macOS 13.3。
 建议 Apple Silicon 使用原生 arm64 Python。
 
