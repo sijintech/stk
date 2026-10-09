@@ -4250,12 +4250,14 @@ TEST_F(LocalModelsPython, AModelIsInstalledStartedAndOfferedAsALocalEndpointFrom
   EXPECT_TRUE(io::get_bool(*models.endpoint("local-tiny-q4"), "managed", false));
   STK_UNTIL(widget("ai_model_settings/ai_endpoint_remove/local-tiny-q4") != nullptr);
   EXPECT_FALSE(widget("ai_model_settings/ai_endpoint_remove/local-tiny-q4")->enabled);
-  // The assistant offers it like any other endpoint.
-  ASSERT_NE(widget("ai_endpoint"), nullptr);
-  const auto &items = widget("ai_endpoint")->items;
-  EXPECT_TRUE(std::any_of(items.begin(), items.end(), [](const auto &item) {
-    return item.find("Tiny chat") != std::string::npos && item.find("this computer") != std::string::npos; }));
-  EXPECT_TRUE(shows("Running"));
+  // The assistant offers it like any other endpoint. (The endpoint list and the local list are read separately: wait
+  // for the panel to catch up rather than expecting both in the same frame.)
+  const auto offered = [&] {
+    const auto *endpoints = widget("ai_endpoint");
+    return endpoints && std::any_of(endpoints->items.begin(), endpoints->items.end(), [](const auto &item) {
+      return item.find("Tiny chat") != std::string::npos && item.find("this computer") != std::string::npos; });
+  };
+  STK_UNTIL(offered() && shows("Running"));
   widget(scope + "ai_local_stop/tiny-q4")->on_click();
   STK_UNTIL(widget(scope + "ai_local_start/tiny-q4") && widget(scope + "ai_local_start/tiny-q4")->enabled &&
             shows("Installed, not running"));
