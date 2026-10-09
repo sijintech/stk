@@ -24,8 +24,9 @@ class FakeModel:
     """An OpenAI-compatible chat-completions server; records each request's path, headers and body."""
 
     def __init__(self, reply="Ferroelectric domains form to lower the depolarization energy.", reasoning="",
-                 version="HTTP/1.0", close=False):
+                 version="HTTP/1.0", close=False, stall=False):
         self.requests = []
+        self.release = threading.Event()  # a stalled server answers once released (a model still thinking)
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -37,6 +38,8 @@ class FakeModel:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 owner.requests.append({"path": self.path, "authorization": self.headers.get("Authorization"), "body": body})
+                if stall:
+                    owner.release.wait(30)
                 if body.get("stream"):
                     chunks = [{"role": "assistant", "content": None}]
                     if reasoning:
@@ -253,3 +256,44 @@ def test_replies_are_read_when_the_server_closes_the_connection(model, version, 
 
 def server_reply():
     return "Ferroelectric domains form to lower the depolarization energy."
+
+
+@pytest.mark.parametrize("location", ["local", "internal"])
+def test_slow_nearby_models_have_time_and_a_cancellation_closes_the_connection(model, location):
+    """A model on this computer (or the group's server) may think for minutes on a CPU: the deadline is long, and a
+    cancellation ends the wait at once. On this computer that is a confirmed cancellation; elsewhere it is uncertain."""
+    from suan.models.gateway import EXTERNAL_TIMEOUT_SECONDS, NEARBY_TIMEOUT_SECONDS, OpenAICompatibleAdapter
+    from suan.project.request_executor import ConfirmedCancellation
+    server = FakeModel(stall=True)
+    try:
+        store, _ = model
+        context = capture(model)
+        message = store.discussion.add("Q?", message_id=str(uuid4()), context_id=context["id"])
+        adapter_id = "openai-compatible/1:near"
+        saved = store.requests.create(message["id"], request_id=str(uuid4()), configuration={"adapter": adapter_id, "model": "m"})
+        endpoint = {"id": "near", "name": "Near", "base_url": server.url, "location": location, "models": ["m"], "adapter": adapter_id}
+        frozen = store.requests.input(saved["id"])
+        prepared = OpenAICompatibleAdapter(endpoint, EndpointKeys()).prepare(frozen)
+        assert prepared.timeout == NEARBY_TIMEOUT_SECONDS > EXTERNAL_TIMEOUT_SECONDS
+        cancel, outcome = threading.Event(), []
+
+        def send():
+            try:
+                prepared.send_stream(frozen, cancel, lambda text: None)
+            except BaseException as exc:  # noqa: BLE001 - the outcome is the point
+                outcome.append(exc)
+        worker = threading.Thread(target=send)
+        worker.start()
+        eventually(lambda: server.requests)
+        cancel.set()
+        worker.join(5)
+        assert not worker.is_alive()
+        expected = ConfirmedCancellation if location == "local" else RuntimeError
+        assert type(outcome[0]) is expected, outcome
+    finally:
+        server.release.set()
+        server.close()
+    # External services keep a short deadline and no in-flight cancellation; the built-in Token Plan is unchanged.
+    external = OpenAICompatibleAdapter({**endpoint, "base_url": "https://api.example.com/v1", "location": "external"},
+                                       EndpointKeys()).prepare(frozen)
+    assert external.timeout == EXTERNAL_TIMEOUT_SECONDS and external.cancel_closes == ""

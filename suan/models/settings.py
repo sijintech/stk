@@ -162,6 +162,7 @@ class EndpointKeys:
     def __init__(self, state_dir=None):
         self._folder = Path(state_dir) / "models" / "keys" if state_dir else None
         self._session = {}
+        self._managed = {}  # keys STK gave the local model servers it started; these win over everything else
         self._lock = threading.Lock()
 
     def __repr__(self):
@@ -179,6 +180,9 @@ class EndpointKeys:
         return value if isinstance(value, str) and _KEY.fullmatch(value) else ""
 
     def _resolve(self, endpoint_id):
+        with self._lock:
+            if endpoint_id in self._managed:
+                return "managed", self._managed[endpoint_id]
         environment = os.environ.get(self.environment_name(endpoint_id), "")
         if environment:
             return "environment", environment
@@ -211,8 +215,16 @@ class EndpointKeys:
                 (self._folder / f"{endpoint_id}.json").unlink(missing_ok=True)
         return self.info(endpoint_id)
 
+    def set_managed(self, endpoint_id, key):
+        """The key of a model server STK started (``LocalModels``): in memory only, until the server stops."""
+        if not isinstance(key, str) or not _KEY.fullmatch(key):
+            raise ProjectError("A managed key must be 16 to 4096 letters, digits or the characters . _ ~ -")
+        with self._lock:
+            self._managed[endpoint_id] = key
+
     def clear(self, endpoint_id):
         with self._lock:
+            self._managed.pop(endpoint_id, None)
             self._session.pop(endpoint_id, None)
             if self._folder is not None:
                 (self._folder / f"{endpoint_id}.json").unlink(missing_ok=True)

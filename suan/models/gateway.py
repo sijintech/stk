@@ -17,6 +17,10 @@ from suan.project.store import ProjectError
 from .settings import EndpointKeys, Endpoints, ModelPolicy, parse_base_url
 
 
+NEARBY_TIMEOUT_SECONDS = 1800  # a 27B model on CPU writes a few tokens a second
+EXTERNAL_TIMEOUT_SECONDS = 300
+
+
 class PolicyDenied(ProjectError):
     """The network setting or the data boundary does not allow sending this request."""
 
@@ -31,6 +35,13 @@ class OpenAICompatibleAdapter:
         self._keys = keys
         scheme, host, port, path = parse_base_url(endpoint["base_url"])
         self._path = path + "/chat/completions"
+        # A model on this computer or the organization's network may answer slowly (CPU, reasoning first); there a
+        # cancellation closes the connection. External services keep the short, single-attempt deadline.
+        nearby = endpoint.get("location") in ("local", "internal")
+        self._timeout = NEARBY_TIMEOUT_SECONDS if nearby else EXTERNAL_TIMEOUT_SECONDS
+        self._cancel_closes = {"local": "this_computer", "internal": "organization"}.get(endpoint.get("location"), "")
+        # Connecting (and the TLS handshake) keeps the short limit, where a cancellation cannot interrupt; the request
+        # deadline applies from then on.
         if scheme == "https":
             self._connect = lambda: http.client.HTTPSConnection(host, port, timeout=_wire.TIMEOUT_SECONDS,
                                                                 context=ssl.create_default_context())
@@ -44,7 +55,8 @@ class OpenAICompatibleAdapter:
         payload, stream_payload, digest = _wire._payload(frozen_input, adapter=self._endpoint["adapter"], options={},
                                                          provider=self._endpoint["name"])
         return _wire._Prepared(self._keys.get(self._endpoint["id"]), payload, stream_payload, digest,
-                               connect=self._connect, path=self._path, provider=self._endpoint["name"], reasoning=True)
+                               connect=self._connect, path=self._path, provider=self._endpoint["name"], reasoning=True,
+                               timeout=self._timeout, cancel_closes=self._cancel_closes)
 
     def send(self, frozen_input, cancel_event):
         return self.prepare(frozen_input).send(frozen_input, cancel_event)
@@ -60,6 +72,7 @@ class ModelGateway:
         self.policy = ModelPolicy(state_dir)
         self._aliyun = AliyunTokenPlanAdapter(credentials)
         self._overrides = {}  # adapters installed by tests or embedding code, by adapter identity
+        self.local = None  # LocalModels, when this service manages local model servers
 
     def __setitem__(self, adapter, value):
         self._overrides[adapter] = value
@@ -79,6 +92,8 @@ class ModelGateway:
         endpoint = self.endpoints.by_adapter(record["configuration"]["adapter"])
         if endpoint is None:
             return
+        if self.local is not None and self.local.manages(endpoint["id"]) and not self.local.is_running(endpoint["id"]):
+            raise PolicyDenied(f"The local model {endpoint['name']} is not running; start it in Models and network")
         if not self.policy.allows(endpoint["location"]):
             raise PolicyDenied(f"The network setting ({self.policy.get()['network']}) does not allow the "
                                f"{endpoint['location']} endpoint {endpoint['name']}")
@@ -100,5 +115,6 @@ class ModelGateway:
                        "key_env": info["key_env"]}
             else:
                 key = self.keys.info(item["id"])
-            endpoints.append({**item, "key": key, "allowed": self.policy.allows(item["location"])})
+            managed = {"managed": True} if self.local is not None and self.local.manages(item["id"]) else {}
+            endpoints.append({**item, **managed, "key": key, "allowed": self.policy.allows(item["location"])})
         return {"endpoints": endpoints, "policy": self.policy.get()}

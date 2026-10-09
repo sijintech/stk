@@ -167,6 +167,8 @@ class Bridge:
                                                      scripting=self._workflow_scripting, poll_seconds=_poll_seconds())
         self.projects = ProjectSessions(self.state_dir, analysis_executor=self.analysis_executor,
                                         workflow_executor=self.workflow_executor)
+        self.projects.local.emit = self.emit
+        self._local_started = False
         self.project_runs = ProjectRuns(self.projects, self.connections.backend)
         self.ui = UIRequests(self.emit)
         self.scripts = ScriptSessions(self.emit, self.script_call)
@@ -291,6 +293,14 @@ class Bridge:
             "project.archive.list": lambda p, c: self.projects.archive("list", p),
             "project.labels.set": self.labels_set,
             "models.list": lambda p, c: self.projects.model_settings("list", p),
+            "models.local.list": lambda p, c: self.projects.local_models("list", p),
+            "models.local.recommendations": lambda p, c: self.projects.local_models("recommendations", p),
+            "models.local.install": lambda p, c: self.projects.local_models("install", p),
+            "models.local.import": lambda p, c: self.projects.local_models("import", p),
+            "models.local.cancel": lambda p, c: self.projects.local_models("cancel", p),
+            "models.local.start": lambda p, c: self.projects.local_models("start", p),
+            "models.local.stop": lambda p, c: self.projects.local_models("stop", p),
+            "models.local.remove": lambda p, c: self.projects.local_models("remove", p),
             "models.endpoints.add": lambda p, c: self.model_settings("add", p, c),
             "models.endpoints.remove": lambda p, c: self.model_settings("remove", p, c),
             "models.keys.set": lambda p, c: self.model_settings("key.set", p, c),
@@ -549,7 +559,7 @@ class Bridge:
                  "project.runs.prepare", "project.runs.list", "project.runs.get",
                  "project.runs.submit", "project.runs.refresh", "project.runs.cancel",
                  "graph.catalog", "graph.presets", "graph.validate", "graph.evaluate", "graph.cancel",
-                 "blob.ensure", "probe", "colormaps.list", "skills.list", "skills.get", "models.list",
+                 "blob.ensure", "probe", "colormaps.list", "skills.list", "skills.get", "models.list", "models.local.list",
                  "connections.list", "connections.check", "connections.ssh",
                  "hub.devices", "hub.templates", "hub.actions", "hub.action",
                  "workspace.list", "workspace.create", "workspace.files", "upload.start", "download.start",
@@ -731,6 +741,10 @@ class Bridge:
             raise BridgeError("unsupported", f"This bridge speaks protocol {PROTOCOL_VERSION}",
                               data={"supported": [PROTOCOL_VERSION]})
         resumed = self.transfers.resume_interrupted() if params.get("resume_transfers", True) else []
+        if not self._local_started:
+            # Local model servers that were running when the service last stopped start again, after this reply.
+            self._local_started = True
+            context.after(self.projects.local.autostart)
         return {
             "protocol": PROTOCOL_VERSION,
             "server": {"name": "stk-desktop-bridge", "version": VERSION, "python": platform.python_version(),

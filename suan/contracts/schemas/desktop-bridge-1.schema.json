@@ -7518,6 +7518,180 @@
           ],
           "additionalProperties": false
         }
+      },
+      "models.local.list": {
+        "description": "Local models installed by this service, their servers and running installations. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/localModels"
+        }
+      },
+      "models.local.recommendations": {
+        "description": "This computer's hardware (read only, nothing is installed or started) and every catalog entry with whether it fits and which one is recommended.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "hardware": {
+              "$ref": "#/$defs/localHardware"
+            },
+            "entries": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/localModelEntry"
+              }
+            }
+          },
+          "required": [
+            "hardware",
+            "entries"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "models.local.install": {
+        "description": "Download the llama.cpp runtime (if needed) and the entry's files in the background, each checked against the catalog's SHA-256; needs the network setting internet. Progress arrives as models.local.progress.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/localModelJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "models.local.import": {
+        "description": "Install an entry, and the llama.cpp build if needed, from files copied to this computer (offline), in the background; every file must match the catalog's size and SHA-256. Progress arrives as models.local.progress.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "id",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/localModels"
+        }
+      },
+      "models.local.cancel": {
+        "description": "Cancel a running installation; downloaded bytes are kept for resuming.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/localModels"
+        }
+      },
+      "models.local.start": {
+        "description": "Start an installed entry's server on a free loopback port; once healthy it is registered as the local endpoint local-<entry> (models.changed).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/localModels"
+        }
+      },
+      "models.local.stop": {
+        "description": "Stop an entry's server; it no longer starts with the service.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/localModels"
+        }
+      },
+      "models.local.remove": {
+        "description": "Stop an entry's server, delete its files and its local endpoint.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/localModels"
+        }
       }
     },
     "events": {
@@ -7865,6 +8039,55 @@
       "models.changed": {
         "type": "object",
         "properties": {},
+        "additionalProperties": false
+      },
+      "models.local.progress": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "stage": {
+            "enum": [
+              "queued",
+              "import",
+              "runtime",
+              "weights",
+              "done",
+              "cancelled",
+              "failed",
+              "starting",
+              "running",
+              "stopped"
+            ]
+          },
+          "state": {
+            "enum": [
+              "running",
+              "done",
+              "cancelled",
+              "failed"
+            ]
+          },
+          "done_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "total_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          },
+          "error": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "id"
+        ],
         "additionalProperties": false
       }
     },
@@ -13166,7 +13389,8 @@
             "",
             "environment",
             "session",
-            "saved"
+            "saved",
+            "managed"
           ]
         },
         "can_remember": {
@@ -13218,6 +13442,10 @@
             "maxLength": 128
           }
         },
+        "managed": {
+          "type": "boolean",
+          "description": "Served by a local model STK installed (models.local.*): its key is set at each start and it is removed with the model"
+        },
         "builtin": {
           "type": "boolean"
         },
@@ -13236,6 +13464,384 @@
         "location",
         "models",
         "builtin"
+      ],
+      "additionalProperties": false
+    },
+    "localModelEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "params_b": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tier": {
+          "enum": [
+            "tiny",
+            "small",
+            "medium",
+            "large"
+          ]
+        },
+        "runtime": {
+          "enum": [
+            "llama.cpp",
+            "vllm"
+          ]
+        },
+        "quantization": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "size_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "name",
+              "size_bytes",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "total_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "min_memory_gb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "context_length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "serve_context": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "license": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "license_url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "commercial_use": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2048
+              }
+            },
+            "required": [
+              "name",
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "recommend_on": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "cpu",
+              "gpu"
+            ]
+          }
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "fits": {
+          "type": "boolean"
+        },
+        "device": {
+          "enum": [
+            "",
+            "cpu",
+            "gpu"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "recommended": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "model",
+        "tier",
+        "runtime",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "localHardware": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "cpu_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memory_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "memory_available_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "disk_free_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "llama_gpu": {
+          "type": "boolean",
+          "description": "llama.cpp here can use a GPU (the shipped Linux Vulkan build with a Vulkan loader, Apple Metal, or STK_LLAMA_SERVER)"
+        },
+        "gpus": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "vendor": {
+                "enum": [
+                  "nvidia",
+                  "apple"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "memory_mib": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "driver": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "unified": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "vendor",
+              "name",
+              "memory_mib",
+              "driver",
+              "unified"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "platform",
+        "cpu_count",
+        "memory_bytes",
+        "memory_available_bytes",
+        "disk_free_bytes",
+        "gpus"
+      ],
+      "additionalProperties": false
+    },
+    "localModelJob": {
+      "type": "object",
+      "properties": {
+        "stage": {
+          "enum": [
+            "queued",
+            "import",
+            "runtime",
+            "weights",
+            "done",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "state": {
+          "enum": [
+            "running",
+            "done",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "done_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "total_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "additionalProperties": false
+    },
+    "localModels": {
+      "type": "object",
+      "properties": {
+        "installed": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "endpoint": {
+                "$ref": "#/$defs/modelEndpointId"
+              },
+              "autostart": {
+                "type": "boolean"
+              },
+              "server": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "stopped",
+                      "starting",
+                      "running",
+                      "failed"
+                    ]
+                  },
+                  "port": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "error": {
+                    "type": "string",
+                    "maxLength": 2048
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "endpoint",
+              "autostart",
+              "server"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "jobs": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/localModelJob"
+          }
+        },
+        "runtimes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "tag": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "platform": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "binary": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "tag",
+              "platform",
+              "binary"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "installed",
+        "jobs",
+        "runtimes"
       ],
       "additionalProperties": false
     }

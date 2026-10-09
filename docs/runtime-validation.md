@@ -2,6 +2,31 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-09：思劲平台 S1c（本机一键部署）
+
+- Python：`test_local_models.py` 17 项（推荐规则、硬件探测、目录必须给出大小与哈希、**随 STK 发布的目录**完整且每项符合桌面协议、
+  按机器推荐 Qwen（4 GiB 可用内存→无、5 GiB→4B Q4 的 8K 版、7 GiB→4B Q4、10 GiB→9B Q4、50 GiB 纯 CPU→35B-A3B Q4、100 GiB→其 Q8、
+  24 GB GPU→27B Q4 且内存再多也不改选 CPU 上的 MoE、12 GB GPU→9B Q4 在 GPU 上、48 GB 卡与 4×H100→27B Q8、H100 的 81559 MiB 算 80 GB；
+  Windows 与 Linux arm64 随附 CPU 版、Linux 没有 Vulkan 时按内存推荐；Apple 统一内存按 Metal 默认份额且不超过可用内存）、
+  目录拒绝非法的 `recommend_on` 与数值字段、已下载的部分不再计入所需磁盘、
+  下载续传与换源、短读与分块中断后续传、服务器忽略 Range、续传字节损坏时从头再下、解包不越界（zip 路径、tar 符号链接与硬链接）、端点 ID、
+  经后台服务安装→启动→提问→停止（服务器有受管密钥且不在命令行、`--no-slots`、`--reasoning off`，其环境不含 Token Plan 与其他端点密钥；
+  设置了同名 `STK_MODEL_KEY_*` 时受管密钥仍优先；端点标为 `managed`、不能改密钥或单独移除，`local-` 开头的 ID 不能手动添加，停止后受管密钥清除）、取消后续传、
+  两个安装共用一次运行时下载、改为离线时取消下载、离线导入（其间改网络设置不会取消导入；去掉修正后此项失败）、启动失败与运行中退出、启动中停止、随服务停止与下次自动启动、遗留进程回收、无法启动（运行时已删）时不再自动启动（去掉修正后此项失败）、移除）；
+  `test_model_gateway.py` 增加本机与机构内端点的长期限与在途取消（本机为已取消、机构内为不确定；去掉关闭连接的修正后两项都失败）。
+  完整 pytest（`-m "not perf"`）**2325 passed、24 skipped**（审查修正前后各跑一次，结果相同）。
+- 原生：`LocalModelsPython` 经真实 Python 后台服务显示硬件（含可用磁盘）与推荐、安装、启动，AI 助手的端点列表把它列为本机端点（原生测试不提问，
+  提问由上面的 Python 测试与下面的真实运行覆盖），其端点标为 `managed`、在端点列表中不能单独移除，停止后显示“已安装，未运行”，移除后端点消失（反复运行均通过）。
+  完整 Linux CTest **1281/1281**（审查修正前后各一次）。
+- 目录核对：317 个下载地址（13 个不同模型项的 156 个文件 × ModelScope 与 Hugging Face，加 5 个 llama.cpp 构建；8K 版与 4B Q4 共用文件）用 Range 请求核对总长度，
+  其中 10 个 GGUF 文件的 20 个地址另核对 GGUF 文件头，全部一致（6 个 Hugging Face 地址首次 TLS 中断，重试通过；ModelScope 的小文件不支持 Range，下载器按“忽略 Range”处理）。
+  b11429 的 Linux（CPU、Vulkan）、Windows CPU 与 macOS arm64 构建经 `_extract` 解包，哈希一致；Linux 两个版本的 `llama-server --version` 可运行，
+  Vulkan 版在没有 GPU 的机器上列出 0 个设备并用 CPU（`llama-server` 本身不链接 `libvulkan`）。
+- 真实运行（手动，不进 CI；48 核 CPU、121 GB 内存、无 GPU）：推荐 `qwen3.6-35b-a3b-q8_0`；安装 `qwen3.5-4b-q4_k_m` 经代理从 ModelScope 下载
+  2.7 GB 用 220 秒并核对哈希，llama.cpp b11429 运行时自动下载解包；启动 5.2 秒就绪并登记为本机端点；网络设置为离线时私有数据的问题发往该端点。
+  首次提问在 60 秒时成为“不确定”（网关期限过短，已修正）；修正后带思考 188.6 秒完成（生成 2,335 个 token，13 token/秒）；
+  `--reasoning off` 后 14.9 秒完成（提示 1,108 个 token 用 11 秒，回答 52 个 token）。不带密钥访问 `/v1/chat/completions` 与 `/slots` 均返回 401。
+
 ## 2026-10-08：思劲平台 S1a/S1b（模型网关与数据边界）
 
 - Python：`test_labels.py` 4 项（默认私有、标注与列表不改修订与历史、事件、未知对象与错误标签拒绝且不写入、格式 11 升级后可标注、脚本 API）；

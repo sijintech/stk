@@ -15,7 +15,7 @@ from suan.project.analyses import AnalysisNotFound
 from suan.project.analysis_runs import AnalysisRunNotFound
 from suan.project.workflows import WorkflowNotFound
 from suan.project.workflow_runs import WorkflowRunNotFound
-from suan.models import ModelGateway, PolicyDenied
+from suan.models import LocalModels, ModelGateway, PolicyDenied
 from suan.project.aliyun import TokenPlanCredentials, provider_info
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
@@ -36,6 +36,9 @@ class ProjectSessions:
         self._credentials = TokenPlanCredentials(state_dir)
         # The model gateway resolves adapters and checks the network setting and data labels before sending.
         self.models = ModelGateway(state_dir, self._credentials)
+        # One-click local models (S1c): servers this service starts on loopback, registered as local endpoints.
+        self.local = LocalModels(state_dir, self.models.endpoints, self.models.policy, keys=self.models.keys)
+        self.models.local = self.local
         self._executor = RequestExecutor(self.models, gate=self.models.admit)
         self._analysis_executor = analysis_executor
         self._workflow_executor = workflow_executor
@@ -259,9 +262,14 @@ class ProjectSessions:
         Never returns a key. Changes are for the person at this computer: scripts may only read (``models.list``)."""
         with self._operation():
             gateway = self.models
+            if action == "add" and params["id"].startswith("local-"):
+                raise ProjectError("Endpoint IDs starting with local- are kept for local models; choose another ID")
             if action == "add":
                 return {"endpoint": gateway.endpoints.add(params["id"], params["name"], params["base_url"], params["models"],
                                                           params.get("location"))}
+            if action in ("remove", "key.set", "key.clear") and self.local.manages(params["id"]):
+                raise ProjectError("This endpoint belongs to a local model: STK sets its key at each start, and it is removed "
+                                   "with the model under Local models")
             if action == "remove":
                 gateway.endpoints.remove(params["id"])
                 gateway.keys.clear(params["id"])
@@ -274,7 +282,27 @@ class ProjectSessions:
                 return {"key": info}
             if action == "policy":
                 gateway.policy.set(params["network"])
+                if params["network"] != "internet":
+                    self.local.cancel_downloads()  # downloads need the internet setting
             return gateway.describe()
+
+    def local_models(self, action, params):
+        """One-click local models (docs/design/model-gateway.md, S1c). Changes are for the person at this computer:
+        scripts may only list (``models.local.list``). Not under the project lock: probing runs nvidia-smi, and long work
+        (downloads, imports, waiting for a server) runs in the background with its own locks."""
+        if self._closed:
+            raise BridgeError("shutting_down", "Project sessions are closed")
+        with self._errors():
+            local = self.local
+            if action == "list":
+                return local.list()
+            if action == "recommendations":
+                return local.recommendations()
+            if action == "install":
+                return {"job": local.install(params["id"])}
+            if action == "import":
+                return local.import_file(params["id"], params["path"])
+            return getattr(local, action)(params["id"])
 
     def labels(self, action, params):
         """Label data public or private, or list what is public (format 12); never changes the revision."""
@@ -450,6 +478,7 @@ class ProjectSessions:
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.
         self._closed = True
+        self.local.shutdown()  # they start again with the service
         if self._workflow_executor is not None:
             self._workflow_executor.shutdown(wait=False)
         if self._analysis_executor is not None:

@@ -1,13 +1,13 @@
 # STK 开发交接（Claude / 后续开发者）
 
-更新：2026-10-08。**P3 工作流（W1–W4）已交付；体验包（[ux-package-2026-10.md](docs/design/ux-package-2026-10.md)）进行中：U1“需要处理”已交付
+更新：2026-10-09。**P3 工作流（W1–W4）已交付；体验包（[ux-package-2026-10.md](docs/design/ux-package-2026-10.md)）进行中：U1“需要处理”已交付
 （[suan/project/attention.py](suan/project/attention.py)、`project.attention.*`、[project_attention.hh](desktop/engine/lib/stk_app/include/stk/app/project_attention.hh)、
 工作台“需要关注”与状态栏计数）；U4 工作流记住视图已交付（`workflow_editor.cc` 的 `ViewMemory`/`save_state`、`AnalysisGraphCanvas::look_at`）；
 U2 用量可见已交付（`Requests.usage`、`project.requests.usage`、AI 助手“本项目已用”与发送按钮模型）；U3 项目内搜索已交付
 （[suan/project/search.py](suan/project/search.py)、`project.search`、工作台“搜索项目”）；**体验包四项完成**；所有者决定的后续顺序：归档方案（[project-archive.md](docs/design/project-archive.md)，已确认并实现）→
 MuFerro 按行工作流运行（W5a 服务与脚本已交付：[suan/desktop_bridge/workflow_runs.py](suan/desktop_bridge/workflow_runs.py) 的远程步骤、
 `muferro.final_state`；W5b 桌面运行区已交付：`simulation_target.hh`、`workflow_editor.cc` 的 `remote_steps()`）→ AI 批量模拟闭环（[方案](docs/design/ai-batch-loop.md)；L1 AI 扫描提议已交付：[suan/project/parameter_sweep.py](suan/project/parameter_sweep.py)、
-AI 助手“提议参数扫描”；L2“用工作流运行新增的 N 行”、L3“就这 N 行的结果提问”已交付；P2 闭环完成）；**归档 A1–A3 已交付**（所有者 2026-10-08 确认方案：格式 11 与 [suan/project/archive.py](suan/project/archive.py)、各列表 `archived` 过滤与冻结检查；桌面 [project_archive.hh](desktop/engine/lib/stk_app/include/stk/app/project_archive.hh) 与共用控件 `src/editors/archive_controls.hh`，九类对象在各自列表中归档/恢复，Home“需要关注”可归档；按所有者澄清，归档即冻结：不能修改、可照原样运行和使用，修改须恢复或复制（“复制为新工作流”）；限制见方案“已知限制”）；**思劲平台方向（[方案](docs/design/sijin-platform-2026-10.md)，所有者已答复，按 S1 → S7）：S1a/S1b 已交付**（[模型网关](docs/design/model-gateway.md)：格式 12 数据标注、`suan/models/` 端点与网络设置、发送前检查、桌面端点选择与“公开数据”）；联邦学习与组网两份评估待所有者决定；S1c 本机一键部署为下一步；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
+AI 助手“提议参数扫描”；L2“用工作流运行新增的 N 行”、L3“就这 N 行的结果提问”已交付；P2 闭环完成）；**归档 A1–A3 已交付**（所有者 2026-10-08 确认方案：格式 11 与 [suan/project/archive.py](suan/project/archive.py)、各列表 `archived` 过滤与冻结检查；桌面 [project_archive.hh](desktop/engine/lib/stk_app/include/stk/app/project_archive.hh) 与共用控件 `src/editors/archive_controls.hh`，九类对象在各自列表中归档/恢复，Home“需要关注”可归档；按所有者澄清，归档即冻结：不能修改、可照原样运行和使用，修改须恢复或复制（“复制为新工作流”）；限制见方案“已知限制”）；**思劲平台方向（[方案](docs/design/sijin-platform-2026-10.md)，所有者已答复两轮，按 S1 → S7）：S1a–S1c 已交付**（[模型网关](docs/design/model-gateway.md)：格式 12 数据标注、`suan/models/` 端点与网络设置、发送前检查、桌面端点选择与“公开数据”；S1c 本机一键部署：[suan/models/local.py](suan/models/local.py)、[catalog.json](suan/models/catalog.json)、`models.local.*`、桌面“本机模型”，真实下载与运行的手动验证见[验收记录](docs/runtime-validation.md)）；第二轮的四份评估（内网穿透、共享会话、文献借阅、Python 3.11 与 Flower）待所有者决定；下一步 S1d 能力分档与自动切换；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
 [开发计划](docs/development-plan.md)开头）：标量体范围（`96152bf`）、启动即工作台（`1d1c338`）、参数扫描生成（`ca8a8b3`）、
 路径框“浏览…”（共用 [path_picker.hh](desktop/engine/lib/stk_app/src/editors/path_picker.hh)，`b1badce`）、
 运行环境选择与“运行所选行”（`stk.batches.run`、[project_simulation_view.cc](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)，`ed5bb29`）、
@@ -67,7 +67,7 @@ git log --oneline HEAD..origin/main
 |---|---|---|
 | 原生桌面 | C++ / GHOST / OpenGL、Vulkan、Metal；分栏/标签、3D、Python、项目、AI、分析图；默认布局以分步引导工作台开始 | 不是完整的五类内容全局侧栏；各模式独立布局未实现 |
 | 项目与表格 | SQLite 格式 **9**；原子修订、撤销、类型化值、引用/公式、文件索引、输入快照、预览/草案；按范围/列表一次生成参数行（[参数扫描](docs/project-sweeps.md)） | 富内容通用插件框架与完整项目打包尚未完成；格式升级必须显式备份 |
-| AI | 阿里 Token Plan、明确捕获上下文、准备/发送、临时流式回复、持久问答、标量参数建议与修改检查 | 不等于通用自主 Agent、文件/技能附件或完整 AI 批量模拟编排 |
+| AI | 阿里 Token Plan、OpenAI 兼容端点与本机一键部署的 llama.cpp 模型（数据默认私有，标注公开才可发往外部端点；网络设置离线/机构内/外网）、明确捕获上下文、准备/发送、临时流式回复、持久问答、标量参数建议与修改检查 | 不等于通用自主 Agent、文件/技能附件或完整 AI 批量模拟编排 |
 | 分析 | 节点图检查；保存定义；参数、有序输出与单输入连线联合草稿（连线须校验后保存）；冻结输入与独立运行；结果归档、精确内联表格与源坐标定位 | 增删节点、多输入列表、拖线与位置保存未实现；多层图、子图及大表 blob 有界读取仍待开发 |
 | Python / Runtime | 持久 Python 会话，项目/图/Viewer/布局等 API；Linux Runtime、MuFerro 流程、SSH 管理 | 不是所有 UI 操作都已覆盖；Runtime 服务端仍限 Linux；通用对等通信待开发 |
 | 技能 | `stk-visualize`、`stk-monitor` 说明包及 `suan skills list/export`；实验契约 `stk.skill/1` 的三个内置技能，桥 `skills.list/get`、`stk.skills`、`suan skills catalog/show` 与原生只读“技能”页（[技能目录](docs/skills.md)） | 项目引用/版本固定、从技能直接准备或运行、技能附件、用户技能目录 **未实现**；节点目录不是技能库 |

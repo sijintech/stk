@@ -18,7 +18,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <limits>
+#include <map>
 #include <unordered_map>
 #include <utility>
 
@@ -415,6 +417,10 @@ class AIEditor final : public Editor {
   {
     auto &models = ctx.store.models();
     const auto id = io::get_string(endpoint, "id");
+    if (io::get_bool(endpoint, "managed", false)) {  // a local model's server: STK sets its key at each start
+      box.paragraph(ctx.tr("models.key.managed"));
+      return;
+    }
     const auto key = endpoint.value("key", Json::object());
     const auto source = io::get_string(key, "source");
     box.paragraph(ctx.tr(!io::get_bool(key, "configured", false) ? "models.key.none" : source == "environment" ? "ai.key.environment" :
@@ -462,7 +468,8 @@ class AIEditor final : public Editor {
       row.label(io::get_string(item, "name") + " · " + std::string(ctx.tr("models.location." + io::get_string(item, "location")))).tip(
           io::get_string(item, "base_url"));
       row.button("ai_endpoint_remove/" + id, ctx.tr("models.remove"), [settings, id] { settings->remove_endpoint(id); })
-          .width(4).disable(models.busy());
+          .width(4).disable(models.busy() || io::get_bool(item, "managed", false))  // removed with its local model
+          .tip(io::get_bool(item, "managed", false) ? std::string(ctx.tr("models.managed_remove")) : std::string());
     }
     if (auto *add = panel->panel("ai_endpoint_add", ctx.tr("models.add.title"), false)) {
       hint(*add, ctx, "models.add.hint");
@@ -488,7 +495,127 @@ class AIEditor final : public Editor {
       }).disable(models.busy() || new_endpoint_.id.empty() || new_endpoint_.name.empty() || new_endpoint_.base_url.empty() ||
                  new_endpoint_.models.empty());
     }
+    local_models(*panel, ctx);
     if (!models.error().empty()) { panel->paragraph(models.error()); }
+  }
+
+  /** One-click local models (S1c): hardware, the catalog with fit and recommendation, install, import, start, stop, remove.
+   * Installed entries show their server's state from models.local.list; installations show live progress. */
+  void local_models(ui::Layout &panel, EditorContext &ctx)
+  {
+    auto &models = ctx.store.models();
+    if (!models.local_supported()) { return; }
+    auto *box = panel.panel("ai_local_models", ctx.tr("models.local.title"), false);
+    if (!box) { return; }
+    auto &catalog = ctx.store.catalog();
+    auto *settings = &models;
+    hint(*box, ctx, "models.local.hint");
+    if (!models.recommendations().is_object()) {
+      if (!models.recommendations_failed()) { models.load_recommendations(); }  // once; a failure waits for "Check again"
+      box->paragraph(ctx.tr(models.recommendations_failed() ? "models.local.read_failed" : "models.local.reading"));
+      if (models.recommendations_failed()) {
+        box->button("ai_local_refresh", ctx.tr("models.local.refresh"), [settings] { settings->load_recommendations(); });
+      }
+      return;
+    }
+    const auto gb = [](const double bytes) {
+      char text[32];
+      std::snprintf(text, sizeof(text), "%.1f", bytes / 1e9);
+      return std::string(text);
+    };
+    const auto &hardware = models.recommendations().value("hardware", Json::object());
+    std::string gpus;
+    for (const auto &gpu : hardware.value("gpus", Json::array())) {
+      gpus += (gpus.empty() ? "" : ", ") + io::get_string(gpu, "name") + " " + gb(double(io::get_int(gpu, "memory_mib", 0)) * 1048576.0) + " GB";
+    }
+    if (!gpus.empty() && !io::get_bool(hardware, "llama_gpu", true)) { gpus += " " + std::string(ctx.tr("models.local.gpu_unused")); }
+    box->paragraph(catalog.format("models.local.hardware", {
+        {"memory", gb(double(io::get_int(hardware, "memory_bytes", 0)))},
+        {"available", gb(double(io::get_int(hardware, "memory_available_bytes", 0)))},
+        {"disk", gb(double(io::get_int(hardware, "disk_free_bytes", 0)))},
+        {"cpus", std::to_string(io::get_int(hardware, "cpu_count", 0))},
+        {"gpus", gpus.empty() ? std::string(ctx.tr("models.local.no_gpu")) : gpus}}));
+    const auto &local = models.local();
+    std::map<std::string, Json> installed, jobs;
+    if (local.is_object()) {
+      for (const auto &item : local.value("installed", Json::array())) { installed[io::get_string(item, "id")] = item; }
+      const Json listed_jobs = local.value("jobs", Json::object());  // kept: items() of a temporary would dangle
+      for (const auto &[key, job] : listed_jobs.items()) { jobs[key] = job; }
+    }
+    const bool online = models.network() == "internet";
+    std::vector<std::string> import_ids, import_names;
+    for (const auto &entry : models.recommendations().value("entries", Json::array())) {
+      const auto id = io::get_string(entry, "id");
+      const bool vllm = io::get_string(entry, "runtime") == "vllm";
+      const auto name = io::get_string(entry, "model") + " · " + io::get_string(entry, "quantization");
+      if (!vllm) { import_ids.push_back(id); import_names.push_back(name); }
+      std::string text = name + " · " + gb(double(io::get_int(entry, "total_bytes", 0))) + " GB · " +
+          catalog.format("models.local.needs", {{"memory", gb(entry.value("min_memory_gb", 0.0) * 1e9)}});
+      if (io::get_bool(entry, "recommended", false)) { text += " · " + std::string(ctx.tr("models.local.recommended")); }
+      else if (!io::get_bool(entry, "fits", true)) {
+        text += " · " + std::string(ctx.tr("models.local.reason." + io::get_string(entry, "reason")));
+      }
+      box->label(text).tip(io::get_string(entry, "license") + "\n" + io::get_string(entry, "commercial_use") + "\n" +
+                           io::get_string(entry, "notes"));
+      // The latest installation: live events while it runs, else what the service last reported.
+      Json job = jobs.count(id) ? jobs[id] : Json(nullptr);
+      if (const auto *live = models.progress(id); live && io::get_string(*live, "stage") != "starting" &&
+          io::get_string(*live, "stage") != "running" && io::get_string(*live, "stage") != "stopped") { job = *live; }
+      const bool installing = job.is_object() && io::get_string(job, "state") == "running";
+      if (job.is_object() && io::get_string(job, "state") != "done") {
+        const auto stage = io::get_string(job, "stage");
+        const auto total = io::get_int(job, "total_bytes", 0), done = io::get_int(job, "done_bytes", 0);
+        std::string line(ctx.tr("models.local.stage." + stage));
+        if (stage == "weights" && total > 0) { line += " " + std::to_string(int(100.0 * double(done) / double(total))) + "%"; }
+        if (!io::get_string(job, "error").empty()) { line += " · " + io::get_string(job, "error"); }
+        box->paragraph(line);
+      }
+      auto &row = box->row();
+      const auto found = installed.find(id);
+      if (found == installed.end()) {
+        if (vllm) { row.label(ctx.tr("models.local.vllm_manual")); continue; }
+        if (installing) {
+          row.button("ai_local_cancel/" + id, ctx.tr("models.local.cancel"), [settings, id] { settings->local_action("cancel", id); })
+              .width(5).disable(models.busy());
+        }
+        else {
+          row.button("ai_local_install/" + id, ctx.tr("models.local.install"), [settings, id] { settings->local_action("install", id); })
+              .width(5).disable(models.busy() || !online || !io::get_bool(entry, "fits", true))
+              .tip(ctx.tr(online ? "models.local.install.tip" : "models.local.needs_internet"));
+        }
+        continue;
+      }
+      const auto server = found->second.value("server", Json::object());
+      const auto state = io::get_string(server, "state", "stopped");
+      std::string status(ctx.tr("models.local.server." + state));
+      if (!io::get_string(server, "error").empty()) { status += " · " + io::get_string(server, "error"); }
+      row.label(status);
+      if (!vllm) {
+        if (state == "running" || state == "starting") {
+          row.button("ai_local_stop/" + id, ctx.tr("models.local.stop"), [settings, id] { settings->local_action("stop", id); })
+              .width(5).disable(models.busy());
+        }
+        else {
+          row.button("ai_local_start/" + id, ctx.tr("models.local.start"), [settings, id] { settings->local_action("start", id); })
+              .width(5).disable(models.busy() || installing);
+        }
+      }
+      row.button("ai_local_remove/" + id, ctx.tr("models.local.remove"), [settings, id] { settings->local_action("remove", id); })
+          .width(5).disable(models.busy() || installing);
+    }
+    // Offline installations: the model files (and the llama.cpp build, if none is installed) copied to this computer.
+    if (auto *offline = box->panel("ai_local_import", ctx.tr("models.local.import.title"), false)) {
+      hint(*offline, ctx, "models.local.import.hint");
+      offline->prop(ctx.tr("models.local.import.entry")).dropdown("ai_local_import_entry", import_names, ui::bind(import_entry_));
+      offline->prop(ctx.tr("models.local.import.path")).text_field("ai_local_import_path", ui::bind(import_path_), {.max_length = 4096});
+      offline->button("ai_local_import_button", ctx.tr("models.local.import.button"), [this, settings, import_ids] {
+        if (import_entry_ >= 0 && size_t(import_entry_) < import_ids.size() && !import_path_.empty()) {
+          settings->import_local(import_ids[size_t(import_entry_)], import_path_);
+        }
+      }).disable(models.busy() || import_entry_ < 0 || size_t(import_entry_) >= import_ids.size() || import_path_.empty());
+    }
+    box->button("ai_local_refresh", ctx.tr("models.local.refresh"), [settings] { settings->load_recommendations(); })
+        .disable(models.busy());
   }
 
   /** Tokens this project used, from the provider's receipts with completed replies (UX package U2).
@@ -767,6 +894,8 @@ class AIEditor final : public Editor {
   bool opened_history_ = false;
   bool model_has_text_ = false;
   struct NewEndpoint { std::string id, name, base_url, models; bool internal = false; } new_endpoint_;
+  int import_entry_ = -1;
+  std::string import_path_;
   std::string key_text_;
   bool key_remember_ = false;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);

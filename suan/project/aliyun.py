@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import ssl
 import threading
 import time
@@ -246,6 +247,17 @@ def _connection():
                                              context=ssl.create_default_context())
     connection.set_debuglevel(0)
     return connection
+
+
+def _close_on_cancel(transport_socket, cancel_event, finished):
+    """Shut the connection down when the request is cancelled while waiting; the blocked read then fails."""
+    while not finished.wait(0.2):
+        if cancel_event.is_set():
+            try:  # the plain socket's shutdown: an SSL socket's own would detach TLS under the reading thread
+                socket.socket.shutdown(transport_socket, socket.SHUT_RDWR)
+            except OSError:
+                pass
+            return
 
 
 def _remaining(deadline):
@@ -485,6 +497,11 @@ class _Prepared:
     path: str = _PATH
     provider: str = "Alibaba Token Plan"
     reasoning: bool = False
+    # Models on this computer or the organization's network can take many minutes (CPU, reasoning); for them a
+    # cancellation closes the connection at once ("this_computer": the reply is confirmed cancelled, as nothing
+    # outside this computer holds it; "organization": its outcome is uncertain).
+    timeout: float = TIMEOUT_SECONDS
+    cancel_closes: str = ""
 
     def send(self, frozen_input, cancel_event):
         return self._send(frozen_input, cancel_event, None)
@@ -506,13 +523,17 @@ class _Prepared:
         if cancel_event.is_set():
             raise ConfirmedCancellation("Request was cancelled before submission")
         connection = response = None
+        finished = threading.Event()
         try:
-            deadline = time.monotonic() + TIMEOUT_SECONDS
+            deadline = time.monotonic() + self.timeout
             connection = (self.connect or _connection)()
             connection.connect()
             if cancel_event.is_set():
                 raise ConfirmedCancellation("Request was cancelled before submission")
             transport_socket = connection.sock
+            if self.cancel_closes:
+                threading.Thread(target=_close_on_cancel, args=(transport_socket, cancel_event, finished),
+                                 name="stk-request-cancel", daemon=True).start()
             transport_socket.settimeout(_remaining(deadline))
             # Local endpoints usually need no key; the Alibaba header order stays as it was.
             headers = {"Authorization": "Bearer " + self.key} if self.key else {}
@@ -530,13 +551,19 @@ class _Prepared:
             if on_text is not None:
                 return _stream_response(transport_socket, response, deadline, on_text, self.reasoning)
             return _response(_read_response(transport_socket, response, deadline))
-        except (ConfirmedCancellation, DefinitiveFailure, InvalidResponse):
-            raise
-        except Exception:
+        except Exception as exc:
+            if self.cancel_closes and cancel_event.is_set() and not isinstance(exc, ConfirmedCancellation):
+                # The connection was closed for the cancellation, so the reply ended early, whatever the parser saw.
+                if self.cancel_closes == "this_computer":
+                    raise ConfirmedCancellation(f"{self.provider} stopped the reply when it was cancelled") from None
+                raise RuntimeError(f"{self.provider} transport outcome is uncertain") from None
+            if isinstance(exc, (ConfirmedCancellation, DefinitiveFailure, InvalidResponse)):
+                raise
             # Provider bodies, TLS errors and connection exceptions can contain
             # request/credential text. Neither cause nor message crosses this seam.
             raise RuntimeError(f"{self.provider} transport outcome is uncertain") from None
         finally:
+            finished.set()
             if response is not None:
                 try:
                     response.close()

@@ -4192,6 +4192,68 @@ TEST_F(ProjectPython, AIQuestionsGoToTheChosenEndpointAndPrivateDataStaysOffExte
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
+class LocalModelsPython : public ProjectPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    options.command = {python, std::string(STK_REPO_ROOT) + "/desktop/tests/bridge/local_models_bridge.py",
+        dir.str(), "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+  }
+};
+
+TEST_F(LocalModelsPython, AModelIsInstalledStartedAndOfferedAsALocalEndpointFromTheAssistant)
+{
+  populated();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area);
+  ai_frame();
+  auto &models = f.shell->store().models();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  const auto open = [&](const std::string &key) {
+    STK_UNTIL(widget(key) != nullptr);
+    const auto [x, y] = f.widget_center("a2/main/" + key);
+    f.drv->click(x, y);
+    f.drv->frame();
+  };
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  STK_UNTIL(models.loaded() && models.local_supported());
+  ASSERT_NO_FATAL_FAILURE(open("ai_model_settings"));
+  ASSERT_NO_FATAL_FAILURE(open("ai_model_settings/ai_local_models"));
+  // The catalog entry fits (it needs almost nothing) and is recommended; the hardware is summarized.
+  STK_UNTIL(!models.recommendations().is_null() && shows("recommended") && shows("This computer:") && shows("GB free disk"));
+  const std::string scope = "ai_model_settings/ai_local_models/";
+  STK_UNTIL(widget(scope + "ai_local_install/tiny-q4") && widget(scope + "ai_local_install/tiny-q4")->enabled);
+  widget(scope + "ai_local_install/tiny-q4")->on_click();
+  STK_UNTIL(widget(scope + "ai_local_start/tiny-q4") && widget(scope + "ai_local_start/tiny-q4")->enabled);
+  widget(scope + "ai_local_start/tiny-q4")->on_click();
+  STK_UNTIL(models.endpoint("local-tiny-q4") != nullptr && widget(scope + "ai_local_stop/tiny-q4") != nullptr);
+  EXPECT_EQ(io::get_string(*models.endpoint("local-tiny-q4"), "location"), "local");
+  // STK manages its key, and the endpoint is removed with the model, not on its own.
+  EXPECT_TRUE(io::get_bool(*models.endpoint("local-tiny-q4"), "managed", false));
+  STK_UNTIL(widget("ai_model_settings/ai_endpoint_remove/local-tiny-q4") != nullptr);
+  EXPECT_FALSE(widget("ai_model_settings/ai_endpoint_remove/local-tiny-q4")->enabled);
+  // The assistant offers it like any other endpoint.
+  ASSERT_NE(widget("ai_endpoint"), nullptr);
+  const auto &items = widget("ai_endpoint")->items;
+  EXPECT_TRUE(std::any_of(items.begin(), items.end(), [](const auto &item) {
+    return item.find("Tiny chat") != std::string::npos && item.find("this computer") != std::string::npos; }));
+  EXPECT_TRUE(shows("Running"));
+  widget(scope + "ai_local_stop/tiny-q4")->on_click();
+  STK_UNTIL(widget(scope + "ai_local_start/tiny-q4") && widget(scope + "ai_local_start/tiny-q4")->enabled &&
+            shows("Installed, not running"));
+  // Removing deletes the files and the endpoint.
+  widget(scope + "ai_local_remove/tiny-q4")->on_click();
+  STK_UNTIL(models.endpoint("local-tiny-q4") == nullptr && widget(scope + "ai_local_install/tiny-q4") != nullptr);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
 #undef STK_UNTIL
 
 }  // namespace

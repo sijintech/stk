@@ -45,6 +45,22 @@ class ModelSettings {
   bool clear_key(const std::string &id);
   bool set_network(const std::string &network);
 
+  /* ---- Local models (models.local.*, S1c) ---- */
+
+  /** The service installs and serves local models. */
+  bool local_supported() const;
+  /** Installed entries, their servers and running installations (null until read). */
+  const io::Json &local() const { return local_; }
+  /** Hardware and catalog entries with fit and recommendation (null until loaded on demand). */
+  const io::Json &recommendations() const { return recommendations_; }
+  /** The last hardware read failed: not read again until asked (``load_recommendations``). */
+  bool recommendations_failed() const { return recommendations_failed_; }
+  bool load_recommendations();
+  /** Live progress of an installation or server start, by catalog entry (from models.local.progress). */
+  const io::Json *progress(const std::string &entry) const;
+  bool local_action(const std::string &action, const std::string &entry);
+  bool import_local(const std::string &entry, const std::string &path);
+
  private:
   void reset();
   bool read();
@@ -55,7 +71,11 @@ class ModelSettings {
   bridge::Client *client_ = nullptr;
   bridge::ListenerHandle listener_;
   std::string session_, error_, network_;
-  io::Json endpoints_ = io::Json::array();
+  io::Json endpoints_ = io::Json::array(), local_, recommendations_, progress_ = io::Json::object();
+  bridge::ListenerHandle progress_listener_;
+  std::optional<bridge::Future<io::Json>> local_read_, recommend_read_;
+  bool local_stale_ = true, recommendations_failed_ = false;
+  bool read_local();
   uint64_t epoch_ = 0, version_ = 0;
   bool stale_ = true, loaded_ = false;
   std::optional<bridge::Future<io::Json>> read_, write_;

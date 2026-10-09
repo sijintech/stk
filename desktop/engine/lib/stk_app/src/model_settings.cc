@@ -13,14 +13,17 @@ ModelSettings::~ModelSettings()
   *alive_ = false;
   if (read_) { read_->cancel(); }
   if (write_) { write_->cancel(); }
+  if (local_read_) { local_read_->cancel(); }
+  if (recommend_read_) { recommend_read_->cancel(); }
 }
 
 void ModelSettings::reset()
 {
   ++epoch_; ++version_;
   endpoints_ = Json::array(); network_.clear(); error_.clear();
-  stale_ = true; loaded_ = false;
-  for (auto *future : {&read_, &write_}) {
+  local_ = recommendations_ = nullptr; progress_ = Json::object(); recommendations_failed_ = false;
+  stale_ = local_stale_ = true; loaded_ = false;
+  for (auto *future : {&read_, &write_, &local_read_, &recommend_read_}) {
     auto old = std::move(*future); future->reset();
     if (old) { old->cancel(); }
   }
@@ -52,11 +55,19 @@ void ModelSettings::sync()
       std::to_string(client->bridge_pid()) + ":" + std::to_string(client->stats().spawned) : std::string();
   if (client != client_ || session != session_) {
     if (client != client_) {
-      listener_ = {};
+      listener_ = {}; progress_listener_ = {};
       const std::weak_ptr<bool> weak = alive_;
       if (client) {
         listener_ = client->on_event("models.changed", [this, weak](const auto &, const Json &) {
-          if (const auto alive = weak.lock(); alive && *alive) { stale_ = true; store_.changed(); }
+          if (const auto alive = weak.lock(); alive && *alive) { stale_ = local_stale_ = true; store_.changed(); }
+        });
+        progress_listener_ = client->on_event("models.local.progress", [this, weak](const auto &, const Json &data) {
+          const auto alive = weak.lock();
+          if (!alive || !*alive) { return; }
+          const auto entry = io::get_string(data, "id");
+          if (!entry.empty()) { progress_[entry] = data; }
+          if (io::get_string(data, "state") != "running") { local_stale_ = true; }  // finished, failed or cancelled: read again
+          store_.changed();
         });
       }
     }
@@ -64,6 +75,78 @@ void ModelSettings::sync()
     reset();
   }
   if (stale_ && supported() && !busy()) { read(); }
+  if (local_stale_ && local_supported() && !local_read_) { read_local(); }
+}
+
+bool ModelSettings::local_supported() const
+{
+  if (!supported()) { return false; }
+  const auto hello = client_->hello_info();
+  for (const auto *method : {"models.local.list", "models.local.recommendations", "models.local.install", "models.local.import",
+                             "models.local.cancel", "models.local.start", "models.local.stop", "models.local.remove"}) {
+    if (!hello->has_method(method)) { return false; }
+  }
+  return true;
+}
+
+bool ModelSettings::read_local()
+{
+  const auto epoch = epoch_;
+  const std::weak_ptr<bool> weak = alive_;
+  local_stale_ = false;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  local_read_ = client_->call("models.local.list", Json::object(), options);
+  local_read_->then([this, weak, epoch](bridge::Result<Json> result) {
+    const auto alive = weak.lock();
+    if (!alive || !*alive || epoch != epoch_) { return; }
+    local_read_.reset();
+    if (result) { local_ = result.value(); ++version_; }
+    else { error_ = result.error().message; }
+    store_.changed();
+  });
+  return true;
+}
+
+bool ModelSettings::load_recommendations()
+{
+  sync();
+  if (!local_supported() || recommend_read_) { return false; }
+  recommendations_failed_ = false;
+  const auto epoch = epoch_;
+  const std::weak_ptr<bool> weak = alive_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  recommend_read_ = client_->call("models.local.recommendations", Json::object(), options);
+  recommend_read_->then([this, weak, epoch](bridge::Result<Json> result) {
+    const auto alive = weak.lock();
+    if (!alive || !*alive || epoch != epoch_) { return; }
+    recommend_read_.reset();
+    if (result) { recommendations_ = result.value(); ++version_; }
+    else { error_ = result.error().message; recommendations_failed_ = true; }
+    store_.changed();
+  });
+  store_.changed();
+  return true;
+}
+
+const Json *ModelSettings::progress(const std::string &entry) const
+{
+  const auto found = progress_.find(entry);
+  return found == progress_.end() ? nullptr : &*found;
+}
+
+bool ModelSettings::local_action(const std::string &action, const std::string &entry)
+{
+  if (!local_supported()) { return false; }
+  progress_.erase(entry);  // a new action: its own events follow
+  return write("models.local." + action, {{"id", entry}});
+}
+
+bool ModelSettings::import_local(const std::string &entry, const std::string &path)
+{
+  if (!local_supported()) { return false; }
+  return write("models.local.import", {{"id", entry}, {"path", path}});
 }
 
 bool ModelSettings::read()
@@ -105,7 +188,7 @@ bool ModelSettings::write(const std::string &method, Json params)
       if (store_.toast) { store_.toast(result.error().message, ui::ToastKind::Warning); }
     }
     else { error_.clear(); }
-    stale_ = true;  // models.changed follows too; reading twice is harmless
+    stale_ = local_stale_ = true;  // read both after the change (models.changed may follow too; reading twice is harmless)
     store_.changed();
   });
   store_.changed();
