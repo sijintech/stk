@@ -21,6 +21,7 @@
   - 两个本机模型中排在前面的那个启动即退出时，改问下一个并说明“无法启动”。
 
   两项各连续 3 次通过。另有 11 个原有原生测试改为显式选择 Token Plan，因为默认已是“自动”。完整 Linux CTest **1283/1283**。
+- CI：`5c3c7b6` [桌面](https://github.com/sijintech/stk/actions/runs/37950071468) 5/5、[Runtime](https://github.com/sijintech/stk/actions/runs/37950071394) 8/8，密钥扫描通过。
 
 ## 2026-10-09：Python 下限升到 3.11
 
