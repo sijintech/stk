@@ -15,9 +15,12 @@ from test_request_executor import ControlledAdapter, StreamingAdapter, eventuall
 from test_desktop_scripts import scripts, execute  # noqa: F401
 
 
-def prepare(harness, model, *, prompt_version="stk.text/1"):
+def prepare(harness, model, *, prompt_version="stk.text/1", public=True):
+    """A pending request to the (external) Token Plan adapter; its table is labelled public unless ``public`` is false."""
     store, _ = model
     context = capture(model)
+    if public:
+        store.labels.set([{"kind": "table", "id": context["selection"]["table_id"]}], label="public")
     message = store.discussion.add('Explain saved values', message_id=str(uuid4()), context_id=context['id'])
     info = harness.call('project.open', {'directory': str(store.directory)})['project']
     p = Project(lambda method, params: harness.call(method, params), info['handle'])

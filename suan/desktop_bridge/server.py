@@ -289,6 +289,14 @@ class Bridge:
             "project.search": lambda p, c: self.projects.search(p),
             "project.archive.set": self.archive_set,
             "project.archive.list": lambda p, c: self.projects.archive("list", p),
+            "project.labels.set": self.labels_set,
+            "models.list": lambda p, c: self.projects.model_settings("list", p),
+            "models.endpoints.add": lambda p, c: self.model_settings("add", p, c),
+            "models.endpoints.remove": lambda p, c: self.model_settings("remove", p, c),
+            "models.keys.set": lambda p, c: self.model_settings("key.set", p, c),
+            "models.keys.clear": lambda p, c: self.model_settings("key.clear", p, c),
+            "models.policy.set": lambda p, c: self.model_settings("policy", p, c),
+            "project.labels.list": lambda p, c: self.projects.labels("list", p),
             "project.attention.viewed": lambda p, c: self.projects.attention("viewed", p),
             "project.analysis_runs.prepare": lambda p, c: self.projects.analysis_runs("prepare", p),
             "project.analysis_runs.get": lambda p, c: self.projects.analysis_runs("get", p),
@@ -533,7 +541,7 @@ class Bridge:
                  "project.workflow_runs.prepare", "project.workflow_runs.get", "project.workflow_runs.list",
                  "project.workflow_runs.start", "project.workflow_runs.cancel", "project.workflow_runs.recover",
                  "project.workflow_runs.stale", "project.attention.list", "project.attention.viewed", "project.search",
-                 "project.archive.set", "project.archive.list",
+                 "project.archive.set", "project.archive.list", "project.labels.set", "project.labels.list",
                  "project.analysis_runs.prepare", "project.analysis_runs.get", "project.analysis_runs.list",
                  "project.analysis_runs.start", "project.analysis_runs.cancel", "project.analysis_runs.recover", "project.analysis_runs.result",
                  "project.snapshots.list", "project.snapshots.capture", "project.snapshots.get",
@@ -541,7 +549,7 @@ class Bridge:
                  "project.runs.prepare", "project.runs.list", "project.runs.get",
                  "project.runs.submit", "project.runs.refresh", "project.runs.cancel",
                  "graph.catalog", "graph.presets", "graph.validate", "graph.evaluate", "graph.cancel",
-                 "blob.ensure", "probe", "colormaps.list", "skills.list", "skills.get",
+                 "blob.ensure", "probe", "colormaps.list", "skills.list", "skills.get", "models.list",
                  "connections.list", "connections.check", "connections.ssh",
                  "hub.devices", "hub.templates", "hub.actions", "hub.action",
                  "workspace.list", "workspace.create", "workspace.files", "upload.start", "download.start",
@@ -623,6 +631,18 @@ class Bridge:
         if result["changed"]:
             kinds = sorted({item["kind"] for item in result["items"]})
             context.after(lambda: self.emit("project.archive.changed", {"handle": params["handle"], "kinds": kinds}))
+        return result
+
+    def model_settings(self, action, params, context):
+        result = self.projects.model_settings(action, params)
+        context.after(lambda: self.emit("models.changed", {}))
+        return result
+
+    def labels_set(self, params, context):
+        result = self.projects.labels("set", params)
+        if result["changed"]:
+            kinds = sorted({item["kind"] for item in result["items"]})
+            context.after(lambda: self.emit("project.labels.changed", {"handle": params["handle"], "kinds": kinds}))
         return result
 
     def run_project(self, action, params, context):

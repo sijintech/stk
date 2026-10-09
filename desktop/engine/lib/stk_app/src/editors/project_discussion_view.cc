@@ -5,6 +5,7 @@
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
 #include "archive_controls.hh"
+#include "model_gate.hh"
 #include "editor_text.hh"
 #include <algorithm>
 #include <limits>
@@ -302,6 +303,12 @@ void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &c
   if (request.value("cancel_requested", false)) { layout.paragraph(ctx.tr("discussion.requests.cancel_requested")); }
   if (status == "running" || status == "uncertain") { layout.paragraph(ctx.tr("discussion.requests.verify")); }
   const bool archived = archived_notice(layout, ctx, "request", id);
+  // Its saved context is checked by the service when this view has not read it.
+  const auto &context = discussion.context();
+  const bool same_context = !context.empty() && io::get_string(context, "id") == io::get_string(request, "context_id");
+  const auto blocked = send_blocked(ctx, discussion, io::get_string(request.at("configuration"), "adapter"),
+                                    same_context ? &context : nullptr);
+  if (status == "pending" && !blocked.empty() && blocked != "ai.missing_key") { layout.paragraph(ctx.tr(blocked)); }
   const auto serialized = request.dump(2);
   if (shown_request_ != serialized) {
     shown_request_ = serialized;
@@ -318,9 +325,7 @@ void ProjectDiscussionView::request_details(ui::Layout &layout, EditorContext &c
   auto &actions = layout.row();
   actions.button("request_start", ctx.tr("discussion.requests.start"), [&discussion, current, id] {
     if (current()) { discussion.start_request(id); }
-  }).disable(!enabled || status != "pending" || !discussion.generation_supported() || archived ||
-      !discussion.provider().value("configured", false) ||
-      io::get_string(request.at("configuration"), "adapter") != io::get_string(discussion.provider(), "adapter"));
+  }).disable(!enabled || status != "pending" || !discussion.generation_supported() || archived || !blocked.empty());
   actions.button("request_reload", ctx.tr("discussion.requests.refresh"), [&discussion, current, id] {
     if (current()) { discussion.load_request(id); }
   }).disable(!enabled);

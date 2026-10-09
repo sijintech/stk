@@ -4,6 +4,8 @@
 #include "stk/app/project_state.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_archive.hh"
+#include "stk/app/project_data_labels.hh"
+#include "stk/app/model_settings.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/core/paths.hh"
 #include "stk/app/script_state.hh"
@@ -361,6 +363,12 @@ class ProjectStream : public ProjectPython {
     auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
     f.screen.set_maximized(&area); ai_frame();
     auto &discussion = state().discussion();
+    // The Token Plan endpoint is external: only data labelled public may be sent to it.
+    std::optional<bridge::Result<Json>> labelled;
+    client->call("project.labels.set", {{"handle", state().project()->handle}, {"label", "public"},
+        {"items", Json::array({{{"kind", "table"}, {"id", table_id}}})}}).then([&](auto value) { labelled = value; });
+    ASSERT_TRUE(loop.pump_until([&] { return labelled.has_value(); }));
+    ASSERT_TRUE(labelled->ok()) << labelled->error().describe();
     ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Streaming scope")); settled();
     ASSERT_TRUE(discussion.prepare_question(discussion.context().at("id"), "Explain the temperature", "fixture-model"));
     settled(); ai_frame();
@@ -2962,7 +2970,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   auto &scripts = f.shell->store().scripts();
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   const std::string source = "import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
-      ") as db:\n    db.execute('DROP TABLE project_archive')\n    db.execute('DROP TABLE workflow_run_events')\n    db.execute('DROP TABLE workflow_run_plans')\n    db.execute('DROP TABLE analysis_run_events')\n    db.execute('DROP TABLE analysis_run_plans')\n    db.execute('DROP TABLE project_requests')\n    db.execute('DROP TABLE project_proposals')\n    db.execute('DROP TABLE project_messages')\n    db.execute('DROP TABLE project_contexts')\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
+      ") as db:\n    db.execute('DROP TABLE project_labels')\n    db.execute('DROP TABLE project_archive')\n    db.execute('DROP TABLE workflow_run_events')\n    db.execute('DROP TABLE workflow_run_plans')\n    db.execute('DROP TABLE analysis_run_events')\n    db.execute('DROP TABLE analysis_run_plans')\n    db.execute('DROP TABLE project_requests')\n    db.execute('DROP TABLE project_proposals')\n    db.execute('DROP TABLE project_messages')\n    db.execute('DROP TABLE project_contexts')\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
   ASSERT_TRUE(scripts.execute(source));
   ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
@@ -2977,7 +2985,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   f.screen.ui()->find("a2/main/upgrade_project")->on_click();
   settled();
   f.drv->frame();
-  EXPECT_EQ(state().project()->format_version, 11);
+  EXPECT_EQ(state().project()->format_version, 12);
   EXPECT_EQ(state().project()->revision, 2);
   EXPECT_EQ(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
   EXPECT_FALSE(state().notice().empty());
@@ -4095,6 +4103,91 @@ TEST_F(ProjectPython, ArchivedContextsLeaveTheDiscussionListAndStillTakeMessages
   widget("discussion_show_archived/contexts")->boolean.assign(false);
   STK_UNTIL(discussion.page("contexts").loaded && !discussion.busy() && discussion.page("contexts").items.size() == 1 &&
             widget("message_composer/save_message")->enabled);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, TablesArePrivateUntilLabelledPublicOnTheDataPage)
+{
+  populated();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  STK_UNTIL(widget("table_public") && widget("table_public")->enabled);
+  EXPECT_FALSE(widget("table_public")->boolean.value());
+  widget("table_public")->boolean.assign(true);
+  STK_UNTIL(f.shell->store().data_labels().is_public("table", table_id) && !f.shell->store().data_labels().busy());
+  std::optional<bridge::Result<Json>> listed;
+  client->call("project.labels.list", {{"handle", state().project()->handle}}).then([&](auto value) { listed = value; });
+  ASSERT_TRUE(loop.pump_until([&] { return listed.has_value(); }));
+  ASSERT_TRUE(listed->ok());
+  ASSERT_EQ(listed->value().at("items").size(), 1u);
+  EXPECT_EQ(listed->value().at("items")[0].at("id"), table_id);
+  widget("table_public")->boolean.assign(false);
+  STK_UNTIL(!f.shell->store().data_labels().is_public("table", table_id) && !f.shell->store().data_labels().busy());
+  EXPECT_EQ(state().project()->revision, 1);  // labelling is not an edit
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, AIQuestionsGoToTheChosenEndpointAndPrivateDataStaysOffExternalOnes)
+{
+  populated();
+  ASSERT_NO_FATAL_FAILURE(saved_request("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));  // its context and question
+  const std::string token_plan = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";  // the same question to the built-in (external) Token Plan
+  std::optional<bridge::Result<Json>> created;
+  client->call("project.requests.create", {{"handle", state().project()->handle}, {"request_id", token_plan},
+      {"message_id", state().discussion().message().at("id")},
+      {"configuration", {{"adapter", "aliyun-token-plan/1"}, {"model", "fixture-v1"}}}}).then([&](auto value) { created = value; });
+  ASSERT_TRUE(loop.pump_until([&] { return created.has_value(); }));
+  ASSERT_TRUE(created->ok()) << created->error().describe();
+  std::optional<bridge::Result<Json>> keyed;
+  client->call("ai.credentials.set", {{"key", "abcdefghijklmnopqrstu"}}).then([&](auto value) { keyed = value; });
+  ASSERT_TRUE(loop.pump_until([&] { return keyed.has_value(); }));
+  ASSERT_TRUE(keyed->ok());
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area);
+  ai_frame();
+  auto &discussion = state().discussion();
+  auto &models = f.shell->store().models();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  ASSERT_TRUE(discussion.load_exchange(token_plan)); ai_frame();
+  // The Token Plan is external and the table is private: the saved question is not sent, and the reason is shown.
+  STK_UNTIL(models.loaded() && widget("ai_endpoint") && shows("This question's data is private"));
+  EXPECT_FALSE(widget("ai_send_saved")->enabled);
+  ASSERT_TRUE(f.shell->store().data_labels().set("table", {table_id}, true));
+  STK_UNTIL(!shows("This question's data is private") && widget("ai_send_saved") && widget("ai_send_saved")->enabled);
+  // The network setting is checked too.
+  ASSERT_TRUE(models.set_network("offline"));
+  STK_UNTIL(!models.busy() && models.network() == "offline" && shows("The network setting does not allow this question's endpoint."));
+  EXPECT_FALSE(widget("ai_send_saved")->enabled);
+  // An endpoint on this computer is added from the settings and chosen; the next question goes to it.
+  ASSERT_TRUE(models.add_endpoint("laptop", "Laptop llama.cpp", "http://127.0.0.1:9/v1", {"qwen2.5-7b-instruct"}, ""));
+  STK_UNTIL(!models.busy() && models.endpoint("laptop") != nullptr);
+  ASSERT_EQ(io::get_string(*models.endpoint("laptop"), "location"), "local");
+  ASSERT_NE(widget("ai_endpoint"), nullptr);
+  const auto &items = widget("ai_endpoint")->items;
+  const auto found = std::find_if(items.begin(), items.end(), [](const auto &item) { return item.find("Laptop llama.cpp") != std::string::npos; });
+  ASSERT_NE(found, items.end());
+  EXPECT_NE(found->find("this computer"), std::string::npos);
+  widget("ai_endpoint")->index.assign(int(found - items.begin()));
+  STK_UNTIL(widget("ai_endpoint_model") && widget("ai_endpoint_model")->items.size() == 1);
+  widget(std::string("ai_question/") + state().project()->handle)->string.assign("Explain the temperature.");
+  STK_UNTIL(widget("ai_prepare") && widget("ai_prepare")->enabled);
+  widget("ai_prepare")->on_click();
+  STK_UNTIL(!discussion.exchange_request().empty() && !discussion.exchange_busy() &&
+            io::get_string(discussion.exchange_request().at("configuration"), "adapter") == "openai-compatible/1:laptop");
+  EXPECT_EQ(io::get_string(discussion.exchange_request().at("configuration"), "model"), "qwen2.5-7b-instruct");
+  // A local endpoint takes private data and is allowed offline: its saved question may be sent.
+  ASSERT_TRUE(f.shell->store().data_labels().set("table", {table_id}, false));
+  STK_UNTIL(!f.shell->store().data_labels().busy() && widget("ai_send_saved") && widget("ai_send_saved")->enabled);
   EXPECT_EQ(state().project()->revision, 1);
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }

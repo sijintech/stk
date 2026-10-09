@@ -15,7 +15,8 @@ from suan.project.analyses import AnalysisNotFound
 from suan.project.analysis_runs import AnalysisRunNotFound
 from suan.project.workflows import WorkflowNotFound
 from suan.project.workflow_runs import WorkflowRunNotFound
-from suan.project.aliyun import ALIYUN_ADAPTER, AliyunTokenPlanAdapter, TokenPlanCredentials, provider_info
+from suan.models import ModelGateway, PolicyDenied
+from suan.project.aliyun import TokenPlanCredentials, provider_info
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
 from suan.project.archive import Archived
@@ -33,7 +34,9 @@ class ProjectSessions:
         self._stores = {}
         self._closed = False
         self._credentials = TokenPlanCredentials(state_dir)
-        self._executor = RequestExecutor({ALIYUN_ADAPTER: AliyunTokenPlanAdapter(self._credentials)})
+        # The model gateway resolves adapters and checks the network setting and data labels before sending.
+        self.models = ModelGateway(state_dir, self._credentials)
+        self._executor = RequestExecutor(self.models, gate=self.models.admit)
         self._analysis_executor = analysis_executor
         self._workflow_executor = workflow_executor
 
@@ -49,7 +52,7 @@ class ProjectSessions:
     def _errors(self):
         try:
             yield
-        except (RevisionConflict, Archived) as exc:
+        except (RevisionConflict, Archived, PolicyDenied) as exc:
             raise BridgeError("conflict", str(exc)) from None
         except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound) as exc:
             raise BridgeError("not_found", str(exc)) from None
@@ -250,6 +253,36 @@ class ProjectSessions:
                 return store.archive.set(params["items"], archived=params["archived"], note=params.get("note"),
                                          include_runs=params.get("include_runs", False))
             return store.archive.list(params.get("kind"))
+
+    def model_settings(self, action, params):
+        """Model endpoints, their keys and the network setting of this computer (docs/design/model-gateway.md).
+        Never returns a key. Changes are for the person at this computer: scripts may only read (``models.list``)."""
+        with self._operation():
+            gateway = self.models
+            if action == "add":
+                return {"endpoint": gateway.endpoints.add(params["id"], params["name"], params["base_url"], params["models"],
+                                                          params.get("location"))}
+            if action == "remove":
+                gateway.endpoints.remove(params["id"])
+                gateway.keys.clear(params["id"])
+                return {"removed": params["id"]}
+            if action in ("key.set", "key.clear"):
+                if gateway.endpoints.get(params["id"]) is None or params["id"] == "aliyun-token-plan":
+                    raise ProjectError("Set keys of added endpoints here; the Token Plan key is set with ai.credentials.set")
+                info = (gateway.keys.set(params["id"], params["key"], remember=params.get("remember", False))
+                        if action == "key.set" else gateway.keys.clear(params["id"]))
+                return {"key": info}
+            if action == "policy":
+                gateway.policy.set(params["network"])
+            return gateway.describe()
+
+    def labels(self, action, params):
+        """Label data public or private, or list what is public (format 12); never changes the revision."""
+        with self._operation():
+            store = self._get(params["handle"])
+            if action == "set":
+                return store.labels.set(params["items"], label=params["label"], note=params.get("note"))
+            return store.labels.list(params.get("kind"))
 
     def search(self, params):
         """Names and text of the project matching a query; reads only (UX package U3)."""

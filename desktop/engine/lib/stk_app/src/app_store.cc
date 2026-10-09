@@ -5,7 +5,9 @@
 #include "stk/app/jobs_state.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
+#include "stk/app/model_settings.hh"
 #include "stk/app/project_archive.hh"
+#include "stk/app/project_data_labels.hh"
 #include "stk/app/project_attention.hh"
 #include "stk/app/skill_catalog.hh"
 #include "stk/app/viewer_state.hh"
@@ -37,6 +39,8 @@ AppStore::~AppStore()
   on_change = nullptr;
   attention_.reset();
   archive_.reset();
+  data_labels_.reset();
+  models_.reset();
   skills_.reset();
   scripts_.reset();
   project_.reset();
@@ -50,6 +54,22 @@ ProjectState &AppStore::project()
     project_ = std::make_unique<ProjectState>(*this);
   }
   return *project_;
+}
+
+ProjectDataLabels &AppStore::data_labels()
+{
+  if (!data_labels_) {
+    data_labels_ = std::make_unique<ProjectDataLabels>(*this);
+  }
+  return *data_labels_;
+}
+
+ModelSettings &AppStore::models()
+{
+  if (!models_) {
+    models_ = std::make_unique<ModelSettings>(*this);
+  }
+  return *models_;
 }
 
 ProjectArchive &AppStore::archive()

@@ -20,7 +20,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 11
+FORMAT_VERSION = 12
 DATABASE_NAME = "project.sqlite3"
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
@@ -158,6 +158,16 @@ _DDL_V11 = (
         at TEXT NOT NULL, note TEXT)""",
     "CREATE INDEX project_archive_by_object ON project_archive(kind, object_id, id)",
 )
+# Data labels (format 12, docs/design/model-gateway.md): data is private unless labelled public; only public
+# data may go to external model endpoints. Append-only like the archive record; not part of revision or undo.
+_DDL_V12 = (
+    """CREATE TABLE project_labels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL CHECK(kind IN ('table','file')),
+        object_id TEXT NOT NULL, label TEXT NOT NULL CHECK(label IN ('public','private')),
+        at TEXT NOT NULL, note TEXT)""",
+    "CREATE INDEX project_labels_by_object ON project_labels(kind, object_id, id)",
+)
 
 
 class ProjectError(ValueError):
@@ -260,7 +270,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11, *_DDL_V12):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -340,6 +350,11 @@ class ProjectStore:
     def archive(self):
         from .archive import Archive
         return Archive(self)
+
+    @property
+    def labels(self):
+        from .labels import Labels
+        return Labels(self)
 
     @property
     def snapshots(self):
@@ -437,7 +452,7 @@ class ProjectStore:
                 backup = self._backup(source)
             for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5),
                                                (5, _DDL_V6), (6, _DDL_V7), (7, _DDL_V8), (8, _DDL_V9),
-                                               (9, _DDL_V10), (10, _DDL_V11)):
+                                               (9, _DDL_V10), (10, _DDL_V11), (11, _DDL_V12)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)

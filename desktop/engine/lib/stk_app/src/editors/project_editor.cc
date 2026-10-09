@@ -8,6 +8,7 @@
 #include "stk/core/paths.hh"
 #include "stk/platform/file_dialog.hh"
 #include "archive_controls.hh"
+#include "stk/app/project_data_labels.hh"
 #include "project_review_view.hh"
 #include "project_discussion_view.hh"
 #include "project_simulation_view.hh"
@@ -621,6 +622,17 @@ class ProjectEditor final : public Editor {
         },
         [&state, ids](int i) { if (i >= 0 && size_t(i) < ids.size()) { state.select_table(ids[i]); } }
       });
+    }
+    // Data is private unless labelled public; only public data may go to external model endpoints (format 12).
+    auto &labels = ctx.store.data_labels();
+    labels.sync();
+    if (labels.supported() && labels.loaded() && !state.table_id().empty()) {
+      auto *shared = &labels;
+      const auto table = state.table_id();
+      box.checkbox("table_public", ctx.tr("labels.table_public"), {
+          [shared, table] { return shared->is_public("table", table); },
+          [shared, table](const bool on) { shared->set("table", {table}, on); }})
+          .disable(labels.busy()).tip(ctx.tr("labels.table_public.tip"));
     }
     auto &row = box.row();
     row.text_field("table_name", ui::bind(table_name_), {.placeholder = std::string(ctx.tr("project.table_name"))});

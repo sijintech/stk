@@ -1,7 +1,8 @@
 """Archived project objects (project format 11, docs/design/project-archive.md).
 
-Archiving hides an object from the default lists and makes it read-only until it is restored; its data,
-identity and results stay as they are. Each change is one appended row of ``project_archive``
+Archiving hides an object from the default lists and freezes it: it cannot be changed (saved, retried,
+sent, applied or discarded in place) but can still be used as it is, which creates new objects (owner
+decision 2026-10-08); its data, identity and results stay as they are. Each change is one appended row of ``project_archive``
 (``kind, object_id, archived, at, note``) and an object's current state is its last row. Unlike the
 run and request journals the rows are not hash-chained: they record a view choice, not results. They
 never advance the editable revision or enter undo. Below format 11 nothing is archived: every read

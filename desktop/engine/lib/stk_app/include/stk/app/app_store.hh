@@ -33,6 +33,8 @@ class ScriptState;
 class SkillCatalogState;
 class ProjectAttention;
 class ProjectArchive;
+class ProjectDataLabels;
+class ModelSettings;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -121,6 +123,10 @@ class AppStore {
   ProjectAttention &attention();
   /** What the open project has archived (project_archive.hh). */
   ProjectArchive &archive();
+  /** Which data of the open project is labelled public (project_data_labels.hh). */
+  ProjectDataLabels &data_labels();
+  /** Model endpoints of this computer and the network setting (model_settings.hh). */
+  ModelSettings &models();
 
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
@@ -173,6 +179,8 @@ class AppStore {
   std::unique_ptr<SkillCatalogState> skills_;
   std::unique_ptr<ProjectAttention> attention_;
   std::unique_ptr<ProjectArchive> archive_;
+  std::unique_ptr<ProjectDataLabels> data_labels_;
+  std::unique_ptr<ModelSettings> models_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

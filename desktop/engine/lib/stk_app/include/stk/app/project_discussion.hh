@@ -72,9 +72,10 @@ class ProjectDiscussion {
   bool create_request(const std::string &model);
   bool start_request(const std::string &id);
   bool recover_request(const std::string &id);
-  /** Prepare a question against the currently inspected saved context. Never sends. */
+  /** Prepare a question against the currently inspected saved context. Never sends. ``adapter`` is the model
+   * endpoint's adapter identity (empty: the built-in Token Plan provider). */
   bool prepare_question(const std::string &context_id, const std::string &text, const std::string &model,
-                        const std::string &prompt_version = "stk.text/1");
+                        const std::string &prompt_version = "stk.text/1", const std::string &adapter = "");
   /** Explicitly compile a completed parameter reply into a saved draft; never applies. */
   bool propose_exchange_edits();
   /** Explicitly re-read the selected request's saved candidate before opening Review. */

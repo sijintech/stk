@@ -148,8 +148,8 @@ class Project:
         return self._call("project.search", {"handle": self.handle, "query": query, "limit": limit})
 
     def archive(self, kind, ids, *, note=None, include_runs=False):
-        """Archive objects of one kind (format 11): hidden from default lists and read-only until restored;
-        nothing is deleted. ``include_runs`` also archives a workflow's runs that are not running."""
+        """Archive objects of one kind (format 11): hidden from default lists and frozen (cannot be changed,
+        can still be used as they are); nothing is deleted. ``include_runs`` also archives a workflow's runs that are not running."""
         return self._archive(kind, ids, True, note, include_runs)
 
     def unarchive(self, kind, ids, *, include_runs=False):
@@ -170,6 +170,26 @@ class Project:
         if kind is not None:
             params["kind"] = kind
         return self._call("project.archive.list", params)
+
+    def mark_public(self, kind, ids, *, note=None):
+        """Label data public (format 12): only public data may be sent to external model endpoints.
+        ``kind`` is "table" or "file"; labelling is recorded but is not a project edit."""
+        params = {"handle": self.handle, "items": [{"kind": kind, "id": identity} for identity in ids], "label": "public"}
+        if note is not None:
+            params["note"] = note
+        return self._call("project.labels.set", params)
+
+    def mark_private(self, kind, ids):
+        """Label data private again (the default): it is no longer sent to external model endpoints."""
+        return self._call("project.labels.set", {"handle": self.handle, "label": "private",
+                                                  "items": [{"kind": kind, "id": identity} for identity in ids]})
+
+    def labels(self, kind=None):
+        """Data currently labelled public ({kind, id, labelled_at, note})."""
+        params = {"handle": self.handle}
+        if kind is not None:
+            params["kind"] = kind
+        return self._call("project.labels.list", params)
 
     def mark_viewed(self, keys):
         """Mark attention items as viewed (kept for this person only, outside the project)."""
@@ -631,6 +651,19 @@ class Desktop:
         return self._call("ui.project.close", {})
 
 
+class Models:
+    """The model endpoints of this computer and the network setting (read only: endpoints, keys and the network
+    setting are changed by the person at this computer in the desktop, never by a script)."""
+
+    def __init__(self, call):
+        self._call = call
+
+    def list(self):
+        """{"endpoints": [...], "policy": {"network": ...}}; each endpoint has its location (local, internal,
+        external), models, key presence (never the key) and whether the network setting allows it."""
+        return self._call("models.list", {})
+
+
 class API:
     def __init__(self, call):
         self._call = call
@@ -642,6 +675,7 @@ class API:
         self.viewer = Viewer(call)
         self.graph = Graph(call)
         self.skills = Skills(call)
+        self.models = Models(call)
 
     def runtime(self, connection, *, node=None):
         """Use a saved Runtime profile, optionally routed through a Hub execution node."""

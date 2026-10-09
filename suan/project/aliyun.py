@@ -1,6 +1,8 @@
 """Single-attempt, text-only Alibaba Token Plan transport.
 
-The adapter identity pins the endpoint and prompt policy. Credentials live only
+The adapter identity pins the endpoint and prompt policy. The payload checks, single attempt and response
+parsing here are also used by the generic OpenAI-compatible adapter (``suan.models.gateway``), with its own
+endpoint, adapter identity and options. Credentials live only
 in the process environment and in a prepared request's memory; they are never
 part of project configuration, request payloads, reprs or error messages.
 """
@@ -191,7 +193,9 @@ def provider_info(credentials=None):
             "key_source": key["source"], "can_remember": key["can_remember"]}
 
 
-def _payload(frozen_input):
+def _payload(frozen_input, adapter=ALIYUN_ADAPTER, options=None, provider="Alibaba Token Plan"):
+    """(payload, stream payload, input digest) for one frozen request sent to ``adapter``; ``options`` are
+    endpoint-specific body fields (Alibaba: no thinking)."""
     try:
         if not isinstance(frozen_input, dict) or set(frozen_input) != {
                 "context", "message", "configuration", "prompt_version"}:
@@ -204,17 +208,17 @@ def _payload(frozen_input):
         if len(encoded) > MAX_INPUT_BYTES:
             raise ValueError
         config = _configuration(frozen_input["configuration"])
-        if config["adapter"] != ALIYUN_ADAPTER:
+        if config["adapter"] != adapter:
             raise ValueError
         if config.get("temperature", 0) >= 2:
-            raise ProjectError("Alibaba Token Plan temperature must be less than 2")
+            raise ProjectError(f"{provider} temperature must be less than 2")
         context, message = frozen_input["context"], frozen_input["message"]
         if (not isinstance(context, dict) or not isinstance(message, dict)
                 or message.get("role") != "user" or not context.get("id")
                 or message.get("context_id") != context["id"]):
             raise ValueError
         text = _message_text(message["text"])
-        body = {"model": config["model"], "stream": False, "enable_thinking": False,
+        body = {"model": config["model"], "stream": False, **({"enable_thinking": False} if options is None else options),
                 "max_tokens": config["max_output_tokens"],
                 "messages": [{"role": "system", "content": system},
                              {"role": "user", "content": _encode({"saved_context": context,
@@ -233,7 +237,7 @@ def _payload(frozen_input):
     except ProjectError:
         raise
     except (KeyError, TypeError, ValueError, RecursionError, UnicodeError):
-        raise ProjectError("Invalid frozen input for the Alibaba Token Plan adapter") from None
+        raise ProjectError(f"Invalid frozen input for the {provider} adapter") from None
 
 
 def _connection():
@@ -268,6 +272,10 @@ def _read_response(transport_socket, response, deadline):
     length = _response_length(response, "application/json")
     chunks, size = [], 0
     while True:
+        # A response that will close its connection (HTTP/1.0 or "Connection: close", as local servers send)
+        # closes the socket once its body is read; the socket must not be touched after that.
+        if response.isclosed():
+            break
         transport_socket.settimeout(_remaining(deadline))
         chunk = response.read1(min(65536, MAX_RESPONSE_BYTES + 1 - size))
         if not chunk:
@@ -337,8 +345,11 @@ def _stream_events(transport_socket, response, deadline):
     length = _response_length(response, "text/event-stream")
     size, line, data, skip_lf, first_line = 0, bytearray(), [], False, True
     while True:
-        transport_socket.settimeout(_remaining(deadline))
-        chunk = response.read1(min(65536, MAX_RESPONSE_BYTES + 1 - size))
+        if response.isclosed():  # the body was read to its end and the connection closed (see _read_response)
+            chunk = b""
+        else:
+            transport_socket.settimeout(_remaining(deadline))
+            chunk = response.read1(min(65536, MAX_RESPONSE_BYTES + 1 - size))
         if not chunk:
             # Even a clean HTTP EOF is not evidence of a completed model call.
             if length is not None and size != length:
@@ -382,8 +393,9 @@ def _stream_events(transport_socket, response, deadline):
                 data.append(value)
 
 
-def _stream_response(transport_socket, response, deadline, on_text):
-    """Publish provisional deltas; return only after stop, DONE and clean framing."""
+def _stream_response(transport_socket, response, deadline, on_text, reasoning=False):
+    """Publish provisional deltas; return only after stop, DONE and clean framing. ``reasoning`` tolerates
+    (and drops) a model's separate reasoning text, which local reasoning models stream."""
     parts, metadata = [], {}
     text_size, stopped, done, role_seen, usage_seen = 0, False, False, False, False
     for event in _stream_events(transport_socket, response, deadline):
@@ -434,7 +446,7 @@ def _stream_response(transport_socket, response, deadline, on_text):
                     or delta.get("tool_calls") not in (None, [])
                     or delta.get("function_call") is not None or delta.get("audio") is not None
                     or delta.get("refusal") is not None
-                    or delta.get("reasoning_content") not in (None, "")):
+                    or (not reasoning and delta.get("reasoning_content") not in (None, ""))):
                 raise ValueError
             role_seen = role_seen or delta.get("role") == "assistant"
             text = delta.get("content")
@@ -468,6 +480,11 @@ class _Prepared:
     payload: bytes = field(repr=False)
     stream_payload: bytes = field(repr=False)
     input_hash: bytes = field(repr=False)
+    # Another OpenAI-compatible endpoint: a connection factory, request path and name (Alibaba by default).
+    connect: object = field(default=None, repr=False)
+    path: str = _PATH
+    provider: str = "Alibaba Token Plan"
+    reasoning: bool = False
 
     def send(self, frozen_input, cancel_event):
         return self._send(frozen_input, cancel_event, None)
@@ -491,17 +508,19 @@ class _Prepared:
         connection = response = None
         try:
             deadline = time.monotonic() + TIMEOUT_SECONDS
-            connection = _connection()
+            connection = (self.connect or _connection)()
             connection.connect()
             if cancel_event.is_set():
                 raise ConfirmedCancellation("Request was cancelled before submission")
             transport_socket = connection.sock
             transport_socket.settimeout(_remaining(deadline))
-            connection.request("POST", _PATH, body=self.payload if on_text is None else self.stream_payload,
-                               headers={"Authorization": "Bearer " + self.key,
-                                        "Content-Type": "application/json",
-                                        "Accept": "application/json" if on_text is None else "text/event-stream",
-                                        "Accept-Encoding": "identity", "Connection": "close"})
+            # Local endpoints usually need no key; the Alibaba header order stays as it was.
+            headers = {"Authorization": "Bearer " + self.key} if self.key else {}
+            headers.update({"Content-Type": "application/json",
+                            "Accept": "application/json" if on_text is None else "text/event-stream",
+                            "Accept-Encoding": "identity", "Connection": "close"})
+            connection.request("POST", self.path, body=self.payload if on_text is None else self.stream_payload,
+                               headers=headers)
             transport_socket.settimeout(_remaining(deadline))
             response = connection.getresponse()
             if response.status in _REJECTED:
@@ -509,14 +528,14 @@ class _Prepared:
             if response.status != 200:
                 raise RuntimeError
             if on_text is not None:
-                return _stream_response(transport_socket, response, deadline, on_text)
+                return _stream_response(transport_socket, response, deadline, on_text, self.reasoning)
             return _response(_read_response(transport_socket, response, deadline))
         except (ConfirmedCancellation, DefinitiveFailure, InvalidResponse):
             raise
         except Exception:
             # Provider bodies, TLS errors and connection exceptions can contain
             # request/credential text. Neither cause nor message crosses this seam.
-            raise RuntimeError("Alibaba Token Plan transport outcome is uncertain") from None
+            raise RuntimeError(f"{self.provider} transport outcome is uncertain") from None
         finally:
             if response is not None:
                 try:

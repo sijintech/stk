@@ -506,6 +506,12 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `demo.create` | `{directory?}` | `{directory, project_id, cases_table, results_table, analysis_id, run_id, run_status}` |
 | `ai.credentials.set` | `{key, remember?}` | `{provider}` (presence and `key_source` only, never the key) |
 | `ai.credentials.clear` | `{}` | `{provider}` |
+| `models.list` | `{}` | `{endpoints: [modelEndpoint], policy: {network}}` |
+| `models.endpoints.add` | `{id, name, base_url, models, location?}` | `{endpoint: modelEndpoint}` |
+| `models.endpoints.remove` | `{id}` | `{removed}` |
+| `models.keys.set` | `{id, key, remember?}` | `{key: modelKeyInfo}` (presence only, never the key) |
+| `models.keys.clear` | `{id}` | `{key: modelKeyInfo}` |
+| `models.policy.set` | `{network}` | `{endpoints, policy}` |
 | `project.sweep.plan` | `{handle, table_id, axes, base_record_id?, mode?}` | `{plan: {table_id, rows, record_ids, commands}, revision}` |
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
@@ -559,6 +565,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.search` | `{handle, query, limit?}` | `{revision, query, results: [projectSearchItem], counts, truncated}` |
 | `project.archive.set` | `{handle, items: [{kind, id}], archived, note?, include_runs?}` | `{changed, items}` |
 | `project.archive.list` | `{handle, kind?}` | `{items: [{kind, id, archived_at, note}], counts}` |
+| `project.labels.set` | `{handle, items: [{kind, id}], label, note?}` | `{changed, items}` |
+| `project.labels.list` | `{handle, kind?}` | `{items: [{kind, id, labelled_at, note}]}` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -1151,6 +1159,23 @@ when needed, and `remember: false` deletes such a file. `ai.credentials.clear` f
 `provider.key_source` (`environment`, `session`, `saved` or empty) and `can_remember`; no reply, error
 message or log line contains the key, and neither method contacts the provider. Both are absent from
 the script catalog.
+
+Model endpoints and the network setting belong to this computer, not to a project
+([model gateway](../design/model-gateway.md)). `models.list` returns the built-in Token Plan endpoint
+(`aliyun-token-plan`, adapter `aliyun-token-plan/1`, location `external`) and the OpenAI-compatible endpoints
+added with `models.endpoints.add` (adapter `openai-compatible/1:<id>`, kept in `<state_dir>/models/endpoints.json`),
+each with `location` (`local` for a loopback host; otherwise `external` unless declared `internal`), `models`,
+`key` presence and `allowed` (whether the network setting permits it). External endpoints must use HTTPS. Keys of
+added endpoints follow the Token Plan rules: `STK_MODEL_KEY_<ID>` wins, then a session key, then
+`<state_dir>/models/keys/<id>.json` (0600). `models.policy.set` chooses `offline` (local endpoints only),
+`organization` (local and internal) or `internet` (all, the default). Changes emit `models.changed`. Only
+`models.list` is in the script catalog: scripts cannot add endpoints, set keys or widen the network setting.
+
+`project.labels.set` labels parameter tables (`table`) and file records (`file`) public or private (project
+format 12, append-only `project_labels`; not an edit: no revision, no undo; emits `project.labels.changed`).
+Data is private unless labelled public. `project.requests.start` refuses with `conflict`, leaving the request
+pending, when the network setting does not allow the request's endpoint, or when the endpoint is external and
+the request's context table is not labelled public.
 
 Recent locations are bridge preferences (`recent-projects.json`, version 1), at most 20 entries in
 most-recently-opened order. Creating/opening successfully remembers canonical directory, project UUID,

@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/app_store.hh"
 #include "stk/app/editor_area.hh"
+#include "stk/app/model_settings.hh"
+#include "stk/app/project_data_labels.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/project_table_view.hh"
 #include "stk/app/shell.hh"
 #include "stk/wm/window.hh"
 #include "archive_controls.hh"
+#include "model_gate.hh"
 #include "project_context_picker.hh"
 #include "project_navigation.hh"
 #include "project_labels.hh"
@@ -213,7 +216,18 @@ class AIEditor final : public Editor {
   }
 
  private:
-  struct Draft { std::string text, model; bool model_initialized = false; int intent = 0; };
+  /** ``endpoint`` is a model endpoint ID (empty: the built-in Token Plan). */
+  struct Draft { std::string text, model, endpoint; bool model_initialized = false; int intent = 0; };
+
+  /** The endpoint the next question goes to, or nullptr before model settings are read (older services). */
+  static const Json *chosen_endpoint(EditorContext &ctx, const Draft &draft)
+  {
+    auto &models = ctx.store.models();
+    models.sync();
+    if (!models.supported() || !models.loaded()) { return nullptr; }
+    return models.endpoint(draft.endpoint.empty() ? "aliyun-token-plan" : draft.endpoint);
+  }
+
 
   void poll(EditorContext &ctx, ProjectDiscussion &discussion)
   {
@@ -315,13 +329,55 @@ class AIEditor final : public Editor {
   void configuration(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft)
   {
     auto &discussion = state.discussion();
+    auto &models = ctx.store.models();
     auto &box = layout.box();
-    box.label("Alibaba Token Plan");
-    auto &model = box.prop(ctx.tr("discussion.requests.model")).text_field("ai_model/" + state.project()->handle, {
-      [&draft] { return draft.model; }, [&draft](const std::string &value) { draft.model = value; draft.model_initialized = true; }
-    }, {.max_length = 128});
-    model_has_text_ = ctx.ui && ctx.ui->editing() == model.id && ctx.ui->edit_state() ?
-        !ctx.ui->edit_state()->text().empty() : !draft.model.empty();
+    const auto *endpoint = chosen_endpoint(ctx, draft);
+    if (models.supported() && models.loaded()) {
+      // The built-in Token Plan or an endpoint added on this computer (docs/design/model-gateway.md).
+      std::vector<std::string> ids, names;
+      for (const auto &item : models.endpoints()) {
+        ids.push_back(io::get_string(item, "id"));
+        names.push_back(io::get_string(item, "name") + " · " + std::string(ctx.tr("models.location." + io::get_string(item, "location"))));
+      }
+      auto *settings = &models;
+      box.prop(ctx.tr("models.endpoint")).dropdown("ai_endpoint", std::move(names), {
+        [&draft, ids] {
+          const auto it = std::find(ids.begin(), ids.end(), draft.endpoint.empty() ? std::string("aliyun-token-plan") : draft.endpoint);
+          return it == ids.end() ? -1 : int(it - ids.begin());
+        },
+        [&draft, ids, settings](const int index) {
+          if (index < 0 || size_t(index) >= ids.size()) { return; }
+          draft.endpoint = ids[size_t(index)] == "aliyun-token-plan" ? std::string() : ids[size_t(index)];
+          if (const auto *chosen = settings->endpoint(ids[size_t(index)]); chosen && !io::get_bool(*chosen, "builtin", false)) {
+            const auto offered = chosen->value("models", Json::array());
+            draft.model = offered.empty() ? std::string() : offered.front().get<std::string>();
+            draft.model_initialized = true;
+          }
+        }});
+    }
+    else { box.label("Alibaba Token Plan"); }
+    const bool builtin = !endpoint || io::get_bool(*endpoint, "builtin", false);
+    if (builtin) {
+      auto &model = box.prop(ctx.tr("discussion.requests.model")).text_field("ai_model/" + state.project()->handle, {
+        [&draft] { return draft.model; }, [&draft](const std::string &value) { draft.model = value; draft.model_initialized = true; }
+      }, {.max_length = 128});
+      model_has_text_ = ctx.ui && ctx.ui->editing() == model.id && ctx.ui->edit_state() ?
+          !ctx.ui->edit_state()->text().empty() : !draft.model.empty();
+    }
+    else {
+      std::vector<std::string> offered;
+      for (const auto &name : endpoint->value("models", Json::array())) { offered.push_back(name.get<std::string>()); }
+      box.prop(ctx.tr("discussion.requests.model")).dropdown("ai_endpoint_model", offered, {
+        [&draft, offered] { const auto it = std::find(offered.begin(), offered.end(), draft.model); return it == offered.end() ? -1 : int(it - offered.begin()); },
+        [&draft, offered](const int index) { if (index >= 0 && size_t(index) < offered.size()) { draft.model = offered[size_t(index)]; } }});
+      model_has_text_ = std::find(offered.begin(), offered.end(), draft.model) != offered.end();
+    }
+    if (endpoint && !io::get_bool(*endpoint, "allowed", true)) { box.paragraph(ctx.tr("models.blocked")); }
+    if (endpoint && !builtin) {
+      endpoint_key(box, ctx, *endpoint);
+      model_settings(box, ctx);
+      return;
+    }
     const auto &provider = discussion.provider();
     const bool configured = provider.value("configured", false);
     const auto source = io::get_string(provider, "key_source");
@@ -351,6 +407,88 @@ class AIEditor final : public Editor {
       if (source == "environment") { keys->paragraph(ctx.tr("ai.key.environment_wins")); }
       hint(*keys, ctx, "ai.key.hint");
     }
+    model_settings(box, ctx);
+  }
+
+  /** The key of an added endpoint (optional: local endpoints usually need none). Never shown or kept here. */
+  void endpoint_key(ui::Layout &box, EditorContext &ctx, const Json &endpoint)
+  {
+    auto &models = ctx.store.models();
+    const auto id = io::get_string(endpoint, "id");
+    const auto key = endpoint.value("key", Json::object());
+    const auto source = io::get_string(key, "source");
+    box.paragraph(ctx.tr(!io::get_bool(key, "configured", false) ? "models.key.none" : source == "environment" ? "ai.key.environment" :
+                         source == "saved" ? "ai.key.saved" : "ai.key.session"));
+    if (!models.editable()) { return; }
+    if (auto *keys = box.panel("ai_endpoint_key", ctx.tr("models.key.title"), false)) {
+      auto &field = keys->text_field("ai_endpoint_key_text", ui::bind(key_text_), {
+          .placeholder = std::string(ctx.tr("ai.key.placeholder")), .max_length = 4096, .password = true});
+      const bool typed = ctx.ui && ctx.ui->editing() == field.id && ctx.ui->edit_state() ?
+          !ctx.ui->edit_state()->text().empty() : !key_text_.empty();
+      keys->checkbox("ai_endpoint_key_remember", ctx.tr("ai.key.remember"), ui::bind(key_remember_))
+          .disable(!io::get_bool(key, "can_remember", false));
+      auto &row = keys->row();
+      auto *settings = &models;
+      row.button("ai_endpoint_key_save", ctx.tr("ai.key.save"), [this, settings, id] {
+        const auto value = std::exchange(key_text_, std::string());
+        if (!value.empty()) { settings->set_key(id, value, key_remember_); }
+      }).disable(models.busy() || !typed);
+      row.button("ai_endpoint_key_clear", ctx.tr("ai.key.clear"), [settings, id] { settings->clear_key(id); })
+          .disable(models.busy() || (source != "session" && source != "saved"));
+    }
+  }
+
+  /** The network setting and the endpoints added on this computer (changed only here, never by scripts). */
+  void model_settings(ui::Layout &box, EditorContext &ctx)
+  {
+    auto &models = ctx.store.models();
+    if (!models.editable() || !models.loaded()) { return; }
+    auto *panel = box.panel("ai_model_settings", ctx.tr("models.settings"), false);
+    if (!panel) { return; }
+    auto *settings = &models;
+    const std::vector<std::string> modes = {"offline", "organization", "internet"};
+    panel->prop(ctx.tr("models.network")).dropdown("ai_network", {
+        std::string(ctx.tr("models.network.offline")), std::string(ctx.tr("models.network.organization")),
+        std::string(ctx.tr("models.network.internet"))}, {
+      [settings, modes] { const auto it = std::find(modes.begin(), modes.end(), settings->network()); return it == modes.end() ? -1 : int(it - modes.begin()); },
+      [settings, modes](const int index) { if (index >= 0 && size_t(index) < modes.size()) { settings->set_network(modes[size_t(index)]); } }
+    }).disable(models.busy());
+    hint(*panel, ctx, "models.network.hint");
+    panel->label(ctx.tr("models.added"));
+    for (const auto &item : models.endpoints()) {
+      if (io::get_bool(item, "builtin", false)) { continue; }
+      const auto id = io::get_string(item, "id");
+      auto &row = panel->row();
+      row.label(io::get_string(item, "name") + " · " + std::string(ctx.tr("models.location." + io::get_string(item, "location")))).tip(
+          io::get_string(item, "base_url"));
+      row.button("ai_endpoint_remove/" + id, ctx.tr("models.remove"), [settings, id] { settings->remove_endpoint(id); })
+          .width(4).disable(models.busy());
+    }
+    if (auto *add = panel->panel("ai_endpoint_add", ctx.tr("models.add.title"), false)) {
+      hint(*add, ctx, "models.add.hint");
+      add->prop(ctx.tr("models.add.id")).text_field("ai_endpoint_add_id", ui::bind(new_endpoint_.id), {.max_length = 32});
+      add->prop(ctx.tr("models.add.name")).text_field("ai_endpoint_add_name", ui::bind(new_endpoint_.name), {.max_length = 64});
+      add->prop(ctx.tr("models.add.base_url")).text_field("ai_endpoint_add_url", ui::bind(new_endpoint_.base_url),
+          {.placeholder = "http://127.0.0.1:8080/v1", .max_length = 2048});
+      add->prop(ctx.tr("models.add.models")).text_field("ai_endpoint_add_models", ui::bind(new_endpoint_.models), {.max_length = 2048});
+      add->checkbox("ai_endpoint_add_internal", ctx.tr("models.add.internal"), ui::bind(new_endpoint_.internal));
+      add->button("ai_endpoint_add_button", ctx.tr("models.add.button"), [this, settings] {
+        std::vector<std::string> names;
+        std::string current;
+        for (const char c : new_endpoint_.models + ",") {
+          if (c == ',') {
+            const auto begin = current.find_first_not_of(" \t"), end = current.find_last_not_of(" \t");
+            if (begin != std::string::npos) { names.push_back(current.substr(begin, end - begin + 1)); }
+            current.clear();
+          }
+          else { current.push_back(c); }
+        }
+        if (settings->add_endpoint(new_endpoint_.id, new_endpoint_.name, new_endpoint_.base_url, names,
+                                   new_endpoint_.internal ? "internal" : "")) { new_endpoint_ = {}; }
+      }).disable(models.busy() || new_endpoint_.id.empty() || new_endpoint_.name.empty() || new_endpoint_.base_url.empty() ||
+                 new_endpoint_.models.empty());
+    }
+    if (!models.error().empty()) { panel->paragraph(models.error()); }
   }
 
   /** Tokens this project used, from the provider's receipts with completed replies (UX package U2).
@@ -486,6 +624,9 @@ class AIEditor final : public Editor {
         settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
     layout.log_view("ai_transcript", transcript_, transcript_units);
     const bool archived = ctx.store.archive().archived("request", id);
+    const auto blocked = request.empty() ? std::string() :
+        send_blocked(ctx, discussion, io::get_string(request.value("configuration", Json::object()), "adapter"), &context);
+    if (status == "pending" && !blocked.empty() && blocked != "ai.missing_key") { layout.paragraph(ctx.tr(blocked)); }
     auto &actions = layout.row();
     // The saved question goes to the model frozen in it, named on the button.
     const auto send_model = io::get_string(request.value("configuration", Json::object()), "model");
@@ -495,8 +636,7 @@ class AIEditor final : public Editor {
       if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
         discussion.start_request(id);
       }
-    }).disable(!enabled || status != "pending" || !discussion.provider().value("configured", false) || archived ||
-               request.value("configuration", Json::object()).value("adapter", "") != discussion.provider().value("adapter", ""));
+    }).disable(!enabled || status != "pending" || archived || !blocked.empty());
     actions.button("ai_refresh_reply", ctx.tr("ai.refresh"), [&discussion, &state, handle, id] {
       if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
         discussion.refresh_exchange();
@@ -531,11 +671,13 @@ class AIEditor final : public Editor {
     layout.paragraph(ctx.tr("ai.prepare_hint"));
     if (picker_.active()) { layout.paragraph(ctx.tr("ai.scope.finish_first")); }
     const auto context_id = io::get_string(discussion.context(), "id");
-    layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id] {
+    const auto *target = chosen_endpoint(ctx, draft);
+    const auto adapter = target ? io::get_string(*target, "adapter") : std::string();
+    layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id, adapter] {
       if (!state.project() || state.project()->handle != handle || active_draft_ != key || picker_.active()) { return; }
       const auto &current = drafts_.at(key);
       if (discussion.prepare_question(context_id, current.text, current.model,
-          current.intent == 1 ? "stk.parameter-edits/1" : current.intent == 2 ? "stk.parameter-sweep/1" : "stk.text/1")) {
+          current.intent == 1 ? "stk.parameter-edits/1" : current.intent == 2 ? "stk.parameter-sweep/1" : "stk.text/1", adapter)) {
         opened_history_ = true;
         proposal_navigation_error_.clear();
       }
@@ -624,6 +766,7 @@ class AIEditor final : public Editor {
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
   bool model_has_text_ = false;
+  struct NewEndpoint { std::string id, name, base_url, models; bool internal = false; } new_endpoint_;
   std::string key_text_;
   bool key_remember_ = false;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);

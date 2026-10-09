@@ -126,9 +126,12 @@ class RequestExecutor:
     for a stuck adapter or releases its execution lock early.
     """
 
-    def __init__(self, adapters=None):
+    def __init__(self, adapters=None, gate=None):
+        """``adapters`` maps adapter identities to adapters (or is any object with ``get``, such as the
+        model gateway); ``gate(store, record, frozen_input)`` may refuse a request before it is claimed."""
         self.executor_id = str(uuid4())
-        self._adapters = dict(adapters or {})
+        self._adapters = adapters if adapters is not None and not isinstance(adapters, dict) else dict(adapters or {})
+        self._gate = gate
         self._lock = threading.RLock()
         self._active = {}
         self._closed = False
@@ -168,6 +171,8 @@ class RequestExecutor:
                 raise
             try:
                 frozen_input = deepcopy(store.requests.input(request_id))
+                if self._gate is not None:
+                    self._gate(store, record, deepcopy(frozen_input))  # refused requests stay pending
                 prepare = getattr(adapter, "prepare", None)
                 if callable(prepare):
                     adapter = prepare(deepcopy(frozen_input))

@@ -297,6 +297,11 @@ int main(int argc, char **argv)
         if (ai_stream) {
           // Use the registered executor and progress API. Leave the adapter at its
           // first marker so the capture shows unsaved text, never a fabricated completion.
+          // The Token Plan endpoint is external: only data labelled public may be sent to it.
+          std::optional<bridge::Result<io::Json>> labelled;
+          client->call("project.labels.set", {{"handle", state.project()->handle}, {"label", "public"},
+              {"items", io::Json::array({{{"kind", "table"}, {"id", table}}})}}).then([&](auto value) { labelled = value; });
+          ok = ok && loop.pump_until([&] { return labelled.has_value(); }, 30) && labelled->ok();
           ok = ok && discussion.start_request(pending) && wait();
           ok = ok && loop.pump_until([&] {
             return std::filesystem::exists(core::path_from_utf8(dir.str() + "/first"));

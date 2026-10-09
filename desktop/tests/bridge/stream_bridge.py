@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 
 from suan.desktop_bridge import projects
+from suan.models import gateway
+from suan.project import aliyun
 from suan.desktop_bridge.__main__ import main
 from suan.project.request_executor import TextResponse
 
@@ -45,9 +47,10 @@ class ControlledAdapter:
         return TextResponse(prefix + "300 K。")
 
 
-projects.AliyunTokenPlanAdapter = ControlledAdapter
-original_provider = projects.provider_info
-projects.provider_info = lambda credentials=None: {**original_provider(credentials), "configured": True}
+# The model gateway builds the Token Plan adapter and reports its key; both are replaced here.
+gateway.AliyunTokenPlanAdapter = ControlledAdapter
+original_provider = aliyun.provider_info
+aliyun.provider_info = projects.provider_info = lambda credentials=None: {**original_provider(credentials), "configured": True}
 
 if legacy:
     from suan.desktop_bridge import server

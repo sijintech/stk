@@ -390,7 +390,8 @@ void ProjectDiscussion::exchange_failed(const std::string &error)
 }
 
 bool ProjectDiscussion::prepare_question(const std::string &context_id, const std::string &text,
-                                         const std::string &model, const std::string &prompt_version)
+                                         const std::string &model, const std::string &prompt_version,
+                                         const std::string &adapter)
 {
   if (prompt_version != "stk.text/1" &&
       (!structured_proposal(prompt_version) || !edit_proposals_supported())) { return false; }
@@ -400,7 +401,8 @@ bool ProjectDiscussion::prepare_question(const std::string &context_id, const st
   const auto message_params = request("exchange_message", {{"context_id", context_id}, {"text", text}, {"role", "user"}},
                                       "message_id");
   Json input = {{"message_id", message_params.at("message_id")},
-      {"configuration", {{"adapter", provider_.at("adapter")}, {"model", model}, {"max_output_tokens", 4096}}}};
+      {"configuration", {{"adapter", adapter.empty() ? provider_.at("adapter") : Json(adapter)}, {"model", model},
+                         {"max_output_tokens", 4096}}}};
   if (prompt_version != "stk.text/1") { input["prompt_version"] = prompt_version; }
   const auto request_params = request("exchange_generation", std::move(input), "request_id");
   const auto id = request_params.at("request_id").get<std::string>();

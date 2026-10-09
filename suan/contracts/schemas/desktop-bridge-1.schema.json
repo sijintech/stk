@@ -2715,7 +2715,8 @@
                                 7,
                                 8,
                                 9,
-                                10
+                                10,
+                                11
                               ]
                             },
                             "to_version": {
@@ -2729,7 +2730,8 @@
                                 8,
                                 9,
                                 10,
-                                11
+                                11,
+                                12
                               ]
                             }
                           },
@@ -6383,7 +6385,7 @@
         }
       },
       "project.archive.set": {
-        "description": "Archive (or restore) 1-100 objects (project format 11): hidden from default lists and read-only until restored; nothing is deleted and the editable revision does not change. Objects in progress are refused; include_runs also covers a workflow's runs that are not running.",
+        "description": "Archive (or restore) 1-100 objects (project format 11): hidden from default lists and frozen (cannot be changed, can still be used as it is); nothing is deleted and the editable revision does not change. Objects in progress are refused; include_runs also covers a workflow's runs that are not running.",
         "params": {
           "type": "object",
           "properties": {
@@ -7135,6 +7137,387 @@
             "run_status"
           ]
         }
+      },
+      "project.labels.set": {
+        "description": "Label 1-100 parameter tables or file records public or private (project format 12). Data is private unless labelled public, and only public data may be sent to external model endpoints. Labelling is recorded with its time and note but is not a project edit: the editable revision does not change.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/projectLabelKind"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "label": {
+              "enum": [
+                "public",
+                "private"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "handle",
+            "items",
+            "label"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "changed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/projectLabelKind"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "changed",
+            "items"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.labels.list": {
+        "description": "Data currently labelled public (optionally one kind) with when and why; everything else is private. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "kind": {
+              "$ref": "#/$defs/projectLabelKind"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/projectLabelKind"
+                  },
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "labelled_at": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id",
+                  "labelled_at",
+                  "note"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "items"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "models.list": {
+        "description": "Model endpoints of this computer (the built-in Alibaba Token Plan and added OpenAI-compatible endpoints) with their location, key presence (never the key) and whether the network setting allows them, and the network setting. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "endpoints": {
+              "type": "array",
+              "maxItems": 33,
+              "items": {
+                "$ref": "#/$defs/modelEndpoint"
+              }
+            },
+            "policy": {
+              "type": "object",
+              "properties": {
+                "network": {
+                  "enum": [
+                    "offline",
+                    "organization",
+                    "internet"
+                  ]
+                }
+              },
+              "required": [
+                "network"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "endpoints",
+            "policy"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "models.endpoints.add": {
+        "description": "Add or replace an OpenAI-compatible endpoint. A loopback host is local; another host is external unless declared internal (inside the organization). External endpoints need HTTPS.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/modelEndpointId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "base_url": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "models": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "location": {
+              "enum": [
+                "local",
+                "internal",
+                "external"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "base_url",
+            "models"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "$ref": "#/$defs/modelEndpoint"
+            }
+          },
+          "required": [
+            "endpoint"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "models.endpoints.remove": {
+        "description": "Remove an added endpoint and forget its key.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/modelEndpointId"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "removed": {
+              "$ref": "#/$defs/modelEndpointId"
+            }
+          },
+          "required": [
+            "removed"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "models.keys.set": {
+        "description": "Set an added endpoint's key for this service session, or remember it on this computer (mode 0600 in the service's state folder). The key is never returned, logged or stored in a project.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/modelEndpointId"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "remember": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "key"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/modelKeyInfo"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "models.keys.clear": {
+        "description": "Forget an added endpoint's session and remembered key; an environment key is unaffected.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/modelEndpointId"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/modelKeyInfo"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "models.policy.set": {
+        "description": "Set which endpoint locations model requests may use: offline (this computer), organization (this computer and the organization's network) or internet (all). Private data never goes to external endpoints regardless.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "network": {
+              "enum": [
+                "offline",
+                "organization",
+                "internet"
+              ]
+            }
+          },
+          "required": [
+            "network"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "endpoints": {
+              "type": "array",
+              "maxItems": 33,
+              "items": {
+                "$ref": "#/$defs/modelEndpoint"
+              }
+            },
+            "policy": {
+              "type": "object",
+              "properties": {
+                "network": {
+                  "enum": [
+                    "offline",
+                    "organization",
+                    "internet"
+                  ]
+                }
+              },
+              "required": [
+                "network"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "endpoints",
+            "policy"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -7456,6 +7839,32 @@
           "handle",
           "kinds"
         ],
+        "additionalProperties": false
+      },
+      "project.labels.changed": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "$ref": "#/$defs/hex32"
+          },
+          "kinds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/$defs/projectLabelKind"
+            }
+          }
+        },
+        "required": [
+          "handle",
+          "kinds"
+        ],
+        "additionalProperties": false
+      },
+      "models.changed": {
+        "type": "object",
+        "properties": {},
         "additionalProperties": false
       }
     },
@@ -12728,6 +13137,107 @@
         "draft",
         "context"
       ]
+    },
+    "projectLabelKind": {
+      "enum": [
+        "table",
+        "file"
+      ]
+    },
+    "modelEndpointId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+    },
+    "modelLocation": {
+      "enum": [
+        "local",
+        "internal",
+        "external"
+      ]
+    },
+    "modelKeyInfo": {
+      "type": "object",
+      "properties": {
+        "configured": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "",
+            "environment",
+            "session",
+            "saved"
+          ]
+        },
+        "can_remember": {
+          "type": "boolean"
+        },
+        "key_env": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "configured",
+        "source",
+        "can_remember",
+        "key_env"
+      ],
+      "additionalProperties": false
+    },
+    "modelEndpoint": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/modelEndpointId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "base_url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "location": {
+          "$ref": "#/$defs/modelLocation"
+        },
+        "models": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "builtin": {
+          "type": "boolean"
+        },
+        "key": {
+          "$ref": "#/$defs/modelKeyInfo"
+        },
+        "allowed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "adapter",
+        "base_url",
+        "location",
+        "models",
+        "builtin"
+      ],
+      "additionalProperties": false
     }
   }
 }
