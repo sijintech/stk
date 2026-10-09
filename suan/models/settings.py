@@ -21,6 +21,7 @@ from suan.project.store import ProjectError
 BUILTIN_ID = "aliyun-token-plan"
 ADAPTER_PREFIX = "openai-compatible/1:"
 LOCATIONS = ("local", "internal", "external")
+TIERS = ("tiny", "small", "medium", "large")  # how capable an endpoint's models are (automatic model choice)
 NETWORK_MODES = ("offline", "organization", "internet")
 MAX_ENDPOINTS = 32
 MAX_MODELS = 32
@@ -117,9 +118,10 @@ class Endpoints:
     def by_adapter(self, adapter):
         return next((item for item in self.list() if item["adapter"] == adapter), None)
 
-    def add(self, endpoint_id, name, base_url, models, location=None):
+    def add(self, endpoint_id, name, base_url, models, location=None, tier=None):
         """Add (or replace) an endpoint. A loopback host is always ``local``; any other host is ``external``
-        unless declared ``internal`` (inside the organization's network). External endpoints need HTTPS."""
+        unless declared ``internal`` (inside the organization's network). External endpoints need HTTPS.
+        ``tier`` (tiny, small, medium, large) tells the automatic model choice how capable its models are."""
         if not isinstance(endpoint_id, str) or not _ID.fullmatch(endpoint_id) or endpoint_id == BUILTIN_ID:
             raise ProjectError("An endpoint ID is 1 to 32 lowercase letters, digits or hyphens (not the built-in one)")
         if not isinstance(name, str) or not name.strip() or len(name) > 64 or "\0" in name:
@@ -138,7 +140,11 @@ class Endpoints:
         if not isinstance(models, list) or not 1 <= len(models) <= MAX_MODELS:
             raise ProjectError(f"List 1 to {MAX_MODELS} model names")
         models = list(dict.fromkeys(_identifier(model, "model") for model in models))
+        if tier not in (None, *TIERS):
+            raise ProjectError("An endpoint's tier is tiny, small, medium or large")
         item = {"id": endpoint_id, "name": name.strip(), "base_url": base_url.rstrip("/"), "location": location, "models": models}
+        if tier:
+            item["tier"] = tier
         with self._lock:
             items = [existing for existing in self._custom() if existing.get("id") != endpoint_id]
             if len(items) >= MAX_ENDPOINTS:

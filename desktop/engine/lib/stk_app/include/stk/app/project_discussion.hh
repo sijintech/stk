@@ -88,6 +88,8 @@ class ProjectDiscussion {
   /** Main-thread, local-only follow-up reads; caller schedules a redraw at the returned time. */
   double pump(double now_seconds);
   const io::Json &exchange_request() const { return exchange_request_; }
+  /** The request the exchange shows or is preparing (known as soon as Prepare is accepted). */
+  const std::string &exchange_id() const { return exchange_id_; }
   const io::Json &exchange_context() const { return exchange_context_; }
   const io::Json &exchange_question() const { return exchange_question_; }
   const io::Json &exchange_reply() const { return exchange_reply_; }

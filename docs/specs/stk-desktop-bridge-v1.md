@@ -507,11 +507,17 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `ai.credentials.set` | `{key, remember?}` | `{provider}` (presence and `key_source` only, never the key) |
 | `ai.credentials.clear` | `{}` | `{provider}` |
 | `models.list` | `{}` | `{endpoints: [modelEndpoint], policy: {network}}` |
-| `models.endpoints.add` | `{id, name, base_url, models, location?}` | `{endpoint: modelEndpoint}` |
+| `models.endpoints.add` | `{id, name, base_url, models, location?, tier?}` | `{endpoint: modelEndpoint}` |
 | `models.endpoints.remove` | `{id}` | `{removed}` |
 | `models.keys.set` | `{id, key, remember?}` | `{key: modelKeyInfo}` (presence only, never the key) |
 | `models.keys.clear` | `{id}` | `{key: modelKeyInfo}` |
 | `models.policy.set` | `{network}` | `{endpoints, policy}` |
+| `models.local.list` | `{}` | `localModels` (`{installed, jobs, runtimes}`) |
+| `models.local.recommendations` | `{}` | `{hardware, entries}` (each catalog entry with `fits`, `device`, `reason`, `recommended`) |
+| `models.local.install` | `{id}` | `{job}` |
+| `models.local.import` | `{id, path}` | `localModels` |
+| `models.local.cancel` / `start` / `stop` / `remove` | `{id}` | `localModels` |
+| `models.route` | `{handle, context_id, prompt_version?}` | `{task, public, candidates, excluded, choice}` (reads only; nothing is started or sent) |
 | `project.sweep.plan` | `{handle, table_id, axes, base_record_id?, mode?}` | `{plan: {table_id, rows, record_ids, commands}, revision}` |
 | `project.snapshot` | `{handle}` | `{snapshot}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
@@ -1110,7 +1116,9 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   HTTP body to 1 MiB and the saved text to 64 KiB, and uses a 60-second socket timeout with elapsed
   deadline checks between operations. It follows no redirects, uses no proxy and makes no retry.
   This adapter requires temperature below 2, within the generic configuration range above. Known
-  rejection responses are failed; transport errors, ambiguous statuses and timeouts remain uncertain.
+  rejection responses, and failures before the connection is established (refused, unreachable, DNS, TLS
+  handshake or connect timeout: nothing of the request was sent), are failed (`adapter_failed`); transport errors
+  after connecting, ambiguous statuses and timeouts remain uncertain.
   No remote cancellation/query, token counting or tool execution is implemented. See
   [request guide](../project-requests.md) for configuration, exact transport scope, lock guarantees
   and save-failure limits.
@@ -1168,8 +1176,22 @@ each with `location` (`local` for a loopback host; otherwise `external` unless d
 `key` presence and `allowed` (whether the network setting permits it). External endpoints must use HTTPS. Keys of
 added endpoints follow the Token Plan rules: `STK_MODEL_KEY_<ID>` wins, then a session key, then
 `<state_dir>/models/keys/<id>.json` (0600). `models.policy.set` chooses `offline` (local endpoints only),
-`organization` (local and internal) or `internet` (all, the default). Changes emit `models.changed`. Only
-`models.list` is in the script catalog: scripts cannot add endpoints, set keys or widen the network setting.
+`organization` (local and internal) or `internet` (all, the default). Changes emit `models.changed`. Of these
+methods only `models.list`, `models.local.list` and `models.route` are in the script catalog: scripts cannot add
+endpoints, set keys, widen the network setting, or install, start or stop local models. An added endpoint may declare
+`tier` (`tiny`, `small`, `medium`, `large`), which the automatic model choice uses.
+
+`models.local.*` install, serve and remove models on this computer (S1c): a catalog shipped with STK
+(`suan/models/catalog.json`), resumable downloads checked by size and SHA-256, and `llama-server` on a loopback port
+registered as the managed endpoint `local-<entry>` (its key is set by STK at each start and never reported; the
+endpoint is marked `managed` and removed with its model). Progress is reported by `models.local.progress`
+(`{id, stage, state, done_bytes?, total_bytes?, error?}`); a start that cannot begin is reported as a `failed` stage too.
+`models.route` (S1d) ranks the endpoints and models for a question on a saved context: simple questions
+(`stk.text/1`) prefer the nearest, ready and smallest model, parameter proposals the strongest; external endpoints are
+excluded for private data (`private_data`), as are endpoints the network setting does not allow (`network`), external
+endpoints without a key (`no_key`) and endpoints without a model (`no_model`). A local model that is installed but not
+running is a candidate with `start: true`. The desktop prepares the question with `choice` and, when a request fails
+with `adapter_failed`, may ask the next candidate on another endpoint as a new request.
 
 `project.labels.set` labels parameter tables (`table`) and file records (`file`) public or private (project
 format 12, append-only `project_labels`; not an edit: no revision, no undo; emits `project.labels.changed`).

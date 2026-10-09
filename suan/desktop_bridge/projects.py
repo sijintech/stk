@@ -266,7 +266,7 @@ class ProjectSessions:
                 raise ProjectError("Endpoint IDs starting with local- are kept for local models; choose another ID")
             if action == "add":
                 return {"endpoint": gateway.endpoints.add(params["id"], params["name"], params["base_url"], params["models"],
-                                                          params.get("location"))}
+                                                          params.get("location"), params.get("tier"))}
             if action in ("remove", "key.set", "key.clear") and self.local.manages(params["id"]):
                 raise ProjectError("This endpoint belongs to a local model: STK sets its key at each start, and it is removed "
                                    "with the model under Local models")
@@ -285,6 +285,23 @@ class ProjectSessions:
                 if params["network"] != "internet":
                     self.local.cancel_downloads()  # downloads need the internet setting
             return gateway.describe()
+
+    def model_route(self, params):
+        """The automatic model choice for a question on a saved context (S1d, docs/design/model-gateway.md): ranked
+        candidates, the endpoints ruled out and why. Reads only; a local model that must be started is marked ``start``."""
+        from suan.models.routing import candidates, task_kind
+        with self._operation():
+            store = self._get(params["handle"])
+            context = store.contexts.get(params["context_id"])
+            public = store.labels.is_public("table", context["selection"]["table_id"])
+            endpoints = self.models.describe()["endpoints"]
+        try:
+            local = self.local.routing_view()
+        except (ProjectError, OSError):
+            local = []  # an unreadable model catalog: no local candidates, the others still answer
+        result = candidates(endpoints, local, task=task_kind(params.get("prompt_version", "stk.text/1")), public=public)
+        result["choice"] = result["candidates"][0] if result["candidates"] else None
+        return result
 
     def local_models(self, action, params):
         """One-click local models (docs/design/model-gateway.md, S1c). Changes are for the person at this computer:

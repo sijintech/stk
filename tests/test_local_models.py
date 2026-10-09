@@ -491,6 +491,12 @@ def test_servers_stop_with_the_service_and_start_again_with_the_next(tmp_path, f
     leftover = second._servers.pop("tiny-q4")["process"]
     third = make(state, managers)
     assert leftover.wait(10) is not None  # stopped by the new service
+    events = []
+    third.emit = lambda name, data: events.append((name, data))
+    with pytest.raises(ProjectError, match="No catalog entry"):
+        third.start("other")  # a start that cannot begin is reported to whoever waits for it, not only to the caller
+    assert ("models.local.progress", {"id": "other", "stage": "failed", "state": "failed"}) in [
+        (name, {key: value for key, value in data.items() if key != "error"}) for name, data in events]
     third.autostart()
     eventually(lambda: third.list()["installed"][0]["server"]["state"] == "running", timeout=30)
     third.shutdown()

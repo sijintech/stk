@@ -21,6 +21,8 @@
 #include <cstdio>
 #include <limits>
 #include <map>
+#include <optional>
+#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -218,8 +220,50 @@ class AIEditor final : public Editor {
   }
 
  private:
-  /** ``endpoint`` is a model endpoint ID (empty: the built-in Token Plan). */
-  struct Draft { std::string text, model, endpoint; bool model_initialized = false; int intent = 0; };
+  /** ``endpoint`` is a model endpoint ID (empty: the built-in Token Plan). ``automatic``: the service chooses the
+   * endpoint and model for each question (models.route, S1d); the default where the service offers it. */
+  struct Draft { std::string text, model, endpoint; bool model_initialized = false, automatic = true; int intent = 0; };
+
+  /** An automatically routed question in flight (S1d): its ranked candidates, those tried, and what it waits for.
+   * Fallback to the next candidate happens only when a request definitely was not sent (``adapter_failed``) or a
+   * local model could not be started; an uncertain outcome is left to the person. */
+  struct AutoAsk {
+    std::string key, context_id, text, prompt_version;
+    Json candidates = Json::array(), current = Json::object();
+    std::set<std::string> tried;  // endpoint IDs
+    std::string request_id, previous_id;
+    std::string starting;          // the local model (catalog entry) being started for the current attempt
+    bool send = false, sent = false, prepare = false;
+    std::string notice;            // shown with the question: why another model answers, or that none is left
+    std::string starting_notice;   // shown while a local model starts
+  };
+  std::optional<AutoAsk> auto_;
+
+  static std::string prompt_version(const int intent)
+  {
+    return intent == 1 ? "stk.parameter-edits/1" : intent == 2 ? "stk.parameter-sweep/1" : "stk.text/1";
+  }
+
+  static bool automatic(EditorContext &ctx, const Draft &draft)
+  {
+    auto &models = ctx.store.models();
+    return draft.automatic && models.supported() && models.loaded() && models.route_supported();
+  }
+
+  /** The service's ranking for the next question (null while it is read). Read again when the question's context or task,
+   * the endpoints, local models or data labels change. */
+  static const Json &route(EditorContext &ctx, ProjectState &state, const Draft &draft)
+  {
+    auto &models = ctx.store.models();
+    auto &labels = ctx.store.data_labels();
+    labels.sync();
+    const auto context_id = io::get_string(state.discussion().context(), "id");
+    const auto prompt = prompt_version(draft.intent);
+    const bool token_plan_key = state.discussion().provider().value("configured", false);  // ai.credentials.* is not models.*
+    const auto key = state.project()->handle + "|" + context_id + "|" + prompt + "|" + std::to_string(models.version()) +
+                     "|" + std::to_string(labels.version()) + "|" + (token_plan_key ? "key" : "nokey");
+    return models.route(key, state.project()->handle, context_id, prompt);
+  }
 
   /** The endpoint the next question goes to, or nullptr before model settings are read (older services). */
   static const Json *chosen_endpoint(EditorContext &ctx, const Draft &draft)
@@ -334,21 +378,30 @@ class AIEditor final : public Editor {
     auto &models = ctx.store.models();
     auto &box = layout.box();
     const auto *endpoint = chosen_endpoint(ctx, draft);
+    const bool choose_automatically = automatic(ctx, draft);
     if (models.supported() && models.loaded()) {
-      // The built-in Token Plan or an endpoint added on this computer (docs/design/model-gateway.md).
+      // Automatic, the built-in Token Plan or an endpoint added on this computer (docs/design/model-gateway.md).
+      static const std::string kAutomatic = "\x01automatic";
       std::vector<std::string> ids, names;
+      if (models.route_supported()) {
+        ids.push_back(kAutomatic);
+        names.push_back(std::string(ctx.tr("models.auto.option")));
+      }
       for (const auto &item : models.endpoints()) {
         ids.push_back(io::get_string(item, "id"));
         names.push_back(io::get_string(item, "name") + " · " + std::string(ctx.tr("models.location." + io::get_string(item, "location"))));
       }
       auto *settings = &models;
       box.prop(ctx.tr("models.endpoint")).dropdown("ai_endpoint", std::move(names), {
-        [&draft, ids] {
-          const auto it = std::find(ids.begin(), ids.end(), draft.endpoint.empty() ? std::string("aliyun-token-plan") : draft.endpoint);
+        [&draft, ids, choose_automatically] {
+          const auto it = std::find(ids.begin(), ids.end(), choose_automatically ? kAutomatic :
+              draft.endpoint.empty() ? std::string("aliyun-token-plan") : draft.endpoint);
           return it == ids.end() ? -1 : int(it - ids.begin());
         },
         [&draft, ids, settings](const int index) {
           if (index < 0 || size_t(index) >= ids.size()) { return; }
+          draft.automatic = ids[size_t(index)] == kAutomatic;
+          if (draft.automatic) { return; }
           draft.endpoint = ids[size_t(index)] == "aliyun-token-plan" ? std::string() : ids[size_t(index)];
           if (const auto *chosen = settings->endpoint(ids[size_t(index)]); chosen && !io::get_bool(*chosen, "builtin", false)) {
             const auto offered = chosen->value("models", Json::array());
@@ -358,8 +411,13 @@ class AIEditor final : public Editor {
         }});
     }
     else { box.label("Alibaba Token Plan"); }
-    const bool builtin = !endpoint || io::get_bool(*endpoint, "builtin", false);
-    if (builtin) {
+    // Automatic: what it will use and why; the Token Plan's key and this project's usage stay below, as for the Token Plan.
+    if (choose_automatically) { automatic_choice(box, ctx, state, draft); }
+    const bool builtin = choose_automatically || !endpoint || io::get_bool(*endpoint, "builtin", false);
+    if (choose_automatically) {
+      // No model field: the choice above names it.
+    }
+    else if (builtin) {
       auto &model = box.prop(ctx.tr("discussion.requests.model")).text_field("ai_model/" + state.project()->handle, {
         [&draft] { return draft.model; }, [&draft](const std::string &value) { draft.model = value; draft.model_initialized = true; }
       }, {.max_length = 128});
@@ -374,7 +432,7 @@ class AIEditor final : public Editor {
         [&draft, offered](const int index) { if (index >= 0 && size_t(index) < offered.size()) { draft.model = offered[size_t(index)]; } }});
       model_has_text_ = std::find(offered.begin(), offered.end(), draft.model) != offered.end();
     }
-    if (endpoint && !io::get_bool(*endpoint, "allowed", true)) { box.paragraph(ctx.tr("models.blocked")); }
+    if (!choose_automatically && endpoint && !io::get_bool(*endpoint, "allowed", true)) { box.paragraph(ctx.tr("models.blocked")); }
     if (endpoint && !builtin) {
       endpoint_key(box, ctx, *endpoint);
       model_settings(box, ctx);
@@ -410,6 +468,127 @@ class AIEditor final : public Editor {
       hint(*keys, ctx, "ai.key.hint");
     }
     model_settings(box, ctx);
+  }
+
+  /** What "Automatic" will use for the next question and why, or why no model can answer it. */
+  void automatic_choice(ui::Layout &box, EditorContext &ctx, ProjectState &state, const Draft &draft)
+  {
+    const auto &ranked = route(ctx, state, draft);
+    model_has_text_ = false;
+    if (state.discussion().context().empty()) { box.paragraph(ctx.tr("models.auto.no_context")); return; }
+    if (ranked.is_null()) { box.paragraph(ctx.tr("models.auto.reading")); return; }
+    if (ranked.contains("error")) { box.paragraph(io::get_string(ranked, "error")); return; }
+    const auto choice = ranked.value("choice", Json());
+    if (choice.is_null()) {
+      box.paragraph(ctx.tr("models.auto.none"));
+      std::set<std::string> reasons;
+      for (const auto &item : ranked.value("excluded", Json::array())) { reasons.insert(io::get_string(item, "reason")); }
+      for (const auto &reason : reasons) { box.paragraph(ctx.tr("models.auto.excluded." + reason)); }
+      return;
+    }
+    model_has_text_ = true;
+    box.paragraph(ctx.store.catalog().format("models.auto.choice", {{"name", io::get_string(choice, "name")},
+        {"model", io::get_string(choice, "model")}}));
+    box.paragraph(ctx.tr(io::get_string(ranked, "task") == "simple" ? "models.auto.simple" : "models.auto.complex"));
+    if (!io::get_bool(ranked, "public", false)) { box.paragraph(ctx.tr("models.auto.private")); }
+    if (io::get_bool(choice, "start", false)) { box.paragraph(ctx.tr("models.auto.will_start")); }
+  }
+
+  /** Local model state by catalog entry (``stopped`` when not listed). */
+  static std::string local_state(ModelSettings &models, const std::string &entry)
+  {
+    const auto &local = models.local();
+    if (!local.is_object()) { return {}; }  // not read yet (or the read failed): neither running nor failed
+    for (const auto &item : local.value("installed", Json::array())) {
+      if (io::get_string(item, "id") == entry) { return io::get_string(item.value("server", Json::object()), "state"); }
+    }
+    return "stopped";
+  }
+
+  /** Move an automatically routed question along: attach its prepared request, start a local model it needs, send it,
+   * and fall back to the next candidate when it definitely was not sent. Runs every frame; does nothing otherwise. */
+  void advance_auto(EditorContext &ctx, ProjectState &state)
+  {
+    if (!auto_ || auto_->key != active_draft_) { return; }
+    auto &discussion = state.discussion();
+    auto &models = ctx.store.models();
+    if (auto_->prepare) {  // the next candidate's question, once the previous exchange read has finished
+      if (discussion.exchange_busy() || discussion.busy() || state.busy()) { return; }
+      auto_->prepare = false;
+      if (!discussion.prepare_question(auto_->context_id, auto_->text, io::get_string(auto_->current, "model"),
+                                       auto_->prompt_version, io::get_string(auto_->current, "adapter"))) {
+        auto_->notice = std::string(ctx.tr("models.auto.exhausted"));
+        auto_->send = false;
+        return;
+      }
+      auto_->request_id = discussion.exchange_id();
+      return;
+    }
+    const auto &request = discussion.exchange_request();
+    const auto id = io::get_string(request, "id");
+    if (auto_->request_id.empty() || id != auto_->request_id || !auto_->send) { return; }
+    const auto status = io::get_string(request, "status");
+    if (!auto_->sent && status != "pending") {  // cancelled (or ended) before STK sent it: nothing more happens
+      auto_->send = false;
+      auto_->starting.clear();
+      auto_->starting_notice.clear();
+      return;
+    }
+    const auto adapter = io::get_string(auto_->current, "adapter");
+    if (!auto_->starting.empty()) {
+      // Only this start's events count (local_action dropped earlier ones); the list may still show an old failure.
+      const auto *progress = models.progress(auto_->starting);
+      const auto stage = progress ? io::get_string(*progress, "stage") : std::string();
+      if (stage == "failed") { fall_back(ctx, true); return; }
+      if ((stage == "running" || local_state(models, auto_->starting) == "running") && models.by_adapter(adapter)) {
+        auto_->starting.clear();
+        auto_->starting_notice.clear();
+        auto_->sent = discussion.start_request(id);
+      }
+      return;
+    }
+    if (!auto_->sent) {
+      const auto entry = io::get_string(auto_->current, "model");
+      if (io::get_bool(auto_->current, "start", false) && local_state(models, entry) != "running") {
+        if (!models.local_action("start", entry)) {
+          if (!models.local_supported() || !models.editable()) { fall_back(ctx, true); }  // cannot be started from here
+          return;  // another settings change is in flight: again next frame
+        }
+        auto_->starting = entry;
+        auto_->starting_notice = ctx.store.catalog().format("models.auto.starting", {{"name", io::get_string(auto_->current, "name")}});
+        return;
+      }
+      auto_->sent = discussion.start_request(id);
+      return;
+    }
+    if (status == "failed" && io::get_string(request, "error_code") == "adapter_failed") { fall_back(ctx, false); }
+  }
+
+  /** The current candidate definitely did not receive the question (``not_started``: its local model could not be
+   * started): ask the next candidate on another endpoint, as a new request. */
+  void fall_back(EditorContext &ctx, const bool not_started)
+  {
+    const auto failed = io::get_string(auto_->current, "name");
+    const Json *next = nullptr;
+    for (const auto &item : auto_->candidates) {
+      if (!auto_->tried.count(io::get_string(item, "endpoint"))) { next = &item; break; }
+    }
+    auto_->starting.clear();
+    auto_->starting_notice.clear();
+    if (!next) {
+      auto_->notice = ctx.store.catalog().format(not_started ? "models.auto.start_exhausted" : "models.auto.exhausted_after",
+                                                 {{"name", failed}});
+      auto_->send = false;
+      return;
+    }
+    auto_->tried.insert(io::get_string(*next, "endpoint"));
+    auto_->current = *next;
+    auto_->previous_id = auto_->request_id;
+    auto_->request_id.clear();
+    auto_->sent = false;
+    auto_->prepare = true;
+    auto_->notice = ctx.store.catalog().format(not_started ? "models.auto.start_fallback" : "models.auto.fallback",
+                                               {{"name", failed}, {"next", io::get_string(*next, "name")}});
   }
 
   /** The key of an added endpoint (optional: local endpoints usually need none). Never shown or kept here. */
@@ -479,6 +658,10 @@ class AIEditor final : public Editor {
           {.placeholder = "http://127.0.0.1:8080/v1", .max_length = 2048});
       add->prop(ctx.tr("models.add.models")).text_field("ai_endpoint_add_models", ui::bind(new_endpoint_.models), {.max_length = 2048});
       add->checkbox("ai_endpoint_add_internal", ctx.tr("models.add.internal"), ui::bind(new_endpoint_.internal));
+      // How capable its models are, for the automatic choice (index 0: judged by where the endpoint is).
+      add->prop(ctx.tr("models.add.tier")).dropdown("ai_endpoint_add_tier", {
+          std::string(ctx.tr("models.tier.default")), std::string(ctx.tr("models.tier.tiny")), std::string(ctx.tr("models.tier.small")),
+          std::string(ctx.tr("models.tier.medium")), std::string(ctx.tr("models.tier.large"))}, ui::bind(new_endpoint_.tier));
       add->button("ai_endpoint_add_button", ctx.tr("models.add.button"), [this, settings] {
         std::vector<std::string> names;
         std::string current;
@@ -490,8 +673,10 @@ class AIEditor final : public Editor {
           }
           else { current.push_back(c); }
         }
+        static const char *const kTiers[] = {"", "tiny", "small", "medium", "large"};
+        const auto tier = new_endpoint_.tier >= 0 && new_endpoint_.tier < 5 ? kTiers[new_endpoint_.tier] : "";
         if (settings->add_endpoint(new_endpoint_.id, new_endpoint_.name, new_endpoint_.base_url, names,
-                                   new_endpoint_.internal ? "internal" : "")) { new_endpoint_ = {}; }
+                                   new_endpoint_.internal ? "internal" : "", tier)) { new_endpoint_ = {}; }
       }).disable(models.busy() || new_endpoint_.id.empty() || new_endpoint_.name.empty() || new_endpoint_.base_url.empty() ||
                  new_endpoint_.models.empty());
     }
@@ -660,6 +845,7 @@ class AIEditor final : public Editor {
     auto &discussion = state.discussion();
     const bool enabled = !state.busy() && !discussion.busy();
     const std::string handle = state.project()->handle;
+    advance_auto(ctx, state);
     discussion.sync_archive();  // archived questions leave the history unless switched to them
     const auto &page = discussion.page("requests");
     if (!page.loaded && enabled) { discussion.load_page("requests", page.offset, true); }
@@ -742,6 +928,10 @@ class AIEditor final : public Editor {
       if (discussion.following()) { layout.label(ctx.tr("ai.following")); }
       else if (status == "running" || status == "uncertain") { layout.paragraph(ctx.tr("ai.paused")); }
       if (request.contains("error_code") && request["error_code"].is_string()) { layout.paragraph(request["error_code"].get<std::string>()); }
+      if (auto_ && auto_->key == key && (auto_->request_id == id || auto_->previous_id == id)) {
+        if (!auto_->notice.empty()) { layout.paragraph(auto_->notice); }
+        if (!auto_->starting_notice.empty()) { layout.paragraph(auto_->starting_notice); }
+      }
       archived_notice(layout, ctx, "request", id);
     }
     else { layout.paragraph(ctx.tr(discussion.exchange_busy() ? "ai.loading" : "ai.empty")); }
@@ -751,7 +941,9 @@ class AIEditor final : public Editor {
         settings_open ? 6.0f : std::clamp(height / unit - 25.0f - candidate_space, 6.0f, 22.0f);
     layout.log_view("ai_transcript", transcript_, transcript_units);
     const bool archived = ctx.store.archive().archived("request", id);
-    const auto blocked = request.empty() ? std::string() :
+    // An automatic question whose local model is not running yet is sent once STK has started it.
+    const bool auto_request = auto_ && auto_->key == key && auto_->request_id == id && !id.empty();
+    const auto blocked = request.empty() || (auto_request && io::get_bool(auto_->current, "start", false)) ? std::string() :
         send_blocked(ctx, discussion, io::get_string(request.value("configuration", Json::object()), "adapter"), &context);
     if (status == "pending" && !blocked.empty() && blocked != "ai.missing_key") { layout.paragraph(ctx.tr(blocked)); }
     auto &actions = layout.row();
@@ -759,11 +951,16 @@ class AIEditor final : public Editor {
     const auto send_model = io::get_string(request.value("configuration", Json::object()), "model");
     const auto send_text = send_model.empty() ? std::string(ctx.tr("ai.send_saved")) :
         ctx.store.catalog().format("ai.send_saved_model", {{"model", send_model}});
-    actions.button("ai_send_saved", send_text, [&discussion, &state, handle, id] {
-      if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
-        discussion.start_request(id);
+    actions.button("ai_send_saved", send_text, [this, &discussion, &state, handle, id, auto_request] {
+      if (!state.project() || state.project()->handle != handle || io::get_string(discussion.exchange_request(), "id") != id) { return; }
+      if (auto_request && auto_ && auto_->request_id == id) {  // started (and sent) next frame; again after a refusal
+        auto_->send = true;
+        auto_->sent = false;
+        return;
       }
-    }).disable(!enabled || status != "pending" || archived || !blocked.empty());
+      discussion.start_request(id);
+    }).disable(!enabled || status != "pending" || archived || !blocked.empty() ||
+               (auto_request && auto_ && auto_->send && !auto_->sent));
     actions.button("ai_refresh_reply", ctx.tr("ai.refresh"), [&discussion, &state, handle, id] {
       if (state.project() && state.project()->handle == handle && io::get_string(discussion.exchange_request(), "id") == id) {
         discussion.refresh_exchange();
@@ -800,16 +997,37 @@ class AIEditor final : public Editor {
     const auto context_id = io::get_string(discussion.context(), "id");
     const auto *target = chosen_endpoint(ctx, draft);
     const auto adapter = target ? io::get_string(*target, "adapter") : std::string();
-    layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id, adapter] {
+    const bool choose_automatically = automatic(ctx, draft);
+    const auto ranked = choose_automatically ? route(ctx, state, draft) : Json();
+    layout.button("ai_prepare", ctx.tr("ai.prepare"), [this, &discussion, &state, handle, key, context_id, adapter, choose_automatically, ranked] {
       if (!state.project() || state.project()->handle != handle || active_draft_ != key || picker_.active()) { return; }
       const auto &current = drafts_.at(key);
-      if (discussion.prepare_question(context_id, current.text, current.model,
-          current.intent == 1 ? "stk.parameter-edits/1" : current.intent == 2 ? "stk.parameter-sweep/1" : "stk.text/1", adapter)) {
+      const auto prompt = prompt_version(current.intent);
+      if (choose_automatically) {
+        const auto choice = ranked.is_object() ? ranked.value("choice", Json()) : Json();
+        if (!choice.is_object()) { return; }
+        AutoAsk ask;
+        ask.key = key; ask.context_id = context_id; ask.text = current.text; ask.prompt_version = prompt;
+        ask.candidates = ranked.value("candidates", Json::array());
+        ask.current = choice;
+        ask.tried.insert(io::get_string(choice, "endpoint"));
+        if (discussion.prepare_question(context_id, current.text, io::get_string(choice, "model"), prompt,
+                                        io::get_string(choice, "adapter"))) {
+          ask.request_id = discussion.exchange_id();
+          auto_ = std::move(ask);
+          opened_history_ = true;
+          proposal_navigation_error_.clear();
+        }
+        return;
+      }
+      if (discussion.prepare_question(context_id, current.text, current.model, prompt, adapter)) {
+        auto_.reset();
         opened_history_ = true;
         proposal_navigation_error_.clear();
       }
     }).disable(!enabled || picker_.active() || discussion.exchange_busy() || context_id.empty() || !has_question ||
-               !model_has_text_ || discussion.provider().empty() ||
+               !(choose_automatically ? ranked.is_object() && ranked.value("choice", Json()).is_object() : model_has_text_) ||
+               discussion.provider().empty() ||
                (draft.intent >= 1 && !discussion.edit_proposals_supported()));
     if (auto *details = layout.panel("ai_scope_detail", ctx.tr("ai.scope_detail"), false)) {
       hint(*details, ctx, "ai.single_turn");
@@ -893,7 +1111,7 @@ class AIEditor final : public Editor {
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
   bool model_has_text_ = false;
-  struct NewEndpoint { std::string id, name, base_url, models; bool internal = false; } new_endpoint_;
+  struct NewEndpoint { std::string id, name, base_url, models; bool internal = false; int tier = 0; } new_endpoint_;
   int import_entry_ = -1;
   std::string import_path_;
   std::string key_text_;

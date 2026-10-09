@@ -15,6 +15,7 @@ ModelSettings::~ModelSettings()
   if (write_) { write_->cancel(); }
   if (local_read_) { local_read_->cancel(); }
   if (recommend_read_) { recommend_read_->cancel(); }
+  if (route_read_) { route_read_->cancel(); }
 }
 
 void ModelSettings::reset()
@@ -22,8 +23,9 @@ void ModelSettings::reset()
   ++epoch_; ++version_;
   endpoints_ = Json::array(); network_.clear(); error_.clear();
   local_ = recommendations_ = nullptr; progress_ = Json::object(); recommendations_failed_ = false;
+  routes_.clear(); route_reading_.clear();
   stale_ = local_stale_ = true; loaded_ = false;
-  for (auto *future : {&read_, &write_, &local_read_, &recommend_read_}) {
+  for (auto *future : {&read_, &write_, &local_read_, &recommend_read_, &route_read_}) {
     auto old = std::move(*future); future->reset();
     if (old) { old->cancel(); }
   }
@@ -149,6 +151,38 @@ bool ModelSettings::import_local(const std::string &entry, const std::string &pa
   return write("models.local.import", {{"id", entry}, {"path", path}});
 }
 
+bool ModelSettings::route_supported() const
+{
+  return supported() && client_->hello_info()->has_method("models.route");
+}
+
+const Json &ModelSettings::route(const std::string &key, const std::string &handle, const std::string &context_id,
+                                 const std::string &prompt_version)
+{
+  sync();
+  if (!route_supported() || context_id.empty()) { return null_; }
+  if (const auto found = routes_.find(key); found != routes_.end()) { return found->second; }
+  if (route_read_) { return null_; }  // one read at a time; this key is read next
+  const auto epoch = epoch_;
+  const std::weak_ptr<bool> weak = alive_;
+  route_reading_ = key;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  route_read_ = client_->call("models.route", {{"handle", handle}, {"context_id", context_id}, {"prompt_version", prompt_version}},
+                              options);
+  route_read_->then([this, weak, epoch, key](bridge::Result<Json> result) {
+    const auto alive = weak.lock();
+    if (!alive || !*alive || epoch != epoch_) { return; }
+    route_read_.reset();
+    route_reading_.clear();
+    if (routes_.size() >= 64) { routes_.clear(); }  // keys carry versions: old ones are not asked again
+    // An error is kept too, under its key: not asked again until something the route depends on changes.
+    routes_[key] = result ? result.value() : Json{{"error", result.error().message}};
+    store_.changed();  // not version_: callers key the route by it, and the route does not change the settings
+  });
+  return null_;
+}
+
 bool ModelSettings::read()
 {
   const auto epoch = epoch_;
@@ -208,10 +242,11 @@ const Json *ModelSettings::by_adapter(const std::string &adapter) const
 }
 
 bool ModelSettings::add_endpoint(const std::string &id, const std::string &name, const std::string &base_url,
-                                 const std::vector<std::string> &models, const std::string &location)
+                                 const std::vector<std::string> &models, const std::string &location, const std::string &tier)
 {
   Json params = {{"id", id}, {"name", name}, {"base_url", base_url}, {"models", models}};
   if (!location.empty()) { params["location"] = location; }
+  if (!tier.empty()) { params["tier"] = tier; }
   return write("models.endpoints.add", std::move(params));
 }
 

@@ -34,7 +34,7 @@ import zipfile
 
 from suan.project.store import ProjectError
 
-from .settings import EndpointKeys, _read, _write_private
+from .settings import TIERS, EndpointKeys, _read, _write_private
 
 CATALOG_ENV = "STK_MODEL_CATALOG"
 CATALOG_FORMAT = "stk.model-catalog/1"
@@ -77,6 +77,8 @@ def load_catalog(path=None):
             value = entry.get(key)
             if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0):
                 raise ProjectError(f"The catalog entry {entry['id']} has an invalid {key}")
+        if entry.get("tier") is not None and entry["tier"] not in TIERS:
+            raise ProjectError(f"The catalog entry {entry['id']} has an invalid tier")
         devices = entry.get("recommend_on", [])
         if not isinstance(devices, list) or not all(device in ("cpu", "gpu") for device in devices):
             raise ProjectError(f"The catalog entry {entry['id']} has an invalid recommend_on")
@@ -455,6 +457,19 @@ class LocalModels:
                       "server": servers.get(key, {"state": "stopped"})} for key, value in state["entries"].items()]
         return {"installed": installed, "jobs": jobs, "runtimes": state["runtimes"]}
 
+    def routing_view(self):
+        """Installed llama.cpp entries for the automatic model choice: ``{id, endpoint, name, tier, state}``; entries the
+        catalog of this STK no longer lists are left out (they cannot be started)."""
+        entries = {entry["id"]: entry for entry in self.catalog()["entries"]}
+        result = []
+        for item in self.list()["installed"]:
+            entry = entries.get(item["id"])
+            if entry is None or entry["runtime"] != "llama.cpp":
+                continue
+            result.append({"id": item["id"], "endpoint": item["endpoint"], "name": str(entry.get("model") or item["id"])[:64],
+                           "tier": entry.get("tier") or "small", "state": item["server"]["state"]})
+        return result
+
     def is_running(self, endpoint):
         with self._lock:
             return any(endpoint_id(key) == endpoint and value["state"] == "running" and value.get("process") is not None
@@ -697,7 +712,16 @@ class LocalModels:
         return [binary]
 
     def start(self, entry_id, *, wait=False):
-        """Start the entry's server on a free loopback port; it is registered as a local endpoint once healthy."""
+        """Start the entry's server on a free loopback port; it is registered as a local endpoint once healthy. A start
+        that cannot begin (not installed, no runtime, being installed ...) is also reported as a failed progress event,
+        for whoever waits for this model (the desktop's automatic model choice), not only to the caller."""
+        try:
+            return self._start(entry_id, wait=wait)
+        except Exception as exc:
+            self.emit("models.local.progress", {"id": entry_id, "stage": "failed", "state": "failed", "error": str(exc)[:2000]})
+            raise
+
+    def _start(self, entry_id, *, wait):
         entry = self._entry(entry_id)
         if entry["runtime"] != "llama.cpp":
             raise ProjectError("Starting vLLM from STK is not available yet; start it yourself and add it as an endpoint")
@@ -846,12 +870,11 @@ class LocalModels:
                 try:
                     self.start(key)
                 except Exception as exc:  # noqa: BLE001 - one entry must not stop the others
-                    with self._lock:
+                    with self._lock:  # start() has reported it (models.local.progress)
                         self._servers[key] = {"process": None, "state": "failed", "error": str(exc)[:2000]}
                         # Not again at the next start (as for a server that fails after starting).
                         self._change(lambda state, key=key: state["entries"][key].update(autostart=False)
                                      if key in state["entries"] else None)
-                    self.emit("models.local.progress", {"id": key, "stage": "failed", "state": "failed", "error": str(exc)[:2000]})
 
     def shutdown(self):
         """Stop every server this service started; they start again with the service (``autostart``)."""

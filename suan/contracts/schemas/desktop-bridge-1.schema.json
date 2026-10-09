@@ -7348,6 +7348,14 @@
                 "maxLength": 128
               }
             },
+            "tier": {
+              "enum": [
+                "tiny",
+                "small",
+                "medium",
+                "large"
+              ]
+            },
             "location": {
               "enum": [
                 "local",
@@ -7528,6 +7536,74 @@
         },
         "result": {
           "$ref": "#/$defs/localModels"
+        }
+      },
+      "models.route": {
+        "description": "The automatic model choice for a question on a saved context (S1d): candidates ranked by task (simple questions: nearest and smallest; parameter proposals: strongest), the endpoints ruled out by the data boundary, the network setting or a missing key, and the choice. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "context_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "prompt_version": {
+              "$ref": "#/$defs/projectRequestPromptVersion"
+            }
+          },
+          "required": [
+            "handle",
+            "context_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "enum": [
+                "simple",
+                "complex"
+              ]
+            },
+            "public": {
+              "type": "boolean"
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "$ref": "#/$defs/modelRouteCandidate"
+              }
+            },
+            "excluded": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "$ref": "#/$defs/modelRouteCandidate"
+              }
+            },
+            "choice": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/modelRouteCandidate"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "task",
+            "public",
+            "candidates",
+            "excluded",
+            "choice"
+          ],
+          "additionalProperties": false
         }
       },
       "models.local.recommendations": {
@@ -13442,6 +13518,15 @@
             "maxLength": 128
           }
         },
+        "tier": {
+          "enum": [
+            "tiny",
+            "small",
+            "medium",
+            "large"
+          ],
+          "description": "How capable the endpoint's models are, as declared when it was added (automatic model choice)"
+        },
         "managed": {
           "type": "boolean",
           "description": "Served by a local model STK installed (models.local.*): its key is set at each start and it is removed with the model"
@@ -13842,6 +13927,62 @@
         "installed",
         "jobs",
         "runtimes"
+      ],
+      "additionalProperties": false
+    },
+    "modelRouteCandidate": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "$ref": "#/$defs/modelEndpointId"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "location": {
+          "$ref": "#/$defs/modelLocation"
+        },
+        "tier": {
+          "enum": [
+            "",
+            "tiny",
+            "small",
+            "medium",
+            "large"
+          ]
+        },
+        "start": {
+          "type": "boolean",
+          "description": "A local model STK installed that is not running: it is started before the question is sent"
+        },
+        "reason": {
+          "enum": [
+            "network",
+            "private_data",
+            "no_key",
+            "no_model"
+          ],
+          "description": "Why an endpoint was ruled out (excluded only)"
+        }
+      },
+      "required": [
+        "endpoint",
+        "name",
+        "adapter",
+        "model",
+        "location",
+        "tier",
+        "start"
       ],
       "additionalProperties": false
     }

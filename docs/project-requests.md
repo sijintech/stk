@@ -178,7 +178,7 @@ print(p.requests.usage())
 临时快照包含执行器身份、序列号、累计文字和 UTF-8 字节数；取消、不确定、终态和执行器关闭时不返回片段。
 
 HTTP 明确拒绝保存为 `failed/adapter_failed`；非法完整响应为 `failed/response_invalid`。
-流式结束证据到齐前断流、连接中断、超时、重定向或不确定服务器状态保留 `uncertain/transport_uncertain`。
+建立连接之前就失败（拒绝连接、无法到达、DNS、TLS 握手或连接超时：请求一个字节都没有发出）记为 `failed/adapter_failed`；连接建立之后，流式结束证据到齐前断流、连接中断、超时、重定向或不确定服务器状态保留 `uncertain/transport_uncertain`。
 错误响应正文、异常原文、认证头和密钥不写入项目。`result` 仅含助手消息 ID、文字摘要及受限观察：
 模型、远端请求 ID、非负 64 位输入/输出 token 数。完整消息和完成标记原子保存，失败全部回滚。
 

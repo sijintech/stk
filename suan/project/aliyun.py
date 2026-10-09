@@ -533,7 +533,12 @@ class _Prepared:
         try:
             deadline = time.monotonic() + self.timeout
             connection = (self.connect or _connection)()
-            connection.connect()
+            try:
+                connection.connect()
+            except Exception:  # refused, unreachable, DNS or TLS handshake: nothing of the request was sent
+                if cancel_event.is_set():
+                    raise ConfirmedCancellation("Request was cancelled before submission") from None
+                raise DefinitiveFailure(f"{self.provider} could not be reached; nothing was sent") from None
             if cancel_event.is_set():
                 raise ConfirmedCancellation("Request was cancelled before submission")
             transport_socket = connection.sock
@@ -558,7 +563,7 @@ class _Prepared:
                 return _stream_response(transport_socket, response, deadline, on_text, self.reasoning)
             return _response(_read_response(transport_socket, response, deadline))
         except Exception as exc:
-            if self.cancel_closes and cancel_event.is_set() and not isinstance(exc, ConfirmedCancellation):
+            if self.cancel_closes and cancel_event.is_set() and not isinstance(exc, (ConfirmedCancellation, DefinitiveFailure)):
                 # The connection was closed for the cancellation, so the reply ended early, whatever the parser saw.
                 if self.cancel_closes == "this_computer":
                     raise ConfirmedCancellation(f"{self.provider} stopped the reply when it was cancelled") from None

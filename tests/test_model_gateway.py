@@ -297,3 +297,49 @@ def test_slow_nearby_models_have_time_and_a_cancellation_closes_the_connection(m
     external = OpenAICompatibleAdapter({**endpoint, "base_url": "https://api.example.com/v1", "location": "external"},
                                        EndpointKeys()).prepare(frozen)
     assert external.timeout == EXTERNAL_TIMEOUT_SECONDS and external.cancel_closes == ""
+
+
+def test_an_endpoint_that_cannot_be_reached_definitely_received_nothing(model):
+    """Refused or unreachable before anything was sent: a definite failure (safe to send elsewhere), not an uncertain one."""
+    import socket
+    from suan.models.gateway import OpenAICompatibleAdapter
+    from suan.project.request_executor import DefinitiveFailure
+    with socket.socket() as probe:  # a port nothing listens on
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    store, _ = model
+    context = capture(model)
+    message = store.discussion.add("Q?", message_id=str(uuid4()), context_id=context["id"])
+    adapter_id = "openai-compatible/1:gone"
+    saved = store.requests.create(message["id"], request_id=str(uuid4()), configuration={"adapter": adapter_id, "model": "m"})
+    endpoint = {"id": "gone", "name": "Gone", "base_url": f"http://127.0.0.1:{port}/v1", "location": "local", "models": ["m"],
+                "adapter": adapter_id}
+    frozen = store.requests.input(saved["id"])
+    with pytest.raises(DefinitiveFailure, match="nothing was sent"):
+        OpenAICompatibleAdapter(endpoint, EndpointKeys()).prepare(frozen).send(frozen, threading.Event())
+
+
+def test_a_connection_that_fails_while_cancelling_is_a_cancellation(model):
+    import dataclasses
+    from suan.models.gateway import OpenAICompatibleAdapter
+    from suan.project.request_executor import ConfirmedCancellation
+    store, _ = model
+    context = capture(model)
+    message = store.discussion.add("Q?", message_id=str(uuid4()), context_id=context["id"])
+    adapter_id = "openai-compatible/1:near"
+    saved = store.requests.create(message["id"], request_id=str(uuid4()), configuration={"adapter": adapter_id, "model": "m"})
+    endpoint = {"id": "near", "name": "Near", "base_url": "http://127.0.0.1:9/v1", "location": "internal", "models": ["m"],
+                "adapter": adapter_id}
+    frozen = store.requests.input(saved["id"])
+    cancel = threading.Event()
+
+    class Connection:
+        def connect(self):  # the person cancels while the connection is being set up, and it then fails
+            cancel.set()
+            raise OSError("refused")
+
+        def close(self):
+            pass
+    prepared = dataclasses.replace(OpenAICompatibleAdapter(endpoint, EndpointKeys()).prepare(frozen), connect=Connection)
+    with pytest.raises(ConfirmedCancellation):
+        prepared.send(frozen, cancel)

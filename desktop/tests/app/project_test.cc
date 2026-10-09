@@ -332,6 +332,24 @@ class ProjectPython : public ::testing::Test {
     ASSERT_EQ(result->value().at("request").at("status"), Json("pending"));
   }
 
+  /** Ask the built-in Token Plan explicitly instead of "Automatic", the default since S1d (with private data and no
+   * model on this computer, Automatic has no candidate, so these tests choose the Token Plan as they did before). */
+  void choose_token_plan(const std::string &area = "a2")
+  {
+    const auto key = area + "/main/ai_endpoint";
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.screen.run_deferred(); f.drv->frame();
+      const auto *dropdown = f.screen.ui()->find(key);
+      return dropdown && dropdown->items.size() > 1;
+    }, 30)) << client->bridge_log().text();
+    const auto *dropdown = f.screen.ui()->find(key);
+    const auto found = std::find_if(dropdown->items.begin(), dropdown->items.end(),
+                                    [](const auto &item) { return item.find("Alibaba Token Plan") != std::string::npos; });
+    ASSERT_NE(found, dropdown->items.end());
+    dropdown->index.assign(int(found - dropdown->items.begin()));
+    f.drv->frame();
+  }
+
   void ai_frame()
   {
     // Provider/history reads are queued by drawing; local exchange reads remain
@@ -507,6 +525,7 @@ class ProjectProposal : public ProjectPython {
     ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Parameter scope")); settled();
     ASSERT_TRUE(discussion.edit_proposals_supported());
     f.drv->frame();
+    ASSERT_NO_FATAL_FAILURE(choose_token_plan());
     const auto handle = state().project()->handle;
     f.screen.ui()->find("a2/main/ai_intent/" + handle)->index.assign(1);
     f.screen.ui()->find("a2/main/ai_question/" + handle)->string.assign("Raise the temperature to 350 K.");
@@ -557,6 +576,7 @@ TEST_F(ProjectProposal, SweepSuggestionBecomesADraftOfNewRowsThatAppliesLikeAMan
   auto &discussion = state().discussion();
   ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Sweep scope")); settled();
   f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(choose_token_plan());
   const auto handle = state().project()->handle;
   f.screen.ui()->find("a2/main/ai_intent/" + handle)->index.assign(2);
   f.screen.ui()->find("a2/main/ai_question/" + handle)->string.assign("Try 310, 320 and 330 K.");
@@ -889,6 +909,7 @@ TEST_F(ProjectScope, ChoosingNewScopeBlocksPrepareAgainstPreviouslySavedData)
   ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Original")); settled();
   auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
   f.screen.set_maximized(&area); ai_frame();
+  ASSERT_NO_FATAL_FAILURE(choose_token_plan());
   widget("ai_question/" + state().project()->handle)->string.assign("Question to prepare"); f.drv->frame();
   ASSERT_TRUE(widget("ai_prepare")->enabled);
   const auto old_prepare = widget("ai_prepare")->on_click;
@@ -1061,6 +1082,7 @@ TEST_F(ProjectPython, AIWorkspaceFirstTypedQuestionPreparesOnceWithoutSending)
   ASSERT_FALSE(discussion.context().empty());
   EXPECT_EQ(discussion.context().at("source_revision"), 1);
   EXPECT_FALSE(widget("ai_prepare")->enabled);
+  ASSERT_NO_FATAL_FAILURE(choose_token_plan());
   const auto input_key = "a2/main/ai_question/" + state().project()->handle;
   const auto [x, y] = f.widget_center(input_key);
   f.drv->click(x, y);
@@ -4201,6 +4223,124 @@ class LocalModelsPython : public ProjectPython {
         dir.str(), "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
   }
 };
+
+TEST_F(LocalModelsPython, AutomaticQuestionsFallBackFromAnUnreachableModelAndStartALocalOne)
+{
+  populated();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area);
+  ai_frame();
+  auto &models = f.shell->store().models();
+  auto &discussion = state().discussion();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Automatic scope")); settled();
+  STK_UNTIL(models.loaded() && models.route_supported());
+  // Private data and only the Token Plan (external): Automatic has no model, says why, and nothing can be prepared.
+  widget("ai_question/" + state().project()->handle)->string.assign("Why do domains form?");
+  const auto texts = [&] {
+    std::string all;
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (!item.text.empty()) { all += item.text + " | "; } }
+    }
+    return all;
+  };
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame();
+    return shows("No model can answer this question") && shows("This question's data is private"); }, 30)) << texts();
+  EXPECT_FALSE(widget("ai_prepare")->enabled);
+  // A model installed on this computer (not started) and an endpoint here that cannot be reached.
+  ASSERT_TRUE(models.local_action("install", "tiny-q4"));
+  const auto installed = [&] {
+    for (const auto &item : models.local().value("installed", Json::array())) {
+      if (io::get_string(item, "id") == "tiny-q4") { return true; }
+    }
+    return false;
+  };
+  STK_UNTIL(!models.busy() && installed());
+  ASSERT_TRUE(models.add_endpoint("a-gone", "A gone", "http://127.0.0.1:9/v1", {"m"}, ""));
+  STK_UNTIL(!models.busy() && models.endpoint("a-gone") != nullptr);
+  // A question takes the nearest ready model first: the unreachable one, then the local model that must be started.
+  STK_UNTIL(shows("Automatic: A gone") && widget("ai_prepare") && widget("ai_prepare")->enabled);
+  widget("ai_prepare")->on_click();
+  STK_UNTIL(io::get_string(discussion.exchange_request().value("configuration", Json::object()), "adapter") ==
+                "openai-compatible/1:a-gone" && widget("ai_send_saved") && widget("ai_send_saved")->enabled);
+  const std::string first = discussion.exchange_request().at("id");
+  widget("ai_send_saved")->on_click();
+  // Nothing reached "A gone" (refused before sending): the question goes to the next candidate as a new request,
+  // whose model STK starts first.
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    return io::get_string(discussion.exchange_request().value("configuration", Json::object()), "adapter") ==
+               "openai-compatible/1:local-tiny-q4" && io::get_string(discussion.exchange_request(), "status") == "completed"; }, 60))
+      << discussion.exchange_request().dump() << "\n" << models.local().dump() << "\n" << client->bridge_log().text();
+  EXPECT_NE(discussion.exchange_request().at("id"), first);
+  EXPECT_EQ(io::get_string(discussion.exchange_reply(), "text"), "Domain walls move under the applied field.");
+  EXPECT_TRUE(shows("A gone could not be reached or refused the question; asking Tiny chat instead."));
+  // The attempt that never reached anything stays recorded as failed (not uncertain).
+  std::optional<bridge::Result<Json>> earlier;
+  client->call("project.requests.get", {{"handle", state().project()->handle}, {"request_id", first}})
+      .then([&](auto value) { earlier = value; });
+  ASSERT_TRUE(loop.pump_until([&] { return earlier.has_value(); }));
+  ASSERT_TRUE(earlier->ok()) << earlier->error().describe();
+  EXPECT_EQ(io::get_string(earlier->value().at("request"), "status"), "failed");
+  EXPECT_EQ(io::get_string(earlier->value().at("request"), "error_code"), "adapter_failed");
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(LocalModelsPython, AnAutomaticQuestionWhoseLocalModelCannotStartGoesToTheNextOne)
+{
+  populated();
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area);
+  ai_frame();
+  auto &models = f.shell->store().models();
+  auto &discussion = state().discussion();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  const auto installed = [&](const std::string &entry) {
+    const auto &local = models.local();
+    if (!local.is_object()) { return false; }
+    for (const auto &item : local.value("installed", Json::array())) {
+      if (io::get_string(item, "id") == entry) { return true; }
+    }
+    return false;
+  };
+  ASSERT_TRUE(discussion.capture(table_id, {record_id}, {field_id}, "Start scope")); settled();
+  STK_UNTIL(models.loaded() && models.local_supported());
+  // Two models on this computer, neither running; "Broken chat" ranks first (same tier, by name) but its server exits.
+  ASSERT_TRUE(models.local_action("install", "broken-q4"));
+  STK_UNTIL(!models.busy() && installed("broken-q4"));
+  ASSERT_TRUE(models.local_action("install", "tiny-q4"));
+  STK_UNTIL(!models.busy() && installed("tiny-q4"));
+  widget("ai_question/" + state().project()->handle)->string.assign("Why do domains form?");
+  STK_UNTIL(shows("Automatic: Broken chat") && shows("STK starts it when the question is sent") &&
+            widget("ai_prepare") && widget("ai_prepare")->enabled);
+  widget("ai_prepare")->on_click();
+  STK_UNTIL(io::get_string(discussion.exchange_request().value("configuration", Json::object()), "model") == "broken-q4" &&
+            widget("ai_send_saved") && widget("ai_send_saved")->enabled);
+  widget("ai_send_saved")->on_click();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    return io::get_string(discussion.exchange_request().value("configuration", Json::object()), "model") == "tiny-q4" &&
+           io::get_string(discussion.exchange_request(), "status") == "completed"; }, 60))
+      << discussion.exchange_request().dump() << "\n" << models.local().dump() << "\n" << client->bridge_log().text();
+  EXPECT_TRUE(shows("Broken chat could not be started; asking Tiny chat instead."));
+  EXPECT_EQ(io::get_string(discussion.exchange_reply(), "text"), "Domain walls move under the applied field.");
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
 
 TEST_F(LocalModelsPython, AModelIsInstalledStartedAndOfferedAsALocalEndpointFromTheAssistant)
 {

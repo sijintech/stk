@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 namespace stk::app {
 class AppStore;
@@ -37,8 +38,9 @@ class ModelSettings {
   uint64_t version() const { return version_; }
   const std::string &error() const { return error_; }
 
+  /** ``tier`` (tiny, small, medium, large; empty: judged by location) tells the automatic choice how capable it is. */
   bool add_endpoint(const std::string &id, const std::string &name, const std::string &base_url,
-                    const std::vector<std::string> &models, const std::string &location);
+                    const std::vector<std::string> &models, const std::string &location, const std::string &tier = "");
   bool remove_endpoint(const std::string &id);
   /** The key goes to the local service only; it is never kept here. */
   bool set_key(const std::string &id, std::string key, bool remember);
@@ -61,6 +63,16 @@ class ModelSettings {
   bool local_action(const std::string &action, const std::string &entry);
   bool import_local(const std::string &entry, const std::string &path);
 
+  /* ---- Automatic model choice (models.route, S1d) ---- */
+
+  /** The service ranks models for a question (models.route). */
+  bool route_supported() const;
+  /** The ranked candidates for ``key`` (the caller's description of what was asked: project, context, task and the
+   * versions it depends on), ``{"error": ...}`` when the service could not rank them, or null while it is read.
+   * Each key is read once; a changed key is read again. */
+  const io::Json &route(const std::string &key, const std::string &handle, const std::string &context_id,
+                        const std::string &prompt_version);
+
  private:
   void reset();
   bool read();
@@ -73,7 +85,10 @@ class ModelSettings {
   std::string session_, error_, network_;
   io::Json endpoints_ = io::Json::array(), local_, recommendations_, progress_ = io::Json::object();
   bridge::ListenerHandle progress_listener_;
-  std::optional<bridge::Future<io::Json>> local_read_, recommend_read_;
+  std::optional<bridge::Future<io::Json>> local_read_, recommend_read_, route_read_;
+  std::string route_reading_;
+  std::unordered_map<std::string, io::Json> routes_;
+  io::Json null_;
   bool local_stale_ = true, recommendations_failed_ = false;
   bool read_local();
   uint64_t epoch_ = 0, version_ = 0;

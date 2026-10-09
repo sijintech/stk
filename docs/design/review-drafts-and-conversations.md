@@ -154,8 +154,8 @@ macOS/Windows 原生界面的真实模型调用仍待验收。临时流式显示
 SQLite 事务。若恰在提交与调用之间崩溃，记录也无法证明未发送：显式恢复只会转为 `uncertain`，不会退回
 `pending`。打开项目本身不做此状态更改。适配器不得自行重试提交。
 
-确定失败使用 `DefinitiveFailure`，确定取消使用 `ConfirmedCancellation`；未知异常或超时记为
-`transport_uncertain`，完整响应校验失败为 `response_invalid`，本地完成保存失败为 `local_save_failed`。
+确定失败使用 `DefinitiveFailure`（含建立连接之前的失败，此时请求没有发出，见[模型网关](model-gateway.md) S1d），确定取消使用
+`ConfirmedCancellation`；连接建立后的未知异常或超时记为 `transport_uncertain`，完整响应校验失败为 `response_invalid`，本地完成保存失败为 `local_save_failed`。
 错误使用固定代码及更新时间，不把异常原文、认证信息或原始响应写入项目。提供方幂等性、远端请求 ID 的
 中途观察和远端查询仍待接入；本机请求 UUID 不能代替提供方幂等保证。
 

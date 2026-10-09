@@ -184,6 +184,12 @@ class Project:
         return self._call("project.labels.set", {"handle": self.handle, "label": "private",
                                                   "items": [{"kind": kind, "id": identity} for identity in ids]})
 
+    def route_model(self, context_id, prompt_version="stk.text/1"):
+        """The automatic model choice for a question on a saved context: {task, public, candidates, excluded, choice}.
+        Simple questions take the nearest and smallest model, parameter proposals the strongest; private data only goes
+        to models on this computer or the organization's network. Reads only; nothing is started or sent."""
+        return self._call("models.route", {"handle": self.handle, "context_id": context_id, "prompt_version": prompt_version})
+
     def labels(self, kind=None):
         """Data currently labelled public ({kind, id, labelled_at, note})."""
         params = {"handle": self.handle}
