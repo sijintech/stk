@@ -11,6 +11,8 @@
   后台服务与脚本（`materials.*`、相对路径被拒、没有 PyTorch 时 `unsupported`、协议无违例）。连续 3 次通过。
   本机 PyTorch 2.14.1+cpu；Python 3.11 与 3.14 没有 PyTorch，需要它的 4 项跳过、其余通过。
 - 完整 pytest（`-m "not perf"`）：审查前 **2375 passed、24 skipped**，审查修正后 **2378 passed、24 skipped**。原生代码未改。
+- CI：`8f10cc7` [Runtime](https://github.com/sijintech/stk/actions/runs/38059670305) 8/8（3.12 任务装了 PyTorch CPU，2393 passed；
+  3.11 与 3.14 没有它，各 2389 passed，训练的 4 项跳过）、[桌面](https://github.com/sijintech/stk/actions/runs/38059670250) 5/5，密钥扫描通过。
 
 ## 2026-10-10：S2b-2 桌面智能体界面
 
