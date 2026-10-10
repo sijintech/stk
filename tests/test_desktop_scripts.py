@@ -98,6 +98,8 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.agent.tools", "project.agent.route", "project.agent.create", "project.agent.say", "project.agent.start",
         "project.agent.cancel", "project.agent.recover", "project.agent.get", "project.agent.list", "project.agent.objects",
         "project.agent.verify", "project.agent.export"}
+    assert {"materials.datasets.synthetic", "materials.datasets.validate", "materials.train", "materials.jobs.get",
+            "materials.jobs.cancel", "materials.models.list", "materials.models.activate", "materials.predict"} <= operations
     assert {"workspace.create", "task.submit", "task.logs", "upload.start", "transfer.get", "connections.ssh"} <= operations
     assert not operations & {"shutdown", "script.execute", "ui.attach", "watch", "logs.subscribe", "hub.review"}
     assert scripts.call("script.close", {"session": session})["closed"]

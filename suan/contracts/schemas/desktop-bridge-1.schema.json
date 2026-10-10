@@ -8407,6 +8407,416 @@
           ],
           "additionalProperties": false
         }
+      },
+      "materials.datasets.synthetic": {
+        "description": "Write a labelled synthetic dataset (stk.dataset/1) to a new or empty folder on this computer, for testing the chain only (docs/design/materials-models-s3.md).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "kind": {
+              "enum": [
+                "pe_loop",
+                "capacity_fade"
+              ]
+            },
+            "samples": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "directory",
+            "kind",
+            "samples"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "card": {
+              "$ref": "#/$defs/materialsDataCard"
+            }
+          },
+          "required": [
+            "card"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.datasets.validate": {
+        "description": "Check a dataset folder (stk.dataset/1) and return its data card. Reads only; nothing leaves this computer.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "directory"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "card": {
+              "$ref": "#/$defs/materialsDataCard"
+            }
+          },
+          "required": [
+            "card"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.train": {
+        "description": "Train a curve model on a dataset on this computer in the background (PyTorch CPU; unsupported without it). The same job_id again returns the job. A model passing its gate is registered and becomes active.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "job_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "options": {
+              "type": "object",
+              "properties": {
+                "hidden": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 4,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 4,
+                    "maximum": 1024
+                  }
+                },
+                "epochs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5000
+                },
+                "batch_size": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4096
+                },
+                "learning_rate": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1
+                },
+                "patience": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5000
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "directory",
+            "job_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/materialsJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.jobs.get": {
+        "description": "A training job of this service.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          "required": [
+            "job_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/materialsJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.jobs.cancel": {
+        "description": "Cancel a training job (it stops after the current epoch; nothing is registered).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          "required": [
+            "job_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/materialsJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.models.list": {
+        "description": "Registered model versions per kind, the active one and the gates.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "pe_loop",
+                "capacity_fade"
+              ]
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "kinds": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "active": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 16
+                  },
+                  "versions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "required": [
+                  "active",
+                  "versions"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "gates": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "kinds",
+            "gates"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.models.activate": {
+        "description": "Use another registered version of a kind (for example to roll back).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "pe_loop",
+                "capacity_fade"
+              ]
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16
+            }
+          },
+          "required": [
+            "kind",
+            "version"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "entry": {
+              "type": "object",
+              "properties": {
+                "active": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 16
+                },
+                "versions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              },
+              "required": [
+                "active",
+                "versions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "entry"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.predict": {
+        "description": "Curves and their readouts from the active (or given) model for 1-100 input rows, on this computer; says which model and whether it learned from synthetic data.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "pe_loop",
+                "capacity_fade"
+              ]
+            },
+            "inputs": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "maxProperties": 64,
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16
+            }
+          },
+          "required": [
+            "kind",
+            "inputs"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "object"
+            },
+            "grid": {
+              "type": "object"
+            },
+            "results": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "curve": {
+                    "type": "array",
+                    "maxItems": 256,
+                    "items": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "readout": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "curve",
+                  "readout"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "model",
+            "grid",
+            "results"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -14755,6 +15165,212 @@
         "turn",
         "stop_reason",
         "awaiting"
+      ],
+      "additionalProperties": false
+    },
+    "materialsDataCard": {
+      "type": "object",
+      "description": "A dataset's data card (stays on this computer): problems, counts, input ranges, curve and readout summaries, digest.",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "problems": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "kind": {
+          "enum": [
+            "pe_loop",
+            "capacity_fade"
+          ]
+        },
+        "synthetic": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "sensitivity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "license": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "inputs": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "number",
+                "integer"
+              ]
+            }
+          }
+        },
+        "curve": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "number",
+              "integer"
+            ]
+          }
+        },
+        "readouts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "number",
+                "integer"
+              ]
+            }
+          }
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "generator": {
+          "type": "object",
+          "maxProperties": 8,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "ok",
+        "problems",
+        "samples"
+      ],
+      "additionalProperties": false
+    },
+    "materialsJob": {
+      "type": "object",
+      "description": "A training job of this service (kept in memory): state, progress, the registered version or why not.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "kind": {
+          "enum": [
+            "pe_loop",
+            "capacity_fade"
+          ]
+        },
+        "state": {
+          "enum": [
+            "running",
+            "done",
+            "rejected",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "dataset": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "synthetic": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "epochs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "train_loss": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "validation_loss": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1000
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16
+        },
+        "metrics": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "gate": {
+          "type": "number"
+        },
+        "started_at": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "epoch",
+        "epochs",
+        "error",
+        "version",
+        "metrics",
+        "gate"
       ],
       "additionalProperties": false
     }

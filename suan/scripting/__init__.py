@@ -756,6 +756,58 @@ class Models:
         return self._call("models.list", {})
 
 
+class Materials:
+    """Materials prediction models on this computer (S3, docs/design/materials-models-s3.md): P-E loops (``pe_loop``)
+    and capacity fade (``capacity_fade``). Datasets are ``stk.dataset/1`` folders; nothing leaves this computer."""
+
+    def __init__(self, call):
+        self._call = call
+
+    def synthetic(self, directory, kind, samples, *, seed=0, name=None):
+        """Write a labelled synthetic dataset (for testing the chain only) and return its data card."""
+        params = {"directory": str(directory), "kind": kind, "samples": samples, "seed": seed}
+        if name is not None:
+            params["name"] = name
+        return self._call("materials.datasets.synthetic", params)["card"]
+
+    def validate(self, directory):
+        return self._call("materials.datasets.validate", {"directory": str(directory)})["card"]
+
+    def train(self, directory, *, job_id=None, options=None, wait=True, poll=0.5, timeout=3600):
+        """Train in the background (PyTorch CPU); with ``wait``, return the job once it has ended."""
+        import time
+        from uuid import uuid4
+        params = {"directory": str(directory), "job_id": job_id or uuid4().hex}
+        if options:
+            params["options"] = options
+        job = self._call("materials.train", params)["job"]
+        deadline = time.monotonic() + timeout
+        while wait and job["state"] == "running" and time.monotonic() < deadline:
+            time.sleep(poll)
+            job = self.job(job["id"])
+        return job
+
+    def job(self, job_id):
+        return self._call("materials.jobs.get", {"job_id": job_id})["job"]
+
+    def cancel(self, job_id):
+        return self._call("materials.jobs.cancel", {"job_id": job_id})["job"]
+
+    def models(self, kind=None):
+        return self._call("materials.models.list", {} if kind is None else {"kind": kind})
+
+    def activate(self, kind, version):
+        return self._call("materials.models.activate", {"kind": kind, "version": version})["entry"]
+
+    def predict(self, kind, inputs, *, version=None):
+        """Curves and readouts for one input row (a dict) or a list of rows."""
+        rows = [inputs] if isinstance(inputs, dict) else list(inputs)
+        params = {"kind": kind, "inputs": rows}
+        if version is not None:
+            params["version"] = version
+        return self._call("materials.predict", params)
+
+
 class API:
     def __init__(self, call):
         self._call = call
@@ -768,6 +820,7 @@ class API:
         self.graph = Graph(call)
         self.skills = Skills(call)
         self.models = Models(call)
+        self.materials = Materials(call)
 
     def runtime(self, connection, *, node=None):
         """Use a saved Runtime profile, optionally routed through a Hub execution node."""
@@ -814,4 +867,4 @@ class API:
         print(json.dumps(catalog, ensure_ascii=False, indent=2))
 
 
-__all__ = ["API", "Connections", "Desktop", "Graph", "Project", "ProjectContexts", "ProjectCSV", "ProjectDiscussion", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "ProjectRequests", "Projects", "Runtime", "ScriptError", "Skills", "Transfers", "Viewer"]
+__all__ = ["API", "Connections", "Desktop", "Graph", "Materials", "Project", "ProjectContexts", "ProjectCSV", "ProjectDiscussion", "ProjectDrafts", "ProjectFiles", "ProjectSnapshots", "ProjectRuns", "ProjectRequests", "Projects", "Runtime", "ScriptError", "Skills", "Transfers", "Viewer"]

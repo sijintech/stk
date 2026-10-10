@@ -581,6 +581,12 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.agent.objects` | `{handle, kind, object_id}` | `{owner}` |
 | `project.agent.verify` / `export` | `{handle, session_id}` | the check / `stk.agent-log/1` |
 | `project.agent.decide` (desktop only) | `{handle, session_id, item_id, decision: apply/discard, draft_sha256, expected_revision}` | `{receipt, revision}`; `project.changed` when applied |
+| `materials.datasets.synthetic` | `{directory (absolute, new or empty), kind, samples (1-5000), seed?, name?}` | `{card}` |
+| `materials.datasets.validate` | `{directory (absolute)}` | `{card}` (data card; stays on this computer) |
+| `materials.train` | `{directory, job_id, options?}` | `{job}`; trains in the background (PyTorch CPU, else `unsupported`); one at a time (`busy`) |
+| `materials.jobs.get` / `cancel` | `{job_id}` | `{job}` (`running`, `done`, `rejected`, `cancelled`, `failed`) |
+| `materials.models.list` / `activate` | `{kind?}` / `{kind, version}` | `{kinds, gates}` / `{entry}` |
+| `materials.predict` | `{kind, inputs: [{name: number}], version?}` | `{model, grid, results: [{curve, readout}]}` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -1233,6 +1239,14 @@ it checks the item is open, the draft pending with the digest shown and `base_re
 current revision, records `approval_decided` (this computer's user and host, `authenticated: false`), applies or
 discards, then records `approval_receipt`; a failed action does not undo the decision and leaves the item open.
 An item not waiting, a different draft or a changed revision is `conflict`; a running session is `busy`.
+
+`materials.*` (S3a, [design](../design/materials-models-s3.md)) are the materials prediction models of this computer:
+curve targets `pe_loop` (P in uC/cm^2 on E/E_max from -1 to 1, up then down branch, 64 points each; read: remanent
+polarization, coercive field, saturation) and `capacity_fade` (SOH on cycles 0-2000, 64 points, null where not measured;
+read: cycle life at SOH 0.8). Datasets are `stk.dataset/1` folders (`dataset.json` and `samples.jsonl`); the synthetic
+generator writes labelled test data only. Training writes a model to the service's state folder and registers it, as
+the active version of its kind, only when the test set's normalized RMSE passes the kind's gate (`gates`); jobs live in
+memory. Every result says whether the model learned from synthetic data. Nothing here sends anything anywhere.
 
 Recent locations are bridge preferences (`recent-projects.json`, version 1), at most 20 entries in
 most-recently-opened order. Creating/opening successfully remembers canonical directory, project UUID,

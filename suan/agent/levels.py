@@ -155,6 +155,14 @@ OPERATIONS = {
     "project.agent.objects": ("read", "the agent's own interface"),
     "project.agent.verify": ("read", "the agent's own interface"),
     "project.agent.export": ("read", "the agent's own interface"),
+    "materials.datasets.synthetic": ("project_edit", "writes files to a folder on this computer"),
+    "materials.datasets.validate": ("read", "not in v1: materials models are a person's work in S3"),
+    "materials.train": ("submit_run", "training uses this computer for minutes; a person starts it"),
+    "materials.jobs.get": ("read", "not in v1: materials models are a person's work in S3"),
+    "materials.jobs.cancel": ("submit_run", "a person cancels training"),
+    "materials.models.list": ("read", "not in v1: materials models are a person's work in S3"),
+    "materials.models.activate": ("project_edit", "a person chooses which model version is used"),
+    "materials.predict": ("read", "not in v1: a prediction tool comes after S3a"),
 }
 
 # Desktop-only methods that are deliberately not in the script catalog.

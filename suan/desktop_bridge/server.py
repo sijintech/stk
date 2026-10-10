@@ -55,6 +55,13 @@ def default_state_dir():
     return Path(os.environ.get("STK_DESKTOP_BRIDGE_DIR", str(Path.home() / ".stk" / "desktop-bridge")))
 
 
+
+def _absolute(path):
+    """A dataset folder given as an absolute path (the service has no notion of the caller's working directory)."""
+    if not isinstance(path, str) or not Path(path).is_absolute():
+        raise BridgeError("invalid_params", "directory is an absolute path")
+    return Path(path)
+
 class StateDirLock:
     """An exclusive lock on ``<state_dir>/bridge.lock`` held for the bridge's lifetime (``busy`` otherwise)."""
 
@@ -173,6 +180,9 @@ class Bridge:
         self.ui = UIRequests(self.emit)
         self.scripts = ScriptSessions(self.emit, self.script_call)
         self.transfers = TransferManager(self.state_dir, self.emit, self.connections.backend)
+        # Materials prediction models (S3): datasets, training on this computer, a registry and prediction.
+        from suan.materials.service import MaterialsService
+        self.materials = MaterialsService(self.state_dir / "materials")
         self.subscriptions = SubscriptionManager(self.emit, self.connections.backend, self.connections.hub_client)
         self.methods = {
             "hello": self.hello,
@@ -294,6 +304,14 @@ class Bridge:
             "project.labels.set": self.labels_set,
             "models.list": lambda p, c: self.projects.model_settings("list", p),
             "models.local.list": lambda p, c: self.projects.local_models("list", p),
+            "materials.datasets.synthetic": lambda p, c: self.materials_call("synthetic", p),
+            "materials.datasets.validate": lambda p, c: self.materials_call("validate", p),
+            "materials.train": lambda p, c: self.materials_call("train", p),
+            "materials.jobs.get": lambda p, c: self.materials_call("job", p),
+            "materials.jobs.cancel": lambda p, c: self.materials_call("cancel", p),
+            "materials.models.list": lambda p, c: self.materials_call("models", p),
+            "materials.models.activate": lambda p, c: self.materials_call("activate", p),
+            "materials.predict": lambda p, c: self.materials_call("predict", p),
             "models.route": lambda p, c: self.projects.model_route(p),
             "project.agent.tools": lambda p, c: self.projects.agent("tools", p),
             "project.agent.route": lambda p, c: self.projects.agent("route", p),
@@ -500,6 +518,43 @@ class Bridge:
             self.handle_line(line)
         self.shutdown()
 
+    def materials_call(self, action, params):
+        """Materials models (S3, docs/design/materials-models-s3.md); everything runs on this computer."""
+        from suan.materials import datasets, service, training
+        if self.closing.is_set():
+            raise BridgeError("shutting_down", "The bridge is shutting down")
+        materials = self.materials
+        try:
+            if action == "synthetic":
+                return {"card": datasets.write_synthetic(_absolute(params["directory"]), params["kind"], params["samples"],
+                                                         seed=params.get("seed", 0), name=params.get("name"))}
+            if action == "validate":
+                return {"card": datasets.validate(_absolute(params["directory"]))}
+            if action == "train":
+                return {"job": materials.train(_absolute(params["directory"]), params["job_id"], options=params.get("options"))}
+            if action == "job":
+                return {"job": materials.job(params["job_id"])}
+            if action == "cancel":
+                return {"job": materials.cancel(params["job_id"])}
+            if action == "models":
+                return materials.models(params.get("kind"))
+            if action == "activate":
+                return {"entry": materials.activate(params["kind"], params["version"])}
+            return materials.predict(params["kind"], params["inputs"], version=params.get("version"))
+        except training.TrainingUnavailable as exc:
+            raise BridgeError("unsupported", str(exc)) from None
+        except service.MaterialsNotFound as exc:
+            raise BridgeError("not_found", str(exc)) from None
+        except service.MaterialsBusy as exc:
+            raise BridgeError("busy", str(exc), retryable=False) from None
+        except service.MaterialsUnavailable as exc:
+            raise BridgeError("unavailable", str(exc), retryable=False) from None
+        except (service.MaterialsError, datasets.DatasetError, ValueError) as exc:
+            raise BridgeError("invalid_params", str(exc)) from None
+        except OSError as exc:
+            raise BridgeError("unavailable", f"A materials file or folder cannot be used: {exc.strerror or type(exc).__name__}",
+                              retryable=False) from None
+
     def shutdown(self, grace=SHUTDOWN_GRACE):
         """Stop subscriptions and evaluations, pause transfers (journals stay resumable), finish requests.
 
@@ -508,6 +563,7 @@ class Bridge:
         if self.closed.is_set():
             return
         self.closing.set()
+        self.materials.shutdown()
         self.workflow_executor.shutdown(wait=False)
         self.analysis_executor.shutdown(wait=False)
         self.ui.close()
@@ -577,6 +633,8 @@ class Bridge:
                  "project.agent.tools", "project.agent.route", "project.agent.create", "project.agent.say",
                  "project.agent.start", "project.agent.cancel", "project.agent.recover", "project.agent.get",
                  "project.agent.list", "project.agent.objects", "project.agent.verify", "project.agent.export",
+                 "materials.datasets.synthetic", "materials.datasets.validate", "materials.train", "materials.jobs.get",
+                 "materials.jobs.cancel", "materials.models.list", "materials.models.activate", "materials.predict",
                  "connections.list", "connections.check", "connections.ssh",
                  "hub.devices", "hub.templates", "hub.actions", "hub.action",
                  "workspace.list", "workspace.create", "workspace.files", "upload.start", "download.start",

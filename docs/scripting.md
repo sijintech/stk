@@ -128,6 +128,7 @@ print(p.selection())
 | 持久修改草案与应用回执 | `stk.project.drafts.save/get/list/apply/discard`，格式 6；明确保存、检查和应用，撤销不重置应用回执，见[草案指南](project-drafts.md) |
 | 明确选择的上下文、文字讨论与草案来源 | `stk.project.contexts.capture/get/list`、`stk.project.discussion.add/get/list/link_draft/proposals`，格式 7；不调用模型或执行消息内容，见[上下文指南](project-contexts.md) |
 | 请求意图、固定输入与执行观察 | `stk.project.requests.create/get/list/cancel/provider/start/recover`，格式 8；`start` 明确发送，普通查询不发送，取消不保证远端已停止，见[请求指南](project-requests.md) |
+| 材料预测模型（S3a） | `stk.materials.synthetic/validate/train/job/cancel/models/activate/predict`：铁电 P–E 回线（`pe_loop`）与锂电池容量衰减（`capacity_fade`）；数据集为 `stk.dataset/1` 文件夹，合成数据只用于检验链路；训练需要 PyTorch（CPU），在本机后台运行，过评估门槛才登记，见[方案](design/materials-models-s3.md) |
 | 智能体会话（S2a、S2b） | `stk.project.agent.create/say/start/get/list/cancel/recover/verify/export/tools/route` 与便捷的 `ask(text)`，格式 13（`get` 默认给最新的 1000 个事件，可用 `offset`/`limit` 分页；`labels(include_structure=True)` 列出结构公开的表）；规划只用本机或机构内模型，工具只有只读、记录、问模型与草案级，智能体不应用草案、不准备或开始运行；每一步记入哈希链，见[智能体设计](design/agent-harness.md) |
 | 数据标注 | `stk.project.mark_public/mark_private/labels`，格式 12；`mark_structure_public(table_ids)`（格式 13）只公开表的结构 |
 | CSV/TSV 表格导入与当前值导出 | `stk.project.csv` 共用类型校验、修订和撤销，见[CSV 交换](project-csv.md) |
