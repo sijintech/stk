@@ -20,7 +20,7 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 12
+FORMAT_VERSION = 13
 DATABASE_NAME = "project.sqlite3"
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
@@ -168,6 +168,37 @@ _DDL_V12 = (
         at TEXT NOT NULL, note TEXT)""",
     "CREATE INDEX project_labels_by_object ON project_labels(kind, object_id, id)",
 )
+# Format 13 (docs/design/agent-harness.md): agent sessions with a hash-chained event log and the objects they made;
+# labels gain "structure" (a table's structure is public, its values private), so project_labels is rebuilt.
+_DDL_V13 = (
+    """CREATE TABLE project_labels_v13 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL CHECK(kind IN ('table','file')),
+        object_id TEXT NOT NULL, label TEXT NOT NULL CHECK(label IN ('public','structure','private')),
+        at TEXT NOT NULL, note TEXT, CHECK(label != 'structure' OR kind = 'table'))""",
+    "INSERT INTO project_labels_v13(id, kind, object_id, label, at, note) "
+    "SELECT id, kind, object_id, label, at, note FROM project_labels ORDER BY id",
+    "DROP TABLE project_labels",
+    "ALTER TABLE project_labels_v13 RENAME TO project_labels",
+    "CREATE INDEX project_labels_by_object ON project_labels(kind, object_id, id)",
+    """CREATE TABLE project_agent_sessions (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id),
+        payload TEXT NOT NULL, request_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL)""",
+    """CREATE TABLE project_agent_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL REFERENCES project_agent_sessions(id),
+        turn INTEGER NOT NULL CHECK(turn >= 0),
+        kind TEXT NOT NULL CHECK(kind IN ('user_turn','model_claimed','model_completed','model_settled',
+            'tool_called','tool_result','awaiting_user','approval_decided','approval_receipt',
+            'observed','policy','cancel_requested','stopped')),
+        payload TEXT NOT NULL, previous_sha256 TEXT NOT NULL, sha256 TEXT NOT NULL)""",
+    "CREATE INDEX project_agent_events_by_session ON project_agent_events(session_id, id)",
+    """CREATE TABLE project_agent_objects (
+        kind TEXT NOT NULL CHECK(kind IN ('context','message','request','draft')),
+        object_id TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES project_agent_sessions(id),
+        event_id INTEGER NOT NULL REFERENCES project_agent_events(id),
+        PRIMARY KEY(kind, object_id))""",
+)
 
 
 class ProjectError(ValueError):
@@ -270,7 +301,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11, *_DDL_V12):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11, *_DDL_V12, *_DDL_V13):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -355,6 +386,11 @@ class ProjectStore:
     def labels(self):
         from .labels import Labels
         return Labels(self)
+
+    @property
+    def agent_sessions(self):
+        from .agent_sessions import AgentSessions
+        return AgentSessions(self)
 
     @property
     def snapshots(self):
@@ -452,7 +488,8 @@ class ProjectStore:
                 backup = self._backup(source)
             for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5),
                                                (5, _DDL_V6), (6, _DDL_V7), (7, _DDL_V8), (8, _DDL_V9),
-                                               (9, _DDL_V10), (10, _DDL_V11), (11, _DDL_V12)):
+                                               (9, _DDL_V10), (10, _DDL_V11), (11, _DDL_V12),
+                                               (12, _DDL_V13)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)

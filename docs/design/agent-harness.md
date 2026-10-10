@@ -637,6 +637,36 @@ start(store, session_id):                         # 处理未处理的发言；�
 8. **记录体积**：单条事件 ≤ 64 KiB，工具结果 ≤ 16 KiB；完整数据留在原对象里，日志只存模型看到的有界内容与摘要。
 9. **链的防篡改能力有限**（同一 SQLite 文件）：靠导出与显示链尾摘要作外部对照。
 
+## 进度
+
+- **S2a（已交付，2026-10-09）**：
+  - 格式 13：`project_agent_sessions`、`project_agent_events`、`project_agent_objects`，并重建 `project_labels` 以加入“结构公开”（`structure`）；
+    `Labels.label/structure_public`、`project.labels.list` 的 `include_structure`、脚本 `mark_structure_public`；
+  - `suan/project/agent_sessions.py`：冻结会话头、哈希链事件（起点为会话头摘要，每次读取复核）、对象登记、状态推导、`verify`；
+  - `suan/agent/levels.py`：脚本目录全部操作的级别与不给智能体的理由（测试保证全覆盖）；
+  - `suan/agent/wire.py`：系统提示与技能、由事件重组对话、带工具的请求体、严格的单个工具调用解析；`_Prepared.parse`；
+    `OpenAICompatibleAdapter.prepare_turn`、`ModelGateway.admit_planner/admit_sources`；路由可排除 `serve_context < 16384` 的本机项（`small_context`）；
+  - `suan/agent/tools.py`：`project_outline`（只读结构，不读值）、`capture_rows`、`table_statistics`（纯 Python 统计与最小二乘）；
+  - `suan/agent/executor.py`：循环、认领后发送、不确定即结束会话、`adapter_failed` 时换会话展示过的同等或更近端点、连续 3 次工具错误即停、
+    上限前做一次不带工具的总结轮、取消、显式恢复；`suan/agent/audit.py`：按日志重组每一轮输入并比对摘要、重算统计；
+  - 后台服务 `project.agent.*`（12 个，均进脚本目录）与脚本 `stk.project.agent.*`。
+  - 交付前审查后的规则（均有测试）：丢失的执行器留下的已认领规划轮，由 `recover` 或下一次 `start` 记为不确定并结束会话，
+    绝不重发（按 `(turn, call)` 判断，`call` 在同一条消息内跨运行连续编号）；工具调用用执行器自己的 ID（`uuid5(会话, call:turn:call)`），
+    模型给的 ID 记为 `model_id`，因此重复的模型 ID 不会让两次记录撞到同一个上下文，审计也按最近的调用配对；
+    每个 `tool_called` 都有 `tool_result`（工具异常与统计溢出记为错误结果）；记不下的回复（编码后超过事件上限）结算为
+    `response_invalid`；重组对话时，没有结果的工具调用（上限时的总结轮仍调用工具、或丢失的步骤）只发其文字；
+    `tool_result.sources` 记下当时的标注；重复的 `create` 在路由之前按调用方参数比对，返回原会话；
+    上一轮刚结束时 `start` 等它退出再回答新消息；会话视图最多 1000 个事件（默认最新的 1000 个，`get` 可分页）；
+    `export` 与其核对读同一份日志。
+- S2b（扫描提议与结果分析工具、子请求的会话来源检查、`decide` 批准、桌面“智能体”用途与时间线、验收）：未实现。
+
+S2a 已知限制：
+- 桌面还没有智能体界面；只能从脚本或 Python 控制台使用。
+- 规划轮只用非流式请求；内置 Token Plan 不用于规划（所有者决定）。
+- 小型本机模型的工具调用可靠性未实测；真实模型的人工验收放在 S2b。
+- 桌面“数据”页仍只区分公开与私有：结构公开的表在那里显示为私有，在那里勾选公开再取消会把它改为私有；三档控件在 S2b。
+- 会话事件数没有总上限（每条消息有轮数与字节上限）；导出最多 100000 个事件。
+
 ## 所有者决定（2026-10-09）
 
 1. **记录形态**：按建议 (a)，格式 13 加三张新表，规划轮不进 `project_requests`（技术项，按建议执行）。

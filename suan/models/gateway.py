@@ -58,6 +58,20 @@ class OpenAICompatibleAdapter:
                                connect=self._connect, path=self._path, provider=self._endpoint["name"], reasoning=True,
                                timeout=self._timeout, cancel_closes=self._cancel_closes)
 
+    def prepare_turn(self, value):
+        """An agent planner turn (suan/agent/wire.py): the same single-attempt transport, deadline and cancellation,
+        with tools in the request and a parser that accepts one tool call. Send it with ``send(value, cancel)``."""
+        import hashlib
+        from suan.agent import wire
+        from suan.project.contexts import _encode
+        model = value["configuration"]["model"]
+        if model not in self._endpoint["models"]:
+            raise ProjectError(f"The endpoint {self._endpoint['name']} does not offer the model {model}")
+        return _wire._Prepared(self._keys.get(self._endpoint["id"]), wire.turn_payload(value), b"",
+                               hashlib.sha256(_encode(value)).digest(), connect=self._connect, path=self._path,
+                               provider=self._endpoint["name"], reasoning=True, timeout=self._timeout,
+                               cancel_closes=self._cancel_closes, parse=wire.turn_response)
+
     def send(self, frozen_input, cancel_event):
         return self.prepare(frozen_input).send(frozen_input, cancel_event)
 
@@ -103,6 +117,35 @@ class ModelGateway:
                 raise PolicyDenied("This question's data is not labelled public: its parameter table stays private and is "
                                    "not sent to external model endpoints. Label the table public, or ask a local or "
                                    "internal model")
+
+    def admit_planner(self, configuration, *, all_public):
+        """Refuse (``PolicyDenied``) an agent planner turn the network setting or the data boundary does not allow. In v1
+        the planner only runs on this computer or the organization's network (owner decision, docs/design/agent-harness.md);
+        an external planner would also need every source the session has seen to be public. Adapters that are not
+        endpoints (installed by tests or embedding code) are not checked, as in ``admit``."""
+        endpoint = self.endpoints.by_adapter(configuration["adapter"])
+        if endpoint is None:
+            if configuration["adapter"] in self._overrides:
+                return
+            raise PolicyDenied("The agent's model endpoint is no longer configured")
+        if self.local is not None and self.local.manages(endpoint["id"]) and not self.local.is_running(endpoint["id"]):
+            raise PolicyDenied(f"The local model {endpoint['name']} is not running; start it in Models and network")
+        if not self.policy.allows(endpoint["location"]):
+            raise PolicyDenied(f"The network setting ({self.policy.get()['network']}) does not allow the "
+                               f"{endpoint['location']} endpoint {endpoint['name']}")
+        if endpoint["location"] == "external":
+            if not all_public:
+                raise PolicyDenied("The agent has read private data: it plans only with models on this computer or the "
+                                   "organization's network")
+            raise PolicyDenied("The agent plans only with models on this computer or the organization's network")
+
+    def admit_sources(self, configuration, *, all_public):
+        """A request the agent makes for itself goes to an external endpoint only when every data source the session
+        has seen is public (its own context table is checked again by ``admit``)."""
+        endpoint = self.endpoints.by_adapter(configuration["adapter"])
+        if endpoint is not None and endpoint["location"] == "external" and not all_public:
+            raise PolicyDenied("The agent has read private data: this request may only go to a model on this computer "
+                               "or the organization's network")
 
     def describe(self):
         """Endpoints with their key presence and whether the network setting allows them; never keys."""

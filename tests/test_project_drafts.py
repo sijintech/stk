@@ -265,6 +265,9 @@ def test_missing_draft_is_reported_without_creating_any_metadata(store):
 
 def legacy_five(store):
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE IF EXISTS project_agent_objects")
+        db.execute("DROP TABLE IF EXISTS project_agent_events")
+        db.execute("DROP TABLE IF EXISTS project_agent_sessions")
         db.execute("DROP TABLE IF EXISTS project_labels")
         db.execute("DROP TABLE IF EXISTS project_archive")
         db.execute("DROP TABLE IF EXISTS workflow_run_events")

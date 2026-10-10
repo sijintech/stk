@@ -146,6 +146,9 @@ def test_invalid_or_obsolete_derived_cache_is_discarded(model, cache):
 
 def legacy(store):
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE IF EXISTS project_agent_objects")
+        db.execute("DROP TABLE IF EXISTS project_agent_events")
+        db.execute("DROP TABLE IF EXISTS project_agent_sessions")
         db.execute("DROP TABLE IF EXISTS project_labels")
         db.execute("DROP TABLE IF EXISTS project_archive")
         db.execute("DROP TABLE IF EXISTS workflow_run_events")

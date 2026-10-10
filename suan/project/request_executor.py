@@ -54,10 +54,10 @@ MAX_ACTIVE_REQUESTS = 8
 class _RequestLock:
     """Persistent lock files are never removed or replaced by this service."""
 
-    def __init__(self, store, request_id):
+    def __init__(self, store, request_id, directory_name="request-locks"):
         _id(request_id)
         directory = store.directory
-        for name in (".stk", "request-locks"):
+        for name in (".stk", directory_name):
             directory = directory / name
             if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
                 raise ProjectError("Request lock directories must not be files or symbolic links")

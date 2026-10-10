@@ -160,6 +160,9 @@ def test_bad_batch_conflict_and_database_paths_do_not_mutate_index(files):
 def test_format_two_keeps_existing_operations_but_requires_explicit_upgrade_for_index(files):
     store, inside, _ = files
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE IF EXISTS project_agent_objects")
+        db.execute("DROP TABLE IF EXISTS project_agent_events")
+        db.execute("DROP TABLE IF EXISTS project_agent_sessions")
         db.execute("DROP TABLE IF EXISTS project_labels")
         db.execute("DROP TABLE IF EXISTS project_archive")
         db.execute("DROP TABLE IF EXISTS workflow_run_events")

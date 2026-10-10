@@ -81,6 +81,9 @@ def test_a_workflow_can_take_its_stopped_runs_with_it(setup):
 def test_older_projects_have_nothing_archived_until_upgraded(tmp_path):
     store = ProjectStore.create(tmp_path / "old", "Old")
     with sqlite3.connect(store.directory / DATABASE_NAME) as db:
+        db.execute("DROP TABLE IF EXISTS project_agent_objects")
+        db.execute("DROP TABLE IF EXISTS project_agent_events")
+        db.execute("DROP TABLE IF EXISTS project_agent_sessions")
         db.execute("DROP TABLE project_labels")
         db.execute("DROP TABLE project_archive")
         db.execute("PRAGMA user_version=10")
@@ -89,7 +92,7 @@ def test_older_projects_have_nothing_archived_until_upgraded(tmp_path):
     with pytest.raises(UnsupportedProjectFormat):
         store.archive.set([{"kind": "workflow", "id": str(uuid4())}], archived=True)
     upgraded = store.upgrade(expected_revision=0)
-    assert upgraded["format_version"] == 12 and upgraded["backup"]
+    assert upgraded["format_version"] == 13 and upgraded["backup"]
     with pytest.raises(ProjectError, match="No workflow"):
         store.archive.set([{"kind": "workflow", "id": str(uuid4())}], archived=True)
 

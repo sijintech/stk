@@ -467,7 +467,8 @@ class LocalModels:
             if entry is None or entry["runtime"] != "llama.cpp":
                 continue
             result.append({"id": item["id"], "endpoint": item["endpoint"], "name": str(entry.get("model") or item["id"])[:64],
-                           "tier": entry.get("tier") or "small", "state": item["server"]["state"]})
+                           "tier": entry.get("tier") or "small", "state": item["server"]["state"],
+                           "serve_context": int(entry.get("serve_context") or 8192)})
         return result
 
     def is_running(self, endpoint):

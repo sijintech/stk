@@ -427,7 +427,7 @@ def test_bounded_pagination_has_stable_order_without_large_fields(model):
 def test_format8_requires_explicit_verified_backup_upgrade_and_preserves_undo_and_snapshots(model, tmp_path):
     store = model[0]
     with sqlite3.connect(store.path) as db:
-        for table in ("project_labels", "project_archive", "workflow_run_events", "workflow_run_plans", "analysis_run_events", "analysis_run_plans"):
+        for table in ("project_agent_objects", "project_agent_events", "project_agent_sessions", "project_labels", "project_archive", "workflow_run_events", "workflow_run_plans", "analysis_run_events", "analysis_run_plans"):
             db.execute(f"DROP TABLE {table}")  # a format-8 database (format 10 adds the workflow run tables)
         db.execute("PRAGMA user_version=8")
     before, history = store.snapshot(), store.history()
@@ -435,7 +435,7 @@ def test_format8_requires_explicit_verified_backup_upgrade_and_preserves_undo_an
         prepare(model)
     assert store.snapshot() == before
     upgraded = store.upgrade(expected_revision=3)
-    assert upgraded["format_version"] == FORMAT_VERSION == 12 and upgraded["revision"] == 4
+    assert upgraded["format_version"] == FORMAT_VERSION == 13 and upgraded["revision"] == 4
     assert store.snapshot()["tables"] == before["tables"]
     assert store.snapshot()["edit_history"] == before["edit_history"]
     assert store.history()[:-1] == history
@@ -456,7 +456,7 @@ def test_format9_migration_failure_rolls_back_and_retains_verified_old_backup(mo
     import suan.project.store as storage
     store = model[0]
     with sqlite3.connect(store.path) as db:
-        for table in ("project_labels", "project_archive", "workflow_run_events", "workflow_run_plans", "analysis_run_events", "analysis_run_plans"):
+        for table in ("project_agent_objects", "project_agent_events", "project_agent_sessions", "project_labels", "project_archive", "workflow_run_events", "workflow_run_plans", "analysis_run_events", "analysis_run_plans"):
             db.execute(f"DROP TABLE {table}")  # a format-8 database (format 10 adds the workflow run tables)
         db.execute("PRAGMA user_version=8")
     before = store.snapshot()

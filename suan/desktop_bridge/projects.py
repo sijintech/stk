@@ -17,6 +17,8 @@ from suan.project.workflows import WorkflowNotFound
 from suan.project.workflow_runs import WorkflowRunNotFound
 from suan.models import LocalModels, ModelGateway, PolicyDenied
 from suan.project.aliyun import TokenPlanCredentials, provider_info
+from suan.project.agent_sessions import AgentSessionNotFound
+from suan.agent.executor import AgentBusy
 from suan.project.request_executor import RequestBusy, RequestExecutor
 
 from suan.project.archive import Archived
@@ -40,6 +42,9 @@ class ProjectSessions:
         self.local = LocalModels(state_dir, self.models.endpoints, self.models.policy, keys=self.models.keys)
         self.models.local = self.local
         self._executor = RequestExecutor(self.models, gate=self.models.admit)
+        # The agent (S2): plans with a model on this computer or the organization's network, using bounded tools.
+        from suan.agent import AgentExecutor
+        self.agents = AgentExecutor(self.models, self._executor, self.local)
         self._analysis_executor = analysis_executor
         self._workflow_executor = workflow_executor
 
@@ -57,8 +62,10 @@ class ProjectSessions:
             yield
         except (RevisionConflict, Archived, PolicyDenied) as exc:
             raise BridgeError("conflict", str(exc)) from None
-        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound) as exc:
+        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound, AgentSessionNotFound) as exc:
             raise BridgeError("not_found", str(exc)) from None
+        except AgentBusy as exc:
+            raise BridgeError("busy", str(exc)) from None
         except RequestBusy:
             raise BridgeError("busy", "A live executor owns this request or the local executor has reached its 8-request limit") from None
         except UnsupportedProjectFormat as exc:
@@ -303,6 +310,52 @@ class ProjectSessions:
         result["choice"] = result["candidates"][0] if result["candidates"] else None
         return result
 
+    def agent(self, action, params):
+        """Agent sessions (format 13, docs/design/agent-harness.md). ``start`` answers in the background; read the
+        session for its steps. Nothing here applies drafts, prepares or starts runs, or labels data."""
+        from suan.agent import audit, levels, tools as agent_tools
+        if action == "tools":
+            with self._operation():
+                self._get(params["handle"])
+            return {"tools": [tool.definition() for tool in agent_tools.registry(self.agents.tool_names)],
+                    "never": [{"operation": name, "level": level, "reason": reason}
+                              for name, (level, reason) in sorted(levels.OPERATIONS.items())
+                              if level not in levels.AGENT_LEVELS]}
+        if action == "route":
+            with self._operation():
+                self._get(params["handle"])
+            return self.agents.route()
+        with self._operation():
+            store = self._get(params["handle"])
+        with self._errors():
+            agents, sessions = self.agents, store.agent_sessions
+            if action == "create":
+                view = agents.create(store, params["session_id"], params["text"], turn_id=params["turn_id"],
+                                     configuration=params.get("configuration"))
+            elif action == "say":
+                view = sessions.say(params["session_id"], params["text"], turn_id=params["turn_id"])
+            elif action == "start":
+                view = agents.start(store, params["session_id"])
+            elif action == "cancel":
+                view = agents.cancel(store, params["session_id"])
+            elif action == "recover":
+                view = agents.recover(store, params["session_id"])
+            elif action == "get":
+                view = sessions.get(params["session_id"], offset=params.get("offset"), limit=params.get("limit"))
+            elif action == "list":
+                return sessions.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
+            elif action == "objects":
+                return {"owner": sessions.object_owner(params["kind"], params["object_id"])}
+            elif action == "verify":
+                return audit.verify(store, params["session_id"])
+            elif action == "export":
+                report, header, events = audit.verify(store, params["session_id"], snapshot=True)
+                return {"format": "stk.agent-log/1", "session": header, "events": events,
+                        "chain_sha256": report["chain_sha256"], "verify": report}
+            else:
+                raise ProjectError(f"Unknown agent action {action}")
+            return {**view, "running": agents.running(store, params["session_id"])}
+
     def local_models(self, action, params):
         """One-click local models (docs/design/model-gateway.md, S1c). Changes are for the person at this computer:
         scripts may only list (``models.local.list``). Not under the project lock: probing runs nvidia-smi, and long work
@@ -322,12 +375,13 @@ class ProjectSessions:
             return getattr(local, action)(params["id"])
 
     def labels(self, action, params):
-        """Label data public or private, or list what is public (format 12); never changes the revision."""
+        """Label data public, structure-public (tables, format 13) or private, or list what is public (format 12);
+        never changes the revision."""
         with self._operation():
             store = self._get(params["handle"])
             if action == "set":
                 return store.labels.set(params["items"], label=params["label"], note=params.get("note"))
-            return store.labels.list(params.get("kind"))
+            return store.labels.list(params.get("kind"), include_structure=params.get("include_structure", False))
 
     def search(self, params):
         """Names and text of the project matching a query; reads only (UX package U3)."""
@@ -495,6 +549,7 @@ class ProjectSessions:
         # The bridge already waited its grace period. Do not wait again on a database
         # lock or a slow filesystem; process exit rolls back any unfinished transaction.
         self._closed = True
+        self.agents.shutdown(wait=False)
         self.local.shutdown()  # they start again with the service
         if self._workflow_executor is not None:
             self._workflow_executor.shutdown(wait=False)

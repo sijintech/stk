@@ -2993,7 +2993,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   auto &scripts = f.shell->store().scripts();
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   const std::string source = "import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
-      ") as db:\n    db.execute('DROP TABLE project_labels')\n    db.execute('DROP TABLE project_archive')\n    db.execute('DROP TABLE workflow_run_events')\n    db.execute('DROP TABLE workflow_run_plans')\n    db.execute('DROP TABLE analysis_run_events')\n    db.execute('DROP TABLE analysis_run_plans')\n    db.execute('DROP TABLE project_requests')\n    db.execute('DROP TABLE project_proposals')\n    db.execute('DROP TABLE project_messages')\n    db.execute('DROP TABLE project_contexts')\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
+      ") as db:\n    db.execute('DROP TABLE project_agent_objects')\n    db.execute('DROP TABLE project_agent_events')\n    db.execute('DROP TABLE project_agent_sessions')\n    db.execute('DROP TABLE project_labels')\n    db.execute('DROP TABLE project_archive')\n    db.execute('DROP TABLE workflow_run_events')\n    db.execute('DROP TABLE workflow_run_plans')\n    db.execute('DROP TABLE analysis_run_events')\n    db.execute('DROP TABLE analysis_run_plans')\n    db.execute('DROP TABLE project_requests')\n    db.execute('DROP TABLE project_proposals')\n    db.execute('DROP TABLE project_messages')\n    db.execute('DROP TABLE project_contexts')\n    db.execute('DROP TABLE project_drafts')\n    db.execute('DROP TABLE run_observations')\n    db.execute('DROP TABLE run_plans')\n    db.execute('DROP TABLE project_snapshots')\n    db.execute('DROP TABLE edit_journal')\n    db.execute('DROP TABLE evaluations')\n    db.execute('DROP TABLE definitions')\n    db.execute('PRAGMA user_version=1')";
   ASSERT_TRUE(scripts.execute(source));
   ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
@@ -3008,7 +3008,7 @@ TEST_F(ProjectPython, ExplicitUpgradeCreatesBackupAndRefreshesFormat)
   f.screen.ui()->find("a2/main/upgrade_project")->on_click();
   settled();
   f.drv->frame();
-  EXPECT_EQ(state().project()->format_version, 12);
+  EXPECT_EQ(state().project()->format_version, 13);
   EXPECT_EQ(state().project()->revision, 2);
   EXPECT_EQ(f.screen.ui()->find("a2/main/upgrade_project"), nullptr);
   EXPECT_FALSE(state().notice().empty());

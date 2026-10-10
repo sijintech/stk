@@ -20,7 +20,7 @@ def task_kind(prompt_version):
     return TASKS.get(prompt_version, "complex")
 
 
-def candidates(endpoints, local_models, *, task, public):
+def candidates(endpoints, local_models, *, task, public, min_context=0):
     """Ranked candidates and the pairs ruled out, each ``{endpoint, name, adapter, model, location, tier, start, reason}``.
 
     ``endpoints``: ``ModelGateway.describe()["endpoints"]`` (with ``allowed`` from the network setting, ``key``, ``managed``).
@@ -31,10 +31,12 @@ def candidates(endpoints, local_models, *, task, public):
     by_endpoint = {item["endpoint"]: item for item in local_models}
     seen, failed = set(), set()
 
-    def consider(endpoint, model, *, tier, start):
+    def consider(endpoint, model, *, tier, start, context=None):
         item = {"endpoint": endpoint["id"], "name": endpoint["name"], "adapter": endpoint["adapter"], "model": model,
                 "location": endpoint["location"], "tier": tier, "start": start}
-        if not endpoint.get("allowed", True):
+        if context is not None and context < min_context:  # a local model served with too short a context
+            excluded.append({**item, "reason": "small_context"})
+        elif not endpoint.get("allowed", True):
             excluded.append({**item, "reason": "network"})
         elif endpoint["location"] == "external" and not public:
             excluded.append({**item, "reason": "private_data"})
@@ -49,7 +51,8 @@ def candidates(endpoints, local_models, *, task, public):
             seen.add(endpoint["id"])
             if local["state"] == "failed":
                 failed.add(endpoint["id"])
-            consider(endpoint, local["id"], tier=local["tier"], start=local["state"] != "running")
+            consider(endpoint, local["id"], tier=local["tier"], start=local["state"] != "running",
+                     context=local.get("serve_context"))
             continue
         # A managed endpoint with no installed entry here: this STK's catalog no longer lists its model; it cannot start.
         if not endpoint.get("models") or endpoint.get("managed"):
@@ -65,7 +68,8 @@ def candidates(endpoints, local_models, *, task, public):
                         "adapter": ADAPTER_PREFIX + local["endpoint"], "location": "local", "allowed": True}
             if local["state"] == "failed":
                 failed.add(endpoint["id"])
-            consider(endpoint, local["id"], tier=local["tier"], start=local["state"] != "running")
+            consider(endpoint, local["id"], tier=local["tier"], start=local["state"] != "running",
+                     context=local.get("serve_context"))
 
     def rank(item):
         tier = TIERS.index(item["tier"]) if item["tier"] in TIERS else 1

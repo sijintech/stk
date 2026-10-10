@@ -124,7 +124,7 @@ request (same idempotency key) may succeed.
 | `graph_error` | no | Graph validation or evaluation failed: `data.graph_code` (stk-graph-v1 codes), `issues`, `node`, `errors` |
 | `cancelled` | no | The operation was cancelled |
 | `timeout` | yes | A hub action has not finished within the wait; repeat the request to keep waiting |
-| `busy` | yes / no | Too many requests in flight (`retryable: true`); another bridge holds the state directory (§1; `data.state_dir`, `retryable: false`, exits with status 3); or a model execution lock is held / the local executor already has 8 active requests (§13; `retryable: false`) |
+| `busy` | yes / no | Too many requests in flight (`retryable: true`); another bridge holds the state directory (§1; `data.state_dir`, `retryable: false`, exits with status 3); or a model execution lock is held / the local executor already has 8 active requests (§13; `retryable: false`); or an agent session limit (one running per project, two per service) or a running session blocks `project.agent.start`/`recover` (`retryable: false`) |
 | `result_too_large` | no | The response would exceed `max_line_bytes` |
 | `shutting_down` | no | The bridge is exiting |
 | `internal_error` | no | A bridge bug (details on stderr) |
@@ -571,8 +571,15 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.search` | `{handle, query, limit?}` | `{revision, query, results: [projectSearchItem], counts, truncated}` |
 | `project.archive.set` | `{handle, items: [{kind, id}], archived, note?, include_runs?}` | `{changed, items}` |
 | `project.archive.list` | `{handle, kind?}` | `{items: [{kind, id, archived_at, note}], counts}` |
-| `project.labels.set` | `{handle, items: [{kind, id}], label, note?}` | `{changed, items}` |
-| `project.labels.list` | `{handle, kind?}` | `{items: [{kind, id, labelled_at, note}]}` |
+| `project.labels.set` | `{handle, items: [{kind, id}], label, note?}` | `{changed, items}` (`label`: `public`, `structure` (tables, format 13) or `private`) |
+| `project.labels.list` | `{handle, kind?, include_structure?}` | `{items: [{kind, id, labelled_at, note, label}]}` |
+| `project.agent.tools` / `route` | `{handle}` | tools and never-used operations / planner candidates |
+| `project.agent.create` | `{handle, session_id, turn_id, text, configuration?}` | `agentSessionView` (sends nothing) |
+| `project.agent.say` | `{handle, session_id, turn_id, text}` | `agentSessionView` |
+| `project.agent.start` / `cancel` / `recover` / `get` | `{handle, session_id, …}` | `agentSessionView` |
+| `project.agent.list` | `{handle, offset?, limit?}` | `{items, total}` |
+| `project.agent.objects` | `{handle, kind, object_id}` | `{owner}` |
+| `project.agent.verify` / `export` | `{handle, session_id}` | the check / `stk.agent-log/1` |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -1195,9 +1202,26 @@ with `adapter_failed`, may ask the next candidate on another endpoint as a new r
 
 `project.labels.set` labels parameter tables (`table`) and file records (`file`) public or private (project
 format 12, append-only `project_labels`; not an edit: no revision, no undo; emits `project.labels.changed`).
-Data is private unless labelled public. `project.requests.start` refuses with `conflict`, leaving the request
-pending, when the network setting does not allow the request's endpoint, or when the endpoint is external and
-the request's context table is not labelled public.
+Data is private unless labelled public. Format 13 adds `structure` for tables: the table's names, fields, units and
+row count may leave this computer, its values stay private (`is_public` is unchanged; `project.labels.list` returns
+such tables only with `include_structure`, each item naming its `label`). `project.requests.start` refuses with
+`conflict`, leaving the request pending, when the network setting does not allow the request's endpoint, or when the
+endpoint is external and the request's context table is not labelled public.
+
+`project.agent.*` (format 13, [agent harness](../design/agent-harness.md)) runs agent sessions: a frozen header
+(system prompt, skills, tool definitions, model, route, policy, limits) and an append-only event log whose SHA-256
+chain starts at the header's digest and is checked on every read. `start` answers the unanswered message in the
+background; planner turns go only to models on this computer or the organization's network (refused otherwise before
+anything is claimed), are claimed before sending and sent once (an uncertain outcome ends the session; only
+`adapter_failed` moves to the next candidate the session showed). A planner turn claimed by a lost executor is
+settled as uncertain by `recover` or the next `start` and never resent. Tool calls carry the executor's own IDs
+(the model's are kept as `model_id`); every recorded call gets a result, and each result's `sources` record the
+data label at that moment. Tools are a fixed registry at the read, record, model and draft levels (S2a has
+`project_outline`, `capture_rows`, `table_statistics`); the agent never applies drafts, prepares or starts runs,
+labels data or changes settings. A session view holds at most 1000 events: `get` pages with `offset`/`limit`, and
+without them (and in every other view) shows the newest 1000 with `total`. `export` and its check read the log once.
+At most one running session per project and two per service (`busy`). Sessions never change the revision. All `project.agent.*` methods are in the script catalog; the desktop-only
+`project.agent.decide` (S2b, design) will not be.
 
 Recent locations are bridge preferences (`recent-projects.json`, version 1), at most 20 entries in
 most-recently-opened order. Creating/opening successfully remembers canonical directory, project UUID,

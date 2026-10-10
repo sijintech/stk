@@ -508,6 +508,9 @@ class _Prepared:
     # outside this computer holds it; "organization": its outcome is uncertain).
     timeout: float = TIMEOUT_SECONDS
     cancel_closes: str = ""
+    # How a complete nonstreaming body is parsed: one text reply (the default), or an agent turn that may call a
+    # tool (suan/agent/wire.py). Everything else (single attempt, deadline, cancellation, classification) is shared.
+    parse: object = field(default=None, repr=False)
 
     def send(self, frozen_input, cancel_event):
         return self._send(frozen_input, cancel_event, None)
@@ -561,7 +564,7 @@ class _Prepared:
                 raise RuntimeError
             if on_text is not None:
                 return _stream_response(transport_socket, response, deadline, on_text, self.reasoning)
-            return _response(_read_response(transport_socket, response, deadline))
+            return (self.parse or _response)(_read_response(transport_socket, response, deadline))
         except Exception as exc:
             if self.cancel_closes and cancel_event.is_set() and not isinstance(exc, (ConfirmedCancellation, DefinitiveFailure)):
                 # The connection was closed for the cancellation, so the reply ended early, whatever the parser saw.

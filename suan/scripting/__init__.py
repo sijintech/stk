@@ -4,6 +4,7 @@ The facade uses the same project commands and revision checks as the native tabl
 It holds IDs, never C++ window pointers. See ``docs/scripting.md`` for the supported coverage.
 """
 from pathlib import Path
+from uuid import uuid4
 
 from .runtime import Connections, Runtime, Transfers
 from .viewer import Viewer
@@ -179,6 +180,15 @@ class Project:
             params["note"] = note
         return self._call("project.labels.set", params)
 
+    def mark_structure_public(self, table_ids, *, note=None):
+        """Label tables structure-public (format 13): their names, fields, units and row counts may go to external
+        models, their values stay private."""
+        params = {"handle": self.handle, "items": [{"kind": "table", "id": identity} for identity in table_ids],
+                  "label": "structure"}
+        if note is not None:
+            params["note"] = note
+        return self._call("project.labels.set", params)
+
     def mark_private(self, kind, ids):
         """Label data private again (the default): it is no longer sent to external model endpoints."""
         return self._call("project.labels.set", {"handle": self.handle, "label": "private",
@@ -190,11 +200,14 @@ class Project:
         to models on this computer or the organization's network. Reads only; nothing is started or sent."""
         return self._call("models.route", {"handle": self.handle, "context_id": context_id, "prompt_version": prompt_version})
 
-    def labels(self, kind=None):
-        """Data currently labelled public ({kind, id, labelled_at, note})."""
+    def labels(self, kind=None, *, include_structure=False):
+        """Data currently labelled public ({kind, id, label, labelled_at, note}); with ``include_structure``, also tables
+        whose structure only is public (label ``structure``)."""
         params = {"handle": self.handle}
         if kind is not None:
             params["kind"] = kind
+        if include_structure:
+            params["include_structure"] = True
         return self._call("project.labels.list", params)
 
     def mark_viewed(self, keys):
@@ -224,6 +237,79 @@ class Project:
     @property
     def requests(self):
         return ProjectRequests(self._call, self.handle)
+
+    @property
+    def agent(self):
+        return ProjectAgent(self._call, self.handle)
+
+
+class ProjectAgent:
+    """Agent sessions (format 13, docs/design/agent-harness.md): the agent plans with a model on this computer or the
+    organization's network and calls bounded tools; at most it saves drafts a person applies. It never prepares or starts
+    runs, labels data or changes settings."""
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def tools(self):
+        return self._call("project.agent.tools", {"handle": self.handle})
+
+    def route(self):
+        return self._call("project.agent.route", {"handle": self.handle})
+
+    def create(self, text, *, session_id=None, turn_id=None, configuration=None):
+        params = {"handle": self.handle, "session_id": session_id or str(uuid4()), "turn_id": turn_id or str(uuid4()),
+                  "text": text}
+        if configuration is not None:
+            params["configuration"] = configuration
+        return self._call("project.agent.create", params)
+
+    def say(self, session_id, text, *, turn_id=None):
+        return self._call("project.agent.say", {"handle": self.handle, "session_id": session_id,
+                                                "turn_id": turn_id or str(uuid4()), "text": text})
+
+    def start(self, session_id):
+        return self._call("project.agent.start", {"handle": self.handle, "session_id": session_id})
+
+    def get(self, session_id, *, offset=None, limit=None):
+        """A session with a page of its events: ``limit`` from ``offset``; without either, the newest 1000."""
+        params = {"handle": self.handle, "session_id": session_id}
+        if offset is not None:
+            params["offset"] = offset
+        if limit is not None:
+            params["limit"] = limit
+        return self._call("project.agent.get", params)
+
+    def list(self, *, offset=0, limit=50):
+        return self._call("project.agent.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def cancel(self, session_id):
+        return self._call("project.agent.cancel", {"handle": self.handle, "session_id": session_id})
+
+    def recover(self, session_id):
+        return self._call("project.agent.recover", {"handle": self.handle, "session_id": session_id})
+
+    def verify(self, session_id):
+        return self._call("project.agent.verify", {"handle": self.handle, "session_id": session_id})
+
+    def export(self, session_id):
+        return self._call("project.agent.export", {"handle": self.handle, "session_id": session_id})
+
+    def ask(self, text, *, session_id=None, wait=True, poll=0.2, timeout=1800):
+        """Start a session with ``text`` (or continue ``session_id``) and, with ``wait``, return it once the agent has
+        answered (state idle, awaiting or ended)."""
+        import time
+        if session_id is None:
+            session = self.create(text)
+            session_id = session["session"]["id"]
+        else:
+            self.say(session_id, text)
+        view = self.start(session_id)
+        deadline = time.monotonic() + timeout
+        while wait and (view["state"] == "ready" or view.get("running")) and time.monotonic() < deadline:
+            time.sleep(poll)
+            view = self.get(session_id)
+        return view
 
 
 class ProjectRequests:

@@ -2716,7 +2716,8 @@
                                 8,
                                 9,
                                 10,
-                                11
+                                11,
+                                12
                               ]
                             },
                             "to_version": {
@@ -2731,7 +2732,8 @@
                                 9,
                                 10,
                                 11,
-                                12
+                                12,
+                                13
                               ]
                             }
                           },
@@ -7170,8 +7172,10 @@
             "label": {
               "enum": [
                 "public",
+                "structure",
                 "private"
-              ]
+              ],
+              "description": "structure (tables only, format 13): the table's structure is public, its values private"
             },
             "note": {
               "type": "string",
@@ -7221,7 +7225,7 @@
         }
       },
       "project.labels.list": {
-        "description": "Data currently labelled public (optionally one kind) with when and why; everything else is private. Reads only.",
+        "description": "Data currently labelled public (optionally one kind) with when and why; with include_structure also the tables whose structure only is public (format 13). Everything else is private. Reads only.",
         "params": {
           "type": "object",
           "properties": {
@@ -7230,6 +7234,9 @@
             },
             "kind": {
               "$ref": "#/$defs/projectLabelKind"
+            },
+            "include_structure": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -7261,6 +7268,12 @@
                       "null"
                     ],
                     "maxLength": 1000
+                  },
+                  "label": {
+                    "enum": [
+                      "public",
+                      "structure"
+                    ]
                   }
                 },
                 "required": [
@@ -7767,6 +7780,556 @@
         },
         "result": {
           "$ref": "#/$defs/localModels"
+        }
+      },
+      "project.agent.tools": {
+        "description": "The agent's tools (name, version, side-effect level, annotations, parameters) and the scripting operations it never uses, with why. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "tools": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object"
+              }
+            },
+            "never": {
+              "type": "array",
+              "maxItems": 512,
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "required": [
+            "tools",
+            "never"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.agent.route": {
+        "description": "Models that can plan for the agent: on this computer (16K context or more) or the organization's network (v1); external endpoints are ruled out. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "enum": [
+                "simple",
+                "complex"
+              ]
+            },
+            "public": {
+              "type": "boolean"
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "$ref": "#/$defs/modelRouteCandidate"
+              }
+            },
+            "excluded": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "$ref": "#/$defs/modelRouteCandidate"
+              }
+            },
+            "choice": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/modelRouteCandidate"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "task",
+            "public",
+            "candidates",
+            "excluded",
+            "choice"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.agent.create": {
+        "description": "Freeze an agent session (system prompt, skills, tools, model, route, policy, limits) with its first message (format 13). Sends nothing; the same request again returns it.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "turn_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192
+            },
+            "configuration": {
+              "type": "object",
+              "properties": {
+                "adapter": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "max_output_tokens": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32768
+                },
+                "temperature": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 2
+                }
+              },
+              "required": [
+                "adapter",
+                "model"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "turn_id",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/agentSessionView"
+        }
+      },
+      "project.agent.say": {
+        "description": "Append the next message to an agent session; the same turn_id again is a no-op. Refused while the previous message is unanswered or once the session ended.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "turn_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "turn_id",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/agentSessionView"
+        }
+      },
+      "project.agent.start": {
+        "description": "Answer the session's unanswered message in the background; read the session for its steps. Repeated calls never resend. The agent saves drafts at most: it never applies them, prepares or starts runs, or labels data.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/agentSessionView"
+        }
+      },
+      "project.agent.cancel": {
+        "description": "Stop a running agent session: records the intent, then stops the current model turn and the requests it waits for.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/agentSessionView"
+        }
+      },
+      "project.agent.recover": {
+        "description": "Settle what a lost agent executor left open: a claimed model turn without its outcome becomes uncertain (never resent) and ends the session.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/agentSessionView"
+        }
+      },
+      "project.agent.get": {
+        "description": "An agent session with a page of its events (the chain checked on every read): limit events from offset; without either, the newest 1000. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          },
+          "required": [
+            "handle",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/agentSessionView"
+        }
+      },
+      "project.agent.list": {
+        "description": "Agent sessions of the project, newest first. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object"
+              }
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "items",
+            "total"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.agent.objects": {
+        "description": "Which agent session and step made a context, discussion message, request or draft (null: not the agent). Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "kind": {
+              "enum": [
+                "context",
+                "message",
+                "request",
+                "draft"
+              ]
+            },
+            "object_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "kind",
+            "object_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "session_id": {
+                      "$ref": "#/$defs/projectUuid"
+                    },
+                    "event_id": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "turn": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "session_id",
+                    "event_id",
+                    "turn"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "owner"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.agent.verify": {
+        "description": "Check an agent session: its chain, frozen header, objects, each planner turn's input rebuilt from the log, and recomputed deterministic tools. Never calls a model.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "events": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "chain_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "planner_turns": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "problems": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "session_id",
+            "events",
+            "chain_sha256",
+            "planner_turns",
+            "problems",
+            "ok"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.agent.export": {
+        "description": "An agent session as stk.agent-log/1 JSON (header, events, chain digest and the check) to keep elsewhere. Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "session_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.agent-log/1"
+            },
+            "session": {
+              "type": "object"
+            },
+            "events": {
+              "type": "array",
+              "maxItems": 100000,
+              "items": {
+                "type": "object"
+              }
+            },
+            "chain_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "verify": {
+              "type": "object",
+              "properties": {
+                "session_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "events": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "chain_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "planner_turns": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "problems": {
+                  "type": "array",
+                  "maxItems": 1000,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "ok": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "session_id",
+                "events",
+                "chain_sha256",
+                "planner_turns",
+                "problems",
+                "ok"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "format",
+            "session",
+            "events",
+            "chain_sha256",
+            "verify"
+          ],
+          "additionalProperties": false
         }
       }
     },
@@ -13970,7 +14533,8 @@
             "network",
             "private_data",
             "no_key",
-            "no_model"
+            "no_model",
+            "small_context"
           ],
           "description": "Why an endpoint was ruled out (excluded only)"
         }
@@ -13983,6 +14547,70 @@
         "location",
         "tier",
         "start"
+      ],
+      "additionalProperties": false
+    },
+    "agentSessionView": {
+      "type": "object",
+      "description": "An agent session: its frozen header, a page of its checked events (the newest 1000 unless paged; total counts all), derived state, and whether it runs in this service.",
+      "properties": {
+        "session": {
+          "type": "object"
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chain_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "awaiting",
+            "idle",
+            "ended"
+          ]
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stop_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "awaiting": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object"
+          }
+        },
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session",
+        "events",
+        "total",
+        "chain_sha256",
+        "state",
+        "turn",
+        "stop_reason",
+        "awaiting"
       ],
       "additionalProperties": false
     }

@@ -1115,7 +1115,7 @@ class WorkflowEditor final : public Editor {
     if (!panel) { return; }
     const auto &project = ctx.store.project().project();
     if (!project) { return; }
-    if (project->format_version < kProjectFormatVersion) { panel->paragraph(ctx.tr("workflow.run.needs_upgrade")); return; }
+    if (project->format_version < 10) { panel->paragraph(ctx.tr("workflow.run.needs_upgrade")); return; }
     if (!workflows_->runs_supported()) { panel->paragraph(ctx.tr("workflow.run.unsupported")); return; }
     hint(*panel, ctx, "workflow.run.intro");
     auto &catalog = ctx.store.catalog();
