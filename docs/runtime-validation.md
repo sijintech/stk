@@ -13,6 +13,8 @@
 - 本机实测（手动，不进 CI）：真实 micromamba 2.9.0（下载并核对 SHA-256）从 conda-forge 安装 Packmol 21.2.1（147 秒，含下载 micromamba）、
   LAMMPS 22 Jul 2025 Update 6（126 秒，1.8 GB）、分子建模工具包 mBuild 1.4.0 + foyer + GMSO + RDKit（169 秒），重新检测均为“STK 已安装”且版本正确。
 - 完整 pytest（`-m "not perf"`）**2390 passed、24 skipped**；完整 Linux CTest **1289/1289**（审查修正前后各一次）。
+- CI：`2d24b4c` [Runtime](https://github.com/sijintech/stk/actions/runs/38070858627) 8/8（3.12 2405 passed，3.11 与 3.14 各 2401 passed）、
+  [桌面](https://github.com/sijintech/stk/actions/runs/38070858576) 5/5（Windows 不跑 `ModulesPython`），密钥扫描通过。
 - CI 发现：`6a2a2b4`（只改文档）的 Runtime 在 Python 3.14 上 1 项失败——S2a 的 `test_the_agent_outlines_…` 用“结构里不含 301”判断没有泄露数值，
   而随机 UUID 恰好含“301”；测试改为去掉标识后比对实际的单元格值（测试本身的问题，产品代码不受影响）。
 
