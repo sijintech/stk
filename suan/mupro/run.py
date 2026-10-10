@@ -11,7 +11,7 @@ mpiexec, which Intel MPI's Hydra also uses inside a Slurm/PBS allocation. srun i
 only used with --launcher srun inside a Slurm allocation; Intel MPI then needs the
 site's I_MPI_PMI_LIBRARY.
 Outside an allocation, Hydra listens on 0.0.0.0, so local mpiexec is refused
-unless the operator sets STK_MUPRO_ALLOW_LOCAL_MPI=1 in the Runtime environment.
+unless the operator sets STK_ALLOW_LOCAL_MPI=1 (or the older STK_MUPRO_ALLOW_LOCAL_MPI=1) in the Runtime environment.
 That guards against accidental local runs; it is not an access control, since
 Runtime clients can run any command.
 
@@ -359,11 +359,11 @@ def _launch_command(program, ranks, threads, launcher, env):
         return launcher, [str(program)]
     # Hydra opens its listener for any rank count, so an explicit one-rank mpiexec is guarded too.
     if launcher == "mpiexec" and not env.get("SLURM_JOB_ID") and not env.get("PBS_JOBID") \
-            and env.get("STK_MUPRO_ALLOW_LOCAL_MPI") != "1":
+            and "1" not in (env.get("STK_ALLOW_LOCAL_MPI"), env.get("STK_MUPRO_ALLOW_LOCAL_MPI")):
         raise MuproError("Refusing local mpiexec outside a Slurm/PBS allocation: Intel MPI's Hydra listens on "
                          "0.0.0.0 while the job runs. Run one rank directly (--launcher auto) or submit to a "
                          "scheduler. On a host that is not externally reachable, the operator may set "
-                         "STK_MUPRO_ALLOW_LOCAL_MPI=1 in the Runtime service environment; tasks cannot set it.")
+                         "STK_ALLOW_LOCAL_MPI=1 in the Runtime service environment; tasks cannot set it.")
     # Outside an allocation srun would queue a separate Slurm job, billed apart from this task.
     if launcher == "srun" and not env.get("SLURM_JOB_ID"):
         raise MuproError("--launcher srun runs inside a Slurm allocation; submit with --backend slurm")

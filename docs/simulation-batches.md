@@ -53,7 +53,7 @@
 
 ```python
 p = stk.project
-stk.batches.templates()  # 当前为 muferro/1
+stk.batches.templates()  # 内置 muferro/1，另加经 stk.engines 注册的引擎
 
 batch = stk.batches.create(
     'muferro/1', [first_case_id, second_case_id], 'runtime:lab',

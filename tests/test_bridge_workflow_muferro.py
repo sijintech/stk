@@ -41,7 +41,7 @@ def scan(inproc, runtime, tmp_path, monkeypatch):
     """Two MuFerro rows (300 K, 325 K) and a workflow cases -> MuFerro -> energy analysis."""
     client, supervisor, _, _ = runtime
     sdk = make_fake_sdk(tmp_path / "fake-sdk")
-    for name in ("STK_MUPRO_ENV_SCRIPTS", "MUPROROOT", "STK_MUPRO_ALLOW_LOCAL_MPI", "SLURM_JOB_ID", "PBS_JOBID"):
+    for name in ("STK_MUPRO_ENV_SCRIPTS", "MUPROROOT", "STK_MUPRO_ALLOW_LOCAL_MPI", "STK_ALLOW_LOCAL_MPI", "SLURM_JOB_ID", "PBS_JOBID"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("MUPRO_SDK_PREFIX", str(sdk))
     h = inproc()

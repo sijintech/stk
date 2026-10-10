@@ -9,7 +9,7 @@ import re
 from uuid import NAMESPACE_URL, uuid5
 
 from .muferro import _canonical, _cells, _create_table, _revision, _table
-from .templates import TEMPLATES, template
+from .templates import remote_templates, template
 
 
 def identity(name):
@@ -82,7 +82,7 @@ class Batches:
         self.stk = stk
 
     def templates(self):
-        return [{"id": t.id, "name": t.name, "table_id": t.table_id} for t in TEMPLATES.values()]
+        return [{"id": t.id, "name": t.name, "table_id": t.table_id} for t in remote_templates().values()]
 
     def create(self, template_id, record_ids, connection, *, expected_revision, options=None, project=None):
         p = project or self.stk.project

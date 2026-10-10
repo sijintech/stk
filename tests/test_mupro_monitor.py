@@ -26,7 +26,7 @@ from suan.mupro.run import main
 from suan.runtime.models import TaskSpec
 
 TESTS = Path(__file__).resolve().parent
-NODE_ENV = ("STK_MUPRO_ENV_SCRIPTS", "MUPRO_SDK_PREFIX", "MUPROROOT", "STK_MUPRO_ALLOW_LOCAL_MPI", "SLURM_JOB_ID",
+NODE_ENV = ("STK_MUPRO_ENV_SCRIPTS", "MUPRO_SDK_PREFIX", "MUPROROOT", "STK_MUPRO_ALLOW_LOCAL_MPI", "STK_ALLOW_LOCAL_MPI", "SLURM_JOB_ID",
             "PBS_JOBID", "SRUN_CPUS_PER_TASK", "STK_MONITOR_PATH", "STK_TASK_ID", "STK_MONITOR_FAKE_TIME",
             "PMI_RANK", "PMIX_RANK", "OMPI_COMM_WORLD_RANK", "SLURM_PROCID", "MV2_COMM_WORLD_RANK")
 HEADER = "    " + "step".rjust(6) + " " * 9 + "".join(label.rjust(18) for label in DEFAULT_LABELS)

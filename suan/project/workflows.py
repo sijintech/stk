@@ -375,7 +375,8 @@ class Workflows:
                     readable.append({"id": entry["id"], "name": entry["name"]})
         return {"revision": revision, "tables": tables[:MAX_CHOICE_TABLES], "omitted_tables": max(0, len(tables) - MAX_CHOICE_TABLES),
                 "snapshots": snapshots, "analyses": readable,
-                "templates": [{"id": template.id, "name": template.name, "table_id": template.table_id}
+                "templates": [{"id": template.id, "name": template.name, "table_id": template.table_id,
+                               "remote": bool(getattr(template, "remote", False)), "local": bool(getattr(template, "local", False))}
                               for template in workflow_templates().values()]}
 
     def validate(self, document):

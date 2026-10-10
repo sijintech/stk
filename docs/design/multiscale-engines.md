@@ -96,6 +96,17 @@ STK 在数据一侧已有插件机制（连接器、输入连接器、图节点�
 4. **PET 分子模型怎么来**：(a) 先由用户提供建好的 LAMMPS 数据文件（用 Moltemplate、EMC、LigParGen 等外部工具），
    STK 负责参数扫描、运行与分析（建议）；(b) STK 内置聚合物建模与力场分配（工作量大，放在之后）。
 
+## 进度
+
+- **E0a（已交付，2026-10-10）**：引擎模板接口与按模板分派。
+  - `suan/workflows/templates.py` 定义远程模板（计算引擎）的接口：`field_ids`、`describe`/`describe_values`、`prepare(…, identity)`、
+    `collect`、`results_prefix`、`final_state`、`validate_run`；
+  - 外部引擎包经 `stk.engines` entry point 注册（内置标识不可替换，加载问题由 `engine_diagnostics()` 报告）；
+  - 按行工作流的冻结、过期判断、提交与收集都按步骤的模板分派，不再直接调用 MuFerro；MuFerro 行为不变（原有测试全部通过）；
+  - `project.workflows.choices()` 报告模板的 `remote`/`local`，桌面据此判断运行区是否要选运行环境（旧服务仍按 `muferro/1`）；
+  - 通用的 `STK_ALLOW_LOCAL_MPI` 取代 MuPRO 专用名（旧名仍有效，二者都只能由运营者设置）。
+- E0 其余部分（模块管理、每个步骤各自的运行环境、桌面仿真视图按引擎显示、共用辅助代码移出 `muferro.py`）：未实现。
+
 ## 所有者决定（2026-10-10）
 
 1. **顺序**：先做计算引擎接口的通用化，再做 LAMMPS，再做 ABACUS。

@@ -96,7 +96,7 @@ def run(task_dir):
         env.update(spec["env"])
         # Mirrors models.RESERVED_ENV as defense in depth for tasks run by this copy; the
         # supervisor fails older queued specs that set these before dispatch.
-        for key in ("SLURM_JOB_ID", "PBS_JOBID", "STK_MUPRO_ALLOW_LOCAL_MPI"):
+        for key in ("SLURM_JOB_ID", "PBS_JOBID", "STK_ALLOW_LOCAL_MPI", "STK_MUPRO_ALLOW_LOCAL_MPI"):
             if key in os.environ:
                 env[key] = os.environ[key]
             else:

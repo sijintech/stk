@@ -13720,6 +13720,14 @@
                     "type": "null"
                   }
                 ]
+              },
+              "remote": {
+                "type": "boolean",
+                "description": "Runs on a Runtime connection chosen for the run (an engine such as MuFerro)."
+              },
+              "local": {
+                "type": "boolean",
+                "description": "Runs on this computer."
               }
             },
             "required": [

@@ -2,6 +2,15 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-10：E0a 计算引擎模板接口
+
+- Python：新增 `test_engine_templates.py` 3 项（entry point 注册、内置标识不可替换、缺接口与导入失败被报告且只加载一次、批处理可用、
+  `choices()` 的 `remote`/`local`、MuFerro 提供完整接口）；`test_mupro.py` 改为检查新名 `STK_ALLOW_LOCAL_MPI` 并保留旧名有效。
+  MuFerro 的工作流、批处理与 Runtime 测试（`test_bridge_workflow_muferro.py`、`test_workflow_muferro.py`、`test_workflow_batches.py`、
+  `test_mupro*.py`、`test_integration_mupro.py`）全部通过。完整 pytest 首次 **3 failed**（固定了旧的 `choices()` 形状 2 项、提示文字 1 项），
+  更新后完整 pytest **2381 passed、24 skipped**。
+- 原生：完整 Linux CTest **1287/1288**，唯一失败为 `wm_app_window_weston`（Wayland 窗口测试，单独重跑连续 3 次通过，与已记录的 Wayland 偶发同类）。
+
 ## 2026-10-10：S3a 材料预测模型
 
 - Python：`test_materials.py` 11 项——合成回线（低于 T_c 时 P_r 与解析值 31.6 μC/cm² 相符、矫顽场在单畴本征值的 0.95–1.25 倍、远高于 T_c 只剩很窄的回线、

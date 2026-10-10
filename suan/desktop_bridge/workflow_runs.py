@@ -39,6 +39,16 @@ _EDIT_RETRIES = 8
 _REMOTE_ERRORS = 10  # consecutive failed reads of a remote task before its attempt fails
 
 
+
+def _engine(plan, step):
+    """The registered template (engine) a remote step of this run was frozen with."""
+    from suan.workflows.templates import workflow_templates
+    identity = plan["steps"][step]["template"]
+    template = workflow_templates().get(identity)
+    if template is None or not getattr(template, "remote", False):
+        raise ProjectError(f"The simulation template {identity} of step {step} is not available in this STK")
+    return template
+
 class _Cancelled(Exception):
     pass
 
@@ -327,13 +337,13 @@ class WorkflowRunExecutor:
 
     def _submit(self, job, plan, step, row, attempt, task):
         """Prepare and submit (or adopt) this attempt's Runtime task, then return: later passes follow it."""
-        from suan.workflows import muferro
+        template = _engine(plan, step)
         key = (step, row["id"])
         job.remote[key] = {"attempt": attempt, "simulation_run_id": None, "state": None, "errors": 0}
         simulation = plan["simulation"]
         connection, options = simulation["connection"], simulation["options"]
         try:
-            live, _, _ = muferro.describe_case(job.store.snapshot(), row["id"], connection, options)
+            live = template.describe_values(job.store.snapshot(), row["id"], connection, options)
         except ValueError as error:
             raise RowChanged(f"Row {row['number']} cannot be run as frozen: {error}") from None
         if json.dumps(live, sort_keys=True) != json.dumps(plan["parameters"][step][row["id"]], sort_keys=True):
@@ -353,8 +363,8 @@ class WorkflowRunExecutor:
                     p.runs.submit(run["id"])
                 return
         identity = f"workflow-run:{job.run_id}:{step}:{row['id']}:{attempt}"
-        run = self._console(job, lambda revision: api.muferro.prepare(
-            row["id"], connection, expected_revision=revision, project=p, identity=identity, **options))
+        run = self._console(job, lambda revision: template.prepare(api, p, row["id"], connection, options, revision,
+                                                                   identity=identity))
         job.remote[key]["simulation_run_id"] = run["id"]
         self._progress(job, step, row, attempt, stage="prepared", simulation_run_id=run["id"])
         submitted = p.runs.submit(run["id"])
@@ -393,7 +403,7 @@ class WorkflowRunExecutor:
         job.remote.pop(key)
         if state == "succeeded":
             try:
-                produced = self._collect(job, step, row, attempt, run)
+                produced = self._collect(job, plan, step, row, attempt, run)
             except _Cancelled:
                 job.remote[key] = remote  # released by _release (interrupted or cancelled)
                 return False
@@ -406,20 +416,20 @@ class WorkflowRunExecutor:
         reason = task.get("reason") or run["status"].get("error") or f"The Runtime task {state}"
         runs.finish_attempt(job.run_id, step, row["id"], attempt, "cancelled" if state == "cancelled" else "failed",
                             executor_id=self.executor_id,
-                            error={"code": "runtime_" + state, "message": f"MuFerro on the Runtime: {reason}"[:2000]})
+                            error={"code": "runtime_" + state, "message": f"{_engine(plan, step).name} on the Runtime: {reason}"[:2000]})
         return True
 
-    def _collect(self, job, step, row, attempt, run):
-        """Download and verify the results (the MuFerro results table), then freeze the final state as the row's snapshot."""
-        from suan.workflows import muferro
+    def _collect(self, job, plan, step, row, attempt, run):
+        """Download and verify the results (the engine's results table), then freeze the final state as the row's snapshot."""
+        template = _engine(plan, step)
         api = self._api(job)
         self._progress(job, step, row, attempt, stage="collecting", simulation_run_id=run["id"])
-        collected = self._console(job, lambda revision: api.muferro.collect(run["id"], project=api.project))
-        prefix = f"results/muferro/{run['id']}/"
+        collected = self._console(job, lambda revision: template.collect(api, api.project, run["id"]))
+        prefix = template.results_prefix(run["id"])
         names = {item["path"][len(prefix):]: item["path"] for item in collected["files"] if item["path"].startswith(prefix)}
-        chosen = muferro.final_state(sorted(names))
+        chosen = template.final_state(sorted(names))
         if not 1 <= len(chosen) <= 100:
-            raise ProjectError(f"The final state of this MuFerro run has {len(chosen)} files; analyses take 1 to 100")
+            raise ProjectError(f"The final state of this {template.name} run has {len(chosen)} files; analyses take 1 to 100")
         paths = [str(job.store.directory / names[name]) for name in chosen]
         indexed = self._edit(job, lambda revision: job.store.files.index(paths, expected_revision=revision))
         self.changed(job.store)

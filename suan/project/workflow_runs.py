@@ -141,7 +141,6 @@ class WorkflowRuns:
         return self.get(run_id)
 
     def _plan(self, workflow_id, rows, run_id, revision, simulation=None):
-        from suan.workflows import muferro
         from suan.workflows.templates import workflow_templates  # Registered versions only.
         saved = self.store.workflows.get(workflow_id)
         record = saved["workflow"]
@@ -173,14 +172,15 @@ class WorkflowRuns:
         if remote and simulation is None:
             raise ProjectError("Choose where to run: this workflow's simulation steps need a Runtime connection")
         if remote and simulation["connection"].startswith("hub:"):
-            raise ProjectError("Workflow runs submit MuFerro through direct or SSH Runtime connections; Hub nodes are not supported")
+            names = ", ".join(sorted({templates[step["ref"]["template"]].name for step in remote}))
+            raise ProjectError(f"Workflow runs submit {names} through direct or SSH Runtime connections; Hub nodes are not supported")
         table_id = tables[0]["ref"]["table"]
         table = next(table for table in model["tables"] if table["id"] == table_id)
         records = {entry["id"]: (number, entry) for number, entry in enumerate(table["records"], start=1)}
         fields = {value["$field"] for step in steps for value in step.get("parameters", {}).values()
                   if type(value) is dict and set(value) == {"$field"}}
-        if remote:
-            fields |= set(muferro.FIELD_IDS.values())  # a MuFerro step takes every case field of its row
+        for step in remote:
+            fields |= set(templates[step["ref"]["template"]].field_ids)  # the case fields an engine step freezes
         frozen_rows = []
         for row in rows:
             if row not in records:
@@ -199,7 +199,7 @@ class WorkflowRuns:
                 parameters[identity] = {}
                 for row in frozen_rows:
                     try:
-                        values, _, _ = muferro.describe_case(model, row["id"], simulation["connection"], simulation["options"])
+                        values = template.describe_values(model, row["id"], simulation["connection"], simulation["options"])
                     except (ValueError, TypeError) as exc:
                         raise ProjectError(f"Row {row['number']}: {exc}") from None
                     parameters[identity][row["id"]] = values
@@ -389,9 +389,10 @@ class WorkflowRuns:
             return {key: value for key, value in step.items() if key != "label"}
 
         def fields_of(step):
-            if plan["steps"].get(step["id"], {}).get("remote"):
-                from suan.workflows import muferro
-                return list(muferro.FIELD_IDS.values())  # every case field of the row
+            frozen = plan["steps"].get(step["id"], {})
+            if frozen.get("remote"):
+                template = templates.get(frozen["template"])
+                return list(template.field_ids) if template is not None else []  # unavailable: reported below
             return [value["$field"] for value in step.get("parameters", {}).values()
                     if type(value) is dict and set(value) == {"$field"}]
 

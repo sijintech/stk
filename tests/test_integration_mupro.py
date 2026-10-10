@@ -25,7 +25,7 @@ from conftest import finish
 pytestmark = pytest.mark.server
 
 # Anything that could reach a real SDK, licence or MPI launcher, and the scheduler markers.
-NODE_ENV = ("STK_MUPRO_ENV_SCRIPTS", "MUPRO_SDK_PREFIX", "MUPROROOT", "STK_MUPRO_ALLOW_LOCAL_MPI", "SLURM_JOB_ID",
+NODE_ENV = ("STK_MUPRO_ENV_SCRIPTS", "MUPRO_SDK_PREFIX", "MUPROROOT", "STK_MUPRO_ALLOW_LOCAL_MPI", "STK_ALLOW_LOCAL_MPI", "SLURM_JOB_ID",
             "PBS_JOBID", "SRUN_CPUS_PER_TASK")
 OWNER = "test-owner-credential-" + "x"*32
 AUTH = {"Authorization": "Bearer " + OWNER}
@@ -95,7 +95,7 @@ def test_local_multirank_via_runtime_is_refused_then_allowed(runtime, node, tmp_
     assert finish(client, supervisor, task["id"], timeout=60)["state"] == "failed"
     refused = report(client, task["id"], tmp_path / "refused")
     assert (refused["state"], refused["classification"], refused["command"]) == ("failed", "configuration", [])
-    assert "0.0.0.0" in refused["reason"] and "STK_MUPRO_ALLOW_LOCAL_MPI=1" in refused["reason"]
+    assert "0.0.0.0" in refused["reason"] and "STK_ALLOW_LOCAL_MPI=1" in refused["reason"]
 
     # The operator opts in through the Runtime service environment, never through the TaskSpec.
     mpiexec = make_fake_mpiexec(bin_dir)

@@ -1223,10 +1223,22 @@ class WorkflowEditor final : public Editor {
 
   /** Whether the shown workflow has a simulation step that runs on a Runtime (muferro/1;
    * suan/workflows/templates.py marks such templates ``remote``). */
+  /** Whether the shown workflow has a simulation step that runs on a Runtime: a template the service reports as
+   * remote (any registered engine; docs/design/multiscale-engines.md), or muferro/1 for services older than that flag. */
   bool remote_steps() const
   {
+    const auto &templates = member(workflows_->choices(), "templates");
     for (const auto &step : member(member(workflows_->selected(), "document"), "steps")) {
-      if (io::get_string(step, "kind") == "simulation" && io::get_string(member(step, "ref"), "template") == "muferro/1") { return true; }
+      if (io::get_string(step, "kind") != "simulation") { continue; }
+      const auto id = io::get_string(member(step, "ref"), "template");
+      bool reported = false;
+      for (const auto &item : templates) {
+        if (io::get_string(item, "id") == id && item.contains("remote")) {
+          reported = true;
+          if (io::get_bool(item, "remote", false)) { return true; }
+        }
+      }
+      if (!reported && id == "muferro/1") { return true; }
     }
     return false;
   }

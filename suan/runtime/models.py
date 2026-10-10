@@ -13,7 +13,8 @@ MPI_RESOURCES = frozenset({"ranks", "threads_per_rank"})
 # Scheduler allocation markers and the operator's local-MPI opt-in come only from the
 # Runtime service or scheduler environment (docs/runtime-mupro.md); the worker sets the
 # monitoring events path and task ID (docs/specs/stk-events-v1.md).
-RESERVED_ENV = ("SLURM_JOB_ID", "PBS_JOBID", "STK_MUPRO_ALLOW_LOCAL_MPI", "STK_MONITOR_PATH", "STK_TASK_ID")
+# STK_ALLOW_LOCAL_MPI (any engine) and its older MuPRO-only name are set by the operator, never by a task.
+RESERVED_ENV = ("SLURM_JOB_ID", "PBS_JOBID", "STK_ALLOW_LOCAL_MPI", "STK_MUPRO_ALLOW_LOCAL_MPI", "STK_MONITOR_PATH", "STK_TASK_ID")
 
 
 def layout(resources):

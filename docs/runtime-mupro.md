@@ -23,7 +23,7 @@ Runtime、控制服务与节点代理只在 Linux 运行；客户端命令 `suan
 | `MUPRO_SDK_PREFIX` | SDK 安装前缀，含 `bin/muFerro` 与 `share/mupro/skills/mupro-muferro/examples/`；与 muprosdk 客户端同名 |
 | `MUPROROOT` | 许可目录路径，最多 256 字节。STK 只传递路径，不读取、打印或复制其中文件 |
 | `STK_MUPRO_ENV_SCRIPTS` | 启动前依次 source 的 bash 脚本，以 `:` 分隔，例如 oneAPI 的 `mpi/latest/env/vars.sh` 与编译器运行库脚本 |
-| `STK_MUPRO_ALLOW_LOCAL_MPI` | 设为 `1` 时允许在 Slurm／PBS 分配之外运行 mpiexec，见“本机多 rank 保护” |
+| `STK_ALLOW_LOCAL_MPI`（旧名 `STK_MUPRO_ALLOW_LOCAL_MPI` 仍有效） | 设为 `1` 时允许在 Slurm／PBS 分配之外运行 mpiexec（所有计算引擎），见“本机多 rank 保护” |
 
 任务参数优先：`--sdk-prefix` 优先于 `MUPRO_SDK_PREFIX`（source 脚本后读取），
 `--env-script` 取代 `STK_MUPRO_ENV_SCRIPTS`，`--license-dir` 取代 `MUPROROOT`。

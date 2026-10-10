@@ -22,7 +22,7 @@ from suan.runtime.common import sha256
 
 WORKSPACE = "a" * 32
 # Anything that could reach a real SDK, licence or MPI launcher, and the scheduler markers.
-NODE_ENV = ("STK_MUPRO_ENV_SCRIPTS", "MUPRO_SDK_PREFIX", "MUPROROOT", "STK_MUPRO_ALLOW_LOCAL_MPI", "SLURM_JOB_ID",
+NODE_ENV = ("STK_MUPRO_ENV_SCRIPTS", "MUPRO_SDK_PREFIX", "MUPROROOT", "STK_MUPRO_ALLOW_LOCAL_MPI", "STK_ALLOW_LOCAL_MPI", "SLURM_JOB_ID",
             "PBS_JOBID", "SRUN_CPUS_PER_TASK")
 
 
@@ -518,7 +518,7 @@ def test_local_multirank_requires_operator_opt_in(node, tmp_path, monkeypatch):
     code, record = launch(sdk, "--example", "--ranks", "2")
     assert code == 2
     assert (record["state"], record["classification"]) == ("failed", "configuration")
-    assert "0.0.0.0" in record["reason"] and "STK_MUPRO_ALLOW_LOCAL_MPI=1" in record["reason"]
+    assert "0.0.0.0" in record["reason"] and "STK_ALLOW_LOCAL_MPI=1" in record["reason"]
     assert record["command"] == [] and not (work / "fake-muferro.json").exists()
     # An explicit one-rank mpiexec would open the same listener.
     code, record = launch(sdk, "--launcher", "mpiexec")
@@ -526,10 +526,15 @@ def test_local_multirank_requires_operator_opt_in(node, tmp_path, monkeypatch):
     code, record = launch(sdk, "--launcher", "none", "--ranks", "2")
     assert code == 2 and record["classification"] == "configuration"
 
-    monkeypatch.setenv("STK_MUPRO_ALLOW_LOCAL_MPI", "1")
+    monkeypatch.setenv("STK_ALLOW_LOCAL_MPI", "1")  # the generic name; the older MuPRO-only name still works below
     assert shutil.which("mpiexec") == str(mpiexec)
     code, record = launch(sdk, "--ranks", "2")
     assert code == 0, record["reason"]
+    from suan.mupro.run import MuproError, _launch_command
+    env = {"PATH": str(bin_dir)}
+    with pytest.raises(MuproError, match="STK_ALLOW_LOCAL_MPI"):
+        _launch_command(sdk / "bin" / "muFerro", 2, 1, "mpiexec", env)
+    assert _launch_command(sdk / "bin" / "muFerro", 2, 1, "mpiexec", {**env, "STK_MUPRO_ALLOW_LOCAL_MPI": "1"})[0] == "mpiexec"
     assert_fake_command(record, tmp_path)
     assert record["command"] == [str(mpiexec), "-n", "2", str(sdk / "bin" / "muFerro")]
     assert record["layout"] == {"ranks": 2, "threads_per_rank": 1, "launcher": "mpiexec"}

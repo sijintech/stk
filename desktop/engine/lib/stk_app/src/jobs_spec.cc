@@ -18,7 +18,7 @@ namespace {
 /* suan/runtime/models.py */
 constexpr int64_t kMaxInt = 2147483647;
 constexpr size_t kMaxName = 200;
-const char *const kReservedEnv[] = {"SLURM_JOB_ID", "PBS_JOBID", "STK_MUPRO_ALLOW_LOCAL_MPI", "STK_MONITOR_PATH",
+const char *const kReservedEnv[] = {"SLURM_JOB_ID", "PBS_JOBID", "STK_ALLOW_LOCAL_MPI", "STK_MUPRO_ALLOW_LOCAL_MPI", "STK_MONITOR_PATH",
                                     "STK_TASK_ID"};
 
 bool is_space(const char c)
