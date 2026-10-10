@@ -16,6 +16,7 @@
   - 完整 pytest（`-m "not perf"`，不设 `STK_TOKEN_PLAN_MODEL`）：审查前 **2347 passed、24 skipped**，审查修正后 **2358 passed、24 skipped**。
 - 原生：格式常量改为 13；桌面“按行运行”的门槛改为格式 10。完整 Linux CTest **1283/1283**（审查前后各一次）。
 - 未做：桌面界面（S2b）、真实模型的人工验收（S2b）。
+- CI：`bfacf38` [桌面](https://github.com/sijintech/stk/actions/runs/38018846172) 5/5、[Runtime](https://github.com/sijintech/stk/actions/runs/38018846206) 8/8，密钥扫描通过。
 
 ## 2026-10-09：思劲平台 S1d（能力分档与自动切换）
 
