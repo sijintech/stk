@@ -1,6 +1,6 @@
 """What in a project needs a person, is running, or finished recently (UX package U1).
 
-A read-only summary across workflow runs, analysis runs, simulation runs, AI drafts and AI requests,
+A read-only summary across workflow runs, analysis runs, simulation runs, AI drafts, AI requests and agent sessions,
 for one "needs attention" surface (docs/design/ux-package-2026-10.md). Failures come first, then
 items to review, then running ones, then finished ones. Each item carries structured fields for the
 interface to word, a navigation target, and a key that changes with the item's state, so a viewed
@@ -13,8 +13,8 @@ _GROUP_ORDER = {"needs_you": 0, "running": 1, "done": 2}
 _SEVERITY_ORDER = {"failure": 0, "review": 1, "progress": 2, "info": 3}
 
 
-def _item(kind, identity, group, severity, *, name=None, status=None, at=None, target=None, **fields):
-    signature = f"{status}"
+def _item(kind, identity, group, severity, *, name=None, status=None, at=None, target=None, step=None, **fields):
+    signature = f"{status}" + (f"@{step}" if step is not None else "")
     if "counts" in fields:
         signature += ":" + ",".join(f"{key}={value}" for key, value in sorted(fields["counts"].items()))
     return {"key": f"{kind}:{identity}:{signature}", "kind": kind, "id": identity, "group": group, "severity": severity,
@@ -33,8 +33,13 @@ def _newest(page, key):
     return items[-MAX_PER_SOURCE:][::-1]
 
 
-def collect(store):
-    """Every attention item of the project, ordered: needs you (failures, reviews), running, done."""
+# Why an agent session stopped that needs a person (docs/design/agent-harness.md, "关注列表").
+_AGENT_FAILURES = ("uncertain", "error", "limit", "interrupted", "private_data", "network", "damaged")
+
+
+def collect(store, *, running_session=None):
+    """Every attention item of the project, ordered: needs you (failures, reviews), running, done.
+    ``running_session(id)`` tells whether this service is answering an agent session right now."""
     with store._connect() as db:
         version = _version(db)
         revision = db.execute("SELECT revision FROM project").fetchone()[0]
@@ -100,6 +105,21 @@ def collect(store):
                 items.append(_item("request", request["id"], "running", "progress", status=status, **common))
             elif status == "completed":
                 items.append(_item("request", request["id"], "done", "info", status=status, **common))
+    if version >= 13:
+        for session in store.agent_sessions.list(limit=MAX_PER_SOURCE)["items"]:
+            common = {"name": session["first_message"], "at": session["created_at"], "step": session["turn"],
+                      "target": {"editor": "ai", "session_id": session["id"], "project_id": store._project_id}}
+            reason, state = session["stop_reason"], session["state"]
+            if running_session is not None and running_session(session["id"]):
+                items.append(_item("agent_session", session["id"], "running", "progress", status="running", **common))
+            elif state == "awaiting":
+                items.append(_item("agent_session", session["id"], "needs_you", "review", status="awaiting", **common))
+            elif state == "ready":  # a message waits for the agent, and nothing here is answering it
+                items.append(_item("agent_session", session["id"], "needs_you", "review", status="ready", **common))
+            elif reason in _AGENT_FAILURES:
+                items.append(_item("agent_session", session["id"], "needs_you", "failure", status=reason, **common))
+            elif reason in ("final", "cancelled"):
+                items.append(_item("agent_session", session["id"], "done", "info", status=reason, **common))
     items.sort(key=lambda item: (_GROUP_ORDER[item["group"]], _SEVERITY_ORDER[item["severity"]], _reverse_time(item["at"])))
     return {"revision": revision, "items": items}
 

@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_state.hh"
+#include "stk/app/project_agent.hh"
+#include "stk/app/project_attention.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_archive.hh"
 #include "stk/app/project_data_labels.hh"
@@ -4137,19 +4139,51 @@ TEST_F(ProjectPython, TablesArePrivateUntilLabelledPublicOnTheDataPage)
   ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
   f.screen.set_maximized(&area);
   auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
-  STK_UNTIL(widget("table_public") && widget("table_public")->enabled);
-  EXPECT_FALSE(widget("table_public")->boolean.value());
-  widget("table_public")->boolean.assign(true);
-  STK_UNTIL(f.shell->store().data_labels().is_public("table", table_id) && !f.shell->store().data_labels().busy());
+  auto &labels = f.shell->store().data_labels();
+  // Format 13: private, structure public (names, fields, units and row counts only) or public.
+  STK_UNTIL(widget("table_label") && widget("table_label")->enabled);
+  EXPECT_EQ(widget("table_label")->index.value(), 0);
+  widget("table_label")->index.assign(2);
+  STK_UNTIL(labels.is_public("table", table_id) && !labels.busy());
   std::optional<bridge::Result<Json>> listed;
   client->call("project.labels.list", {{"handle", state().project()->handle}}).then([&](auto value) { listed = value; });
   ASSERT_TRUE(loop.pump_until([&] { return listed.has_value(); }));
   ASSERT_TRUE(listed->ok());
   ASSERT_EQ(listed->value().at("items").size(), 1u);
   EXPECT_EQ(listed->value().at("items")[0].at("id"), table_id);
-  widget("table_public")->boolean.assign(false);
-  STK_UNTIL(!f.shell->store().data_labels().is_public("table", table_id) && !f.shell->store().data_labels().busy());
+  widget("table_label")->index.assign(1);
+  STK_UNTIL(labels.label("table", table_id) == "structure" && !labels.busy());
+  EXPECT_FALSE(labels.is_public("table", table_id));  // its values stay private
+  STK_UNTIL(widget("table_label") && widget("table_label")->index.value() == 1);
+  widget("table_label")->index.assign(0);
+  STK_UNTIL(labels.label("table", table_id) == "private" && !labels.busy());
   EXPECT_EQ(state().project()->revision, 1);  // labelling is not an edit
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(ProjectPython, AFormat12ProjectKeepsThePublicCheckbox)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  // Format 12: no agent sessions, labels are public or private only.
+  ASSERT_TRUE(scripts.execute("import sqlite3\nwith sqlite3.connect(" + Json(dir.str() + "/project/project.sqlite3").dump() +
+      ") as db:\n    for table in ('project_agent_objects', 'project_agent_events', 'project_agent_sessions'):\n"
+      "        db.execute('DROP TABLE ' + table)\n    db.execute('PRAGMA user_version=12')"));
+  ASSERT_TRUE(loop.pump_until([&] { return !scripts.busy(); }, 30));
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  state().refresh(); settled();
+  ASSERT_EQ(state().project()->format_version, 12);
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  STK_UNTIL(widget("table_public") && widget("table_public")->enabled);
+  EXPECT_EQ(widget("table_label"), nullptr);
+  EXPECT_FALSE(f.shell->store().data_labels().structure_supported());
+  widget("table_public")->boolean.assign(true);
+  STK_UNTIL(f.shell->store().data_labels().is_public("table", table_id) && !f.shell->store().data_labels().busy());
+  EXPECT_FALSE(state().agent().supported());  // no agent purpose in a format-12 project
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
 
@@ -4404,6 +4438,170 @@ TEST_F(LocalModelsPython, AModelIsInstalledStartedAndOfferedAsALocalEndpointFrom
   // Removing deletes the files and the endpoint.
   widget(scope + "ai_local_remove/tiny-q4")->on_click();
   STK_UNTIL(models.endpoint("local-tiny-q4") == nullptr && widget(scope + "ai_local_install/tiny-q4") != nullptr);
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+/** Agent sessions (S2b, docs/design/agent-harness.md) with a real service whose model is scripted
+ * (desktop/tests/bridge/agent_bridge.py): it outlines, captures the rows, proposes a sweep of three new rows. */
+class AgentPython : public ProjectPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    std::filesystem::create_directories(dir.str() + "/agent-control");
+    options.command = {python, std::string(STK_REPO_ROOT) + "/desktop/tests/bridge/agent_bridge.py", dir.str() + "/agent-control",
+        "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+  }
+
+  const ui::Widget *widget(const std::string &key) { return f.screen.ui()->find("a2/main/" + key); }
+
+  std::string timeline()
+  {
+    std::string shown;
+    if (const auto *log = widget("ai_agent_timeline"); log && log->log) {
+      for (size_t i = 0; i < log->log->line_count(); ++i) { shown += std::string(log->log->line(i)) + "\n"; }
+    }
+    return shown;
+  }
+
+  /** Open the AI assistant on the agent purpose and ask; the session waits for the person when it returns. */
+  void ask_agent(const std::string &text)
+  {
+    populated();
+    auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+    f.screen.set_maximized(&area);
+    const auto handle = state().project()->handle;
+    STK_UNTIL(widget("ai_intent/" + handle) != nullptr && state().agent().supported());
+    f.screen.ui()->find("a2/main/ai_intent/" + handle)->index.assign(3);
+    STK_UNTIL(state().agent().route_loaded() && widget("ai_agent_text/" + handle) != nullptr);
+    EXPECT_EQ(io::get_string(state().agent().route().at("choice"), "endpoint"), "laptop");
+    f.screen.ui()->find("a2/main/ai_agent_text/" + handle)->string.assign(text);
+    STK_UNTIL(widget("ai_agent_send") && widget("ai_agent_send")->enabled);
+    widget("ai_agent_send")->on_click();
+    STK_UNTIL(io::get_string(state().agent().view(), "state") == "awaiting" && !state().agent().running());
+  }
+};
+
+TEST_F(AgentPython, TheAgentsDraftIsAppliedFromItsCardThroughTheSession)
+{
+  ASSERT_NO_FATAL_FAILURE(ask_agent("Scan the temperature of the first case."));
+  auto &agent = state().agent();
+  const auto view = agent.view();
+  STK_UNTIL(timeline().find("Propose a parameter-sweep draft") != std::string::npos);
+  const auto shown = timeline();
+  EXPECT_NE(shown.find("[read] Look at the project's structure"), std::string::npos) << shown;
+  EXPECT_NE(shown.find("[record] Capture rows"), std::string::npos) << shown;
+  EXPECT_NE(shown.find("I saved a draft."), std::string::npos) << shown;
+  ASSERT_EQ(view.at("awaiting").size(), 1u);
+  const auto item = view.at("awaiting")[0];
+  const auto draft_id = io::get_string(item, "draft_id");
+  EXPECT_EQ(state().project()->revision, 1);  // the agent saved a draft, nothing else
+  EXPECT_EQ(state().table()->records.size(), 1u);
+  // The card opens the draft in the review page; applying there goes through the session.
+  STK_UNTIL(widget("ai_agent_review/" + io::get_string(item, "item_id")) &&
+            widget("ai_agent_review/" + io::get_string(item, "item_id"))->enabled);
+  widget("ai_agent_review/" + io::get_string(item, "item_id"))->on_click();
+  STK_UNTIL(io::get_string(state().saved_review(), "id") == draft_id &&
+            (agent.track_draft(draft_id), agent.draft_state(draft_id) == AgentDraft::Waiting));
+  ASSERT_TRUE(agent.awaiting_for_draft(draft_id).has_value());
+  ASSERT_TRUE(state().preview()); settled();
+  ASSERT_TRUE(state().apply_review());
+  STK_UNTIL(!state().busy() && state().project()->revision == 2 && io::get_string(state().saved_review(), "status") == "applied");
+  EXPECT_EQ(state().table()->records.size(), 4u);
+  // The decision and its receipt are in the session; the card now asks to run the new rows.
+  f.screen.set_maximized(&f.area("a2"));
+  STK_UNTIL(io::get_string(agent.view(), "state") == "awaiting" &&
+            io::get_string(agent.view().at("awaiting")[0], "kind") == "run_rows");
+  std::vector<std::string> kinds;
+  for (const auto &event : agent.view().at("events")) { kinds.push_back(io::get_string(event, "kind")); }
+  const auto decided = std::find(kinds.begin(), kinds.end(), "approval_decided");
+  ASSERT_NE(decided, kinds.end());
+  EXPECT_NE(std::find(decided, kinds.end(), "approval_receipt"), kinds.end());
+  STK_UNTIL(timeline().find("approved applying the draft") != std::string::npos);
+  EXPECT_NE(widget("ai_agent_run_rows/rows:" + draft_id), nullptr);
+  // The record checks out, and the Home list shows the session waiting for the person.
+  ASSERT_TRUE(agent.verify());
+  STK_UNTIL(!agent.verification().empty());
+  EXPECT_TRUE(agent.verification().value("ok", false)) << agent.verification().dump();
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(AgentPython, DiscardingTheAgentsDraftIsRecordedInTheSession)
+{
+  ASSERT_NO_FATAL_FAILURE(ask_agent("Scan the temperature of the first case."));
+  auto &agent = state().agent();
+  const auto draft_id = io::get_string(agent.view().at("awaiting")[0], "draft_id");
+  // Discarding goes through the session once its draft is known to wait there (the card already tracks it).
+  STK_UNTIL((agent.track_draft(draft_id), agent.draft_state(draft_id) == AgentDraft::Waiting));
+  ASSERT_TRUE(state().discard_saved_draft(draft_id));
+  STK_UNTIL(!state().busy() && io::get_string(agent.view(), "state") == "idle");
+  const auto &events = agent.view().at("events");
+  const auto decided = std::find_if(events.begin(), events.end(), [](const Json &event) {
+    return io::get_string(event, "kind") == "approval_decided";
+  });
+  ASSERT_NE(decided, events.end());
+  EXPECT_EQ(io::get_string(*decided, "decision"), "discard");
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_EQ(state().table()->records.size(), 1u);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(AgentPython, SessionsAppearInTheAttentionListAndOpenInTheAssistant)
+{
+  ASSERT_NO_FATAL_FAILURE(ask_agent("Scan the temperature of the first case."));
+  const auto session = state().agent().selected();
+  const auto draft_id = io::get_string(state().agent().view().at("awaiting")[0], "draft_id");
+  // A new session is chosen in the assistant; Home lists the waiting one.
+  state().agent().select("");
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorWorkspace));
+  f.screen.set_maximized(&area);
+  auto &attention = f.shell->store().attention();
+  const auto listed = [&]() -> Json {
+    if (!attention.result().is_object()) { return Json(); }
+    for (const auto &entry : attention.result().value("items", Json::array())) {
+      if (io::get_string(entry, "kind") == "agent_session" && io::get_string(entry, "id") == session) { return entry; }
+    }
+    return Json();
+  };
+  // Sessions never change the revision: read the list again until the session shows.
+  STK_UNTIL((attention.sync(), !attention.busy()) && (listed().is_object() || (attention.refresh(), false)));
+  const auto item = listed();
+  EXPECT_EQ(io::get_string(item, "status"), "awaiting");
+  EXPECT_EQ(io::get_string(item, "group"), "needs_you");
+  const auto key = io::get_string(item, "key");
+  STK_UNTIL(widget("workspace_attention_open/" + key) && widget("workspace_attention_open/" + key)->enabled);
+  EXPECT_EQ(widget("workspace_attention_archive/" + key), nullptr);  // sessions cannot be archived in v1
+  widget("workspace_attention_open/" + key)->on_click();
+  STK_UNTIL(dynamic_cast<EditorArea *>(f.screen.maximized()) &&
+            dynamic_cast<EditorArea *>(f.screen.maximized())->editor().type().id == kEditorAI &&
+            state().agent().selected() == session && state().agent().view().contains("awaiting"));
+  // The review page names the session that proposed the draft.
+  STK_UNTIL(state().agent().owner("draft", draft_id) != nullptr);
+  EXPECT_EQ(io::get_string(state().agent().owner("draft", draft_id)->at("owner"), "session_id"), session);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(AgentPython, ARunningSessionCanBeCancelledAndItsDraftsWait)
+{
+  std::ofstream(dir.str() + "/agent-control/hold") << "1";
+  populated();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorAI));
+  f.screen.set_maximized(&area);
+  const auto handle = state().project()->handle;
+  STK_UNTIL(widget("ai_intent/" + handle) != nullptr && state().agent().supported());
+  f.screen.ui()->find("a2/main/ai_intent/" + handle)->index.assign(3);
+  STK_UNTIL(state().agent().route_loaded() && widget("ai_agent_text/" + handle) != nullptr);
+  f.screen.ui()->find("a2/main/ai_agent_text/" + handle)->string.assign("Look at the project.");
+  STK_UNTIL(widget("ai_agent_send") && widget("ai_agent_send")->enabled);
+  widget("ai_agent_send")->on_click();
+  // The planner turn is held: the session runs, sending is off and Cancel is on.
+  STK_UNTIL(state().agent().running() && widget("ai_agent_cancel") && widget("ai_agent_cancel")->enabled);
+  EXPECT_FALSE(widget("ai_agent_send")->enabled);
+  EXPECT_TRUE(f.screen.ui()->find("a2/main/ai_agent_text/" + handle)->string.value().empty());  // the saved message left the box
+  widget("ai_agent_cancel")->on_click();
+  std::filesystem::remove(dir.str() + "/agent-control/hold");
+  STK_UNTIL(!state().agent().running() && io::get_string(state().agent().view(), "stop_reason") == "cancelled");
   EXPECT_EQ(state().project()->revision, 1);
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }

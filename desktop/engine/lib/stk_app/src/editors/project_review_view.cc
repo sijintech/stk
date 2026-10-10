@@ -3,6 +3,7 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
+#include "stk/app/project_agent.hh"
 #include "stk/app/project_discussion.hh"
 #include "archive_controls.hh"
 #include "project_labels.hh"
@@ -33,9 +34,14 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
     selected_draft_.clear();
   }
   const auto &saved = state.saved_review();
+  // Agent sessions (format 13): a draft a session waits on is applied or discarded through the session, so read
+  // who made the shown drafts and what their sessions wait for.
+  state.agent().pump(0.0);
+  if (!selected_draft_.empty()) { state.agent().track_draft(selected_draft_); }
   if (!saved.empty()) {
     auto &discussion = state.discussion();
     const auto saved_id = io::get_string(saved, "id");
+    state.agent().track_draft(saved_id);
     if (discussion.supported() && discussion.origin_draft() != saved_id && !discussion.busy() && !state.busy()) {
       discussion.load_origin(saved_id, true);
     }
@@ -43,6 +49,16 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
       layout.paragraph(ctx.store.catalog().format("discussion.review_origin", {
         {"message", io::get_string(discussion.origin(), "message_id")},
         {"context", io::get_string(discussion.origin(), "context_id")}}));
+    }
+    // A draft an agent session saved: which session and message made it, and whether the session waits on it.
+    if (const auto *made = state.agent().owner("draft", saved_id); made && made->value("owner", io::Json()).is_object()) {
+      const auto &owner = made->at("owner");
+      layout.paragraph(ctx.store.catalog().format("agent.review_origin", {
+        {"session", io::get_string(owner, "session_id").substr(0, 8)}, {"step", std::to_string(io::get_int(owner, "turn", 0) + 1)}}));
+      const auto made_state = state.agent().draft_state(saved_id);
+      if (made_state == AgentDraft::Waiting) { layout.paragraph(ctx.tr("agent.review_decide")); }
+      else if (made_state == AgentDraft::Running) { layout.paragraph(ctx.tr("agent.review_running")); }
+      else if (made_state == AgentDraft::Unknown) { layout.paragraph(ctx.tr("agent.review_reading")); }
     }
     if (discussion.supported()) {
       if (!discussion.error().empty()) { layout.paragraph(discussion.error()); }
@@ -123,7 +139,8 @@ void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, Pro
     }).disable(state.busy() || !pending);
     actions.button("discard_saved_draft", ctx.tr("project.drafts.discard"), [&state, handle, id = selected_draft_] {
       if (state.project() && state.project()->handle == handle) { state.discard_saved_draft(id); }
-    }).disable(state.busy() || !pending || archived);
+    }).disable(state.busy() || !pending || archived || state.agent().draft_state(selected_draft_) == AgentDraft::Unknown ||
+               state.agent().draft_state(selected_draft_) == AgentDraft::Running);
     if (chosen != drafts.end()) { archive_button(actions, ctx, "draft", selected_draft_, "draft_archive", false, !state.busy()); }
   }
   auto &pages = panel->row();

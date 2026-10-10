@@ -234,7 +234,12 @@ class AgentSessions:
                                                 "LIMIT ? OFFSET ?", (limit, offset))]
             items = []
             for session_id in ids:
-                header, events = self._read(db, session_id)
+                try:
+                    header, events = self._read(db, session_id)
+                except ProjectError:  # a damaged log is listed as such (verify says what is wrong), never hides the rest
+                    items.append({"id": session_id, "created_at": "", "first_message": "", "state": "ended", "turn": 0,
+                                  "stop_reason": "damaged", "awaiting": []})
+                    continue
                 first = next((event["text"] for event in events if event["kind"] == "user_turn"), "")
                 items.append({"id": session_id, "created_at": header["created_at"], "first_message": first[:200],
                               **self.state(events)})

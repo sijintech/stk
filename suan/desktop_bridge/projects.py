@@ -413,7 +413,7 @@ class ProjectSessions:
             project_id = store._project_id
             if action == "viewed":
                 return {"viewed": self._viewed.mark(project_id, list(dict.fromkeys(params["keys"])))}
-            result = collect(store)
+            result = collect(store, running_session=lambda session_id: self.agents.running(store, session_id))
             viewed = self._viewed.viewed(project_id)
             for item in result["items"]:
                 item["viewed"] = item["key"] in viewed

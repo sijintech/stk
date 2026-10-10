@@ -116,3 +116,34 @@ def test_simulation_runs_and_ai_requests_by_state(model):
     failed = next(item for item in items if item["kind"] == "request" and item["group"] == "needs_you")
     assert failed["error"] == "adapter_failed" and failed["target"] == {"page": "conversation", "request_id": requests[0]}
     assert [item["group"] for item in items] == ["needs_you"] * 2 + ["running"] * 2 + ["done"] * 2
+
+
+def test_agent_sessions_by_state(tmp_path):
+    from suan.project.agent_sessions import HARNESS, digest
+    store = ProjectStore.create(tmp_path / "project", "Agent")
+    sessions = store.agent_sessions
+
+    def made(reason=None, awaiting=False):
+        session_id = str(uuid4())
+        sessions.create(session_id, {"id": session_id, "harness": HARNESS}, "Scan the cases", turn_id=str(uuid4()),
+                        request_sha256=digest({"s": session_id}))
+        if awaiting:
+            sessions.append(session_id, "awaiting_user", {"text": "", "items": [{"item_id": "draft:x", "kind": "apply_draft",
+                                                                                 "draft_id": str(uuid4())}]}, turn=0)
+        if reason:
+            sessions.append(session_id, "stopped", {"reason": reason}, turn=0)
+        return session_id
+    ready, review, failed, done, live = made(), made("final", awaiting=True), made("uncertain"), made("final"), made()
+    items = {item["id"]: item for item in collect(store, running_session=lambda session_id: session_id == live)["items"]}
+    assert [(items[s]["group"], items[s]["severity"], items[s]["status"]) for s in (ready, review, failed, done, live)] == [
+        ("needs_you", "review", "ready"), ("needs_you", "review", "awaiting"), ("needs_you", "failure", "uncertain"),
+        ("done", "info", "final"), ("running", "progress", "running")]
+    assert items[review]["target"] == {"editor": "ai", "session_id": review, "project_id": store._project_id}
+    assert items[review]["name"] == "Scan the cases"
+    # A damaged log is listed as a failure; it does not hide the other sessions or the rest of the list.
+    with store._connect(write=True) as db:
+        db.execute("UPDATE project_agent_events SET payload=replace(payload, 'Scan', 'Skip') WHERE session_id=?", (done,))
+    items = {item["id"]: item for item in collect(store)["items"]}
+    assert (items[done]["group"], items[done]["status"]) == ("needs_you", "damaged") and len(items) == 5
+    # The key carries the message number: a session that waits again after a later message reappears.
+    assert items[review]["key"] == f"agent_session:{review}:awaiting@0"

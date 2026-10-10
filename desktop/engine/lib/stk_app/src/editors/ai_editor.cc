@@ -2,6 +2,7 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/model_settings.hh"
+#include "stk/app/project_agent.hh"
 #include "stk/app/project_data_labels.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
@@ -183,6 +184,21 @@ class AIEditor final : public Editor {
     const std::string key = state.project()->directory + "\n" + state.project()->id;
     active_draft_ = key;
     auto &draft = drafts_[key];
+    // Agent sessions (format 13): a fourth purpose with its own view (steps, wait cards, record).
+    auto &agent = state.agent();
+    if (!pending_session_.empty()) {
+      // A session another page asked to show: only in its own project, and not while a message is being saved.
+      if (!pending_project_.empty() && pending_project_ != state.project()->id) { pending_session_.clear(); }
+      else if (agent.supported() && !agent.busy()) {
+        draft.intent = kAgentIntent;
+        agent.select(pending_session_);
+        pending_session_.clear();
+      }
+    }
+    if (draft.intent == kAgentIntent) {
+      if (!agent.supported()) { draft.intent = 0; }
+      else { agent_view(layout, ctx, state, draft); return; }
+    }
     if (!discussion.provider_loaded() && !discussion.busy() && !state.busy()) { discussion.load_provider(); }
     if (!draft.model_initialized && discussion.provider_loaded() && !discussion.provider().empty()) {
       draft.model = io::get_string(discussion.provider(), "model");
@@ -222,7 +238,8 @@ class AIEditor final : public Editor {
  private:
   /** ``endpoint`` is a model endpoint ID (empty: the built-in Token Plan). ``automatic``: the service chooses the
    * endpoint and model for each question (models.route, S1d); the default where the service offers it. */
-  struct Draft { std::string text, model, endpoint; bool model_initialized = false, automatic = true; int intent = 0; };
+  struct Draft { std::string text, model, endpoint, agent_text; bool model_initialized = false, automatic = true; int intent = 0; };
+  static constexpr int kAgentIntent = 3;
 
   /** An automatically routed question in flight (S1d): its ranked candidates, those tried, and what it waits for.
    * Fallback to the next candidate happens only when a request definitely was not sent (``adapter_failed``) or a
@@ -983,9 +1000,7 @@ class AIEditor final : public Editor {
     if (parameter_request && status == "completed") { proposal_actions(layout, ctx, state, handle, id, enabled); }
     layout.separator();
     layout.label(ctx.tr("ai.compose"));
-    layout.prop(ctx.tr("ai.intent")).dropdown("ai_intent/" + handle,
-        {std::string(ctx.tr("ai.intent_discuss")), std::string(ctx.tr("ai.intent_edits")), std::string(ctx.tr("ai.intent_sweep"))},
-        ui::bind(draft.intent));
+    intent_dropdown(layout, ctx, state, draft);
     if (draft.intent >= 1 && !discussion.edit_proposals_supported()) { layout.paragraph(ctx.tr("ai.edits_unavailable")); }
     if (draft.intent == 2) { hint(layout, ctx, "ai.intent_sweep.hint"); }
     // Active toolkit edits must disappear on project switch before a new binding is installed.
@@ -1107,6 +1122,242 @@ class AIEditor final : public Editor {
                (!saved.is_null() && io::get_string(saved, "status") != "pending"));
   }
 
+  void intent_dropdown(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft)
+  {
+    std::vector<std::string> intents = {std::string(ctx.tr("ai.intent_discuss")), std::string(ctx.tr("ai.intent_edits")),
+                                        std::string(ctx.tr("ai.intent_sweep"))};
+    if (state.agent().supported()) { intents.push_back(std::string(ctx.tr("ai.intent_agent"))); }
+    layout.prop(ctx.tr("ai.intent")).dropdown("ai_intent/" + state.project()->handle, std::move(intents), ui::bind(draft.intent));
+  }
+
+ public:
+  /** {"session_id"}: show that agent session (for example from a Home attention item). */
+  bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &, std::string &) override
+  {
+    const auto session = io::get_string(target, "session_id");
+    if (session.empty()) { return false; }
+    pending_session_ = session;  // taken by the next draw (navigation redraws the area)
+    pending_project_ = io::get_string(target, "project_id");
+    return true;
+  }
+
+ private:
+  static void poll_agent(EditorContext &ctx, ProjectAgent &agent)
+  {
+    const double now = clock_seconds(), wake = agent.pump(now);
+    auto *wm = ctx.area.shell().window_manager();
+    if (!wm || !std::isfinite(wake) || (agent.wake_scheduled > now && agent.wake_scheduled <= wake + 1e-4)) { return; }
+    agent.wake_scheduled = wake;
+    const auto delay = uint64_t(std::clamp((wake - now) * 1000.0 + 1.0, 1.0, 60000.0));
+    wm->add_timer(delay, 0, [store = &ctx.store] { store->changed(); });
+  }
+
+  /** One line per step of the session, in words: what the person said, which tool ran at which level and how it
+   * ended, the agent's answers, decisions on its cards and why it stopped. */
+  static std::string agent_steps(const Json &view, EditorContext &ctx)
+  {
+    const auto &catalog = ctx.store.catalog();
+    std::string text;
+    const auto line = [&text](const std::string &value) { text += value + "\n"; };
+    for (const auto &event : view.value("events", Json::array())) {
+      const auto kind = io::get_string(event, "kind");
+      if (kind == "user_turn") {
+        line("");
+        line(std::string(ctx.tr("ai.you")) + "\n" + io::get_string(event, "text"));
+      }
+      else if (kind == "model_completed" && !io::get_string(event, "text").empty()) {
+        line(std::string(ctx.tr("ai.agent.says")) + "\n" + io::get_string(event, "text"));
+      }
+      else if (kind == "tool_called") {
+        const auto tool = io::get_string(event, "tool");
+        line(catalog.format("ai.agent.step", {{"level", std::string(catalog.tr_or("ai.agent.level." + io::get_string(event, "level"), "?"))},
+                                              {"tool", std::string(catalog.tr_or("ai.agent.tool." + tool, tool))}}));
+      }
+      else if (kind == "tool_result") {
+        const auto status = io::get_string(event, "status");
+        std::string detail;
+        if (status == "error") {
+          try { detail = io::get_string(Json::parse(io::get_string(event, "content")).value("data", Json::object()), "error"); }
+          catch (const std::exception &) {}
+        }
+        line("  " + catalog.format("ai.agent.result." + (status == "ok" || status == "error" ? status : std::string("unknown")),
+                                   {{"error", detail}}));
+      }
+      else if (kind == "model_settled") {
+        line(catalog.format("ai.agent.settled", {{"status", std::string(ctx.tr("discussion.requests." + io::get_string(event, "status")))},
+                                                 {"code", io::get_string(event, "code")}}));
+      }
+      else if (kind == "approval_decided") {
+        const auto by = event.value("by", Json::object());
+        line(catalog.format("ai.agent.decided." + io::get_string(event, "decision"),
+                            {{"user", io::get_string(by, "user")}, {"host", io::get_string(by, "host")}}));
+      }
+      else if (kind == "approval_receipt") {
+        line(!event.value("ok", false) ? catalog.format("ai.agent.receipt_failed", {{"error", io::get_string(event, "error")}}) :
+             event.contains("applied_revision") ? catalog.format("ai.agent.receipt_ok", {{"revision", std::to_string(io::get_int(event, "applied_revision", -1))}})
+                                                : std::string(ctx.tr("ai.agent.receipt_done")));
+      }
+      else if (kind == "policy" && event.contains("fallback")) {
+        line(catalog.format("ai.agent.fallback", {{"model", io::get_string(event.at("fallback"), "model")}}));
+      }
+      else if (kind == "cancel_requested") { line(std::string(ctx.tr("ai.agent.cancel_requested"))); }
+      else if (kind == "stopped") {
+        const auto reason = io::get_string(event, "reason");
+        line(std::string(catalog.tr_or("ai.agent.stopped." + reason, reason)));
+      }
+    }
+    return text;
+  }
+
+  void agent_view(ui::Layout &layout, EditorContext &ctx, ProjectState &state, Draft &draft)
+  {
+    auto &agent = state.agent();
+    const auto &catalog = ctx.store.catalog();
+    const std::string handle = state.project()->handle;
+    if (agent_opening_ != handle) { agent_opening_ = handle; shown_agent_.clear(); agent_timeline_.clear(); agent_navigation_error_.clear(); }
+    poll_agent(ctx, agent);
+    const bool enabled = !state.busy() && !agent.busy();
+    intent_dropdown(layout, ctx, state, draft);
+    hint(layout, ctx, "ai.agent.intro");
+    if (!agent.error().empty()) { layout.paragraph(agent.error()); }
+    if (!agent_navigation_error_.empty()) { layout.paragraph(agent_navigation_error_); }
+    // The planner: a model on this computer or the organization's network (v1), chosen by the service.
+    const auto &route = agent.route();
+    const auto choice = route.value("choice", Json());
+    if (!agent.route_loaded()) { layout.paragraph(ctx.tr("models.auto.reading")); }
+    else if (choice.is_object()) {
+      layout.paragraph(catalog.format("ai.agent.planner", {{"name", io::get_string(choice, "name")}, {"model", io::get_string(choice, "model")},
+          {"location", std::string(ctx.tr("models.location." + io::get_string(choice, "location")))}}));
+    }
+    else { layout.paragraph(ctx.tr("ai.agent.no_planner")); }
+    // Sessions, newest first; the first entry starts a new one.
+    std::vector<std::string> ids = {""}, titles = {std::string(ctx.tr("ai.agent.new_session"))};
+    for (const auto &session : agent.sessions()) {
+      ids.push_back(io::get_string(session, "id"));
+      auto first = io::get_string(session, "first_message");
+      if (first.size() > 60) { first = first.substr(0, 57) + "..."; }
+      titles.push_back(first + " · " + std::string(catalog.tr_or("ai.agent.state." + io::get_string(session, "state"), io::get_string(session, "state"))));
+    }
+    if (!agent.selected().empty() && std::find(ids.begin(), ids.end(), agent.selected()) == ids.end()) {
+      ids.push_back(agent.selected()); titles.push_back(agent.selected().substr(0, 8));
+    }
+    auto &sessions = layout.row();
+    sessions.dropdown("ai_agent_session", std::move(titles), {
+      [ids, &agent] { const auto at = std::find(ids.begin(), ids.end(), agent.selected()); return at == ids.end() ? 0 : int(at - ids.begin()); },
+      [ids, &agent, &state, handle](const int index) {
+        if (state.project() && state.project()->handle == handle && index >= 0 && size_t(index) < ids.size()) { agent.select(ids[size_t(index)]); }
+      }}).disable(!enabled);
+    sessions.button("ai_agent_refresh", ctx.tr("ai.refresh_history"), [&agent] { agent.load_list(); agent.draft_changed(""); }).width(6);
+    const auto &view = agent.view();
+    const auto state_name = io::get_string(view, "state");
+    const bool running = agent.running();
+    if (!agent.selected().empty() && !view.empty()) {
+      layout.paragraph(running ? std::string(ctx.tr("ai.agent.running")) :
+          std::string(catalog.tr_or("ai.agent.state." + state_name, state_name)));
+      const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
+      const float width = ctx.draw ? float(ctx.draw->rect.width()) : 1280.0f;
+      const float wrap_width = std::max(unit, width - 4 * unit);
+      const auto shown = io::get_string(view, "chain_sha256") + std::to_string(wrap_width);
+      if (shown_agent_ != shown) {
+        shown_agent_ = shown;
+        agent_timeline_ = wrapped_text(agent_steps(view, ctx), wrap_width, ctx);
+      }
+      const float height = ctx.draw ? float(ctx.draw->rect.height()) : 800.0f;
+      layout.log_view("ai_agent_timeline", agent_timeline_, std::clamp(height / unit - 24.0f, 6.0f, 22.0f));
+      agent_cards(layout, ctx, state, view);
+      const auto usage = view.value("usage", Json::object());
+      if (!usage.empty()) {
+        const auto planner = usage.value("planner", Json::object()), requests = usage.value("requests", Json::object());
+        layout.paragraph(catalog.format("ai.agent.usage", {{"turns", std::to_string(io::get_int(planner, "turns", 0))},
+            {"planner", std::to_string(io::get_int(planner, "input_tokens", 0) + io::get_int(planner, "output_tokens", 0))},
+            {"requests", std::to_string(io::get_int(requests, "requests", 0))},
+            {"request_tokens", std::to_string(io::get_int(requests, "input_tokens", 0) + io::get_int(requests, "output_tokens", 0))}}));
+      }
+      auto &actions = layout.row();
+      actions.button("ai_agent_cancel", ctx.tr("discussion.requests.cancel"), [&agent] { agent.cancel(); })
+          .disable(!enabled || !running);
+      actions.button("ai_agent_continue", ctx.tr("ai.agent.continue"), [&agent] { agent.start(); })
+          .disable(!enabled || running || state_name != "ready").tip(ctx.tr("ai.agent.continue.tip"));
+      if (auto *record = layout.panel("ai_agent_record", ctx.tr("ai.agent.record"), false)) {
+        record->paragraph(catalog.format("ai.agent.chain", {{"events", std::to_string(io::get_int(view, "total", 0))},
+            {"digest", io::get_string(view, "chain_sha256").substr(0, 16)}}));
+        auto &checks = record->row();
+        checks.button("ai_agent_verify", ctx.tr("ai.agent.verify"), [&agent] { agent.verify(); }).disable(!enabled);
+        checks.button("ai_agent_recover", ctx.tr("discussion.requests.recover"), [&agent] { agent.recover(); })
+            .disable(!enabled || running).tip(ctx.tr("ai.agent.recover.tip"));
+        const auto &check = agent.verification();
+        if (!check.empty()) {
+          record->paragraph(check.value("ok", false) ? std::string(ctx.tr("ai.agent.verified")) :
+              catalog.format("ai.agent.verify_failed", {{"count", std::to_string(check.value("problems", Json::array()).size())}}));
+          for (const auto &problem : check.value("problems", Json::array())) { record->paragraph(problem.get<std::string>()); }
+        }
+      }
+      if (state_name == "ended") { layout.paragraph(ctx.tr("ai.agent.ended")); }
+    }
+    else if (!agent.selected().empty()) { layout.paragraph(ctx.tr("ai.loading")); }
+    layout.separator();
+    // A message the service saved is no longer a draft (the same words typed again stay in the box).
+    if (const auto sent = agent.take_sent(); !sent.empty() && sent == draft.agent_text) { draft.agent_text.clear(); }
+    auto &input = layout.text_area("ai_agent_text/" + handle, ui::bind(draft.agent_text), {.max_length = 8192, .visible_lines = 3});
+    const bool has_text = ctx.ui && ctx.ui->editing() == input.id && ctx.ui->edit_state() ?
+        !ctx.ui->edit_state()->text().empty() : !draft.agent_text.empty();
+    const bool new_session = agent.selected().empty();
+    layout.button("ai_agent_send", ctx.tr(new_session ? "ai.agent.start" : "ai.agent.say"), [&agent, &state, handle, &draft] {
+      if (state.project() && state.project()->handle == handle) { agent.ask(draft.agent_text); }
+    }).disable(!enabled || !has_text || running || state_name == "ready" || state_name == "ended" ||
+               (new_session && !choice.is_object()));
+  }
+
+  /** What the session waits for: a draft to review and apply (through the session, project.agent.decide), then the
+   * rows it added to run from the workflow editor. */
+  void agent_cards(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const Json &view)
+  {
+    auto &agent = state.agent();
+    const auto &catalog = ctx.store.catalog();
+    const std::string handle = state.project()->handle;
+    const bool enabled = !state.busy() && !agent.busy() && !agent.running();
+    for (const auto &item : view.value("awaiting", Json::array())) {
+      const auto kind = io::get_string(item, "kind"), item_id = io::get_string(item, "item_id");
+      auto &card = layout.box();
+      if (kind == "apply_draft") {
+        const auto draft_id = io::get_string(item, "draft_id");
+        agent.track_draft(draft_id);  // so the review page knows this session waits on it
+        card.paragraph(catalog.format("ai.agent.wait_apply", {{"title", io::get_string(item, "title")}}));
+        const bool current = io::get_int(item, "base_revision", -1) == state.project()->revision;
+        if (!current) { card.paragraph(ctx.tr("ai.edits_stale")); }
+        std::weak_ptr<bool> weak = alive_;
+        card.button("ai_agent_review/" + item_id, ctx.tr("ai.agent.open_review"), [this, weak, &agent, &state, handle, draft_id,
+            shell = &ctx.area.shell(), screen = ctx.area.screen(), store = &ctx.store] {
+          if (!state.project() || state.project()->handle != handle) { return; }
+          agent_navigation_error_.clear();
+          const auto revision = state.project()->revision;
+          const auto review_generation = state.review_generation();
+          const auto valid = [weak, &state, handle] { return weak.lock() && state.project() && state.project()->handle == handle; };
+          agent.read_draft(draft_id, [this, weak, valid, shell, screen, store, handle, revision, review_generation](const Json &draft) {
+            if (!valid()) { return; }
+            shell->open_saved_review(screen, handle, revision, draft, review_generation, valid, [this, weak, store](bridge::Result<Json> opened) {
+              if (!weak.lock()) { return; }
+              agent_navigation_error_ = opened.ok() ? "" : opened.error().message;
+              store->changed();
+            });
+          });
+        }).disable(!enabled || !current || !agent.decide_supported()).tip(ctx.tr("ai.agent.open_review.tip"));
+      }
+      else if (kind == "run_rows") {
+        const auto rows = item.value("rows", Json::array());
+        card.paragraph(catalog.format("ai.agent.wait_run", {{"count", std::to_string(rows.size())}}));
+        auto *shell = &ctx.area.shell();
+        auto *screen = ctx.area.screen();
+        const auto self = lifetime();
+        const Json target = {{"table_id", io::get_string(item, "table_id")}, {"rows", rows}};
+        card.button("ai_agent_run_rows/" + item_id, catalog.format("ai.run_new_rows", {{"count", std::to_string(rows.size())}}),
+            [shell, screen, self, target] {
+          shell->open_target_later(screen, kEditorWorkflow, target, [self] { return !self.expired(); });
+        }).disable(shell->text_input_active()).tip(ctx.tr("ai.run_new_rows.tip"));
+      }
+    }
+  }
+
   std::unordered_map<std::string, Draft> drafts_;
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
@@ -1121,6 +1372,8 @@ class AIEditor final : public Editor {
   std::shared_ptr<const CapturedProjectTable> captured_;
   ProjectContextPicker picker_;
   ui::LogBuffer transcript_, raw_reply_;
+  std::string pending_session_, pending_project_, agent_opening_, shown_agent_, agent_navigation_error_;
+  ui::LogBuffer agent_timeline_;
 };
 }  // namespace
 

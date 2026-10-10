@@ -277,9 +277,12 @@ class WorkspaceEditor final : public Editor {
       row.button("workspace_attention_seen/" + key, ctx.tr("workspace.attention.seen"), [attention, key] {
         attention->mark_viewed({key});
       }).width(3);
-      // Put away for good (format 11): it leaves this list and its own list until restored there.
-      if (auto *shelve = archive_button(row, ctx, kind, io::get_string(item, "id"), "workspace_attention_archive/" + key)) {
-        shelve->width(3);
+      // Put away for good (format 11): it leaves this list and its own list until restored there. Agent sessions
+      // cannot be archived yet (v1); "seen" puts them aside.
+      if (kind != "agent_session") {
+        if (auto *shelve = archive_button(row, ctx, kind, io::get_string(item, "id"), "workspace_attention_archive/" + key)) {
+          shelve->width(3);
+        }
       }
     }
   }
@@ -304,7 +307,7 @@ class WorkspaceEditor final : public Editor {
     }
     if (!page.empty()) { return project_navigation_action(ctx, page); }
     const auto editor = io::get_string(target, "editor");
-    if (editor != kEditorWorkflow && editor != kEditorAnalysisGraph) { return {}; }
+    if (editor != kEditorWorkflow && editor != kEditorAnalysisGraph && editor != kEditorAI) { return {}; }
     auto *shell = &ctx.area.shell();
     auto *screen = ctx.area.screen();
     const auto weak = lifetime();

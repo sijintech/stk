@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/project_state.hh"
+#include "stk/app/project_agent.hh"
 #include "stk/app/project_discussion.hh"
 
 #include <algorithm>
@@ -200,6 +201,7 @@ std::optional<ProjectSweepAxis> project_sweep_axis(const std::string_view type, 
 ProjectState::ProjectState(AppStore &store) : store_(store)
 {
   discussion_ = std::make_unique<ProjectDiscussion>(store, *this);
+  agent_ = std::make_unique<ProjectAgent>(store, *this);
   open_external = platform::open_with_system;
   open_vscode = platform::open_with_vscode;
 }
@@ -729,6 +731,9 @@ bool ProjectState::can_apply_review() const
          review_->project_id == project_->id && review_->base_revision == project_->revision &&
          dirty_revision_ <= review_->base_revision &&
          (saved_review_.empty() || (io::get_string(saved_review_, "status") == "pending" &&
+          // An agent's draft waits until its session is known and not running (the decision goes through it).
+          agent_->draft_state(io::get_string(saved_review_, "id")) != AgentDraft::Unknown &&
+          agent_->draft_state(io::get_string(saved_review_, "id")) != AgentDraft::Running &&
           io::get_int(saved_review_, "base_revision", -1) == review_->base_revision &&
           io::python_json_dumps(saved_review_.at("commands"), true, true) ==
               io::python_json_dumps(review_->commands, true, true)));
@@ -890,9 +895,12 @@ bool ProjectState::apply_review()
   ++review_generation_;
   review_.reset();
   if (!saved_review_.empty()) {
+    const auto draft_id = io::get_string(saved_review_, "id");
+    if (const auto item = agent_->awaiting_for_draft(draft_id); item && item->base_revision == review->base_revision) {
+      return decide(*item, "apply", review->base_revision);
+    }
     busy_ = true;
     const auto generation = review_generation_;
-    const auto draft_id = io::get_string(saved_review_, "id");
     bridge::CallOptions options;
     options.retry = bridge::CallOptions::Retry::Never;
     on(client_->call("project.drafts.apply", {{"handle", project_->handle},
@@ -917,6 +925,7 @@ bool ProjectState::apply_review()
 void ProjectState::clear_drafts()
 {
   discussion_->reset();
+  agent_->reset();
   drafts_ = Json::array();
   drafts_error_.clear();
   drafts_loaded_ = false;
@@ -1064,9 +1073,63 @@ bool ProjectState::load_draft(const std::string &id)
   return true;
 }
 
+bool ProjectState::decide(const AgentItem &item, const std::string &decision, const int64_t expected_revision)
+{
+  // The person's decision on an agent session's draft: recorded with the session, then applied or discarded by the
+  // service. A failed action leaves the item open (the decision stays recorded); the draft is read again either way.
+  busy_ = true;
+  const auto generation = review_generation_;
+  bridge::CallOptions options;
+  options.retry = bridge::CallOptions::Retry::Never;
+  on(client_->call("project.agent.decide", {{"handle", project_->handle}, {"session_id", item.session_id},
+        {"item_id", item.item_id}, {"decision", decision}, {"draft_sha256", item.draft_sha256},
+        {"expected_revision", expected_revision}}, options),
+     [this, generation, item](const bridge::Result<Json> &result) {
+    busy_ = false;
+    drafts_loaded_ = false;
+    discussion_->draft_changed(item.draft_id);
+    agent_->draft_changed(item.draft_id);
+    if (!result.ok()) { fail(result.error()); }
+    else {
+      const auto &receipt = result.value().at("receipt");
+      if (!receipt.value("ok", false)) {
+        bridge::Error error;
+        error.code = bridge::ErrorCode::Conflict;
+        error.name = "conflict";
+        error.message = io::get_string(receipt, "error");
+        fail(error);
+      }
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(receipt, "applied_revision", -1));
+      bridge::CallOptions read;
+      read.retry = bridge::CallOptions::Retry::Never;
+      on(client_->call("project.drafts.get", {{"handle", project_->handle}, {"draft_id", item.draft_id}}, read),
+         [this, generation, item](const bridge::Result<Json> &draft) {
+        if (draft.ok() && generation == review_generation_ && io::get_string(saved_review_, "id") == item.draft_id) {
+          saved_review_ = draft.value().at("draft");
+        }
+        changed();
+      });
+    }
+    refresh();
+  });
+  changed();
+  return true;
+}
+
 bool ProjectState::discard_saved_draft(const std::string &id)
 {
   if (!drafts_supported() || busy() || id.empty()) { return false; }
+  AgentItem item;
+  const auto made = agent_->draft_state(id, &item);
+  if (made == AgentDraft::Unknown || made == AgentDraft::Running) {
+    drafts_error_ = std::string(store_.tr(made == AgentDraft::Running ? "agent.review_running" : "agent.review_reading"));
+    changed();
+    return false;
+  }
+  if (made == AgentDraft::Waiting && item.base_revision == project_->revision) {
+    if (io::get_string(saved_review_, "id") == id) { ++review_generation_; review_.reset(); }
+    return decide(item, "discard", item.base_revision);
+  }
   busy_ = true;
   drafts_error_.clear();
   const auto generation = review_generation_;

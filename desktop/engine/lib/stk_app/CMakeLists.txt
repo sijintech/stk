@@ -63,6 +63,7 @@ add_library(stk_app STATIC
   src/project_table_view.cc
   src/project_context_selection.cc
   src/project_discussion.cc
+  src/project_agent.cc
   src/project_review.cc
   src/script_state.cc
   src/scripting_ui.cc

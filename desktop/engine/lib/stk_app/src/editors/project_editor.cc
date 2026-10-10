@@ -624,15 +624,32 @@ class ProjectEditor final : public Editor {
       });
     }
     // Data is private unless labelled public; only public data may go to external model endpoints (format 12).
+    // From format 13 a table's structure alone may be public (its names, fields, units and row count; the agent).
     auto &labels = ctx.store.data_labels();
     labels.sync();
     if (labels.supported() && labels.loaded() && !state.table_id().empty()) {
       auto *shared = &labels;
       const auto table = state.table_id();
-      box.checkbox("table_public", ctx.tr("labels.table_public"), {
-          [shared, table] { return shared->is_public("table", table); },
-          [shared, table](const bool on) { shared->set("table", {table}, on); }})
-          .disable(labels.busy()).tip(ctx.tr("labels.table_public.tip"));
+      if (labels.structure_supported()) {
+        static const std::vector<std::string> kLabels = {"private", "structure", "public"};
+        box.prop(ctx.tr("labels.table_label")).dropdown("table_label", {std::string(ctx.tr("labels.private")),
+            std::string(ctx.tr("labels.structure")), std::string(ctx.tr("labels.public"))}, {
+          [shared, table] {
+            const auto at = std::find(kLabels.begin(), kLabels.end(), shared->label("table", table));
+            return at == kLabels.end() ? 0 : int(at - kLabels.begin());
+          },
+          [shared, table](const int i) {
+            if (i >= 0 && size_t(i) < kLabels.size() && shared->label("table", table) != kLabels[i]) {
+              shared->set("table", {table}, kLabels[i]);
+            }
+          }}).disable(labels.busy()).tip(ctx.tr("labels.table_label.tip"));
+      }
+      else {
+        box.checkbox("table_public", ctx.tr("labels.table_public"), {
+            [shared, table] { return shared->is_public("table", table); },
+            [shared, table](const bool on) { shared->set("table", {table}, on); }})
+            .disable(labels.busy()).tip(ctx.tr("labels.table_public.tip"));
+      }
     }
     auto &row = box.row();
     row.text_field("table_name", ui::bind(table_name_), {.placeholder = std::string(ctx.tr("project.table_name"))});

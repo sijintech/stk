@@ -13848,7 +13848,8 @@
             "analysis_run",
             "simulation_run",
             "draft",
-            "request"
+            "request",
+            "agent_session"
           ]
         },
         "id": {
@@ -13979,7 +13980,7 @@
         "counts"
       ],
       "additionalProperties": false,
-      "description": "Failures, items to review, running and finished work across workflow, analysis and simulation runs, AI drafts and requests; newest 50 per source. Read-only; viewed marks belong to this person (bridge state directory)."
+      "description": "Failures, items to review, running and finished work across workflow, analysis and simulation runs, AI drafts and requests, and agent sessions (format 13); newest 50 per source. Read-only; viewed marks belong to this person (bridge state directory)."
     },
     "projectSearchItem": {
       "type": "object",

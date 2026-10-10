@@ -149,8 +149,9 @@ MuFerro 仿真与仿真批次面板可直接选择**运行环境**并用字段�
 **模型端点与数据边界**（项目格式 12，[方案](design/model-gateway.md)）：AI 助手的“模型端点”可选内置的阿里云 Token Plan，
 或在“模型与网络”中添加的 OpenAI 兼容端点（例如本机 llama.cpp 的 `http://127.0.0.1:8080/v1`；其他电脑上的端点默认算外部，
 可标为“位于机构内网”；外部端点须用 HTTPS）。添加的端点可设密钥（只交给本机后台服务，不写入项目与日志）。
-“网络”可选离线（只用本机模型）、机构内（本机与机构内服务器）或允许外网。**数据默认私有**：只有在数据页勾选“公开数据”的参数表，
-其上下文才能发往外部端点；私有数据只交给本机或机构内的模型。不能发送时，AI 助手会说明原因（数据未公开、网络设置不允许或端点已移除）。
+“网络”可选离线（只用本机模型）、机构内（本机与机构内服务器）或允许外网。**数据默认私有**：只有在数据页标为“公开数据”（格式 13 起
+为“数据标注”下拉框中的“公开”）的参数表，其上下文才能发往外部端点；私有数据只交给本机或机构内的模型。格式 13 起还可选“结构公开”：
+表名、字段、单位与行数可以外发，数值仍私有（供智能体使用）。不能发送时，AI 助手会说明原因（数据未公开、网络设置不允许或端点已移除）。
 端点、密钥与网络设置只能在桌面中修改，脚本只能读取。
 
 **自动选择模型**（[方案](design/model-gateway.md)“能力分档与自动切换”）：AI 助手的“模型端点”默认是“自动（推荐）”，会显示这次将用哪个模型以及原因：
@@ -208,8 +209,16 @@ vLLM 档（GPU 服务器上的不量化模型）目前只评估能否放下，�
 含 MuFerro 步骤的运行结束后，运行区的 **就这 N 行的结果提问** 把各行的结果（温度、最终步数、能量）捕获为新的上下文并打开 AI 助手；
 要据此提出下一轮扫描，请在参数表重新捕获基准行。
 
-当前是单条问题与选定上下文的文字请求，不自动附带其他问答、文件或未保存输入；没有
-工具调用、自动修改/模拟、Markdown 渲染或默认 AI 主页切换。各增量的本机与跨平台验证见[验收记录](runtime-validation.md)。
+**智能体（多步）**（项目格式 13，[设计](design/agent-harness.md)）：“用途”选“智能体（多步）”后，AI 助手显示将用的规划模型及其位置
+（只用本机或机构内的模型；只有外部端点时说明原因）。写下任务后点“开始”，智能体一步步查看项目结构、取行、统计与拟合、就取到的行提问，
+或提议参数扫描草案，每一步在时间线上列出工具、级别与结果。它**不会**应用草案、准备或开始运行，也不改标注；需要你处理的事项显示为卡片：
+“检查并应用草案”的 **打开修改检查** 进入修改检查页，在那里点“应用”或“丢弃”会作为你的决定记入会话（记录本机用户名与主机名，未验证身份）；
+应用后卡片改为 **用工作流运行新增的 N 行**。之后可以接着发言（例如“分析结果”），智能体会先看到你做了什么。“记录”中可核对整条记录
+（每一轮的输入都能由日志重组、统计可重算），“恢复”把丢失的运行留下的未完成步骤记为不确定；模型轮结果不确定时会话结束、绝不重发。
+会话显示规划轮与代问的用量。工作台“需要关注”列出等待你处理、出错或正在运行的会话，点“打开”回到该会话。脚本可用 `stk.project.agent`，
+但只有桌面能批准草案。
+
+问答用途是单条问题与选定上下文的文字请求，不自动附带其他问答、文件或未保存输入；没有 Markdown 渲染或默认 AI 主页切换。各增量的本机与跨平台验证见[验收记录](runtime-validation.md)。
 双平台真实模型和输入设备验收见[工作台清单](workbench-acceptance.md#ai-助手)。
 
 ## 安装
@@ -571,7 +580,15 @@ covers the same current input within the session, not a transaction resumed acro
 Streaming replies remain temporary until a complete validated response is saved; cancellation immediately hides
 the partial text. Parameter suggestions can be explicitly saved as a draft, opened for review, previewed and applied;
 completion alone never changes project values. See [parameter suggestions](project-parameter-edits.md).
-General tool execution, automatic workflow execution and a new default homepage remain planned.
+**Agent (several steps)** (project format 13, [design](design/agent-harness.md)): the agent plans with a model on this
+computer or the organization's network only, works step by step with bounded tools (project structure, rows,
+statistics, questions on captured rows, parameter-sweep drafts) and lists each step with its level. It never applies
+drafts, prepares or starts runs or changes labels: a card asks you to open the draft in Review changes, where
+applying or discarding it is recorded in the session as your decision (local user and host, not authenticated),
+then to run the new rows from the workflow editor. The record can be checked (every planner turn rebuilt from the
+log, statistics recomputed); an uncertain planner turn ends the session and is never resent. From format 13 the
+data page labels a table private, structure public (names, fields, units and row counts may leave; values stay
+private) or public. Automatic workflow execution and a new default homepage remain planned.
 **View → Focus preparation / Focus analysis / Restore split layout** preserves existing editors and unsaved input.
 See the [acceptance record](runtime-validation.md) for verification by commit and platform.
 macOS/Windows real-account acceptance remains separate.

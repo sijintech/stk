@@ -14,8 +14,9 @@ class AppStore;
 class ProjectState;
 
 /** Which parameter tables and file records of the open project are labelled public (project.labels.*, format 12;
- * docs/design/model-gateway.md). Data is private unless labelled public, and only public data may be sent to
- * external model endpoints. Read again after project.labels.changed or an own change; replies of a closed or
+ * docs/design/model-gateway.md), and from format 13 which tables only have their structure public (names, fields,
+ * units and row counts; docs/design/agent-harness.md). Data is private unless labelled, and only public data may be
+ * sent to external model endpoints. Read again after project.labels.changed or an own change; replies of a closed or
  * replaced project opening or bridge are ignored. Labelling never changes the project's revision. */
 class ProjectDataLabels {
  public:
@@ -29,9 +30,14 @@ class ProjectDataLabels {
   bool supported() const;
   bool loaded() const { return loaded_; }
   bool busy() const { return read_.has_value() || write_.has_value(); }
+  /** The table's structure may be labelled public on its own (format 13). */
+  bool structure_supported() const;
   bool is_public(const std::string &kind, const std::string &id) const;
+  /** "public", "structure" or "private". */
+  std::string label(const std::string &kind, const std::string &id) const;
   uint64_t version() const { return version_; }
   bool set(const std::string &kind, const std::vector<std::string> &ids, bool make_public);
+  bool set(const std::string &kind, const std::vector<std::string> &ids, const std::string &label);
 
  private:
   void reset();
@@ -45,7 +51,7 @@ class ProjectDataLabels {
   std::string handle_, session_;
   uint64_t epoch_ = 0, version_ = 0;
   bool stale_ = true, loaded_ = false;
-  std::map<std::string, std::set<std::string>> public_;
+  std::map<std::string, std::map<std::string, std::string>> labels_;  // kind -> id -> public | structure
   std::optional<bridge::Future<io::Json>> read_, write_;
 };
 }  // namespace stk::app

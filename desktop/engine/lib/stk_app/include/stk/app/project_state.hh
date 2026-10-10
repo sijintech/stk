@@ -8,6 +8,8 @@ namespace stk::app {
 
 class AppStore;
 class ProjectDiscussion;
+class ProjectAgent;
+struct AgentItem;
 
 /** Shared table data. Views select by UUID, never by the sorted display row. */
 /** The newest project format the Python service creates; older projects are offered an explicit,
@@ -141,6 +143,9 @@ class ProjectState {
   bool discard_saved_draft(const std::string &id);
   bool copy_saved_review();
   ProjectDiscussion &discussion() { return *discussion_; }
+  /** Agent sessions (format 13). Applying or discarding a draft an agent session waits on goes through the
+   * session (project.agent.decide), so the decision is recorded with it. */
+  ProjectAgent &agent() { return *agent_; }
   bool import_csv(const std::string &source, const std::string &name, const io::Json &types,
                   const io::Json &units, const std::string &delimiter);
   bool export_csv(const std::string &destination, const std::string &delimiter);
@@ -188,6 +193,7 @@ class ProjectState {
   void on_state(bridge::BridgeState state);
   void changed();
   void fail(const bridge::Error &error);
+  bool decide(const AgentItem &item, const std::string &decision, int64_t expected_revision);
   void clear();
   void clear_review();
   void clear_drafts();
@@ -199,6 +205,7 @@ class ProjectState {
 
   AppStore &store_;
   std::unique_ptr<ProjectDiscussion> discussion_;
+  std::unique_ptr<ProjectAgent> agent_;
   bridge::Client *client_ = nullptr;
   bridge::BridgeState bridge_state_ = bridge::BridgeState::Stopped;
   bridge::ListenerHandle state_listener_, changed_listener_, closed_listener_, runs_listener_;

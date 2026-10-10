@@ -19,7 +19,7 @@ ProjectDataLabels::~ProjectDataLabels()
 void ProjectDataLabels::reset()
 {
   ++epoch_; ++version_;
-  public_.clear(); stale_ = true; loaded_ = false;
+  labels_.clear(); stale_ = true; loaded_ = false;
   for (auto *future : {&read_, &write_}) {
     auto old = std::move(*future); future->reset();
     if (old) { old->cancel(); }
@@ -33,6 +33,11 @@ bool ProjectDataLabels::supported() const
       project_.project()->format_version < 12) { return false; }
   const auto hello = client_->hello_info();
   return hello && hello->has_method("project.labels.set") && hello->has_method("project.labels.list");
+}
+
+bool ProjectDataLabels::structure_supported() const
+{
+  return supported() && project_.project()->format_version >= 13;
 }
 
 void ProjectDataLabels::sync()
@@ -66,17 +71,20 @@ bool ProjectDataLabels::read()
   stale_ = false;
   bridge::CallOptions options;
   options.retry = bridge::CallOptions::Retry::Never;
-  read_ = client_->call("project.labels.list", {{"handle", handle_}}, options);
+  Json params = {{"handle", handle_}};
+  if (structure_supported()) { params["include_structure"] = true; }  // older services refuse the parameter
+  read_ = client_->call("project.labels.list", params, options);
   read_->then([this, weak, epoch](bridge::Result<Json> result) {
     const auto alive = weak.lock();
     if (!alive || !*alive || epoch != epoch_) { return; }
     read_.reset();
     if (!result) { store_.changed(); return; }
-    std::map<std::string, std::set<std::string>> ids;
+    std::map<std::string, std::map<std::string, std::string>> labels;
     for (const auto &item : result.value().value("items", Json::array())) {
-      ids[io::get_string(item, "kind")].insert(io::get_string(item, "id"));
+      const auto label = io::get_string(item, "label");
+      labels[io::get_string(item, "kind")][io::get_string(item, "id")] = label.empty() ? "public" : label;
     }
-    if (ids != public_ || !loaded_) { public_ = std::move(ids); ++version_; }
+    if (labels != labels_ || !loaded_) { labels_ = std::move(labels); ++version_; }
     loaded_ = true;
     store_.changed();
   });
@@ -85,14 +93,29 @@ bool ProjectDataLabels::read()
 
 bool ProjectDataLabels::is_public(const std::string &kind, const std::string &id) const
 {
-  const auto found = public_.find(kind);
-  return found != public_.end() && found->second.count(id) != 0;
+  return label(kind, id) == "public";
+}
+
+std::string ProjectDataLabels::label(const std::string &kind, const std::string &id) const
+{
+  const auto found = labels_.find(kind);
+  if (found == labels_.end()) { return "private"; }
+  const auto label = found->second.find(id);
+  return label == found->second.end() ? "private" : label->second;
 }
 
 bool ProjectDataLabels::set(const std::string &kind, const std::vector<std::string> &ids, const bool make_public)
 {
+  return set(kind, ids, std::string(make_public ? "public" : "private"));
+}
+
+bool ProjectDataLabels::set(const std::string &kind, const std::vector<std::string> &ids, const std::string &label)
+{
   sync();
   if (!supported() || write_ || ids.empty() || ids.size() > 100) { return false; }
+  if (label != "public" && label != "private" && (label != "structure" || kind != "table" || !structure_supported())) {
+    return false;
+  }
   Json items = Json::array();
   for (const auto &id : ids) { items.push_back({{"kind", kind}, {"id", id}}); }
   const auto epoch = epoch_;
@@ -100,7 +123,7 @@ bool ProjectDataLabels::set(const std::string &kind, const std::vector<std::stri
   bridge::CallOptions options;
   options.retry = bridge::CallOptions::Retry::Never;
   write_ = client_->call("project.labels.set", {{"handle", handle_}, {"items", items},
-                                                {"label", make_public ? "public" : "private"}}, options);
+                                                {"label", label}}, options);
   write_->then([this, weak, epoch](bridge::Result<Json> result) {
     const auto alive = weak.lock();
     if (!alive || !*alive || epoch != epoch_) { return; }
