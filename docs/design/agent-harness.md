@@ -1,10 +1,10 @@
 # 智能体 harness v1（S2 设计）
 
-更新：2026-10-09。状态：**设计，待所有者决定；均未实现。**
+更新：2026-10-09。状态：**设计，所有者已于 2026-10-09 作答（见“所有者决定”）；均未实现。**
 上位方案：[思劲平台方向](sijin-platform-2026-10.md)第 5.2 节与“七、分期与验收”S2 行；模型层前提见[模型网关](model-gateway.md)（S1a–S1d 已交付）。
 
 文中 `文件:行` 指当前 `main` 中已有的代码与文档，用来说明复用点与缺口。凡写“新增”“改为”“将”的内容都还不存在。
-所有者对文末“需要所有者决定”作答之前，不实现其中任何一项（同 [review-drafts-and-conversations.md](review-drafts-and-conversations.md):303-311 的约定：新记录类型须所有者确认）。
+新记录类型须所有者确认（[review-drafts-and-conversations.md](review-drafts-and-conversations.md):303-311 的约定）；所有者已对文末的决定作答，见“所有者决定（2026-10-09）”。
 
 ## 要做到什么
 
@@ -173,7 +173,10 @@ CREATE TABLE project_agent_objects (
 
 - **升级**：
   - `FORMAT_VERSION = 13`，在 store.py:453-455 的元组末尾加 `(12, _DDL_V13)`，沿用“先备份再迁移”；
-  - 不改动任何已有表。`project_archive` 的 CHECK 重建放到 S2c（决定 6）；
+  - 除新表外，只重建 `project_labels`（store.py:163-170）把标注扩为 `public`、`structure`、`private` 三种（决定 8 的“结构公开”）：
+    建新表、逐行复制、删旧表、改名，复制的行不变；`structure` 只用于 `table`。现有 `is_public` 只认 `public`，所以“结构公开”的表的数据仍按私有处理；
+    新增 `Labels.structure_public(kind, id)`（`public` 或 `structure`）。数据页的“公开数据”勾选改为“私有 / 结构公开 / 公开”三选一；
+  - 其他已有表不动。`project_archive` 的 CHECK 重建放到 S2c（决定 6）；
   - 格式 < 13 时，`project.agent.*` 返回“请先升级”。
 - **与请求、草案一样**：不推进可编辑修订，不进撤销（同 workflow_runs.py:8）。
 - **对象登记表**：
@@ -265,7 +268,7 @@ CREATE TABLE project_agent_objects (
 
 | 工具 | 级别 | 参数 | 实现（复用） | 数据来源 | 产物 |
 |---|---|---|---|---|---|
-| `project_outline` | read | 无 | **新增结构读取**：各表 ID、名称、字段（ID、名称、类型、单位）、行数、标注；工作流 ID、名称、参数表、步骤种类；是否有 MuFerro 算例表与结果表。用 SQL 计数，不读单元格；不用 `store.snapshot()`，因为它读取所有表的全部数据（store.py:500-503） | 列出的每张表（结构按该表的标注算，决定 8） | — |
+| `project_outline` | read | 无 | **新增结构读取**：各表 ID、名称、字段（ID、名称、类型、单位）、行数、标注；工作流 ID、名称、参数表、步骤种类；是否有 MuFerro 算例表与结果表。用 SQL 计数，不读单元格；不用 `store.snapshot()`，因为它读取所有表的全部数据（store.py:500-503） | 列出的每张表的结构（“公开”或“结构公开”的表算公开，决定 8） | — |
 | `capture_rows` | record | `table_id, record_ids?(≤100), field_ids?(≤64)` | `store.contexts.capture`（contexts.py:157-224），`expected_revision` 取当前修订。上下文可达 256 KiB（contexts.py:18），送回模型时截断到 16 KiB 并标 `truncated`；全文留在上下文里 | 该表 | 上下文 |
 | `table_statistics` | read | `context_id, fields, x_field?, fit: none/linear/quadratic` | `suan/agent/stats.py`：n、均值、标准差、最小、最大；最小二乘线性或二次拟合与 R²。只用上下文的冻结数值；纯 Python，结果确定 | 上下文的表 | — |
 | `propose_sweep` | model + draft | `context_id, instruction` | `discussion.add`（代问消息）→ 选模型（复杂任务，`public` 按会话来源集合，见“数据边界”）→ `requests.create(stk.parameter-sweep/1)` → `RequestExecutor.start` → 等终态 → `requests.propose_edits`（`expected_revision` 取上下文修订）；同一项目有运行正在写入时，返回“请等运行结束” | 上下文的表 | 消息、子请求、草案 |
@@ -328,7 +331,7 @@ CREATE TABLE project_agent_objects (
 - **来源由服务端计算，不由模型声明。**
   - 每个工具给出 `sources:[{kind:"table", id}]`，并在 `tool_result` 中记下当时的标注；
   - 会话的来源集合是所有 `tool_result.sources` 的并集，只增不减（历史对话会整段重发，所以必须用并集）；
-  - 未知种类一律视为私有；表的**结构**也按该表的标注算（决定 8）。
+  - 未知种类一律视为私有；表的**结构**按该表的标注算：标注为“公开”或“结构公开”时结构算公开，否则算私有（决定 8）。
 - **规划轮（v1）只发往本机或机构内端点**（决定 4）：
   - 会话创建时，用 `candidates(..., task="complex", public=False)`（routing.py:23-78）求候选，外部端点自然被排除为 `private_data`；
   - 每次发送前，新增的 `ModelGateway.admit_planner(configuration, sources)` 再检查一次：端点仍存在、网络设置允许（`policy.allows`）、受管本机模型在运行（同 gateway.py:95-99）、位置不是 `external`；
@@ -339,7 +342,7 @@ CREATE TABLE project_agent_objects (
   - **缺口**：子请求的指令或问题文字由规划模型写成，而规划模型可能已经读过别的私有表。现有 `admit` 只看子请求上下文那一张表（gateway.py:100-101），所以一条针对公开表的子请求，可能把私有数据带到外部端点。
   - **路由**：工具选模型时传 `public = all_public(会话来源集合 ∪ {该上下文的表})`，按**当前**标注计算。
   - **检查**：在 `RequestExecutor.start` 之前，工具先调用新增的 `ModelGateway.admit_sources(configuration, sources)`，规则同上；之后执行器照常运行现有的 `admit`。两层检查各管一件事：前者管会话来源，后者管单表；
-  - 一旦会话读到任何私有来源（包括私有表的结构），其后的子请求只发往本机或机构内端点。
+  - 一旦会话读到任何私有来源（包括没有标为“结构公开”的私有表的结构），其后的子请求只发往本机或机构内端点。
 - **标注每次发送前重新读取。** 会话中途有表改为私有，下一次发送立即生效；改为公开时，已停下的会话不会自动继续。
 - **用户输入的话**与现有 AI 助手的问题一样，不按标注检查（model-gateway.md 的“数据标注”一节）。v1 中它只发给本机或机构内的规划模型；进入子请求的文字随子请求的检查走。
 - **工具本身不联网**：v1 的 8 个工具除子请求外，都只读写本地项目。
@@ -634,7 +637,25 @@ start(store, session_id):                         # 处理未处理的发言；�
 8. **记录体积**：单条事件 ≤ 64 KiB，工具结果 ≤ 16 KiB；完整数据留在原对象里，日志只存模型看到的有界内容与摘要。
 9. **链的防篡改能力有限**（同一 SQLite 文件）：靠导出与显示链尾摘要作外部对照。
 
-## 需要所有者决定
+## 所有者决定（2026-10-09）
+
+1. **记录形态**：按建议 (a)，格式 13 加三张新表，规划轮不进 `project_requests`（技术项，按建议执行）。
+2. **Token Plan**：所有者先选“现在就开”，又在澄清时确认**规划只用本机或机构内模型**；因此 Token Plan 不用于规划轮，
+   只用于智能体代问的子请求（按会话来源集合检查，与现有 AI 助手相同），不必等工单确认。
+3. **运行**：v1 保持“AI 从不准备或开始运行”；S2c 加“智能体准备运行计划、人在卡片上批准后开始”。
+4. **模型位置**：规划只用本机或机构内模型；子请求只有在会话读过的所有数据都公开时才可发往外部。
+5. **规划轮“不确定”之后**：会话结束，用户另开新会话。
+6. **格式 13 范围**：按建议只加表（技术项），另按决定 8 重建 `project_labels`。
+7. **规划轮回退**：按建议 (a)（技术项）。
+8. **表结构**：**新增“结构公开”标注**（三种：公开 / 结构公开 / 私有）；结构按标注判定，详见“数据边界”与“持久化”。
+9. **能力标签**：按建议 (a)（技术项）。
+10. **上限**：按建议值（12 轮、连续 3 次错误、30 分钟、20 万 token、每项目 1 个会话、全局 2 个；超限先总结再停，可人工加额度）。
+11. **脚本目录**：按建议 (a)，除 `decide` 外全部进入（技术项）。
+12. **签名的草案批准**：v1（S2b）提供。
+13. **MCP**：按建议 (a)，S2 之后（技术项）。
+14. **思考**：按建议保持关闭。
+
+## 需要所有者决定（原文，已作答）
 
 1. **智能体记录的形态。**
    - (a) 格式 13 只加三张新表（会话、哈希链事件、对象登记），规划轮不进 `project_requests`；
