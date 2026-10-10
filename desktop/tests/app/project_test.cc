@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_state.hh"
+#include "stk/app/module_settings.hh"
 #include "stk/app/project_agent.hh"
 #include "stk/app/project_attention.hh"
 #include "stk/app/project_discussion.hh"
@@ -4605,6 +4606,52 @@ TEST_F(AgentPython, ARunningSessionCanBeCancelledAndItsDraftsWait)
   EXPECT_EQ(state().project()->revision, 1);
   EXPECT_EQ(client->stats().schema_violations, 0u);
 }
+
+#ifndef _WIN32  // the fake programs are shell scripts
+/** Computation modules on Home (E0b, docs/design/multiscale-engines.md) with a real service, an isolated modules
+ * folder, a fake micromamba and a fake LAMMPS on PATH (desktop/tests/bridge/modules_bridge.py). */
+class ModulesPython : public ProjectPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &python) override
+  {
+    options.command = {python, std::string(STK_REPO_ROOT) + "/desktop/tests/bridge/modules_bridge.py", dir.str() + "/modules-work",
+        "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+  }
+};
+
+TEST_F(ModulesPython, HomeDetectsInstalledEnginesAndInstallsMissingOnes)
+{
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorWorkspace));
+  f.screen.set_maximized(&area);
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/" + key); };
+  const auto shows = [&](const std::string &text) {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+    }
+    return false;
+  };
+  auto &modules = f.shell->store().modules();
+  STK_UNTIL(modules.loaded() && widget("workspace_modules") != nullptr);
+  const auto [x, y] = f.widget_center("a2/main/workspace_modules");
+  f.drv->click(x, y);
+  // Never searched: the panel looks by itself and finds the LAMMPS on PATH, used as it is; looking again changes nothing.
+  STK_UNTIL(shows("Found on this computer · 2 Aug 2023 - Update 3"));
+  STK_UNTIL(widget("workspace_modules/workspace_modules_detect") && widget("workspace_modules/workspace_modules_detect")->enabled);
+  widget("workspace_modules/workspace_modules_detect")->on_click();
+  STK_UNTIL(!modules.detecting() && shows("Found on this computer · 2 Aug 2023 - Update 3"));
+  EXPECT_EQ(widget("workspace_modules/workspace_module_install/lammps"), nullptr);
+  // Packmol is missing: installing it (from the fake conda-forge) makes it STK's, and removing it takes it away.
+  STK_UNTIL(widget("workspace_modules/workspace_module_install/packmol") &&
+            widget("workspace_modules/workspace_module_install/packmol")->enabled);
+  widget("workspace_modules/workspace_module_install/packmol")->on_click();
+  STK_UNTIL(shows("Installed by STK") && widget("workspace_modules/workspace_module_remove/packmol") != nullptr &&
+            widget("workspace_modules/workspace_module_remove/packmol")->enabled);
+  widget("workspace_modules/workspace_module_remove/packmol")->on_click();
+  STK_UNTIL(widget("workspace_modules/workspace_module_install/packmol") != nullptr);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+#endif
 
 #undef STK_UNTIL
 

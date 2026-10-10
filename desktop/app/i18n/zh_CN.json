@@ -2052,5 +2052,19 @@
   "ai.agent.state.damaged": "记录损坏",
   "agent.review_running": "生成这个草案的智能体会话正在工作；等它停下后再应用或丢弃。",
   "agent.review_reading": "正在读取这个草案的智能体会话…",
-  "workspace.attention.state.damaged": "记录损坏"
+  "workspace.attention.state.damaged": "记录损坏",
+  "workspace.modules": "计算模块",
+  "workspace.modules.hint": "相场之外的计算引擎（LAMMPS 分子动力学、ABACUS 第一性原理）与分子建模工具。已经装在这台电脑上的会被检测并直接使用；没有的可以在这里安装（从 conda-forge 装到 STK 自己的文件夹，需要网络设置允许外网）。",
+  "workspace.modules.reading": "正在读取模块…",
+  "workspace.modules.detect": "重新检测",
+  "workspace.modules.install": "安装（约 {size} MB）",
+  "workspace.modules.install.tip": "先确认这台电脑上没有已装好的同一软件；安装可以取消，失败或取消不会留下半装的环境。",
+  "workspace.modules.state.missing": "未找到",
+  "workspace.modules.state.detected": "已检测到",
+  "workspace.modules.state.installed": "STK 已安装",
+  "workspace.modules.state.installing": "正在安装",
+  "workspace.modules.scale.atomistic": "原子尺度",
+  "workspace.modules.scale.electronic": "电子尺度",
+  "workspace.modules.scale.mesoscale": "介观尺度",
+  "workspace.modules.detecting": "正在检测这台电脑上的软件…"
 }

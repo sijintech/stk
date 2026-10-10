@@ -1,0 +1,162 @@
+{
+ "format": "stk.modules/1",
+ "micromamba": {
+  "version": "2.9.0-0",
+  "url": "https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-{platform}",
+  "license": "BSD-3-Clause",
+  "files": {
+   "linux-64": {
+    "size_bytes": 18292808,
+    "sha256": "366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3"
+   },
+   "linux-aarch64": {
+    "size_bytes": 22020296,
+    "sha256": "9f93b974adcb4d166996af969b6cd371287d1a3e52733704727884d9b74cb7a7"
+   },
+   "osx-arm64": {
+    "size_bytes": 14596096,
+    "sha256": "ec2a072f028e1a7cf20f3e2e74d5a8127cf5a5f27636375b5359811565f4e5be"
+   },
+   "osx-64": {
+    "size_bytes": 16317928,
+    "sha256": "1e71054bb3ac9a076e21f7ec48acfef536f9b3f1408f371a942784bf5ef83d8a"
+   },
+   "win-64": {
+    "size_bytes": 11454464,
+    "sha256": "a6d804394b2418991c4e29562853eaace2f2ce9d9da661a98e74e02e8dbb44b0"
+   }
+  }
+ },
+ "modules": [
+  {
+   "id": "lammps",
+   "name": "LAMMPS",
+   "kind": "engine",
+   "scale": "atomistic",
+   "purpose": "Classical molecular dynamics (densities, glass transitions, moduli, diffusion).",
+   "license": "GPL-2.0",
+   "homepage": "https://www.lammps.org",
+   "detect": {
+    "executables": [
+     "lmp",
+     "lmp_mpi",
+     "lmp_serial"
+    ],
+    "version_args": [
+     "-h"
+    ],
+    "version_pattern": "(?:LAMMPS \\(([^)]+)\\)|Simulator - ([^\\n]+))"
+   },
+   "install": {
+    "channel": "conda-forge",
+    "packages": [
+     "lammps",
+     "mpich"
+    ],
+    "approximate_mb": 1800
+   },
+   "platforms": [
+    "linux-64",
+    "linux-aarch64",
+    "osx-arm64",
+    "osx-64"
+   ]
+  },
+  {
+   "id": "abacus",
+   "name": "ABACUS",
+   "kind": "engine",
+   "scale": "electronic",
+   "purpose": "First-principles DFT (plane waves and numerical atomic orbitals): structures, energies, band gaps.",
+   "license": "LGPL-3.0",
+   "homepage": "https://abacus.deepmodeling.com",
+   "detect": {
+    "executables": [
+     "abacus"
+    ],
+    "version_args": [
+     "--version"
+    ],
+    "version_pattern": "(v?[0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
+   },
+   "install": {
+    "channel": "conda-forge",
+    "packages": [
+     "abacus",
+     "mpich"
+    ],
+    "approximate_mb": 900
+   },
+   "platforms": [
+    "linux-64",
+    "linux-aarch64",
+    "osx-arm64",
+    "osx-64"
+   ]
+  },
+  {
+   "id": "packmol",
+   "name": "Packmol",
+   "kind": "tool",
+   "scale": "atomistic",
+   "purpose": "Packs molecules into a box at a target density (initial configurations for molecular dynamics).",
+   "license": "MIT",
+   "homepage": "https://m3g.github.io/packmol/",
+   "detect": {
+    "executables": [
+     "packmol"
+    ]
+   },
+   "install": {
+    "channel": "conda-forge",
+    "packages": [
+     "packmol"
+    ],
+    "approximate_mb": 30
+   },
+   "platforms": [
+    "linux-64",
+    "linux-aarch64",
+    "osx-arm64",
+    "osx-64",
+    "win-64"
+   ]
+  },
+  {
+   "id": "molecular-modeling",
+   "name": "Molecular modeling (mBuild, foyer, GMSO, RDKit)",
+   "kind": "python",
+   "scale": "atomistic",
+   "purpose": "Builds molecules and polymer chains, assigns force fields (OPLS-AA) and writes LAMMPS data files.",
+   "license": "MIT (mBuild, foyer, GMSO), BSD-3-Clause (RDKit)",
+   "homepage": "https://mosdef.org",
+   "detect": {
+    "imports": [
+     "mbuild",
+     "foyer",
+     "gmso",
+     "rdkit"
+    ],
+    "version_of": "mbuild"
+   },
+   "install": {
+    "channel": "conda-forge",
+    "packages": [
+     "python=3.12",
+     "mbuild",
+     "foyer",
+     "gmso",
+     "rdkit",
+     "packmol"
+    ],
+    "approximate_mb": 1500
+   },
+   "platforms": [
+    "linux-64",
+    "linux-aarch64",
+    "osx-arm64",
+    "osx-64"
+   ]
+  }
+ ]
+}

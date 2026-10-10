@@ -35,6 +35,7 @@ class ProjectAttention;
 class ProjectArchive;
 class ProjectDataLabels;
 class ModelSettings;
+class ModuleSettings;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -127,6 +128,8 @@ class AppStore {
   ProjectDataLabels &data_labels();
   /** Model endpoints of this computer and the network setting (model_settings.hh). */
   ModelSettings &models();
+  /** Optional software modules: engines and modeling tools (module_settings.hh). */
+  ModuleSettings &modules();
 
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
@@ -181,6 +184,7 @@ class AppStore {
   std::unique_ptr<ProjectArchive> archive_;
   std::unique_ptr<ProjectDataLabels> data_labels_;
   std::unique_ptr<ModelSettings> models_;
+  std::unique_ptr<ModuleSettings> modules_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;

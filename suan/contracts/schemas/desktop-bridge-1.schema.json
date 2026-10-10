@@ -8817,6 +8817,110 @@
           ],
           "additionalProperties": false
         }
+      },
+      "modules.list": {
+        "description": "Optional software modules (engines and modeling tools) and what is known about each on this computer (docs/design/multiscale-engines.md). Reads only.",
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/moduleListing"
+        }
+      },
+      "modules.detect": {
+        "description": "Look for a module (or all) on PATH, in common conda environments and in STK's modules folder, and record what is found. Installs nothing.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,40}$"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/moduleListing"
+        }
+      },
+      "modules.install": {
+        "description": "Desktop only: install a module that was not found, from conda-forge with micromamba into STK's modules folder (needs the network setting to allow the internet). An installation found on this computer is used instead.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,40}$"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/moduleJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "modules.cancel": {
+        "description": "Desktop only: cancel a module installation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,40}$"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/moduleJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "modules.remove": {
+        "description": "Desktop only: remove a module STK installed (never one found elsewhere).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,40}$"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/moduleListing"
+        }
       }
     },
     "events": {
@@ -9212,6 +9316,41 @@
         },
         "required": [
           "id"
+        ],
+        "additionalProperties": false
+      },
+      "modules.progress": {
+        "type": "object",
+        "description": "A module installation's progress (desktop only).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,40}$"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "done",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "stage": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "line": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "stage"
         ],
         "additionalProperties": false
       }
@@ -15379,6 +15518,195 @@
         "version",
         "metrics",
         "gate"
+      ],
+      "additionalProperties": false
+    },
+    "moduleJob": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]{1,40}$"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "done",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "stage": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "log": {
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1000
+        },
+        "started_at": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "stage",
+        "log",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "moduleListing": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "platform": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "modules": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]{1,40}$"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "kind": {
+                "enum": [
+                  "engine",
+                  "tool",
+                  "python"
+                ]
+              },
+              "scale": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "purpose": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "license": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "homepage": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "state": {
+                "enum": [
+                  "missing",
+                  "detected",
+                  "installed",
+                  "installing"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 100
+              },
+              "programs": {
+                "type": "object",
+                "maxProperties": 8,
+                "additionalProperties": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "prefix": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 4096
+              },
+              "installable": {
+                "type": "boolean"
+              },
+              "approximate_mb": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "packages": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "string",
+                  "maxLength": 60
+                }
+              },
+              "job": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/moduleJob"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "kind",
+              "state",
+              "version",
+              "programs",
+              "installable",
+              "job"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "detected_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64,
+          "description": "When this computer was last searched (null: never; the desktop then searches once)."
+        }
+      },
+      "required": [
+        "root",
+        "platform",
+        "detected_at",
+        "modules"
       ],
       "additionalProperties": false
     }

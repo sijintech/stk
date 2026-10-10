@@ -581,6 +581,9 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.agent.objects` | `{handle, kind, object_id}` | `{owner}` |
 | `project.agent.verify` / `export` | `{handle, session_id}` | the check / `stk.agent-log/1` |
 | `project.agent.decide` (desktop only) | `{handle, session_id, item_id, decision: apply/discard, draft_sha256, expected_revision}` | `{receipt, revision}`; `project.changed` when applied |
+| `modules.list` / `modules.detect` | `{}` / `{id?}` | `{root, platform, modules: [{id, name, kind, scale, state: missing/detected/installed/installing, version, programs, prefix, installable, job, ...}]}` |
+| `modules.install` / `cancel` (desktop only) | `{id}` | `{job}`; progress as `modules.progress` events |
+| `modules.remove` (desktop only) | `{id}` | the listing; only modules STK installed |
 | `materials.datasets.synthetic` | `{directory (absolute, new or empty), kind, samples (1-5000), seed?, name?}` | `{card}` |
 | `materials.datasets.validate` | `{directory (absolute)}` | `{card}` (data card; stays on this computer) |
 | `materials.train` | `{directory, job_id, options?}` | `{job}`; trains in the background (PyTorch CPU, else `unsupported`); one at a time (`busy`) |

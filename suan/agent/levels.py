@@ -155,6 +155,8 @@ OPERATIONS = {
     "project.agent.objects": ("read", "the agent's own interface"),
     "project.agent.verify": ("read", "the agent's own interface"),
     "project.agent.export": ("read", "the agent's own interface"),
+    "modules.list": ("read", "not needed in v1: the agent does not run engines"),
+    "modules.detect": ("record", "runs the programs it finds and records them; not needed in v1"),
     "materials.datasets.synthetic": ("project_edit", "writes files to a folder on this computer"),
     "materials.datasets.validate": ("read", "not in v1: materials models are a person's work in S3"),
     "materials.train": ("submit_run", "training uses this computer for minutes; a person starts it"),
@@ -166,7 +168,10 @@ OPERATIONS = {
 }
 
 # Desktop-only methods that are deliberately not in the script catalog.
-DESKTOP_ONLY = {"project.agent.decide": ("project_edit", "a person approves a draft from the session card")}
+DESKTOP_ONLY = {"project.agent.decide": ("project_edit", "a person approves a draft from the session card"),
+                "modules.install": ("project_edit", "a person installs software on this computer"),
+                "modules.cancel": ("project_edit", "a person installs software on this computer"),
+                "modules.remove": ("project_edit", "a person removes software from this computer")}
 
 # The operations each tool's implementation performs (by their store equivalents); all must be at agent levels.
 TOOL_USES = {

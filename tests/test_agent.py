@@ -102,7 +102,10 @@ def test_the_agent_outlines_captures_and_computes_then_answers_without_changing_
     results = [json.loads(event["content"]) for event in view["events"] if event["kind"] == "tool_result"]
     outline, captured, computed = (result["data"] for result in results)
     assert outline["tables"][0]["label"] == "private" and outline["tables"][0]["rows"] == 5
-    assert "values" not in json.dumps(outline) and "301" not in json.dumps(outline)  # structure only, no values
+    # Structure only: no cell value appears (identifiers are random and may contain any digits, so they are left out).
+    import re
+    text = re.sub(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "", json.dumps(outline))
+    assert "values" not in text and not any(str(value) in text for value in (300, 310, 320, 601, 621, 641))
     assert len(captured["rows"]) == 5
     fit = computed["fit"]
     assert fit["coefficients"] == pytest.approx([1.0, 2.0]) and fit["r2"] == pytest.approx(1.0)

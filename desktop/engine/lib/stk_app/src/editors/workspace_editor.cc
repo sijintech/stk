@@ -5,10 +5,13 @@
  * marks the next step. Buttons only navigate; nothing here runs, sends or changes data.
  */
 #include "archive_controls.hh"
+#include "editor_text.hh"
 #include "project_navigation.hh"
 
 #include "../app_theme.hh"
 #include "stk/app/jobs_state.hh"
+#include "stk/app/model_settings.hh"
+#include "stk/app/module_settings.hh"
 #include "stk/app/project_attention.hh"
 #include "stk/app/project_search.hh"
 #include "stk/app/viewer_state.hh"
@@ -119,9 +122,66 @@ class WorkspaceEditor final : public Editor {
         .disable(!available);
     // The skill library is shared across projects: reachable with or without one.
     tools.button("workspace_skills", ctx.tr("workspace.skills"), editor_navigation_action(ctx, kEditorSkills));
+    modules(layout, ctx);
   }
 
  private:
+  /** Optional computation modules (docs/design/multiscale-engines.md): engines for each scale and modeling tools.
+   * What is already installed on this computer is detected and used; a missing module is installed on request. */
+  void modules(ui::Layout &layout, EditorContext &ctx)
+  {
+    auto &modules = ctx.store.modules();
+    modules.sync();
+    if (!modules.supported()) { return; }
+    auto *box = layout.panel("workspace_modules", ctx.tr("workspace.modules"), false);
+    if (!box) { return; }
+    auto &catalog = ctx.store.catalog();
+    auto *settings = &modules;
+    hint(*box, ctx, "workspace.modules.hint");
+    if (!modules.error().empty()) { box->paragraph(modules.error()); }
+    if (!modules.loaded()) { box->paragraph(ctx.tr("workspace.modules.reading")); }
+    if (modules.detecting()) { box->paragraph(ctx.tr("workspace.modules.detecting")); }
+    auto &models = ctx.store.models();
+    models.sync();
+    const bool online = models.network() == "internet";
+    box->button("workspace_modules_detect", ctx.tr("workspace.modules.detect"), [settings] { settings->detect(); })
+        .disable(modules.detecting());
+    if (!modules.loaded()) { return; }
+    for (const auto &item : modules.listing().value("modules", io::Json::array())) {
+      const auto id = io::get_string(item, "id"), state = io::get_string(item, "state");
+      box->label(io::get_string(item, "name") + " · " + std::string(catalog.tr_or("workspace.modules.scale." +
+          io::get_string(item, "scale"), io::get_string(item, "scale"))) + " · " + io::get_string(item, "license"))
+          .tip(io::get_string(item, "purpose") + "\n" + io::get_string(item, "homepage"));
+      std::string status(catalog.tr_or("workspace.modules.state." + state, state));
+      if (!io::get_string(item, "version").empty()) { status += " · " + io::get_string(item, "version"); }
+      const auto programs = item.value("programs", io::Json::object());
+      if (!programs.empty() && programs.begin()->is_string()) { status += " · " + programs.begin()->get<std::string>(); }
+      const auto job = item.value("job", io::Json());
+      if (job.is_object()) {
+        const auto log = job.value("log", io::Json::array());
+        if (state == "installing" && !log.empty()) { status += " · " + log.back().get<std::string>(); }
+        if (!io::get_string(job, "error").empty() && state == "missing") { status += " · " + io::get_string(job, "error"); }
+      }
+      box->paragraph(status);
+      if (!modules.installable()) { continue; }
+      auto &row = box->row();
+      if (state == "missing") {
+        row.button("workspace_module_install/" + id, catalog.format("workspace.modules.install",
+            {{"size", std::to_string(io::get_int(item, "approximate_mb", 0))}}), [settings, id] { settings->act("install", id); })
+            .width(8).disable(modules.busy() || !online || !io::get_bool(item, "installable", false))
+            .tip(ctx.tr(online ? "workspace.modules.install.tip" : "models.local.needs_internet"));
+      }
+      else if (state == "installing") {
+        row.button("workspace_module_cancel/" + id, ctx.tr("models.local.cancel"), [settings, id] { settings->act("cancel", id); })
+            .width(5);
+      }
+      else if (state == "installed") {
+        row.button("workspace_module_remove/" + id, ctx.tr("models.local.remove"), [settings, id] { settings->act("remove", id); })
+            .width(5).disable(modules.busy());
+      }
+    }
+  }
+
   /** Find names and text in the open project (UX package U3): searching starts on Enter or the
    * button, results are grouped by kind and open where they live. Reads only. */
   void search(ui::Layout &layout, EditorContext &ctx)

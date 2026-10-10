@@ -2052,5 +2052,19 @@
   "ai.agent.state.damaged": "Damaged record",
   "agent.review_running": "The agent session that proposed this draft is working; apply or discard it once it stops.",
   "agent.review_reading": "Reading the agent session of this draft…",
-  "workspace.attention.state.damaged": "Damaged record"
+  "workspace.attention.state.damaged": "Damaged record",
+  "workspace.modules": "Computation modules",
+  "workspace.modules.hint": "Engines besides phase field (LAMMPS molecular dynamics, ABACUS first-principles) and molecular modeling tools. What is already installed on this computer is detected and used as it is; a missing module can be installed here (from conda-forge into STK's own folder; the network setting must allow the internet).",
+  "workspace.modules.reading": "Reading modules…",
+  "workspace.modules.detect": "Detect again",
+  "workspace.modules.install": "Install (about {size} MB)",
+  "workspace.modules.install.tip": "Install only when the software is not already on this computer; installing can be cancelled, and a failed or cancelled install leaves nothing behind.",
+  "workspace.modules.state.missing": "Not found",
+  "workspace.modules.state.detected": "Found on this computer",
+  "workspace.modules.state.installed": "Installed by STK",
+  "workspace.modules.state.installing": "Installing",
+  "workspace.modules.scale.atomistic": "atomistic",
+  "workspace.modules.scale.electronic": "electronic",
+  "workspace.modules.scale.mesoscale": "mesoscale",
+  "workspace.modules.detecting": "Looking for the software on this computer…"
 }

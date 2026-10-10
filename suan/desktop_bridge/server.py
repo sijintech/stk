@@ -55,12 +55,12 @@ def default_state_dir():
     return Path(os.environ.get("STK_DESKTOP_BRIDGE_DIR", str(Path.home() / ".stk" / "desktop-bridge")))
 
 
-
 def _absolute(path):
     """A dataset folder given as an absolute path (the service has no notion of the caller's working directory)."""
     if not isinstance(path, str) or not Path(path).is_absolute():
         raise BridgeError("invalid_params", "directory is an absolute path")
     return Path(path)
+
 
 class StateDirLock:
     """An exclusive lock on ``<state_dir>/bridge.lock`` held for the bridge's lifetime (``busy`` otherwise)."""
@@ -183,6 +183,9 @@ class Bridge:
         # Materials prediction models (S3): datasets, training on this computer, a registry and prediction.
         from suan.materials.service import MaterialsService
         self.materials = MaterialsService(self.state_dir / "materials")
+        # Optional software modules (engines and modeling tools): detected, or installed from conda-forge (E0b).
+        from suan.modules import Modules
+        self.modules = Modules(policy=self.projects.models.policy, emit=self.emit)
         self.subscriptions = SubscriptionManager(self.emit, self.connections.backend, self.connections.hub_client)
         self.methods = {
             "hello": self.hello,
@@ -304,6 +307,11 @@ class Bridge:
             "project.labels.set": self.labels_set,
             "models.list": lambda p, c: self.projects.model_settings("list", p),
             "models.local.list": lambda p, c: self.projects.local_models("list", p),
+            "modules.list": lambda p, c: self.modules_call("list", p),
+            "modules.detect": lambda p, c: self.modules_call("detect", p),
+            "modules.install": lambda p, c: self.modules_call("install", p),
+            "modules.cancel": lambda p, c: self.modules_call("cancel", p),
+            "modules.remove": lambda p, c: self.modules_call("remove", p),
             "materials.datasets.synthetic": lambda p, c: self.materials_call("synthetic", p),
             "materials.datasets.validate": lambda p, c: self.materials_call("validate", p),
             "materials.train": lambda p, c: self.materials_call("train", p),
@@ -518,6 +526,28 @@ class Bridge:
             self.handle_line(line)
         self.shutdown()
 
+    def modules_call(self, action, params):
+        """Optional software modules (docs/design/multiscale-engines.md, E0b). Installing and removing change this
+        computer and use the network: desktop only (not in the script catalog); listing and detecting are not."""
+        from suan.project.store import ProjectError
+        if self.closing.is_set():
+            raise BridgeError("shutting_down", "The bridge is shutting down")
+        try:
+            if action == "list":
+                return self.modules.list()
+            if action == "detect":
+                return self.modules.detect(params.get("id"))
+            if action == "install":
+                return {"job": self.modules.install(params["id"])}
+            if action == "cancel":
+                return {"job": self.modules.cancel(params["id"])}
+            return self.modules.remove(params["id"])
+        except ProjectError as exc:
+            raise BridgeError("invalid_params", str(exc)) from None
+        except OSError as exc:
+            raise BridgeError("unavailable", f"The modules folder cannot be used: {exc.strerror or type(exc).__name__}",
+                              retryable=False) from None
+
     def materials_call(self, action, params):
         """Materials models (S3, docs/design/materials-models-s3.md); everything runs on this computer."""
         from suan.materials import datasets, service, training
@@ -564,6 +594,7 @@ class Bridge:
             return
         self.closing.set()
         self.materials.shutdown()
+        self.modules.shutdown()
         self.workflow_executor.shutdown(wait=False)
         self.analysis_executor.shutdown(wait=False)
         self.ui.close()
@@ -633,6 +664,7 @@ class Bridge:
                  "project.agent.tools", "project.agent.route", "project.agent.create", "project.agent.say",
                  "project.agent.start", "project.agent.cancel", "project.agent.recover", "project.agent.get",
                  "project.agent.list", "project.agent.objects", "project.agent.verify", "project.agent.export",
+                 "modules.list", "modules.detect",
                  "materials.datasets.synthetic", "materials.datasets.validate", "materials.train", "materials.jobs.get",
                  "materials.jobs.cancel", "materials.models.list", "materials.models.activate", "materials.predict",
                  "connections.list", "connections.check", "connections.ssh",
@@ -720,6 +752,8 @@ class Bridge:
 
     def model_settings(self, action, params, context):
         result = self.projects.model_settings(action, params)
+        if action == "policy" and params["network"] != "internet":
+            self.modules.cancel_all()  # module installations download from conda-forge too
         context.after(lambda: self.emit("models.changed", {}))
         return result
 

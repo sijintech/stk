@@ -6,6 +6,7 @@
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
 #include "stk/app/model_settings.hh"
+#include "stk/app/module_settings.hh"
 #include "stk/app/project_archive.hh"
 #include "stk/app/project_data_labels.hh"
 #include "stk/app/project_attention.hh"
@@ -41,6 +42,7 @@ AppStore::~AppStore()
   archive_.reset();
   data_labels_.reset();
   models_.reset();
+  modules_.reset();
   skills_.reset();
   scripts_.reset();
   project_.reset();
@@ -70,6 +72,14 @@ ModelSettings &AppStore::models()
     models_ = std::make_unique<ModelSettings>(*this);
   }
   return *models_;
+}
+
+ModuleSettings &AppStore::modules()
+{
+  if (!modules_) {
+    modules_ = std::make_unique<ModuleSettings>(*this);
+  }
+  return *modules_;
 }
 
 ProjectArchive &AppStore::archive()
