@@ -307,6 +307,7 @@ class Bridge:
             "project.agent.objects": lambda p, c: self.projects.agent("objects", p),
             "project.agent.verify": lambda p, c: self.projects.agent("verify", p),
             "project.agent.export": lambda p, c: self.projects.agent("export", p),
+            "project.agent.decide": self.decide_agent_item,
             "models.local.recommendations": lambda p, c: self.projects.local_models("recommendations", p),
             "models.local.install": lambda p, c: self.projects.local_models("install", p),
             "models.local.import": lambda p, c: self.projects.local_models("import", p),
@@ -713,6 +714,14 @@ class Bridge:
         if not result["replayed"]:
             context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                                 "revision": result["revision"]}))
+        return result
+
+    def decide_agent_item(self, params, context):
+        """A person's decision on an agent session's draft (desktop only: not in the script catalog)."""
+        result = self.projects.agent("decide", params)
+        if result["receipt"].get("applied_revision") is not None:
+            context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                                "revision": result["receipt"]["applied_revision"]}))
         return result
 
     def upgrade_project(self, params, context):

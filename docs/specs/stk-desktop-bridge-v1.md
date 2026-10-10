@@ -580,6 +580,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.agent.list` | `{handle, offset?, limit?}` | `{items, total}` |
 | `project.agent.objects` | `{handle, kind, object_id}` | `{owner}` |
 | `project.agent.verify` / `export` | `{handle, session_id}` | the check / `stk.agent-log/1` |
+| `project.agent.decide` (desktop only) | `{handle, session_id, item_id, decision: apply/discard, draft_sha256, expected_revision}` | `{receipt, revision}`; `project.changed` when applied |
 | `project.analysis_runs.prepare` | `{handle, run_id, analysis_id, snapshot_id, bindings, expected_revision, parameter_overrides?}` | `{run: analysisRun}` |
 | `project.analysis_runs.get` / `project.analysis_runs.start` / `project.analysis_runs.cancel` / `project.analysis_runs.recover` | `{handle, run_id}` | `{run: analysisRun}` |
 | `project.analysis_runs.list` | `{handle, offset?, limit?}` | `{runs: [analysisRunSummary], next_offset: integer|null}` |
@@ -1216,12 +1217,22 @@ anything is claimed), are claimed before sending and sent once (an uncertain out
 `adapter_failed` moves to the next candidate the session showed). A planner turn claimed by a lost executor is
 settled as uncertain by `recover` or the next `start` and never resent. Tool calls carry the executor's own IDs
 (the model's are kept as `model_id`); every recorded call gets a result, and each result's `sources` record the
-data label at that moment. Tools are a fixed registry at the read, record, model and draft levels (S2a has
-`project_outline`, `capture_rows`, `table_statistics`); the agent never applies drafts, prepares or starts runs,
-labels data or changes settings. A session view holds at most 1000 events: `get` pages with `offset`/`limit`, and
+data label at that moment; a call left without a result by a lost executor is run again by the next `start` with
+the same ID (same objects, its request never sent twice). Tools are a fixed registry at the read, record, model and
+draft levels: `project_outline`, `capture_rows`, `table_statistics`, `propose_sweep` and `ask_about_context` (each
+makes one request through the request executor, on a running model chosen like `models.route`; to an external
+endpoint only when every source the session has read is public, checked again before sending by
+`ModelGateway.admit_sources`), `draft_status`, `find_runs`, `capture_run_results`; the agent never applies drafts,
+prepares or starts runs, labels data or changes settings. A turn that leaves drafts to review ends with
+`awaiting_user` items (`apply_draft`, then `run_rows` once applied); before the next message is answered, `observed`
+records what people did about them. `get` adds `usage` (planner turns and the session's requests). A session view holds at most 1000 events: `get` pages with `offset`/`limit`, and
 without them (and in every other view) shows the newest 1000 with `total`. `export` and its check read the log once.
-At most one running session per project and two per service (`busy`). Sessions never change the revision. All `project.agent.*` methods are in the script catalog; the desktop-only
-`project.agent.decide` (S2b, design) will not be.
+At most one running session per project and two per service (`busy`). Sessions never change the revision. All `project.agent.*` methods except `decide` are in the script catalog.
+`project.agent.decide` is the person's decision on an `apply_draft` item from the desktop (scripts get `unsupported`):
+it checks the item is open, the draft pending with the digest shown and `base_revision == expected_revision ==` the
+current revision, records `approval_decided` (this computer's user and host, `authenticated: false`), applies or
+discards, then records `approval_receipt`; a failed action does not undo the decision and leaves the item open.
+An item not waiting, a different draft or a changed revision is `conflict`; a running session is `busy`.
 
 Recent locations are bridge preferences (`recent-projects.json`, version 1), at most 20 entries in
 most-recently-opened order. Creating/opening successfully remembers canonical directory, project UUID,

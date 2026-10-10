@@ -2,6 +2,8 @@
 rebuild each planner turn's input from the log and compare it with the digest recorded before sending, and recompute
 the deterministic tools. Never calls a model.
 """
+import json
+
 from suan.project.agent_sessions import digest
 
 from . import tools as tools_module, wire
@@ -42,6 +44,17 @@ def _check(store, session_id, report, header, events):
                 continue
             if digest(event["content"]) != event["content_sha256"]:
                 problems.append(f"Tool result {event['call_id']} does not match its digest")
+            if call["tool"] == "propose_sweep":
+                # The saved proposal is checked against its request (never recompiled): same draft, same base.
+                data = {}
+                try:
+                    data = json.loads(event["content"]).get("data", {})
+                    proposal = store.requests.edit_proposal(data["request_id"])
+                except Exception:  # noqa: BLE001 - reported, not raised
+                    proposal = {"draft": None}
+                draft = proposal.get("draft") or {}
+                if draft.get("id") != data.get("draft_id") or draft.get("base_revision") != data.get("base_revision"):
+                    problems.append(f"The draft of propose_sweep ({call['call_id']}) does not match its request")
             if call["tool"] in RECOMPUTED:
                 tool = tools_module.REGISTRY[call["tool"]]
                 context = tools_module.ToolContext(store, session_id, event["turn"], call["call_id"])

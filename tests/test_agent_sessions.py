@@ -76,6 +76,9 @@ def test_a_session_ends_after_an_uncertain_turn_and_objects_belong_to_one_sessio
     view = sessions.get(first)
     assert view["state"] == "awaiting" and view["awaiting"][0]["draft_id"] == draft
     sessions.append(first, "approval_decided", {"item_id": "a1", "decision": "apply"}, turn=0)
+    sessions.append(first, "approval_receipt", {"item_id": "a1", "ok": False, "error": "locked"}, turn=0)
+    assert sessions.get(first)["state"] == "awaiting"  # the action failed: the item stays open
+    sessions.append(first, "approval_receipt", {"item_id": "a1", "ok": True, "applied_revision": 2}, turn=0)
     assert sessions.get(first)["state"] == "idle"
     sessions.append(second, "stopped", {"reason": "uncertain"}, turn=0)
     assert sessions.get(second)["state"] == "ended"

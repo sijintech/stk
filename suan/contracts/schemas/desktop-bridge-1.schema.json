@@ -8331,6 +8331,82 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.agent.decide": {
+        "description": "A person's decision on an agent session's waiting draft, from the desktop only (not in the script catalog): checks the item, the draft digest and the revision, records approval_decided (by this computer's user and host, not authenticated), applies or discards the draft, then records approval_receipt. Emits project.changed when applied.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "session_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "item_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "decision": {
+              "enum": [
+                "apply",
+                "discard"
+              ]
+            },
+            "draft_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "handle",
+            "session_id",
+            "item_id",
+            "decision",
+            "draft_sha256",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "receipt": {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                },
+                "applied_revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "error": {
+                  "type": "string",
+                  "maxLength": 1000
+                }
+              },
+              "required": [
+                "ok"
+              ],
+              "additionalProperties": false
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "receipt",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -14600,6 +14676,73 @@
         },
         "running": {
           "type": "boolean"
+        },
+        "usage": {
+          "type": "object",
+          "description": "Tokens of the planner turns and of the requests the session made (get only).",
+          "properties": {
+            "planner": {
+              "type": "object",
+              "properties": {
+                "turns": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "input_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "output_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "turns",
+                "input_tokens",
+                "output_tokens"
+              ],
+              "additionalProperties": false
+            },
+            "requests": {
+              "type": "object",
+              "properties": {
+                "requests": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "input_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "output_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "requests",
+                "input_tokens",
+                "output_tokens"
+              ],
+              "additionalProperties": false
+            },
+            "input_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "output_tokens": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "planner",
+            "requests",
+            "input_tokens",
+            "output_tokens"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

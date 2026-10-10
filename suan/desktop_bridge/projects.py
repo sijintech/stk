@@ -28,6 +28,17 @@ from .attention import AttentionViews
 from .recent_projects import RecentProjects
 
 
+def _person():
+    """Who decided at this computer: the local user and host name (STK has no accounts, so not authenticated)."""
+    import getpass
+    import socket
+    try:
+        user = getpass.getuser()
+    except Exception:  # noqa: BLE001 - no user name is still a decision
+        user = ""
+    return {"user": user[:128], "host": socket.gethostname()[:255]}
+
+
 class ProjectSessions:
     def __init__(self, state_dir=None, *, analysis_executor=None, workflow_executor=None):
         self._recent = RecentProjects(state_dir)
@@ -342,6 +353,11 @@ class ProjectSessions:
                 view = agents.recover(store, params["session_id"])
             elif action == "get":
                 view = sessions.get(params["session_id"], offset=params.get("offset"), limit=params.get("limit"))
+                view["usage"] = agents.usage(store, params["session_id"])
+            elif action == "decide":
+                return agents.decide(store, params["session_id"], params["item_id"], params["decision"],
+                                     draft_sha256=params["draft_sha256"], expected_revision=params["expected_revision"],
+                                     by=_person())
             elif action == "list":
                 return sessions.list(offset=params.get("offset", 0), limit=params.get("limit", 50))
             elif action == "objects":

@@ -92,10 +92,10 @@ def until(condition, s, timeout=60, tick=True):
     pytest.fail("condition not reached")
 
 
-def settled(s, run_id, tick=True):
+def settled(s, run_id, tick=True, timeout=60):
     executor, store = s["h"].bridge.workflow_executor, s["h"].bridge.projects._stores[s["handle"]]
     return until(lambda: (lambda run: run if run["status"] == "stopped" and not executor.active(store, run_id) else None)(
-        get(s, run_id)), s, tick=tick)
+        get(s, run_id)), s, timeout=timeout, tick=tick)
 
 
 def tasks(run):

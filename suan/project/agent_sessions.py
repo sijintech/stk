@@ -19,6 +19,7 @@ MAX_HEADER_BYTES = 256 * 1024
 MAX_EVENT_BYTES = 64 * 1024
 MAX_USER_TEXT_CHARS = 8 * 1024
 MAX_VIEW_EVENTS = 1000
+MAX_AWAITING = 100  # the newest open items a view lists
 KINDS = ("user_turn", "model_claimed", "model_completed", "model_settled", "tool_called", "tool_result", "awaiting_user",
          "approval_decided", "approval_receipt", "observed", "policy", "cancel_requested", "stopped")
 OBJECT_KINDS = ("context", "message", "request", "draft")
@@ -288,10 +289,11 @@ class AgentSessions:
             elif kind == "awaiting_user":
                 for item in event.get("items", []):
                     awaited[item["item_id"]] = item
-            elif kind in ("approval_decided", "observed") and event.get("item_id"):
-                if kind == "approval_decided" or event.get("resolved", False):
-                    resolved.add(event["item_id"])
-        open_items = [item for key, item in awaited.items() if key not in resolved]
+            elif kind == "approval_receipt" and event.get("ok") and event.get("item_id"):
+                resolved.add(event["item_id"])  # a decision whose action failed leaves its item open
+            elif kind == "observed" and event.get("resolved", False) and event.get("item_id"):
+                resolved.add(event["item_id"])
+        open_items = [item for key, item in awaited.items() if key not in resolved][-MAX_AWAITING:]
         if ended:
             state = "ended"
         elif not answered:

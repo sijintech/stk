@@ -15,7 +15,7 @@ from suan.project import ProjectStore
 from suan.project.agent_sessions import AgentSessions
 from suan.project.aliyun import InvalidResponse
 from suan.project.request_executor import ConfirmedCancellation, DefinitiveFailure
-from suan.project.store import ProjectError
+from suan.project.store import ProjectError, RevisionConflict
 from test_desktop_bridge import bridge_env, inproc  # noqa: F401
 
 PLANNER = "test-planner/1"
@@ -255,8 +255,9 @@ def test_the_service_runs_agent_sessions_for_scripts_and_the_desktop(inproc, pro
     handle = h.call("project.open", {"directory": str(store.directory)})["project"]["handle"]
     planner = Planner(call("project_outline"), wire.ModelTurn("One table, Cases.", None, "stop"))
     h.bridge.projects.models[PLANNER] = planner
-    assert {tool["name"] for tool in h.call("project.agent.tools", {"handle": handle})["tools"]} == {
-        "project_outline", "capture_rows", "table_statistics"}
+    assert {tool["name"] for tool in h.call("project.agent.tools", {"handle": handle})["tools"]} == set(tools.REGISTRY) == {
+        "project_outline", "capture_rows", "table_statistics", "propose_sweep", "ask_about_context", "draft_status",
+        "find_runs", "capture_run_results"}
     session_id, turn_id = str(uuid4()), str(uuid4())
     created = h.call("project.agent.create", {"handle": handle, "session_id": session_id, "turn_id": turn_id,
                                               "text": "What is in this project?",
@@ -327,7 +328,7 @@ def test_a_planner_turn_on_an_openai_compatible_server_sends_tools_and_reads_one
     assert view["stop_reason"] == "final", view["events"][-1]
     first, second = bodies
     assert first["stream"] is False and first["parallel_tool_calls"] is False and first["tool_choice"] == "auto"
-    assert [tool["function"]["name"] for tool in first["tools"]] == ["project_outline", "capture_rows", "table_statistics"]
+    assert [tool["function"]["name"] for tool in first["tools"]] == list(tools.REGISTRY)
     assert first["messages"][0]["role"] == "system" and json.loads(first["messages"][1]["content"]) == {"message": "What is here?"}
     # The call's ID in the conversation is the executor's (servers may repeat theirs); the server's is kept in the log.
     sent_id = second["messages"][-2]["tool_calls"][0]["id"]
@@ -373,8 +374,8 @@ def test_a_run_lost_between_steps_continues_with_new_call_numbers(project):
     store, ids = project
     agents = executor(Planner(call("project_outline"), wire.ModelTurn("Done.", None, "stop")))
     session_id = session(agents, store)
-    # A run that died after a tool call was recorded (no result): the call gets an unknown result and the message is
-    # answered by a new run whose planner turns continue the numbering.
+    # A run that died after a tool call was recorded (no result): the next run runs the call again with the same ID
+    # (so it makes the same objects) and answers the message, its planner turns continuing the numbering.
     store.agent_sessions.append(session_id, "model_claimed", {"call": 0, "configuration": {"adapter": PLANNER, "model": "m"},
                                                               "input_sha256": "0" * 64, "transcript_events": 1}, turn=0)
     store.agent_sessions.append(session_id, "model_completed", {"call": 0, "text": None, "finish_reason": "tool_calls",
@@ -385,8 +386,9 @@ def test_a_run_lost_between_steps_continues_with_new_call_numbers(project):
                                 turn=0)
     view = agents.start(store, session_id, wait=True)
     assert view["stop_reason"] == "final"
-    unknown = next(event for event in view["events"] if event["kind"] == "tool_result")
-    assert unknown["call_id"] == "lost" and unknown["status"] == "unknown"
+    rerun = next(event for event in view["events"] if event["kind"] == "tool_result")
+    assert rerun["call_id"] == "lost" and rerun["status"] == "ok"
+    assert [event["kind"] for event in view["events"]].count("tool_called") == 2  # not recorded again
     assert [event["call"] for event in view["events"] if event["kind"] == "model_claimed"] == [0, 1, 2]
     assert roles_answered(wire.transcript(view["session"], view["events"]))
 
@@ -559,3 +561,181 @@ def test_the_service_names_agent_limits_and_checks_handles(inproc, project):
         assert error["code"] == "busy" and "agent session" in error["message"]
     finally:
         release.set()
+
+
+class Answers:
+    """Scripted answers to the session's own requests (a text adapter for the request executor)."""
+
+    def __init__(self, *answers):
+        self.answers, self.asked = list(answers), []
+
+    def send(self, frozen_input, cancel):
+        self.asked.append(frozen_input)
+        answer = self.answers.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer(frozen_input) if callable(answer) else answer
+
+
+def requesting(tmp_path, answers):
+    """A tool context whose requests go to a local endpoint answered by ``answers``."""
+    from suan.project.request_executor import RequestExecutor
+    gateway = ModelGateway(tmp_path / "state")
+    gateway.endpoints.add("laptop", "Laptop", "http://127.0.0.1:9/v1", ["m"])
+    gateway["openai-compatible/1:laptop"] = answers
+    return {"gateway": gateway, "requests": RequestExecutor(gateway, gate=gateway.admit), "local": None}
+
+
+def sweep_answer(ids, count=3):
+    def answer(frozen_input):
+        context = frozen_input["context"]
+        return json.dumps({"format": "stk.parameter-sweep/1", "context_id": context["id"],
+                           "base_revision": context["source_revision"], "summary": "More temperatures.",
+                           "base_record_id": ids["rows"][0], "mode": "product",
+                           "axes": [{"field_id": ids["x"], "start": 400, "stop": 500, "count": count}]})
+    return answer
+
+
+def test_a_sweep_step_replayed_makes_the_same_request_and_draft_and_never_resends(project, tmp_path):
+    store, ids = project
+    answers = Answers(sweep_answer(ids))
+    services = requesting(tmp_path, answers)
+    session_id = str(uuid4())
+    captured = tools.capture_rows(tools.ToolContext(store, session_id, 0, "a"), {"table_id": ids["table"]})
+    context = tools.ToolContext(store, session_id, 0, "b", services, sources=captured.sources)
+    first = tools.propose_sweep(context, {"context_id": captured.data["context_id"], "instruction": "Three more."})
+    again = tools.propose_sweep(context, {"context_id": captured.data["context_id"], "instruction": "Three more."})
+    assert first.status == "ok" and first.data == again.data and first.objects == again.objects
+    assert len(answers.asked) == 1 and first.data["new_rows"] == 3
+    assert [kind for kind, _ in first.objects] == ["message", "request", "draft"]
+    assert store.drafts.get(first.data["draft_id"])["status"] == "pending"
+
+
+def test_request_steps_report_a_changed_project_a_running_workflow_and_an_uncertain_answer(project, tmp_path, monkeypatch):
+    store, ids = project
+    answers = Answers(RuntimeError("connection reset after sending"))
+    services = requesting(tmp_path, answers)
+    session_id = str(uuid4())
+    captured = tools.capture_rows(tools.ToolContext(store, session_id, 0, "a"), {"table_id": ids["table"]})
+    store.apply([{"op": "set_cell", "table_id": ids["table"], "record_id": ids["rows"][1], "field_id": ids["x"], "value": 1}],
+                expected_revision=store.info()["revision"])
+    with pytest.raises(RevisionConflict, match="capture them again"):  # a stale context: nothing is asked
+        tools.propose_sweep(tools.ToolContext(store, session_id, 0, "b", services),
+                            {"context_id": captured.data["context_id"], "instruction": "More."})
+    assert answers.asked == []
+    uncertain = tools.ToolContext(store, session_id, 0, "c", services)
+    for _ in range(2):  # replayed: the request is not sent again
+        result = tools.ask_about_context(uncertain, {"context_id": captured.data["context_id"], "question": "Why?"})
+        assert result.status == "error" and "ended uncertain" in result.data["error"]
+    assert len(answers.asked) == 1
+    from suan.project.workflow_runs import WorkflowRuns
+    monkeypatch.setattr(WorkflowRuns, "list", lambda self, **options: {"runs": [{"status": "running"}], "next_offset": None})
+    with pytest.raises(ProjectError, match="workflow run is writing"):
+        tools.ask_about_context(tools.ToolContext(store, session_id, 0, "d", services),
+                                {"context_id": captured.data["context_id"], "question": "Why?"})
+    assert len(answers.asked) == 1
+
+
+def test_a_decision_checks_the_item_the_draft_and_the_revision_and_scripts_cannot_decide(project, tmp_path, inproc):
+    store, ids = project
+    services = requesting(tmp_path, Answers(sweep_answer(ids)))
+    planner = Planner(lambda frozen, cancel: call("capture_rows", {"table_id": ids["table"]}),
+                      lambda frozen, cancel: call("propose_sweep", {"context_id": json.loads(frozen["messages"][-1]["content"])
+                                                                    ["data"]["context_id"], "instruction": "Three more."}),
+                      wire.ModelTurn("Review the draft.", None, "stop"))
+    agents = executor(planner, services=services)
+    session_id = session(agents, store)
+    view = agents.start(store, session_id, wait=True)
+    item = view["awaiting"][0]
+    revision = store.info()["revision"]
+    by = {"user": "someone", "host": "here"}
+    with pytest.raises(ProjectError, match="not waiting"):
+        agents.decide(store, session_id, "draft:" + str(uuid4()), "apply", draft_sha256=item["draft_sha256"],
+                      expected_revision=revision, by=by)
+    with pytest.raises(ProjectError, match="project changed"):
+        agents.decide(store, session_id, item["item_id"], "apply", draft_sha256=item["draft_sha256"],
+                      expected_revision=revision + 1, by=by)
+    assert "approval_decided" not in [event["kind"] for event in store.agent_sessions.get(session_id)["events"]]
+    store.drafts.discard(item["draft_id"])  # a person discarded it elsewhere
+    with pytest.raises(ProjectError, match="no longer pending"):
+        agents.decide(store, session_id, item["item_id"], "apply", draft_sha256=item["draft_sha256"],
+                      expected_revision=revision, by=by)
+    assert store.info()["revision"] == revision
+    from suan.desktop_bridge.protocol import BridgeError
+    h = inproc()
+    with pytest.raises(BridgeError) as refused:  # a script cannot approve
+        h.bridge.script_call("project.agent.decide", {}, threading.Event())
+    assert refused.value.code == "unsupported"
+
+
+def test_a_failed_step_keeps_its_objects_and_nothing_is_made_once_cancelled(project, tmp_path):
+    store, ids = project
+    answers = Answers(RuntimeError("connection reset after sending"), "答" * 4000)
+    services = requesting(tmp_path, answers)
+    session_id = str(uuid4())
+    captured = tools.capture_rows(tools.ToolContext(store, session_id, 0, "a"), {"table_id": ids["table"]})
+    failed = tools.ask_about_context(tools.ToolContext(store, session_id, 0, "b", services),
+                                     {"context_id": captured.data["context_id"], "question": "Why?"})
+    assert failed.status == "error" and "uncertain" in failed.data["error"]
+    assert [kind for kind, _ in failed.objects] == ["message", "request"] and failed.sources
+    # A long answer in Chinese is cut by bytes, keeping the result whole JSON with its request ID.
+    long = tools.ask_about_context(tools.ToolContext(store, session_id, 0, "c", services),
+                                   {"context_id": captured.data["context_id"], "question": "Explain."})
+    text, truncated = tools.content("ask_about_context", long)
+    assert not truncated and long.data["truncated"] and json.loads(text)["data"]["request_id"]
+    # Cancelled before the step: nothing is made or sent.
+    stopped = tools.ToolContext(store, session_id, 0, "d", services)
+    stopped.cancel.set()
+    with pytest.raises(ProjectError, match="cancelled"):
+        tools.ask_about_context(stopped, {"context_id": captured.data["context_id"], "question": "Why?"})
+    assert not tools._message_exists(store, stopped.object_id("message")) and len(answers.asked) == 2
+
+
+def test_a_replayed_step_settles_a_request_its_lost_executor_left_running(project, tmp_path):
+    store, ids = project
+    answers = Answers()
+    services = requesting(tmp_path, answers)
+    session_id = str(uuid4())
+    captured = tools.capture_rows(tools.ToolContext(store, session_id, 0, "a"), {"table_id": ids["table"]})
+    context = tools.ToolContext(store, session_id, 0, "b", services)
+    message_id, request_id = context.object_id("message"), context.object_id("request")
+    store.discussion.add("Why?", message_id=message_id, context_id=captured.data["context_id"])
+    store.requests.create(message_id, request_id=request_id, configuration={"adapter": "openai-compatible/1:laptop", "model": "m"})
+    store.requests._claim(request_id, executor_id=str(uuid4()))  # claimed by an executor that is gone
+    started = time.monotonic()
+    result = tools.ask_about_context(context, {"context_id": captured.data["context_id"], "question": "Why?"})
+    assert result.status == "error" and "uncertain (executor_lost)" in result.data["error"]
+    assert time.monotonic() - started < 5 and answers.asked == []
+
+
+def test_decisions_on_the_card_reach_the_planner_and_a_failed_apply_can_be_retried(project, tmp_path, monkeypatch):
+    store, ids = project
+    services = requesting(tmp_path, Answers(sweep_answer(ids)))
+    planner = Planner(lambda frozen, cancel: call("capture_rows", {"table_id": ids["table"]}),
+                      lambda frozen, cancel: call("propose_sweep", {"context_id": json.loads(frozen["messages"][-1]["content"])
+                                                                    ["data"]["context_id"], "instruction": "Three more."}),
+                      wire.ModelTurn("Review the draft.", None, "stop"), wire.ModelTurn("It was applied.", None, "stop"))
+    agents = executor(planner, services=services)
+    session_id = session(agents, store)
+    item = agents.start(store, session_id, wait=True)["awaiting"][0]
+    revision, by = store.info()["revision"], {"user": "someone", "host": "here"}
+    from suan.project.drafts import Drafts
+    original = Drafts.apply
+    monkeypatch.setattr(Drafts, "apply", lambda self, *a, **k: (_ for _ in ()).throw(ProjectError("database is locked")))
+    failed = agents.decide(store, session_id, item["item_id"], "apply", draft_sha256=item["draft_sha256"],
+                           expected_revision=revision, by=by)
+    assert failed["receipt"] == {"ok": False, "error": "database is locked"}
+    assert store.agent_sessions.get(session_id)["awaiting"][0]["item_id"] == item["item_id"]  # still open
+    monkeypatch.setattr(Drafts, "apply", original)
+    applied = agents.decide(store, session_id, item["item_id"], "apply", draft_sha256=item["draft_sha256"],
+                            expected_revision=revision, by=by)
+    assert applied["receipt"]["applied_revision"] == revision + 1
+    store.agent_sessions.say(session_id, "What happened?", turn_id=str(uuid4()))
+    view = agents.start(store, session_id, wait=True)
+    observed = [event for event in view["events"] if event["kind"] == "observed"]
+    decisions = [event["facts"] for event in observed if event["facts"]["kind"] == "decision"]
+    assert [(fact["decision"], fact["ok"]) for fact in decisions] == [("apply", False), ("apply", True)]
+    told = json.loads(planner.sent[-1]["messages"][-1]["content"])
+    assert told["message"] == "What happened?" and len(told["stk_observations"]) == len(observed)
+    # Starting the same message again (a run lost between steps) does not observe twice.
+    assert agents._observe.__name__ and sum(event["kind"] == "observed" for event in view["events"]) == len(observed)
