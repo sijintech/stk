@@ -15,6 +15,9 @@
   结果与单进程相同。改用固定版本前，conda-forge 默认的无 MPI 版本在 2 进程下两份各自完整运行、日志互相覆盖却显示成功（已防止）。
 - 完整 pytest（`-m "not perf"`）：审查前 2414 passed、3 failed（固定的模板列表，已更新），审查修正后 **2427 passed、24 skipped**；
   Python 3.11 上 LAMMPS、引擎模板与 MuPRO 测试 81 passed。原生代码未改；工作流、仿真、模块与智能体相关 CTest **69/69**。
+- CI：`1859ca7` [Runtime](https://github.com/sijintech/stk/actions/runs/38097721893) 8/8（3.12 2442 passed，3.11 与 3.14 各 2438 passed）、
+  [桌面](https://github.com/sijintech/stk/actions/runs/38097721844) 5/5，密钥扫描通过。
+- 建模性能（手动，不进 CI）：GMSO 写数据文件约 0.13 秒/原子（540/1080/2160 原子 63.5/128.2/246.2 秒，另有转换 11.8/23.0/46.0 秒），见方案。
 
 ## 2026-10-10：E0b 模块管理
 
