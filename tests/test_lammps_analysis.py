@@ -223,3 +223,23 @@ def test_lammps_log_source_records_the_frozen_source(tmp_path):
     source = result["outputs"]["table"]["attrs"]["source"]["used"][0]
     assert source["path"] == "log.lammps"
     assert source["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("kind", ["tg", "modulus", "diffusion"])
+def test_property_presets_reject_duplicate_measured_columns_before_fitting(tmp_path, kind):
+    from suan.graph.evaluator import EvaluationFailed
+    from suan.graph.resolve import LocalDirResolver
+    from suan.graph.service import MemoryBlobSink, evaluate_request
+    table = {"tg": density_table, "modulus": stress_table, "diffusion": msd_table}[kind]()
+    path = tmp_path / ("density-temperature.csv" if kind == "tg" else "stress-strain.dat" if kind == "modulus" else "msd.dat")
+    separator = "," if kind == "tg" else " "
+    names = table.columns + [table.columns[-1]]
+    arrays = [table.column(name) for name in table.columns] + [table.column(table.columns[-1]) * 10]
+    path.write_text(separator.join(names) + "\n" + "\n".join(separator.join(map(str, row))
+                    for row in zip(*arrays)) + "\n")
+    with pytest.raises(EvaluationFailed, match="unique") as caught:
+        evaluate_request({"preset": "lammps-"+kind, "parameters": {"time_min": 1000, "time_max": 10000}
+                          if kind == "diffusion" else {}, "outputs": ["summary"]},
+                         resolver=LocalDirResolver({"data": tmp_path}), blob_sink=MemoryBlobSink(),
+                         cache_dir=tmp_path / "cache")
+    assert "summary" not in caught.value.partial.outputs

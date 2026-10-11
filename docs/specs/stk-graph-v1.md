@@ -1251,6 +1251,9 @@ Unless stated otherwise: input fields are kept (zero-copy), coordinates are phys
 - `table`: `muferro_energy` (`kt: N energy: e1..e5` rows), `columns` (whitespace, optional header
   row, `#`/`!` comments), `csv` (header required), `progress_jsonl` (one object per line; columns =
   union of keys). Column units from `units`, else `unspecified` (`normalized` for muFerro energy).
+  Names must be unique after the existing normalization (trim, replace `/` and `.` with `_`,
+  truncate to 128 characters). Ambiguous headers are rejected before forming column dictionaries;
+  duplicate measured columns must not silently overwrite each other.
 
 **Filters**
 

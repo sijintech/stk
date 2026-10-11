@@ -377,7 +377,7 @@ def _table_fingerprint(ctx, inputs, params):
         raise _failure(exc) from None
 
 
-@node("stk.source.table", title={"en": "Table file", "zh": "表格文件"},
+@node("stk.source.table", impl_version=2, title={"en": "Table file", "zh": "表格文件"},
       description={"en": "Read a table file inside a binding: muFerro energy_out.dat, whitespace columns "
                          "(optional header), CSV or a progress JSONL log."},
       outputs=[Port("out", "table")],

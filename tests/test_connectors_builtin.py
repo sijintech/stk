@@ -154,3 +154,22 @@ def test_generic_table_readers():
     assert jsonl.column("note").tolist() == ["", "x"] and jsonl.column("step").dtype == np.int64
     with pytest.raises(ConnectorError):
         read_jsonl("[1, 2]\n")
+
+
+@pytest.mark.parametrize("reader,separator", [(read_csv, ","), (read_columns, " ")])
+@pytest.mark.parametrize("names", [
+    ["Strain", "Stress", "Stress"],
+    ["Stress", " Stress "],
+    ["Stress/x", "Stress.x"],
+    ["a" * 128 + "x", "a" * 128 + "y"],
+])
+def test_ambiguous_table_headers_never_overwrite_measured_columns(reader, separator, names):
+    text = separator.join(names) + "\n" + separator.join(str(i + 1) for i in range(len(names))) + "\n"
+    with pytest.raises(ConnectorError, match="unique") as caught:
+        reader(text)
+    assert caught.value.code == "invalid_data"
+
+
+def test_jsonl_names_that_normalize_to_the_same_field_are_rejected():
+    with pytest.raises(ConnectorError, match="unique"):
+        read_jsonl('{"stress/x": 1, "stress.x": 2}\n')

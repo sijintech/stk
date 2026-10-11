@@ -1,6 +1,6 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-11，交接时 `main` 包含 E1 数据写出器 `057f96d` 与本次 E1c 分析交付（见 `git log`；CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
+更新：2026-10-11，交接时 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 及其表头/缓存与桌面测试修正（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
 代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
 [开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
@@ -38,9 +38,9 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 所有者 2026-10-11 16:46 UTC 要求至少 12 小时后再提请决策；**2026-10-12 04:46 UTC 之前不提请决策**，
 继续已有授权且不依赖这些选择的工作。这个时间不构成批准，也不自动选择任何选项。
 
-1. **E1b 之前：PET 中与酯基相连的苯环碳的电荷**（[方案](docs/design/multiscale-engines.md#需要所有者决定e1b-之前)）。
+1. **E1b 建模之前：PET 中与酯基相连的苯环碳的电荷**（[方案](docs/design/multiscale-engines.md#需要所有者决定e1b-之前)）。
    foyer 的 OPLS-AA 给 −0.115 且无氢平衡，每条 4 聚体链净电荷 −0.805。可选：
-   (a) 保持 STK 按 OPLS-AA 惯例推出的 0.0（类型 `stk_ester_ipso`，非文献值），每个生成的数据文件记录力场来源（foyer 版本、补丁 SHA-256）；
+   (a) 采用可行性脚本临时使用的 0.0（类型 `stk_ester_ipso`，STK 按 OPLS-AA 惯例推测，非文献值、未获批准），每个生成的数据文件记录力场来源（foyer 版本、补丁 SHA-256）；
    (b) 改用文献中 PET 常用的 LigParGen/CM1A 电荷；(c) 由合作方提供电荷。2026-10-10 已向所有者提出，**尚未答复**。
 2. **S3 下一步**：`stk.dataset/1` 两个数据格式要先交给合作方讨论；MuPRO 能否做电场扫描以产生相场回线待确认。
 3. **S2c**（外部规划模型、智能体准备运行）视所有者决定。
@@ -115,6 +115,8 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 | E1a 手动（真实 LAMMPS） | LJ 熔体两行与 PET 两行经项目工作流（设定 450/550 K，平均 445.8/551.4 K）；2 进程 `1 by 1 by 2` 与单进程一致；2026-10-11 用 `examples/pet_lammps` 重新运行，结果见[验收记录](docs/runtime-validation.md) |
 | E1b `057f96d` | 写出器 19 项通过，正交/三斜 540 原子对照和真实能量/晶胞读回通过；[Runtime](https://github.com/sijintech/stk/actions/runs/38157976224) 8/8、[桌面](https://github.com/sijintech/stk/actions/runs/38157976221) 5/5、密钥扫描/文档 CI 通过 |
 | E1c 本机 | 合成曲线与真实氩路径 3 passed；完整 pytest 2469 passed、24 skipped，最后新增单位检查定向 33 passed；原生定向 104/104（含技能 GL/Vulkan 截图）；新代码 CI 见[验收记录](docs/runtime-validation.md) |
+| E1c 修正 | 拒绝重复/规范化重名表头，`stk.source.table@1` 实现版本升为 2，旧缓存不能绕过校验；完整 pytest **2483 passed、24 skipped**、Linux CTest **1289/1289、无跳过**；3.11/3.14 各 78 passed、1 skipped；真实氩路径 3 passed |
+| E1c `6927e27` CI | Runtime 8/8、密钥扫描与文档通过；桌面已结束，Linux 1285/1289、macOS CPU 837/838、Windows CPU 795/796，失败均为预设数量旧断言；包构建与新环境冒烟通过，修正后的 CI 继续跟踪 |
 | 更早各期 | 见[验收记录](docs/runtime-validation.md)，每项含提交与 CI 链接 |
 
 未解决：

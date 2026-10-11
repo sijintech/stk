@@ -2,6 +2,29 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-11：E1c 表头、缓存与桌面回归修正
+
+- 实际误算复现：旧读取器对 `Strain Stress Stress` 保留后一列，合成模量从 **2.5 GPa** 变成 **25 GPa**。
+  修正为构造字典前拒绝重复/规范化重名（裁剪、`/`/`.` 替换、128 字符截断），覆盖两种表头格式、JSONL 规范化碰撞与三套性质预设。
+- 缓存回归先复现失败：即使新读取器正确，旧实现版本已缓存的 25 GPa 仍可命中；
+  `stk.source.table@1` **impl_version 1→2** 后，相同输入/预设明确失败且不输出 summary。
+  原始失败 `/tmp/stk-e1c-oldcache-before.xml` 保留。只有这一既有节点的实现版本变化，端口/参数/主版本、其余声明与六技能哈希不变。
+- 最终完整 Python：**2483 passed、24 skipped、2 deselected**（472.51 秒），定向 **96 passed、1 skipped**；
+  Python 3.11/3.14 各 **78 passed、1 skipped**（既有离屏 GL probe 不可用）。
+  JUnit：`/tmp/stk-e1c-headers-and-cache-full.xml`、`/tmp/stk-e1c-headers-py311.xml`、`/tmp/stk-e1c-headers-py314.xml`。
+- 最终完整 Linux 原生 CTest **1289/1289、无失败、无跳过**（268.42 秒，`/tmp/stk-e1c-headers-native-full.xml`）。
+  三处预设数断言更新为 11，新增三套中英文表单基准；既有八套布局逐项不变，未改产品 UI 代码或放宽判据。
+  真实 LAMMPS → Runtime → 按行工作流 → 隔离分析/归档复验 **3 passed**（16.50 秒，`/tmp/stk-e1c-real-headers.xml`）。
+- 上一代码 `6927e27` [桌面 CI](https://github.com/sijintech/stk/actions/runs/38160740368) **已完成失败**：
+  Linux **1285/1289**（Graph、ViewerFake 与 en/zh PropertiesForms），macOS CPU **837/838**、Windows CPU **795/796**（Graph）；
+  失败均为预设数旧断言。macOS 因 CPU 失败未执行 Metal，后续必跑检查缺少 Metal 报告也失败，不能记为 Metal 产品失败或通过。
+  Linux 包构建与新环境包冒烟成功。原始 Linux/macOS JUnit 与日志保留在 `/tmp/stk-e1c-{linux,macos}-38160740368/`，
+  Windows 失败日志 `/tmp/stk-e1c-windows-38160740368.log`；未重跑覆盖首轮证据。
+  [Runtime](https://github.com/sijintech/stk/actions/runs/38160740449) **8/8**、密钥扫描与文档成功。
+- 推送前确认上述桌面 CI 已结束；测试全部清空 `STK_TOKEN_PLAN_API_KEY`、取消 `STK_TOKEN_PLAN_MODEL`，无模型请求。
+  暂存改动经 gitleaks（`.gitleaks.toml`、redact，24.74 KB）无泄漏；修正提交的实际哈希与新 CI 在提交后补记。
+  性质收敛、PET 电荷与桌面 LAMMPS 入口的限制仍与下条相同。
+
 ## 2026-10-11：E1c Tg、模量与扩散分析
 
 - 已知合成曲线：Tg **340 K**（两段斜率 -0.0002/-0.0007 g/cm³/K）、模量 **2.5 GPa**（自由截距 0.125 GPa）、
@@ -31,7 +54,10 @@
 - 推送门槛：上一代码 `057f96d` [桌面 CI](https://github.com/sijintech/stk/actions/runs/38157976221) **5/5 已完成通过**，
   [Runtime](https://github.com/sijintech/stk/actions/runs/38157976224) 8/8、密钥扫描通过后才推送本次代码。
   测试全部清空 `STK_TOKEN_PLAN_API_KEY`、取消 `STK_TOKEN_PLAN_MODEL`，无模型请求。
-  本次暂存改动经 gitleaks（`.gitleaks.toml`、redact）扫描无泄漏。本次代码提交/CI 推送后补记。
+  本次暂存改动经 gitleaks（`.gitleaks.toml`、redact）扫描无泄漏。
+  代码 `6927e27` 已推送；[Runtime](https://github.com/sijintech/stk/actions/runs/38160740449) **8/8 已完成通过**，
+  [桌面](https://github.com/sijintech/stk/actions/runs/38160740368)已结束失败（预设数量断言，具体首轮结果与修正见上条）；
+  [密钥扫描](https://github.com/sijintech/stk/actions/runs/38160740601)、[文档](https://github.com/sijintech/stk/actions/runs/38160740493)已通过。
 - 剩余限制：无平衡自动判定、跨行自动密度汇总、Tg 置信区间、通用分子质心/多原点 MSD 或全体系漂移自动校正；
   需核对研究协议、采样相关性、温度历史、应变率与扩散区。桌面 LAMMPS 导入/专用仿真视图和 PET 建模未交付，电荷仍待所有者决定。
 

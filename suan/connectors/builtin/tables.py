@@ -46,6 +46,7 @@ def columns_table(columns, *, id="table", units=None, keep=None, index=None, qua
     """A :class:`~suan.data.model.Table` from ``{name: [values]}`` (``keep`` selects and orders columns)."""
     from suan.data.model import Table
     units = dict(units or {})
+    _unique_names(columns)
     unknown = set(units) - set(columns)
     if unknown:
         raise ConnectorError(f"Units given for unknown column(s) {', '.join(sorted(unknown))}", "invalid_param")
@@ -67,6 +68,12 @@ def _safe(name):
     return re.sub(r"[/.]", "_", name)[:128]
 
 
+def _unique_names(names):
+    normalized = [_safe(name) for name in names]
+    if len(normalized) != len(set(normalized)):
+        raise ConnectorError("Column names must be unique after normalization", "invalid_data")
+
+
 def read_columns(text, *, id="table", units=None, keep=None):
     """Whitespace-separated columns; ``#``/``!`` comments; an optional header row of names."""
     rows = []
@@ -85,6 +92,9 @@ def read_columns(text, *, id="table", units=None, keep=None):
     if any(len(row) != width for row in rows):
         raise ConnectorError("Rows have different numbers of columns", "invalid_data")
     names = header or [f"column_{i + 1}" for i in range(width)]
+    # Validate before forming a dict: duplicate headers otherwise silently
+    # overwrite measured columns, including stress, density and MSD.
+    _unique_names(names)
     try:
         values = [[_number(token) for token in row] for row in rows]
     except ValueError as exc:
@@ -100,6 +110,7 @@ def read_csv(text, *, id="table", units=None, keep=None):
     if not rows:
         raise ConnectorError("CSV needs a header row", "invalid_data")
     header, body = [name.strip() for name in rows[0]], rows[1:]
+    _unique_names(header)
     if any(len(row) != len(header) for row in body):
         raise ConnectorError("CSV rows have different numbers of columns", "invalid_data")
     columns = {}
