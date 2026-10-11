@@ -57,7 +57,7 @@ def test_batch_intent_is_idempotent_order_independent_and_offline(project, tmp_p
     p = api.projects.open(directory)
     api._project_handle = p.handle
     assert api.batches.inspect(batch)['id'] == batch
-    assert len(api.batches.templates()) == 1
+    assert [t['id'] for t in api.batches.templates()] == ['muferro/1', 'lammps/1']
     with pytest.raises(ValueError, match='template'):
         api.batches.create('untrusted.module:run', members, 'runtime:offline', expected_revision=revision(p))
     with pytest.raises(ValueError, match='distinct'):

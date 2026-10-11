@@ -13,7 +13,7 @@ from suan.project import analyses, files, workflows
 from suan.project.store import UnsupportedProjectFormat
 from suan.project.workflows import DOCUMENT_FORMAT, TABLE_ID, WorkflowNotFound
 from suan.scripting import Project
-from suan.workflows import muferro
+from suan.workflows import lammps, muferro
 from test_desktop_bridge import bridge_env, inproc  # noqa: F401
 
 VOLUME = json.loads((Path(__file__).resolve().parents[1] / "suan" / "graph" / "presets" / "volume.json").read_text())
@@ -268,6 +268,7 @@ def test_choices_list_referencable_objects_only(store, project):
     assert answer["analyses"] == [{"id": project["volume"], "name": "Volume"}, {"id": project["threshold"], "name": "Threshold"},
                                   {"id": project["dynamic"], "name": "Dynamic"}]
     assert answer["templates"] == [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID, "remote": True, "local": False},
+                                   {"id": "lammps/1", "name": "LAMMPS", "table_id": lammps.TABLE_ID, "remote": True, "local": False},
                                    {"id": "demo-synthetic/1", "name": "Synthetic demo solver", "table_id": None,
                                     "remote": False, "local": True}]
     assert store.snapshot() == before and store.history() == history  # read-only
@@ -297,6 +298,8 @@ def test_bridge_methods_scripting_api_and_events(inproc, tmp_path):
     assert p.workflows.choices() == {"revision": p.snapshot()["project"]["revision"], "tables": [], "omitted_tables": 0,
                                      "snapshots": [], "analyses": [],
                                      "templates": [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID,
+                                                    "remote": True, "local": False},
+                                                   {"id": "lammps/1", "name": "LAMMPS", "table_id": lammps.TABLE_ID,
                                                     "remote": True, "local": False},
                                                    {"id": "demo-synthetic/1", "name": "Synthetic demo solver", "table_id": None,
                                                     "remote": False, "local": True}]}

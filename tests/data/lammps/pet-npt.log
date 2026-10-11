@@ -1,0 +1,89 @@
+LAMMPS (22 Jul 2025 - Update 6)
+OMP_NUM_THREADS environment is not set. Defaulting to 1 thread.
+  using 1 OpenMP thread(s) per MPI task
+# STK feasibility check: OPLS-AA PET (6 chains x 4 repeat units) from mBuild + foyer + GMSO
+units real
+atom_style full
+boundary p p p
+pair_style lj/cut/coul/long 9.0
+pair_modify mix geometric tail yes
+bond_style harmonic
+angle_style harmonic
+dihedral_style opls
+special_bonds lj/coul 0.0 0.0 0.5
+read_data pet.data
+Reading data file ...
+  triclinic box = (0 0 0) to (31.317 31.317 31.317) with tilt (0 0 0)
+  1 by 1 by 1 MPI processor grid
+WARNING: Pair style 4*epsilon*(-sigma**6/r**6 + sigma**12/r**12) in data file differs from currently defined pair style lj/cut/coul/long (src/read_data.cpp:811)
+WARNING: Bond style LAMMPSHarmonicBondPotential in data file differs from currently defined bond style harmonic (src/read_data.cpp:835)
+WARNING: Angle style LAMMPSHarmonicAnglePotential in data file differs from currently defined angle style harmonic (src/read_data.cpp:848)
+WARNING: Dihedral style OPLSTorsionPotential in data file differs from currently defined dihedral style opls (src/read_data.cpp:861)
+  (1) pair lj/cut/coul/long, perpetual
+      attributes: half, newton on
+      pair build: half/bin/newton/tri
+      stencil: half/bin/3d/tri
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 13.44 | 13.44 | 13.44 Mbytes
+   Step          Temp          Press         Density         PotEng         KinEng         TotEng    
+         0   0              1300036.2      0.2500017      145564.69      0              145564.69    
+      1000   0             -142.77192      0.2500017     -68.287484      0             -68.287484    
+Loop time of 4.43871 on 1 procs for 1000 steps with 540 atoms
+  estimated absolute RMS force accuracy = 0.011610303
+  estimated relative force accuracy = 3.4964083e-05
+  using double precision FFTW3
+  3d grid and FFT values/proc = 2744 729
+Generated 105 of 105 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 12.74 | 12.74 | 12.74 Mbytes
+   Step          Temp          Press         Density         PotEng         KinEng         TotEng    
+     65000   296.03904     -971.48884      1.220458       42.823867      475.63308      518.45695    
+     66000   298.68762     -1734.1702      1.2075113      63.029659      479.88844      542.9181     
+     67000   295.24127      2548.1616      1.2263439      39.281302      474.35134      513.63264    
+     68000   303.41144     -379.45823      1.2394387      35.420699      487.47799      522.89869    
+     69000   310.98056      2007.7473      1.2393258      29.75539       499.63897      529.39436    
+     70000   311.80343      277.46298      1.234874       64.383395      500.96104      565.34444    
+     71000   282.03537      5753.2628      1.2295147      45.128844      453.134        498.26284    
+     72000   316.61487      11.066598      1.2027172      39.575657      508.69138      548.26703    
+     73000   308.38512     -4640.2267      1.213134       69.233214      495.46899      564.7022     
+     74000   309.91374      91.769884      1.2437537      22.567549      497.92496      520.49251    
+     75000   295.9581      -6253.9653      1.2474861      65.672875      475.50304      541.17591    
+     76000   291.62995     -3069.6953      1.218003       51.193321      468.54918      519.7425     
+     77000   290.81665     -4521.0393      1.2312234      65.549541      467.2425       532.79204    
+     78000   321.43527      187.85032      1.2330092      60.176127      516.4361       576.61223    
+     79000   285.6107      -2248.051       1.2104276      53.857938      458.87832      512.73626    
+     80000   276.26432     -523.53659      1.2052615      44.066405      443.8619       487.92831    
+     81000   295.70774      259.64096      1.2217117      65.281439      475.10079      540.38223    
+     82000   307.2538       2007.386       1.2035627      97.888337      493.65136      591.53969    
+     83000   307.44129      2770.2769      1.238152       21.3905        493.95259      515.34309    
+     84000   306.9202       2398.7303      1.2427189      71.615121      493.11536      564.73048    
+     85000   292.84214     -3748.1419      1.1960069      61.579888      470.49676      532.07665    
+Loop time of 68.5794 on 1 procs for 20000 steps with 540 atoms
+
+Performance: 25.197 ns/day, 0.952 hours/ns, 291.633 timesteps/s, 157.482 katom-step/s
+99.9% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 45.716     | 45.716     | 45.716     |   0.0 | 66.66
+Bond    | 8.0933     | 8.0933     | 8.0933     |   0.0 | 11.80
+Kspace  | 5.9592     | 5.9592     | 5.9592     |   0.0 |  8.69
+Neigh   | 5.0025     | 5.0025     | 5.0025     |   0.0 |  7.29
+Comm    | 0.56824    | 0.56824    | 0.56824    |   0.0 |  0.83
+Output  | 0.00049332 | 0.00049332 | 0.00049332 |   0.0 |  0.00
+Modify  | 3.0858     | 3.0858     | 3.0858     |   0.0 |  4.50
+Other   |            | 0.1542     |            |       |  0.22
+
+Nlocal:            540 ave         540 max         540 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           5103 ave        5103 max        5103 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:         126427 ave      126427 max      126427 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 126427
+Ave neighs/atom = 234.12407
+Ave special neighs/atom = 9.6666667
+Neighbor list builds = 428
+Dangerous builds = 0
+Total wall time: 0:04:22

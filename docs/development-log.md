@@ -1,5 +1,22 @@
 # 开发交接记录
 
+## 2026-10-10：E1a LAMMPS 计算引擎
+
+先在本机用真实模块走通 PET 建模：mBuild 由重复单元建链、Packmol 填充、foyer 分配 OPLS-AA、GMSO 写数据文件、LAMMPS 压缩与 NPT。
+foyer 的 OPLS-AA 对芳香酯缺一个角与两个二面角（类别写成 `C`，酯羰基碳却是 `C_2`），按同一文件的 `C` 条目补上（与 GROMACS 发布的 OPLS-AA 一致）；
+与酯基相连的苯环碳拿到 −0.115 而没有氢平衡，每条链带 −0.805 净电荷，按 OPLS-AA 惯例取 0.0（STK 推出的值，列入“需要所有者决定”）。
+最后阶段密度 1.223 g/cm³（实验约 1.335；4 聚体、540 原子、约 20 ps，只说明工具链可用）。
+
+然后实现 E1a（见[方案](design/multiscale-engines.md)“进度”）：`suan/lammps/`（脚本检查、日志读取与核对、TaskSpec、计算端启动器）、
+`suan/workflows/lammps.py` 与模板 `lammps/1`、`stk.lammps`；与 MuFerro 共用的辅助函数移到 `suan/workflows/common.py`，
+MPI 启动规则移到 `suan/runtime/launch.py`（MuPRO 的提示文字不变）。本机发现 conda-forge 默认装的 LAMMPS 没有 MPI，
+2 个进程各自完整运行、日志互相覆盖却显示成功；模块目录改为固定 MPICH 版本，启动器对没有 MPI 的程序拒绝多于 1 个进程。
+
+交付前审查（独立代理，用真实 LAMMPS 复现，9 项属实另 5 项次要，均已处理）：`if … then "shell …"` 与多层 include 绕过脚本检查；
+被包含文件中的参数读不到；变量样式可由变量拼出 `getenv`；`thermo_style multi` 被误判为截断；最终状态截断会丢掉报告；
+工作流准备时不检查参数；运行改写输入后无法收集；收集时报告列出的输出未与运行环境核对；被取消时不写报告；以及几处误拒（核壳模型的 `region shell`、
+`./` 路径、多行三引号）与多值 index 默认值。只追踪字面路径（由变量拼出的路径不追踪）已写入说明。
+
 ## 2026-10-10：E0b 模块管理（检测已有软件，没有才安装）
 
 按所有者决定：可选模块由人选择；先检测这台电脑上已有的 LAMMPS、ABACUS、Packmol 与分子建模工具包（PATH、常见 conda 环境、STK 自己的文件夹），

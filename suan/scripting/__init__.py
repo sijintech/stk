@@ -839,6 +839,12 @@ class API:
         return MuFerro(self)
 
     @property
+    def lammps(self):
+        """Import LAMMPS case folders, prepare immutable plans and collect verified thermodynamic results."""
+        from suan.workflows.lammps import Lammps
+        return Lammps(self)
+
+    @property
     def project(self):
         """Project selected when this execution started; close/switch never retargets a held handle."""
         if self._project_handle is None:

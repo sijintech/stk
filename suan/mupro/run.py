@@ -33,6 +33,7 @@ import tomllib
 
 from suan.monitor.events import ENV_PATH as MONITOR_ENV
 from suan.runtime.common import atomic_json, now, sha256
+from suan.runtime.launch import mpi_command
 from suan.runtime.models import relative_path
 from .spec import LAUNCHERS
 
@@ -348,32 +349,8 @@ def _prepare_env(args):
 
 
 def _launch_command(program, ranks, threads, launcher, env):
-    if launcher == "auto":
-        # A single rank runs as an MPI singleton (no PMI listener). Several ranks use
-        # mpiexec, also inside a Slurm/PBS allocation, which Hydra detects. srun is an
-        # explicit choice: Intel MPI then needs I_MPI_PMI_LIBRARY from the site.
-        launcher = "none" if ranks == 1 else "mpiexec"
-    if launcher == "none":
-        if ranks > 1:
-            raise MuproError("--launcher none runs a single rank; use mpiexec or srun for several ranks")
-        return launcher, [str(program)]
-    # Hydra opens its listener for any rank count, so an explicit one-rank mpiexec is guarded too.
-    if launcher == "mpiexec" and not env.get("SLURM_JOB_ID") and not env.get("PBS_JOBID") \
-            and "1" not in (env.get("STK_ALLOW_LOCAL_MPI"), env.get("STK_MUPRO_ALLOW_LOCAL_MPI")):
-        raise MuproError("Refusing local mpiexec outside a Slurm/PBS allocation: Intel MPI's Hydra listens on "
-                         "0.0.0.0 while the job runs. Run one rank directly (--launcher auto) or submit to a "
-                         "scheduler. On a host that is not externally reachable, the operator may set "
-                         "STK_ALLOW_LOCAL_MPI=1 in the Runtime service environment; tasks cannot set it.")
-    # Outside an allocation srun would queue a separate Slurm job, billed apart from this task.
-    if launcher == "srun" and not env.get("SLURM_JOB_ID"):
-        raise MuproError("--launcher srun runs inside a Slurm allocation; submit with --backend slurm")
-    path = shutil.which(launcher, path=env.get("PATH", ""))
-    if not path:
-        raise MuproError(f"{launcher} not found on PATH; source the Intel MPI environment with --env-script")
-    if launcher == "srun":
-        env["SRUN_CPUS_PER_TASK"] = str(threads)
-        return launcher, [path, f"--ntasks={ranks}", f"--cpus-per-task={threads}", str(program)]
-    return launcher, [path, "-n", str(ranks), str(program)]
+    return mpi_command(program, ranks, threads, launcher, env, error=MuproError, mpi="Intel MPI's Hydra",
+                       missing_hint="source the Intel MPI environment with --env-script")
 
 
 def _stage_example(prefix, folder):

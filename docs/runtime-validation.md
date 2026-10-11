@@ -2,6 +2,20 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-10：E1a LAMMPS 计算引擎
+
+- Python：`test_lammps.py` 26 项——脚本检查（参数的 index 默认值、拒绝的命令、引号中的命令、任意深度的 include 与其中的参数、变量拼出的变量样式、
+  不误拒核壳模型与多行三引号）；用真实 LAMMPS（22 Jul 2025）的日志节选读出 2 段热力学输出、单位、平均密度 1.2225 g/cm³，
+  截断、ERROR、NaN、`thermo_style multi` 各自判为失败；TaskSpec 不带算例文本；启动器（假 LAMMPS）传 `-var`、记录输出、NaN/ERROR/未正常结束、
+  拒绝脚本中的 `shell`、没有 MPI 的程序拒绝多进程、本机 MPI 规则、拒绝已有输出、改写输入判失败、SIGTERM 时仍写报告、`verify` 与 `check`；
+  最终状态保留报告且不截断。`test_workflow_lammps.py` 7 项——导入读出参数与默认值、拒绝含输出或脚本不明的文件夹与含 `shell` 的脚本（项目不变）、
+  两行经工作流步骤 `lammps/1` 在真实本机运行环境上运行并收集（结果表的平均密度随温度变化）、空着的参数在准备时被拒、复制不要求行已填完。
+- 本机实测（手动，不进 CI）：真实 LAMMPS（MPICH 版）经项目工作流运行 LJ 熔体两行（`lj` 单位、默认热力学列）与 PET 模型两行
+  （最小化 + 2 ps NVT，设定 450/550 K，平均 445.8/551.4 K）；`suan.lammps check` 报告 MOLECULE、KSPACE 与 MPICH；2 进程区域分解为 `1 by 1 by 2`、
+  结果与单进程相同。改用固定版本前，conda-forge 默认的无 MPI 版本在 2 进程下两份各自完整运行、日志互相覆盖却显示成功（已防止）。
+- 完整 pytest（`-m "not perf"`）：审查前 2414 passed、3 failed（固定的模板列表，已更新），审查修正后 **2427 passed、24 skipped**；
+  Python 3.11 上 LAMMPS、引擎模板与 MuPRO 测试 81 passed。原生代码未改；工作流、仿真、模块与智能体相关 CTest **69/69**。
+
 ## 2026-10-10：E0b 模块管理
 
 - Python：`test_modules.py` 9 项（假的 micromamba，不下载）——目录与固定的 micromamba 摘要；PATH 上已有的程序被检测、读出版本、不重装、不移除；

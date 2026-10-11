@@ -1,8 +1,7 @@
 """Client-side TaskSpec builder for muFerro runs; safe on any client OS."""
 
+from suan.runtime.launch import LAUNCHERS  # noqa: F401 - re-exported for the MuPRO CLI and launcher
 from suan.runtime.models import BACKENDS, relative_path
-
-LAUNCHERS = ("auto", "none", "mpiexec", "srun")
 
 
 def muferro_spec(workspace_id, *, case_dir=".", inputs=None, example=False, ranks=1, threads_per_rank=1,

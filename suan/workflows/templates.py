@@ -17,8 +17,9 @@ built-in identities cannot be replaced. Loading problems are reported by ``engin
 import math
 import threading
 
-from . import muferro
+from . import lammps, muferro
 from suan.runtime.models import TaskSpec
+from suan.lammps.spec import lammps_spec
 from suan.mupro.spec import muferro_spec
 
 
@@ -65,7 +66,51 @@ class MuFerroTemplate:
             raise ValueError("Saved run parameters or command do not match the batch template")
 
 
-BUILTIN_TEMPLATES = {MuFerroTemplate.id: MuFerroTemplate()}
+class LammpsTemplate:
+    """Imported LAMMPS cases (docs/design/multiscale-engines.md, E1), run on a Runtime per row."""
+    id = "lammps/1"
+    table_id = lammps.TABLE_ID
+    name = "LAMMPS"
+    remote = True
+    field_ids = tuple(lammps.FIELD_IDS.values())
+
+    def describe(self, model, record_id, connection, options):
+        values, _, label = lammps.describe_case(model, record_id, connection, options)
+        return {"record_id": record_id, "label": label, "values": values}
+
+    def describe_values(self, model, record_id, connection, options):
+        return lammps.describe_case(model, record_id, connection, options)[0]
+
+    def prepare(self, stk, project, record_id, connection, options, revision, identity=None):
+        extra = {"identity": identity} if identity is not None else {}
+        return stk.lammps.prepare(record_id, connection, expected_revision=revision, project=project, **extra, **options)
+
+    def collect(self, stk, project, run_id):
+        return stk.lammps.collect(run_id, project=project)
+
+    @staticmethod
+    def results_prefix(run_id):
+        return f"results/lammps/{run_id}/"
+
+    @staticmethod
+    def final_state(names):
+        return lammps.final_state(names)
+
+    def validate_run(self, plan, entry, intent):
+        parameters = plan["parameters"]
+        frozen = {"project": {"id": plan["project_id"]}, "tables": [{"id": self.table_id,
+            "fields": parameters["fields"], "records": [{"id": parameters["record_id"],
+            "values": parameters["values"], "definitions": parameters["definitions"]}]}]}
+        described = self.describe(frozen, entry["record_id"], intent["connection"], intent["options"])
+        expected = TaskSpec(**lammps_spec("0" * 32, case_dir="case", name="LAMMPS", **intent["options"])).to_dict()
+        ignored = {"workspace_id", "inputs", "input_hashes", "outputs"}
+        if (described != entry or
+                {k: v for k, v in expected.items() if k not in ignored} !=
+                {k: v for k, v in plan["spec"].items() if k not in ignored}):
+            raise ValueError("Saved run parameters or command do not match the batch template")
+
+
+BUILTIN_TEMPLATES = {MuFerroTemplate.id: MuFerroTemplate(), LammpsTemplate.id: LammpsTemplate()}
 TEMPLATES = dict(BUILTIN_TEMPLATES)  # remote (batch-capable) templates, plus engines registered through entry points
 
 

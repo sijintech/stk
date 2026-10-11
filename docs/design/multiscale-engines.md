@@ -121,8 +121,58 @@ STK 在数据一侧已有插件机制（连接器、输入连接器、图节点�
     Windows 下按 `Scripts`、`Library\bin` 与环境根目录查找。
   - 本机实测：真实 micromamba 从 conda-forge 装好 LAMMPS（22 Jul 2025 Update 6，126 秒，1.8 GB）、Packmol 21.2.1、
     分子建模工具包（mBuild 1.4.0，169 秒），均被正确检测。
+- **E1 可行性（本机实测，2026-10-10，尚未写入 STK）**：用真实模块走通 PET 建模 → LAMMPS。
+  - mBuild 由重复单元 SMILES `OCCOC(=O)c1ccc(cc1)C=O` 建 4 聚体链（90 原子），Packmol 以 250 kg/m³ 松散填充 6 条链（540 原子）；
+  - foyer 自带的 OPLS-AA 对芳香酯缺三项参数（酯羰基碳的类别是 `C_2`，而相应条目写的是 `C`）：角 CA–C–OS、二面角 CA–C–OS–CT 与
+    CA–CA–C–OS；补丁按同一文件中类别 `C` 的条目补上，数值与 GROMACS 发布的 OPLS-AA（`ffbonded.itp`）一致；
+  - foyer 给与酯基相连的苯环碳 −0.115（苯的 C–H 值）而没有氢平衡，每条链净电荷 −0.805；按 OPLS-AA 对带取代基芳碳的惯例
+    （取代基与环合起来呈中性，如苯腈 +0.035、硝基苯 +0.09、萘的稠合碳 0.0），酯基本身中性，故该碳取 0.0，补丁新增类型 `stk_ester_ipso`；
+    补丁并入 foyer 的 `oplsaa.xml` 后整体加载（foyer 逐个文件校验，补丁不能单独引用原文件的类型）；之后每条链电荷为零、全部二面角有参数；
+  - GMSO 写出 `atom_style full`、`real` 单位的数据文件；GMSO 写入倾斜行，LAMMPS 把盒子当作三斜，`kspace_style` 须放在 `read_data` 之后；
+  - LAMMPS（22 Jul 2025 Update 6，单进程）：能量最小化 → 500 K NVT → 用 `fix deform` 逐步压缩到约 1.2 g/cm³（直接 5000 atm NPT
+    在 4 ps 内从 0.25 压到 1.17 g/cm³，原子飞出、PPPM 报错）→ 500 K、1 atm NPT → 降温到 300 K → 300 K、1 atm NPT，共约 4.4 分钟；
+    最后阶段后一半的平均密度 1.223 g/cm³（实验无定形 PET 约 1.335 g/cm³；4 聚体、羟基/醛基端基、540 原子、约 20 ps，偏低在预期之内，
+    只说明工具链可用，不是可报告的结果）。
+- **E1a（已交付，2026-10-10）**：LAMMPS 计算引擎（导入的算例按行在运行环境上运行），先从 Python 控制台与按行工作流使用。
+  - 计算端 `python -m suan.lammps run|verify|check`：读准备时写入的 `stk-lammps-input.json`（脚本名与参数，命令行上不带算例文本），
+    再次检查脚本，找程序（`--program` → 本机 STK 模块登记 → PATH 上的 `lmp`/`lmp_mpi`/`lmp_serial`），在算例文件夹中运行
+    `lmp -in <脚本> -log log.lammps -nocite -var 名 值 …`，检查 `log.lammps` 后写 `stk-lammps.json`；LAMMPS 退出码为 0 不等于成功：
+    日志须正常结束（`Total wall time`）、没有 `ERROR`、每段热力学输出完整且全部有限（NaN 记为 `numerical_failure`）；
+  - 结果取最后一段热力学输出后一半的平均（密度、温度、压力、势能，以及全部列的平均与末值），单位制取自脚本的 `units`；
+  - 参数：温度、压力、步数、时间步长、随机种子按 `-var` 传入；脚本可用 `variable temperature index 300` 给默认值（导入时读入行中），
+    用了而没有默认值的须在行中填写，脚本没用到的须留空（脚本用到哪些参数随原始输入一起冻结，准备工作流运行时即检查每一行）；
+    以其他样式定义这些变量会被拒绝（LAMMPS 会报错），默认值须是单个数（多个值的 index 循环在 `-var` 下只跑一次）；
+  - 脚本检查：覆盖主脚本、`include`/`jump` 引用的全部文件（任意深度）以及 `if … then "…"`、`run … every N "…"` 中引号里的命令；
+    拒绝 `shell`、`python`、`plugin`、`fix python/*`、`pair_style python`、`log`、`getenv` 与 `python` 变量、由变量拼出的命令名或变量样式，
+    以及字面上的绝对路径、`~` 与 `..`；由变量拼出的路径不追踪。这是防误用与防止把脚本当作纯输入，不是沙箱（运行环境的客户端本来就能运行任何命令）；
+  - 只读 `thermo_style one/custom` 的热力学输出；`multi`、`yaml` 明确报“不支持的输出格式”；运行改写了自己的输入文件时判为失败
+    （否则收集时无法与冻结的计划核对）；被取消或超时（SIGTERM）时仍写出 `stk-lammps.json`；
+  - 多进程：同 MuPRO 的本机 MPI 规则（共用 `suan/runtime/launch.py`）；LAMMPS 没有 MPI（`lmp -h` 显示 MPI STUBS）时拒绝多于 1 个进程，
+    否则每个进程各自完整跑一遍、日志互相覆盖却显示成功——本机正是这样发现的：conda-forge 默认选到无 MPI 的版本，
+    模块目录因此固定为与 MPICH 链接的 CPU 版本 `lammps=*=cpu*_mpi_mpich_*`（四个平台都有）；
+  - 项目：`stk.lammps.import_case/clone_case/prepare/collect`，工作流模板 `lammps/1`（内置的第二个远程引擎，经 E0a 的按模板分派运行）；
+    结果表“LAMMPS results / 分子动力学结果”；传给下游分析的最终状态是报告与算例文件夹中除轨迹（`*.dump`、`*.lammpstrj` 等或名字含 dump）
+    以外的全部文件，超过 100 个时该步骤明确失败而不截断；收集时报告列出的输出必须都在运行环境中且内容一致；
+  - 与 MuFerro 共用的项目辅助函数移入 `suan/workflows/common.py`。
+  - 本机实测（手动，不进 CI）：真实 LAMMPS（22 Jul 2025 Update 6，MPICH 版）经项目工作流与本机运行环境跑 LJ 熔体两行（`lj` 单位）
+    与 PET 模型两行（最小化 + 2 ps NVT，设定 450/550 K，平均 445.8/551.4 K）；2 进程运行时区域分解为 `1 by 1 by 2`、结果与单进程相同。
+  - 尚未做（E1 后续）：桌面的导入按钮与按引擎的仿真视图（目前只有 MuFerro）、建模步骤（E1b）、Tg/模量/扩散分析（E1c）、原子与键的显示（E1d）、
+    运行中的监控事件、远程运行环境上的模块安装；单次下载上限 1 GiB（同 MuFerro），轨迹很大的运行暂时无法经工作流收集。
+  - 交付前审查（独立代理，用真实 LAMMPS 复现）后的修正：引号中的命令（`if`、`run every`）与多层 `include` 原先不检查，`shell` 可经此执行；
+    写在被包含文件中的参数原先读不到，行中无法设置；变量样式可由变量拼成 `getenv`；`thermo_style multi` 的正常运行被误判为输出被截断；
+    最终状态按名字排序后截断到 100 个，会丢掉报告；工作流准备时不检查参数，空着的参数要到运行时才失败；运行改写输入后无法收集；
+    `region shell`、`./` 路径与多行三引号被误拒；多值 index 默认值被接受。
 - E0 其余部分（每个步骤各自的运行环境、桌面仿真视图按引擎显示、共用辅助代码移出 `muferro.py`、在远程运行环境上安装模块）：未实现，
   随 E1 按需要做。
+
+## 需要所有者决定（E1b 之前）
+
+- **PET 中与酯基相连的苯环碳的电荷**：foyer 的 OPLS-AA 给 −0.115 而无氢平衡，每条链带 −0.805 的净电荷。现在的做法（`stk_ester_ipso` 取 0.0）
+  是 STK 按 OPLS-AA 的惯例推出的，不是文献中现成的值；三项键合参数则有出处（GROMACS 发布的 OPLS-AA）。
+  可选：(a) 保持 0.0，并在每个生成的数据文件中记录力场来源（foyer 版本、补丁的 SHA-256）；(b) 改用文献中 PET 模拟常用的 LigParGen/CM1A 电荷；
+  (c) 由合作方提供电荷。
+- **建模的性能**：GMSO 写 540 原子的数据文件用了约 82 秒（建链与填充不到 1 秒、分配力场约 6 秒）；E1b 之前要测 2 倍、4 倍体系，
+  必要时改用 mBuild 自带的 LAMMPS 写出器。
 
 ## 所有者决定（2026-10-10）
 

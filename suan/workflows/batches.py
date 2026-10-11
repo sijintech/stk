@@ -8,7 +8,7 @@ import hashlib
 import re
 from uuid import NAMESPACE_URL, uuid5
 
-from .muferro import _canonical, _cells, _create_table, _revision, _table
+from .common import _canonical, _cells, _create_table, _revision, _table
 from .templates import remote_templates, template
 
 
@@ -38,7 +38,7 @@ def _ids(values):
 
 
 def _batch(model, batch_id):
-    table = _table(model, TABLE_ID, FIELDS, FIELD_IDS)
+    table = _table(model, TABLE_ID, FIELDS, FIELD_IDS, "Batch")
     row = next((r for r in table["records"] if r["id"] == batch_id), None) if table else None
     if row is None:
         raise ValueError("Saved batch not found")
@@ -97,7 +97,7 @@ class Batches:
                   "connection": connection, "options": options,
                   "entries": [adapter.describe(model, r, connection, options) for r in sorted(_ids(record_ids))]}
         batch_id = _identity(intent)
-        table = _table(model, TABLE_ID, FIELDS, FIELD_IDS)
+        table = _table(model, TABLE_ID, FIELDS, FIELD_IDS, "Batch")
         if table and any(r["id"] == batch_id for r in table["records"]):
             _batch(model, batch_id)
             return {"id": batch_id, "revision": expected_revision}

@@ -16,7 +16,7 @@ from suan.project import analyses, files, workflows
 from suan.project.drafts import _IMMUTABLE as _DRAFT_IDENTITY, _digest as _draft_digest
 from suan.project.requests import PARAMETER_SWEEP_PROMPT_VERSION, PROMPT_VERSION
 from suan.project.store import ProjectError, RevisionConflict
-from suan.workflows import muferro
+from suan.workflows import lammps, muferro
 
 from . import levels, stats
 
@@ -45,6 +45,10 @@ class ToolContext:
     def object_id(self, kind):
         """The ID of an object this step makes: the same call replayed makes the same objects."""
         return str(uuid5(UUID(self.session_id), f"{self.turn}:{self.call_id}:{kind}"))
+
+
+_ROLES = {muferro.TABLE_ID: "muferro_cases", muferro.RESULT_TABLE_ID: "muferro_results",
+          lammps.TABLE_ID: "lammps_cases", lammps.RESULT_TABLE_ID: "lammps_results"}
 
 
 def all_public(store, sources):
@@ -109,8 +113,7 @@ def project_outline(context, arguments):
         if table["id"] in _MANAGED:
             continue
         label = store.labels.label("table", table["id"])
-        role = "muferro_cases" if table["id"] == muferro.TABLE_ID else "muferro_results" if table["id"] == muferro.RESULT_TABLE_ID \
-            else None
+        role = _ROLES.get(table["id"])
         entry = {"id": table["id"], "name": table["name"], "rows": counts.get(table["id"], 0), "label": label,
                  "fields": fields.get(table["id"], [])}
         if role:

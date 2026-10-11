@@ -50,10 +50,11 @@
    "install": {
     "channel": "conda-forge",
     "packages": [
-     "lammps",
+     "lammps=*=cpu*_mpi_mpich_*",
      "mpich"
     ],
-    "approximate_mb": 1800
+    "approximate_mb": 1800,
+    "note": "The CPU build linked to MPICH: conda-forge's default solve picks the build without MPI, which runs every rank as a separate serial copy."
    },
    "platforms": [
     "linux-64",
