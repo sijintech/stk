@@ -2,6 +2,22 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-11：E1c 多温度 Tg 来源与日志列校验
+
+- 审查复现两项失败（`/tmp/stk-e1c-density-before.xml`）：汇总表的八日志摘要没有进入最终 Tg 诊断；
+  早期热力学段的重复列名被汇总入口接受。修正后分析 **27 passed**，八个合成温度日志汇总得到 **340 K**，
+  输入表不变、全部来源在 summary/fit/provenance 与可序列化 JSON 诊断中一致。
+- 各来源 SHA-256 指日志文本 UTF-8 编码，`role: input_text`；不把标签当成已读取/核验的磁盘文件。
+  调用者保留原始冻结日志。热力学日志所有段都拒绝重复列名，`stk.source.lammps_log@1` 实现版本 **1→2** 隔离旧缓存。
+  发布目录仅此节点实现版本改变，主版本/端口/参数与六技能哈希不变。
+- Python 3.11/3.14 的分析/源节点/CLI/契约/技能定向各 **108 passed、1 skipped**（既有离屏 GL probe 不可用）；
+  原生 Graph/目录定向 **7/7、无跳过**；真实 LAMMPS 三模板经 Runtime、工作流、分析归档复验 **3 passed**（16.47 秒）。
+  JUnit：`/tmp/stk-e1c-density-{after,py311,py314,native,real}.xml`。
+  最终完整 Python **2485 passed、24 skipped、2 deselected**（458.73 秒，`/tmp/stk-e1c-density-full.xml`）；本次代码 CI 提交后补记。
+- 推送门槛：上一代码 `c17bb4b` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/38162974612) **5/5 已结束成功**，
+  Runtime 8/8、密钥扫描与文档通过后再推送本次代码。PET 电荷仍待所有者决定，没有实施相关建模。
+  暂存改动经 gitleaks（`.gitleaks.toml`、redact）无泄漏；测试空 API key、取消模型变量，无模型请求。
+
 ## 2026-10-11：E1c 表头、缓存与桌面回归修正
 
 - 实际误算复现：旧读取器对 `Strain Stress Stress` 保留后一列，合成模量从 **2.5 GPa** 变成 **25 GPa**。
@@ -22,7 +38,12 @@
   Windows 失败日志 `/tmp/stk-e1c-windows-38160740368.log`；未重跑覆盖首轮证据。
   [Runtime](https://github.com/sijintech/stk/actions/runs/38160740449) **8/8**、密钥扫描与文档成功。
 - 推送前确认上述桌面 CI 已结束；测试全部清空 `STK_TOKEN_PLAN_API_KEY`、取消 `STK_TOKEN_PLAN_MODEL`，无模型请求。
-  暂存改动经 gitleaks（`.gitleaks.toml`、redact，24.74 KB）无泄漏；修正提交的实际哈希与新 CI 在提交后补记。
+  暂存改动经 gitleaks（`.gitleaks.toml`、redact，24.80 KB）无泄漏。
+  修正代码 **`c17bb4b`**：[桌面](https://github.com/sijintech/stk/actions/runs/38162974612) **5/5 已完成通过**，
+  Linux **1289/1289**、macOS CPU **838/838**、Metal **180/180**（macOS 均无跳过）；Windows 与包构建/新环境包冒烟通过。
+  [Runtime](https://github.com/sijintech/stk/actions/runs/38162974582) **8/8 已完成通过**
+  （3.12：2498 passed、7 skipped；3.11/3.14 各 2494 passed、11 skipped；均 4 deselected），
+  [密钥扫描](https://github.com/sijintech/stk/actions/runs/38162974606)、[文档](https://github.com/sijintech/stk/actions/runs/38162974584)通过；桌面完成后补记结果。
   性质收敛、PET 电荷与桌面 LAMMPS 入口的限制仍与下条相同。
 
 ## 2026-10-11：E1c Tg、模量与扩散分析

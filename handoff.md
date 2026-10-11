@@ -1,6 +1,6 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-11，交接时 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 及其表头/缓存与桌面测试修正（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
+更新：2026-10-11，交接时 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
 代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
 [开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
@@ -35,7 +35,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 
 ## 待所有者决定（决定前不要按某个选项实现）
 
-所有者 2026-10-11 16:46 UTC 要求至少 12 小时后再提请决策；**2026-10-12 04:46 UTC 之前不提请决策**，
+所有者 2026-10-11 16:46 UTC 要求至少 12 小时后再提请决策；按分钟向后取整，**2026-10-12 04:47 UTC 之前不提请决策**，
 继续已有授权且不依赖这些选择的工作。这个时间不构成批准，也不自动选择任何选项。
 
 1. **E1b 建模之前：PET 中与酯基相连的苯环碳的电荷**（[方案](docs/design/multiscale-engines.md#需要所有者决定e1b-之前)）。
@@ -55,6 +55,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
    可行性脚本在 [examples/pet_lammps/](examples/pet_lammps/README.md)。
 2. **E1c 已交付**（只用导入算例）：三套脚本、四个图节点、三个预设与技能；Tg 密度两段拟合、模量小应变斜率、显式扩散窗口。
    合成曲线与真实氩的运行/分析归档通过；限制与使用见[指南](docs/lammps-analysis.md)。短轨迹拟合不代表材料性质验收。
+   多温度 `density_series` 的来源随最终 Tg 诊断保存；日志任一段的重复列名拒绝，日志源实现版本 2 隔离旧缓存。
 3. **桌面的 LAMMPS 入口**：导入按钮与按引擎显示的仿真视图（现在桌面只认 MuFerro；LAMMPS 只能从 Python 控制台 `stk.lammps` 与工作流编辑器使用）。
 4. 之后：E1d 球棍显示、运行中的监控事件、远程运行环境上的模块安装 → E2 ABACUS（先查 conda-forge 的 MPI 变体，LAMMPS 默认无 MPI 的教训）→ E3 串联。
 5. 与 E 系列并行、需要人参与的：S2 真实本机模型的 GUI 人工验收（[工作台清单](docs/workbench-acceptance.md)“AI 智能体（多步）”）；
@@ -115,7 +116,8 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 | E1a 手动（真实 LAMMPS） | LJ 熔体两行与 PET 两行经项目工作流（设定 450/550 K，平均 445.8/551.4 K）；2 进程 `1 by 1 by 2` 与单进程一致；2026-10-11 用 `examples/pet_lammps` 重新运行，结果见[验收记录](docs/runtime-validation.md) |
 | E1b `057f96d` | 写出器 19 项通过，正交/三斜 540 原子对照和真实能量/晶胞读回通过；[Runtime](https://github.com/sijintech/stk/actions/runs/38157976224) 8/8、[桌面](https://github.com/sijintech/stk/actions/runs/38157976221) 5/5、密钥扫描/文档 CI 通过 |
 | E1c 本机 | 合成曲线与真实氩路径 3 passed；完整 pytest 2469 passed、24 skipped，最后新增单位检查定向 33 passed；原生定向 104/104（含技能 GL/Vulkan 截图）；新代码 CI 见[验收记录](docs/runtime-validation.md) |
-| E1c 修正 | 拒绝重复/规范化重名表头，`stk.source.table@1` 实现版本升为 2，旧缓存不能绕过校验；完整 pytest **2483 passed、24 skipped**、Linux CTest **1289/1289、无跳过**；3.11/3.14 各 78 passed、1 skipped；真实氩路径 3 passed |
+| E1c 修正 `c17bb4b` | 重名表头拒绝、旧缓存隔离；本机完整 pytest **2483 passed、24 skipped**、Linux CTest **1289/1289、无跳过**；[桌面 CI](https://github.com/sijintech/stk/actions/runs/38162974612) **5/5**（macOS CPU 838/838、Metal 180/180）、[Runtime](https://github.com/sijintech/stk/actions/runs/38162974582) **8/8**，密钥扫描/文档通过 |
+| E1c 多温度来源 | 八个合成温度日志汇总/拟合得到 340 K，全部日志摘要随结果保存；完整 pytest **2485 passed、24 skipped**，3.11/3.14 各 108 passed、1 skipped，原生目录 7/7、真实氩三路径通过；本次提交的 CI 继续跟踪 |
 | E1c `6927e27` CI | Runtime 8/8、密钥扫描与文档通过；桌面已结束，Linux 1285/1289、macOS CPU 837/838、Windows CPU 795/796，失败均为预设数量旧断言；包构建与新环境冒烟通过，修正后的 CI 继续跟踪 |
 | 更早各期 | 见[验收记录](docs/runtime-validation.md)，每项含提交与 CI 链接 |
 

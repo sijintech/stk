@@ -161,6 +161,40 @@ def test_log_reader_keeps_one_complete_block_and_requires_real_units():
         density_series({"bad": text.replace("units real", "units metal")})
 
 
+def test_density_series_keeps_all_log_sources_through_tg_and_serialized_diagnostics():
+    import json
+    measured = density_table()
+    logs = {}
+    for temperature, density in zip(measured.column("Temperature"), measured.column("Density")):
+        logs[f"temperature-{temperature} K"] = (
+            "LAMMPS (test)\nunits real\nPer MPI rank memory allocation (min/avg/max) = 1 | 1 | 1\n"
+            "Step Temp Density\n"
+            f"0 {temperature} {density}\n1 {temperature} {density}\n2 {temperature} {density}\n"
+            "Loop time of 1 on 1 procs for 2 steps with 1 atoms\nTotal wall time: 0:00:01\n")
+    series = density_series(logs)
+    before = series.to_json()
+    result = tg(series)
+    assert scalar(result, "Tg") == pytest.approx(340)
+    diagnostics = json.loads(json.dumps(result["diagnostics"], allow_nan=False))
+    assert diagnostics["source"]["used"] == [
+        {"path": label, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "role": "input_text"}
+        for label, text in logs.items()]
+    for output in ("summary", "fit"):
+        assert result[output].attrs["diagnostics"]["source"] == diagnostics["source"]
+        assert result[output].provenance.to_json() == diagnostics["source"]
+    assert series.to_json() == before
+
+
+def test_density_series_rejects_duplicate_thermo_columns_in_every_block():
+    text = (Path(__file__).parent / "data/lammps/pet-npt.log").read_text()
+    # The input has two blocks; an ambiguous earlier block must also fail.
+    first_header = next(line for line in text.splitlines() if line.lstrip().startswith("Step "))
+    ambiguous = text.replace(first_header, first_header.replace("Temp", "Density"), 1)
+    for operation in (lambda: density_series({"bad": ambiguous}), lambda: log_table(ambiguous)):
+        with pytest.raises(AnalysisError, match="Duplicate"):
+            operation()
+
+
 @pytest.mark.parametrize("kind", ["tg", "modulus", "diffusion"])
 def test_graph_presets_produce_inspectable_tables_plots_and_provenance(tmp_path, kind):
     from suan.graph.resolve import LocalDirResolver

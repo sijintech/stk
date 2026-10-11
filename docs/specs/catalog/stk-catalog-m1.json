@@ -4276,7 +4276,7 @@
    "id": "stk.source.lammps_log@1",
    "type": "stk.source.lammps_log",
    "version": 1,
-   "impl_version": 1,
+   "impl_version": 2,
    "stage": "source",
    "category": "source",
    "title": {

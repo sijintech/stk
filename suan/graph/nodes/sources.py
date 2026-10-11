@@ -436,7 +436,7 @@ def _lammps_log_fingerprint(ctx, inputs, params):
         raise _failure(exc) from None
 
 
-@node("stk.source.lammps_log", title={"en": "LAMMPS thermodynamics", "zh": "LAMMPS 热力学表"},
+@node("stk.source.lammps_log", impl_version=2, title={"en": "LAMMPS thermodynamics", "zh": "LAMMPS 热力学表"},
       description={"en": "Read one finished real-units thermo block; reject errors, truncation and nonfinite values."},
       outputs=[Port("out", "table")],
       params={"binding": binding(), "path": rel_path("log.lammps"), "block": integer(-1)},

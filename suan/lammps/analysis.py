@@ -167,12 +167,14 @@ def diffusion(table, *, time="Time", msd="MSD", time_min, time_max, dimensions=3
 
 
 def _verified_real(text):
-    from .log import verify_log
+    from .log import read_log, verify_log
     styles = [words[1] for line in text.splitlines() if (words := line.split())[:1] == ["units"] and len(words) > 1]
     # A log can contain clear + units + a second simulation. The existing
     # verifier records the last style; earlier blocks must not be mislabeled.
     if not styles or any(style != "real" for style in styles):
         raise AnalysisError("LAMMPS property logs require explicit units real throughout")
+    if any(len(block["columns"]) != len(set(block["columns"])) for block in read_log(text)["blocks"]):
+        raise AnalysisError("Duplicate thermo column names")
     try:
         verified = verify_log(text)
     except (OverflowError, ValueError):
@@ -209,7 +211,7 @@ def density_series(logs):
     Callers retain the frozen log files; this utility does no filesystem reads.
     Never combine different unit styles or failed/incomplete runs.
     """
-    from suan.data.model import Table
+    from suan.data.model import Provenance, Table
     if not isinstance(logs, dict) or not 1 <= len(logs) <= MAX_TG_POINTS:
         raise AnalysisError("Density series requires 1..500 labeled logs")
     temperatures, densities, sources, samples, hashes = [], [], [], [], {}
@@ -225,8 +227,13 @@ def density_series(logs):
         sources.append(label)
         samples.append(qoi["samples"])
         hashes[label] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    provenance = Provenance(activity={"kind": "convert", "id": None},
+                            agent={"reader": "stk.lammps.density_series@1"},
+                            used=[{"path": label, "sha256": digest, "role": "input_text"}
+                                  for label, digest in hashes.items()])
     return Table.from_columns({"Temperature": temperatures, "Density": densities, "Source": sources, "Samples": samples},
                               units={"Temperature": "K", "Density": "g/cm3", "Source": "1", "Samples": "1"},
-                              id="density_temperature", attrs={"averaging": "last thermo block, second half",
-                                                               "source_text_sha256": hashes,
-                                                               "limits": "Retain frozen logs; inspect equilibration and temperature history."})
+                              id="density_temperature", provenance=provenance,
+                              attrs={"averaging": "last thermo block, second half",
+                                     "source_text_sha256": hashes,
+                                     "limits": "Retain frozen logs; inspect equilibration and temperature history."})
