@@ -9,6 +9,7 @@
 |---|---|
 | `pet-oplsaa-patch.xml` | foyer OPLS-AA 的补丁：芳香酯缺的角 CA–C_2–OS 与二面角 CA–C_2–OS–CT、CA–CA–C_2–OS（数值取自 GROMACS 发布的 OPLS-AA，注释中有原行），以及 `stk_ester_ipso` |
 | `build_pet.py` | mBuild 建 4 聚体链 → Packmol 松散填充 → foyer（补丁逐节并入 `oplsaa.xml` 后整体加载）→ GMSO 写 `atom_style full`、`real` 单位的数据文件；打印各步耗时 |
+| `compare_writer.py` | 540 原子正交/三斜体系逐项对照 GMSO 与 STK 写出器；可选真实 LAMMPS 的同坐标/同盒子 `run 0` 分项能量检查；仍使用历史待定电荷夹具 |
 | `in.pet` | 完整的平衡流程：最小化 → 500 K NVT → `fix deform` 逐步压缩到约 1.2 g/cm³ → NPT 降温到 300 K（约 4.4 分钟，单进程） |
 | `acceptance/` | 手动验收：真实 LAMMPS 经项目工作流与本机运行环境跑 LJ 熔体两行与 PET 两行；不在 `tests/` 下，CI 不收集 |
 
@@ -32,6 +33,21 @@ STK_LAMMPS=<modules>/envs/lammps/bin/lmp PYTHONPATH=tests env -u STK_TOKEN_PLAN_
 ```
 
 数据文件头含用户名与时间，`*.data` 不提交，按第 1 步重新生成。
+
+STK 自有写出器的手动验收（仓库根目录，不进普通 CI）：
+
+```bash
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= PYTHONPATH=. \
+  <modules>/envs/molecular-modeling/bin/python examples/pet_lammps/compare_writer.py \
+  --out /tmp/stk-writer-comparison --lammps <modules>/envs/lammps/bin/lmp
+```
+
+结果写入 `comparison.json`，包括每段实际耗时、各类数量与能量；盒子/质量容差 `5.1e-4`，LJ 系数 `5.1e-6`，
+电荷/键合系数 `5.1e-7`，坐标 `1.1e-5 Å`（GMSO 的精度），同几何能量容差 `0.002 kcal/mol` 或相对 `1e-9`。
+GMSO 将默认 residue 中的六条链标为同一分子；STK 用键图连通分量标出六条链，检查脚本独立验证连通关系。
+GMSO 0.17.0 三斜盒子把 dump 的外包围边界写进 data 文件头，实际读回体积不符；报告会保留此错误与读回值，
+对照时显式恢复其意图表达的晶胞，并用真实 LAMMPS 核对 STK 的六个晶胞参数，不能把这项写成原始文件头相等。
+使用范围与明确拒绝的势项见 [写出器指南](../../docs/lammps-data.md)。
 
 ## 已知的结果（2026-10-10/11，本机）
 

@@ -2,6 +2,28 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-11：E1b 独立数据写出器
+
+- 接手 Git：干净 `main`，`101bb27` 与远端一致；上一代码提交 `1859ca7` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/38097721844)
+  5/5 已完成通过，当前交接提交 [Runtime](https://github.com/sijintech/stk/actions/runs/38151033592) 与[密钥扫描](https://github.com/sijintech/stk/actions/runs/38151033573)也通过。
+- `test_lammps_data.py` **19 passed**：保留非零净电荷、真实系数合并、分子键连通关系、整个角度周期上的独立 RB/OPLS 能量公式对照、
+  三斜矢量关系、非法盒子/NaN/Inf/缺参数/外部成员/非标准非键合例外与势项拒绝、improper 显式选项、原子替换且失败不覆盖文件。
+- LAMMPS 与工作流/模板/模块定向回归 **97 passed、1 skipped**（既有真实 MuFerro 测试未设置 `STK_TEST_MUPRO_PREFIX`）；
+  Python 3.11 与 3.14 的写出器/LAMMPS/工作流各 **56 passed**。测试清空 `STK_TOKEN_PLAN_API_KEY`，取消 `STK_TOKEN_PLAN_MODEL`；未发送模型请求。
+- 手动（mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0、LAMMPS 22 Jul 2025 Update 6）：正交/三斜各 540 原子、558 键、912 角、1212 二面角逐项通过。
+  数据容差见示例 README；质量/盒子与坐标保留 STK 的更高精度。类型数 GMSO 15/16/25/30 → STK 10/9/14/13，
+  每项实际势系数不变，分子编号按六条键连通链而非默认 residue。
+- 真实 LAMMPS 读回 STK 正交/三斜六个晶胞参数与 ParmEd 输入一致（绝对容差 `1e-10`）。
+  GMSO 0.17.0 三斜 data 头使用 dump 外包围边界，实际读回体积 **45648.625 Å³**，STK/输入 **29188.420 Å³**；
+  这是参考实现错误，验收明确记录差异，未声称原始文件头相等。
+- 同几何 `run 0` 的键、角、二面角、LJ、短/长程静电与总势能全部通过（`0.002 kcal/mol` 或相对 `1e-9`）；
+  总势能差约 `1.1e-5 kcal/mol`。在直接比较原文件能量时发现松散填充重叠构型放大 GMSO 的坐标舍入误差，
+  因此几何精度独立检查，能量检查显式使用同坐标/同晶胞以隔离系数转换。
+- STK 写出 **0.044/0.045 秒**，GMSO 写出 **62.15/62.53 秒**，转换 **11.69/11.32 秒**；
+  [原始报告](../examples/pet_lammps/validation/2026-10-11-writer.json)保留实际量值与所有差异。
+- 本次代码提交/CI：提交后继续记录；无原生产品代码改动。剩余限制：建模步骤与 PET 电荷仍待决定；不支持任意力场或所有 ParmEd 势项，
+  不输出速度，RB 只允许源舍入级常数。540 原子历史电荷夹具不构成材料参数/性质验收。
+
 ## 2026-10-11：PET 可行性材料移入仓库后的复验
 
 - `examples/pet_lammps/build_pet.py`（分子建模模块的 Python，mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0）：6 条 4 聚体链 540 原子、558 键、912 角、1212 二面角，

@@ -57,12 +57,10 @@ def chain(repeats=4):
     return polymer
 
 
-def build(chains, repeats, density, out):
-    """Returns the timings in seconds; ``density`` is in kg/m3 (Packmol packs loosely, LAMMPS compresses)."""
+def typed_structure(chains=6, repeats=4, density=250.0):
+    """Historical feasibility fixture, including the still-undecided charge patch."""
     import foyer
     import mbuild as mb
-    from gmso.external import from_parmed
-    from gmso.formats.lammpsdata import write_lammpsdata
     timings, t = {}, time.time()
     box = mb.fill_box(compound=chain(repeats), n_compounds=chains, density=density)
     timings["pack"], t = time.time() - t, time.time()
@@ -70,6 +68,15 @@ def build(chains, repeats, density, out):
         ff = foyer.Forcefield(forcefield_files=[merged_forcefield(Path(work) / "oplsaa-stk.xml")])
     structure = ff.apply(box)
     timings["apply"], t = time.time() - t, time.time()
+    return structure, timings
+
+
+def build(chains, repeats, density, out):
+    """Returns timings; density is kg/m3. This remains the GMSO reference path."""
+    from gmso.external import from_parmed
+    from gmso.formats.lammpsdata import write_lammpsdata
+    structure, timings = typed_structure(chains, repeats, density)
+    t = time.time()
     topology = from_parmed(structure)
     timings["from_parmed"], t = time.time() - t, time.time()
     write_lammpsdata(topology, str(out), atom_style="full", unit_style="real")

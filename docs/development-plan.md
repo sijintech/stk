@@ -1,6 +1,6 @@
 # STK 开发计划
 
-更新：2026-10-09。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
+更新：2026-10-11。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
 存储与求值方案见[项目数据模型](design/project-model.md)。设计目标不代表当前版本已经实现。
 当前模块职责、归档清单与新增代码放置原则见[仓库结构说明](repository-structure.md)。
 
@@ -49,8 +49,9 @@ S4 联邦学习 → S5 文献与知识库 → S6 复现验证 → S7 本地交�
   **E0a（已交付）** 引擎模板接口与按模板分派；**E0b（已交付）** 模块管理（`suan/modules/`、`modules.*`、工作台“计算模块”）；
   **E1a（已交付，2026-10-10）** LAMMPS 引擎：计算端 `python -m suan.lammps`、`stk.lammps` 导入/准备/收集、工作流模板 `lammps/1`、
   结果表；LAMMPS 模块固定为与 MPICH 链接的版本。PET 建模链路（mBuild + foyer OPLS-AA + Packmol + GMSO → LAMMPS）已在本机走通（尚未写入 STK）。
-  **下一步**：E1b 建模步骤（先请所有者决定酯基苯环碳的电荷取法，见方案“需要所有者决定（E1b 之前）”；GMSO 写文件已测得约 0.13 秒/原子，
-  建议先做与电荷无关的 STK 自有 LAMMPS 数据写出器，以 GMSO 输出对照；可行性脚本已移入 `examples/pet_lammps/`）→
+  **E1b 独立写出器（已交付，2026-10-11）**：`suan.lammps.write_data` 从已分配参数的 ParmEd 结构写 full/real 数据，不分配或改写电荷；
+  正交/三斜 540 原子 PET 与 GMSO 逐项对照并用真实 LAMMPS 核对势能与晶胞。发现 GMSO 0.17.0 三斜 data 头误写 dump 外包围边界，STK 按正确 data 约定输出。
+  **下一步**：E1c 先继续；E1b 建模步骤仍待酯基苯环碳的电荷决定（见方案“需要所有者决定（E1b 之前）”；至少 2026-10-12 04:46 UTC 后再提请决策）→
   E1c 密度–温度（Tg）、模量、扩散分析 → E1d 原子与键的显示；桌面的 LAMMPS 导入与仿真视图随 E1b/E1c 做。
 - **S3 材料预测模型（[方案](design/materials-models-s3.md)，2026-10-10，所有者已决定；S3a 已交付）**：先做最简单的端到端测试——
   铁电预测 P–E 电滞回线，锂电池预测容量衰减曲线（SOH，读出循环寿命）；还没有真实数据（要与学校合作者合作后才有），

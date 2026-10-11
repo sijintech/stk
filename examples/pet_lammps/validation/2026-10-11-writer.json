@@ -1,0 +1,241 @@
+{
+  "fixture": "540-atom PET; historical 0.0 charge patch UNDECIDED; not material validation",
+  "preparation_seconds": {
+    "pack": 0.5004861354827881,
+    "apply": 5.9123334884643555
+  },
+  "orthogonal": {
+    "atoms": 540,
+    "molecules": 6,
+    "gmso_residue_molecules": 1,
+    "gmso_triclinic_header_bug": false,
+    "gmso_raw_box": {
+      "xlo xhi": [
+        0.0,
+        31.317
+      ],
+      "ylo yhi": [
+        0.0,
+        31.317
+      ],
+      "zlo zhi": [
+        0.0,
+        31.317
+      ],
+      "xy xz yz": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "stk_box": {
+      "xlo xhi": [
+        0.0,
+        31.31707
+      ],
+      "ylo yhi": [
+        0.0,
+        31.31707
+      ],
+      "zlo zhi": [
+        0.0,
+        31.31707
+      ],
+      "xy xz yz": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "topology": {
+      "Bonds": 558,
+      "Angles": 912,
+      "Dihedrals": 1212
+    },
+    "reference_types": {
+      "Masses": 15,
+      "Pair Coeffs": 15,
+      "Bond Coeffs": 16,
+      "Angle Coeffs": 25,
+      "Dihedral Coeffs": 30
+    },
+    "stk_types": {
+      "Masses": 10,
+      "Pair Coeffs": 10,
+      "Bond Coeffs": 9,
+      "Angle Coeffs": 14,
+      "Dihedral Coeffs": 13
+    },
+    "gmso_conversion_seconds": 11.686838251072913,
+    "gmso_write_seconds": 62.15408159303479,
+    "stk_write_seconds": 0.0441626210231334,
+    "gmso_actual_cell": {
+      "lx": 31.317,
+      "ly": 31.317,
+      "lz": 31.317,
+      "xy": 0.0,
+      "xz": 0.0,
+      "yz": 0.0,
+      "volume": 30714.288332013,
+      "a": 31.317,
+      "b": 31.317,
+      "c": 31.317,
+      "alpha": 90.0,
+      "beta": 90.0,
+      "gamma": 90.0
+    },
+    "stk_actual_cell": {
+      "lx": 31.31707,
+      "ly": 31.31707,
+      "lz": 31.31707,
+      "xy": 0.0,
+      "xz": 0.0,
+      "yz": 0.0,
+      "volume": 30714.4942909161,
+      "a": 31.31707,
+      "b": 31.31707,
+      "c": 31.31707,
+      "alpha": 90.0,
+      "beta": 90.0,
+      "gamma": 90.0
+    },
+    "energy_geometry": "STK coordinates and cell for both files (isolate coefficients)",
+    "gmso_energy": {
+      "Step": 0.0,
+      "PotEng": 145572.99245458,
+      "E_bond": 173.490851778131,
+      "E_angle": 180.946912821876,
+      "E_dihed": 56.6853867989666,
+      "E_vdwl": 145293.041598357,
+      "E_coul": 2006.82493159784,
+      "E_long": -2137.99722677313
+    },
+    "stk_energy": {
+      "Step": 0.0,
+      "PotEng": 145572.992465426,
+      "E_bond": 173.490851778131,
+      "E_angle": 180.946919585853,
+      "E_dihed": 56.6853908804989,
+      "E_vdwl": 145293.041598357,
+      "E_coul": 2006.82493159784,
+      "E_long": -2137.99722677313
+    }
+  },
+  "triclinic": {
+    "atoms": 540,
+    "molecules": 6,
+    "gmso_residue_molecules": 1,
+    "gmso_triclinic_header_bug": true,
+    "gmso_raw_box": {
+      "xlo xhi": [
+        0.0,
+        42.151892
+      ],
+      "ylo yhi": [
+        0.0,
+        35.14852
+      ],
+      "zlo zhi": [
+        0.0,
+        30.810843
+      ],
+      "xy xz yz": [
+        8.105436,
+        2.729456,
+        4.898621
+      ]
+    },
+    "stk_box": {
+      "xlo xhi": [
+        0.0,
+        31.31707
+      ],
+      "ylo yhi": [
+        0.0,
+        30.24996671670259
+      ],
+      "zlo zhi": [
+        0.0,
+        30.81091221335254
+      ],
+      "xy xz yz": [
+        8.1054541528088,
+        2.729462496530402,
+        4.898632099476048
+      ]
+    },
+    "topology": {
+      "Bonds": 558,
+      "Angles": 912,
+      "Dihedrals": 1212
+    },
+    "reference_types": {
+      "Masses": 15,
+      "Pair Coeffs": 15,
+      "Bond Coeffs": 16,
+      "Angle Coeffs": 25,
+      "Dihedral Coeffs": 30
+    },
+    "stk_types": {
+      "Masses": 10,
+      "Pair Coeffs": 10,
+      "Bond Coeffs": 9,
+      "Angle Coeffs": 14,
+      "Dihedral Coeffs": 13
+    },
+    "gmso_conversion_seconds": 11.31657839694526,
+    "gmso_write_seconds": 62.531603101990186,
+    "stk_write_seconds": 0.0450848659966141,
+    "gmso_actual_cell": {
+      "lx": 42.151892,
+      "ly": 35.14852,
+      "lz": 30.810843,
+      "xy": 8.105436,
+      "xz": 2.729456,
+      "yz": 4.898621,
+      "volume": 45648.6246004749,
+      "a": 42.151892,
+      "b": 36.0709932070146,
+      "c": 31.316999602903,
+      "alpha": 80.0955961712016,
+      "beta": 85.0000006630228,
+      "gamma": 77.0142996166603
+    },
+    "stk_actual_cell": {
+      "lx": 31.31707,
+      "ly": 30.2499667167026,
+      "lz": 30.8109122133525,
+      "xy": 8.1054541528088,
+      "xz": 2.7294624965304,
+      "yz": 4.89863209947605,
+      "volume": 29188.4195948167,
+      "a": 31.31707,
+      "b": 31.31707,
+      "c": 31.31707,
+      "alpha": 80.0,
+      "beta": 85.0,
+      "gamma": 75.0
+    },
+    "energy_geometry": "STK coordinates and cell for both files (isolate coefficients)",
+    "gmso_energy": {
+      "Step": 0.0,
+      "PotEng": 145573.00253012,
+      "E_bond": 173.490851778135,
+      "E_angle": 180.946912821874,
+      "E_dihed": 56.6853867989666,
+      "E_vdwl": 145293.031599376,
+      "E_coul": 1998.3095859428,
+      "E_long": -2129.46180659725
+    },
+    "stk_energy": {
+      "Step": 0.0,
+      "PotEng": 145573.002540966,
+      "E_bond": 173.490851778135,
+      "E_angle": 180.946919585852,
+      "E_dihed": 56.6853908804989,
+      "E_vdwl": 145293.031599376,
+      "E_coul": 1998.3095859428,
+      "E_long": -2129.46180659725
+    }
+  }
+}

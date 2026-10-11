@@ -1,6 +1,6 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-11，交接时 `main` 为 `b5eef06` 之后的交接提交（见 `git log`）。本文是当前快照：状态、待所有者决定的事项、下一步、
+更新：2026-10-11，交接时 `main` 包含本次 E1 数据写出器交付（见 `git log`；CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
 代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
 [开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
@@ -31,9 +31,12 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | S1 模型接入 | 全部交付：端点与密钥、数据标注与网络设置、本机一键部署（llama.cpp）、能力分档与自动切换 | [model-gateway.md](docs/design/model-gateway.md)；`suan/models/` |
 | S2 智能体 | S2a、S2b 交付（格式 13 会话/事件/对象、8 个工具、签名批准、桌面“智能体（多步）”）；**真实模型的 GUI 人工验收未做** | [agent-harness.md](docs/design/agent-harness.md)；`suan/agent/` |
 | S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
-| 多尺度引擎 | E0a 引擎模板接口、E0b 模块管理、**E1a LAMMPS 引擎**交付（`1859ca7`，CI 全绿）；E1b 起未做 | [multiscale-engines.md](docs/design/multiscale-engines.md)；见下节 |
+| 多尺度引擎 | E0a、E0b、E1a 已交付；**E1b 独立数据写出器已交付**，建模仍待电荷决定；E1c 继续开发 | [multiscale-engines.md](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md) |
 
 ## 待所有者决定（决定前不要按某个选项实现）
+
+所有者 2026-10-11 16:46 UTC 要求至少 12 小时后再提请决策；**2026-10-12 04:46 UTC 之前不提请决策**，
+继续已有授权且不依赖这些选择的工作。这个时间不构成批准，也不自动选择任何选项。
 
 1. **E1b 之前：PET 中与酯基相连的苯环碳的电荷**（[方案](docs/design/multiscale-engines.md#需要所有者决定e1b-之前)）。
    foyer 的 OPLS-AA 给 −0.115 且无氢平衡，每条 4 聚体链净电荷 −0.805。可选：
@@ -45,7 +48,10 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 
 ## 下一步（建议顺序，不依赖待决定事项的先做）
 
-1. **E1b 中与电荷无关的部分：STK 自己的 LAMMPS 数据文件写出器**。GMSO 写文件约 0.13 秒/原子（540/1080/2160 原子 63.5/128.2/246.2 秒），
+1. **E1b 独立数据写出器已交付**：`suan.lammps.write_data` 保留传入电荷，支持 full/real、谐振键/角、RB→OPLS 与三斜盒子。
+   540 原子正交/三斜 PET 对照、真实 LAMMPS 同几何能量与晶胞读回见验收记录；类型按实际参数合并，分子按键图连通分量编号。
+   GMSO 0.17.0 的三斜 data 头错误已明确记录，不复制其 dump 外包围边界。建模步骤仍待电荷决定。
+   之前 GMSO 写文件约 0.13 秒/原子（540/1080/2160 原子 63.5/128.2/246.2 秒），
    约 9000 原子的体系要约 20 分钟。由 foyer 给出的 ParmEd 结构直接写 `atom_style full`、`real` 单位（原子、键、角、RB→OPLS 二面角、对势系数），
    用 GMSO 在 540 原子体系上的输出逐项对照验证（数值容差、类型合并、三斜盒子）。写出器不依赖电荷取值；**建模步骤本身（链长、链数、密度作为参数行、
    力场来源记录）等电荷决定后再做**。可行性脚本在 [examples/pet_lammps/](examples/pet_lammps/README.md)。
@@ -68,6 +74,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | 计算端启动器 `python -m suan.lammps run|verify|check`、找程序、MPI 检查 | [suan/lammps/run.py](suan/lammps/run.py)、[spec.py](suan/lammps/spec.py)、共用 MPI 规则 [suan/runtime/launch.py](suan/runtime/launch.py) |
 | 项目：导入/复制/准备/收集、最终状态 | [suan/workflows/lammps.py](suan/workflows/lammps.py)、与 MuFerro 共用的 [common.py](suan/workflows/common.py) |
 | 模板注册 | [suan/workflows/templates.py](suan/workflows/templates.py) 的 `LammpsTemplate`（E0a 接口，外部引擎经 `stk.engines` entry point） |
+| 数据写出（不分配电荷或力场） | [suan/lammps/data.py](suan/lammps/data.py)、[tests/test_lammps_data.py](tests/test_lammps_data.py)、手动对照 `examples/pet_lammps/compare_writer.py` |
 | 模块目录（LAMMPS 固定 MPICH 版 `lammps=*=cpu*_mpi_mpich_*`） | [suan/modules/catalog.json](suan/modules/catalog.json)、[suan/modules/](suan/modules/) |
 | 测试 | [tests/test_lammps.py](tests/test_lammps.py)（26）、[tests/test_workflow_lammps.py](tests/test_workflow_lammps.py)（7）、假 LAMMPS [tests/lammps_fake.py](tests/lammps_fake.py)、真实日志节选 `tests/data/lammps/pet-npt.log` |
 | 手动验收（真实 LAMMPS，不进 CI）与 PET 可行性脚本 | [examples/pet_lammps/](examples/pet_lammps/README.md) |
