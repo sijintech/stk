@@ -1,6 +1,6 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-11，交接时 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
+更新：2026-10-11，交接时 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
 代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
 [开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
@@ -115,10 +115,10 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 | E1a CI | [Runtime](https://github.com/sijintech/stk/actions/runs/38097721893) 8/8（3.12 2442 passed，3.11 与 3.14 各 2438）、[桌面](https://github.com/sijintech/stk/actions/runs/38097721844) 5/5、密钥扫描通过 |
 | E1a 手动（真实 LAMMPS） | LJ 熔体两行与 PET 两行经项目工作流（设定 450/550 K，平均 445.8/551.4 K）；2 进程 `1 by 1 by 2` 与单进程一致；2026-10-11 用 `examples/pet_lammps` 重新运行，结果见[验收记录](docs/runtime-validation.md) |
 | E1b `057f96d` | 写出器 19 项通过，正交/三斜 540 原子对照和真实能量/晶胞读回通过；[Runtime](https://github.com/sijintech/stk/actions/runs/38157976224) 8/8、[桌面](https://github.com/sijintech/stk/actions/runs/38157976221) 5/5、密钥扫描/文档 CI 通过 |
-| E1c 本机 | 合成曲线与真实氩路径 3 passed；完整 pytest 2469 passed、24 skipped，最后新增单位检查定向 33 passed；原生定向 104/104（含技能 GL/Vulkan 截图）；新代码 CI 见[验收记录](docs/runtime-validation.md) |
+| E1c 初版 `6927e27` 本机 | 合成曲线与真实氩路径 3 passed；完整 pytest 2469 passed、24 skipped，最后新增单位检查定向 33 passed；原生定向 104/104（含技能 GL/Vulkan 截图）；首轮 CI 与修正见后续记录 |
 | E1c 修正 `c17bb4b` | 重名表头拒绝、旧缓存隔离；本机完整 pytest **2483 passed、24 skipped**、Linux CTest **1289/1289、无跳过**；[桌面 CI](https://github.com/sijintech/stk/actions/runs/38162974612) **5/5**（macOS CPU 838/838、Metal 180/180）、[Runtime](https://github.com/sijintech/stk/actions/runs/38162974582) **8/8**，密钥扫描/文档通过 |
-| E1c 多温度来源 | 八个合成温度日志汇总/拟合得到 340 K，全部日志摘要随结果保存；完整 pytest **2485 passed、24 skipped**，3.11/3.14 各 108 passed、1 skipped，原生目录 7/7、真实氩三路径通过；本次提交的 CI 继续跟踪 |
-| E1c `6927e27` CI | Runtime 8/8、密钥扫描与文档通过；桌面已结束，Linux 1285/1289、macOS CPU 837/838、Windows CPU 795/796，失败均为预设数量旧断言；包构建与新环境冒烟通过，修正后的 CI 继续跟踪 |
+| E1c 多温度来源 `be9bdd7` | 完整 pytest **2485 passed、24 skipped**，3.11/3.14 各 108 passed、1 skipped，原生目录 7/7、真实氩三路径通过；[桌面 CI](https://github.com/sijintech/stk/actions/runs/38164654996) **5/5**（Linux 1289/1289、macOS CPU 838/838、Metal 180/180，无跳过）、[Runtime](https://github.com/sijintech/stk/actions/runs/38164655024) **8/8**，密钥扫描/文档通过 |
+| E1c `6927e27` 首轮 CI | Runtime 8/8、密钥扫描与文档通过；桌面已结束，Linux 1285/1289、macOS CPU 837/838、Windows CPU 795/796，失败均为预设数量旧断言；已在 `c17bb4b` 修正并通过桌面 5/5，原始证据见验收记录 |
 | 更早各期 | 见[验收记录](docs/runtime-validation.md)，每项含提交与 CI 链接 |
 
 未解决：

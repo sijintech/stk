@@ -8,7 +8,9 @@ Critical review 沿 `density_series` → Tg 检查多温度来源，复现最终
 这些是 `input_text` 摘要，函数不读取文件，不声称核对原始磁盘字节；冻结日志仍由调用者保存。
 `stk.source.lammps_log@1` 实现版本升为 2，使旧缓存不能绕过新校验；节点主版本/端口/参数与六技能哈希不变。
 八个合成温度点从完整日志汇总、拟合回读 340 K，八份来源与 JSON 诊断一致；真实氩三路径仍通过。
-本机与 CI 实际结果见[验收记录](runtime-validation.md)。不涉及 PET 建模或电荷决定。
+代码 `be9bdd7` 已推送 main，桌面 CI 5/5、Runtime 8/8、密钥扫描与文档均已结束通过；
+Linux 1289/1289、macOS CPU 838/838 与 Metal 180/180，无失败、无跳过。本机与 CI 证据见[验收记录](runtime-validation.md)。
+最终状态以文档提交补记，不涉及 PET 建模或电荷决定。
 
 ## 2026-10-11：E1c 表头、缓存与桌面回归修正
 

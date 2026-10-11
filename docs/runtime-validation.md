@@ -13,10 +13,17 @@
 - Python 3.11/3.14 的分析/源节点/CLI/契约/技能定向各 **108 passed、1 skipped**（既有离屏 GL probe 不可用）；
   原生 Graph/目录定向 **7/7、无跳过**；真实 LAMMPS 三模板经 Runtime、工作流、分析归档复验 **3 passed**（16.47 秒）。
   JUnit：`/tmp/stk-e1c-density-{after,py311,py314,native,real}.xml`。
-  最终完整 Python **2485 passed、24 skipped、2 deselected**（458.73 秒，`/tmp/stk-e1c-density-full.xml`）；本次代码 CI 提交后补记。
+  最终完整 Python **2485 passed、24 skipped、2 deselected**（458.73 秒，`/tmp/stk-e1c-density-full.xml`）。
 - 推送门槛：上一代码 `c17bb4b` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/38162974612) **5/5 已结束成功**，
   Runtime 8/8、密钥扫描与文档通过后再推送本次代码。PET 电荷仍待所有者决定，没有实施相关建模。
   暂存改动经 gitleaks（`.gitleaks.toml`、redact）无泄漏；测试空 API key、取消模型变量，无模型请求。
+  代码 **`be9bdd7`** 已推送；[Runtime](https://github.com/sijintech/stk/actions/runs/38164655024) **8/8 已完成通过**
+  （3.12：2500 passed、7 skipped；3.11/3.14 各 2496 passed、11 skipped；均 4 deselected），
+  [文档](https://github.com/sijintech/stk/actions/runs/38164655117)、[密钥扫描](https://github.com/sijintech/stk/actions/runs/38164655029)通过；
+  [桌面](https://github.com/sijintech/stk/actions/runs/38164654996) **5/5 已完成通过**：Linux **1289/1289**、
+  macOS CPU **838/838**、Metal **180/180**（三份 JUnit 均无失败、无跳过）；Windows CPU **796 项、0 失败**，Linux 包构建与新环境包冒烟成功。
+  原始成功报告保留在 `/tmp/stk-e1c-linux-be9bdd7/ctest-junit.xml` 与 `/tmp/stk-e1c-macos-be9bdd7/ctest-{cpu,metal}.xml`。
+  四份交接文档在代码 CI 全部结束后以文档提交补记最终状态，剩余科学与产品限制未变。
 
 ## 2026-10-11：E1c 表头、缓存与桌面回归修正
 
