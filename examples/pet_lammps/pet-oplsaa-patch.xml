@@ -1,0 +1,27 @@
+<ForceField name="STK OPLS-AA patch for aromatic esters" version="1" combining_rule="geometric">
+ <!-- foyer's oplsaa.xml lists these terms with atom class C, while its ester carbonyl carbon (opls_465) has class C_2,
+      so an aromatic ester (PET, terephthalates) gets no parameters for them. Values are the class-C entries of the same
+      file, which equal OPLS-AA as distributed with GROMACS (share/top/oplsaa.ff/ffbonded.itp):
+        angle    "OS C CA 1 111.400 677.808 ; wlj"
+        torsion  "CA C OS CT 3 29.28800 -8.36800 -20.92000 0 0 0 ; benzoic acids & esters"
+        torsion  "CA CA C OS 3 8.78640 0.00000 -8.78640 0 0 0 ; aryl acid, amide, ester" -->
+ <!-- OPLS-AA gives an aromatic carbon that carries a substituent the charge that keeps ring and substituent neutral
+      (benzonitrile opls_260 +0.035, nitrobenzene opls_768 +0.09, anisole opls_199 +0.085, ring fusion opls_147 0.0).
+      The ester group opls_465/466/467 with its alkoxy carbon is neutral by itself, so the ring carbon it is bonded to
+      gets 0.0; foyer would otherwise give it the benzene C-H value -0.115 (opls_145) with no hydrogen to balance it.
+      Lennard-Jones parameters are those of opls_145. -->
+ <AtomTypes>
+  <Type name="stk_ester_ipso" class="CA" element="C" mass="12.011" def="[C;X3;r6]([C;X3]([O;X1])[O;X2])" overrides="opls_145"
+        desc="Aromatic C bonded to the carbonyl C of an ester (terephthalates, benzoates)"/>
+ </AtomTypes>
+ <NonbondedForce coulomb14scale="0.5" lj14scale="0.5">
+  <Atom type="stk_ester_ipso" charge="0.0" sigma="0.355" epsilon="0.29288"/>
+ </NonbondedForce>
+ <HarmonicAngleForce>
+  <Angle class1="CA" class2="C_2" class3="OS" angle="1.94429678" k="677.808"/>
+ </HarmonicAngleForce>
+ <RBTorsionForce>
+  <Proper class1="CA" class2="C_2" class3="OS" class4="CT" c0="29.288" c1="-8.368" c2="-20.92" c3="0.0" c4="0.0" c5="0.0"/>
+  <Proper class1="CA" class2="CA" class3="C_2" class4="OS" c0="8.7864" c1="0.0" c2="-8.7864" c3="0.0" c4="0.0" c5="0.0"/>
+ </RBTorsionForce>
+</ForceField>

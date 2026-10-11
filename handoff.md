@@ -1,51 +1,88 @@
-# STK 开发交接（Claude / 后续开发者）
+# STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-10。**P3 工作流（W1–W4）已交付；体验包（[ux-package-2026-10.md](docs/design/ux-package-2026-10.md)）进行中：U1“需要处理”已交付
-（[suan/project/attention.py](suan/project/attention.py)、`project.attention.*`、[project_attention.hh](desktop/engine/lib/stk_app/include/stk/app/project_attention.hh)、
-工作台“需要关注”与状态栏计数）；U4 工作流记住视图已交付（`workflow_editor.cc` 的 `ViewMemory`/`save_state`、`AnalysisGraphCanvas::look_at`）；
-U2 用量可见已交付（`Requests.usage`、`project.requests.usage`、AI 助手“本项目已用”与发送按钮模型）；U3 项目内搜索已交付
-（[suan/project/search.py](suan/project/search.py)、`project.search`、工作台“搜索项目”）；**体验包四项完成**；所有者决定的后续顺序：归档方案（[project-archive.md](docs/design/project-archive.md)，已确认并实现）→
-MuFerro 按行工作流运行（W5a 服务与脚本已交付：[suan/desktop_bridge/workflow_runs.py](suan/desktop_bridge/workflow_runs.py) 的远程步骤、
-`muferro.final_state`；W5b 桌面运行区已交付：`simulation_target.hh`、`workflow_editor.cc` 的 `remote_steps()`）→ AI 批量模拟闭环（[方案](docs/design/ai-batch-loop.md)；L1 AI 扫描提议已交付：[suan/project/parameter_sweep.py](suan/project/parameter_sweep.py)、
-AI 助手“提议参数扫描”；L2“用工作流运行新增的 N 行”、L3“就这 N 行的结果提问”已交付；P2 闭环完成）；**归档 A1–A3 已交付**（所有者 2026-10-08 确认方案：格式 11 与 [suan/project/archive.py](suan/project/archive.py)、各列表 `archived` 过滤与冻结检查；桌面 [project_archive.hh](desktop/engine/lib/stk_app/include/stk/app/project_archive.hh) 与共用控件 `src/editors/archive_controls.hh`，九类对象在各自列表中归档/恢复，Home“需要关注”可归档；按所有者澄清，归档即冻结：不能修改、可照原样运行和使用，修改须恢复或复制（“复制为新工作流”）；限制见方案“已知限制”）；**思劲平台方向（[方案](docs/design/sijin-platform-2026-10.md)，所有者已答复三轮，按 S1 → S7）：S1 全部交付（S1a–S1d）**（[模型网关](docs/design/model-gateway.md)：格式 12 数据标注、`suan/models/` 端点与网络设置、发送前检查、桌面端点选择与“公开数据”；S1c 本机一键部署：[suan/models/local.py](suan/models/local.py)、[catalog.json](suan/models/catalog.json)、`models.local.*`、桌面“本机模型”，真实下载与运行的手动验证见[验收记录](docs/runtime-validation.md)；S1d 自动选择模型：[suan/models/routing.py](suan/models/routing.py)、`models.route`、AI 助手默认“自动”与按候选回退）；第二轮的四份评估（内网穿透、共享会话、文献借阅、Python 3.11 与 Flower）已由所有者在 2026-10-09 逐项决定（方案“所有者决定（第三轮）”）；Python 下限已升到 3.11（推荐 3.12）；S2 智能体 harness 的[设计](docs/design/agent-harness.md)已由所有者作答（规划只用本机或机构内模型、v1 不准备运行、新增“结构公开”标注等），按 S2a → S2b 实现；**S2 已交付（S2a、S2b-1、S2b-2）**（格式 13、[suan/agent/](suan/agent/) 循环与 8 个工具、[agent_sessions.py](suan/project/agent_sessions.py) 哈希链日志、`project.agent.*` 13 个方法（`decide` 只给桌面）与脚本 `stk.project.agent`、验收测试 `tests/test_agent_muferro_acceptance.py`；桌面 [project_agent.hh](desktop/engine/lib/stk_app/include/stk/app/project_agent.hh) 与 AI 助手“智能体（多步）”、修改检查页经会话批准、数据页三档标注，原生测试 `AgentPython.*`；见设计“进度”），桌面上的人工验收待人完成；**S3 材料预测模型**（[方案](docs/design/materials-models-s3.md)：铁电 P–E 回线、锂电池容量衰减，暂无真实数据）**S3a 已交付**（[suan/materials/](suan/materials/)、`materials.*`、脚本 `stk.materials`，训练需要 PyTorch CPU），下一步迁移学习与桌面界面；**多尺度计算引擎**（[方案](docs/design/multiscale-engines.md)，为 PET 项目加入 LAMMPS 与 ABACUS）E0a 引擎模板接口（[suan/workflows/templates.py](suan/workflows/templates.py)）、E0b 模块管理（[suan/modules/](suan/modules/)、`modules.*`、工作台“计算模块”）、E1a LAMMPS 引擎（[suan/lammps/](suan/lammps/)、[suan/workflows/lammps.py](suan/workflows/lammps.py)、模板 `lammps/1`、`stk.lammps`）已交付；LAMMPS 目前从 Python 控制台导入、经按行工作流运行，桌面的导入按钮与仿真视图仍只有 MuFerro；E1b 建模步骤前需所有者决定酯基苯环碳的电荷（方案“需要所有者决定（E1b 之前）”）；此前完成的可用性开发包（[审视记录](docs/design/user-review-2026-10-06.md)，进度见
-[开发计划](docs/development-plan.md)开头）：标量体范围（`96152bf`）、启动即工作台（`1d1c338`）、参数扫描生成（`ca8a8b3`）、
-路径框“浏览…”（共用 [path_picker.hh](desktop/engine/lib/stk_app/src/editors/path_picker.hh)，`b1badce`）、
-运行环境选择与“运行所选行”（`stk.batches.run`、[project_simulation_view.cc](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)，`ed5bb29`）、
-分析“运行并显示”（`analysis_graph_editor.cc` 的 `RunAndShow` 链条，`7e64ece`）已交付，第 3 项完成；
-第 4 项已交付[术语表](docs/design/glossary.md)与 AI 助手内的 API 密钥（`TokenPlanCredentials`，`ai.credentials.*`），
-以及收起内部细节（[project_labels.hh](desktop/engine/lib/stk_app/src/editors/project_labels.hh)）与一行说明
-（[editor_text.hh](desktop/engine/lib/stk_app/src/editors/editor_text.hh) 的 `hint()`），第 4 项完成；
-第 5 项：示例项目（[suan/workflows/demo.py](suan/workflows/demo.py)，工作台按钮与 `suan demo`）、
-无头 `stk`（[suan/scripting/headless.py](suan/scripting/headless.py)）、[Linux 快速上手](docs/quickstart-linux.md) 与文档站。
-**可用性开发包已全部交付（最终状态 `3fd0c17`，桌面 CI 5/5 通过）。所有者决定 AI 批量模拟闭环交给团队后续完成，
-当前进行 P3 工作流编辑（计划见[开发计划](docs/development-plan.md)“P3 工作流编辑”）：W1a 候选图模型已交付**
-（`AnalysisParameterDraft` 的 `graph()`/`graph_changes()` 与 `add_node`、`remove_node`、`set_links`、`set_node_param`、`move_nodes`、`set_graph_output`），
-W1b 候选视图与“编辑图结构”面板、W1c 节点参数表单已交付（`analysis_graph_editor.cc` 的 `shown_view()`、`graph_edit_panel()`、
-`list_input()`、`node_params_editor()`），W2 画布拖动与拖线已交付（`canvas_drag_*`、`AnalysisGraphCanvas::hit_port`）；
-W3 方案（[项目工作流与子图导航](docs/design/project-workflows.md)）已由所有者确认；W3a 已交付：[suan/project/workflows.py](suan/project/workflows.py)（存储与 `validate`）、共用受管表格 [suan/project/managed.py](suan/project/managed.py)、`stk.project.workflows`、`project.workflows.*`，用户说明见 [docs/project-workflows.md](docs/project-workflows.md)；W3b 已交付：[workflow_editor.cc](desktop/engine/lib/stk_app/src/editors/workflow_editor.cc)、[workflow_view.hh](desktop/engine/lib/stk_app/include/stk/app/workflow_view.hh)、[project_workflows.hh](desktop/engine/lib/stk_app/include/stk/app/project_workflows.hh)，分析图 `navigate()`/面包屑，`AppShell::open_in_area_later/return_in_area_later`；W3c-1 编辑模型已交付（[workflow_draft.hh](desktop/engine/lib/stk_app/include/stk/app/workflow_draft.hh)、`project.workflows.choices`、`ProjectWorkflows::create/update/check`）；W3c-2 编辑界面已交付（`workflow_editor.cc` 的 `edit_panel`/`step_panel`/`drag_finish`）；W4 方案（[workflow-runs.md](docs/design/workflow-runs.md)）已确认；W4a-1 已交付：[suan/project/workflow_runs.py](suan/project/workflow_runs.py)、格式 10、`suan/workflows/templates.py` 的 `LOCAL_TEMPLATES`/`workflow_templates()`、分析运行 `parameter_overrides`；W4a-2 已交付：[suan/desktop_bridge/workflow_runs.py](suan/desktop_bridge/workflow_runs.py) 执行器、`project.workflow_runs.*`、示例工作流“算例 → 合成求解 → 温度场”；W4b 已交付（`workflow_editor.cc` 的 `run_panel`/`run_detail`，`ProjectWorkflows::run_rows/start_run/...`，分析图 `navigate` 支持 `analysis_run_id`）；W4c 已交付（`WorkflowRuns.stale`、`project.workflow_runs.stale`、运行区过期标记与重算）；体验包见文首；ADE 参考第 1 组已并入 W4、第 3 组（AI 做法）交给负责 AI 批量模拟闭环的同事（[ade-references-2026-10.md](docs/design/ade-references-2026-10.md)）；
-之前为保存分析的单输入连线编辑（`3cbaa36`）与技能目录首版（`5a12d5a`、`df4729d`）。均已推送 `main`。
-接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态；各提交的 CI 结果记在[验收记录](docs/runtime-validation.md)。
+更新：2026-10-11，交接时 `main` 为 `b5eef06` 之后的交接提交（见 `git log`）。本文是当前快照：状态、待所有者决定的事项、下一步、
+代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
+[开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
+接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
 
 ## 先读什么，先做什么
 
-1. 阅读 [AGENTS.md](AGENTS.md)：所有者要求日常直接在 `main` 开发、提交、推送，不自动开分支或 PR。
-2. 阅读本文，再看[开发计划](docs/development-plan.md)开头的 **2026-10-05 交付顺序**。
-3. 产品决定以[工作台设计](docs/design/project-workbench.md)为准；存储/求值方向见[项目模型](docs/design/project-model.md)。
-   已发布的 [specs](docs/specs/README.md) 是现有协议依据，设计提案不是当前数据库 DDL。
-4. 接手先检查工作区、当前提交与远端状态，保护别人的未提交改动。完成一个可验收增量后做 critical review，
-   修复实际问题、运行相关检查、更新计划/验收记录，再提交推送。
+1. [AGENTS.md](AGENTS.md)：共同约定与**所有代理都必须遵守的规则**（密钥、测试环境变量、不发收费请求、推送前等上一个代码提交的桌面 CI、
+   “合作方”称呼）。`CLAUDE.md` 只是 Claude 的入口，内容与 AGENTS.md 相同方向，不另立规则。
+2. 本文，再看[开发计划](docs/development-plan.md)开头 **2026-10-08 思劲平台方向**一节（包括其中的“多尺度计算引擎”与“S3”条目）。
+3. 产品决定在 `docs/design/`（多尺度见 [multiscale-engines.md](docs/design/multiscale-engines.md)），已发布协议在 `docs/specs/`；
+   设计目标不是已实现功能。
+4. 接手先检查工作区、当前提交、远端与 CI，保护别人的未提交改动：
 
 ```bash
 git status --short --branch
 git log -5 --oneline
-git fetch origin main
-git log --oneline HEAD..origin/main
+git fetch origin main && git log --oneline HEAD..origin/main
+gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌面 CI 是否已结束、是否通过
 ```
 
-交接前只有主工作树；另有历史分支 `docs/development-handoff`、`fix/desktop-transfer-resume`。
-它们不属于本轮待办，不应因为存在就合并或删除；无关旧 PR 也没有获得隐含合并授权。
-更长历史在[开发交接记录](docs/development-log.md)，测试证据在[验收记录](docs/runtime-validation.md)。
-旧日志中的“下一步”可能已被新计划替代，不要从最早里程碑重新开始。
+只有主工作树；历史分支 `docs/development-handoff`、`fix/desktop-transfer-resume` 与无关旧 PR 不属于待办，不合并也不删除。
+
+## 现在的状态（2026-10-11）
+
+| 方向 | 状态 | 入口 |
+|---|---|---|
+| 桌面与项目基线 | 原生桌面（GHOST/OpenGL/Vulkan/Metal）、项目格式 **13**（SQLite + 文件）、表格/参数扫描、保存分析、项目工作流（按行运行 MuFerro 与 LAMMPS）、归档、技能目录、工作台 | [开发计划](docs/development-plan.md)“当前基线”；`suan/project/`、`desktop/engine/lib/stk_app/` |
+| S1 模型接入 | 全部交付：端点与密钥、数据标注与网络设置、本机一键部署（llama.cpp）、能力分档与自动切换 | [model-gateway.md](docs/design/model-gateway.md)；`suan/models/` |
+| S2 智能体 | S2a、S2b 交付（格式 13 会话/事件/对象、8 个工具、签名批准、桌面“智能体（多步）”）；**真实模型的 GUI 人工验收未做** | [agent-harness.md](docs/design/agent-harness.md)；`suan/agent/` |
+| S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
+| 多尺度引擎 | E0a 引擎模板接口、E0b 模块管理、**E1a LAMMPS 引擎**交付（`1859ca7`，CI 全绿）；E1b 起未做 | [multiscale-engines.md](docs/design/multiscale-engines.md)；见下节 |
+
+## 待所有者决定（决定前不要按某个选项实现）
+
+1. **E1b 之前：PET 中与酯基相连的苯环碳的电荷**（[方案](docs/design/multiscale-engines.md#需要所有者决定e1b-之前)）。
+   foyer 的 OPLS-AA 给 −0.115 且无氢平衡，每条 4 聚体链净电荷 −0.805。可选：
+   (a) 保持 STK 按 OPLS-AA 惯例推出的 0.0（类型 `stk_ester_ipso`，非文献值），每个生成的数据文件记录力场来源（foyer 版本、补丁 SHA-256）；
+   (b) 改用文献中 PET 常用的 LigParGen/CM1A 电荷；(c) 由合作方提供电荷。2026-10-10 已向所有者提出，**尚未答复**。
+2. **S3 下一步**：`stk.dataset/1` 两个数据格式要先交给合作方讨论；MuPRO 能否做电场扫描以产生相场回线待确认。
+3. **S2c**（外部规划模型、智能体准备运行）视所有者决定。
+4. **保存分析修改提案的持久形式**（较早的 P3 项，[建议](docs/design/review-drafts-and-conversations.md#保存分析修改提案的持久形式建议待所有者确认2026-10-06)）：仍待确认，目前未排期。
+
+## 下一步（建议顺序，不依赖待决定事项的先做）
+
+1. **E1b 中与电荷无关的部分：STK 自己的 LAMMPS 数据文件写出器**。GMSO 写文件约 0.13 秒/原子（540/1080/2160 原子 63.5/128.2/246.2 秒），
+   约 9000 原子的体系要约 20 分钟。由 foyer 给出的 ParmEd 结构直接写 `atom_style full`、`real` 单位（原子、键、角、RB→OPLS 二面角、对势系数），
+   用 GMSO 在 540 原子体系上的输出逐项对照验证（数值容差、类型合并、三斜盒子）。写出器不依赖电荷取值；**建模步骤本身（链长、链数、密度作为参数行、
+   力场来源记录）等电荷决定后再做**。可行性脚本在 [examples/pet_lammps/](examples/pet_lammps/README.md)。
+2. **E1c 分析模板**（只用导入的算例，不依赖建模）：密度–温度两段直线拟合求 Tg、单轴拉伸小应变段斜率求模量、小分子 MSD 的爱因斯坦关系求扩散系数；
+   每项一套 LAMMPS 脚本模板（参数来自参数表）与一个读结果表/日志的分析。
+3. **桌面的 LAMMPS 入口**：导入按钮与按引擎显示的仿真视图（现在桌面只认 MuFerro；LAMMPS 只能从 Python 控制台 `stk.lammps` 与工作流编辑器使用）。
+4. 之后：E1d 球棍显示、运行中的监控事件、远程运行环境上的模块安装 → E2 ABACUS（先查 conda-forge 的 MPI 变体，LAMMPS 默认无 MPI 的教训）→ E3 串联。
+5. 与 E 系列并行、需要人参与的：S2 真实本机模型的 GUI 人工验收（[工作台清单](docs/workbench-acceptance.md)“AI 智能体（多步）”）；
+   macOS/Windows 真机复核。
+
+## 多尺度引擎：E1a LAMMPS（最近一次交付）
+
+导入的 LAMMPS 算例（输入脚本 + 它读的文件）成为“LAMMPS cases”表的一行，温度、压力、步数、时间步长、随机种子从脚本的 `index` 默认值读入；
+行作为工作流步骤 `lammps/1` 在运行环境上运行；STK 检查 `log.lammps` 后把后一半的平均密度、温度、压力、能量写入“LAMMPS results”表。
+
+| 从哪里改 | 入口 |
+|---|---|
+| 脚本检查（拒绝 shell/python/getenv/字面路径，任意深度 include 与引号中的命令） | [suan/lammps/script.py](suan/lammps/script.py) |
+| 日志读取与判定（`Total wall time`、`ERROR`、NaN、`thermo_style multi/yaml` 不支持） | [suan/lammps/log.py](suan/lammps/log.py) |
+| 计算端启动器 `python -m suan.lammps run|verify|check`、找程序、MPI 检查 | [suan/lammps/run.py](suan/lammps/run.py)、[spec.py](suan/lammps/spec.py)、共用 MPI 规则 [suan/runtime/launch.py](suan/runtime/launch.py) |
+| 项目：导入/复制/准备/收集、最终状态 | [suan/workflows/lammps.py](suan/workflows/lammps.py)、与 MuFerro 共用的 [common.py](suan/workflows/common.py) |
+| 模板注册 | [suan/workflows/templates.py](suan/workflows/templates.py) 的 `LammpsTemplate`（E0a 接口，外部引擎经 `stk.engines` entry point） |
+| 模块目录（LAMMPS 固定 MPICH 版 `lammps=*=cpu*_mpi_mpich_*`） | [suan/modules/catalog.json](suan/modules/catalog.json)、[suan/modules/](suan/modules/) |
+| 测试 | [tests/test_lammps.py](tests/test_lammps.py)（26）、[tests/test_workflow_lammps.py](tests/test_workflow_lammps.py)（7）、假 LAMMPS [tests/lammps_fake.py](tests/lammps_fake.py)、真实日志节选 `tests/data/lammps/pet-npt.log` |
+| 手动验收（真实 LAMMPS，不进 CI）与 PET 可行性脚本 | [examples/pet_lammps/](examples/pet_lammps/README.md) |
+
+继续开发时须保留这些边界：
+
+- LAMMPS 退出码 0 不等于成功：日志须正常结束、无 `ERROR`、每段热力学输出完整且全部有限；收集时重新校验日志并与冻结的输入与报告核对。
+- 参数经 `-var` 传入；LAMMPS 中 `-var` 定义的 index 变量会让脚本里同名的 `variable X index V` 失效，以别的样式重定义会报错，
+  所以参数变量只能是单值 `index`。脚本用到哪些参数随原始输入冻结。
+- 脚本检查是防误用，不是沙箱；由变量拼出的路径不追踪。
+- LAMMPS 没有 MPI（`lmp -h` 显示 MPI STUBS）时拒绝多于 1 个进程——conda-forge 默认的无 MPI 版本在 2 进程下会各自完整运行、日志互相覆盖却显示成功。
+- 最终状态是报告与算例文件夹中除轨迹以外的文件，超过 100 个时明确失败、不截断；单次下载上限 1 GiB。
+
+本机开发用的模块（仅此机器）：`/home/mnemora/opt/stk-modules/envs/{lammps,packmol,molecular-modeling}`（LAMMPS 22 Jul 2025 Update 6 MPICH 版；
+mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/opt/stk-modules/mamba`。STK 自己安装的模块在 `~/.stk/modules/envs/`。
 
 ## 所有者已经确定的方向
 
@@ -61,137 +98,21 @@ git log --oneline HEAD..origin/main
 - 需要直接连接与 SSH；已有 Linux Runtime 连接/SSH 隧道和本机 stdio 桥，**通用 Mac↔Windows STK 点对点端点尚未实现**。
 - `toolkits/` 最终按功能迁入 `suan/`，保留必要兼容；不是整目录改名。当前还有真实调用，不能提前删除。
 
-## 当前已经能做什么
-
-| 范围 | 已交付基线 | 尚未交付或需区分 |
-|---|---|---|
-| 原生桌面 | C++ / GHOST / OpenGL、Vulkan、Metal；分栏/标签、3D、Python、项目、AI、分析图；默认布局以分步引导工作台开始 | 不是完整的五类内容全局侧栏；各模式独立布局未实现 |
-| 项目与表格 | SQLite 格式 **9**；原子修订、撤销、类型化值、引用/公式、文件索引、输入快照、预览/草案；按范围/列表一次生成参数行（[参数扫描](docs/project-sweeps.md)） | 富内容通用插件框架与完整项目打包尚未完成；格式升级必须显式备份 |
-| AI | 阿里 Token Plan、OpenAI 兼容端点与本机一键部署的 llama.cpp 模型（数据默认私有，标注公开才可发往外部端点；网络设置离线/机构内/外网）、明确捕获上下文、准备/发送、临时流式回复、持久问答、标量参数建议与修改检查 | 不等于通用自主 Agent、文件/技能附件或完整 AI 批量模拟编排 |
-| 分析 | 节点图检查；保存定义；参数、有序输出与单输入连线联合草稿（连线须校验后保存）；冻结输入与独立运行；结果归档、精确内联表格与源坐标定位 | 增删节点、多输入列表、拖线与位置保存未实现；多层图、子图及大表 blob 有界读取仍待开发 |
-| Python / Runtime | 持久 Python 会话，项目/图/Viewer/布局等 API；Linux Runtime、MuFerro 流程、SSH 管理 | 不是所有 UI 操作都已覆盖；Runtime 服务端仍限 Linux；通用对等通信待开发 |
-| 技能 | `stk-visualize`、`stk-monitor` 说明包及 `suan skills list/export`；实验契约 `stk.skill/1` 的三个内置技能，桥 `skills.list/get`、`stk.skills`、`suan skills catalog/show` 与原生只读“技能”页（[技能目录](docs/skills.md)） | 项目引用/版本固定、从技能直接准备或运行、技能附件、用户技能目录 **未实现**；节点目录不是技能库 |
-
-用户此前在 macOS 和 Windows 真机上确认过能启动并看到 3D；这不是对后续每个交互、IME、GPU 驱动或安装包的全面验收。
-
-## 可用性开发包：参数扫描生成
-
-规划在 [suan/project/sweep.py](suan/project/sweep.py)（只读，输出普通命令；按 `project.apply` 的 1000 条命令上限检查），
-桥 `project.sweep.plan`（[projects.py](suan/desktop_bridge/projects.py)）、控制台 `stk.project.sweep`、
-CLI `suan project sweep`；原生 `ProjectState::sweep` 先取计划再以同一修订提交，修订变化即丢弃。
-面板在 [project_editor.cc](desktop/engine/lib/stk_app/src/editors/project_editor.cc) 的 `sweep_controls`，
-输入解析为纯函数 `project_sweep_axis`。测试：`tests/test_project_sweep.py`、`ProjectTable.SweepAxes*`、
-`ProjectPython.SweepPanel*`、截图 `project_sweep_render_*`。下一步按计划做浏览按钮与“运行选中行”。
-
-## 最近一次交付：保存分析的单输入连线
-
-在“保存的分析”草稿面板新增 **连线 / Links**：选中节点的已知单输入端口可从全部已声明的上游输出中改接，
-可选输入可断开；多输入、未知类型、未声明端口、重复节点 ID、带别名/额外字段的连线保持只读并说明原因。
-含连线修改的草稿须点击“校验候选”，用 `graph.validate` 检查完整候选（图、参数、输出），通过后才能保存；
-保存用 `ProjectAnalyses::replace_definition` 按读取修订一次写入整个定义。只有参数/输出修改的草稿行为不变。
-用法见[保存分析指南](docs/project-analyses.md#编辑连线与图结构)。
-
-继续开发时须保留这些边界：
-
-- 校验结果绑定 `AnalysisCandidateKey`（打开句柄、分析 UUID、读取修订、草稿代次与版本、桥进程会话），
-  任何后续编辑、修订或桥变化都使旧通过失效；迟到回复按票据丢弃。目录读取前/失败时输入只读。
-- 连线编辑只改原始 JSON 中目标输入，未触碰的连线、别名、标签与参数类型逐字保留；设回原值即撤销该项修改。
-- 有未应用或无效的参数文字（如 `1e`）时，连线选择、校验与保存暂停，文字不被重置。
-- 画布与“校验”面板仍显示已保存定义；校验、保存、读回不运行节点、不准备运行、不改 Viewer；
-  保存回复丢失时按 UUID 核对，不重发。
-
-| 从哪里改 | 入口 |
-|---|---|
-| 连线草稿与校验绑定 | [analysis_parameter_draft.hh](desktop/engine/lib/stk_app/include/stk/app/analysis_parameter_draft.hh)、[analysis_parameter_draft.cc](desktop/engine/lib/stk_app/src/analysis_parameter_draft.cc) |
-| 保存与界面 | [project_analyses.cc](desktop/engine/lib/stk_app/src/project_analyses.cc)、[analysis_graph_editor.cc](desktop/engine/lib/stk_app/src/editors/analysis_graph_editor.cc) 中 `links_panel` |
-| 回归 / 截图 | [analysis_parameter_draft_test.cc](desktop/tests/app/analysis_parameter_draft_test.cc)、[analysis_links_editor_test.cc](desktop/tests/app/analysis_links_editor_test.cc)、[analysis_links_render.cc](desktop/tests/app/analysis_links_render.cc) |
-
-## 上一项交付：技能目录首版
-
-实验契约 `stk.skill/1`（[技能目录](docs/skills.md)）区分 SKILL.md 说明包、节点目录与版本化技能。
-三个内置技能包装可离线验证的图预设；身份为 `id@version` 加定义与模板的 `content_sha256`，
-[锁文件](tests/data/skill-catalog.lock.json)使同版本内容漂移在 CI 中失败（刷新方法与规则见技能目录文档）。
-桥 `skills.list/get`（[协议 §16](docs/specs/stk-desktop-bridge-v1.md#16-versioned-skill-catalog-additive-extension-experimental)）、
-Python `stk.skills`、`suan skills catalog/show` 与原生 **文件 → 技能** / 工作台“技能库”共用一次解析。
-
-继续开发时须保留这些边界：
-
-- 目录只读：不执行入口、不启动图工作进程、不准备运行、不改项目/Viewer/布局、不调用模型。
-- 可用性来自已安装节点与 `find_spec`，不导入模块；离屏渲染等运行能力只声明 `checked: false`。
-  依赖范围已用屏蔽模块的实际求值核对（例如畴占比不需要 VTK）；修改定义时同步该回归。
-- 坏定义逐文件进入 `problems`，不隐藏其他技能；未知 ID/版本为 `not_found` 并给出已知版本。
-- 原生状态按请求代次、桥客户端与进程会话过滤回复；来自其他桥的当前回复会清空目录并重新读取，不会卡在“读取中”。
-  搜索按 UTF-8 边界截断到 200 字节；旧桥缺方法时显示“不提供技能目录”。
-- 未改数据库格式。项目采用固定版本、从技能直接运行、附件与用户技能目录仍待设计。
-
-| 从哪里改 | 入口 |
-|---|---|
-| 契约、解析、可用性、锁 | [suan/skills/catalog.py](suan/skills/catalog.py)、[definitions](suan/skills/definitions/)、[skill-catalog.lock.json](tests/data/skill-catalog.lock.json) |
-| 桥 / Python / CLI | [server.py](suan/desktop_bridge/server.py)、[桥 schema](suan/contracts/schemas/desktop-bridge-1.schema.json)、[scripting/skills.py](suan/scripting/skills.py)、[skills/cli.py](suan/skills/cli.py) |
-| 原生状态与页面 | [skill_catalog.hh](desktop/engine/lib/stk_app/include/stk/app/skill_catalog.hh)、[skill_catalog.cc](desktop/engine/lib/stk_app/src/skill_catalog.cc)、[skills_editor.cc](desktop/engine/lib/stk_app/src/editors/skills_editor.cc) |
-| 回归 / 截图 | [test_skill_catalog.py](tests/test_skill_catalog.py)、[skills_catalog_test.cc](desktop/tests/app/skills_catalog_test.cc)、[skills_bridge.py](desktop/tests/bridge/skills_bridge.py)、[project_render.cc](desktop/tests/app/project_render.cc) |
-
-## 更早交付：项目工作台
-
-`b2e5632` 新增 `workspace` 编辑器：从 **文件 → 工作台**，或项目、AI、分析图的页头进入。
-工作台显示当前项目，定位对话、文件、保存分析、分析运行、仿真运行、项目表格及创建/打开项目。
-导航复用原编辑器并最大化目标区域；**视图 → 恢复分栏布局** 返回已有分栏。
-Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
-
-继续开发时须保留这些边界：
-
-- 进入页面不发送模型请求、不启动计算，不改变 Viewer 的载荷、来源、相机或历史运行。
-- 未发送的问题、有效参数草稿和无效原文（如 `1e`）在页面往返时保留。
-- 项目路由检查全部窗口的活动文本输入。文件入口会选择共享文件索引表；切表前还检查全部窗口及隐藏标签的
-  单元格、表名/字段名草稿，有草稿时保持布局与选择并提示先保存或重新载入。
-  此保护仅覆盖新工作台入口，不代表所有既有手工切表动作都已统一改造。
-- 回调固定项目打开句柄与来源编辑器/外壳寿命；切换、关闭/重开项目、销毁编辑器/窗口后旧动作失效。
-- 标签容量满时不替换用户编辑器。导航不创建另一份项目状态；文件页切表也不会自动保存一份“上一张表”的工作区状态。
-- 本轮没有数据库迁移；对象深链接、对话附件和完整新主页尚未实现（技能库入口已由技能目录首版补上）。
-
-| 从哪里改 | 入口 |
-|---|---|
-| 工作台 / 返回按钮 | [workspace_editor.cc](desktop/engine/lib/stk_app/src/editors/workspace_editor.cc)、[project_navigation.hh](desktop/engine/lib/stk_app/src/editors/project_navigation.hh) |
-| 路由、标签复用及寿命保护 | [shell.cc](desktop/engine/lib/stk_app/src/shell.cc)、[editor.hh](desktop/engine/lib/stk_app/include/stk/app/editor.hh) |
-| 文件/运行/项目子页与草稿保护 | [project_editor.cc](desktop/engine/lib/stk_app/src/editors/project_editor.cc) |
-| AI 与分析界面 | [ai_editor.cc](desktop/engine/lib/stk_app/src/editors/ai_editor.cc)、[analysis_graph_editor.cc](desktop/engine/lib/stk_app/src/editors/analysis_graph_editor.cc) |
-| 新回归 / 截图 | [workspace_navigation_test.cc](desktop/tests/app/workspace_navigation_test.cc)、[analysis_parameters_editor_test.cc](desktop/tests/app/analysis_parameters_editor_test.cc)、[project_render.cc](desktop/tests/app/project_render.cc) |
-
-## 建议接下来的开发包
-
-### 1. 可审查的工作流提案（下一项功能）
-
-按[开发计划](docs/development-plan.md)第 3 项：在已有“参数建议 → 草案 → 检查 → 明确应用”的模式上，
-让 AI 或 Python 提出保存分析的修改（参数、输出、单输入连线），以同一 `AnalysisParameterDraft` 候选承载，
-走同一 `graph.validate` 校验与按修订保存；提案、校验、保存、准备和执行保持分离，不自动采纳或重放。
-先由所有者确认提案的持久形式：建议复用格式 6 草案与格式 7 来源关联、不升级数据库格式，
-理由与边界见[决定建议](docs/design/review-drafts-and-conversations.md#保存分析修改提案的持久形式建议待所有者确认2026-10-06)。确认前不实现。
-
-其他与连线首版相邻、但需单独设计验收的工作：多输入列表编辑、增删节点、拖线与位置保存、子图。
-
-### 2. 技能目录的后续（按需排期，不与其他包混做）
-
-- 项目采用固定技能版本：先定迁移、备份与恢复规则，把解析后的技能内容随项目保存，而非依赖全局目录保留旧版本。
-- 从技能明确准备/运行（复用 `graph.evaluate` 或保存分析）、对话附件、更多入口类型（批次模板、Python 操作）及用户技能目录。
-
-### 3. 持续跟进的稳定性与平台工作
-
-- Weston 偶发退出故障仍未定位，见下节。新一次 CI 通过不能替代根因修复。
-- macOS/Windows 按[真机验收清单](docs/workbench-acceptance.md)复核交互、IME、实际模型调用；Windows CI 没有 GPU 真机验收。
-- 完整 AI 编排、通用 P2P、文档预览与 toolkits 迁移按主计划分批推进，避免混成一个大改动。
 
 ## 验证状态与未解决问题
 
-截至 2026-10-06：
-
 | 证据 | 结果 |
 |---|---|
-| 连线编辑 `3cbaa36` | 本机：草稿/校验单元 5 项、交互 **7/7**、截图 **8**；定向 **175/175**；完整 CTest **1151/1151**，0 失败/跳过。[桌面 CI](https://github.com/sijintech/stk/actions/runs/37459650536) Linux **1151**、macOS **770** / Metal **146**、Windows **729** 全部通过；[Runtime](https://github.com/sijintech/stk/actions/runs/37459650588) **7/7** |
-| 技能目录首版本机 | Python 完整 **2199 passed / 24 环境跳过**；技能 Python **13/13**；原生定向 **95/95**；完整 CTest **1131/1131** |
-| 技能目录 CI | `df4729d` [桌面](https://github.com/sijintech/stk/actions/runs/37358644803) Linux **1131**、macOS **758** / Metal **142**；`08de943` Windows CPU 重跑 **717/717**；[Runtime](https://github.com/sijintech/stk/actions/runs/37362435293) **7/7** |
-| 人工截图检查 | 本机技能页 8 张、连线 8 张及旧保存分析英文窄窗口逐张检查；未逐张检查 macOS CI 截图 |
+| E1a `1859ca7` 本机 | 完整 pytest（`-m "not perf"`）**2427 passed、24 skipped**；Python 3.11 相关 81 passed；工作流/仿真/模块/智能体 CTest **69/69** |
+| E1a CI | [Runtime](https://github.com/sijintech/stk/actions/runs/38097721893) 8/8（3.12 2442 passed，3.11 与 3.14 各 2438）、[桌面](https://github.com/sijintech/stk/actions/runs/38097721844) 5/5、密钥扫描通过 |
+| E1a 手动（真实 LAMMPS） | LJ 熔体两行与 PET 两行经项目工作流（设定 450/550 K，平均 445.8/551.4 K）；2 进程 `1 by 1 by 2` 与单进程一致；2026-10-11 用 `examples/pet_lammps` 重新运行，结果见[验收记录](docs/runtime-validation.md) |
+| 更早各期 | 见[验收记录](docs/runtime-validation.md)，每项含提交与 CI 链接 |
 
-上一轮工作台交付（`b2e5632`）的证据见[验收记录](docs/runtime-validation.md#2026-10-05项目工作台与跨页草稿保护)。
+未解决：
+
+- **E1 的限制**：桌面没有 LAMMPS 入口；没有建模步骤与 Tg/模量/扩散分析；运行中没有监控事件；远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载上限。
+  PET 可行性模型密度 1.223 g/cm³（实验约 1.335），4 聚体、540 原子、约 20 ps，只说明工具链可用。
+- **S2**：真实本机模型的 GUI 人工验收未做。
 
 已知 Weston 问题：旧提交 `17ea194` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/36737424406)
 有一项 `wm_app_window_weston_csd` 在窗口检查/布局重载之后 **SIGSEGV (11)**；更早非 CSD 用例也曾异常退出。
@@ -202,9 +123,6 @@ Python 可调用 `stk.ui.activate_editor("workspace", maximize=True)`。
 [窗口用例](desktop/tests/wm/CMakeLists.txt)、[应用窗口冒烟](desktop/tests/wm/app_smoke.cc)。
 需要定位时保留原始 `LastTest.log`、Weston 日志和信号/调用栈；不要通过取消测试、放宽判据或反复重跑覆盖原始失败。
 
-本轮本机证据在会话临时目录（不属于 Git，可能已被清理）：
-`/tmp/claude-1000/-home-mnemora-xcheng-sijin-stk/07437944-4ce3-4414-bbc7-e80a0698ca9c/scratchpad/` 下的
-`pytest-full-A.log`、`skills-{focused,full}.{log,xml}`、`links-{focused,full2}.{log,xml}` 与 `build-*.log`。远端 CI 链接是可共享的证据入口。
 
 ## 构建、启动和测试
 
@@ -251,6 +169,24 @@ Python 测试按改动选取，例如技能相关可从 `tests/test_skill_catalo
 完整测试需要 Python 的科学/控制/可视化/测试依赖及 Xvfb/Weston；sysroot 下载入口支持 `--with-test-servers`。
 配置时将 `STK_BRIDGE_TEST_PYTHON` 和 `STK_APP_TEST_PYTHON` 指向实际 venv，避免缺依赖导致测试跳过。
 
+### Python 测试与密钥扫描
+
+完整 Python 套件约 7.5 分钟（没有安装 xdist，不要加 `-n`）；LAMMPS 相关可先跑定向：
+
+```bash
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= /home/mnemora/opt/stk-venv/bin/python -m pytest -q -m "not perf" -p no:cacheprovider
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= /home/mnemora/opt/stk-venv/bin/python -m pytest -q -p no:cacheprovider \
+  tests/test_lammps.py tests/test_workflow_lammps.py tests/test_project_workflows.py tests/test_workflow_batches.py tests/test_modules.py
+```
+
+Python 3.11 与 3.14 的环境在 `/home/mnemora/opt/stk-venv311`、`/home/mnemora/opt/stk-venv314`（CI 测 3.11、3.12、3.14）。
+新增内置模板时，`test_project_workflows.py` 与 `test_workflow_batches.py` 中固定的模板列表要一起更新。
+提交前对暂存的改动做密钥扫描（gitleaks，规则在 `.gitleaks.toml`；本机没有全局安装时自行下载固定版本），CI 也会扫描：
+
+```bash
+git diff --cached | gitleaks stdin --config .gitleaks.toml --no-banner
+```
+
 ### macOS / Windows 启动
 
 这两个脚本已存在并供用户测试，不要再建一套。完整工具链要求见[快速启动](desktop/QUICKSTART.md)。
@@ -275,7 +211,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --
 当前产品适配器是 `aliyun-token-plan/1`，代码在 [suan/project/aliyun.py](suan/project/aliyun.py)，
 指定端点为 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`。
 所有者说已将 `STK_TOKEN_PLAN_API_KEY` 写入自己的 Bash 启动配置，可按需要选择 `STK_TOKEN_PLAN_MODEL`。
-不要把 Claude 作为开发助手与 STK 产品的模型提供方混为一谈，也不要因此改换产品端点。
+不要把开发助手（Claude、Codex）与 STK 产品的模型提供方混为一谈，也不要因此改换产品端点。
 
 本次交接没有读取或打印密钥。非交互 shell、其他操作系统和已运行的桥不一定继承 Bash 配置；
 查看[模型请求指南](docs/project-requests.md)，只检查配置是否可用，日志/项目/测试夹具不得存入凭据。
@@ -302,9 +238,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --
 提交前更新[开发计划](docs/development-plan.md)、[交接日志](docs/development-log.md)及[验收记录](docs/runtime-validation.md)，
 注明实际提交、CI/本机/真机证据和剩余限制。本文状态发生变化时同步维护，避免下次接手读到陈旧优先级。
 
-## 可直接给 Claude 的起始指令
 
-> 请先读仓库根目录的 CLAUDE.md、AGENTS.md 和 handoff.md，再按 docs/development-plan.md 最新顺序继续。
-> 核对 Git/CI 后，从可审查的工作流提案开始（开发计划第 3 项），复用分析草稿候选、graph.validate 与按修订保存。
-> 日常直接在 main 工作，不新建分支或合并无关 PR；每个关键节点做 critical review，修复问题、测试并更新文档后提交推送。
-> 保留用户草稿、项目身份、冻结运行和明确执行边界，区分已实现能力与设计目标。
+## 可直接给接手代理（Codex / Claude）的起始指令
+
+> 请先读仓库根目录的 AGENTS.md 和 handoff.md，再看 docs/development-plan.md 开头“2026-10-08 思劲平台方向”一节与
+> docs/design/multiscale-engines.md。核对 Git 与最近代码提交的 CI 后，继续多尺度引擎 E1：
+> 先做 STK 自己的 LAMMPS 数据文件写出器（由 foyer 给出的 ParmEd 结构写 atom_style full / real 单位，
+> 用 GMSO 在 540 原子 PET 体系上的输出逐项对照验证，可行性脚本在 examples/pet_lammps/），再做 E1c 的 Tg、模量、扩散分析模板。
+> PET 酯基苯环碳的电荷仍待所有者决定，决定前不要实现依赖它的建模步骤，也不要把 0.0 当作定论。
+> 日常直接在 main 工作，不新建分支或合并无关 PR；测试时清空 STK_TOKEN_PLAN_API_KEY、取消 STK_TOKEN_PLAN_MODEL，不发收费的模型请求，
+> 不读取或打印密钥；上一个代码提交的桌面 CI 结束后再推送新的代码。每个交付节点做 critical review，修复问题、测试，
+> 更新 handoff.md、开发计划、开发日志与验收记录（写实际结果与剩余限制）后提交推送。

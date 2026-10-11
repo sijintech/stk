@@ -1,0 +1,19 @@
+# 3D Lennard-Jones melt (LAMMPS examples/melt), parameters set by STK
+variable temperature index 3.0
+variable steps index 250
+variable seed index 87287
+units lj
+atom_style atomic
+lattice fcc 0.8442
+region box block 0 6 0 6 0 6
+create_box 1 box
+create_atoms 1 box
+mass 1 1.0
+velocity all create ${temperature} ${seed} loop geom
+pair_style lj/cut 2.5
+pair_coeff 1 1 1.0 1.0 2.5
+neighbor 0.3 bin
+fix 1 all nve
+thermo 50
+run ${steps}
+write_data final.data

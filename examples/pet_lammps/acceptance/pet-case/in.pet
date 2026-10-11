@@ -1,0 +1,26 @@
+# PET (6 chains x 4 repeat units, OPLS-AA from mBuild + foyer + GMSO): short smoke protocol set by STK
+variable temperature index 500
+variable steps index 2000
+variable seed index 4928459
+units real
+atom_style full
+boundary p p p
+pair_style lj/cut/coul/long 9.0
+pair_modify mix geometric tail yes
+bond_style harmonic
+angle_style harmonic
+dihedral_style opls
+special_bonds lj/coul 0.0 0.0 0.5
+read_data pet.data
+kspace_style pppm 1.0e-4
+neighbor 2.0 bin
+neigh_modify every 1 delay 0 check yes
+thermo_style custom step temp press density pe ke etotal
+thermo 200
+minimize 1.0e-4 1.0e-6 1000 10000
+reset_timestep 0
+velocity all create ${temperature} ${seed} dist gaussian
+timestep 1.0
+fix 1 all nvt temp ${temperature} ${temperature} 100.0
+run ${steps}
+write_data equilibrated.data

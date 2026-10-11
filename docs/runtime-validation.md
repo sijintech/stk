@@ -2,6 +2,13 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-11：PET 可行性材料移入仓库后的复验
+
+- `examples/pet_lammps/build_pet.py`（分子建模模块的 Python，mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0）：6 条 4 聚体链 540 原子、558 键、912 角、1212 二面角，
+  净电荷 0.0000；填充 0.5 秒、foyer 5.9 秒、GMSO 转换 11.8 秒、写出 61.4 秒；foyer 对 384 个 improper 不给参数（RB 形式按 proper 处理）。
+- `examples/pet_lammps/acceptance`（真实 LAMMPS 22 Jul 2025 Update 6 MPICH 版，经项目工作流与本机运行环境）：**2 passed**（26 秒）；
+  LJ 两行设定 2.0/3.0，平均 1.03/1.672（`lj` 单位）；PET 两行设定 450/550 K，平均 445.758/551.423 K，与 2026-10-10 一致；算例文件夹未被写入。
+
 ## 2026-10-10：E1a LAMMPS 计算引擎
 
 - Python：`test_lammps.py` 26 项——脚本检查（参数的 index 默认值、拒绝的命令、引号中的命令、任意深度的 include 与其中的参数、变量拼出的变量样式、

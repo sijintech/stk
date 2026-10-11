@@ -122,6 +122,7 @@ STK 在数据一侧已有插件机制（连接器、输入连接器、图节点�
   - 本机实测：真实 micromamba 从 conda-forge 装好 LAMMPS（22 Jul 2025 Update 6，126 秒，1.8 GB）、Packmol 21.2.1、
     分子建模工具包（mBuild 1.4.0，169 秒），均被正确检测。
 - **E1 可行性（本机实测，2026-10-10，尚未写入 STK）**：用真实模块走通 PET 建模 → LAMMPS。
+  - 脚本、OPLS-AA 补丁与手动验收在 [examples/pet_lammps/](../../examples/pet_lammps/README.md)（2026-10-11 移入，可行性材料，不是产品代码）；
   - mBuild 由重复单元 SMILES `OCCOC(=O)c1ccc(cc1)C=O` 建 4 聚体链（90 原子），Packmol 以 250 kg/m³ 松散填充 6 条链（540 原子）；
   - foyer 自带的 OPLS-AA 对芳香酯缺三项参数（酯羰基碳的类别是 `C_2`，而相应条目写的是 `C`）：角 CA–C–OS、二面角 CA–C–OS–CT 与
     CA–CA–C–OS；补丁按同一文件中类别 `C` 的条目补上，数值与 GROMACS 发布的 OPLS-AA（`ffbonded.itp`）一致；
