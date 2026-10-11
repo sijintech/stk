@@ -184,3 +184,51 @@ def statistics(ctx, inputs, params):
     if not table.n_rows:
         ctx.warn("No numeric fields to summarize", code="empty_result")
     return table
+
+
+def _lammps_property(ctx, inputs, params, function):
+    from suan.lammps.analysis import AnalysisError
+    try:
+        ctx.check()
+        result = function(inputs["in"], **params)
+    except AnalysisError as exc:
+        raise NodeExecutionError(str(exc), code="invalid_result") from None
+    ctx.warn("A finite-time MD fit: inspect equilibration, the fit regime and independent replicas; "
+             "OLS standard errors do not account for correlated samples.", code="md_fit_limits")
+    return result
+
+
+@node("stk.analysis.lammps_tg", title={"en": "Density glass transition", "zh": "密度玻璃化转变"},
+      description={"en": "Fit two decreasing density-temperature lines; Tg is their intersection inside the split gap."},
+      inputs=[Port("in", "table")],
+      outputs=[Port("summary", "table"), Port("fit", "table"), Port("diagnostics", "value", value_type="json")],
+      params={"temperature": string("Temperature"), "density": string("Density"),
+              "split_temperature": number(None, nullable=True, exclusive_minimum=0),
+              "min_points": integer(3, minimum=3, maximum=250)})
+def lammps_tg(ctx, inputs, params):
+    from suan.lammps.analysis import tg
+    return _lammps_property(ctx, inputs, {**params, "check": ctx.check}, tg)
+
+
+@node("stk.analysis.lammps_modulus", title={"en": "Tensile modulus", "zh": "拉伸模量"},
+      description={"en": "Fit stress (GPa) against engineering strain in an explicit small-strain window."},
+      inputs=[Port("in", "table")],
+      outputs=[Port("summary", "table"), Port("fit", "table"), Port("diagnostics", "value", value_type="json")],
+      params={"strain": string("Strain"), "stress": string("Stress"),
+              "strain_min": number(0.0, minimum=0), "strain_max": number(0.02, exclusive_minimum=0)})
+def lammps_modulus(ctx, inputs, params):
+    from suan.lammps.analysis import modulus
+    return _lammps_property(ctx, inputs, params, modulus)
+
+
+@node("stk.analysis.lammps_diffusion", title={"en": "MSD diffusion", "zh": "MSD 扩散"},
+      description={"en": "D = MSD slope / (2*d); input fs/Ao2, output cm2/s. Select a diffusive time window."},
+      inputs=[Port("in", "table")],
+      outputs=[Port("summary", "table"), Port("fit", "table"), Port("diagnostics", "value", value_type="json")],
+      params={"time": string("Time"), "msd": string("MSD"),
+              "time_min": number(None, nullable=True, minimum=0),
+              "time_max": number(None, nullable=True, exclusive_minimum=0),
+              "dimensions": integer(3, minimum=1, maximum=3)})
+def lammps_diffusion(ctx, inputs, params):
+    from suan.lammps.analysis import diffusion
+    return _lammps_property(ctx, inputs, params, diffusion)

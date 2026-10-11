@@ -1,0 +1,44 @@
+{
+  "fixture": "public synthetic 108-atom FCC argon; finite-time path smoke, not property validation",
+  "kind": "tg",
+  "lammps_version": "LAMMPS (22 Jul 2025 - Update 6)",
+  "parameters": {
+    "equilibration_steps": 1000,
+    "pressure": 1.0,
+    "sample_interval": 10,
+    "seed": 4928459,
+    "steps": 1000,
+    "temperature": 20,
+    "timestep": 1.0
+  },
+  "analysis_parameters": {},
+  "density_point": {
+    "columns": {
+      "Temperature": [
+        20.775198992280675
+      ],
+      "Density": [
+        1.7492312382110078
+      ],
+      "Source": [
+        "tg"
+      ],
+      "Samples": [
+        51
+      ]
+    },
+    "units": {
+      "Temperature": "K",
+      "Density": "g/cm3",
+      "Source": "1",
+      "Samples": "1"
+    }
+  },
+  "log_sha256": "ac6ac0e9f6dabdc020a55f89009c2e57cd78b540788527f434549086f49fc423",
+  "input_sha256": {
+    "in.tg": "1b7a286cb53c33fba0391930ec8d9d8bd18b724be674a8df1dc42a1ecb0a2f14",
+    "model.in": "ea81681bb5dca85b7e28af37ccb3944a72bcc3a690c73bd08d19249f7cc1250c",
+    "system.data": "ad948c2256027968123376aa8d4bd680f8d51ee0dd2931a7f92ac265bf1e2391"
+  },
+  "outputs": {}
+}

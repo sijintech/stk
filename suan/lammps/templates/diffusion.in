@@ -1,0 +1,34 @@
+# STK MSD sampling: fixed production cell, selected solute atom type.
+# Choose one representative atom type per small molecule, or document atom-averaged MSD.
+units real
+atom_style full
+boundary p p p
+variable temperature index 300
+variable pressure index 1
+variable steps index 100000
+variable timestep index 1
+variable seed index 4928459
+variable equilibration_steps index 10000
+variable sample_interval index 100
+variable solute_type index 1
+include model.in
+timestep ${timestep}
+velocity all create ${temperature} ${seed} dist gaussian
+thermo ${sample_interval}
+thermo_style custom step temp press density pe
+thermo_modify format float %.15g
+fix equilibrium all npt temp ${temperature} ${temperature} 100 iso ${pressure} ${pressure} 1000
+run ${equilibration_steps}
+unfix equilibrium
+reset_timestep 0
+# A changing NPT cell contaminates displacement; production uses NVT.
+fix ensemble all nvt temp ${temperature} ${temperature} 100
+group solute type ${solute_type}
+compute displacement solute msd com no average no
+variable elapsed equal time
+fix samples all ave/time ${sample_interval} 1 ${sample_interval} v_elapsed c_displacement[4] &
+  file msd.dat title1 "# STK time fs; unwrapped MSD Angstrom^2; one origin; verify global drift" title2 "Step Time MSD"
+thermo_style custom step temp press density pe c_displacement[4]
+run ${steps}
+unfix samples
+unfix ensemble

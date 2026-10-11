@@ -6,9 +6,9 @@ Conventions: links are written on the input side as `{"from": "<node>.<port>"}` 
 
 ## Families
 
-- **source** — read data through connectors; a `binding` names the run, `path` is relative inside it: `stk.source.file@1`, `stk.source.muferro_frame@1`, `stk.source.muferro_run@1`, `stk.source.table@1`
+- **source** — read data through connectors; a `binding` names the run, `path` is relative inside it: `stk.source.file@1`, `stk.source.lammps_log@1`, `stk.source.muferro_frame@1`, `stk.source.muferro_run@1`, `stk.source.table@1`
 - **filter** — transform datasets (data-stage params re-run them): `stk.filter.calculator@1`, `stk.filter.contour@1`, `stk.filter.crop@1`, `stk.filter.glyph_source@1`, `stk.filter.label_surfaces@1`, `stk.filter.sample@1`, `stk.filter.slice@1`, `stk.filter.streamlines@1`, `stk.filter.threshold@1`
-- **analysis** — derive labels, fractions and statistics: `stk.analysis.film_detect@1`, `stk.analysis.label_fractions@1`, `stk.analysis.orientation_classify@1`, `stk.analysis.statistics@1`
+- **analysis** — derive labels, fractions and statistics: `stk.analysis.film_detect@1`, `stk.analysis.label_fractions@1`, `stk.analysis.lammps_diffusion@1`, `stk.analysis.lammps_modulus@1`, `stk.analysis.lammps_tg@1`, `stk.analysis.orientation_classify@1`, `stk.analysis.statistics@1`
 - **render** — turn data into draw layers; appearance params are client-stage: `stk.render.axes@1`, `stk.render.categorical_legend@1`, `stk.render.glyphs@1`, `stk.render.orientation_legend@1`, `stk.render.outline@1`, `stk.render.scalar_bar@1`, `stk.render.surface@1`, `stk.render.volume@1`
 - **view** — camera and scene assembly: `stk.view.camera@1`, `stk.view.scene@1`
 - **output** — deliverables: payload, image, dataset export: `stk.output.dataset@1`, `stk.output.image@1`, `stk.output.payload@1`
@@ -34,6 +34,19 @@ Read a field file inside a binding: MuPRO DAT, NPY, VTI, legacy VTK STRUCTURED_P
 | `unit` | string \| null | null | data |  |
 | `quantity` | string \| null | null | data |  |
 | `step` | integer (≥0) \| null | null | data | Time step metadata |
+
+## `stk.source.lammps_log@1` — LAMMPS thermodynamics
+
+Read one finished real-units thermo block; reject errors, truncation and nonfinite values.
+
+- Inputs: none
+- Outputs: `out` (table)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `binding` | string | **required** | data | binding |
+| `path` | string | "log.lammps" | data | path |
+| `block` | integer | -1 | data |  |
 
 ## `stk.source.muferro_frame@1` — muFerro frame
 
@@ -251,6 +264,49 @@ Point (or cell) counts and fractions per category; the denominator excludes 'exc
 | `field` | string \| null | null | data |  |
 | `exclude` | array of integer | [-1, 0] | data |  |
 | `include_empty` | boolean | true | data |  |
+
+## `stk.analysis.lammps_diffusion@1` — MSD diffusion
+
+D = MSD slope / (2*d); input fs/Ao2, output cm2/s. Select a diffusive time window.
+
+- Inputs: `in` (table)
+- Outputs: `summary` (table), `fit` (table), `diagnostics` (value)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `time` | string | "Time" | data |  |
+| `msd` | string | "MSD" | data |  |
+| `time_min` | number (≥0) \| null | null | data |  |
+| `time_max` | number (>0) \| null | null | data |  |
+| `dimensions` | integer (≥1, ≤3) | 3 | data |  |
+
+## `stk.analysis.lammps_modulus@1` — Tensile modulus
+
+Fit stress (GPa) against engineering strain in an explicit small-strain window.
+
+- Inputs: `in` (table)
+- Outputs: `summary` (table), `fit` (table), `diagnostics` (value)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `strain` | string | "Strain" | data |  |
+| `stress` | string | "Stress" | data |  |
+| `strain_min` | number (≥0) | 0.0 | data |  |
+| `strain_max` | number (>0) | 0.02 | data |  |
+
+## `stk.analysis.lammps_tg@1` — Density glass transition
+
+Fit two decreasing density-temperature lines; Tg is their intersection inside the split gap.
+
+- Inputs: `in` (table)
+- Outputs: `summary` (table), `fit` (table), `diagnostics` (value)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `temperature` | string | "Temperature" | data |  |
+| `density` | string | "Density" | data |  |
+| `split_temperature` | number (>0) \| null | null | data |  |
+| `min_points` | integer (≥3, ≤250) | 3 | data |  |
 
 ## `stk.analysis.orientation_classify@1` — Orientation classify
 

@@ -1,6 +1,6 @@
 # 技能目录（首版，实验性）
 
-更新：2026-10-05。状态：**只读内置目录及原生浏览页已实现**；契约 `stk.skill/1` 仍是实验格式，未冻结。
+更新：2026-10-11。状态：**只读内置目录及原生浏览页已实现**；契约 `stk.skill/1` 仍是实验格式，未冻结。
 产品方向见[项目工作台设计](design/project-workbench.md)，存储边界见[项目数据模型](design/project-model.md)。
 
 ## 三类内容不要混用
@@ -11,13 +11,18 @@
 | 节点目录 | `stk.catalog/1`；`suan graph catalog`、桥 `graph.catalog` | 可执行的节点类型、端口与参数 |
 | 版本化技能 | `suan/skills/definitions/<id>.json`；`suan skills catalog/show`、桥 `skills.list/get`、`stk.skills` | 一个可引用单元：稳定 ID、版本、执行入口、输入/参数/输出、依赖、例子，并可指向说明包 |
 
-技能不是节点目录的别名，也不是把全部图预设改名。首版只收录三个已经能离线验证的能力：
+技能不是节点目录的别名，也不是把全部图预设改名。当前收录六个已经能离线验证的能力：
 
 | 技能 | 执行入口 | 选择原因 |
 |---|---|---|
 | `stk.visualize.scalar_volume@2` | 预设 `scalar-volume` | 绑定普通场文件，可在无服务器时检查带符号标量与单位标签 |
 | `stk.muferro.domains@1` | 预设 `muferro-domains` | 真实 MuFerro 结果的主要分析：畴变体、占比与能量曲线 |
 | `stk.muferro.energy_trace@1` | 预设 `energy-plot` | 只读解析能量表，示范不需绘图库的输出与需要绘图库的输出 |
+| `stk.lammps.tg@1` | 预设 `lammps-tg` | 密度–温度两段拟合；交点与分段规则明确 |
+| `stk.lammps.modulus@1` | 预设 `lammps-modulus` | 工程应变窗口内拉伸应力斜率，保留自由截距 |
+| `stk.lammps.diffusion@1` | 预设 `lammps-diffusion` | 显式时间窗口中的 MSD 爱因斯坦关系，不自动选择扩散段 |
+
+后三项的单位、脚本与物理限制见[LAMMPS 分析](lammps-analysis.md)。数值输出只需 NumPy，绘图另需 matplotlib；查询目录不运行 LAMMPS。
 
 ## 契约要点
 

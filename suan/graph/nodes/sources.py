@@ -426,3 +426,41 @@ def table_source(ctx, inputs, params):
                                   agent={"reader": reader_id, "node": ctx.node_id},
                                   used=[{"path": path, "sha256": sha, "role": "input"}])
     return table
+
+
+def _lammps_log_fingerprint(ctx, inputs, params):
+    from suan.connectors.api import ConnectorError
+    try:
+        return {"path": params["path"], "sha256": _source(ctx, params["binding"]).sha256(params["path"])}
+    except ConnectorError as exc:
+        raise _failure(exc) from None
+
+
+@node("stk.source.lammps_log", title={"en": "LAMMPS thermodynamics", "zh": "LAMMPS 热力学表"},
+      description={"en": "Read one finished real-units thermo block; reject errors, truncation and nonfinite values."},
+      outputs=[Port("out", "table")],
+      params={"binding": binding(), "path": rel_path("log.lammps"), "block": integer(-1)},
+      fingerprint=_lammps_log_fingerprint)
+def lammps_log(ctx, inputs, params):
+    import hashlib
+    from suan.connectors.api import ConnectorError
+    from suan.data.model import Provenance
+    from suan.lammps.analysis import AnalysisError, log_table
+    source = _source(ctx, params["binding"])
+    path = params["path"]
+    try:
+        with source.open(path) as stream:
+            raw = stream.read(TABLE_LIMIT + 1)
+        if len(raw) > TABLE_LIMIT:
+            raise NodeExecutionError("LAMMPS log exceeds the table reader byte budget", code="budget_exceeded")
+        ctx.check()
+        table = log_table(raw.decode("utf-8"), block=params["block"])
+        table.provenance = Provenance(activity={"kind": "import", "id": None},
+                                      agent={"reader": "stk.lammps-log@1", "node": ctx.node_id},
+                                      used=[{"path": path, "sha256": hashlib.sha256(raw).hexdigest(), "role": "input"}])
+        table.attrs["source"] = table.provenance.to_json()
+        return table
+    except ConnectorError as exc:
+        raise _failure(exc) from None
+    except (AnalysisError, UnicodeDecodeError) as exc:
+        raise NodeExecutionError(str(exc), code="invalid_result") from None

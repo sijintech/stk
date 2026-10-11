@@ -1,0 +1,102 @@
+{
+ "id": "lammps-modulus",
+ "name": "Tensile modulus",
+ "description": "Small-strain OLS slope with a free intercept. Stress is tensile-positive GPa.",
+ "bindings": [
+  {
+   "name": "data",
+   "description": "Directory or frozen run snapshot holding the result table."
+  }
+ ],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "lammps-modulus",
+  "name": "Tensile modulus",
+  "description": "Small-strain OLS slope with a free intercept. Stress is tensile-positive GPa.",
+  "catalog": {
+   "stk": 1
+  },
+  "parameters": [
+   {
+    "name": "path",
+    "type": "string",
+    "default": "stress-strain.dat",
+    "label": "Result table path",
+    "description": "Relative to data binding; use case/ prefix for a workflow final-state snapshot."
+   },
+   {
+    "name": "strain_min",
+    "type": "number",
+    "default": 0.0,
+    "minimum": 0,
+    "label": "Fit strain minimum"
+   },
+   {
+    "name": "strain_max",
+    "type": "number",
+    "default": 0.02,
+    "label": "Fit strain maximum",
+    "minimum": 0
+   }
+  ],
+  "nodes": [
+   {
+    "id": "data",
+    "type": "stk.source.table@1",
+    "params": {
+     "binding": "data",
+     "path": {
+      "$param": "path"
+     },
+     "format": "columns",
+     "units": {
+      "Strain": "1",
+      "Stress": "GPa"
+     }
+    }
+   },
+   {
+    "id": "fit",
+    "type": "stk.analysis.lammps_modulus@1",
+    "inputs": {
+     "in": {
+      "from": "data.out"
+     }
+    },
+    "params": {
+     "strain_min": {
+      "$param": "strain_min"
+     },
+     "strain_max": {
+      "$param": "strain_max"
+     }
+    }
+   },
+   {
+    "id": "plot",
+    "type": "stk.plot.line@1",
+    "inputs": {
+     "table": {
+      "from": "fit.fit"
+     }
+    },
+    "params": {
+     "x": "Strain",
+     "y": [
+      "Stress",
+      "Fitted"
+     ],
+     "title": "Tensile modulus",
+     "x_label": "Strain (1)",
+     "y_label": "Stress (GPa)"
+    }
+   }
+  ],
+  "outputs": {
+   "summary": "fit.summary",
+   "fit": "fit.fit",
+   "diagnostics": "fit.diagnostics",
+   "plot": "plot.plot"
+  }
+ }
+}

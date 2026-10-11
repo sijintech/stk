@@ -13,7 +13,7 @@ from suan.graph.registry import Registry
 from suan.graph.schema import validate_graph
 
 ROOT = Path(__file__).resolve().parents[1]
-PRESETS = ("energy-plot", "iso", "muferro-domains", "muferro-polarization-glyphs",
+PRESETS = ("energy-plot", "iso", "lammps-diffusion", "lammps-modulus", "lammps-tg", "muferro-domains", "muferro-polarization-glyphs",
            "scalar-volume", "slice", "vectors", "volume")
 
 
@@ -37,7 +37,9 @@ def test_every_preset_validates_against_the_spec_and_live_catalogs():
         assert all(b["description"] for b in preset["bindings"])
         assert catalog.load_preset(preset["id"]) == preset["graph"]
         for name in preset["graph"]["outputs"]:
-            assert name in ("view", "image", "fractions", "families", "energy", "table")
+            allowed = ("summary", "fit", "diagnostics", "plot") if preset["id"].startswith("lammps-") else (
+                "view", "image", "fractions", "families", "energy", "table")
+            assert name in allowed
 
 
 def test_presets_hold_no_paths_and_expose_their_thresholds():

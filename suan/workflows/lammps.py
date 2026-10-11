@@ -16,7 +16,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from suan.lammps.log import VERIFIER, verify_log
 from suan.lammps.run import INPUT, INPUT_FORMAT, LOG, RESULT
-from suan.lammps.script import OWN_FILES, PARAMETERS, ScriptError, check_parameters, check_script
+from suan.lammps.script import OWN_FILES, PARAMETERS, PROPERTY_PARAMETERS, ScriptError, check_parameters, check_script
 from suan.lammps.spec import lammps_spec
 from suan.runtime.models import TaskSpec, relative_path
 from .common import (_canonical, _capture, _cells, _copy_input, _create_table, _directory, _folder, _hash,
@@ -39,6 +39,12 @@ FIELDS = {
     "attempt": ("Attempt / 尝试次数", "integer", None),
     "source": ("Frozen source / 原始输入版本", "json", None),
 }
+FIELDS.update({
+    "equilibration_steps": ("Equilibration steps / 平衡步数", "integer", None),
+    "sample_interval": ("Sample interval / 采样间隔", "integer", None),
+    "strain_rate": ("Strain rate (1/fs) / 应变率", "number", None),
+    "solute_type": ("Solute atom type / 溶质原子类型", "integer", None),
+})
 FIELD_IDS = {key: identity("case:" + key) for key in FIELDS}
 RESULT_TABLE_ID = identity("results")
 RESULT_FIELDS = {
@@ -56,6 +62,28 @@ NAME = "LAMMPS"
 MAX_INPUT_BYTES = 256 * 1024 * 1024
 MAX_FILES = 100
 SCRIPT_NAMES = ("in.*", "*.in", "*.lmp", "*.lammps")
+
+
+def _case_table(model):
+    """New property fields are optional on an E1a table; reads never migrate it."""
+    table = next((t for t in model["tables"] if t["id"] == TABLE_ID), None)
+    present = {f["id"] for f in table["fields"]} if table else set()
+    required = {key: value for key, value in FIELDS.items()
+                if key not in PROPERTY_PARAMETERS or FIELD_IDS[key] in present}
+    return _table(model, TABLE_ID, required, FIELD_IDS, NAME)
+
+
+def _extend_case_fields(table):
+    if table is None:
+        return _create_table(TABLE_ID, "LAMMPS cases / 分子动力学算例", FIELDS, FIELD_IDS)
+    present = {f["id"] for f in table["fields"]}
+    return [{"op": "add_field", "id": FIELD_IDS[key], "table_id": TABLE_ID, "name": FIELDS[key][0],
+             "type": FIELDS[key][1]} for key in PROPERTY_PARAMETERS if FIELD_IDS[key] not in present]
+
+
+def _case_values(table, row):
+    present = {f["id"] for f in table["fields"]}
+    return {key: row["values"].get(field) for key, field in FIELD_IDS.items() if field in present}
 
 
 def _inputs(folder):
@@ -157,11 +185,11 @@ def final_state(names):
 
 def describe_case(model, record_id, connection, options, identity=None):
     """Validated row values, the task template and the plan label (as MuFerro's describe_case)."""
-    table = _table(model, TABLE_ID, FIELDS, FIELD_IDS, NAME)
+    table = _case_table(model)
     row = next((r for r in table["records"] if r["id"] == record_id), None) if table else None
     if row is None or any(e.get("state") != "ok" for e in row.get("evaluations", {}).values()):
         raise ValueError("Select a LAMMPS case row without formula errors")
-    values = {key: row["values"].get(field) for key, field in FIELD_IDS.items()}
+    values = _case_values(table, row)
     _parameters(values)
     if connection.startswith("hub:"):
         raise ValueError("LAMMPS preparation uses direct/SSH Runtime profiles; Hub preparation is not supported")
@@ -192,7 +220,7 @@ class Lammps:
         ``script`` names the input script when the folder has more than one ``in.*`` file."""
         p = project or self.stk.project
         model = _revision(p, expected_revision)
-        table = _table(model, TABLE_ID, FIELDS, FIELD_IDS, NAME)
+        table = _case_table(model)
         source, paths = _inputs(source)
         row_id = str(uuid4())
         root = _directory(self.stk, p)
@@ -216,7 +244,7 @@ class Lammps:
         indexed, captured = _capture(p, copied, hashes, expected_revision)
         values["source"] = {"snapshot_id": captured["snapshot"]["id"], "bindings": dict(zip(names, indexed["record_ids"])),
                             "parameters": checked["used"]}
-        commands = [] if table else _create_table(TABLE_ID, "LAMMPS cases / 分子动力学算例", FIELDS, FIELD_IDS)
+        commands = _extend_case_fields(table)
         commands += [{"op": "add_record", "id": row_id, "table_id": TABLE_ID}]
         commands += _cells(TABLE_ID, row_id, values, FIELD_IDS)
         result = p.apply(commands, expected_revision=captured["revision"])
@@ -230,14 +258,14 @@ class Lammps:
         """Copy evaluated parameters as literals, sharing the immutable imported source (parameters may still be empty)."""
         p = project or self.stk.project
         model = _revision(p, expected_revision)
-        table = _table(model, TABLE_ID, FIELDS, FIELD_IDS, NAME)
+        table = _case_table(model)
         row = next((r for r in table["records"] if r["id"] == record_id), None) if table else None
         if row is None or any(e.get("state") != "ok" for e in row.get("evaluations", {}).values()):
             raise ValueError("Select a LAMMPS case row without formula errors")
-        values = {key: row["values"].get(field) for key, field in FIELD_IDS.items()}
+        values = _case_values(table, row)
         _source(values["source"])
         row_id = str(uuid4())
-        commands = [{"op": "add_record", "id": row_id, "table_id": TABLE_ID}]
+        commands = _extend_case_fields(table) + [{"op": "add_record", "id": row_id, "table_id": TABLE_ID}]
         commands += _cells(TABLE_ID, row_id, values, FIELD_IDS)
         result = p.apply(commands, expected_revision=expected_revision)
         print("Copied LAMMPS parameters:", row_id, flush=True)

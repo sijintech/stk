@@ -686,7 +686,7 @@ int main(int argc, char **argv)
         const auto &catalog = shell.store().skills();
         const auto *list = screen.ui()->find("skills_list");
         const auto *parameters = screen.ui()->find("skills_parameters");
-        ok = ok && list && list->list && list->list->count == 3 && list->list->selected.value() == 2 &&
+        ok = ok && list && list->list && list->list->count == 6 && list->list->selected.value() == 5 &&
              parameters && parameters->rect.w > 0 && catalog.problem_count() == 0 && catalog.error().empty() &&
              state.project()->revision == 1 && shell.store().viewer().evaluations_started() == 0 &&
              client->stats().schema_violations == 0;

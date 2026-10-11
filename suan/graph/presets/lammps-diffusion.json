@@ -1,0 +1,113 @@
+{
+ "id": "lammps-diffusion",
+ "name": "MSD diffusion",
+ "description": "Einstein diffusion from an explicitly selected linear MSD window, in cm2/s.",
+ "bindings": [
+  {
+   "name": "data",
+   "description": "Directory or frozen run snapshot holding the result table."
+  }
+ ],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "lammps-diffusion",
+  "name": "MSD diffusion",
+  "description": "Einstein diffusion from an explicitly selected linear MSD window, in cm2/s.",
+  "catalog": {
+   "stk": 1
+  },
+  "parameters": [
+   {
+    "name": "path",
+    "type": "string",
+    "default": "msd.dat",
+    "label": "Result table path",
+    "description": "Relative to data binding; use case/ prefix for a workflow final-state snapshot."
+   },
+   {
+    "name": "time_min",
+    "type": "json",
+    "label": "Fit time minimum (fs)",
+    "description": "Required: choose a diffusive regime after ballistic and transient motion.",
+    "default": null
+   },
+   {
+    "name": "time_max",
+    "type": "json",
+    "label": "Fit time maximum (fs)",
+    "default": null
+   },
+   {
+    "name": "dimensions",
+    "type": "integer",
+    "default": 3,
+    "minimum": 1,
+    "maximum": 3,
+    "label": "MSD dimensions",
+    "description": "Use 3 for total MSD; match selected components for 1/2-dimensional MSD."
+   }
+  ],
+  "nodes": [
+   {
+    "id": "data",
+    "type": "stk.source.table@1",
+    "params": {
+     "binding": "data",
+     "path": {
+      "$param": "path"
+     },
+     "format": "columns",
+     "units": {
+      "Time": "fs",
+      "MSD": "Ao2"
+     }
+    }
+   },
+   {
+    "id": "fit",
+    "type": "stk.analysis.lammps_diffusion@1",
+    "inputs": {
+     "in": {
+      "from": "data.out"
+     }
+    },
+    "params": {
+     "time_min": {
+      "$param": "time_min"
+     },
+     "time_max": {
+      "$param": "time_max"
+     },
+     "dimensions": {
+      "$param": "dimensions"
+     }
+    }
+   },
+   {
+    "id": "plot",
+    "type": "stk.plot.line@1",
+    "inputs": {
+     "table": {
+      "from": "fit.fit"
+     }
+    },
+    "params": {
+     "x": "Time",
+     "y": [
+      "MSD",
+      "Fitted"
+     ],
+     "title": "MSD diffusion",
+     "x_label": "Time (fs)",
+     "y_label": "MSD (Ao2)"
+    }
+   }
+  ],
+  "outputs": {
+   "summary": "fit.summary",
+   "fit": "fit.fit",
+   "diagnostics": "fit.diagnostics",
+   "plot": "plot.plot"
+  }
+ }
+}

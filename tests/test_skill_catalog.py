@@ -20,7 +20,8 @@ from test_desktop_scripts import execute, scripts  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / "tests" / "data" / "skill-catalog.lock.json"
-BUILTIN = ["stk.muferro.domains@1", "stk.muferro.energy_trace@1", "stk.visualize.scalar_volume@2"]
+BUILTIN = ["stk.lammps.diffusion@1", "stk.lammps.modulus@1", "stk.lammps.tg@1",
+           "stk.muferro.domains@1", "stk.muferro.energy_trace@1", "stk.visualize.scalar_volume@2"]
 
 
 def builtin_definition(name):
@@ -213,9 +214,9 @@ def test_availability_follows_modules_and_node_types(monkeypatch):
 def test_pages_and_queries_are_bounded():
     catalog = load_catalog()
     first = catalog.page(limit=1)
-    assert [s["ref"] for s in first["skills"]] == BUILTIN[:1] and first["total"] == 3 and first["next_offset"] == 1
-    last = catalog.page(offset=2, limit=1)
-    assert [s["ref"] for s in last["skills"]] == BUILTIN[2:] and last["next_offset"] is None
+    assert [s["ref"] for s in first["skills"]] == BUILTIN[:1] and first["total"] == len(BUILTIN) and first["next_offset"] == 1
+    last = catalog.page(offset=len(BUILTIN)-1, limit=1)
+    assert [s["ref"] for s in last["skills"]] == BUILTIN[-1:] and last["next_offset"] is None
     assert catalog.page(offset=10)["skills"] == [] and catalog.page(offset=10)["next_offset"] is None
     assert catalog.page(query="  MUFERRO ")["total"] == 2
     assert [s["id"] for s in catalog.page(query="铁电")["skills"]] == ["stk.muferro.domains"]
@@ -240,8 +241,10 @@ sys.meta_path.insert(0, Block())
 from suan.graph.catalog import build_registry
 from suan.graph.resolve import LocalDirResolver
 from suan.graph.service import MemoryBlobSink, evaluate_request
-binding = "data" if preset == "scalar-volume" else "run"
+binding = "data" if preset == "scalar-volume" or preset.startswith("lammps-") else "run"
 params = {"path": "field.npy", "field": "field"} if preset == "scalar-volume" else {}
+if preset == "lammps-diffusion":
+    params = {"time_min": 1000, "time_max": 10000}
 with tempfile.TemporaryDirectory() as cache:
     try:
         result = evaluate_request({"preset": preset, "outputs": outputs, "parameters": params},
@@ -263,10 +266,18 @@ def test_declared_module_scopes_match_real_evaluation(tmp_path):
     write_domain_run(tmp_path / "run", grid=(8, 7, 6), steps=2, interval=1)
     (tmp_path / "field").mkdir()
     np.save(tmp_path / "field" / "field.npy", np.arange(24.0).reshape(2, 3, 4) - 7.25)
+    from test_lammps_analysis import density_table, stress_table, msd_table
+    (tmp_path / "lammps").mkdir()
+    for filename, table, separator in [("density-temperature.csv", density_table(), ","),
+                                        ("stress-strain.dat", stress_table(), " "), ("msd.dat", msd_table(), " ")]:
+        columns = table.columns
+        (tmp_path / "lammps" / filename).write_text(separator.join(columns) + "\n" + "\n".join(
+            separator.join(map(str, row)) for row in zip(*(table.column(name) for name in columns))) + "\n")
     catalog = load_catalog()
     for skill in catalog.skills:
         offline = [o["name"] for o in skill["outputs"] if o["name"] != "image"]  # PNG needs offscreen OpenGL
-        data = tmp_path / ("field" if skill["entry"]["preset"] == "scalar-volume" else "run")
+        preset = skill["entry"]["preset"]
+        data = tmp_path / ("lammps" if preset.startswith("lammps-") else "field" if preset == "scalar-volume" else "run")
         for dependency in skill["dependencies"]["python"]:
             scoped = [name for name in offline if not dependency["outputs"] or name in dependency["outputs"]]
             others = [name for name in offline if name not in scoped]
@@ -286,7 +297,7 @@ def test_bridge_methods_are_read_only_and_schema_checked(inproc):
     hello = harness.call("hello", {"protocol": 1})
     assert {"skills.list", "skills.get"} <= set(hello["methods"])
     page = harness.call("skills.list", {"limit": 2})
-    assert [s["ref"] for s in page["skills"]] == BUILTIN[:2] and page["total"] == 3 and page["next_offset"] == 2
+    assert [s["ref"] for s in page["skills"]] == BUILTIN[:2] and page["total"] == len(BUILTIN) and page["next_offset"] == 2
     assert page["problems"] == [] and page["problem_count"] == 0
     assert [s["id"] for s in harness.call("skills.list", {"query": "ENERGY_OUT"})["skills"]] == ["stk.muferro.energy_trace"]
     skill = harness.call("skills.get", {"id": "stk.muferro.domains"})["skill"]

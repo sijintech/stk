@@ -16,7 +16,8 @@ from suan.graph.registry import (Budget, CancelToken, GraphError, NodeContext, N
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_NODES = {"muferro_run": "stk.source.muferro_run@1", "muferro_frame": "stk.source.muferro_frame@1",
-                "file_source": "stk.source.file@1", "table_source": "stk.source.table@1"}
+                "file_source": "stk.source.file@1", "table_source": "stk.source.table@1",
+                "lammps_log": "stk.source.lammps_log@1"}
 
 
 class Context:

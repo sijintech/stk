@@ -33,6 +33,28 @@ def test_a_script_declares_its_parameters_with_index_defaults():
     assert commands('print "a # b" # note\nfix 1 all &\n  nve\n') == [(1, ["print", "a # b"]), (2, ["fix", "1", "all", "nve"])]
 
 
+def test_property_scripts_take_valid_numeric_row_parameters():
+    from suan.lammps.templates import NAMES, template_text
+    for name in NAMES:
+        checked = check_script(template_text(name), ["in." + name, "model.in", "system.data"],
+                               lambda _: "pair_style lj/cut 9\nread_data system.data\n")
+        values = checked["parameters"]
+        assert checked["units"] == "real"
+        assert {"equilibration_steps", "sample_interval", "temperature", "steps", "timestep", "seed", "pressure"} <= set(values)
+        assert check_parameters(values, checked["used"]) == values
+        if name == "modulus":
+            assert values["strain_rate"] == 1e-6
+        if name == "diffusion":
+            assert values["solute_type"] == 1 and "msd com no average no" in template_text(name)
+        invalid = {**values, "sample_interval": values["steps"]}
+        with pytest.raises(ScriptError, match="three sample intervals"):
+            check_parameters(invalid, checked["used"])
+        with pytest.raises(ScriptError):
+            check_parameters({**values, "equilibration_steps": True}, checked["used"])
+    with pytest.raises(ValueError):
+        template_text("../../outside")
+
+
 @pytest.mark.parametrize("line, message", [
     ("shell rm -rf data", "shell"),
     ("python source here", "python"),

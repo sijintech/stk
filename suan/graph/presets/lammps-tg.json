@@ -1,0 +1,103 @@
+{
+ "id": "lammps-tg",
+ "name": "Glass transition",
+ "description": "Two decreasing density lines; the intersection must lie in the split gap.",
+ "bindings": [
+  {
+   "name": "data",
+   "description": "Directory or frozen run snapshot holding the result table."
+  }
+ ],
+ "graph": {
+  "schema": "stk.graph/1",
+  "id": "lammps-tg",
+  "name": "Glass transition",
+  "description": "Two decreasing density lines; the intersection must lie in the split gap.",
+  "catalog": {
+   "stk": 1
+  },
+  "parameters": [
+   {
+    "name": "path",
+    "type": "string",
+    "default": "density-temperature.csv",
+    "label": "Result table path",
+    "description": "Relative to data binding; use case/ prefix for a workflow final-state snapshot."
+   },
+   {
+    "name": "split_temperature",
+    "type": "json",
+    "default": null,
+    "label": "Split temperature (K)",
+    "description": "Null searches all admissible gaps; otherwise sets the regime boundary."
+   },
+   {
+    "name": "min_points",
+    "type": "integer",
+    "default": 3,
+    "minimum": 3,
+    "maximum": 250,
+    "label": "Minimum points per regime"
+   }
+  ],
+  "nodes": [
+   {
+    "id": "data",
+    "type": "stk.source.table@1",
+    "params": {
+     "binding": "data",
+     "path": {
+      "$param": "path"
+     },
+     "format": "csv",
+     "units": {
+      "Temperature": "K",
+      "Density": "g/cm3"
+     }
+    }
+   },
+   {
+    "id": "fit",
+    "type": "stk.analysis.lammps_tg@1",
+    "inputs": {
+     "in": {
+      "from": "data.out"
+     }
+    },
+    "params": {
+     "split_temperature": {
+      "$param": "split_temperature"
+     },
+     "min_points": {
+      "$param": "min_points"
+     }
+    }
+   },
+   {
+    "id": "plot",
+    "type": "stk.plot.line@1",
+    "inputs": {
+     "table": {
+      "from": "fit.fit"
+     }
+    },
+    "params": {
+     "x": "Temperature",
+     "y": [
+      "Density",
+      "Fitted"
+     ],
+     "title": "Glass transition",
+     "x_label": "Temperature (K)",
+     "y_label": "Density (g/cm3)"
+    }
+   }
+  ],
+  "outputs": {
+   "summary": "fit.summary",
+   "fit": "fit.fit",
+   "diagnostics": "fit.diagnostics",
+   "plot": "plot.plot"
+  }
+ }
+}

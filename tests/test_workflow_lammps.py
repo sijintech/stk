@@ -132,3 +132,31 @@ def test_a_row_that_leaves_a_used_parameter_empty_is_refused_when_the_run_is_pre
     # Cloning keeps an incomplete row as it is, to be filled in afterwards.
     clone = s["api"].lammps.clone_case(s["rows"][0], expected_revision=s["store"].info()["revision"])["record_id"]
     assert clone and s["client"].tasks() == []
+
+
+def test_legacy_case_table_reads_and_runs_without_eager_migration(scan):
+    from suan.lammps.script import PROPERTY_PARAMETERS
+    s = scan
+    s["store"].apply([{"op": "delete_field", "id": lammps.FIELD_IDS[key]} for key in PROPERTY_PARAMETERS],
+                     expected_revision=s["store"].info()["revision"])
+    revision = s["store"].info()["revision"]
+    run = prepare(s, rows=[s["rows"][0]])
+    assert not set(run["parameters"]["simulate"][s["rows"][0]]) & set(PROPERTY_PARAMETERS)
+    assert s["store"].info()["revision"] == revision
+    s["h"].call("project.workflow_runs.start", {"handle": s["handle"], "run_id": run["id"]})
+    done = settled(s, run["id"])
+    assert done["complete"] and all(task["produced"] is not None for task in done["tasks"]), done
+    # Explicit import extends the case table only after the old run has finished.
+    from suan.lammps.templates import template_text
+    folder = s["tmp"] / "modulus"
+    folder.mkdir()
+    (folder / "in.modulus").write_text(template_text("modulus"))
+    (folder / "model.in").write_text("read_data system.data\n")
+    (folder / "system.data").write_text("fixture\n")
+    imported = s["api"].lammps.import_case(folder, script="in.modulus", expected_revision=s["store"].info()["revision"])
+    table = next(t for t in s["store"].snapshot()["tables"] if t["id"] == lammps.TABLE_ID)
+    row = next(r for r in table["records"] if r["id"] == imported["record_id"])
+    assert row["values"][lammps.FIELD_IDS["strain_rate"]] == 1e-6
+    frozen = prepare(s, rows=[imported["record_id"]])
+    assert frozen["parameters"]["simulate"][imported["record_id"]]["strain_rate"] == 1e-6
+    assert s["store"].workflow_runs.get(run["id"])["parameters"] == run["parameters"]

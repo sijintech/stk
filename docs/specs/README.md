@@ -25,6 +25,7 @@ are not existing graph-v1 or bridge-v1 capabilities; their schema and protocol e
 | [stk-events-v1.md](stk-events-v1.md) | Monitoring events: the JSONL file at `$STK_MONITOR_PATH`, the envelope, event types, the Python emitter and reader, the Runtime endpoint `GET /v1/tasks/{id}/events`, and the muFerro legacy adapter | `event-1` |
 | [stk-desktop-bridge-v1.md](stk-desktop-bridge-v1.md) | Desktop bridge protocol v1: NDJSON over the stdio of `python -m suan.desktop_bridge --stdio`, the envelope and error codes, session, connections, hub review, workspaces, resumable transfers, tasks, subscriptions (watch, logs, events), graph evaluation, blobs, probe and colormaps | `desktop-bridge-1` |
 | [domain-classifiers.md](domain-classifiers.md) | Clean-room formulas for ferroelectric domains: the cubic-26 direction sets and numberings, orientation classification, film detection, label fractions, orientation and categorical colours, label surfaces | none (implemented by `suan/analysis/` and the analysis/filter nodes of `stk-graph-v1.md`) |
+| [lammps-analysis-v1.md](lammps-analysis-v1.md) | Additive graph-v1 nodes for real-units thermo logs, density Tg, tensile modulus and explicit-window MSD diffusion, including units, rejection rules and limits | node declarations in `catalog/m1_nodes.py`; existing graph/data schemas unchanged |
 
 ## How they relate
 

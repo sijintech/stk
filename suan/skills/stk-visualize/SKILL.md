@@ -50,6 +50,18 @@ The same operations exist on the command line: `suan graph catalog | validate | 
 
 ## Reporting rules
 
+For imported LAMMPS results use `lammps-tg`, `lammps-modulus`, or `lammps-diffusion`, with binding `data`.
+They deliver `summary`, `fit`, `diagnostics`, and `plot`; plots additionally need matplotlib.
+Density-temperature CSV uses K/g/cm3; stress-strain uses dimensionless engineering strain/tensile-positive GPa;
+MSD uses fs/Ao2 and returns cm2/s. Units are explicit, not inferred. Workflow snapshots use paths
+`case/stress-strain.dat` or `case/msd.dat`. Tg needs an explicitly assembled table across temperature rows.
+Diffusion requires `time_min` and `time_max`: inspect a long-time diffusive regime, selected atoms/components,
+fixed production cell and global drift. Defaults are null and evaluation fails until a window is supplied.
+Report equilibration, temperature history, strain rate, chosen windows, and independent replicas.
+Correlated MD samples make OLS standard errors descriptive fit statistics, not property uncertainty;
+no Tg confidence interval is provided. These presets analyze saved files; they do not generate PET models
+or decide charges. See `docs/lammps-analysis.md` and `examples/lammps_analysis/` in the repository.
+
 - **Never infer physics from colours.** Colours come from a colormap or palette; read values from
   `statistics`, `label_fractions`, the plot `data_file`, or a probe. Say which output a number came from.
 - **State every threshold you used**: e.g. `min_magnitude = 0.1` (points with |P| at or below it are

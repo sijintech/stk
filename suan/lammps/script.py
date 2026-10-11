@@ -19,6 +19,9 @@ import re
 
 # Row fields of a LAMMPS case that a script can take as variables, with their kinds.
 PARAMETERS = {"temperature": "number", "pressure": "number", "steps": "integer", "timestep": "number", "seed": "integer"}
+PROPERTY_PARAMETERS = {"equilibration_steps": "integer", "sample_interval": "integer", "strain_rate": "number",
+                       "solute_type": "integer"}
+PARAMETERS.update(PROPERTY_PARAMETERS)
 # Command words that run programs, load code or move the log STK reads.
 FORBIDDEN_COMMANDS = {"shell", "python", "plugin", "log", "mdi", "kim", "kim_init", "kim_interactions", "kim_query",
                       "kim_param", "kim_property"}
@@ -217,6 +220,8 @@ def check_parameters(values, used):
                 raise ScriptError(f"{name} must be a positive integer" + (" below 2^31" if name == "seed" else ""))
         elif type(value) not in (int, float) or not math.isfinite(value) or (name != "pressure" and value <= 0):
             raise ScriptError(f"{name} must be finite" + ("" if name == "pressure" else " and positive"))
+    if "sample_interval" in used and "steps" in used and values["steps"] < 3 * values["sample_interval"]:
+        raise ScriptError("steps must cover at least three sample intervals")
     return {name: values[name] for name in used}
 
 

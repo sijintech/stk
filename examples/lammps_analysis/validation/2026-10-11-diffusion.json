@@ -1,0 +1,145 @@
+{
+  "fixture": "public synthetic 108-atom FCC argon; finite-time path smoke, not property validation",
+  "kind": "diffusion",
+  "lammps_version": "LAMMPS (22 Jul 2025 - Update 6)",
+  "parameters": {
+    "equilibration_steps": 1000,
+    "pressure": 1.0,
+    "sample_interval": 10,
+    "seed": 4928459,
+    "solute_type": 1,
+    "steps": 1000,
+    "temperature": 300,
+    "timestep": 1.0
+  },
+  "analysis_parameters": {
+    "path": "case/msd.dat",
+    "time_min": 100,
+    "time_max": 1000
+  },
+  "density_point": {
+    "columns": {
+      "Temperature": [
+        295.848372745098
+      ],
+      "Density": [
+        0.81986468
+      ],
+      "Source": [
+        "diffusion"
+      ],
+      "Samples": [
+        51
+      ]
+    },
+    "units": {
+      "Temperature": "K",
+      "Density": "g/cm3",
+      "Source": "1",
+      "Samples": "1"
+    }
+  },
+  "log_sha256": "22d3f2eaf5eedff6ee212556ccb79a6383b5cd0fb3fa06142a3c784b7a69d77e",
+  "input_sha256": {
+    "in.diffusion": "a3f6f28c52ccb787137090c5e5dc5a7e4ed05ffabf37d8aa10d4a6171435f529",
+    "model.in": "ea81681bb5dca85b7e28af37ccb3944a72bcc3a690c73bd08d19249f7cc1250c",
+    "system.data": "ad948c2256027968123376aa8d4bd680f8d51ee0dd2931a7f92ac265bf1e2391"
+  },
+  "outputs": {
+    "summary": {
+      "attrs": {
+        "diagnostics": {
+          "conversion": "Ao2/fs * 0.1 = cm2/s",
+          "dimensions": 3,
+          "intercept": -1.759032310957159,
+          "limits": "Selected MSD components must match dimensions; verify a diffusive regime, group and unwrapped positions.",
+          "r_squared": 0.9842489774399177,
+          "range": [
+            100.0,
+            1000.0
+          ],
+          "rss": 11.699984945352574,
+          "samples": 91,
+          "slope": 0.010790598147794235,
+          "slope_stderr": 0.00014469462767134375,
+          "source": {
+            "activity": {
+              "id": null,
+              "kind": "import"
+            },
+            "agent": {
+              "node": "data",
+              "reader": "stk.columns@1"
+            },
+            "used": [
+              {
+                "path": "case/msd.dat",
+                "role": "input",
+                "sha256": "903a3ce30ec5cf7c664930cd7c39f1933c81dd47f1b5c35cc59efae6cb1747e1"
+              }
+            ]
+          }
+        },
+        "limits": "Unweighted fit; correlated MD samples are not independent uncertainty estimates.",
+        "method": "diffusion"
+      },
+      "column_names": [
+        "Diffusion",
+        "SlopeStdError",
+        "Samples"
+      ],
+      "columns": {
+        "Diffusion": [
+          0.00017984330246323724
+        ],
+        "Samples": [
+          91
+        ],
+        "SlopeStdError": [
+          2.411577127855729e-06
+        ]
+      },
+      "type": "table",
+      "units": {
+        "Diffusion": "cm2/s",
+        "Samples": "1",
+        "SlopeStdError": "cm2/s"
+      }
+    },
+    "diagnostics": {
+      "type": "value",
+      "value": {
+        "conversion": "Ao2/fs * 0.1 = cm2/s",
+        "dimensions": 3,
+        "intercept": -1.759032310957159,
+        "limits": "Selected MSD components must match dimensions; verify a diffusive regime, group and unwrapped positions.",
+        "r_squared": 0.9842489774399177,
+        "range": [
+          100.0,
+          1000.0
+        ],
+        "rss": 11.699984945352574,
+        "samples": 91,
+        "slope": 0.010790598147794235,
+        "slope_stderr": 0.00014469462767134375,
+        "source": {
+          "activity": {
+            "id": null,
+            "kind": "import"
+          },
+          "agent": {
+            "node": "data",
+            "reader": "stk.columns@1"
+          },
+          "used": [
+            {
+              "path": "case/msd.dat",
+              "role": "input",
+              "sha256": "903a3ce30ec5cf7c664930cd7c39f1933c81dd47f1b5c35cc59efae6cb1747e1"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# Synthetic engineering strain and tensile-positive stress in GPa
+Step Strain Stress
+0 0 0.125
+1 0.005 0.1375
+2 0.01 0.15
+3 0.015 0.1625
+4 0.02 0.175
+5 0.03 0.25
+6 0.04 0.25

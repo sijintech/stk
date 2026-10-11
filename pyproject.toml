@@ -22,6 +22,7 @@ include = [
     { path = "docs/visualization.md", format = "sdist" },
     { path = "docs/hub.md", format = "sdist" },
     { path = "docs/project.md", format = "sdist" },
+    { path = "docs/lammps*.md", format = "sdist" },
     { path = "docs/scripting.md", format = "sdist" },
     { path = "docs/ssh.md", format = "sdist" },
     { path = "docs/specs", format = "sdist" },

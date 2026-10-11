@@ -131,11 +131,11 @@ TEST_F(SkillsCatalogPython, ListsSelectsAndShowsTheContractWithoutRunningAnythin
   ASSERT_TRUE(skills().loading());  // the first draw requests the first page once
   ASSERT_NO_FATAL_FAILURE(settle());
   ASSERT_TRUE(skills().error().empty()) << skills().error();
-  ASSERT_EQ(skills().skills().size(), 3u);
-  EXPECT_EQ(skills().total(), 3); EXPECT_FALSE(skills().has_next()); EXPECT_EQ(skills().problem_count(), 0);
-  EXPECT_EQ(skills().skills()[0].ref, "stk.muferro.domains@1");
+  ASSERT_EQ(skills().skills().size(), 6u);
+  EXPECT_EQ(skills().total(), 6); EXPECT_FALSE(skills().has_next()); EXPECT_EQ(skills().problem_count(), 0);
+  EXPECT_EQ(skills().skills()[0].ref, "stk.lammps.diffusion@1");
   const auto *list = widget("skills_list");
-  ASSERT_NE(list, nullptr); ASSERT_TRUE(list->list); EXPECT_EQ(list->list->count, 3);
+  ASSERT_NE(list, nullptr); ASSERT_TRUE(list->list); EXPECT_EQ(list->list->count, 6);
   EXPECT_EQ(list->list->selected.value(), -1);
   EXPECT_FALSE(widget("skills_previous")->enabled); EXPECT_FALSE(widget("skills_next")->enabled);
   EXPECT_EQ(widget("skills_inputs"), nullptr);
@@ -145,7 +145,7 @@ TEST_F(SkillsCatalogPython, ListsSelectsAndShowsTheContractWithoutRunningAnythin
 
   list = widget("skills_list");  // frames rebuild widgets: never reuse a pointer across them
   ASSERT_NE(list, nullptr); ASSERT_TRUE(list->list);
-  list->list->selected.assign(2);  // the list binding selects by ref
+  list->list->selected.assign(5);  // the list binding selects by ref
   EXPECT_EQ(skills().selected(), "stk.visualize.scalar_volume@2");
   ASSERT_NO_FATAL_FAILURE(settle());
   ASSERT_TRUE(skills().detail().is_object()) << skills().detail_error();
@@ -156,7 +156,7 @@ TEST_F(SkillsCatalogPython, ListsSelectsAndShowsTheContractWithoutRunningAnythin
   EXPECT_EQ(skill.at("parameters").at(2).at("default"), 0);  // the component default stays an integer
   EXPECT_TRUE(skill.at("parameters").at(2).at("default").is_number_integer());
   f.drv->frame();
-  EXPECT_EQ(widget("skills_list")->list->selected.value(), 2);
+  EXPECT_EQ(widget("skills_list")->list->selected.value(), 5);
   for (const auto *key : {"skills_inputs", "skills_parameters", "skills_outputs", "skills_dependencies", "skills_examples"}) {
     EXPECT_NE(widget(key), nullptr) << key;
   }
@@ -192,7 +192,7 @@ TEST_F(SkillsCatalogPython, SearchPagesAndKeepsOnlyTheLatestReply)
   EXPECT_EQ(skills().query(), "铁电"); EXPECT_EQ(skills().skills()[0].id, "stk.muferro.domains");
   ASSERT_TRUE(skills().search(""));
   ASSERT_NO_FATAL_FAILURE(settle());
-  EXPECT_EQ(skills().total(), 3); EXPECT_FALSE(skills().next_page()); EXPECT_FALSE(skills().previous_page());
+  EXPECT_EQ(skills().total(), 6); EXPECT_FALSE(skills().next_page()); EXPECT_FALSE(skills().previous_page());
   EXPECT_TRUE(skills().search(std::string(SkillCatalogState::kMaxQuery + 50, 'x')));  // clamped, still valid
   ASSERT_NO_FATAL_FAILURE(settle());
   EXPECT_TRUE(skills().error().empty()) << skills().error();
@@ -246,7 +246,7 @@ TEST_F(SkillsCatalogPython, RepliesForAnotherBridgeAreDiscardedAndReloaded)
   f.shell->store().set_bridge(client.get());
   f.drv->frame();
   ASSERT_NO_FATAL_FAILURE(settle());
-  EXPECT_EQ(skills().total(), 3);
+  EXPECT_EQ(skills().total(), 6);
 }
 
 TEST_F(SkillsCatalogPython, OlderBridgeShowsTheCatalogAsUnavailable)
@@ -275,12 +275,12 @@ TEST_F(SkillsCatalogPython, BrokenDefinitionsAndMissingModulesAreExplained)
   ASSERT_NO_FATAL_FAILURE(start({"catalog", dir.str() + "/definitions"}));
   ASSERT_NO_FATAL_FAILURE(open());
   ASSERT_NO_FATAL_FAILURE(settle());
-  ASSERT_EQ(skills().skills().size(), 4u);
+  ASSERT_EQ(skills().skills().size(), 7u);
   EXPECT_EQ(skills().problem_count(), 1);
   EXPECT_EQ(io::get_string(skills().problems().at(0), "code"), "invalid_json");
   EXPECT_EQ(io::get_string(skills().problems().at(0), "file"), "broken.json");
   EXPECT_NE(widget("skills_problems"), nullptr);
-  const auto &limited = skills().skills()[3];
+  const auto &limited = skills().skills()[6];
   EXPECT_EQ(limited.ref, "test.fixture.limited@1"); EXPECT_EQ(limited.status, "limited");
   EXPECT_EQ(limited.unavailable_outputs, std::vector<std::string>{"energy"});
   ASSERT_TRUE(skills().select(limited.ref));
@@ -305,7 +305,7 @@ TEST_F(SkillsCatalogPython, WorkspaceOpensTheSharedLibraryWithoutAProject)
   ASSERT_NE(target, nullptr);
   EXPECT_EQ(target->editor().type().id, kEditorSkills);
   ASSERT_NO_FATAL_FAILURE(settle());
-  EXPECT_EQ(skills().skills().size(), 3u);
+  EXPECT_EQ(skills().skills().size(), 6u);
   ASSERT_NE(widget("project_workspace"), nullptr);  // the way back
 }
 

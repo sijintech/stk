@@ -1,6 +1,9 @@
 {
  "schema": "stk.skill-lock/1",
  "skills": {
+  "stk.lammps.diffusion@1": "2aad2330607e3d1c9957c3fbd9b7f6bd751c54db3c3aaedda01497adba52dee8",
+  "stk.lammps.modulus@1": "31218adccc5629694a1dbb81dd119b011ff438df2573762c7384fe5470b0a4a1",
+  "stk.lammps.tg@1": "671e0a265414deed6ecaadbed99fee024083bd2b540f305675eb74dfed8a668a",
   "stk.muferro.domains@1": "967a537f9f7a4476cd664306c710a649d4d5fd87ff3850262d0c6acc4db93a34",
   "stk.muferro.energy_trace@1": "6cd8371fea468b02c71823e7af9a5c6a3aa09dd1a739fedbdfd2dc9b98a9de3e",
   "stk.visualize.scalar_volume@2": "a83fafe3b3837e97958a948b78ed0a2bf72f8f52e3eb4b781c8935d22f0213de"

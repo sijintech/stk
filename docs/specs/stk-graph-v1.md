@@ -590,6 +590,52 @@ Point (or cell) counts and fractions per category; the denominator excludes 'exc
 | `exclude` | integer[0..256] | `[-1, 0]` | data |
 | `include_empty` | boolean | `true` | data |
 
+#### `stk.analysis.lammps_diffusion@1` — MSD diffusion / MSD 扩散
+
+D = MSD slope / (2*d); input fs/Ao2, output cm2/s. Select a diffusive time window.
+
+- stage `analysis`, cache `memory`, time_dependent `false`
+- inputs: `in`: table (required)
+- outputs: `summary`: table, `fit`: table, `diagnostics`: value<json>
+
+| param | type | default | stage |
+|---|---|---|---|
+| `time` | string | `"Time"` | data |
+| `msd` | string | `"MSD"` | data |
+| `time_min` | number (>=0) \| null | `null` | data |
+| `time_max` | number (>0) \| null | `null` | data |
+| `dimensions` | integer (>=1, <=3) | `3` | data |
+
+#### `stk.analysis.lammps_modulus@1` — Tensile modulus / 拉伸模量
+
+Fit stress (GPa) against engineering strain in an explicit small-strain window.
+
+- stage `analysis`, cache `memory`, time_dependent `false`
+- inputs: `in`: table (required)
+- outputs: `summary`: table, `fit`: table, `diagnostics`: value<json>
+
+| param | type | default | stage |
+|---|---|---|---|
+| `strain` | string | `"Strain"` | data |
+| `stress` | string | `"Stress"` | data |
+| `strain_min` | number (>=0) | `0.0` | data |
+| `strain_max` | number (>0) | `0.02` | data |
+
+#### `stk.analysis.lammps_tg@1` — Density glass transition / 密度玻璃化转变
+
+Fit two decreasing density-temperature lines; Tg is their intersection inside the split gap.
+
+- stage `analysis`, cache `memory`, time_dependent `false`
+- inputs: `in`: table (required)
+- outputs: `summary`: table, `fit`: table, `diagnostics`: value<json>
+
+| param | type | default | stage |
+|---|---|---|---|
+| `temperature` | string | `"Temperature"` | data |
+| `density` | string | `"Density"` | data |
+| `split_temperature` | number (>0) \| null | `null` | data |
+| `min_points` | integer (>=3, <=250) | `3` | data |
+
 #### `stk.analysis.orientation_classify@1` — Orientation classify / 畴取向分类
 
 Label each point with the nearest reference direction (docs/specs/domain-classifiers.md): -1 unclassified/no data, 0 substrate (film detection), 1..N variants.
@@ -1064,6 +1110,20 @@ Read a field file inside a binding: MuPRO DAT, NPY, VTI, legacy VTK STRUCTURED_P
 | `unit` | string \| null | `null` | data |
 | `quantity` | string (pattern) \| null | `null` | data |
 | `step` | integer (>=0) \| null | `null` | data |
+
+#### `stk.source.lammps_log@1` — LAMMPS thermodynamics / LAMMPS 热力学表
+
+Read one finished real-units thermo block; reject errors, truncation and nonfinite values.
+
+- stage `source`, cache `memory`, time_dependent `false`
+- inputs: none
+- outputs: `out`: table
+
+| param | type | default | stage |
+|---|---|---|---|
+| `binding` | string (pattern) | **required** | data |
+| `path` | string (pattern) | `"log.lammps"` | data |
+| `block` | integer | `-1` | data |
 
 #### `stk.source.muferro_frame@1` — muFerro frame / muFerro 帧
 

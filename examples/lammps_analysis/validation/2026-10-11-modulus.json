@@ -1,0 +1,142 @@
+{
+  "fixture": "public synthetic 108-atom FCC argon; finite-time path smoke, not property validation",
+  "kind": "modulus",
+  "lammps_version": "LAMMPS (22 Jul 2025 - Update 6)",
+  "parameters": {
+    "equilibration_steps": 1000,
+    "pressure": 1.0,
+    "sample_interval": 10,
+    "seed": 4928459,
+    "steps": 1000,
+    "strain_rate": 2e-05,
+    "temperature": 20,
+    "timestep": 1.0
+  },
+  "analysis_parameters": {
+    "path": "case/stress-strain.dat"
+  },
+  "density_point": {
+    "columns": {
+      "Temperature": [
+        20.614828588235294
+      ],
+      "Density": [
+        1.7407849784313727
+      ],
+      "Source": [
+        "modulus"
+      ],
+      "Samples": [
+        51
+      ]
+    },
+    "units": {
+      "Temperature": "K",
+      "Density": "g/cm3",
+      "Source": "1",
+      "Samples": "1"
+    }
+  },
+  "log_sha256": "86a66f7ea25bf7723019ae84bc0b31d99a382e1892723f6907ff2bff0b674565",
+  "input_sha256": {
+    "in.modulus": "437bc23e8964c298d9ae25caa6932cf270c758e0adf374355ff1c8c50a02354d",
+    "model.in": "ea81681bb5dca85b7e28af37ccb3944a72bcc3a690c73bd08d19249f7cc1250c",
+    "system.data": "ad948c2256027968123376aa8d4bd680f8d51ee0dd2931a7f92ac265bf1e2391"
+  },
+  "outputs": {
+    "summary": {
+      "attrs": {
+        "diagnostics": {
+          "intercept": -0.0011761056121212116,
+          "r_squared": 0.7897545133344236,
+          "range": [
+            0.0002,
+            0.02
+          ],
+          "rss": 0.005246372778693195,
+          "samples": 100,
+          "slope": 2.43161399129913,
+          "slope_stderr": 0.12673567384851375,
+          "source": {
+            "activity": {
+              "id": null,
+              "kind": "import"
+            },
+            "agent": {
+              "node": "data",
+              "reader": "stk.columns@1"
+            },
+            "used": [
+              {
+                "path": "case/stress-strain.dat",
+                "role": "input",
+                "sha256": "a51b0ee319a9be00f5a1c76482e8845d9f9d8b7c59d0f47d9f78e70ec14d4d40"
+              }
+            ]
+          }
+        },
+        "limits": "Unweighted fit; correlated MD samples are not independent uncertainty estimates.",
+        "method": "modulus"
+      },
+      "column_names": [
+        "Modulus",
+        "Intercept",
+        "SlopeStdError",
+        "Samples"
+      ],
+      "columns": {
+        "Intercept": [
+          -0.0011761056121212116
+        ],
+        "Modulus": [
+          2.43161399129913
+        ],
+        "Samples": [
+          100
+        ],
+        "SlopeStdError": [
+          0.12673567384851375
+        ]
+      },
+      "type": "table",
+      "units": {
+        "Intercept": "GPa",
+        "Modulus": "GPa",
+        "Samples": "1",
+        "SlopeStdError": "GPa"
+      }
+    },
+    "diagnostics": {
+      "type": "value",
+      "value": {
+        "intercept": -0.0011761056121212116,
+        "r_squared": 0.7897545133344236,
+        "range": [
+          0.0002,
+          0.02
+        ],
+        "rss": 0.005246372778693195,
+        "samples": 100,
+        "slope": 2.43161399129913,
+        "slope_stderr": 0.12673567384851375,
+        "source": {
+          "activity": {
+            "id": null,
+            "kind": "import"
+          },
+          "agent": {
+            "node": "data",
+            "reader": "stk.columns@1"
+          },
+          "used": [
+            {
+              "path": "case/stress-strain.dat",
+              "role": "input",
+              "sha256": "a51b0ee319a9be00f5a1c76482e8845d9f9d8b7c59d0f47d9f78e70ec14d4d40"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

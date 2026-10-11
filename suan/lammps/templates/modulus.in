@@ -1,0 +1,35 @@
+# STK tensile sampling: engineering strain in x, pressure controlled in y/z.
+units real
+atom_style full
+boundary p p p
+variable temperature index 300
+variable pressure index 1
+variable steps index 20000
+variable timestep index 1
+variable seed index 4928459
+variable equilibration_steps index 10000
+variable sample_interval index 100
+variable strain_rate index 0.000001
+include model.in
+timestep ${timestep}
+velocity all create ${temperature} ${seed} dist gaussian
+thermo ${sample_interval}
+thermo_style custom step temp press density pe
+thermo_modify format float %.15g
+fix equilibrium all npt temp ${temperature} ${temperature} 100 iso ${pressure} ${pressure} 1000
+run ${equilibration_steps}
+unfix equilibrium
+reset_timestep 0
+variable initial_length equal $(lx:%.15g)
+variable strain_sample equal (lx-v_initial_length)/v_initial_length
+# LAMMPS pressure is positive in compression; 1 atm = 0.000101325 GPa.
+variable stress_sample equal -pxx*0.000101325
+fix ensemble all npt temp ${temperature} ${temperature} 100 y ${pressure} ${pressure} 1000 z ${pressure} ${pressure} 1000
+fix stretch all deform 1 x erate ${strain_rate} remap x
+fix samples all ave/time ${sample_interval} 1 ${sample_interval} v_strain_sample v_stress_sample &
+  file stress-strain.dat title1 "# STK engineering strain; tensile stress GPa" title2 "Step Strain Stress"
+thermo_style custom step temp press density pe v_strain_sample v_stress_sample
+run ${steps}
+unfix samples
+unfix stretch
+unfix ensemble

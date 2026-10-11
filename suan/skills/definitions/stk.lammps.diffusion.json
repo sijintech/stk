@@ -1,0 +1,58 @@
+{
+ "schema": "stk.skill/1",
+ "id": "stk.lammps.diffusion",
+ "version": 1,
+ "title": {
+  "en": "MSD diffusion",
+  "zh_CN": "MSD 扩散"
+ },
+ "summary": {
+  "en": "Einstein diffusion from an explicitly selected linear MSD window, in cm2/s. Inspect equilibration, units, fit windows and independent replicas.",
+  "zh_CN": "在指定扩散时间窗口内，用 MSD 的爱因斯坦关系估算扩散系数。须检查平衡、单位、拟合窗口与独立重复。"
+ },
+ "guide": {
+  "pack": "stk-visualize"
+ },
+ "entry": {
+  "kind": "graph.preset",
+  "preset": "lammps-diffusion"
+ },
+ "dependencies": {
+  "python": [
+   {
+    "module": "numpy",
+    "purpose": {
+     "en": "Read and construct scientific result tables.",
+     "zh_CN": "读取和构造科学结果表。"
+    }
+   },
+   {
+    "module": "matplotlib",
+    "outputs": [
+     "plot"
+    ],
+    "purpose": {
+     "en": "Draw the measured data and fitted lines.",
+     "zh_CN": "绘制原始数据与拟合线。"
+    }
+   }
+  ]
+ },
+ "examples": [
+  {
+   "title": {
+    "en": "Fit with numeric outputs",
+    "zh_CN": "拟合并查看数值输出"
+   },
+   "parameters": {
+    "time_min": 1000,
+    "time_max": 10000
+   },
+   "outputs": [
+    "summary",
+    "fit",
+    "diagnostics"
+   ]
+  }
+ ]
+}

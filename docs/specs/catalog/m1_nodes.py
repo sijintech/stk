@@ -169,6 +169,17 @@ def table_source(ctx, inputs, params):
     _todo()
 
 
+# E1c additive extension: docs/specs/lammps-analysis-v1.md
+
+@node("stk.source.lammps_log", title={"en": "LAMMPS thermodynamics", "zh": "LAMMPS 热力学表"},
+      description={"en": "Read one finished real-units thermo block; reject errors, truncation and nonfinite values."},
+      outputs=[Port("out", "table")],
+      params={"binding": binding(), "path": rel_path("log.lammps"), "block": integer(-1)},
+      fingerprint=_todo)
+def lammps_log(ctx, inputs, params):
+    _todo()
+
+
 # ---------------------------------------------------------------------------
 # Filters
 
@@ -400,6 +411,39 @@ def label_fractions(ctx, inputs, params):
           "components": enum(["each", "magnitude", "both"], "both"),
       })
 def statistics(ctx, inputs, params):
+    _todo()
+
+
+# E1c additive extension: docs/specs/lammps-analysis-v1.md
+
+@node("stk.analysis.lammps_tg", title={"en": "Density glass transition", "zh": "密度玻璃化转变"},
+      description={"en": "Fit two decreasing density-temperature lines; Tg is their intersection inside the split gap."},
+      inputs=[Port("in", "table")],
+      outputs=[Port("summary", "table"), Port("fit", "table"), Port("diagnostics", "value", value_type="json")],
+      params={"temperature": string("Temperature"), "density": string("Density"),
+              "split_temperature": number(None, nullable=True, exclusive_minimum=0),
+              "min_points": integer(3, minimum=3, maximum=250)})
+def lammps_tg(ctx, inputs, params):
+    _todo()
+
+@node("stk.analysis.lammps_modulus", title={"en": "Tensile modulus", "zh": "拉伸模量"},
+      description={"en": "Fit stress (GPa) against engineering strain in an explicit small-strain window."},
+      inputs=[Port("in", "table")],
+      outputs=[Port("summary", "table"), Port("fit", "table"), Port("diagnostics", "value", value_type="json")],
+      params={"strain": string("Strain"), "stress": string("Stress"),
+              "strain_min": number(0.0, minimum=0), "strain_max": number(0.02, exclusive_minimum=0)})
+def lammps_modulus(ctx, inputs, params):
+    _todo()
+
+@node("stk.analysis.lammps_diffusion", title={"en": "MSD diffusion", "zh": "MSD 扩散"},
+      description={"en": "D = MSD slope / (2*d); input fs/Ao2, output cm2/s. Select a diffusive time window."},
+      inputs=[Port("in", "table")],
+      outputs=[Port("summary", "table"), Port("fit", "table"), Port("diagnostics", "value", value_type="json")],
+      params={"time": string("Time"), "msd": string("MSD"),
+              "time_min": number(None, nullable=True, minimum=0),
+              "time_max": number(None, nullable=True, exclusive_minimum=0),
+              "dimensions": integer(3, minimum=1, maximum=3)})
+def lammps_diffusion(ctx, inputs, params):
     _todo()
 
 

@@ -1,6 +1,6 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-11，交接时 `main` 包含本次 E1 数据写出器交付（见 `git log`；CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
+更新：2026-10-11，交接时 `main` 包含 E1 数据写出器 `057f96d` 与本次 E1c 分析交付（见 `git log`；CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
 代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
 [开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
@@ -31,7 +31,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | S1 模型接入 | 全部交付：端点与密钥、数据标注与网络设置、本机一键部署（llama.cpp）、能力分档与自动切换 | [model-gateway.md](docs/design/model-gateway.md)；`suan/models/` |
 | S2 智能体 | S2a、S2b 交付（格式 13 会话/事件/对象、8 个工具、签名批准、桌面“智能体（多步）”）；**真实模型的 GUI 人工验收未做** | [agent-harness.md](docs/design/agent-harness.md)；`suan/agent/` |
 | S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
-| 多尺度引擎 | E0a、E0b、E1a 已交付；**E1b 独立数据写出器已交付**，建模仍待电荷决定；E1c 继续开发 | [multiscale-engines.md](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md) |
+| 多尺度引擎 | E0a、E0b、E1a、**E1b 独立数据写出器、E1c 分析模板已交付**；建模仍待电荷决定 | [方案](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md)、[分析](docs/lammps-analysis.md) |
 
 ## 待所有者决定（决定前不要按某个选项实现）
 
@@ -51,18 +51,16 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 1. **E1b 独立数据写出器已交付**：`suan.lammps.write_data` 保留传入电荷，支持 full/real、谐振键/角、RB→OPLS 与三斜盒子。
    540 原子正交/三斜 PET 对照、真实 LAMMPS 同几何能量与晶胞读回见验收记录；类型按实际参数合并，分子按键图连通分量编号。
    GMSO 0.17.0 的三斜 data 头错误已明确记录，不复制其 dump 外包围边界。建模步骤仍待电荷决定。
-   之前 GMSO 写文件约 0.13 秒/原子（540/1080/2160 原子 63.5/128.2/246.2 秒），
-   约 9000 原子的体系要约 20 分钟。由 foyer 给出的 ParmEd 结构直接写 `atom_style full`、`real` 单位（原子、键、角、RB→OPLS 二面角、对势系数），
-   用 GMSO 在 540 原子体系上的输出逐项对照验证（数值容差、类型合并、三斜盒子）。写出器不依赖电荷取值；**建模步骤本身（链长、链数、密度作为参数行、
-   力场来源记录）等电荷决定后再做**。可行性脚本在 [examples/pet_lammps/](examples/pet_lammps/README.md)。
-2. **E1c 分析模板**（只用导入的算例，不依赖建模）：密度–温度两段直线拟合求 Tg、单轴拉伸小应变段斜率求模量、小分子 MSD 的爱因斯坦关系求扩散系数；
-   每项一套 LAMMPS 脚本模板（参数来自参数表）与一个读结果表/日志的分析。
+   写出器不依赖电荷取值；**建模步骤本身（链长、链数、密度作为参数行、力场来源记录）等电荷决定后再做**。
+   可行性脚本在 [examples/pet_lammps/](examples/pet_lammps/README.md)。
+2. **E1c 已交付**（只用导入算例）：三套脚本、四个图节点、三个预设与技能；Tg 密度两段拟合、模量小应变斜率、显式扩散窗口。
+   合成曲线与真实氩的运行/分析归档通过；限制与使用见[指南](docs/lammps-analysis.md)。短轨迹拟合不代表材料性质验收。
 3. **桌面的 LAMMPS 入口**：导入按钮与按引擎显示的仿真视图（现在桌面只认 MuFerro；LAMMPS 只能从 Python 控制台 `stk.lammps` 与工作流编辑器使用）。
 4. 之后：E1d 球棍显示、运行中的监控事件、远程运行环境上的模块安装 → E2 ABACUS（先查 conda-forge 的 MPI 变体，LAMMPS 默认无 MPI 的教训）→ E3 串联。
 5. 与 E 系列并行、需要人参与的：S2 真实本机模型的 GUI 人工验收（[工作台清单](docs/workbench-acceptance.md)“AI 智能体（多步）”）；
    macOS/Windows 真机复核。
 
-## 多尺度引擎：E1a LAMMPS（最近一次交付）
+## 多尺度引擎：LAMMPS 代码入口
 
 导入的 LAMMPS 算例（输入脚本 + 它读的文件）成为“LAMMPS cases”表的一行，温度、压力、步数、时间步长、随机种子从脚本的 `index` 默认值读入；
 行作为工作流步骤 `lammps/1` 在运行环境上运行；STK 检查 `log.lammps` 后把后一半的平均密度、温度、压力、能量写入“LAMMPS results”表。
@@ -75,9 +73,11 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | 项目：导入/复制/准备/收集、最终状态 | [suan/workflows/lammps.py](suan/workflows/lammps.py)、与 MuFerro 共用的 [common.py](suan/workflows/common.py) |
 | 模板注册 | [suan/workflows/templates.py](suan/workflows/templates.py) 的 `LammpsTemplate`（E0a 接口，外部引擎经 `stk.engines` entry point） |
 | 数据写出（不分配电荷或力场） | [suan/lammps/data.py](suan/lammps/data.py)、[tests/test_lammps_data.py](tests/test_lammps_data.py)、手动对照 `examples/pet_lammps/compare_writer.py` |
+| E1c 脚本/拟合/图预设 | [suan/lammps/analysis.py](suan/lammps/analysis.py)、[templates.py](suan/lammps/templates.py)、`suan/lammps/templates/*.in`、`suan/graph/presets/lammps-*.json`、[已知曲线测试](tests/test_lammps_analysis.py) |
 | 模块目录（LAMMPS 固定 MPICH 版 `lammps=*=cpu*_mpi_mpich_*`） | [suan/modules/catalog.json](suan/modules/catalog.json)、[suan/modules/](suan/modules/) |
-| 测试 | [tests/test_lammps.py](tests/test_lammps.py)（26）、[tests/test_workflow_lammps.py](tests/test_workflow_lammps.py)（7）、假 LAMMPS [tests/lammps_fake.py](tests/lammps_fake.py)、真实日志节选 `tests/data/lammps/pet-npt.log` |
+| 测试 | [tests/test_lammps.py](tests/test_lammps.py)、[tests/test_workflow_lammps.py](tests/test_workflow_lammps.py)、假 LAMMPS [tests/lammps_fake.py](tests/lammps_fake.py)、真实日志节选 `tests/data/lammps/pet-npt.log` |
 | 手动验收（真实 LAMMPS，不进 CI）与 PET 可行性脚本 | [examples/pet_lammps/](examples/pet_lammps/README.md) |
+| E1c 合成数据与真实路径（108 原子氩，非性质验收） | [examples/lammps_analysis/](examples/lammps_analysis/README.md) |
 
 继续开发时须保留这些边界：
 
@@ -113,11 +113,14 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 | E1a `1859ca7` 本机 | 完整 pytest（`-m "not perf"`）**2427 passed、24 skipped**；Python 3.11 相关 81 passed；工作流/仿真/模块/智能体 CTest **69/69** |
 | E1a CI | [Runtime](https://github.com/sijintech/stk/actions/runs/38097721893) 8/8（3.12 2442 passed，3.11 与 3.14 各 2438）、[桌面](https://github.com/sijintech/stk/actions/runs/38097721844) 5/5、密钥扫描通过 |
 | E1a 手动（真实 LAMMPS） | LJ 熔体两行与 PET 两行经项目工作流（设定 450/550 K，平均 445.8/551.4 K）；2 进程 `1 by 1 by 2` 与单进程一致；2026-10-11 用 `examples/pet_lammps` 重新运行，结果见[验收记录](docs/runtime-validation.md) |
+| E1b `057f96d` | 写出器 19 项通过，正交/三斜 540 原子对照和真实能量/晶胞读回通过；[Runtime](https://github.com/sijintech/stk/actions/runs/38157976224) 8/8、[桌面](https://github.com/sijintech/stk/actions/runs/38157976221) 5/5、密钥扫描/文档 CI 通过 |
+| E1c 本机 | 合成曲线与真实氩路径 3 passed；完整 pytest 2469 passed、24 skipped，最后新增单位检查定向 33 passed；原生定向 104/104（含技能 GL/Vulkan 截图）；新代码 CI 见[验收记录](docs/runtime-validation.md) |
 | 更早各期 | 见[验收记录](docs/runtime-validation.md)，每项含提交与 CI 链接 |
 
 未解决：
 
-- **E1 的限制**：桌面没有 LAMMPS 入口；没有建模步骤与 Tg/模量/扩散分析；运行中没有监控事件；远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载上限。
+- **E1 的限制**：桌面没有 LAMMPS 导入/专用仿真视图；没有 PET 建模步骤；运行中没有监控事件；远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载上限。
+  E1c 不自动判定平衡或扩散区，没有跨温度行自动汇总、Tg 置信区间、通用分子质心/多原点 MSD；OLS 误差不能当材料性质不确定度。
   PET 可行性模型密度 1.223 g/cm³（实验约 1.335），4 聚体、540 原子、约 20 ps，只说明工具链可用。
 - **S2**：真实本机模型的 GUI 人工验收未做。
 
@@ -151,7 +154,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 ```bash
 cmake --build /home/mnemora/opt/stk-build/merge-check --parallel 4 && \
-STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemora/opt/stk-build/merge-check \
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemora/opt/stk-build/merge-check \
   --parallel 4 --timeout 600 --output-on-failure \
   --output-junit /tmp/stk-claude-full.xml
 ```
@@ -159,7 +162,7 @@ STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemora/opt/stk-build/merge-check
 工作台/技能/布局/分析草稿定向回归（相关修改时使用；不需要每次文档修改都跑完整套件）：
 
 ```bash
-STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemora/opt/stk-build/merge-check \
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemora/opt/stk-build/merge-check \
   -R '^(SkillCatalog\.|SkillsCatalogPython\.|project_skills|WorkspaceNavigation(Python)?\.|AnalysisParametersEditorPython\.|FocusNavigation\.|ScriptPython\.)' \
   --parallel 4 --output-on-failure --output-junit /tmp/stk-claude-focused.xml
 python3 desktop/tests/check_required_tests.py /tmp/stk-claude-focused.xml 'SkillCatalog\..*' 'SkillsCatalogPython\..*' \
@@ -191,7 +194,7 @@ Python 3.11 与 3.14 的环境在 `/home/mnemora/opt/stk-venv311`、`/home/mnemo
 提交前对暂存的改动做密钥扫描（gitleaks，规则在 `.gitleaks.toml`；本机没有全局安装时自行下载固定版本），CI 也会扫描：
 
 ```bash
-git diff --cached | gitleaks stdin --config .gitleaks.toml --no-banner
+git diff --cached | gitleaks stdin --config .gitleaks.toml --redact --no-banner
 ```
 
 ### macOS / Windows 启动

@@ -1,0 +1,23 @@
+# STK Tg sampling: run independent temperature rows on an imported model.
+# Density and temperature means return via the ordinary LAMMPS results table.
+units real
+atom_style full
+boundary p p p
+variable temperature index 350
+variable pressure index 1
+variable steps index 10000
+variable timestep index 1
+variable seed index 4928459
+variable equilibration_steps index 10000
+variable sample_interval index 100
+include model.in
+timestep ${timestep}
+velocity all create ${temperature} ${seed} dist gaussian
+thermo ${sample_interval}
+thermo_style custom step temp press density pe
+thermo_modify format float %.15g
+fix ensemble all npt temp ${temperature} ${temperature} 100 iso ${pressure} ${pressure} 1000
+run ${equilibration_steps}
+reset_timestep 0
+run ${steps}
+unfix ensemble

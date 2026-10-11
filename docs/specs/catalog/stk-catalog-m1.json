@@ -341,6 +341,245 @@
    "cache": "memory"
   },
   {
+   "id": "stk.analysis.lammps_diffusion@1",
+   "type": "stk.analysis.lammps_diffusion",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "analysis",
+   "category": "analysis",
+   "title": {
+    "en": "MSD diffusion",
+    "zh": "MSD 扩散"
+   },
+   "description": {
+    "en": "D = MSD slope / (2*d); input fs/Ao2, output cm2/s. Select a diffusive time window."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "table",
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "summary",
+     "type": "table"
+    },
+    {
+     "name": "fit",
+     "type": "table"
+    },
+    {
+     "name": "diagnostics",
+     "type": "value",
+     "value_type": "json"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "time": {
+      "type": "string",
+      "default": "Time",
+      "x-stk-stage": "data"
+     },
+     "msd": {
+      "type": "string",
+      "default": "MSD",
+      "x-stk-stage": "data"
+     },
+     "time_min": {
+      "anyOf": [
+       {
+        "type": "number",
+        "minimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "time_max": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "dimensions": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3,
+      "default": 3,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.analysis.lammps_modulus@1",
+   "type": "stk.analysis.lammps_modulus",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "analysis",
+   "category": "analysis",
+   "title": {
+    "en": "Tensile modulus",
+    "zh": "拉伸模量"
+   },
+   "description": {
+    "en": "Fit stress (GPa) against engineering strain in an explicit small-strain window."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "table",
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "summary",
+     "type": "table"
+    },
+    {
+     "name": "fit",
+     "type": "table"
+    },
+    {
+     "name": "diagnostics",
+     "type": "value",
+     "value_type": "json"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "strain": {
+      "type": "string",
+      "default": "Strain",
+      "x-stk-stage": "data"
+     },
+     "stress": {
+      "type": "string",
+      "default": "Stress",
+      "x-stk-stage": "data"
+     },
+     "strain_min": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.0,
+      "x-stk-stage": "data"
+     },
+     "strain_max": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "default": 0.02,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.analysis.lammps_tg@1",
+   "type": "stk.analysis.lammps_tg",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "analysis",
+   "category": "analysis",
+   "title": {
+    "en": "Density glass transition",
+    "zh": "密度玻璃化转变"
+   },
+   "description": {
+    "en": "Fit two decreasing density-temperature lines; Tg is their intersection inside the split gap."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "table",
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "summary",
+     "type": "table"
+    },
+    {
+     "name": "fit",
+     "type": "table"
+    },
+    {
+     "name": "diagnostics",
+     "type": "value",
+     "value_type": "json"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "temperature": {
+      "type": "string",
+      "default": "Temperature",
+      "x-stk-stage": "data"
+     },
+     "density": {
+      "type": "string",
+      "default": "Density",
+      "x-stk-stage": "data"
+     },
+     "split_temperature": {
+      "anyOf": [
+       {
+        "type": "number",
+        "exclusiveMinimum": 0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     },
+     "min_points": {
+      "type": "integer",
+      "minimum": 3,
+      "maximum": 250,
+      "default": 3,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
    "id": "stk.analysis.orientation_classify@1",
    "type": "stk.analysis.orientation_classify",
    "version": 1,
@@ -4032,6 +4271,60 @@
    "time_dependent": false,
    "deterministic": true,
    "cache": "disk"
+  },
+  {
+   "id": "stk.source.lammps_log@1",
+   "type": "stk.source.lammps_log",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "LAMMPS thermodynamics",
+    "zh": "LAMMPS 热力学表"
+   },
+   "description": {
+    "en": "Read one finished real-units thermo block; reject errors, truncation and nonfinite values."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "table"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "binding": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "x-stk-widget": "binding",
+      "x-stk-stage": "data"
+     },
+     "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))[^\\\\\\u0000]+$",
+      "x-stk-widget": "path",
+      "default": "log.lammps",
+      "x-stk-stage": "data"
+     },
+     "block": {
+      "type": "integer",
+      "default": -1,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "binding"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
   },
   {
    "id": "stk.source.muferro_frame@1",

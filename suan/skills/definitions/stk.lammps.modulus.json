@@ -1,0 +1,55 @@
+{
+ "schema": "stk.skill/1",
+ "id": "stk.lammps.modulus",
+ "version": 1,
+ "title": {
+  "en": "Tensile modulus",
+  "zh_CN": "拉伸模量"
+ },
+ "summary": {
+  "en": "Small-strain OLS slope with a free intercept. Stress is tensile-positive GPa. Inspect equilibration, units, fit windows and independent replicas.",
+  "zh_CN": "由指定小应变窗口内的拉伸应力斜率估算模量。须检查平衡、单位、拟合窗口与独立重复。"
+ },
+ "guide": {
+  "pack": "stk-visualize"
+ },
+ "entry": {
+  "kind": "graph.preset",
+  "preset": "lammps-modulus"
+ },
+ "dependencies": {
+  "python": [
+   {
+    "module": "numpy",
+    "purpose": {
+     "en": "Read and construct scientific result tables.",
+     "zh_CN": "读取和构造科学结果表。"
+    }
+   },
+   {
+    "module": "matplotlib",
+    "outputs": [
+     "plot"
+    ],
+    "purpose": {
+     "en": "Draw the measured data and fitted lines.",
+     "zh_CN": "绘制原始数据与拟合线。"
+    }
+   }
+  ]
+ },
+ "examples": [
+  {
+   "title": {
+    "en": "Fit with numeric outputs",
+    "zh_CN": "拟合并查看数值输出"
+   },
+   "parameters": {},
+   "outputs": [
+    "summary",
+    "fit",
+    "diagnostics"
+   ]
+  }
+ ]
+}
