@@ -1,0 +1,323 @@
+{
+  "scope": "Initial model construction at two longer chain lengths; no MD equilibration or property validation",
+  "models": [
+    {
+      "parameters": {
+        "chain_length": 8,
+        "chain_count": 6,
+        "packing_density": 150.0,
+        "seed": 42
+      },
+      "validation": {
+        "formula_per_chain": {
+          "C": 80,
+          "H": 66,
+          "O": 33
+        },
+        "chain_count": 6,
+        "chain_charge_e": [
+          -1.942890293094024e-16,
+          -1.942890293094024e-16,
+          -1.942890293094024e-16,
+          -1.942890293094024e-16,
+          -1.942890293094024e-16,
+          -1.942890293094024e-16
+        ],
+        "atom_types": {
+          "PET_CA": 288,
+          "PET_CO_ACID": 6,
+          "PET_CO_ESTER": 90,
+          "PET_CT_ESTER": 90,
+          "PET_CT_OH": 6,
+          "PET_HA": 192,
+          "PET_HAE": 180,
+          "PET_HC_OH": 12,
+          "PET_HO_ACID": 6,
+          "PET_HO_TAIL": 6,
+          "PET_OES": 90,
+          "PET_OH_ACID": 6,
+          "PET_OH_TAIL": 6,
+          "PET_O_ACID": 6,
+          "PET_O_ESTER": 90
+        },
+        "atoms": 1074,
+        "bonds": 1116,
+        "angles": 1830,
+        "proper_torsions": 2448,
+        "periodic_impropers": 384,
+        "untyped_foyer_candidates_removed": 0,
+        "explicit_periodic_planar_impropers": 384,
+        "ordering": "central atom SECOND; explicit source tuples preserved",
+        "initial_geometry": {
+          "method": "RDKit ETKDGv3; deterministic default then random-coordinate fallback",
+          "seed": 42,
+          "embedding_attempts": [
+            {
+              "use_random_coordinates": false,
+              "return_code": -1,
+              "seconds": 0.11316991795320064,
+              "failure_counts": [
+                30,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "use_random_coordinates": true,
+              "return_code": 0,
+              "seconds": 1.6024740930879489,
+              "failure_counts": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ],
+          "max_attempts_per_mode": 30,
+          "rdkit_internal_timeout_seconds": 45,
+          "uff_max_iterations": 200,
+          "uff_status": 1,
+          "timeout_scope": "RDKit timeout does not cover all preprocessing; launcher provides the hard 1800 s wall budget",
+          "coordinate_sha256": "7bcf68f6f60a7524632a79b30b993c634ee94cf2f731332cb2d12d3cea70aafb",
+          "coordinate_hash_units": "Angstrom, little-endian float64, RDKit atom order"
+        },
+        "periodic_interchain_self_image_overlap_threshold_A": 1.99,
+        "periodic_interchain_self_image_overlap_count": 0,
+        "packmol": {
+          "version": "21.2.1",
+          "perfect_packing_verified": true
+        },
+        "input_element_masses_replaced_amu": {
+          "PET_CA": 12.01078,
+          "PET_CO_ACID": 12.01078,
+          "PET_CO_ESTER": 12.01078,
+          "PET_CT_ESTER": 12.01078,
+          "PET_CT_OH": 12.01078,
+          "PET_HA": 1.007947,
+          "PET_HAE": 1.007947,
+          "PET_HC_OH": 1.007947,
+          "PET_HO_ACID": 1.007947,
+          "PET_HO_TAIL": 1.007947,
+          "PET_OES": 15.99943,
+          "PET_OH_ACID": 15.99943,
+          "PET_OH_TAIL": 15.99943,
+          "PET_O_ACID": 15.99943,
+          "PET_O_ESTER": 15.99943
+        },
+        "box_lengths_A": [
+          46.92332999999999,
+          46.92332999999999,
+          46.92332999999999
+        ],
+        "initial_density_kg_m3": 150.0000224392037
+      },
+      "software": {
+        "mbuild": "1.4.0",
+        "foyer": "1.2.0",
+        "parmed": "4.3.1",
+        "rdkit": "2026.9.1",
+        "packmol": "21.2.1"
+      },
+      "timings_seconds": {
+        "initial_geometry": 2.4048884180374444,
+        "packmol": 5.65143830399029,
+        "foyer_and_validation": 0.9965414120815694
+      },
+      "files": {
+        "forcefield.xml": "0f4a88629f62a87cc8a9f7bd6a744811c49fb38bb1d9e200362cc6bf015c1962",
+        "in.diffusion": "4f7f98b65fddc70c11336bd5fb2db5e3de79710c390ed951debdc785d00b2103",
+        "in.modulus": "e77f0fc172fae781576a670c4eedcd92d5dc4d2ad855265682d5129a40a9167d",
+        "in.pet": "e7c1d3aed97f77e282b6fb75451be56f613c93fd83d9130d4b0bc23290bb3deb",
+        "in.tg": "0ab5276c557639493a5bee0cfc7889f5b7ffa906c65ca057888fdde9c68029fa",
+        "model.in": "04a36229f0aecc5ab1356fc8a0c1a38a92a432127a829fc5fc65f2d7894541f4",
+        "pet.data": "3904d2a7ae4ab3cb1c0bd095e5216df13e61ae17ab9b49932d06bdd784abc7d8"
+      },
+      "profile_id": "stk.pet.opls-mk2022/1",
+      "profile_canonical_sha256": "6e1d1479246066f05e290748e4491e6093f2bc02f6dad54144f252a13ff07809",
+      "forcefield_xml_sha256": "0f4a88629f62a87cc8a9f7bd6a744811c49fb38bb1d9e200362cc6bf015c1962"
+    },
+    {
+      "parameters": {
+        "chain_length": 20,
+        "chain_count": 6,
+        "packing_density": 100.0,
+        "seed": 42
+      },
+      "validation": {
+        "formula_per_chain": {
+          "C": 200,
+          "H": 162,
+          "O": 81
+        },
+        "chain_count": 6,
+        "chain_charge_e": [
+          -5.273559366969494e-16,
+          -5.273559366969494e-16,
+          -5.273559366969494e-16,
+          -5.273559366969494e-16,
+          -5.273559366969494e-16,
+          -5.273559366969494e-16
+        ],
+        "atom_types": {
+          "PET_CA": 720,
+          "PET_CO_ACID": 6,
+          "PET_CO_ESTER": 234,
+          "PET_CT_ESTER": 234,
+          "PET_CT_OH": 6,
+          "PET_HA": 480,
+          "PET_HAE": 468,
+          "PET_HC_OH": 12,
+          "PET_HO_ACID": 6,
+          "PET_HO_TAIL": 6,
+          "PET_OES": 234,
+          "PET_OH_ACID": 6,
+          "PET_OH_TAIL": 6,
+          "PET_O_ACID": 6,
+          "PET_O_ESTER": 234
+        },
+        "atoms": 2658,
+        "bonds": 2772,
+        "angles": 4566,
+        "proper_torsions": 6120,
+        "periodic_impropers": 960,
+        "untyped_foyer_candidates_removed": 0,
+        "explicit_periodic_planar_impropers": 960,
+        "ordering": "central atom SECOND; explicit source tuples preserved",
+        "initial_geometry": {
+          "method": "RDKit ETKDGv3; deterministic default then random-coordinate fallback",
+          "seed": 42,
+          "embedding_attempts": [
+            {
+              "use_random_coordinates": false,
+              "return_code": -1,
+              "seconds": 1.2294192989356816,
+              "failure_counts": [
+                30,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "use_random_coordinates": true,
+              "return_code": 0,
+              "seconds": 16.346245562075637,
+              "failure_counts": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ],
+          "max_attempts_per_mode": 30,
+          "rdkit_internal_timeout_seconds": 45,
+          "uff_max_iterations": 200,
+          "uff_status": 1,
+          "timeout_scope": "RDKit timeout does not cover all preprocessing; launcher provides the hard 1800 s wall budget",
+          "coordinate_sha256": "dad59d3ad9030e894744ae622d3211d9510b54cc9f7c9d8b8b2887dd2fa38613",
+          "coordinate_hash_units": "Angstrom, little-endian float64, RDKit atom order"
+        },
+        "periodic_interchain_self_image_overlap_threshold_A": 1.99,
+        "periodic_interchain_self_image_overlap_count": 0,
+        "packmol": {
+          "version": "21.2.1",
+          "perfect_packing_verified": true
+        },
+        "input_element_masses_replaced_amu": {
+          "PET_CA": 12.01078,
+          "PET_CO_ACID": 12.01078,
+          "PET_CO_ESTER": 12.01078,
+          "PET_CT_ESTER": 12.01078,
+          "PET_CT_OH": 12.01078,
+          "PET_HA": 1.007947,
+          "PET_HAE": 1.007947,
+          "PET_HC_OH": 1.007947,
+          "PET_HO_ACID": 1.007947,
+          "PET_HO_TAIL": 1.007947,
+          "PET_OES": 15.99943,
+          "PET_OH_ACID": 15.99943,
+          "PET_OH_TAIL": 15.99943,
+          "PET_O_ACID": 15.99943,
+          "PET_O_ESTER": 15.99943
+        },
+        "box_lengths_A": [
+          72.73159,
+          72.73159,
+          72.73159
+        ],
+        "initial_density_kg_m3": 100.00001727059285
+      },
+      "software": {
+        "mbuild": "1.4.0",
+        "foyer": "1.2.0",
+        "parmed": "4.3.1",
+        "rdkit": "2026.9.1",
+        "packmol": "21.2.1"
+      },
+      "timings_seconds": {
+        "initial_geometry": 22.393972037010826,
+        "packmol": 8.123543964931741,
+        "foyer_and_validation": 2.4032808169722557
+      },
+      "files": {
+        "forcefield.xml": "0f4a88629f62a87cc8a9f7bd6a744811c49fb38bb1d9e200362cc6bf015c1962",
+        "in.diffusion": "4f7f98b65fddc70c11336bd5fb2db5e3de79710c390ed951debdc785d00b2103",
+        "in.modulus": "e77f0fc172fae781576a670c4eedcd92d5dc4d2ad855265682d5129a40a9167d",
+        "in.pet": "e7c1d3aed97f77e282b6fb75451be56f613c93fd83d9130d4b0bc23290bb3deb",
+        "in.tg": "0ab5276c557639493a5bee0cfc7889f5b7ffa906c65ca057888fdde9c68029fa",
+        "model.in": "04a36229f0aecc5ab1356fc8a0c1a38a92a432127a829fc5fc65f2d7894541f4",
+        "pet.data": "a37cfb80ed9539f44a88d902a4899e308213043b8d86c950470beaa2d6d8fb7e"
+      },
+      "profile_id": "stk.pet.opls-mk2022/1",
+      "profile_canonical_sha256": "6e1d1479246066f05e290748e4491e6093f2bc02f6dad54144f252a13ff07809",
+      "forcefield_xml_sha256": "0f4a88629f62a87cc8a9f7bd6a744811c49fb38bb1d9e200362cc6bf015c1962"
+    }
+  ]
+}

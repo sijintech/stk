@@ -1,7 +1,8 @@
 """Write foyer/ParmEd OPLS structures as LAMMPS ``full`` data in ``real`` units.
 
 No force-field assignment or charge correction happens here. Supported potentials
-are Lennard-Jones, harmonic bonds/angles and RB torsions representable by OPLS.
+are Lennard-Jones, harmonic bonds/angles, RB torsions representable by OPLS,
+and single periodic planarity impropers representable by CVFF.
 Coordinates/box lengths are Angstrom, energies kcal/mol, angles degrees, charges e.
 See https://docs.lammps.org/dihedral_opls.html and Howto_triclinic.html.
 """
@@ -43,6 +44,24 @@ def rb_to_opls(torsion_type):
                  (-2 * c[1] - 1.5 * c[3], -c[2] - c[4], -0.5 * c[3], -0.25 * c[4]))
 
 
+def periodic_improper_to_cvff(torsion_type):
+    """Convert a single ParmEd n=2, phase=180 degree planarity term.
+
+ParmEd and LAMMPS both use K * (1 - cos(2 * phi)); K has no extra 1/2.
+The writer preserves the original four-atom tuple, including its angle
+convention. Harmonic impropers and multi-term parameter lists do not fit here.
+"""
+    try:
+        amplitude = _finite(torsion_type.phi_k, "improper amplitude", minimum=0)
+        period = _finite(torsion_type.per, "improper periodicity")
+        phase = _finite(torsion_type.phase, "improper phase")
+    except AttributeError:
+        raise DataError("A single periodic improper parameter type is required") from None
+    if period != 2 or not math.isclose(phase, 180.0, rel_tol=0, abs_tol=1e-10):
+        raise DataError("CVFF planarity impropers require periodicity 2 and phase 180 degrees")
+    return amplitude, -1, 2
+
+
 def _cell(box):
     if box is None or len(box) != 6:
         raise DataError("A periodic box [a, b, c, alpha, beta, gamma] is required")
@@ -79,7 +98,10 @@ Velocities are deliberately not exported; initialize them in the input script.
     if not atoms:
         raise DataError("At least one typed atom is required")
     lengths, tilt = _cell(structure.box)
-    for name in ("dihedrals", "urey_bradleys", "cmaps", "trigonal_angles", "out_of_plane_bends",
+    periodic_impropers = list(getattr(structure, "dihedrals", ()))
+    if any(not getattr(term, "improper", False) for term in periodic_impropers):
+        raise DataError("Proper periodic dihedrals are unsupported")
+    for name in ("urey_bradleys", "cmaps", "trigonal_angles", "out_of_plane_bends",
                  "pi_torsions", "stretch_bends", "torsion_torsions"):
         if getattr(structure, name, ()):
             raise DataError(f"Unsupported potential terms: {name}")
@@ -156,6 +178,16 @@ Velocities are deliberately not exported; initialize them in the input script.
                     raise DataError("RB per-torsion 1-4 scaling is unsupported; set OPLS special_bonds in the script")
             rows.append((intern(table, key), *ids))
         sections[section] = (table, rows)
+    if periodic_impropers:
+        table, rows = {}, []
+        for term in periodic_impropers:
+            ids = members(term, 4)
+            parameter = getattr(term, "type", None)
+            if parameter is None:
+                raise DataError("Missing periodic improper parameters")
+            key = periodic_improper_to_cvff(parameter)
+            rows.append((intern(table, key), *ids))
+        sections["Improper"] = (table, rows)
     # foyer materializes OpenMM's special pairs as ParmEd adjustments. Only
     # the standard OPLS 1-2/1-3 exclusions and half-strength 1-4 pairs fit here.
     for pair in getattr(structure, "adjusts", ()):
@@ -183,10 +215,14 @@ Velocities are deliberately not exported; initialize them in the input script.
              f"{len(atoms)} atoms"]
     for section, (_, rows) in sections.items():
         lines.append(f"{len(rows)} {section.lower()}s")
-    lines.extend(["0 impropers", "", f"{len(types)} atom types"])
+    if not periodic_impropers:
+        lines.append("0 impropers")
+    lines.extend(["", f"{len(types)} atom types"])
     for section, (table, _) in sections.items():
         lines.append(f"{len(table)} {section.lower()} types")
-    lines.extend(["0 improper types", ""])
+    if not periodic_impropers:
+        lines.append("0 improper types")
+    lines.append("")
     for axis, length in zip("xyz", lengths):
         lines.append(f"0 {_fmt(length)} {axis}lo {axis}hi")
     # Include even zero tilt for consistent GMSO/LAMMPS triclinic handling.
@@ -196,6 +232,12 @@ Velocities are deliberately not exported; initialize them in the input script.
                   "# RB rounding constant omitted (kcal/mol): " + _fmt(math.fsum(
                       getattr(term.type, f"c{i}") for term in getattr(structure, "rb_torsions", ()) for i in range(5))),
                   "", "Masses", ""])
+    if periodic_impropers:
+        # Put style metadata before the first section, leaving legacy files
+        # byte-for-byte unchanged when there are no periodic impropers.
+        start = lines.index("Masses")
+        lines[start:start] = ["# improper_style cvff; original atom order preserved",
+                             f"# periodic planarity impropers written: {len(periodic_impropers)}", ""]
     lines.extend(f"{index} {_fmt(key[0])}" for key, index in types.items())
     lines.extend(["", "Pair Coeffs", ""])
     lines.extend(f"{index} {_fmt(key[1])} {_fmt(key[2])}" for key, index in types.items())

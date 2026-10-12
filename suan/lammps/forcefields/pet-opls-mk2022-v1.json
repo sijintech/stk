@@ -1,0 +1,2473 @@
+{
+  "format": "stk.pet-forcefield/1",
+  "id": "stk.pet.opls-mk2022/1",
+  "scope": "Dry neutral linear PET with one COOH and one OH end; no penetrant, ions, branching or crystallinity validation",
+  "sources": {
+    "published": {
+      "doi": "10.3390/polym14061161",
+      "url": "https://www.mdpi.com/2073-4360/14/6/1161",
+      "supplement_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC8951138.1/polymers-14-01161-s001.zip",
+      "supplement_zip_sha256": "aeb126cea1ecf997545619389bdf94e17e57470384648ad14d53564eabd03457",
+      "supplement_pdf_sha256": "65f9363f878c9c35bdbb98d51c8b0921729a072dfa3c381d1175e3aff85134ea",
+      "license": "CC-BY-4.0",
+      "citation": "Sangkhawasi et al., All-Atom Molecular Dynamics Simulations on a Single Chain of PET and PEV Polymers, Polymers 2022, 14, 1161.",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "authors": [
+        "Mattanun Sangkhawasi",
+        "Tawun Remsungnen",
+        "Alisa S. Vangnai",
+        "Rungtiva P. Poo-arporn",
+        "Thanyada Rungrotmongkol"
+      ]
+    },
+    "canonical": {
+      "url": "https://raw.githubusercontent.com/gromacs/gromacs/v2025.3/share/top/oplsaa.ff/ffbonded.itp",
+      "sha256": "145e6924f52fae7e93108fa3d674f31a53aea10c80b13dd89abf0b011adfd4fa",
+      "license": "GNU LGPL v2.1 (GROMACS v2025.3 README and COPYING)",
+      "license_url": "https://raw.githubusercontent.com/gromacs/gromacs/v2025.3/COPYING"
+    }
+  },
+  "charge_model": "Published PET trimer Merz-Kollman (B3LYP/6-31+G(d)); complete head/body/tail assignments, not isolated aromatic-carbon substitution",
+  "charge_rounding_correction": {
+    "type": "PET_OH_TAIL",
+    "published_charge_e": -0.566,
+    "effective_charge_e": -0.565,
+    "delta_e": 0.001,
+    "reason": "Published rounded head/body/tail charges sum to -0.001 e per COOH/OH chain. Correct exactly its unique terminal alcohol oxygen, rather than globally renormalizing all atoms."
+  },
+  "bonded_only_aliases": {
+    "CO": "C",
+    "OES": "OS",
+    "HAE": "HC"
+  },
+  "published_S1": {
+    "head": [
+      [
+        "H1",
+        "HO",
+        0.45
+      ],
+      [
+        "O2",
+        "OH",
+        -0.53
+      ],
+      [
+        "C3",
+        "CO",
+        0.635
+      ],
+      [
+        "O4",
+        "O",
+        -0.44
+      ],
+      [
+        "C5",
+        "CA",
+        -0.115
+      ],
+      [
+        "C6",
+        "CA",
+        -0.115
+      ],
+      [
+        "C7",
+        "CA",
+        -0.115
+      ],
+      [
+        "C8",
+        "CA",
+        -0.115
+      ],
+      [
+        "C9",
+        "CA",
+        -0.115
+      ],
+      [
+        "C10",
+        "CA",
+        -0.115
+      ],
+      [
+        "H11",
+        "HA",
+        0.115
+      ],
+      [
+        "H12",
+        "HA",
+        0.115
+      ],
+      [
+        "H13",
+        "HA",
+        0.115
+      ],
+      [
+        "H14",
+        "HA",
+        0.115
+      ],
+      [
+        "C15",
+        "CO",
+        0.625
+      ],
+      [
+        "O16",
+        "O",
+        -0.43
+      ],
+      [
+        "O17",
+        "OES",
+        -0.33
+      ],
+      [
+        "C18",
+        "CT",
+        0.19
+      ],
+      [
+        "H19",
+        "HAE",
+        0.03
+      ],
+      [
+        "H20",
+        "HAE",
+        0.03
+      ],
+      [
+        "C21",
+        "CT",
+        0.19
+      ],
+      [
+        "H22",
+        "HAE",
+        0.03
+      ],
+      [
+        "H23",
+        "HAE",
+        0.03
+      ]
+    ],
+    "body": [
+      [
+        "O24",
+        "OES",
+        -0.33
+      ],
+      [
+        "C25",
+        "CO",
+        0.625
+      ],
+      [
+        "O26",
+        "O",
+        -0.43
+      ],
+      [
+        "C27",
+        "CA",
+        -0.115
+      ],
+      [
+        "C28",
+        "CA",
+        -0.115
+      ],
+      [
+        "C29",
+        "CA",
+        -0.115
+      ],
+      [
+        "C30",
+        "CA",
+        -0.115
+      ],
+      [
+        "C31",
+        "CA",
+        -0.115
+      ],
+      [
+        "C32",
+        "CA",
+        -0.115
+      ],
+      [
+        "H33",
+        "HA",
+        0.115
+      ],
+      [
+        "H34",
+        "HA",
+        0.115
+      ],
+      [
+        "H35",
+        "HA",
+        0.115
+      ],
+      [
+        "H36",
+        "HA",
+        0.115
+      ],
+      [
+        "C37",
+        "CO",
+        0.625
+      ],
+      [
+        "O38",
+        "O",
+        -0.43
+      ],
+      [
+        "O39",
+        "OES",
+        -0.33
+      ],
+      [
+        "C40",
+        "CT",
+        0.19
+      ],
+      [
+        "H41",
+        "HAE",
+        0.03
+      ],
+      [
+        "H42",
+        "HAE",
+        0.03
+      ],
+      [
+        "C43",
+        "CT",
+        0.19
+      ],
+      [
+        "H44",
+        "HAE",
+        0.03
+      ],
+      [
+        "H45",
+        "HAE",
+        0.03
+      ]
+    ],
+    "tail": [
+      [
+        "O46",
+        "OES",
+        -0.33
+      ],
+      [
+        "C47",
+        "CO",
+        0.625
+      ],
+      [
+        "O48",
+        "O",
+        -0.43
+      ],
+      [
+        "C49",
+        "CA",
+        -0.115
+      ],
+      [
+        "C50",
+        "CA",
+        -0.115
+      ],
+      [
+        "C51",
+        "CA",
+        -0.115
+      ],
+      [
+        "C52",
+        "CA",
+        -0.115
+      ],
+      [
+        "C53",
+        "CA",
+        -0.115
+      ],
+      [
+        "C54",
+        "CA",
+        -0.115
+      ],
+      [
+        "H55",
+        "HA",
+        0.115
+      ],
+      [
+        "H56",
+        "HA",
+        0.115
+      ],
+      [
+        "H57",
+        "HA",
+        0.115
+      ],
+      [
+        "H58",
+        "HA",
+        0.115
+      ],
+      [
+        "C59",
+        "CO",
+        0.625
+      ],
+      [
+        "O60",
+        "O",
+        -0.43
+      ],
+      [
+        "O61",
+        "OES",
+        -0.33
+      ],
+      [
+        "C62",
+        "CT",
+        0.19
+      ],
+      [
+        "H63",
+        "HAE",
+        0.03
+      ],
+      [
+        "H64",
+        "HAE",
+        0.03
+      ],
+      [
+        "C65",
+        "CT",
+        0.145
+      ],
+      [
+        "H66",
+        "HC",
+        0.06
+      ],
+      [
+        "H67",
+        "HC",
+        0.06
+      ],
+      [
+        "O68",
+        "OH",
+        -0.566
+      ],
+      [
+        "H69",
+        "HO",
+        0.3
+      ]
+    ]
+  },
+  "atom_types": [
+    {
+      "name": "PET_CA",
+      "class": "CA",
+      "element": "C",
+      "smarts": "[C;X3;r6]",
+      "charge_e": -0.115,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        3.55,
+        0.07,
+        12.012
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_HA",
+      "class": "HA",
+      "element": "H",
+      "smarts": "[H][C;X3;r6]",
+      "charge_e": 0.115,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        2.42,
+        0.03,
+        1.008
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_CO_ACID",
+      "class": "CO",
+      "element": "C",
+      "smarts": "[C;X3]([O;X1])([O;X2][H])[C;X3;r6]",
+      "charge_e": 0.635,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        3.75,
+        0.066,
+        12.012
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_O_ACID",
+      "class": "O",
+      "element": "O",
+      "smarts": "[O;X1][C;X3]([O;X2][H])[C;X3;r6]",
+      "charge_e": -0.44,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        2.96,
+        0.21,
+        15.999
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_OH_ACID",
+      "class": "OH",
+      "element": "O",
+      "smarts": "[O;X2]([H])[C;X3]([O;X1])[C;X3;r6]",
+      "charge_e": -0.53,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        3,
+        0.17,
+        15.999
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_HO_ACID",
+      "class": "HO",
+      "element": "H",
+      "smarts": "[H][O;X2][C;X3]([O;X1])[C;X3;r6]",
+      "charge_e": 0.45,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        0.5,
+        0.03,
+        1.008
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_CO_ESTER",
+      "class": "CO",
+      "element": "C",
+      "smarts": "[C;X3]([O;X1])([O;X2][C;X4])[C;X3;r6]",
+      "charge_e": 0.625,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        3.75,
+        0.066,
+        12.012
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_O_ESTER",
+      "class": "O",
+      "element": "O",
+      "smarts": "[O;X1][C;X3]([O;X2][C;X4])[C;X3;r6]",
+      "charge_e": -0.43,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        2.96,
+        0.21,
+        15.999
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_OES",
+      "class": "OES",
+      "element": "O",
+      "smarts": "[O;X2]([C;X3]([O;X1])[C;X3;r6])[C;X4]",
+      "charge_e": -0.33,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        2.9,
+        0.14,
+        15.999
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_CT_ESTER",
+      "class": "CT",
+      "element": "C",
+      "smarts": "[C;X4]([O;X2][C;X3]([O;X1])[C;X3;r6])",
+      "charge_e": 0.19,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        3.5,
+        0.066,
+        12.012
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_HAE",
+      "class": "HAE",
+      "element": "H",
+      "smarts": "[H][C;X4]([O;X2][C;X3]([O;X1])[C;X3;r6])",
+      "charge_e": 0.03,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        2.42,
+        0.03,
+        1.008
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_CT_OH",
+      "class": "CT",
+      "element": "C",
+      "smarts": "[C;X4]([O;X2][H])",
+      "charge_e": 0.145,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        3.5,
+        0.066,
+        12.012
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_HC_OH",
+      "class": "HC",
+      "element": "H",
+      "smarts": "[H][C;X4]([O;X2][H])",
+      "charge_e": 0.06,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        2.5,
+        0.03,
+        1.008
+      ],
+      "source": "Polymers 2022 S1/S2"
+    },
+    {
+      "name": "PET_OH_TAIL",
+      "class": "OH",
+      "element": "O",
+      "smarts": "[O;X2]([H])[C;X4]",
+      "charge_e": -0.565,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        3,
+        0.17,
+        15.999
+      ],
+      "source": "Polymers 2022 S1/S2; tail OH uses recorded rounding correction"
+    },
+    {
+      "name": "PET_HO_TAIL",
+      "class": "HO",
+      "element": "H",
+      "smarts": "[H][O;X2][C;X4]",
+      "charge_e": 0.3,
+      "lj_sigma_A_epsilon_kcal_mass": [
+        0.5,
+        0.03,
+        1.008
+      ],
+      "source": "Polymers 2022 S1/S2"
+    }
+  ],
+  "terms": {
+    "bond": [
+      {
+        "types": [
+          "CA",
+          "CA"
+        ],
+        "foyer_parameters": {
+          "length": 0.13999999999999999,
+          "k": 392459.2
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CA",
+            "CA"
+          ],
+          "source_parameters": [
+            938,
+            1.4
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CO"
+        ],
+        "foyer_parameters": {
+          "length": 0.149,
+          "k": 334720.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CA",
+            "CO"
+          ],
+          "source_parameters": [
+            800,
+            1.49
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "HA"
+        ],
+        "foyer_parameters": {
+          "length": 0.10800000000000001,
+          "k": 307105.6
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CA",
+            "HA"
+          ],
+          "source_parameters": [
+            734,
+            1.08
+          ]
+        }
+      },
+      {
+        "types": [
+          "CO",
+          "O"
+        ],
+        "foyer_parameters": {
+          "length": 0.12290000000000001,
+          "k": 476976.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CO",
+            "O"
+          ],
+          "source_parameters": [
+            1140,
+            1.229
+          ]
+        }
+      },
+      {
+        "types": [
+          "CO",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "length": 0.13269999999999998,
+          "k": 179075.2
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CO",
+            "OES"
+          ],
+          "source_parameters": [
+            428,
+            1.327
+          ]
+        }
+      },
+      {
+        "types": [
+          "CO",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "length": 0.13640000000000002,
+          "k": 376560.00000000006
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CO",
+            "OH"
+          ],
+          "source_parameters": [
+            900,
+            1.364
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "CT"
+        ],
+        "foyer_parameters": {
+          "length": 0.15289999999999998,
+          "k": 224262.40000000002
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CT",
+            "CT"
+          ],
+          "source_parameters": [
+            536,
+            1.529
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "HAE"
+        ],
+        "foyer_parameters": {
+          "length": 0.10900000000000001,
+          "k": 284512.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CT",
+            "HAE"
+          ],
+          "source_parameters": [
+            680,
+            1.09
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "HC"
+        ],
+        "foyer_parameters": {
+          "length": 0.10900000000000001,
+          "k": 284512.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CT",
+            "HC"
+          ],
+          "source_parameters": [
+            680,
+            1.09
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "length": 0.141,
+          "k": 267776.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "CT",
+            "OES"
+          ],
+          "source_parameters": [
+            640,
+            1.41
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "length": 0.141,
+          "k": 267776.0
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "CT",
+            "OH"
+          ],
+          "source_types": [
+            "CT",
+            "OH"
+          ],
+          "source_line_number": 213,
+          "source_line": "CT    OH      1    0.14100   267776.0   ;",
+          "source_function": 1,
+          "source_parameters": [
+            0.141,
+            267776.0
+          ],
+          "source_units": [
+            "nm",
+            "kJ mol^-1 nm^-2"
+          ],
+          "parmed_parameters": {
+            "req_A": 1.41,
+            "k_kcal_mol_A2": 320.0
+          }
+        }
+      },
+      {
+        "types": [
+          "HO",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "length": 0.0945,
+          "k": 462750.39999999997
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_bond_kr_kcal_mol_A2_r0_A",
+          "source_types": [
+            "HO",
+            "OH"
+          ],
+          "source_parameters": [
+            1106,
+            0.945
+          ]
+        }
+      }
+    ],
+    "angle": [
+      {
+        "types": [
+          "CA",
+          "CA",
+          "CA"
+        ],
+        "foyer_parameters": {
+          "angle": 2.0943951023931953,
+          "k": 527.184
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "CA",
+            "CA",
+            "CA"
+          ],
+          "source_types": [
+            "CA",
+            "CA",
+            "CA"
+          ],
+          "source_line_number": 587,
+          "source_line": "CA     CA     CA      1   120.000    527.184   ; PHE(OL)",
+          "source_function": 1,
+          "source_parameters": [
+            120.0,
+            527.184
+          ],
+          "source_units": [
+            "deg",
+            "kJ mol^-1 rad^-2"
+          ],
+          "parmed_parameters": {
+            "theteq_deg": 120.0,
+            "k_kcal_mol_rad2": 62.99999999999999
+          }
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CA",
+          "CO"
+        ],
+        "foyer_parameters": {
+          "angle": 2.0943951023931953,
+          "k": 711.28
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CA",
+            "CA",
+            "CO"
+          ],
+          "source_parameters": [
+            170,
+            120
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CA",
+          "HA"
+        ],
+        "foyer_parameters": {
+          "angle": 2.0943951023931953,
+          "k": 292.88
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CA",
+            "CA",
+            "HA"
+          ],
+          "source_parameters": [
+            70,
+            120
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CO",
+          "O"
+        ],
+        "foyer_parameters": {
+          "angle": 2.101376419401173,
+          "k": 669.44
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CA",
+            "CO",
+            "O"
+          ],
+          "source_parameters": [
+            160,
+            120.4
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CO",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "angle": 1.9442967867216832,
+          "k": 677.808
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CA",
+            "CO",
+            "OES"
+          ],
+          "source_parameters": [
+            162,
+            111.4
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CO",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "angle": 1.9526743671312559,
+          "k": 711.28
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CA",
+            "CO",
+            "OH"
+          ],
+          "source_parameters": [
+            170,
+            111.88
+          ]
+        }
+      },
+      {
+        "types": [
+          "CO",
+          "OES",
+          "CT"
+        ],
+        "foyer_parameters": {
+          "angle": 2.0402898955813713,
+          "k": 694.544
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CO",
+            "OES",
+            "CT"
+          ],
+          "source_parameters": [
+            166,
+            116.9
+          ]
+        }
+      },
+      {
+        "types": [
+          "CO",
+          "OH",
+          "HO"
+        ],
+        "foyer_parameters": {
+          "angle": 1.9722220547535925,
+          "k": 292.88
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CO",
+            "OH",
+            "HO"
+          ],
+          "source_parameters": [
+            70,
+            113
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "CT",
+          "HAE"
+        ],
+        "foyer_parameters": {
+          "angle": 1.932079481957723,
+          "k": 313.8
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CT",
+            "CT",
+            "HAE"
+          ],
+          "source_parameters": [
+            75,
+            110.7
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "CT",
+          "HC"
+        ],
+        "foyer_parameters": {
+          "angle": 1.932079481957723,
+          "k": 313.8
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "CT",
+            "CT",
+            "HC"
+          ],
+          "source_types": [
+            "CT",
+            "CT",
+            "HC"
+          ],
+          "source_line_number": 881,
+          "source_line": "CT     CT     HC      1   110.700    313.800   ; CHARMM 22 parameter file",
+          "source_function": 1,
+          "source_parameters": [
+            110.7,
+            313.8
+          ],
+          "source_units": [
+            "deg",
+            "kJ mol^-1 rad^-2"
+          ],
+          "parmed_parameters": {
+            "theteq_deg": 110.7,
+            "k_kcal_mol_rad2": 37.5
+          }
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "CT",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "angle": 1.911135530933791,
+          "k": 418.40000000000003
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "CT",
+            "CT",
+            "OES"
+          ],
+          "source_parameters": [
+            100,
+            109.5
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "CT",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "angle": 1.911135530933791,
+          "k": 418.4
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "CT",
+            "CT",
+            "OH"
+          ],
+          "source_types": [
+            "CT",
+            "CT",
+            "OH"
+          ],
+          "source_line_number": 909,
+          "source_line": "CT     CT     OH      1   109.500    418.400   ;",
+          "source_function": 1,
+          "source_parameters": [
+            109.5,
+            418.4
+          ],
+          "source_units": [
+            "deg",
+            "kJ mol^-1 rad^-2"
+          ],
+          "parmed_parameters": {
+            "theteq_deg": 109.5,
+            "k_kcal_mol_rad2": 49.99999999999999
+          }
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "OH",
+          "HO"
+        ],
+        "foyer_parameters": {
+          "angle": 1.8936822384138476,
+          "k": 460.24
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "CT",
+            "OH",
+            "HO"
+          ],
+          "source_types": [
+            "CT",
+            "OH",
+            "HO"
+          ],
+          "source_line_number": 1095,
+          "source_line": "CT     OH     HO      1   108.500    460.240   ;",
+          "source_function": 1,
+          "source_parameters": [
+            108.5,
+            460.24
+          ],
+          "source_units": [
+            "deg",
+            "kJ mol^-1 rad^-2"
+          ],
+          "parmed_parameters": {
+            "theteq_deg": 108.5,
+            "k_kcal_mol_rad2": 55.0
+          }
+        }
+      },
+      {
+        "types": [
+          "HAE",
+          "CT",
+          "HAE"
+        ],
+        "foyer_parameters": {
+          "angle": 1.8814649336498872,
+          "k": 276.144
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "HC",
+            "CT",
+            "HC"
+          ],
+          "source_types": [
+            "HC",
+            "CT",
+            "HC"
+          ],
+          "source_line_number": 929,
+          "source_line": "HC     CT     HC      1   107.800    276.144   ; CHARMM 22 parameter file",
+          "source_function": 1,
+          "source_parameters": [
+            107.8,
+            276.144
+          ],
+          "source_units": [
+            "deg",
+            "kJ mol^-1 rad^-2"
+          ],
+          "parmed_parameters": {
+            "theteq_deg": 107.8,
+            "k_kcal_mol_rad2": 33.0
+          }
+        }
+      },
+      {
+        "types": [
+          "HAE",
+          "CT",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "angle": 1.911135530933791,
+          "k": 292.88
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "HAE",
+            "CT",
+            "OES"
+          ],
+          "source_parameters": [
+            70,
+            109.5
+          ]
+        }
+      },
+      {
+        "types": [
+          "HC",
+          "CT",
+          "HC"
+        ],
+        "foyer_parameters": {
+          "angle": 1.8814649336498872,
+          "k": 276.144
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "HC",
+            "CT",
+            "HC"
+          ],
+          "source_parameters": [
+            66,
+            107.8
+          ]
+        }
+      },
+      {
+        "types": [
+          "HC",
+          "CT",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "angle": 1.911135530933791,
+          "k": 292.88
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "HC",
+            "CT",
+            "OH"
+          ],
+          "source_types": [
+            "HC",
+            "CT",
+            "OH"
+          ],
+          "source_line_number": 961,
+          "source_line": "HC     CT     OH      1   109.500    292.880   ;",
+          "source_function": 1,
+          "source_parameters": [
+            109.5,
+            292.88
+          ],
+          "source_units": [
+            "deg",
+            "kJ mol^-1 rad^-2"
+          ],
+          "parmed_parameters": {
+            "theteq_deg": 109.5,
+            "k_kcal_mol_rad2": 35.0
+          }
+        }
+      },
+      {
+        "types": [
+          "O",
+          "CO",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "angle": 2.1537362969610028,
+          "k": 694.544
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "O",
+            "CO",
+            "OES"
+          ],
+          "source_parameters": [
+            166,
+            123.4
+          ]
+        }
+      },
+      {
+        "types": [
+          "O",
+          "CO",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "angle": 2.152340033559407,
+          "k": 836.8000000000001
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S3_angle_ka_kcal_mol_rad2_theta0_deg",
+          "source_types": [
+            "O",
+            "CO",
+            "OH"
+          ],
+          "source_parameters": [
+            200,
+            123.32
+          ]
+        }
+      }
+    ],
+    "proper": [
+      {
+        "types": [
+          "CA",
+          "CA",
+          "CA",
+          "CA"
+        ],
+        "foyer_parameters": {
+          "c0": 30.334,
+          "c1": 0.0,
+          "c2": -30.334,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CA",
+            "CA",
+            "CA",
+            "CA"
+          ],
+          "source_parameters": [
+            0,
+            7.25,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CA",
+          "CA",
+          "CO"
+        ],
+        "foyer_parameters": {
+          "c0": 30.334,
+          "c1": 0.0,
+          "c2": -30.334,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CA",
+            "CA",
+            "CA",
+            "CO"
+          ],
+          "source_parameters": [
+            0,
+            7.25,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CA",
+          "CA",
+          "HA"
+        ],
+        "foyer_parameters": {
+          "c0": 30.334,
+          "c1": 0.0,
+          "c2": -30.334,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CA",
+            "CA",
+            "CA",
+            "HA"
+          ],
+          "source_parameters": [
+            0,
+            7.25,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CA",
+          "CO",
+          "O"
+        ],
+        "foyer_parameters": {
+          "c0": 8.7864,
+          "c1": 0.0,
+          "c2": -8.7864,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CA",
+            "CA",
+            "CO",
+            "O"
+          ],
+          "source_parameters": [
+            0,
+            2.1,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CA",
+          "CO",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "c0": 8.2634,
+          "c1": 0.0,
+          "c2": -8.2634,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CA",
+            "CA",
+            "CO",
+            "OES"
+          ],
+          "source_parameters": [
+            0,
+            1.975,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CA",
+          "CO",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "c0": 3.01248,
+          "c1": 0.0,
+          "c2": -3.01248,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CA",
+            "CA",
+            "CO",
+            "OH"
+          ],
+          "source_parameters": [
+            0,
+            0.72,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CO",
+          "OES",
+          "CT"
+        ],
+        "foyer_parameters": {
+          "c0": 29.691756,
+          "c1": -2.5083080000000004,
+          "c2": -27.183448000000002,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CA",
+            "CO",
+            "OES",
+            "CT"
+          ],
+          "source_parameters": [
+            1.199,
+            6.497,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CA",
+          "CO",
+          "OH",
+          "HO"
+        ],
+        "foyer_parameters": {
+          "c0": 29.288,
+          "c1": -8.368,
+          "c2": -20.92,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "CA",
+            "C",
+            "OH",
+            "HO"
+          ],
+          "source_types": [
+            "CA",
+            "C",
+            "OH",
+            "HO"
+          ],
+          "source_line_number": 1387,
+          "source_line": "CA     C      OH     HO      3     29.28800  -8.36800 -20.92000   0.00000   0.00000   0.00000 ; benzoic acids & esters",
+          "source_function": 3,
+          "source_parameters": [
+            29.288,
+            -8.368,
+            -20.92,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "source_units": [
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1"
+          ],
+          "parmed_parameters": {
+            "rb_c0_to_c5_kcal_mol": [
+              7.0,
+              -2.0,
+              -5.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "lammps_opls_K1_to_K4_kcal_mol": [
+            4.0,
+            5.0,
+            -0.0,
+            -0.0
+          ],
+          "rb_to_opls_constant_kcal_mol": 0.0,
+          "conversion_max_error_kcal_mol": 1.7763568394002505e-15
+        }
+      },
+      {
+        "types": [
+          "CO",
+          "CA",
+          "CA",
+          "HA"
+        ],
+        "foyer_parameters": {
+          "c0": 30.334,
+          "c1": 0.0,
+          "c2": -30.334,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CO",
+            "CA",
+            "CA",
+            "HA"
+          ],
+          "source_parameters": [
+            0,
+            7.25,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CO",
+          "OES",
+          "CT",
+          "CT"
+        ],
+        "foyer_parameters": {
+          "c0": -4.524996,
+          "c1": 2.558516,
+          "c2": 3.93296,
+          "c3": -1.96648,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CO",
+            "OES",
+            "CT",
+            "CT"
+          ],
+          "source_parameters": [
+            -0.518,
+            -0.94,
+            0.235
+          ]
+        }
+      },
+      {
+        "types": [
+          "CO",
+          "OES",
+          "CT",
+          "HAE"
+        ],
+        "foyer_parameters": {
+          "c0": 0.336812,
+          "c1": 1.0104360000000001,
+          "c2": 0.0,
+          "c3": -1.347248,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CO",
+            "OES",
+            "CT",
+            "HAE"
+          ],
+          "source_parameters": [
+            0,
+            0,
+            0.161
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "CT",
+          "OH",
+          "HO"
+        ],
+        "foyer_parameters": {
+          "c0": -6.679756000000001,
+          "c1": -9.44538,
+          "c2": 16.125136,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CT",
+            "CT",
+            "OH",
+            "HO"
+          ],
+          "source_parameters": [
+            4.515,
+            -3.854,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "CT",
+          "OES",
+          "CO",
+          "O"
+        ],
+        "foyer_parameters": {
+          "c0": 25.104,
+          "c1": 0.0,
+          "c2": -25.104,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "CT",
+            "OES",
+            "CO",
+            "O"
+          ],
+          "source_parameters": [
+            0,
+            6,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "HA",
+          "CA",
+          "CA",
+          "HA"
+        ],
+        "foyer_parameters": {
+          "c0": 30.334,
+          "c1": 0.0,
+          "c2": -30.334,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "HA",
+            "CA",
+            "CA",
+            "HA"
+          ],
+          "source_types": [
+            "X",
+            "CA",
+            "CA",
+            "X"
+          ],
+          "source_line_number": 1956,
+          "source_line": "X      CA     CA     X       3     30.33400   0.00000 -30.33400   0.00000   0.00000   0.00000 ; aromatic ring",
+          "source_function": 3,
+          "source_parameters": [
+            30.334,
+            0.0,
+            -30.334,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "source_units": [
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1"
+          ],
+          "parmed_parameters": {
+            "rb_c0_to_c5_kcal_mol": [
+              7.25,
+              0.0,
+              -7.25,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "lammps_opls_K1_to_K4_kcal_mol": [
+            -0.0,
+            7.25,
+            -0.0,
+            -0.0
+          ],
+          "rb_to_opls_constant_kcal_mol": 0.0,
+          "conversion_max_error_kcal_mol": 2.6645352591003757e-15
+        }
+      },
+      {
+        "types": [
+          "HAE",
+          "CT",
+          "CT",
+          "HAE"
+        ],
+        "foyer_parameters": {
+          "c0": 0.6276,
+          "c1": 1.8827999999999998,
+          "c2": 0.0,
+          "c3": -2.5104,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "HAE",
+            "CT",
+            "CT",
+            "HAE"
+          ],
+          "source_parameters": [
+            0,
+            0,
+            0.3
+          ]
+        }
+      },
+      {
+        "types": [
+          "HAE",
+          "CT",
+          "CT",
+          "HC"
+        ],
+        "foyer_parameters": {
+          "c0": 0.6276,
+          "c1": 1.8828,
+          "c2": 0.0,
+          "c3": -2.5104,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "HC",
+            "CT",
+            "CT",
+            "HC"
+          ],
+          "source_types": [
+            "HC",
+            "CT",
+            "CT",
+            "HC"
+          ],
+          "source_line_number": 1824,
+          "source_line": "HC     CT     CT     HC      3      0.62760   1.88280   0.00000  -2.51040   0.00000   0.00000 ; hydrocarbon *new* 11/99",
+          "source_function": 3,
+          "source_parameters": [
+            0.6276,
+            1.8828,
+            0.0,
+            -2.5104,
+            0.0,
+            0.0
+          ],
+          "source_units": [
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1"
+          ],
+          "parmed_parameters": {
+            "rb_c0_to_c5_kcal_mol": [
+              0.15,
+              0.45,
+              0.0,
+              -0.6,
+              0.0,
+              0.0
+            ]
+          },
+          "lammps_opls_K1_to_K4_kcal_mol": [
+            -1.1102230246251565e-16,
+            -0.0,
+            0.3,
+            -0.0
+          ],
+          "rb_to_opls_constant_kcal_mol": 5.551115123125783e-17,
+          "conversion_max_error_kcal_mol": 2.498001805406602e-16
+        }
+      },
+      {
+        "types": [
+          "HAE",
+          "CT",
+          "CT",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "c0": 0.9790560000000001,
+          "c1": 2.9371680000000002,
+          "c2": 0.0,
+          "c3": -3.9162240000000006,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "HAE",
+            "CT",
+            "CT",
+            "OES"
+          ],
+          "source_parameters": [
+            0,
+            0,
+            0.468
+          ]
+        }
+      },
+      {
+        "types": [
+          "HAE",
+          "CT",
+          "CT",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "c0": 0.97905,
+          "c1": 2.93716,
+          "c2": 0.0,
+          "c3": -3.91622,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "HC",
+            "CT",
+            "CT",
+            "OH"
+          ],
+          "source_types": [
+            "HC",
+            "CT",
+            "CT",
+            "OH"
+          ],
+          "source_line_number": 1831,
+          "source_line": "HC     CT     CT     OH      3      0.97905   2.93716   0.00000  -3.91622   0.00000   0.00000 ; alcohols, ethers AA",
+          "source_function": 3,
+          "source_parameters": [
+            0.97905,
+            2.93716,
+            0.0,
+            -3.91622,
+            0.0,
+            0.0
+          ],
+          "source_units": [
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1"
+          ],
+          "parmed_parameters": {
+            "rb_c0_to_c5_kcal_mol": [
+              0.23399856596558316,
+              0.7019980879541109,
+              0.0,
+              -0.9359990439770555,
+              0.0,
+              0.0
+            ]
+          },
+          "lammps_opls_K1_to_K4_kcal_mol": [
+            2.390057361356668e-06,
+            -0.0,
+            0.46799952198852773,
+            -0.0
+          ],
+          "rb_to_opls_constant_kcal_mol": -2.3900573613844234e-06,
+          "conversion_max_error_kcal_mol": 3.0531133177191805e-16
+        }
+      },
+      {
+        "types": [
+          "HC",
+          "CT",
+          "CT",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "c0": 0.97905,
+          "c1": 2.93716,
+          "c2": 0.0,
+          "c3": -3.91622,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "HC",
+            "CT",
+            "CT",
+            "OS"
+          ],
+          "source_types": [
+            "HC",
+            "CT",
+            "CT",
+            "OS"
+          ],
+          "source_line_number": 1832,
+          "source_line": "HC     CT     CT     OS      3      0.97905   2.93716   0.00000  -3.91622   0.00000   0.00000 ; alcohols, ethers AA",
+          "source_function": 3,
+          "source_parameters": [
+            0.97905,
+            2.93716,
+            0.0,
+            -3.91622,
+            0.0,
+            0.0
+          ],
+          "source_units": [
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1"
+          ],
+          "parmed_parameters": {
+            "rb_c0_to_c5_kcal_mol": [
+              0.23399856596558316,
+              0.7019980879541109,
+              0.0,
+              -0.9359990439770555,
+              0.0,
+              0.0
+            ]
+          },
+          "lammps_opls_K1_to_K4_kcal_mol": [
+            2.390057361356668e-06,
+            -0.0,
+            0.46799952198852773,
+            -0.0
+          ],
+          "rb_to_opls_constant_kcal_mol": -2.3900573613844234e-06,
+          "conversion_max_error_kcal_mol": 3.0531133177191805e-16
+        }
+      },
+      {
+        "types": [
+          "HC",
+          "CT",
+          "OH",
+          "HO"
+        ],
+        "foyer_parameters": {
+          "c0": 0.8137880000000001,
+          "c1": 2.441364,
+          "c2": 0.0,
+          "c3": -3.2551520000000003,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "HC",
+            "CT",
+            "OH",
+            "HO"
+          ],
+          "source_parameters": [
+            0,
+            0,
+            0.389
+          ]
+        }
+      },
+      {
+        "types": [
+          "HO",
+          "OH",
+          "CO",
+          "O"
+        ],
+        "foyer_parameters": {
+          "c0": 35.162336,
+          "c1": -3.857648,
+          "c2": -31.304688000000002,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "polymers-2022-supplement",
+          "table": "S4_cos3_A1_A2_A3_kcal",
+          "source_types": [
+            "HO",
+            "OH",
+            "CO",
+            "O"
+          ],
+          "source_parameters": [
+            1.844,
+            7.482,
+            0
+          ]
+        }
+      },
+      {
+        "types": [
+          "OES",
+          "CT",
+          "CT",
+          "OES"
+        ],
+        "foyer_parameters": {
+          "c0": -1.1506,
+          "c1": 1.1506,
+          "c2": 0.0,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "OS",
+            "CT",
+            "CT",
+            "OS"
+          ],
+          "source_types": [
+            "OS",
+            "CT",
+            "CT",
+            "OS"
+          ],
+          "source_line_number": 1909,
+          "source_line": "OS     CT     CT     OS      3     -1.15060   1.15060   0.00000   0.00000   0.00000   0.00000 ; polyethers, crown ethers",
+          "source_function": 3,
+          "source_parameters": [
+            -1.1506,
+            1.1506,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "source_units": [
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1"
+          ],
+          "parmed_parameters": {
+            "rb_c0_to_c5_kcal_mol": [
+              -0.275,
+              0.275,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "lammps_opls_K1_to_K4_kcal_mol": [
+            -0.55,
+            -0.0,
+            -0.0,
+            -0.0
+          ],
+          "rb_to_opls_constant_kcal_mol": 0.0,
+          "conversion_max_error_kcal_mol": 1.1102230246251565e-16
+        }
+      },
+      {
+        "types": [
+          "OES",
+          "CT",
+          "CT",
+          "OH"
+        ],
+        "foyer_parameters": {
+          "c0": 9.03534,
+          "c1": -9.03534,
+          "c2": 0.0,
+          "c3": 0.0,
+          "c4": 0.0,
+          "c5": 0.0
+        },
+        "origin": {
+          "source": "gromacs-v2025.3-oplsaa",
+          "lookup_types": [
+            "OS",
+            "CT",
+            "CT",
+            "OH"
+          ],
+          "source_types": [
+            "OH",
+            "CT",
+            "CT",
+            "OS"
+          ],
+          "source_line_number": 1908,
+          "source_line": "OH     CT     CT     OS      3      9.03534  -9.03534   0.00000   0.00000   0.00000   0.00000 ; hexopyranoses",
+          "source_function": 3,
+          "source_parameters": [
+            9.03534,
+            -9.03534,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "source_units": [
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1",
+            "kJ mol^-1"
+          ],
+          "parmed_parameters": {
+            "rb_c0_to_c5_kcal_mol": [
+              2.159498087954111,
+              -2.159498087954111,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "lammps_opls_K1_to_K4_kcal_mol": [
+            4.318996175908222,
+            -0.0,
+            -0.0,
+            -0.0
+          ],
+          "rb_to_opls_constant_kcal_mol": 0.0,
+          "conversion_max_error_kcal_mol": 8.881784197001252e-16
+        }
+      }
+    ]
+  },
+  "impropers": {
+    "carbonyl": {
+      "center_class": "CO",
+      "ordered_classes": [
+        "O",
+        "CO",
+        "CA",
+        "OES_or_OH"
+      ],
+      "phi_k_kcal_mol": 10.5,
+      "phase_deg": 180.0,
+      "periodicity": 2,
+      "cvff": [
+        10.5,
+        -1,
+        2
+      ],
+      "source": "gromacs-v2025.3-oplsaa",
+      "source_line_number": 2556,
+      "source_types": [
+        "O",
+        "C",
+        "X",
+        "Y"
+      ],
+      "source_parameters": [
+        180.0,
+        43.932,
+        2
+      ]
+    },
+    "aromatic": {
+      "center_class": "CA",
+      "ordered_classes": [
+        "HA_or_CO",
+        "CA",
+        "CA",
+        "CA"
+      ],
+      "phi_k_kcal_mol": 1.1,
+      "phase_deg": 180.0,
+      "periodicity": 2,
+      "cvff": [
+        1.1,
+        -1,
+        2
+      ],
+      "source": "gromacs-v2025.3-oplsaa",
+      "source_line_number": 2571,
+      "source_types": [
+        "Z",
+        "CA",
+        "X",
+        "Y"
+      ],
+      "source_parameters": [
+        180.0,
+        4.6024,
+        2
+      ]
+    },
+    "ordering": "Central atom is SECOND in explicit ordered tuples; preserve planes IJK/JKL. Do not use Foyer generic permutation or central-first reorder.",
+    "construction": "One explicit periodic improper per aromatic or carbonyl center; 8N per chain. XML excludes them; worker constructs them and removes only untyped Foyer candidates after validation."
+  },
+  "adaptations": [
+    "PPPM long-range Coulomb is an STK adaptation; the source paper used shifted 12 A Coulomb. This is not a byte-for-byte or trajectory reproduction.",
+    "Missing 1 bond, 6 angles, 7 proper class tuples filled explicitly from fixed GROMACS v2025.3 OPLS-AA; no wildcard force-field fallback or reinterpretation of SI labels.",
+    "Canonical planar periodic impropers are added with source and ordered tuples, not silently dropped.",
+    "Two canonical RB proper terms have source-rounding constant offsets (~2.39e-6 kcal/mol); writer permits only its existing 5e-6 kcal/mol tolerance."
+  ],
+  "conversions": {
+    "bond": "source 0.5*k*(r-r0)^2; Foyer k=k_source*4.184*100, r0_A/10; ParmEd/LAMMPS k=k_source/2",
+    "angle": "source 0.5*k*(theta-theta0)^2; Foyer k=k_source*4.184, radians; ParmEd/LAMMPS k=k_source/2",
+    "proper": "cos3 => RB [A1/2+A2+A3/2,-A1/2+1.5*A3,-A2,-2*A3,0,0]; Foyer coefficients multiply 4.184",
+    "improper": "GROMACS periodic E=k*(1+cos(n*phi-phase)); ParmEd phi_k=k/4.184; phase=180 and n=2 => CVFF [phi_k,-1,2]"
+  }
+}

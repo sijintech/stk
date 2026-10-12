@@ -18,6 +18,7 @@ import math
 import threading
 
 from . import lammps, muferro
+from .pet import DEFAULT_PARAMETERS as PET_DEFAULTS, OUTPUTS as PET_OUTPUTS
 from suan.runtime.models import TaskSpec
 from suan.lammps.spec import lammps_spec
 from suan.mupro.spec import muferro_spec
@@ -135,7 +136,31 @@ class DemoSyntheticTemplate:
         return synthetic_field(temperature, directory)
 
 
-LOCAL_TEMPLATES = {DemoSyntheticTemplate.id: DemoSyntheticTemplate()}
+class PetModelTemplate:
+    """Build a PET case locally using optional modules; its files are frozen per row."""
+    id = "pet-model/1"
+    name = "PET molecular modeling / PET 分子建模"
+    table_id = None
+    local = True
+    parameters = [
+        {"name": "chain_length", "type": "integer", "label": "Chain length / 链长", "default": PET_DEFAULTS["chain_length"]},
+        {"name": "chain_count", "type": "integer", "label": "Chain count / 链数", "default": PET_DEFAULTS["chain_count"]},
+        {"name": "packing_density", "type": "number", "unit": "kg/m3",
+         "label": "Initial packing density / 初始填充密度", "default": PET_DEFAULTS["packing_density"]},
+        {"name": "seed", "type": "integer", "label": "Random seed / 随机种子", "default": PET_DEFAULTS["seed"]},
+    ]
+    outputs = list(PET_OUTPUTS)
+
+    def run(self, parameters, directory):
+        from .pet import model_pet
+        return model_pet(parameters, directory)
+
+    def run_cancellable(self, parameters, directory, cancel):
+        from .pet import model_pet
+        return model_pet(parameters, directory, cancel=cancel)
+
+
+LOCAL_TEMPLATES = {DemoSyntheticTemplate.id: DemoSyntheticTemplate(), PetModelTemplate.id: PetModelTemplate()}
 ENTRY_POINT_GROUP = "stk.engines"
 _REMOTE_PROTOCOL = ("id", "name", "table_id", "field_ids", "describe", "describe_values", "prepare", "collect",
                     "results_prefix", "final_state")

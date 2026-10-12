@@ -472,6 +472,19 @@ class WorkflowRunExecutor:
                 time.sleep(0.05)
         raise RevisionConflict("The project kept changing; try this task again")
 
+    def _local_cancelled(self, job):
+        """A long local step also observes cancellation saved by another service."""
+        if self._closing.is_set():
+            job.cancel.set()
+        if not job.cancel.is_set():
+            try:
+                state = job.store.workflow_runs.get(job.run_id)
+                if state["status"] != "running" or state["executor_id"] != self.executor_id:
+                    job.cancel.set()
+            except (ProjectError, OSError):
+                job.cancel.set()  # The run disappeared or its project became unavailable.
+        return job.cancel.is_set()
+
     def _simulate(self, job, plan, step, row, attempt):
         from suan.workflows.templates import workflow_templates
         frozen = plan["steps"][step]
@@ -479,7 +492,34 @@ class WorkflowRunExecutor:
         relative = Path(plan["directory"], f"row-{row['number']}", step, f"attempt-{attempt}")
         directory = job.store.directory / relative
         directory.parent.mkdir(parents=True, exist_ok=True)
-        template.run(plan["parameters"][step][row["id"]], directory)
+        finished, observer = threading.Event(), None
+        try:
+            cancellable = getattr(template, "run_cancellable", None)
+            if callable(cancellable):
+                if self._local_cancelled(job):
+                    raise _Cancelled()
+
+                def observe():
+                    while not finished.wait(0.2):
+                        if self._local_cancelled(job):
+                            return
+
+                observer = threading.Thread(target=observe, daemon=True,
+                                            name="stk-workflow-cancel-" + job.run_id)
+                observer.start()
+                cancellable(plan["parameters"][step][row["id"]], directory, job.cancel)
+                if self._local_cancelled(job):
+                    raise _Cancelled()
+            else:
+                template.run(plan["parameters"][step][row["id"]], directory)
+        except Exception:
+            if job.cancel.is_set():
+                raise _Cancelled() from None
+            raise
+        finally:
+            finished.set()
+            if observer is not None:
+                observer.join(timeout=1)
         paths = [directory / name for name in frozen["outputs"]]
         missing = [path.name for path in paths if not path.is_file()]
         if missing:

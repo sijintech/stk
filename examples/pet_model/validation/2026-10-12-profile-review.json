@@ -1,0 +1,20 @@
+{
+  "charge_rows": 69,
+  "atom_types": 15,
+  "bond": {
+    "published": 11,
+    "canonical": 1
+  },
+  "angle": {
+    "canonical": 6,
+    "published": 13
+  },
+  "torsion": {
+    "published": 16,
+    "canonical": 7
+  },
+  "improper_categories": 2,
+  "energy_grid_points_per_proper": 35,
+  "issues": [],
+  "scope": "Independent scientific parameter transcription/conversion check against raster-checked SI and pinned raw GROMACS, not physical property validation"
+}

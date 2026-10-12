@@ -2,14 +2,14 @@
 
 [多尺度引擎方案](../../docs/design/multiscale-engines.md)“E1 可行性”与“E1a”所用的脚本与输入，2026-10-11 从会话临时目录移入仓库，
 供后续 E1b（建模步骤）与 E1c（分析模板）参考。**这里的 PET 模型只说明工具链可用，不是可报告的结果**：
-与酯基相连的苯环碳电荷（补丁类型 `stk_ester_ipso`，0.0）是 STK 按 OPLS-AA 惯例推出的，等待所有者决定
-（方案“需要所有者决定（E1b 之前）”）。
+与酯基相连的苯环碳电荷（补丁类型 `stk_ester_ipso`，0.0）是 STK 按 OPLS-AA 惯例推出的，是历史推断，不是新默认方案。所有者 2026-10-12 授权依据文献判断后，产品采用完整 PET 专用电荷/LJ 与 COOH/OH 端基；
+新默认体系为 546 原子，见[建模示例](../pet_model/README.md)与[来源](../../docs/pet-model.md)。此处 540 原子夹具仅用于历史写出器对照。
 
 | 文件 | 内容 |
 |---|---|
 | `pet-oplsaa-patch.xml` | foyer OPLS-AA 的补丁：芳香酯缺的角 CA–C_2–OS 与二面角 CA–C_2–OS–CT、CA–CA–C_2–OS（数值取自 GROMACS 发布的 OPLS-AA，注释中有原行），以及 `stk_ester_ipso` |
 | `build_pet.py` | mBuild 建 4 聚体链 → Packmol 松散填充 → foyer（补丁逐节并入 `oplsaa.xml` 后整体加载）→ GMSO 写 `atom_style full`、`real` 单位的数据文件；打印各步耗时 |
-| `compare_writer.py` | 540 原子正交/三斜体系逐项对照 GMSO 与 STK 写出器；可选真实 LAMMPS 的同坐标/同盒子 `run 0` 分项能量检查；仍使用历史待定电荷夹具 |
+| `compare_writer.py` | 540 原子正交/三斜体系逐项对照 GMSO 与 STK 写出器；可选真实 LAMMPS 的同坐标/同盒子 `run 0` 分项能量检查；仍使用历史电荷夹具 |
 | `in.pet` | 完整的平衡流程：最小化 → 500 K NVT → `fix deform` 逐步压缩到约 1.2 g/cm³ → NPT 降温到 300 K（约 4.4 分钟，单进程） |
 | `acceptance/` | 手动验收：真实 LAMMPS 经项目工作流与本机运行环境跑 LJ 熔体两行与 PET 两行；不在 `tests/` 下，CI 不收集 |
 

@@ -2,6 +2,53 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-12：E1b 文献参数 PET 本机建模
+
+- 授权：所有者要求按文献/公开资料判断并直接执行 PET，解除此前电荷选择等待。采用完整 PET OPLS-AA/MK 2022 适配参数，
+  苯环 C −0.115 e 与其他电荷、LJ 配套；醇端 O 的 +0.001 e 舍入修正记录原值/使用值，不沿用历史 0.0。
+  默认 COOH/OH 六条四聚体为 546 原子，不改写旧 540 原子 OH/CHO 的独立写出器夹具。
+- 独立来源复核：69 个 S1 电荷、15 个类型，12 种键（11 SI+1 canonical）、19 种角（13+6）、23 种 proper（16+7），
+  每 proper 35 个角度核对源 cos3/RB/OPLS，源行、单位及两类平面 improper 一致。
+  固定论文补充材料与 GROMACS v2025.3 文件 SHA 在资源/来源文档中，公开报告在 `examples/pet_model/validation/2026-10-12-profile-review.json`。
+- Critical review 的真实发现与修正：Foyer 保留输入元素质量，现明确换用 S2 并记录原质量；指定 Packmol 的确切程序，
+  不接受 `WITHOUT PERFECT PACKING`，使用周期填充并独立审查互链/自镜像重叠。
+  **1×DP2、250 kg/m³** 的初始盒子出现约 **1.336 Å** 自镜像重叠而拒绝；降至 80 kg/m³ 后通过。
+  成功产物发布前再次核对完整 profile、冻结参数、全部七份实际文件 SHA、XML 摘要、组成与逐链中性；
+  拒绝重名 JSON 键/非有限值/超过 2 MiB 的 manifest。取消观察持久项目状态并结束子树，不覆盖已有目录。
+- 长链构象回归先真实复现 **DP8/seed42** 的默认 ETKDG 嵌入失败；改为同种子随机坐标 fallback，直接保留坐标转换 mBuild，重复得到相同 SHA。
+  **DP8×6、150 kg/m³**（1074 原子）构象/填充/分配分别 2.405/5.651/0.997 秒；
+  **DP20×6、100 kg/m³**（2658 原子）分别 22.394/8.124/2.403 秒，类型、每链中性和周期重叠审查通过。
+  UFF 200 步状态 **1（未收敛）** 明确记录，只用于有限初始几何松弛，不能当 PET 力场或平衡验收。
+  独立 DP100 标准/随机模式在内部 timeout=45 秒下约 192 秒仍未返回，**外部停止，censored**；未当作成功或算法返回失败。
+  首版因此明确限制 **DP2–DP20**，产品启动器保留 30 分钟硬预算/取消；大链外部建模后导入仍允许。
+  证据在 `2026-10-12-{geometry,extended-chains}.json`，RDKit 内部 timeout 不承诺覆盖所有前处理。
+- 真正独立的真实软件验收 **5 passed**（20.56 秒，`/tmp/stk-pet-geometry-delivery.xml`）：
+  四原子周期 improper 的解析/OpenMM/LAMMPS 能量与力，以及两份 PET 体系的独立键图与参数核对。
+  **1×DP2、80 kg/m³** 为 47/48/77/102/16；**6×DP4、250 kg/m³** 为 546/564/918/1224/192（原子/键/角/proper/improper）。
+  原始构型六分项能量最大差 **3.75e-12 kcal/mol**；明确记录的≤0.01 Å 受控扰动后，全力最大差 **2.35e-11 kcal/mol/Å**，
+  12 个有限差分分量最大差 **6.25e-8 kcal/mol/Å**。期望系数直接从论文与 canonical 数据独立转录，不读取产品 profile 生成期望。
+  原始 DP2 近乎平面 proper 受 [LAMMPS sine 保护](https://raw.githubusercontent.com/lammps/lammps/stable_22Jul2025/src/MOLECULE/dihedral_opls.cpp)影响，
+  全力最大差 **3.49e-5**，保留原始差异，不称精确一致。非周期参考仅与相同非周期 LAMMPS Hamiltonian 比较；生成 PPPM 案例另行读回成功。
+  两份模型与四原子报告在 `examples/pet_model/validation/`，不提交生成的数据文件。
+- 真实项目路径 **1 passed**（46.29 秒，`/tmp/stk-pet-real-geometry-workflow.xml`）：
+  模块实际检测/登记→两行模型（546/47）→准备后修改表格仍用原冻结种子→八产物 SHA 快照→显式导入→Runtime/LAMMPS 最小化与 60 步运行→收集。
+  此短运行仅软件路径，约 0.25 g/cm³ 的松散盒子不是平衡密度。
+- Python 3.12/3.11/3.14 的六文件定向各 **105 passed、无跳过**（9.77/10.03/10.07 秒；`/tmp/stk-pet-agent-final{312,311,314}.xml`），
+  含独立化学图资源、manifest 反例、冻结/重开/跨进程取消、旧模板兼容；worker/profile/writer/分析定向 **87 passed**（1.74 秒）。
+  Linux 原生工作流/仿真/技能目录定向 **40/40、无跳过**（35.42 秒，`/tmp/stk-pet-native-focused.xml`）。
+  完整 Python **2569 passed、24 skipped、2 deselected**（464.88 秒，`/tmp/stk-pet-full-final.xml`）；
+  其后新增链长上限与构象回归，最终相关套件 **168 passed**（22.99 秒，`/tmp/stk-pet-related-complete.xml`），
+  Python 3.11/3.14 的 worker/profile/writer/分析/工作流最终各 **131 passed、无跳过**（6.77/6.74 秒，
+  `/tmp/stk-pet-core-complete-{311,314}.xml`）。完整计数不包含后加的一个上限用例。
+  wheel/sdist 构建成功并核对 worker、JSON/XML、文档与示例入包；从仓库外安装的包读回 profile、模板注册通过。
+- 推送门槛：上一代码头 `be9bdd7` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/38164654996) **5/5 已结束成功**；
+  当前初始文档头 `dff03f1` 的 Runtime 8/8、密钥扫描与文档也已完成成功，之后才推进本次代码推送。
+  本次代码与本节同一交付提交；提交时 CI 尚未运行，推送后补实际提交与链接。暂存约 265 KiB 改动经 gitleaks（`.gitleaks.toml`、redact）通过，无泄漏；
+  全部测试空 API key、模型变量取消，无收费模型请求。
+- 剩余限制：构象/填充与平衡分别判定，资源边界不保证长链成功；仅干燥、中性、COOH/OH 线性 PET，
+  未提供气体/水/离子参数，不声称 Tg、模量、气体 D/渗透率收敛。PPPM、参数缺项与平面 improper 都是明确适配，非作者轨迹的精确复现。
+  本机建模后显式导入远端案例；参数表与工作流创建分两次普通可撤销编辑，未实现自动串联。macOS/Windows 真机分子模块验收尚未做。
+
 ## 2026-10-11：E1c 多温度 Tg 来源与日志列校验
 
 - 审查复现两项失败（`/tmp/stk-e1c-density-before.xml`）：汇总表的八日志摘要没有进入最终 Tg 诊断；

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ForceField name="STK dry COOH/OH PET OPLS-AA MK 2022 adaptation" version="1" combining_rule="geometric">
+  <!--PET-specific S1-S4 DOI 10.3390/polym14061161; CC BY 4.0. Missing bonded terms and planar impropers: GROMACS v2025.3 OPLS-AA, LGPL-2.1. See accompanying JSON for every parameter source and adaptation.-->
+  <!--Only PET COOH/OH chemistry. The worker adds explicitly ordered periodic planar impropers from the profile JSON; this XML alone is incomplete. Tail OH charge -0.566 -> -0.565 compensates published 0.001 e per-chain rounding.-->
+  <AtomTypes>
+    <Type name="PET_CA" class="CA" element="C" mass="12.012" def="[C;X3;r6]" />
+    <Type name="PET_HA" class="HA" element="H" mass="1.008" def="[H][C;X3;r6]" />
+    <Type name="PET_CO_ACID" class="CO" element="C" mass="12.012" def="[C;X3]([O;X1])([O;X2][H])[C;X3;r6]" />
+    <Type name="PET_O_ACID" class="O" element="O" mass="15.999" def="[O;X1][C;X3]([O;X2][H])[C;X3;r6]" />
+    <Type name="PET_OH_ACID" class="OH" element="O" mass="15.999" def="[O;X2]([H])[C;X3]([O;X1])[C;X3;r6]" />
+    <Type name="PET_HO_ACID" class="HO" element="H" mass="1.008" def="[H][O;X2][C;X3]([O;X1])[C;X3;r6]" />
+    <Type name="PET_CO_ESTER" class="CO" element="C" mass="12.012" def="[C;X3]([O;X1])([O;X2][C;X4])[C;X3;r6]" />
+    <Type name="PET_O_ESTER" class="O" element="O" mass="15.999" def="[O;X1][C;X3]([O;X2][C;X4])[C;X3;r6]" />
+    <Type name="PET_OES" class="OES" element="O" mass="15.999" def="[O;X2]([C;X3]([O;X1])[C;X3;r6])[C;X4]" />
+    <Type name="PET_CT_ESTER" class="CT" element="C" mass="12.012" def="[C;X4]([O;X2][C;X3]([O;X1])[C;X3;r6])" />
+    <Type name="PET_HAE" class="HAE" element="H" mass="1.008" def="[H][C;X4]([O;X2][C;X3]([O;X1])[C;X3;r6])" />
+    <Type name="PET_CT_OH" class="CT" element="C" mass="12.012" def="[C;X4]([O;X2][H])" />
+    <Type name="PET_HC_OH" class="HC" element="H" mass="1.008" def="[H][C;X4]([O;X2][H])" />
+    <Type name="PET_OH_TAIL" class="OH" element="O" mass="15.999" def="[O;X2]([H])[C;X4]" />
+    <Type name="PET_HO_TAIL" class="HO" element="H" mass="1.008" def="[H][O;X2][C;X4]" />
+  </AtomTypes>
+  <NonbondedForce coulomb14scale="0.5" lj14scale="0.5">
+    <Atom type="PET_CA" charge="-0.115" sigma="0.355" epsilon="0.29288000000000003" />
+    <Atom type="PET_HA" charge="0.115" sigma="0.242" epsilon="0.12552" />
+    <Atom type="PET_CO_ACID" charge="0.635" sigma="0.375" epsilon="0.276144" />
+    <Atom type="PET_O_ACID" charge="-0.44" sigma="0.296" epsilon="0.87864" />
+    <Atom type="PET_OH_ACID" charge="-0.53" sigma="0.3" epsilon="0.7112800000000001" />
+    <Atom type="PET_HO_ACID" charge="0.45" sigma="0.05" epsilon="0.12552" />
+    <Atom type="PET_CO_ESTER" charge="0.625" sigma="0.375" epsilon="0.276144" />
+    <Atom type="PET_O_ESTER" charge="-0.43" sigma="0.296" epsilon="0.87864" />
+    <Atom type="PET_OES" charge="-0.33" sigma="0.29" epsilon="0.5857600000000001" />
+    <Atom type="PET_CT_ESTER" charge="0.19" sigma="0.35" epsilon="0.276144" />
+    <Atom type="PET_HAE" charge="0.03" sigma="0.242" epsilon="0.12552" />
+    <Atom type="PET_CT_OH" charge="0.145" sigma="0.35" epsilon="0.276144" />
+    <Atom type="PET_HC_OH" charge="0.06" sigma="0.25" epsilon="0.12552" />
+    <Atom type="PET_OH_TAIL" charge="-0.565" sigma="0.3" epsilon="0.7112800000000001" />
+    <Atom type="PET_HO_TAIL" charge="0.3" sigma="0.05" epsilon="0.12552" />
+  </NonbondedForce>
+  <HarmonicBondForce>
+    <Bond class1="CA" class2="CA" length="0.13999999999999999" k="392459.20000000001" />
+    <Bond class1="CA" class2="CO" length="0.14899999999999999" k="334720" />
+    <Bond class1="CA" class2="HA" length="0.10800000000000001" k="307105.59999999998" />
+    <Bond class1="CO" class2="O" length="0.12290000000000001" k="476976" />
+    <Bond class1="CO" class2="OES" length="0.13269999999999998" k="179075.20000000001" />
+    <Bond class1="CO" class2="OH" length="0.13640000000000002" k="376560.00000000006" />
+    <Bond class1="CT" class2="CT" length="0.15289999999999998" k="224262.40000000002" />
+    <Bond class1="CT" class2="HAE" length="0.10900000000000001" k="284512" />
+    <Bond class1="CT" class2="HC" length="0.10900000000000001" k="284512" />
+    <Bond class1="CT" class2="OES" length="0.14099999999999999" k="267776" />
+    <Bond class1="CT" class2="OH" length="0.14099999999999999" k="267776" />
+    <Bond class1="HO" class2="OH" length="0.094500000000000001" k="462750.39999999997" />
+  </HarmonicBondForce>
+  <HarmonicAngleForce>
+    <Angle class1="CA" class2="CA" class3="CA" angle="2.0943951023931953" k="527.18399999999997" />
+    <Angle class1="CA" class2="CA" class3="CO" angle="2.0943951023931953" k="711.27999999999997" />
+    <Angle class1="CA" class2="CA" class3="HA" angle="2.0943951023931953" k="292.88" />
+    <Angle class1="CA" class2="CO" class3="O" angle="2.101376419401173" k="669.44000000000005" />
+    <Angle class1="CA" class2="CO" class3="OES" angle="1.9442967867216832" k="677.80799999999999" />
+    <Angle class1="CA" class2="CO" class3="OH" angle="1.9526743671312559" k="711.27999999999997" />
+    <Angle class1="CO" class2="OES" class3="CT" angle="2.0402898955813713" k="694.54399999999998" />
+    <Angle class1="CO" class2="OH" class3="HO" angle="1.9722220547535925" k="292.88" />
+    <Angle class1="CT" class2="CT" class3="HAE" angle="1.9320794819577229" k="313.80000000000001" />
+    <Angle class1="CT" class2="CT" class3="HC" angle="1.9320794819577229" k="313.80000000000001" />
+    <Angle class1="CT" class2="CT" class3="OES" angle="1.911135530933791" k="418.40000000000003" />
+    <Angle class1="CT" class2="CT" class3="OH" angle="1.911135530933791" k="418.39999999999998" />
+    <Angle class1="CT" class2="OH" class3="HO" angle="1.8936822384138476" k="460.24000000000001" />
+    <Angle class1="HAE" class2="CT" class3="HAE" angle="1.8814649336498872" k="276.14400000000001" />
+    <Angle class1="HAE" class2="CT" class3="OES" angle="1.911135530933791" k="292.88" />
+    <Angle class1="HC" class2="CT" class3="HC" angle="1.8814649336498872" k="276.14400000000001" />
+    <Angle class1="HC" class2="CT" class3="OH" angle="1.911135530933791" k="292.88" />
+    <Angle class1="O" class2="CO" class3="OES" angle="2.1537362969610028" k="694.54399999999998" />
+    <Angle class1="O" class2="CO" class3="OH" angle="2.152340033559407" k="836.80000000000007" />
+  </HarmonicAngleForce>
+  <RBTorsionForce>
+    <Proper class1="CA" class2="CA" class3="CA" class4="CA" c0="30.334" c1="0" c2="-30.334" c3="0" c4="0" c5="0" />
+    <Proper class1="CA" class2="CA" class3="CA" class4="CO" c0="30.334" c1="0" c2="-30.334" c3="0" c4="0" c5="0" />
+    <Proper class1="CA" class2="CA" class3="CA" class4="HA" c0="30.334" c1="0" c2="-30.334" c3="0" c4="0" c5="0" />
+    <Proper class1="CA" class2="CA" class3="CO" class4="O" c0="8.7864000000000004" c1="0" c2="-8.7864000000000004" c3="0" c4="0" c5="0" />
+    <Proper class1="CA" class2="CA" class3="CO" class4="OES" c0="8.2634000000000007" c1="0" c2="-8.2634000000000007" c3="0" c4="0" c5="0" />
+    <Proper class1="CA" class2="CA" class3="CO" class4="OH" c0="3.01248" c1="0" c2="-3.01248" c3="0" c4="0" c5="0" />
+    <Proper class1="CA" class2="CO" class3="OES" class4="CT" c0="29.691756000000002" c1="-2.5083080000000004" c2="-27.183448000000002" c3="0" c4="0" c5="0" />
+    <Proper class1="CA" class2="CO" class3="OH" class4="HO" c0="29.288" c1="-8.3680000000000003" c2="-20.920000000000002" c3="0" c4="0" c5="0" />
+    <Proper class1="CO" class2="CA" class3="CA" class4="HA" c0="30.334" c1="0" c2="-30.334" c3="0" c4="0" c5="0" />
+    <Proper class1="CO" class2="OES" class3="CT" class4="CT" c0="-4.5249959999999998" c1="2.558516" c2="3.93296" c3="-1.96648" c4="0" c5="0" />
+    <Proper class1="CO" class2="OES" class3="CT" class4="HAE" c0="0.336812" c1="1.0104360000000001" c2="0" c3="-1.347248" c4="0" c5="0" />
+    <Proper class1="CT" class2="CT" class3="OH" class4="HO" c0="-6.6797560000000011" c1="-9.4453800000000001" c2="16.125136000000001" c3="0" c4="0" c5="0" />
+    <Proper class1="CT" class2="OES" class3="CO" class4="O" c0="25.103999999999999" c1="0" c2="-25.103999999999999" c3="0" c4="0" c5="0" />
+    <Proper class1="HA" class2="CA" class3="CA" class4="HA" c0="30.334" c1="0" c2="-30.334" c3="0" c4="0" c5="0" />
+    <Proper class1="HAE" class2="CT" class3="CT" class4="HAE" c0="0.62760000000000005" c1="1.8827999999999998" c2="0" c3="-2.5104000000000002" c4="0" c5="0" />
+    <Proper class1="HAE" class2="CT" class3="CT" class4="HC" c0="0.62760000000000005" c1="1.8828" c2="0" c3="-2.5104000000000002" c4="0" c5="0" />
+    <Proper class1="HAE" class2="CT" class3="CT" class4="OES" c0="0.97905600000000015" c1="2.9371680000000002" c2="0" c3="-3.9162240000000006" c4="0" c5="0" />
+    <Proper class1="HAE" class2="CT" class3="CT" class4="OH" c0="0.97904999999999998" c1="2.93716" c2="0" c3="-3.91622" c4="0" c5="0" />
+    <Proper class1="HC" class2="CT" class3="CT" class4="OES" c0="0.97904999999999998" c1="2.93716" c2="0" c3="-3.91622" c4="0" c5="0" />
+    <Proper class1="HC" class2="CT" class3="OH" class4="HO" c0="0.81378800000000007" c1="2.4413640000000001" c2="0" c3="-3.2551520000000003" c4="0" c5="0" />
+    <Proper class1="HO" class2="OH" class3="CO" class4="O" c0="35.162336000000003" c1="-3.8576480000000002" c2="-31.304688000000002" c3="0" c4="0" c5="0" />
+    <Proper class1="OES" class2="CT" class3="CT" class4="OES" c0="-1.1506000000000001" c1="1.1506000000000001" c2="0" c3="0" c4="0" c5="0" />
+    <Proper class1="OES" class2="CT" class3="CT" class4="OH" c0="9.0353399999999997" c1="-9.0353399999999997" c2="0" c3="0" c4="0" c5="0" />
+  </RBTorsionForce>
+</ForceField>

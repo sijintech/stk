@@ -5,8 +5,9 @@ molecular-modelling module (mBuild, foyer, GMSO, RDKit) with Packmol on PATH, fo
 
     ~/.stk/modules/envs/molecular-modeling/bin/python build_pet.py --chains 6 --out acceptance/pet-case/pet.data
 
-The charge of the ring carbon bonded to the ester group (type ``stk_ester_ipso``, 0.0) is STK's own choice and waits on
-the owner's decision; see "需要所有者决定（E1b 之前）" in the design document. Do not report results built from it.
+The ring-carbon 0.0 patch is a historical feasibility inference, not the selected product forcefield.
+The literature-backed COOH/OH PET profile is in suan/lammps/pet.py and examples/pet_model;
+this different 540-atom OH/CHO fixture remains only for writer comparison. Do not report its material properties.
 """
 from pathlib import Path
 import argparse
@@ -58,7 +59,7 @@ def chain(repeats=4):
 
 
 def typed_structure(chains=6, repeats=4, density=250.0):
-    """Historical feasibility fixture, including the still-undecided charge patch."""
+    """Historical feasibility fixture, including the historical charge patch."""
     import foyer
     import mbuild as mb
     timings, t = {}, time.time()

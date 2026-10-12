@@ -270,6 +270,8 @@ def test_choices_list_referencable_objects_only(store, project):
     assert answer["templates"] == [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID, "remote": True, "local": False},
                                    {"id": "lammps/1", "name": "LAMMPS", "table_id": lammps.TABLE_ID, "remote": True, "local": False},
                                    {"id": "demo-synthetic/1", "name": "Synthetic demo solver", "table_id": None,
+                                    "remote": False, "local": True},
+                                   {"id": "pet-model/1", "name": "PET molecular modeling / PET 分子建模", "table_id": None,
                                     "remote": False, "local": True}]
     assert store.snapshot() == before and store.history() == history  # read-only
     store.apply([{"op": "set_cell", "table_id": analyses.TABLE_ID, "record_id": project["dynamic"],
@@ -302,6 +304,8 @@ def test_bridge_methods_scripting_api_and_events(inproc, tmp_path):
                                                    {"id": "lammps/1", "name": "LAMMPS", "table_id": lammps.TABLE_ID,
                                                     "remote": True, "local": False},
                                                    {"id": "demo-synthetic/1", "name": "Synthetic demo solver", "table_id": None,
+                                                    "remote": False, "local": True},
+                                                   {"id": "pet-model/1", "name": "PET molecular modeling / PET 分子建模", "table_id": None,
                                                     "remote": False, "local": True}]}
     error = h.error("project.workflows.get", {"handle": info["handle"], "workflow_id": str(uuid4())})
     assert error["code"] == "not_found"

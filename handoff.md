@@ -1,6 +1,6 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-11，交接时 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
+更新：2026-10-12；本次 PET 建模交付与 CI 见下文及验收记录。此前 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
 代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
 [开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
@@ -23,7 +23,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 
 只有主工作树；历史分支 `docs/development-handoff`、`fix/desktop-transfer-resume` 与无关旧 PR 不属于待办，不合并也不删除。
 
-## 现在的状态（2026-10-11）
+## 现在的状态（2026-10-12）
 
 | 方向 | 状态 | 入口 |
 |---|---|---|
@@ -31,28 +31,30 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | S1 模型接入 | 全部交付：端点与密钥、数据标注与网络设置、本机一键部署（llama.cpp）、能力分档与自动切换 | [model-gateway.md](docs/design/model-gateway.md)；`suan/models/` |
 | S2 智能体 | S2a、S2b 交付（格式 13 会话/事件/对象、8 个工具、签名批准、桌面“智能体（多步）”）；**真实模型的 GUI 人工验收未做** | [agent-harness.md](docs/design/agent-harness.md)；`suan/agent/` |
 | S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
-| 多尺度引擎 | E0a、E0b、E1a、**E1b 独立数据写出器、E1c 分析模板已交付**；建模仍待电荷决定 | [方案](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md)、[分析](docs/lammps-analysis.md) |
+| 多尺度引擎 | E0a、E0b、E1a、**E1b 写出器与 PET 本机建模、E1c 分析模板已交付**；PET 参数已按所有者新授权选择 | [方案](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md)、[分析](docs/lammps-analysis.md) |
 
 ## 待所有者决定（决定前不要按某个选项实现）
 
 所有者 2026-10-11 16:46 UTC 要求至少 12 小时后再提请决策；按分钟向后取整，**2026-10-12 04:47 UTC 之前不提请决策**，
 继续已有授权且不依赖这些选择的工作。这个时间不构成批准，也不自动选择任何选项。
 
-1. **E1b 建模之前：PET 中与酯基相连的苯环碳的电荷**（[方案](docs/design/multiscale-engines.md#需要所有者决定e1b-之前)）。
-   foyer 的 OPLS-AA 给 −0.115 且无氢平衡，每条 4 聚体链净电荷 −0.805。可选：
-   (a) 采用可行性脚本临时使用的 0.0（类型 `stk_ester_ipso`，STK 按 OPLS-AA 惯例推测，非文献值、未获批准），每个生成的数据文件记录力场来源（foyer 版本、补丁 SHA-256）；
-   (b) 改用文献中 PET 常用的 LigParGen/CM1A 电荷；(c) 由合作方提供电荷。2026-10-10 已向所有者提出，**尚未答复**。
-2. **S3 下一步**：`stk.dataset/1` 两个数据格式要先交给合作方讨论；MuPRO 能否做电场扫描以产生相场回线待确认。
-3. **S2c**（外部规划模型、智能体准备运行）视所有者决定。
-4. **保存分析修改提案的持久形式**（较早的 P3 项，[建议](docs/design/review-drafts-and-conversations.md#保存分析修改提案的持久形式建议待所有者确认2026-10-06)）：仍待确认，目前未排期。
+所有者 2026-10-12 明确授权根据文献与公开资料判断并直接执行 PET，因此 PET 电荷不再待决定。
+采用完整 PET OPLS-AA/MK 2022 适配方案：芳环 C −0.115 e，配套全部电荷/LJ；唯一末端醇氧的 +0.001 e 舍入修正明确记录，
+不采用历史 0.0 推断。COOH/OH 六条四聚体为 546 原子，来源与限制见[PET 模型](docs/pet-model.md)。其他事项仍待决定。
+
+1. **S3 下一步**：`stk.dataset/1` 两个数据格式要先交给合作方讨论；MuPRO 能否做电场扫描以产生相场回线待确认。
+2. **S2c**（外部规划模型、智能体准备运行）视所有者决定。
+3. **保存分析修改提案的持久形式**（较早的 P3 项，[建议](docs/design/review-drafts-and-conversations.md#保存分析修改提案的持久形式建议待所有者确认2026-10-06)）：仍待确认，目前未排期。
 
 ## 下一步（建议顺序，不依赖待决定事项的先做）
 
-1. **E1b 独立数据写出器已交付**：`suan.lammps.write_data` 保留传入电荷，支持 full/real、谐振键/角、RB→OPLS 与三斜盒子。
-   540 原子正交/三斜 PET 对照、真实 LAMMPS 同几何能量与晶胞读回见验收记录；类型按实际参数合并，分子按键图连通分量编号。
-   GMSO 0.17.0 的三斜 data 头错误已明确记录，不复制其 dump 外包围边界。建模步骤仍待电荷决定。
-   写出器不依赖电荷取值；**建模步骤本身（链长、链数、密度作为参数行、力场来源记录）等电荷决定后再做**。
-   可行性脚本在 [examples/pet_lammps/](examples/pet_lammps/README.md)。
+1. **E1b 写出器与 PET 建模已交付**：写出器保留传入电荷，支持 full/real、谐振键/角、RB→OPLS、三斜盒子，
+   新增明确相位 180°/周期 2 的平面 periodic improper→CVFF，保留原子顺序，其他 improper 仍拒绝。
+   `stk.lammps.create_pet_workflow` 建参数表与本机 `pet-model/1` 工作流；明确 start 后用已登记分子建模/Packmol 模块生成并冻结八项产物。
+   文献参数、来源、文件摘要与每链中性校验随模型保存；取消停止 Python/Packmol，完整成功才发布，不覆盖已有目录。
+   旧 540 原子 GMSO 对照保留为写出器夹具；新 COOH/OH 默认 546 原子不是同一个化学体系。
+   操作见 [examples/pet_model](examples/pet_model/README.md)。生成后**显式导入** LAMMPS 算例，不声称自动串联本机模型与远程仿真。
+   初始填充不是平衡样品；未分配气体参数，未验证 PET 材料性质。长链 DP≤20 只是构象生成资源上限，不保证成功或物性收敛。
 2. **E1c 已交付**（只用导入算例）：三套脚本、四个图节点、三个预设与技能；Tg 密度两段拟合、模量小应变斜率、显式扩散窗口。
    合成曲线与真实氩的运行/分析归档通过；限制与使用见[指南](docs/lammps-analysis.md)。短轨迹拟合不代表材料性质验收。
    多温度 `density_series` 的来源随最终 Tg 诊断保存；日志任一段的重复列名拒绝，日志源实现版本 2 隔离旧缓存。
@@ -73,6 +75,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | 计算端启动器 `python -m suan.lammps run|verify|check`、找程序、MPI 检查 | [suan/lammps/run.py](suan/lammps/run.py)、[spec.py](suan/lammps/spec.py)、共用 MPI 规则 [suan/runtime/launch.py](suan/runtime/launch.py) |
 | 项目：导入/复制/准备/收集、最终状态 | [suan/workflows/lammps.py](suan/workflows/lammps.py)、与 MuFerro 共用的 [common.py](suan/workflows/common.py) |
 | 模板注册 | [suan/workflows/templates.py](suan/workflows/templates.py) 的 `LammpsTemplate`（E0a 接口，外部引擎经 `stk.engines` entry point） |
+| PET 本机建模、参数记录与工作流 | [suan/lammps/pet.py](suan/lammps/pet.py)、[pet_worker.py](suan/lammps/pet_worker.py)、[suan/workflows/pet.py](suan/workflows/pet.py)、[指南](examples/pet_model/README.md) |
 | 数据写出（不分配电荷或力场） | [suan/lammps/data.py](suan/lammps/data.py)、[tests/test_lammps_data.py](tests/test_lammps_data.py)、手动对照 `examples/pet_lammps/compare_writer.py` |
 | E1c 脚本/拟合/图预设 | [suan/lammps/analysis.py](suan/lammps/analysis.py)、[templates.py](suan/lammps/templates.py)、`suan/lammps/templates/*.in`、`suan/graph/presets/lammps-*.json`、[已知曲线测试](tests/test_lammps_analysis.py) |
 | 模块目录（LAMMPS 固定 MPICH 版 `lammps=*=cpu*_mpi_mpich_*`） | [suan/modules/catalog.json](suan/modules/catalog.json)、[suan/modules/](suan/modules/) |
@@ -111,6 +114,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 | 证据 | 结果 |
 |---|---|
+| E1b PET 本机建模（2026-10-12） | 完整 pytest 2569 passed、24 skipped（后加上限另定向）；最终定向 168 passed；独立真实模型/构象 5 passed、项目→LAMMPS 1 passed；原生定向 40/40。代码与 CI 见[验收记录](docs/runtime-validation.md) |
 | E1a `1859ca7` 本机 | 完整 pytest（`-m "not perf"`）**2427 passed、24 skipped**；Python 3.11 相关 81 passed；工作流/仿真/模块/智能体 CTest **69/69** |
 | E1a CI | [Runtime](https://github.com/sijintech/stk/actions/runs/38097721893) 8/8（3.12 2442 passed，3.11 与 3.14 各 2438）、[桌面](https://github.com/sijintech/stk/actions/runs/38097721844) 5/5、密钥扫描通过 |
 | E1a 手动（真实 LAMMPS） | LJ 熔体两行与 PET 两行经项目工作流（设定 450/550 K，平均 445.8/551.4 K）；2 进程 `1 by 1 by 2` 与单进程一致；2026-10-11 用 `examples/pet_lammps` 重新运行，结果见[验收记录](docs/runtime-validation.md) |
@@ -123,7 +127,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 未解决：
 
-- **E1 的限制**：桌面没有 LAMMPS 导入/专用仿真视图；没有 PET 建模步骤；运行中没有监控事件；远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载上限。
+- **E1 的限制**：桌面没有 LAMMPS 导入/专用仿真视图；PET 建模仅本机、需显式导入远程算例；运行中没有监控事件；远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载上限。
   E1c 不自动判定平衡或扩散区，没有跨温度行自动汇总、Tg 置信区间、通用分子质心/多原点 MSD；OLS 误差不能当材料性质不确定度。
   PET 可行性模型密度 1.223 g/cm³（实验约 1.335），4 聚体、540 原子、约 20 ps，只说明工具链可用。
 - **S2**：真实本机模型的 GUI 人工验收未做。
@@ -257,9 +261,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File desktop/setup-windows.ps1 --
 
 > 请先读仓库根目录的 AGENTS.md 和 handoff.md，再看 docs/development-plan.md 开头“2026-10-08 思劲平台方向”一节与
 > docs/design/multiscale-engines.md。核对 Git 与最近代码提交的 CI 后，继续多尺度引擎 E1：
-> 先做 STK 自己的 LAMMPS 数据文件写出器（由 foyer 给出的 ParmEd 结构写 atom_style full / real 单位，
-> 用 GMSO 在 540 原子 PET 体系上的输出逐项对照验证，可行性脚本在 examples/pet_lammps/），再做 E1c 的 Tg、模量、扩散分析模板。
-> PET 酯基苯环碳的电荷仍待所有者决定，决定前不要实现依赖它的建模步骤，也不要把 0.0 当作定论。
+> E1b 写出器、PET 本机建模与 E1c 三套分析已交付，下一步见本文；不要重新实现已完成内容。
+> 所有者已授权按文献自主选择 PET 参数并执行，采用完整 OPLS-AA/MK 2022 适配方案；历史 0.0 不是新默认电荷。
+> 读 docs/pet-model.md 和 examples/pet_model/README.md，区分初始填充、软件验证与尚未完成的物性收敛。
+> S3、S2c 等其他事项仍待所有者决定，决定前不按未选项实施。
 > 日常直接在 main 工作，不新建分支或合并无关 PR；测试时清空 STK_TOKEN_PLAN_API_KEY、取消 STK_TOKEN_PLAN_MODEL，不发收费的模型请求，
 > 不读取或打印密钥；上一个代码提交的桌面 CI 结束后再推送新的代码。每个交付节点做 critical review，修复问题、测试，
 > 更新 handoff.md、开发计划、开发日志与验收记录（写实际结果与剩余限制）后提交推送。

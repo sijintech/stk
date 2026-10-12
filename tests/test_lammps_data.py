@@ -1,10 +1,11 @@
 """Physical and failure boundaries without optional molecular-modeling packages."""
+import hashlib
 import math
 from types import SimpleNamespace as NS
 
 import pytest
 
-from suan.lammps.data import DataError, rb_to_opls, render_data, write_data
+from suan.lammps.data import DataError, periodic_improper_to_cvff, rb_to_opls, render_data, write_data
 
 
 def structure():
@@ -114,3 +115,85 @@ def test_opls_special_pairs_are_checked():
     s.adjusts[0].type.chgscale = 1.0
     with pytest.raises(DataError, match="special_bonds"):
         render_data(s)
+
+
+def periodic_improper(s, order=(0, 1, 2, 3), amplitude=10.5):
+    return NS(**{f"atom{i}": s.atoms[index] for i, index in enumerate(order, 1)},
+              improper=True, type=NS(phi_k=amplitude, per=2, phase=180))
+
+
+def test_no_periodic_impropers_preserves_pre_extension_data_bytes():
+    # Recorded from the released writer and this existing topology fixture.
+    assert hashlib.sha256(render_data(structure()).encode()).hexdigest() == (
+        "32c23eb08007dd581d66507fd1c2e1964a2b7b2b7689cd3179236571881ca977")
+
+
+def test_periodic_improper_cvff_energy_and_derivative_over_whole_period():
+    for amplitude in (0.0, 1.1, 10.5):
+        source = NS(phi_k=amplitude, per=2, phase=180)
+        k, sign, period = periodic_improper_to_cvff(source)
+        for degree in range(-180, 181, 7):
+            phi = math.radians(degree)
+            expected = amplitude * (1 + math.cos(2 * phi - math.pi))
+            cvff = k * (1 + sign * math.cos(period * phi))
+            assert cvff == pytest.approx(expected, abs=1e-12)
+            step = 1e-5
+            derivative = (k * (1 + sign * math.cos(period * (phi + step))) -
+                          k * (1 + sign * math.cos(period * (phi - step)))) / (2 * step)
+            assert derivative == pytest.approx(-2 * amplitude * math.sin(2 * phi - math.pi), abs=5e-9)
+
+
+def test_periodic_improper_types_members_order_and_atomic_failure(tmp_path):
+    s = structure()
+    original = periodic_improper(s, order=(3, 1, 0, 2))
+    s.dihedrals = [original, periodic_improper(s), periodic_improper(s, amplitude=1.1)]
+    data = render_data(s)
+    assert "3 impropers\n" in data and "2 improper types\n" in data
+    assert "0 impropers\n" not in data
+    assert "Improper Coeffs\n\n1 10.5 -1 2\n2 1.1 -1 2" in data
+    assert "Impropers\n\n1 1 4 2 1 3\n2 1 1 2 3 4\n3 2 1 2 3 4" in data
+    assert "# improper_style cvff; original atom order preserved" in data
+    assert original.atom1 is s.atoms[3] and original.atom3 is s.atoms[0]
+    path = tmp_path / "system.data"
+    write_data(s, path)
+    original.type.phase = 90
+    with pytest.raises(DataError, match="phase 180"):
+        write_data(s, path)
+    assert path.read_text() == data and list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("change", [
+    lambda t: setattr(t, "improper", False),
+    lambda t: setattr(t, "type", None),
+    lambda t: setattr(t, "type", [t.type]),
+    lambda t: setattr(t.type, "phi_k", -1),
+    lambda t: setattr(t.type, "phi_k", float("inf")),
+    lambda t: setattr(t.type, "phi_k", float("nan")),
+    lambda t: setattr(t.type, "per", 3),
+    lambda t: setattr(t.type, "per", 2.01),
+    lambda t: setattr(t.type, "per", float("nan")),
+    lambda t: setattr(t.type, "phase", 0),
+    lambda t: setattr(t.type, "phase", 90),
+    lambda t: setattr(t.type, "phase", float("nan")),
+    lambda t: setattr(t, "atom2", object()),
+    lambda t: setattr(t, "atom4", t.atom1),
+])
+def test_periodic_improper_rejects_lossy_conversion(change):
+    s = structure()
+    s.dihedrals = [periodic_improper(s)]
+    change(s.dihedrals[0])
+    with pytest.raises(DataError):
+        render_data(s, allow_untyped_impropers=True)
+
+
+def test_periodic_improper_does_not_enable_ignoring_untyped_impropers():
+    s = structure()
+    s.dihedrals = [periodic_improper(s)]
+    s.impropers = [NS(type=None)]
+    with pytest.raises(DataError, match="Improper"):
+        render_data(s)
+    data = render_data(s, allow_untyped_impropers=True)
+    assert "1 impropers\n" in data and "explicitly ignored untyped impropers: 1" in data
+    s.impropers[0].type = NS(psi_k=10, psi_eq=0)
+    with pytest.raises(DataError):
+        render_data(s, allow_untyped_impropers=True)

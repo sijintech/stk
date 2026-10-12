@@ -1,0 +1,398 @@
+{
+  "scope": "Independent chemistry/parameter/software verification, not converged PET material properties",
+  "reports": [
+    {
+      "parameters": {
+        "chain_length": 2,
+        "chain_count": 1,
+        "packing_density": 80.0,
+        "seed": 4928459
+      },
+      "scope": "independent chemistry/parameter and run0 equivalence; no material property validation",
+      "atoms": 47,
+      "bonds": 48,
+      "angles": 77,
+      "proper_torsions": 102,
+      "periodic_impropers": 16,
+      "independent_chemical_roles": {
+        "CA": 12,
+        "COa": 1,
+        "COe": 3,
+        "CTe": 3,
+        "CTt": 1,
+        "HA": 8,
+        "HAE": 6,
+        "HC": 2,
+        "HOa": 1,
+        "HOt": 1,
+        "OES": 3,
+        "OHa": 1,
+        "OHt": 1,
+        "Oa": 1,
+        "Oe": 3
+      },
+      "nonperiodic_hamiltonian": "all-to-all geometric LJ + direct Coulomb (LAMMPS real constant332.06371), OPLS0/0/0.5; no tails/shifts",
+      "nonperiodic_bounds": "expanded to contain all unwrapped positions; packed coordinates retained, controlled perturbations recorded separately",
+      "packed_reference_kcal_mol": {
+        "ebond": 11.927441231407014,
+        "eangle": 12.801934343459612,
+        "edihed": -1.0385101354619266,
+        "eimp": 0.0013849895730655426,
+        "evdwl": 14.310191086117554,
+        "ecoul": -32.44193453561323
+      },
+      "packed_lammps_direct_kcal_mol": {
+        "pe": 5.560506979481452,
+        "ebond": 11.92744123140671,
+        "eangle": 12.80193434345954,
+        "edihed": -1.038510135461973,
+        "eimp": 0.001384989573040007,
+        "evdwl": 14.31019108611756,
+        "ecoul": -32.44193453561342,
+        "elong": 0.0
+      },
+      "packed_max_force_difference_kcal_mol_A": 3.490277438800149e-05,
+      "packed_force_limit": "LAMMPS dihedral_opls.cpp near-planar sin(phi) denominator guard; packed-state forces are recorded, not claimed exact",
+      "controlled_geometry": {
+        "seed": 8703,
+        "attempt": 0,
+        "maximum_coordinate_change_A": 0.01,
+        "minimum_abs_sin_proper_phi": 3.9980118471217544e-05
+      },
+      "controlled_note": "fixed tiny coordinate perturbations explicitly avoid the third-party 1e-5 sine guard; generated case untouched",
+      "reference_kcal_mol": {
+        "ebond": 13.614240532464157,
+        "eangle": 12.745284085043458,
+        "edihed": -0.9608275443329545,
+        "eimp": 0.010784841861486195,
+        "evdwl": 14.000939647806234,
+        "ecoul": -32.47378465180992
+      },
+      "lammps_direct_kcal_mol": {
+        "pe": 6.936636911031613,
+        "ebond": 13.61424053246365,
+        "eangle": 12.74528408504352,
+        "edihed": -0.9608275443330206,
+        "eimp": 0.01078484186148396,
+        "evdwl": 14.00093964780616,
+        "ecoul": -32.47378465181018,
+        "elong": 0.0
+      },
+      "canonical_RB_constant_removed_kcal_mol": -9.560229445537693e-06,
+      "max_force_difference_kcal_mol_A": 1.4132695014268393e-11,
+      "finite_difference_components": 12,
+      "finite_difference_max_difference_kcal_mol_A": 1.857515741221505e-08,
+      "periodic_PPPM_readback_kcal_mol": {
+        "pe": 5.55331255947317,
+        "ebond": 11.9274412314068,
+        "eangle": 12.80193434345959,
+        "edihed": -1.03851013546196,
+        "eimp": 0.001384989573052753,
+        "evdwl": 14.31475196608799,
+        "ecoul": 124.5761152758204,
+        "elong": -157.0298051114127
+      },
+      "periodic_note": "separate generated PPPM run0 readback; NOT compared against the nonperiodic OpenMM reference",
+      "worker_validation": {
+        "formula_per_chain": {
+          "C": 20,
+          "H": 18,
+          "O": 9
+        },
+        "chain_count": 1,
+        "chain_charge_e": [
+          -2.7755575615628914e-17
+        ],
+        "atom_types": {
+          "PET_CA": 12,
+          "PET_CO_ACID": 1,
+          "PET_CO_ESTER": 3,
+          "PET_CT_ESTER": 3,
+          "PET_CT_OH": 1,
+          "PET_HA": 8,
+          "PET_HAE": 6,
+          "PET_HC_OH": 2,
+          "PET_HO_ACID": 1,
+          "PET_HO_TAIL": 1,
+          "PET_OES": 3,
+          "PET_OH_ACID": 1,
+          "PET_OH_TAIL": 1,
+          "PET_O_ACID": 1,
+          "PET_O_ESTER": 3
+        },
+        "atoms": 47,
+        "bonds": 48,
+        "angles": 77,
+        "proper_torsions": 102,
+        "periodic_impropers": 16,
+        "untyped_foyer_candidates_removed": 0,
+        "explicit_periodic_planar_impropers": 16,
+        "ordering": "central atom SECOND; explicit source tuples preserved",
+        "initial_geometry": {
+          "method": "RDKit ETKDGv3; deterministic default then random-coordinate fallback",
+          "seed": 4928459,
+          "embedding_attempts": [
+            {
+              "use_random_coordinates": false,
+              "return_code": 0,
+              "seconds": 0.06535724806599319,
+              "failure_counts": [
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ],
+          "max_attempts_per_mode": 30,
+          "rdkit_internal_timeout_seconds": 45,
+          "uff_max_iterations": 200,
+          "uff_status": 0,
+          "timeout_scope": "RDKit timeout does not cover all preprocessing; launcher provides the hard 1800 s wall budget",
+          "coordinate_sha256": "9448a9358c5a309203ba3a51b4473b03bbcb31e84c3780b2ace93693de9526d1",
+          "coordinate_hash_units": "Angstrom, little-endian float64, RDKit atom order"
+        },
+        "periodic_interchain_self_image_overlap_threshold_A": 1.99,
+        "periodic_interchain_self_image_overlap_count": 0,
+        "packmol": {
+          "version": "21.2.1",
+          "perfect_packing_verified": true
+        },
+        "input_element_masses_replaced_amu": {
+          "PET_CA": 12.01078,
+          "PET_CO_ACID": 12.01078,
+          "PET_CO_ESTER": 12.01078,
+          "PET_CT_ESTER": 12.01078,
+          "PET_CT_OH": 12.01078,
+          "PET_HA": 1.007947,
+          "PET_HAE": 1.007947,
+          "PET_HC_OH": 1.007947,
+          "PET_HO_ACID": 1.007947,
+          "PET_HO_TAIL": 1.007947,
+          "PET_OES": 15.99943,
+          "PET_OH_ACID": 15.99943,
+          "PET_OH_TAIL": 15.99943,
+          "PET_O_ACID": 15.99943,
+          "PET_O_ESTER": 15.99943
+        },
+        "box_lengths_A": [
+          20.28913,
+          20.28913,
+          20.28913
+        ],
+        "initial_density_kg_m3": 79.99996788282772
+      },
+      "source_manifest_sha256": "2e5aa7b6c8796862373ca8293afceb70f580454156cbf732b9458d94068b75a7"
+    },
+    {
+      "parameters": {
+        "chain_length": 4,
+        "chain_count": 6,
+        "packing_density": 250.0,
+        "seed": 4928459
+      },
+      "scope": "independent chemistry/parameter and run0 equivalence; no material property validation",
+      "atoms": 546,
+      "bonds": 564,
+      "angles": 918,
+      "proper_torsions": 1224,
+      "periodic_impropers": 192,
+      "independent_chemical_roles": {
+        "CA": 144,
+        "COa": 6,
+        "COe": 42,
+        "CTe": 42,
+        "CTt": 6,
+        "HA": 96,
+        "HAE": 84,
+        "HC": 12,
+        "HOa": 6,
+        "HOt": 6,
+        "OES": 42,
+        "OHa": 6,
+        "OHt": 6,
+        "Oa": 6,
+        "Oe": 42
+      },
+      "nonperiodic_hamiltonian": "all-to-all geometric LJ + direct Coulomb (LAMMPS real constant332.06371), OPLS0/0/0.5; no tails/shifts",
+      "nonperiodic_bounds": "expanded to contain all unwrapped positions; packed coordinates retained, controlled perturbations recorded separately",
+      "packed_reference_kcal_mol": {
+        "ebond": 126.62478084605856,
+        "eangle": 154.71459751302365,
+        "edihed": 28.970345087206937,
+        "eimp": 0.4833923750911243,
+        "evdwl": 191.8413667891536,
+        "ecoul": -378.19425782528634
+      },
+      "packed_lammps_direct_kcal_mol": {
+        "pe": 124.4402247852451,
+        "ebond": 126.6247808460594,
+        "eangle": 154.7145975130244,
+        "edihed": 28.97034508720706,
+        "eimp": 0.4833923750910732,
+        "evdwl": 191.8413667891531,
+        "ecoul": -378.1942578252901,
+        "elong": 0.0
+      },
+      "packed_max_force_difference_kcal_mol_A": 1.6466827901240322e-11,
+      "packed_force_limit": "LAMMPS dihedral_opls.cpp near-planar sin(phi) denominator guard; packed-state forces are recorded, not claimed exact",
+      "controlled_geometry": {
+        "seed": 8703,
+        "attempt": 0,
+        "maximum_coordinate_change_A": 0.01,
+        "minimum_abs_sin_proper_phi": 4.9062698262834766e-05
+      },
+      "controlled_note": "fixed tiny coordinate perturbations explicitly avoid the third-party 1e-5 sine guard; generated case untouched",
+      "reference_kcal_mol": {
+        "ebond": 141.16586302057982,
+        "eangle": 159.086546461182,
+        "edihed": 30.349628290855954,
+        "eimp": 0.8121288908461091,
+        "evdwl": 192.54690091310684,
+        "ecoul": -378.1969992561139
+      },
+      "lammps_direct_kcal_mol": {
+        "pe": 145.7640683204802,
+        "ebond": 141.1658630205801,
+        "eangle": 159.0865464611826,
+        "edihed": 30.34962829085564,
+        "eimp": 0.8121288908461267,
+        "evdwl": 192.5469009131087,
+        "ecoul": -378.196999256093,
+        "elong": 0.0
+      },
+      "canonical_RB_constant_removed_kcal_mol": -5.736137667322616e-05,
+      "max_force_difference_kcal_mol_A": 2.3518964553659316e-11,
+      "finite_difference_components": 12,
+      "finite_difference_max_difference_kcal_mol_A": 6.25003302445748e-08,
+      "periodic_PPPM_readback_kcal_mol": {
+        "pe": 125.3227906116463,
+        "ebond": 126.6247808460568,
+        "eangle": 154.7145975130253,
+        "edihed": 28.97034508720656,
+        "eimp": 0.4833923750910672,
+        "evdwl": 191.592490346136,
+        "ecoul": 1051.504591895145,
+        "elong": -1428.567407451014
+      },
+      "periodic_note": "separate generated PPPM run0 readback; NOT compared against the nonperiodic OpenMM reference",
+      "worker_validation": {
+        "formula_per_chain": {
+          "C": 40,
+          "H": 34,
+          "O": 17
+        },
+        "chain_count": 6,
+        "chain_charge_e": [
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17,
+          -8.326672684688674e-17
+        ],
+        "atom_types": {
+          "PET_CA": 144,
+          "PET_CO_ACID": 6,
+          "PET_CO_ESTER": 42,
+          "PET_CT_ESTER": 42,
+          "PET_CT_OH": 6,
+          "PET_HA": 96,
+          "PET_HAE": 84,
+          "PET_HC_OH": 12,
+          "PET_HO_ACID": 6,
+          "PET_HO_TAIL": 6,
+          "PET_OES": 42,
+          "PET_OH_ACID": 6,
+          "PET_OH_TAIL": 6,
+          "PET_O_ACID": 6,
+          "PET_O_ESTER": 42
+        },
+        "atoms": 546,
+        "bonds": 564,
+        "angles": 918,
+        "proper_torsions": 1224,
+        "periodic_impropers": 192,
+        "untyped_foyer_candidates_removed": 0,
+        "explicit_periodic_planar_impropers": 192,
+        "ordering": "central atom SECOND; explicit source tuples preserved",
+        "initial_geometry": {
+          "method": "RDKit ETKDGv3; deterministic default then random-coordinate fallback",
+          "seed": 4928459,
+          "embedding_attempts": [
+            {
+              "use_random_coordinates": false,
+              "return_code": 0,
+              "seconds": 0.3149445030139759,
+              "failure_counts": [
+                22,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ],
+          "max_attempts_per_mode": 30,
+          "rdkit_internal_timeout_seconds": 45,
+          "uff_max_iterations": 200,
+          "uff_status": 1,
+          "timeout_scope": "RDKit timeout does not cover all preprocessing; launcher provides the hard 1800 s wall budget",
+          "coordinate_sha256": "75474045c6944da5aee240721606fc05dffb31dbd0815a3ea0459da2aca3d1d3",
+          "coordinate_hash_units": "Angstrom, little-endian float64, RDKit atom order"
+        },
+        "periodic_interchain_self_image_overlap_threshold_A": 1.99,
+        "periodic_interchain_self_image_overlap_count": 0,
+        "packmol": {
+          "version": "21.2.1",
+          "perfect_packing_verified": true
+        },
+        "input_element_masses_replaced_amu": {
+          "PET_CA": 12.01078,
+          "PET_CO_ACID": 12.01078,
+          "PET_CO_ESTER": 12.01078,
+          "PET_CT_ESTER": 12.01078,
+          "PET_CT_OH": 12.01078,
+          "PET_HA": 1.007947,
+          "PET_HAE": 1.007947,
+          "PET_HC_OH": 1.007947,
+          "PET_HO_ACID": 1.007947,
+          "PET_HO_TAIL": 1.007947,
+          "PET_OES": 15.99943,
+          "PET_OH_ACID": 15.99943,
+          "PET_OH_TAIL": 15.99943,
+          "PET_O_ACID": 15.99943,
+          "PET_O_ESTER": 15.99943
+        },
+        "box_lengths_A": [
+          31.53283,
+          31.53283,
+          31.53283
+        ],
+        "initial_density_kg_m3": 249.99997823743297
+      },
+      "source_manifest_sha256": "78fe0d34382e05ef25fe107cbd4200694588d57683fbe1cdedbb50c8b2379dc7"
+    }
+  ]
+}

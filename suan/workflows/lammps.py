@@ -215,6 +215,12 @@ class Lammps:
     def __init__(self, stk):
         self.stk = stk
 
+    def create_pet_workflow(self, *, expected_revision, rows=None, project=None, name="PET modeling / PET 建模"):
+        """Create a parameter table and local modeling workflow; execute nothing."""
+        from .pet import create_pet_workflow
+        return create_pet_workflow(self.stk, expected_revision=expected_revision, rows=rows,
+                                   project=project, name=name)
+
     def import_case(self, source, *, expected_revision, script=None, project=None):
         """Copy and freeze a clean case folder; create one editable case row, without execution.
         ``script`` names the input script when the folder has more than one ``in.*`` file."""
