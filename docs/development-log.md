@@ -24,7 +24,8 @@ DP100 试验内部 timeout 未返回，外部停止并保留 censored 证据，�
 独立 OpenMM 参考从文献数值和化学键图重建，未从产品 profile 读期望；非周期相同 Hamiltonian 的能量、力与有限差分对照，
 生成 PPPM 案例另行真实读回；保留 LAMMPS 原始近乎平面 proper 力的保护截断差异，未声称原始 DP2 全力精确一致。
 真实模型两行已走参数冻结、建模、八产物快照、显式导入和 Runtime/LAMMPS 路径。
-本机测试、提交与 CI 的实际证据见[验收记录](runtime-validation.md)。来源/操作见[模型](pet-model.md)与[示例](../examples/pet_model/README.md)。
+代码 `fbcd9f4` 已推送 main；Runtime 8/8、桌面 5/5、密钥扫描与文档均已完成成功。
+本机测试与最终 CI 的实际证据见[验收记录](runtime-validation.md)。来源/操作见[模型](pet-model.md)与[示例](../examples/pet_model/README.md)。
 初始填充和软件核对不代表已平衡无定形 PET；未实现气体参数、分子质心/多原点气体 MSD 或 Tg/模量/扩散材料性质收敛。
 
 ## 2026-10-11：E1c 多温度 Tg 来源与日志列校验

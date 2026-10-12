@@ -43,7 +43,14 @@
   wheel/sdist 构建成功并核对 worker、JSON/XML、文档与示例入包；从仓库外安装的包读回 profile、模板注册通过。
 - 推送门槛：上一代码头 `be9bdd7` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/38164654996) **5/5 已结束成功**；
   当前初始文档头 `dff03f1` 的 Runtime 8/8、密钥扫描与文档也已完成成功，之后才推进本次代码推送。
-  本次代码与本节同一交付提交；提交时 CI 尚未运行，推送后补实际提交与链接。暂存约 265 KiB 改动经 gitleaks（`.gitleaks.toml`、redact）通过，无泄漏；
+  代码 **`fbcd9f4`** 已推送 main；[Runtime](https://github.com/sijintech/stk/actions/runs/38285992490) **8/8 已完成成功**
+  （3.12：2585 passed、7 skipped；3.11/3.14 各 2581 passed、11 skipped；均 4 deselected；
+  Windows 客户端 3.11/3.12 各 2125 passed、92 skipped、276 deselected，含六个 POSIX shebang 测试的平台跳过）；
+  [桌面](https://github.com/sijintech/stk/actions/runs/38285992314) **5/5 已完成成功**：Linux GL/Vulkan/X11/Wayland、
+  macOS CPU/Metal/应用包冒烟、Windows CPU、Linux 包构建与新环境包冒烟均通过；
+  Linux **1289/1289**、Windows CPU **796 项、0 失败**；macOS CPU **838/838**、Metal **180/180**，
+  两份 macOS JUnit 均无失败/跳过，必跑检查也成功。原始 macOS 报告保留 `/tmp/stk-pet-macos-ci/ctest-{cpu,metal}.xml`。
+  [密钥扫描](https://github.com/sijintech/stk/actions/runs/38285992279)与[文档](https://github.com/sijintech/stk/actions/runs/38285992192)已完成成功。暂存约 265 KiB 改动经 gitleaks（`.gitleaks.toml`、redact）通过，无泄漏；
   全部测试空 API key、模型变量取消，无收费模型请求。
 - 剩余限制：构象/填充与平衡分别判定，资源边界不保证长链成功；仅干燥、中性、COOH/OH 线性 PET，
   未提供气体/水/离子参数，不声称 Tg、模量、气体 D/渗透率收敛。PPPM、参数缺项与平面 improper 都是明确适配，非作者轨迹的精确复现。

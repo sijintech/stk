@@ -1,6 +1,6 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-12；本次 PET 建模交付与 CI 见下文及验收记录。此前 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
+更新：2026-10-12；PET 建模代码 `fbcd9f4` 已推送，Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，实际测试数与限制见验收记录。此前 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
 代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
 [开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
@@ -114,7 +114,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 | 证据 | 结果 |
 |---|---|
-| E1b PET 本机建模（2026-10-12） | 完整 pytest 2569 passed、24 skipped（后加上限另定向）；最终定向 168 passed；独立真实模型/构象 5 passed、项目→LAMMPS 1 passed；原生定向 40/40。代码与 CI 见[验收记录](docs/runtime-validation.md) |
+| E1b PET 本机建模（2026-10-12） | 完整 pytest 2569 passed、24 skipped（后加上限另定向）；最终定向 168 passed；独立真实模型/构象 5 passed、项目→LAMMPS 1 passed；原生定向 40/40。`fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，详见[验收记录](docs/runtime-validation.md) |
 | E1a `1859ca7` 本机 | 完整 pytest（`-m "not perf"`）**2427 passed、24 skipped**；Python 3.11 相关 81 passed；工作流/仿真/模块/智能体 CTest **69/69** |
 | E1a CI | [Runtime](https://github.com/sijintech/stk/actions/runs/38097721893) 8/8（3.12 2442 passed，3.11 与 3.14 各 2438）、[桌面](https://github.com/sijintech/stk/actions/runs/38097721844) 5/5、密钥扫描通过 |
 | E1a 手动（真实 LAMMPS） | LJ 熔体两行与 PET 两行经项目工作流（设定 450/550 K，平均 445.8/551.4 K）；2 进程 `1 by 1 by 2` 与单进程一致；2026-10-11 用 `examples/pet_lammps` 重新运行，结果见[验收记录](docs/runtime-validation.md) |
