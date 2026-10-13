@@ -15,8 +15,13 @@
 - 本地检查：六份 Markdown 的新增链接 **17 项**全部存在，换行与文件结尾通过，公开文件不含源稿访问链接/文件身份；
   `git diff --check` 通过。三篇 PET/PET–PEO/传输研究的 DOI 与出版社摘要核对一致；不替客户选择材料阈值。
   本次只修改设计与四份交接文档，没有改运行代码，未重复执行科学/桌面套件；文档站构建由本次 CI 核对。
-  本机 Node 为 24、没有 pnpm，未把这一环境当成文档站构建通过。暂存改动经 gitleaks（`.gitleaks.toml`、redact）无泄漏，提交 CI 在结束后补记。
+  本机 Node 为 24、没有 pnpm，未把这一环境当成文档站构建通过。暂存约 26.6 KB 改动经 gitleaks（`.gitleaks.toml`、redact）无泄漏。
   未运行模型请求，未改变端点/网络/权限或发布协议。材料指标、真实数据、工期起算日、部署资源与验收门槛仍待实施任务落实。
+- 路线文档 **`b5fc3b7`** 已推送；[文档站](https://github.com/sijintech/stk/actions/runs/38329803248)与
+  [密钥扫描](https://github.com/sijintech/stk/actions/runs/38329803250)已完成成功；
+  [Runtime](https://github.com/sijintech/stk/actions/runs/38329803247) **8/8 已完成成功**。
+  纯文档改动未触发新的原生桌面 CI，上一个代码头桌面 5/5 已完成成功。
+  CI 结束后补记四份交接文档，再次核对 **276 个本地链接**、格式与暂存 gitleaks，全部通过。
 
 ## 2026-10-12：E1b 文献参数 PET 本机建模
 
