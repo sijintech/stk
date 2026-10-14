@@ -1,5 +1,9 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
+2026-10-14 界面反馈：所有者要求 **Viewer 常驻并排、独立节点/表格/文件树窗口、Python 程序编辑页与运行按钮**。
+已核对现有实现并补充[产品约定](docs/design/project-workbench.md#2026-10-14所有者补充的界面要求)；本次为界面盘点与方向更新，未改运行代码，改版尚未交付。
+后续先修导航遮挡 Viewer，再拆分编辑页面与扩展对象单元格；不要继续按“代码编程只交给 VSCode”的旧约定实施。
+
 更新：2026-10-14；PET 专项全流程研究、O₂ 示踪协议与 E1d 结构/轨迹查看已交付，修正热态后的全新 11 段真实 MD 与搬迁离线复核通过。
 本机原生 **1318/1318、无跳过**，Python 完整 **2782 passed、24 skipped**，最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**。
 代码 **`6aca8f8` 与索引补正 `20cc2f7` 已推送 main**；`20cc2f7` 的 Runtime **8/8**、桌面 **5/5**、文档与密钥扫描全部成功。
@@ -62,6 +66,11 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 3. **保存分析修改提案的持久形式**（较早的 P3 项，[建议](docs/design/review-drafts-and-conversations.md#保存分析修改提案的持久形式建议待所有者确认2026-10-06)）：仍待确认，目前未排期。
 
 ## 下一步（建议顺序，不依赖待决定事项的先做）
+
+0. **界面改版**：按[工作台约定](docs/design/project-workbench.md#2026-10-14所有者补充的界面要求)实施常驻 Viewer 和可组合编辑区。
+   分析节点编辑已存在但只读来源/保存分析入口混淆；首次文件菜单导航还会把新页放进 Viewer 区域。
+   基础表格可复用，JSON 摘要不等于富对象；目录树、程序文件载入/编辑/保存和安全左右交换仍待实现。
+   已捕获四张当前界面截图，验收范围与限制见[记录](docs/runtime-validation.md)。
 
 1. **E1b 写出器与 PET 建模已交付**：写出器保留传入电荷，支持 full/real、谐振键/角、RB→OPLS、三斜盒子，
    新增明确相位 180°/周期 2 的平面 periodic improper→CVFF，保留原子顺序，其他 improper 仍拒绝。
@@ -132,7 +141,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
   参考多维表格和 Houdini 参数化；不要为每个 UI 页面另造一份业务状态。
 - 项目采用“目录 + SQLite + 普通资源文件”。稳定 ID 用于持久关联，打开句柄只表示当前会话；
   大数据与图像等不必逐单元格写入 SQLite。表达式/依赖由应用服务求值，SQLite 本身不会执行所有计算。
-- STK 内使用 Python 控制公开操作和布局；UI、Python、AI 复用共享服务和校验。代码编辑主要跳转 VSCode。
+- STK 内使用 Python 控制公开操作和布局；UI、Python、AI 复用共享服务和校验。2026-10-14 明确应用内基础代码编辑与运行，VSCode 保留为可选外部 IDE。
 - Markdown/HTML/PDF、AI 报告、LaTeX 编译与嵌入预览仍是后续目标。
 - 需要直接连接与 SSH；已有 Linux Runtime 连接/SSH 隧道和本机 stdio 桥，**通用 Mac↔Windows STK 点对点端点尚未实现**。
 - `toolkits/` 最终按功能迁入 `suan/`，保留必要兼容；不是整目录改名。当前还有真实调用，不能提前删除。
