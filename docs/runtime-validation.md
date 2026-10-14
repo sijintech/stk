@@ -2,7 +2,7 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
-## 2026-10-14：PET 全流程 / E1d（代码实现交付，热态修正后重新完整验收中）
+## 2026-10-14：PET 全流程 / E1d（真实软件全流程与最终代码 CI 通过）
 
 - Git/CI 前置：初始 `main`/`origin/main` 为 `8ced4af`，工作区干净；本次期间再次 fetch 仍相同。
   最近代码 `4f54d78` 的[桌面 CI](https://github.com/sijintech/stk/actions/runs/38491407351)已完成 **5/5 成功**，允许之后推送新代码。
@@ -31,13 +31,13 @@
   NPT 盒体积由约 7217 增至 11165 Å³，扩散段密度 0.71155042 g/cm³，因此这次通过仅是旧实现软件路径证据。
   已删除该 FIRE（保留非重叠插入、气体速度生成与全体系零线动量），协议 48/48 通过；
   独立真实短测正常退出，源 607.383579989503 K → 首个 NPT 606.22709481453 K，热态继承通过；新检查对保存的旧 FIRE 数据明确拒绝（1 个预期失败，`/tmp/stk-pet-study-old-thermal-negative-20261014.xml`），不是悄悄丢弃旧证据。
-  新增真实首点温度检查后，从建模开始重新运行全部阶段，旧记录不覆盖；最终结果待补。
+  新增真实首点温度检查后，从建模开始重新运行全部阶段，旧记录不覆盖；最终通过结果见本节末尾。
 - 真实 O₂ 语法/路径短测：546 PET + 4 气体原子，插入、最小化、10 步 COM MSD 和写出完成，550 原子/566 键，正常结束且日志校验通过。
   `/tmp/stk-pet-o2-real-smoke-20261014` 仅用于提前发现求解器语法/分组问题，不作扩散物性判断。
   546 PET 真实轨迹已由原生 headless Vulkan 导出（`/tmp/stk-pet-546-viewer-20261014.png`），实际步 40000、5 图层；像素图已人工查看。
 - wheel/sdist 构建通过；安装 wheel 后在仓库外确认 PET 协调/精准系数/O₂/4 新节点与分子预设可用。
   文档与示例按现有包规则仅进 sdist；发现新例缺少显式 include 后已补并重建，最终源码 wheel 与 sdist 示例/契约逐字节匹配，无 archive，仓库外安装冒烟通过；
-  中英文 i18n 各 2095 键/0 问题、345 个本地链接检查通过，暂存约 379 KB 的 gitleaks 无泄漏。最终暂存约 **385 KB** 的 gitleaks 无泄漏；代码 **`6aca8f8` 已推送 main**，CI 正在进行，结束后补记实际结果。
+  中英文 i18n 各 2095 键/0 问题、345 个本地链接检查通过，暂存约 379 KB 的 gitleaks 无泄漏。最终暂存约 **385 KB** 的 gitleaks 无泄漏；代码 **`6aca8f8` 已推送 main**，CI 实际结果见下。
 - 最后 backend review 发现预先准备的 owned child 可含额外行，首次分析复用也可能绑定错误记录；
   已在关联/开始前要求唯一 owned row、准确 table/order 和完整冻结 bindings，拒绝后不提交/不改状态。
   唯一子行 guard 后相关 **196 passed、无跳过**（149.85 秒，`/tmp/stk-pet-related-guards-final-20261014.xml`）；
@@ -52,7 +52,7 @@
 - `6aca8f8` 首轮 CI：文档（38531300843）与密钥扫描（38531300581）成功；Runtime（38531300583）的 Windows 3.11/3.12 各
   **2286 passed、92 skipped、1 failed、316 deselected**。失败均为文件同 tick 改写后复用旧 dump 索引，
   Windows 的 size/mtime/ctime/inode 签名不保证内容不变；不是跳过真实 Runtime 测试或单位误差。
-  正修为索引复用核完整 raw SHA，图缓存也复核并失效旧错误指纹，新增元数据固定的跨平台反例；
+  已修为索引复用核完整 raw SHA，图缓存也复核并失效旧错误指纹，新增元数据固定的跨平台反例；
   该代码头[桌面 CI](https://github.com/sijintech/stk/actions/runs/38531300727)已完成 **5/5 成功**，满足推送修正门槛；Linux 原生 **1318/1318**（260.96 秒）。
   Runtime Linux 3.12 **2787 passed、7 skipped、4 deselected**，3.11/3.14 各 **2783 passed、11 skipped、4 deselected**；
   另 desktop **3 passed**、control/Blender **24 passed**、web type-check/build 成功，整体为 **6/8**（两 Windows 失败）。
@@ -63,9 +63,40 @@
   `6aca8f8` 桌面其余实际计数：macOS CPU **840/840**（304.53 秒）、Metal **192/192**（342.93 秒）、Windows CPU **798/798**（354.12 秒），均无跳过。
   Linux 新 PET 宽窄/中英文/GL/Vulkan 必跑 **8/8**、Metal 新 PET 必跑 **4/4**，各真实执行。
   Linux 三 Python 版本的离线合成例均 **7/7**（3.11 0.866 秒、3.12 0.989 秒、3.14 0.968 秒）。
+- 索引补正 **`20cc2f715411baf1c07718934e5e8c2cfb84d44e` 已在 `6aca8f8` 桌面 5/5 结束后推送 main**；暂存约 13.60 KB 的 gitleaks 无泄漏。
+  [Runtime](https://github.com/sijintech/stk/actions/runs/38535406260) **8/8 已完成成功**；Windows 3.11/3.12 各
+  **2297 passed、92 skipped、316 deselected**（391.80/674.60 秒），reader 56 项及 source/node 20 项均实际执行，原失败及 10 个新反例通过。
+  Linux 3.12 **2797 passed、7 skipped、4 deselected**（652.46 秒），3.11/3.14 各 **2793 passed、11 skipped、4 deselected**；
+  三 Linux Python 版本的离线合成例各 **7/7**（0.553/1.035/0.911 秒），desktop **3 passed**、control/Blender **24 passed**、web type-check/build 成功。
+  [桌面](https://github.com/sijintech/stk/actions/runs/38535406254) **5/5 已完成成功**：Linux 原生 **1318/1318**（236.99 秒），
+  macOS CPU **840/840**（272.92 秒）、Metal **192/192**（327.56 秒），Windows CPU **798/798**（300.02 秒），均无原生失败或跳过。
+  Linux 新 PET 必跑渲染 **8/8**、Metal **4/4**，三平台两项 `LammpsProjectPython` 必跑均实际执行通过；两 Linux 打包/干净环境启动及 macOS 应用包冒烟通过。
+  [文档](https://github.com/sijintech/stk/actions/runs/38535406237)与[密钥扫描](https://github.com/sijintech/stk/actions/runs/38535406248)均完成成功，全部精确匹配 `20cc2f7`。
+- **修正热态后的全新真实 PET 软件全流程通过**：study `c4c3b0cd-48aa-41a9-82fd-a19be39fe967`，
+  从建模开始完成 546 PET 原子的压密/释放、8 个温度降温、300 K 模量、600 K 两分子 O₂ 扩散，共 **11 个真实 LAMMPS 阶段**；
+  全流程验收 **1 passed**（4883.98 秒，`/tmp/stk-pet-study-thermal-fixed-20261014.xml`）。
+  每段 **126 帧**，验证实际首步 0 与生产末步；11 个冻结输入/几何/晶胞/速度交接、8 个密度点与 25 个 O₂ COM 样本独立核对通过，
+  最大 MSD 文本舍入差 **0.0004942122628222023 Å²**。新首个 NPT **606.22709481453 K**，源为 **607.383579989503 K**；
+  20000 步平衡预算结束 **600.154865617982 K、1.04573245290015 g/cm³**，未再出现旧 FIRE 的 PET 近零温重置。
+  **模量和扩散数值拟合成功；Tg 未解析**，原因是两段密度斜率不满足物理判据，完整观测与失败诊断归档。
+  报告明确 `software_complete=true`、`material_validation=false`；不将科学拒绝改为伪造 Tg。
+- 最新 `20cc2f7` 代码对保存项目再次离线验收 **1 passed**（2.62 秒，`/tmp/stk-pet-study-durable-offline-20261014.xml`），
+  禁止 Runtime 访问并重算输入/密度/轨迹与 COM；完整测试还验证搬迁重开、重复开始不产生重复任务。
+  公开项目独立保留在本机 `/home/mnemora/opt/stk-validation/pet-study-20261014-20cc2f7/project`；
+  同级 `evidence.json`、`observations.png/pdf` 和 `oxygen-trajectory-final.png` 保存结构化证据、实际三组观测与末帧。
+  只复制项目，不复制 Runtime 状态、连接配置或凭据；74 MiB 真实产物不进 Git。
+  当前正确热态的 550 原子轨迹由原生 headless Vulkan 导出，**实际步 200000、5 图层**，图像已目检；数值图亦目检，未为失败 Tg 画拟合。
+- 最终独立 scientific critical review：550 原子/8 分子、4 气体原子分组及单位一致；生产 NVT 后半平均 **598.521 K**，密度恒定 **1.0457325 g/cm³** 与最终质量/晶胞独立算值一致。
+  10–40 ps 全部 121 点独立 OLS 为 **0.006841529597615499 Å²/fs**，换算有限窗口 D **0.00011402549329359164 cm²/s**，仅复核数值计算。
+  NPT 后半密度 **1.093363 ± 0.025371 g/cm³**，其最后单帧晶胞给 NVT 的 1.045732；压力 NPT/NVT 后半分别约 **−38 ± 3131 / −445 ± 3119 atm**（均为样本标准差）。
+  短小体系和有限预算未证明平衡，不能以目标 1 atm、恒密度或正斜率宣称物性验收。未发现剩余实现阻断。
 - 所有测试清空 `STK_TOKEN_PLAN_API_KEY` 并取消 `STK_TOKEN_PLAN_MODEL`，未发收费模型请求；真实验收只用公开参数和自建 PET。
-  余限：短链/有限时间、单原点与有限气体数、全系统零初始动量后残余漂移、文本状态不保存 thermostat/barostat 内部态；
+  余限：6×DP4/单种子/约 2 nm 盒、每 50 K 仅 2 ps 斜坡和 5 ps 采样，600→550 K 密度非单调；
+  模量为单方向 **4×10⁹ s⁻¹、2%** 短时窗口，O₂ 为两分子/600 K/50 ps、单原点，未核对长时 MSD 指数、多原点、副本、链长/体积收敛及交叉参数实验一致性。
+  全系统零初始动量后残余漂移、文本状态不保存 thermostat/barostat 内部态；后续须做平稳性、分块不确定度与不同预算比较。
   尚不验证收敛物性、溶解度、渗透率、PET 弹性体/酒液/长期变形，GUI 精确拾取及厂内强制边界也未交付。
+- 最终交付记录经独立只读 critical review，无阻断；五份文档 **326 个本地文件链接**、`git diff --check` 通过。
+  暂存文档经 `.gitleaks.toml` 的 redact 扫描无泄漏；本次仅补记实际结果，不改运行代码，未重复启动真实 MD。
 
 ## 2026-10-13：PET 数据闭环节点 1（桌面、字典、调用清单）
 

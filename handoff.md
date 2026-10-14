@@ -1,8 +1,9 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-14；本次代码实现 PET 专项全流程研究、O₂ 示踪协议与 E1d 结构/轨迹查看，正在重新验收修正 O₂ 热态后的完整真实 PET 流程。
+更新：2026-10-14；PET 专项全流程研究、O₂ 示踪协议与 E1d 结构/轨迹查看已交付，修正热态后的全新 11 段真实 MD 与搬迁离线复核通过。
 本机原生 **1318/1318、无跳过**，Python 完整 **2782 passed、24 skipped**，最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**。
-代码 **`6aca8f8` 已推送 main**；本次完整热态复核正在继续；Windows CI 的同 tick 索引复用问题已修，三版本各 76 项与新整套通过，修复提交/CI 随后补记[验收记录](docs/runtime-validation.md)。
+代码 **`6aca8f8` 与索引补正 `20cc2f7` 已推送 main**；`20cc2f7` 的 Runtime **8/8**、桌面 **5/5**、文档与密钥扫描全部成功。
+三版本 reader/source 各 **76/76**。真实模量/O₂ 扩散拟合成功，Tg 未解析并保存拒绝原因；`software_complete=true`、`material_validation=false`，详见[验收记录](docs/runtime-validation.md)。
 代码 `4f54d78` 已推送 main，Runtime **8/8**、桌面 **5/5**、文档与密钥扫描均已完成成功。
 此前 PET 建模代码 `fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，实际测试数与新节点结果见验收记录。
 `main` 还包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
@@ -45,7 +46,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
 | 多尺度引擎 | E0a、E0b、E1a、**E1b 写出器与 PET 本机建模、E1c 分析模板已交付**；PET 参数已按所有者新授权选择 | [方案](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md)、[分析](docs/lammps-analysis.md) |
 | PET 数据闭环节点 1 | MuFerro/LAMMPS 桌面导入、按冻结引擎处理运行及批次、离线热力学摘要；字典草案和全合成离线数据演练 | [桌面指南](docs/lammps-desktop.md)、[字典](docs/design/pet-data-dictionary.md)、[示例](examples/pet_data/README.md)、[厂内清单](docs/design/inplant-execution-baseline.md) |
-| PET 专项研究 / E1d（本次工作树） | 冻结建模→压密→逐温降温→模量/O₂ 或 PET 链 COM MSD→保存分析；明确启动、取消、恢复、成功阶段复用；full/real 原子/真实键/盒子与实际轨迹帧 | [全流程例](examples/pet_study/README.md)、[结构契约](docs/specs/lammps-structure-1.md)、[参数/限制](docs/pet-model.md) |
+| PET 专项研究 / E1d（已交付） | 冻结建模→压密→逐温降温→模量/O₂ 或 PET 链 COM MSD→保存分析；明确启动、取消、恢复、成功阶段复用；full/real 原子/真实键/盒子与实际轨迹帧。11 段真实软件验收通过，物性未验证收敛 | [全流程例](examples/pet_study/README.md)、[结构契约](docs/specs/lammps-structure-1.md)、[参数/限制](docs/pet-model.md) |
 
 ## 待所有者决定（决定前不要按某个选项实现）
 
@@ -74,7 +75,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
    多温度 `density_series` 的来源随最终 Tg 诊断保存；日志任一段的重复列名拒绝，日志源实现版本 2 隔离旧缓存。
 3. **桌面的 LAMMPS 入口（节点 1）**：内置引擎选择、指定主脚本、准备/日志/收集/离线查看与结果行导航；批次按引擎区分，资源选项在编辑器会话内各自保留。
    旧项目/引擎/成员回调失效；本次另保护当前 Runtime/资源设置改变后的旧准备按钮。结构入口离线核对采集清单、输入、日志和 full/real，才替换 Viewer。
-4. **本次 PET 专项研究 / E1d**：完成真实阶段验收、提交与 CI；轨迹只从已核验采集清单查看，自动 final_state 快照仍排除 dump。
+4. **PET 专项研究 / E1d 已交付**：真实 11 段、三份分析/诊断、搬迁离线重开与 CI 通过；轨迹只从已核验采集清单查看，自动 final_state 快照仍排除 dump。
    LAMMPS `write_data` 的系数 `%g` 表示会舍入；下游每段从首个冻结模型恢复精确 54 类系数，保存表示差异诊断。
    剩余：长链、独立构型、热历史、气体扩散窗口与统计收敛；GUI 精确原子拾取、运行中监控、远程模块安装 → E2 ABACUS → E3 串联。
 5. 与 E 系列并行、需要人参与的：S2 真实本机模型的 GUI 人工验收（[工作台清单](docs/workbench-acceptance.md)“AI 智能体（多步）”）；
@@ -141,7 +142,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 | 证据 | 结果 |
 |---|---|
-| PET 专项 / E1d 本机（2026-10-14，本次工作树） | 完整 Python **2782 passed、24 skipped**；最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**；原生 **1318/1318、无跳过**。真实 546 PET 压密与 GPU 导出通过，长程后半程仍在验收。最终 CI/结果见[验收](docs/runtime-validation.md) |
+| PET 专项 / E1d（2026-10-14，`20cc2f7`） | 完整 Python **2782 passed、24 skipped**；协议/后端/dispatcher 三版本各 **97 passed**，reader/source 各 **76/76**；原生 **1318/1318、无跳过**。真实 11 段与离线复核通过；桌面 **5/5**、Runtime **8/8**，详见[验收](docs/runtime-validation.md) |
 | 数据闭环节点 1 本机（2026-10-13） | Python 完整 **2598 passed、24 skipped**，最终 guard 定向 **28 passed**；Linux 原生 **1309/1309、无跳过**，含 4 新交互/16 截图；真实 LAMMPS 原生 **2/2**；离线字典例三 Python 版本各 **7/7**。打包/i18n/链接/暂存密钥扫描通过，当前提交 CI 见[验收](docs/runtime-validation.md) |
 | E1b PET 本机建模（2026-10-12） | 完整 pytest 2569 passed、24 skipped（后加上限另定向）；最终定向 168 passed；独立真实模型/构象 5 passed、项目→LAMMPS 1 passed；原生定向 40/40。`fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，详见[验收记录](docs/runtime-validation.md) |
 | E1a `1859ca7` 本机 | 完整 pytest（`-m "not perf"`）**2427 passed、24 skipped**；Python 3.11 相关 81 passed；工作流/仿真/模块/智能体 CTest **69/69** |
@@ -161,6 +162,8 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
   运行中没有通用监控事件，远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载或查看器的更小资源上限。
   E1c 不自动判定平衡或扩散区，通用独立算例仍需明确选择汇总来源；没有 Tg 置信区间或通用多原点 MSD。
   PET 专项只支持 PET 链或显式 O₂ 质心的单原点 MSD；OLS 误差不能当材料性质不确定度。
+  本次 546 PET + 2 O₂ 短时全流程的 Tg 未解析，模量/D 仅为有限窗口数值拟合成功，未做链长、独立构型、热历史与统计收敛。
+  可离线打开的公开验收项目保留在本机 `/home/mnemora/opt/stk-validation/pet-study-20261014-20cc2f7/project`，旁有 evidence.json、数值图与最终轨迹截图；不是仓库夹具或已验证材料数据集。
   历史 540 原子可行性模型密度 1.223 g/cm³（所引用实验约 1.335）、4 聚体、约 20 ps，只说明工具链可用；
   它不是本次 COOH/OH 默认 546 原子模型的物性验收，初始填充密度也不能当作平衡密度。
 - **S2**：真实本机模型的 GUI 人工验收未做。
