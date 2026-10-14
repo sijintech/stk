@@ -18,7 +18,7 @@ import pytest
 np = pytest.importorskip("numpy")
 
 from suan.data.model import Category, CellArray, ImageData, PolyData, Table  # noqa: E402
-from suan.graph.nodes import output, plot, render, view  # noqa: E402
+from suan.graph.nodes import molecule_render, output, plot, render, view  # noqa: E402
 from suan.graph.registry import Budget, CancelToken, NodeExecutionError, Registry  # noqa: E402
 from suan.render.layers import Layer, Scene  # noqa: E402
 from suan.render.payload import Payload, decode  # noqa: E402
@@ -113,7 +113,7 @@ def two_squares():
 
 def test_declarations_equal_the_frozen_catalog():
     registry = Registry(namespaces={"stk": 1})
-    for module in (render, view, output, plot):
+    for module in (render, molecule_render, view, output, plot):
         registry.register(module)
     frozen_catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
     expected = {n["id"]: n for n in frozen_catalog["nodes"] if n["category"] in ("render", "view", "output", "plot")}
@@ -123,7 +123,7 @@ def test_declarations_equal_the_frozen_catalog():
 
 def test_node_modules_import_without_numpy():
     code = ("import sys; sys.modules['numpy'] = None; "
-            "import suan.graph.nodes.render, suan.graph.nodes.view, suan.graph.nodes.output, suan.graph.nodes.plot; "
+            "import suan.graph.nodes.render, suan.graph.nodes.molecule_render, suan.graph.nodes.view, suan.graph.nodes.output, suan.graph.nodes.plot; "
             "print('ok')")
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                             env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)})

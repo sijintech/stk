@@ -3686,6 +3686,129 @@ class LammpsSimulationPython : public SimulationPython {
   }
 };
 
+TEST_F(LammpsSimulationPython, NativePetStudyFreezesWithoutExecutionAndRejectsRetainedClicksAfterEngineSwitch)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  auto &jobs = f.shell->store().jobs();
+  auto done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 60));
+    ASSERT_TRUE(scripts.error().empty()) << scripts.error();
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+    f.drv->frame();
+  };
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  ASSERT_TRUE(scripts.execute("import sys\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom simulation_fixture import LammpsRuntime\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "_simulation_runtime = LammpsRuntime(" + Json(dir.str() + "/pet-runtime").dump() + ")\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('pet-test', _simulation_runtime.url, 'abcdefghijklmnopqrstu', check=False)\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('pet-other', _simulation_runtime.url, 'abcdefghijklmnopqrstu', check=False)"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  jobs.sync(); jobs.refresh_connections();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &item) {
+      return item.info.id == "runtime:pet-test";
+    });
+  }, 30));
+  jobs.select_connection("runtime:pet-test");
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  auto widget = [&](const std::string &id) { return f.screen.ui()->find("a2/main/" + id); };
+  auto toggle = [&](const std::string &id) {
+    const auto [x, y] = f.widget_center("a2/main/" + id);
+    f.drv->click(x, y); f.drv->frame();
+  };
+  toggle("project_simulation");
+  widget("project_simulation/simulation_engine")->index.assign(1); f.drv->frame();
+  toggle("project_simulation");
+  toggle("project_pet_study");
+  ASSERT_NE(widget("project_pet_study/pet_study_recipe"), nullptr);
+  widget("project_pet_study/pet_study_recipe")->string.assign("[]"); f.drv->frame();
+  EXPECT_FALSE(widget("project_pet_study/pet_study_create")->enabled);
+  widget("project_pet_study/pet_study_recipe")->string.assign("{\"diffusion\":{\"group\":\"o2_com\"}}");
+  f.drv->frame();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    const auto *button = widget("project_pet_study/pet_study_create");
+    return button && button->enabled;
+  }, 30));
+  const auto create_before_target_change = widget("project_pet_study/pet_study_create")->on_click;
+  auto history_before_target_change = scripts.history().size();
+  widget("project_pet_study/ranks")->number.assign(2);
+  create_before_target_change();
+  EXPECT_EQ(scripts.history().size(), history_before_target_change);
+  widget("project_pet_study/ranks")->number.assign(1);
+  jobs.select_connection("runtime:pet-other");
+  create_before_target_change();
+  EXPECT_EQ(scripts.history().size(), history_before_target_change);
+  jobs.select_connection("runtime:pet-test"); f.drv->frame();
+  widget("project_pet_study/pet_study_create")->on_click();
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute(
+      "from suan.workflows.pet_study import TABLE_ID\n"
+      "table = next(t for t in stk.project.snapshot()['tables'] if t['id'] == TABLE_ID)\n"
+      "assert len(table['records']) == 1\n"
+      "_pet_native_id = table['records'][0]['id']\n"
+      "_pet_native = stk.lammps.get_pet_study(_pet_native_id)\n"
+      "assert _pet_native['status'] == 'prepared' and not _pet_native['objects']\n"
+      "assert _pet_native['recipe']['diffusion']['group'] == 'o2_com'\n"
+      "assert _simulation_runtime.client.tasks() == []\n"
+      "assert _simulation_runtime.client.workspaces() == []"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(widget("project_pet_study/pet_study_get")->enabled);
+  widget("project_pet_study/pet_study_get")->on_click();
+  ASSERT_NO_FATAL_FAILURE(done());
+  // Duplicate default names remain distinct, and Create explicitly selects
+  // its new study rather than silently retaining the earlier one.
+  widget("project_pet_study/pet_study_create")->on_click();
+  ASSERT_NO_FATAL_FAILURE(done());
+  auto *saved = widget("project_pet_study/pet_study_saved");
+  ASSERT_EQ(saved->items.size(), 2u);
+  EXPECT_NE(saved->items[0], saved->items[1]);
+  EXPECT_EQ(saved->index.get(), 1);
+  ASSERT_TRUE(scripts.execute(
+      "table = next(t for t in stk.project.snapshot()['tables'] if t['id'] == TABLE_ID)\n"
+      "assert len(table['records']) == 2\n"
+      "_pet_native_id2 = next(r['id'] for r in table['records'] if r['id'] != _pet_native_id)\n"
+      "from suan.workflows.pet_study import PetStudy\n"
+      "_pet_start_original = PetStudy.start\n_pet_selected_starts = []\n"
+      "def _pet_selection_start(self, study_id, **kwargs):\n"
+      "    _pet_selected_starts.append(study_id)\n"
+      "    return self.get(study_id, project=kwargs['project'])\n"
+      "PetStudy.start = _pet_selection_start"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  widget("project_pet_study/pet_study_start")->on_click();
+  ASSERT_NO_FATAL_FAILURE(done());
+  const auto second_start = widget("project_pet_study/pet_study_start")->on_click;
+  widget("project_pet_study/pet_study_saved")->index.assign(0); f.drv->frame();
+  const auto before_stale_selection = scripts.history().size();
+  second_start();
+  EXPECT_EQ(scripts.history().size(), before_stale_selection);
+  widget("project_pet_study/pet_study_start")->on_click();
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("assert _pet_selected_starts == [_pet_native_id2, _pet_native_id]\n"
+      "PetStudy.start = _pet_start_original\nassert _simulation_runtime.client.tasks() == []"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(widget("project_pet_study/pet_study_start")->enabled);
+  const auto retained_start = widget("project_pet_study/pet_study_start")->on_click;
+  const auto retained_create = widget("project_pet_study/pet_study_create")->on_click;
+  // Switch via the other native engine selector. Old PET callbacks cannot
+  // submit against a context that the user has left.
+  toggle("project_simulation");
+  widget("project_simulation/simulation_engine")->index.assign(0); f.drv->frame();
+  EXPECT_EQ(widget("project_pet_study"), nullptr);
+  const auto history = scripts.history().size();
+  retained_start(); retained_create(); f.drv->frame();
+  EXPECT_EQ(scripts.history().size(), history);
+  ASSERT_TRUE(scripts.execute("assert _simulation_runtime.client.tasks() == []\n"
+      "assert stk.lammps.get_pet_study(_pet_native_id)['status'] == 'prepared'"));
+  ASSERT_NO_FATAL_FAILURE(done());
+}
+
 TEST_F(LammpsSimulationPython, NativeButtonsPrepareSubmitCollectAndViewTheSavedRunOffline)
 {
   populated();

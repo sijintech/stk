@@ -50,12 +50,14 @@ int main(int argc, char **argv)
   const bool ai_scope = editor == "ai_scope" || editor == "ai_scope_narrow";
   const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope || ai_focus;
   const bool lammps = editor == "simulation_lammps" || editor == "simulation_lammps_narrow" ||
-                      editor == "batches_lammps" || editor == "batches_lammps_narrow";
+                      editor == "batches_lammps" || editor == "batches_lammps_narrow" ||
+                      editor == "pet_study" || editor == "pet_study_narrow";
+  const bool pet_study = editor == "pet_study" || editor == "pet_study_narrow";
   const bool batch_page = editor == "batches" || editor == "batches_lammps" || editor == "batches_lammps_narrow";
   const bool simulation_page = editor == "simulation" || batch_page || lammps;
   const int canvas_width = editor == "workspace_narrow" || editor == "skills_narrow" ? 560 :
       editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ||
-      editor == "simulation_lammps_narrow" || editor == "batches_lammps_narrow" ? 760 : 1280;
+      editor == "simulation_lammps_narrow" || editor == "batches_lammps_narrow" || editor == "pet_study_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions bo;
@@ -528,6 +530,35 @@ int main(int argc, char **argv)
         ok = ok && scripts.status().at("run").at("state") == "succeeded";
         state.select_table(lammps ? "a70a9da3-fb57-5d06-9ab3-5de529a82882" : "27e50c45-2d61-523c-a56b-f505bbd595c5");
         ok = ok && state.table() && state.table()->records.size() == 1;
+        if (pet_study) {
+          ok = ok && scripts.execute("from suan.desktop_bridge.connections import ConnectionStore\n"
+              "ConnectionStore(" + io::Json(dir.str() + "/bridge").dump() + ").add_runtime('pet-demo', "
+              "'http://127.0.0.1:1', 'abcdefghijklmnopqrstu', check=False)\n"
+              "stk.lammps.create_pet_study({'diffusion':{'group':'o2_com'}}, connection='runtime:pet-demo', "
+              "expected_revision=stk.project.snapshot()['project']['revision']); None");
+          ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
+          ok = ok && scripts.status().at("run").at("state") == "succeeded";
+          for (const auto *key : {"a2/main/project_simulation", "a2/main/project_pet_study"}) {
+            ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+            if (const auto *widget = screen.ui()->find(key)) {
+              const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
+              screen.ui()->handle_event(ui::Event::mouse_down(center));
+              screen.ui()->handle_event(ui::Event::mouse_up(center));
+            }
+            else { ok = false; }
+          }
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+          if (const auto *widget = screen.ui()->find("a2/main/project_pet_study/pet_study_recipe")) {
+            widget->string.assign("{\"diffusion\":{\"group\":\"o2_com\"}}");
+          }
+          else { ok = false; }
+          if (const auto *widget = screen.ui()->find("a2/main/project_pet_study/pet_study_get"); widget && widget->enabled) {
+            widget->on_click();
+          }
+          else { ok = false; }
+          ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
+          ok = ok && scripts.status().at("run").at("state") == "succeeded";
+        }
         if (batch_page) {
           const auto id = state.record_id();
           ok = ok && scripts.execute(std::string("p = stk.project\nrow = stk.") + (lammps ? "lammps" : "muferro") + ".clone_case(" + io::Json(id).dump() +

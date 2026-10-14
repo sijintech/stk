@@ -6,10 +6,10 @@ Conventions: links are written on the input side as `{"from": "<node>.<port>"}` 
 
 ## Families
 
-- **source** — read data through connectors; a `binding` names the run, `path` is relative inside it: `stk.source.file@1`, `stk.source.lammps_log@1`, `stk.source.muferro_frame@1`, `stk.source.muferro_run@1`, `stk.source.table@1`
+- **source** — read data through connectors; a `binding` names the run, `path` is relative inside it: `stk.source.file@1`, `stk.source.lammps_density_series@1`, `stk.source.lammps_log@1`, `stk.source.lammps_structure@1`, `stk.source.muferro_frame@1`, `stk.source.muferro_run@1`, `stk.source.table@1`
 - **filter** — transform datasets (data-stage params re-run them): `stk.filter.calculator@1`, `stk.filter.contour@1`, `stk.filter.crop@1`, `stk.filter.glyph_source@1`, `stk.filter.label_surfaces@1`, `stk.filter.sample@1`, `stk.filter.slice@1`, `stk.filter.streamlines@1`, `stk.filter.threshold@1`
 - **analysis** — derive labels, fractions and statistics: `stk.analysis.film_detect@1`, `stk.analysis.label_fractions@1`, `stk.analysis.lammps_diffusion@1`, `stk.analysis.lammps_modulus@1`, `stk.analysis.lammps_tg@1`, `stk.analysis.orientation_classify@1`, `stk.analysis.statistics@1`
-- **render** — turn data into draw layers; appearance params are client-stage: `stk.render.axes@1`, `stk.render.categorical_legend@1`, `stk.render.glyphs@1`, `stk.render.orientation_legend@1`, `stk.render.outline@1`, `stk.render.scalar_bar@1`, `stk.render.surface@1`, `stk.render.volume@1`
+- **render** — turn data into draw layers; appearance params are client-stage: `stk.render.axes@1`, `stk.render.categorical_legend@1`, `stk.render.glyphs@1`, `stk.render.molecule_atoms@1`, `stk.render.molecule_lines@1`, `stk.render.orientation_legend@1`, `stk.render.outline@1`, `stk.render.scalar_bar@1`, `stk.render.surface@1`, `stk.render.volume@1`
 - **view** — camera and scene assembly: `stk.view.camera@1`, `stk.view.scene@1`
 - **output** — deliverables: payload, image, dataset export: `stk.output.dataset@1`, `stk.output.image@1`, `stk.output.payload@1`
 - **plot** — stk.plot/1 figures (matplotlib), delivered as SVG/PNG plus the plotted data: `stk.plot.bar@1`, `stk.plot.heatmap@1`, `stk.plot.histogram@1`, `stk.plot.line@1`
@@ -35,6 +35,19 @@ Read a field file inside a binding: MuPRO DAT, NPY, VTI, legacy VTK STRUCTURED_P
 | `quantity` | string \| null | null | data |  |
 | `step` | integer (≥0) \| null | null | data | Time step metadata |
 
+## `stk.source.lammps_density_series@1` — LAMMPS density series
+
+Read explicit real-unit logs, preserving every raw digest and optional frozen study receipt.
+
+- Inputs: none
+- Outputs: `out` (table)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `binding` | string | **required** | data | binding |
+| `paths` | array of string | [] | data |  |
+| `receipt_path` | string \| null | null | data |  |
+
 ## `stk.source.lammps_log@1` — LAMMPS thermodynamics
 
 Read one finished real-units thermo block; reject errors, truncation and nonfinite values.
@@ -47,6 +60,21 @@ Read one finished real-units thermo block; reject errors, truncation and nonfini
 | `binding` | string | **required** | data | binding |
 | `path` | string | "log.lammps" | data | path |
 | `block` | integer | -1 | data |  |
+
+## `stk.source.lammps_structure@1` — LAMMPS molecule
+
+Read full/real topology and optional complete text dump; preserve original atom IDs, charges and bonds.
+
+- Inputs: none
+- Outputs: `atoms` (dataset), `bonds` (dataset), `box` (dataset), `diagnostics` (value)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `binding` | string | **required** | data | binding |
+| `topology` | string | "state.data" | data |  |
+| `trajectory` | string | "" | data |  |
+| `step` | integer (≥0) \| "latest" \| "first" | "latest" | data | step |
+| `wrapped_display` | boolean | true | data |  |
 
 ## `stk.source.muferro_frame@1` — muFerro frame
 
@@ -384,6 +412,34 @@ Instanced glyphs (arrow/cone/sphere/line/cube) at the input points, oriented by 
 | `center` | boolean | true | client |  |
 | `scale` | object {by, field, factor} | {"by": "magnitude", "factor": "auto"} | client |  |
 | `color` | object {by, solid, field, component, colormap, palette, range, range_mode, lightness_range} | {"by": "orientation"} | client |  |
+| `opacity` | number (≥0, ≤1) | 1.0 | client |  |
+| `name` | string \| null | null | client |  |
+
+## `stk.render.molecule_atoms@1` — Molecular atoms
+
+Sphere points retaining atom ID, molecule ID, type, charge and original position attributes; no field probe.
+
+- Inputs: `in` (dataset; kinds points)
+- Outputs: `layer` (layer)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `radius` | number (>0, ≤10) | 0.3 | client |  |
+| `color` | object {by, solid, field, component, colormap, palette, range, range_mode, lightness_range} | {"by": "field", "field": "atom_type"} | client |  |
+| `opacity` | number (≥0, ≤1) | 1.0 | client |  |
+| `name` | string \| null | null | client |  |
+
+## `stk.render.molecule_lines@1` — Molecular lines
+
+Render explicit two-point topology bonds or cell edges as lines, without inferring connectivity.
+
+- Inputs: `in` (dataset; kinds polydata)
+- Outputs: `layer` (layer)
+
+| param | type | default | stage | notes |
+|---|---|---|---|---|
+| `width_px` | number (≥0, ≤32) | 1.5 | client |  |
+| `color` | object {by, solid, field, component, colormap, palette, range, range_mode, lightness_range} | {"by": "solid", "solid": [0.35, 0.35, 0.35]} | client |  |
 | `opacity` | number (≥0, ≤1) | 1.0 | client |  |
 | `name` | string \| null | null | client |  |
 

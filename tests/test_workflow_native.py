@@ -81,6 +81,7 @@ def test_project_switch_rejected_before_import(project_api):
     ("import", {"source": "unused"}), ("clone", {"record_id": "unused"}),
     ("prepare", {"record_id": "unused", "connection": "runtime:unused"}),
     ("collect", {"run_id": "unused"}), ("view", {"run_id": "unused"}), ("logs", {"run_id": "unused"}),
+    ("view_structure", {"run_id": "unused"}),
     ("batch_create", {"record_ids": ["unused"], "connection": "runtime:unused"}),
     ("batch_submit", {"batch_id": "unused"}),
 ])
@@ -204,6 +205,43 @@ def test_collect_logs_and_offline_view_reopen_and_recheck_bytes(native_runtime, 
     (Path(collected["directory"]) / "log.lammps").write_text("changed synthetic log\n")
     with pytest.raises(ValueError, match="changed locally"):
         invoke(s, "view", run_id=run["id"])
+
+
+def test_molecular_view_uses_only_verified_collected_files_and_never_refreshes_runtime(native_runtime, monkeypatch):
+    s = native_runtime
+    topology = ("Full real display fixture\n\n2 atoms\n0 bonds\n0 angles\n0 dihedrals\n0 impropers\n\n"
+                "1 atom types\n\n0 10 xlo xhi\n0 10 ylo yhi\n0 10 zlo zhi\n\nMasses\n\n1 12\n\n"
+                "Atoms # full\n\n1 1 1 0 2 3 4\n2 1 1 0 3 3 4\n")
+    program = s["program"].read_text()
+    s["program"].write_text(program.replace('"fake LAMMPS data file\\n"', repr(topology)))
+    run = prepared(s)
+    task = s["p"].runs.submit(run["id"])["status"]["task"]["id"]
+    assert finish(s["client"], s["supervisor"], task)["state"] == "succeeded"
+    collected = invoke(s, "collect", run_id=run["id"])
+    opens = []
+    monkeypatch.setattr(s["api"].viewer, "open", lambda path, **kwargs: opens.append((path, kwargs)))
+    original = s["api"]._call
+
+    def offline(operation, params):
+        assert not operation.startswith("runtime.") and operation != "project.runs.refresh"
+        return original(operation, params)
+
+    monkeypatch.setattr(s["api"], "_call", offline)
+    # This transport fixture has two unrelated data files: require an explicit
+    # selection rather than guessing their scientific meaning.
+    with pytest.raises(ValueError, match="explicit collected.*topology"):
+        invoke(s, "view_structure", run_id=run["id"])
+    invoke(s, "view_structure", run_id=run["id"], topology="final.data", trajectory=False)
+    assert opens == [(collected["directory"], {"preset": "lammps-molecule",
+                     "parameters": {"topology": "final.data", "trajectory": ""}})]
+    for topology, trajectory in (("../final.data", False), ("absent.data", False),
+                                 ("final.data", True), ("final.data", "uncollected.dump")):
+        with pytest.raises(ValueError):
+            invoke(s, "view_structure", run_id=run["id"], topology=topology, trajectory=trajectory)
+    (Path(collected["directory"]) / "final.data").write_text("altered output\n")
+    with pytest.raises(ValueError, match="changed locally"):
+        invoke(s, "view_structure", run_id=run["id"], topology="final.data")
+    assert len(opens) == 1
 
 
 def test_view_rejects_modified_summary_and_symlinked_artifacts(native_runtime):

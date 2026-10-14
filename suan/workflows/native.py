@@ -17,6 +17,7 @@ _PARAMETERS = {
     "prepare": ({"record_id", "connection"}, {"options", "identity", "table_id"}),
     "collect": ({"run_id"}, {"max_bytes"}),
     "view": ({"run_id"}, set()),
+    "view_structure": ({"run_id"}, {"topology", "trajectory"}),
     "logs": ({"run_id"}, set()),
     "batch_create": ({"record_ids", "connection"}, {"template_id", "options"}),
     "batch_run": ({"record_ids", "connection"}, {"template_id", "options"}),
@@ -77,6 +78,8 @@ def native_action(stk, engine, action, params):
     if not required <= params.keys() or params.keys() - required - optional:
         raise ValueError("Missing or unknown simulation action parameters")
     module = _ENGINES[engine]
+    if action == "view_structure" and module is not lammps:
+        raise ValueError("Molecular structure viewing requires a LAMMPS run")
     project_id, expected = params.pop("project_id"), params.pop("expected_revision")
     p = stk.project
     model = p.snapshot()
@@ -117,6 +120,8 @@ def native_action(stk, engine, action, params):
             summary["file_count"] = len(result["files"])
             print("LAMMPS collected results:", json.dumps(summary, ensure_ascii=False, allow_nan=False), flush=True)
         return result
+    if action == "view_structure":
+        return service.view_structure(project=p, **params)
     run = p.runs.refresh(params["run_id"])
     task = run["status"].get("task")
     if not task:

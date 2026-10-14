@@ -251,7 +251,10 @@ class WorkflowRuns:
                 "source_revision": revision, "created_at": _now(), "table_id": table_id, "rows": frozen_rows,
                 "order": _order(steps), "steps": frozen_steps, "parameters": parameters,
                 "directory": f"{RESULTS_DIRECTORY}/{run_id}"}
-        if remote:
+        # A registered local coordinator may explicitly consume a frozen Runtime
+        # intent without itself being a remote solver. Its child plans compare
+        # this fingerprint before starting; ordinary local templates ignore it.
+        if simulation is not None:
             plan["simulation"] = simulation
         return plan
 

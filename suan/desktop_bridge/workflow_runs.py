@@ -495,7 +495,8 @@ class WorkflowRunExecutor:
         finished, observer = threading.Event(), None
         try:
             cancellable = getattr(template, "run_cancellable", None)
-            if callable(cancellable):
+            coordinator = getattr(template, "execute_local", None)
+            if callable(cancellable) or callable(coordinator):
                 if self._local_cancelled(job):
                     raise _Cancelled()
 
@@ -507,7 +508,14 @@ class WorkflowRunExecutor:
                 observer = threading.Thread(target=observe, daemon=True,
                                             name="stk-workflow-cancel-" + job.run_id)
                 observer.start()
-                cancellable(plan["parameters"][step][row["id"]], directory, job.cancel)
+                if callable(coordinator):
+                    coordinator(stk=self._api(job), cleanup_stk=self._api(job, cancellable=False),
+                                parameters=plan["parameters"][step][row["id"]], directory=directory,
+                                cancel=job.cancel, context={"run_id": job.run_id, "step": step,
+                                    "row_id": row["id"], "attempt": attempt,
+                                    "simulation": plan.get("simulation")})
+                else:
+                    cancellable(plan["parameters"][step][row["id"]], directory, job.cancel)
                 if self._local_cancelled(job):
                     raise _Cancelled()
             else:

@@ -1,6 +1,7 @@
 # PET 分子模型：文献来源、参数适配与科学验证边界
 
-2026-10-12。所有者授权 STK 根据文献与公开资料选择 PET 参数方案并实施，原先等待苯环碳电荷决定的事项已解除。
+2026-10-12 确定建模参数，2026-10-14 新增专用分阶段研究与 O₂ 示踪协议。
+所有者授权 STK 根据文献与公开资料选择 PET 参数方案并实施，原先等待苯环碳电荷决定的事项已解除。
 采用版本化的 **STK PET OPLS-AA/MK 2022 适配模型**（`stk.pet.opls-mk2022/1`），
 用于干燥、无定形、未离子化、COOH/OH 端基的线性 PET。它是可追溯的建模基线，**不是已经验证的 PET 材料性质模型，也不是论文的精确复现**。
 实现、测试与 CI 的实际交付状态以[开发计划](development-plan.md)和[验收记录](runtime-validation.md)为准。
@@ -94,6 +95,66 @@ Foyer 返回的 ParmEd 结构可能保留输入元素库质量，worker 因此�
 重开、刷新或创建表格不启动构建。准备时冻结行参数，开始后使用已安装的软件；软件版本不是二进制快照，实际使用版本保存在产物中。
 参数方案按版本维护，未来改物理参数须新增版本，不覆写已发布 profile 1。
 
+## PET 专用分阶段研究与 O₂ 示踪
+
+新增协议 `stk.pet-study-recipe/1` 与本机协调步骤 `pet-study/1`，在项目格式 13 中串联现有建模、LAMMPS 运行、快照和保存分析。
+它是 PET 专用流程；未改变原 PET profile 1 或旧 E1c 模板，也不替代通用工作流协议。
+`stk.lammps.create_pet_study` 冻结配方与 Runtime 意图，显式 `start_pet_study` 才开始计算；
+查看、重开和恢复记录不会自行提交。使用方法见[全流程示例](../examples/pet_study/README.md)，实际运行结果与 CI 另记[验收记录](runtime-validation.md)。
+
+初始最小化与高温预热后，NPT 压力逐步升至设定压密压力，再释放至设定压力；默认末端压力为 1 atm。
+冷却温度按冻结序列逐段下降：下一段读取前段的几何、晶胞与原子速度，以前一设定温度到本段温度作 NPT 温度斜坡，
+随后在本段温度采样。模量和扩散分别读取所选温度的保存状态，不互相使用已经拉伸或已经加入气体的状态。
+交接采用文本 `state.data`，并不保存温控器/压控器的内部状态，也不声称等同于连续二进制 restart 的动力学。
+各段保持输入 `input-state.data` 与输出 `state.data` 分离，并保存来源快照、实际文件摘要和含原子/分子 ID、类型、电荷及非折回坐标的轨迹。
+
+LAMMPS 的这些势函数在 `write_data` 中以默认 `%g` 写浮点系数，即六位有效数字；
+OPLS 的内部半系数写出前会乘回 2，harmonic 角的内部弧度会换回度，CVFF 的符号和周期数仍按整数写出。
+这会使状态文件中的某些 OPLS 系数与初始精确值略有差异。
+下游每段在 `read_data` 后立即读取由**首次冻结 `pet.data`**生成的 `forcefield-exact.in`，
+用 17 位有效数字恢复原有 pair/bond/angle/dihedral/improper 系数，不从前段舍入表反复推导参数；O₂ 新类型系数另行设置。
+配套 JSON 保存原始数据摘要、逐类型精确数值和命令摘要；输入/输出的校验只识别已确认的文本表示舍入并逐项记录，任意改参仍拒绝。
+初始松弛使用原始精确数据，不因增加下游恢复文件改变已冻结的松弛输入。
+这些规则针对当前明确支持的势函数；源码依据是固定的
+[LAMMPS 22Jul2025 OPLS 写出函数](https://raw.githubusercontent.com/lammps/lammps/stable_22Jul2025/src/MOLECULE/dihedral_opls.cpp)，
+以及下列[各势函数写出实现](#可复核的公开来源与许可)。
+
+默认 `pet_chain_com` 为纯 PET 整链质心的单原点 MSD；`{"diffusion":{"group":"o2_com"}}` 选择独立版本
+`stk.oxygen.iff2021-12-6/1` 的中性 O₂ 示踪模型。它采用 Wang、Hou、Heinz 的
+[2021 年 IFF 气体模型](https://doi.org/10.1021/acs.jctc.0c01132)，
+[作者公开稿](https://par.nsf.gov/servlets/purl/10297174)表 2 中的 12–6 参数，完整保留该双原子模型的键与 LJ 项：
+
+| 参数 | 文献定义 | STK / LAMMPS real 定义 |
+|---|---|---|
+| O–O 平衡距离 | 1.2074 Å | 1.2074 Å |
+| 谐振键系数 | `U = ½ Kr Δr²`，Kr = 1640.4 kcal mol⁻¹ Å⁻² | `U = K Δr²`，K = 820.2 kcal mol⁻¹ Å⁻² |
+| LJ 距离 | 势能最小位置 rmin = 3.297 Å | 零交点 σ = rmin / 2¹ᐟ⁶ = 2.9372930737086986 Å |
+| LJ 势阱深度 | ε = 0.1047 kcal mol⁻¹ | 原值 |
+| 每个氧原子的质量、电荷 | 作者补充 FRC / O₂ 结构文件 | 15.9994 g mol⁻¹、0 e |
+
+作者示例输入将 σ 舍入为 2.937 Å；STK 明确使用表中 rmin 的解析转换，不声称逐位复现作者轨迹。
+交叉 σ、ε 沿现有 PET OPLS 的几何混合规则生成；O₂ 的 1–2 非键合排除，不增加角、二面角、虚拟电荷点、极化或化学反应。
+原论文关于气体/水与力场兼容性的结果不能转述为本 PET/O₂ 混合体系的扩散准确性证明。
+
+O₂ 只在扩散分支中随机插入，默认两个分子；重叠距离、尝试预算、分子数和随机种子随配方冻结。
+建模、初速度和分子插入的种子分别受其随机数算法范围限制，插入种子还须与冻结的 MPI 进程数相容。
+未满足非重叠条件或未生成全部指定分子时停止，不能用缺少的示踪分子继续拟合。
+新增类型、质量、电荷、分子 ID、气体键与总原子数须核对；PET 原有身份、拓扑和系数保持不变。
+随机非重叠插入不是 GCMC 或平衡吸附方法，其实际构型、数量与执行选项需保留，不能把气体数解释为预测溶解度。
+
+气体插入后保留已有 PET 坐标和速度，只为新 O₂ 创建速度，再清除全体系线动量；这个步骤不对全体系作 FIRE 最小化。
+固定 [LAMMPS 22Jul2025 的 FIRE 初始化](https://raw.githubusercontent.com/lammps/lammps/stable_22Jul2025/src/min_fire.cpp)
+会清零全部原子速度，并把速度用于最小化的虚拟动力学，不能当作保留高温保存态的准备步骤。
+这与初始 PET 建模后先最小化、再为全体系明确创建热速度的顺序不同。
+插入分支依赖明确的非重叠约束与后续有限 NPT 准备，仍须检查温度、压力、密度和体积随时间的稳定性；
+保留热态或完成准备预算本身不证明含气体系已平衡。
+
+扩散先作有限 NPT 准备，生产段采用固定体积 NVT；质心按原子质量与非折回坐标计算，并只选择指定 PET 或 O₂ 分子组。
+不会去掉气体组自身的整体质心位移；插入后只清除全体系初始线动量。当前为单时间原点、有限浓度与有限时间采样，
+还需检验整体漂移、独立构型、多原点、长时扩散区和稀释极限。
+`pilot` 与 `research` 是不同的起始预算，不是平衡或收敛判据；完整软件结果始终保留 `material_validation = false`，
+被拒绝的 Tg、模量或扩散拟合保存失败诊断，不补造物性值。
+
 ## 科学适用范围与仍需完成的验证
 
 参数与拓扑核对、独立势能公式对照、真实 LAMMPS 运行以及项目生成/归档路径是分别验收的环节。
@@ -111,11 +172,16 @@ Foyer 返回的 ParmEd 结构可能保留输入元素库质量，worker 因此�
   Tg 的密度曲线需覆盖玻璃态与高温态，评估拟合窗口和不确定度。小四聚体是功能验收体系，不代表高分子量 PET。
 - **模量**：先取得受力与结构稳定的玻璃态构型，检查温度、方向、应变窗口、应变率与独立构型之间的变化；
   MD 高应变率结果不能直接当作实验加载速率下的材料模量。
-- **扩散与阻隔**：选择与聚合物相容、明确出处的 O₂/CO₂/H₂O 参数及交叉作用，
-  取得已平衡含气体系，检查分子质心、多时间原点、整体漂移与真正扩散区。
-  现有 E1c 单原点原子组 MSD 拟合不等于完整气体分子扩散验收；扩散系数也不足以单独给出渗透率，尚需吸附/溶解信息。
+- **扩散与阻隔**：首个 O₂ 示踪参数与专项分子质心采样已实现，但 PET/O₂ 交叉作用和材料扩散尚未验证；CO₂、水和乙醇参数尚未提供。
+  仍须取得已平衡含气体系，检查分子质心、多时间原点、整体漂移、浓度效应与真正扩散区。
+  旧 E1c 单原点所选原子组模板保持原状；新专项质心 MSD 也不等于收敛气体扩散验收。
+  扩散系数不足以单独给出渗透率，尚需吸附/溶解信息。
 - **不同材料形态与化学**：本模型不描述晶体/半结晶形态、取向、交联、改性共聚物、去质子化端基或水解反应；
   这些体系需要重新选择端基、参数或模型。固定电荷经典模型也不提供电子性质或化学反应路径。
+
+纯 PET 不能代替 PET 基弹性体，干燥 PET/O₂ 也不能代替酒液接触后的材料。
+多相或多个热转变不由两段直线 Tg 拟合自动识别；小应变斜率不能代替回弹、黏弹性或长期永久变形。
+组成、结晶、热史、接触状态与实验时间尺度必须另行记录、标定和验证。
 
 ## 可复核的公开来源与许可
 
@@ -132,3 +198,19 @@ Foyer 返回的 ParmEd 结构可能保留输入元素库质量，worker 因此�
   SHA-256 `145e6924f52fae7e93108fa3d674f31a53aea10c80b13dd89abf0b011adfd4fa`；
   其[仓库许可](https://raw.githubusercontent.com/gromacs/gromacs/v2025.3/COPYING)为 LGPL v2.1。
   参数来源固定到版本与文件摘要，运行时不从外网补参数；这些公开数据的使用不表示原作者或 NIH 为 STK 模型背书。
+- O₂ 参数：Wang、Hou、Heinz，JCTC 2021, 17, 5198–5213，[DOI 10.1021/acs.jctc.0c01132](https://doi.org/10.1021/acs.jctc.0c01132)。
+  [作者补充代码与结构 ZIP](https://acs.figshare.com/articles/journal_contribution/14977419)的 SHA-256 为
+  `542c793b9bdadfab894eb45c913435bce1f47ad30fe031987d6da0f821ed52fc`，公开元数据标注 CC BY-NC 4.0。
+  质量与零电荷分别核对 `Supporting_Files/FORCE_FIELD/cvff_interface_Gas.frc` 的 `o2g` 类型及 `Supporting_Files/MODEL/O2.car`、`O2.mdf`。
+  仓库记录必需的数值事实、来源与换算，没有分发整份作者力场、结构文件或补充 ZIP；许可字段记录来源许可，不宣称其适用于所有下游用途。
+- 气体传输的研究参考：[Lightfoot 等，PET/PEF 氧扩散对照研究](https://doi.org/10.1021/acs.macromol.1c01316)。
+  其[作者研究记录](https://researchportal.bath.ac.uk/en/publications/a-comparative-study-of-oxygen-diffusion-in-pet-and-pef-using-mole/)
+  与[公开补充材料](https://acs.figshare.com/articles/journal_contribution/17105809)保留长时间 MSD 和多条轨迹分析。
+  该研究使用的聚合物/氧模型与 STK 不同，只用于制定长时采样、扩散区与独立轨迹的后续验证方法，不作为本实现已经通过的数值基准。
+- 文本系数表示：固定 LAMMPS `stable_22Jul2025` 的
+  [LJ/Coulomb long](https://raw.githubusercontent.com/lammps/lammps/stable_22Jul2025/src/KSPACE/pair_lj_cut_coul_long.cpp)、
+  [harmonic bond](https://raw.githubusercontent.com/lammps/lammps/stable_22Jul2025/src/MOLECULE/bond_harmonic.cpp)、
+  [harmonic angle](https://raw.githubusercontent.com/lammps/lammps/stable_22Jul2025/src/MOLECULE/angle_harmonic.cpp)、
+  [OPLS dihedral](https://raw.githubusercontent.com/lammps/lammps/stable_22Jul2025/src/MOLECULE/dihedral_opls.cpp) 与
+  [CVFF improper](https://raw.githubusercontent.com/lammps/lammps/stable_22Jul2025/src/MOLECULE/improper_cvff.cpp) 的 `write_data` 实现。
+  这是文件表示精度的来源，不是更改物理参数或放宽任意系数差异的依据。

@@ -94,4 +94,14 @@ std::string SimulationTarget::runtime_name(EditorContext &ctx, const std::string
   }
   return connection.rfind("runtime:", 0) == 0 ? connection.substr(8) : connection;
 }
+
+bool SimulationTarget::matches(const JobsState &jobs, const std::string &connection,
+                               const std::optional<Json> &options) const
+{
+  if (!options || jobs.hub() || jobs.active_id() != connection ||
+      Json::parse(options_, nullptr, false) != *options) { return false; }
+  return std::any_of(jobs.connections().begin(), jobs.connections().end(), [&](const auto &row) {
+    return row.info.id == connection && row.info.kind == "runtime" && row.health != Health::Offline;
+  });
+}
 }  // namespace stk::app

@@ -69,6 +69,132 @@ bool contains(const std::vector<std::string> &v, const std::string &s)
 
 }  // namespace
 
+TEST(PythonViewer, MolecularTopologyAndRealTimestepsRenderWithoutChangingTheCamera)
+{
+  std::string reason;
+  const std::string python = graph_python(reason);
+  if (python.empty()) { g_skipped_all = true; GTEST_SKIP() << reason; }
+  ASSERT_NE(g_gpu, nullptr);
+  TempDir dir("molecule-python");
+  const auto run = dir.str() + "/molecule";
+  std::filesystem::create_directories(run);
+  ASSERT_TRUE(write_text(run + "/state.data", R"(Full real molecular display fixture
+
+2 atoms
+1 bonds
+0 angles
+0 dihedrals
+0 impropers
+
+2 atom types
+1 bond types
+
+0 8 xlo xhi
+0 8 ylo yhi
+0 8 zlo zhi
+
+Masses
+
+1 12.011
+2 15.9994
+
+Atoms # full
+
+27 7 2 -0.2 3.2074 4 4
+9 7 1 0.2 2 4 4
+
+Bonds
+
+8 1 9 27
+)"));
+  ASSERT_TRUE(write_text(run + "/trajectory.dump", R"(ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+2
+ITEM: BOX BOUNDS pp pp pp
+0 8
+0 8
+0 8
+ITEM: ATOMS id mol type q xu yu zu
+27 7 2 -0.2 3.2074 4 4
+9 7 1 0.2 2 4 4
+ITEM: TIMESTEP
+100
+ITEM: NUMBER OF ATOMS
+2
+ITEM: BOX BOUNDS pp pp pp
+0 8
+0 8
+0 8
+ITEM: ATOMS id mol type q xu yu zu
+9 7 1 0.2 4 4 4
+27 7 2 -0.2 5.2074 4 4
+)"));
+  ManualLoop loop;
+  auto client = bridge::Client::create(python_bridge_options(python, dir.str(), loop.executor()));
+  std::string error;
+  ASSERT_TRUE(client->start(&error)) << error;
+  ASSERT_TRUE(client->wait_ready(120)) << client->bridge_log().text();
+  {
+    app::AppStore store;
+    store.set_bridge(client.get());
+    auto &vs = store.viewer();
+    vs.prefetch_neighbours = false;
+    auto ready = [&] {
+      return loop.pump_until([&] { return !vs.evaluating() && (vs.payload() || !vs.eval_error().empty()); },
+                             120, [&] { vs.pump(); });
+    };
+    ASSERT_TRUE(vs.open_path(run, "lammps-molecule", {{"topology", "state.data"}, {"trajectory", "trajectory.dump"}}));
+    ASSERT_TRUE(ready()) << vs.eval_error() << client->bridge_log().text();
+    ASSERT_NE(vs.payload(), nullptr) << vs.eval_error();
+    ASSERT_EQ(vs.step_choices().size(), 2u);
+    const auto *atoms = vs.payload()->layer("atoms");
+    ASSERT_NE(atoms, nullptr);
+    EXPECT_EQ((*atoms)["type"], "points");
+    EXPECT_EQ((*atoms)["appearance"]["render_as"], "spheres");
+    EXPECT_FALSE(atoms->contains("pick"));
+    EXPECT_EQ((*atoms)["appearance"]["radius"], 0.3);
+    EXPECT_EQ(vs.payload()->doubles((*atoms)["attributes"]["atom_id"]["accessor"].get<std::string>()),
+              (std::vector<double>{9, 27}));
+    EXPECT_EQ(vs.payload()->doubles((*atoms)["attributes"]["atom_type"]["accessor"].get<std::string>()),
+              (std::vector<double>{1, 2}));
+    const auto charges = vs.payload()->doubles((*atoms)["attributes"]["charge"]["accessor"].get<std::string>());
+    ASSERT_EQ(charges.size(), 2u);
+    EXPECT_NEAR(charges[0], 0.2, 1e-7);  // GPU delivery uses float32; reader values remain float64.
+    EXPECT_NEAR(charges[1], -0.2, 1e-7);
+    ASSERT_NE(vs.payload()->layer("bonds"), nullptr);
+    ASSERT_NE(vs.payload()->layer("box"), nullptr);
+    viewer_gpu::Viewer viewer(g_gpu->fonts());
+    viewer.set_payload(vs.payload());
+    auto changed_camera = viewer.camera();
+    changed_camera.position += viewer::dvec3{1.0, 0.5, 0.25};
+    viewer.set_camera(changed_camera);
+    const auto latest = render(viewer, 400, 300);
+    const auto layer_infos = viewer.layers();
+    for (const auto &[id, count] : {std::pair{"atoms", 2u}, {"bonds", 1u}, {"box", 12u}}) {
+      const auto layer = std::find_if(layer_infos.begin(), layer_infos.end(),
+                                     [&](const auto &item) { return item.id == id; });
+      ASSERT_NE(layer, layer_infos.end()) << id;
+      EXPECT_EQ(layer->elements, count) << id;
+    }
+    const auto camera = viewer.camera();
+    const auto serial = vs.payload_serial();
+    vs.set_parameter("step", ui::FormValue::number(0));
+    ASSERT_TRUE(loop.pump_until([&] { return vs.payload_serial() != serial && !vs.evaluating(); },
+                               120, [&] { vs.pump(); })) << vs.eval_error();
+    viewer.set_payload(vs.payload());
+    const auto first = render(viewer, 400, 300);
+    EXPECT_GT(differing_fraction(latest, first), 0.001);
+    EXPECT_EQ(viewer.camera().position, camera.position);
+    EXPECT_EQ(viewer.camera().focal_point, camera.focal_point);
+    const auto image_path = std::filesystem::path(STK_APP_TEST_SCRATCH) /
+        (std::string("molecule-") + g_gpu->backend_name() + ".png");
+    std::filesystem::create_directories(image_path.parent_path());
+    ASSERT_TRUE(gfx::png_write(image_path.string(), first));
+  }
+  client->close();
+}
+
 TEST(PythonViewer, OpacityFormUpdatesVolumeWithoutRerunningData)
 {
   std::string reason;

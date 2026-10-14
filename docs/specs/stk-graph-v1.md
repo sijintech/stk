@@ -550,6 +550,10 @@ of every failed value are printed (`step=100: error [...]`) and the exit status 
 
 ## 13. Milestone-1 node catalog
 
+The additive E1d molecular source and sphere/line representations follow
+[LAMMPS structure reader version 1](lammps-structure-1.md); existing node declarations
+and the reserved `particles` kind are unchanged.
+
 Generated from `docs/specs/catalog/m1_nodes.py` (the JSON form is `stk-catalog-m1.json`). Types are
 listed by id. Ports: `name: type<kinds>`; params: JSON types with bounds, default and stage.
 Implementation owners: sources → Phase B1 (`suan/graph/nodes/sources.py`); filters and analysis →
@@ -1006,6 +1010,36 @@ Instanced glyphs (arrow/cone/sphere/line/cube) at the input points, oriented by 
 | `opacity` | number (>=0, <=1) | `1.0` | client |
 | `name` | string \| null | `null` | client |
 
+#### `stk.render.molecule_atoms@1` — Molecular atoms / 分子原子
+
+Sphere points retaining atom ID, molecule ID, type, charge and original position attributes; no field probe.
+
+- stage `representation`, cache `memory`, time_dependent `false`
+- inputs: `in`: dataset<points> (required)
+- outputs: `layer`: layer
+
+| param | type | default | stage |
+|---|---|---|---|
+| `radius` | number (>0, <=10) | `0.3` | client |
+| `color` | object | `{"by": "field", "field": "atom_type"}` | client |
+| `opacity` | number (>=0, <=1) | `1.0` | client |
+| `name` | string \| null | `null` | client |
+
+#### `stk.render.molecule_lines@1` — Molecular lines / 分子线段
+
+Render explicit two-point topology bonds or cell edges as lines, without inferring connectivity.
+
+- stage `representation`, cache `memory`, time_dependent `false`
+- inputs: `in`: dataset<polydata> (required)
+- outputs: `layer`: layer
+
+| param | type | default | stage |
+|---|---|---|---|
+| `width_px` | number (>=0, <=32) | `1.5` | client |
+| `color` | object | `{"by": "solid", "solid": [0.35, 0.35, 0.35]}` | client |
+| `opacity` | number (>=0, <=1) | `1.0` | client |
+| `name` | string \| null | `null` | client |
+
 #### `stk.render.orientation_legend@1` — Orientation legend / 取向色球
 
 The stk:orientation-hsl colour sphere overlay (SimViz orientation legend).
@@ -1111,6 +1145,20 @@ Read a field file inside a binding: MuPRO DAT, NPY, VTI, legacy VTK STRUCTURED_P
 | `quantity` | string (pattern) \| null | `null` | data |
 | `step` | integer (>=0) \| null | `null` | data |
 
+#### `stk.source.lammps_density_series@1` — LAMMPS density series / LAMMPS 多温密度
+
+Read explicit real-unit logs, preserving every raw digest and optional frozen study receipt.
+
+- stage `source`, cache `memory`, time_dependent `false`
+- inputs: none
+- outputs: `out`: table
+
+| param | type | default | stage |
+|---|---|---|---|
+| `binding` | string (pattern) | **required** | data |
+| `paths` | string[0..98] | `[]` | data |
+| `receipt_path` | string \| null | `null` | data |
+
 #### `stk.source.lammps_log@1` — LAMMPS thermodynamics / LAMMPS 热力学表
 
 Read one finished real-units thermo block; reject errors, truncation and nonfinite values.
@@ -1124,6 +1172,22 @@ Read one finished real-units thermo block; reject errors, truncation and nonfini
 | `binding` | string (pattern) | **required** | data |
 | `path` | string (pattern) | `"log.lammps"` | data |
 | `block` | integer | `-1` | data |
+
+#### `stk.source.lammps_structure@1` — LAMMPS molecule / LAMMPS 分子结构
+
+Read full/real topology and optional complete text dump; preserve original atom IDs, charges and bonds.
+
+- stage `source`, cache `memory`, time_dependent `true`
+- inputs: none
+- outputs: `atoms`: dataset<points>, `bonds`: dataset<polydata>, `box`: dataset<polydata>, `diagnostics`: value<json>
+
+| param | type | default | stage |
+|---|---|---|---|
+| `binding` | string (pattern) | **required** | data |
+| `topology` | string | `"state.data"` | data |
+| `trajectory` | string | `""` | data |
+| `step` | integer (>=0) \| enum "latest" \| "first" | `"latest"` | data |
+| `wrapped_display` | boolean | `true` | data |
 
 #### `stk.source.muferro_frame@1` — muFerro frame / muFerro 帧
 

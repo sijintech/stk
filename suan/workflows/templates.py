@@ -160,7 +160,27 @@ class PetModelTemplate:
         return model_pet(parameters, directory, cancel=cancel)
 
 
-LOCAL_TEMPLATES = {DemoSyntheticTemplate.id: DemoSyntheticTemplate(), PetModelTemplate.id: PetModelTemplate()}
+class PetStudyTemplate:
+    """Explicit local orchestration, with lifecycle owned by workflow_runs."""
+    id = "pet-study/1"
+    name = "PET simulation study / PET 全流程模拟研究"
+    table_id = None
+    local = True
+    parameters = [{"name": "recipe", "type": "json", "default": {}},
+                  {"name": "study_id", "type": "string", "default": ""},
+                  {"name": "wait_seconds", "type": "integer", "unit": "s", "default": 86400}]
+    outputs = ["pet-study.json"]
+
+    def run(self, parameters, directory):
+        raise ValueError("PET studies require the project workflow executor")
+
+    def execute_local(self, **kwargs):
+        from .pet_study import execute_local
+        return execute_local(**kwargs)
+
+
+LOCAL_TEMPLATES = {DemoSyntheticTemplate.id: DemoSyntheticTemplate(), PetModelTemplate.id: PetModelTemplate(),
+                   PetStudyTemplate.id: PetStudyTemplate()}
 ENTRY_POINT_GROUP = "stk.engines"
 _REMOTE_PROTOCOL = ("id", "name", "table_id", "field_ids", "describe", "describe_values", "prepare", "collect",
                     "results_prefix", "final_state")

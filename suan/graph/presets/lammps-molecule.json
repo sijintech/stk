@@ -1,0 +1,30 @@
+{
+ "id": "lammps-molecule",
+ "name": "LAMMPS molecule",
+ "description": "Full/real topology atoms, explicit bonds and the physical simulation cell, with optional complete text-dump frames.",
+ "bindings": [{"name": "data", "description": "Verified collected case directory or another local directory holding the explicit topology and trajectory files."}],
+ "graph": {
+  "schema": "stk.graph/1", "id": "lammps-molecule", "name": "LAMMPS molecule",
+  "description": "Sphere atoms with original IDs, types and charges; only data-file bonds; no inferred connectivity or volume probe.",
+  "catalog": {"stk": 1},
+  "parameters": [
+   {"name": "topology", "type": "string", "default": "state.data", "label": "Topology file", "description": "Relative full/real LAMMPS data file inside the data binding."},
+   {"name": "trajectory", "type": "string", "default": "", "label": "Trajectory file", "description": "Relative complete text dump, or empty for the static topology. Duplicate or backward timesteps are rejected."},
+   {"name": "step", "type": "step", "default": "latest", "label": "Timestep", "description": "An exact available dump timestep, first or latest."},
+   {"name": "wrapped_display", "type": "boolean", "default": true, "label": "Wrap periodic display", "description": "Display convention only; original coordinates remain in source_position. Static data does not encode periodic boundaries."},
+   {"name": "radius", "type": "number", "default": 0.3, "minimum": 0.001, "maximum": 10, "label": "Atom display radius (angstrom)", "description": "Visual radius, not an atomic or van der Waals radius."},
+   {"name": "view", "type": "enum", "choices": ["iso", "+x", "-x", "+y", "-y", "+z", "-z"], "default": "iso", "label": "View"}
+  ],
+  "nodes": [
+   {"id": "molecule", "type": "stk.source.lammps_structure@1", "params": {"binding": "data", "topology": {"$param": "topology"}, "trajectory": {"$param": "trajectory"}, "step": {"$param": "step"}, "wrapped_display": {"$param": "wrapped_display"}}},
+   {"id": "atoms", "type": "stk.render.molecule_atoms@1", "inputs": {"in": {"from": "molecule.atoms"}}, "params": {"radius": {"$param": "radius"}}},
+   {"id": "bonds", "type": "stk.render.molecule_lines@1", "inputs": {"in": {"from": "molecule.bonds"}}},
+   {"id": "box", "type": "stk.render.molecule_lines@1", "inputs": {"in": {"from": "molecule.box"}}, "params": {"color": {"by": "solid", "solid": [0.6, 0.6, 0.6]}, "width_px": 1}},
+   {"id": "legend", "type": "stk.render.categorical_legend@1", "inputs": {"source": {"from": "atoms.layer"}}, "params": {"field": "atom_type", "title": "Atom types"}},
+   {"id": "axes", "type": "stk.render.axes@1"},
+   {"id": "camera", "type": "stk.view.camera@1", "params": {"preset": {"$param": "view"}}},
+   {"id": "scene", "type": "stk.view.scene@1", "inputs": {"layers": [{"from": "atoms.layer"}, {"from": "bonds.layer"}, {"from": "box.layer"}, {"from": "legend.layer"}, {"from": "axes.layer"}], "camera": {"from": "camera.camera"}}}
+  ],
+  "outputs": {"view": "scene.scene", "diagnostics": "molecule.diagnostics"}
+ }
+}

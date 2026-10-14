@@ -80,7 +80,10 @@ suan graph run lammps-diffusion --bind data=/absolute/results \
 保存分析可使用 `load_preset("lammps-modulus")` 得到图，沿用 `stk.analysis-document/1` 与已有保存/准备接口。
 在项目工作流中，把分析的 `data` 输入接到仿真步骤的 `files` 输出，设置 `path="case/stress-strain.dat"` 或 `"case/msd.dat"`。
 按行冻结脚本、参数与文件后运行下游分析；修改当前窗口或参数不会改写旧结果。
-Tg 需要跨温度行的汇总表，当前按行工作流不自动把多个行的产物合并；明确汇总后再运行 Tg 预设。
+Tg 需要跨温度行的汇总表，通用按行工作流不自动合并多个行的产物。
+[PET 全流程研究](../examples/pet_study/README.md)提供专项降温串联和冻结日志汇总：
+`stk.source.lammps_density_series@1` 从各段原始日志重算最后 thermo 段后一半的温度与密度，保留实际字节 SHA256 和来源回执。
+曲线不满足 Tg 分段条件时，归档原始观测和失败诊断。
 `stk.source.lammps_log@1` 可直接读取一个正常结束的 real 单位 thermo 段（默认最后一段），不拼接重置后的步数。
 
 结果保留来源文件与 SHA-256，显示 `md_fit_limits`：MD 采样相关，OLS 标准误差只是拟合描述，
@@ -89,5 +92,7 @@ Tg 需要跨温度行的汇总表，当前按行工作流不自动把多个行�
 CSV/列文件的表头必须唯一，规范化后重名也拒绝；热力学日志的所有段也拒绝重复列名，不会用后一列覆盖前一列。
 上限为一般拟合 100000 行、Tg 500 温度、日志 256 MiB。
 
-这些入口不实现桌面的 LAMMPS 导入按钮、自动 PET 建模、球棍显示或轨迹分析。
-PET 酯基苯环碳电荷仍待所有者决定；历史可行性夹具中的 0.0 不是定论。
+三种旧分析预设和公开哈希保持不变；[桌面导入与结构/轨迹查看](lammps-desktop.md)、
+[PET 建模及分阶段协议](pet-model.md)另有对应实现，不由拟合节点触发。
+所有者已授权文献判断，现使用完整 PET OPLS-AA/MK2022 配套（芳环 C −0.115 e），历史 0.0 不作为定论。
+新协议区分 PET 链质心自扩散与 O₂ 示踪质心扩散；都不凭短时拟合建立物性收敛、溶解度或渗透率结论。

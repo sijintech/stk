@@ -91,7 +91,7 @@ TEST_P(PropertiesForms, AllPresetsMatchGoldens)
   AppFixture f(lang, 1.0f, 1280, 900);
   app::ViewerState &vs = f.shell->store().viewer();
   vs.set_metadata(stk::apptest::repo_presets(), stk::apptest::repo_catalog());
-  ASSERT_EQ(vs.presets().size(), 11u);
+  ASSERT_EQ(vs.presets().size(), 12u);
   nlohmann::ordered_json doc = nlohmann::ordered_json::object();
   for (const app::PresetInfo &p : vs.presets()) {
     vs.select_preset(p.id);

@@ -6,6 +6,7 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/jobs_state.hh"
+#include "stk/app/jobs_spec.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
 #include "stk/platform/file_dialog.hh"
@@ -56,6 +57,8 @@ void ProjectSimulationView::select_engine(int index)
   batch_selection_.clear();
   batch_id_.clear();
   batch_member_.clear();
+  study_id_.clear();
+  study_create_pending_ = false;
 }
 
 bool ProjectSimulationView::context_current(const ProjectState &state, const std::string &project,
@@ -78,6 +81,9 @@ void ProjectSimulationView::sync_project(ProjectState &state)
     batch_selection_.clear();
     batch_id_.clear();
     batch_member_.clear();
+    study_id_.clear();
+    study_create_pending_ = false;
+    study_recipe_ = "{}";
   }
   if (observed_table_ != state.table_id()) {
     observed_table_ = state.table_id();
@@ -136,9 +142,10 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
   auto &target = engine_ == 1 ? lammps_target_ : target_;
   const auto connection = target.runtime_controls(*panel, ctx);
   const auto options = target.options_controls(*panel, ctx, engine.id);
-  panel->button("simulation_prepare", ctx.tr("simulation.prepare"), [this, &state, &scripts, project, handle, generation, revision, record, connection, options, engine] {
+  panel->button("simulation_prepare", ctx.tr("simulation.prepare"), [this, &state, &scripts, &jobs, project, handle, generation, revision, record, connection, options, engine] {
     if (!context_current(state, project, handle, generation) || state.record_id() != record || state.table_id() != engine.cases) { return; }
     error_.clear();
+    if (!(engine_ == 1 ? lammps_target_ : target_).matches(jobs, connection, options)) { return; }
     execute(scripts, engine.id, "prepare", {{"project_id", project}, {"expected_revision", revision},
         {"record_id", record}, {"connection", connection}, {"options", *options}});
   }).disable(!enabled || state.table_id() != engine.cases || record.empty() || connection.empty() || !options || jobs.hub());
@@ -168,6 +175,10 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
   }).disable(!enabled || !selected_engine || !succeeded ||
               (selected_engine == &engines[0] && !scripts.desktop_ready()));
   if (selected_engine == &engines[1]) {
+    actions.button("simulation_structure", ctx.tr("simulation.structure"), [this, &state, &scripts, project, handle, generation, revision, run] {
+      if (!context_current(state, project, handle, generation) || state.run_id() != run) { return; }
+      execute(scripts, "lammps/1", "view_structure", {{"project_id", project}, {"expected_revision", revision}, {"run_id", run}});
+    }).disable(!enabled || !succeeded || !scripts.desktop_ready());
     std::string result_record;
     for (const auto &table : state.tables()) {
       if (table.id != selected_engine->results) { continue; }
@@ -187,6 +198,100 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
     panel->label(ctx.tr("script.run_state." + io::get_string(scripts.status()["run"], "state")));
   }
   panel->log_view("simulation_output", scripts.output(), 6);
+}
+
+void ProjectSimulationView::draw_pet_studies(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
+{
+  sync_project(state);
+  if (engine_ != 1) { return; }
+  auto *panel = layout.panel("project_pet_study", ctx.tr("pet_study.title"), false);
+  if (!panel) { return; }
+  if (state.project()->format_version < 13) { panel->paragraph(ctx.tr("pet_study.format")); return; }
+  constexpr auto table_id = "9e571686-b05d-51f5-b243-be046b33ae40";
+  constexpr auto name_id = "70efa784-8a37-5b0f-9a8d-ca5e7d6fe3dd";
+  auto &scripts = ctx.store.scripts();
+  scripts.sync();
+  if (!scripts.error().empty()) { panel->paragraph(scripts.error()); }
+  auto &jobs = ctx.store.jobs();
+  jobs.sync();
+  const bool enabled = state.ready() && !state.busy() && scripts.ready() && !scripts.busy();
+  const auto project = state.project()->id;
+  const auto handle = state.project()->handle;
+  const auto generation = generation_;
+  const auto revision = state.project()->revision;
+  const auto run_action = [&scripts](const std::string &action, const Json &parameters) {
+    return scripts.execute("import json as _stk_json\nfrom suan.workflows.pet_study_native import native_action as _stk_pet\n"
+                    "_stk_pet(stk, " + Json(action).dump() + ", _stk_json.loads(" + Json(parameters.dump()).dump() + ")); None");
+  };
+  hint(*panel, ctx, "pet_study.hint");
+  panel->prop(ctx.tr("pet_study.recipe")).text_field("pet_study_recipe", ui::bind(study_recipe_));
+  hint(*panel, ctx, "pet_study.recipe_hint");
+  const auto connection = lammps_target_.runtime_controls(*panel, ctx);
+  const auto options = lammps_target_.options_controls(*panel, ctx, "lammps/1");
+  const auto recipe = Json::parse(study_recipe_, nullptr, false);
+  const bool recipe_valid = recipe.is_object();
+  if (!recipe_valid) { panel->paragraph(ctx.tr("pet_study.invalid_recipe")); }
+  panel->button("pet_study_create", ctx.tr("pet_study.create"),
+      [this, &state, &jobs, project, handle, generation, revision, connection, options, recipe, text = study_recipe_, run_action] {
+    if (!context_current(state, project, handle, generation) || study_recipe_ != text || !options || !recipe.is_object()) { return; }
+    if (!lammps_target_.matches(jobs, connection, options)) { return; }
+    const auto hex = new_idempotency_key();
+    const auto id = hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) + "-" +
+                    hex.substr(16, 4) + "-" + hex.substr(20);
+    if (run_action("create", {{"project_id", project}, {"expected_revision", revision}, {"connection", connection},
+                              {"recipe", recipe}, {"options", *options}, {"study_id", id}})) {
+      // Keep the explicit new selection while the project table is arriving.
+      // A failed create must never make Start silently select an older study.
+      study_id_ = id;
+      study_create_pending_ = true;
+    }
+  }).disable(!enabled || connection.empty() || !options || !recipe_valid);
+  std::vector<std::string> ids, names;
+  for (const auto &table : state.tables()) {
+    if (table.id != table_id) { continue; }
+    for (const auto &row : table.records) {
+      ids.push_back(row.id);
+      names.push_back(row_label(ctx.store, &table, row.id) + " · " + io::get_string(row.values, name_id, row.id));
+    }
+  }
+  const bool selection_found = std::find(ids.begin(), ids.end(), study_id_) != ids.end();
+  if (selection_found) { study_create_pending_ = false; }
+  if (!study_create_pending_ && !ids.empty() && !selection_found) { study_id_ = ids.back(); }
+  panel->prop(ctx.tr("pet_study.saved")).dropdown("pet_study_saved", std::move(names), {
+    [this, ids] { const auto found = std::find(ids.begin(), ids.end(), study_id_); return found == ids.end() ? -1 : int(found - ids.begin()); },
+    [this, &state, project, handle, generation, ids](int index) {
+      if (context_current(state, project, handle, generation) && index >= 0 && size_t(index) < ids.size()) {
+        study_id_ = ids[size_t(index)];
+        study_create_pending_ = false;
+      }
+    }
+  });
+  const auto study = study_id_;
+  const bool selected = std::find(ids.begin(), ids.end(), study) != ids.end();
+  if (selected) {
+    for (const auto &table : state.tables()) {
+      if (table.id != table_id) { continue; }
+      for (const auto &row : table.records) {
+        if (row.id != study) { continue; }
+        const auto intent = row.values.value("a97aee9c-0517-54a6-bc1f-bab47bb99be6", Json());
+        if (intent.is_object()) {
+          panel->label(ctx.store.catalog().format("pet_study.frozen_target", {
+              {"runtime", SimulationTarget::runtime_name(ctx, io::get_string(intent, "connection"))}}));
+        }
+      }
+    }
+  }
+  auto &actions = panel->row();
+  for (const std::string action : {"get", "start", "cancel", "recover"}) {
+    actions.button("pet_study_" + action, ctx.tr("pet_study." + action),
+        [this, &state, project, handle, generation, revision, study, action, run_action] {
+      if (!context_current(state, project, handle, generation) || study_id_ != study) { return; }
+      run_action(action, {{"project_id", project}, {"expected_revision", revision}, {"study_id", study}});
+    }).disable(!enabled || !selected);
+  }
+  panel->button("pet_study_workflows", ctx.tr("pet_study.workflows"), editor_navigation_action(ctx, "workflow", false));
+  panel->button("pet_study_analyses", ctx.tr("pet_study.analyses"), editor_navigation_action(ctx, kEditorAnalysisGraph, false));
+  panel->log_view("pet_study_output", scripts.output(), 6);
 }
 
 void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
@@ -279,13 +384,15 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
   // One explicit click saves the batch, prepares its inputs and submits the prepared rows.
   run_row.button("run_selected", can_run ? ctx.store.catalog().format("batch.run_selected", {
                  {"rows", std::to_string(members.size())}, {"runtime", runtime_name}}) : std::string(ctx.tr("batch.run_selected_blocked")),
-             [this, &state, &scripts, project, handle, generation, members, batch_params, engine] {
+             [this, &state, &scripts, &jobs, project, handle, generation, members, batch_params, engine, connection, options] {
                if (!context_current(state, project, handle, generation) || batch_selection_ != members) { return; }
+               if (!(engine_ == 1 ? lammps_target_ : target_).matches(jobs, connection, options)) { return; }
                error_.clear(); execute(scripts, engine.id, "batch_run", batch_params());
              })
       .disable(!can_run);
-  run_row.button("create", ctx.tr("batch.create"), [this, &state, &scripts, project, handle, generation, members, batch_params, engine] {
+  run_row.button("create", ctx.tr("batch.create"), [this, &state, &scripts, &jobs, project, handle, generation, members, batch_params, engine, connection, options] {
     if (!context_current(state, project, handle, generation) || batch_selection_ != members) { return; }
+    if (!(engine_ == 1 ? lammps_target_ : target_).matches(jobs, connection, options)) { return; }
     error_.clear();
     execute(scripts, engine.id, "batch_create", batch_params());
   }).width(10).disable(!can_run);

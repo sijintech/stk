@@ -1,6 +1,8 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-13；材料数据闭环节点 1 已实施：内置 MuFerro/LAMMPS 桌面入口、数据字典及离线合成演练、厂内调用清单；当前提交 CI 见验收记录。
+更新：2026-10-14；本次代码实现 PET 专项全流程研究、O₂ 示踪协议与 E1d 结构/轨迹查看，正在重新验收修正 O₂ 热态后的完整真实 PET 流程。
+本机原生 **1318/1318、无跳过**，Python 完整 **2765 passed、24 skipped**，最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**。
+前一个代码交付为 `4f54d78`；本次完整热态复核、提交 SHA 与 CI 结束后补记[验收记录](docs/runtime-validation.md)。
 代码 `4f54d78` 已推送 main，Runtime **8/8**、桌面 **5/5**、文档与密钥扫描均已完成成功。
 此前 PET 建模代码 `fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，实际测试数与新节点结果见验收记录。
 `main` 还包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
@@ -33,7 +35,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 
 只有主工作树；历史分支 `docs/development-handoff`、`fix/desktop-transfer-resume` 与无关旧 PR 不属于待办，不合并也不删除。
 
-## 现在的状态（2026-10-13）
+## 现在的状态（2026-10-14）
 
 | 方向 | 状态 | 入口 |
 |---|---|---|
@@ -43,6 +45,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
 | 多尺度引擎 | E0a、E0b、E1a、**E1b 写出器与 PET 本机建模、E1c 分析模板已交付**；PET 参数已按所有者新授权选择 | [方案](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md)、[分析](docs/lammps-analysis.md) |
 | PET 数据闭环节点 1 | MuFerro/LAMMPS 桌面导入、按冻结引擎处理运行及批次、离线热力学摘要；字典草案和全合成离线数据演练 | [桌面指南](docs/lammps-desktop.md)、[字典](docs/design/pet-data-dictionary.md)、[示例](examples/pet_data/README.md)、[厂内清单](docs/design/inplant-execution-baseline.md) |
+| PET 专项研究 / E1d（本次工作树） | 冻结建模→压密→逐温降温→模量/O₂ 或 PET 链 COM MSD→保存分析；明确启动、取消、恢复、成功阶段复用；full/real 原子/真实键/盒子与实际轨迹帧 | [全流程例](examples/pet_study/README.md)、[结构契约](docs/specs/lammps-structure-1.md)、[参数/限制](docs/pet-model.md) |
 
 ## 待所有者决定（决定前不要按某个选项实现）
 
@@ -64,14 +67,16 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
    `stk.lammps.create_pet_workflow` 建参数表与本机 `pet-model/1` 工作流；明确 start 后用已登记分子建模/Packmol 模块生成并冻结八项产物。
    文献参数、来源、文件摘要与每链中性校验随模型保存；取消停止 Python/Packmol，完整成功才发布，不覆盖已有目录。
    旧 540 原子 GMSO 对照保留为写出器夹具；新 COOH/OH 默认 546 原子不是同一个化学体系。
-   操作见 [examples/pet_model](examples/pet_model/README.md)。生成后**显式导入** LAMMPS 算例，不声称自动串联本机模型与远程仿真。
-   初始填充不是平衡样品；未分配气体参数，未验证 PET 材料性质。长链 DP≤20 只是构象生成资源上限，不保证成功或物性收敛。
+   操作见 [examples/pet_model](examples/pet_model/README.md)。旧建模工作流仍显式导入；新 `pet-study/1` 专项串联冻结模型与状态，未改通用工作流 DAG。
+   初始填充不是平衡样品；新协议有独立 IFF2021 O₂ 参数，未验证收敛 PET/O₂ 物性。长链 DP≤20 只是构象生成资源上限。
 2. **E1c 已交付**（只用导入算例）：三套脚本、四个图节点、三个预设与技能；Tg 密度两段拟合、模量小应变斜率、显式扩散窗口。
    合成曲线与真实氩的运行/分析归档通过；限制与使用见[指南](docs/lammps-analysis.md)。短轨迹拟合不代表材料性质验收。
    多温度 `density_series` 的来源随最终 Tg 诊断保存；日志任一段的重复列名拒绝，日志源实现版本 2 隔离旧缓存。
 3. **桌面的 LAMMPS 入口（节点 1）**：内置引擎选择、指定主脚本、准备/日志/收集/离线查看与结果行导航；批次按引擎区分，资源选项在编辑器会话内各自保留。
-   旧项目/引擎/成员回调失效，打开和重开不执行；目前仅热力学结果查看，球棍/轨迹仍是 E1d。
-4. 之后：E1d 球棍显示、运行中的监控事件、远程运行环境上的模块安装 → E2 ABACUS（先查 conda-forge 的 MPI 变体，LAMMPS 默认无 MPI 的教训）→ E3 串联。
+   旧项目/引擎/成员回调失效；本次另保护当前 Runtime/资源设置改变后的旧准备按钮。结构入口离线核对采集清单、输入、日志和 full/real，才替换 Viewer。
+4. **本次 PET 专项研究 / E1d**：完成真实阶段验收、提交与 CI；轨迹只从已核验采集清单查看，自动 final_state 快照仍排除 dump。
+   LAMMPS `write_data` 的系数 `%g` 表示会舍入；下游每段从首个冻结模型恢复精确 54 类系数，保存表示差异诊断。
+   剩余：长链、独立构型、热历史、气体扩散窗口与统计收敛；GUI 精确原子拾取、运行中监控、远程模块安装 → E2 ABACUS → E3 串联。
 5. 与 E 系列并行、需要人参与的：S2 真实本机模型的 GUI 人工验收（[工作台清单](docs/workbench-acceptance.md)“AI 智能体（多步）”）；
    macOS/Windows 真机复核。
 6. **PET 研发数据闭环**：按[新增路线](docs/design/pet-materials-data-loop.md)八节点推进，业务字典、导入样例与厂内部署设计可同 E1 并行。
@@ -98,6 +103,8 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | PET 本机建模、参数记录与工作流 | [suan/lammps/pet.py](suan/lammps/pet.py)、[pet_worker.py](suan/lammps/pet_worker.py)、[suan/workflows/pet.py](suan/workflows/pet.py)、[指南](examples/pet_model/README.md) |
 | 数据写出（不分配电荷或力场） | [suan/lammps/data.py](suan/lammps/data.py)、[tests/test_lammps_data.py](tests/test_lammps_data.py)、手动对照 `examples/pet_lammps/compare_writer.py` |
 | E1c 脚本/拟合/图预设 | [suan/lammps/analysis.py](suan/lammps/analysis.py)、[templates.py](suan/lammps/templates.py)、`suan/lammps/templates/*.in`、`suan/graph/presets/lammps-*.json`、[已知曲线测试](tests/test_lammps_analysis.py) |
+| PET 专项持久串联 / 版本化协议 / 原生按钮 | [pet_study.py](suan/workflows/pet_study.py)、[pet_protocol.py](suan/lammps/pet_protocol.py)、[pet_study_native.py](suan/workflows/pet_study_native.py)、[全流程验收](examples/pet_study/README.md) |
+| full/real 拓扑 / 轨迹 / 球与键 / 多温日志 | [structure.py](suan/lammps/structure.py)、[分子 source](suan/graph/nodes/lammps_structure.py)、[表示](suan/graph/nodes/molecule_render.py)、[多温 source](suan/graph/nodes/pet_study_sources.py) |
 | 模块目录（LAMMPS 固定 MPICH 版 `lammps=*=cpu*_mpi_mpich_*`） | [suan/modules/catalog.json](suan/modules/catalog.json)、[suan/modules/](suan/modules/) |
 | 测试 | [tests/test_lammps.py](tests/test_lammps.py)、[tests/test_workflow_lammps.py](tests/test_workflow_lammps.py)、假 LAMMPS [tests/lammps_fake.py](tests/lammps_fake.py)、真实日志节选 `tests/data/lammps/pet-npt.log` |
 | 手动验收（真实 LAMMPS，不进 CI）与 PET 可行性脚本 | [examples/pet_lammps/](examples/pet_lammps/README.md) |
@@ -134,6 +141,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 | 证据 | 结果 |
 |---|---|
+| PET 专项 / E1d 本机（2026-10-14，本次工作树） | 完整 Python **2765 passed、24 skipped**；最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**；原生 **1318/1318、无跳过**。真实 546 PET 压密与 GPU 导出通过，长程后半程仍在验收。最终 CI/结果见[验收](docs/runtime-validation.md) |
 | 数据闭环节点 1 本机（2026-10-13） | Python 完整 **2598 passed、24 skipped**，最终 guard 定向 **28 passed**；Linux 原生 **1309/1309、无跳过**，含 4 新交互/16 截图；真实 LAMMPS 原生 **2/2**；离线字典例三 Python 版本各 **7/7**。打包/i18n/链接/暂存密钥扫描通过，当前提交 CI 见[验收](docs/runtime-validation.md) |
 | E1b PET 本机建模（2026-10-12） | 完整 pytest 2569 passed、24 skipped（后加上限另定向）；最终定向 168 passed；独立真实模型/构象 5 passed、项目→LAMMPS 1 passed；原生定向 40/40。`fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，详见[验收记录](docs/runtime-validation.md) |
 | E1a `1859ca7` 本机 | 完整 pytest（`-m "not perf"`）**2427 passed、24 skipped**；Python 3.11 相关 81 passed；工作流/仿真/模块/智能体 CTest **69/69** |
@@ -148,8 +156,11 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 未解决：
 
-- **E1 的限制**：桌面入口仅内置 MuFerro/LAMMPS；原子/轨迹查看未实现。PET 建模仅本机、需显式导入远程算例；运行中没有监控事件；远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载上限。
-  E1c 不自动判定平衡或扩散区，没有跨温度行自动汇总、Tg 置信区间、通用分子质心/多原点 MSD；OLS 误差不能当材料性质不确定度。
+- **E1 的限制**：桌面入口仅内置 MuFerro/LAMMPS；E1d 已支持有界 full/real 原子、拓扑键与轨迹显示，GUI 精确原子拾取尚未实现。
+  PET 建模仅本机，旧独立建模工作流需显式导入算例；新 PET 专项研究自动串联冻结状态与跨温度密度汇总。
+  运行中没有通用监控事件，远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载或查看器的更小资源上限。
+  E1c 不自动判定平衡或扩散区，通用独立算例仍需明确选择汇总来源；没有 Tg 置信区间或通用多原点 MSD。
+  PET 专项只支持 PET 链或显式 O₂ 质心的单原点 MSD；OLS 误差不能当材料性质不确定度。
   历史 540 原子可行性模型密度 1.223 g/cm³（所引用实验约 1.335）、4 聚体、约 20 ps，只说明工具链可用；
   它不是本次 COOH/OH 默认 546 原子模型的物性验收，初始填充密度也不能当作平衡密度。
 - **S2**：真实本机模型的 GUI 人工验收未做。

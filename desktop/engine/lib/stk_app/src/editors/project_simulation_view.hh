@@ -18,6 +18,7 @@ class ProjectSimulationView {
  public:
   void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void draw_batches(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
+  void draw_pet_studies(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
  private:
   void sync_project(ProjectState &state);
   void select_engine(int index);
@@ -28,6 +29,9 @@ class ProjectSimulationView {
   uint64_t generation_ = 0;
   std::string source_;
   std::string script_;
+  std::string study_recipe_ = "{}";
+  std::string study_id_;
+  bool study_create_pending_ = false;
   std::string project_, handle_, observed_table_, error_;
   PathPicker source_picker_;
   std::vector<std::string> batch_selection_;

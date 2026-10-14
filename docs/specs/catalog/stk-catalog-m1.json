@@ -3438,6 +3438,348 @@
    "cache": "memory"
   },
   {
+   "id": "stk.render.molecule_atoms@1",
+   "type": "stk.render.molecule_atoms",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Molecular atoms",
+    "zh": "分子原子"
+   },
+   "description": {
+    "en": "Sphere points retaining atom ID, molecule ID, type, charge and original position attributes; no field probe."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "points"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "radius": {
+      "type": "number",
+      "maximum": 10,
+      "exclusiveMinimum": 0,
+      "default": 0.3,
+      "x-stk-stage": "client"
+     },
+     "color": {
+      "type": "object",
+      "required": [
+       "by"
+      ],
+      "properties": {
+       "by": {
+        "enum": [
+         "solid",
+         "field",
+         "orientation"
+        ]
+       },
+       "solid": {
+        "type": "array",
+        "items": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "minItems": 3,
+        "maxItems": 4
+       },
+       "field": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "component": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 0
+         },
+         {
+          "const": "magnitude"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "colormap": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "palette": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "range": {
+        "type": "array",
+        "prefixItems": [
+         {
+          "type": [
+           "number",
+           "null"
+          ]
+         },
+         {
+          "type": [
+           "number",
+           "null"
+          ]
+         }
+        ],
+        "minItems": 2,
+        "maxItems": 2
+       },
+       "range_mode": {
+        "enum": [
+         "data",
+         "symmetric",
+         "fixed",
+         "global"
+        ]
+       },
+       "lightness_range": {
+        "type": "array",
+        "items": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "minItems": 2,
+        "maxItems": 2
+       }
+      },
+      "additionalProperties": false,
+      "x-stk-widget": "json",
+      "default": {
+       "by": "field",
+       "field": "atom_type"
+      },
+      "x-stk-stage": "client"
+     },
+     "opacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 1.0,
+      "x-stk-stage": "client"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.render.molecule_lines@1",
+   "type": "stk.render.molecule_lines",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "representation",
+   "category": "render",
+   "title": {
+    "en": "Molecular lines",
+    "zh": "分子线段"
+   },
+   "description": {
+    "en": "Render explicit two-point topology bonds or cell edges as lines, without inferring connectivity."
+   },
+   "inputs": [
+    {
+     "name": "in",
+     "type": "dataset",
+     "accepts": [
+      "polydata"
+     ],
+     "required": true,
+     "multi": false
+    }
+   ],
+   "outputs": [
+    {
+     "name": "layer",
+     "type": "layer"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "width_px": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 32,
+      "default": 1.5,
+      "x-stk-stage": "client"
+     },
+     "color": {
+      "type": "object",
+      "required": [
+       "by"
+      ],
+      "properties": {
+       "by": {
+        "enum": [
+         "solid",
+         "field",
+         "orientation"
+        ]
+       },
+       "solid": {
+        "type": "array",
+        "items": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "minItems": 3,
+        "maxItems": 4
+       },
+       "field": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "component": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 0
+         },
+         {
+          "const": "magnitude"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "colormap": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "palette": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "range": {
+        "type": "array",
+        "prefixItems": [
+         {
+          "type": [
+           "number",
+           "null"
+          ]
+         },
+         {
+          "type": [
+           "number",
+           "null"
+          ]
+         }
+        ],
+        "minItems": 2,
+        "maxItems": 2
+       },
+       "range_mode": {
+        "enum": [
+         "data",
+         "symmetric",
+         "fixed",
+         "global"
+        ]
+       },
+       "lightness_range": {
+        "type": "array",
+        "items": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "minItems": 2,
+        "maxItems": 2
+       }
+      },
+      "additionalProperties": false,
+      "x-stk-widget": "json",
+      "default": {
+       "by": "solid",
+       "solid": [
+        0.35,
+        0.35,
+        0.35
+       ]
+      },
+      "x-stk-stage": "client"
+     },
+     "opacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 1.0,
+      "x-stk-stage": "client"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "client"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
    "id": "stk.render.orientation_legend@1",
    "type": "stk.render.orientation_legend",
    "version": 1,
@@ -4273,6 +4615,68 @@
    "cache": "disk"
   },
   {
+   "id": "stk.source.lammps_density_series@1",
+   "type": "stk.source.lammps_density_series",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "LAMMPS density series",
+    "zh": "LAMMPS 多温密度"
+   },
+   "description": {
+    "en": "Read explicit real-unit logs, preserving every raw digest and optional frozen study receipt."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "out",
+     "type": "table"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "binding": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "x-stk-widget": "binding",
+      "x-stk-stage": "data"
+     },
+     "paths": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1
+      },
+      "maxItems": 98,
+      "default": [],
+      "x-stk-stage": "data"
+     },
+     "receipt_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "binding"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
    "id": "stk.source.lammps_log@1",
    "type": "stk.source.lammps_log",
    "version": 1,
@@ -4323,6 +4727,96 @@
     "additionalProperties": false
    },
    "time_dependent": false,
+   "deterministic": true,
+   "cache": "memory"
+  },
+  {
+   "id": "stk.source.lammps_structure@1",
+   "type": "stk.source.lammps_structure",
+   "version": 1,
+   "impl_version": 1,
+   "stage": "source",
+   "category": "source",
+   "title": {
+    "en": "LAMMPS molecule",
+    "zh": "LAMMPS 分子结构"
+   },
+   "description": {
+    "en": "Read full/real topology and optional complete text dump; preserve original atom IDs, charges and bonds."
+   },
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "atoms",
+     "type": "dataset",
+     "kind": "points"
+    },
+    {
+     "name": "bonds",
+     "type": "dataset",
+     "kind": "polydata"
+    },
+    {
+     "name": "box",
+     "type": "dataset",
+     "kind": "polydata"
+    },
+    {
+     "name": "diagnostics",
+     "type": "value",
+     "value_type": "json"
+    }
+   ],
+   "params": {
+    "type": "object",
+    "properties": {
+     "binding": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "x-stk-widget": "binding",
+      "x-stk-stage": "data"
+     },
+     "topology": {
+      "type": "string",
+      "minLength": 1,
+      "default": "state.data",
+      "x-stk-stage": "data"
+     },
+     "trajectory": {
+      "type": "string",
+      "default": "",
+      "x-stk-stage": "data"
+     },
+     "step": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0
+       },
+       {
+        "enum": [
+         "latest",
+         "first"
+        ]
+       }
+      ],
+      "x-stk-widget": "step",
+      "x-stk-choices-from": "evaluator",
+      "default": "latest",
+      "x-stk-stage": "data"
+     },
+     "wrapped_display": {
+      "type": "boolean",
+      "default": true,
+      "x-stk-stage": "data"
+     }
+    },
+    "required": [
+     "binding"
+    ],
+    "additionalProperties": false
+   },
+   "time_dependent": true,
    "deterministic": true,
    "cache": "memory"
   },

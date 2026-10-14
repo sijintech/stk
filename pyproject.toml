@@ -31,6 +31,7 @@ include = [
     { path = "examples/runtime", format = "sdist" },
     { path = "examples/pet_model", format = "sdist" },
     { path = "examples/pet_data", format = "sdist" },
+    { path = "examples/pet_study", format = "sdist" },
     { path = "deploy/systemd", format = "sdist" },
     { path = "tests", format = "sdist" },
 ]

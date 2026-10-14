@@ -221,6 +221,35 @@ class Lammps:
         return create_pet_workflow(self.stk, expected_revision=expected_revision, rows=rows,
                                    project=project, name=name)
 
+    @property
+    def studies(self):
+        """Persistent PET modeling, MD and analysis runs; inspection never starts work."""
+        from .pet_study import PetStudy
+        return PetStudy(self.stk)
+
+    def create_pet_study(self, recipe=None, *, connection, expected_revision, options=None,
+                         name="PET study / PET 研究", project=None, study_id=None, wait_seconds=None):
+        """Freeze a complete PET study and Runtime intent without submitting tasks."""
+        return self.studies.create(recipe, connection=connection, expected_revision=expected_revision,
+                                   options=options, name=name, project=project, study_id=study_id,
+                                   wait_seconds=wait_seconds)
+
+    def get_pet_study(self, study_id, *, project=None):
+        """Read canonical stage and analysis records offline."""
+        return self.studies.get(study_id, project=project)
+
+    def start_pet_study(self, study_id, *, expected_revision, project=None):
+        """Explicitly start or resume the frozen study; successful stages are reused."""
+        return self.studies.start(study_id, expected_revision=expected_revision, project=project)
+
+    def cancel_pet_study(self, study_id, *, expected_revision, project=None):
+        """Cancel the study and its active canonical child runs."""
+        return self.studies.cancel(study_id, expected_revision=expected_revision, project=project)
+
+    def recover_pet_study(self, study_id, *, expected_revision, project=None):
+        """Recover interrupted ownership without automatically restarting the study."""
+        return self.studies.recover(study_id, expected_revision=expected_revision, project=project)
+
     def import_case(self, source, *, expected_revision, script=None, project=None):
         """Copy and freeze a clean case folder; create one editable case row, without execution.
         ``script`` names the input script when the folder has more than one ``in.*`` file."""
@@ -505,3 +534,31 @@ class Lammps:
         return {"run_id": run_id, "table_id": RESULT_TABLE_ID, "record_id": row_id,
                 "directory": str(destination / "case"), "units": checked["units"],
                 "thermo": thermo, "qoi": qoi, "files": files}
+
+    def view_structure(self, run_id, *, topology=None, trajectory=None, project=None):
+        """Open verified full/real topology and optional collected trajectory in the shared Viewer.
+
+        Only files in this run's collected manifest may be used. ``trajectory=False``
+        explicitly chooses a static structure. Opening never downloads or runs a solver.
+        """
+        result = self.view(run_id, project=project)
+        if result["units"] != "real":
+            raise ValueError("The molecular Viewer currently requires LAMMPS real units")
+        prefix = f"results/lammps/{UUID(run_id)}/case/"
+        names = {file["path"][len(prefix):] for file in result["files"] if file["path"].startswith(prefix)}
+        if topology is None:
+            topology = next((name for name in ("state.data", "equilibrated.data", "pet.data") if name in names), None)
+            if topology is None:
+                candidates = sorted(name for name in names if name.endswith(".data"))
+                if len(candidates) == 1:
+                    topology = candidates[0]
+        if type(topology) is not str or relative_path(topology) not in names:
+            raise ValueError("Select an explicit collected LAMMPS topology file")
+        if trajectory is None:
+            trajectory = "trajectory.dump" if "trajectory.dump" in names else False
+        if trajectory is not False and (type(trajectory) is not str or relative_path(trajectory) not in names):
+            raise ValueError("Select an explicit collected LAMMPS trajectory file")
+        from suan.lammps.structure import read_data
+        read_data(Path(result["directory"]) / topology)  # full style, finite bounded topology before replacing the Viewer
+        return self.stk.viewer.open(result["directory"], preset="lammps-molecule",
+                                    parameters={"topology": topology, "trajectory": trajectory or ""})

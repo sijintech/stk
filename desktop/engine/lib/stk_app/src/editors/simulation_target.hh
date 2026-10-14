@@ -7,6 +7,7 @@
 namespace stk::ui { class Layout; }
 namespace stk::app {
 struct EditorContext;
+class JobsState;
 
 /** Where a simulation runs: a saved direct or SSH Runtime profile and the engine's execution options,
  * shared by the simulation batch panel and the workflow run panel. */
@@ -20,6 +21,9 @@ class SimulationTarget {
   std::optional<io::Json> options_controls(ui::Layout &panel, EditorContext &ctx, const std::string &engine = "");
   /** The profile's display name, or its id without the "runtime:" prefix. */
   static std::string runtime_name(EditorContext &ctx, const std::string &connection);
+  /** Recheck a retained prepare/submit callback against the visible target. */
+  bool matches(const JobsState &jobs, const std::string &connection,
+               const std::optional<io::Json> &options) const;
 
  private:
   std::string options_ = R"({"backend":"local","ranks":1,"threads_per_rank":1})";
