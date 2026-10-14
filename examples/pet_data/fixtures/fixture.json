@@ -1,0 +1,184 @@
+{
+  "format": "stk.pet-data-example/0.1",
+  "dictionary_version": "pet-data-dictionary-draft/0.1",
+  "synthetic": true,
+  "not_for_material_validation": true,
+  "source_kinds": [
+    "literature",
+    "calculation",
+    "measurement",
+    "inference",
+    "synthetic"
+  ],
+  "tables": [
+    {
+      "name": "materials",
+      "path": "materials.csv",
+      "types": {
+        "id": "text",
+        "name": "text",
+        "intended_family": "text",
+        "note": "text",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {}
+    },
+    {
+      "name": "formulations",
+      "path": "formulations.csv",
+      "types": {
+        "id": "text",
+        "material_id": "text",
+        "version": "integer",
+        "planned_composition": "json",
+        "actual_composition": "json",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {
+        "material_id": "materials"
+      }
+    },
+    {
+      "name": "batches",
+      "path": "batches.csv",
+      "types": {
+        "id": "text",
+        "formulation_id": "text",
+        "process_status": "text",
+        "process_note": "text",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {
+        "formulation_id": "formulations"
+      }
+    },
+    {
+      "name": "samples",
+      "path": "samples.csv",
+      "types": {
+        "id": "text",
+        "batch_id": "text",
+        "parent_sample_id": "text",
+        "sample_role": "text",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {
+        "batch_id": "batches",
+        "parent_sample_id": "samples"
+      }
+    },
+    {
+      "name": "states",
+      "path": "states.csv",
+      "types": {
+        "id": "text",
+        "sample_id": "text",
+        "sequence": "integer",
+        "state_kind": "text",
+        "contact_medium": "text",
+        "conditions": "json",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {
+        "sample_id": "samples"
+      }
+    },
+    {
+      "name": "observations",
+      "path": "observations.csv",
+      "types": {
+        "id": "text",
+        "material_id": "text",
+        "basis_observation_id": "text",
+        "state_id": "text",
+        "batch_id": "text",
+        "represented_source_kind": "text",
+        "value": "number",
+        "value_unit": "text",
+        "value_status": "text",
+        "raw_path": "text",
+        "note": "text",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {
+        "material_id": "materials",
+        "basis_observation_id": "observations",
+        "state_id": "states",
+        "batch_id": "batches"
+      }
+    },
+    {
+      "name": "processing",
+      "path": "processing.csv",
+      "types": {
+        "id": "text",
+        "observation_id": "text",
+        "method_version": "text",
+        "value": "number",
+        "value_unit": "text",
+        "value_status": "text",
+        "exclusion_reason": "text",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {
+        "observation_id": "observations"
+      }
+    },
+    {
+      "name": "reviews",
+      "path": "reviews.csv",
+      "types": {
+        "id": "text",
+        "processing_id": "text",
+        "reviewer_id": "text",
+        "review_status": "text",
+        "allowed_uses": "json",
+        "reason": "text",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {
+        "processing_id": "processing"
+      }
+    },
+    {
+      "name": "decisions",
+      "path": "decisions.csv",
+      "types": {
+        "id": "text",
+        "material_id": "text",
+        "formulation_id": "text",
+        "review_id": "text",
+        "decision": "text",
+        "reason": "text",
+        "next_task": "text",
+        "source_kind": "text",
+        "synthetic": "boolean"
+      },
+      "relations": {
+        "material_id": "materials",
+        "formulation_id": "formulations",
+        "review_id": "reviews"
+      }
+    }
+  ],
+  "assets": [
+    "raw/curve-A-dry.csv",
+    "raw/curve-A-contact.csv",
+    "raw/curve-A-desorbed.csv",
+    "raw/curve-B-dry.csv",
+    "raw/curve-B-contact.csv",
+    "raw/curve-B-desorbed.csv",
+    "raw/calculation.json",
+    "raw/literature.json",
+    "raw/inference.json",
+    "raw/failure.json"
+  ]
+}

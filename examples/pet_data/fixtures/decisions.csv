@@ -1,0 +1,2 @@
+id,material_id,formulation_id,review_id,decision,reason,next_task,source_kind,synthetic
+syn-decision-01,syn-material-01,syn-formulation-01-v1,syn-review-available,need_actual_target_and_evidence,Synthetic records cannot select or validate a material.,Define actual material target/conditions and permitted evidence after factory boundary acceptance.,synthetic,true

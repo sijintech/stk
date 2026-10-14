@@ -840,7 +840,7 @@ class API:
 
     @property
     def lammps(self):
-        """Import LAMMPS case folders, prepare immutable plans and collect verified thermodynamic results."""
+        """Import LAMMPS cases, prepare plans, collect verified results and view their metadata offline."""
         from suan.workflows.lammps import Lammps
         return Lammps(self)
 

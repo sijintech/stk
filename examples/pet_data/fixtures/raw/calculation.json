@@ -1,0 +1,8 @@
+{
+  "synthetic": true,
+  "source_kind": "synthetic",
+  "represented_source_kind": "calculation",
+  "method": "synthetic-placeholder/1",
+  "material_validated": false,
+  "note": "No physical solver was run."
+}

@@ -1,0 +1,7 @@
+id,sample_id,sequence,state_kind,contact_medium,conditions,source_kind,synthetic
+syn-state-A-dry,syn-split-A-1,1,dry,not_applicable,"{""status"": ""not_specified"", ""note"": ""No contact formulation, temperature or exposure protocol.""}",synthetic,true
+syn-state-A-contact,syn-split-A-1,2,contact,not_specified,"{""status"": ""not_specified"", ""note"": ""No contact formulation, temperature or exposure protocol.""}",synthetic,true
+syn-state-A-desorbed,syn-split-A-1,3,desorbed,not_specified,"{""status"": ""not_specified"", ""note"": ""No contact formulation, temperature or exposure protocol.""}",synthetic,true
+syn-state-B-dry,syn-split-B-1,1,dry,not_applicable,"{""status"": ""not_specified"", ""note"": ""No contact formulation, temperature or exposure protocol.""}",synthetic,true
+syn-state-B-contact,syn-split-B-1,2,contact,not_specified,"{""status"": ""not_specified"", ""note"": ""No contact formulation, temperature or exposure protocol.""}",synthetic,true
+syn-state-B-desorbed,syn-split-B-1,3,desorbed,not_specified,"{""status"": ""not_specified"", ""note"": ""No contact formulation, temperature or exposure protocol.""}",synthetic,true

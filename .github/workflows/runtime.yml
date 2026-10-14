@@ -31,6 +31,8 @@ jobs:
       - run: python -m pytest -m "not desktop and not perf" -rs
         env:
           STK_REQUIRE_SSH_TEST: '1'
+      - name: Offline synthetic PET data example
+        run: env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= python -m unittest examples.pet_data.acceptance -v
       # Informational: lists missing optional pieces; fails only on a broken node catalog.
       - run: suan graph doctor
       - run: python -m build

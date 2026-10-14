@@ -1,0 +1,11 @@
+id,material_id,basis_observation_id,state_id,batch_id,represented_source_kind,value,value_unit,value_status,raw_path,note,source_kind,synthetic
+syn-observation-A-dry,syn-material-01,,syn-state-A-dry,syn-batch-A,measurement,3,1,synthetic_available,raw/curve-A-dry.csv,"Last artificial curve point; dimensionless software values, not a PET property.",synthetic,true
+syn-observation-A-contact,syn-material-01,,syn-state-A-contact,syn-batch-A,measurement,4,1,synthetic_available,raw/curve-A-contact.csv,"Last artificial curve point; dimensionless software values, not a PET property.",synthetic,true
+syn-observation-A-desorbed,syn-material-01,,syn-state-A-desorbed,syn-batch-A,measurement,5,1,synthetic_available,raw/curve-A-desorbed.csv,"Last artificial curve point; dimensionless software values, not a PET property.",synthetic,true
+syn-observation-B-dry,syn-material-01,,syn-state-B-dry,syn-batch-B,measurement,4,1,synthetic_available,raw/curve-B-dry.csv,"Last artificial curve point; dimensionless software values, not a PET property.",synthetic,true
+syn-observation-B-contact,syn-material-01,,syn-state-B-contact,syn-batch-B,measurement,5,1,synthetic_available,raw/curve-B-contact.csv,"Last artificial curve point; dimensionless software values, not a PET property.",synthetic,true
+syn-observation-B-desorbed,syn-material-01,,syn-state-B-desorbed,syn-batch-B,measurement,,1,missing,raw/curve-B-desorbed.csv,"Last artificial curve point; dimensionless software values, not a PET property.",synthetic,true
+syn-observation-calculation,syn-material-01,,syn-state-A-contact,,calculation,,,not_quantified,raw/calculation.json,No physical solver was run.,synthetic,true
+syn-observation-literature,syn-material-01,,,,literature,,,not_quantified,raw/literature.json,"Fictional text fixture; no article, DOI, expert evidence or material claim.",synthetic,true
+syn-observation-inference,syn-material-01,syn-observation-A-contact,syn-state-A-contact,,inference,,,not_quantified,raw/inference.json,Demonstrate a hypothesis link only; no material conclusion.,synthetic,true
+syn-observation-failure,syn-material-01,,,syn-batch-failed,measurement,,,failed,raw/failure.json,Synthetic preparation failure; no quantitative observation.,synthetic,true

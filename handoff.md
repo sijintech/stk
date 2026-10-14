@@ -1,6 +1,8 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-更新：2026-10-12；PET 建模代码 `fbcd9f4` 已推送，Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，实际测试数与限制见验收记录。此前 `main` 包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
+更新：2026-10-13；材料数据闭环节点 1 已实施：内置 MuFerro/LAMMPS 桌面入口、数据字典及离线合成演练、厂内调用清单；当前提交 CI 见验收记录。
+此前 PET 建模代码 `fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，实际测试数与新节点结果见验收记录。
+`main` 还包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
 代码入口与验证方法。较早的交付细节（工作台、技能目录、连线编辑、体验包、归档、可用性开发包、S1/S2/S3 各期）已移到
 [开发交接记录](docs/development-log.md)与[开发计划](docs/development-plan.md)，测试与 CI 证据在[验收记录](docs/runtime-validation.md)。
 接手时以实际 Git 状态和对应提交的 CI 为准，不把此处的快照当作永久状态。
@@ -9,7 +11,8 @@
 Runtime 8/8、密钥扫描与文档站均已结束通过。
 已读取正文与表格，新增[材料数据闭环路线](docs/design/pet-materials-data-loop.md)并纳入开发计划：
 原始证据与样品状态、数据加工复核、PET 训练评价、受控自主任务、厂内全问题/聊天/派生查询及恢复移交。
-本次为设计交付；未改项目格式、端点/网络或现有智能体执行规则，未将方案原稿/客户资料复制到公开仓库。
+路线提交为设计交付；所有者 2026-10-13 要求开始实施，本次节点 1 结果见下。项目格式仍为 13，端点/网络及智能体执行规则未变。
+未将方案原稿/客户资料复制到公开仓库。
 
 ## 先读什么，先做什么
 
@@ -29,7 +32,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 
 只有主工作树；历史分支 `docs/development-handoff`、`fix/desktop-transfer-resume` 与无关旧 PR 不属于待办，不合并也不删除。
 
-## 现在的状态（2026-10-12）
+## 现在的状态（2026-10-13）
 
 | 方向 | 状态 | 入口 |
 |---|---|---|
@@ -38,6 +41,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | S2 智能体 | S2a、S2b 交付（格式 13 会话/事件/对象、8 个工具、签名批准、桌面“智能体（多步）”）；**真实模型的 GUI 人工验收未做** | [agent-harness.md](docs/design/agent-harness.md)；`suan/agent/` |
 | S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
 | 多尺度引擎 | E0a、E0b、E1a、**E1b 写出器与 PET 本机建模、E1c 分析模板已交付**；PET 参数已按所有者新授权选择 | [方案](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md)、[分析](docs/lammps-analysis.md) |
+| PET 数据闭环节点 1 | MuFerro/LAMMPS 桌面导入、按冻结引擎处理运行及批次、离线热力学摘要；字典草案和全合成离线数据演练 | [桌面指南](docs/lammps-desktop.md)、[字典](docs/design/pet-data-dictionary.md)、[示例](examples/pet_data/README.md)、[厂内清单](docs/design/inplant-execution-baseline.md) |
 
 ## 待所有者决定（决定前不要按某个选项实现）
 
@@ -64,11 +68,15 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 2. **E1c 已交付**（只用导入算例）：三套脚本、四个图节点、三个预设与技能；Tg 密度两段拟合、模量小应变斜率、显式扩散窗口。
    合成曲线与真实氩的运行/分析归档通过；限制与使用见[指南](docs/lammps-analysis.md)。短轨迹拟合不代表材料性质验收。
    多温度 `density_series` 的来源随最终 Tg 诊断保存；日志任一段的重复列名拒绝，日志源实现版本 2 隔离旧缓存。
-3. **桌面的 LAMMPS 入口**：导入按钮与按引擎显示的仿真视图（现在桌面只认 MuFerro；LAMMPS 只能从 Python 控制台 `stk.lammps` 与工作流编辑器使用）。
+3. **桌面的 LAMMPS 入口（节点 1）**：内置引擎选择、指定主脚本、准备/日志/收集/离线查看与结果行导航；批次按引擎区分，资源选项在编辑器会话内各自保留。
+   旧项目/引擎/成员回调失效，打开和重开不执行；目前仅热力学结果查看，球棍/轨迹仍是 E1d。
 4. 之后：E1d 球棍显示、运行中的监控事件、远程运行环境上的模块安装 → E2 ABACUS（先查 conda-forge 的 MPI 变体，LAMMPS 默认无 MPI 的教训）→ E3 串联。
 5. 与 E 系列并行、需要人参与的：S2 真实本机模型的 GUI 人工验收（[工作台清单](docs/workbench-acceptance.md)“AI 智能体（多步）”）；
    macOS/Windows 真机复核。
 6. **PET 研发数据闭环**：按[新增路线](docs/design/pet-materials-data-loop.md)八节点推进，业务字典、导入样例与厂内部署设计可同 E1 并行。
+   节点 1 已加入字典草案、普通表合成导入与厂内调用清单；下一步节点 2 厂内执行基线，见[清单](docs/design/inplant-execution-baseline.md)。
+   可先做只读版本化部署清单与模型请求统一准入，覆盖自由问题、planner/子请求、发送前目标/策略复核与外部回退；
+   用纯合成内容测试，不启用或改写实际端点/网络。Runtime/SSH、子进程/插件/下载及日志/备份仍须继续接入并做真实部署出口观测。
    企业内部数据/聊天接入前先验收厂内边界；公开表标注不能覆盖自由问题/派生查询的隔离要求。
    PET 数据集需新契约与批次分组评价；现有 S3a 随机样本划分和内存训练任务不满足该项目。
    自主训练需后续企业授权策略与新版工具；当前智能体仍不准备/开始运行，S2c 外部规划等其他待决定事项不解除。
@@ -84,6 +92,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 | 日志读取与判定（`Total wall time`、`ERROR`、NaN、`thermo_style multi/yaml` 不支持） | [suan/lammps/log.py](suan/lammps/log.py) |
 | 计算端启动器 `python -m suan.lammps run|verify|check`、找程序、MPI 检查 | [suan/lammps/run.py](suan/lammps/run.py)、[spec.py](suan/lammps/spec.py)、共用 MPI 规则 [suan/runtime/launch.py](suan/runtime/launch.py) |
 | 项目：导入/复制/准备/收集、最终状态 | [suan/workflows/lammps.py](suan/workflows/lammps.py)、与 MuFerro 共用的 [common.py](suan/workflows/common.py) |
+| 原生仿真动作/引擎与离线查看 | [dispatcher](suan/workflows/native.py)、[桌面视图](desktop/engine/lib/stk_app/src/editors/project_simulation_view.cc)、[Python 验证](tests/test_workflow_native.py) |
 | 模板注册 | [suan/workflows/templates.py](suan/workflows/templates.py) 的 `LammpsTemplate`（E0a 接口，外部引擎经 `stk.engines` entry point） |
 | PET 本机建模、参数记录与工作流 | [suan/lammps/pet.py](suan/lammps/pet.py)、[pet_worker.py](suan/lammps/pet_worker.py)、[suan/workflows/pet.py](suan/workflows/pet.py)、[指南](examples/pet_model/README.md) |
 | 数据写出（不分配电荷或力场） | [suan/lammps/data.py](suan/lammps/data.py)、[tests/test_lammps_data.py](tests/test_lammps_data.py)、手动对照 `examples/pet_lammps/compare_writer.py` |
@@ -124,6 +133,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 | 证据 | 结果 |
 |---|---|
+| 数据闭环节点 1 本机（2026-10-13） | Python 完整 **2598 passed、24 skipped**，最终 guard 定向 **28 passed**；Linux 原生 **1309/1309、无跳过**，含 4 新交互/16 截图；真实 LAMMPS 原生 **2/2**；离线字典例三 Python 版本各 **7/7**。打包/i18n/链接/暂存密钥扫描通过，当前提交 CI 见[验收](docs/runtime-validation.md) |
 | E1b PET 本机建模（2026-10-12） | 完整 pytest 2569 passed、24 skipped（后加上限另定向）；最终定向 168 passed；独立真实模型/构象 5 passed、项目→LAMMPS 1 passed；原生定向 40/40。`fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，详见[验收记录](docs/runtime-validation.md) |
 | E1a `1859ca7` 本机 | 完整 pytest（`-m "not perf"`）**2427 passed、24 skipped**；Python 3.11 相关 81 passed；工作流/仿真/模块/智能体 CTest **69/69** |
 | E1a CI | [Runtime](https://github.com/sijintech/stk/actions/runs/38097721893) 8/8（3.12 2442 passed，3.11 与 3.14 各 2438）、[桌面](https://github.com/sijintech/stk/actions/runs/38097721844) 5/5、密钥扫描通过 |
@@ -137,7 +147,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 未解决：
 
-- **E1 的限制**：桌面没有 LAMMPS 导入/专用仿真视图；PET 建模仅本机、需显式导入远程算例；运行中没有监控事件；远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载上限。
+- **E1 的限制**：桌面入口仅内置 MuFerro/LAMMPS；原子/轨迹查看未实现。PET 建模仅本机、需显式导入远程算例；运行中没有监控事件；远程运行环境上不能安装模块；轨迹很大时超出 1 GiB 下载上限。
   E1c 不自动判定平衡或扩散区，没有跨温度行自动汇总、Tg 置信区间、通用分子质心/多原点 MSD；OLS 误差不能当材料性质不确定度。
   历史 540 原子可行性模型密度 1.223 g/cm³（所引用实验约 1.335）、4 聚体、约 20 ps，只说明工具链可用；
   它不是本次 COOH/OH 默认 546 原子模型的物性验收，初始填充密度也不能当作平衡密度。

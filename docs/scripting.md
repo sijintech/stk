@@ -5,6 +5,8 @@
 
 `stk.muferro` 提供案例导入、选行准备、结果收集和三维打开，复用项目/Runtime/Viewer API，
 与原生 MuFerro 面板使用同一实现。步骤和参数见[完整仿真指南](simulation-muferro.md)。
+`stk.lammps` 提供脚本/数据目录导入、准备、收集与已校验结果的离线 `view`；
+内置两种引擎的桌面入口见 [LAMMPS 桌面指南](lammps-desktop.md)。
 
 ## 不打开桌面：终端、脚本与 Jupyter
 

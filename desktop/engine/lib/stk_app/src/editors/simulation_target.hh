@@ -8,7 +8,7 @@ namespace stk::ui { class Layout; }
 namespace stk::app {
 struct EditorContext;
 
-/** Where a simulation runs: a saved direct or SSH Runtime profile and the muferro_spec execution options,
+/** Where a simulation runs: a saved direct or SSH Runtime profile and the engine's execution options,
  * shared by the simulation batch panel and the workflow run panel. */
 class SimulationTarget {
  public:
@@ -17,7 +17,7 @@ class SimulationTarget {
   std::string runtime_controls(ui::Layout &panel, EditorContext &ctx);
   /** Execution options as fields over one JSON object, with the raw JSON folded away. Returns the options
    * to send, or nullopt (with the reason shown) when they cannot be used. */
-  std::optional<io::Json> options_controls(ui::Layout &panel, EditorContext &ctx);
+  std::optional<io::Json> options_controls(ui::Layout &panel, EditorContext &ctx, const std::string &engine = "");
   /** The profile's display name, or its id without the "runtime:" prefix. */
   static std::string runtime_name(EditorContext &ctx, const std::string &connection);
 

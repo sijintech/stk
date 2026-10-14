@@ -1,0 +1,4 @@
+id,processing_id,reviewer_id,review_status,allowed_uses,reason,source_kind,synthetic
+syn-review-available,syn-processing-available,synthetic-reviewer-A,reviewed_for_demo,"[""software_demo""]",No authenticated expert or material verification.,synthetic,true
+syn-review-missing,syn-processing-missing,synthetic-reviewer-A,pending,[],Missing final point retained.,synthetic,true
+syn-review-failed,syn-processing-failed,synthetic-reviewer-A,excluded_for_demo,[],Failure retained; exclusion is explicit.,synthetic,true

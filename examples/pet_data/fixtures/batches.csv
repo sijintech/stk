@@ -1,0 +1,4 @@
+id,formulation_id,process_status,process_note,source_kind,synthetic
+syn-batch-A,syn-formulation-01-v1,synthetic_completed,No real preparation or thermal history.,synthetic,true
+syn-batch-B,syn-formulation-01-v1,synthetic_completed,Independent identity for software grouping only.,synthetic,true
+syn-batch-failed,syn-formulation-01-v1,failed,Synthetic preparation failure; no sample or numerical result.,synthetic,true

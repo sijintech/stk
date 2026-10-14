@@ -36,7 +36,7 @@ std::string SimulationTarget::runtime_controls(ui::Layout &panel, EditorContext 
   return active;
 }
 
-std::optional<Json> SimulationTarget::options_controls(ui::Layout &panel, EditorContext &ctx)
+std::optional<Json> SimulationTarget::options_controls(ui::Layout &panel, EditorContext &ctx, const std::string &engine)
 {
   const Json options = Json::parse(options_, nullptr, false);
   const bool valid = options.is_object();
@@ -72,7 +72,8 @@ std::optional<Json> SimulationTarget::options_controls(ui::Layout &panel, Editor
       {.min = 1, .max = 60 * 24 * 30, .step = 10, .integer = true}).disable(!valid);
   }
   if (auto *advanced = panel.panel("advanced_options", ctx.tr("simulation.options_advanced"), false)) {
-    hint(*advanced, ctx, "simulation.options_hint");
+    hint(*advanced, ctx, engine == "lammps/1" ? "simulation.lammps_options_hint" :
+                         engine == "muferro/1" ? "simulation.muferro_options_hint" : "simulation.options_hint");
     advanced->text_field("options", ui::bind(options_), {.max_length = 65536, .mono = true});
   }
   if (!valid) {

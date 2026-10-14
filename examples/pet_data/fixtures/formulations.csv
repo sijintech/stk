@@ -1,0 +1,2 @@
+id,material_id,version,planned_composition,actual_composition,source_kind,synthetic
+syn-formulation-01-v1,syn-material-01,1,"{""status"": ""not_specified""}",,synthetic,true

@@ -3521,12 +3521,146 @@ TEST_F(ProjectPython, MuFerroImportButtonUsesTheSharedWorkflowAndBindsProjectIde
   // A callback from a previously displayed project cannot import into a new project.
   ASSERT_TRUE(state().create(dir.str() + "/other", "Other"));
   settled();
+  const auto script_history = scripts.history().size();
   import();
   ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy(); }, 30));
-  EXPECT_EQ(scripts.status().at("run").at("state"), "failed");
+  EXPECT_EQ(scripts.history().size(), script_history);  // Rejected before dispatch, not executed against the new project.
   EXPECT_EQ(state().project()->revision, 0);
   EXPECT_TRUE(state().tables().empty());
   EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+class LammpsProjectPython : public ProjectPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &) override
+  {
+    // The parent fixture's AI-only model placeholder is unnecessary here.
+    options.env.erase("STK_TOKEN_PLAN_MODEL");
+  }
+};
+
+TEST_F(LammpsProjectPython, NativeImportRequiresAnExplicitScriptAndFencesEngineAndProjectChanges)
+{
+  populated();
+  const auto source = core::path_from_utf8(dir.str() + "/案例 'quoted' case");
+  std::filesystem::create_directories(source);
+  for (const char *name : {"in.pet", "in.other"}) {
+    std::ofstream file(source / name);
+    file << "units lj\natom_style atomic\nvariable temperature index 1.5\n"
+            "variable steps index 20\nthermo 5\nrun ${steps}\n";
+  }
+  { std::ofstream file(source / "input.toml");
+    file << "material = 'material.toml'\n[system]\nsimulation_grid = [4,3,2]\n"
+            "temperature = 298\ntimestep_total = 3\ndt = 0.01\n[output]\ninterval = 2\n"; }
+  { std::ofstream file(source / "material.toml"); file << "[landau]\na1 = '3.8e5*(TEM-479)'\n"; }
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_simulation");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_simulation/" + key); };
+  auto done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 30));
+    f.drv->frame();
+  };
+  ASSERT_NE(widget("simulation_engine"), nullptr);
+  widget("simulation_engine")->index.assign(1);
+  f.drv->frame();
+  ASSERT_NE(widget("simulation_script"), nullptr);
+  widget("simulation_source")->string.assign(core::path_to_utf8(source));
+  f.drv->frame();
+  ASSERT_TRUE(widget("simulation_import")->enabled);
+  widget("simulation_import")->on_click();
+  ASSERT_NO_FATAL_FAILURE(done());
+  EXPECT_EQ(scripts.status().at("run").at("state"), "failed");
+  EXPECT_EQ(state().project()->revision, 1);  // Ambiguity is a visible error, never an arbitrary script choice.
+  EXPECT_EQ(state().tables().size(), 1u);
+  widget("simulation_script")->string.assign("in.pet");
+  f.drv->frame();
+  widget("simulation_import")->on_click();
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  state().select_table("a70a9da3-fb57-5d06-9ab3-5de529a82882");
+  ASSERT_NE(state().table(), nullptr);
+  ASSERT_EQ(state().table()->records.size(), 1u);
+  EXPECT_EQ(state().table()->records[0].values.at("86dea4a7-7896-57ba-b888-743fcc70782f"), "in.pet");
+  EXPECT_EQ(state().table()->records[0].values.at("ac8845ed-e05c-5f93-916a-dd0ba11b5e8d"), 1.5);
+  const auto field = std::find_if(state().table()->fields.begin(), state().table()->fields.end(),
+      [](const auto &item) { return item.id == "ac8845ed-e05c-5f93-916a-dd0ba11b5e8d"; });
+  ASSERT_NE(field, state().table()->fields.end());
+  EXPECT_TRUE(field->unit.empty());  // LJ temperature is not Kelvin; the script owns its unit style.
+  EXPECT_TRUE(state().runs().empty());
+  f.drv->frame();
+  const auto revision = state().project()->revision;
+  const auto stale_engine_import = widget("simulation_import")->on_click;
+  std::filesystem::remove(source / "in.other");  // Both engines could now successfully import this directory.
+  widget("simulation_engine")->index.assign(0);
+  f.drv->frame();
+  EXPECT_EQ(widget("simulation_script"), nullptr);
+  EXPECT_TRUE(widget("simulation_source")->string.value().empty());
+  widget("simulation_source")->string.assign(core::path_to_utf8(source));
+  stale_engine_import();  // Cannot read MuFerro's newly entered source and route it through the old engine.
+  ASSERT_NO_FATAL_FAILURE(done());
+  EXPECT_EQ(state().project()->revision, revision);
+  ASSERT_TRUE(scripts.execute("from suan.workflows.lammps import TABLE_ID as LT\n"
+      "t = next(t for t in stk.project.snapshot()['tables'] if t['id'] == LT)\nassert len(t['records']) == 1"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  EXPECT_EQ(scripts.status().at("run").at("state"), "succeeded");
+  widget("simulation_engine")->index.assign(1);
+  f.drv->frame();
+  widget("simulation_source")->string.assign(core::path_to_utf8(source));
+  f.drv->frame();
+  const auto stale_project_import = widget("simulation_import")->on_click;
+  ASSERT_TRUE(state().create(dir.str() + "/other-lammps-project", "Other"));
+  settled();
+  stale_project_import();
+  ASSERT_NO_FATAL_FAILURE(done());
+  EXPECT_EQ(state().project()->revision, 0);
+  EXPECT_TRUE(state().tables().empty());
+  EXPECT_TRUE(state().runs().empty());
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(LammpsProjectPython, NativeFolderAnswersAreDiscardedAfterChangingTheEngine)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  auto &jobs = f.shell->store().jobs();
+  HeldDialog dialog;
+  jobs.file_dialog = &dialog;
+  struct Reset { JobsState &jobs; ~Reset() { jobs.file_dialog = nullptr; } } reset{jobs};
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_simulation");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &key) { return f.screen.ui()->find("a2/main/project_simulation/" + key); };
+  widget("simulation_browse")->on_click();
+  ASSERT_EQ(dialog.requests.size(), 1u);
+  widget("simulation_engine")->index.assign(1);
+  f.drv->frame();
+  dialog.answer({"/cases/old-muferro-directory"});
+  f.drv->frame();
+  EXPECT_TRUE(widget("simulation_source")->string.value().empty());
+  // Switching away and back also invalidates an older LAMMPS dialog.
+  widget("simulation_browse")->on_click();
+  widget("simulation_engine")->index.assign(0);
+  f.drv->frame();
+  widget("simulation_engine")->index.assign(1);
+  f.drv->frame();
+  dialog.answer({"/cases/old-lammps-directory"});
+  f.drv->frame();
+  EXPECT_TRUE(widget("simulation_source")->string.value().empty());
+  EXPECT_EQ(state().project()->revision, 1);
+  EXPECT_TRUE(state().runs().empty());
+  EXPECT_TRUE(scripts.history().empty());
 }
 
 #ifdef __linux__
@@ -3543,6 +3677,303 @@ class SimulationPython : public ProjectPython {
     ProjectPython::TearDown();
   }
 };
+
+class LammpsSimulationPython : public SimulationPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &) override
+  {
+    options.env.erase("STK_TOKEN_PLAN_MODEL");
+  }
+};
+
+TEST_F(LammpsSimulationPython, NativeButtonsPrepareSubmitCollectAndViewTheSavedRunOffline)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  auto &jobs = f.shell->store().jobs();
+  auto done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 60));
+    std::string output;
+    for (size_t i = 0; i < scripts.output().line_count(); ++i) { output += scripts.output().line(i); output += '\n'; }
+    ASSERT_TRUE(scripts.error().empty()) << scripts.error();
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded") << output;
+    f.drv->frame();
+  };
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  ASSERT_TRUE(scripts.execute("import sys\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom simulation_fixture import LammpsRuntime\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "_simulation_runtime = LammpsRuntime(" + Json(dir.str() + "/lammps-runtime").dump() + ")\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('lammps-test', _simulation_runtime.url, _simulation_runtime.config['token'], check=False)"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  jobs.sync();
+  jobs.refresh_connections();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &item) { return item.info.id == "runtime:lammps-test"; });
+  }, 30));
+  jobs.select_connection("runtime:lammps-test");
+  std::string source, program;
+  { std::ifstream file(core::path_from_utf8(dir.str() + "/lammps-runtime/source.txt")); std::getline(file, source); }
+  { std::ifstream file(core::path_from_utf8(dir.str() + "/lammps-runtime/program.txt")); std::getline(file, program); }
+  ASSERT_FALSE(source.empty());
+  ASSERT_FALSE(program.empty());
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_simulation");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &id) { return f.screen.ui()->find("a2/main/" + id); };
+  auto click = [&](const std::string &id) {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.screen.run_deferred(); f.drv->frame();
+      const auto *w = widget(id); return w && w->enabled;
+    }, 30)) << id;
+    widget(id)->on_click();
+  };
+  widget("project_simulation/simulation_engine")->index.assign(1);
+  f.drv->frame();
+  widget("project_simulation/simulation_source")->string.assign(source);
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_import"));  // Empty script selects the sole input.
+  ASSERT_NO_FATAL_FAILURE(done());
+  state().select_table("a70a9da3-fb57-5d06-9ab3-5de529a82882");
+  ASSERT_NE(state().table(), nullptr);
+  ASSERT_EQ(state().table()->records.size(), 1u);
+  EXPECT_EQ(state().table()->records[0].values.at("445cc0d4-1514-517f-a00e-b73b36005fb7"), 20);
+  const auto [ax, ay] = f.widget_center("a2/main/project_simulation/advanced_options");
+  f.drv->click(ax, ay);
+  f.drv->frame();
+  auto *advanced = widget("project_simulation/advanced_options/options");
+  ASSERT_NE(advanced, nullptr);
+  advanced->string.assign(Json({{"backend", "local"}, {"ranks", 1}, {"threads_per_rank", 1},
+      {"program", program}, {"launcher", "none"}}).dump());
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_prepare"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(state().load_runs()); settled();
+  ASSERT_EQ(state().runs().size(), 1u);
+  const auto run = state().run_id();
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_prepare"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("assert _simulation_runtime.client.tasks() == []\n"
+      "runs = stk.project.runs.list()['runs']\nassert len(runs) == 1\n"
+      "plan = stk.project.runs.get(runs[0]['id'])['plan']\n"
+      "assert plan['spec']['argv'][2] == 'suan.lammps'\n"
+      "assert '--program' in plan['spec']['argv']"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  // Collapse the tall simulation controls before opening Runs so its header
+  // remains inside the real viewport; submission still uses the native button.
+  const auto [cx, cy] = f.widget_center("a2/main/project_simulation/advanced_options");
+  f.drv->click(cx, cy);
+  f.drv->frame();
+  EXPECT_EQ(widget("project_simulation/advanced_options/options"), nullptr);
+  const auto [sx, sy] = f.widget_center("a2/main/project_simulation");
+  f.drv->click(sx, sy);
+  f.drv->frame();
+  EXPECT_EQ(widget("project_simulation/simulation_prepare"), nullptr);
+  const auto [rx, ry] = f.widget_center("a2/main/project_runs");
+  f.drv->click(rx, ry);
+  ASSERT_NO_FATAL_FAILURE(click("project_runs/submit"));
+  settled();
+  ASSERT_TRUE(loop.pump_until([&] {
+    if (state().busy()) { return false; }
+    const auto phase = io::get_string(state().run().value("status", Json::object()).value("task", Json::object()), "state");
+    if (phase == "succeeded" || phase == "failed" || phase == "cancelled") { return true; }
+    state().refresh_run(); return false;
+  }, 90));
+  ASSERT_EQ(state().run().at("status").at("task").at("state"), "succeeded");
+  f.drv->frame();
+  const auto [runs_x, runs_y] = f.widget_center("a2/main/project_runs");
+  f.drv->click(runs_x, runs_y);
+  f.drv->frame();
+  const auto [simulation_x, simulation_y] = f.widget_center("a2/main/project_simulation");
+  f.drv->click(simulation_x, simulation_y);
+  // A historical LAMMPS run remains LAMMPS even while the new-case controls show MuFerro.
+  f.drv->frame();
+  widget("project_simulation/simulation_engine")->index.assign(0);
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_logs"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_collect"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_collect"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("from suan.workflows.lammps import RESULT_TABLE_ID as RT, RESULT_FIELD_IDS as RF\n"
+      "t = next(t for t in stk.project.snapshot()['tables'] if t['id'] == RT)\n"
+      "assert len(t['records']) == 1\nassert t['records'][0]['values'][RF['units']] == 'real'\n"
+      "assert t['records'][0]['values'][RF['step']] == 20\n"
+      "assert len(_simulation_runtime.client.tasks()) == 1\n_simulation_runtime.close()"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  const auto history = scripts.history().size();
+  ASSERT_TRUE(state().close()); settled();
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
+  ASSERT_TRUE(state().load_runs()); settled();
+  ASSERT_EQ(state().run_id(), run);
+  ASSERT_EQ(state().runs().size(), 1u);
+  EXPECT_EQ(scripts.history().size(), history);  // Reopen and refresh only read saved metadata.
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_view"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  std::string output;
+  for (size_t i = 0; i < scripts.output().line_count(); ++i) { output += scripts.output().line(i); output += '\n'; }
+  EXPECT_NE(output.find("LAMMPS collected results:"), std::string::npos);
+  EXPECT_NE(output.find("\"units\": \"real\""), std::string::npos);
+  EXPECT_FALSE(f.shell->store().viewer().payload());  // The metadata summary is not a MuFerro domain viewer.
+  ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_results"));
+  EXPECT_EQ(state().table_id(), "3f63a5bf-fc98-5c23-b211-7dcb31a5b173");
+  ASSERT_NE(state().table(), nullptr);
+  ASSERT_EQ(state().table()->records.size(), 1u);
+  const auto result_record = state().record_id();
+  EXPECT_EQ(state().table()->records[0].values.at("c7a88cd8-bfe3-54e4-85f1-80920e2dd04d"), run);
+  const double density = state().table()->records[0].values.at("9111ca43-5a88-5a41-9c2d-03cf53b01728");
+  EXPECT_TRUE(std::isfinite(density));
+  EXPECT_GT(density, 0);
+  f.drv->frame();
+  const auto old_results = widget("project_simulation/simulation_results")->on_click;
+  ASSERT_TRUE(state().create(dir.str() + "/unrelated-project", "Unrelated")); settled();
+  old_results();
+  EXPECT_TRUE(state().table_id().empty());
+  EXPECT_TRUE(state().record_id().empty());
+  EXPECT_NE(state().record_id(), result_record);
+  EXPECT_EQ(state().project()->revision, 0);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
+
+TEST_F(LammpsSimulationPython, NativeBatchRunReusesTwoTasksAndEngineSwitchClearsTheSelection)
+{
+  populated();
+  auto &scripts = f.shell->store().scripts();
+  auto &jobs = f.shell->store().jobs();
+  auto done = [&] {
+    ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 90));
+    ASSERT_TRUE(scripts.error().empty()) << scripts.error();
+    ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
+    f.drv->frame();
+  };
+  ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
+  ASSERT_TRUE(scripts.execute("import sys, time\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
+      ")\nfrom simulation_fixture import LammpsRuntime\nfrom suan.desktop_bridge.connections import ConnectionStore\n"
+      "_simulation_runtime = LammpsRuntime(" + Json(dir.str() + "/lammps-batch-runtime").dump() + ")\n"
+      "ConnectionStore(" + Json(dir.str() + "/bridge").dump() +
+      ").add_runtime('lammps-batch', _simulation_runtime.url, _simulation_runtime.config['token'], check=False)\n"
+      "p = stk.project\nfirst = stk.lammps.import_case(_simulation_runtime.source, expected_revision=p.snapshot()['project']['revision'])['record_id']\n"
+      "second = stk.lammps.clone_case(first, expected_revision=p.snapshot()['project']['revision'])['record_id']\n"
+      "from suan.workflows.lammps import TABLE_ID as LT, FIELD_IDS as LF\n"
+      "p.apply([{'op': 'set_cell', 'table_id': LT, 'record_id': second, 'field_id': LF['temperature'], 'value': 350}], expected_revision=p.snapshot()['project']['revision'])"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  jobs.sync(); jobs.refresh_connections();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return std::any_of(jobs.connections().begin(), jobs.connections().end(), [](const auto &item) { return item.info.id == "runtime:lammps-batch"; });
+  }, 30));
+  jobs.select_connection("runtime:lammps-batch");
+  std::string program;
+  { std::ifstream file(core::path_from_utf8(dir.str() + "/lammps-batch-runtime/program.txt")); std::getline(file, program); }
+  ASSERT_FALSE(program.empty());
+  state().select_table("a70a9da3-fb57-5d06-9ab3-5de529a82882");
+  auto &area = f.area("a2");
+  ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
+  f.screen.set_maximized(&area);
+  f.drv->frame();
+  const auto [x, y] = f.widget_center("a2/main/project_batches");
+  f.drv->click(x, y);
+  f.drv->frame();
+  auto widget = [&](const std::string &id) { return f.screen.ui()->find("a2/main/project_batches/" + id); };
+  auto click = [&](const std::string &id) {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.screen.run_deferred(); f.drv->frame(); const auto *w = widget(id); return w && w->enabled;
+    }, 30)) << id;
+    widget(id)->on_click();
+  };
+  ASSERT_NE(widget("batch_engine"), nullptr);
+  EXPECT_EQ(widget("batch_engine")->index.value(), 1);  // Selecting the LAMMPS case table selects its engine.
+  ASSERT_NO_FATAL_FAILURE(click("all"));
+  f.drv->frame();
+  ASSERT_NE(widget("selection"), nullptr);
+  ASSERT_TRUE(widget("selection")->table);
+  EXPECT_EQ(widget("selection")->table->rows, 2);
+  EXPECT_EQ(widget("selection")->table->columns[1].title.find("K"), std::string::npos);
+  widget("batch_engine")->index.assign(0);
+  f.drv->frame();
+  EXPECT_EQ(widget("selection"), nullptr);
+  EXPECT_FALSE(widget("run_selected")->enabled);
+  widget("batch_engine")->index.assign(1);
+  f.drv->frame();
+  EXPECT_EQ(widget("selection"), nullptr);
+  EXPECT_FALSE(widget("run_selected")->enabled);
+  ASSERT_NO_FATAL_FAILURE(click("all"));
+  const auto [ax, ay] = f.widget_center("a2/main/project_batches/advanced_options");
+  f.drv->click(ax, ay);
+  f.drv->frame();
+  ASSERT_NE(widget("advanced_options/options"), nullptr);
+  widget("advanced_options/options")->string.assign(Json({{"backend", "local"}, {"ranks", 1}, {"threads_per_rank", 1},
+      {"program", program}, {"launcher", "none"}}).dump());
+  ASSERT_NO_FATAL_FAILURE(click("run_selected"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  widget("members")->table->selected.assign(0);
+  f.drv->frame();
+  const auto stale_member_cancel = widget("one_cancel")->on_click;
+  const auto member_history = scripts.history().size();
+  const auto member_revision = state().project()->revision;
+  widget("members")->table->selected.assign(1);
+  f.drv->frame();
+  stale_member_cancel();
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy(); }, 30));
+  EXPECT_EQ(scripts.history().size(), member_history);
+  EXPECT_EQ(state().project()->revision, member_revision);
+  ASSERT_NO_FATAL_FAILURE(click("run_selected"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("from suan.workflows.batches import TABLE_ID as BT, FIELD_IDS as BF\n"
+      "t = next(t for t in p.snapshot()['tables'] if t['id'] == BT)\nassert len(t['records']) == 1\n"
+      "batch = t['records'][0]['id']\nassert t['records'][0]['values'][BF['intent']]['template'] == 'lammps/1'\n"
+      "assert len(p.runs.list()['runs']) == 2\nassert len(_simulation_runtime.client.tasks()) == 2\n"
+      "deadline = time.monotonic() + 60\n"
+      "while any(t['state'] not in {'succeeded','failed','cancelled'} for t in _simulation_runtime.client.tasks()) and time.monotonic() < deadline:\n    time.sleep(.05)\n"
+      "assert all(t['state'] == 'succeeded' for t in _simulation_runtime.client.tasks())"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("all_refresh"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_NO_FATAL_FAILURE(click("all_collect"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  ASSERT_TRUE(scripts.execute("from suan.workflows.lammps import RESULT_TABLE_ID as RT, RESULT_FIELD_IDS as RF\n"
+      "t = next(t for t in p.snapshot()['tables'] if t['id'] == RT)\nassert len(t['records']) == 2\n"
+      "assert {row['values'][RF['temperature']] for row in t['records']} == {300, 350}\n"
+      "assert all(i['last_operation']['ok'] for i in stk.batches.inspect(batch)['items'])\n_simulation_runtime.close()"));
+  ASSERT_NO_FATAL_FAILURE(done());
+  const auto history = scripts.history().size();
+  ASSERT_TRUE(state().close()); settled();
+  ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
+  state().select_table("a70a9da3-fb57-5d06-9ab3-5de529a82882");
+  f.drv->frame();
+  ASSERT_NE(widget("members"), nullptr);
+  ASSERT_TRUE(widget("members")->table);
+  EXPECT_EQ(widget("members")->table->rows, 2);
+  EXPECT_EQ(scripts.history().size(), history);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame();
+    const auto *w = widget("batch_archive"); return w && w->enabled;
+  }, 30));
+  const auto batches = std::find_if(state().tables().begin(), state().tables().end(), [](const auto &table) {
+    return table.id == "9ab21772-9bc4-56ab-94e1-f3f1049fb398";
+  });
+  ASSERT_NE(batches, state().tables().end());
+  ASSERT_EQ(batches->records.size(), 1u);
+  const auto batch_id = batches->records.front().id;
+  auto &archive = f.shell->store().archive();
+  ASSERT_FALSE(archive.archived("batch", batch_id));
+  const auto stale_archive = widget("batch_archive")->on_click;
+  const auto archive_history = scripts.history().size();
+  const auto archive_revision = state().project()->revision;
+  widget("batch_engine")->index.assign(0);
+  f.drv->frame();
+  EXPECT_EQ(widget("members"), nullptr);  // The saved LAMMPS batch is not shown as MuFerro.
+  stale_archive();
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.screen.run_deferred(); f.drv->frame(); return !archive.busy() && !state().busy() && !scripts.busy();
+  }, 30));
+  EXPECT_FALSE(archive.archived("batch", batch_id));
+  EXPECT_EQ(scripts.history().size(), archive_history);
+  EXPECT_EQ(state().project()->revision, archive_revision);
+  EXPECT_EQ(client->stats().schema_violations, 0u);
+}
 
 TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOffline)
 {

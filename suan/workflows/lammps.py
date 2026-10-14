@@ -429,3 +429,79 @@ class Lammps:
               flush=True)
         return {"run_id": run_id, "table_id": RESULT_TABLE_ID, "record_id": row_id,
                 "directory": str(destination / "case"), "qoi": qoi, "files": values["files"]}
+
+    def view(self, run_id, *, project=None):
+        """Read verified collected thermo/result metadata offline; never downloads or submits.
+
+        The desktop can open the returned result table and row. Atom/trajectory
+        rendering is a separate capability; this does not use MuFerro's viewer.
+        """
+        p = project or self.stk.project
+        model = p.snapshot()
+        run = p.runs.get(run_id)
+        plan = run["plan"]
+        argv = plan.get("spec", {}).get("argv", [])
+        if (plan.get("project_id") != model["project"]["id"] or not plan["label"].startswith(LABEL)
+                or plan["parameters"]["table_id"] != TABLE_ID
+                or not isinstance(argv, list) or argv[:4] != ["{python}", "-m", "suan.lammps", "run"]
+                or "--case-dir" not in argv or argv[argv.index("--case-dir") + 1:][:1] != ["case"]):
+            raise ValueError("Select a run prepared by the LAMMPS project workflow")
+        table = _table(model, RESULT_TABLE_ID, RESULT_FIELDS, RESULT_FIELD_IDS, NAME)
+        row_id = str(uuid5(UUID(run_id), "lammps-result"))
+        row = next((r for r in table["records"] if r["id"] == row_id), None) if table else None
+        if row is None:
+            raise ValueError("Collect this LAMMPS run before viewing it")
+        values = row["values"]
+        if (values.get(RESULT_FIELD_IDS["run"]) != run_id
+                or values.get(RESULT_FIELD_IDS["task"]) != (run["status"].get("task") or {}).get("id")):
+            raise ValueError("Collected result identity does not match this LAMMPS run")
+        root = _directory(self.stk, p)
+        prefix = f"results/lammps/{UUID(run_id)}/"
+        files = values.get(RESULT_FIELD_IDS["files"])
+        if not isinstance(files, list) or not 1 <= len(files) <= 10000:
+            raise ValueError("Collected LAMMPS result files are missing")
+        names = set()
+        for file in files:
+            if not isinstance(file, dict) or set(file) != {"path", "sha256"}:
+                raise ValueError("Invalid collected result file metadata")
+            name = relative_path(file["path"])
+            if not name.startswith(prefix) or name in names:
+                raise ValueError("Collected files must belong to this LAMMPS run")
+            names.add(name)
+            path = root
+            for part in Path(name).parts:
+                path = path / part
+                if path.is_symlink():
+                    raise ValueError("Collected result paths must not be symbolic links")
+            if (not path.is_file() or not path.resolve().is_relative_to(root.resolve())
+                    or _hash(path) != file["sha256"]):
+                raise ValueError("Collected result changed locally; inspect its files before viewing")
+        required = {prefix + RESULT, prefix + "case/" + LOG, prefix + "case/" + INPUT}
+        if not required <= names:
+            raise ValueError("Collected LAMMPS result files are missing")
+        digests = {file["path"]: file["sha256"] for file in files}
+        if any(digests.get(prefix + file["path"]) != file["sha256"] for file in plan["inputs"]):
+            raise ValueError("Collected inputs do not match the frozen LAMMPS run plan")
+        destination = root / prefix
+        if (destination / RESULT).stat().st_size > 2 * 1024 * 1024:
+            raise ValueError("The LAMMPS run report exceeds 2 MiB")
+        report = json.loads((destination / RESULT).read_text(encoding="utf-8"))
+        frozen = json.loads((destination / "case" / INPUT).read_text(encoding="utf-8"))
+        checked = verify_log((destination / "case" / LOG).read_text(encoding="utf-8", errors="replace"))
+        if (report.get("app") != "LAMMPS" or report.get("state") != "succeeded" or report.get("case_dir") != "case"
+                or report.get("verification", {}).get("verifier") != VERIFIER
+                or report.get("verification", {}).get("status") != "passed"
+                or checked["verification"]["status"] != "passed" or checked["qoi"] != report.get("qoi")
+                or report.get("script") != frozen.get("script") or report.get("variables") != frozen.get("variables")):
+            raise ValueError("Collected LAMMPS output does not match its input/log contract")
+        qoi = checked["qoi"]
+        thermo = {"columns": qoi["columns"], "means": qoi["means"], "final": qoi["final"],
+                  "samples": qoi["samples"], "runs": qoi["runs"], "version": checked["version"]}
+        expected = {"thermo": thermo, "units": checked["units"], "step": qoi["step"], "density": qoi["density"],
+                    "temperature_mean": qoi["temperature"], "pressure_mean": qoi["pressure"],
+                    "potential_energy": qoi["potential_energy"]}
+        if any(values.get(RESULT_FIELD_IDS[key]) != value for key, value in expected.items()):
+            raise ValueError("Collected thermo summary changed; inspect its result table before viewing")
+        return {"run_id": run_id, "table_id": RESULT_TABLE_ID, "record_id": row_id,
+                "directory": str(destination / "case"), "units": checked["units"],
+                "thermo": thermo, "qoi": qoi, "files": files}

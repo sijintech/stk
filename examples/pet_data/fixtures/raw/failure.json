@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "source_kind": "synthetic",
+  "represented_source_kind": "measurement",
+  "batch_id": "syn-batch-failed",
+  "status": "failed",
+  "value": null,
+  "note": "Synthetic preparation failure; no quantitative observation."
+}

@@ -49,8 +49,13 @@ int main(int argc, char **argv)
   const bool ai_focus = editor == "ai_focus";
   const bool ai_scope = editor == "ai_scope" || editor == "ai_scope_narrow";
   const bool ai = editor == "ai" || editor == "ai_narrow" || ai_stream || ai_proposal || ai_scope || ai_focus;
+  const bool lammps = editor == "simulation_lammps" || editor == "simulation_lammps_narrow" ||
+                      editor == "batches_lammps" || editor == "batches_lammps_narrow";
+  const bool batch_page = editor == "batches" || editor == "batches_lammps" || editor == "batches_lammps_narrow";
+  const bool simulation_page = editor == "simulation" || batch_page || lammps;
   const int canvas_width = editor == "workspace_narrow" || editor == "skills_narrow" ? 560 :
-      editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ? 760 : 1280;
+      editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ||
+      editor == "simulation_lammps_narrow" || editor == "batches_lammps_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions bo;
@@ -61,7 +66,7 @@ int main(int argc, char **argv)
   bo.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
   bo.env["STK_STATE_DIR"] = dir.str() + "/runtime";
   bo.env["STK_TOKEN_PLAN_API_KEY"] = "";
-  bo.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
+  if (!lammps) { bo.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model"; }
   bo.executor = loop.executor();
   bo.strict = bo.validate = true;
   std::string error;
@@ -374,13 +379,21 @@ int main(int argc, char **argv)
         ok = ok && state.import_csv(source, "Imported parameters / 导入参数", {{"Temperature", "number"}},
                                    {{"Temperature", "K"}}, ",") && loop.pump_until([&] { return !state.busy(); }, 30);
       }
-      if (editor == "simulation" || editor == "batches") {
+      if (simulation_page) {
         const auto source = core::path_from_utf8(dir.str() + "/case");
         std::filesystem::create_directories(source);
-        { std::ofstream file(source / "input.toml");
+        if (lammps) {
+          std::ofstream file(source / "in.pet");
+          file << "# Synthetic UI fixture; no task is submitted\nunits lj\natom_style atomic\n"
+                  "variable temperature index 1.5\nvariable steps index 20\n"
+                  "variable timestep index 0.005\nthermo 5\nrun ${steps}\n";
+        }
+        else {
+          { std::ofstream file(source / "input.toml");
           file << "material = 'material.toml'\n[system]\nsimulation_grid = [16,16,16]\n"
                   "temperature = 298\ntimestep_total = 101\ndt = 0.01\n[output]\ninterval = 100\n"; }
-        { std::ofstream file(source / "material.toml"); file << "[landau]\na1 = '3.8e5*(TEM-479)'\n"; }
+          { std::ofstream file(source / "material.toml"); file << "[landau]\na1 = '3.8e5*(TEM-479)'\n"; }
+        }
       }
       if (editor == "recent") {
         ok = ok && state.close() && loop.pump_until([&] { return !state.busy() && !state.recent_loading(); }, 30);
@@ -481,9 +494,9 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      if (editor == "manage" || editor == "files" || editor == "snapshots" || editor == "runs" || editor == "csv" || editor == "simulation" || editor == "batches") {
+      if (editor == "manage" || editor == "files" || editor == "snapshots" || editor == "runs" || editor == "csv" || simulation_page) {
         ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
-        if (const auto *widget = screen.ui()->find((editor == "simulation" || editor == "batches") ? "a2/main/project_simulation" : editor == "manage" ? "a2/main/manage_objects" :
+        if (const auto *widget = screen.ui()->find(simulation_page ? "a2/main/project_simulation" : editor == "manage" ? "a2/main/manage_objects" :
                                                   editor == "files" ? "a2/main/project_files" : editor == "csv" ? "a2/main/project_csv" : editor == "runs" ? "a2/main/project_runs" : "a2/main/input_snapshots")) {
           const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
           screen.ui()->handle_event(ui::Event::mouse_down(center));
@@ -491,10 +504,17 @@ int main(int argc, char **argv)
         }
         else { ok = false; }
       }
-      if (editor == "simulation" || editor == "batches") {
+      if (simulation_page) {
         auto &scripts = shell.store().scripts();
         ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         ok = ok && loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30);
+        if (lammps) {
+          if (const auto *widget = screen.ui()->find("a2/main/project_simulation/simulation_engine")) {
+            widget->index.assign(1);
+          }
+          else { ok = false; }
+          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        }
         if (const auto *widget = screen.ui()->find("a2/main/project_simulation/simulation_source")) {
           widget->string.assign(dir.str() + "/case");
         }
@@ -506,13 +526,13 @@ int main(int argc, char **argv)
         else { ok = false; }
         ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
         ok = ok && scripts.status().at("run").at("state") == "succeeded";
-        state.select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+        state.select_table(lammps ? "a70a9da3-fb57-5d06-9ab3-5de529a82882" : "27e50c45-2d61-523c-a56b-f505bbd595c5");
         ok = ok && state.table() && state.table()->records.size() == 1;
-        if (editor == "batches") {
+        if (batch_page) {
           const auto id = state.record_id();
-          ok = ok && scripts.execute("p = stk.project\nrow = stk.muferro.clone_case(" + io::Json(id).dump() +
+          ok = ok && scripts.execute(std::string("p = stk.project\nrow = stk.") + (lammps ? "lammps" : "muferro") + ".clone_case(" + io::Json(id).dump() +
               ", expected_revision=p.snapshot()['project']['revision'])['record_id']\n"
-              "stk.batches.create('muferro/1', [" + io::Json(id).dump() +
+              "stk.batches.create('" + (lammps ? "lammps/1" : "muferro/1") + "', [" + io::Json(id).dump() +
               ", row], 'runtime:lab', expected_revision=p.snapshot()['project']['revision']); None");
           ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
           ok = ok && scripts.status().at("run").at("state") == "succeeded";

@@ -1,0 +1,5 @@
+point_index,response,response_status,response_unit,source_kind,synthetic
+0,0,synthetic_available,1,synthetic,true
+1,1,synthetic_available,1,synthetic,true
+2,2,synthetic_available,1,synthetic,true
+3,3,synthetic_available,1,synthetic,true

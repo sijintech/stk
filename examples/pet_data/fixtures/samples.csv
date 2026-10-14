@@ -1,0 +1,5 @@
+id,batch_id,parent_sample_id,sample_role,source_kind,synthetic
+syn-sample-A,syn-batch-A,,parent,synthetic,true
+syn-split-A-1,syn-batch-A,syn-sample-A,split,synthetic,true
+syn-sample-B,syn-batch-B,,parent,synthetic,true
+syn-split-B-1,syn-batch-B,syn-sample-B,split,synthetic,true
