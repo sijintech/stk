@@ -5,9 +5,10 @@ import random
 
 import pytest
 
+from suan.lammps import structure
 from suan.lammps.structure import (Cell, Limits, StructureError, atom_sample, display_geometry,
                                    index_dump, iter_dump_frames, minimum_image, parse_data,
-                                   read_data, read_dump_frame)
+                                   read_data, read_dump_frame, verify_dump_index)
 
 
 DATA = """Synthetic full/real topology; no material validation
@@ -255,6 +256,79 @@ def test_index_refuses_changed_file_and_another_topology(tmp_path):
     other = parse_data(DATA.replace("40 2 3", "40 3 3"))
     with pytest.raises(StructureError, match="another topology"):
         read_dump_frame(path, other, index=index)
+
+
+@pytest.mark.parametrize("change", [
+    lambda raw: raw.replace(b"TIMESTEP\n0\n", b"TIMESTEP\n1\n"),
+    lambda raw: raw.replace(b"0.2 4 4 4", b"0.3 4 4 4"),
+    lambda raw: raw.replace(b"0 10\n", b"0 11\n", 1),
+])
+def test_index_rejects_same_size_changed_bytes_even_with_identical_file_stat(tmp_path, monkeypatch, change):
+    path = tmp_path / "trajectory.dump"
+    original = dump_frame().encode()
+    path.write_bytes(original)
+    with path.open("rb") as stream:
+        signature = structure._signature(stream)
+    # Some file systems retain all available metadata for a rapid equal-size rewrite.
+    monkeypatch.setattr(structure, "_signature", lambda stream: signature)
+    topology = parse_data(DATA)
+    index = index_dump(path, topology)
+    changed = change(original)
+    assert changed != original and len(changed) == len(original)
+    path.write_bytes(changed)
+    with pytest.raises(StructureError, match="changed") as failure:
+        read_dump_frame(path, topology, index=index)
+    assert failure.value.code == "source_changed"
+
+
+@pytest.mark.parametrize("binary", [False, True])
+def test_raw_index_verification_preserves_stream_position_and_enforces_byte_limit(binary):
+    original = dump_frame()
+    stream = io.BytesIO(original.encode()) if binary else io.StringIO(original)
+    index = index_dump(stream, parse_data(DATA))
+    stream.seek(11)
+    verify_dump_index(stream, index)
+    assert stream.tell() == 11
+    with pytest.raises(StructureError, match="byte budget"):
+        verify_dump_index(stream, index, limits=Limits(max_bytes=8))
+    assert stream.tell() == 11
+    stream.seek(0)
+    changed = original.replace("TIMESTEP\n0\n", "TIMESTEP\n1\n")
+    stream.write(changed.encode() if binary else changed)
+    stream.seek(11)
+    with pytest.raises(StructureError, match="changed"):
+        verify_dump_index(stream, index)
+    assert stream.tell() == 11
+
+
+def test_raw_index_verification_cancels_mid_hash_and_restores_position():
+    stream = io.BytesIO((dump_frame() + "\n" * 70000).encode())
+    index = index_dump(stream, parse_data(DATA))
+    stream.seek(11)
+    checks = 0
+
+    def cancel():
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise RuntimeError("fixture cancelled during raw hash")
+
+    with pytest.raises(RuntimeError, match="cancelled during raw hash"):
+        verify_dump_index(stream, index, check=cancel)
+    assert stream.tell() == 11 and checks == 2
+
+
+def test_index_signature_change_rejects_before_reading_bytes(tmp_path, monkeypatch):
+    path = tmp_path / "trajectory.dump"
+    path.write_bytes(dump_frame().encode())
+    index = index_dump(path, parse_data(DATA))
+    changed = (*index.signature[:-1], index.signature[-1] + 1)
+    monkeypatch.setattr(structure, "_signature", lambda stream: changed)
+    with path.open("rb") as stream:
+        stream.seek(11)
+        with pytest.raises(StructureError, match="changed"):
+            verify_dump_index(stream, index, check=lambda: pytest.fail("stat change must reject before hashing"))
+        assert stream.tell() == 11
 
 
 def test_periodic_display_splits_real_bonds_and_never_infers_nearby_bonds():

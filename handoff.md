@@ -1,8 +1,8 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
 更新：2026-10-14；本次代码实现 PET 专项全流程研究、O₂ 示踪协议与 E1d 结构/轨迹查看，正在重新验收修正 O₂ 热态后的完整真实 PET 流程。
-本机原生 **1318/1318、无跳过**，Python 完整 **2765 passed、24 skipped**，最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**。
-前一个代码交付为 `4f54d78`；本次完整热态复核、提交 SHA 与 CI 结束后补记[验收记录](docs/runtime-validation.md)。
+本机原生 **1318/1318、无跳过**，Python 完整 **2782 passed、24 skipped**，最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**。
+代码 **`6aca8f8` 已推送 main**；本次完整热态复核正在继续；Windows CI 的同 tick 索引复用问题已修，三版本各 76 项与新整套通过，修复提交/CI 随后补记[验收记录](docs/runtime-validation.md)。
 代码 `4f54d78` 已推送 main，Runtime **8/8**、桌面 **5/5**、文档与密钥扫描均已完成成功。
 此前 PET 建模代码 `fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，实际测试数与新节点结果见验收记录。
 `main` 还包含 E1 数据写出器 `057f96d`、E1c 分析 `6927e27` 与修正 `c17bb4b`、`be9bdd7`（CI 见验收记录）。本文是当前快照：状态、待所有者决定的事项、下一步、
@@ -141,7 +141,7 @@ mBuild 1.4.0、foyer 1.2.0、GMSO 0.17.0），`MAMBA_ROOT_PREFIX=/home/mnemora/o
 
 | 证据 | 结果 |
 |---|---|
-| PET 专项 / E1d 本机（2026-10-14，本次工作树） | 完整 Python **2765 passed、24 skipped**；最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**；原生 **1318/1318、无跳过**。真实 546 PET 压密与 GPU 导出通过，长程后半程仍在验收。最终 CI/结果见[验收](docs/runtime-validation.md) |
+| PET 专项 / E1d 本机（2026-10-14，本次工作树） | 完整 Python **2782 passed、24 skipped**；最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**；原生 **1318/1318、无跳过**。真实 546 PET 压密与 GPU 导出通过，长程后半程仍在验收。最终 CI/结果见[验收](docs/runtime-validation.md) |
 | 数据闭环节点 1 本机（2026-10-13） | Python 完整 **2598 passed、24 skipped**，最终 guard 定向 **28 passed**；Linux 原生 **1309/1309、无跳过**，含 4 新交互/16 截图；真实 LAMMPS 原生 **2/2**；离线字典例三 Python 版本各 **7/7**。打包/i18n/链接/暂存密钥扫描通过，当前提交 CI 见[验收](docs/runtime-validation.md) |
 | E1b PET 本机建模（2026-10-12） | 完整 pytest 2569 passed、24 skipped（后加上限另定向）；最终定向 168 passed；独立真实模型/构象 5 passed、项目→LAMMPS 1 passed；原生定向 40/40。`fbcd9f4` 的 Runtime 8/8、桌面 5/5、密钥扫描与文档均通过，详见[验收记录](docs/runtime-validation.md) |
 | E1a `1859ca7` 本机 | 完整 pytest（`-m "not perf"`）**2427 passed、24 skipped**；Python 3.11 相关 81 passed；工作流/仿真/模块/智能体 CTest **69/69** |

@@ -12,10 +12,12 @@
 O₂ 采用独立 IFF2021 12–6 数值与明确单位换算，不作为已验证的 PET/O₂ 阻隔模型；失败拟合保留观测和原因。
 关闭/超时停止跟踪并保留已接受任务，明确恢复接续，成功阶段不重跑。`write_data` 的六位系数表示差异被识别，
 下游从首个冻结模型恢复完整精度的 54 类参数。E1d full/real 结构、真实键、盒子与实际轨迹帧沿用 payload/2 和原生 GPU。
-本机完整 Python **2765 passed、24 skipped**、最终协议/后端/dispatcher 三 Python 版本各 **97 passed**、3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**，
+本机完整 Python **2782 passed、24 skipped**、最终协议/后端/dispatcher 三 Python 版本各 **97 passed**、3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**，
 原生 **1318/1318、无跳过**；真实 546 PET 压密、550 PET/O₂ GPU 导出已通过；O₂ 热态修正后重新完整验收与推送 CI 完成后补[验收](runtime-validation.md)。
-代码与使用见[全流程例](../examples/pet_study/README.md)、[桌面指南](lammps-desktop.md)、[结构契约](specs/lammps-structure-1.md)。
+代码 `6aca8f8` 已推送 main；新 CI 和热态修正后真实验收正在进行。代码与使用见[全流程例](../examples/pet_study/README.md)、[桌面指南](lammps-desktop.md)、[结构契约](specs/lammps-structure-1.md)。
 纯 PET/O₂ 的短链有限时间软件验证不替代弹性体、酒液、长期变形、溶解度/渗透率或收敛物性的验证。
+
+轨迹索引补正：首个代码头桌面 CI 已完成 5/5；Runtime 的 Windows 文件同 tick 改写反例失败，现以完整 raw SHA 复核索引和缓存，清除旧错误指纹。三 Python 版本各 76 项、完整 Python 2782 项与桌面相关 11/11 通过，等前代码头桌面结束后推送修正；不以延时或跳过规避。
 
 **2026-10-12 项目方案落实**：所有者提供 PET 基弹性体研发与材料数据能力建设第 6 版方案，要求后续 STK 支持落地。
 已读取 DOCX 正文及表格，形成[PET 材料数据闭环路线](design/pet-materials-data-loop.md)：以原始证据、材料/批次/样品状态、

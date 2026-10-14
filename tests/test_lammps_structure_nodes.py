@@ -15,6 +15,7 @@ from suan.graph.nodes import lammps_structure, molecule_render
 from suan.graph.registry import CancelToken, Cancelled, NodeExecutionError
 from suan.graph.resolve import LocalDirResolver
 from suan.graph.service import MemoryBlobSink, evaluate_request
+from suan.lammps import structure
 from suan.render.payload import decode
 from test_lammps_structure import DATA, dump_frame
 from test_desktop_bridge import bridge_env  # noqa: F401
@@ -121,6 +122,59 @@ def test_revisit_and_appearance_change_reuse_geometry_and_new_bytes_invalidate(m
     changed = run(molecule, cache=cache)
     assert changed.parameters["step"] == {"value": 35, "choices": [5, 20, 35]}
     assert changed.keys["molecule"] != first.keys["molecule"]
+
+
+def test_same_stat_rewrite_changes_fingerprint_steps_and_graph_geometry(molecule, monkeypatch):
+    path = molecule / "trajectory.dump"
+    with path.open("rb") as stream:
+        signature = structure._signature(stream)
+    monkeypatch.setattr(structure, "_signature", lambda stream: signature)
+    monkeypatch.setattr(lammps_structure, "_signature", lambda stream: signature)
+    cache = GraphCache()
+    first = run(molecule, cache=cache)
+    original = path.read_bytes()
+    changed = original.replace(b"TIMESTEP\n20\n", b"TIMESTEP\n21\n").replace(
+        b"10 1 1 0.1 11 1 1", b"10 1 1 0.3 14 1 1")
+    assert changed != original and len(changed) == len(original)
+    path.write_bytes(changed)
+    result = run(molecule, cache=cache)
+    assert result.parameters["step"] == {"value": 21, "choices": [5, 21]}
+    assert result.keys["molecule"] != first.keys["molecule"]
+    atom_layer = next(layer for layer in result.outputs["view"].layers if layer.id == "atoms")
+    np.testing.assert_allclose(atom_layer.attributes["source_position"].values[0], [14, 1, 1])
+    assert atom_layer.attributes["charge"].values[0] == .3
+    assert result.outputs["diagnostics"]["source"]["used"][1]["sha256"] == hashlib.sha256(changed).hexdigest()
+
+
+def test_same_stat_invalid_rewrite_cannot_reuse_cached_graph(molecule, monkeypatch):
+    path = molecule / "trajectory.dump"
+    with path.open("rb") as stream:
+        signature = structure._signature(stream)
+    monkeypatch.setattr(structure, "_signature", lambda stream: signature)
+    monkeypatch.setattr(lammps_structure, "_signature", lambda stream: signature)
+    cache = GraphCache()
+    run(molecule, cache=cache)
+    original = path.read_bytes()
+    changed = original.replace(b"40 2 3", b"90 2 3")
+    assert changed != original and len(changed) == len(original)
+    path.write_bytes(changed)
+    with pytest.raises(EvaluationFailed, match="unknown dump atom ID"):
+        run(molecule, cache=cache)
+
+
+def test_cached_graph_index_verification_propagates_cancellation_and_preserves_seek(molecule):
+    topology = structure.parse_data(DATA)
+    sha = hashlib.sha256(DATA.encode()).hexdigest()
+    with (molecule / "trajectory.dump").open("rb") as stream:
+        first = lammps_structure._index(stream, topology, sha, lambda: None)
+        stream.seek(11)
+        token = CancelToken()
+        token.cancel()
+        with pytest.raises(Cancelled):
+            lammps_structure._index(stream, topology, sha, token.raise_if_cancelled)
+        assert stream.tell() == 11
+        assert lammps_structure._index(stream, topology, sha, lambda: None) is first
+        assert stream.tell() == 11
 
 
 def test_static_topology_has_unknown_boundary_and_no_fabricated_time(molecule):

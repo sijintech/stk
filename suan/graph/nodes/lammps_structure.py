@@ -57,7 +57,7 @@ def _topology(stream, check):
 
 
 def _index(stream, topology, topology_sha, check):
-    from suan.lammps.structure import index_dump
+    from suan.lammps.structure import StructureError, index_dump, verify_dump_index
     signature = _signature(stream)
     # Cached indexes contain offsets and IDs, never the coordinates of all frames.
     # A non-file stream is reindexed and rehashed rather than trusting object identity.
@@ -65,9 +65,19 @@ def _index(stream, topology, topology_sha, check):
     if key is not None:
         with _INDEX_LOCK:
             found = _INDEXES.get(key)
-            if found is not None:
-                _INDEXES.move_to_end(key)
-                check()
+        if found is not None:
+            try:
+                verify_dump_index(stream, found, check=check)
+            except StructureError as error:
+                if error.code != "source_changed":
+                    raise
+                with _INDEX_LOCK:
+                    if _INDEXES.get(key) is found:
+                        del _INDEXES[key]
+            else:
+                with _INDEX_LOCK:
+                    if _INDEXES.get(key) is found:
+                        _INDEXES.move_to_end(key)
                 return found
     result = index_dump(stream, topology, check=check)
     if key is not None:
@@ -116,7 +126,7 @@ def _load(ctx, params, *, read_frame=False):
 def fingerprint(ctx, inputs, params):
     from suan.lammps.structure import READER
     _, _, used, selected = _load(ctx, params)
-    return {"reader": READER, "used": used, "step": selected}
+    return {"reader": READER, "index_verification": "raw-sha256/1", "used": used, "step": selected}
 
 
 @node("stk.source.lammps_structure", title={"en": "LAMMPS molecule", "zh": "LAMMPS 分子结构"},

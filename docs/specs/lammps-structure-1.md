@@ -69,6 +69,15 @@ Content hashes, the selected step and the reader version enter the graph cache k
 Changing appearance parameters reuses molecular geometry; changed source bytes or a
 new timestep invalidate it.
 
+Before reusing a trajectory index, both frame reads and graph fingerprints verify the
+complete original byte SHA-256 on every platform. A changed file signature rejects an
+old index immediately; an unchanged signature is insufficient evidence of unchanged
+bytes. The graph discards a stale index and validates the current complete trajectory
+again. Hashing is cancellable and restores an existing stream's position, including on
+failure. Each verification reads up to the 256 MiB file limit; cached offset lookup
+therefore still incurs a full bounded file read. The internal fingerprint verifier
+revision also invalidates graph entries produced before this verification rule.
+
 The source outputs are `atoms` (PolyData points), `bonds` (PolyData two-point segments),
 `box` (PolyData containing the actual twelve cell edges), and JSON `diagnostics`.
 Coordinates and floating source attributes remain float64 before payload encoding,

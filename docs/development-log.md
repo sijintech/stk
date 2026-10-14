@@ -14,10 +14,13 @@ E1d 使用有界 full/real data/dump reader，保留真实 ID、原子属性、�
 GUI 精确原子拾取未实施，体场探针不会采样分子点；原始 reader 为 float64，GPU 属性显示可能为 float32。
 兼容回归同步 12 个预设数量、生成节点参考与新增中英文表单 goldens；旧 11 份预设布局逐项一致。
 
-本机完整 Python **2765 passed、24 skipped**，最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**；
+本机完整 Python **2782 passed、24 skipped**，最终协议/后端/dispatcher 三 Python 版本各 **97 passed**，3.11/3.14 相关各 **195 passed**、最后来源 guard 各 **4 passed**；
 原生 **1318/1318、无跳过**，546 PET 真实压密/轨迹 GPU 导出通过，O₂ 插入与 COM 求解器短测通过。
-首轮 11 段软件路径已通过；科学复核发现并修复 O₂ 前置 FIRE 清空 PET 速度的问题，独立短测确认温度继承，正在从建模重验全部 11 段，物性收敛不作通过声明；本次提交、CI 和最终结果在[验收记录](runtime-validation.md)完成后补记。
+首轮 11 段软件路径已通过；科学复核发现并修复 O₂ 前置 FIRE 清空 PET 速度的问题，独立短测确认温度继承，正在从建模重验全部 11 段，物性收敛不作通过声明；代码 `6aca8f8` 已推送 main；CI 与热态修正后的真实全流程仍在验收，实际结果见[验收记录](runtime-validation.md)。
 
+
+
+轨迹索引补正：首个代码头桌面 CI 已完成 5/5；Runtime 的 Windows 文件同 tick 改写反例失败，现以完整 raw SHA 复核索引和缓存，清除旧错误指纹。三 Python 版本各 76 项、完整 Python 2782 项与桌面相关 11/11 通过，等前代码头桌面结束后推送修正；不以延时或跳过规避。
 
 ## 2026-10-13：PET 数据闭环节点 1 实施
 

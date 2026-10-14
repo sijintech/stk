@@ -37,7 +37,7 @@
   546 PET 真实轨迹已由原生 headless Vulkan 导出（`/tmp/stk-pet-546-viewer-20261014.png`），实际步 40000、5 图层；像素图已人工查看。
 - wheel/sdist 构建通过；安装 wheel 后在仓库外确认 PET 协调/精准系数/O₂/4 新节点与分子预设可用。
   文档与示例按现有包规则仅进 sdist；发现新例缺少显式 include 后已补并重建，最终源码 wheel 与 sdist 示例/契约逐字节匹配，无 archive，仓库外安装冒烟通过；
-  中英文 i18n 各 2095 键/0 问题、345 个本地链接检查通过，暂存约 379 KB 的 gitleaks 无泄漏。提交 SHA 与 CI 结束后补记。
+  中英文 i18n 各 2095 键/0 问题、345 个本地链接检查通过，暂存约 379 KB 的 gitleaks 无泄漏。最终暂存约 **385 KB** 的 gitleaks 无泄漏；代码 **`6aca8f8` 已推送 main**，CI 正在进行，结束后补记实际结果。
 - 最后 backend review 发现预先准备的 owned child 可含额外行，首次分析复用也可能绑定错误记录；
   已在关联/开始前要求唯一 owned row、准确 table/order 和完整冻结 bindings，拒绝后不提交/不改状态。
   唯一子行 guard 后相关 **196 passed、无跳过**（149.85 秒，`/tmp/stk-pet-related-guards-final-20261014.xml`）；
@@ -49,6 +49,20 @@
   3.14 **97 passed**（106.22 秒），均无跳过；真实 MD 未因这些反例重复提交。
 - 最后交互 review 修正同名多研究创建后仍选旧研究：caller 生成新 UUID，表更新期间不回退旧行，同名用行号区分；
   旧选择回调拒绝、桥接错误在 PET 面板可见。2 研究选择/分派与界面定向 5/5（8.49 秒）、native dispatcher 9/9（0.63 秒）通过。
+- `6aca8f8` 首轮 CI：文档（38531300843）与密钥扫描（38531300581）成功；Runtime（38531300583）的 Windows 3.11/3.12 各
+  **2286 passed、92 skipped、1 failed、316 deselected**。失败均为文件同 tick 改写后复用旧 dump 索引，
+  Windows 的 size/mtime/ctime/inode 签名不保证内容不变；不是跳过真实 Runtime 测试或单位误差。
+  正修为索引复用核完整 raw SHA，图缓存也复核并失效旧错误指纹，新增元数据固定的跨平台反例；
+  该代码头[桌面 CI](https://github.com/sijintech/stk/actions/runs/38531300727)已完成 **5/5 成功**，满足推送修正门槛；Linux 原生 **1318/1318**（260.96 秒）。
+  Runtime Linux 3.12 **2787 passed、7 skipped、4 deselected**，3.11/3.14 各 **2783 passed、11 skipped、4 deselected**；
+  另 desktop **3 passed**、control/Blender **24 passed**、web type-check/build 成功，整体为 **6/8**（两 Windows 失败）。
+  Windows 索引修正 reader/source 三版本各 **76/76**（3.11 2.74 秒、3.12 1.91 秒、3.14 1.88 秒），
+  10 个新反例覆盖固定元数据、头/坐标/盒子改变、预算/取消恢复、缓存失效，不用 sleep/skip。
+  独立 critical review 通过，最后桌面相关 **11/11**（28.42 秒，`/tmp/stk-pet-native-index-fixed-20261014.xml`），最终完整 Python **2782 passed、24 skipped、2 deselected**（611.58 秒，`/tmp/stk-pet-full-python-index-fixed-20261014.xml`）；不覆盖首轮失败证据。
+  修正 wheel/sdist 构建并逐字节复核通过；仓库外安装后实际读取新 546 PET 的 126 帧轨迹、完整 SHA 校验与最新步 20000 通过。
+  `6aca8f8` 桌面其余实际计数：macOS CPU **840/840**（304.53 秒）、Metal **192/192**（342.93 秒）、Windows CPU **798/798**（354.12 秒），均无跳过。
+  Linux 新 PET 宽窄/中英文/GL/Vulkan 必跑 **8/8**、Metal 新 PET 必跑 **4/4**，各真实执行。
+  Linux 三 Python 版本的离线合成例均 **7/7**（3.11 0.866 秒、3.12 0.989 秒、3.14 0.968 秒）。
 - 所有测试清空 `STK_TOKEN_PLAN_API_KEY` 并取消 `STK_TOKEN_PLAN_MODEL`，未发收费模型请求；真实验收只用公开参数和自建 PET。
   余限：短链/有限时间、单原点与有限气体数、全系统零初始动量后残余漂移、文本状态不保存 thermostat/barostat 内部态；
   尚不验证收敛物性、溶解度、渗透率、PET 弹性体/酒液/长期变形，GUI 精确拾取及厂内强制边界也未交付。

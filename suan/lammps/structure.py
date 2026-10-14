@@ -520,18 +520,35 @@ def index_dump(source, topology, *, limits=DEFAULT_LIMITS, check=None):
         return DumpIndex(tuple(frames), lines.hash.hexdigest(), signature, _topology_identity(topology))
 
 
-def _verify_index(stream, index, limits, check):
-    signature = _signature(stream)
-    if signature is not None:
-        if signature != index.signature:
-            raise StructureError("Dump file changed after indexing")
-    else:
-        stream.seek(0)
-        lines = _Lines(stream, limits, check)
-        while lines.read() is not None:
-            pass
-        if lines.hash.hexdigest() != index.sha256:
-            raise StructureError("Dump stream changed after indexing")
+def verify_dump_index(source, index, *, limits=DEFAULT_LIMITS, check=None):
+    """Verify the complete raw bytes before reusing offsets, preserving stream position.
+
+    File metadata is only a fast rejection path: an equal-size rewrite can retain all
+    available timestamps. Every reuse therefore hashes the bounded input on every OS.
+    """
+    with _stream(source) as stream:
+        position = stream.tell()
+        try:
+            signature = _signature(stream)
+            if signature is not None and signature != index.signature:
+                raise StructureError("Dump file changed after indexing", "source_changed")
+            stream.seek(0)
+            digest, count = hashlib.sha256(), 0
+            while True:
+                if check is not None:
+                    check()
+                raw = stream.read(min(65536, limits.max_bytes - count + 1))
+                if not raw:
+                    break
+                data = raw.encode("utf-8") if isinstance(raw, str) else raw
+                count += len(data)
+                if count > limits.max_bytes:
+                    raise StructureError("Dump byte budget exceeded", "budget_exceeded")
+                digest.update(data)
+            if signature != _signature(stream) or digest.hexdigest() != index.sha256:
+                raise StructureError("Dump input changed after indexing", "source_changed")
+        finally:
+            stream.seek(position)
 
 
 def read_dump_frame(source, topology, *, frame="latest", index=None, limits=DEFAULT_LIMITS, check=None):
@@ -548,7 +565,7 @@ def read_dump_frame(source, topology, *, frame="latest", index=None, limits=DEFA
     else:
         raise StructureError("Select an exact integer timestep, first or latest")
     with _stream(source) as stream:
-        _verify_index(stream, index, limits, check)
+        verify_dump_index(stream, index, limits=limits, check=check)
         before = _signature(stream)
         stream.seek(selected.offset)
         lines = _Lines(stream, limits, check)
