@@ -26,6 +26,7 @@
   所有实际 source_kind 均为 synthetic，缺测/失败为空，不作 PET 训练或实验结果。项目保留 `/tmp/stk-pet-data-20261013-final`。
   只读 review 未发现阻断问题；字典是草案，格式 13 普通表尚未强制领域关系或用途规则。
 - wheel/sdist 构建成功：核对新 dispatcher、离线 view、桌面指南、字典及完整合成例入包，无归档代码。
+  wheel 中两份工作流实现与 `4f54d78` 实际字节一致，sdist 的 **24 项示例/字典文件**也逐字节一致。
   使用本地 wheel、`--no-index --no-deps` 在仓库外安装并导入，固定引擎拒绝与公开 view 可用；不调用模型/求解器。
   本机中英文 i18n 各 **2079 键、0 问题**；已目检 GL 的中文窄屏 LAMMPS 导入与英文宽屏批次截图，未强制 LJ 温度为 K。
 - 全部修正后重新编译，最终完整 Linux 原生 **1309/1309、无失败/跳过**（274.06 秒，`/tmp/stk-e1-desktop-full-native-final.xml`）。
@@ -33,7 +34,20 @@
   必跑检查匹配 **20 项**通过。前一完整 **1309/1309**（275.26 秒）先于最后归档回调保护，保留 `-pre-archive-guard.xml`，不替代最终报告。
   三平台 CI 已加入对应必跑规则，macOS Metal 新增 8 张渲染；未执行的其他平台结果不当本机成功。
 - 格式/i18n 与 **401 个本地链接**检查通过；暂存约 153 KB 经 gitleaks（`.gitleaks.toml`、redact）无泄漏。
-  本次代码提交与 Runtime/桌面/密钥扫描/文档 CI 在推送后补记实际结果。
+  代码 **`4f54d78`** 已推送 main；[文档](https://github.com/sijintech/stk/actions/runs/38491407349)与
+  [密钥扫描](https://github.com/sijintech/stk/actions/runs/38491407329)已完成成功；
+  [Runtime](https://github.com/sijintech/stk/actions/runs/38491407387) **8/8 已完成成功**；
+  Python 3.12 **2613 passed、7 skipped、4 deselected**（534.47 秒），3.11/3.14 各 **2609 passed、11 skipped、4 deselected**（472.66/530.82 秒）；
+  三个 Linux 版本的离线例各 **7/7、无跳过**（0.880/0.984/0.981 秒）。Windows 3.11/3.12 各 **2143 passed、92 skipped、286 deselected**（538.59/350.33 秒），
+  客户端入口/服务端拒绝检查成功；Windows 未运行独立离线例或 Linux-only Runtime 夹具。
+  另桌面 Python **3 passed**、control/Blender 协议 **24 passed**，web 检查成功。
+  [桌面](https://github.com/sijintech/stk/actions/runs/38491407351) **5/5 已完成成功**。
+  Linux **1309/1309**（315 秒），macOS CPU **840/840**（257 秒）、Metal **188/188**（263 秒），三份 JUnit 均 **无失败/跳过**；
+  Linux 新交互 **4/4**、新渲染 **16/16**，macOS 新交互 **2/2**、Metal 新渲染 **8/8**，必跑检查均成功。
+  真实报告保留 `/tmp/stk-e1-ci-4f54-linux/ctest-junit.xml` 与 `/tmp/stk-e1-ci-4f54-macos/ctest-{cpu,metal}.xml`；
+  Linux 包构建与新环境包冒烟、macOS 应用包冒烟也通过；Windows CPU **798/798、无失败/跳过**，
+  新交互 **2/2**及真实 Python 桥必跑检查均成功；筛选记录保留 `/tmp/stk-e1-ci-4f54-windows-summary.json`。
+  CI 结束后补记四份交接文档，复核 **296 个本地链接**与格式、再次做暂存 gitleaks，无泄漏。
 - 剩余限制：原生仿真面板只有内置两引擎入口与热力学结果，第三方仍可用既有工作流/脚本；
   面板的第三方入口、原子/键/轨迹显示、远程模块安装、运行中事件未实现。
   两种引擎的资源选项只在当前编辑器会话保留，没有新增跨重启持久设置。
