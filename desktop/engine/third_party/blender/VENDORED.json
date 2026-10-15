@@ -14,13 +14,18 @@
   {
    "file": "0002-metal-free-safe-list-chains.patch",
    "sha256": "436ed6905e3c4e81710d352e671ff04b8e7bc1871244ea06047c5e28e333ad37"
+  },
+  {
+   "file": "0003-wayland-cooperative-event-thread-stop.patch",
+   "sha256": "570fbdc2645a788c18eb52b5dd336d292698d0c110ccf7ea6245762709f454e2"
   }
  ],
  "shims_used": [
   "IMB_colormanagement.hh",
   "IMB_imbuf.hh",
   "IMB_imbuf_types.hh",
-  "draw_debug.hh"
+  "draw_debug.hh",
+  "stk_posix_event_thread.hh"
  ],
  "system_includes": [
   "AvailabilityMacros.h",
@@ -346,7 +351,7 @@
   "intern/ghost/intern/GHOST_SystemPathsUnix.hh": "e3d0d217cb773a101f6e5c13279e9ad5c982fd6a5cf87528fbacbc5847791a1a",
   "intern/ghost/intern/GHOST_SystemPathsWin32.cc": "da6c7ffb70bac2e5fca7c2db1929bce88469bbc62c05d8a9de937aa76480239f",
   "intern/ghost/intern/GHOST_SystemPathsWin32.hh": "a9caebd2cfcb52002ffa66c857de5937a039f5d5c11189db97eaec82bc3814a9",
-  "intern/ghost/intern/GHOST_SystemWayland.cc": "8fe7d68e52aae660f1dd215119211e3a6d8c07691d8ec077df42cbee10ddeb17",
+  "intern/ghost/intern/GHOST_SystemWayland.cc": "56f8158ca34676ca292d6e01013e81bf1c114e9f2a957722eaab8c4db6e61b05",
   "intern/ghost/intern/GHOST_SystemWayland.hh": "03332324611286a81a5fe2a955ff9f0abdb33c418db2e865227fc621ed5511e5",
   "intern/ghost/intern/GHOST_SystemWin32.cc": "d0412e8a1049e985254c0f40b2b75e73b49d4d74fad0f35571b41f87c61d5c11",
   "intern/ghost/intern/GHOST_SystemWin32.hh": "acf998d259ac8e26d3b70719f41a8d29ed7a3c355b89c1d2be1f575a1d23b0f6",

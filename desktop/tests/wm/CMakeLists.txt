@@ -181,6 +181,20 @@ if(NOT TARGET GTest::gtest_main)
 endif()
 include(GoogleTest)
 
+# The cooperative event-thread regression is a separate POSIX-only executable. It uses the
+# production shim with real pipes/poll/pthreads, and links no STK, Blender, GPU or Wayland library.
+if(UNIX)
+  find_package(Threads REQUIRED)
+  add_executable(stk_posix_event_thread_tests posix_event_thread_test.cc)
+  target_include_directories(stk_posix_event_thread_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/third_party/blender/shims)
+  target_compile_features(stk_posix_event_thread_tests PRIVATE cxx_std_20)
+  target_link_libraries(stk_posix_event_thread_tests PRIVATE GTest::gtest_main Threads::Threads)
+  target_compile_options(stk_posix_event_thread_tests PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
+  gtest_discover_tests(stk_posix_event_thread_tests DISCOVERY_TIMEOUT 30
+    PROPERTIES LABELS "wm;posix" TIMEOUT 20)
+endif()
+
 add_executable(stk_wm_tests
   support.cc
   test_app.cc

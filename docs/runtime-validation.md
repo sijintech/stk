@@ -2,7 +2,7 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
-## 2026-10-15：本地科研多维表格（本机验收通过，提交 CI 待核对）
+## 2026-10-15：本地科研多维表格（`faf3a44` 首轮CI已记录，修正节点本机验收通过）
 
 - Git/CI 前置：干净 main/origin/main `73e4fbe`；Runtime 38679106858 **8/8**、Secret 38679106815、Docs 38679106830 全成功。
   上一代码头 `2e331ca` 桌面 38675881571 **5/5 完成成功**，满足本节点推送门禁；未新建分支/PR或合并无关工作。
@@ -27,10 +27,31 @@
   第四轮定向 **86/86、零跳过 / 28.69s**（`targeted4.xml`），原五项失败和新 CSV 界面全流程均通过。
   独立审查再发现单叶过滤视图追加条件会丢原条件，修复后新增真实桥反例 **1/1、零跳过 / 0.66s**，保留嵌套组而非重写为新叶。
   最终统一构建成功，完整 CTest **1432/1432、零失败、零跳过 / 339.17s**（`native-full-final.xml`）；新增必跑检查 **65/65**，含中英宽窄/focus/看板/卡片20张GL/Vulkan截图。
-  新增测试已接三平台CI必跑，不靠跳过/取消或放宽原行为断言。提交 SHA 与 CI 待补。
+  新增测试已接三平台CI必跑，不靠跳过/取消或放宽原行为断言。代码 **`faf3a44af0303af1e5b597d40ad927e8e02bd98d` 已推送 main**；推送前再次核对旧桌面 38675881571 全5项completed/success，精确代码头 CI 核对中。
 - wheel/sdist 离线构建、仓库外安装冒烟成功：三新增服务模块与 bridge schema 在两包和安装目标中均与源码逐字节一致，均无 archive；
   sdist 含最终表格契约与新增测试。实际安装包的十种字段/保存视图重开/对象解析、CSV SHA冲突零写入及类型/单位导入、整批撤销重做/原UUID、筛选导出均通过。
   证据 `/tmp/stk-table-packaging-20261015/{package-verification,installed-wheel-smoke}.json`；未调用模型或Runtime。
+- 首轮精确代码头 CI：文档 38718495515、密钥扫描 38718495517 **completed/success**；[Runtime 38718495465](https://github.com/sijintech/stk/actions/runs/38718495465) **5/8 success、3/8 failure，全部completed**。
+  Linux3.11/3.14 pytest各 **2864 passed、11 skipped、4 deselected**（582.28/651.88s），3.12 **2868 passed、7 skipped、4 deselected**（662.16s）；三版本新表36/36。
+  Windows3.11/3.12各 **2367 passed、92 skipped、317 deselected**（597.46/492.77s），新表36/36及client入口/服务器拒绝步骤均通过。
+  desktop **3 passed/7.37s**、control/Blender **24 passed/9.93s**、web build通过。三个Linux均只在后续独立PET合成例6/7通过、唯一1例失败（14!=13）；doctor/build/upload因此未运行，未算作包CI通过。
+  [桌面 38718495503](https://github.com/sijintech/stk/actions/runs/38718495503) **4/5 success、1/5 failure，全部completed**。
+  Linux **1431/1432、零跳过/未运行 / 367.44s**；唯一`wm_app_window_weston`在保存/重载布局成功后SIGSEGV，CSD用例通过；原始日志/LastTest/JUnit和Weston日志已保留，未重跑覆盖。
+  macOS CPU **918/918 / 361.55s**、Metal **210/210 / 407.53s**，Windows CPU **876/876 / 408.28s**，均零跳过/未运行。
+  主必跑checker Linux642、MacCPU620、Windows613全部成功；新表格截图Linux20/Mac10均实际必跑。Linux发布包/全新Ubuntu启动与Mac应用包/解压启动均成功。
+- 首轮代码CI实际发现：Linux3.11 pytest **2864 passed、11 skipped、4 deselected / 582.28s**，后续独立PET合成例 **6/7通过、1失败**，唯一失败为旧夹具要求新项目格式13而当前为14。
+  仅把该夹具改为当前FORMAT_VERSION并同步示例说明，保留9表/32记录/61引用/20冻结与全部来源/raw字节反例；生产源与原生代码未改。
+  三Python版本独立例各 **7/7、零跳过**（3.11 1.203s、3.12 1.022s、3.14 1.216s），日志 `/tmp/stk-pet-data-format14-*.log`；审查和diff检查通过。
+  `faf3a44`桌面全部已结束，推送门禁已满足；继续修真实退出缺口后统一推送。
+- Weston退出诊断：原始二进制在本机带崩溃栈诊断运行100次均未复现（92.80s），不是修复证明，也没有得到本次CI调用栈。
+  两次独立源码复核发现GHOST事件线程detach+cancel不等待结束即释放display/mutex，以及lock_without_input可未持锁返回的确定生命周期缺口。
+  已改为独立stop唤醒与join完成后再拆资源、持锁后复查停止、断线错误退出；不在持server_mutex时join，不用取消展开Wayland回调。
+  新增12项独立POSIX测试覆盖真实pipe/poll/锁竞争、回调完成sentinel、HUP/EBADF与初始化失败回滚；连同Weston/CSD真实窗口，定向 **14/14、零跳过 / 2.66s**。
+  两次独立CR修复wait_readable错误传播和测试stop-before-unlock确定性；最终单一构建和完整原生 **1444/1444、零失败/跳过 / 328.66s**（`/tmp/stk-wayland-exit-20261015/native-full-final.xml`），新增必跑 **77/77**；没有改表格/项目/模型行为。
+  仓库外从固定90MiB源包真正重新生成 **1095个文件**，全部SHA和metadata/3个补丁/5个shim一致；vendor.py --check通过。
+  [pthread_cancel](https://man7.org/linux/man-pages/man3/pthread_cancel.3.html)仅提交取消请求，[pthread_join](https://man7.org/linux/man-pages/man3/pthread_join.3.html)完成后才保证线程终止；本修正采用协作停止并等待完成。
+  修正节点6份Markdown的343个本地文件链接均存在，diff空白检查通过；暂存约42KB经`.gitleaks.toml`/redact扫描无泄漏。
+  在得到更多证据前，不把历史SIGSEGV断言为已证明根因或“环境问题”。
 - 点击实测起点：1440×1200 的新默认布局，真实桥加载公开合成表，a4 为活动表格；原 Viewer 已有公开 payload/相机。
   以下由 ScreenDriver 的 mouse down/up 事件驱动，不是直接调用按钮回调的计数，也不是线上用户遥测。
 

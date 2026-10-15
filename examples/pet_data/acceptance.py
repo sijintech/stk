@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from suan.project import ProjectStore
+from suan.project.store import FORMAT_VERSION
 
 from .offline import create_demo, verify_demo
 
@@ -30,7 +31,7 @@ class OfflinePETDataAcceptance(unittest.TestCase):
             self.assertEqual(ProjectStore(self.project).snapshot(), before)
         self.assertEqual((result["tables"], result["records"], result["references"], result["frozen_files"]),
                          (9, 32, 61, 20))
-        self.assertEqual(result["format_version"], 13)
+        self.assertEqual(result["format_version"], FORMAT_VERSION)
         self.assertFalse(result["material_validated"])
         table = self.receipt()["tables"]["observations"]
         records = next(t for t in before["tables"] if t["id"] == table["table_id"])["records"]

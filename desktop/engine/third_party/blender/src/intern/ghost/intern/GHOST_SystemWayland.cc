@@ -7,6 +7,9 @@
  */
 
 #include "GHOST_SystemWayland.hh"
+
+/* STK: cooperative event-thread shutdown before freeing Wayland resources. */
+#include "stk_posix_event_thread.hh"
 #include "GHOST_Context.hh"
 #include "GHOST_Event.hh"
 #include "GHOST_EventButton.hh"
@@ -150,8 +153,6 @@ static bool xkb_compose_state_feed_and_get_utf8(
 
 #ifdef USE_EVENT_BACKGROUND_THREAD
 static void gwl_display_event_thread_destroy(GWL_Display *display);
-
-static void ghost_wl_display_lock_without_input(wl_display *wl_display, std::mutex *server_mutex);
 
 /** Default size for pending event vector. */
 constexpr size_t events_pending_default_size = 4096 / sizeof(void *);
@@ -1628,19 +1629,8 @@ struct GWL_Display {
 
   /* Threaded event handling. */
 #ifdef USE_EVENT_BACKGROUND_THREAD
-  /**
-   * Run a thread that consumes events in the background.
-   * Use `pthread` because `std::thread` leaks memory.
-   *
-   * Not set when `background == true`.
-   */
-  pthread_t events_pthread = 0;
-  /**
-   * Use to exit the event reading loop.
-   *
-   * Not set when `background == true`.
-   */
-  bool events_pthread_is_active = false;
+  /** STK: joinable worker; stop wakes its poll before teardown releases any resource. */
+  stk::ghost::PosixEventThread events_thread;
 
   /**
    * Events added from the event reading thread.
@@ -1683,12 +1673,9 @@ struct GWL_Display {
 static void gwl_display_destroy(GWL_Display *display)
 {
 #ifdef USE_EVENT_BACKGROUND_THREAD
-  if (!display->background) {
-    if (display->events_pthread) {
-      ghost_wl_display_lock_without_input(display->wl.display, display->system->server_mutex);
-      display->events_pthread_is_active = false;
-    }
-  }
+  /* Stop without holding server_mutex: the worker may be waiting to acquire it.
+   * Joining before destroying registry/seats/display also protects late logging. */
+  gwl_display_event_thread_destroy(display);
 #endif
 
   /* For typical WAYLAND use this will always be set.
@@ -1712,15 +1699,6 @@ static void gwl_display_destroy(GWL_Display *display)
     }
   }
 #endif
-
-#ifdef USE_EVENT_BACKGROUND_THREAD
-  if (!display->background) {
-    if (display->events_pthread) {
-      gwl_display_event_thread_destroy(display);
-      display->system->server_mutex->unlock();
-    }
-  }
-#endif /* USE_EVENT_BACKGROUND_THREAD */
 
   /* Important to remove after the seats which may have key repeat timers active. */
   if (display->key_repeat_timer_manager) {
@@ -2726,65 +2704,51 @@ static bool ghost_wl_surface_commit_and_wait_for_apply(GHOST_SystemWayland *syst
 
 #ifdef USE_EVENT_BACKGROUND_THREAD
 
-static void ghost_wl_display_lock_without_input(wl_display *wl_display, std::mutex *server_mutex)
-{
-  const int fd = wl_display_get_fd(wl_display);
-  int state;
-  do {
-    state = file_descriptor_is_io_ready(fd, GWL_IOR_READ | GWL_IOR_NO_RETRY, 0);
-    /* Re-check `state` with a lock held, needed to avoid holding the lock. */
-    if (state == 0) {
-      server_mutex->lock();
-      state = file_descriptor_is_io_ready(fd, GWL_IOR_READ | GWL_IOR_NO_RETRY, 0);
-      if (state == 0) {
-        break;
-      }
-    }
-  } while (state == 0);
-}
-
 static int ghost_wl_display_event_pump_from_thread(wl_display *wl_display,
                                                    const int fd,
-                                                   std::mutex *server_mutex)
+                                                   std::mutex *server_mutex,
+                                                   stk::ghost::PosixEventThread &thread)
 {
-  /* Based on SDL's `Wayland_PumpEvents`. */
-  server_mutex->lock();
+  /* The stop wake-up is outside this lock. A worker that was waiting for the lock
+   * must observe stop before touching display objects. No cancellation unwinds
+   * Wayland callbacks or leaves server_mutex locked. */
+  std::unique_lock lock(*server_mutex);
+  if (thread.stop_requested()) {
+    return 0;
+  }
   int err = 0;
   if (wl_display_prepare_read(wl_display) == 0) {
     bool wait_on_fd = false;
-    /* Use #GWL_IOR_NO_RETRY to ensure #SIGINT will break us out of our wait. */
     if (file_descriptor_is_io_ready(fd, GWL_IOR_READ | GWL_IOR_NO_RETRY, 0) > 0) {
       err = wl_display_read_events(wl_display);
     }
     else {
       wl_display_cancel_read(wl_display);
-      /* Without this, the thread will loop continuously, 100% CPU. */
       wait_on_fd = true;
     }
-
-    server_mutex->unlock();
-
+    lock.unlock();
     if (wait_on_fd) {
-      /* Important this runs after unlocking. */
-      file_descriptor_is_io_ready(fd, GWL_IOR_READ | GWL_IOR_NO_RETRY, INT32_MAX);
+      if (thread.wait_readable(fd) < 0) {
+        return -1;
+      }
     }
   }
   else {
-    server_mutex->unlock();
-
-    /* Wait for input (unlocked, so as not to block other threads). */
-    int state = file_descriptor_is_io_ready(fd, GWL_IOR_READ | GWL_IOR_NO_RETRY, INT32_MAX);
-    /* Re-check `state` with a lock held, needed to avoid holding the lock. */
+    lock.unlock();
+    const int state = thread.wait_readable(fd);
+    if (state < 0) {
+      return -1;
+    }
     if (state > 0) {
-      server_mutex->lock();
-      state = file_descriptor_is_io_ready(fd, GWL_IOR_READ | GWL_IOR_NO_RETRY, 0);
-      if (state > 0) {
+      lock.lock();
+      if (thread.stop_requested()) {
+        return 0;
+      }
+      if (file_descriptor_is_io_ready(fd, GWL_IOR_READ | GWL_IOR_NO_RETRY, 0) > 0) {
         err = wl_display_dispatch_pending(wl_display);
       }
-      server_mutex->unlock();
     }
   }
-
   return err;
 }
 #endif /* USE_EVENT_BACKGROUND_THREAD */
@@ -8417,47 +8381,36 @@ static const wl_registry_listener registry_listener = {
 
 #ifdef USE_EVENT_BACKGROUND_THREAD
 
-static void *gwl_display_event_thread_fn(void *display_voidp)
+static void gwl_display_event_thread_fn(void *display_voidp,
+                                        stk::ghost::PosixEventThread &thread)
 {
   GWL_Display *display = static_cast<GWL_Display *>(display_voidp);
   GHOST_ASSERT(!display->background, "Foreground only");
   const int fd = wl_display_get_fd(display->wl.display);
-  while (display->events_pthread_is_active) {
-    /* Wait for an event, this thread is dedicated to event handling. */
+  while (!thread.stop_requested()) {
     if (ghost_wl_display_event_pump_from_thread(
-            display->wl.display, fd, display->system->server_mutex) == -1)
+            display->wl.display, fd, display->system->server_mutex, thread) == -1)
     {
       break;
     }
   }
-
-  /* Wait until the main thread cancels this thread, otherwise this thread may exit
-   * before cancel is called, causing a crash on exit. */
-  while (true) {
-    pause();
-  }
-
-  return nullptr;
 }
 
-/* Event reading thread. */
-static void gwl_display_event_thread_create(GWL_Display *display)
+static int gwl_display_event_thread_create(GWL_Display *display)
 {
   GHOST_ASSERT(!display->background, "Foreground only");
-  GHOST_ASSERT(display->events_pthread == 0, "Only call once");
+  GHOST_ASSERT(!display->events_thread.joinable(), "Only call once");
   display->events_pending.reserve(events_pending_default_size);
-  display->events_pthread_is_active = true;
-  pthread_create(&display->events_pthread, nullptr, gwl_display_event_thread_fn, display);
-  /* Application logic should take priority, this only ensures events don't accumulate when busy
-   * which typically takes a while (5+ seconds of frantic mouse motion for example). */
-  pthread_set_min_priority(display->events_pthread);
-  pthread_detach(display->events_pthread);
+  const int error = display->events_thread.start(gwl_display_event_thread_fn, display);
+  if (error == 0) {
+    pthread_set_min_priority(display->events_thread.native_handle());
+  }
+  return error;
 }
 
 static void gwl_display_event_thread_destroy(GWL_Display *display)
 {
-  GHOST_ASSERT(!display->background, "Foreground only");
-  pthread_cancel(display->events_pthread);
+  display->events_thread.stop_and_join();
 }
 
 #endif /* USE_EVENT_BACKGROUND_THREAD */
@@ -8565,19 +8518,18 @@ GHOST_SystemWayland::GHOST_SystemWayland(const bool background)
    * see: #113328 for an example of size on startup issues. */
   wl_display_roundtrip(display_->wl.display);
 
+  /* Initialize everything used by callbacks before starting the worker. */
+  display_->key_repeat_timer_manager = new GHOST_TimerManager();
 #ifdef USE_EVENT_BACKGROUND_THREAD
-  /* There is no need for an event handling thread in background mode
-   * because there no polling for user input. */
-  if (background) {
-    GHOST_ASSERT(display_->events_pthread_is_active == false, "Expected to be false");
-  }
-  else {
-    gwl_display_event_thread_create(display_);
+  if (!background) {
+    const int error = gwl_display_event_thread_create(display_);
+    if (error != 0) {
+      display_destroy_and_free_all();
+      throw std::runtime_error(std::string("Unable to start Wayland event thread: ") +
+                               strerror(error));
+    }
   }
 #endif
-  /* Could be null in background mode, however there are enough
-   * references to the timer-manager that it's safer to create it. */
-  display_->key_repeat_timer_manager = new GHOST_TimerManager();
 }
 
 void GHOST_SystemWayland::display_destroy_and_free_all()

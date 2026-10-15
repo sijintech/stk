@@ -376,6 +376,18 @@ def vendor(archive: Path) -> None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_bytes(files[rel])
         patches = apply_patches(stage)
+        # Local patches may introduce an STK shim that was absent from the upstream
+        # include closure. Record it from the patched source so regeneration keeps
+        # VENDORED.json accurate (the shim itself is maintained outside src/).
+        patch_shims = {p.relative_to(SHIMS).as_posix() for p in SHIMS.rglob("*") if p.is_file()}
+        patch_true, patch_false = set(MANIFEST["macros"]["true"]), set(MANIFEST["macros"]["false"])
+        for rel in chosen:
+            if PurePosixPath(rel).suffix in CODE_SUFFIXES:
+                text = (stage / rel).read_text(encoding="utf-8", errors="replace")
+                for _kind, name, _line in active_includes(
+                        text, patch_true, patch_false):
+                    if name in patch_shims:
+                        shims_used.add(name)
         for leftover in list(stage.rglob("*.orig")) + list(stage.rglob("*.rej")):
             leftover.unlink()
         if SRC.exists():
