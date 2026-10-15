@@ -52,7 +52,7 @@ class ProjectFileTreePython : public ::testing::Test {
     ASSERT_TRUE(project().create(directory.str() + "/project", "File tree"));
     ASSERT_NO_FATAL_FAILURE(idle()); ASSERT_TRUE(project().loaded());
     fs::create_directories(directory.path() / "project" / "inputs");
-    std::ofstream(directory.path() / "project" / "inputs" / "case.py") << "raise AssertionError('must not run')\n";
+    std::ofstream(directory.path() / "project" / "inputs" / "case.py", std::ios::binary) << "raise AssertionError('must not run')\n";
     std::ofstream(directory.path() / "project" / "field.npy") << "synthetic metadata-only fixture\n";
     tree = std::make_unique<ProjectFileTree>(store); tree->sync(); ASSERT_TRUE(tree->supported());
   }
@@ -92,7 +92,11 @@ TEST_F(ProjectFileTreePython, RegisteredSearchTargetsAndExplicitResolutionKeepSh
   std::string resolved;
   ASSERT_TRUE(tree->resolve([&](const std::string &path) { resolved = path; }));
   ASSERT_NO_FATAL_FAILURE(loaded(*tree));
-  EXPECT_EQ(resolved, core::path_to_utf8(directory.path() / "project" / "inputs" / "case.py"));
+  std::error_code path_error;
+  EXPECT_FALSE(resolved.empty());
+  EXPECT_TRUE(!resolved.empty() && fs::equivalent(core::path_from_utf8(resolved),
+      directory.path() / "project" / "inputs" / "case.py", path_error));
+  EXPECT_FALSE(path_error) << path_error.message();
   EXPECT_EQ(project().table_id(), table); EXPECT_EQ(project().record_id(), record);
 }
 
@@ -153,7 +157,10 @@ TEST_F(ProjectFileTreePython, CodeActionReusesRightEditorAndRejectsHiddenOriginW
   const auto path = core::path_to_utf8(directory.path() / "project" / "inputs" / "case.py");
   ASSERT_TRUE(loop.pump_until([&] {
     frame();
-    return right.editor().type().id == kEditorPython && right.editor().save_state().value("source_path", "") == path;
+    const auto actual = right.editor().save_state().value("source_path", "");
+    std::error_code path_error;
+    return right.editor().type().id == kEditorPython && !actual.empty() &&
+        fs::equivalent(core::path_from_utf8(actual), core::path_from_utf8(path), path_error) && !path_error;
   }, 30));
   EXPECT_EQ(right.tab_count(), right_tabs);
   EXPECT_EQ(right.editor().save_state().at("source"), "raise AssertionError('must not run')\n");

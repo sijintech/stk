@@ -6,6 +6,7 @@
 #include "stk/app/script_state.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
+#include "stk/core/paths.hh"
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
 
@@ -15,6 +16,14 @@
 namespace stk::app {
 namespace {
 using io::Json;
+
+bool same_file_path(const std::string &left, const std::string &right)
+{
+  if (left.empty() || right.empty()) { return false; }
+  std::error_code error;
+  const bool same = std::filesystem::equivalent(core::path_from_utf8(left), core::path_from_utf8(right), error);
+  return !error && same;
+}
 
 class ScriptPython : public ::testing::Test {
  protected:
@@ -828,7 +837,7 @@ TEST_F(ScriptPython, ProgramEditorOpensAndSavesWithoutRunningAndProtectsIndepend
   f.screen.set_maximized(&area); f.drv->frame();
   std::string reason;
   ASSERT_TRUE(area.editor().navigate({{"path", first}}, {}, reason));
-  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == first; }));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return same_file_path(area.editor().save_state().value("source_path", ""), first); }));
   EXPECT_TRUE(state().status().at("run").is_null());
   const auto *source = f.screen.ui()->find("a2/main/python_source"); ASSERT_NE(source, nullptr);
   EXPECT_EQ(source->string.value(), "print('first disk')\n");
@@ -840,7 +849,7 @@ TEST_F(ScriptPython, ProgramEditorOpensAndSavesWithoutRunningAndProtectsIndepend
   EXPECT_EQ(wmtest::read_text(first), "print('first disk')\n");
   ASSERT_TRUE(area.add_tab(kEditorPython)); f.drv->frame();
   ASSERT_TRUE(area.editor().navigate({{"path", second}}, {}, reason));
-  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == second; }));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return same_file_path(area.editor().save_state().value("source_path", ""), second); }));
   EXPECT_EQ(area.tab(0).save_state().at("source"), "print('edited buffer')\n");
   EXPECT_TRUE(area.tab(0).has_unsaved_changes()); EXPECT_FALSE(area.tab(1).has_unsaved_changes());
   area.set_active_tab(0); f.drv->frame();
@@ -859,7 +868,7 @@ TEST_F(ScriptPython, ProgramEditorDistinguishesBufferAndSavedFileAndRejectsExter
   auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
   f.screen.set_maximized(&area); f.drv->frame();
   std::string reason; ASSERT_TRUE(area.editor().navigate({{"path", file}}, {}, reason));
-  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == file; }));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return same_file_path(area.editor().save_state().value("source_path", ""), file); }));
   const auto *source = f.screen.ui()->find("a2/main/python_source"); ASSERT_NE(source, nullptr);
   source->string.assign("print('current buffer')\n"); f.drv->frame();
   const auto *run_file = f.screen.ui()->find("a2/main/python_run_file"); ASSERT_NE(run_file, nullptr);
@@ -897,13 +906,13 @@ TEST_F(ScriptPython, ProgramEditorRestoresDirtyBaselineAndDropsCallbacksAfterNav
   auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
   f.screen.set_maximized(&area); f.drv->frame();
   std::string reason; ASSERT_TRUE(area.editor().navigate({{"path", first}}, {}, reason));
-  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == first; }));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return same_file_path(area.editor().save_state().value("source_path", ""), first); }));
   const auto *save = f.screen.ui()->find("a2/main/python_save"); ASSERT_NE(save, nullptr);
   const auto old_save = save->on_click;
   const auto *run = f.screen.ui()->find("a2/header/python_run"); ASSERT_NE(run, nullptr); const auto old_run = run->on_click;
   ASSERT_TRUE(area.editor().navigate({{"path", second}}, {}, reason));
   old_save(); old_run();
-  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == second; }));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return same_file_path(area.editor().save_state().value("source_path", ""), second); }));
   EXPECT_TRUE(state().status().at("run").is_null()); EXPECT_EQ(wmtest::read_text(first), "first = 1\n");
   // A retained idle Reset must not cancel the shared worker after another program tab starts.
   const auto *reset = f.screen.ui()->find("a2/header/python_interrupt"); ASSERT_NE(reset, nullptr);
@@ -1048,7 +1057,7 @@ TEST_F(ScriptPython, OfflineAnalysisFileButtonPreservesCurrentWorkAndOpensItsArc
   ASSERT_NE(file_path, nullptr); EXPECT_EQ(file_path->string.value(), runner);
   const auto [open_x, open_y] = f.widget_center("a2/main/python_open");
   f.drv->click(open_x, open_y);
-  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == runner; }));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return same_file_path(area.editor().save_state().value("source_path", ""), runner); }));
   ASSERT_FALSE(std::filesystem::exists(destination));
   EXPECT_EQ(state().status().at("run").at("id"), script_before);
   const auto *run_file = f.screen.ui()->find("a2/main/python_run_file");

@@ -15,7 +15,7 @@ def test_bridge_read_save_and_saved_execution_are_distinct_explicit_actions(scri
     path = tmp_path / 'program.py'
     marker = tmp_path / 'explicit-only'
     source = f"from pathlib import Path\nPath({str(marker)!r}).write_text('disk')\nprint('disk version')\n"
-    path.write_text(source, encoding='utf-8')
+    path.write_bytes(source.encode('utf-8'))
     session = scripts.call('script.open')['session']
     loaded = scripts.call('script.file.read', {'path': str(path)})
     assert loaded == {'path': str(path), 'source': source,
