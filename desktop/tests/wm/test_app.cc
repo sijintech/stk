@@ -20,7 +20,7 @@
 #include "support.hh"
 
 using namespace stk;
-using stk::wmtest::AppFixture;
+using AppFixture = stk::wmtest::LegacyAppFixture;
 using stk::wmtest::ScreenDriver;
 
 namespace {
@@ -73,48 +73,32 @@ bool click_popup_item(AppFixture &f, const std::string &needle)
 
 TEST(App, DefaultLayout)
 {
-  AppFixture f("en");
-  const auto areas = f.screen.areas();
-  ASSERT_EQ(areas.size(), 4u);
-  /* A new user starts on the guided Workspace; Jobs is the second tab of the same area. */
-  EXPECT_EQ(areas[0]->type(), app::kEditorWorkspace);
-  ASSERT_EQ(f.area("a1").tab_count(), 2);
-  EXPECT_EQ(f.area("a1").tab(1).type().id, app::kEditorJobs);
-  EXPECT_EQ(areas[1]->type(), app::kEditorViewer);
-  EXPECT_EQ(areas[2]->type(), app::kEditorProperties);
-  EXPECT_EQ(areas[3]->type(), app::kEditorLogs);
-  app::EditorArea &bottom = f.area("a4");
-  ASSERT_EQ(bottom.tab_count(), 4);
-  EXPECT_EQ(bottom.tab(1).type().id, app::kEditorProbe);
-  EXPECT_EQ(bottom.tab(2).type().id, app::kEditorTransfers);
-  EXPECT_EQ(bottom.tab(3).type().id, app::kEditorBridgeLog);
-  /* Workspace | Viewer | Properties side by side over the full-width bottom strip. */
-  const wm::Rect jobs = areas[0]->rect(), viewer = areas[1]->rect(), props = areas[2]->rect(),
-                 strip = areas[3]->rect();
-  EXPECT_EQ(jobs.xmin, 0);
-  EXPECT_EQ(props.xmax, 1280);
-  EXPECT_LT(jobs.xmax, viewer.xmin);
-  EXPECT_LT(viewer.xmax, props.xmin);
-  EXPECT_EQ(strip.xmin, 0);
-  EXPECT_EQ(strip.xmax, 1280);
-  EXPECT_LT(strip.ymax, jobs.ymin);
-  EXPECT_NEAR(double(jobs.width()) / 1276.0, 0.30, 0.01);
-  EXPECT_NEAR(double(viewer.width()) / 1276.0, 0.45, 0.01);
-  /* Top bar and status bar are global areas of one bar height each. */
+  stk::wmtest::AppFixture f("en");
+  ASSERT_EQ(f.screen.areas().size(), 4u);
+  auto &files = f.area("a1"), &viewer = f.area("a2"), &nodes = f.area("a3"), &table = f.area("a4");
+  EXPECT_EQ(files.editor().type().id, app::kEditorFiles);
+  EXPECT_EQ(viewer.editor().type().id, app::kEditorViewer);
+  EXPECT_EQ(nodes.editor().type().id, app::kEditorAnalysisGraph);
+  EXPECT_EQ(table.editor().type().id, app::kEditorTable);
+  ASSERT_EQ(files.tab_count(), 5); EXPECT_EQ(files.tab(2).type().id, app::kEditorJobs);
+  ASSERT_EQ(nodes.tab_count(), 4); EXPECT_EQ(nodes.tab(1).type().id, app::kEditorPython);
+  ASSERT_EQ(table.tab_count(), 5); EXPECT_EQ(table.tab(3).type().id, app::kEditorTransfers);
+  EXPECT_LT(files.rect().xmax, viewer.rect().xmin);
+  EXPECT_LT(viewer.rect().xmax, nodes.rect().xmin);
+  EXPECT_EQ(files.rect().xmin, 0); EXPECT_EQ(nodes.rect().xmax, 1280);
+  EXPECT_EQ(table.rect().xmin, viewer.rect().xmin); EXPECT_EQ(table.rect().xmax, 1280);
+  EXPECT_LT(table.rect().ymax, viewer.rect().ymin);
+  EXPECT_LT(table.rect().ymax, nodes.rect().ymin);
+  EXPECT_EQ(files.rect().ymin, table.rect().ymin);
   const int bar = wm::ui_bar_height_px(1.0f);
-  ASSERT_NE(f.screen.global_area(wm::RegionAlign::Top), nullptr);
   EXPECT_EQ(f.screen.global_area(wm::RegionAlign::Top)->rect(), (wm::Rect{0, 800 - bar, 1280, 800}));
   EXPECT_EQ(f.screen.global_area(wm::RegionAlign::Bottom)->rect(), (wm::Rect{0, 0, 1280, bar}));
-  /* Regions: header on top of every area; the viewer has a toolbar and a sidebar. */
-  app::EditorArea &v = f.area("a2");
-  EXPECT_EQ(v.find_region("header")->rect().height(), bar);
-  EXPECT_TRUE(v.find_region("toolbar")->visible());
-  EXPECT_TRUE(v.find_region("sidebar")->visible());
-  EXPECT_FALSE(f.area("a1").find_region("toolbar")->visible());
-  /* The UI built one block per visible region plus the bars. */
-  EXPECT_NE(f.screen.ui()->find("a2/header/editor_type"), nullptr);
-  EXPECT_NE(f.screen.ui()->find("a4/header/tabs"), nullptr);
-  EXPECT_NE(f.screen.ui()->find("file"), nullptr);
+  EXPECT_EQ(viewer.find_region("header")->rect().height(), 2 * bar);
+  EXPECT_TRUE(viewer.find_region("toolbar")->visible()); EXPECT_FALSE(viewer.find_region("sidebar")->visible());
+  EXPECT_FALSE(nodes.find_region("sidebar")->visible());
+  for (const auto *key : {"tool_files", "tool_analysis_graph", "tool_table", "tool_python", "tool_swap"}) {
+    ASSERT_NE(f.screen.ui()->find(key), nullptr); EXPECT_TRUE(f.screen.ui()->find(key)->enabled);
+  }
 }
 
 TEST(App, SplitterDragMovesOnlyItsNeighbours)
@@ -236,7 +220,11 @@ TEST(App, TabsAndEditorSwitching)
   const ui::Widget *tabs = f.screen.ui()->find("a4/header/tabs");
   ASSERT_NE(tabs, nullptr);
   const int top = f.screen.rect().ymax;
-  f.drv->click(int(tabs->rect.x + tabs->rect.w * 2.5f / 4.0f), top - 1 - int(tabs->rect.cy()));
+  if (tabs->type == ui::WidgetType::Dropdown) {
+    f.drv->click(int(tabs->rect.cx()), top - 1 - int(tabs->rect.cy()));
+    ASSERT_TRUE(click_popup_item(f, f.shell->store().tr("editor.transfers.title").data()));
+  }
+  else { f.drv->click(int(tabs->rect.x + tabs->rect.w * 2.5f / 4.0f), top - 1 - int(tabs->rect.cy())); }
   EXPECT_EQ(bottom.active_tab(), 2);
   EXPECT_EQ(bottom.type(), app::kEditorTransfers);
 
@@ -357,7 +345,7 @@ TEST(App, ScalesKeepEverythingInside)
         }
       }
     }
-    EXPECT_EQ(f.area("a1").find_region("header")->rect().height(), wm::ui_bar_height_px(s));
+    EXPECT_EQ(f.area("a1").find_region("header")->rect().height(), 2 * wm::ui_bar_height_px(s));
   }
 }
 
@@ -414,7 +402,7 @@ TEST(App, EditorKeysExistInEveryCatalog)
   {
     keys.emplace_back(app::bridge_state_key(st));
   }
-  EXPECT_EQ(f.shell->registry().types().size(), 14u);
+  EXPECT_EQ(f.shell->registry().types().size(), 16u);
   for (const std::string &k : keys) {
     EXPECT_TRUE(cat.has("zh_CN", k)) << k;
     EXPECT_TRUE(cat.has("en", k)) << k;

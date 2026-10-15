@@ -241,9 +241,39 @@ bool ScriptState::execute(const std::string &source)
   return true;
 }
 
-bool ScriptState::execute_file(const std::string &path)
+bool ScriptState::execute_file(const std::string &path, const std::string &expected_version)
 {
+  if (!expected_version.empty()) {
+    return start({{"path", path}, {"expected_version", expected_version}});
+  }
   return start({{"path", path}});
+}
+
+bool ScriptState::files_supported() const
+{
+  const auto hello = client_ ? client_->hello_info() : std::nullopt;
+  return ready() && hello && hello->has_method("script.file.read") && hello->has_method("script.file.write");
+}
+
+bool ScriptState::read_file(const std::string &path, Completion completion)
+{
+  sync();
+  if (!files_supported()) { return false; }
+  // Document owners bind their own lifetime/generation. Resolve even after bridge restart so
+  // their pending-file flag cannot remain stuck; the owner rejects a stale answer itself.
+  client_->call("script.file.read", {{"path", path}}).then(std::move(completion));
+  return true;
+}
+
+bool ScriptState::write_file(const std::string &path, const std::string &source,
+                             const std::string &expected_version, Completion completion)
+{
+  sync();
+  if (!files_supported()) { return false; }
+  client_->call("script.file.write", {{"path", path}, {"source", source},
+                 {"expected_version", expected_version.empty() ? Json(nullptr) : Json(expected_version)}})
+      .then(std::move(completion));
+  return true;
 }
 
 bool ScriptState::interrupt()

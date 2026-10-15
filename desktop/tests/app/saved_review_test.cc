@@ -75,7 +75,7 @@ class SavedReviewPython : public ::testing::Test {
     options.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
     options.env["STK_STATE_DIR"] = dir.str() + "/runtime";
     options.env["STK_TOKEN_PLAN_API_KEY"] = "";
-    options.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.executor = loop.executor();
     options.strict = options.validate = true;
     client = bridge::Client::create(options);
@@ -258,11 +258,14 @@ TEST_F(SavedReviewPython, DeferredOpenPreservesUncommittedTextInAnotherInstalled
 
 TEST_F(SavedReviewPython, FullFirstAreaUsesAnotherAreaWithCapacity)
 {
-  auto *available = &f.area("a2");
+  auto *available = &f.area("a3");
   const auto before = available->tab_count();
   for (auto *area : f.screen.areas()) {
     auto *editor = dynamic_cast<EditorArea *>(area);
     ASSERT_NE(editor, nullptr);
+    for (int i = 0; i < editor->tab_count(); ++i) {
+      if (editor->tab(i).type().id == kEditorProject) { ASSERT_TRUE(editor->set_tab_type(i, kEditorLogs)); }
+    }
     if (editor != available) { ASSERT_NO_FATAL_FAILURE(fill_tabs(*editor)); }
   }
   f.screen.set_maximized(&f.area("a1"));
@@ -273,12 +276,12 @@ TEST_F(SavedReviewPython, FullFirstAreaUsesAnotherAreaWithCapacity)
   ASSERT_TRUE(result->ok()) << result->error().describe();
   EXPECT_EQ(available->tab_count(), before + 1);
   EXPECT_EQ(available->editor().type().id, kEditorProject);
-  EXPECT_EQ(f.screen.maximized(), available);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
   EXPECT_EQ(state().saved_review().at("id"), draft.at("id"));
   EXPECT_FALSE(state().review());
   EXPECT_EQ(state().project()->revision, 0);
   f.drv->frame();
-  const auto *tabs = f.screen.ui()->find("a2/main/project_view");
+  const auto *tabs = f.screen.ui()->find(available->id() + "/main/project_view");
   ASSERT_NE(tabs, nullptr);
   EXPECT_EQ(tabs->index.value(), 1);
 }
@@ -288,6 +291,9 @@ TEST_F(SavedReviewPython, AllFullAreasRejectWithoutAdoptionButAnExistingProjectT
   for (auto *area : f.screen.areas()) {
     auto *editor = dynamic_cast<EditorArea *>(area);
     ASSERT_NE(editor, nullptr);
+    for (int i = 0; i < editor->tab_count(); ++i) {
+      if (editor->tab(i).type().id == kEditorProject) { ASSERT_TRUE(editor->set_tab_type(i, kEditorLogs)); }
+    }
     ASSERT_NO_FATAL_FAILURE(fill_tabs(*editor));
   }
   const auto layout = f.screen.to_json();

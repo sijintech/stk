@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "stk/app/project_state.hh"
+#include "stk/app/editor_area.hh"
 
 namespace stk::app {
 namespace {
@@ -128,7 +129,15 @@ void AppShell::perform_ui_request(wm::Screen &screen, const std::string &operati
     auto result = project.request_review(params["handle"].get<std::string>(),
                                          params["expected_revision"].get<int64_t>(), params["commands"]);
     if (result.ok()) {
-      if (auto *editor = focus_editor(screen, kEditorProject)) { editor->show_view("review"); }
+      const auto opened = activate_editor(&screen, kEditorProject, false);
+      if (!opened) {
+        project.discard_review();
+        complete(opened.error());
+        return;
+      }
+      if (auto *area = dynamic_cast<EditorArea *>(screen.find_area(io::get_string(opened.value(), "area_id")))) {
+        area->editor().show_view("review");
+      }
     }
     complete(std::move(result));
     return;

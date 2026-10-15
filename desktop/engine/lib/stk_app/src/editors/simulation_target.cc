@@ -32,7 +32,7 @@ std::string SimulationTarget::runtime_controls(ui::Layout &panel, EditorContext 
       [&jobs, ids](int i) { if (i >= 0 && size_t(i) < ids.size() && ids[size_t(i)] != jobs.active_id()) { jobs.select_connection(ids[size_t(i)]); } }
     });
   }
-  line.button("manage_runtimes", ctx.tr("simulation.manage_runtimes"), editor_navigation_action(ctx, kEditorJobs, true)).width(6);
+  line.button("manage_runtimes", ctx.tr("simulation.manage_runtimes"), editor_navigation_action(ctx, kEditorJobs, false)).width(6);
   return active;
 }
 

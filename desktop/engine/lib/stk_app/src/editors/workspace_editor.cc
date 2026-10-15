@@ -89,7 +89,7 @@ class WorkspaceEditor final : public Editor {
       }
       else { box.paragraph(ctx.tr("workspace.status.no_runtime")); }
       auto &row = box.row();
-      row.button("workspace_runtime", ctx.tr("workspace.runtime"), editor_navigation_action(ctx, kEditorJobs, true));
+      row.button("workspace_runtime", ctx.tr("workspace.runtime"), editor_navigation_action(ctx, kEditorJobs, false));
     }
     {
       auto &box = step(layout, ctx, 4, "workspace.step.run", next);

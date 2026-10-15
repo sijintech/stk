@@ -29,25 +29,7 @@ add_library(stk_app STATIC
   src/editor.cc
   src/editor_area.cc
   src/editors.cc
-  src/editors/viewer_common.cc
-  src/editors/viewer_editor.cc
-  src/editors/viewer_panels.cc
-  src/editors/jobs_editor.cc
-  src/editors/jobs_logs.cc
-  src/editors/jobs_transfers.cc
-  src/editors/project_editor.cc
-  src/editors/project_review_view.cc
-  src/editors/project_discussion_view.cc
-  src/editors/project_simulation_view.cc
-  src/editors/simulation_target.cc
-  src/editors/python_editor.cc
-  src/editors/ai_editor.cc
-  src/editors/workspace_editor.cc
-  src/editors/skills_editor.cc
-  src/editors/workflow_editor.cc
-  src/editors/analysis_graph_editor.cc
   src/analysis_graph_state.cc
-  src/editors/project_context_picker.cc
   src/jobs_gpu.cc
   src/jobs_spec.cc
   src/jobs_state.cc
@@ -73,6 +55,8 @@ add_library(stk_app STATIC
   src/viewer_export.cc
   src/viewer_state.cc
 )
+include(${CMAKE_CURRENT_LIST_DIR}/editor_modules.cmake)
+
 target_include_directories(stk_app PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_compile_features(stk_app PUBLIC cxx_std_20)
 # stk_bridge (CPU only): BridgeStatus mirrors the bridge client into the status bar.

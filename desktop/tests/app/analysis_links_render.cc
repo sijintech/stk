@@ -98,6 +98,7 @@ int main(int argc, char **argv)
       project.refresh(); require(loop.pump_until([&] { return !project.busy(); }, 30), "refresh project");
       auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
       require(area && area->set_tab_type(0, app::kEditorAnalysisGraph), "analysis editor");
+      area->set_sidebar_open(true);
       require(area->editor().load_state({{"saved", true}}), "saved mode");
       area->find_region(app::EditorArea::kSidebar)->set_size_1x(narrow ? 385 : 560);
       screen.set_maximized(area);
@@ -122,9 +123,10 @@ int main(int argc, char **argv)
         require(found != dropdown->items.end(), "no entry " + prefix + " in " + key);
         dropdown->index.assign(int(found - dropdown->items.begin())); frame();
       };
-      auto collapse = [&](const std::string &key) {
+      auto set_panel_open = [&](const std::string &key, const bool open) {
         const auto *panel = widget(key);
         require(panel != nullptr, "panel " + key);
+        if (screen.ui()->panel_open(panel->id, false) == open) { return; }
         const ui::Vec2 center{panel->rect.x + 8, panel->rect.cy()};
         screen.ui()->handle_event(ui::Event::mouse_down(center));
         screen.ui()->handle_event(ui::Event::mouse_up(center)); frame();
@@ -138,11 +140,11 @@ int main(int argc, char **argv)
             ports->table->rows > 0 && ports->table->cell(0, 2) != "?";
       }, "saved definition, draft and node catalog");
       // Bring the links panel into view; the parameter and output editors stay intact.
-      collapse("analysis_parameter_values_panel");
-      collapse("analysis_output_panel");
+      set_panel_open("analysis_parameter_values_panel", false);
+      set_panel_open("analysis_output_panel", false);
       if (scenario == "edit") {
         // Graph structure: add an iso-surface next to "component", then fill its required field.
-        collapse("analysis_graph_edit_panel");  // starts collapsed: this opens it
+        set_panel_open("analysis_graph_edit_panel", true);
         choose("graph_node_select", "component / ");
         const auto *types = widget("analysis_graph_add_type");
         require(types && types->enabled, "node types");
@@ -163,7 +165,8 @@ int main(int argc, char **argv)
         printf("wrote %s\n", output.c_str());
       }
       else {
-      collapse("analysis_links_panel");  // starts collapsed: this opens it
+      set_panel_open("analysis_graph_edit_panel", false);
+      set_panel_open("analysis_links_panel", true);
       require(widget("analysis_links_validate") != nullptr, "links panel open");
       choose("graph_node_select", "box / ");
       choose("analysis_link/box/in/analysis_link_source", "component.out");

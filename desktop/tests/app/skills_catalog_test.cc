@@ -294,16 +294,16 @@ TEST_F(SkillsCatalogPython, BrokenDefinitionsAndMissingModulesAreExplained)
 TEST_F(SkillsCatalogPython, WorkspaceOpensTheSharedLibraryWithoutAProject)
 {
   ASSERT_NO_FATAL_FAILURE(start());
-  auto &home = f.area("a1");
-  ASSERT_TRUE(home.set_tab_type(0, kEditorWorkspace));
+  auto &viewer = f.tab("a2", kEditorViewer);
+  auto &home = f.tab("a1", kEditorWorkspace);
   f.screen.set_maximized(&home); f.drv->frame();
   const auto *button = widget("workspace_skills");
   ASSERT_NE(button, nullptr); ASSERT_TRUE(button->enabled);
   const auto [x, y] = f.widget_center("workspace_skills");
   f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame();
-  auto *target = dynamic_cast<EditorArea *>(f.screen.maximized());
-  ASSERT_NE(target, nullptr);
-  EXPECT_EQ(target->editor().type().id, kEditorSkills);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(home.editor().type().id, kEditorSkills);
+  EXPECT_EQ(viewer.editor().type().id, kEditorViewer);
   ASSERT_NO_FATAL_FAILURE(settle());
   EXPECT_EQ(skills().skills().size(), 6u);
   ASSERT_NE(widget("project_workspace"), nullptr);  // the way back

@@ -554,6 +554,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.files.index` | `{handle, expected_revision, paths: [string]}` | `{revision, commands, table_id, record_ids}` |
 | `project.files.refresh` | `{handle, expected_revision, record_ids: [uuid]}` | `{revision, commands, table_id, record_ids}` |
 | `project.files.resolve` | `{handle, expected_revision, record_id}` | `{revision, record_id, path, kind}` |
+| `project.files.children` | `{handle, expected_revision, path?: relative POSIX directory, offset?: 0, limit?: 200}` | one live directory page plus separate saved registrations; see schema |
+| `project.files.resolve_path` | `{handle, expected_revision, path: relative POSIX file or directory}` | `{revision, path, kind}`; checks an explicitly selected project file or directory |
 | `project.analyses.create` / `project.analyses.update` | `{handle, analysis_id, name, document, expected_revision}` | `{revision, commands, table_id, record_id}` |
 | `project.analyses.list` | `{handle, offset?, limit?}` | `{revision, table_id, compatible, error, offset, total, analyses: [analysisSummary]}` |
 | `project.analyses.get` | `{handle, analysis_id}` | `{revision, table_id, compatible, error, analysis: analysisSummary + {document}}` |
@@ -864,6 +866,7 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   it. Project-relative locations cannot escape the project; external locations retain their OS path syntax.
   Missing future output files may be registered. Size/mtime are observations, not content hashes or immutable
   snapshots. See [file index guide](../project-files.md) for field names, state values and restore semantics.
+- Added 2026-10-14: `project.files.children` lists metadata for one real project directory, at most 4096 inspected entries and 200 entries per page. It does not recurse, register resources or open file contents. Hidden/internal paths and parent traversal are rejected. Link/reparse entries may be visible as links; they are never followed or opened, and link/reparse path components are rejected. Saved registration summaries (at most 200) are distinct from live observations; external registered paths are not automatically probed. Pagination is a live view, not a filesystem snapshot. `resolve_path` rechecks an explicitly selected relative regular file or real directory (including the empty root path); it does not execute or read file contents. The desktop retains at most 64 directories and 8192 entries per editor.
 - `project.snapshots.*` requires format 4 and explicitly manages frozen input bytes, distinct from
   `project.snapshot` (the current editable model). Capture selects 1–100 indexed files, default total budget
   256 MiB (`max_bytes` may be 1 byte–1 TiB), and appends a manifest after a final revision check. It emits
@@ -1273,11 +1276,15 @@ The shared schema remains authoritative. The user-facing API and coverage are in
 |---|---|---|
 | `script.open` | optional initial absolute `directory` | session status |
 | `script.status` | `session` | session status |
-| `script.execute` | `session`, exactly one of `source` / absolute `path`, optional `project_handle` | `{run}` |
+| `script.execute` | `session`, exactly one of `source` / absolute `path`, optional `project_handle`; file execution may include `expected_version` (SHA-256) | `{run}` |
 | `script.read` | `session`, optional `cursor` (0), `limit` (65536, max 65536) | status plus `{text, cursor, truncated}` |
 | `script.interrupt` | `session` | `{interrupted}` (whether execution was running) |
 | `script.close` | `session` | `{closed: true}` |
 | `script.catalog` | none | `{operations: {name: {params, result}}, ui_operations}` |
+| `script.file.read` | absolute `.py` `path` | `{path, source, version, size}` |
+| `script.file.write` | absolute `.py` `path`, `source`, `expected_version` (SHA-256 or null for create only) | `{path, version, size}` |
+
+Added 2026-10-14: file editing is explicit and never executes source. Files must be regular UTF-8 `.py` files without NUL, at most 256 KiB; links/reparse components are rejected. Versions hash the original bytes. Save rechecks the version and replaces atomically; null creates only, and external modification/removal is a conflict. This is optimistic concurrency, not a lock against other applications. File execution with `expected_version` checks and executes the same bytes that were read. Reading, saving and reopening do not create or run a worker.
 
 One bridge owns one shared Python session. Open is idempotent; a different initial directory while
 it is open is a conflict. Tokens and run/kernel IDs are opaque 32-digit lowercase hex strings.

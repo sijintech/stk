@@ -31,6 +31,15 @@ namespace {
 
 using io::Json;
 
+EditorArea *visible_editor(wm::Screen &screen, const char *type)
+{
+  for (auto *base : screen.areas()) {
+    auto *area = dynamic_cast<EditorArea *>(base);
+    if (area && area->editor().type().id == type) { return area; }
+  }
+  return nullptr;
+}
+
 const std::string table_id = "11111111-1111-4111-8111-111111111111";
 const std::string field_id = "22222222-2222-4222-8222-222222222222";
 const std::string record_id = "33333333-3333-4333-8333-333333333333";
@@ -221,13 +230,16 @@ TEST(ProjectLayout, FileMenuOpensOneProjectTabAndKeepsViewer)
   ASSERT_NE(it, menu.end());
   it->action();
   f.drv->frame();
-  auto &area = f.area("a2");
-  ASSERT_EQ(area.tab_count(), 2);
-  EXPECT_EQ(area.editor().type().id, kEditorProject);
-  EXPECT_EQ(area.tab(0).type().id, kEditorViewer);
-  it->action();
-  f.drv->frame();
-  EXPECT_EQ(area.tab_count(), 2);
+  auto *area = visible_editor(f.screen, kEditorProject);
+  ASSERT_NE(area, nullptr);
+  const auto count = area->tab_count();
+  auto *instance = &area->editor();
+  EXPECT_EQ(f.area("a2").editor().type().id, kEditorViewer);
+  EXPECT_EQ(f.area("a2").tab_count(), 1);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  it->action(); f.drv->frame();
+  EXPECT_EQ(visible_editor(f.screen, kEditorProject), area);
+  EXPECT_EQ(&area->editor(), instance); EXPECT_EQ(area->tab_count(), count);
 }
 
 TEST(ProjectLayout, OpenResultCreatesAViewerTabWhenTheLayoutHasNone)
@@ -243,10 +255,11 @@ TEST(ProjectLayout, OpenResultCreatesAViewerTabWhenTheLayoutHasNone)
   f.drv->frame();
   ASSERT_TRUE(f.shell->store().viewer().payload());
   EXPECT_FALSE(f.shell->store().has_open_result());
-  auto *shown = dynamic_cast<EditorArea *>(f.screen.maximized());
+  auto *shown = visible_editor(f.screen, kEditorViewer);
   ASSERT_NE(shown, nullptr);
-  EXPECT_EQ(shown->editor().type().id, kEditorViewer);
-  EXPECT_EQ(shown->tab_count(), 3);  // Workspace and Jobs keep their tabs
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_NE(shown, &f.area("a2"));
+  EXPECT_EQ(f.area("a1").tab_count(), 5); // file/project management tabs remain intact
   EXPECT_EQ(f.area("a2").editor().type().id, kEditorProject);
 }
 
@@ -631,7 +644,8 @@ TEST_F(ProjectProposal, SweepSuggestionBecomesADraftOfNewRowsThatAppliesLikeAMan
   state().refresh(); settled();
   f.screen.set_maximized(&area); ai_frame();
   click("ai_run_rows");
-  auto *workflow = dynamic_cast<EditorArea *>(f.screen.maximized());
+  auto *workflow = visible_editor(f.screen, kEditorWorkflow);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
   ASSERT_NE(workflow, nullptr);
   ASSERT_TRUE(loop.pump_until([&] {
     f.screen.run_deferred(); f.drv->frame();
@@ -685,8 +699,8 @@ TEST_F(ProjectProposal, SuggestionIsSavedThenOpenedAndAppliedThroughItsDurableRe
   EXPECT_EQ(state().saved_review().at("id"), draft.at("id"));
   EXPECT_FALSE(state().review());
   EXPECT_FALSE(state().can_apply_review());
-  ASSERT_NE(f.screen.maximized(), nullptr);
-  EXPECT_EQ(dynamic_cast<EditorArea *>(f.screen.maximized())->editor().type().id, kEditorProject);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  ASSERT_NE(visible_editor(f.screen, kEditorProject), nullptr);
   ASSERT_TRUE(state().preview()); settled();
   ASSERT_TRUE(state().can_apply_review());
   ASSERT_TRUE(state().apply_review()); settled();
@@ -1951,11 +1965,10 @@ TEST_F(ProjectPython, BrowseButtonsOnlyFillPathFieldsAndDropAnswersForAnotherPro
   EXPECT_EQ(widget("project_csv/source")->string.value(), "");
 
   ASSERT_TRUE(area.set_tab_type(0, kEditorPython)); frame();
-  open_panel("python_file");
-  ASSERT_NE(widget("python_file/python_browse"), nullptr);
-  widget("python_file/python_browse")->on_click();
+  ASSERT_NE(widget("python_browse"), nullptr);
+  widget("python_browse")->on_click();
   dialog.answer({"/scripts/a.py"}); frame();
-  EXPECT_EQ(widget("python_file/python_path")->string.value(), "/scripts/a.py");
+  EXPECT_EQ(widget("python_path")->string.value(), "/scripts/a.py");
   EXPECT_TRUE(f.shell->store().scripts().history().empty());  // Choosing a script does not run it.
 }
 
@@ -2724,6 +2737,62 @@ TEST_F(ProjectPython, BridgeRestartReopensWithoutReplayingEdits)
   EXPECT_EQ(state().table()->text(0, 0), "300");
 }
 
+class ProjectDraftRecoveryPython : public ProjectPython {
+ protected:
+  void configure_bridge(bridge::ClientOptions &options, const std::string &) override
+  {
+    options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
+  }
+};
+
+TEST_F(ProjectDraftRecoveryPython, BridgeReconnectKeepsDirtyTableAndReattachesItsOriginalProject)
+{
+  populated();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorTable));
+  f.screen.set_maximized(&area); f.drv->frame();
+  const auto *value = f.screen.ui()->find("a2/main/cell_value"); ASSERT_NE(value, nullptr);
+  value->string.assign("475"); f.drv->frame();
+  ASSERT_TRUE(area.editor().has_unsaved_changes());
+  ASSERT_FALSE(f.shell->project_selection_available(state().project()->id));
+  const auto before = *state().project();
+  EXPECT_FALSE(state().open(dir.str() + "/another-project"));
+  EXPECT_FALSE(state().close());
+  client->shutdown_bridge();
+  ASSERT_TRUE(loop.pump_until([&] {
+    return state().loaded() && !state().busy() && state().project()->handle != before.handle;
+  }, 60)) << state().error() << client->bridge_log().text();
+  f.drv->frame();
+  EXPECT_EQ(state().project()->id, before.id);
+  EXPECT_EQ(state().project()->directory, before.directory);
+  EXPECT_EQ(state().project()->revision, before.revision);
+  EXPECT_EQ(state().table()->text(0, 0), "300");
+  ASSERT_TRUE(area.editor().has_unsaved_changes());
+  value = f.screen.ui()->find("a2/main/cell_value"); ASSERT_NE(value, nullptr);
+  EXPECT_EQ(value->string.value(), "475");
+  const auto *save = f.screen.ui()->find("a2/main/save_cell"); ASSERT_NE(save, nullptr); ASSERT_TRUE(save->enabled);
+  save->on_click(); settled(); f.drv->frame();
+  EXPECT_EQ(state().table()->text(0, 0), "475");
+  EXPECT_EQ(state().project()->revision, before.revision + 1);
+  EXPECT_FALSE(area.editor().has_unsaved_changes());
+}
+
+TEST_F(ProjectDraftRecoveryPython, RejectedOpenAndCloseDoNotAlsoCompleteTheRequest)
+{
+  populated();
+  const auto before = *state().project();
+  state().set_selection_guard([] { return false; });
+  int completions = 0;
+  EXPECT_FALSE(state().open(dir.str() + "/other-project", [&](const auto &) { ++completions; }));
+  EXPECT_FALSE(state().close([&](const auto &) { ++completions; }));
+  loop.run_ready();
+  EXPECT_EQ(completions, 0); // False tells the UI caller to reply once itself.
+  ASSERT_TRUE(state().project());
+  EXPECT_EQ(state().project()->handle, before.handle);
+  EXPECT_EQ(state().project()->revision, before.revision);
+  EXPECT_FALSE(state().busy());
+}
+
 TEST_F(ProjectPython, RecentProjectsReopenAfterRestartAndForgetOnlyHistoryThroughButtons)
 {
   populated();
@@ -3063,6 +3132,10 @@ TEST_F(ProjectPython, PersistentUndoRedoButtonsAndNewEditsShareTheProjectHistory
   EXPECT_EQ(f.screen.ui()->find("a2/main/cell_value")->string.value(), "Unsaved draft");
   EXPECT_FALSE(f.screen.ui()->find("a2/main/save_cell")->enabled);
   ASSERT_TRUE(redo()->enabled);
+  EXPECT_FALSE(state().close());
+  EXPECT_EQ(f.screen.ui()->find("a2/main/cell_value")->string.value(), "Unsaved draft");
+  ASSERT_NE(f.screen.ui()->find("a2/main/reload_cell"), nullptr);
+  f.screen.ui()->find("a2/main/reload_cell")->on_click(); f.drv->frame();
   ASSERT_TRUE(state().close());
   settled();
   ASSERT_TRUE(state().open(dir.str() + "/project"));
@@ -3238,7 +3311,7 @@ TEST_F(ProjectPython, IndexedPayloadOpensAHiddenViewerAndMissingFilesDoNotReplac
   f.drv->frame();
   EXPECT_EQ(area.editor().type().id, kEditorViewer);
   EXPECT_EQ(area.tab_count(), 2);
-  EXPECT_EQ(f.screen.maximized(), &area);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
   auto &viewer = f.shell->store().viewer();
   ASSERT_TRUE(viewer.payload());
   EXPECT_EQ(viewer.source().kind, SourceKind::Payload);
@@ -4410,6 +4483,7 @@ TEST_F(WorkflowSimulationPython, MuFerroWorkflowRunsEveryRowOnThePickedRuntime)
   auto &area = f.area("a2");
   ASSERT_TRUE(area.set_tab_type(0, kEditorWorkflow));
   f.screen.set_maximized(&area);
+  area.set_sidebar_open(true);
   area.find_region(EditorArea::kSidebar)->set_size_1x(560);
   auto widget = [&](const std::string &id) { f.screen.run_deferred(); f.drv->frame(); return f.screen.ui()->find(id); };
   const auto shows = [&](const std::string &text) {
@@ -4443,8 +4517,8 @@ TEST_F(WorkflowSimulationPython, MuFerroWorkflowRunsEveryRowOnThePickedRuntime)
   widget("workflow_run_ask_results")->on_click();
   ASSERT_TRUE(loop.pump_until([&] {
     f.screen.run_deferred(); f.drv->frame();
-    auto *maximized = dynamic_cast<EditorArea *>(f.screen.maximized());
-    return !discussion.busy() && maximized && maximized->editor().type().id == kEditorAI && !discussion.context().empty();
+    auto *assistant = visible_editor(f.screen, kEditorAI);
+    return !discussion.busy() && !f.screen.maximized() && assistant && !discussion.context().empty();
   }, 30));
   const auto context = discussion.context();
   EXPECT_EQ(context.at("title"), "Results of MuFerro scan (3 rows)");
@@ -5128,8 +5202,7 @@ TEST_F(AgentPython, SessionsAppearInTheAttentionListAndOpenInTheAssistant)
   STK_UNTIL(widget("workspace_attention_open/" + key) && widget("workspace_attention_open/" + key)->enabled);
   EXPECT_EQ(widget("workspace_attention_archive/" + key), nullptr);  // sessions cannot be archived in v1
   widget("workspace_attention_open/" + key)->on_click();
-  STK_UNTIL(dynamic_cast<EditorArea *>(f.screen.maximized()) &&
-            dynamic_cast<EditorArea *>(f.screen.maximized())->editor().type().id == kEditorAI &&
+  STK_UNTIL(f.screen.maximized() == nullptr && visible_editor(f.screen, kEditorAI) &&
             state().agent().selected() == session && state().agent().view().contains("awaiting"));
   // The review page names the session that proposed the draft.
   STK_UNTIL(state().agent().owner("draft", draft_id) != nullptr);

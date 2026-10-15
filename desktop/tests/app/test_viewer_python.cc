@@ -278,7 +278,7 @@ TEST(ViewerFormsGpu, VolumePropertiesAtNarrowWidth)
     wm::Screen screen;
     shell.install(screen, nullptr);
     shell.build_default_layout(screen);
-    screen.set_maximized(screen.find_area("a3"));
+    ASSERT_TRUE(shell.activate_editor(&screen, app::kEditorProperties, true).ok());
     auto &vs = shell.store().viewer();
     vs.set_metadata(repo_presets(), repo_catalog());
     vs.select_preset("volume");

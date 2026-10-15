@@ -10,7 +10,7 @@
 #include "support.hh"
 
 using namespace stk;
-using stk::wmtest::AppFixture;
+using AppFixture = stk::wmtest::LegacyAppFixture;
 namespace fs = std::filesystem;
 
 namespace {

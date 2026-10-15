@@ -56,6 +56,7 @@ class FocusNavigation : public ::testing::Test {
 TEST_F(FocusNavigation, SwitchingKeepsLiveEditorsCustomSplitsAndPythonSource)
 {
   auto &preparation = f.area("a1"), &analysis = f.area("a2"), &python = f.area("a4");
+  const int ai_index = preparation.tab_count();
   ASSERT_TRUE(preparation.add_tab(kEditorAI));
   ASSERT_TRUE(python.add_tab(kEditorPython));
   ASSERT_TRUE(python.editor().load_state({{"source", "unsaved = '保留输入'"}, {"path", "/tmp/local.py"}}));
@@ -73,8 +74,7 @@ TEST_F(FocusNavigation, SwitchingKeepsLiveEditorsCustomSplitsAndPythonSource)
   }
   auto first = f.shell->activate_editor(&f.screen, kEditorAI, true);
   ASSERT_TRUE(first.ok());
-  // a1 starts with Workspace and Jobs, so the added AI tab is the third.
-  EXPECT_EQ(first.value(), (Json{{"area_id", "a1"}, {"editor_id", "ai"}, {"tab_index", 2}, {"maximized", true}}));
+  EXPECT_EQ(first.value(), (Json{{"area_id", "a1"}, {"editor_id", "ai"}, {"tab_index", ai_index}, {"maximized", true}}));
   EXPECT_EQ(f.screen.maximized(), &preparation);
   for (int i = 0; i < 3; ++i) {
     ASSERT_TRUE(f.shell->activate_editor(&f.screen, kEditorViewer, true).ok());
@@ -99,6 +99,7 @@ TEST_F(FocusNavigation, SwitchingKeepsLiveEditorsCustomSplitsAndPythonSource)
 TEST_F(FocusNavigation, PrefersMaximizedActiveThenOtherActiveThenAnExistingHiddenTab)
 {
   auto &first = f.area("a1"), &second = f.area("a2"), &third = f.area("a3");
+  const int first_count = first.tab_count(), second_count = second.tab_count(), third_count = third.tab_count();
   ASSERT_TRUE(first.add_tab(kEditorAI, false));
   ASSERT_TRUE(second.add_tab(kEditorAI));
   ASSERT_TRUE(third.add_tab(kEditorAI));
@@ -110,26 +111,28 @@ TEST_F(FocusNavigation, PrefersMaximizedActiveThenOtherActiveThenAnExistingHidde
   EXPECT_EQ(f.screen.maximized(), &second); // Active matching tab beats the first area's hidden AI.
   second.set_active_tab(0); third.set_active_tab(0);
   ASSERT_TRUE(f.shell->activate_editor(&f.screen, kEditorAI, false).ok());
-  EXPECT_EQ(first.active_tab(), 2);  // after the default Workspace and Jobs tabs
+  EXPECT_EQ(first.active_tab(), first_count);
   EXPECT_EQ(f.screen.maximized(), nullptr); // False explicitly restores the split layout.
-  EXPECT_EQ(first.tab_count(), 3); EXPECT_EQ(second.tab_count(), 2); EXPECT_EQ(third.tab_count(), 2);
+  EXPECT_EQ(first.tab_count(), first_count + 1); EXPECT_EQ(second.tab_count(), second_count + 1);
+  EXPECT_EQ(third.tab_count(), third_count + 1);
 }
 
 TEST_F(FocusNavigation, FullFirstAreasUseTheRemainingCapacityWithoutReplacingAnyTab)
 {
-  auto &available = f.area("a2");
-  Editor *viewer = &available.editor();
+  auto &available = f.area("a3");
+  Editor *original = &available.editor();
+  const int original_tabs = available.tab_count();
   for (auto *area : f.screen.areas()) {
     auto &editor = *dynamic_cast<EditorArea *>(area);
     if (&editor != &available) { ASSERT_NO_FATAL_FAILURE(fill(editor)); }
   }
   const auto result = f.shell->activate_editor(&f.screen, kEditorAI, true);
   ASSERT_TRUE(result.ok());
-  EXPECT_EQ(result.value().at("area_id"), "a2"); EXPECT_EQ(result.value().at("tab_index"), 1);
-  EXPECT_EQ(&available.tab(0), viewer); EXPECT_EQ(available.tab_count(), 2);
+  EXPECT_EQ(result.value().at("area_id"), "a3"); EXPECT_EQ(result.value().at("tab_index"), original_tabs);
+  EXPECT_EQ(&available.tab(0), original); EXPECT_EQ(available.tab_count(), original_tabs + 1);
   Editor *created = &available.editor();
   ASSERT_TRUE(f.shell->activate_editor(&f.screen, kEditorAI, true).ok());
-  EXPECT_EQ(available.tab_count(), 2); EXPECT_EQ(&available.editor(), created);
+  EXPECT_EQ(available.tab_count(), original_tabs + 1); EXPECT_EQ(&available.editor(), created);
 }
 
 TEST_F(FocusNavigation, InvalidFullAndFailedFactoriesLeaveTheLayoutUnchanged)
@@ -188,7 +191,6 @@ TEST_F(FocusNavigation, ActiveTargetInputIsNotCommittedOrHiddenByNavigation)
 
 TEST_F(FocusNavigation, AnotherWindowsActiveInputDoesNotBlockOrChange)
 {
-  ASSERT_NO_FATAL_FAILURE(edit_python());
   struct ExtraScreen {
     AppShell &shell;
     wm::Screen screen;
@@ -198,6 +200,7 @@ TEST_F(FocusNavigation, AnotherWindowsActiveInputDoesNotBlockOrChange)
     }
     ~ExtraScreen() { shell.forget(screen); }
   } other(*f.shell);
+  ASSERT_NO_FATAL_FAILURE(edit_python());
   const auto before = f.screen.to_json();
   const auto result = f.shell->activate_editor(&other.screen, kEditorAI, true);
   ASSERT_TRUE(result.ok());

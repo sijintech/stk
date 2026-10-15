@@ -51,6 +51,7 @@ int main(int argc, char **argv)
   options.env["STK_STATE_DIR"] = directory.str() + "/runtime";
   options.env["STK_PROFILES_FILE"] = directory.str() + "/profiles.json";
   options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+  options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
   options.executor = loop.executor(); options.strict = options.validate = true;
   auto client = bridge::Client::create(options);
   std::string error;
@@ -152,23 +153,48 @@ int main(int argc, char **argv)
       }
       project.refresh(); require(loop.pump_until([&] { return !project.busy() && project.project()->revision == revision; }, 30),
                                  "refresh project");
-      auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
+      auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a3"));
       require(area && area->set_tab_type(0, app::kEditorWorkflow), "workflow editor");
+      area->set_sidebar_open(true);  // These focused fixtures inspect the editing/run controls.
       area->find_region(app::EditorArea::kSidebar)->set_size_1x(narrow ? 385 : 520);
       screen.set_maximized(area);
       wm::DrawContext context;
       context.ui_scale = 1; context.fonts = &gpu->fonts(); context.rect = {0, 0, width, height}; context.now = 100;
       gfx::Image image;
       auto frame = [&] { require(gfx::render_offscreen(width, height, [&] { screen.draw(context); }, image, error), error); };
-      auto widget = [&](const std::string &key) { return screen.ui()->find(key); };
+      auto *display_area = area;
+      auto widget = [&](const std::string &key) -> const ui::Widget * {
+        const std::string prefix = display_area->id() + "/", suffix = "/" + key;
+        for (const auto &block : screen.ui()->blocks()) {
+          for (const auto &item : block->widgets()) {
+            if (item.key.starts_with(prefix) && item.key.ends_with(suffix)) { return &item; }
+          }
+        }
+        return nullptr;
+      };
       auto wait = [&](const std::function<bool()> &predicate, const char *description) {
         require(loop.pump_until([&] { screen.run_deferred(); frame(); return predicate(); }, 45), description);
       };
       auto shows = [&](const std::string &text) {
         for (const auto &block : screen.ui()->blocks()) {
-          for (const auto &item : block->widgets()) { if (item.text.find(text) != std::string::npos) { return true; } }
+          for (const auto &item : block->widgets()) {
+            if (item.key.starts_with(display_area->id() + "/") && item.text.find(text) != std::string::npos) { return true; }
+          }
         }
         return false;
+      };
+      auto show_home = [&] {
+        const auto opened = shell.activate_editor(&screen, app::kEditorWorkspace, false);
+        require(opened.ok(), "open shared Home editor");
+        require(!screen.maximized(), "ordinary Home navigation keeps the split layout");
+        display_area = dynamic_cast<app::EditorArea *>(screen.find_area(io::get_string(opened.value(), "area_id")));
+        const auto *viewer_area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
+        require(display_area && display_area->editor().type().id == app::kEditorWorkspace &&
+                    viewer_area && viewer_area->editor().type().id == app::kEditorViewer,
+                "Home navigation keeps the separate Viewer");
+        // These older artifacts show one page at a readable width. Focus it explicitly only
+        // after checking normal navigation; default combined-workspace artifacts are separate.
+        screen.set_maximized(display_area);
       };
       wait([&] { return shows(zh ? "所有引用与连线都有效。" : "All references and links are valid."); }, "workflow checked");
       std::string reason;
@@ -232,7 +258,7 @@ int main(int argc, char **argv)
             "18181818-1818-4181-8181-181818181802", "18181818-1818-4181-8181-181818181803"}));
         run("19191919-1919-4191-8191-191919191902", Json::array({"18181818-1818-4181-8181-181818181801"}));
         project.refresh();
-        require(area->set_tab_type(0, app::kEditorWorkspace), "home");
+        show_home();
         wait([&] { return shows(zh ? "失败 · 工作流运行 · 温度扫描 · 完成 4/6" : "Failed · Workflow run · Temperature scan · 4/6 done") &&
                           shows(zh ? "已完成未查看（1）" : "Finished, not viewed (1)"); }, "attention listed");
       }
@@ -272,7 +298,7 @@ int main(int argc, char **argv)
       }
       if (scenario == "home_search") {
         // A search that finds the workflow, the analysis and the indexed field files.
-        require(area->set_tab_type(0, app::kEditorWorkspace), "home");
+        show_home();
         wait([&] { return widget("workspace_search") && widget("workspace_search")->enabled; }, "search box");
         widget("workspace_search_text")->string.assign(zh ? "温度" : "temperature");
         widget("workspace_search")->on_click();

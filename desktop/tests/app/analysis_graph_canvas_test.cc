@@ -379,9 +379,21 @@ TEST(AnalysisGraphCanvas, CjkTitlesAreClippedAsUtf8AndFineLabelsDisappearAtOverv
     }
   }
   EXPECT_TRUE(found);
-  ASSERT_TRUE(canvas.zoom_at(.1, 300, 200));
+  ASSERT_TRUE(canvas.look_at({0, 0}, .1, 600, 400));
   const auto overview = canvas.draw_list(600, 400, 1, measurer, "zh_CN");
   EXPECT_FALSE(std::any_of(overview.cmds.begin(), overview.cmds.end(), [](const auto &cmd) { return cmd.type == ui::CmdType::Text; }));
+  ASSERT_TRUE(canvas.look_at({view->nodes[0].rect.x + view->nodes[0].rect.width / 2,
+                              view->nodes[0].rect.y + view->nodes[0].rect.height / 2}, .3, 600, 400));
+  const auto beside_viewer = canvas.draw_list(600, 400, 1, measurer, "zh_CN");
+  bool readable_id = false;
+  for (const auto &cmd : beside_viewer.cmds) {
+    if (cmd.type == ui::CmdType::Text) {
+      EXPECT_TRUE(core::utf8::is_valid(cmd.text));
+      EXPECT_EQ(cmd.font.size_px, 11);
+      readable_id = true;
+    }
+  }
+  EXPECT_TRUE(readable_id) << "a fitted split view keeps stable node IDs readable";
   EXPECT_EQ(view->nodes[0].title_zh.size(), std::string("温度🧪").size() * 60);
 }
 

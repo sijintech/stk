@@ -69,8 +69,7 @@ INSTANTIATE_TEST_SUITE_P(JobsLayout, JobsLayoutGolden, ::testing::Values("en", "
 TEST(JobsLayout, DropsOnJobsAndTransfersQueueUploads)
 {
   AppFixture f("en");
-  app::EditorArea &bottom = f.area("a4");
-  bottom.set_active_tab(2); /* Transfers */
+  app::EditorArea &bottom = f.tab("a4", app::kEditorTransfers);
   f.drv->frame();
   auto drop = [&](wm::Area &a, std::vector<std::string> paths) {
     const auto [x, y] = AppFixture::center(a.find_region("main")->rect());
@@ -345,8 +344,7 @@ TEST(JobsLayout, TransfersEditorResumesAndCancels)
   UiOnFake u;
   app::JobsState &jobs = u.jobs();
   u.f.screen.set_maximized(nullptr);
-  app::EditorArea &bottom = u.f.area("a4");
-  bottom.set_active_tab(2); /* Transfers */
+  app::EditorArea &bottom = u.f.tab("a4", app::kEditorTransfers);
   u.f.screen.set_maximized(&bottom);
   ASSERT_TRUE(u.pump([&] { return jobs.ready() && !jobs.connections().empty(); }));
   jobs.select_connection("runtime:lab");

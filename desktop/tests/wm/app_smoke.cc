@@ -143,11 +143,11 @@ int run(const gfx::Backend backend, const std::string &layout_out, const bool ex
         check(ok && img.width == win->width(), "read_pixels", err);
         if (ok) {
           const wm::Area *top = screen.global_area(wm::RegionAlign::Top);
-          const wm::Rect jobs_h = area("a1")->find_region("header")->rect();
+          const wm::Rect files_h = area("a1")->find_region("header")->rect();
           const wm::Rect viewer = area("a2")->find_region("main")->rect();
           const wm::Splitter &s = screen.splitters().front();
           const uint8_t *p_top = img.px_bl(top->rect().xmax - 3, top->rect().ymin + 2);
-          const uint8_t *p_head = img.px_bl(jobs_h.xmin + jobs_h.width() / 2, jobs_h.ymin + 1);
+          const uint8_t *p_head = img.px_bl(files_h.xmin + files_h.width() / 2, files_h.ymin + 1);
           const uint8_t *p_view = img.px_bl(viewer.xmax - 8, viewer.ymin + 8);
           const uint8_t *p_gap = img.px_bl(s.rect.xmin, s.rect.ymin + s.rect.height() / 2);
           check(near(p_top, ui::Color::rgb(0x181818)), "top bar color", hex(p_top));
@@ -155,14 +155,14 @@ int run(const gfx::Backend backend, const std::string &layout_out, const bool ex
           check(near(p_view, ui::Color::rgb(0x3d3d3d)), "viewer background", hex(p_view));
           check(near(p_gap, ui::Color::rgb(0x161616)), "splitter gap color", hex(p_gap));
         }
-        /* Drag the Jobs | Viewer splitter 80 px to the right with synthesized events. */
+        /* Drag the Files | Viewer splitter 80 px to the right with synthesized events. */
         const wm::Splitter *s = nullptr;
         for (const wm::Splitter &sp : screen.splitters()) {
           if (sp.dir == wm::SplitDir::Horizontal && sp.node->children[size_t(sp.index)]->area.get() == area("a1")) {
             s = &sp;
           }
         }
-        check(s != nullptr, "jobs | viewer splitter");
+        check(s != nullptr, "files | viewer splitter");
         if (!s) {
           wm->quit(1);
           break;
@@ -178,7 +178,7 @@ int run(const gfx::Backend backend, const std::string &layout_out, const bool ex
           send(wm::EventType::MouseMove, drag_x + 20 * i, y);
         }
         send(wm::EventType::MouseUp, drag_x + 80, y);
-        printf("  jobs width after the drag: %d\n", area("a1")->rect().width());
+        printf("  files width after the drag: %d\n", area("a1")->rect().width());
         next();
         break;
       }
@@ -189,10 +189,12 @@ int run(const gfx::Backend backend, const std::string &layout_out, const bool ex
           gfx::Image img;
           if (win->read_pixels(img, err)) {
             const wm::Rect m = area("a1")->find_region("main")->rect();
-            /* The old bar position is now inside the Jobs area: its main region's top margin
-             * (above the first row; the Jobs editor's content may reach the region's bottom). */
+            /* The old gap position is now inside the Files area's main-region top margin,
+             * above its first row. Compare the actual editor's themed main background. */
             const uint8_t *p = img.px_bl(drag_x, m.ymax - 2);
-            check(near(p, ui::Color::rgb(0x282828)), "splitter moved on screen", hex(p));
+            check(area("a1")->editor().type().id == app::kEditorFiles &&
+                      near(p, area("a1")->editor().main_background(screen.ui()->theme())),
+                  "splitter moved on screen", hex(p));
           }
           win->set_client_size(900, 600);
           next();
@@ -220,9 +222,11 @@ int run(const gfx::Backend backend, const std::string &layout_out, const bool ex
         break;
       case 4:
         if (new_frame()) {
-          const int want = wm::ui_bar_height_px(win->ui_scale());
-          const int got = area("a2")->find_region("header")->rect().height();
-          check(std::fabs(win->ui_scale() - 1.25f * win->dpi_factor()) < 1e-3f && got == want,
+          /* The narrow Files column has a tab row and a separate editor-controls row. */
+          const int want = 2 * wm::ui_bar_height_px(win->ui_scale());
+          const int got = area("a1")->find_region("header")->rect().height();
+          check(std::fabs(win->ui_scale() - 1.25f * win->dpi_factor()) < 1e-3f &&
+                    area("a1")->rect().width() < 700 * win->ui_scale() && got == want,
                 "UI scale 1.25 applied", std::to_string(got) + " px header");
           shell.set_ui_scale(1.0f);
           next();

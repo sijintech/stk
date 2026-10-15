@@ -88,6 +88,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.analysis_runs.prepare", "project.analysis_runs.get", "project.analysis_runs.list",
         "project.analysis_runs.start", "project.analysis_runs.cancel", "project.analysis_runs.recover", "project.analysis_runs.result",
         "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
+        "project.files.children", "project.files.resolve_path",
         "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
         "project.workflows.create", "project.workflows.update", "project.workflows.get", "project.workflows.list",
         "project.workflows.validate", "project.workflows.choices",

@@ -2823,6 +2823,49 @@
           ]
         }
       },
+      "script.file.read": {
+        "description": "Explicitly read one regular local UTF-8 .py file, at most 256 KiB; never execute it. Symbolic link components are refused.",
+        "params": {
+          "type": "object",
+          "properties": {"path": {"$ref": "#/$defs/absPath"}},
+          "required": ["path"],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "path": {"$ref": "#/$defs/absPath"},
+            "source": {"type": "string", "maxLength": 262144},
+            "version": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size": {"type": "integer", "minimum": 0, "maximum": 262144}
+          },
+          "required": ["path", "source", "version", "size"],
+          "additionalProperties": false
+        }
+      },
+      "script.file.write": {
+        "description": "Explicit atomic UTF-8 .py save with final content-version check. Null expected_version only creates an absent destination. Does not execute code or journal source.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "path": {"$ref": "#/$defs/absPath"},
+            "source": {"type": "string", "maxLength": 262144},
+            "expected_version": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{64}$"}]}
+          },
+          "required": ["path", "source", "expected_version"],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "path": {"$ref": "#/$defs/absPath"},
+            "version": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size": {"type": "integer", "minimum": 0, "maximum": 262144}
+          },
+          "required": ["path", "version", "size"],
+          "additionalProperties": false
+        }
+      },
       "script.open": {
         "description": "Open or return the one local Python console session. User code is never auto-run.",
         "params": {
@@ -2871,6 +2914,10 @@
             },
             "path": {
               "$ref": "#/$defs/absPath"
+            },
+            "expected_version": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
             },
             "project_handle": {
               "$ref": "#/$defs/hex32"
@@ -3567,6 +3614,236 @@
           "required": [
             "revision",
             "record_id",
+            "path",
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.files.children": {
+        "description": "Read a bounded single project directory without following links, reading content, or changing registrations.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4096
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "directory": {
+              "type": "string"
+            },
+            "entries": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "kind": {
+                    "enum": [
+                      "directory",
+                      "file",
+                      "link",
+                      "other"
+                    ]
+                  },
+                  "state": {
+                    "enum": [
+                      "present",
+                      "missing",
+                      "unavailable"
+                    ]
+                  },
+                  "size": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "registered": {
+                    "type": "boolean"
+                  },
+                  "record_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "path",
+                  "kind",
+                  "state",
+                  "size",
+                  "registered",
+                  "record_id"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "registrations": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "path": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "location": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "display_truncated": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "path",
+                  "location",
+                  "state",
+                  "kind",
+                  "display_truncated"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "registrations_truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "revision",
+            "directory",
+            "entries",
+            "next_offset",
+            "truncated",
+            "registrations",
+            "registrations_truncated"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.files.resolve_path": {
+        "description": "Recheck one explicit public project path for opening without reading its content.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "path": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "file",
+                "directory"
+              ]
+            }
+          },
+          "required": [
+            "revision",
             "path",
             "kind"
           ],

@@ -52,7 +52,7 @@ class ScriptPython : public ::testing::Test {
     options.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
     options.env["STK_STATE_DIR"] = dir.str() + "/runtime";
     options.env["STK_TOKEN_PLAN_API_KEY"] = "";
-    options.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model";
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.executor = loop.executor();
     options.strict = options.validate = true;
     client = bridge::Client::create(options);
@@ -345,8 +345,8 @@ TEST_F(ScriptPython, ProjectSelectionReadKeepsActiveTextAndWritePreservesIndepen
   const auto table = project.table_id();
   const auto first = project.record_id();
   const auto second = project.table()->records[1].id;
-  ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorProject));
-  ASSERT_TRUE(f.area("a3").set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorTable));
+  ASSERT_TRUE(f.area("a3").set_tab_type(0, kEditorTable));
   f.drv->frame();
   f.screen.ui()->find("a2/main/table_search")->string.assign("red");
   f.screen.ui()->find("a3/main/table_search")->string.assign("blue");
@@ -422,6 +422,14 @@ TEST_F(ScriptPython, ProjectReviewOpensNativeDifferencesAndOnlyTheApplyButtonWri
   ASSERT_NO_FATAL_FAILURE(open_project());
   auto &project = f.shell->store().project();
   auto &area = f.area("a2");
+  // Choose an unambiguous existing review tab rather than depending on default peer tabs.
+  for (auto *base : f.screen.areas()) {
+    auto *other = dynamic_cast<EditorArea *>(base);
+    if (!other || other == &area) { continue; }
+    for (int i = 0; i < other->tab_count(); ++i) {
+      if (other->tab(i).type().id == kEditorProject) { ASSERT_TRUE(other->set_tab_type(i, kEditorLogs)); }
+    }
+  }
   ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
   ASSERT_TRUE(area.add_tab(kEditorPython));
   f.screen.set_maximized(&f.area("a1"));
@@ -433,7 +441,7 @@ TEST_F(ScriptPython, ProjectReviewOpensNativeDifferencesAndOnlyTheApplyButtonWri
   EXPECT_EQ(project.project()->revision, 0);
   EXPECT_TRUE(project.tables().empty());
   EXPECT_EQ(area.editor().type().id, kEditorProject);
-  EXPECT_EQ(f.screen.maximized(), &area);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
   f.drv->frame();
   ASSERT_NE(f.screen.ui()->find("a2/main/review_rows"), nullptr);
   const auto *apply = f.screen.ui()->find("a2/main/review_apply");
@@ -452,6 +460,52 @@ TEST_F(ScriptPython, ProjectReviewOpensNativeDifferencesAndOnlyTheApplyButtonWri
   ASSERT_TRUE(pump([&] { return !project.busy(); }));
   EXPECT_TRUE(project.tables().empty());
   EXPECT_EQ(project.project()->revision, 2);
+}
+
+TEST_F(ScriptPython, ProjectReviewNavigationFailureKeepsNoInvisibleCandidateAndCanBeRetried)
+{
+  ASSERT_NO_FATAL_FAILURE(open_project());
+  auto &project = f.shell->store().project();
+  for (auto *base : f.screen.areas()) {
+    auto *area = dynamic_cast<EditorArea *>(base); ASSERT_NE(area, nullptr);
+    for (int i = 0; i < area->tab_count(); ++i) {
+      if (area->tab(i).type().id == kEditorProject) { ASSERT_TRUE(area->set_tab_type(i, kEditorLogs)); }
+    }
+    while (area->tab_count() < 16) { ASSERT_TRUE(area->add_tab(kEditorLogs, false)); }
+  }
+  f.drv->frame();
+  const auto full_layout = f.screen.to_json();
+  execute("before = p.snapshot()\nbefore_history = p.history()\nrejected(request, 'busy')\n"
+          "assert p.snapshot() == before and p.history() == before_history");
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  EXPECT_EQ(f.screen.to_json(), full_layout);
+  EXPECT_EQ(project.review_source(), "[]"); EXPECT_FALSE(project.review());
+  EXPECT_TRUE(project.saved_review().empty()); EXPECT_TRUE(project.review_error().empty());
+  EXPECT_EQ(project.project()->revision, 0); EXPECT_TRUE(project.tables().empty());
+
+  auto &available = f.area("a3");
+  available.close_tab(15); ASSERT_EQ(available.tab_count(), 15);
+  const auto with_capacity = f.screen.to_json();
+  auto &registry = f.shell->registry();
+  const auto *type = registry.find(kEditorProject); ASSERT_NE(type, nullptr);
+  const auto factory = type->create;
+  registry.add({kEditorProject, "editor.project.title", [](const EditorType &) -> std::unique_ptr<Editor> { return nullptr; }});
+  execute("rejected(request, 'unavailable')\nassert p.snapshot() == before and p.history() == before_history");
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  EXPECT_EQ(f.screen.to_json(), with_capacity);
+  EXPECT_EQ(project.review_source(), "[]"); EXPECT_FALSE(project.review());
+  EXPECT_TRUE(project.saved_review().empty()); EXPECT_TRUE(project.review_error().empty());
+  EXPECT_EQ(project.project()->revision, 0); EXPECT_TRUE(project.tables().empty());
+
+  registry.add({kEditorProject, "editor.project.title", factory});
+  execute("assert p.review(commands, expected_revision=0)['accepted']\n"
+          "assert p.snapshot() == before and p.history() == before_history");
+  ASSERT_TRUE(pump([&] { return !project.busy(); }));
+  ASSERT_TRUE(project.review()) << project.review_error();
+  EXPECT_EQ(available.editor().type().id, kEditorProject);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  f.drv->frame(); EXPECT_NE(f.screen.ui()->find(available.id() + "/main/review_rows"), nullptr);
+  EXPECT_EQ(project.project()->revision, 0); EXPECT_TRUE(project.tables().empty());
 }
 
 TEST_F(ScriptPython, ProjectReviewRejectsStaleMalformedAndExistingDraftRequests)
@@ -562,6 +616,13 @@ TEST_F(ScriptPython, ProjectReviewRunsFromConsoleShortcutAndAddsAProjectTab)
   ASSERT_NO_FATAL_FAILURE(open_project());
   auto &project = f.shell->store().project();
   auto &area = f.area("a2");
+  // Exercise creation, including layouts that ship with a project-management peer tab.
+  for (auto *base : f.screen.areas()) {
+    auto *other = dynamic_cast<EditorArea *>(base); ASSERT_NE(other, nullptr);
+    for (int i = 0; i < other->tab_count(); ++i) {
+      if (other->tab(i).type().id == kEditorProject) { ASSERT_TRUE(other->set_tab_type(i, kEditorLogs)); }
+    }
+  }
   ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
   f.screen.set_maximized(&area);
   f.drv->frame();
@@ -579,8 +640,13 @@ TEST_F(ScriptPython, ProjectReviewRunsFromConsoleShortcutAndAddsAProjectTab)
   EXPECT_EQ(state().status().at("run").at("state"), "succeeded") << output();
   ASSERT_TRUE(project.review()) << project.review_error();
   EXPECT_EQ(area.editor().type().id, kEditorPython);
-  auto *target = dynamic_cast<EditorArea *>(f.screen.maximized());
+  EditorArea *target = nullptr;
+  for (auto *base : f.screen.areas()) {
+    auto *candidate = dynamic_cast<EditorArea *>(base);
+    if (candidate && candidate->editor().type().id == kEditorProject) { target = candidate; break; }
+  }
   ASSERT_NE(target, nullptr);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
   EXPECT_NE(target, &area);
   EXPECT_EQ(target->editor().type().id, kEditorProject);
   EXPECT_GT(target->tab_count(), 1);
@@ -724,8 +790,19 @@ TEST_F(ScriptPython, ConsoleEditorRunsMultilineDraftAndRestoresWithoutExecuting)
   EXPECT_NE(output().find("42"), std::string::npos);
   const auto run = state().status()["run"]["id"];
   const auto saved = f.shell->capture_layout(f.screen, nullptr);
+  const auto *discard = f.screen.ui()->find("a2/main/python_discard");
+  ASSERT_NE(discard, nullptr); ASSERT_TRUE(discard->enabled); discard->on_click();
+  f.drv->frame();
   f.drv->click(x, y);
   ASSERT_NE(f.screen.ui()->editing(), 0u);
+  const auto before_refused_reset = f.screen.to_json();
+  f.shell->build_default_layout(f.screen);
+  EXPECT_EQ(f.screen.to_json(), before_refused_reset);
+  ASSERT_NE(f.screen.ui(), nullptr);
+  EXPECT_TRUE(f.screen.ui()->text_input_active());
+  f.drv->key(wm::Key::Esc);
+  f.drv->frame();
+  ASSERT_FALSE(f.screen.ui()->text_input_active());
   f.shell->build_default_layout(f.screen);
   EXPECT_EQ(f.screen.ui(), nullptr); // old text bindings must not outlive their editor owner
   ASSERT_TRUE(f.shell->apply_layout(f.screen, saved));
@@ -740,6 +817,119 @@ TEST_F(ScriptPython, ConsoleEditorRunsMultilineDraftAndRestoresWithoutExecuting)
   loop.run_ready();
   EXPECT_EQ(state().status()["run"]["id"], run);
   EXPECT_EQ(restored_area.editor().save_state()["path"], dir.str() + "/selected-only.py");
+}
+
+TEST_F(ScriptPython, ProgramEditorOpensAndSavesWithoutRunningAndProtectsIndependentDrafts)
+{
+  const auto first = dir.str() + "/first.py", second = dir.str() + "/second.py";
+  ASSERT_TRUE(wmtest::write_text(first, "print('first disk')\n"));
+  ASSERT_TRUE(wmtest::write_text(second, "print('second disk')\n"));
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
+  f.screen.set_maximized(&area); f.drv->frame();
+  std::string reason;
+  ASSERT_TRUE(area.editor().navigate({{"path", first}}, {}, reason));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == first; }));
+  EXPECT_TRUE(state().status().at("run").is_null());
+  const auto *source = f.screen.ui()->find("a2/main/python_source"); ASSERT_NE(source, nullptr);
+  EXPECT_EQ(source->string.value(), "print('first disk')\n");
+  source->string.assign("print('edited buffer')\n"); f.drv->frame();
+  EXPECT_TRUE(area.editor().has_unsaved_changes());
+  EXPECT_FALSE(area.editor().navigate({{"path", second}}, {}, reason));
+  EXPECT_EQ(reason, "script.navigate_unsaved");
+  EXPECT_EQ(area.editor().save_state().at("source"), "print('edited buffer')\n");
+  EXPECT_EQ(wmtest::read_text(first), "print('first disk')\n");
+  ASSERT_TRUE(area.add_tab(kEditorPython)); f.drv->frame();
+  ASSERT_TRUE(area.editor().navigate({{"path", second}}, {}, reason));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == second; }));
+  EXPECT_EQ(area.tab(0).save_state().at("source"), "print('edited buffer')\n");
+  EXPECT_TRUE(area.tab(0).has_unsaved_changes()); EXPECT_FALSE(area.tab(1).has_unsaved_changes());
+  area.set_active_tab(0); f.drv->frame();
+  const auto *save = f.screen.ui()->find("a2/main/python_save"); ASSERT_NE(save, nullptr); ASSERT_TRUE(save->enabled);
+  const auto [x, y] = f.widget_center(save->key); f.drv->click(x, y);
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return !area.editor().has_unsaved_changes(); }));
+  EXPECT_EQ(wmtest::read_text(first), "print('edited buffer')\n");
+  EXPECT_EQ(wmtest::read_text(second), "print('second disk')\n");
+  EXPECT_TRUE(state().status().at("run").is_null()); EXPECT_TRUE(state().history().empty());
+}
+
+TEST_F(ScriptPython, ProgramEditorDistinguishesBufferAndSavedFileAndRejectsExternalChanges)
+{
+  const auto file = dir.str() + "/program.py";
+  ASSERT_TRUE(wmtest::write_text(file, "print('saved file')\n"));
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
+  f.screen.set_maximized(&area); f.drv->frame();
+  std::string reason; ASSERT_TRUE(area.editor().navigate({{"path", file}}, {}, reason));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == file; }));
+  const auto *source = f.screen.ui()->find("a2/main/python_source"); ASSERT_NE(source, nullptr);
+  source->string.assign("print('current buffer')\n"); f.drv->frame();
+  const auto *run_file = f.screen.ui()->find("a2/main/python_run_file"); ASSERT_NE(run_file, nullptr);
+  EXPECT_FALSE(run_file->enabled);
+  const auto *run = f.screen.ui()->find("a2/header/python_run"); ASSERT_NE(run, nullptr); ASSERT_TRUE(run->enabled);
+  run->on_click();
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return !state().busy() && state().status().at("run").is_object(); }));
+  EXPECT_NE(output().find("current buffer"), std::string::npos);
+  EXPECT_EQ(wmtest::read_text(file), "print('saved file')\n");
+  const auto run_id = state().status().at("run").at("id");
+  const auto draft = area.editor().save_state();
+  ASSERT_TRUE(wmtest::write_text(file, "print('external revision')\n"));
+  const auto *save = f.screen.ui()->find("a2/main/python_save"); ASSERT_NE(save, nullptr); save->on_click();
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return f.screen.ui()->find("a2/main/python_source")->enabled; }));
+  EXPECT_TRUE(area.editor().has_unsaved_changes());
+  EXPECT_EQ(area.editor().save_state().at("source"), draft.at("source"));
+  EXPECT_EQ(wmtest::read_text(file), "print('external revision')\n");
+  const auto *discard = f.screen.ui()->find("a2/main/python_discard"); ASSERT_NE(discard, nullptr); discard->on_click();
+  f.drv->frame();
+  run_file = f.screen.ui()->find("a2/main/python_run_file"); ASSERT_NE(run_file, nullptr); ASSERT_TRUE(run_file->enabled);
+  run_file->on_click();
+  ASSERT_TRUE(pump([&] { return !state().busy(); }));
+  EXPECT_EQ(state().status().at("run").at("id"), run_id);
+  EXPECT_NE(state().error().find("conflict"), std::string::npos);
+  EXPECT_EQ(wmtest::read_text(file), "print('external revision')\n");
+  const auto *reload = f.screen.ui()->find("a2/main/python_reload"); ASSERT_NE(reload, nullptr); reload->on_click();
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().at("source") == "print('external revision')\n"; }));
+  EXPECT_FALSE(area.editor().has_unsaved_changes());
+}
+
+TEST_F(ScriptPython, ProgramEditorRestoresDirtyBaselineAndDropsCallbacksAfterNavigation)
+{
+  const auto first = dir.str() + "/first.py", second = dir.str() + "/second.py";
+  ASSERT_TRUE(wmtest::write_text(first, "first = 1\n")); ASSERT_TRUE(wmtest::write_text(second, "second = 2\n"));
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorPython));
+  f.screen.set_maximized(&area); f.drv->frame();
+  std::string reason; ASSERT_TRUE(area.editor().navigate({{"path", first}}, {}, reason));
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == first; }));
+  const auto *save = f.screen.ui()->find("a2/main/python_save"); ASSERT_NE(save, nullptr);
+  const auto old_save = save->on_click;
+  const auto *run = f.screen.ui()->find("a2/header/python_run"); ASSERT_NE(run, nullptr); const auto old_run = run->on_click;
+  ASSERT_TRUE(area.editor().navigate({{"path", second}}, {}, reason));
+  old_save(); old_run();
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == second; }));
+  EXPECT_TRUE(state().status().at("run").is_null()); EXPECT_EQ(wmtest::read_text(first), "first = 1\n");
+  // A retained idle Reset must not cancel the shared worker after another program tab starts.
+  const auto *reset = f.screen.ui()->find("a2/header/python_interrupt"); ASSERT_NE(reset, nullptr);
+  const auto old_reset = reset->on_click;
+  ASSERT_TRUE(area.add_tab(kEditorPython)); f.drv->frame();
+  const auto *other_source = f.screen.ui()->find("a2/main/python_source"); ASSERT_NE(other_source, nullptr);
+  other_source->string.assign("import time\ntime.sleep(0.2)\nshared_marker = 42\nprint('new task finished')\n");
+  f.drv->frame();
+  const auto *other_run = f.screen.ui()->find("a2/header/python_run"); ASSERT_NE(other_run, nullptr);
+  ASSERT_TRUE(other_run->enabled); other_run->on_click(); ASSERT_TRUE(state().busy());
+  old_reset();
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return !state().busy(); }));
+  ASSERT_TRUE(state().status().at("run").is_object());
+  EXPECT_EQ(state().status().at("run").at("state"), "succeeded") << output();
+  EXPECT_NE(output().find("new task finished"), std::string::npos);
+  ASSERT_NO_FATAL_FAILURE(execute("assert shared_marker == 42"));
+  area.set_active_tab(0); f.drv->frame();
+  const auto *source = f.screen.ui()->find("a2/main/python_source"); ASSERT_NE(source, nullptr);
+  source->string.assign("second = 'draft'\n"); f.drv->frame();
+  const auto saved = area.editor().save_state();
+  auto restored = f.shell->registry().create(kEditorPython);
+  ASSERT_NE(restored, nullptr); ASSERT_TRUE(restored->load_state(saved));
+  EXPECT_TRUE(restored->has_unsaved_changes());
+  EXPECT_EQ(restored->save_state().at("baseline"), "second = 2\n");
+  EXPECT_EQ(restored->save_state().at("source"), "second = 'draft'\n");
+  EXPECT_FALSE(restored->navigate({{"path", first}}, {}, reason)); EXPECT_EQ(reason, "script.navigate_unsaved");
 }
 
 TEST_F(ScriptPython, ViewerPayloadControlsKeepInvalidUpdatesAndStaleSourcesOut)
@@ -852,24 +1042,16 @@ TEST_F(ScriptPython, OfflineAnalysisFileButtonPreservesCurrentWorkAndOpensItsArc
   ASSERT_FALSE(std::filesystem::exists(destination));
   EXPECT_EQ(state().status().at("run").at("id"), script_before);
   EXPECT_FALSE(state().busy());
-  // Run the selected file through a real pointer click, including the scroll needed
-  // to reach the file controls below the Python input and output panels.
+  // Opening reads the selected file into the program editor without executing it.
   const auto main_rect = area.find_region(EditorArea::kMain)->ui_rect();
-  f.screen.ui()->handle_event(ui::Event::wheel({main_rect.x1() - 2, main_rect.cy()}, -1000));
-  f.drv->frame();
-  // A drop fills the path but does not change the panel's remembered closed state.
-  // Explicitly expand it, just as the Run file instructions require.
-  const auto *file_panel = f.screen.ui()->find("a2/main/python_file");
-  ASSERT_NE(file_panel, nullptr);
-  ASSERT_EQ(file_panel->rect.intersect(main_rect), file_panel->rect);
-  const auto [panel_x, panel_y] = f.widget_center(file_panel->key);
-  f.drv->click(panel_x, panel_y);
-  f.screen.ui()->handle_event(ui::Event::wheel({main_rect.x1() - 2, main_rect.cy()}, -1000));
-  f.drv->frame();
-  const auto *file_path = f.screen.ui()->find("a2/main/python_file/python_path");
+  const auto *file_path = f.screen.ui()->find("a2/main/python_path");
   ASSERT_NE(file_path, nullptr); EXPECT_EQ(file_path->string.value(), runner);
+  const auto [open_x, open_y] = f.widget_center("a2/main/python_open");
+  f.drv->click(open_x, open_y);
+  ASSERT_TRUE(pump([&] { f.drv->frame(); return area.editor().save_state().value("source_path", "") == runner; }));
+  ASSERT_FALSE(std::filesystem::exists(destination));
   EXPECT_EQ(state().status().at("run").at("id"), script_before);
-  const auto *run_file = f.screen.ui()->find("a2/main/python_file/python_run_file");
+  const auto *run_file = f.screen.ui()->find("a2/main/python_run_file");
   ASSERT_NE(run_file, nullptr); ASSERT_TRUE(run_file->enabled);
   ASSERT_EQ(run_file->rect.intersect(main_rect), run_file->rect);
   const auto layout_before = wm::layout_to_json(f.shell->capture_layout(f.screen, nullptr));
@@ -937,6 +1119,7 @@ TEST_F(ScriptPython, OfflineAnalysisFileButtonPreservesCurrentWorkAndOpensItsArc
   EXPECT_EQ(project.project()->revision, 3);
   ASSERT_TRUE(area.set_tab_type(0, kEditorAnalysisGraph));
   ASSERT_TRUE(area.editor().load_state({{"saved", true}}));
+  area.set_sidebar_open(true);
   area.find_region(EditorArea::kSidebar)->set_size_1x(550); f.drv->frame();
   ASSERT_NO_FATAL_FAILURE(click("analysis_list"));
   ASSERT_NO_FATAL_FAILURE(wait([&] { return widget("analysis_documents") && widget("analysis_documents")->enabled; }));

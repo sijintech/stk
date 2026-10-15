@@ -173,7 +173,7 @@ class WorkflowEditorPython : public ::testing::Test {
   int64_t revision = 0;
   AppStore &store() { return f.shell->store(); }
   ProjectState &project() { return store().project(); }
-  EditorArea &area() { return f.area("a2"); }
+  EditorArea &area() { return f.area("a3"); }  // editing pane; keep the default Viewer in a2
   std::string handle() { return project().project()->handle; }
   const ui::Widget *widget(const std::string &key) { return f.screen.ui()->find(key); }
   bool shows(const std::string &text)
@@ -226,6 +226,7 @@ class WorkflowEditorPython : public ::testing::Test {
     options.python.configured = python; options.state_dir = directory.str() + "/bridge"; options.cache_dir = directory.str() + "/cache";
     options.env["PYTHONPATH"] = STK_REPO_ROOT; options.env["STK_PROFILES_FILE"] = directory.str() + "/profiles.json";
     options.env["STK_STATE_DIR"] = directory.str() + "/runtime"; options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.command = {python, "-u", core::path_to_utf8(directory.path() / "bridge.py"), directory.str(), "--stdio",
         "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
     options.executor = loop.executor(); options.strict = options.validate = true; options.call_timeout_s = 10;
@@ -266,6 +267,7 @@ class WorkflowEditorPython : public ::testing::Test {
     project().refresh();
     ASSERT_TRUE(loop.pump_until([&] { return !project().busy() && project().project()->revision == revision; }, 30));
     ASSERT_TRUE(area().set_tab_type(0, kEditorWorkflow));
+    area().set_sidebar_open(true);  // this fixture inspects editing controls, not the closed default inspector
     f.screen.set_maximized(&area()); area().find_region(EditorArea::kSidebar)->set_size_1x(560); f.drv->frame();
     // The first workflow is shown and checked without a click.
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("All references and links are valid."); }));
@@ -477,7 +479,10 @@ TEST_F(WorkflowEditorPython, EachWorkflowKeepsItsViewAndStepAndTheLayoutReopensT
 TEST_F(WorkflowEditorPython, HomeSearchFindsWorkflowsAnalysesAndFilesAndOpensThem)
 {
   f.shell->restore_split_layout(&f.screen);
+  f.tab("a1", kEditorWorkspace); f.drv->frame();
   ASSERT_EQ(f.area("a1").editor().type().id, kEditorWorkspace);
+  const auto selected_table = project().table_id(), selected_record = project().record_id();
+  auto *viewer_editor = &f.area("a2").editor();
   const auto find = [&](const std::string &query) {
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workspace_search") && widget("workspace_search")->enabled; }));
     widget("workspace_search_text")->string.assign(query);
@@ -487,24 +492,23 @@ TEST_F(WorkflowEditorPython, HomeSearchFindsWorkflowsAnalysesAndFilesAndOpensThe
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Workflows (1)") && shows("Saved analyses (1)"); }));
   ASSERT_NO_FATAL_FAILURE(click("workspace_search_open/0"));  // the workflow comes first
   ASSERT_NO_FATAL_FAILURE(frames_until([&] {
-    auto *maximized = dynamic_cast<EditorArea *>(f.screen.maximized());
-    return maximized && maximized->editor().type().id == kEditorWorkflow && shows("Temperature scan · 3 steps");
+    return !f.screen.maximized() && area().editor().type().id == kEditorWorkflow && shows("Temperature scan · 3 steps");
   }));
-  // A file opens the file page with its row selected.
-  f.shell->restore_split_layout(&f.screen);
+  EXPECT_EQ(&f.area("a2").editor(), viewer_editor);
+  // A file opens its tree details without taking over the shared table/record selection.
   ASSERT_NO_FATAL_FAILURE(find("field.vtk"));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Files (1)"); }));
   EXPECT_FALSE(shows("Nothing found"));
   ASSERT_NO_FATAL_FAILURE(click("workspace_search_open/0"));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] {
-    auto *maximized = dynamic_cast<EditorArea *>(f.screen.maximized());
-    return maximized && maximized->editor().type().id == kEditorProject && !project().record_id().empty();
+    const auto *open = widget("files_open_viewer");
+    return !f.screen.maximized() && f.area("a1").editor().type().id == kEditorFiles &&
+        shows("field.vtk") && open && open->enabled;
   }));
-  EXPECT_EQ(project().table_id(), "becb9ec9-1a27-5d31-8aa3-5402f09f43a9");  // the file index
-  ASSERT_NE(project().table(), nullptr);
-  EXPECT_EQ(project().table()->text(project().selected_record(), 0), "field.vtk");
+  EXPECT_EQ(project().table_id(), selected_table);
+  EXPECT_EQ(project().record_id(), selected_record);
+  EXPECT_EQ(&f.area("a2").editor(), viewer_editor);
   // Nothing found is said plainly; searching never changes the project.
-  f.shell->restore_split_layout(&f.screen);
   f.tab("a1", kEditorWorkspace); f.drv->frame();  // the file page took Home's area
   const auto before = project().project()->revision;
   ASSERT_NO_FATAL_FAILURE(find("no such words"));
@@ -866,6 +870,7 @@ TEST_F(WorkflowEditorPython, HomeListsAFailedRunFirstAndOpensItInTheWorkflowEdit
   project().refresh();
   // Home lists it under "Needs you" and the status bar counts it.
   f.shell->restore_split_layout(&f.screen);
+  f.tab("a1", kEditorWorkspace); f.drv->frame();
   ASSERT_EQ(f.area("a1").editor().type().id, kEditorWorkspace);
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Failed · Workflow run · Temperature scan · 1/2 done"); }));
   EXPECT_TRUE(shows("Needs you (1)"));
@@ -883,9 +888,9 @@ TEST_F(WorkflowEditorPython, HomeListsAFailedRunFirstAndOpensItInTheWorkflowEdit
   ASSERT_NO_FATAL_FAILURE(click(open));
   // The workflow editor opens that run; opening it marked the item viewed, so the count is gone.
   ASSERT_NO_FATAL_FAILURE(frames_until([&] {
-    auto *maximized = dynamic_cast<EditorArea *>(f.screen.maximized());
-    return maximized && maximized->editor().type().id == kEditorWorkflow && shows("Stopped · 1/2 done · 1 failed");
+    return !f.screen.maximized() && area().editor().type().id == kEditorWorkflow && shows("Stopped · 1/2 done · 1 failed");
   }));
+  EXPECT_EQ(f.area("a2").editor().type().id, kEditorViewer);
   EXPECT_EQ(widget("status_attention"), nullptr);
   EXPECT_EQ(calls("project.attention.viewed"), 1u);
   // The shown run belongs to this workflow's view (U4): another workflow and back shows it again.
@@ -990,6 +995,7 @@ TEST_F(WorkflowEditorPython, HomeArchivesAFailedRun)
   ASSERT_EQ(io::get_string(out.at("run"), "status"), "stopped");
   project().refresh();
   f.shell->restore_split_layout(&f.screen);
+  f.tab("a1", kEditorWorkspace); f.drv->frame();
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("Failed · Workflow run · Temperature scan · 1/2 done"); }));
   ASSERT_NE(widget("status_attention"), nullptr);
   std::string shelve;

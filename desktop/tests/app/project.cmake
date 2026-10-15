@@ -9,7 +9,8 @@ add_executable(stk-project-tests project_test.cc script_test.cc project_table_vi
   analysis_input_reuse_test.cc analysis_input_reuse_editor_test.cc
   analysis_result_inspection_test.cc analysis_result_inspection_editor_test.cc
   analysis_table_grid_test.cc analysis_table_grid_editor_test.cc skills_catalog_test.cc analysis_links_editor_test.cc
-  workflow_editor_test.cc workflow_draft_test.cc)
+  workflow_editor_test.cc workflow_draft_test.cc table_editor_test.cc project_file_tree_test.cc
+  workbench_modules_test.cc)
 target_link_libraries(stk-project-tests PRIVATE stk_jobs_test_support GTest::gtest_main)
 if(MSVC)
   target_compile_options(stk-project-tests PRIVATE /W3 /utf-8 /bigobj)
@@ -282,6 +283,26 @@ foreach(_mode wide narrow saved_wide saved_narrow)
         --mode ${_mode} --gpu-backend ${_be} --lang ${_lang}
         --export "${_jobs_out}/analysis_graph_${_mode}_${_be}_${_lang}.png")
       set_tests_properties(analysis_graph_${_mode}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
+        ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
+        FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
+    endforeach()
+  endforeach()
+endforeach()
+
+# Default, composed workspace: real project/tree/table and Viewer, with nodes or Python beside it.
+add_executable(stk-workbench-modules-render workbench_modules_render.cc)
+target_link_libraries(stk-workbench-modules-render PRIVATE stk_jobs_test_support stk_gfx)
+set_target_properties(stk-workbench-modules-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${STK_DESKTOP_BIN_DIR}")
+if(MSVC)
+  target_compile_options(stk-workbench-modules-render PRIVATE /W3 /utf-8 /bigobj)
+endif()
+foreach(_mode nodes_wide nodes_narrow python_wide python_narrow)
+  foreach(_lang en zh)
+    foreach(_be ${_jobs_backends})
+      add_test(NAME workbench_modules_${_mode}_render_${_be}_${_lang} COMMAND stk-workbench-modules-render
+        --mode ${_mode} --gpu-backend ${_be} --lang ${_lang}
+        --export "${_jobs_out}/workbench_modules_${_mode}_${_be}_${_lang}.png")
+      set_tests_properties(workbench_modules_${_mode}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
         ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
         FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
     endforeach()

@@ -549,23 +549,46 @@ static int index_in_parent(const ScreenNode *node)
   return -1;
 }
 
-Area *Screen::split(Area &area, const SplitDir dir, float factor, const bool new_first)
+bool Screen::swap_areas(Area &first, Area &second)
+{
+  if (&first == &second || first.screen_ != this || second.screen_ != this ||
+      !first.node_ || !second.node_ || first.node_->area.get() != &first ||
+      second.node_->area.get() != &second || maximized_ || capture_ != Capture::None ||
+      (ui_ && ui_->text_input_active())) {
+    return false;
+  }
+  auto *left = first.node_;
+  auto *right = second.node_;
+  std::swap(left->area, right->area);
+  first.node_ = right;
+  second.node_ = left;
+  splitters_.clear();
+  first.tag_redraw();
+  second.tag_redraw();
+  tag_redraw();
+  return true;
+}
+
+Area *Screen::split(Area &area, const SplitDir dir, float factor, const bool new_first,
+                    const std::string &new_area_type)
 {
   ScreenNode *leaf = area.node_;
   if (!leaf || area.screen_ != this || !std::isfinite(factor)) {
     return nullptr;
   }
   factor = std::clamp(factor, 0.05f, 0.95f);
-  std::unique_ptr<Area> created = create_area(area.type());
+  std::unique_ptr<Area> created = create_area(new_area_type.empty() ? area.type() : new_area_type);
   if (!created) {
     return nullptr;
   }
-  created->load_state(area.save_state());
-  for (const auto &r : created->regions()) {
-    if (const Region *src = area.find_region(r->name())) {
-      r->resizable = src->resizable;
-      r->set_size_1x(src->size_1x());
-      r->set_visible(src->visible());
+  if (new_area_type.empty()) {
+    created->load_state(area.save_state());
+    for (const auto &r : created->regions()) {
+      if (const Region *src = area.find_region(r->name())) {
+        r->resizable = src->resizable;
+        r->set_size_1x(src->size_1x());
+        r->set_visible(src->visible());
+      }
     }
   }
   /* Refuse splits that cannot give both areas their minimum size (known after a layout). */

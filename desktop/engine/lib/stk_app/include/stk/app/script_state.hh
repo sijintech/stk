@@ -31,7 +31,12 @@ class ScriptState {
   const std::vector<std::string> &history() const { return history_; }
 
   bool execute(const std::string &source);
-  bool execute_file(const std::string &path);
+  bool execute_file(const std::string &path, const std::string &expected_version = {});
+  /** Local .py document operations. Never execute, mutate history or print document source. */
+  bool files_supported() const;
+  bool read_file(const std::string &path, Completion completion);
+  bool write_file(const std::string &path, const std::string &source,
+                  const std::string &expected_version, Completion completion);
   bool interrupt();
   void refresh();
   void clear_output();

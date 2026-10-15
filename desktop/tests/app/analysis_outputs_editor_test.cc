@@ -193,6 +193,7 @@ class AnalysisOutputsEditorPython : public ::testing::Test {
     revision = saved.at("revision").get<int64_t>(); project().refresh();
     ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
     ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph)); ASSERT_TRUE(area().editor().load_state({{"saved", true}}));
+    area().set_sidebar_open(true);
     f.screen.set_maximized(&area()); area().find_region(EditorArea::kSidebar)->set_size_1x(510); f.drv->frame();
     ASSERT_NO_FATAL_FAILURE(click("analysis_list"));
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_documents") != nullptr; }));
@@ -364,8 +365,19 @@ TEST_F(AnalysisOutputsEditorPython, ProjectCloseAndReopenPreserveDetachedOutputD
   ASSERT_NO_FATAL_FAILURE(output("image", true));
   const auto old_save = widget("analysis_parameters_save")->on_click;
   const auto old_clear = widget("analysis_outputs_clear")->on_click;
+  const auto original_handle = handle();
+  EXPECT_FALSE(project().close());
+  EXPECT_EQ(handle(), original_handle); EXPECT_FALSE(project().busy());
+  EXPECT_TRUE(widget("analysis_output_requested")->boolean.value());
+  // Test-only forced session loss preserves the detached-draft regression; the ordinary
+  // desktop close above is deliberately refused while the local output change is unsaved.
+  project().set_selection_guard({});
   ASSERT_TRUE(project().close());
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
+  auto *shell = f.shell.get(); auto *state = &project(); const auto weak = shell->lifetime();
+  state->set_selection_guard([shell, state, weak] {
+    return !weak.expired() && (!state->project() || shell->project_selection_available(state->project()->id));
+  });
   old_save(); old_clear(); f.drv->frame();
   EXPECT_TRUE(widget("analysis_output_requested")->boolean.value());
   EXPECT_FALSE(widget("analysis_output_choices")->enabled);

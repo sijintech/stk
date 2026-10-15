@@ -142,6 +142,8 @@ class Window {
    * that is not consumed closes the window.
    */
   std::function<bool(const Event &)> on_event;
+  /** Optional close veto, checked before user event handlers on every native window. */
+  std::function<bool()> can_close;
 
   /**
    * Adds a function run once when the window is being destroyed (WindowManager::close_window or

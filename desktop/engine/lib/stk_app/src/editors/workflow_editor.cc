@@ -71,6 +71,11 @@ constexpr size_t kMemoryLimit = 50;
 class WorkflowEditor final : public Editor {
  public:
   explicit WorkflowEditor(const EditorType &type) : Editor(type) {}
+  bool has_unsaved_changes() const override { return draft_.dirty(); }
+  bool can_change_project_selection(const std::string_view project_id) const override
+  {
+    return !store_ || !store_->project().project() || store_->project().project()->id != project_id || !draft_.dirty();
+  }
   ~WorkflowEditor() override { *alive_ = false; }
   bool draws_gpu() const override { return true; }
   bool has_sidebar() const override { return true; }

@@ -160,6 +160,10 @@ struct TableSpec {
   /** Optional model-value ordering, independent of formatted cell text. Negative/zero/positive
    * means before/equal/after. Must be a strict weak ordering; ties retain model order. */
   std::function<int(int row_a, int row_b, int column)> compare;
+  /** Optional pointer selection of a body cell, after selected.assign(model_row). Column is the
+   * actual column index, including horizontally scrolled columns; headers and empty rows do not
+   * activate it. Existing row-only selection and keyboard navigation keep their semantics. */
+  std::function<void(int model_row, int column)> on_cell_select;
 };
 
 struct ImageSpec {

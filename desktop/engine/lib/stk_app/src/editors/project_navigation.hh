@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include <algorithm>
+
 #include "stk/app/editor_area.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/app/project_state.hh"
@@ -25,7 +27,7 @@ inline std::function<void()> project_navigation_action(EditorContext &ctx, std::
 }
 
 /** Global navigation (no project scope), e.g. the shared skill library. */
-inline std::function<void()> editor_navigation_action(EditorContext &ctx, std::string editor_id, const bool maximize = true)
+inline std::function<void()> editor_navigation_action(EditorContext &ctx, std::string editor_id, const bool maximize = false)
 {
   auto *area = &ctx.area;
   auto *editor = &area->editor();
@@ -56,7 +58,8 @@ inline void workspace_link(ui::Layout &row, EditorContext &ctx)
 {
   // Widget callbacks can be retained by a menu or an integration after this frame.
   row.button("project_workspace", ctx.tr("editor.workspace.title"),
-             project_navigation_action(ctx, "workspace")).width(6);
+             project_navigation_action(ctx, "workspace")).width(ctx.draw && ctx.ui ?
+                 std::min(6.0f, float(ctx.draw->rect.width()) / ctx.ui->style().unit * .4f) : 6.0f);
 }
 
 }  // namespace stk::app

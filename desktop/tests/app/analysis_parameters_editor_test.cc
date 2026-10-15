@@ -132,6 +132,13 @@ class AnalysisParametersEditorPython : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(type(value));
     ASSERT_NO_FATAL_FAILURE(click("analysis_parameter_apply"));
   }
+  void restore_desktop_selection_guard()
+  {
+    auto *shell = f.shell.get(); auto *state = &project(); const auto weak = shell->lifetime();
+    state->set_selection_guard([shell, state, weak] {
+      return !weak.expired() && (!state->project() || shell->project_selection_available(state->project()->id));
+    });
+  }
   void save() {
     ASSERT_NO_FATAL_FAILURE(click("analysis_parameters_save"));
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision > revision &&
@@ -173,6 +180,7 @@ class AnalysisParametersEditorPython : public ::testing::Test {
     revision = saved.at("revision").get<int64_t>(); project().refresh();
     ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
     ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph)); ASSERT_TRUE(area().editor().load_state({{"saved", true}}));
+    area().set_sidebar_open(true);
     f.screen.set_maximized(&area()); area().find_region(EditorArea::kSidebar)->set_size_1x(510); f.drv->frame();
     ASSERT_NO_FATAL_FAILURE(click("analysis_list"));
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_documents") != nullptr; }));
@@ -299,8 +307,15 @@ TEST_F(AnalysisParametersEditorPython, ExternalRevisionAndSessionSwitchPreserveD
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy(); }));
   EXPECT_FALSE(widget("analysis_parameters_save")->enabled); EXPECT_FALSE(widget("analysis_parameter_value")->enabled);
   EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "2"); save_old();
+  const auto original_handle = handle();
+  EXPECT_FALSE(project().close());
+  EXPECT_EQ(handle(), original_handle); EXPECT_FALSE(project().busy());
+  EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "2");
+  // Test-only external session loss: normal desktop closure above must preserve this draft.
+  project().set_selection_guard({});
   ASSERT_TRUE(project().close());
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
+  restore_desktop_selection_guard();
   ASSERT_TRUE(project().create(directory.str() + "/other-project", "Different project"));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().loaded() && !project().busy(); })); save_old();
   EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "2"); EXPECT_FALSE(widget("analysis_parameter_value")->enabled);
@@ -364,7 +379,13 @@ TEST_F(AnalysisParametersEditorPython, DestroyedEditorRejectsRetainedBindingsAnd
 {
   ASSERT_NO_FATAL_FAILURE(edit("component", "2")); const auto save_old = widget("analysis_parameters_save")->on_click;
   const auto input = widget("analysis_parameter_value")->string;
-  ASSERT_TRUE(area().set_tab_type(0, kEditorProject)); input.assign("3"); save_old(); loop.run_ready();
+  EXPECT_FALSE(area().set_tab_type(0, kEditorProject));
+  EXPECT_EQ(area().editor().type().id, kEditorAnalysisGraph);
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(input.value(), "2");
+  // Force destruction only in this fixture, modelling an external window/owner loss. AppStore
+  // remains alive so late bindings must fence the destroyed editor rather than write anywhere.
+  f.screen.clear(); input.assign("3"); save_old(); loop.run_ready();
   EXPECT_TRUE(calls("project.analyses.update").empty()); EXPECT_EQ(project().project()->revision, revision);
 }
 
@@ -496,8 +517,16 @@ TEST_F(AnalysisParametersEditorPython, ActiveInvalidTextSurvivesProjectCloseAndR
   ASSERT_NO_FATAL_FAILURE(edit("component", "2"));
   const auto old_save = widget("analysis_parameters_save")->on_click;
   ASSERT_NO_FATAL_FAILURE(type("1e", false));
+  const auto original_handle = handle();
+  EXPECT_FALSE(project().close());
+  EXPECT_EQ(handle(), original_handle); EXPECT_FALSE(project().busy());
+  ASSERT_TRUE(f.screen.ui()->text_input_active());
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "1e");
+  // Test-only external session loss, independent of the guarded desktop close action.
+  project().set_selection_guard({});
   ASSERT_TRUE(project().close());
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
+  restore_desktop_selection_guard();
   ASSERT_NE(widget("analysis_parameter_value"), nullptr);
   EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "1e");
   EXPECT_FALSE(widget("analysis_parameter_value")->enabled);

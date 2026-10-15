@@ -239,6 +239,7 @@ class ProjectAnalysisRunsPython : public ::testing::Test {
     auto &area = f.area("a2");
     ASSERT_TRUE(area.set_tab_type(0, kEditorAnalysisGraph));
     ASSERT_TRUE(area.editor().load_state({{"saved", true}}));
+    area.set_sidebar_open(true);
     f.screen.set_maximized(&area); area.find_region(EditorArea::kSidebar)->set_size_1x(440); f.drv->frame();
     ASSERT_NE(widget("analysis_list"), nullptr); widget("analysis_list")->on_click();
     ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("analysis_documents") != nullptr; }, 30));

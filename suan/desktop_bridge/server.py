@@ -30,6 +30,7 @@ from .analysis_runs import AnalysisRunExecutor
 from .workflow_runs import WorkflowRunExecutor
 from .project_runs import ProjectRuns
 from .scripts import ScriptSessions
+from .script_files import read_file as read_script_file, write_file as write_script_file
 from .ui_requests import UIRequests, UI_OPERATIONS
 from .protocol import (MAX_LINE_BYTES, PROTOCOL_VERSION, BridgeError, LineReader, check_envelope, decode_line,
                        encode_message, error_object, leading_id)
@@ -280,6 +281,8 @@ class Bridge:
             "project.csv.import": lambda p, c: self.csv_project("import", p, c),
             "project.csv.export": lambda p, c: self.csv_project("export", p, c),
             "project.files.list": lambda p, c: self.projects.files("list", p),
+            "project.files.children": lambda p, c: self.projects.files("children", p),
+            "project.files.resolve_path": lambda p, c: self.projects.files("resolve_path", p),
             "project.files.index": lambda p, c: self.edit_project_files("index", p, c),
             "project.files.refresh": lambda p, c: self.edit_project_files("refresh", p, c),
             "project.files.resolve": lambda p, c: self.projects.files("resolve", p),
@@ -366,6 +369,8 @@ class Bridge:
             "project.runs.submit": lambda p, c: self.run_project("submit", p, c),
             "project.runs.refresh": lambda p, c: self.run_project("refresh", p, c),
             "project.runs.cancel": lambda p, c: self.run_project("cancel", p, c),
+            "script.file.read": lambda p, c: read_script_file(p),
+            "script.file.write": lambda p, c: write_script_file(p),
             "script.open": lambda p, c: self.scripts.open(p),
             "script.status": lambda p, c: self.scripts.status(p),
             "script.execute": self.scripts.execute,
@@ -646,6 +651,7 @@ class Bridge:
                  "project.requests.propose_edits", "project.requests.edit_proposal", "project.requests.usage",
                  "project.csv.import", "project.csv.export",
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
+                 "project.files.children", "project.files.resolve_path",
                  "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
                  "project.workflows.create", "project.workflows.update", "project.workflows.get",
                  "project.workflows.list", "project.workflows.validate", "project.workflows.choices",

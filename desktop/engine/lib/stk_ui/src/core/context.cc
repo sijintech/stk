@@ -1504,6 +1504,17 @@ EventResult Context::mouse_down(const Event &e)
         const int model_row = w->table ? table_perm(*w)[size_t(view_row)] : view_row;
         Binding<int> sel = w->list ? w->list->selected : w->table->selected;
         sel.assign(model_row);
+        if (w->table && w->table->on_cell_select) {
+          float x = w->rect.x + style_.pixel - table_scroll_x(*w);
+          for (int column = 0; column < int(w->table->columns.size()); ++column) {
+            const float width = table_col_px(*w, column);
+            if (e.pos.x >= x && e.pos.x < x + width) {
+              w->table->on_cell_select(model_row, column);
+              break;
+            }
+            x += width;
+          }
+        }
         if (dbl && w->list && w->list->on_activate) {
           w->list->on_activate(model_row);
         }

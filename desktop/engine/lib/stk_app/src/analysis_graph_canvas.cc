@@ -282,6 +282,14 @@ ui::DrawList AnalysisGraphCanvas::draw_list(double width, double height, double 
                 small_font, ui::Color::rgb(0xC3CEDB));
       if (problem) { draw.text("!", {float(box.x + box.width - 15 * scale), float(box.y + 17 * scale)}, title_font, accent); }
     }
+    else if (zoom_ >= .2 && box.width >= 28 * ui_scale_ && box.height >= 14 * ui_scale_) {
+      // A fitted graph beside the Viewer often falls below detail zoom. Keep its stable node
+      // IDs readable at the UI font size instead of showing an anonymous row of empty boxes.
+      const ui::FontStyle overview_font{ui::FontKind::Regular, float(11 * ui_scale_)};
+      draw.text(ui::clip_text(node.id, float(box.width - 8 * ui_scale_), measurer, overview_font),
+                {float(box.x + 4 * ui_scale_), float(box.y + 12 * ui_scale_)},
+                overview_font, ui::Color::rgb(0xF0F2F5));
+    }
     auto sockets = [&](const std::vector<AnalysisGraphPort> &ports, bool input) {
       const bool shared_row = !node.inputs.empty() && !node.outputs.empty();
       const double available = (shared_row ? box.width / 2 : box.width) - 14 * scale;

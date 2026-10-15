@@ -69,6 +69,12 @@ struct AppFixture {
   std::pair<int, int> widget_center(const std::string &key) const;
 };
 
+/** Explicit pre-2026-10-14 layout for geometry and persisted-layout compatibility tests.
+ * AppFixture itself always exercises the current product default. */
+struct LegacyAppFixture : AppFixture {
+  LegacyAppFixture(const std::string &lang = "en", float scale = 1.0f, int width = 1280, int height = 800);
+};
+
 /** Serializes areas, regions, splitters and UI blocks / widgets of the last frame (goldens). */
 std::string dump_screen(const wm::Screen &screen);
 

@@ -26,12 +26,14 @@ TEST(WorkspaceNavigation, EmptyWorkspaceHasOnlyProjectManagementAndSurvivesShell
   }
   auto action = f.screen.ui()->find("workspace_project")->on_click;
   action(); f.screen.run_deferred(); f.drv->frame();
-  auto *target = dynamic_cast<EditorArea *>(f.screen.maximized()); ASSERT_NE(target, nullptr);
-  EXPECT_EQ(target->editor().type().id, kEditorProject);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  auto &target = f.area("a1");
+  EXPECT_EQ(target.editor().type().id, kEditorProject);
   EXPECT_NE(f.screen.ui()->find("project_location/directory"), nullptr);
   auto back = f.screen.ui()->find("project_workspace")->on_click;
   back(); f.screen.run_deferred(); f.drv->frame();
-  EXPECT_EQ(f.screen.maximized(), &area);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(area.editor().type().id, kEditorWorkspace);
   action = f.screen.ui()->find("workspace_project")->on_click;
   f.shell.reset();
   action(); back(); // Screens may outlive the shell in headless integrations.
@@ -45,11 +47,17 @@ bool shows(const wmtest::AppFixture &f, const std::string &text)
   return false;
 }
 
-TEST(WorkspaceNavigation, StartsOnTheGuidedWorkspaceAndOpensJobsAndViewerWithoutAProject)
+TEST(WorkspaceNavigation, GuidedWorkspaceRemainsAvailableAndOpensJobsAndViewerWithoutAProject)
 {
   wmtest::AppFixture f;
   auto &home = f.area("a1");
-  ASSERT_EQ(home.editor().type().id, kEditorWorkspace);  // the default layout's start page
+  ASSERT_EQ(home.editor().type().id, kEditorFiles);
+  for (int i = 0; i < home.tab_count(); ++i) {
+    if (home.tab(i).type().id == kEditorWorkspace) { home.set_active_tab(i); break; }
+  }
+  ASSERT_EQ(home.editor().type().id, kEditorWorkspace);
+  const int original_tabs = home.tab_count();
+  f.screen.set_maximized(&home); // Explicitly expose the optional guide's buttons in this test.
   f.drv->frame();
   EXPECT_TRUE(shows(f, "1. Project  ·  next"));
   EXPECT_TRUE(shows(f, "3. Where to run"));
@@ -57,15 +65,16 @@ TEST(WorkspaceNavigation, StartsOnTheGuidedWorkspaceAndOpensJobsAndViewerWithout
   ASSERT_TRUE(f.screen.ui()->find("workspace_runtime")->enabled);
   auto [x, y] = f.widget_center("workspace_runtime");
   f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame();
-  auto *target = dynamic_cast<EditorArea *>(f.screen.maximized());
-  ASSERT_NE(target, nullptr);
-  EXPECT_EQ(target, &home);  // Jobs is the Workspace's neighbour tab: reused, not duplicated
-  EXPECT_EQ(target->editor().type().id, kEditorJobs);
-  EXPECT_EQ(home.tab_count(), 2);
-  f.shell->restore_split_layout(&f.screen); home.set_active_tab(0); f.drv->frame();
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(home.editor().type().id, kEditorJobs);
+  EXPECT_EQ(home.tab_count(), original_tabs);
+  for (int i = 0; i < home.tab_count(); ++i) {
+    if (home.tab(i).type().id == kEditorWorkspace) { home.set_active_tab(i); break; }
+  }
+  f.screen.set_maximized(&home); f.drv->frame();
   std::tie(x, y) = f.widget_center("workspace_viewer");
   f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame();
-  EXPECT_EQ(f.screen.maximized(), nullptr);  // the Viewer keeps its Properties beside it
+  EXPECT_EQ(f.screen.maximized(), nullptr);  // explicit navigation restores the peer panes
   EXPECT_EQ(f.area("a2").editor().type().id, kEditorViewer);
   EXPECT_EQ(home.editor().type().id, kEditorWorkspace);
 }
@@ -91,7 +100,15 @@ class WorkspaceNavigationPython : public ::testing::Test {
     f.shell->open_project_page_later(&f.screen, page, handle());
     f.screen.run_deferred(); f.drv->frame();
   }
-  EditorArea &destination() { return *dynamic_cast<EditorArea *>(f.screen.maximized()); }
+  EditorArea &destination(const std::string &type)
+  {
+    for (auto *base : f.screen.areas()) {
+      auto *area = dynamic_cast<EditorArea *>(base);
+      if (area && area->editor().type().id == type) { return *area; }
+    }
+    ADD_FAILURE() << "No active destination: " << type;
+    return home();
+  }
   void SetUp() override
   {
     std::string python = STK_BRIDGE_TEST_PYTHON_DEFAULT;
@@ -105,16 +122,19 @@ class WorkspaceNavigationPython : public ::testing::Test {
     options.env["STK_STATE_DIR"] = dir.str() + "/runtime";
     options.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
     options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.strict = options.validate = true;
     client = bridge::Client::create(options);
     ASSERT_TRUE(client->start()); ASSERT_TRUE(client->wait_ready(60)); loop.run_ready();
     f.shell->store().set_bridge(client.get()); project().sync();
     ASSERT_TRUE(project().create(dir.str() + "/project", "Workspace navigation"));
     ASSERT_NO_FATAL_FAILURE(idle()); ASSERT_TRUE(project().loaded());
-    ASSERT_TRUE(home().set_tab_type(0, kEditorWorkspace));
-    ASSERT_TRUE(f.area("a2").add_tab(kEditorProject));
-    ASSERT_TRUE(f.area("a3").add_tab(kEditorAI));
-    ASSERT_TRUE(f.area("a4").add_tab(kEditorAnalysisGraph));
+    // This navigation fixture explicitly chooses one destination per editor. The product's
+    // default and old saved layouts have separate coverage; shared AppFixture stays unchanged.
+    ASSERT_TRUE(home().set_tabs({kEditorWorkspace, kEditorJobs, kEditorFiles}, 0));
+    ASSERT_TRUE(f.area("a2").set_tabs({kEditorViewer, kEditorProject, kEditorTable}, 1));
+    ASSERT_TRUE(f.area("a3").set_tabs({kEditorProperties, kEditorAI}, 1));
+    ASSERT_TRUE(f.area("a4").set_tabs({kEditorLogs, kEditorAnalysisGraph}, 1));
     f.screen.set_maximized(&home()); f.drv->frame();
   }
   void TearDown() override
@@ -151,25 +171,28 @@ TEST_F(WorkspaceNavigationPython, VisibleButtonsReuseEditorsAndRevealFilesAndBot
   const auto camera = viewer.camera_serial();
   const auto revision = project().project()->revision;
   auto *tables = &f.area("a2").editor(), *ai = &f.area("a3").editor(), *graph = &f.area("a4").editor();
+  auto *files = &home().tab(2);
   const int n2 = f.area("a2").tab_count(), n3 = f.area("a3").tab_count(), n4 = f.area("a4").tab_count();
   const auto click = [&](const char *page) {
+    f.screen.set_maximized(&home()); f.drv->frame();
     const auto key = std::string("workspace_") + page;
     ASSERT_NE(widget(key), nullptr); ASSERT_TRUE(widget(key)->enabled);
     const auto [x, y] = f.widget_center(key); f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame();
   };
   ASSERT_NO_FATAL_FAILURE(click("files"));
-  EXPECT_EQ(&destination().editor(), tables); EXPECT_NE(widget("project_files/paths"), nullptr);
-  EXPECT_EQ(widget("project_view"), nullptr);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(&destination(kEditorFiles).editor(), files); EXPECT_NE(widget("files_tree"), nullptr);
+  EXPECT_EQ(widget(destination(kEditorFiles).id() + "/main/project_view"), nullptr);
   go("workspace"); ASSERT_NO_FATAL_FAILURE(click("simulation_runs"));
-  EXPECT_EQ(&destination().editor(), tables); EXPECT_NE(widget("project_runs/list"), nullptr);
+  EXPECT_EQ(&destination(kEditorProject).editor(), tables); EXPECT_NE(widget("project_runs/list"), nullptr);
   go("workspace"); ASSERT_NO_FATAL_FAILURE(click("analysis_runs"));
-  EXPECT_EQ(&destination().editor(), graph); ASSERT_NE(widget("analysis_saved_section"), nullptr);
+  EXPECT_EQ(&destination(kEditorAnalysisGraph).editor(), graph); ASSERT_NE(widget("analysis_saved_section"), nullptr);
   EXPECT_EQ(widget("analysis_saved_section")->index.value(), 1); EXPECT_NE(widget("analysis_run_list"), nullptr);
   go("workspace"); ASSERT_NO_FATAL_FAILURE(click("analyses"));
-  EXPECT_EQ(&destination().editor(), graph); EXPECT_EQ(widget("graph_mode")->index.value(), 2);
+  EXPECT_EQ(&destination(kEditorAnalysisGraph).editor(), graph); EXPECT_EQ(widget("graph_mode")->index.value(), 2);
   EXPECT_EQ(widget("analysis_saved_section")->index.value(), 0); EXPECT_NE(widget("analysis_list"), nullptr);
   go("workspace"); ASSERT_NO_FATAL_FAILURE(click("conversation"));
-  EXPECT_EQ(&destination().editor(), ai);
+  EXPECT_EQ(&destination(kEditorAI).editor(), ai);
   ASSERT_NO_FATAL_FAILURE(idle());
   EXPECT_EQ(project().project()->revision, revision);
   EXPECT_EQ(f.area("a2").tab_count(), n2); EXPECT_EQ(f.area("a3").tab_count(), n3); EXPECT_EQ(f.area("a4").tab_count(), n4);
@@ -178,7 +201,7 @@ TEST_F(WorkspaceNavigationPython, VisibleButtonsReuseEditorsAndRevealFilesAndBot
   viewer.close();
 }
 
-TEST_F(WorkspaceNavigationPython, FilesSelectsExistingIndexWithoutEditingIt)
+TEST_F(WorkspaceNavigationPython, FilesShowsExistingIndexWithoutEditingOrChangingSelection)
 {
   { std::ofstream file(dir.path() / "input.txt"); file << "input fixture"; }
   ASSERT_TRUE(project().index_files({core::path_to_utf8(dir.path() / "input.txt")}));
@@ -186,9 +209,15 @@ TEST_F(WorkspaceNavigationPython, FilesSelectsExistingIndexWithoutEditingIt)
   const auto revision = project().project()->revision;
   const auto table = io::get_string(project().file_index(), "table_id"); ASSERT_FALSE(table.empty());
   const auto snapshot = project().tables();
+  const auto selected = project().table_id(), record = project().record_id();
   go("files");
-  EXPECT_EQ(project().table_id(), table); EXPECT_EQ(project().project()->revision, revision);
-  ASSERT_NE(widget(table + "/records"), nullptr); EXPECT_EQ(widget(table + "/records")->table->rows, 1);
+  EXPECT_EQ(project().table_id(), selected); EXPECT_EQ(project().record_id(), record);
+  EXPECT_EQ(project().project()->revision, revision);
+  f.screen.set_maximized(&destination(kEditorFiles)); f.drv->frame();
+  const auto *panel = widget("files_registered"); ASSERT_NE(panel, nullptr);
+  const auto [x, y] = f.widget_center(panel->key); f.drv->click(x, y);
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("files_registrations") != nullptr; }, 30));
+  EXPECT_EQ(widget("files_registrations")->table->rows, 1);
   EXPECT_EQ(project().tables().size(), snapshot.size());
 }
 
@@ -208,7 +237,7 @@ TEST_F(WorkspaceNavigationPython, OldActionsRefuseProjectSwitchCloseReopenAndDes
   old(); f.screen.run_deferred(); EXPECT_EQ(f.screen.to_json(), destroyed);
 }
 
-TEST_F(WorkspaceNavigationPython, FilesProtectCellDraftsInHiddenTabsAndOtherWindows)
+TEST_F(WorkspaceNavigationPython, IndependentFilesKeepsCellDraftsInHiddenTabsAndOtherWindows)
 {
   const std::string table = "aabbccdd-1111-4111-8111-111111111111";
   const std::string field = "aabbccdd-2222-4222-8222-222222222222";
@@ -224,6 +253,7 @@ TEST_F(WorkspaceNavigationPython, FilesProtectCellDraftsInHiddenTabsAndOtherWind
   ASSERT_TRUE(project().index_files({core::path_to_utf8(dir.path() / "input.txt")}));
   ASSERT_NO_FATAL_FAILURE(idle());
   project().select_table(table); project().select_record(record); go("data");
+  f.screen.set_maximized(&destination(kEditorTable)); f.drv->frame();
   ASSERT_EQ(project().table_id(), table);
   const auto revision = project().project()->revision;
   ASSERT_NE(widget("cell_value"), nullptr); widget("cell_value")->string.assign("1e"); f.drv->frame();
@@ -241,32 +271,39 @@ TEST_F(WorkspaceNavigationPython, FilesProtectCellDraftsInHiddenTabsAndOtherWind
   const auto *cell = other.ui()->find("cell_value"); ASSERT_NE(cell, nullptr);
   const auto layout = f.screen.to_json(), other_layout = other.to_json();
   ASSERT_EQ(project().table_id(), table);
-  ASSERT_FALSE(f.area("a2").tab(1).can_change_project_selection(project().project()->id));
-  go("files"); EXPECT_EQ(f.screen.to_json(), layout); EXPECT_EQ(other.to_json(), other_layout);
+  ASSERT_FALSE(f.area("a2").tab(2).can_change_project_selection(project().project()->id));
+  go("files");
+  EXPECT_NE(f.screen.to_json(), layout); EXPECT_EQ(other.to_json(), other_layout);
+  EXPECT_EQ(destination(kEditorFiles).editor().type().id, kEditorFiles);
   EXPECT_EQ(project().table_id(), table); EXPECT_EQ(project().record_id(), record);
   cell->string.assign("2e"); driver.frame();
   ASSERT_FALSE(area->editor().can_change_project_selection(project().project()->id));
 
-  go("data"); ASSERT_NE(widget("cell_value"), nullptr);
+  go("data"); f.screen.set_maximized(&destination(kEditorTable)); f.drv->frame();
+  ASSERT_NE(widget("cell_value"), nullptr);
   EXPECT_EQ(widget("cell_value")->string.value(), "1e");
   ASSERT_NE(widget("reload_cell"), nullptr); widget("reload_cell")->on_click(); f.drv->frame();
-  go("workspace"); const auto first_clean = f.screen.to_json();
-  go("files"); EXPECT_EQ(f.screen.to_json(), first_clean); EXPECT_EQ(project().table_id(), table);
+  go("workspace");
+  go("files"); EXPECT_EQ(destination(kEditorFiles).editor().type().id, kEditorFiles);
+  EXPECT_EQ(project().table_id(), table);
   ASSERT_NE(other.ui()->find("cell_value"), nullptr);
   EXPECT_EQ(other.ui()->find("cell_value")->string.value(), "2e");
   ASSERT_NE(other.ui()->find("reload_cell"), nullptr); other.ui()->find("reload_cell")->on_click(); driver.frame();
   go("data");
+  f.screen.set_maximized(&destination(kEditorTable)); f.drv->frame();
   ASSERT_NE(widget("manage_objects"), nullptr);
   const auto [x, y] = f.widget_center("manage_objects"); f.drv->click(x, y); f.drv->frame();
   ASSERT_NE(widget("manage_objects/rename_table"), nullptr);
   widget("manage_objects/rename_table")->string.assign("Unsaved table name"); f.drv->frame();
-  go("workspace"); const auto names_dirty = f.screen.to_json();
-  go("files"); EXPECT_EQ(f.screen.to_json(), names_dirty); EXPECT_EQ(project().table_id(), table);
-  go("data"); ASSERT_NE(widget("manage_objects/rename_table"), nullptr);
+  go("workspace");
+  go("files"); EXPECT_EQ(destination(kEditorFiles).editor().type().id, kEditorFiles);
+  EXPECT_EQ(project().table_id(), table);
+  go("data"); f.screen.set_maximized(&destination(kEditorTable)); f.drv->frame();
+  ASSERT_NE(widget("manage_objects/rename_table"), nullptr);
   EXPECT_EQ(widget("manage_objects/rename_table")->string.value(), "Unsaved table name");
   ASSERT_NE(widget("manage_objects/reload_names"), nullptr); widget("manage_objects/reload_names")->on_click(); f.drv->frame();
-  go("files"); EXPECT_EQ(project().table_id(), io::get_string(project().file_index(), "table_id"));
-  EXPECT_NE(widget("project_files/paths"), nullptr); EXPECT_EQ(project().project()->revision, revision);
+  go("files"); EXPECT_EQ(project().table_id(), table); EXPECT_EQ(project().record_id(), record);
+  EXPECT_NE(widget("files_tree"), nullptr); EXPECT_EQ(project().project()->revision, revision);
 }
 
 TEST_F(WorkspaceNavigationPython, DeferredNavigationRefusesChangedSourceAndClosedScreen)
@@ -285,7 +322,7 @@ TEST_F(WorkspaceNavigationPython, FullTabsDoNotReplaceAnEditorOrChangeSelection)
   for (auto *base : f.screen.areas()) {
     auto *area = dynamic_cast<EditorArea *>(base); ASSERT_NE(area, nullptr);
     for (int i = 0; i < area->tab_count(); ++i) {
-      if (area->tab(i).type().id == kEditorProject) { ASSERT_TRUE(area->set_tab_type(i, kEditorLogs)); }
+      if (area->tab(i).type().id == kEditorFiles) { ASSERT_TRUE(area->set_tab_type(i, kEditorLogs)); }
     }
     while (area->tab_count() < 16) { ASSERT_TRUE(area->add_tab(kEditorLogs, false)); }
   }
@@ -308,7 +345,7 @@ TEST_F(WorkspaceNavigationPython, AnotherWindowActiveInputPreventsProjectNavigat
   ASSERT_TRUE(other.ui()->text_input_active());
   const auto text = other.ui()->edit_state()->text(); const auto layout = f.screen.to_json();
   go("files"); EXPECT_EQ(f.screen.to_json(), layout); EXPECT_EQ(other.ui()->edit_state()->text(), text);
-  driver.key(wm::Key::Esc); go("files"); EXPECT_EQ(destination().editor().type().id, kEditorProject);
+  driver.key(wm::Key::Esc); go("files"); EXPECT_EQ(destination(kEditorFiles).editor().type().id, kEditorFiles);
 }
 
 TEST_F(WorkspaceNavigationPython, ReturningToConversationKeepsItsUnsentQuestion)
@@ -319,7 +356,7 @@ TEST_F(WorkspaceNavigationPython, ReturningToConversationKeepsItsUnsentQuestion)
   widget(key)->string.assign("Compare these cases without starting a simulation.");
   f.drv->frame(); ASSERT_NE(widget("project_workspace"), nullptr);
   widget("project_workspace")->on_click(); f.screen.run_deferred(); f.drv->frame();
-  ASSERT_EQ(destination().editor().type().id, kEditorWorkspace);
+  ASSERT_EQ(destination(kEditorWorkspace).editor().type().id, kEditorWorkspace);
   go("conversation");
   ASSERT_NE(widget(key), nullptr);
   EXPECT_EQ(widget(key)->string.value(), "Compare these cases without starting a simulation.");

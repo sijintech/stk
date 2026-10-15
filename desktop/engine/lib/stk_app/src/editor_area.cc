@@ -3,6 +3,7 @@
 #include "stk/app/editor_area.hh"
 
 #include <algorithm>
+#include <exception>
 
 #include "stk/app/app_store.hh"
 #include "stk/app/shell.hh"
@@ -47,7 +48,8 @@ class EditorRegion final : public wm::Region {
 
   int size_px(const float ui_scale) const override
   {
-    return kind_ == Kind::Header ? wm::ui_bar_height_px(ui_scale) : Region::size_px(ui_scale);
+    return kind_ == Kind::Header ? wm::ui_bar_height_px(ui_scale) *
+        (owner_.rect().width() < 700 * ui_scale ? 2 : 1) : Region::size_px(ui_scale);
   }
 
   void build_ui(ui::Context &ui, const wm::DrawContext &ctx) override
@@ -58,7 +60,7 @@ class EditorRegion final : public wm::Region {
     switch (kind_) {
       case Kind::Header:
         b.set_background(theme::kHeaderBack);
-        owner_.build_header(b.layout().row(false), ec);
+        owner_.build_header(b.layout(), ec);
         break;
       case Kind::Toolbar:
         b.set_background(theme::kToolBack);
@@ -156,7 +158,7 @@ EditorArea::EditorArea(AppShell &shell, const std::string &type) : wm::Area(type
   sync_regions();
 }
 
-EditorArea::~EditorArea() = default;
+EditorArea::~EditorArea() { alive_.reset(); }
 
 void EditorArea::sync_regions()
 {
@@ -189,6 +191,11 @@ bool EditorArea::set_tab_type(const int index, const std::string &type)
   if (tabs_[size_t(index)]->type().id == type) {
     return true;
   }
+  if (tabs_[size_t(index)]->has_unsaved_changes() ||
+      (screen() && screen()->ui() && screen()->ui()->text_input_active())) {
+    if (shell_.store().toast) { shell_.store().toast(std::string(shell_.store().tr("app.unsaved")), ui::ToastKind::Warning); }
+    return false;
+  }
   std::unique_ptr<Editor> e = shell_.registry().create(type);
   if (!e) {
     return false;
@@ -212,9 +219,32 @@ bool EditorArea::add_tab(const std::string &type, const bool activate)
   return true;
 }
 
+bool EditorArea::move_tab_to(const int index, EditorArea &destination, const bool activate)
+{
+  if (&destination == this || &destination.shell_ != &shell_ || !screen() || destination.screen() != screen() ||
+      index < 0 || size_t(index) >= tabs_.size() || tabs_.size() <= 1 || destination.tabs_.size() >= 16 ||
+      (screen()->ui() && screen()->ui()->text_input_active())) {
+    return false;
+  }
+  try { destination.tabs_.reserve(destination.tabs_.size() + 1); }
+  catch (const std::exception &) { return false; }
+  destination.tabs_.push_back(std::move(tabs_[size_t(index)]));
+  tabs_.erase(tabs_.begin() + index);
+  if (active_ >= int(tabs_.size()) || active_ > index) { active_ = std::max(0, active_ - 1); }
+  if (activate) { destination.active_ = int(destination.tabs_.size()) - 1; }
+  sync_regions();
+  destination.sync_regions();
+  return true;
+}
+
 void EditorArea::close_tab(const int index)
 {
   if (tabs_.size() <= 1 || index < 0 || index >= int(tabs_.size())) {
+    return;
+  }
+  if (tabs_[size_t(index)]->has_unsaved_changes() ||
+      (screen() && screen()->ui() && screen()->ui()->text_input_active())) {
+    if (shell_.store().toast) { shell_.store().toast(std::string(shell_.store().tr("app.unsaved")), ui::ToastKind::Warning); }
     return;
   }
   tabs_.erase(tabs_.begin() + index);
@@ -224,9 +254,17 @@ void EditorArea::close_tab(const int index)
   sync_regions();
 }
 
+bool EditorArea::has_unsaved_changes() const
+{
+  return std::any_of(tabs_.begin(), tabs_.end(), [](const auto &editor) {
+    return editor->has_unsaved_changes();
+  });
+}
+
 bool EditorArea::set_tabs(const std::vector<std::string> &types, const int active)
 {
-  if (types.empty() || types.size() > 16) {
+  if (types.empty() || types.size() > 16 || has_unsaved_changes() ||
+      (screen() && screen()->ui() && screen()->ui()->text_input_active())) {
     return false;
   }
   std::vector<std::unique_ptr<Editor>> tabs;
@@ -280,14 +318,21 @@ std::vector<ui::MenuEntry> EditorArea::area_menu(const wm::DrawContext *draw)
   AppStore &store = shell_.store();
   wm::Screen *s = screen();
   std::vector<ui::MenuEntry> m;
-  auto defer = [s](std::function<void()> fn) {
-    if (s) {
-      s->defer(std::move(fn));
+  const auto valid = [this, s, shell = &shell_, shell_weak = shell_.lifetime(),
+                       weak = std::weak_ptr<bool>(alive_), tab = active_, origin = editor().lifetime()] {
+    return !weak.expired() && !shell_weak.expired() && shell->has_screen(s) && shell->has_area(this) &&
+        active_ == tab && editor().lifetime().lock() == origin.lock();
+  };
+  auto defer = [s, valid](std::function<void()> fn) {
+    if (s && valid()) {
+      s->defer([s, valid, fn = std::move(fn)] {
+        if (valid() && (!s->ui() || !s->ui()->text_input_active())) { fn(); }
+      });
     }
   };
-  auto split = [this, s, &store](wm::SplitDir dir) {
-    return [this, s, dir, &store]() {
-      s->defer([this, s, dir, &store]() {
+  auto split = [this, s, &store, defer](wm::SplitDir dir) {
+    return [this, s, dir, &store, defer]() {
+      defer([this, s, dir, &store]() {
         if (!s->split(*this, dir, 0.5f)) {
           if (store.toast) {
             store.toast(std::string(store.tr("area.too_small")), ui::ToastKind::Warning);
@@ -305,7 +350,8 @@ std::vector<ui::MenuEntry> EditorArea::area_menu(const wm::DrawContext *draw)
                [this, s, defer]() {
                  defer([this, s]() {
                    if (Area *p = s->sibling(*this, false)) {
-                     s->join(*this, *p);
+                     auto *other = dynamic_cast<EditorArea *>(p);
+                     if (!other || !other->has_unsaved_changes()) { s->join(*this, *p); }
                    }
                  });
                },
@@ -314,7 +360,8 @@ std::vector<ui::MenuEntry> EditorArea::area_menu(const wm::DrawContext *draw)
                [this, s, defer]() {
                  defer([this, s]() {
                    if (Area *n = s->sibling(*this, true)) {
-                     s->join(*this, *n);
+                     auto *other = dynamic_cast<EditorArea *>(n);
+                     if (!other || !other->has_unsaved_changes()) { s->join(*this, *n); }
                    }
                  });
                },
@@ -340,10 +387,11 @@ std::vector<ui::MenuEntry> EditorArea::area_menu(const wm::DrawContext *draw)
                  const int i = active_;
                  defer([this, i]() { close_tab(i); });
                },
-               tabs_.size() > 1});
+               tabs_.size() > 1 && !editor().has_unsaved_changes()});
   m.push_back({std::string(store.tr("area.menu.close_area")),
                [this, s, defer]() {
                  defer([this, s]() {
+                   if (has_unsaved_changes()) { return; }
                    /* The neighbour takes the space; `this` is destroyed. */
                    if (Area *p = s->sibling(*this, false)) {
                      s->join(*p, *this);
@@ -353,19 +401,33 @@ std::vector<ui::MenuEntry> EditorArea::area_menu(const wm::DrawContext *draw)
                    }
                  });
                },
-               prev != nullptr || next != nullptr});
+               (prev != nullptr || next != nullptr) && !has_unsaved_changes()});
   EditorContext ec = context(s ? s->ui() : nullptr, draw);
   editor().menu_entries(m, ec);
+  for (int i = 0; i < tab_count(); ++i) {
+    m.push_back({mark(i == active_, store.tr(tab(i).type().title_key)), [this, i] { set_active_tab(i); }});
+  }
+  for (auto &entry : m) {
+    if (entry.action) {
+      entry.action = [valid, action = std::move(entry.action)] { if (valid()) { action(); } };
+    }
+  }
   return m;
 }
 
-void EditorArea::build_header(ui::Layout &row, EditorContext &ctx)
+void EditorArea::build_header(ui::Layout &layout, EditorContext &ctx)
 {
+  auto &row = layout.row(false);
   ui::Context &ui = *ctx.ui;
   const ui::Style &st = ui.style();
   const EditorRegistry &reg = shell_.registry();
   auto units = [&](float px) { return px / std::max(1.0f, st.unit); };
   auto text_w = [&](std::string_view s) { return ui.measurer().width(s, st.font); };
+  const auto valid = [this, shell = &shell_, shell_weak = shell_.lifetime(),
+                       weak = std::weak_ptr<bool>(alive_), origin = editor().lifetime()] {
+    return !weak.expired() && !shell_weak.expired() && shell->has_area(this) &&
+        editor().lifetime().lock() == origin.lock();
+  };
 
   std::vector<std::string> names;
   float names_w = 0.0f;
@@ -374,22 +436,31 @@ void EditorArea::build_header(ui::Layout &row, EditorContext &ctx)
     names_w = std::max(names_w, text_w(names.back()));
   }
   const int current = reg.index_of(editor().type().id);
+  const float available = ctx.draw ? float(ctx.draw->rect.width()) : 1000.0f;
+  const float scale = ctx.draw ? ctx.draw->ui_scale : 1.0f;
+  const bool compact = available < 700 * scale;
   row.dropdown("editor_type",
                names,
                ui::Binding<int>{[current]() { return current; },
-                                [this, &reg](int i) {
-                                  if (i < 0 || i >= int(reg.types().size())) {
+                                [this, &reg, valid](int i) {
+                                  if (!valid() || i < 0 || i >= int(reg.types().size())) {
                                     return;
                                   }
                                   const std::string id = reg.types()[size_t(i)]->id;
                                   const int tab = active_;
                                   if (wm::Screen *s = screen()) {
-                                    s->defer([this, tab, id]() { set_tab_type(tab, id); });
+                                    s->defer([this, tab, id, valid]() {
+                                      if (!valid()) { return; }
+                                      for (int i = 0; i < tab_count(); ++i) {
+                                        if (this->tab(i).type().id == id) { set_active_tab(i); return; }
+                                      }
+                                      set_tab_type(tab, id);
+                                    });
                                   }
                                 }})
-      .width(units(names_w + 2 * st.text_margin + st.unit))
+      .width(units(std::min(names_w + 2 * st.text_margin + st.unit, std::max(85.0f, available * 0.3f))))
       .tip(ctx.tr("area.editor_type.tip"));
-  if (tabs_.size() > 1) {
+  if (tabs_.size() > 1 && available >= 300 * scale) {
     /* The tabs widget gives every tab the same width: size it for the longest label. */
     std::vector<std::string> labels;
     float widest = 0.0f;
@@ -398,15 +469,20 @@ void EditorArea::build_header(ui::Layout &row, EditorContext &ctx)
       widest = std::max(widest, text_w(labels.back()) + 2 * st.text_margin);
     }
     const float w = widest * float(labels.size());
-    row.tabs("tabs", labels, ui::Binding<int>{[this]() { return active_; }, [this](int i) { set_active_tab(i); }})
-        .width(units(w));
+    auto binding = ui::Binding<int>{[active = active_]() { return active; },
+                                   [this, valid](int i) { if (valid()) { set_active_tab(i); } }};
+    if (w > available * 0.35f) {
+      row.dropdown("tabs", std::move(labels), std::move(binding)).width(units(std::min(widest + st.unit, available * 0.3f)));
+    }
+    else { row.tabs("tabs", labels, std::move(binding)).width(units(w)); }
   }
-  editor().draw_header(row, ctx);
+  if (!compact) { editor().draw_header(row, ctx); }
   row.label(""); /* Flexible space. */
   const std::string_view menu = ctx.tr("area.menu");
   row.menu_button("area_menu", menu, area_menu(ctx.draw))
       .width(units(std::max(2.0f * st.unit, text_w(menu) + 2 * st.text_margin)))
       .tip(ctx.tr("area.menu.tip"));
+  if (compact) { editor().draw_header(layout.row(false), ctx); }
 }
 
 bool EditorArea::on_drop(const wm::Event &event)
@@ -463,7 +539,8 @@ nlohmann::json EditorArea::save_state() const
 
 bool EditorArea::load_state(const nlohmann::json &state)
 {
-  if (!state.is_object()) {
+  if (!state.is_object() || has_unsaved_changes() ||
+      (screen() && screen()->ui() && screen()->ui()->text_input_active())) {
     return false;
   }
   bool toolbar = toolbar_open_, sidebar = sidebar_open_;

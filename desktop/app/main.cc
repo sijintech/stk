@@ -772,11 +772,19 @@ int run_gui(const Args &a, const stk::gfx::Backend backend)
     }
   };
   shell.on_quit = [&]() {
+    if (shell.has_unsaved_changes() || shell.text_input_active()) {
+      if (shell.store().toast) { shell.store().toast(std::string(shell.store().tr("app.unsaved")), ui::ToastKind::Warning); }
+      return;
+    }
     save_layout();
     wm->quit(kOk);
   };
   win->on_event = [&](const wm::Event &e) {
     if (e.type == wm::EventType::Close) {
+      if (shell.has_unsaved_changes() || shell.text_input_active()) {
+        if (shell.store().toast) { shell.store().toast(std::string(shell.store().tr("app.unsaved")), ui::ToastKind::Warning); }
+        return true;
+      }
       save_layout();
     }
     return false;

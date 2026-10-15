@@ -138,6 +138,7 @@ int main(int argc, char **argv)
       project.refresh(); require(loop.pump_until([&] { return !project.busy(); }, 30), "refresh project");
       auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
       require(area && area->set_tab_type(0, app::kEditorAnalysisGraph), "analysis editor");
+      area->set_sidebar_open(true);
       require(area->editor().load_state({{"saved", true}}), "saved mode");
       area->find_region(app::EditorArea::kSidebar)->set_size_1x(narrow ? 385 : 560);
       screen.set_maximized(area);

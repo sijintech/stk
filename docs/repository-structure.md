@@ -1,6 +1,6 @@
 # 仓库结构与归档边界
 
-更新：2026-09-28。目标依据：[开发计划](development-plan.md)与[工作台设计](design/project-workbench.md)。
+更新：2026-10-14。目标依据：[开发计划](development-plan.md)与[工作台设计](design/project-workbench.md)。
 
 ## 检查结论
 
@@ -23,6 +23,14 @@
 | `examples/`、`deploy/` | 可执行工作流示例与部署配置 | 与 Runtime/客户端行为一同维护 |
 | `plugins/` | 可选 Synorder 集成 | 暂缓不等于无用；保留独立可选依赖，不加入主流程必需依赖 |
 | `archive/` | 不参与当前产品构建的历史文件 | 保留来源、理由与恢复说明；新功能不从这里导入代码 |
+
+## 原生编辑器的独立模块
+
+`desktop/engine/lib/stk_app/editor_modules.cmake` 将 Viewer、分析图、项目流程、表格、文件树、Python、
+项目管理、任务、工作台、技能及 AI 分成 11 个可单独构建的对象库。新编辑器在同一 `EditorType` 注册表接入；
+每页独立 UI 状态，项目/修订/撤销、Viewer 与执行服务仍共用。`stk_ui` 提供通用控件，`stk_wm` 提供真实区域交换，
+Python 文件与目录服务位于 `suan/desktop_bridge/`、`suan/project/`。具体职责、构建命令及少点击验收规则见
+[桌面模块](desktop-modules.md)。运行时加载插件、富对象单元格类型扩展不属于这组 CMake 模块的既有能力。
 
 ## 本轮归档与保留依据
 

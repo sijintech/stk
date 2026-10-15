@@ -118,7 +118,11 @@ def test_every_row_is_submitted_at_once_then_collected_and_analysed(scan):
     assert s["client"].tasks() == []  # preparing submits nothing
     s["h"].call("project.workflow_runs.start", {"handle": s["handle"], "run_id": run["id"]})
     # Both rows reach the Runtime before either finishes (the scheduler has not run yet).
-    until(lambda: len(s["client"].tasks()) == 2, s, tick=False)
+    # reserve() exposes each task as 'preparing' while its input files are copied. Task count
+    # alone does not mean both submit requests have finished. Keep the scheduler stopped until
+    # both complete submissions are queued; this still proves no row waits for another to finish.
+    until(lambda: (lambda current: len(current) == 2 and all(task["state"] == "queued" for task in current))(
+        s["client"].tasks()), s, tick=False)
     assert all(task["state"] == "queued" for task in s["client"].tasks())
     done = settled(s, run["id"])
     assert done["complete"], done["tasks"]

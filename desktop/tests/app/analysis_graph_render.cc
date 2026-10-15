@@ -107,6 +107,7 @@ int main(int argc, char **argv)
     auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
     ok = ok && area && area->set_tab_type(0, app::kEditorAnalysisGraph);
     if (ok) {
+      area->set_sidebar_open(true);
       area->find_region(app::EditorArea::kSidebar)->set_size_1x(saved ? (narrow ? 340 : 430) : (narrow ? 260 : 350));
       screen.set_maximized(area);
       wm::DrawContext context;

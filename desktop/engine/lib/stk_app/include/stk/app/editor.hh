@@ -127,6 +127,9 @@ class Editor {
   }
   /** Whether navigation may change a project's table/record selection without losing a draft. */
   virtual bool can_change_project_selection(std::string_view project_id) const { return true; }
+  /** Local work that must be saved or explicitly discarded before this editor is destroyed.
+   * Navigation that only hides a live tab may preserve it; replacing a tab/layout may not. */
+  virtual bool has_unsaved_changes() const { return false; }
 
   /* ---- Persistence ---- */
 
@@ -177,6 +180,8 @@ inline constexpr const char *kEditorAnalysisGraph = "analysis_graph";
 inline constexpr const char *kEditorWorkspace = "workspace";
 inline constexpr const char *kEditorSkills = "skills";
 inline constexpr const char *kEditorWorkflow = "workflow";
+inline constexpr const char *kEditorTable = "table";
+inline constexpr const char *kEditorFiles = "files";
 
 /** Registers the built-in desktop editors. */
 void register_builtin_editors(EditorRegistry &registry);

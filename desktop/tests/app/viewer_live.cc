@@ -276,7 +276,22 @@ int run(const gfx::Backend backend, const Options &opt)
         {
           check(vs.probe().status == app::ProbeState::Status::Done, "pick probed through the bridge",
                 vs.probe().error.empty() ? vs.probe().sample.dump() : vs.probe().error);
-          area("a4")->set_active_tab(1); /* Logs | Probe | Transfers | Bridge log */
+          auto *probe_area = area("a4");
+          int probe_tab = -1;
+          if (probe_area) {
+            for (int i = 0; i < probe_area->tab_count(); ++i) {
+              if (probe_area->tab(i).type().id == app::kEditorProbe) {
+                probe_tab = i;
+                break;
+              }
+            }
+          }
+          check(probe_tab >= 0, "Probe editor tab exists");
+          if (probe_tab < 0) {
+            wm->quit(1);
+            break;
+          }
+          probe_area->set_active_tab(probe_tab);
           store.changed();
           next();
         }

@@ -118,6 +118,14 @@ class FileIndex:
     def __init__(self, store):
         self.store = store
 
+    def children(self, path="", *, expected_revision, offset=0, limit=200):
+        from .file_tree import children
+        return children(self, path, expected_revision=expected_revision, offset=offset, limit=limit)
+
+    def resolve_path(self, path, *, expected_revision):
+        from .file_tree import resolve_path
+        return resolve_path(self, path, expected_revision=expected_revision)
+
     def _read(self, expected_revision=_UNSET):
         snapshot = self.store.snapshot()
         if expected_revision is not _UNSET:

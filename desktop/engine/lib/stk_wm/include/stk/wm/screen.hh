@@ -364,14 +364,20 @@ class Screen {
 
   /**
    * Splits `area` along `dir`: the new area (same type, state copied via save_state/load_state)
-   * gets `factor` of the length, after `area` (or before with `new_first`). Returns nullptr when
-   * the result would violate minimum sizes (after a layout) or no factory can create the type.
+   * gets `factor` of the length, after `area` (or before with `new_first`). A nonempty
+   * `new_area_type` creates that type with its defaults instead of copying the original state.
+   * Returns nullptr when the result would violate minimum sizes (after a layout) or no factory
+   * can create the type.
    */
-  Area *split(Area &area, SplitDir dir, float factor = 0.5f, bool new_first = false);
+  Area *split(Area &area, SplitDir dir, float factor = 0.5f, bool new_first = false,
+              const std::string &new_area_type = {});
   /** `keep` and `remove` are adjacent siblings in one split (they share a full edge). */
   bool can_join(const Area &keep, const Area &remove) const;
   /** `keep` takes over the space of `remove`, which is destroyed. */
   bool join(Area &keep, Area &remove);
+  /** Exchange live areas between two leaves, retaining IDs, regions, focus and editor state.
+   * Refuses foreign/global areas, maximization, active text input and pointer drags. */
+  bool swap_areas(Area &first, Area &second);
   /** Adjacent sibling area after (`forward`) or before `area`, if it is a leaf. */
   Area *sibling(const Area &area, bool forward) const;
 

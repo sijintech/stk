@@ -158,6 +158,24 @@ app::EditorArea &AppFixture::area(const std::string &id)
   return *dynamic_cast<app::EditorArea *>(a);
 }
 
+LegacyAppFixture::LegacyAppFixture(const std::string &lang, const float scale, const int width, const int height)
+    : AppFixture(lang, scale, width, height)
+{
+  const auto leaf = [](const char *id, const std::vector<const char *> &types, double factor) {
+    nlohmann::json tabs = nlohmann::json::array();
+    for (const auto *type : types) { tabs.push_back({{"type", type}}); }
+    return nlohmann::json{{"factor", factor}, {"area", {{"id", id}, {"type", types.front()},
+        {"state", {{"tabs", tabs}, {"active", 0}}}}}};
+  };
+  const nlohmann::json top = {{"factor", .8}, {"split", "horizontal"}, {"children", {
+      leaf("a1", {app::kEditorWorkspace, app::kEditorJobs}, .3), leaf("a2", {app::kEditorViewer}, .45),
+      leaf("a3", {app::kEditorProperties}, .25)}}};
+  std::string error;
+  EXPECT_TRUE(screen.from_json({{"maximized", nullptr}, {"root", {{"factor", 1.0}, {"split", "vertical"},
+      {"children", {top, leaf("a4", {app::kEditorLogs, app::kEditorProbe, app::kEditorTransfers, app::kEditorBridgeLog}, .2)}}}}}, &error)) << error;
+  drv->frame();
+}
+
 app::EditorArea &AppFixture::tab(const std::string &id, const std::string &editor)
 {
   app::EditorArea &a = area(id);

@@ -10,6 +10,7 @@
 #include "../wm/support.hh"
 
 #include <cstdlib>
+#include <algorithm>
 #include <filesystem>
 
 namespace stk::app {
@@ -56,6 +57,7 @@ class AnalysisDocumentsEditor : public ::testing::Test {
     ASSERT_TRUE(loop.pump_until([&] { return project().loaded() && !project().busy(); }, 30));
     ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph));
     f.screen.set_maximized(&area()); area().find_region(EditorArea::kSidebar)->set_size_1x(410);
+    area().set_sidebar_open(true);  // This fixture exercises sidebar controls explicitly.
     f.drv->frame();
     ASSERT_TRUE(loop.pump_until([&] {
       f.drv->frame(); return store().scripts().ready() && store().scripts().desktop_ready() &&
@@ -111,7 +113,115 @@ class AnalysisDocumentsEditor : public ::testing::Test {
           widget("graph_mode")->index.value() == 2;
     }, 30)) << client->bridge_log().text();
   }
+  Json saved_document()
+  {
+    Json result = Json::object();
+    const auto found = std::find_if(project().tables().begin(), project().tables().end(),
+        [](const auto &table) { return table.name == "Analyses"; });
+    EXPECT_NE(found, project().tables().end());
+    if (found == project().tables().end()) { return result; }
+    EXPECT_EQ(found->records.size(), 1u);
+    for (size_t column = 0; column < found->fields.size(); ++column) {
+      const auto &name = found->fields[column].name;
+      const auto *key = name == "Format" ? "format" : name == "Graph" ? "graph" :
+          name == "Parameters" ? "parameters" : name == "Outputs" ? "outputs" : nullptr;
+      if (key) {
+        const auto *value = found->cell(0, int(column)); EXPECT_NE(value, nullptr);
+        if (value) { result[key] = *value; }
+      }
+    }
+    return result;
+  }
 };
+
+TEST_F(AnalysisDocumentsEditor, MainTemplateShortcutSavesEditableFlowWithoutAViewerConfiguration)
+{
+  ASSERT_FALSE(viewer().presets().empty());
+  const auto raw = viewer().presets().front().raw;
+  viewer().close(); area().set_sidebar_open(false); f.drv->frame();
+  ASSERT_FALSE(viewer().graph_inspection()->desired);
+  ASSERT_NE(widget("graph_new_flow"), nullptr); ASSERT_TRUE(widget("graph_new_flow")->enabled);
+  ASSERT_NE(widget("graph_copy_editable"), nullptr); EXPECT_FALSE(widget("graph_copy_editable")->enabled);
+  const auto [x, y] = f.widget_center(widget("graph_new_flow")->key);
+  f.drv->click(x, y);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame(); return project().project()->revision == 1 && !project().busy() &&
+        widget("graph_mode")->index.value() == 2 && widget("analysis_parameters");
+  }, 30)) << client->bridge_log().text();
+  Json outputs = Json::array();
+  for (const auto &entry : raw.at("graph").at("outputs").items()) { outputs.push_back(entry.key()); }
+  // The bridge canonicalizes object key order. Array ordering and every value remain exact.
+  EXPECT_EQ(nlohmann::json(saved_document()), (nlohmann::json{{"format", "stk.analysis-document/1"},
+      {"graph", raw.at("graph")}, {"parameters", Json::object()}, {"outputs", outputs}}));
+  EXPECT_TRUE(area().sidebar_open());
+  ASSERT_NE(widget("graph_node_select"), nullptr);
+  const auto parameters = *widget("analysis_parameters")->table;
+  int threshold = -1;
+  for (int row = 0; row < parameters.rows; ++row) {
+    if (parameters.cell(row, 0) == "min_magnitude") { threshold = row; }
+  }
+  ASSERT_GE(threshold, 0); parameters.selected.assign(threshold); f.drv->frame();
+  ASSERT_NE(widget("analysis_parameter_value"), nullptr);
+  EXPECT_TRUE(widget("analysis_parameter_value")->enabled);
+  EXPECT_EQ(widget("analysis_parameter_value")->string.value(), "0.1") << "empty overrides use the template default";
+  EXPECT_EQ(viewer().source().kind, SourceKind::None);
+  EXPECT_FALSE(viewer().payload()); EXPECT_EQ(viewer().evaluations_started(), 0);
+  EXPECT_TRUE(store().scripts().history().empty());
+  ASSERT_TRUE(store().scripts().status().contains("run")); EXPECT_TRUE(store().scripts().status().at("run").is_null());
+}
+
+TEST_F(AnalysisDocumentsEditor, MainCopyShortcutPersistsCurrentConfigurationAndKeepsTheViewer)
+{
+  viewer().set_parameter("min_magnitude", ui::FormValue::number(0.75));
+  area().set_sidebar_open(false); f.drv->frame();
+  const auto before = definition();
+  const auto source = viewer().source();
+  const auto payload = viewer().payload();
+  const auto camera = viewer().camera_serial(), serial = viewer().payload_serial();
+  const auto label = viewer().source_label();
+  ASSERT_NE(widget("graph_copy_editable"), nullptr); ASSERT_TRUE(widget("graph_copy_editable")->enabled);
+  const auto [x, y] = f.widget_center(widget("graph_copy_editable")->key);
+  f.drv->click(x, y);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame(); return project().project()->revision == 1 && !project().busy() &&
+        widget("graph_mode")->index.value() == 2 && widget("analysis_parameters");
+  }, 30)) << client->bridge_log().text();
+  EXPECT_EQ(nlohmann::json(saved_document()), nlohmann::json(before));
+  EXPECT_EQ(saved_document().at("parameters").at("min_magnitude"), 0.75);
+  EXPECT_EQ(definition(), before);
+  EXPECT_TRUE(area().sidebar_open());
+  EXPECT_EQ(viewer().source().kind, source.kind); EXPECT_EQ(viewer().source().path, source.path);
+  EXPECT_EQ(viewer().source_label(), label); EXPECT_EQ(viewer().payload(), payload);
+  EXPECT_EQ(viewer().camera_serial(), camera); EXPECT_EQ(viewer().payload_serial(), serial);
+  EXPECT_EQ(viewer().evaluations_started(), 0); EXPECT_FALSE(viewer().evaluating());
+  EXPECT_TRUE(store().scripts().history().empty());
+}
+
+TEST_F(AnalysisDocumentsEditor, RetainedMainShortcutsRejectChangedProjectRevisions)
+{
+  area().set_sidebar_open(false); f.drv->frame();
+  ASSERT_NE(widget("graph_copy_editable"), nullptr); ASSERT_TRUE(widget("graph_copy_editable")->enabled);
+  const auto old_copy = widget("graph_copy_editable")->on_click;
+  const auto old_open = widget("graph_open_flows")->on_click;
+  const auto before = definition();
+  const std::string table = "84444444-4444-4444-8444-444444444444";
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "create_table"}, {"id", table}, {"name", "Revision boundary"}}})));
+  ASSERT_TRUE(loop.pump_until([&] { return !project().busy() && project().project()->revision == 1; }, 30));
+  old_copy(); old_open(); loop.run_ready(); f.drv->frame();
+  EXPECT_EQ(project().project()->revision, 1); ASSERT_EQ(project().tables().size(), 1u);
+  EXPECT_EQ(project().tables().front().id, table); EXPECT_FALSE(area().sidebar_open());
+  EXPECT_EQ(definition(), before);
+  viewer().close(); f.drv->frame();
+  ASSERT_NE(widget("graph_new_flow"), nullptr); ASSERT_TRUE(widget("graph_new_flow")->enabled);
+  const auto old_new = widget("graph_new_flow")->on_click;
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "rename_table"}, {"id", table}, {"name", "New revision"}}})));
+  ASSERT_TRUE(loop.pump_until([&] { return !project().busy() && project().project()->revision == 2; }, 30));
+  old_new(); loop.run_ready(); f.drv->frame();
+  EXPECT_EQ(project().project()->revision, 2); ASSERT_EQ(project().tables().size(), 1u);
+  EXPECT_EQ(project().tables().front().id, table); EXPECT_FALSE(area().sidebar_open());
+  EXPECT_EQ(widget("graph_mode")->index.value(), 0);
+  EXPECT_EQ(viewer().evaluations_started(), 0); EXPECT_TRUE(store().scripts().history().empty());
+}
 
 TEST_F(AnalysisDocumentsEditor, SaveShowsIndependentDefinitionAndUndoKeepsItsOldReadExplicit)
 {

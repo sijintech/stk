@@ -40,6 +40,7 @@ class AnalysisGraphEditorTest : public ::testing::Test {
     ASSERT_TRUE(viewer().open_path(core::path_to_utf8(dir.path() / "run"), "muferro-domains"));
     ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph));
     f.screen.set_maximized(&area());
+    area().set_sidebar_open(true);
     area().find_region(EditorArea::kSidebar)->set_size_1x(370);
     f.drv->frame();
     ASSERT_EQ(viewer().evaluations_started(), 0);
@@ -136,7 +137,8 @@ TEST_F(AnalysisGraphEditorTest, ParameterEditKeepsPannedCanvasAndSelectionDuring
   AnalysisGraphState model(viewer());
   ASSERT_TRUE(model.view()); ASSERT_GT(model.view()->nodes.size(), 2u);
   AnalysisGraphCanvas expected;
-  expected.set_view(model.view()); ASSERT_TRUE(expected.fit(1000, 640));
+  const double top = 4.0 * f.screen.ui()->style().unit;
+  expected.set_view(model.view()); ASSERT_TRUE(expected.fit(1000, 700 - top));
   wm::DrawContext draw; draw.rect = {0, 0, 1000, 700}; draw.ui_scale = 1;
   EditorContext ctx{f.shell->store(), area(), f.screen.ui(), &draw};
   auto event = [&](const wm::EventType type, const int x, const int y, const wm::MouseButton button) {
@@ -150,7 +152,7 @@ TEST_F(AnalysisGraphEditorTest, ParameterEditKeepsPannedCanvasAndSelectionDuring
   viewer().set_parameter("min_magnitude", ui::FormValue::number(0.75));
   const auto &rect = model.view()->nodes[2].rect;
   const auto point = expected.to_screen({rect.x + rect.width / 2, rect.y + rect.height / 2});
-  ASSERT_TRUE(event(wm::EventType::MouseDown, int(std::floor(point.x)), int(std::floor(699 - 60 - point.y)), wm::MouseButton::Left));
+  ASSERT_TRUE(event(wm::EventType::MouseDown, int(std::floor(point.x)), int(std::floor(699 - top - point.y)), wm::MouseButton::Left));
   f.drv->frame();
   ASSERT_NE(widget("graph_node_select"), nullptr);
   EXPECT_EQ(widget("graph_node_select")->index.value(), 2);
@@ -184,8 +186,15 @@ TEST_F(AnalysisGraphEditorTest, NavigationPreservesTheGraphInstanceAndHonorsItsO
   ASSERT_TRUE(navigate); navigate();
   EXPECT_EQ(&area().editor(), graph); // Structural changes are deferred.
   f.screen.run_deferred();
-  ASSERT_NE(f.screen.maximized(), nullptr);
-  EXPECT_EQ(dynamic_cast<EditorArea *>(f.screen.maximized())->editor().type().id, kEditorViewer);
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EditorArea *shown_viewer = nullptr;
+  for (auto *base : f.screen.areas()) {
+    auto *candidate = dynamic_cast<EditorArea *>(base);
+    if (candidate && candidate->editor().type().id == kEditorViewer) { shown_viewer = candidate; }
+  }
+  ASSERT_NE(shown_viewer, nullptr);
+  EXPECT_NE(shown_viewer, &area());
+  EXPECT_EQ(&area().editor(), graph);  // Graph and Viewer now stay visible side by side.
   EXPECT_EQ(&area().tab(0), graph);
   ASSERT_TRUE(f.shell->activate_editor(&f.screen, kEditorAnalysisGraph, true).ok());
   EXPECT_EQ(&area().editor(), graph);

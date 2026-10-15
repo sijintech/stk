@@ -666,6 +666,16 @@ class ProjectFiles:
     def list(self):
         return self._call("project.files.list", {"handle": self.handle})
 
+    def children(self, path="", *, expected_revision, offset=0, limit=200):
+        """Read one bounded project directory; never register or execute its entries."""
+        return self._call("project.files.children", {"handle": self.handle, "path": path,
+            "expected_revision": expected_revision, "offset": offset, "limit": limit})
+
+    def resolve_path(self, path, *, expected_revision):
+        """Recheck a public project path for an explicit open; no content is read."""
+        return self._call("project.files.resolve_path", {"handle": self.handle, "path": path,
+                                                        "expected_revision": expected_revision})
+
     def index(self, paths, *, expected_revision):
         if isinstance(paths, (str, bytes)):
             raise TypeError("paths must be a sequence of paths, not a single string")

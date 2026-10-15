@@ -16,7 +16,8 @@
 
 using namespace stk;
 using stk::io::Json;
-using stk::wmtest::AppFixture;
+// Keep preset form goldens at their documented historical Properties pane geometry.
+using AppFixture = stk::wmtest::LegacyAppFixture;
 
 namespace {
 

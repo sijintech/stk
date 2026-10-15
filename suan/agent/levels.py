@@ -65,6 +65,8 @@ OPERATIONS = {
     "project.files.index": ("project_edit", "changes the project"),
     "project.files.refresh": ("project_edit", "changes the project"),
     "project.files.resolve": ("read", "not needed in v1"),
+    "project.files.children": ("read", "bounded metadata-only directory browsing; not needed in v1"),
+    "project.files.resolve_path": ("read", "explicit public project path resolution; not needed in v1"),
     "project.analyses.create": ("project_edit", "changes the project"),
     "project.analyses.update": ("project_edit", "changes the project"),
     "project.analyses.get": ("read", "not needed in v1"),

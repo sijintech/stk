@@ -41,6 +41,7 @@ add_executable(stk_ui_tests
   test_number.cc
   test_text_edit.cc
   test_events.cc
+  test_table_cell_selection.cc
   test_layout_golden.cc
   test_form.cc
   test_transfer_function.cc

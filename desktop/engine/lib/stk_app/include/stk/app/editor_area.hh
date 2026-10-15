@@ -54,7 +54,12 @@ class EditorArea : public wm::Area {
   bool set_tab_type(int index, const std::string &type);
   /** Appends a tab (false: unknown type). */
   bool add_tab(const std::string &type, bool activate = true);
+  /** Move a live tab to another area on this screen, retaining its instance and drafts.
+   * Refuses active text input, a full destination or an empty source; allocates before moving. */
+  bool move_tab_to(int index, EditorArea &destination, bool activate = true);
   void close_tab(int index);
+  /** Includes hidden tabs, so layout/area operations cannot discard a hidden draft. */
+  bool has_unsaved_changes() const;
   /** Replaces all tabs (types must be registered; false leaves the area unchanged). */
   bool set_tabs(const std::vector<std::string> &types, int active);
 
@@ -98,6 +103,7 @@ class EditorArea : public wm::Area {
   int active_ = 0;
   bool toolbar_open_ = true;
   bool sidebar_open_ = true;
+  std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };
 
 }  // namespace stk::app

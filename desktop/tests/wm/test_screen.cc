@@ -125,6 +125,66 @@ TEST_F(TreeFixture, SplitJoinAndCollapse)
   EXPECT_EQ(a.rect(), (Rect{0, 0, 1000, 500}));
 }
 
+TEST_F(TreeFixture, SwapLiveLeavesKeepsRegionsFocusAndSplitGeometryAndRestoresExactly)
+{
+  Area &a = screen.set_root(rec("a"));
+  drv.frame();
+  Area *b = screen.split(a, SplitDir::Horizontal, 0.45f); ASSERT_NE(b, nullptr);
+  drv.frame();
+  Area *c = screen.split(*b, SplitDir::Vertical, 0.35f); ASSERT_NE(c, nullptr);
+  drv.frame();
+  auto *a_node = a.node(), *c_node = c->node();
+  const auto a_rect = a.rect(), c_rect = c->rect(), b_rect = b->rect();
+  const auto a_factor = a_node->factor, c_factor = c_node->factor;
+  auto *a_region = as_rec(&a).main, *c_region = as_rec(c).main;
+  as_rec(&a).dropped = {"preserved local state"};
+  screen.set_focus(a_region);
+  const auto before = screen.to_json();
+  ASSERT_TRUE(screen.swap_areas(a, *c));
+  drv.frame();
+  EXPECT_EQ(a.node(), c_node); EXPECT_EQ(c->node(), a_node);
+  EXPECT_EQ(a_node->factor, a_factor); EXPECT_EQ(c_node->factor, c_factor);
+  EXPECT_EQ(a.rect(), c_rect); EXPECT_EQ(c->rect(), a_rect); EXPECT_EQ(b->rect(), b_rect);
+  EXPECT_EQ(as_rec(&a).main, a_region); EXPECT_EQ(as_rec(c).main, c_region);
+  EXPECT_EQ(screen.focused_region(), a_region);
+  EXPECT_EQ(as_rec(&a).dropped, (std::vector<std::string>{"preserved local state"}));
+  drv.key(Key::A);
+  ASSERT_FALSE(a_region->events.empty()); EXPECT_EQ(a_region->events.back(), EventType::KeyUp);
+  EXPECT_TRUE(c_region->events.empty());
+  ASSERT_TRUE(screen.swap_areas(a, *c)); drv.frame();
+  EXPECT_EQ(a.node(), a_node); EXPECT_EQ(c->node(), c_node);
+  EXPECT_EQ(screen.to_json(), before);
+  EXPECT_EQ(screen.focused_region(), a_region);
+}
+
+TEST_F(TreeFixture, SwapRefusesSameForeignMaximizedAndCapturedAreasWithoutChangingTree)
+{
+  Area &a = screen.set_root(rec("a"));
+  drv.frame();
+  Area *b = screen.split(a, SplitDir::Horizontal, 0.5f); ASSERT_NE(b, nullptr); drv.frame();
+  Screen other;
+  Area &foreign = other.set_root(rec("foreign"));
+  auto unattached = rec("unattached");
+  const auto before = screen.to_json();
+  EXPECT_FALSE(screen.swap_areas(a, a));
+  EXPECT_FALSE(screen.swap_areas(a, foreign));
+  EXPECT_FALSE(screen.swap_areas(a, *unattached));
+  EXPECT_EQ(screen.to_json(), before);
+  screen.set_maximized(&a);
+  const auto maximized = screen.to_json();
+  EXPECT_FALSE(screen.swap_areas(a, *b));
+  EXPECT_EQ(screen.to_json(), maximized);
+  screen.set_maximized(nullptr); drv.frame();
+  const auto [x, y] = center(a.rect());
+  drv.move(x, y); drv.down(x, y);
+  ASSERT_EQ(screen.capture(), Screen::Capture::Region);
+  EXPECT_FALSE(screen.swap_areas(a, *b));
+  EXPECT_EQ(screen.to_json(), before);
+  drv.up(x, y);
+  EXPECT_EQ(screen.capture(), Screen::Capture::None);
+  EXPECT_TRUE(screen.swap_areas(a, *b));
+}
+
 TEST_F(TreeFixture, SplitAlongParentDirectionInserts)
 {
   Area &a = screen.set_root(rec());

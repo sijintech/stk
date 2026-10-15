@@ -147,6 +147,7 @@ class AnalysisLinksEditorPython : public ::testing::Test {
   void open_panel(const std::string &key)
   {
     const auto *header = widget(key); ASSERT_NE(header, nullptr) << key;
+    if (f.screen.ui()->panel_open(header->id, false)) { return; }
     const auto [x, y] = f.widget_center(header->key);
     f.drv->click(x, y); f.drv->frame();
   }
@@ -209,6 +210,7 @@ class AnalysisLinksEditorPython : public ::testing::Test {
     revision = saved.at("revision").get<int64_t>(); project().refresh();
     ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
     ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph)); ASSERT_TRUE(area().editor().load_state({{"saved", true}}));
+    area().set_sidebar_open(true);
     f.screen.set_maximized(&area()); area().find_region(EditorArea::kSidebar)->set_size_1x(560); f.drv->frame();
     ASSERT_NO_FATAL_FAILURE(click("analysis_list"));
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_documents") != nullptr; }));
@@ -456,7 +458,7 @@ TEST_F(AnalysisLinksEditorPython, DraggingANodeMovesItWithoutNeedingValidationAn
   auto probe = std::make_shared<CanvasProbe>();
   probe->view = analysis_graph_view(io::Graph::from_json(document.at("graph")), &types);
   probe->rect = area().find_region(EditorArea::kMain)->rect();
-  probe->top = 3.0 * f.screen.ui()->style().unit;
+  probe->top = 4.0 * f.screen.ui()->style().unit;
   probe->canvas.set_view(std::make_shared<const AnalysisGraphView>(probe->view));
   ASSERT_TRUE(probe->canvas.fit(probe->rect.width(), probe->rect.height() - probe->top, 1));
   ASSERT_GE(probe->canvas.zoom(), 0.5);  // sockets are hit only when labels are shown

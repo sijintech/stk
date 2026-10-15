@@ -335,7 +335,7 @@ void ProjectState::on_state(const bridge::BridgeState state)
     }
   }
   else if (project_ && ready()) {
-    start_open(project_->directory, {}, false, project_->id);
+    start_open(project_->directory, {}, false, project_->id, {}, true);
   }
   changed();
 }
@@ -402,8 +402,16 @@ bool ProjectState::open(const std::string &directory,
 
 bool ProjectState::start_open(const std::string &directory, const std::string &name, const bool create,
                               std::string expected_id,
-                              std::function<void(bridge::Result<bridge::ProjectInfo>)> complete)
+                              std::function<void(bridge::Result<bridge::ProjectInfo>)> complete, const bool reconnect)
 {
+  // Reattaching the same visible project after a lost bridge preserves its local drafts and
+  // selection. A selection-change fence must not prevent the draft's own project from recovering.
+  const bool same_project_reconnect = reconnect && !create && project_ && project_->handle.empty() &&
+      directory == project_->directory && expected_id == project_->id;
+  if (!same_project_reconnect && selection_guard_ && !selection_guard_()) {
+    error_ = std::string(store_.tr("app.unsaved")); changed();
+    return false;
+  }
   if (!ready() || busy()) {
     return false;
   }
@@ -473,6 +481,10 @@ void ProjectState::clear()
 
 bool ProjectState::close(std::function<void(bridge::Result<bool>)> complete)
 {
+  if (selection_guard_ && !selection_guard_()) {
+    error_ = std::string(store_.tr("app.unsaved")); changed();
+    return false;
+  }
   if (busy() || !project_) {
     return false;
   }
@@ -1534,6 +1546,9 @@ const ProjectTable *ProjectState::table() const
 
 void ProjectState::select_table(std::string id)
 {
+  if (id != table_id_ && selection_guard_ && !selection_guard_()) {
+    error_ = std::string(store_.tr("app.unsaved")); changed(); return;
+  }
   if (id != table_id_) {
     table_id_ = std::move(id);
     record_id_.clear();
@@ -1544,6 +1559,9 @@ void ProjectState::select_table(std::string id)
 
 void ProjectState::select_record(std::string id)
 {
+  if (id != record_id_ && selection_guard_ && !selection_guard_()) {
+    error_ = std::string(store_.tr("app.unsaved")); changed(); return;
+  }
   record_id_ = std::move(id);
   validate_selection();
   changed();

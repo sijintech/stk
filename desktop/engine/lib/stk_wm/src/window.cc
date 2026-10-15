@@ -643,6 +643,9 @@ void WindowManager::draw_dirty()
 
 void WindowManager::deliver(Window &window, const Event &event)
 {
+  if (event.type == EventType::Close && window.can_close && !window.can_close()) {
+    return;
+  }
   if (window.on_event && window.on_event(event)) {
     return;
   }

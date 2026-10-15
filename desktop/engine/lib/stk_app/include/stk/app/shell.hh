@@ -4,8 +4,7 @@
  * registry, installs on a screen the top bar (app menu File / View / Language / UI scale, window
  * title and, on GNOME Wayland, the client-side window buttons), the status bar (bridge state,
  * connection, hints), the area factory and the application shortcuts, builds the default layout
- * (Jobs | Viewer | Properties over a bottom strip with the Logs / Probe / Transfers / Bridge log
- * tabs) and converts screens to and from layout files.
+ * (Files beside Viewer and Nodes/Python, with Table below and optional management/log tabs) and converts screens to and from layout files.
  *
  *   AppShell shell({.i18n_dir = locate_i18n_dir("")});
  *   shell.install(window->screen(), window);
@@ -106,6 +105,13 @@ class AppShell {
   }
   /** Whether an installed window has an active text edit. Pure inspection, without committing it. */
   bool text_input_active() const;
+  /** Every live editor, including hidden tabs in other windows, agrees to change selection. */
+  bool project_selection_available(std::string_view project_id) const;
+  bool has_unsaved_changes() const;
+  bool can_close_screen(wm::Screen *screen) const;
+  bool has_screen(const wm::Screen *screen) const;
+  /** Swap live Viewer/editing areas without reconstructing editors or their state. */
+  bool swap_visual_editors(wm::Screen &screen);
   /** Lifetime fence for callbacks retained by editors or integrations. */
   std::weak_ptr<void> lifetime() const { return alive_; }
   /** Replaces the screen's tree with the default layout. */
@@ -144,7 +150,7 @@ class AppShell {
    * `origin` is still that area's active editor, reusing such a tab or adding one. A refusing
    * editor leaves the area as it was and its reason is shown as a toast. */
   void open_in_area_later(EditorArea *area, std::weak_ptr<void> origin, std::string editor_id,
-                          io::Json target);
+                          io::Json target, std::function<bool()> valid = {});
   /** Deferred: from the active editor `from`, activate the tab of `area` whose editor is `origin`;
    * when that tab is gone, show `fallback` in an `editor_id` tab instead. */
   void return_in_area_later(EditorArea *area, std::weak_ptr<void> from, std::weak_ptr<void> origin,
@@ -195,8 +201,7 @@ class AppShell {
   std::vector<ui::MenuEntry> language_menu();
   std::vector<ui::MenuEntry> scale_menu();
   void reset_layout(wm::Screen &screen);
-  static void focus_viewer(wm::Screen &screen);
-  static Editor *focus_editor(wm::Screen &screen, const std::string &type);
+  void focus_viewer(wm::Screen &screen);
   void handle_ui_request(const std::string &operation, const io::Json &params, int64_t expires_at,
                          std::function<bool()> valid, ScriptState::Completion complete);
   void perform_ui_request(wm::Screen &screen, const std::string &operation, const io::Json &params,

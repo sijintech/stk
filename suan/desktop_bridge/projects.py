@@ -533,6 +533,11 @@ class ProjectSessions:
             if action == "list":
                 return index.list()
             revision = params["expected_revision"]
+            if action == "children":
+                return index.children(params.get("path", ""), expected_revision=revision,
+                                      offset=params.get("offset", 0), limit=params.get("limit", 200))
+            if action == "resolve_path":
+                return index.resolve_path(params["path"], expected_revision=revision)
             if action == "index":
                 return index.index(params["paths"], expected_revision=revision)
             if action == "refresh":

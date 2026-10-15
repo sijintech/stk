@@ -69,6 +69,8 @@ class ProjectState {
   void sync();
   void attach(bridge::Client *client);
   bool ready() const;
+  /** UI host fence for project/selection changes, independent of persistence semantics. */
+  void set_selection_guard(std::function<bool()> guard) { selection_guard_ = std::move(guard); }
   bool busy() const { return busy_ || fetching_; }
   bool loaded() const { return project_.has_value() && snapshot_ready_; }
   const std::optional<bridge::ProjectInfo> &project() const { return project_; }
@@ -189,7 +191,7 @@ class ProjectState {
  private:
   template<class T, class F> void on(bridge::Future<T> future, F fn);
   bool start_open(const std::string &directory, const std::string &name, bool create, std::string expected_id = {},
-                  std::function<void(bridge::Result<bridge::ProjectInfo>)> complete = {});
+                  std::function<void(bridge::Result<bridge::ProjectInfo>)> complete = {}, bool reconnect = false);
   void on_state(bridge::BridgeState state);
   void changed();
   void fail(const bridge::Error &error);
@@ -204,6 +206,7 @@ class ProjectState {
   bool edit_files(const std::vector<std::string> &items, bool index);
 
   AppStore &store_;
+  std::function<bool()> selection_guard_;
   std::unique_ptr<ProjectDiscussion> discussion_;
   std::unique_ptr<ProjectAgent> agent_;
   bridge::Client *client_ = nullptr;

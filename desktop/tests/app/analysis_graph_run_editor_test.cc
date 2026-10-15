@@ -190,6 +190,7 @@ class AnalysisGraphRunEditorPython : public ::testing::Test {
     project().refresh();
     ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
     ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph)); ASSERT_TRUE(area().editor().load_state({{"saved", true}}));
+    area().set_sidebar_open(true);
     f.screen.set_maximized(&area()); area().find_region(EditorArea::kSidebar)->set_size_1x(510); f.drv->frame();
     ASSERT_NO_FATAL_FAILURE(click("analysis_list"));
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_documents") != nullptr; }));

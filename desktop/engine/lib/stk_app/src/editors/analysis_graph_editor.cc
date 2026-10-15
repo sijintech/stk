@@ -62,6 +62,11 @@ void table(ui::Layout &layout, std::string_view key, std::vector<ui::TableColumn
 class AnalysisGraphEditor final : public Editor {
  public:
   explicit AnalysisGraphEditor(const EditorType &type) : Editor(type) {}
+  bool has_unsaved_changes() const override { return parameter_edits(); }
+  bool can_change_project_selection(const std::string_view project_id) const override
+  {
+    return !store_ || !store_->project().project() || store_->project().project()->id != project_id || !parameter_edits();
+  }
   bool show_view(const std::string_view view) override
   {
     if (view != "saved" && view != "runs") { return false; }
@@ -120,7 +125,7 @@ class AnalysisGraphEditor final : public Editor {
     row.button("graph_viewer", ctx.tr("analysis_graph.view_3d"), [weak, shell, screen] {
       const auto live = weak.lock();
       if (!live || !*live || !screen) { return; }
-      shell->activate_editor_later(screen, kEditorViewer, true, [weak] {
+      shell->activate_editor_later(screen, kEditorViewer, false, [weak] {
         const auto still_live = weak.lock();
         return still_live && *still_live;
       });
@@ -148,6 +153,63 @@ class AnalysisGraphEditor final : public Editor {
     auto &selector = narrow ? layout.dropdown("graph_mode", std::move(modes), std::move(mode_binding)) :
         layout.tabs("graph_mode", std::move(modes), std::move(mode_binding));
     selector.disable(shell->text_input_active());
+    auto &actions = layout.row();
+    auto *area = &ctx.area;
+    const auto epoch = documents_->epoch();
+    const auto &project = ctx.store.project().project();
+    const auto handle = project ? project->handle : std::string();
+    const auto revision = project ? project->revision : -1;
+    const auto usable = [this, weak, shell, shell_weak = shell->lifetime(), epoch, handle, revision] {
+      if (weak.expired() || shell_weak.expired() || shell->text_input_active() || parameter_edits()) { return false; }
+      const auto &current = store_->project().project();
+      return current && current->handle == handle && current->revision == revision &&
+          documents_->epoch() == epoch && !documents_->busy() && !documents_->uncertain() && !store_->project().busy();
+    };
+    actions.button("graph_open_flows", ctx.tr("analysis_graph.open_flows"), [this, weak, area, usable] {
+      if (!usable()) { return; }
+      ++navigation_generation_; state_->show_saved(); saved_section_ = 0;
+      documents_->load_page(0); area->set_sidebar_open(true); redraw();
+    }).disable(!documents_->supported() || !usable());
+    actions.button("graph_edit_tools", ctx.tr("analysis_graph.edit_tools"), [weak, area] {
+      if (!weak.expired()) { area->set_sidebar_open(true); }
+    });
+    if (!project) {
+      actions.button("graph_project", ctx.tr("project.location"), project_navigation_action(ctx, "project"));
+    }
+    const auto *definition = state_->definition();
+    const Json copy = definition ? Json{{"format", "stk.analysis-document/1"}, {"graph", definition->graph},
+        {"parameters", definition->parameters}, {"outputs", definition->requested_outputs}} : Json();
+    const auto generation = state_->generation();
+    actions.button("graph_copy_editable", ctx.tr("analysis_graph.copy_editable"), [this, usable, copy, generation, area] {
+      if (!usable() || state_->generation() != generation || copy.is_null()) { return; }
+      if (documents_->save_new(std::string(store_->tr("analysis_graph.new_name")), copy)) {
+        document_navigation_ = navigation_generation_; area->set_sidebar_open(true); redraw();
+      }
+    }).disable(!documents_->supported() || !usable() || copy.is_null());
+    // A new flow may be created from metadata without opening data or evaluating a node.
+    if (!state_->view() && !ctx.store.viewer().presets().empty()) {
+      const auto presets = ctx.store.viewer().presets();
+      if (std::none_of(presets.begin(), presets.end(), [this](const auto &p) { return p.id == new_preset_; })) { new_preset_ = presets.front().id; }
+      std::vector<std::string> names;
+      size_t selected = 0;
+      for (size_t i = 0; i < presets.size(); ++i) { names.push_back(presets[i].name); if (presets[i].id == new_preset_) { selected = i; } }
+      auto &create = layout.row();
+      create.dropdown("graph_new_template", names, {[selected] { return int(selected); }, [this, presets, weak](const int i) {
+        if (!weak.expired() && i >= 0 && size_t(i) < presets.size()) { new_preset_ = presets[size_t(i)].id; }
+      }});
+      const auto preset_id = new_preset_;
+      const auto raw = presets[selected].raw;
+      create.button("graph_new_flow", ctx.tr("analysis_graph.new_from_template"), [this, usable, raw, preset_id, area] {
+        if (!usable() || new_preset_ != preset_id || !raw.contains("graph") ||
+            !raw.at("graph").contains("outputs") || !raw.at("graph").at("outputs").is_object()) { return; }
+        Json outputs = Json::array();
+        for (const auto &item : raw.at("graph").at("outputs").items()) { outputs.push_back(item.key()); }
+        if (documents_->save_new(std::string(store_->tr("analysis_graph.new_name")),
+            {{"format", "stk.analysis-document/1"}, {"graph", raw.at("graph")}, {"parameters", Json::object()}, {"outputs", outputs}})) {
+          document_navigation_ = navigation_generation_; area->set_sidebar_open(true); redraw();
+        }
+      }).disable(!documents_->supported() || !usable());
+    }
     // A workflow step's analysis shares the caption row with the way back, so the canvas offset stays two rows.
     auto *caption_row = breadcrumb(layout, ctx);
     if (!state_->view()) {
@@ -163,7 +225,7 @@ class AnalysisGraphEditor final : public Editor {
         {{"nodes", std::to_string(view.nodes.size())}, {"edges", std::to_string(view.edges.size())}});
     (caption_row ? *caption_row : layout).label(caption).tip(ctx.tr("analysis_graph.navigation"));
     // Two fixed-height UI rows occupy this band; drawing and pointer coordinates use the same offset.
-    canvas_top_ = 3.0f * (ctx.ui ? ctx.ui->style().unit : 20.0f);
+    canvas_top_ = 4.0f * (ctx.ui ? ctx.ui->style().unit : 20.0f);
   }
 
   void draw_sidebar(ui::Layout &layout, EditorContext &ctx) override
@@ -357,6 +419,7 @@ class AnalysisGraphEditor final : public Editor {
   std::optional<Breadcrumb> breadcrumb_;
   std::optional<std::string> pending_open_, pending_run_;
   std::string document_name_;
+  std::string new_preset_;
   AnalysisParameterDraft parameter_draft_;
   AnalysisCandidateValidation candidate_check_;
   std::optional<bridge::Future<Json>> candidate_future_;
@@ -867,7 +930,7 @@ class AnalysisGraphEditor final : public Editor {
     auto &catalog = ctx.store.catalog();
     const auto changes = parameter_draft_.graph_changes();
     auto *panel = layout.panel("analysis_graph_edit_panel", changes.empty() ? std::string(ctx.tr("analysis_graph_edit.title")) :
-        catalog.format("analysis_graph_edit.title_count", {{"count", std::to_string(changes.size())}}), false);
+        catalog.format("analysis_graph_edit.title_count", {{"count", std::to_string(changes.size())}}), true);
     if (!panel) { return; }
     hint(*panel, ctx, "analysis_graph_edit.hint");
     if (!graph_edit_error_.empty()) { panel->paragraph(text(graph_edit_error_)); }

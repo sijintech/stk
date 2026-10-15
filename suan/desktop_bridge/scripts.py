@@ -107,6 +107,14 @@ class ScriptSessions:
 
     @staticmethod
     def _source(params):
+        if "expected_version" in params:
+            if "source" in params:
+                raise BridgeError("invalid_params", "A saved-file version requires a file path")
+            from .script_files import read_file
+            saved = read_file(params)
+            if saved["version"] != params["expected_version"]:
+                raise BridgeError("conflict", "Python file changed externally; reload before running the saved file")
+            return saved["source"], saved["path"]
         if "source" in params:
             source, filename = params["source"], "<console>"
         else:
