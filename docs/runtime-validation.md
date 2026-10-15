@@ -2,7 +2,7 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
-## 2026-10-14：模块化工作区与少点击验收（`10adde6` 首轮 CI 已结束，跨平台夹具修正中）
+## 2026-10-14：模块化工作区与少点击验收（`2e331ca` 跨平台 CI 全部通过）
 
 - 前置：main / origin/main 为 `c31daa0`；其 Runtime 38602814854、密钥扫描 38602815186、文档 38602815231 均完成成功。
   上一个代码头 `20cc2f7` 的桌面 38535406254 **5/5 完成成功**，之后才允许本节点新代码推送。
@@ -14,14 +14,14 @@
 - 原生统一构建完成（GCC 15，现有 Linux sysroot，GL+Vulkan）。最终定向 **24/24、零跳过**；覆盖 6 个双语缩放默认布局结构检查、
   实例交换/旧布局迁移/工厂失败/菜单失效、草稿拒绝与外部失联、复核导航失败无残留。
   默认界面和新组合截图 **20/20**（两语言 × 两 GPU × 4 组合模式 + 4 默认导出），实际打开目检。
-  最后完整 CTest **1367/1367、零失败、零跳过**（299.26 秒，`/tmp/stk-ui-modules-native-final.xml`）；新增必跑检查 **70/70**。
+  首版本机完整 CTest **1367/1367、零失败、零跳过**（299.26 秒，`/tmp/stk-ui-modules-native-final.xml`）；新增必跑检查 **70/70**。
   前一次完整实际 **1361/1367**，剩余 6 项是窄栏双行标题、Files 背景及 a3 已为分析图的旧假设；
   保留像素/几何/透明度控件断言，显式选择 Properties 后定向 **6/6**（8.03 秒），再完整重跑通过。代码 **`10adde6a8c0b1bd8fcb02278ad30926e8c7ff631`** 已推送 main。
   文档 38672811827、密钥扫描 38672811832 已完成成功；首轮 Runtime 38672811830 **6/8**，桌面 38672811869 **4/5，已结束**。
   两个 Windows 版本均为 **2326 passed、92 skipped、1 failed、316 deselected**（3.11 379.90 秒、3.12 510.41 秒）。
   唯一失败是新脚本文件测试用 `write_text` 让 Windows 自动写 CRLF，却预期 LF 字节；产品保留真实字节/换行和 SHA 的行为正确。
   仅夹具改为显式 UTF-8 字节写入，保留原 SHA/source/size 和现有 BOM/CRLF 断言；本机 3.11/3.12/3.14 各 **10 passed、零跳过**（1.36/1.35/1.32 秒），未改产品代码。
-  修正代码在本代码头桌面完成后推送；Windows 修正 CI 结果仍待验证。
+  当时尚未推送修正，未将本机结果当作 Windows CI 通过；最终修正结果见下。
   首轮 Runtime Linux 3.11/3.14 各 **2823 passed、11 skipped、4 deselected**（561.07/669.49 秒），3.12 **2827 passed、7 skipped、4 deselected**（516.11 秒）；
   各版本新增程序文件 10 项、目录 20 项均实际通过，离线 PET 例各 **7/7**。另 desktop **3 passed**、control/Blender **24 passed**、web type-check/build 成功。
 - 首轮桌面 CI（38672811869）Linux **1367/1367**（341.76 秒）、macOS CPU **873/873**（295.49 秒）/Metal **200/200**（299.43 秒）通过，均零跳过。
@@ -30,8 +30,18 @@
   Python 返回规范反斜杠，C++ 夹具混合分隔符；改用 UTF-8 路径与 `filesystem::equivalent(..., error_code)` 检查实际文件身份，空路径/错误不能通过。
   `.py` 夹具另外固定二进制 LF 写入，保留源码/草稿/执行/Viewer 断言；不改变生产路径、原始换行或 SHA 策略。
   独立 critical review 确认空路径、缺失/不同文件不能通过；增量构建后全部 ScriptPython/FileTree 原生 **34/34、零跳过**（6.39 秒，`/tmp/stk-ui-windows-fixture-native.xml`）。
-  仅三份测试源码和交付记录变动；`10adde6` 桌面已完成后才推送修正，后续 CI 仍待实际验证。
+  仅三份测试源码和交付记录变动；推送遵守等待 `10adde6` 桌面完成的约定，最终 CI 结果见下。
   本次夹具修正与记录的暂存约 **7 KB** 经 `.gitleaks.toml` / redact 扫描无泄漏。
+- 跨平台夹具修正 **`2e331cab24b1c5fac2dbff680c0d72c88a6afc4f` 已推送 main**；`10adde6` 桌面 38672811869 明确 completed 后才推送。
+  仅三份测试源码与交付记录变动，`desktop/engine`、`desktop/app`、`suan` 对首版的 diff 为空。
+  文档 38675881572、密钥扫描 38675881621 已完成成功；[Runtime 38675881568](https://github.com/sijintech/stk/actions/runs/38675881568) **8/8 已完成成功**；[桌面 38675881571](https://github.com/sijintech/stk/actions/runs/38675881571) **5/5 已完成成功**。
+  Windows 3.11/3.12 各 **2327 passed、92 skipped、316 deselected**（497.92/794.21 秒），原失败已修；两版本程序文件 10 项、目录 20 项均实际通过。
+  Linux 3.11/3.14 各 **2823 passed、11 skipped、4 deselected**（570.35/645.12 秒），3.12 **2827 passed、7 skipped、4 deselected**（539.10 秒）；
+  三版本新 30 项均实际通过，离线 PET 例各 **7/7**（0.879/0.636/1.032 秒）。另 desktop **3 passed**、control/Blender **24 passed**、web type-check/build 成功。
+- 修正提交最终桌面：Linux **1367/1367、零跳过**（334.63 秒），macOS CPU **873/873**（290.40 秒）/Metal **200/200**（304.31 秒），均零跳过。
+  Windows **831/831、零跳过**（367.26 秒），原六个失败用例逐项通过；必跑 checker **568 matched** 实际全部运行通过。
+  Linux 必跑 checker **597 matched**、macOS CPU **575 matched**，均成功；Linux 16 个、Metal 8 个新增组合截图必跑全部通过。
+  Linux 发布包与全新 Ubuntu 24.04 GL/Vulkan 解包启动、macOS 应用包/解压后启动均成功。
 - 点击任务（真实 ScreenDriver 鼠标事件）：新默认 Viewer/节点/表格/文件树 **0 次导航**；进入 Python、切回节点、左右交换各 **1 次**。
   固定旧单 Viewer 起点，传统 File → Python **2 次**，顶部 Python **1 次**，最终布局一致、无执行；这是同版本两条路径比较，不冒充历史用户遥测。
   另外验证中英文 900 UI 像素宽度、1/1.5/2 倍缩放的顶部入口，检查可点击裁剪范围与 Viewer 实例不变。
@@ -46,7 +56,10 @@
   本机完整 XML、定向/截图/必跑报告与摘要另保留在 `/home/mnemora/opt/stk-validation/ui-modules-20261014-10adde6/`。
 - Critical review 的修复：隐藏草稿删除保护、自动同项目重连、单次 completion、来源/修订/生命周期、工厂/最大化回滚、旧隐藏标签保留原实例迁移，
   附加窗口与布局销毁保护、菜单异步失效、窄页头实际越界与概览空节点，复核导航失败清理内存候选。没有通过跳过或删掉原语义断言消除失败。
-- 限制：仅本机自动事件/软件 GPU/X11/Wayland 范围；macOS/Windows 以 CI 和后续真机为准。组合截图为公开合成场，不等于 PET 轨迹人工操作、物性收敛或读屏验收。
+- 交付记录收尾：六份 Markdown 的 **358 个本地文件链接、0 缺失**，`git diff --check` 与暂存 gitleaks/redact 扫描通过。
+  点击指标已纳入根目录 `AGENTS.md` 共同开发约定；后续 UI 交付持续记录起点、实际次数与任务终态。
+- 限制：本机使用自动事件/软件 GPU/X11/Wayland；CI 已覆盖 macOS Metal 与 Windows CPU，跨平台真机人工/读屏验收仍未做。
+  组合截图为公开合成场，不等于 PET 轨迹人工操作或物性收敛。
   富对象专用单元格/缩略图、批量粘贴、完整 IDE、二进制插件 ABI、按工作模式保存布局尚未实现。
   现有自定义布局继续恢复；新默认需在“视图 → 恢复默认布局”选择，未保存编辑稿会阻止实例销毁。全过程 key 为空、MODEL unset，无收费模型请求，未读写实际密钥/端点。
 
