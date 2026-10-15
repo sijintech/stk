@@ -2,7 +2,7 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
-## 2026-10-15：本地科研多维表格（`faf3a44` 首轮CI已记录，修正节点本机验收通过）
+## 2026-10-15：本地科研多维表格（`faf3a44` / `d03366e`，修正提交跨平台CI全部通过）
 
 - Git/CI 前置：干净 main/origin/main `73e4fbe`；Runtime 38679106858 **8/8**、Secret 38679106815、Docs 38679106830 全成功。
   上一代码头 `2e331ca` 桌面 38675881571 **5/5 完成成功**，满足本节点推送门禁；未新建分支/PR或合并无关工作。
@@ -27,10 +27,13 @@
   第四轮定向 **86/86、零跳过 / 28.69s**（`targeted4.xml`），原五项失败和新 CSV 界面全流程均通过。
   独立审查再发现单叶过滤视图追加条件会丢原条件，修复后新增真实桥反例 **1/1、零跳过 / 0.66s**，保留嵌套组而非重写为新叶。
   最终统一构建成功，完整 CTest **1432/1432、零失败、零跳过 / 339.17s**（`native-full-final.xml`）；新增必跑检查 **65/65**，含中英宽窄/focus/看板/卡片20张GL/Vulkan截图。
-  新增测试已接三平台CI必跑，不靠跳过/取消或放宽原行为断言。代码 **`faf3a44af0303af1e5b597d40ad927e8e02bd98d` 已推送 main**；推送前再次核对旧桌面 38675881571 全5项completed/success，精确代码头 CI 核对中。
+  新增测试已接三平台CI必跑，不靠跳过/取消或放宽原行为断言。代码 **`faf3a44af0303af1e5b597d40ad927e8e02bd98d` 已推送 main**；推送前再次核对旧桌面 38675881571 全5项completed/success，首轮精确代码头 CI 实际结果见下。
 - wheel/sdist 离线构建、仓库外安装冒烟成功：三新增服务模块与 bridge schema 在两包和安装目标中均与源码逐字节一致，均无 archive；
   sdist 含最终表格契约与新增测试。实际安装包的十种字段/保存视图重开/对象解析、CSV SHA冲突零写入及类型/单位导入、整批撤销重做/原UUID、筛选导出均通过。
   证据 `/tmp/stk-table-packaging-20261015/{package-verification,installed-wheel-smoke}.json`；未调用模型或Runtime。
+  修正提交`d03366e`再从完整git archive副本离线生成两包；sdist有884个成员，修正PET例/README、新服务/schema/格式14契约均与提交逐字节一致，包内无archive。
+  从解包源码实际导入运行PET数据演练 **7/7、零跳过 / 1.051s**；wheel与已通过安装冒烟的旧包逐字节相同，没有冒称重复安装。
+  最终打包证据 `/tmp/stk-table-packaging-final-20261015/`，可持久副本见本文末证据目录的`package-final/`。
 - 首轮精确代码头 CI：文档 38718495515、密钥扫描 38718495517 **completed/success**；[Runtime 38718495465](https://github.com/sijintech/stk/actions/runs/38718495465) **5/8 success、3/8 failure，全部completed**。
   Linux3.11/3.14 pytest各 **2864 passed、11 skipped、4 deselected**（582.28/651.88s），3.12 **2868 passed、7 skipped、4 deselected**（662.16s）；三版本新表36/36。
   Windows3.11/3.12各 **2367 passed、92 skipped、317 deselected**（597.46/492.77s），新表36/36及client入口/服务器拒绝步骤均通过。
@@ -51,7 +54,18 @@
   仓库外从固定90MiB源包真正重新生成 **1095个文件**，全部SHA和metadata/3个补丁/5个shim一致；vendor.py --check通过。
   [pthread_cancel](https://man7.org/linux/man-pages/man3/pthread_cancel.3.html)仅提交取消请求，[pthread_join](https://man7.org/linux/man-pages/man3/pthread_join.3.html)完成后才保证线程终止；本修正采用协作停止并等待完成。
   修正节点6份Markdown的343个本地文件链接均存在，diff空白检查通过；暂存约42KB经`.gitleaks.toml`/redact扫描无泄漏。
+  修正 **`d03366e30caf9421d0ffa61ce74058ec9ebcf550` 已推送 main**；明确等`faf3a44`桌面5个job全部completed后才推送。精确修正CI全部完成成功，实际结果如下。
   在得到更多证据前，不把历史SIGSEGV断言为已证明根因或“环境问题”。
+- 修正提交精确 CI：文档 38725595247、密钥扫描 38725595380 **completed/success**；[Runtime 38725595362](https://github.com/sijintech/stk/actions/runs/38725595362) **8/8 已完成成功**。
+  Linux3.11/3.14各 **2864 passed、11 skipped、4 deselected**（503.27/643.74s），3.12 **2868 passed、7 skipped、4 deselected**（602.70s）；
+  Windows3.11/3.12各 **2367 passed、92 skipped、317 deselected**（421.33/615.75s）；五矩阵新表均实际 **36/36**。
+  三Linux版本的独立PET例均 **7/7、零跳过**（0.792/1.016/1.325s），doctor、build、artifact upload逐step全部成功，三个包artifact实际存在且head匹配。
+  desktop **3 passed/6.71s**、control/Blender **24 passed/8.78s**、web build **2.84s**，均成功；没有重跑覆盖首轮失败。
+  [桌面 38725595367](https://github.com/sijintech/stk/actions/runs/38725595367) **5/5 已完成成功**。
+  Linux **1444/1444 / 380.19s**，macOS CPU **930/930 / 286.86s**、Metal **210/210 / 286.37s**，Windows CPU **876/876 / 299.89s**，均零失败/跳过/未运行。
+  Linux两个Weston窗口均实际通过（各1.03s）；12项PosixEventThread在Linux和Mac CPU均逐项执行通过，Windows未注册UNIX目标。
+  必跑checker Linux654、MacCPU632、Windows613全部通过，Linux328与Mac164个单截图checker通过；新增表格截图Linux20/Mac10均必跑通过。
+  Linux发布包和全新Ubuntu解包启动、Mac应用包和全新目录解压启动均成功。完整日志/JUnit/metadata见证据目录`ci-d03366e/`；Windows按真实job日志记录，未虚构未上传的JUnit。
 - 点击实测起点：1440×1200 的新默认布局，真实桥加载公开合成表，a4 为活动表格；原 Viewer 已有公开 payload/相机。
   以下由 ScreenDriver 的 mouse down/up 事件驱动，不是直接调用按钮回调的计数，也不是线上用户遥测。
 
@@ -65,6 +79,7 @@
 
   上述用例的 Viewer payload/相机 serial 保持，求值次数为0；字段/对象/CSV表单另有真实桥功能验收，未以直接binding/action冒称鼠标计数。
 - 交付文档 critical review 已同步项目/CSV/Python指南；13份Markdown **482个本地文件链接、零缺失**，`git diff --check`通过；暂存约467KB经`.gitleaks.toml`/redact扫描无泄漏。
+  最终四份交接/计划/日志/验收记录再次独立复核，澄清历史Weston措辞并补齐修正提交打包与CI；**335个本地文件链接、零缺失**，diff检查及最终暂存密钥扫描通过。
 - 证据副本：`/home/mnemora/opt/stk-validation/table-workbench-20261015/`，含整套/定向XML、20张新截图、旧界面对照与包验证摘要。
   本机为自动事件/软件GPU，尚未做macOS/Windows真机人工或读屏验收。当前页搜索/统计最多500行，批量粘贴1000命令；
   附件缩略图、填充柄/看板拖动、通用关联聚合、大表增量引擎与云协作/权限/分享仍未实现。对象来源元数据不替代内容校验或运行授权。
