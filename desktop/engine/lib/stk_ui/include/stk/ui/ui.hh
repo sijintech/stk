@@ -29,6 +29,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -143,6 +144,44 @@ struct TableColumn {
   float width = 6.0f; /**< Initial width in UI units (resizable by dragging the header edge). */
   bool sortable = true;
   bool numeric = false; /**< Sort numerically and right-align. */
+  std::string key; /**< Optional stable identity for width retention across insert/reorder. */
+};
+
+struct TableCell {
+  int row = -1, column = -1; /**< Model row, actual column (including frozen columns). */
+  bool operator==(const TableCell &) const = default;
+};
+
+struct TableSelection {
+  TableCell anchor, active;
+  bool operator==(const TableSelection &) const = default;
+};
+
+enum class TableCellStyle : uint8_t { Text, Badge, Checkbox };
+
+/** Opt-in spreadsheet interaction. The application owns selection and persistent drafts.
+ * A selection setter may refuse a change: the getter must return the accepted selection.
+ * Callbacks are model-row based; rectangles and row vectors follow the current sorted view.
+ * on_change saves a draft only. ONLY Enter/Tab calls on_commit; false retains the editor.
+ * Losing focus, disappearing or changing data_version suspends editing without committing or
+ * cancelling the application draft. Escape explicitly calls on_cancel. */
+struct TableGridSpec {
+  Binding<TableSelection> selection;
+  std::function<bool(TableCell)> editable;
+  std::function<std::string(TableCell)> edit_text;
+  std::function<void(TableCell, std::string)> on_change;
+  std::function<bool(TableCell, std::string)> on_commit;
+  std::function<void(TableCell)> on_cancel;
+  /** Complete export value, never a clipped display summary. TSV quotes tabs/newlines/quotes. */
+  std::function<std::string(int row, int column)> export_cell;
+  /** Remaining model rows from the rectangle's top-left, in view order; raw UTF-8 TSV.
+   * The application parses, validates bounds/types and applies the whole paste atomically. */
+  std::function<bool(const std::vector<int> &model_rows, int first_column, std::string)> on_paste;
+  std::function<bool(const std::vector<int> &model_rows, int first_column, int columns)> on_clear;
+  std::function<bool(TableCell)> on_toggle;
+  std::function<TableCellStyle(int row, int column)> cell_style;
+  std::function<bool(int row, int column)> checked;
+  int first_column = 0; /**< First selectable/exportable data column; preceding columns are row labels. */
 };
 
 struct TableSpec {
@@ -164,6 +203,17 @@ struct TableSpec {
    * actual column index, including horizontally scrolled columns; headers and empty rows do not
    * activate it. Existing row-only selection and keyboard navigation keep their semantics. */
   std::function<void(int model_row, int column)> on_cell_select;
+  std::optional<TableGridSpec> grid;
+  int frozen_columns = 0; /**< Leading columns stay fixed during horizontal scrolling. */
+  /** Widths in UI units. Missing/invalid external widths use retained or initial widths. */
+  std::function<std::optional<float>(std::string_view column_key)> column_width;
+  std::function<void(std::string_view column_key, float units)> on_column_width;
+  /** Optional header menu: right-click or the header's trailing menu affordance. */
+  std::function<std::vector<MenuEntry>(int column)> column_menu;
+  float row_height = 1.0f; /**< Header/body row height in UI units; default preserves legacy density. */
+  /** Optional external/global sorting. Header clicks request an order; the UI never reorders
+   * the supplied rows locally when this is present (including before the new result arrives). */
+  std::function<void(int column, bool ascending)> on_sort;
 };
 
 struct ImageSpec {
@@ -479,10 +529,15 @@ class Context {
     bool multiline = false;
     bool follow_caret = true;
     std::function<bool(const std::string &)> commit;
+    bool table = false;
+    TableCell cell;
+    uint64_t table_version = 0;
+    std::function<void(TableCell, std::string)> table_change;
+    std::function<void(TableCell)> table_cancel;
   };
   struct DragState {
     enum class Kind : uint8_t {
-      None, Press, Number, Slider, TextSelect, Scroll, TableScroll, ColumnResize, Splitter, ImagePan, Header,
+      None, Press, Number, Slider, TextSelect, Scroll, TableScroll, ColumnResize, Splitter, ImagePan, Header, TableSelect,
     };
     WidgetId id = 0;
     Kind kind = Kind::None;
@@ -502,10 +557,15 @@ class Context {
     Rect anchor;
     bool colormap = false;
     bool menu = false;
+    int table_column = -1;
+    uint64_t table_version = 0;
+    std::vector<MenuEntry> entries;
   };
   struct TableState {
     float scroll_x = 0.0f;
     std::vector<float> widths_u;
+    std::vector<std::string> column_keys;
+    uint64_t widths_frame = 0;
     int sort_col = -1;
     bool ascending = true;
     std::vector<int> perm;
@@ -559,6 +619,20 @@ class Context {
   float table_col_px(const Widget &w, int c);
   int table_resize_hit(const Widget &w, Vec2 p);
   int table_header_col(const Widget &w, Vec2 p);
+  Rect table_column_rect(const Widget &w, int column);
+  Rect table_column_clip(const Widget &w, int column);
+  Rect table_cell_rect(const Widget &w, TableCell cell);
+  TableCell table_hit_cell(const Widget &w, Vec2 position);
+  int table_view_row(const Widget &w, int model_row);
+  bool table_select(const Widget &w, TableCell cell, bool extend);
+  void table_reveal(const Widget &w, TableCell cell);
+  std::vector<int> table_selection_rows(const Widget &w, bool remaining = false);
+  bool table_grid_key(const Widget &w, const Event &e);
+  bool begin_table_edit(const Widget &w, bool replace = false);
+  bool commit_table_edit(const Event &e);
+  bool table_edit_current() const;
+  void table_edit_changed();
+  void table_open_menu(const Widget &w, int column);
   Rect image_display_rect(const Widget &w);
   Rect scrollbar_rect(const Widget &w, float content, float view, float scroll, Rect area) const;
   uint8_t primary_mod() const { return config_.mac_shortcuts ? MOD_SUPER : MOD_CTRL; }
@@ -576,6 +650,7 @@ class Context {
   Style style_;
   Vec2 window_;
   double now_ = 0.0;
+  uint64_t frame_serial_ = 0;
   bool building_ = false;
   bool redraw_ = true;
 
@@ -597,6 +672,7 @@ class Context {
   double last_click_time_ = -1.0;
   Vec2 last_click_pos_;
   WidgetId last_click_id_ = 0;
+  TableCell last_table_cell_;
 
   std::vector<Toast> toasts_;
   uint64_t toast_serial_ = 0;

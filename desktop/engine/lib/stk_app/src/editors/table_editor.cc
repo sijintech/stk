@@ -2,7 +2,7 @@
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
-#include "stk/app/project_table_editor.hh"
+#include "stk/app/table_workbench.hh"
 #include "project_navigation.hh"
 
 namespace stk::app {
@@ -46,25 +46,14 @@ class TableEditor final : public Editor {
       layout.button("table_open_project", ctx.tr("project.location"), project_navigation_action(ctx, "project"));
       return;
     }
-    layout.label(state.project()->name);
-    layout.label(ctx.store.catalog().format("project.revision", {{"revision", std::to_string(state.project()->revision)}}));
     if (!state.loaded()) { return; }
-    const bool editable = state.ready() && !state.busy();
-    tables_.controls(layout, ctx, state, editable);
-    const auto *table = state.table();
-    if (!table) { return; }
-    tables_.grid(layout, ctx, state);
-    if (tables_.selected_visible(state)) {
-      tables_.cell(layout, ctx, state, editable, project_navigation_action(ctx, "review"));
-    }
-    else if (!state.record_id().empty()) { layout.paragraph(ctx.tr("project.filter.hidden_selection")); }
-    tables_.fields(layout, ctx, state, editable, table->fields.empty());
-    tables_.sweep(layout, ctx, state, editable);
-    tables_.management(layout, ctx, state, editable);
+    tables_.draw(layout, ctx);
   }
+  nlohmann::json save_state() const override { return tables_.save_state(); }
+  bool load_state(const nlohmann::json &state) override { return tables_.load_state(state); }
 
  private:
-  ProjectTableEditor tables_;
+  TableWorkbench tables_;
 };
 }  // namespace
 

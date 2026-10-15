@@ -72,7 +72,7 @@ def evaluate(fields, records, literals, definitions, cached, changed, revision):
             try:
                 json.dumps(entry["value"], allow_nan=False)
                 field = fields[key[1]]
-                check_target(Value(entry["value"], entry["unit"]), field["type"], field["unit"])
+                check_target(Value(entry["value"], entry["unit"]), field["type"], field["unit"], field.get("options"), field.get("_project_id"))
                 return True
             except (EvaluationError, ValueError, TypeError, RecursionError):
                 return False
@@ -138,7 +138,7 @@ def evaluate(fields, records, literals, definitions, cached, changed, revision):
             else:
                 expression = Expression(definition["expression"], definition["bindings"].keys())
                 result = expression.evaluate(lambda name: resolve(address(definition["bindings"][name])))
-            check_target(result, field["type"], field["unit"])
+            check_target(result, field["type"], field["unit"], field.get("options"), field.get("_project_id"))
             cache[key] = {"state": "ok", "value": result.value, "unit": result.unit,
                           "evaluated_revision": revision, "engine_version": ENGINE_VERSION}
         except EvaluationError as exc:

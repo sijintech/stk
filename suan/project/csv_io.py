@@ -66,6 +66,9 @@ def _literal(text, kind, row, name):
     stripped = text.strip()
     if not stripped:
         return None
+    if kind in {"date", "url"}:
+        _check_value(text, kind)
+        return text
     try:
         value = json.loads(stripped, parse_constant=_constant)
         _check_value(value, kind)
@@ -78,7 +81,7 @@ class TableCSV:
     def __init__(self, store):
         self.store = store
 
-    def import_file(self, source, *, name, expected_revision, types=None, units=None, delimiter=","):
+    def import_file(self, source, *, name, expected_revision, types=None, units=None, delimiter=",", expected_sha256=None):
         """Create one new table in one undoable edit batch; no inference or partial import."""
         _expected_revision(expected_revision)
         _text(name, "Table name")
@@ -88,6 +91,8 @@ class TableCSV:
             raise ProjectError("CSV types and units must map column names to declarations")
         source = _path(self.store, source)
         text, digest = _read(source)
+        if expected_sha256 is not None and expected_sha256 != digest:
+            raise RevisionConflict("CSV source changed since its preview; preview it again")
         reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, strict=True)
         try:
             headers = next(reader, None)
@@ -126,7 +131,36 @@ class TableCSV:
         return {"revision": result["revision"], "table_id": table_id, "field_ids": fields,
                 "record_ids": records, "rows": len(records), "columns": len(fields), "source_sha256": digest}
 
-    def export_file(self, table_id, destination, *, expected_revision, delimiter=","):
+    def preview(self, source, *, expected_revision, delimiter=",", limit=20):
+        _expected_revision(expected_revision)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ProjectError("CSV preview limit must be 1 to 100")
+        revision = self.store.info()["revision"]
+        if revision != expected_revision:
+            raise RevisionConflict("CSV preview revision is stale")
+        text, digest = _read(_path(self.store, source))
+        try:
+            reader = csv.reader(io.StringIO(text, newline=""), delimiter=_delimiter(delimiter), strict=True)
+            headers = next(reader, None)
+            _headers(headers)
+            shown, count = [], 0
+            for row in reader:
+                count += 1
+                if count > MAX_EXPORT_ROWS or len(row) != len(headers):
+                    raise ProjectError("CSV preview has too many rows or a nonrectangular record")
+                if len(shown) < limit:
+                    shown.append(row)
+        except csv.Error as exc:
+            raise ProjectError(f"Invalid CSV: {exc}") from None
+        if self.store.info()["revision"] != revision:
+            raise RevisionConflict("Project changed during CSV preview")
+        commands = 1 + len(headers) + count * (1 + len(headers))
+        return {"revision": revision, "source_sha256": digest,
+                "columns": [{"name": h, "type": "text", "unit": None} for h in headers], "rows": shown,
+                "total_rows": count, "truncated": count > len(shown), "command_count": commands,
+                "can_import": commands <= 1000}
+
+    def export_file(self, table_id, destination, *, expected_revision, delimiter=",", definition=None, view_id=None):
         """Export evaluated values from one consistent revision, never replace an existing file."""
         _expected_revision(expected_revision)
         delimiter = _delimiter(delimiter)
@@ -137,6 +171,19 @@ class TableCSV:
         table = next((table for table in snapshot["tables"] if table["id"] == table_id), None)
         if table is None:
             raise ProjectError("CSV table does not exist")
+        if definition is not None or view_id is not None:
+            page = self.store.table.query(table_id, expected_revision=expected_revision,
+                                          definition=definition, view_id=view_id, limit=500)
+            if page["issues"] or page["total"] > MAX_EXPORT_ROWS:
+                raise ProjectError("Cannot export an unresolved view or more than 10000 records")
+            hidden = {c["field_id"] for c in page["definition"]["columns"] if c["hidden"]}
+            fields = [f for f in page["fields"] if f["id"] not in hidden]
+            records = list(page["records"])
+            while page["next_offset"] is not None:
+                page = self.store.table.query(table_id, expected_revision=expected_revision,
+                    definition=definition, view_id=view_id, offset=page["next_offset"], limit=500)
+                records.extend(page["records"])
+            table = {**table, "fields": fields, "records": records}
         fields = table["fields"]
         headers = [field["name"] for field in fields]
         _headers(headers)
@@ -165,7 +212,7 @@ class TableCSV:
                     values.append(json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
                 elif value is None:
                     values.append("")
-                elif field["type"] == "text":
+                elif field["type"] in {"text", "date", "url", "single_select"}:
                     values.append(value)
                 else:
                     values.append(json.dumps(value, allow_nan=False))

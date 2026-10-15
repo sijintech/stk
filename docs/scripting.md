@@ -148,6 +148,7 @@ print(p.selection())
 | 材料预测模型（S3a） | `stk.materials.synthetic/validate/train/job/cancel/models/activate/predict`：铁电 P–E 回线（`pe_loop`）与锂电池容量衰减（`capacity_fade`）；数据集为 `stk.dataset/1` 文件夹，合成数据只用于检验链路；训练需要 PyTorch（CPU），在本机后台运行，过评估门槛才登记，见[方案](design/materials-models-s3.md) |
 | 智能体会话（S2a、S2b） | `stk.project.agent.create/say/start/get/list/cancel/recover/verify/export/tools/route` 与便捷的 `ask(text)`，格式 13（`get` 默认给最新的 1000 个事件，可用 `offset`/`limit` 分页；`labels(include_structure=True)` 列出结构公开的表）；规划只用本机或机构内模型，工具只有只读、记录、问模型与草案级，智能体不应用草案、不准备或开始运行；每一步记入哈希链，见[智能体设计](design/agent-harness.md) |
 | 数据标注 | `stk.project.mark_public/mark_private/labels`，格式 12；`mark_structure_public(table_ids)`（格式 13）只公开表的结构 |
+| 本地多维表格查询/规划 | `stk.project.table.query/views_list/views_get/paste_plan/objects_list_candidates/objects_resolve/csv_preview`，只读且要求修订；新字段配置与命名视图通过 `apply` 写入格式14，见[契约](specs/project-tables-14.md) |
 | CSV/TSV 表格导入与当前值导出 | `stk.project.csv` 共用类型校验、修订和撤销，见[CSV 交换](project-csv.md) |
 | 参数扫描生成 | `stk.project.sweep(table_id, axes, expected_revision=...)` 按范围/列表生成新行，`dry_run=True` 只返回计划，见[参数扫描](project-sweeps.md) |
 | 文件索引登记、刷新、列表、路径检查 | `stk.project.files` 已实现；不复制、删除、打开或执行文件，见[文件指南](project-files.md) |

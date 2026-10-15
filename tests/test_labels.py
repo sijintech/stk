@@ -4,6 +4,8 @@ from uuid import uuid4
 
 import pytest
 
+from suan.project.store import FORMAT_VERSION
+
 from suan.project import ProjectError, ProjectStore
 from suan.project.store import _DDL_V12, DATABASE_NAME, UnsupportedProjectFormat
 from test_bridge_workflow_runs import analysis_document, setup  # noqa: F401
@@ -57,11 +59,13 @@ def test_older_projects_label_nothing_until_upgraded(tmp_path):
         db.execute("DROP TABLE IF EXISTS project_agent_events")
         db.execute("DROP TABLE IF EXISTS project_agent_sessions")
         db.execute("DROP TABLE project_labels")
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=11")
     assert store.labels.list() == {"items": []} and not store.labels.is_public("table", table)
     with pytest.raises(UnsupportedProjectFormat):
         store.labels.set([{"kind": "table", "id": table}], label="public")
-    assert store.upgrade(expected_revision=1)["format_version"] == 13
+    assert store.upgrade(expected_revision=1)["format_version"] == FORMAT_VERSION
     assert store.labels.set([{"kind": "table", "id": table}], label="public")["changed"] == 1
 
 
@@ -112,11 +116,13 @@ def test_upgrading_to_format_13_keeps_every_label(setup):
         for statement in _DDL_V12:
             db.execute(statement)
         db.executemany("INSERT INTO project_labels VALUES (?,?,?,?,?,?)", rows)
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=12")
     with pytest.raises(UnsupportedProjectFormat, match="format 13"):
         store.labels.set([{"kind": "table", "id": ids["cases"]}], label="structure")
     upgraded = store.upgrade(expected_revision=store.info()["revision"])
-    assert upgraded["format_version"] == 13 and upgraded["backup"]
+    assert upgraded["format_version"] == FORMAT_VERSION and upgraded["backup"]
     assert store.labels.list() == before and store.labels.is_public("table", ids["cases"])
     with sqlite3.connect(store.path) as db:  # the whole history, ids kept, and the new CHECK in place
         assert db.execute("SELECT id, kind, object_id, label, at, note FROM project_labels ORDER BY id").fetchall() == rows

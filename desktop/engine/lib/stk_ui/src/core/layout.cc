@@ -371,9 +371,10 @@ Widget &Layout::table(std::string_view key, TableSpec spec)
 {
   Widget &w = add_widget(WidgetType::Table, key);
   const Style &st = ctx().style();
-  w.height = std::round((spec.visible_rows + 1.0f) * st.unit * scale_y_) + 2.0f * st.pixel;
-  w.table_base_height = w.height;
   w.table = std::make_shared<TableSpec>(std::move(spec));
+  w.height = std::round((w.table->visible_rows + 1.0f) * ctx().list_row_height(w) * scale_y_) + 2.0f * st.pixel;
+  w.table_base_height = w.height;
+  ctx().table_state(w);
   return w;
 }
 

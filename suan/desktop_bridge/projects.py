@@ -167,6 +167,18 @@ class ProjectSessions:
             store = self._get(params["handle"])
             return store.apply(params["commands"], expected_revision=params["expected_revision"])
 
+    def table(self, action, params):
+        with self._operation():
+            store = self._get(params["handle"])
+            args = {key: value for key, value in params.items() if key != "handle"}
+            if action == "csv_preview":
+                return store.csv.preview(**args)
+            if action == "views_get":
+                args["identity"] = args.pop("id")
+            if action == "objects_resolve":
+                args["value"] = args.pop("reference")
+            return getattr(store.table, action)(**args)
+
     def credentials(self, action, params):
         """Set or forget the Token Plan key; replies report only where a key comes from."""
         with self._errors():

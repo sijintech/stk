@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import pytest
 
+from suan.project.store import FORMAT_VERSION
+
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project import analyses
 from suan.project.analyses import AnalysisNotFound, DOCUMENT_FORMAT, FIELD_IDS, TABLE_ID
@@ -62,7 +64,7 @@ def test_create_uses_fixed_fields_and_one_revision_and_undo_batch(store):
     assert answer["revision"] == 1 and answer["record_id"] == identity and answer["table_id"] == TABLE_ID
     assert {c["op"] for c in answer["commands"]} == {"create_table", "add_field", "add_record", "set_cell"}
     snapshot = store.snapshot()
-    assert snapshot["format_version"] == 13
+    assert snapshot["format_version"] == FORMAT_VERSION
     assert "analysis_index" not in snapshot
     table = snapshot["tables"][0]
     assert table["id"] == TABLE_ID and {f["id"] for f in table["fields"]} == set(FIELD_IDS.values())
@@ -337,6 +339,8 @@ def test_future_format_is_visible_and_cannot_be_downgraded(store):
 
 def test_format_two_is_not_implicitly_upgraded(store):
     with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=2")
     for action in (lambda: store.analyses.list(), lambda: store.analyses.get(str(uuid4())), lambda: create(store)):
         with pytest.raises(UnsupportedProjectFormat):

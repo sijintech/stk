@@ -14,6 +14,12 @@ project extension (§13, 2026-09-28) and the experimental skill catalog (§16, 2
 library plus the STK core it drives). Conformance tests: `tests/test_desktop_bridge*.py`. The C++
 client is `desktop/engine/lib/stk_bridge` (WP8), written against this document and the schema.
 
+2026-10-15 additive table extension: [project tables / format 14](project-tables-14.md) specifies
+the seven read/plan methods under `project.table`, typed field `options`, durable views, the three
+new revisioned commands, CSV preview/source-checksum and view-export parameters. The protocol
+remains v1; method discovery gates use of new methods. Format 13 remains readable; using new
+stored field schemas/views requires the explicit backup-first upgrade to format 14.
+
 The bridge replaces the file-queue bridge of the Blender workbench (`suan/blender_client/bridge.py`,
 archived at D1 exit under the tag `archive/blender-workbench-2026-09`).
 

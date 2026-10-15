@@ -202,6 +202,8 @@ def test_format_two_upgrade_preserves_formulas_and_starts_a_new_undo_boundary(mo
         db.execute("DROP TABLE run_plans")
         db.execute("DROP TABLE project_snapshots")
         db.execute("DROP TABLE edit_journal")
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=2")
     store = ProjectStore(store.directory)
     assert "edit_history" not in store.snapshot()

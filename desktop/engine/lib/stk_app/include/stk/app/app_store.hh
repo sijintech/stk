@@ -50,6 +50,8 @@ struct OpenResultRequest {
   std::string task_id;      /**< Empty when opening local paths. */
   std::string preset;       /**< Graph preset to evaluate; empty = let the Viewer choose. */
   std::vector<std::string> local_paths;
+  /** Optional in-memory source fence, checked when the shell actually consumes this request. */
+  std::function<bool()> still_current;
 };
 
 /** State of the Python bridge child process (driven by stk_bridge from WP8 on). */

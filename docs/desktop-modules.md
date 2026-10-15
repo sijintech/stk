@@ -1,6 +1,6 @@
 # 桌面编辑模块与交互成本
 
-2026-10-14。编辑器可组合、可单独构建；所有模块仍随一个原生应用发布。
+2026-10-15。编辑器可组合、可单独构建；所有模块仍随一个原生应用发布。
 当前交付结果及剩余限制以[验收记录](runtime-validation.md)为准。
 
 ## 模块边界
@@ -23,7 +23,7 @@ cmake --build build --target stk_editor_analysis
 | `viewer` | 三维查看与属性/探针，`src/editors/viewer_*.cc` |
 | `analysis` | 分析节点画布、参数、编辑与运行检查，`src/editors/analysis_graph_editor.cc` |
 | `workflow` | 项目级工作流，`src/editors/workflow_editor.cc` |
-| `table` | 独立表格页和可复用 `ProjectTableEditor`；传统项目页共用组件 |
+| `table` | `TableWorkbench` 多维表格、独立只读控制器和可复用定义编辑器；传统项目页继续共用 `ProjectTableEditor` |
 | `files` | 独立真实目录页和 `ProjectFileTree` 异步控制器 |
 | `python` | 程序文档、显式保存与运行，`src/editors/python_editor.cc` |
 | `project` | 项目管理、复核、讨论与仿真 |
@@ -59,8 +59,10 @@ Python 服务仍在 `suan/`，目录列举和程序文件读写经同一桌面�
 
 ## 数据与草稿约束
 
-- 独立表格复用五种字段、UUID 引用、公式、单位和撤销；点击单元格可选择字段并查看 JSON 详情。
-  富对象缩略图、结构/结果专用单元格、批量粘贴和完整单元格内编辑仍需后续版本化类型契约。
+- 独立表格已有十种字段、UUID 引用、公式、单位和撤销，内联编辑/矩形粘贴/已存视图沿同一项目服务；
+  新强类型、选项和命名视图使用显式格式 14，旧 13 不自动升级。
+  对象候选和来源查看不执行任务；富对象缩略图、填充柄、看板拖动和云端协作仍未实现，
+  具体能力与限制见[多维表格](design/multidimensional-tables.md)。
 - 目录树按需列一层，真实磁盘观察与已登记资源分开；展开、选择、刷新不运行代码或注册文件。
 - Python 代码是主区域，输出可展开/收起；载入/保存不执行，运行缓冲区与运行保存文件有明确来源。
   UTF-8 `.py` 上限 256 KiB，SHA 版本冲突保留草稿；乐观并发不能锁住其它编辑器。

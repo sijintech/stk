@@ -867,6 +867,17 @@ ProjectTableEditor::ProjectTableEditor() : impl_(std::make_unique<Impl>()) {}
 ProjectTableEditor::~ProjectTableEditor() = default;
 bool ProjectTableEditor::can_change_project_selection(std::string_view id) const { return impl_->can_change_project_selection(id); }
 bool ProjectTableEditor::has_unsaved_changes() const { return impl_->has_unsaved_changes(); }
+void ProjectTableEditor::select_field(std::string_view id)
+{
+  if (!impl_->has_unsaved_changes()) { impl_->cell_field_ = id; }
+}
+void ProjectTableEditor::set_visible_records(std::vector<std::string> ids)
+{
+  if (*impl_->visible_ids_ != ids) {
+    impl_->visible_ids_ = std::make_shared<std::vector<std::string>>(std::move(ids));
+    ++impl_->query_version_;
+  }
+}
 void ProjectTableEditor::controls(ui::Layout &l, EditorContext &c, ProjectState &s, bool e) { impl_->table_controls(l, c, s, e); }
 void ProjectTableEditor::fields(ui::Layout &l, EditorContext &c, ProjectState &s, bool e, bool expanded) { impl_->field_controls(l, c, s, e, expanded); }
 void ProjectTableEditor::sweep(ui::Layout &l, EditorContext &c, ProjectState &s, bool e) { impl_->sweep_controls(l, c, s, e); }

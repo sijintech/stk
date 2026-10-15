@@ -119,6 +119,10 @@ class Project:
         return ProjectCSV(self._call, self.handle)
 
     @property
+    def table(self):
+        return ProjectTable(self._call, self.handle)
+
+    @property
     def files(self):
         return ProjectFiles(self._call, self.handle)
 
@@ -439,23 +443,71 @@ class ProjectDrafts:
         return self._call("project.drafts.discard", {"handle": self.handle, "draft_id": draft_id})["draft"]
 
 
+class ProjectTable:
+    """Versioned table views and read-only plans; edits still use Project.apply."""
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def _read(self, method, expected_revision, **params):
+        return self._call("project.table." + method, {"handle": self.handle,
+                          "expected_revision": expected_revision, **params})
+
+    def query(self, table_id, *, expected_revision, view_id=None, definition=None, offset=0, limit=200):
+        params = {"table_id": table_id, "offset": offset, "limit": limit}
+        if view_id is not None:
+            params["view_id"] = view_id
+        if definition is not None:
+            params["definition"] = definition
+        return self._read("query", expected_revision, **params)
+
+    def paste_plan(self, table_id, record_ids, field_ids, text, *, expected_revision, delimiter="\t", append_rows=False, fit_targets=False):
+        return self._read("paste.plan", expected_revision, table_id=table_id, record_ids=record_ids,
+                          field_ids=field_ids, text=text, delimiter=delimiter, append_rows=append_rows, fit_targets=fit_targets)
+
+    def views_list(self, table_id, *, expected_revision):
+        return self._read("views.list", expected_revision, table_id=table_id)
+
+    def views_get(self, identity, *, expected_revision):
+        return self._read("views.get", expected_revision, id=identity)
+
+    def objects_list_candidates(self, kind, *, expected_revision, table_id=None, offset=0, limit=100):
+        params = {"kind": kind, "offset": offset, "limit": limit}
+        if table_id is not None:
+            params["table_id"] = table_id
+        return self._read("objects.list_candidates", expected_revision, **params)
+
+    def objects_resolve(self, reference, *, expected_revision):
+        return self._read("objects.resolve", expected_revision, reference=reference)
+
+    def csv_preview(self, source, *, expected_revision, delimiter=",", limit=20):
+        return self._read("csv.preview", expected_revision, source=str(Path(source).expanduser().absolute()),
+                          delimiter=delimiter, limit=limit)
+
+
 class ProjectCSV:
     def __init__(self, call, handle):
         self._call, self.handle = call, handle
 
-    def import_file(self, source, *, name, expected_revision, types=None, units=None, delimiter=","):
+    def import_file(self, source, *, name, expected_revision, types=None, units=None, delimiter=",", expected_sha256=None):
         params = {"handle": self.handle, "source": str(Path(source).expanduser().absolute()),
                   "name": name, "expected_revision": expected_revision, "delimiter": delimiter}
         if types is not None:
             params["types"] = types
         if units is not None:
             params["units"] = units
+        if expected_sha256 is not None:
+            params["expected_sha256"] = expected_sha256
         return self._call("project.csv.import", params)
 
-    def export_file(self, table_id, destination, *, expected_revision, delimiter=","):
-        return self._call("project.csv.export", {"handle": self.handle, "table_id": table_id,
+    def export_file(self, table_id, destination, *, expected_revision, delimiter=",", definition=None, view_id=None):
+        params = {"handle": self.handle, "table_id": table_id,
             "destination": str(Path(destination).expanduser().absolute()),
-            "expected_revision": expected_revision, "delimiter": delimiter})
+            "expected_revision": expected_revision, "delimiter": delimiter}
+        if definition is not None:
+            params["definition"] = definition
+        if view_id is not None:
+            params["view_id"] = view_id
+        return self._call("project.csv.export", params)
 
 
 class ProjectRuns:

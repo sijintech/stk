@@ -4,6 +4,8 @@ from uuid import uuid4
 
 import pytest
 
+from suan.project.store import FORMAT_VERSION
+
 from suan.project import ProjectError, ProjectStore
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 from test_bridge_workflow_runs import analysis_document, prepare, settled, setup  # noqa: F401
@@ -86,13 +88,15 @@ def test_older_projects_have_nothing_archived_until_upgraded(tmp_path):
         db.execute("DROP TABLE IF EXISTS project_agent_sessions")
         db.execute("DROP TABLE project_labels")
         db.execute("DROP TABLE project_archive")
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=10")
     assert store.archive.list() == {"items": [], "counts": {kind: 0 for kind in store.archive.list()["counts"]}}
     assert not store.archive.is_archived("workflow", str(uuid4())) and store.archive.ids("draft") == set()
     with pytest.raises(UnsupportedProjectFormat):
         store.archive.set([{"kind": "workflow", "id": str(uuid4())}], archived=True)
     upgraded = store.upgrade(expected_revision=0)
-    assert upgraded["format_version"] == 13 and upgraded["backup"]
+    assert upgraded["format_version"] == FORMAT_VERSION and upgraded["backup"]
     with pytest.raises(ProjectError, match="No workflow"):
         store.archive.set([{"kind": "workflow", "id": str(uuid4())}], archived=True)
 

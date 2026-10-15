@@ -368,8 +368,8 @@ class PetStudy:
     def _project(self, project=None, expected_revision=None):
         project = project or self.stk.project
         model = project.snapshot() if expected_revision is None else _revision(project, expected_revision)
-        if model["format_version"] != 13:
-            raise ProjectError("PET studies require project format 13; upgrade explicitly first")
+        if model["format_version"] not in (13, 14):
+            raise ProjectError("PET studies require project format 13 or 14; upgrade explicitly first")
         return project, model
 
     def _record(self, project, study_id):

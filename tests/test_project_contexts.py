@@ -236,11 +236,13 @@ def test_format_six_explicit_upgrade_preserves_drafts_and_verified_backup(model,
     with sqlite3.connect(store.path) as db:
         for name in ("project_agent_objects", "project_agent_events", "project_agent_sessions", "project_labels", "project_archive", "workflow_run_events", "workflow_run_plans", "analysis_run_events", "analysis_run_plans", "project_requests", "project_proposals", "project_messages", "project_contexts"):
             db.execute(f"DROP TABLE {name}")
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=6")
     with pytest.raises(UnsupportedProjectFormat, match="format 7"):
         capture(model)
     result = store.upgrade(expected_revision=1)
-    assert result["format_version"] == FORMAT_VERSION == 13 and result["revision"] == 2
+    assert result["format_version"] == FORMAT_VERSION == 14 and result["revision"] == 2
     assert store.drafts.get(draft["id"]) == draft and store.snapshot()["tables"] == before["tables"]
     assert store.snapshot()["edit_history"] == before["edit_history"] and store.history()[:-1] == history
     restored = tmp_path / "old"
@@ -270,6 +272,8 @@ def test_failed_format_seven_upgrade_rolls_back_all_metadata_tables(model, monke
     with sqlite3.connect(store.path) as db:
         for name in ("project_agent_objects", "project_agent_events", "project_agent_sessions", "project_labels", "project_archive", "workflow_run_events", "workflow_run_plans", "analysis_run_events", "analysis_run_plans", "project_requests", "project_proposals", "project_messages", "project_contexts"):
             db.execute(f"DROP TABLE {name}")
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=6")
     before, history = store.snapshot(), store.history()
     monkeypatch.setattr(storage, "_DDL_V7", (*storage._DDL_V7, "invalid SQL"))

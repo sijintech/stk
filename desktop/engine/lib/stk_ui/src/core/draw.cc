@@ -620,18 +620,24 @@ void Context::draw_widget(const Widget &w)
       if (table) {
         /* Header cells with sort indicator and column separators. */
         TableState &ts = table_state(w);
-        float x = r.x + px - horizontal;
         const Rect hdr{r.x + px, r.y + px, r.w - 2 * px, row_h};
         draw_.round_box(hdr, clamp_radius(bc.roundness * st.unit, hdr), CORNER_TOP, th.panel_header, none);
         draw_.clip_push(hdr);
         for (int c = 0; c < int(w.table->columns.size()); c++) {
           const TableColumn &col = w.table->columns[size_t(c)];
-          const float cw = table_col_px(w, c);
-          const Rect cell{x, hdr.y, cw, row_h};
+          const Rect cell = table_column_rect(w, c);
+          const bool advanced = w.table->grid || w.table->frozen_columns > 0 || w.table->column_menu;
+          if (advanced) { draw_.clip_push(table_column_clip(w, c).intersect(hdr)); }
           float tw = cell.w - st.text_margin * 2;
+          if (w.table->column_menu) {
+            const float x = cell.x1() - 0.5f * st.unit, y = cell.cy();
+            const float d = 0.12f * st.unit;
+            draw_.triangle({x - d, y - d * 0.5f}, {x + d, y - d * 0.5f}, {x, y + d}, th.space_text);
+            tw -= st.unit;
+          }
           if (ts.sort_col == c) {
             const float s = std::round(0.2f * st.unit);
-            const float cx = cell.x1() - st.text_margin - s, cy = cell.cy();
+            const float cx = cell.x1() - st.text_margin - s - (w.table->column_menu ? st.unit : 0), cy = cell.cy();
             if (ts.ascending) {
               draw_.triangle({cx - s, cy + s * 0.5f}, {cx + s, cy + s * 0.5f}, {cx, cy - s * 0.6f}, th.space_text);
             }
@@ -642,17 +648,24 @@ void Context::draw_widget(const Widget &w)
           }
           text_in({cell.x + st.text_margin, cell.y, tw, cell.h}, col.title, col.numeric ? Align::Right : Align::Left,
                   th.space_text);
-          x += cw;
           if (c + 1 < int(w.table->columns.size())) {
-            draw_.rect({x - px, hdr.y + 2 * px, px, row_h - 4 * px}, th.box.outline);
+            draw_.rect({cell.x1() - px, hdr.y + 2 * px, px, row_h - 4 * px}, th.box.outline);
           }
+          if (advanced) { draw_.clip_pop(); }
         }
         draw_.clip_pop();
       }
       draw_.clip_push(body);
       const std::vector<int> *perm = table ? &table_perm(w) : nullptr;
+      const bool grid = table && w.table->grid.has_value();
+      const TableSelection selection = grid ? w.table->grid->selection.value() : TableSelection{};
       const int selected = w.list && w.list->selected ? w.list->selected.value() :
-                           (w.table && w.table->selected ? w.table->selected.value() : -1);
+                           (!grid && w.table && w.table->selected ? w.table->selected.value() : -1);
+      const int anchor_row = grid ? table_view_row(w, selection.anchor.row) : -1;
+      const int active_row = grid ? table_view_row(w, selection.active.row) : -1;
+      const int top_row = std::min(anchor_row, active_row), bottom_row = std::max(anchor_row, active_row);
+      const int first_column = std::min(selection.anchor.column, selection.active.column);
+      const int last_column = std::max(selection.anchor.column, selection.active.column);
       for (int i = first; i < last; i++) {
         const float y = std::round(body.y + lpad + float(i) * row_h - scroll);
         const Rect row{body.x, y, body.w - sbw, row_h};
@@ -679,24 +692,86 @@ void Context::draw_widget(const Widget &w)
           text_in(row.inset(st.text_margin, 0), w.list->text ? w.list->text(i) : std::string(), Align::Left, tc);
         }
         else {
-          float x = r.x + px - horizontal;
-          for (int c = 0; c < int(w.table->columns.size()); c++) {
-            const float cw = table_col_px(w, c);
-            const Rect cell{x + st.text_margin, row.y, cw - 2 * st.text_margin, row.h};
-            Color cc = tc;
-            if (!sel && w.table->cell_color) {
-              const Color custom = w.table->cell_color(model, c);
-              if (custom.a != 0) {
-                cc = custom;
+          if (!grid && w.table->frozen_columns == 0) {
+            float x = r.x + px - horizontal;
+            for (int c = 0; c < int(w.table->columns.size()); c++) {
+              const float cw = table_col_px(w, c);
+              const Rect cell{x + st.text_margin, row.y, cw - 2 * st.text_margin, row.h};
+              Color cc = tc;
+              if (!sel && w.table->cell_color) {
+                const Color custom = w.table->cell_color(model, c);
+                if (custom.a != 0) {
+                  cc = custom;
+                }
               }
+              text_in(cell, w.table->cell ? w.table->cell(model, c) : std::string(),
+                      w.table->columns[size_t(c)].numeric ? Align::Right : Align::Left, cc);
+              x += cw;
             }
-            text_in(cell, w.table->cell ? w.table->cell(model, c) : std::string(),
-                    w.table->columns[size_t(c)].numeric ? Align::Right : Align::Left, cc);
-            x += cw;
+          }
+          else {
+            for (int c = 0; c < int(w.table->columns.size()); c++) {
+              Rect full = table_column_rect(w, c);
+              full.y = row.y;
+              const Rect visible = full.intersect(table_column_clip(w, c)).intersect(body);
+              if (visible.empty()) { continue; }
+              draw_.clip_push(visible);
+              const bool in_selection = grid && anchor_row >= 0 && active_row >= 0 &&
+                                        i >= top_row && i <= bottom_row && c >= first_column && c <= last_column;
+              if (in_selection) { draw_.rect(full.inset(px, px), lc.inner_sel); }
+              if (grid && selection.active == TableCell{model, c}) {
+                draw_.round_box(full.inset(px, px), 0, CORNER_ALL, none, th.menu.inner_sel);
+              }
+              const Rect cell = full.inset(st.text_margin, 0);
+              Color cc = in_selection ? lc.text_sel : tc;
+              if (!sel && !in_selection && w.table->cell_color) {
+                const Color custom = w.table->cell_color(model, c);
+                if (custom.a != 0) { cc = custom; }
+              }
+              const std::string value = w.table->cell ? w.table->cell(model, c) : std::string();
+              const auto cell_style = grid && w.table->grid->cell_style ?
+                                          w.table->grid->cell_style(model, c) : TableCellStyle::Text;
+              if (cell_style == TableCellStyle::Checkbox) {
+                const float side = std::round(0.65f * st.unit);
+                const Rect square{cell.x, cell.cy() - side * 0.5f, side, side};
+                const bool checked = w.table->grid->checked && w.table->grid->checked(model, c);
+                const auto colors = state_colors(th.option, checked, false, disabled);
+                auto &cmd = draw_.round_box(square, 2 * px, CORNER_ALL, colors.inner, colors.outline);
+                if (checked) {
+                  cmd.tria = Tria::Check; cmd.tria_center = {square.cx(), square.cy()};
+                  cmd.tria_size = 0.5f * side; cmd.tria_color = colors.item;
+                }
+              }
+              else if (cell_style == TableCellStyle::Badge) {
+                const float width = std::min(cell.w, tm.width(value, font) + 2 * st.text_margin);
+                const Rect badge{cell.x, cell.y + 3 * px, width, std::max(0.0f, cell.h - 6 * px)};
+                draw_.round_box(badge, 0.2f * st.unit, CORNER_ALL, th.panel_header, none);
+                text_in(badge.inset(st.text_margin, 0), value, Align::Left, cc);
+              }
+              else {
+                text_in(cell, value, w.table->columns[size_t(c)].numeric ? Align::Right : Align::Left, cc);
+              }
+              if (grid) {
+                draw_.rect({full.x1() - px, full.y, px, full.h}, th.box.outline);
+                draw_.rect({full.x, full.y1() - px, full.w, px}, th.box.outline);
+              }
+              draw_.clip_pop();
+            }
           }
         }
       }
       draw_.clip_pop();
+      if (table && editing && edit_.table && table_edit_current()) {
+        const Rect cell = table_cell_rect(w, edit_.cell);
+        const Rect visible = cell.intersect(table_column_clip(w, edit_.cell.column)).intersect(body);
+        if (!visible.empty()) {
+          draw_.clip_push(visible);
+          draw_.round_box(cell, 0, CORNER_ALL, th.text.inner_sel, th.menu.inner_sel);
+          draw_editing(cell.inset(st.text_margin, 0));
+          draw_.clip_pop();
+          edit_caret_ = edit_caret_.intersect(visible);
+        }
+      }
       if (ms > 0.0f) {
         const bool hot = hover && mouse_.x >= body.x1() - st.scrollbar - 2 * px;
         draw_scrollbar(body, ms + body.h, body.h, scroll, hot);

@@ -445,6 +445,8 @@ def test_context_discussion_requires_explicit_upgrade_from_format_six(inproc, tm
                           *storage._DDL_V5, *storage._DDL_V6):
             db.execute(statement)
         db.execute(f"PRAGMA application_id={storage.APPLICATION_ID}")
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=6")
         db.execute("INSERT INTO project VALUES (?, 'Format six', 0)", (str(uuid4()),))
     harness = inproc()
@@ -466,7 +468,7 @@ def test_context_discussion_requires_explicit_upgrade_from_format_six(inproc, tm
     assert ProjectStore(directory).info()["revision"] == 0
     assert harness.events_of("project.changed") == []
     upgraded = harness.call("project.upgrade", {"handle": handle, "expected_revision": 0})
-    assert upgraded["format_version"] == 13 and upgraded["revision"] == 1 and upgraded["backup"]
+    assert upgraded["format_version"] == FORMAT_VERSION and upgraded["revision"] == 1 and upgraded["backup"]
     assert harness.call("project.contexts.list", {"handle": handle}) == {"contexts": [], "next_offset": None}
     assert harness.call("project.discussion.list", {"handle": handle}) == {"messages": [], "next_offset": None}
     assert harness.call("project.discussion.proposals", {"handle": handle}) == {"proposals": [], "next_offset": None}

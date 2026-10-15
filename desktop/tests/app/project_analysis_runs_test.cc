@@ -54,6 +54,8 @@ def run(self, identity, method, params):
     if method == 'project.snapshot' and mode() == 'legacy':
         store = self.projects._get(params['handle'])
         with store._connect(write=True) as database:
+            database.execute('DROP TABLE table_views')
+            database.execute('DROP TABLE field_options')
             database.execute('DROP TABLE project_agent_objects')
             database.execute('DROP TABLE project_agent_events')
             database.execute('DROP TABLE project_agent_sessions')
@@ -154,7 +156,7 @@ class ProjectAnalysisRunsPython : public ::testing::Test {
     loop.run_ready(); store().set_bridge(client.get()); project().sync();
     ASSERT_TRUE(project().create(directory.str() + "/project", "Analysis runs"));
     ASSERT_NO_FATAL_FAILURE(settled()); ASSERT_TRUE(project().loaded());
-    ASSERT_EQ(project().project()->format_version, 13);
+    ASSERT_EQ(project().project()->format_version, kProjectFormatVersion);
     ASSERT_TRUE(apptest::write_signed_field(directory.path() / "signed.dat"));
     Json indexed, captured, saved;
     ASSERT_NO_FATAL_FAILURE(call("project.files.index", {{"handle", handle()}, {"expected_revision", 0},
@@ -422,7 +424,7 @@ TEST_F(ProjectAnalysisRunsPython, FormatEightRequiresAnExplicitVerifiedBackupUpg
   EXPECT_EQ(project().project()->format_version, 8); EXPECT_TRUE(calls("project.upgrade").empty());
   upgrade->on_click();
   ASSERT_NO_FATAL_FAILURE(settled()); runs->sync();
-  EXPECT_EQ(project().project()->format_version, 13); EXPECT_TRUE(runs->supported());
+  EXPECT_EQ(project().project()->format_version, kProjectFormatVersion); EXPECT_TRUE(runs->supported());
   size_t backups = 0;
   for (const auto &entry : fs::directory_iterator(directory.path() / "project/backups")) {
     if (entry.path().extension() == ".sqlite3") { ++backups; }

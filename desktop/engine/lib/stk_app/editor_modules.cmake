@@ -62,6 +62,7 @@ stk_editor_module(analysis
 
 stk_editor_module(table
   src/project_table_editor.cc
+  src/table_workbench.cc
   src/editors/table_editor.cc
 )
 

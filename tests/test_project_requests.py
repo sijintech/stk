@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import pytest
 
+from suan.project.store import FORMAT_VERSION
+
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.contexts import _digest, _encode
 from suan.project.requests import Requests, _assistant_id
@@ -324,6 +326,8 @@ def test_format7_upgrade_preserves_context_and_messages_and_backs_up_before_sche
         db.execute("DROP TABLE IF EXISTS analysis_run_events")
         db.execute("DROP TABLE IF EXISTS analysis_run_plans")
         db.execute("DROP TABLE project_requests")
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=7")
     old = ProjectStore(store.directory)
     assert old.info()["format_version"] == 7
@@ -331,7 +335,7 @@ def test_format7_upgrade_preserves_context_and_messages_and_backs_up_before_sche
         old.requests.list()
     assert old.discussion.get(message["id"]) == message
     result = old.upgrade(expected_revision=1)
-    assert result["upgraded"] and result["format_version"] == 13 and result["revision"] == 2
+    assert result["upgraded"] and result["format_version"] == FORMAT_VERSION and result["revision"] == 2
     with sqlite3.connect(result["backup"]["path"]) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 7
         assert db.execute("SELECT revision FROM project").fetchone()[0] == 1

@@ -20,10 +20,10 @@ from .journal import Capture, restore
 
 
 APPLICATION_ID = 0x53544B50  # STKP
-FORMAT_VERSION = 13
+FORMAT_VERSION = 14
 DATABASE_NAME = "project.sqlite3"
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
-FIELD_TYPES = {"text", "integer", "number", "boolean", "json"}
+from .field_types import FIELD_TYPES, CORE_TYPES
 
 _DDL = (
     "CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT NOT NULL, revision INTEGER NOT NULL)",
@@ -200,6 +200,14 @@ _DDL_V13 = (
         PRIMARY KEY(kind, object_id))""",
 )
 
+_DDL_V14 = (
+    """CREATE TABLE field_options (
+        field_id TEXT PRIMARY KEY REFERENCES fields(id), definition TEXT NOT NULL)""",
+    """CREATE TABLE table_views (
+        id TEXT PRIMARY KEY, table_id TEXT NOT NULL REFERENCES tables(id),
+        name TEXT NOT NULL, definition TEXT NOT NULL)""",
+)
+
 
 class ProjectError(ValueError):
     """Invalid project, unsupported format or rejected mutation."""
@@ -239,6 +247,9 @@ def _check_value(value, kind):
     # Unset cells are absent from snapshots; explicit JSON null is a stored empty value.
     if value is None:
         return
+    if kind not in CORE_TYPES:
+        from .field_types import check
+        return check(value, kind)
     valid = {
         "text": isinstance(value, str),
         "integer": type(value) is int and -(2**63) <= value < 2**63,
@@ -301,7 +312,7 @@ class ProjectStore:
             try:
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11, *_DDL_V12, *_DDL_V13):
+                    for statement in (*_DDL, *_DDL_V2, *_DDL_V3, *_DDL_V4, *_DDL_V5, *_DDL_V6, *_DDL_V7, *_DDL_V8, *_DDL_V9, *_DDL_V10, *_DDL_V11, *_DDL_V12, *_DDL_V13, *_DDL_V14):
                         db.execute(statement)
                     db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                     db.execute(f"PRAGMA user_version={FORMAT_VERSION}")
@@ -351,6 +362,11 @@ class ProjectStore:
     def csv(self):
         from .csv_io import TableCSV
         return TableCSV(self)
+
+    @property
+    def table(self):
+        from .table_workbench import TableWorkbench
+        return TableWorkbench(self)
 
     @property
     def files(self):
@@ -489,7 +505,7 @@ class ProjectStore:
             for source_version, statements in ((1, _DDL_V2), (2, _DDL_V3), (3, _DDL_V4), (4, _DDL_V5),
                                                (5, _DDL_V6), (6, _DDL_V7), (7, _DDL_V8), (8, _DDL_V9),
                                                (9, _DDL_V10), (10, _DDL_V11), (11, _DDL_V12),
-                                               (12, _DDL_V13)):
+                                               (12, _DDL_V13), (13, _DDL_V14)):
                 if version <= source_version:
                     for statement in statements:
                         db.execute(statement)
@@ -504,6 +520,12 @@ class ProjectStore:
     @staticmethod
     def _model(db):
         fields = {row["id"]: dict(row) for row in db.execute("SELECT * FROM fields")}
+        if _version(db) >= 14:
+            from .field_types import read_options
+            project_id = db.execute("SELECT id FROM project").fetchone()[0]
+            for field in fields.values():
+                field["options"] = read_options(db, field["id"], field["type"])
+                field["_project_id"] = project_id
         records = {row["id"]: dict(row) for row in db.execute("SELECT * FROM records")}
         literals = {(row["record_id"], row["field_id"]): json.loads(row["value"]) for row in db.execute("SELECT * FROM cells")}
         definitions, cache = {}, {}
@@ -546,6 +568,10 @@ class ProjectStore:
         for table in tables:
             table["fields"] = [dict(row) for row in db.execute(
                 "SELECT id, name, type, unit FROM fields WHERE table_id=? ORDER BY rowid", (table["id"],))]
+            if _version(db) >= 14:
+                from .field_types import read_options
+                for field in table["fields"]:
+                    field["options"] = read_options(db, field["id"], field["type"])
             records = {row["id"]: {"id": row["id"], "values": {}} for row in db.execute(
                 "SELECT id FROM records WHERE table_id=? ORDER BY rowid", (table["id"],))}
             for cell in db.execute("SELECT * FROM cells WHERE table_id=?", (table["id"],)):
@@ -671,6 +697,11 @@ class ProjectStore:
             applied.append(self._apply_command(db, command, changed))
             if capture:
                 capture.created(command)
+        if _version(db) >= 14:
+            from .field_types import check, read_options
+            project_id = db.execute("SELECT id FROM project").fetchone()[0]
+            for row in db.execute("SELECT c.value,f.id,f.type FROM cells c JOIN fields f ON f.id=c.field_id"):
+                check(json.loads(row["value"]), row["type"], read_options(db, row["id"], row["type"]), project_id)
         if _version(db) >= 2:
             self._evaluate(db, revision + 1, changed, persist=True)
         db.execute("UPDATE project SET revision=?", (revision + 1,))
@@ -688,7 +719,7 @@ class ProjectStore:
     def _apply_command(db, command, changed):
         specs = {
             "create_table": ({"op", "name"}, {"id"}),
-            "add_field": ({"op", "table_id", "name", "type"}, {"id", "unit"}),
+            "add_field": ({"op", "table_id", "name", "type"}, {"id", "unit", "options"}),
             "add_record": ({"op", "table_id"}, {"id"}),
             "set_cell": ({"op", "table_id", "record_id", "field_id", "value"}, set()),
             "rename_table": ({"op", "id", "name"}, set()),
@@ -699,10 +730,16 @@ class ProjectStore:
             "delete_record": ({"op", "id"}, set()),
             "delete_field": ({"op", "id"}, set()),
             "delete_table": ({"op", "id"}, set()),
+            "set_field_schema": ({"op", "id", "type", "unit", "options"}, set()),
+            "put_table_view": ({"op", "id", "table_id", "name", "definition"}, set()),
+            "delete_table_view": ({"op", "id"}, set()),
         }
         if not isinstance(command, dict) or not isinstance(command.get("op"), str) or command["op"] not in specs:
             raise ProjectError("Unknown project command")
         op = command["op"]
+        if (op in {"set_field_schema", "put_table_view", "delete_table_view"} or
+                (op == "add_field" and (command.get("type") not in CORE_TYPES or "options" in command))) and _version(db) < 14:
+            raise UnsupportedProjectFormat("Upgrade this project to format 14 before editing typed fields or views")
         if op in {"set_reference", "set_expression", "unset_cell", "delete_record", "delete_field", "delete_table"} and _version(db) < 2:
             raise UnsupportedProjectFormat("Upgrade this project to format 2 before editing references/expressions or deleting objects")
         required, optional = specs[op]
@@ -727,7 +764,42 @@ class ProjectStore:
                     raise ProjectError("Only numeric fields may declare a unit")
             db.execute("INSERT INTO fields VALUES (?, ?, ?, ?, ?)",
                        (command["id"], command["table_id"], command["name"], kind, unit))
+            if _version(db) >= 14 and (kind not in CORE_TYPES or "options" in command):
+                from .field_types import options
+                command["options"] = options(kind, command.get("options"))
+                db.execute("INSERT INTO field_options VALUES (?,?)", (command["id"], _json(command["options"])))
             changed.add(("field", command["id"]))
+        elif op == "set_field_schema":
+            from .field_types import options
+            kind, unit = command["type"], command["unit"]
+            command["options"] = options(kind, command["options"])
+            previous = db.execute("SELECT type FROM fields WHERE id=?", (command["id"],)).fetchone()
+            if previous is not None and previous[0] in {"single_select", "multi_select"} and kind == previous[0]:
+                from .field_types import read_options
+                old_ids = {c["id"] for c in read_options(db, command["id"], kind)["choices"]}
+                removed = old_ids - {c["id"] for c in command["options"]["choices"]}
+                used = []
+                for row in db.execute("SELECT value FROM cells WHERE field_id=?", (command["id"],)):
+                    used.append(json.loads(row[0]))
+                for row in db.execute("SELECT result FROM evaluations WHERE field_id=?", (command["id"],)):
+                    result = json.loads(row[0])
+                    if result.get("state") == "ok":
+                        used.append(result.get("value"))
+                if any(removed.intersection([item for item in v if type(item) is str] if kind == "multi_select" and type(v) is list
+                                            else [v] if type(v) is str else []) for v in used):
+                    raise ProjectError("Cannot remove a used choice; clear its values explicitly first")
+            if unit is not None:
+                _text(unit, "Unit")
+                if kind not in {"integer", "number"}:
+                    raise ProjectError("Only numeric fields may declare a unit")
+            if db.execute("UPDATE fields SET type=?,unit=? WHERE id=?", (kind, unit, command["id"])).rowcount != 1:
+                raise ProjectError("Cannot configure a missing field")
+            db.execute("INSERT INTO field_options VALUES (?,?) ON CONFLICT(field_id) DO UPDATE SET definition=excluded.definition",
+                       (command["id"], _json(command["options"])))
+            changed.add(("field", command["id"]))
+        elif op in {"put_table_view", "delete_table_view"}:
+            from .table_workbench import apply_view
+            apply_view(db, command)
         elif op == "add_record":
             db.execute("INSERT INTO records VALUES (?, ?)", (command["id"], command["table_id"]))
             changed.add(("record", command["id"]))
@@ -753,7 +825,12 @@ class ProjectStore:
                     _reference(reference)
                 definition = {"kind": "expression", "expression": command["expression"], "bindings": command["bindings"]}
             if op == "set_cell":
-                _check_value(command["value"], field["type"])
+                if field["type"] in CORE_TYPES:
+                    _check_value(command["value"], field["type"])
+                else:
+                    from .field_types import check, read_options
+                    check(command["value"], field["type"], read_options(db, field["id"], field["type"]),
+                          db.execute("SELECT id FROM project").fetchone()[0])
             db.execute("DELETE FROM cells WHERE record_id=? AND field_id=?", key)
             if _version(db) >= 2:
                 db.execute("DELETE FROM definitions WHERE record_id=? AND field_id=?", key)
@@ -775,6 +852,12 @@ class ProjectStore:
             else:
                 changed.add((kind, command["id"]))
             column = kind + "_id"
+            if _version(db) >= 14:
+                if kind == "table":
+                    db.execute("DELETE FROM table_views WHERE table_id=?", (command["id"],))
+                    db.execute("DELETE FROM field_options WHERE field_id IN (SELECT id FROM fields WHERE table_id=?)", (command["id"],))
+                elif kind == "field":
+                    db.execute("DELETE FROM field_options WHERE field_id=?", (command["id"],))
             db.execute(f"DELETE FROM definitions WHERE {column}=?", (command["id"],))
             db.execute(f"DELETE FROM cells WHERE {column}=?", (command["id"],))
             if kind == "table":

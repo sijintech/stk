@@ -209,6 +209,7 @@ std::optional<OpenResultRequest> AppStore::take_open_result()
 {
   std::optional<OpenResultRequest> request = std::move(pending_open_);
   pending_open_.reset();
+  if (request && request->still_current && !request->still_current()) { return std::nullopt; }
   return request;
 }
 

@@ -9,6 +9,8 @@ come from this module, never from the journal or a command.
 RELATIONS = {
     "tables": ("id", "name"),
     "fields": ("id", "table_id", "name", "type", "unit"),
+    "field_options": ("field_id", "definition"),
+    "table_views": ("id", "table_id", "name", "definition"),
     "records": ("id", "table_id"),
     "cells": ("table_id", "record_id", "field_id", "value"),
     "definitions": ("table_id", "record_id", "field_id", "definition"),
@@ -17,12 +19,12 @@ RELATIONS = {
 
 def _key(relation, row):
     columns = RELATIONS[relation]
-    keys = ("record_id", "field_id") if relation in {"cells", "definitions"} else ("id",)
+    keys = ("record_id", "field_id") if relation in {"cells", "definitions"} else ("field_id",) if relation == "field_options" else ("id",)
     return tuple(row[1 + columns.index(column)] for column in keys)
 
 
 def _where(relation):
-    return "record_id=? AND field_id=?" if relation in {"cells", "definitions"} else "id=?"
+    return "record_id=? AND field_id=?" if relation in {"cells", "definitions"} else "field_id=?" if relation == "field_options" else "id=?"
 
 
 def _row(db, relation, key):
@@ -51,6 +53,12 @@ class Capture:
         op = command.get("op")
         if not isinstance(op, str):
             return
+        modern = self.db.execute("PRAGMA user_version").fetchone()[0] >= 14
+        if modern and op == "set_field_schema" and isinstance(command.get("id"), str):
+            self.watch("fields", (command["id"],))
+            self.watch("field_options", (command["id"],))
+        elif modern and op in {"put_table_view", "delete_table_view"} and isinstance(command.get("id"), str):
+            self.watch("table_views", (command["id"],))
         if op in {"create_table", "add_field", "add_record", "rename_table", "rename_field"}:
             relation = {"create_table": "tables", "add_field": "fields", "add_record": "records",
                         "rename_table": "tables", "rename_field": "fields"}[op]
@@ -66,8 +74,14 @@ class Capture:
             for relation in ("cells", "definitions"):
                 self.children(relation, kind + "_id", command["id"])
             if kind == "table":
+                if modern:
+                    self.children("table_views", "table_id", command["id"])
+                    for row in self.db.execute("SELECT id FROM fields WHERE table_id=?", (command["id"],)):
+                        self.watch("field_options", (row[0],))
                 for relation in ("fields", "records"):
                     self.children(relation, "table_id", command["id"])
+            elif modern and kind == "field":
+                self.watch("field_options", (command["id"],))
 
     def created(self, command):
         relation = {"create_table": "tables", "add_field": "fields", "add_record": "records"}.get(command["op"])
@@ -75,6 +89,8 @@ class Capture:
             # Covers IDs assigned by the store; an earlier delete/create in this same batch
             # retains the first before-image instead of treating the row as newly created.
             self.before.setdefault((relation, (command["id"],)), None)
+            if relation == "fields" and self.db.execute("PRAGMA user_version").fetchone()[0] >= 14:
+                self.before.setdefault(("field_options", (command["id"],)), None)
 
     def delta(self):
         result = []
@@ -132,4 +148,6 @@ def restore(db, delta, side):
                 changed.add(("cell", *entry["key"]))
             elif relation in {"records", "fields"}:
                 changed.add(("record" if relation == "records" else "field", entry["key"][0]))
+            elif relation == "field_options":
+                changed.add(("field", entry["key"][0]))
     return changed

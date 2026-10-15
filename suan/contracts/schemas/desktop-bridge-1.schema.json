@@ -2717,7 +2717,8 @@
                                 9,
                                 10,
                                 11,
-                                12
+                                12,
+                                13
                               ]
                             },
                             "to_version": {
@@ -2733,7 +2734,8 @@
                                 10,
                                 11,
                                 12,
-                                13
+                                13,
+                                14
                               ]
                             }
                           },
@@ -4654,7 +4656,9 @@
                   "integer",
                   "number",
                   "boolean",
-                  "json"
+                  "json",
+                  "date",
+                  "url"
                 ]
               }
             },
@@ -4666,6 +4670,10 @@
                 "minLength": 1,
                 "maxLength": 1024
               }
+            },
+            "expected_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
             }
           },
           "required": [
@@ -4747,6 +4755,12 @@
                 ",",
                 "\t"
               ]
+            },
+            "definition": {
+              "$ref": "#/$defs/projectTableViewDefinition"
+            },
+            "view_id": {
+              "$ref": "#/$defs/projectUuid"
             }
           },
           "required": [
@@ -9198,6 +9212,666 @@
         "result": {
           "$ref": "#/$defs/moduleListing"
         }
+      },
+      "project.table.views.list": {
+        "description": "Explicit bounded table metadata/query/plan; never edits or executes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "table_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "views": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectTableView"
+              },
+              "maxItems": 1000
+            }
+          },
+          "required": [
+            "revision",
+            "views"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.views.get": {
+        "description": "Explicit bounded table metadata/query/plan; never edits or executes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "view": {
+              "$ref": "#/$defs/projectTableView"
+            }
+          },
+          "required": [
+            "revision",
+            "view"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.query": {
+        "description": "Explicit bounded table metadata/query/plan; never edits or executes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "view_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "definition": {
+              "$ref": "#/$defs/projectTableViewDefinition"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "table_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "view_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "definition": {
+              "$ref": "#/$defs/projectTableViewDefinition"
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "text",
+                      "integer",
+                      "number",
+                      "boolean",
+                      "json",
+                      "date",
+                      "url",
+                      "single_select",
+                      "multi_select",
+                      "object"
+                    ]
+                  },
+                  "unit": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "options": {
+                    "$ref": "#/$defs/projectFieldOptions"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "type",
+                  "unit"
+                ]
+              },
+              "maxItems": 1000
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "maxItems": 500
+            },
+            "records": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "values": {
+                    "type": "object"
+                  },
+                  "definitions": {
+                    "type": "object",
+                    "description": "Field UUID to stable reference/expression definition; absent for literal-only records.",
+                    "additionalProperties": {
+                      "$ref": "#/$defs/projectCellDefinition"
+                    }
+                  },
+                  "evaluations": {
+                    "type": "object",
+                    "description": "Field UUID to state, value/unit or structured error, evaluated_revision and engine_version.",
+                    "additionalProperties": {
+                      "$ref": "#/$defs/projectCellEvaluation"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "values"
+                ]
+              },
+              "maxItems": 500
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000
+            }
+          },
+          "required": [
+            "revision",
+            "table_id",
+            "view_id",
+            "definition",
+            "fields",
+            "total",
+            "record_ids",
+            "records",
+            "next_offset",
+            "issues"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.paste.plan": {
+        "description": "Explicit bounded table metadata/query/plan; never edits or executes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "maxItems": 1000,
+              "uniqueItems": true
+            },
+            "field_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "maxItems": 1000,
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 1048576
+            },
+            "delimiter": {
+              "enum": [
+                "\t",
+                ","
+              ]
+            },
+            "append_rows": {
+              "type": "boolean"
+            },
+            "fit_targets": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "table_id",
+            "record_ids",
+            "field_ids",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "base_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "command_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "maxItems": 1000
+            },
+            "field_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "maxItems": 1000
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectCommand"
+              },
+              "maxItems": 1000
+            }
+          },
+          "required": [
+            "base_revision",
+            "table_id",
+            "rows",
+            "columns",
+            "command_count",
+            "record_ids",
+            "field_ids",
+            "commands"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.objects.list_candidates": {
+        "description": "Explicit bounded table metadata/query/plan; never edits or executes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "enum": [
+                "record",
+                "file",
+                "snapshot_file",
+                "analysis",
+                "simulation",
+                "workflow"
+              ]
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "reference": {
+                    "$ref": "#/$defs/projectObjectReference"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "enum": [
+                      "available",
+                      "missing",
+                      "stale"
+                    ]
+                  },
+                  "summary": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "label",
+                  "state",
+                  "summary"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 200
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "revision",
+            "items",
+            "total",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.objects.resolve": {
+        "description": "Explicit bounded table metadata/query/plan; never edits or executes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reference": {
+              "$ref": "#/$defs/projectObjectReference"
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "reference"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reference": {
+              "$ref": "#/$defs/projectObjectReference"
+            },
+            "state": {
+              "enum": [
+                "available",
+                "missing",
+                "stale"
+              ]
+            },
+            "label": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "object"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "revision",
+            "reference",
+            "state",
+            "label",
+            "summary",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.csv.preview": {
+        "description": "Explicit bounded table metadata/query/plan; never edits or executes work.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "delimiter": {
+              "enum": [
+                ",",
+                "\t"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "text"
+                  },
+                  "unit": {
+                    "type": "null"
+                  }
+                },
+                "required": [
+                  "name",
+                  "type",
+                  "unit"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 64
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 64
+              },
+              "maxItems": 100
+            },
+            "total_rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "command_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "can_import": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "revision",
+            "source_sha256",
+            "columns",
+            "rows",
+            "total_rows",
+            "truncated",
+            "command_count",
+            "can_import"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {
@@ -9715,7 +10389,12 @@
                 "integer",
                 "number",
                 "boolean",
-                "json"
+                "json",
+                "date",
+                "url",
+                "single_select",
+                "multi_select",
+                "object"
               ]
             },
             "unit": {
@@ -9729,6 +10408,9 @@
                   "type": "null"
                 }
               ]
+            },
+            "options": {
+              "$ref": "#/$defs/projectFieldOptions"
             }
           },
           "required": [
@@ -9965,6 +10647,94 @@
             "id"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "set_field_schema"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "type": {
+              "enum": [
+                "text",
+                "integer",
+                "number",
+                "boolean",
+                "json",
+                "date",
+                "url",
+                "single_select",
+                "multi_select",
+                "object"
+              ]
+            },
+            "unit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "options": {
+              "$ref": "#/$defs/projectFieldOptions"
+            }
+          },
+          "required": [
+            "op",
+            "id",
+            "type",
+            "unit",
+            "options"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "put_table_view"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "definition": {
+              "$ref": "#/$defs/projectTableViewDefinition"
+            }
+          },
+          "required": [
+            "op",
+            "id",
+            "table_id",
+            "name",
+            "definition"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "delete_table_view"
+            },
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "op",
+            "id"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -10023,7 +10793,12 @@
                         "integer",
                         "number",
                         "boolean",
-                        "json"
+                        "json",
+                        "date",
+                        "url",
+                        "single_select",
+                        "multi_select",
+                        "object"
                       ]
                     },
                     "unit": {
@@ -10035,6 +10810,9 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "options": {
+                      "$ref": "#/$defs/projectFieldOptions"
                     }
                   },
                   "required": [
@@ -15984,6 +16762,817 @@
         "platform",
         "detected_at",
         "modules"
+      ],
+      "additionalProperties": false
+    },
+    "projectFieldOptions": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1,
+              "type": "integer"
+            },
+            "choices": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label",
+                  "color"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 256,
+              "minItems": 1
+            }
+          },
+          "required": [
+            "version",
+            "choices"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1,
+              "type": "integer"
+            },
+            "kinds": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "record",
+                  "file",
+                  "snapshot_file",
+                  "analysis",
+                  "simulation",
+                  "workflow"
+                ]
+              },
+              "maxItems": 6,
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "version",
+            "kinds"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "projectObjectReference": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "kind": {
+          "enum": [
+            "record",
+            "file",
+            "snapshot_file",
+            "analysis",
+            "simulation",
+            "workflow"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "record_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "version",
+        "project_id",
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "projectTableFilter": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "enum": [
+                "and",
+                "or"
+              ]
+            },
+            "conditions": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "op": {
+                        "enum": [
+                          "and",
+                          "or"
+                        ]
+                      },
+                      "conditions": {
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "op": {
+                                  "enum": [
+                                    "and",
+                                    "or"
+                                  ]
+                                },
+                                "conditions": {
+                                  "type": "array",
+                                  "items": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "op": {
+                                            "enum": [
+                                              "and",
+                                              "or"
+                                            ]
+                                          },
+                                          "conditions": {
+                                            "type": "array",
+                                            "items": {
+                                              "oneOf": [
+                                                {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "op": {
+                                                      "enum": [
+                                                        "and",
+                                                        "or"
+                                                      ]
+                                                    },
+                                                    "conditions": {
+                                                      "type": "array",
+                                                      "items": {
+                                                        "oneOf": [
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "op": {
+                                                                "enum": [
+                                                                  "and",
+                                                                  "or"
+                                                                ]
+                                                              },
+                                                              "conditions": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                  "oneOf": [
+                                                                    {
+                                                                      "type": "object",
+                                                                      "properties": {
+                                                                        "op": {
+                                                                          "enum": [
+                                                                            "and",
+                                                                            "or"
+                                                                          ]
+                                                                        },
+                                                                        "conditions": {
+                                                                          "type": "array",
+                                                                          "items": {
+                                                                            "oneOf": [
+                                                                              {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                  "field_id": {
+                                                                                    "$ref": "#/$defs/projectUuid"
+                                                                                  },
+                                                                                  "op": {
+                                                                                    "enum": [
+                                                                                      "eq",
+                                                                                      "ne",
+                                                                                      "contains",
+                                                                                      "gt",
+                                                                                      "gte",
+                                                                                      "lt",
+                                                                                      "lte"
+                                                                                    ]
+                                                                                  },
+                                                                                  "value": {}
+                                                                                },
+                                                                                "required": [
+                                                                                  "field_id",
+                                                                                  "op",
+                                                                                  "value"
+                                                                                ],
+                                                                                "additionalProperties": false
+                                                                              },
+                                                                              {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                  "field_id": {
+                                                                                    "$ref": "#/$defs/projectUuid"
+                                                                                  },
+                                                                                  "op": {
+                                                                                    "enum": [
+                                                                                      "is_empty",
+                                                                                      "is_not_empty",
+                                                                                      "is_null",
+                                                                                      "is_unset",
+                                                                                      "is_error"
+                                                                                    ]
+                                                                                  }
+                                                                                },
+                                                                                "required": [
+                                                                                  "field_id",
+                                                                                  "op"
+                                                                                ],
+                                                                                "additionalProperties": false
+                                                                              }
+                                                                            ]
+                                                                          },
+                                                                          "maxItems": 64
+                                                                        }
+                                                                      },
+                                                                      "required": [
+                                                                        "op",
+                                                                        "conditions"
+                                                                      ],
+                                                                      "additionalProperties": false
+                                                                    },
+                                                                    {
+                                                                      "type": "object",
+                                                                      "properties": {
+                                                                        "field_id": {
+                                                                          "$ref": "#/$defs/projectUuid"
+                                                                        },
+                                                                        "op": {
+                                                                          "enum": [
+                                                                            "eq",
+                                                                            "ne",
+                                                                            "contains",
+                                                                            "gt",
+                                                                            "gte",
+                                                                            "lt",
+                                                                            "lte"
+                                                                          ]
+                                                                        },
+                                                                        "value": {}
+                                                                      },
+                                                                      "required": [
+                                                                        "field_id",
+                                                                        "op",
+                                                                        "value"
+                                                                      ],
+                                                                      "additionalProperties": false
+                                                                    },
+                                                                    {
+                                                                      "type": "object",
+                                                                      "properties": {
+                                                                        "field_id": {
+                                                                          "$ref": "#/$defs/projectUuid"
+                                                                        },
+                                                                        "op": {
+                                                                          "enum": [
+                                                                            "is_empty",
+                                                                            "is_not_empty",
+                                                                            "is_null",
+                                                                            "is_unset",
+                                                                            "is_error"
+                                                                          ]
+                                                                        }
+                                                                      },
+                                                                      "required": [
+                                                                        "field_id",
+                                                                        "op"
+                                                                      ],
+                                                                      "additionalProperties": false
+                                                                    }
+                                                                  ]
+                                                                },
+                                                                "maxItems": 64
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "op",
+                                                              "conditions"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "field_id": {
+                                                                "$ref": "#/$defs/projectUuid"
+                                                              },
+                                                              "op": {
+                                                                "enum": [
+                                                                  "eq",
+                                                                  "ne",
+                                                                  "contains",
+                                                                  "gt",
+                                                                  "gte",
+                                                                  "lt",
+                                                                  "lte"
+                                                                ]
+                                                              },
+                                                              "value": {}
+                                                            },
+                                                            "required": [
+                                                              "field_id",
+                                                              "op",
+                                                              "value"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "field_id": {
+                                                                "$ref": "#/$defs/projectUuid"
+                                                              },
+                                                              "op": {
+                                                                "enum": [
+                                                                  "is_empty",
+                                                                  "is_not_empty",
+                                                                  "is_null",
+                                                                  "is_unset",
+                                                                  "is_error"
+                                                                ]
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "field_id",
+                                                              "op"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          }
+                                                        ]
+                                                      },
+                                                      "maxItems": 64
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "op",
+                                                    "conditions"
+                                                  ],
+                                                  "additionalProperties": false
+                                                },
+                                                {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "field_id": {
+                                                      "$ref": "#/$defs/projectUuid"
+                                                    },
+                                                    "op": {
+                                                      "enum": [
+                                                        "eq",
+                                                        "ne",
+                                                        "contains",
+                                                        "gt",
+                                                        "gte",
+                                                        "lt",
+                                                        "lte"
+                                                      ]
+                                                    },
+                                                    "value": {}
+                                                  },
+                                                  "required": [
+                                                    "field_id",
+                                                    "op",
+                                                    "value"
+                                                  ],
+                                                  "additionalProperties": false
+                                                },
+                                                {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "field_id": {
+                                                      "$ref": "#/$defs/projectUuid"
+                                                    },
+                                                    "op": {
+                                                      "enum": [
+                                                        "is_empty",
+                                                        "is_not_empty",
+                                                        "is_null",
+                                                        "is_unset",
+                                                        "is_error"
+                                                      ]
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "field_id",
+                                                    "op"
+                                                  ],
+                                                  "additionalProperties": false
+                                                }
+                                              ]
+                                            },
+                                            "maxItems": 64
+                                          }
+                                        },
+                                        "required": [
+                                          "op",
+                                          "conditions"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "field_id": {
+                                            "$ref": "#/$defs/projectUuid"
+                                          },
+                                          "op": {
+                                            "enum": [
+                                              "eq",
+                                              "ne",
+                                              "contains",
+                                              "gt",
+                                              "gte",
+                                              "lt",
+                                              "lte"
+                                            ]
+                                          },
+                                          "value": {}
+                                        },
+                                        "required": [
+                                          "field_id",
+                                          "op",
+                                          "value"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "field_id": {
+                                            "$ref": "#/$defs/projectUuid"
+                                          },
+                                          "op": {
+                                            "enum": [
+                                              "is_empty",
+                                              "is_not_empty",
+                                              "is_null",
+                                              "is_unset",
+                                              "is_error"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "field_id",
+                                          "op"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "maxItems": 64
+                                }
+                              },
+                              "required": [
+                                "op",
+                                "conditions"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "field_id": {
+                                  "$ref": "#/$defs/projectUuid"
+                                },
+                                "op": {
+                                  "enum": [
+                                    "eq",
+                                    "ne",
+                                    "contains",
+                                    "gt",
+                                    "gte",
+                                    "lt",
+                                    "lte"
+                                  ]
+                                },
+                                "value": {}
+                              },
+                              "required": [
+                                "field_id",
+                                "op",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "field_id": {
+                                  "$ref": "#/$defs/projectUuid"
+                                },
+                                "op": {
+                                  "enum": [
+                                    "is_empty",
+                                    "is_not_empty",
+                                    "is_null",
+                                    "is_unset",
+                                    "is_error"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "field_id",
+                                "op"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "maxItems": 64
+                      }
+                    },
+                    "required": [
+                      "op",
+                      "conditions"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "field_id": {
+                        "$ref": "#/$defs/projectUuid"
+                      },
+                      "op": {
+                        "enum": [
+                          "eq",
+                          "ne",
+                          "contains",
+                          "gt",
+                          "gte",
+                          "lt",
+                          "lte"
+                        ]
+                      },
+                      "value": {}
+                    },
+                    "required": [
+                      "field_id",
+                      "op",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "field_id": {
+                        "$ref": "#/$defs/projectUuid"
+                      },
+                      "op": {
+                        "enum": [
+                          "is_empty",
+                          "is_not_empty",
+                          "is_null",
+                          "is_unset",
+                          "is_error"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "field_id",
+                      "op"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "maxItems": 64
+            }
+          },
+          "required": [
+            "op",
+            "conditions"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "field_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "op": {
+              "enum": [
+                "eq",
+                "ne",
+                "contains",
+                "gt",
+                "gte",
+                "lt",
+                "lte"
+              ]
+            },
+            "value": {}
+          },
+          "required": [
+            "field_id",
+            "op",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "field_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "op": {
+              "enum": [
+                "is_empty",
+                "is_not_empty",
+                "is_null",
+                "is_unset",
+                "is_error"
+              ]
+            }
+          },
+          "required": [
+            "field_id",
+            "op"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "projectTableViewDefinition": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "grid",
+            "board",
+            "gallery"
+          ]
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field_id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "width": {
+                "type": "number",
+                "minimum": 48,
+                "maximum": 2048
+              },
+              "hidden": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "field_id"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 1000
+        },
+        "filters": {
+          "$ref": "#/$defs/projectTableFilter"
+        },
+        "sorts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field_id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "direction": {
+                "enum": [
+                  "asc",
+                  "desc"
+                ]
+              },
+              "nulls": {
+                "enum": [
+                  "first",
+                  "last"
+                ]
+              }
+            },
+            "required": [
+              "field_id",
+              "direction"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 16
+        },
+        "group_field_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "row_height": {
+          "type": "integer",
+          "minimum": 24,
+          "maximum": 240
+        },
+        "frozen_columns": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "version",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "projectTableView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "definition": {
+          "$ref": "#/$defs/projectTableViewDefinition"
+        }
+      },
+      "required": [
+        "id",
+        "table_id",
+        "name",
+        "definition"
       ],
       "additionalProperties": false
     }

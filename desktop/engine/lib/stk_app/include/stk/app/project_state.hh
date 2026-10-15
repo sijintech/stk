@@ -14,10 +14,11 @@ struct AgentItem;
 /** Shared table data. Views select by UUID, never by the sorted display row. */
 /** The newest project format the Python service creates; older projects are offered an explicit,
  * backup-first upgrade (suan/project/store.py FORMAT_VERSION). */
-inline constexpr int kProjectFormatVersion = 13;
+inline constexpr int kProjectFormatVersion = 14;
 
 struct ProjectField {
   std::string id, name, type, unit;
+  io::Json options = io::Json::object();
 };
 struct ProjectRecord {
   std::string id;
@@ -149,8 +150,8 @@ class ProjectState {
    * session (project.agent.decide), so the decision is recorded with it. */
   ProjectAgent &agent() { return *agent_; }
   bool import_csv(const std::string &source, const std::string &name, const io::Json &types,
-                  const io::Json &units, const std::string &delimiter);
-  bool export_csv(const std::string &destination, const std::string &delimiter);
+                  const io::Json &units, const std::string &delimiter, const std::string &expected_sha256 = {});
+  bool export_csv(const std::string &destination, const std::string &delimiter, const io::Json &definition = nullptr);
   bool backup();
   bool upgrade();
   bool undo();
@@ -163,6 +164,8 @@ class ProjectState {
   bool refresh_file();
   bool open_file(bool vscode);
   bool view_file(const std::string &preset);
+  /** Resolve one indexed file without changing the table/record selection. Explicit Viewer action. */
+  bool view_file_record(const std::string &id, const std::string &preset, std::function<bool()> still_current = {});
   bool open_folder(bool vscode);
   bool capture_file();
   bool load_input_snapshots();

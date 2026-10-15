@@ -256,6 +256,14 @@ TEST_F(WorkspaceNavigationPython, IndependentFilesKeepsCellDraftsInHiddenTabsAnd
   f.screen.set_maximized(&destination(kEditorTable)); f.drv->frame();
   ASSERT_EQ(project().table_id(), table);
   const auto revision = project().project()->revision;
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    const auto *grid = widget("records");
+    return grid && grid->table && grid->table->rows == 1 && grid->table->cell(0, 1) == "300";
+  }, 30));
+  const auto *details = widget("table_details");
+  ASSERT_NE(details, nullptr); ASSERT_TRUE(details->enabled && details->on_click);
+  details->on_click(); f.drv->frame();
   ASSERT_NE(widget("cell_value"), nullptr); widget("cell_value")->string.assign("1e"); f.drv->frame();
   ASSERT_FALSE(f.area("a2").editor().can_change_project_selection(project().project()->id));
   go("workspace"); f.area("a2").set_active_tab(0); // Keep the dirty Project editor hidden behind Viewer.

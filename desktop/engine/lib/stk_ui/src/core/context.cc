@@ -61,6 +61,7 @@ void Context::set_scroll(WidgetId id, float v, float max)
 
 void Context::begin_frame(Vec2 window_size, double now)
 {
+  ++frame_serial_;
   window_ = window_size;
   now_ = std::max(now_, now);
   blocks_.clear();
@@ -183,7 +184,7 @@ void Context::end_frame()
   build_overlays();
   /* Interaction state of widgets that no longer exist is dropped (after the overlays are built,
    * since popup items are rebuilt there). */
-  if (edit_.id && !find_id(edit_.id)) {
+  if (edit_.id && (!find_id(edit_.id) || (edit_.table && !table_edit_current()))) {
     commit_edit();
   }
   if (drag_.id && !find_id(drag_.id)) {
@@ -229,29 +230,38 @@ void Context::build_overlays()
   /* Dropdown / menu popup. */
   if (popup_.owner) {
     const Widget *owner = find_id(popup_.owner);
-    if (!owner || owner->block->kind() == Block::Kind::Popup) {
+    if (!owner || owner->block->kind() == Block::Kind::Popup ||
+        (popup_.table_column >= 0 && (!owner->table || !owner->table->column_menu ||
+         owner->table->data_version != popup_.table_version ||
+         size_t(popup_.table_column) >= owner->table->columns.size()))) {
       popup_ = {};
     }
     else {
-      popup_.anchor = owner->rect;
-      popup_.count = int(owner->items.size());
+      std::vector<std::string> table_items;
+      if (popup_.table_column >= 0) {
+        popup_.entries = owner->table->column_menu(popup_.table_column);
+        popup_.anchor = table_column_rect(*owner, popup_.table_column).intersect(table_column_clip(*owner, popup_.table_column));
+        for (const auto &entry : popup_.entries) { table_items.push_back(entry.text); }
+      }
+      else { popup_.anchor = owner->rect; }
+      const auto &items = popup_.table_column >= 0 ? table_items : owner->items;
+      popup_.count = int(items.size());
       Block &b = new_block(Block::Kind::Popup, "popup", {0, 0, window_.x, window_.y});
       Layout &root = b.layout();
       root.align_ = true;
       float mw = 0.0f;
-      for (const std::string &s : owner->items) {
+      for (const std::string &s : items) {
         mw = std::max(mw, LayoutEngine::text_w(*this, s));
       }
       const float strip = popup_.colormap ? std::round(4.0f * st.unit) : 0.0f;
-      const float W = std::round(std::max(owner->rect.w, mw + 2 * m + strip + (strip > 0 ? m : 0.0f) + st.unit));
+      const float W = std::round(std::max(popup_.anchor.w, mw + 2 * m + strip + (strip > 0 ? m : 0.0f) + st.unit));
       for (int i = 0; i < popup_.count; i++) {
         Widget &it = root.add_widget(WidgetType::MenuItem, std::to_string(i));
         it.id = utf8::hash_combine(popup_.owner, uint64_t(i) + 1);
-        it.text = owner->items[size_t(i)];
+        it.text = items[size_t(i)];
         it.menu_index = i;
-        if (popup_.menu && size_t(i) < owner->menu.size()) {
-          it.enabled = owner->menu[size_t(i)].enabled;
-        }
+        const auto &entries = popup_.table_column >= 0 ? popup_.entries : owner->menu;
+        if (popup_.menu && size_t(i) < entries.size()) { it.enabled = entries[size_t(i)].enabled; }
         if (popup_.colormap) {
           it.colormaps = owner->colormaps;
         }
@@ -259,9 +269,9 @@ void Context::build_overlays()
       const float pad = st.box_space;
       const float content = float(popup_.count) * st.unit;
       const float max_h = std::max(st.unit * 3, window_.y - 2 * pad);
-      Rect f{owner->rect.x, owner->rect.y1(), W, std::min(content + 2 * pad, max_h)};
-      if (f.y1() > window_.y && owner->rect.y - f.h >= 0.0f) {
-        f.y = owner->rect.y - f.h;
+      Rect f{popup_.anchor.x, popup_.anchor.y1(), W, std::min(content + 2 * pad, max_h)};
+      if (f.y1() > window_.y && popup_.anchor.y - f.h >= 0.0f) {
+        f.y = popup_.anchor.y - f.h;
       }
       f.y = std::clamp(f.y, 0.0f, std::max(0.0f, window_.y - f.h));
       f.x = std::clamp(f.x, 0.0f, std::max(0.0f, window_.x - f.w));
@@ -491,6 +501,17 @@ void Context::open_popup_for(const Widget &w)
 void Context::popup_select(int index)
 {
   const Widget *owner = find_id(popup_.owner);
+  if (popup_.table_column >= 0) {
+    const bool current = owner && owner->enabled && owner->table &&
+                         owner->table->data_version == popup_.table_version;
+    const auto entries = popup_.entries;
+    popup_ = {};
+    redraw_ = true;
+    if (current && index >= 0 && size_t(index) < entries.size() && entries[size_t(index)].enabled && entries[size_t(index)].action) {
+      entries[size_t(index)].action();
+    }
+    return;
+  }
   popup_ = {};
   redraw_ = true;
   if (!owner || index < 0 || size_t(index) >= owner->items.size()) {
@@ -575,6 +596,12 @@ void Context::commit_edit()
   if (!edit_.id) {
     return;
   }
+  if (edit_.table) {
+    table_edit_changed(); // Suspend into the application draft; never implicitly write data.
+    edit_ = {};
+    redraw_ = true;
+    return;
+  }
   EditState old = std::move(edit_);
   edit_ = {};
   redraw_ = true;
@@ -588,7 +615,10 @@ void Context::commit_edit()
 void Context::cancel_edit()
 {
   if (edit_.id) {
+    const auto cancel = edit_.table_cancel;
+    const auto cell = edit_.cell;
     edit_ = {};
+    if (cancel) { cancel(cell); }
     redraw_ = true;
   }
 }
@@ -596,7 +626,8 @@ void Context::cancel_edit()
 void Context::edit_click(const Widget &w, Vec2 p, bool extend, bool dbl)
 {
   const FontStyle &font = w.mono ? style_.mono : style_.font;
-  const float local = p.x - (w.rect.x + style_.text_margin) + edit_.scroll_x;
+  const Rect rect = edit_.table ? table_cell_rect(w, edit_.cell) : w.rect;
+  const float local = p.x - (rect.x + style_.text_margin) + edit_.scroll_x;
   size_t idx = edit_.password ?
                          unmask_offset(edit_.edit.text(),
                                        measurer().index_at_x(mask_text(edit_.edit.text()), local, font)) :
@@ -837,6 +868,7 @@ bool Context::activate_focused(const Event &e)
       return false;
     case WidgetType::VirtualList:
     case WidgetType::Table: {
+      if (w->table && w->table->grid) { return table_grid_key(*w, e); }
       const int count = w->list ? w->list->count : (w->table ? w->table->rows : 0);
       Binding<int> sel = w->list ? w->list->selected : w->table->selected;
       if (count <= 0) {
@@ -955,6 +987,10 @@ float Context::list_row_height(const Widget &w) const
   if (w.type == WidgetType::LogView) {
     return std::round(style_.mono.size_px * 1.4f);
   }
+  if (w.table) {
+    const float height = std::isfinite(w.table->row_height) ? std::clamp(w.table->row_height, 0.5f, 12.0f) : 1.0f;
+    return std::round(height * style_.unit);
+  }
   return style_.unit;
 }
 
@@ -1036,13 +1072,39 @@ Rect Context::scrollbar_rect(const Widget &w, float content, float view, float s
 Context::TableState &Context::table_state(const Widget &w)
 {
   TableState &s = tables_[w.id];
-  if (s.widths_u.size() != w.table->columns.size()) {
-    s.widths_u.clear();
-    s.scroll_x = 0;
-    if (s.sort_col >= int(w.table->columns.size())) { s.sort_col = -1; }
-    for (const TableColumn &c : w.table->columns) {
-      s.widths_u.push_back(c.width);
+  if (s.widths_frame == frame_serial_) { return s; }
+  s.widths_frame = frame_serial_;
+  std::vector<std::string> keys;
+  bool stable = false;
+  for (size_t i = 0; i < w.table->columns.size(); ++i) {
+    const auto &column = w.table->columns[i];
+    stable |= !column.key.empty();
+    keys.push_back(column.key.empty() ? "#" + std::to_string(i) : column.key);
+  }
+  if (s.column_keys != keys) {
+    std::vector<float> widths;
+    for (size_t i = 0; i < keys.size(); ++i) {
+      const auto old = std::find(s.column_keys.begin(), s.column_keys.end(), keys[i]);
+      const size_t index = size_t(old - s.column_keys.begin());
+      widths.push_back(stable && old != s.column_keys.end() && index < s.widths_u.size() ?
+                           s.widths_u[index] : w.table->columns[i].width);
     }
+    if (s.sort_col >= 0 && size_t(s.sort_col) < s.column_keys.size() && stable) {
+      const auto found = std::find(keys.begin(), keys.end(), s.column_keys[size_t(s.sort_col)]);
+      s.sort_col = found == keys.end() ? -1 : int(found - keys.begin());
+    }
+    else if (s.sort_col >= int(keys.size())) { s.sort_col = -1; }
+    s.widths_u = std::move(widths);
+    s.column_keys = std::move(keys);
+    s.scroll_x = 0;
+    s.perm_version = ~0ull;
+  }
+  for (size_t i = 0; i < w.table->columns.size(); ++i) {
+    if (w.table->column_width) {
+      const auto width = w.table->column_width(w.table->columns[i].key);
+      if (width && std::isfinite(*width) && *width >= 1.5f && *width <= 10000.0f) { s.widths_u[i] = *width; }
+    }
+    if (!std::isfinite(s.widths_u[i]) || s.widths_u[i] <= 0) { s.widths_u[i] = 6.0f; }
   }
   return s;
 }
@@ -1058,7 +1120,7 @@ const std::vector<int> &Context::table_perm(const Widget &w)
     for (int i = 0; i < t.rows; i++) {
       s.perm[size_t(i)] = i;
     }
-    if (s.sort_col >= 0 && size_t(s.sort_col) < t.columns.size() && t.cell) {
+    if (!t.on_sort && s.sort_col >= 0 && size_t(s.sort_col) < t.columns.size() && t.cell) {
       const int c = s.sort_col;
       if (t.compare) {
         std::stable_sort(s.perm.begin(), s.perm.end(), [&](int a, int b) {
@@ -1099,7 +1161,7 @@ float Context::table_col_px(const Widget &w, int c)
 {
   TableState &s = table_state(w);
   const int n = int(s.widths_u.size());
-  if (c == n - 1) {
+  if (c == n - 1 && !w.table->grid) {
     float used = 0.0f;
     for (int i = 0; i < n - 1; i++) {
       used += std::round(s.widths_u[size_t(i)] * style_.unit);
@@ -1112,34 +1174,21 @@ float Context::table_col_px(const Widget &w, int c)
 
 int Context::table_header_col(const Widget &w, Vec2 p)
 {
-  const float row_h = list_row_height(w);
-  if (p.y >= w.rect.y + style_.pixel + row_h) {
-    return -1;
-  }
-  float x = w.rect.x + style_.pixel - table_scroll_x(w);
-  for (int c = 0; c < int(w.table->columns.size()); c++) {
-    const float cw = table_col_px(w, c);
-    if (p.x >= x && p.x < x + cw) {
-      return c;
-    }
-    x += cw;
+  if (p.y < w.rect.y + style_.pixel || p.y >= w.rect.y + style_.pixel + list_row_height(w)) { return -1; }
+  for (int c = 0; c < int(w.table->columns.size()); ++c) {
+    if (table_column_rect(w, c).intersect(table_column_clip(w, c)).contains(p)) { return c; }
   }
   return -1;
 }
 
 int Context::table_resize_hit(const Widget &w, Vec2 p)
 {
-  const float row_h = list_row_height(w);
-  if (p.y >= w.rect.y + style_.pixel + row_h) {
-    return -1;
-  }
+  if (p.y < w.rect.y + style_.pixel || p.y >= w.rect.y + style_.pixel + list_row_height(w)) { return -1; }
   const float tol = std::max(3.0f, std::round(0.2f * style_.unit));
-  float x = w.rect.x + style_.pixel - table_scroll_x(w);
-  for (int c = 0; c + 1 < int(w.table->columns.size()); c++) {
-    x += table_col_px(w, c);
-    if (std::fabs(p.x - x) <= tol) {
-      return c;
-    }
+  const int count = int(w.table->columns.size()) - (w.table->grid ? 0 : 1);
+  for (int c = 0; c < count; ++c) {
+    const Rect rect = table_column_rect(w, c), clip = table_column_clip(w, c);
+    if (rect.x1() >= clip.x && rect.x1() <= clip.x1() && std::fabs(p.x - rect.x1()) <= tol) { return c; }
   }
   return -1;
 }
@@ -1182,10 +1231,14 @@ EventResult Context::handle_event(const Event &e)
     case EventType::TextInput:
     case EventType::ImeCommit:
     case EventType::ImePreedit: {
+      if (edit_.table && !table_edit_current()) { commit_edit(); }
       if (!edit_.id && e.type != EventType::ImeCommit && !e.text.empty()) {
         /* Typing into a focused field starts editing it. */
         const Widget *w = find_id(focus_);
-        if (w && w->enabled && w->type == WidgetType::TextField) {
+        if (w && w->enabled && w->table && w->table->grid) {
+          begin_table_edit(*w, true);
+        }
+        else if (w && w->enabled && w->type == WidgetType::TextField) {
           begin_edit(*w, false); /* continue at the end of the current text */
         }
         else if (w && w->enabled && (w->type == WidgetType::Number || w->type == WidgetType::Slider)) {
@@ -1209,11 +1262,13 @@ EventResult Context::handle_event(const Event &e)
           }
           edit_.edit.insert(clean);
         }
+        table_edit_changed();
         r = {true, true};
       }
       break;
     }
     case EventType::FocusLost:
+      if (edit_.table) { commit_edit(); }
       drag_ = {};
       hover_ = 0;
       r.redraw = true;
@@ -1276,10 +1331,23 @@ EventResult Context::mouse_move(const Event &e)
         }
         break;
       }
+      case DragState::Kind::TableSelect: {
+        const Rect body = list_body(*w);
+        if (body.empty()) { break; }
+        if (e.pos.y < body.y || e.pos.y >= body.y1()) {
+          set_scroll(w->id, scroll_of(w->id) + (e.pos.y < body.y ? -1 : 1) * style_.unit, max_scroll(*w));
+        }
+        const Vec2 point{std::clamp(e.pos.x, body.x, std::max(body.x, body.x1() - style_.scrollbar - 1)),
+                         std::clamp(e.pos.y, body.y, std::max(body.y, body.y1() - 1))};
+        table_select(*w, table_hit_cell(*w, point), true);
+        break;
+      }
       case DragState::Kind::ColumnResize: {
         TableState &s = table_state(*w);
         if (drag_.column < 0 || size_t(drag_.column) >= s.widths_u.size()) { break; }
-        s.widths_u[size_t(drag_.column)] = std::max(1.5f, float(drag_.start_value) + d.x / style_.unit);
+        const float width = std::clamp(float(drag_.start_value) + d.x / style_.unit, 1.5f, 10000.0f);
+        s.widths_u[size_t(drag_.column)] = width;
+        if (w->table->on_column_width) { w->table->on_column_width(w->table->columns[size_t(drag_.column)].key, width); }
         break;
       }
       case DragState::Kind::Splitter: {
@@ -1374,7 +1442,8 @@ EventResult Context::mouse_down(const Event &e)
                   toasts_.end());
     return {true, true};
   }
-  if (edit_.id && (!w || w->id != edit_.id)) {
+  if (edit_.id && (!w || w->id != edit_.id || (edit_.table &&
+      (!w->table || table_hit_cell(*w, e.pos) != edit_.cell || !table_edit_current())))) {
     commit_edit();
   }
   tooltip_forced_ = 0;
@@ -1388,14 +1457,21 @@ EventResult Context::mouse_down(const Event &e)
     return {true, false};
   }
   if (e.button != MouseButton::Left) {
+    if (e.button == MouseButton::Right && w->table && w->table->column_menu) {
+      table_open_menu(*w, table_header_col(*w, e.pos));
+      return {true, true};
+    }
     return {true, false};
   }
+  const TableCell clicked_cell = w->table && w->table->grid ? table_hit_cell(*w, e.pos) : TableCell{};
   const bool dbl = last_click_id_ == w->id && now_ - last_click_time_ <= config_.double_click_time &&
+                   (!(w->table && w->table->grid) || clicked_cell == last_table_cell_) &&
                    std::fabs(e.pos.x - last_click_pos_.x) < 4 * style_.scale &&
                    std::fabs(e.pos.y - last_click_pos_.y) < 4 * style_.scale;
   last_click_id_ = dbl ? 0 : w->id;
   last_click_time_ = now_;
   last_click_pos_ = e.pos;
+  last_table_cell_ = clicked_cell;
   if (w->focusable() && w->type != WidgetType::MenuItem) {
     focus_ = w->id;
   }
@@ -1480,6 +1556,10 @@ EventResult Context::mouse_down(const Event &e)
         }
         const int hc = table_header_col(*w, e.pos);
         if (hc >= 0) {
+          const Rect header = table_column_rect(*w, hc);
+          if (w->table->column_menu && e.pos.x >= header.x1() - style_.unit) {
+            table_open_menu(*w, hc); drag_ = {}; break;
+          }
           drag_.kind = DragState::Kind::Header;
           drag_.column = hc;
           break;
@@ -1498,6 +1578,22 @@ EventResult Context::mouse_down(const Event &e)
         break;
       }
       if (!body.contains(e.pos)) { break; }
+      if (w->table && w->table->grid) {
+        const auto cell = table_hit_cell(*w, e.pos);
+        if (edit_.table && edit_.cell == cell) {
+          edit_click(*w, e.pos, shift, dbl);
+          drag_.kind = DragState::Kind::TextSelect;
+          break;
+        }
+        if (!table_select(*w, cell, shift)) { drag_ = {}; break; }
+        const auto &grid = *w->table->grid;
+        if (grid.cell_style && grid.cell_style(cell.row, cell.column) == TableCellStyle::Checkbox && grid.on_toggle) {
+          grid.on_toggle(cell); drag_ = {}; break;
+        }
+        drag_.kind = DragState::Kind::TableSelect;
+        if (dbl && begin_table_edit(*w)) { drag_.kind = DragState::Kind::TextSelect; }
+        break;
+      }
       const int view_row = int((e.pos.y - body.y + scroll) / row_h);
       const int count = w->list ? w->list->count : w->table->rows;
       if (view_row >= 0 && view_row < count) {
@@ -1505,15 +1601,8 @@ EventResult Context::mouse_down(const Event &e)
         Binding<int> sel = w->list ? w->list->selected : w->table->selected;
         sel.assign(model_row);
         if (w->table && w->table->on_cell_select) {
-          float x = w->rect.x + style_.pixel - table_scroll_x(*w);
-          for (int column = 0; column < int(w->table->columns.size()); ++column) {
-            const float width = table_col_px(*w, column);
-            if (e.pos.x >= x && e.pos.x < x + width) {
-              w->table->on_cell_select(model_row, column);
-              break;
-            }
-            x += width;
-          }
+          const auto cell = table_hit_cell(*w, e.pos);
+          if (cell.column >= 0) { w->table->on_cell_select(model_row, cell.column); }
         }
         if (dbl && w->list && w->list->on_activate) {
           w->list->on_activate(model_row);
@@ -1602,6 +1691,7 @@ EventResult Context::mouse_up(const Event &e)
           s.sort_col = d.column;
           s.ascending = true;
         }
+        if (w->table->on_sort) { w->table->on_sort(d.column, s.ascending); }
       }
       break;
     default:
@@ -1688,7 +1778,9 @@ bool Context::handle_popup_event(const Event &e, EventResult &res)
   const int n = popup_.count;
   const Widget *owner = find_id(popup_.owner);
   auto enabled = [&](int i) {
-    return !owner || !popup_.menu || size_t(i) >= owner->menu.size() || owner->menu[size_t(i)].enabled;
+    if (!owner) { return false; }
+    const auto &entries = popup_.table_column >= 0 ? popup_.entries : owner->menu;
+    return !popup_.menu || size_t(i) >= entries.size() || entries[size_t(i)].enabled;
   };
   auto step = [&](int dir) {
     int h = popup_.highlight;
@@ -1741,8 +1833,12 @@ EventResult Context::key_down(const Event &e)
   if (popup_.owner && handle_popup_event(e, res)) {
     return res;
   }
+  if (edit_.table && !table_edit_current()) { commit_edit(); }
   if (edit_.id) {
-    edit_key(e);
+    if (edit_.table && !edit_.edit.composing() && (e.key == Key::Enter || e.key == Key::Tab)) {
+      commit_table_edit(e);
+    }
+    else { edit_key(e); table_edit_changed(); }
     return {true, true};
   }
   if (e.key == Key::Escape) {
@@ -1760,6 +1856,8 @@ EventResult Context::key_down(const Event &e)
     }
     return {false, false};
   }
+  if (const Widget *focused = find_id(focus_); focused && focused->enabled && focused->table &&
+      focused->table->grid && table_grid_key(*focused, e)) { return {true, true}; }
   if (e.key == Key::Tab && !(e.mods & (MOD_CTRL | MOD_ALT | MOD_SUPER))) {
     focus_next((e.mods & MOD_SHIFT) != 0);
     return {true, true};

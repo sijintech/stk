@@ -3,7 +3,9 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace stk::ui { class Layout; }
 
@@ -22,6 +24,10 @@ class ProjectTableEditor {
 
   bool can_change_project_selection(std::string_view project_id) const;
   bool has_unsaved_changes() const;
+  /** Select a field from a companion grid; refuses to abandon this component's draft. */
+  void select_field(std::string_view id);
+  /** A companion grid supplies its visible stable rows, preserving this form's stale-action fence. */
+  void set_visible_records(std::vector<std::string> ids);
   void controls(ui::Layout &, EditorContext &, ProjectState &, bool editable);
   void fields(ui::Layout &, EditorContext &, ProjectState &, bool editable, bool expanded = false);
   void sweep(ui::Layout &, EditorContext &, ProjectState &, bool editable);

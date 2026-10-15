@@ -351,7 +351,6 @@ TEST_F(ScriptPython, ProjectSelectionReadKeepsActiveTextAndWritePreservesIndepen
 {
   ASSERT_NO_FATAL_FAILURE(selection_project());
   auto &project = f.shell->store().project();
-  const auto table = project.table_id();
   const auto first = project.record_id();
   const auto second = project.table()->records[1].id;
   ASSERT_TRUE(f.area("a2").set_tab_type(0, kEditorTable));
@@ -360,6 +359,11 @@ TEST_F(ScriptPython, ProjectSelectionReadKeepsActiveTextAndWritePreservesIndepen
   f.screen.ui()->find("a2/main/table_search")->string.assign("red");
   f.screen.ui()->find("a3/main/table_search")->string.assign("blue");
   f.drv->frame();
+  ASSERT_TRUE(pump([&] {
+    f.drv->frame();
+    const auto *blue = f.screen.ui()->find("a3/main/records");
+    return blue && blue->table && blue->table->rows == 1;
+  }));
   const auto [x, y] = f.widget_center("a2/main/table_search");
   f.drv->click(x, y);
 #ifdef __APPLE__
@@ -379,22 +383,32 @@ TEST_F(ScriptPython, ProjectSelectionReadKeepsActiveTextAndWritePreservesIndepen
   const auto layout = f.screen.to_json();
   execute("assert p.select(t1, r2, expected_revision=1)['record_id'] == r2");
   f.drv->frame();
+  ASSERT_TRUE(pump([&] {
+    f.drv->frame();
+    const auto *blue = f.screen.ui()->find("a3/main/records");
+    return blue && blue->table && blue->table->selected.value() == 0;
+  }));
   EXPECT_EQ(f.screen.to_json(), layout);
   EXPECT_EQ(project.record_id(), second);
   EXPECT_EQ(f.screen.ui()->find("a2/main/table_search")->string.value(), "unfinished search");
   EXPECT_EQ(f.screen.ui()->find("a3/main/table_search")->string.value(), "blue");
-  EXPECT_EQ(f.screen.ui()->find("a2/main/" + table + "/records")->table->selected.value(), -1);
-  EXPECT_EQ(f.screen.ui()->find("a3/main/" + table + "/records")->table->selected.value(), 0);
+  EXPECT_EQ(f.screen.ui()->find("a2/main/records")->table->selected.value(), -1);
+  EXPECT_EQ(f.screen.ui()->find("a3/main/records")->table->selected.value(), 0);
   EXPECT_EQ(project.project()->revision, 1);
   execute("assert p.select(t2, r3, expected_revision=1)['record_id'] == r3");
   f.drv->frame();
   EXPECT_EQ(f.screen.ui()->find("a2/main/table_search")->string.value(), "unfinished search");
   EXPECT_EQ(f.screen.ui()->find("a3/main/table_search")->string.value(), "blue");
-  EXPECT_EQ(f.screen.ui()->find("a2/main/" + project.table_id() + "/records")->table->rows, 0);
+  EXPECT_EQ(f.screen.ui()->find("a2/main/records")->table->rows, 0);
   execute("assert p.select(t1, r2, expected_revision=1)['record_id'] == r2");
   f.drv->frame();
-  EXPECT_EQ(f.screen.ui()->find("a2/main/" + table + "/records")->table->selected.value(), -1);
-  EXPECT_EQ(f.screen.ui()->find("a3/main/" + table + "/records")->table->selected.value(), 0);
+  ASSERT_TRUE(pump([&] {
+    f.drv->frame();
+    const auto *blue = f.screen.ui()->find("a3/main/records");
+    return blue && blue->table && blue->table->rows == 1;
+  }));
+  EXPECT_EQ(f.screen.ui()->find("a2/main/records")->table->selected.value(), -1);
+  EXPECT_EQ(f.screen.ui()->find("a3/main/records")->table->selected.value(), 0);
 }
 
 TEST_F(ScriptPython, ProjectSelectionQueuedRequestsRejectNewRevisionAndDifferentOpening)

@@ -57,11 +57,14 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (output.empty() || (language != "en" && language != "zh") ||
-      (mode != "nodes_wide" && mode != "nodes_narrow" && mode != "python_wide" && mode != "python_narrow")) {
+      (mode != "nodes_wide" && mode != "nodes_narrow" && mode != "python_wide" && mode != "python_narrow" &&
+       mode != "table_wide" && mode != "table_narrow" && mode != "table_focus" && mode != "table_board" && mode != "table_gallery")) {
     return 2;
   }
   const bool python = mode == "python_wide" || mode == "python_narrow";
-  const bool narrow = mode == "nodes_narrow" || mode == "python_narrow";
+  const bool tables = mode.starts_with("table_");
+  const bool focused = mode == "table_focus" || mode == "table_board" || mode == "table_gallery";
+  const bool narrow = mode == "nodes_narrow" || mode == "python_narrow" || mode == "table_narrow";
   const int width = narrow ? 900 : 1440, height = 1000;
   bridge::test::TempDir directory{"workbench-modules-render"};
   bridge::test::ManualLoop loop;
@@ -122,12 +125,36 @@ int main(int argc, char **argv)
         {{"op", "add_field"}, {"id", label}, {"table_id", table}, {"name", "Source"}, {"type", "text"}},
         {{"op", "add_field"}, {"id", reviewed}, {"table_id", table}, {"name", "Reviewed"}, {"type", "boolean"}}
     });
-    for (int i = 0; i < 3; ++i) {
+    const std::string phase = "66666666-6666-4666-8666-666666666666";
+    const std::string date = "77777777-7777-4777-8777-777777777777";
+    const std::string evidence = "88888888-8888-4888-8888-888888888888";
+    const std::string dry = "99999999-9999-4999-8999-999999999999";
+    const std::string wet = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    if (tables) {
+      commands.push_back({{"op", "add_field"}, {"id", phase}, {"table_id", table}, {"name", language == "zh" ? "状态" : "State"}, {"type", "single_select"},
+        {"options", {{"version", 1}, {"choices", io::Json::array({{{"id", dry}, {"label", language == "zh" ? "待复核" : "To review"}, {"color", "#5B8FF9"}},
+          {{"id", wet}, {"label", language == "zh" ? "已复核" : "Reviewed"}, {"color", "#61DDAA"}}})}}}});
+      commands.push_back({{"op", "add_field"}, {"id", date}, {"table_id", table}, {"name", language == "zh" ? "日期" : "Date"}, {"type", "date"}});
+      commands.push_back({{"op", "add_field"}, {"id", evidence}, {"table_id", table}, {"name", language == "zh" ? "证据对象" : "Evidence"}, {"type", "object"},
+        {"options", {{"version", 1}, {"kinds", {"record", "file", "snapshot_file", "analysis", "simulation", "workflow"}}}}});
+    }
+    for (int i = 0; i < (tables ? 24 : 3); ++i) {
       const std::string id = std::to_string(40000000 + i) + "-4444-4444-8444-444444444444";
       commands.push_back({{"op", "add_record"}, {"id", id}, {"table_id", table}});
       commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", temperature}, {"value", 300 + i * 25}});
       commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", label}, {"value", "synthetic"}});
       commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", reviewed}, {"value", i == 0}});
+      if (tables) {
+        commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", phase}, {"value", i % 3 == 0 ? dry : wet}});
+        commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", date}, {"value", "2026-10-15"}});
+        commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", evidence},
+          {"value", {{"version", 1}, {"project_id", project.project()->id}, {"kind", "record"}, {"id", "40000000-4444-4444-8444-444444444444"}, {"table_id", table}}}});
+      }
+    }
+    if (tables) {
+      const auto kind = mode == "table_board" ? "board" : mode == "table_gallery" ? "gallery" : "grid";
+      commands.push_back({{"op", "put_table_view"}, {"id", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}, {"table_id", table},
+        {"name", language == "zh" ? "复核工作视图" : "Review workspace"}, {"definition", {{"version", 1}, {"kind", kind}, {"group_field_id", phase}}}});
     }
     ok = ok && project.apply(commands) && loop.pump_until([&] { return !project.busy(); }, 30);
     const auto inputs = directory.path() / "project" / "inputs";
@@ -218,7 +245,7 @@ int main(int argc, char **argv)
         ok = frame();
         const auto *code_open = screen.ui()->find("files_open_code");
         const auto *records = records_widget(screen);
-        ok = ok && code_open && code_open->enabled && records && records->table->rows == 3 &&
+        ok = ok && code_open && code_open->enabled && records && records->table->rows == (tables ? 24 : 3) &&
             records->table->cell(0, 1) == "300" && records->table->cell(0, 2) == "synthetic";
       }
       if (ok && python) {
@@ -250,7 +277,7 @@ int main(int argc, char **argv)
               scripts.output().line_count() >= 4;
         }
       }
-      else if (ok) {
+      else if (ok && !tables) {
         stage = "fit verified source pipeline beside Viewer";
         const auto inspection = viewer.graph_inspection();
         ok = inspection && inspection->shown_graph_verified.value_or(false) && inspection->shown_matches_desired.value_or(false);
@@ -260,8 +287,19 @@ int main(int argc, char **argv)
         const auto *fit = screen.ui()->find("graph_fit");
         if (fit && fit->enabled) { fit->on_click(); } else { ok = false; }
       }
+      if (ok && tables) {
+        stage = "show typed table workspace";
+        ok = loop.pump_until([&] { drawing = frame(); const auto *v = screen.ui()->find("table_views"); return !drawing || (v && v->items.size() >= 2); }, 30) && drawing;
+        if (ok && (mode == "table_board" || mode == "table_gallery")) { screen.ui()->find("table_views")->index.assign(1); }
+        if (focused) { screen.set_maximized(table_area); }
+        ok = ok && loop.pump_until([&] {
+          drawing = frame();
+          const auto *records = screen.ui()->find("records");
+          return !drawing || (mode == "table_board" || mode == "table_gallery" ? screen.ui()->find("open") != nullptr : records && records->table->rows == 24);
+        }, 30) && drawing;
+      }
       stage = ok ? "export combined workspace" : stage;
-      ok = ok && frame() && !screen.maximized() && files_area->editor().type().id == app::kEditorFiles &&
+      ok = ok && frame() && (focused ? screen.maximized() == table_area : !screen.maximized()) && files_area->editor().type().id == app::kEditorFiles &&
           viewer_area->editor().type().id == app::kEditorViewer && table_area->editor().type().id == app::kEditorTable &&
           viewer.payload() == payload && viewer.evaluations_started() == evaluations &&
           project.project()->revision == revision && project.table_id() == table && client->stats().schema_violations == 0 &&

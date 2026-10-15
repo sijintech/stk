@@ -5,7 +5,11 @@ CSV 用于准备小型参数表、交换文本和导出计算值。项目本身�
 
 ## 桌面操作
 
-打开项目后展开 **CSV / TSV 表格**：
+独立表格页从 **更多 → CSV/TSV** 打开对话框：先选择输入文件并“预览”，逐列选择类型和数值单位，再“导入”。
+预览不创建表；导入核对预览的 SHA，字节变化须重新预览，整批失败零写入。对话框导出使用当前视图的可见列与全表筛选/排序，
+不包含仅作用于当前页的搜索。单选、多选和对象值需要字段配置，不能由 CSV 自动推断，见[多维表格](design/multidimensional-tables.md)。
+
+传统项目页继续保留 **CSV / TSV 表格** 面板和 JSON 类型映射：
 
 1. 填写 UTF-8 输入文件的绝对路径（或点“浏览…”选择）和新表格名称。第一行是列名，后续每条 CSV 记录是一行。
 2. 默认所有列按文本保存，`001`、`true` 和 `=1+1` 都保持原文本。需要数值等类型时展开“列类型”。
@@ -25,10 +29,12 @@ CSV 用于准备小型参数表、交换文本和导出计算值。项目本身�
 ```python
 p = stk.project
 revision = p.snapshot()["project"]["revision"]
+preview = p.table.csv_preview("/absolute/path/parameters.csv", expected_revision=revision)
 imported = p.csv.import_file(
     "/absolute/path/parameters.csv", name="参数",
     types={"Temperature": "number", "Enabled": "boolean"},
     units={"Temperature": "K"}, expected_revision=revision,
+    expected_sha256=preview["source_sha256"],
 )
 print(imported["table_id"], imported["rows"], imported["source_sha256"])
 
@@ -39,7 +45,8 @@ exported = p.csv.export_file(
 print(exported["path"], exported["sha256"])
 ```
 
-独立 Python 使用 `ProjectStore(directory).csv`，方法相同且不依赖桌面/Runtime。
+独立 Python 使用 `ProjectStore(directory).csv`，方法相同且不依赖桌面/Runtime；预览入口为 `.csv.preview(...)`。
+导出可提供互斥的 `definition` 或 `view_id`，指定全表筛选/排序及可见列；两者均不提供时保留原全表存储顺序。
 独立接口的相对文件路径基于项目目录；桌面 `stk` helper 的相对文件路径基于脚本当前工作目录。
 导入返回新修订、表/字段/记录 ID、行列数和所读源文件的 SHA-256；不自动保存源文件副本。
 导出返回所读取的修订、表 ID、路径、行列数、字节数和内容 SHA-256。
@@ -61,14 +68,15 @@ CLI 路径基于当前工作目录，`--tsv` 选择制表符。JSON 参数在 Wi
 
 - 支持 UTF-8 和可选 BOM；CSV 引号中的逗号、制表符、引号与换行按标准 CSV 解析。
   列名必须非空且唯一，最多 64 列；每条记录的值数须与表头完全一致，空白行不会自动忽略。
-- 类型只有 `text`、`integer`、`number`、`boolean`、`json`。非文本列使用 JSON 字面量，
+- 导入可声明 `text`、`integer`、`number`、`boolean`、`json`，格式14另有 `date`、`url`；后两者使用 ISO 日期/绝对 http(s) 字符串。
+  单选、多选、对象需要额外字段配置，本入口不自动创建该配置。其余非文本列使用 JSON 字面量，
   例如整数 `12`、数值 `1e-3`、布尔 `true`/`false`；拒绝 `NaN`/`Infinity` 和超出 int64 的整数。
   非文本空白单元格导入为 `null`；文本空白保留原字符串。JSON 单元格按普通 CSV 规则引用。
 - 输入和输出均不超过 8 MiB；单字段长度也受 Python CSV 解析器限制（默认 131072 字符）。
   导入复用最多 1000 条命令的原子修改批次：有 `C` 列时最多
   `floor((999 - C) / (C + 1))` 条记录，例如 5 列最多 165 条，10 列最多 89 条。
   超限整体拒绝；大规模数据导入和流式表格编辑仍待后续实现。导出最多 10000 条记录。
-- 导出使用当前表的字段/记录存储顺序，不使用界面的临时排序。公式输出当前计算值，
+- 未指定视图时导出使用当前表的字段/记录存储顺序；独立表格对话框明确传入当前视图，传统面板和默认CLI仍为全表。公式输出当前计算值，
   有求值错误的单元格会阻止导出；未赋值和普通 `null` 导出为空白，JSON 列导出 `null`。
   文本 `null` 与空文本无法通过 CSV 区分；重新导入会产生新对象 ID。
 - 文件中的文本不会被 STK 解释为公式；CSV 不携带项目类型声明，重新导入时需再次指定类型/单位。

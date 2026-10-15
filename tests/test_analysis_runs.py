@@ -1,5 +1,6 @@
 """Immutable analysis preparation, bounded sources and single-attempt lifecycle facts."""
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 import hashlib
 import json
 import shutil
@@ -429,14 +430,20 @@ def test_format8_requires_explicit_verified_backup_upgrade_and_preserves_undo_an
     with sqlite3.connect(store.path) as db:
         for table in ("project_agent_objects", "project_agent_events", "project_agent_sessions", "project_labels", "project_archive", "workflow_run_events", "workflow_run_plans", "analysis_run_events", "analysis_run_plans"):
             db.execute(f"DROP TABLE {table}")  # a format-8 database (format 10 adds the workflow run tables)
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=8")
     before, history = store.snapshot(), store.history()
     with pytest.raises(UnsupportedProjectFormat, match="format 9"):
         prepare(model)
     assert store.snapshot() == before
     upgraded = store.upgrade(expected_revision=3)
-    assert upgraded["format_version"] == FORMAT_VERSION == 13 and upgraded["revision"] == 4
-    assert store.snapshot()["tables"] == before["tables"]
+    assert upgraded["format_version"] == FORMAT_VERSION == 14 and upgraded["revision"] == 4
+    expected_tables = deepcopy(before["tables"])
+    for table in expected_tables:
+        for field in table["fields"]:
+            field["options"] = {"version": 1}
+    assert store.snapshot()["tables"] == expected_tables
     assert store.snapshot()["edit_history"] == before["edit_history"]
     assert store.history()[:-1] == history
     backup = tmp_path / "restored"
@@ -458,6 +465,8 @@ def test_format9_migration_failure_rolls_back_and_retains_verified_old_backup(mo
     with sqlite3.connect(store.path) as db:
         for table in ("project_agent_objects", "project_agent_events", "project_agent_sessions", "project_labels", "project_archive", "workflow_run_events", "workflow_run_plans", "analysis_run_events", "analysis_run_plans"):
             db.execute(f"DROP TABLE {table}")  # a format-8 database (format 10 adds the workflow run tables)
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=8")
     before = store.snapshot()
     monkeypatch.setattr(storage, "_DDL_V9", (*storage._DDL_V9, "bad SQL"))

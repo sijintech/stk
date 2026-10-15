@@ -7,6 +7,8 @@ from uuid import uuid4
 
 import pytest
 
+from suan.project.store import FORMAT_VERSION
+
 from suan.graph.schema import canonical_json
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.analysis_runs import effective_parameters
@@ -200,11 +202,13 @@ def test_older_projects_need_an_explicit_upgrade(project):
     with sqlite3.connect(store.path) as db:
         for table in ("project_agent_objects", "project_agent_events", "project_agent_sessions", "project_labels", "project_archive", "workflow_run_events", "workflow_run_plans"):
             db.execute(f"DROP TABLE {table}")
+        db.execute("DROP TABLE IF EXISTS field_options")
+        db.execute("DROP TABLE IF EXISTS table_views")
         db.execute("PRAGMA user_version=9")
     with pytest.raises(UnsupportedProjectFormat, match="format 10"):
         prepare(store, ids)
     upgraded = store.upgrade(expected_revision=revision(store))
-    assert upgraded["format_version"] == 13 and upgraded["backup"]
+    assert upgraded["format_version"] == FORMAT_VERSION and upgraded["backup"]
     assert prepare(store, ids)["status"] == "prepared"
 
 

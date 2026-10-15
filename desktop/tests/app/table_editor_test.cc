@@ -42,6 +42,7 @@ class TableEditorPython : public ::testing::Test {
     options.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
     options.env["STK_STATE_DIR"] = dir.str() + "/runtime";
     options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.env["STK_PROJECTS_DIR"] = dir.str() + "/projects";
     options.executor = loop.executor();
     options.strict = options.validate = true;
@@ -65,6 +66,13 @@ class TableEditorPython : public ::testing::Test {
   {
     ASSERT_TRUE(loop.pump_until([&] { return !state().busy(); }, 30)) << client->bridge_log().text();
     f.drv->frame();
+    if (state().table()) {
+      ASSERT_TRUE(loop.pump_until([&] {
+        f.drv->frame();
+        const auto *grid = widget("records");
+        return grid && grid->table && size_t(grid->table->rows) == state().table()->records.size();
+      }, 30));
+    }
   }
   void populated()
   {
@@ -87,8 +95,10 @@ class TableEditorPython : public ::testing::Test {
     settled();
     state().select_table(table_id);
     state().select_record(record_id);
-    f.drv->frame();
+    settled();
     ASSERT_NE(widget("records"), nullptr);
+    ASSERT_EQ(widget("cell_value"), nullptr) << "the default workspace keeps the grid unobstructed";
+    click("table_details");
     ASSERT_NE(widget("cell_value"), nullptr);
   }
   void click(const char *key)
@@ -117,11 +127,17 @@ class TableEditorPython : public ::testing::Test {
   }
   void cell(int row, int column)
   {
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.drv->frame();
+      const auto *grid = widget("records");
+      return grid && grid->table && row < grid->table->rows;
+    }, 30));
     const auto *w = widget("records"); ASSERT_NE(w, nullptr); ASSERT_TRUE(w->table->on_cell_select);
     const auto spec = *w->table;
     spec.selected.assign(row);
     spec.on_cell_select(row, column);
     f.drv->frame();
+    if (!widget("cell_field")) { click("table_details"); }
   }
 };
 
@@ -160,6 +176,11 @@ TEST_F(TableEditorPython, ClickedCellSelectsStableFieldAndUsesExistingReferenceA
     f.drv->frame();
   };
   pointer(rect.x + style.pixel + 6 * style.unit, rect.y + style.pixel + 0.5f * style.unit);
+  ASSERT_TRUE(loop.pump_until([&] {
+    f.drv->frame();
+    const auto *grid = widget("records");
+    return grid && grid->table && grid->table->rows == 2 && grid->table->cell(0, 1) == "200";
+  }, 30));
   pointer(rect.x + style.pixel + 6 * style.unit, rect.y + style.pixel + 1.5f * style.unit);
   EXPECT_EQ(state().record_id(), second_id);
   ASSERT_NE(widget("cell_value"), nullptr);
@@ -171,11 +192,11 @@ TEST_F(TableEditorPython, ClickedCellSelectsStableFieldAndUsesExistingReferenceA
   EXPECT_EQ(*state().table()->cell(1, 0), 210);
   click("project_undo"); settled();
   EXPECT_EQ(*state().table()->cell(1, 0), 200);
-  cell(0, 3);
+  cell(1, 3);  // The saved/query sort puts the original first record second in the view.
   EXPECT_EQ(widget("cell_mode")->index.value(), 1);
   EXPECT_EQ(state().record_id(), record_id);
   EXPECT_EQ(*state().table()->cell(0, 2), 300);
-  cell(0, 2);
+  cell(1, 2);
   EXPECT_EQ(widget("cell_mode")->index.value(), 0);
   EXPECT_NE(widget("cell_value")->string.value().find("synthetic"), std::string::npos);
   panel("cell_details");
@@ -199,7 +220,7 @@ TEST_F(TableEditorPython, DirtyDraftBlocksOtherRowFieldTableAndHiddenTabNavigati
   f.drv->frame();
   EXPECT_EQ(state().table_id(), table_id);
   ASSERT_TRUE(area().add_tab(kEditorTable));
-  f.drv->frame();
+  settled();
   ASSERT_EQ(area().tab_count(), 2);
   ASSERT_NE(widget("records"), nullptr);
   cell(1, 1);
@@ -255,6 +276,9 @@ TEST_F(TableEditorPython, RetainedManagementCallbacksCannotModifyAnotherProjectO
   })));
   settled();
   state().select_table(table_id); state().select_record(record_id); f.drv->frame();
+  settled();
+  if (!widget("cell_field")) { click("table_details"); }
+  if (!widget("rename_table")) { panel("manage_objects"); }
   ASSERT_NE(widget("rename_table"), nullptr);
   widget("rename_table")->string.assign("Unsaved name");
   f.drv->frame();
@@ -282,8 +306,9 @@ TEST_F(TableEditorPython, DestructiveActionsCannotDiscardAnotherHiddenTablesDirt
   populated();
   assign_value("345");
   ASSERT_TRUE(area().editor().has_unsaved_changes());
-  ASSERT_TRUE(area().add_tab(kEditorTable)); f.drv->frame();
+  ASSERT_TRUE(area().add_tab(kEditorTable)); settled();
   ASSERT_FALSE(area().editor().has_unsaved_changes());
+  click("table_details");
   panel("manage_objects");
   const auto revision = state().project()->revision;
   for (const auto *key : {"delete_record", "delete_field", "delete_table"}) {

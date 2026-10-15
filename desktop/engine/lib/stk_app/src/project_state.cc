@@ -35,7 +35,8 @@ ProjectTable ProjectTable::from_json(const Json &value)
   table.name = io::get_string(value, "name");
   for (const auto &field : value.at("fields")) {
     table.fields.push_back({io::get_string(field, "id"), io::get_string(field, "name"),
-                            io::get_string(field, "type"), io::get_string(field, "unit")});
+                            io::get_string(field, "type"), io::get_string(field, "unit"),
+                            field.value("options", Json::object())});
   }
   for (const auto &record : value.at("records")) {
     table.records.push_back({io::get_string(record, "id"), record.at("values"),
@@ -1263,7 +1264,7 @@ bool ProjectState::index_files(const std::vector<std::string> &paths) { return e
 bool ProjectState::refresh_file() { return selected_file() && edit_files({record_id_}, false); }
 
 bool ProjectState::import_csv(const std::string &source, const std::string &name, const Json &types,
-                              const Json &units, const std::string &delimiter)
+                              const Json &units, const std::string &delimiter, const std::string &expected_sha256)
 {
   if (!ready() || busy() || !loaded()) { return false; }
   busy_ = true;
@@ -1271,8 +1272,10 @@ bool ProjectState::import_csv(const std::string &source, const std::string &name
   notice_.clear();
   bridge::CallOptions options;
   options.retry = bridge::CallOptions::Retry::Never;
-  on(client_->call("project.csv.import", {{"handle", project_->handle}, {"expected_revision", project_->revision},
-      {"source", source}, {"name", name}, {"types", types}, {"units", units}, {"delimiter", delimiter}}, options),
+  Json request = {{"handle", project_->handle}, {"expected_revision", project_->revision},
+      {"source", source}, {"name", name}, {"types", types}, {"units", units}, {"delimiter", delimiter}};
+  if (!expected_sha256.empty()) { request["expected_sha256"] = expected_sha256; }
+  on(client_->call("project.csv.import", std::move(request), options),
       [this](const bridge::Result<Json> &result) {
     busy_ = false;
     if (!result.ok()) { fail(result.error()); }
@@ -1288,7 +1291,7 @@ bool ProjectState::import_csv(const std::string &source, const std::string &name
   return true;
 }
 
-bool ProjectState::export_csv(const std::string &destination, const std::string &delimiter)
+bool ProjectState::export_csv(const std::string &destination, const std::string &delimiter, const Json &definition)
 {
   if (!ready() || busy() || !loaded() || !table()) { return false; }
   busy_ = true;
@@ -1296,8 +1299,10 @@ bool ProjectState::export_csv(const std::string &destination, const std::string 
   notice_.clear();
   bridge::CallOptions options;
   options.retry = bridge::CallOptions::Retry::Never;
-  on(client_->call("project.csv.export", {{"handle", project_->handle}, {"expected_revision", project_->revision},
-      {"table_id", table_id_}, {"destination", destination}, {"delimiter", delimiter}}, options),
+  Json request = {{"handle", project_->handle}, {"expected_revision", project_->revision},
+      {"table_id", table_id_}, {"destination", destination}, {"delimiter", delimiter}};
+  if (!definition.is_null()) { request["definition"] = definition; }
+  on(client_->call("project.csv.export", std::move(request), options),
       [this](const bridge::Result<Json> &result) {
     busy_ = false;
     if (!result.ok()) { fail(result.error()); }
@@ -1357,15 +1362,20 @@ bool ProjectState::open_file(const bool vscode)
 
 bool ProjectState::view_file(const std::string &preset)
 {
-  if (!ready() || busy() || !selected_file()) { return false; }
+  return selected_file() && view_file_record(record_id_, preset);
+}
+bool ProjectState::view_file_record(const std::string &id, const std::string &preset, std::function<bool()> still_current)
+{
+  if (!ready() || busy() || !loaded() || !canonical_project_uuid(id)) { return false; }
   busy_ = true;
   error_.clear();
   notice_.clear();
-  on(client_->project_files_resolve(project_->handle, project_->revision, record_id_),
-     [this, preset](const bridge::Result<Json> &result) {
+  on(client_->project_files_resolve(project_->handle, project_->revision, id),
+     [this, preset, id, revision = project_->revision, still_current = std::move(still_current)](const bridge::Result<Json> &result) {
     busy_ = false;
+    if ((still_current && !still_current()) || !project_ || project_->revision != revision) { changed(); return; }
     if (!result) { fail(result.error()); refresh(); }
-    else {
+    else if (io::get_string(result.value(), "record_id") == id && io::get_int(result.value(), "revision", -1) == revision) {
       const auto path = io::get_string(result.value(), "path");
       const auto source = classify_path(path, &error_);
       if (source.kind != SourceKind::None) {
@@ -1376,6 +1386,11 @@ bool ProjectState::view_file(const std::string &preset)
         else {
           OpenResultRequest request;
           request.local_paths = {path};
+          request.still_current = [this, weak = std::weak_ptr<bool>(alive_), handle = project_->handle, revision, still_current] {
+            const auto alive = weak.lock();
+            return alive && *alive && project_ && project_->handle == handle && project_->revision == revision &&
+                   (!still_current || still_current());
+          };
           if (source.evaluates()) { request.preset = preset; }
           store_.request_open_result(std::move(request));
         }
@@ -1383,6 +1398,7 @@ bool ProjectState::view_file(const std::string &preset)
       if (!error_.empty()) { store_.log(error_); }
       changed();
     }
+    else { error_ = "Invalid or stale file resolution"; changed(); }
     if (project_ && dirty_revision_ > project_->revision) { refresh(); }
   });
   changed();

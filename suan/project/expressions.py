@@ -54,11 +54,19 @@ def _same_unit(left, right):
     return left
 
 
-def check_target(value, kind, unit):
+def check_target(value, kind, unit, options=None, project_id=None):
     """Check the value assigned to a field; an absent target unit imposes no unit assertion."""
     if unit is not None and value.unit != unit:
         raise EvaluationError("unit", f"Result unit {value.unit!r} does not match field unit {unit!r}")
     if value.value is None:
+        return value
+    if kind not in {"text", "integer", "number", "boolean", "json"}:
+        from .field_types import check
+        from .store import ProjectError
+        try:
+            check(value.value, kind, options, project_id)
+        except ProjectError as exc:
+            raise EvaluationError("type", str(exc)) from None
         return value
     valid = {"text": isinstance(value.value, str),
              "integer": type(value.value) is int and -(2**63) <= value.value < 2**63,

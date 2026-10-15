@@ -1,5 +1,17 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
+2026-10-15 本地科研多维表格扩展本机验收完成（本节点待提交推送，基线 `73e4fbe`；随后核对精确代码头 CI）。
+独立表格已改为网格主体，接通内联编辑/键盘矩形/TSV 规划预览、十种字段、命名网格/看板/卡片视图、
+全表类型化筛选/分组/排序、对象候选及来源和 CSV 图形映射。共享项目修订/选择/撤销，不另建数据库。
+新建项目使用格式 14；旧 13 可读/查询，强类型和命名视图需要明确执行校验备份后的升级。
+PET 研究同时兼容 13/14；真实 PET 公开副本两种格式各离线复核通过，没有重跑 MD。
+所有者明确本轮先做本地体验；协作/权限/云分享、缩略图、填充柄、看板拖动、大表增量引擎仍未实现。
+本轮模块/功能/限制见[多维表格](docs/design/multidimensional-tables.md)，契约见[格式 14](docs/specs/project-tables-14.md)。
+完整 Python **2853 passed/24 skipped/2 deselected**，相关三版本各 **127 passed**。完整原生 **1432/1432、零跳过**，新增必跑 **65/65**；
+原五项旧夹具失败及审查反例均已修复通过。wheel/sdist 和仓库外安装包冒烟通过；实际点击与后续 CI 见[验收记录](docs/runtime-validation.md)。
+测试继续清空模型 key、取消 model，不发收费模型请求；上一代码头 `2e331ca` 桌面已 5/5 完成成功，推送门禁满足。
+
+
 2026-10-14 界面模块化已交付：代码 `10adde6` 与跨平台夹具修正 `2e331ca` 已推送 main。
 `2e331ca` 的 Runtime **8/8**、桌面 **5/5**、文档与密钥扫描全部完成成功。
 默认文件树 / Viewer / 分析图 / 表格直接并列；Python、切回节点、左右交换各 **1 次导航点击**。
@@ -46,11 +58,11 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 
 只有主工作树；历史分支 `docs/development-handoff`、`fix/desktop-transfer-resume` 与无关旧 PR 不属于待办，不合并也不删除。
 
-## 现在的状态（2026-10-14）
+## 现在的状态（2026-10-15）
 
 | 方向 | 状态 | 入口 |
 |---|---|---|
-| 桌面与项目基线 | 原生桌面（GHOST/OpenGL/Vulkan/Metal）、项目格式 **13**（SQLite + 文件）、表格/参数扫描、保存分析、项目工作流（按行运行 MuFerro 与 LAMMPS）、归档、技能目录、工作台 | [开发计划](docs/development-plan.md)“当前基线”；`suan/project/`、`desktop/engine/lib/stk_app/` |
+| 桌面与项目基线 | 原生桌面（GHOST/OpenGL/Vulkan/Metal）、项目格式 **14**（旧 13 可读、升级先备份；SQLite + 文件）、表格/参数扫描、保存分析、项目工作流（按行运行 MuFerro 与 LAMMPS）、归档、技能目录、工作台 | [开发计划](docs/development-plan.md)“当前基线”；`suan/project/`、`desktop/engine/lib/stk_app/` |
 | S1 模型接入 | 全部交付：端点与密钥、数据标注与网络设置、本机一键部署（llama.cpp）、能力分档与自动切换 | [model-gateway.md](docs/design/model-gateway.md)；`suan/models/` |
 | S2 智能体 | S2a、S2b 交付（格式 13 会话/事件/对象、8 个工具、签名批准、桌面“智能体（多步）”）；**真实模型的 GUI 人工验收未做** | [agent-harness.md](docs/design/agent-harness.md)；`suan/agent/` |
 | S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
@@ -75,7 +87,7 @@ gh run list --branch main --limit 6   # 看最近代码提交的 Runtime 与桌�
 
 0. **界面模块化已交付**：本机及精确代码头跨平台 CI 全部通过；入口和边界见[模块说明](docs/desktop-modules.md)。
    后续按版本化类型契约扩展对象单元格与摘要/缩略图，完善跨视图联动；点击数是每次交付必查指标。
-   当前五种字段、UUID 引用/公式和 JSON 详情有效，不把完整富对象多维表格列为已完成。
+   本地多维表格已增加十种字段、对象来源、批量编辑与命名视图；后续按[能力矩阵](docs/design/multidimensional-tables.md)完善附件预览、聚合和大表处理。
 
 1. **E1b 写出器与 PET 建模已交付**：写出器保留传入电荷，支持 full/real、谐振键/角、RB→OPLS、三斜盒子，
    新增明确相位 180°/周期 2 的平面 periodic improper→CVFF，保留原子顺序，其他 improper 仍拒绝。

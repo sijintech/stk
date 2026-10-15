@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 
 from lammps_fake import PROGRAM
-from suan.project import ProjectStore
+from suan.project import ProjectStore, ProjectError
 from suan.scripting import API
 from suan.workflows import pet
 from suan.workflows.pet_study import FIELD_IDS, LINK_FIELD_IDS, LINK_TABLE_ID, TABLE_ID, PetStudy, _id
@@ -93,6 +93,35 @@ def revision(s):
 def create(s, **kwargs):
     return s["service"].create(s["recipe"], connection=s["connection"], options=s["options"],
                                expected_revision=revision(s), **kwargs)
+
+
+@pytest.mark.parametrize("version,accepted", [(12, False), (13, True), (14, True), (15, False)])
+def test_study_project_gate_keeps_format13_and_accepts_format14_only(version, accepted):
+    class SavedProject:
+        def snapshot(self):
+            return {"format_version": version}
+
+    project = SavedProject()
+    service = PetStudy(None)
+    if accepted:
+        assert service._project(project) == (project, {"format_version": version})
+    else:
+        with pytest.raises(ProjectError, match="format 13 or 14"):
+            service._project(project)
+
+
+def test_existing_format13_study_create_still_does_not_upgrade_or_execute(study):
+    import sqlite3
+    s = study
+    store = s["h"].bridge.projects._stores[s["p"].handle]
+    with sqlite3.connect(store.path) as db:
+        db.execute("DROP TABLE field_options")
+        db.execute("DROP TABLE table_views")
+        db.execute("PRAGMA user_version=13")
+    made = create(s)
+    assert made["status"] == "prepared" and s["calls"] == []
+    assert s["p"].snapshot()["format_version"] == 13
+    assert s["service"].status(made["study_id"])["status"] == "prepared"
 
 
 def done(s, identity, timeout=180):

@@ -78,6 +78,8 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot", "project.apply", "project.preview", "project.history",
         "project.backup", "project.upgrade", "project.undo", "project.redo", "project.csv.import", "project.csv.export",
         "project.sweep.plan",
+        "project.table.views.list", "project.table.views.get", "project.table.query", "project.table.paste.plan",
+        "project.table.objects.list_candidates", "project.table.objects.resolve", "project.table.csv.preview",
         "project.drafts.save", "project.drafts.get", "project.drafts.list", "project.drafts.apply", "project.drafts.discard",
         "project.contexts.capture", "project.contexts.get", "project.contexts.list",
         "project.discussion.add", "project.discussion.get", "project.discussion.list",
