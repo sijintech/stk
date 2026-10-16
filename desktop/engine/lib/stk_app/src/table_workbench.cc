@@ -28,7 +28,13 @@ std::string uuid()
   return s.substr(0, 8) + "-" + s.substr(8, 4) + "-" + s.substr(12, 4) + "-" + s.substr(16, 4) + "-" + s.substr(20);
 }
 const std::vector<std::string> types = {"text", "integer", "number", "boolean", "json", "date", "url", "single_select", "multi_select", "object"};
+const std::vector<std::string> io_formats = {"csv", "xlsx", "json"};
 const std::vector<std::string> kinds = {"record", "file", "snapshot_file", "analysis", "simulation", "workflow"};
+std::string table_bridge_session(const bridge::Client *client)
+{
+  return client && client->state() == bridge::BridgeState::Ready ?
+      std::to_string(client->bridge_pid()) + ":" + std::to_string(client->stats().spawned) : std::string();
+}
 Json default_view()
 {
   return {{"version", 1}, {"kind", "grid"}, {"columns", Json::array()},
@@ -103,6 +109,7 @@ bool valid_view_state(const Json &v)
 
 struct TableWorkbench::Impl {
   std::shared_ptr<void> alive = std::make_shared<int>(0);
+  AppStore *store = nullptr;
   std::unique_ptr<TableWorkbenchState> reads;
   ProjectTableEditor advanced;
   std::string identity, project_id, handle, table_id, search, error;
@@ -131,11 +138,13 @@ struct TableWorkbench::Impl {
   float detail_share = .65f;
   std::string draft_record, draft_field, draft_text, active_field_id;
   int64_t draft_revision = -1;
-  std::string draft_handle;
-  std::string csv_source, csv_destination, csv_name, csv_types = "{}", csv_units = "{}";
+  std::string draft_handle, restored_draft_project_id, workspace_schema_mode;
+  bool restored_cell_draft = false;
+  std::string csv_source, csv_destination, csv_name, csv_sheet, csv_notice_at_open;
+  int io_format = 0, io_mode = 0, io_mapping_page = 0;
   bool csv_tsv = false;
   Json csv_preview;
-  std::string csv_preview_source, csv_preview_delimiter;
+  std::string csv_preview_source, csv_preview_delimiter, csv_preview_format, csv_preview_sheet;
   std::vector<int> csv_column_types;
   std::vector<std::string> csv_column_units;
   PathPicker source_picker, destination_picker;
@@ -170,9 +179,14 @@ struct TableWorkbench::Impl {
   }
   std::function<bool()> fence(ProjectState &state, bool mapping = false)
   {
+    auto *owner = store;
+    auto *client = owner ? owner->bridge() : nullptr;
+    const auto session = table_bridge_session(client);
     return [weak = std::weak_ptr<void>(alive), this, &state, h = state.project()->handle,
-            t = state.table_id(), rev = state.project()->revision, epoch = mapping_epoch, mapping] {
-      return !weak.expired() && state.loaded() && state.project()->handle == h && state.table_id() == t &&
+            t = state.table_id(), rev = state.project()->revision, epoch = mapping_epoch, mapping,
+            owner, client, session] {
+      return !weak.expired() && owner && owner->bridge() == client && !session.empty() &&
+             table_bridge_session(client) == session && state.loaded() && state.project()->handle == h && state.table_id() == t &&
              state.project()->revision == rev && (!mapping || epoch == mapping_epoch);
     };
   }
@@ -210,6 +224,7 @@ struct TableWorkbench::Impl {
   }
   void sync(EditorContext &ctx, ProjectState &state)
   {
+    store = &ctx.store;
     if (!reads) { reads = std::make_unique<TableWorkbenchState>(ctx.store); }
     reads->sync();
     if (ui_complete && !state.busy()) {
@@ -225,9 +240,21 @@ struct TableWorkbench::Impl {
       reset_view(); seen_revision = -1; views = Json::array(); selection = {};
       search = previous_search;
       if (restored.is_object() && io::get_string(restored, "project_id") == project_id && io::get_string(restored, "table_id") == state.table_id()) {
-        view = restored["view"]; view_id = io::get_string(restored, "view_id"); view_name = io::get_string(restored, "view_name"); search = io::get_string(restored, "search"); configure(); restored = nullptr;
+        view = restored["view"]; view_id = io::get_string(restored, "view_id"); view_name = io::get_string(restored, "view_name"); search = io::get_string(restored, "search"); configure();
+        if (restored.contains("workspace_parameters")) {
+          const auto &p = restored.at("workspace_parameters");
+          view_changed = p.at("view_changed").get<bool>(); offset = p.at("offset").get<int>();
+          selection = {{p.at("anchor_row").get<int>(), p.at("anchor_column").get<int>()}, {p.at("active_row").get<int>(), p.at("active_column").get<int>()}};
+        }
+        restored = nullptr;
       }
       settings = new_field = new_table = paste_modal = object_modal = csv_modal = false;
+    }
+    if (restored_cell_draft && state.project()->id == restored_draft_project_id && state.table_id() == table_id &&
+        state.project()->revision == draft_revision && state.table() &&
+        std::any_of(state.table()->fields.begin(), state.table()->fields.end(), [this](const auto &f) { return f.id == draft_field; }) &&
+        std::any_of(state.table()->records.begin(), state.table()->records.end(), [this](const auto &r) { return r.id == draft_record; })) {
+      draft_handle = state.project()->handle; restored_cell_draft = false;
     }
     if (pending_edit && !state.busy()) {
       pending_edit = false;
@@ -435,7 +462,7 @@ struct TableWorkbench::Impl {
     row.button("table_details", ctx.tr("table.detail"), [this, current] { if (current()) { details = !details; } }).width(4);
     row.menu_button("table_more", ctx.tr("table.more"), {
       {std::string(ctx.tr("project.add_field")), [this, current] { if (current()) { ++schema_epoch; new_field = true; } }},
-      {std::string(ctx.tr("project.csv.title")), [this, current] { if (current()) { ++csv_epoch; csv_modal = true; } }},
+      {std::string(ctx.tr("project.csv.title")), [this, current, &state] { if (current()) { ++csv_epoch; io_mode = 2; csv_notice_at_open = state.notice(); csv_modal = true; } }},
       {std::string(ctx.tr("table.help")), [this, current] { if (current()) { help = true; } }}
     }).width(3);
     // Saved views are a one-click tab switch. The implicit all-records view is always present.
@@ -449,6 +476,12 @@ struct TableWorkbench::Impl {
       reset_view(); view_id = vids[size_t(i)];
       for (const auto &v : views) { if (io::get_string(v, "id") == view_id) { view = v.at("definition"); view_name = io::get_string(v, "name"); configure(); break; } }
     }});
+    viewrow.button("table_io", ctx.tr("table.io.import"), [this, current, &state] {
+      if (current()) { ++csv_epoch; io_mode = 0; csv_notice_at_open = state.notice(); csv_modal = true; }
+    }).width(3.5f).disable(state.busy());
+    viewrow.button("table_export", ctx.tr("table.io.export"), [this, current, &state] {
+      if (current()) { ++csv_epoch; io_mode = 1; csv_notice_at_open = state.notice(); csv_modal = true; }
+    }).width(3.5f).disable(state.busy());
     viewrow.button("table_add_record", ctx.tr("table.add_record"), [this, current, shell = &ctx.area.shell(), &state] {
       if (current() && available(*shell, state)) { state.apply(Json::array({{{"op", "add_record"}, {"table_id", state.table_id()}}})); }
     }).width(5).disable(state.busy());
@@ -1029,40 +1062,100 @@ struct TableWorkbench::Impl {
   void csv_dialog(EditorContext &ctx, ProjectState &state)
   {
     if (!csv_modal) { return; }
-    const auto current = [base = fence(state), this, generation = csv_epoch] { return base() && csv_modal && generation == csv_epoch; };
+    const auto current = [base = fence(state), this, generation = csv_epoch,
+                          selected_format = io_format, selected_sheet = csv_sheet, tsv = csv_tsv] {
+      return base() && csv_modal && generation == csv_epoch &&
+             selected_format == io_format && selected_sheet == csv_sheet && tsv == csv_tsv;
+    };
     auto close = [this, weak = std::weak_ptr<void>(alive), generation = csv_epoch] { if (!weak.expired() && generation == csv_epoch) { ++csv_epoch; csv_modal = false; } };
-    auto &box = ctx.ui->modal("table_csv_dialog", ctx.tr("project.csv.title"), close, {.width_units = 42});
+    const float modal_width = std::min(42.0f, std::max(16.0f, ctx.ui->window_size().x / ctx.ui->style().unit - 1));
+    auto &box = ctx.ui->modal("table_csv_dialog", ctx.tr("table.io.title"), close, {.width_units = modal_width});
+    if (!state.error().empty()) { box.paragraph(state.error()); }
+    // This dialog shows completions from its own opening; historical success notices remain
+    // in the shared project header and do not masquerade as the new import/export result.
+    if (!state.notice().empty() && state.notice() != csv_notice_at_open) { box.paragraph(state.notice()); }
+    box.prop(ctx.tr("table.io.format")).dropdown("table_io_format", {"CSV", "Excel (.xlsx)", "JSON"},
+      {[this, weak = std::weak_ptr<void>(alive)] { return weak.expired() ? 0 : io_format; },
+       [this, current](int value) {
+         if (!current() || value < 0 || value >= int(io_formats.size()) || value == io_format) { return; }
+         io_format = value; csv_sheet.clear(); csv_preview = nullptr; ++csv_epoch;
+       }});
+    const auto format = io_formats[size_t(io_format)];
+    const std::string delimiter = csv_tsv ? "\t" : ",";
+    if (io_mode != 1) {
     auto &source = box.prop(ctx.tr("project.csv.source")).row(true);
     source.text_field("table_csv_source", bind(csv_source));
     source_picker.button(source, ctx, "table_csv_browse", &csv_source, {.title_key = "project.csv.source_dialog", .still_current = current});
     source_picker.draw_error(box);
-    box.checkbox("table_csv_tsv", ctx.tr("project.csv.tsv"), bind(csv_tsv));
-    const std::string delimiter = csv_tsv ? "\t" : ",";
-    box.button("table_csv_preview", ctx.tr("table.csv_preview"), [this, current, delimiter] {
+    if (format == "csv") { box.checkbox("table_csv_tsv", ctx.tr("project.csv.tsv"), bind(csv_tsv)); }
+    if (format == "xlsx" && csv_preview.is_object() && csv_preview.contains("sheets")) {
+      std::vector<std::string> sheets;
+      for (const auto &sheet : csv_preview.at("sheets")) { sheets.push_back(io::get_string(sheet, "name")); }
+      box.prop(ctx.tr("table.io.sheet")).dropdown("table_io_sheet", sheets,
+        {[this, weak = std::weak_ptr<void>(alive), sheets] {
+          if (weak.expired()) { return -1; }
+          const auto found = std::find(sheets.begin(), sheets.end(), csv_sheet);
+          return found == sheets.end() ? -1 : int(found - sheets.begin());
+        }, [this, current, sheets](int value) {
+          if (current() && value >= 0 && size_t(value) < sheets.size() && csv_sheet != sheets[size_t(value)]) {
+            csv_sheet = sheets[size_t(value)]; ++csv_epoch;
+          }
+        }});
+    }
+    box.button("table_csv_preview", ctx.tr("table.io.preview"), [this, current, delimiter, format] {
       if (!current()) { return; }
-      csv_preview = nullptr; const auto generation = ++csv_epoch;
+      const auto generation = ++csv_epoch;
       const auto paths = platform::split_path_list(csv_source);
       const auto path = paths.size() == 1 ? paths.front() : csv_source;
-      reads->scoped_call("project.table.csv.preview", {{"source", path}, {"delimiter", delimiter}, {"limit", 20}},
-        [this, weak = std::weak_ptr<void>(alive), path, delimiter, generation](const Json &result) {
+      Json request = {{"source", path}, {"format", format}, {"limit", 20}};
+      if (format == "csv") { request["delimiter"] = delimiter; }
+      if (format == "xlsx" && !csv_sheet.empty()) { request["sheet"] = csv_sheet; }
+      reads->scoped_call("project.table.io.preview", std::move(request),
+        [this, weak = std::weak_ptr<void>(alive), path, delimiter, format, generation](const Json &result) {
           if (weak.expired() || !csv_modal || csv_epoch != generation) { return; }
           csv_preview = result; csv_preview_source = path; csv_preview_delimiter = delimiter;
-          csv_column_types.assign(result.at("columns").size(), 0); csv_column_units.assign(result.at("columns").size(), "");
+          csv_preview_format = format; csv_preview_sheet = io::get_string(result, "sheet");
+          csv_sheet = csv_preview_sheet;
+          csv_column_types.assign(result.at("columns").size(), 0); csv_column_units.assign(result.at("columns").size(), ""); io_mapping_page = 0;
+          if (csv_name.empty()) { csv_name = io::get_string(result, "table_name"); }
         });
-    }).disable(csv_source.empty() || reads->pending("project.table.csv.preview"));
+    }).disable(csv_source.empty() || reads->pending("project.table.io.preview") || state.busy());
     const auto paths = platform::split_path_list(csv_source);
     const bool valid_preview = csv_preview.is_object() && csv_preview_source == (paths.size() == 1 ? paths.front() : csv_source) &&
-        csv_preview_delimiter == delimiter && csv_preview.value("revision", int64_t(-1)) == state.project()->revision;
+        csv_preview_format == format && csv_preview_sheet == csv_sheet &&
+        (format != "csv" || csv_preview_delimiter == delimiter) && csv_preview.value("revision", int64_t(-1)) == state.project()->revision;
     if (valid_preview) {
       const auto cols = csv_preview.at("columns"); const auto preview_rows = csv_preview.at("rows");
+      const bool schema_present = csv_preview.value("schema_present", false);
       box.label(std::to_string(csv_preview.value("total_rows", 0)) + " " + std::string(ctx.tr("table.records")) + " · SHA256 " + io::get_string(csv_preview, "source_sha256").substr(0, 12));
       ui::TableSpec spec; for (const auto &c : cols) { spec.columns.push_back({io::get_string(c, "name"), 7, false}); }
       spec.rows = int(preview_rows.size()); spec.visible_rows = std::min(5, std::max(2, int(preview_rows.size())));
-      spec.cell = [preview_rows](int r, int c) { return preview_rows.at(size_t(r)).at(size_t(c)).get<std::string>(); };
+      spec.cell = [preview_rows](int r, int c) { return value_text(&preview_rows.at(size_t(r)).at(size_t(c))); };
       box.table("table_csv_preview_grid", std::move(spec));
-      if (auto *mapping = box.panel("table_csv_mapping", ctx.tr("table.csv_mapping"), true)) {
+      const int mapping_count = std::max(1, std::min(6, int(ctx.ui->window_size().y / ctx.ui->style().unit) - 18));
+      const int page_count = (int(cols.size()) + mapping_count - 1) / mapping_count;
+      io_mapping_page = std::clamp(io_mapping_page, 0, std::max(0, page_count - 1));
+      const size_t mapping_start = size_t(io_mapping_page * mapping_count);
+      const size_t mapping_end = std::min(cols.size(), mapping_start + size_t(mapping_count));
+      if (page_count > 1) {
+        auto &pages = box.row(true);
+        pages.button("table_io_columns_prev", "‹", [this, current] { if (current() && io_mapping_page > 0) { --io_mapping_page; } }).width(2).disable(io_mapping_page == 0);
+        pages.label(std::to_string(io_mapping_page + 1) + " / " + std::to_string(page_count));
+        pages.button("table_io_columns_next", "›", [this, current, page_count] { if (current() && io_mapping_page + 1 < page_count) { ++io_mapping_page; } }).width(2).disable(io_mapping_page + 1 == page_count);
+      }
+      if (schema_present) {
+        box.paragraph(ctx.tr("table.io.schema_hint"));
+        if (auto *mapping = box.panel("table_csv_mapping", ctx.tr("table.csv_mapping"), true)) {
+          for (size_t i = mapping_start; i < mapping_end; ++i) {
+            const auto &column = cols[i];
+            mapping->label(io::get_string(column, "name") + " · " + std::string(ctx.tr("project.type." + io::get_string(column, "type"))) +
+                (io::get_string(column, "unit").empty() ? "" : " · " + io::get_string(column, "unit")));
+          }
+        }
+      }
+      else if (auto *mapping = box.panel("table_csv_mapping", ctx.tr("table.csv_mapping"), true)) {
         std::vector<std::string> labels; for (size_t i = 0; i < 7; ++i) { labels.emplace_back(ctx.tr("project.type." + types[i])); }
-        for (size_t i = 0; i < cols.size(); ++i) {
+        for (size_t i = mapping_start; i < mapping_end; ++i) {
           auto &r = mapping->scope("csv_column" + std::to_string(i)).prop(io::get_string(cols[i], "name")).row(true);
           r.dropdown("type", labels, {[this, weak = std::weak_ptr<void>(alive), i] { return !weak.expired() && i < csv_column_types.size() ? csv_column_types[i] : 0; },
             [this, current, i](int value) { if (current() && i < csv_column_types.size() && value >= 0 && value < 7) { csv_column_types[i] = value; } }});
@@ -1071,29 +1164,49 @@ struct TableWorkbench::Impl {
               .disable(csv_column_types[i] != 1 && csv_column_types[i] != 2);
         }
       }
+      for (const auto &warning : csv_preview.value("warnings", Json::array())) { box.paragraph(warning.get<std::string>()); }
       box.prop(ctx.tr("project.csv.name")).text_field("table_csv_name", bind(csv_name));
-      box.paragraph(ctx.tr("table.csv_limit"));
-      box.button("table_csv_import", ctx.tr("project.csv.import"), [this, current, &state, delimiter, cols] {
-        if (!current() || selection_dirty()) { return; }
-        Json types_map = Json::object(), units_map = Json::object();
-        for (size_t i = 0; i < cols.size(); ++i) {
-          const auto name = io::get_string(cols[i], "name"); types_map[name] = types[size_t(csv_column_types[i])];
-          if ((csv_column_types[i] == 1 || csv_column_types[i] == 2) && !csv_column_units[i].empty()) { units_map[name] = csv_column_units[i]; }
+      box.paragraph(ctx.tr("table.io.limit"));
+      box.button("table_csv_import", ctx.tr("project.csv.import"), [this, current, &state, delimiter, format, cols, schema_present] {
+        const auto live_paths = platform::split_path_list(csv_source);
+        const auto live_source = live_paths.size() == 1 ? live_paths.front() : csv_source;
+        if (!current() || selection_dirty() || live_source != csv_preview_source) { return; }
+        Json request = {{"format", format}, {"source", csv_preview_source}, {"table_name", csv_name},
+                        {"expected_sha256", io::get_string(csv_preview, "source_sha256")}};
+        if (format == "csv") { request["delimiter"] = delimiter; }
+        if (format == "xlsx") { request["sheet"] = csv_preview_sheet; }
+        if (!schema_present) {
+          Json types_map = Json::object(), units_map = Json::object();
+          for (size_t i = 0; i < cols.size(); ++i) {
+            const auto name = io::get_string(cols[i], "name"); types_map[name] = types[size_t(csv_column_types[i])];
+            if ((csv_column_types[i] == 1 || csv_column_types[i] == 2) && !csv_column_units[i].empty()) { units_map[name] = csv_column_units[i]; }
+          }
+          request["types"] = std::move(types_map); request["units"] = std::move(units_map);
         }
-        if (state.import_csv(csv_preview_source, csv_name, types_map, units_map, delimiter, io::get_string(csv_preview, "source_sha256"))) { csv_modal = false; }
-      }).disable(state.busy() || csv_name.empty() || !csv_preview.value("can_import", false));
+        if (state.import_table_file(std::move(request))) { ++csv_epoch; csv_modal = false; }
+      }).disable(state.busy() || selection_dirty() || csv_name.empty() || !csv_preview.value("can_import", false));
     }
     if (!reads->error().empty()) { box.paragraph(reads->error()); }
-    box.separator();
+    }
+    if (io_mode == 2) { box.separator(); }
+    if (io_mode != 0) {
     box.paragraph(ctx.tr("table.csv_export_hint"));
+    if (format == "json") { box.paragraph(ctx.tr("table.io.schema_hint")); }
+    if (format == "xlsx") { box.paragraph(ctx.tr("table.io.xlsx_hint")); }
     auto &destination = box.prop(ctx.tr("project.csv.destination")).row(true);
     destination.text_field("table_csv_destination", bind(csv_destination));
     destination_picker.button(destination, ctx, "table_csv_save_as", &csv_destination, {.mode = platform::FileDialogMode::SaveFile,
-        .title_key = "project.csv.destination_dialog", .file_name = "table.csv", .still_current = current});
+        .title_key = "project.csv.destination_dialog", .file_name = "table." + format,
+        .still_current = [this, current, path = csv_destination] { return current() && path == csv_destination; }});
     destination_picker.draw_error(box);
-    box.button("table_csv_export", ctx.tr("project.csv.export"), [this, current, &state, delimiter] {
-      if (current() && !selection_dirty()) { state.export_csv(csv_destination, delimiter, view); }
-    }).disable(state.busy() || !state.table() || csv_destination.empty());
+    box.button("table_csv_export", ctx.tr("project.csv.export"), [this, current, &state, delimiter, format] {
+      if (!current() || selection_dirty()) { return; }
+      Json request = {{"format", format}, {"destination", csv_destination}, {"table_id", state.table_id()}, {"definition", view}};
+      if (format == "csv") { request["delimiter"] = delimiter; }
+      state.export_table_file(std::move(request));
+    }).disable(state.busy() || selection_dirty() || !state.table() || csv_destination.empty());
+    }
+    box.button("table_io_close", ctx.tr("table.done"), close);
   }
   void draw(ui::Layout &layout, EditorContext &ctx)
   {
@@ -1102,7 +1215,7 @@ struct TableWorkbench::Impl {
     if (!state.table()) {
       auto &r = layout.row();
       r.label(ctx.tr("table.no_tables")); r.button("table_first", ctx.tr("project.add_table"), [this, current = fence(state)] { if (current()) { ++schema_epoch; new_table = true; } });
-      r.button("table_first_csv", ctx.tr("project.csv.title"), [this, current = fence(state)] { if (current()) { csv_modal = true; } });
+      r.button("table_first_csv", ctx.tr("table.io.title"), [this, current = fence(state), &state] { if (current()) { io_mode = 0; csv_notice_at_open = state.notice(); csv_modal = true; } });
       field_dialog(ctx, state); csv_dialog(ctx, state); return;
     }
     rebuild(state);
@@ -1111,6 +1224,13 @@ struct TableWorkbench::Impl {
     if (!reads->error().empty()) { layout.paragraph(reads->error()); }
     if (reads->query_result().is_object()) {
       for (const auto &issue : reads->query_result().value("issues", Json::array())) { if (issue.is_string()) { layout.paragraph(issue.get<std::string>()); } }
+    }
+    if (schema_dirty && !new_field && !new_table) {
+      auto &draft = layout.row(true);
+      draft.label(ctx.tr("table.draft"));
+      draft.button("table_schema_resume", ctx.tr("table.resume_draft"), [this, current = fence(state)] {
+        if (current()) { ++schema_epoch; new_table = workspace_schema_mode == "table"; new_field = !new_table; }
+      });
     }
     if (dirty) {
       auto &draft = layout.row(true);
@@ -1129,7 +1249,7 @@ struct TableWorkbench::Impl {
     if (dirty && details) {
       auto &box = ctx.ui->modal("table_draft_dialog", ctx.tr("table.draft"), [this, weak = std::weak_ptr<void>(alive)] { if (!weak.expired()) { details = false; } }, {.width_units = 30});
       box.text_area("table_draft_text", bind(draft_text), {.max_length = 65536, .mono = true, .visible_lines = 5});
-      box.button("table_draft_save", ctx.tr("project.save_cell"), [this, current = fence(state), &state] { if (current()) { commit(state, selection.active, draft_text); } }).disable(pending_edit || draft_revision != state.project()->revision || draft_handle != state.project()->handle);
+      box.button("table_draft_save", ctx.tr("project.save_cell"), [this, current = fence(state), &state] { if (current()) { commit(state, selection.active, draft_text); } }).disable(pending_edit || !valid(selection.active) || draft_revision != state.project()->revision || draft_handle != state.project()->handle);
       box.button("table_draft_close", ctx.tr("table.done"), [this, current = fence(state)] { if (current()) { details = false; } });
     }
     view_dialog(ctx, state); field_dialog(ctx, state); paste_dialog(ctx, state); object_dialog(ctx, state); csv_dialog(ctx, state);
@@ -1151,19 +1271,99 @@ Json TableWorkbench::save_state() const
 {
   return {{"version", 1}, {"details", impl_->details}, {"detail_share", impl_->detail_share},
           {"project_id", impl_->project_id}, {"table_id", impl_->table_id}, {"view", impl_->view},
-          {"view_id", impl_->view_id}, {"view_name", impl_->view_name}, {"search", impl_->search}};
+          {"view_id", impl_->view_id}, {"view_name", impl_->view_name}, {"search", impl_->search},
+          {"io", {{"version", 1}, {"format", io_formats[size_t(impl_->io_format)]}, {"source", impl_->csv_source},
+                  {"destination", impl_->csv_destination}, {"name", impl_->csv_name}, {"sheet", impl_->csv_sheet},
+                  {"tsv", impl_->csv_tsv}, {"column_types", impl_->csv_column_types}, {"column_units", impl_->csv_column_units}}}};
 }
 bool TableWorkbench::load_state(const Json &value)
 {
   try {
-  // Earlier independent Table editors wrote an empty object. Keep the owner's saved layout.
-  if (value.is_object() && value.empty()) { return true; }
-  if (!value.is_object() || value.value("version", 0) != 1 || !value.contains("details") || !value["details"].is_boolean() || !value.contains("detail_share") || !io::is_finite_number(value["detail_share"])) { return false; }
-  if (value.contains("view")) {
-    if (value.dump().size() > 131072 || !valid_view_state(value["view"])) { return false; }
-    impl_->restored = value;
+    // Earlier independent Table editors wrote an empty object. Keep the owner's saved layout.
+    if (value.is_object() && value.empty()) { return true; }
+    if (!value.is_object() || value.value("version", 0) != 1 || value.dump().size() > 262144 ||
+        !value.contains("details") || !value["details"].is_boolean() || !value.contains("detail_share") || !io::is_finite_number(value["detail_share"])) { return false; }
+    if (value.contains("view") && !valid_view_state(value["view"])) { return false; }
+    for (const char *key : {"project_id", "table_id", "view_id", "view_name", "search"}) {
+      if (value.contains(key) && (!value.at(key).is_string() || value.at(key).get_ref<const std::string &>().size() > 4096)) { return false; }
+    }
+    if (value.contains("io")) {
+      const auto &v = value.at("io");
+      if (!v.is_object() || v.value("version", 0) != 1 ||
+          std::find(io_formats.begin(), io_formats.end(), io::get_string(v, "format")) == io_formats.end() ||
+          !v.contains("tsv") || !v.at("tsv").is_boolean() || !v.contains("column_types") || !v.at("column_types").is_array() || v.at("column_types").size() > 64 ||
+          !v.contains("column_units") || !v.at("column_units").is_array() || v.at("column_units").size() != v.at("column_types").size()) { return false; }
+      for (const char *key : {"source", "destination", "name", "sheet"}) {
+        if (!v.contains(key) || !v.at(key).is_string() || v.at(key).get_ref<const std::string &>().size() > 32768) { return false; }
+      }
+      for (const auto &type : v.at("column_types")) { if (!type.is_number_integer() || type.get<int64_t>() < 0 || type.get<int64_t>() > 6) { return false; } }
+      for (const auto &unit : v.at("column_units")) { if (!unit.is_string() || unit.get_ref<const std::string &>().size() > 64) { return false; } }
+    }
+    if (value.contains("view")) { impl_->restored = value; }
+    impl_->details = value["details"].get<bool>(); impl_->detail_share = std::clamp(value["detail_share"].get<float>(), .3f, .8f);
+    if (value.contains("io")) {
+      const auto &v = value.at("io");
+      impl_->io_format = int(std::find(io_formats.begin(), io_formats.end(), io::get_string(v, "format")) - io_formats.begin());
+      impl_->csv_source = io::get_string(v, "source"); impl_->csv_destination = io::get_string(v, "destination"); impl_->csv_name = io::get_string(v, "name"); impl_->csv_sheet = io::get_string(v, "sheet");
+      impl_->csv_tsv = v.at("tsv").get<bool>(); impl_->csv_column_types = v.at("column_types").get<std::vector<int>>(); impl_->csv_column_units = v.at("column_units").get<std::vector<std::string>>();
+    }
+    return true;
   }
-  impl_->details = value["details"].get<bool>(); impl_->detail_share = std::clamp(value["detail_share"].get<float>(), .3f, .8f); return true;
+  catch (const std::exception &) { return false; }
+}
+Json TableWorkbench::save_workspace_state() const
+{
+  const auto &v = *impl_;
+  return {{"version", 1}, {"layout", save_state()}, {"advanced", v.advanced.save_workspace_state()},
+          {"parameters", {{"view_changed", v.view_changed}, {"view_name_dirty", v.view_name_dirty}, {"offset", v.offset},
+                          {"anchor_row", v.selection.anchor.row}, {"anchor_column", v.selection.anchor.column},
+                          {"active_row", v.selection.active.row}, {"active_column", v.selection.active.column},
+                          {"filter_value", v.filter_value}, {"filter_field", v.filter_field}, {"filter_op", v.filter_op},
+                          {"sort_field", v.sort_field}, {"sort_direction", v.sort_direction},
+                          {"object_kind", v.object_kind}, {"object_table", v.object_table}, {"object_offset", v.object_offset},
+                          {"append_paste", v.append_paste}, {"active_field_id", v.active_field_id}, {"viewer_preset", v.viewer_preset}}},
+          {"draft", {{"dirty", v.dirty}, {"project_id", v.restored_cell_draft ? v.restored_draft_project_id : v.project_id},
+                     {"record_id", v.draft_record}, {"field_id", v.draft_field}, {"revision", v.draft_revision}, {"text", v.draft_text}}},
+          {"schema", {{"dirty", v.schema_dirty}, {"mode", v.new_table ? "table" : v.new_field ? "field" : v.workspace_schema_mode.empty() ? "field" : v.workspace_schema_mode},
+                      {"field_name", v.field_name}, {"field_unit", v.field_unit}, {"field_type", v.field_type},
+                      {"choices_text", v.choices_text}, {"table_name", v.table_name}, {"edit_field_id", v.edit_field_id}, {"options", v.edit_field_options}}}};
+}
+bool TableWorkbench::load_workspace_state(const Json &value)
+{
+  try {
+    if (!value.is_object() || value.value("version", 0) != 1 || value.dump().size() > 2097152 ||
+        !value.contains("layout") || !value.contains("advanced") || !value.contains("parameters") || !value.at("parameters").is_object() ||
+        !value.contains("draft") || !value.at("draft").is_object() || !value.contains("schema") || !value.at("schema").is_object()) { return false; }
+    const auto &p = value.at("parameters"), &d = value.at("draft"), &s = value.at("schema");
+    for (const auto *part : {&p, &d, &s}) {
+      for (const auto &entry : part->items()) { if (entry.value().is_string() && entry.value().get_ref<const std::string &>().size() > 65536) { return false; } }
+    }
+    for (const char *key : {"view_changed", "view_name_dirty", "append_paste"}) { if (!p.contains(key) || !p.at(key).is_boolean()) { return false; } }
+    for (const char *key : {"filter_value", "object_table", "active_field_id", "viewer_preset"}) { if (!p.contains(key) || !p.at(key).is_string()) { return false; } }
+    for (const char *key : {"offset", "anchor_row", "anchor_column", "active_row", "active_column", "filter_field", "filter_op", "sort_field", "sort_direction", "object_kind", "object_offset"}) {
+      if (!p.contains(key) || !p.at(key).is_number_integer() || p.at(key).get<int64_t>() < -1 || p.at(key).get<int64_t>() > 10000) { return false; }
+    }
+    if (p.at("offset").get<int>() < 0 || p.at("filter_op").get<int>() < 0 || p.at("filter_op").get<int>() > 11 ||
+        p.at("sort_direction").get<int>() < 0 || p.at("sort_direction").get<int>() > 1 || p.at("object_kind").get<int>() < 0 || p.at("object_kind").get<int>() >= int(kinds.size()) || p.at("object_offset").get<int>() < 0) { return false; }
+    for (const char *key : {"project_id", "record_id", "field_id", "text"}) { if (!d.contains(key) || !d.at(key).is_string()) { return false; } }
+    if (!d.contains("dirty") || !d.at("dirty").is_boolean() || !d.contains("revision") || !d.at("revision").is_number_integer() || d.at("revision").get<int64_t>() < -1) { return false; }
+    for (const char *key : {"mode", "field_name", "field_unit", "choices_text", "table_name", "edit_field_id"}) { if (!s.contains(key) || !s.at(key).is_string()) { return false; } }
+    if (!s.contains("dirty") || !s.at("dirty").is_boolean() || (s.at("mode") != "table" && s.at("mode") != "field") ||
+        !s.contains("options") || !s.at("options").is_object() || !s.contains("field_type") || !s.at("field_type").is_number_integer() || s.at("field_type").get<int64_t>() < 0 || s.at("field_type").get<int64_t>() >= int(types.size())) { return false; }
+    TableWorkbench next;
+    if (!next.load_state(value.at("layout")) || !next.impl_->advanced.load_workspace_state(value.at("advanced"))) { return false; }
+    auto &v = *next.impl_;
+    v.project_id = io::get_string(value.at("layout"), "project_id"); v.table_id = io::get_string(value.at("layout"), "table_id");
+    v.view = value.at("layout").value("view", default_view()); v.view_id = io::get_string(value.at("layout"), "view_id"); v.view_name = io::get_string(value.at("layout"), "view_name"); v.search = io::get_string(value.at("layout"), "search"); v.configure();
+    v.restored["workspace_parameters"] = p;
+    v.view_changed = p.at("view_changed").get<bool>(); v.view_name_dirty = p.at("view_name_dirty").get<bool>(); v.offset = p.at("offset").get<int>();
+    v.selection = {{p.at("anchor_row").get<int>(), p.at("anchor_column").get<int>()}, {p.at("active_row").get<int>(), p.at("active_column").get<int>()}};
+    v.filter_value = io::get_string(p, "filter_value"); v.filter_field = p.at("filter_field").get<int>(); v.filter_op = p.at("filter_op").get<int>(); v.sort_field = p.at("sort_field").get<int>(); v.sort_direction = p.at("sort_direction").get<int>();
+    v.object_kind = p.at("object_kind").get<int>(); v.object_table = io::get_string(p, "object_table"); v.object_offset = p.at("object_offset").get<int>(); v.append_paste = p.at("append_paste").get<bool>(); v.active_field_id = io::get_string(p, "active_field_id"); v.viewer_preset = io::get_string(p, "viewer_preset");
+    v.dirty = d.at("dirty").get<bool>(); v.restored_draft_project_id = io::get_string(d, "project_id"); v.restored_cell_draft = v.dirty;
+    v.draft_record = io::get_string(d, "record_id"); v.draft_field = io::get_string(d, "field_id"); v.draft_text = io::get_string(d, "text"); v.draft_revision = d.at("revision").get<int64_t>();
+    v.schema_dirty = s.at("dirty").get<bool>(); v.workspace_schema_mode = io::get_string(s, "mode"); v.field_name = io::get_string(s, "field_name"); v.field_unit = io::get_string(s, "field_unit"); v.field_type = s.at("field_type").get<int>(); v.choices_text = io::get_string(s, "choices_text"); v.table_name = io::get_string(s, "table_name"); v.edit_field_id = io::get_string(s, "edit_field_id"); v.edit_field_options = s.at("options");
+    impl_ = std::move(next.impl_); return true;
   }
   catch (const std::exception &) { return false; }
 }

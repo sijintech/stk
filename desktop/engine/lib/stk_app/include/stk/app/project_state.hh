@@ -91,6 +91,10 @@ class ProjectState {
   bool open(const std::string &directory,
             std::function<void(bridge::Result<bridge::ProjectInfo>)> complete = {});
   bool close(std::function<void(bridge::Result<bool>)> complete = {});
+  /** Adopt a pre-read workspace project and snapshot together on the UI thread. No reads,
+   * edits or execution are dispatched; pending callbacks for the old handle become stale. */
+  bool adopt_workspace_project(const std::optional<bridge::ProjectInfo> &info, const io::Json &snapshot,
+                               std::string table_id, std::string record_id, std::string *error = nullptr);
   void refresh();
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
   /** Whether the Python service builds the offline example project (demo.create). */
@@ -152,6 +156,8 @@ class ProjectState {
   bool import_csv(const std::string &source, const std::string &name, const io::Json &types,
                   const io::Json &units, const std::string &delimiter, const std::string &expected_sha256 = {});
   bool export_csv(const std::string &destination, const std::string &delimiter, const io::Json &definition = nullptr);
+  bool import_table_file(io::Json request);
+  bool export_table_file(io::Json request);
   bool backup();
   bool upgrade();
   bool undo();

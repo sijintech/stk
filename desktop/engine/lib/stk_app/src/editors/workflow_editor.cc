@@ -7,6 +7,7 @@
  * analysis graph tab of the same area with a breadcrumb back here. Nothing here runs or prepares
  * a step, changes the Viewer or calls a model.
  */
+#include "workspace_fields.hh"
 #include "stk/app/analysis_graph_canvas.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_discussion.hh"
@@ -71,7 +72,12 @@ constexpr size_t kMemoryLimit = 50;
 class WorkflowEditor final : public Editor {
  public:
   explicit WorkflowEditor(const EditorType &type) : Editor(type) {}
-  bool has_unsaved_changes() const override { return draft_.dirty(); }
+  bool has_unsaved_changes() const override
+  {
+    return draft_.dirty() || (!workspace_restore_.is_null() && !workspace_restore_.at("draft").is_null() &&
+      (workspace_restore_.at("draft").at("baseline") != workspace_restore_.at("draft").at("document") ||
+       workspace_restore_.at("draft").at("baseline_name") != workspace_restore_.at("draft").at("name")));
+  }
   bool can_change_project_selection(const std::string_view project_id) const override
   {
     return !store_ || !store_->project().project() || store_->project().project()->id != project_id || !draft_.dirty();
@@ -260,6 +266,27 @@ class WorkflowEditor final : public Editor {
     return true;
   }
 
+  nlohmann::json save_workspace_state() const override
+  {
+    if (!workspace_restore_.is_null()) { return workspace_restore_; }
+    return {{"version", 1}, {"layout", save_state()}, {"project", store_ && store_->project().project() ? store_->project().project()->id : std::string()},
+      {"draft", draft_.save_workspace_state()}, {"name_text", name_text_}, {"label_text", label_text_}, {"literal_text", literal_text_},
+      {"add_kind", add_kind_}, {"add_object", add_object_}, {"archived", show_archived_}, {"archived_runs", show_archived_runs_},
+      {"target", target_.save_workspace_state()}};
+  }
+  bool load_workspace_state(const nlohmann::json &value) override
+  {
+    if (!workspace_fields(value, {"project", "name_text", "label_text"}, {"add_kind", "add_object"}, {"archived", "archived_runs"},
+        {"layout", "draft", "literal_text", "target"}) || !value.contains("layout") || !value.contains("draft") ||
+        !value.contains("literal_text") || !value.at("literal_text").is_object() || value.at("literal_text").size() > 200) { return false; }
+    for (const auto &[key, item] : value.at("literal_text").items()) { (void)key; if (!item.is_string()) { return false; } }
+    WorkflowDraft checked;
+    SimulationTarget target;
+    if ((!value.at("draft").is_null() && !checked.load_workspace_state(value.at("draft"), "workspace-validation")) ||
+        !target.load_workspace_state(value.value("target", Json::object())) || !load_state(value.at("layout"))) { return false; }
+    workspace_restore_ = value; return true;
+  }
+
   bool handle_gpu_event(const wm::Event &event, EditorContext &ctx) override
   {
     attach(ctx);
@@ -364,10 +391,43 @@ class WorkflowEditor final : public Editor {
       runs_listed_.clear(); page_archive_.clear(); runs_archive_.clear();
       run_unchecked_.clear(); run_rows_table_.clear(); run_row_ = -1;
       checked_document_ = checked_validation_ = nullptr;
-      draft_.reset(); requested_.reset(); cancel_drag();
+      draft_.reset(); workspace_detached_ = false; requested_.reset(); cancel_drag();
     }
     if (workflows_->supported() && !workflows_->busy()) { request(ctx); }
     sync_draft(ctx);
+    if (!workspace_restore_.is_null() && project_id(ctx) == io::get_string(workspace_restore_, "project")) {
+      const auto &saved_draft = workspace_restore_.at("draft");
+      const auto &selected = workflows_->selected();
+      if (saved_draft.is_null() || (!selected.is_null() && io::get_string(selected, "id") == io::get_string(saved_draft, "workflow_id"))) {
+        const auto value = std::move(workspace_restore_); workspace_restore_ = nullptr;
+        if (!value.at("draft").is_null()) {
+          draft_.load_workspace_state(value.at("draft"), ctx.store.project().project()->handle); requested_.reset();
+          workspace_detached_ = workflows_->selected_revision() != draft_.revision() ||
+            io::get_string(selected, "name") != draft_.baseline_name() || !selected.contains("document") ||
+              io::python_json_dumps(selected.at("document"), true, true) != io::python_json_dumps(draft_.baseline(), true, true);
+        }
+        name_text_ = value.value("name_text", std::string()); label_text_ = value.value("label_text", std::string());
+        literal_text_ = value.at("literal_text").get<std::map<std::string, std::string>>();
+        name_source_ = {draft_.generation(), draft_.version()};
+        auto restored_step = selected_id_;
+        if (value.at("layout").contains("views")) {
+          for (const auto &memory : value.at("layout").at("views")) {
+            if (io::get_string(memory, "project") == project_id(ctx) && io::get_string(memory, "workflow") == draft_.workflow_id()) {
+              restored_step = io::get_string(memory, "step");
+            }
+          }
+        }
+        label_source_ = std::make_tuple(restored_step, draft_.generation(), draft_.version());
+        literal_source_.clear();
+        for (const auto &[key, text] : literal_text_) {
+          (void)text; literal_source_[key] = std::make_tuple(key, draft_.generation(), draft_.version());
+        }
+        add_kind_ = std::clamp(int(io::get_int(value, "add_kind", 3)), 0, 3); add_object_ = int(io::get_int(value, "add_object", 0));
+        show_archived_ = value.value("archived", false); show_archived_runs_ = value.value("archived_runs", false);
+        target_.load_workspace_state(value.at("target"));
+      }
+      else if (!workflows_->busy()) { pending_ = io::get_string(saved_draft, "workflow_id"); }
+    }
     if (editable(ctx) && candidate_edits()) {
       // Every candidate is checked as soon as it changes (latest only); positions and the name keep a check valid.
       const auto key = candidate_key(ctx);
@@ -482,6 +542,10 @@ class WorkflowEditor final : public Editor {
     const auto revision = workflows_->selected_revision();
     const bool here = draft_.pinned() && draft_.workflow_id() == id && draft_.revision() == revision &&
         draft_.handle() == project->handle;
+    if (here && workspace_detached_ && !draft_.dirty()) {
+      try { draft_.pin(project->handle, id, revision, name, selected.at("document")); workspace_detached_ = false; }
+      catch (const std::exception &error) { edit_error_ = error.what(); }
+    }
     if (here) { return; }
     // A newer read of an unchanged workflow keeps the edits; a changed one leaves them detached.
     if (draft_.dirty() && draft_.workflow_id() == id && draft_.handle() == project->handle &&
@@ -498,7 +562,7 @@ class WorkflowEditor final : public Editor {
   bool draft_current() const
   {
     const auto &selected = workflows_->selected();
-    return draft_.pinned() && !selected.is_null() && draft_.workflow_id() == io::get_string(selected, "id") &&
+    return !workspace_detached_ && draft_.pinned() && !selected.is_null() && draft_.workflow_id() == io::get_string(selected, "id") &&
         draft_.revision() == workflows_->selected_revision();
   }
   bool detached() const { return draft_.dirty() && !draft_current(); }
@@ -1711,6 +1775,8 @@ class WorkflowEditor final : public Editor {
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::unique_ptr<ProjectWorkflows> workflows_;
   WorkflowDraft draft_;
+  Json workspace_restore_;
+  bool workspace_detached_ = false;
   std::optional<AnalysisCandidateKey> requested_;
   AnalysisGraphCanvas canvas_;
   std::shared_ptr<AnalysisGraphView> view_;

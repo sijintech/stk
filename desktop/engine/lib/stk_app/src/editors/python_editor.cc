@@ -178,6 +178,11 @@ class PythonEditor final : public Editor {
     return true;
   }
 
+  std::vector<std::string> workspace_resource_paths() const override
+  {
+    return valid_path(source_path_) ? std::vector<std::string>{source_path_} : std::vector<std::string>{};
+  }
+
   nlohmann::json save_state() const override
   {
     return {{"source", source_}, {"baseline", baseline_}, {"path", path_}, {"source_path", source_path_},

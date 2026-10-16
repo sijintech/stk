@@ -3,6 +3,7 @@
 #include "stk/ui/log_buffer.hh"
 #include "stk/app/project_table_view.hh"
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,12 +14,17 @@ struct EditorContext;
 
 class ProjectDiscussionView {
  public:
+  io::Json save_workspace_state() const;
+  bool load_workspace_state(const io::Json &value);
   void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state, int &project_view);
  private:
   void capture_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void captured_cells(ui::Layout &layout, EditorContext &ctx);
   void request_details(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void request_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
+  io::Json workspace_pending_;
+  std::optional<int> workspace_cell_;
+  std::string workspace_open_;
   std::string project_, title_, text_, table_, row_, field_, selected_, shown_context_, shown_message_;
   std::vector<std::string> rows_, fields_;
   int category_ = 0;

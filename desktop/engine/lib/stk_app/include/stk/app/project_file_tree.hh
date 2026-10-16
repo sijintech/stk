@@ -13,6 +13,9 @@ class ProjectFileTree {
  public:
   explicit ProjectFileTree(AppStore &store, std::function<bool()> owner_valid = {});
   ~ProjectFileTree();
+  io::Json save_workspace_state() const;
+  static bool check_workspace_state(const io::Json &value);
+  bool load_workspace_state(const io::Json &value);
   void sync();
   bool supported() const;
   bool busy() const { return future_.has_value(); }
@@ -38,12 +41,12 @@ class ProjectFileTree {
   std::function<bool()> owner_valid_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   bridge::Client *client_ = nullptr;
-  std::string handle_, session_, error_;
+  std::string handle_, session_, error_, workspace_project_;
   int64_t revision_ = -1;
   uint64_t epoch_ = 0, version_ = 0;
   std::map<std::string, io::Json> pages_;
   std::set<std::string> expanded_{""};
-  io::Json selected_;
+  io::Json selected_, workspace_pending_, workspace_selection_;
   std::optional<bridge::Future<io::Json>> future_;
 };
 }  // namespace stk::app

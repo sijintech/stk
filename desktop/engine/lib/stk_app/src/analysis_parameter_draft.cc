@@ -4,6 +4,7 @@
 
 #include "stk/core/utf8.hh"
 #include "stk/io/graph.hh"
+#include "workspace_baseline.hh"
 
 #include <algorithm>
 #include <cmath>
@@ -157,6 +158,43 @@ void AnalysisParameterDraft::pin(std::string handle, std::string analysis_id, in
   handle_ = std::move(handle); analysis_id_ = std::move(analysis_id); revision_ = revision;
   name_ = std::move(name); baseline_ = std::move(detached); edits_.clear(); outputs_override_.reset();
   graph_.reset(); ++generation_; ++version_; ++evaluation_version_;
+}
+
+io::Json AnalysisParameterDraft::save_workspace_state() const
+{
+  if (!pinned()) { return nullptr; }
+  return {{"version", 1}, {"analysis_id", analysis_id_}, {"revision", revision_}, {"name", name_},
+    {"baseline", baseline_}, {"baseline_json", io::python_json_dumps(baseline_, true, true)}, {"document", candidate_document()}};
+}
+bool AnalysisParameterDraft::load_workspace_state(const Json &value, const std::string &handle)
+{
+  try {
+    if (!value.is_object() || value.size() != (value.contains("baseline_json") ? 7 : 6) || !value.contains("baseline") ||
+        value.at("version") != 1 ||
+        !value.at("revision").is_number_integer() || value.at("revision").get<int64_t>() < 0 ||
+        !value.at("analysis_id").is_string() || !value.at("name").is_string()) { return false; }
+    AnalysisParameterDraft loaded;
+    loaded.pin(handle, value.at("analysis_id").get<std::string>(), value.at("revision").get<int64_t>(),
+               value.at("name").get<std::string>(), workspace_baseline(value, max_document_bytes));
+    // pin validates the complete candidate shape without making it the saved baseline.
+    AnalysisParameterDraft checked;
+    checked.pin(handle, loaded.analysis_id_, loaded.revision_, loaded.name_, value.at("document"));
+    const auto &candidate = value.at("document");
+    for (const auto &[key, old] : loaded.baseline_.at("parameters").items()) {
+      (void)old;
+      if (!candidate.at("parameters").contains(key)) { loaded.edits_[key] = std::nullopt; }
+    }
+    for (const auto &[key, item] : candidate.at("parameters").items()) {
+      if (!loaded.baseline_.at("parameters").contains(key) || !same_json(item, loaded.baseline_.at("parameters").at(key))) {
+        loaded.edits_[key] = item;
+      }
+    }
+    if (!same_json(candidate.at("outputs"), loaded.baseline_.at("outputs"))) { loaded.outputs_override_ = candidate.at("outputs"); }
+    if (!same_json(candidate.at("graph"), loaded.baseline_.at("graph"))) { loaded.graph_ = candidate.at("graph"); }
+    loaded.generation_ = generation_ + 1; loaded.version_ = version_ + 1; loaded.evaluation_version_ = evaluation_version_ + 1;
+    *this = std::move(loaded); return true;
+  }
+  catch (const std::exception &) { return false; }
 }
 
 void AnalysisParameterDraft::reset()

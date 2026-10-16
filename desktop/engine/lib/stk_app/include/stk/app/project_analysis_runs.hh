@@ -46,7 +46,8 @@ class ProjectAnalysisRuns {
    * nullopt everything (projects before format 11; see project_archive.hh). */
   void set_archive_filter(std::optional<bool> archived) { list_archived_ = archived; }
   bool load_page(int64_t offset = 0);
-  bool load(const std::string &run_id);
+  /** Workspace restoration reads once; only explicit user navigation follows active journals. */
+  bool load(const std::string &run_id, bool follow = true);
   bool prepare(const std::string &analysis_id, int64_t expected_revision,
                const std::string &snapshot_id, const io::Json &bindings);
   bool start();

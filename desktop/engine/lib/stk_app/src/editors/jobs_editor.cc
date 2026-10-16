@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <ctime>
 
+#include "workspace_fields.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/platform/file_dialog.hh"
 
@@ -140,6 +141,10 @@ class JobsEditor final : public Editor {
     store_ = &ctx.store;
     JobsState &jobs = ctx.store.jobs();
     jobs.sync();
+    if (!workspace_form_.is_null()) {
+      if (auto form = decode_form(workspace_form_)) { jobs.form() = std::move(*form); }
+      workspace_form_ = nullptr;
+    }
     if (!prefs_applied_) {
       prefs_applied_ = true;
       if (!pref_connection_.empty()) {
@@ -213,7 +218,61 @@ class JobsEditor final : public Editor {
     return true;
   }
 
+  nlohmann::json save_workspace_state() const override
+  {
+    Json form = workspace_form_;
+    if (store_) { form = encode_form(store_->jobs().form()); }
+    return {{"version", 1}, {"detail_tab", detail_tab_}, {"log_stream", log_stream_}, {"form", form}};
+  }
+  bool load_workspace_state(const nlohmann::json &value) override
+  {
+    if (!workspace_fields(value, {}, {"detail_tab", "log_stream"}, {}, {"form"}) ||
+        (value.contains("form") && !decode_form(value.at("form")))) { return false; }
+    detail_tab_ = std::clamp(int(io::get_int(value, "detail_tab", 0)), 0, 3);
+    log_stream_ = std::clamp(int(io::get_int(value, "log_stream", 0)), 0, 2);
+    workspace_form_ = value.value("form", Json());
+    // Connection/node/workspace identifiers, credentials, env and any pending submission stay local.
+    pref_connection_.clear(); pref_node_.clear(); pref_workspace_.clear(); prefs_applied_ = true;
+    return true;
+  }
+
  private:
+  static Json encode_form(const SubmitForm &f)
+  {
+    return {{"version", 1}, {"use_template", f.use_template}, {"template_name", f.template_name},
+      {"name", f.name}, {"program", f.program}, {"arguments", f.arguments}, {"backend", f.backend},
+      {"layout", int(f.layout)}, {"cpus", f.cpus}, {"ranks", f.ranks}, {"threads_per_rank", f.threads_per_rank},
+      {"nodes", f.nodes}, {"memory_mb", f.memory_mb}, {"walltime_s", f.walltime_s}, {"gpus", f.gpus},
+      {"queue", f.queue}, {"account", f.account}, {"outputs", f.outputs},
+      {"retry", {{"auto_retries", f.retry.auto_retries}, {"backoff_s", f.retry.backoff_s}}}};
+  }
+  static std::optional<SubmitForm> decode_form(const Json &value)
+  {
+    if (value.is_null()) { return SubmitForm{}; }
+    if (!workspace_fields(value, {"template_name", "name", "program", "arguments", "queue", "account", "outputs"},
+        {"backend", "layout", "cpus", "ranks", "threads_per_rank", "nodes", "memory_mb", "walltime_s", "gpus"},
+        {"use_template"}, {"retry"}, 256 * 1024)) { return std::nullopt; }
+    SubmitForm f;
+    if (value.contains("retry")) {
+      const auto &retry = value.at("retry");
+      if (!retry.is_object() || retry.size() != 2 || !retry.contains("auto_retries") || !retry.at("auto_retries").is_number_integer() ||
+          retry.at("auto_retries").get<int64_t>() < 0 || retry.at("auto_retries").get<int64_t>() > 100 ||
+          !retry.contains("backoff_s") || !retry.at("backoff_s").is_number() || !std::isfinite(retry.at("backoff_s").get<double>()) ||
+          retry.at("backoff_s").get<double>() < 0 || retry.at("backoff_s").get<double>() > 3600) { return std::nullopt; }
+      f.retry.auto_retries = int(io::get_int(retry, "auto_retries", 2)); f.retry.backoff_s = retry.at("backoff_s").get<double>();
+    }
+    f.use_template = value.value("use_template", false); f.template_name = value.value("template_name", std::string());
+    f.name = value.value("name", std::string()); f.program = value.value("program", std::string("{python}"));
+    f.arguments = value.value("arguments", std::string()); f.backend = std::clamp(int(io::get_int(value, "backend", 0)), 0, 2);
+    f.layout = io::get_int(value, "layout", 0) == 1 ? LayoutMode::Mpi : LayoutMode::Threads;
+    f.cpus = int(io::get_int(value, "cpus", 1)); f.ranks = int(io::get_int(value, "ranks", 0));
+    f.threads_per_rank = int(io::get_int(value, "threads_per_rank", 0)); f.nodes = int(io::get_int(value, "nodes", 1));
+    f.memory_mb = int(io::get_int(value, "memory_mb", 0)); f.walltime_s = int(io::get_int(value, "walltime_s", 0));
+    f.gpus = int(io::get_int(value, "gpus", 0)); f.queue = value.value("queue", std::string());
+    f.account = value.value("account", std::string()); f.outputs = value.value("outputs", std::string());
+    return f;
+  }
+
   /* ---- Status ---- */
 
   void status_line(ui::Layout &l, EditorContext &ctx, JobsState &jobs)
@@ -1302,6 +1361,7 @@ class JobsEditor final : public Editor {
   std::string pref_connection_, pref_node_, pref_workspace_;
   bool prefs_applied_ = false;
 
+  Json workspace_form_;
   int detail_tab_ = 0;
   int log_stream_ = 0;
   int input_sel_ = -1;

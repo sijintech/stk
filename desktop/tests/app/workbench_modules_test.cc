@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
 #include "stk/app/viewer_state.hh"
+#include "stk/app/project_state.hh"
 #include "stk/app/script_state.hh"
 #include "stk/io/payload.hh"
 #include "../wm/support.hh"
@@ -397,6 +398,71 @@ TEST(WorkbenchModulesClicks, NarrowAndScaledToolButtonsRemainOneClick)
       EXPECT_TRUE(f.shell->store().scripts().history().empty());
     }
   }
+}
+
+TEST_F(WorkbenchModules, WorkspaceAreaAndTabEnvelopesRejectMissingAndUnknownSettingsAtomically)
+{
+  auto &area = f.area("a3");
+  const auto original = area.save_workspace_state();
+  ASSERT_FALSE(area.has_unsaved_changes());
+  const auto before = instances();
+  auto extra_area = original; extra_area["unknown_setting"] = true;
+  auto missing_area = original; missing_area.erase("active");
+  auto extra_tab = original; extra_tab["tabs"][0]["unknown_setting"] = true;
+  auto missing_tab = original; missing_tab["tabs"][0].erase("state");
+  for (const auto &invalid : {extra_area, missing_area, extra_tab, missing_tab}) {
+    EXPECT_FALSE(area.load_state(invalid));
+    EXPECT_EQ(area.save_workspace_state(), original);
+    EXPECT_EQ(instances(), before);
+  }
+  EXPECT_EQ(f.shell->store().viewer().evaluations_started(), 0u);
+}
+
+TEST_F(WorkbenchModules, ExplicitWorkspaceHooksRoundTripAllLocalEditorsWithoutViewerEvaluation)
+{
+  auto &area = f.area("a4");
+  for (const auto *type : {kEditorSkills, kEditorWorkspace, kEditorAI, kEditorJobs, kEditorProject,
+                          kEditorFiles, kEditorWorkflow, kEditorAnalysisGraph}) {
+    ASSERT_TRUE(area.set_tab_type(area.active_tab(), type)) << type;
+    const auto captured = area.editor().save_workspace_state();
+    EXPECT_TRUE(captured.is_object()) << type;
+    EXPECT_TRUE(area.editor().load_workspace_state(captured)) << type << " " << captured.dump();
+    EXPECT_EQ(area.editor().save_workspace_state(), captured) << type;
+    EXPECT_EQ(f.shell->store().viewer().evaluations_started(), 0) << type;
+  }
+}
+
+TEST_F(WorkbenchModules, WorkspaceKeepsLocalSearchAndUnsentAITextButRefusesHostConfiguration)
+{
+  auto &area = f.area("a4");
+  ASSERT_TRUE(area.set_tab_type(area.active_tab(), kEditorSkills));
+  ASSERT_TRUE(area.editor().load_workspace_state({{"version", 1}, {"query", "LAMMPS"}}));
+  EXPECT_EQ(area.editor().save_workspace_state().at("query"), "LAMMPS");
+  EXPECT_FALSE(area.editor().load_workspace_state({{"version", 1}, {"query", 12}}));
+  ASSERT_TRUE(area.set_tab_type(area.active_tab(), kEditorAI));
+  const Json saved = {{"version", 1}, {"drafts", Json::array({{{"project", "11111111-1111-4111-8111-111111111111"},
+    {"text", "Unsent scientific question"}, {"agent_text", "Unsent local task"}, {"intent", 0}}})}};
+  ASSERT_TRUE(area.editor().load_workspace_state(saved)); EXPECT_EQ(area.editor().save_workspace_state(), saved);
+  auto invalid = saved; invalid["endpoint"] = "must-not-restore";
+  EXPECT_FALSE(area.editor().load_workspace_state(invalid)); EXPECT_EQ(area.editor().save_workspace_state(), saved);
+  EXPECT_EQ(f.shell->store().viewer().evaluations_started(), 0);
+}
+
+TEST_F(WorkbenchModules, WorkspaceRetainsDiscussionDraftAndReviewParametersWithoutSendingOrApplying)
+{
+  auto &area = f.area("a4"); ASSERT_TRUE(area.set_tab_type(area.active_tab(), kEditorProject));
+  auto saved = area.editor().save_workspace_state();
+  saved["project_id"] = "11111111-1111-4111-8111-111111111111";
+  saved["review_source"] = "[{\"op\":\"create_table\",\"name\":\"Explicit apply only\"}]";
+  saved["discussion"]["project"] = saved["project_id"];
+  saved["discussion"]["title"] = "Unsent selection"; saved["discussion"]["text"] = "Unsent scientific note";
+  saved["discussion"]["category"] = 2; saved["discussion"]["rows"] = {"22222222-2222-4222-8222-222222222222"};
+  saved["review"]["project"] = saved["project_id"]; saved["review"]["draft_title"] = "Unsaved review title";
+  saved["review"]["selected"] = 3; saved["review"]["category"] = 1;
+  ASSERT_TRUE(area.editor().load_workspace_state(saved)); EXPECT_EQ(area.editor().save_workspace_state(), saved);
+  auto invalid = saved; invalid["discussion"]["rows"] = {123};
+  EXPECT_FALSE(area.editor().load_workspace_state(invalid)); EXPECT_EQ(area.editor().save_workspace_state(), saved);
+  EXPECT_FALSE(f.shell->store().project().project()); EXPECT_EQ(f.shell->store().viewer().evaluations_started(), 0);
 }
 
 }  // namespace

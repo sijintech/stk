@@ -80,6 +80,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.sweep.plan",
         "project.table.views.list", "project.table.views.get", "project.table.query", "project.table.paste.plan",
         "project.table.objects.list_candidates", "project.table.objects.resolve", "project.table.csv.preview",
+        "project.table.io.preview", "project.table.io.import", "project.table.io.export",
         "project.drafts.save", "project.drafts.get", "project.drafts.list", "project.drafts.apply", "project.drafts.discard",
         "project.contexts.capture", "project.contexts.get", "project.contexts.list",
         "project.discussion.add", "project.discussion.get", "project.discussion.list",

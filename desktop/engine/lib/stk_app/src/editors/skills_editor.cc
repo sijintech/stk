@@ -4,6 +4,7 @@
  * It shows each skill's identity, entry, inputs, parameters, outputs, dependencies, availability
  * and examples. Nothing here runs a skill, prepares a run, changes a project or calls a model.
  */
+#include "workspace_fields.hh"
 #include "project_navigation.hh"
 
 #include "stk/app/skill_catalog.hh"
@@ -82,6 +83,13 @@ class SkillsEditor final : public Editor {
       rows(layout, ctx, skills, 6.0f);
       detail(layout, ctx, skills);
     }
+  }
+
+  nlohmann::json save_workspace_state() const override { return {{"version", 1}, {"query", query_}}; }
+  bool load_workspace_state(const nlohmann::json &value) override
+  {
+    if (!workspace_fields(value, {"query"}, {}, {}, {}, 65536)) { return false; }
+    query_ = value.value("query", std::string()); return true;
   }
 
  private:

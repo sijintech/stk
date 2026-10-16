@@ -3,6 +3,7 @@
 
 #include "stk/app/analysis_document.hh"
 #include "stk/core/utf8.hh"
+#include "workspace_baseline.hh"
 
 #include <cmath>
 #include <stdexcept>
@@ -160,6 +161,32 @@ void WorkflowDraft::pin(std::string handle, std::string workflow_id, const int64
   baseline_name_ = std::move(name); baseline_ = std::move(detached);
   document_.reset(); name_.reset();
   ++generation_; ++version_; ++check_version_;
+}
+
+io::Json WorkflowDraft::save_workspace_state() const
+{
+  if (!pinned()) { return nullptr; }
+  return {{"version", 1}, {"workflow_id", workflow_id_}, {"revision", revision_}, {"baseline_name", baseline_name_},
+    {"baseline", baseline_}, {"baseline_json", io::python_json_dumps(baseline_, true, true)}, {"name", name()}, {"document", document()}};
+}
+bool WorkflowDraft::load_workspace_state(const Json &value, const std::string &handle)
+{
+  try {
+    if (!value.is_object() || value.size() != (value.contains("baseline_json") ? 8 : 7) || !value.contains("baseline") ||
+        value.at("version") != 1 ||
+        !value.at("revision").is_number_integer() || value.at("revision").get<int64_t>() < 0 ||
+        !value.at("workflow_id").is_string() || !value.at("baseline_name").is_string() || !value.at("name").is_string()) { return false; }
+    check_workflow_document(value.at("document"));
+    if (!valid_name(value.at("name").get<std::string>())) { return false; }
+    WorkflowDraft loaded;
+    loaded.pin(handle, value.at("workflow_id").get<std::string>(), value.at("revision").get<int64_t>(),
+               value.at("baseline_name").get<std::string>(), workspace_baseline(value, Limits::max_document_bytes));
+    if (!same_json(value.at("document"), loaded.baseline_)) { loaded.document_ = value.at("document"); }
+    if (value.at("name").get<std::string>() != loaded.baseline_name_) { loaded.name_ = value.at("name").get<std::string>(); }
+    loaded.generation_ = generation_ + 1; loaded.version_ = version_ + 1; loaded.check_version_ = check_version_ + 1;
+    *this = std::move(loaded); return true;
+  }
+  catch (const std::exception &) { return false; }
 }
 
 void WorkflowDraft::reset()

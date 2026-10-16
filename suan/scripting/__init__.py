@@ -119,6 +119,10 @@ class Project:
         return ProjectCSV(self._call, self.handle)
 
     @property
+    def table_io(self):
+        return ProjectTableIO(self._call, self.handle)
+
+    @property
     def table(self):
         return ProjectTable(self._call, self.handle)
 
@@ -448,6 +452,10 @@ class ProjectTable:
     def __init__(self, call, handle):
         self._call, self.handle = call, handle
 
+    @property
+    def io(self):
+        return ProjectTableIO(self._call, self.handle)
+
     def _read(self, method, expected_revision, **params):
         return self._call("project.table." + method, {"handle": self.handle,
                           "expected_revision": expected_revision, **params})
@@ -482,6 +490,38 @@ class ProjectTable:
     def csv_preview(self, source, *, expected_revision, delimiter=",", limit=20):
         return self._read("csv.preview", expected_revision, source=str(Path(source).expanduser().absolute()),
                           delimiter=delimiter, limit=limit)
+
+
+class ProjectTableIO:
+    """Explicit CSV, Excel and typed JSON value exchange; not a project/workspace backup."""
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def preview(self, source, *, format, expected_revision, delimiter=",", sheet=None, limit=20):
+        params = {"handle": self.handle, "source": str(Path(source).expanduser().absolute()),
+                  "format": format, "expected_revision": expected_revision, "delimiter": delimiter, "limit": limit}
+        if sheet is not None:
+            params["sheet"] = sheet
+        return self._call("project.table.io.preview", params)
+
+    def import_file(self, source, *, format, name, expected_revision, types=None, units=None,
+                    delimiter=",", sheet=None, expected_sha256=None):
+        params = {"handle": self.handle, "source": str(Path(source).expanduser().absolute()),
+                  "format": format, "name": name, "expected_revision": expected_revision, "delimiter": delimiter}
+        for key, value in (("types", types), ("units", units), ("sheet", sheet), ("expected_sha256", expected_sha256)):
+            if value is not None:
+                params[key] = value
+        return self._call("project.table.io.import", params)
+
+    def export_file(self, table_id, destination, *, format, expected_revision, definition=None, view_id=None, delimiter=","):
+        params = {"handle": self.handle, "table_id": table_id,
+                  "destination": str(Path(destination).expanduser().absolute()),
+                  "format": format, "expected_revision": expected_revision, "delimiter": delimiter}
+        if definition is not None:
+            params["definition"] = definition
+        if view_id is not None:
+            params["view_id"] = view_id
+        return self._call("project.table.io.export", params)
 
 
 class ProjectCSV:

@@ -34,6 +34,7 @@ if(TARGET stk-bridge-fake)
     viewer_support.cc
     test_viewer_state.cc
     test_viewer_forms.cc
+    viewer_workspace_state_test.cc
     ${CMAKE_SOURCE_DIR}/tests/wm/support.cc
   )
   target_include_directories(stk_app_viewer_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/wm)

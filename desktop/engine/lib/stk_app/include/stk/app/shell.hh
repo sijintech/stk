@@ -37,6 +37,7 @@ class WindowManager;
 
 namespace stk::app {
 class EditorArea;
+class WorkspaceTransfer;
 
 /**
  * Directory of the message catalogs: `override_dir`, $STK_I18N_DIR, next to the executable
@@ -179,6 +180,17 @@ class AppShell {
                              std::shared_ptr<const io::Payload> payload, std::string label,
                              std::function<bool()> valid, ScriptState::Completion complete);
 
+  /** Explicit portable workspace actions. Import/open never execute restored programs. */
+  WorkspaceTransfer &workspace_transfer();
+  io::Json capture_workspace() const;
+  bool apply_workspace(const io::Json &state, std::string *error = nullptr);
+  bool export_workspace(const std::string &path, ScriptState::Completion complete);
+  bool import_workspace(const std::string &source, const std::string &destination,
+                        const std::string &expected_sha256, ScriptState::Completion complete,
+                        bool allow_incomplete = false);
+  bool open_workspace(const std::string &directory, ScriptState::Completion complete,
+                      bool allow_incomplete = false);
+
   /** Where File > Save layout writes (default: wm::default_layout_path()). Empty = disabled. */
   std::filesystem::path layout_path;
   /** Called by File > Quit and Ctrl+Q (GUI). */
@@ -209,6 +221,15 @@ class AppShell {
 
   void perform_viewer_request(wm::Screen &screen, const std::string &operation, const io::Json &params,
                               ScriptState::Completion complete);
+
+  bool receive_workspace(const std::string &method, io::Json params,
+                         ScriptState::Completion complete, bool allow_incomplete);
+  struct WorkspacePrepared;
+  std::shared_ptr<WorkspacePrepared> prepare_workspace(const io::Json &state, std::string *error);
+  bool commit_workspace(const std::shared_ptr<WorkspacePrepared> &prepared, std::string *error);
+  std::unique_ptr<WorkspaceTransfer> workspace_transfer_;
+  std::vector<std::unique_ptr<wm::Screen>> workspace_screens_;
+  bool workspace_busy_ = false;
 
   ShellOptions options_;
   AppStore store_;

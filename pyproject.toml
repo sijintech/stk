@@ -22,6 +22,8 @@ include = [
     { path = "docs/visualization.md", format = "sdist" },
     { path = "docs/hub.md", format = "sdist" },
     { path = "docs/project.md", format = "sdist" },
+    { path = "docs/project-table-io.md", format = "sdist" },
+    { path = "docs/design/portable-workspaces.md", format = "sdist" },
     { path = "docs/lammps*.md", format = "sdist" },
     { path = "docs/pet-model.md", format = "sdist" },
     { path = "docs/design/pet-data-dictionary.md", format = "sdist" },
@@ -41,6 +43,8 @@ python = ">=3.11,<3.15"
 click = ">=8,<9"
 psutil = ">=5.9,<8"
 toml = ">=0.10,<1"
+openpyxl = ">=3.1.5,<4"
+defusedxml = ">=0.7.1,<1"
 numpy = { version = ">=1.24,<3", optional = true }
 matplotlib = { version = ">=3.6,<4", optional = true }
 PySide6 = { version = ">=6.4,<7", optional = true }

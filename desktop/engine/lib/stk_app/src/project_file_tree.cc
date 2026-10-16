@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/project_file_tree.hh"
+#include <algorithm>
 #include "stk/app/app_store.hh"
 #include "stk/app/project_state.hh"
 
@@ -14,7 +15,44 @@ void ProjectFileTree::clear()
   ++epoch_;
   auto old = std::move(future_); future_.reset();
   if (old) { old->cancel(); }
-  pages_.clear(); expanded_ = {""}; selected_ = nullptr; error_.clear(); changed();
+  pages_.clear(); expanded_ = {""}; selected_ = nullptr; workspace_selection_ = nullptr; error_.clear(); changed();
+}
+io::Json ProjectFileTree::save_workspace_state() const
+{
+  if (!workspace_pending_.is_null()) { return workspace_pending_; }
+  return {{"version", 1}, {"project", workspace_project_},
+    {"expanded", expanded_}, {"selection", {{"path", io::get_string(selected_, "path")},
+      {"record_id", io::get_bool(selected_, "index_only", false) ? io::get_string(selected_, "id") : std::string()}}}};
+}
+bool ProjectFileTree::check_workspace_state(const Json &value)
+{
+  const auto relative = [](const Json &item) {
+    if (!item.is_string()) { return false; }
+    const auto path = item.get<std::string>();
+    if (path.size() > 4096 || path.find('\\') != std::string::npos || path.find('\0') != std::string::npos ||
+        (!path.empty() && (path.front() == '/' || path.back() == '/'))) { return false; }
+    size_t offset = 0;
+    while (offset < path.size()) {
+      const auto end = path.find('/', offset); const auto part = path.substr(offset, end - offset);
+      if (std::any_of(part.begin(), part.end(), [](const unsigned char ch) { return ch < 32 || ch == 127; }) || part.empty() || part == "." || part == ".." || part.front() == '.' || part.find(':') != std::string::npos) { return false; }
+      if (end == std::string::npos) { break; } offset = end + 1;
+    }
+    return true;
+  };
+  if (!value.is_object() || value.size() != 4 || value.value("version", Json()) != 1 ||
+      !value.contains("project") || !value.at("project").is_string() || value.at("project").get_ref<const std::string &>().size() > 64 ||
+      !value.contains("expanded") || !value.at("expanded").is_array() || value.at("expanded").size() > 64 ||
+      !value.contains("selection") || !value.at("selection").is_object()) { return false; }
+  if (!std::all_of(value.at("expanded").begin(), value.at("expanded").end(), relative)) { return false; }
+  const auto &selection = value.at("selection");
+  return selection.size() == 2 && selection.contains("path") && relative(selection.at("path")) &&
+      selection.contains("record_id") && selection.at("record_id").is_string() &&
+      selection.at("record_id").get_ref<const std::string &>().size() <= 64;
+}
+bool ProjectFileTree::load_workspace_state(const Json &value)
+{
+  if (!check_workspace_state(value)) { return false; }
+  workspace_pending_ = value; return true;
 }
 void ProjectFileTree::sync()
 {
@@ -26,7 +64,29 @@ void ProjectFileTree::sync()
       std::to_string(client->bridge_pid()) + ":" + std::to_string(client->stats().spawned) : std::string();
   if (client != client_ || session != session_ || handle != handle_ || revision != revision_) {
     client_ = client; session_ = session; handle_ = handle; revision_ = revision;
+    workspace_project_ = project_.project() ? project_.project()->id : std::string();
     clear();
+  }
+  if (!workspace_pending_.is_null() && supported() && project_.project() &&
+      io::get_string(workspace_pending_, "project") == project_.project()->id) {
+    expanded_ = workspace_pending_.at("expanded").get<std::set<std::string>>(); expanded_.insert("");
+    workspace_selection_ = workspace_pending_.at("selection"); workspace_pending_ = nullptr;
+  }
+  if (supported() && !busy() && !workspace_selection_.is_null()) {
+    for (const auto &path : expanded_) {
+      if (!pages_.count(path)) { load(path, 0); return; }
+    }
+    const auto selection = std::move(workspace_selection_); workspace_selection_ = nullptr;
+    const auto record = io::get_string(selection, "record_id"), path = io::get_string(selection, "path");
+    if (!record.empty()) { select_record(record); }
+    else {
+      for (const auto &[parent, page] : pages_) {
+        (void)parent;
+        for (const auto &entry : page.at("entries")) {
+          if (io::get_string(entry, "path") == path) { select(entry); return; }
+        }
+      }
+    }
   }
 }
 bool ProjectFileTree::supported() const
@@ -60,7 +120,7 @@ bool ProjectFileTree::load(const std::string &path, const int offset)
     const auto live = weak.lock(); if (!live || !*live || (owner_valid_ && !owner_valid_())) { return; }
     sync(); if (epoch != epoch_) { return; }
     future_.reset();
-    if (!result) { error_ = result.error().describe(); }
+    if (!result) { error_ = result.error().describe(); workspace_selection_ = nullptr; }
     else if (io::get_int(result.value(), "revision", -1) != revision_ ||
              io::get_string(result.value(), "directory") != path || !result.value().contains("entries") ||
              !result.value().at("entries").is_array()) { error_ = "Invalid directory response"; }

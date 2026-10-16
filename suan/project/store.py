@@ -364,6 +364,11 @@ class ProjectStore:
         return TableCSV(self)
 
     @property
+    def table_io(self):
+        from .table_io import TableIO
+        return TableIO(self)
+
+    @property
     def table(self):
         from .table_workbench import TableWorkbench
         return TableWorkbench(self)

@@ -148,6 +148,10 @@ struct ProjectTableEditor::Impl {
     const auto &table = *state.table();
     if (table.id == kAnalysesTable || table.id == io::get_string(state.file_index(), "table_id")) { return; }
     const auto identity = state.project()->handle + table.id;
+    if (restored_sweep_ && sweep_project_id_ == state.project()->id && sweep_table_id_ == table.id) {
+      sweep_identity_ = identity; restored_sweep_ = false;
+    }
+    sweep_project_id_ = state.project()->id; sweep_table_id_ = table.id;
     if (sweep_identity_ != identity) {
       sweep_identity_ = identity;
       sweep_.assign(1, {});
@@ -302,6 +306,10 @@ struct ProjectTableEditor::Impl {
   {
     const auto &table = *state.table();
     const auto identity = state.project()->handle + table.id;
+    if (restored_sweep_ && sweep_project_id_ == state.project()->id && sweep_table_id_ == table.id) {
+      sweep_identity_ = identity; restored_sweep_ = false;
+    }
+    sweep_project_id_ = state.project()->id; sweep_table_id_ = table.id;
     if (query_handle_ != state.project()->handle) {
       query_handle_ = state.project()->handle;
       query_ = {};
@@ -578,6 +586,12 @@ struct ProjectTableEditor::Impl {
       layout.paragraph(ctx.tr("project.empty_table"));
       return;
     }
+    if (restored_draft_ && draft_dirty_ && (draft_identity_ != state.project()->id + table.id + state.record_id() + cell_field_ || std::none_of(table.fields.begin(), table.fields.end(), [this](const auto &field) { return field.id == cell_field_; }))) {
+      layout.paragraph(ctx.tr("project.draft_stale"));
+      layout.paragraph(cell_mode_ == 2 ? expression_ : cell_text_);
+      layout.button("table_advanced_discard", ctx.tr("table.discard_draft"), [this] { draft_dirty_ = false; restored_draft_ = false; draft_identity_.clear(); });
+      return;
+    }
     std::vector<std::string> names, ids;
     for (const auto &field : table.fields) {
       names.push_back(field.name);
@@ -761,6 +775,12 @@ struct ProjectTableEditor::Impl {
     // Name/delete drafts have the same revision precondition as cell edits. Switching the
     // target resets them; a background revision change keeps a dirty draft for review.
     const std::string identity = state.project()->id + table->id + cell_field_ + state.record_id();
+    if (restored_manage_ && manage_dirty_ && identity != manage_identity_) {
+      layout.paragraph(ctx.tr("project.draft_stale"));
+      layout.paragraph(rename_table_ + " / " + rename_field_);
+      layout.button("table_manage_discard", ctx.tr("table.discard_draft"), [this] { manage_dirty_ = false; restored_manage_ = false; manage_identity_.clear(); });
+      return;
+    }
     if (identity != manage_identity_ || (!manage_dirty_ && manage_revision_ != state.project()->revision)) {
       manage_identity_ = identity;
       manage_revision_ = state.project()->revision;
@@ -861,12 +881,85 @@ struct ProjectTableEditor::Impl {
   std::function<void()> open_review_;
   std::shared_ptr<void> lifetime_ = std::make_shared<int>(0);
   bool selection_error_ = false;
+  bool restored_draft_ = false, restored_manage_ = false, restored_sweep_ = false;
+  std::string sweep_project_id_, sweep_table_id_;
 };
 
 ProjectTableEditor::ProjectTableEditor() : impl_(std::make_unique<Impl>()) {}
 ProjectTableEditor::~ProjectTableEditor() = default;
 bool ProjectTableEditor::can_change_project_selection(std::string_view id) const { return impl_->can_change_project_selection(id); }
 bool ProjectTableEditor::has_unsaved_changes() const { return impl_->has_unsaved_changes(); }
+io::Json ProjectTableEditor::save_workspace_state() const
+{
+  const auto &v = *impl_;
+  Json axes = Json::array();
+  for (const auto &axis : v.sweep_) {
+    axes.push_back({{"field_id", axis.field_id}, {"kind", axis.kind}, {"start", axis.start},
+                    {"stop", axis.stop}, {"count", axis.count}, {"list", axis.list}});
+  }
+  return {{"version", 1}, {"query", {{"text", v.query_.text}, {"errors_only", v.query_.errors_only}}},
+          {"table_name", v.table_name_}, {"field_name", v.field_name_}, {"unit", v.unit_},
+          {"cell_field", v.cell_field_}, {"cell_text", v.cell_text_}, {"draft_identity", v.draft_identity_},
+          {"draft_revision", v.draft_revision_}, {"draft_dirty", v.draft_dirty_},
+          {"expression", v.expression_}, {"bindings", v.bindings_}, {"binding_name", v.binding_name_},
+          {"selected_binding", v.selected_binding_}, {"source_table", v.source_table_},
+          {"source_record", v.source_record_}, {"source_field", v.source_field_},
+          {"cell_mode", v.cell_mode_}, {"field_type", v.field_type_},
+          {"sweep", axes}, {"sweep_project_id", v.sweep_project_id_}, {"sweep_table_id", v.sweep_table_id_},
+          {"sweep_zip", v.sweep_zip_}, {"sweep_copy", v.sweep_copy_},
+          {"manage_identity", v.manage_identity_}, {"manage_revision", v.manage_revision_},
+          {"manage_dirty", v.manage_dirty_}, {"rename_table", v.rename_table_}, {"rename_field", v.rename_field_}};
+}
+bool ProjectTableEditor::load_workspace_state(const io::Json &state)
+{
+  try {
+    if (!state.is_object() || state.value("version", 0) != 1 || state.dump().size() > 524288) { return false; }
+    for (const char *key : {"table_name", "field_name", "unit", "cell_field", "cell_text", "draft_identity", "expression",
+                           "bindings", "binding_name", "selected_binding", "source_table", "source_record", "source_field",
+                           "sweep_project_id", "sweep_table_id", "manage_identity", "rename_table", "rename_field"}) {
+      if (!state.contains(key) || !state.at(key).is_string() || state.at(key).get_ref<const std::string &>().size() > 65536) { return false; }
+    }
+    for (const char *key : {"draft_dirty", "sweep_zip", "sweep_copy", "manage_dirty"}) {
+      if (!state.contains(key) || !state.at(key).is_boolean()) { return false; }
+    }
+    for (const char *key : {"draft_revision", "manage_revision"}) {
+      if (!state.contains(key) || !state.at(key).is_number_integer() || state.at(key).get<int64_t>() < -1) { return false; }
+    }
+    if (!state.contains("cell_mode") || !state.at("cell_mode").is_number_integer() || state.at("cell_mode").get<int64_t>() < 0 || state.at("cell_mode").get<int64_t>() > 2 ||
+        !state.contains("field_type") || !state.at("field_type").is_number_integer() || state.at("field_type").get<int64_t>() < 0 || state.at("field_type").get<int64_t>() > 4 ||
+        !state.contains("query") || !state.at("query").is_object() || !state.at("query").contains("text") || !state.at("query").at("text").is_string() ||
+        state.at("query").at("text").get_ref<const std::string &>().size() > 256 || !state.at("query").contains("errors_only") || !state.at("query").at("errors_only").is_boolean() ||
+        !state.contains("sweep") || !state.at("sweep").is_array() || state.at("sweep").empty() || state.at("sweep").size() > 16) { return false; }
+    auto next = std::make_unique<Impl>();
+    for (const auto &axis : state.at("sweep")) {
+      if (!axis.is_object() || !axis.contains("kind") || !axis.at("kind").is_number_integer() || axis.at("kind").get<int64_t>() < 0 || axis.at("kind").get<int64_t>() > 1) { return false; }
+      for (const char *key : {"field_id", "start", "stop", "count", "list"}) {
+        if (!axis.contains(key) || !axis.at(key).is_string() || axis.at(key).get_ref<const std::string &>().size() > 65536) { return false; }
+      }
+    }
+    auto &v = *next;
+    v.query_.text = io::get_string(state.at("query"), "text"); v.query_.errors_only = state.at("query").at("errors_only").get<bool>();
+    v.table_name_ = io::get_string(state, "table_name"); v.field_name_ = io::get_string(state, "field_name"); v.unit_ = io::get_string(state, "unit");
+    v.cell_field_ = io::get_string(state, "cell_field"); v.cell_text_ = io::get_string(state, "cell_text"); v.draft_identity_ = io::get_string(state, "draft_identity");
+    v.draft_revision_ = state.at("draft_revision").get<int64_t>(); v.draft_dirty_ = state.at("draft_dirty").get<bool>();
+    v.expression_ = io::get_string(state, "expression"); v.bindings_ = io::get_string(state, "bindings"); v.binding_name_ = io::get_string(state, "binding_name");
+    v.selected_binding_ = io::get_string(state, "selected_binding"); v.source_table_ = io::get_string(state, "source_table");
+    v.source_record_ = io::get_string(state, "source_record"); v.source_field_ = io::get_string(state, "source_field");
+    v.cell_mode_ = state.at("cell_mode").get<int>(); v.field_type_ = state.at("field_type").get<int>();
+    v.sweep_.clear();
+    for (const auto &axis : state.at("sweep")) {
+      Impl::SweepInput input; input.field_id = io::get_string(axis, "field_id"); input.kind = axis.at("kind").get<int>();
+      input.start = io::get_string(axis, "start"); input.stop = io::get_string(axis, "stop"); input.count = io::get_string(axis, "count"); input.list = io::get_string(axis, "list"); v.sweep_.push_back(std::move(input));
+    }
+    v.sweep_project_id_ = io::get_string(state, "sweep_project_id"); v.sweep_table_id_ = io::get_string(state, "sweep_table_id");
+    v.sweep_zip_ = state.at("sweep_zip").get<bool>(); v.sweep_copy_ = state.at("sweep_copy").get<bool>();
+    v.manage_identity_ = io::get_string(state, "manage_identity"); v.manage_revision_ = state.at("manage_revision").get<int64_t>(); v.manage_dirty_ = state.at("manage_dirty").get<bool>();
+    v.rename_table_ = io::get_string(state, "rename_table"); v.rename_field_ = io::get_string(state, "rename_field");
+    v.restored_draft_ = v.restored_manage_ = v.restored_sweep_ = true;
+    impl_ = std::move(next); return true;
+  }
+  catch (const std::exception &) { return false; }
+}
 void ProjectTableEditor::select_field(std::string_view id)
 {
   if (!impl_->has_unsaved_changes()) { impl_->cell_field_ = id; }

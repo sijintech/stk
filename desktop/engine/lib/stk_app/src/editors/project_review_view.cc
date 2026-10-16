@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "project_review_view.hh"
+#include "workspace_fields.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/project_state.hh"
@@ -26,12 +27,29 @@ std::string summary(const AppStore &store, const std::optional<io::Json> &value)
 }
 }  // namespace
 
+io::Json ProjectReviewView::save_workspace_state() const
+{
+  if (!workspace_pending_.is_null()) { return workspace_pending_; }
+  return {{"version", 1}, {"project", draft_project_}, {"draft_title", draft_title_}, {"selected_draft", selected_draft_},
+    {"selected", selected_}, {"category", category_}};
+}
+bool ProjectReviewView::load_workspace_state(const io::Json &value)
+{
+  if (!workspace_fields(value, {"project", "draft_title", "selected_draft"}, {"selected", "category"}, {}, {}, 65536)) { return false; }
+  workspace_pending_ = value; return true;
+}
+
 void ProjectReviewView::saved_drafts(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
 {
   if (draft_project_ != state.project()->id) {
     draft_project_ = state.project()->id;
     draft_title_.clear();
     selected_draft_.clear();
+  }
+  if (!workspace_pending_.is_null() && io::get_string(workspace_pending_, "project") == draft_project_) {
+    const auto value = std::move(workspace_pending_); workspace_pending_ = nullptr;
+    draft_title_ = value.value("draft_title", std::string()); selected_draft_ = value.value("selected_draft", std::string());
+    workspace_selection_ = std::pair{std::max(0, int(io::get_int(value, "selected", 0))), std::clamp(int(io::get_int(value, "category", 0)), 0, 1)};
   }
   const auto &saved = state.saved_review();
   // Agent sessions (format 13): a draft a session waits on is applied or discarded through the session, so read
@@ -184,6 +202,10 @@ void ProjectReviewView::draw(ui::Layout &layout, EditorContext &ctx, ProjectStat
     commands_ = ui::LogBuffer(std::numeric_limits<size_t>::max());
     details_ = ui::LogBuffer(std::numeric_limits<size_t>::max());
     if (review) { commands_.append(review->commands.dump(2)); }
+  }
+  if (workspace_selection_) {
+    selected_ = workspace_selection_->first; category_ = workspace_selection_->second;
+    if (review) { workspace_selection_.reset(); }
   }
   if (!review) { return; }
   layout.label(ctx.store.catalog().format("project.review.summary", {

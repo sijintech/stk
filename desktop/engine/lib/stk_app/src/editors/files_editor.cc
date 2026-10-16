@@ -106,7 +106,20 @@ class FilesEditor final : public Editor {
     registrations(layout, ctx);
     details(layout, ctx);
   }
+  nlohmann::json save_workspace_state() const override
+  {
+    return tree_ ? tree_->save_workspace_state() : workspace_tree_.is_null() ? Json{{"version", 1}, {"project", ""},
+      {"expanded", Json::array({""})}, {"selection", {{"path", ""}, {"record_id", ""}}}} : workspace_tree_;
+  }
+  bool load_workspace_state(const nlohmann::json &value) override
+  {
+    if (!ProjectFileTree::check_workspace_state(value)) { return false; }
+    workspace_tree_ = value;
+    if (tree_) { tree_->load_workspace_state(value); workspace_tree_ = nullptr; }
+    return true;
+  }
  private:
+  Json workspace_tree_;
   void attach(EditorContext &ctx)
   {
     ctx.store.project().sync();
@@ -114,6 +127,7 @@ class FilesEditor final : public Editor {
       const auto shell = ctx.area.shell().lifetime();
       tree_ = std::make_unique<ProjectFileTree>(ctx.store, [shell] { return !shell.expired(); });
     }
+    if (!workspace_tree_.is_null()) { tree_->load_workspace_state(workspace_tree_); workspace_tree_ = nullptr; }
     tree_->sync();
   }
   void flatten(const std::string &path, const int depth, std::vector<Json> &rows) const

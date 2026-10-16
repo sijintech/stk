@@ -1016,5 +1016,109 @@ TEST_F(WorkflowEditorPython, HomeArchivesAFailedRun)
   EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
 
+TEST_F(WorkflowEditorPython, WorkspaceReopensCandidateAndUnappliedTextWithoutNextFrameResetOrExecution)
+{
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_name") && widget("workflow_step_label"); }));
+  widget("workflow_name")->string.assign("Unapplied local title");
+  widget("workflow_step_label")->string.assign("Unapplied step label");
+  auto saved = area().editor().save_workspace_state();
+  saved["draft"]["document"]["steps"][2]["parameters"]["colormap"] = "viridis";
+  saved["literal_text"]["temperature/colormap"] = "\"cividis\"";
+  const auto before = project().project()->revision;
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkflow));
+  ASSERT_TRUE(area().editor().load_workspace_state(saved));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] {
+    return widget("workflow_param/colormap/value") && widget("workflow_name") &&
+      widget("workflow_name")->string.value() == "Unapplied local title";
+  }));
+  for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
+  EXPECT_EQ(widget("workflow_name")->string.value(), "Unapplied local title");
+  ASSERT_NE(widget("workflow_step_label"), nullptr);
+  EXPECT_EQ(widget("workflow_step_label")->string.value(), "Unapplied step label");
+  EXPECT_EQ(widget("workflow_param/colormap/value")->string.value(), "\"cividis\"");
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  const auto restored = area().editor().save_workspace_state();
+  EXPECT_EQ(restored.at("draft").at("document").at("steps")[2].at("parameters").at("colormap"), "viridis");
+  EXPECT_EQ(project().project()->revision, before);
+  EXPECT_EQ(calls("project.workflows.update"), 0u); EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+  EXPECT_EQ(store().viewer().evaluations_started(), 0);
+}
+
+TEST_F(WorkflowEditorPython, WorkspaceBundleRelocatesAbsoluteCandidateAndRebindsOriginalDatabaseBaseline)
+{
+  const auto source = core::path_to_utf8(directory.path() / "project" / "field.vtk");
+  auto saved_document = stored().at("document"); saved_document["steps"][2]["parameters"]["path"] = source;
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id},
+      {"name", "Temperature scan"}, {"document", saved_document}, {"expected_revision", project().project()->revision}}, out));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] {
+    const auto state = area().editor().save_workspace_state();
+    return state.contains("draft") && state.at("draft").is_object() && state.at("draft").at("baseline") == saved_document;
+  }));
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  auto captured = area().editor().save_workspace_state();
+  captured["draft"]["document"]["steps"][2]["parameters"]["colormap"] = "viridis";
+  const auto old_handle = handle(); const auto before_revision = project().project()->revision;
+  const auto archive = core::path_to_utf8(directory.path() / "workflow.stkworkspace");
+  ASSERT_NO_FATAL_FAILURE(call("workspace.export", {{"handle", handle()}, {"expected_revision", before_revision},
+      {"path", archive}, {"state", {{"editor", captured}}}}, out));
+  ASSERT_TRUE(out.at("complete").get<bool>()) << out.at("diagnostics");
+  const auto destination = directory.path() / "restored";
+  ASSERT_NO_FATAL_FAILURE(call("workspace.import", {{"path", archive}, {"destination", core::path_to_utf8(destination)}}, out));
+  const auto relocated = out.at("state").at("editor");
+  const auto new_source = core::path_to_utf8(destination / "project" / "field.vtk");
+  ASSERT_EQ(relocated.at("draft").at("document").at("steps")[2].at("parameters").at("path"), new_source);
+  ASSERT_EQ(relocated.at("draft").at("baseline_json"), captured.at("draft").at("baseline_json"));
+  ASSERT_TRUE(project().close()); ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
+  ASSERT_TRUE(project().open(core::path_to_utf8(destination / "project")));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().loaded() && !project().busy(); }));
+  ASSERT_NE(handle(), old_handle);
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkflow)); ASSERT_TRUE(area().editor().load_workspace_state(relocated));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+  for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
+  const auto restored = area().editor().save_workspace_state();
+  EXPECT_EQ(restored.at("draft").at("baseline"), saved_document);
+  EXPECT_EQ(restored.at("draft").at("document").at("steps")[2].at("parameters").at("path"), new_source);
+  EXPECT_EQ(restored.at("draft").at("document").at("steps")[2].at("parameters").at("colormap"), "viridis");
+  EXPECT_EQ(project().project()->revision, before_revision);
+  EXPECT_EQ(io::python_json_dumps(stored().at("document"), true, true), io::python_json_dumps(saved_document, true, true));
+  EXPECT_EQ(calls("project.workflows.update"), 1u); EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, WorkspaceBaselineIgnoresObjectOrderButRejectsChangedNumericTypes)
+{
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  auto legacy = area().editor().save_workspace_state(); legacy["draft"].erase("baseline_json");
+  const auto original = legacy.at("draft").at("baseline"); Json reordered = Json::object();
+  for (const auto *key : {"ui", "steps", "format"}) { reordered[key] = original.at(key); }
+  legacy["draft"]["baseline"] = reordered;
+  legacy["draft"]["document"]["steps"][2]["parameters"]["colormap"] = "viridis";
+  const auto before_revision = project().project()->revision;
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkflow));
+  ASSERT_TRUE(area().editor().load_workspace_state(legacy));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+  auto numeric = area().editor().save_workspace_state();
+  auto baseline = io::parse_json(numeric.at("draft").at("baseline_json").get<std::string>());
+  ASSERT_TRUE(baseline.at("ui").at("positions").at("cases")[0].is_number_integer());
+  baseline["ui"]["positions"]["cases"][0] = 0.0;
+  numeric["draft"]["baseline_json"] = io::python_json_dumps(baseline, true, true);
+  ASSERT_NO_FATAL_FAILURE(click("workflow_discard"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !area().editor().has_unsaved_changes(); }));
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkflow));
+  ASSERT_TRUE(area().editor().load_workspace_state(numeric));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("changed elsewhere and the local edits"); }));
+  for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
+  EXPECT_TRUE(area().editor().has_unsaved_changes()); EXPECT_EQ(widget("workflow_save"), nullptr);
+  EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document").at("steps")[2].at("parameters").at("colormap"), "viridis");
+  EXPECT_EQ(project().project()->revision, before_revision);
+  EXPECT_EQ(calls("project.workflows.update"), 0u); EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
 }  // namespace
 }  // namespace stk::app

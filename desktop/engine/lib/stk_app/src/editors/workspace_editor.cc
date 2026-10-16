@@ -5,6 +5,7 @@
  * marks the next step. Buttons only navigate; nothing here runs, sends or changes data.
  */
 #include "archive_controls.hh"
+#include "workspace_fields.hh"
 #include "editor_text.hh"
 #include "project_navigation.hh"
 
@@ -123,6 +124,13 @@ class WorkspaceEditor final : public Editor {
     // The skill library is shared across projects: reachable with or without one.
     tools.button("workspace_skills", ctx.tr("workspace.skills"), editor_navigation_action(ctx, kEditorSkills));
     modules(layout, ctx);
+  }
+
+  nlohmann::json save_workspace_state() const override { return {{"version", 1}, {"search", search_text_}}; }
+  bool load_workspace_state(const nlohmann::json &value) override
+  {
+    if (!workspace_fields(value, {"search"}, {}, {}, {}, 65536)) { return false; }
+    search_text_ = value.value("search", std::string()); return true;
   }
 
  private:

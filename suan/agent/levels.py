@@ -36,6 +36,9 @@ OPERATIONS = {
     "project.table.objects.list_candidates": ("read", "same-project metadata only; not used by agent tools"),
     "project.table.objects.resolve": ("read", "same-project metadata only; not used by agent tools"),
     "project.table.csv.preview": ("read", "explicit local bounded file read; not used by agent tools"),
+    "project.table.io.preview": ("read", "explicit local table file preview; not used by agent tools"),
+    "project.table.io.import": ("project_edit", "imports a table in one explicit edit batch"),
+    "project.table.io.export": ("project_edit", "writes a new table file on this computer"),
     "project.sweep.plan": ("read", "not needed: sweeps are proposed by a request and saved as a draft"),
     "project.history": ("read", "not needed in v1"),
     "project.backup": ("project_edit", "writes a backup file on this computer"),
@@ -178,6 +181,10 @@ OPERATIONS = {
 
 # Desktop-only methods that are deliberately not in the script catalog.
 DESKTOP_ONLY = {"project.agent.decide": ("project_edit", "a person approves a draft from the session card"),
+                "workspace.export": ("project_edit", "a person exports a portable workspace from the desktop"),
+                "workspace.preview": ("read", "the desktop previews a local workspace package"),
+                "workspace.import": ("project_edit", "the desktop imports to a new local directory"),
+                "workspace.open": ("read", "the desktop reads an extracted workspace descriptor"),
                 "modules.install": ("project_edit", "a person installs software on this computer"),
                 "modules.cancel": ("project_edit", "a person installs software on this computer"),
                 "modules.remove": ("project_edit", "a person removes software from this computer")}

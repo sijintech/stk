@@ -2829,19 +2829,42 @@
         "description": "Explicitly read one regular local UTF-8 .py file, at most 256 KiB; never execute it. Symbolic link components are refused.",
         "params": {
           "type": "object",
-          "properties": {"path": {"$ref": "#/$defs/absPath"}},
-          "required": ["path"],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "required": [
+            "path"
+          ],
           "additionalProperties": false
         },
         "result": {
           "type": "object",
           "properties": {
-            "path": {"$ref": "#/$defs/absPath"},
-            "source": {"type": "string", "maxLength": 262144},
-            "version": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "size": {"type": "integer", "minimum": 0, "maximum": 262144}
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "source": {
+              "type": "string",
+              "maxLength": 262144
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 262144
+            }
           },
-          "required": ["path", "source", "version", "size"],
+          "required": [
+            "path",
+            "source",
+            "version",
+            "size"
+          ],
           "additionalProperties": false
         }
       },
@@ -2850,21 +2873,53 @@
         "params": {
           "type": "object",
           "properties": {
-            "path": {"$ref": "#/$defs/absPath"},
-            "source": {"type": "string", "maxLength": 262144},
-            "expected_version": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{64}$"}]}
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "source": {
+              "type": "string",
+              "maxLength": 262144
+            },
+            "expected_version": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              ]
+            }
           },
-          "required": ["path", "source", "expected_version"],
+          "required": [
+            "path",
+            "source",
+            "expected_version"
+          ],
           "additionalProperties": false
         },
         "result": {
           "type": "object",
           "properties": {
-            "path": {"$ref": "#/$defs/absPath"},
-            "version": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "size": {"type": "integer", "minimum": 0, "maximum": 262144}
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 262144
+            }
           },
-          "required": ["path", "version", "size"],
+          "required": [
+            "path",
+            "version",
+            "size"
+          ],
           "additionalProperties": false
         }
       },
@@ -9869,6 +9924,1155 @@
             "truncated",
             "command_count",
             "can_import"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.io.preview": {
+        "description": "Explicit bounded CSV, Excel worksheet or typed STK table JSON preview; no edits or execution.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "delimiter": {
+              "enum": [
+                ",",
+                "\t"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "format": {
+              "enum": [
+                "csv",
+                "xlsx",
+                "json"
+              ]
+            },
+            "sheet": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "source",
+            "format"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "text",
+                      "integer",
+                      "number",
+                      "boolean",
+                      "json",
+                      "date",
+                      "url",
+                      "single_select",
+                      "multi_select",
+                      "object"
+                    ]
+                  },
+                  "unit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "options": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "name",
+                  "type",
+                  "unit"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 64
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {},
+                "maxItems": 64
+              },
+              "maxItems": 100
+            },
+            "total_rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "command_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "can_import": {
+              "type": "boolean"
+            },
+            "format": {
+              "enum": [
+                "csv",
+                "xlsx",
+                "json"
+              ]
+            },
+            "sheets": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "sheet": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "schema_present": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000
+            },
+            "table_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "revision",
+            "source_sha256",
+            "columns",
+            "rows",
+            "total_rows",
+            "truncated",
+            "command_count",
+            "can_import",
+            "format",
+            "sheets",
+            "sheet",
+            "schema_present",
+            "warnings",
+            "table_name"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.io.import": {
+        "description": "Import CSV, Excel worksheet or typed STK table JSON as one atomic undoable new table; SHA and revision pinned.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "source": {
+              "$ref": "#/$defs/absPath"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "delimiter": {
+              "enum": [
+                ",",
+                "\t"
+              ]
+            },
+            "types": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "enum": [
+                  "text",
+                  "integer",
+                  "number",
+                  "boolean",
+                  "json",
+                  "date",
+                  "url"
+                ]
+              }
+            },
+            "units": {
+              "type": "object",
+              "maxProperties": 64,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            },
+            "expected_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "format": {
+              "enum": [
+                "csv",
+                "xlsx",
+                "json"
+              ]
+            },
+            "sheet": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "handle",
+            "source",
+            "name",
+            "expected_revision",
+            "format"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "field_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "maxItems": 1000
+            },
+            "record_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "maxItems": 1000
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "format": {
+              "enum": [
+                "csv",
+                "xlsx",
+                "json"
+              ]
+            },
+            "sheet": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "revision",
+            "table_id",
+            "field_ids",
+            "record_ids",
+            "rows",
+            "columns",
+            "source_sha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.io.export": {
+        "description": "Export evaluated values in CSV, Excel or typed STK table JSON to a new file without replacing existing files.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "destination": {
+              "$ref": "#/$defs/absPath"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "delimiter": {
+              "enum": [
+                ",",
+                "\t"
+              ]
+            },
+            "definition": {
+              "$ref": "#/$defs/projectTableViewDefinition"
+            },
+            "view_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "format": {
+              "enum": [
+                "csv",
+                "xlsx",
+                "json"
+              ]
+            }
+          },
+          "required": [
+            "handle",
+            "table_id",
+            "destination",
+            "expected_revision",
+            "format"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "format": {
+              "enum": [
+                "csv",
+                "xlsx",
+                "json"
+              ]
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000
+            }
+          },
+          "required": [
+            "revision",
+            "table_id",
+            "path",
+            "rows",
+            "columns",
+            "size",
+            "sha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "workspace.export": {
+        "description": "Explicit portable workspace archive: consistent project backup, safe desktop state and selected assets; no credentials or execution.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1099511627776
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "state": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "path": {
+                    "$ref": "#/$defs/absPath"
+                  }
+                },
+                "required": [
+                  "id",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "path",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.workspace/1"
+            },
+            "project": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "format_version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "source_root": {
+                  "$ref": "#/$defs/absPath"
+                },
+                "aliases": {
+                  "type": "array",
+                  "maxItems": 128,
+                  "items": {
+                    "$ref": "#/$defs/absPath"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "revision",
+                "format_version",
+                "source_root"
+              ],
+              "additionalProperties": false
+            },
+            "diagnostics": {
+              "type": "array",
+              "maxItems": 20000,
+              "items": {
+                "type": "object"
+              }
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "archive_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "file_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20000
+            },
+            "total_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "state": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "source": {
+                    "$ref": "#/$defs/absPath"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "file",
+                      "directory"
+                    ]
+                  },
+                  "aliases": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                      "$ref": "#/$defs/absPath"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "source",
+                  "path",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            },
+            "workspace_path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "project_directory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path_map": {
+              "type": "object",
+              "maxProperties": 132225,
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "format",
+            "project",
+            "diagnostics",
+            "complete",
+            "path",
+            "sha256",
+            "archive_bytes",
+            "file_count",
+            "total_bytes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "workspace.preview": {
+        "description": "Verify workspace manifest, hashes and portable state without extracting or executing.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1099511627776
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.workspace/1"
+            },
+            "project": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "format_version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "source_root": {
+                  "$ref": "#/$defs/absPath"
+                },
+                "aliases": {
+                  "type": "array",
+                  "maxItems": 128,
+                  "items": {
+                    "$ref": "#/$defs/absPath"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "revision",
+                "format_version",
+                "source_root"
+              ],
+              "additionalProperties": false
+            },
+            "diagnostics": {
+              "type": "array",
+              "maxItems": 20000,
+              "items": {
+                "type": "object"
+              }
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "archive_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "file_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20000
+            },
+            "total_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "state": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "source": {
+                    "$ref": "#/$defs/absPath"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "file",
+                      "directory"
+                    ]
+                  },
+                  "aliases": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                      "$ref": "#/$defs/absPath"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "source",
+                  "path",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            },
+            "workspace_path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "project_directory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path_map": {
+              "type": "object",
+              "maxProperties": 132225,
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "format",
+            "project",
+            "diagnostics",
+            "complete",
+            "path",
+            "sha256",
+            "state",
+            "resources",
+            "file_count",
+            "total_bytes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "workspace.import": {
+        "description": "Verify and extract a workspace to a new directory atomically; return relocated state without executing or changing the desktop.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1099511627776
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "destination": {
+              "$ref": "#/$defs/absPath"
+            },
+            "expected_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "path",
+            "destination"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.workspace/1"
+            },
+            "project": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "format_version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "source_root": {
+                  "$ref": "#/$defs/absPath"
+                },
+                "aliases": {
+                  "type": "array",
+                  "maxItems": 128,
+                  "items": {
+                    "$ref": "#/$defs/absPath"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "revision",
+                "format_version",
+                "source_root"
+              ],
+              "additionalProperties": false
+            },
+            "diagnostics": {
+              "type": "array",
+              "maxItems": 20000,
+              "items": {
+                "type": "object"
+              }
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "archive_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "file_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20000
+            },
+            "total_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "state": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "source": {
+                    "$ref": "#/$defs/absPath"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "file",
+                      "directory"
+                    ]
+                  },
+                  "aliases": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                      "$ref": "#/$defs/absPath"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "source",
+                  "path",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            },
+            "workspace_path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "project_directory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path_map": {
+              "type": "object",
+              "maxProperties": 132225,
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "format",
+            "project",
+            "diagnostics",
+            "complete",
+            "directory",
+            "project_directory",
+            "workspace_path",
+            "sha256",
+            "state",
+            "path_map"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "workspace.open": {
+        "description": "Read and relocate an extracted workspace after moving it; return state without execution or desktop mutation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "required": [
+            "directory"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "const": "stk.workspace/1"
+            },
+            "project": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "format_version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "source_root": {
+                  "$ref": "#/$defs/absPath"
+                },
+                "aliases": {
+                  "type": "array",
+                  "maxItems": 128,
+                  "items": {
+                    "$ref": "#/$defs/absPath"
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "revision",
+                "format_version",
+                "source_root"
+              ],
+              "additionalProperties": false
+            },
+            "diagnostics": {
+              "type": "array",
+              "maxItems": 20000,
+              "items": {
+                "type": "object"
+              }
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "archive_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "file_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20000
+            },
+            "total_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "state": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "source": {
+                    "$ref": "#/$defs/absPath"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "file",
+                      "directory"
+                    ]
+                  },
+                  "aliases": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                      "$ref": "#/$defs/absPath"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "source",
+                  "path",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "directory": {
+              "$ref": "#/$defs/absPath"
+            },
+            "workspace_path": {
+              "$ref": "#/$defs/absPath"
+            },
+            "project_directory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path_map": {
+              "type": "object",
+              "maxProperties": 132225,
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "format",
+            "project",
+            "diagnostics",
+            "complete",
+            "directory",
+            "project_directory",
+            "workspace_path",
+            "sha256",
+            "state",
+            "path_map"
           ],
           "additionalProperties": false
         }

@@ -19,10 +19,13 @@ target_link_libraries(stk-wm-smoke PRIVATE stk_app_sample stk_wm)
 add_executable(stk-app-smoke app_smoke.cc)
 target_link_libraries(stk-app-smoke PRIVATE stk_app stk_wm)
 
+add_executable(stk-workspace-window-smoke workspace_window_smoke.cc)
+target_link_libraries(stk-workspace-window-smoke PRIVATE stk_app stk_wm)
+
 add_executable(stk-png-diff png_diff.cc)
 target_link_libraries(stk-png-diff PRIVATE stk_gfx)
 
-set_target_properties(stk-wm-image-check stk-wm-smoke stk-app-smoke stk-png-diff PROPERTIES
+set_target_properties(stk-wm-image-check stk-wm-smoke stk-app-smoke stk-workspace-window-smoke stk-png-diff PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${STK_DESKTOP_BIN_DIR}")
 
 set(_golden_dir "${CMAKE_CURRENT_SOURCE_DIR}/golden")
@@ -201,6 +204,7 @@ add_executable(stk_wm_tests
   test_app_store_open.cc
   test_layout_golden.cc
   test_layout_math.cc
+  test_workspace_tree.cc
   test_persistence.cc
   test_screen.cc
 )
@@ -263,6 +267,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND)
       set_tests_properties(${_name} PROPERTIES
         LABELS "gpu;window" TIMEOUT 180 SKIP_RETURN_CODE 77 ENVIRONMENT "${_env_common}"
         RESOURCE_LOCK display_${_server} PASS_REGULAR_EXPRESSION "PASS"
+        FAIL_REGULAR_EXPRESSION "FAIL|leaked|Error: Not freed memory")
+      add_test(NAME workspace_window_${_server}
+        COMMAND ${Python3_EXECUTABLE} ${_runner} --server ${_server}
+                --workdir ${CMAKE_CURRENT_BINARY_DIR}/d_${_server}_workspace ${_sysroot_arg}
+                -- $<TARGET_FILE:stk-workspace-window-smoke> --gpu-backend ${_be})
+      set_tests_properties(workspace_window_${_server} PROPERTIES
+        LABELS "gpu;window;workspace" TIMEOUT 180 SKIP_RETURN_CODE 77 ENVIRONMENT "${_env_common}"
+        RESOURCE_LOCK display_${_server} PASS_REGULAR_EXPRESSION "PASS workspace native windows"
         FAIL_REGULAR_EXPRESSION "FAIL|leaked|Error: Not freed memory")
     endif()
   endforeach()

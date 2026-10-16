@@ -99,7 +99,21 @@ class AnalysisParametersEditorPython : public ::testing::Test {
   }
   void read(Json &out) { ASSERT_NO_FATAL_FAILURE(call("project.analyses.get", {{"handle", handle()}, {"analysis_id", analysis_id}}, out)); }
   void frames_until(const std::function<bool()> &condition) {
-    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return condition(); }, 30)) << client->bridge_log().text();
+    const bool done = loop.pump_until([&] { f.drv->frame(); return condition(); }, 30);
+    Json status = Json::array();
+    if (!done) {
+      for (const auto &block : f.screen.ui()->blocks()) {
+        for (const auto &item : block->widgets()) {
+          if (item.key.find("analysis_parameter") != std::string::npos || item.key == "graph_mode") {
+            status.push_back({{"key", item.key}, {"text", item.text}, {"enabled", item.enabled}});
+          }
+        }
+      }
+    }
+    ASSERT_TRUE(done) << "synthetic_workspace=" << area().editor().save_workspace_state().dump()
+        << "\nsynthetic_project_revision=" << (project().project() ? project().project()->revision : -1)
+        << " analysis_get_calls=" << calls("project.analyses.get").size()
+        << "\nsynthetic_parameter_widgets=" << status.dump() << '\n' << client->bridge_log().text();
   }
   void click(const char *key) {
     const auto *value = widget(key); ASSERT_NE(value, nullptr); ASSERT_TRUE(value->enabled); ASSERT_TRUE(value->on_click);
@@ -280,6 +294,83 @@ TEST_F(AnalysisParametersEditorPython, WorkspaceRoundTripKeepsInvalidTextAndAcce
   ASSERT_NO_FATAL_FAILURE(read(current));
   auto expected = document; expected["parameters"]["component"] = 2;
   EXPECT_EQ(exact(current.at("analysis").at("document")), exact(expected));
+}
+
+TEST_F(AnalysisParametersEditorPython, WorkspaceBundleRelocatesAbsoluteInputButRetainsDatabaseComparisonBaseline)
+{
+  const auto source = core::path_to_utf8(directory.path() / "input.dat");
+  auto metadata = document.at("parameters").at("precision_record"); metadata["asset_path"] = source;
+  ASSERT_NO_FATAL_FAILURE(edit("precision_record", exact(metadata)));  // scientific metadata may contain an absolute resource reference
+  ASSERT_NO_FATAL_FAILURE(save());
+  Json original; ASSERT_NO_FATAL_FAILURE(read(original)); const auto saved_document = original.at("analysis").at("document");
+  ASSERT_NO_FATAL_FAILURE(edit("component", "2"));
+  const auto captured = area().editor().save_workspace_state(); const auto old_handle = handle();
+  const auto before_revision = project().project()->revision;
+  const auto archive = core::path_to_utf8(directory.path() / "analysis.stkworkspace"); Json out;
+  ASSERT_NO_FATAL_FAILURE(call("workspace.export", {{"handle", handle()}, {"expected_revision", before_revision},
+      {"path", archive}, {"state", {{"editor", captured}}}}, out));
+  ASSERT_TRUE(out.at("complete").get<bool>()) << out.at("diagnostics");
+  const auto destination = directory.path() / "restored";
+  ASSERT_NO_FATAL_FAILURE(call("workspace.import", {{"path", archive}, {"destination", core::path_to_utf8(destination)}}, out));
+  const auto relocated = out.at("state").at("editor"); const auto new_source = out.at("path_map").at(source);
+  ASSERT_EQ(relocated.at("draft").at("document").at("parameters").at("precision_record").at("asset_path"), new_source);
+  ASSERT_EQ(relocated.at("draft").at("baseline_json"), captured.at("draft").at("baseline_json"));
+  // Construct a fresh editor before opening the restored project; its old callbacks and draft
+  // cannot authorize writes against the new opening handle.
+  ASSERT_NO_FATAL_FAILURE(click("analysis_parameters_discard"));  // the captured candidate remains in the bundle
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !area().editor().has_unsaved_changes(); }));
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
+  ASSERT_TRUE(project().close()); ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
+  ASSERT_TRUE(project().open(core::path_to_utf8(destination / "project")));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().loaded() && !project().busy(); }));
+  ASSERT_NE(handle(), old_handle);
+  const auto reads_before_restore = calls("project.analyses.get").size();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph)); ASSERT_TRUE(area().editor().load_workspace_state(relocated));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_parameters_save") && widget("analysis_parameters_save")->enabled; }));
+  for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
+  const auto restored = area().editor().save_workspace_state();
+  EXPECT_EQ(restored.at("draft").at("baseline"), saved_document);
+  EXPECT_EQ(restored.at("draft").at("document").at("parameters").at("precision_record").at("asset_path"), new_source);
+  EXPECT_EQ(restored.at("draft").at("document").at("parameters").at("component"), 2);
+  EXPECT_EQ(project().project()->revision, before_revision);
+  EXPECT_EQ(calls("project.analyses.get").size(), reads_before_restore + 1);
+  Json unchanged; ASSERT_NO_FATAL_FAILURE(read(unchanged)); EXPECT_EQ(exact(unchanged.at("analysis").at("document")), exact(saved_document));
+  EXPECT_EQ(calls("project.analyses.update").size(), 1u);
+}
+
+TEST_F(AnalysisParametersEditorPython, WorkspaceBaselineIgnoresKeyOrderButRequiresExactNumericTypes)
+{
+  ASSERT_NO_FATAL_FAILURE(edit("component", "2"));
+  auto legacy = area().editor().save_workspace_state();
+  legacy["draft"].erase("baseline_json");
+  const auto original = legacy.at("draft").at("baseline"); Json reordered = Json::object();
+  for (const auto *key : {"outputs", "parameters", "graph", "format"}) { reordered[key] = original.at(key); }
+  legacy["draft"]["baseline"] = reordered;
+  const auto before_revision = project().project()->revision;
+  ASSERT_NO_FATAL_FAILURE(click("analysis_parameters_discard"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !area().editor().has_unsaved_changes(); }));
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph));
+  ASSERT_TRUE(area().editor().load_workspace_state(legacy));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_parameters_save") && widget("analysis_parameters_save")->enabled; }));
+  auto numeric = area().editor().save_workspace_state();
+  auto baseline = io::parse_json(numeric.at("draft").at("baseline_json").get<std::string>());
+  ASSERT_TRUE(baseline.at("parameters").at("component").is_number_integer());
+  baseline["parameters"]["component"] = 1.0;
+  numeric["draft"]["baseline_json"] = exact(baseline);
+  ASSERT_NO_FATAL_FAILURE(click("analysis_parameters_discard"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !area().editor().has_unsaved_changes(); }));
+  ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph));
+  ASSERT_TRUE(area().editor().load_workspace_state(numeric));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] {
+    return widget("analysis_parameters_save") && !widget("analysis_parameters_save")->enabled &&
+        widget("analysis_parameter_value") && !widget("analysis_parameter_value")->enabled;
+  }));
+  for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
+  EXPECT_TRUE(area().editor().has_unsaved_changes()); EXPECT_FALSE(widget("analysis_parameters_save")->enabled);
+  EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document").at("parameters").at("component"), 2);
+  EXPECT_EQ(project().project()->revision, before_revision); EXPECT_TRUE(calls("project.analyses.update").empty());
 }
 
 TEST_F(AnalysisParametersEditorPython, NullAbsentEmptyStringAndEmptyUnknownKeyStayDistinct)

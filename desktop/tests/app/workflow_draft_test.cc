@@ -152,5 +152,63 @@ TEST(WorkflowDraft, PositionsAndTheNameDoNotInvalidateACheck)
       {"inputs", {{"in", {{"from", "b.out"}, {"as", "x"}}}}}}}}, {"ui", Json::object()}}), std::invalid_argument);
 }
 
+TEST(WorkflowDraft, WorkspaceKeepsUnsavedNameStepsAndPositionsWithANewOpening)
+{
+  auto model = pinned();
+  ASSERT_TRUE(model.set_name("Unsaved name", model.generation()).accepted);
+  ASSERT_TRUE(model.set_parameter("view", "path", Json("new.vtk"), model.generation()).accepted);
+  ASSERT_TRUE(model.move_steps({{"view", {800, 120}}}, model.generation()).accepted);
+  const auto state = model.save_workspace_state(); EXPECT_FALSE(state.contains("handle"));
+  auto restored = pinned(); const auto generation = restored.generation();
+  ASSERT_TRUE(restored.load_workspace_state(state, "new-opening"));
+  EXPECT_GT(restored.generation(), generation); EXPECT_EQ(restored.handle(), "new-opening");
+  EXPECT_TRUE(restored.dirty()); EXPECT_EQ(restored.name(), "Unsaved name");
+  EXPECT_EQ(exact(restored.baseline()), exact(model.baseline())); EXPECT_EQ(exact(restored.document()), exact(model.document()));
+  EXPECT_FALSE(restored.set_name("stale callback", generation).accepted);
+}
+
+TEST(WorkflowDraft, InvalidWorkspaceDocumentAndImportedHandleAreAtomicRefusals)
+{
+  auto model = pinned(); ASSERT_TRUE(model.set_name("Unsaved", model.generation()).accepted);
+  const auto before = model.save_workspace_state(); const auto generation = model.generation();
+  auto invalid = before; invalid["document"]["steps"] = "invalid";
+  EXPECT_FALSE(model.load_workspace_state(invalid, "new-opening"));
+  EXPECT_EQ(model.save_workspace_state(), before); EXPECT_EQ(model.generation(), generation);
+  invalid = before; invalid["handle"] = "imported-opening";
+  EXPECT_FALSE(model.load_workspace_state(invalid, "new-opening")); EXPECT_EQ(model.save_workspace_state(), before);
+}
+
+TEST(WorkflowDraft, WorkspaceRelocatesCandidateButKeepsExactOriginalBaselineForRebase)
+{
+  auto original = saved(); original["steps"][2]["parameters"]["path"] = "/old-machine/project/input.dat";
+  WorkflowDraft model; model.pin("old-opening", id, 4, "Temperature scan", original);
+  auto state = model.save_workspace_state();
+  state["baseline"]["steps"][2]["parameters"]["path"] = "/new-machine/project/input.dat";
+  state["document"]["steps"][2]["parameters"]["path"] = "/new-machine/project/input.dat";
+  auto restored = pinned(); ASSERT_TRUE(restored.load_workspace_state(state, "new-opening"));
+  EXPECT_EQ(exact(restored.baseline()), exact(original));
+  EXPECT_EQ(restored.document().at("steps")[2].at("parameters").at("path"), "/new-machine/project/input.dat");
+  EXPECT_TRUE(restored.dirty()); EXPECT_TRUE(restored.current("new-opening", 4));
+  EXPECT_FALSE(restored.current("old-opening", 4)); EXPECT_FALSE(restored.current("new-opening", 5));
+  ASSERT_TRUE(restored.rebase(5, "Temperature scan", original));
+  auto changed = original; changed["steps"][0]["label"] = "Another saved document";
+  EXPECT_FALSE(restored.rebase(6, "Temperature scan", changed));
+  auto legacy = model.save_workspace_state(); legacy.erase("baseline_json");
+  ASSERT_TRUE(restored.load_workspace_state(legacy, "legacy-opening"));
+  EXPECT_EQ(exact(restored.baseline()), exact(original));
+}
+
+TEST(WorkflowDraft, InvalidOpaqueBaselineIsRejectedAtomically)
+{
+  auto model = pinned(); const auto before = model.save_workspace_state(); const auto generation = model.generation();
+  for (const Json bad : {Json(nullptr), Json("{} {}"), Json("{\"a\":1,\"a\":2}"),
+                        Json(std::string(100, '[') + std::string(100, ']')),
+                        Json(std::string(WorkflowDocumentLimits::max_document_bytes + 1, ' '))}) {
+    auto state = before; state["baseline_json"] = bad;
+    EXPECT_FALSE(model.load_workspace_state(state, "other-opening"));
+    EXPECT_EQ(model.save_workspace_state(), before); EXPECT_EQ(model.generation(), generation);
+  }
+}
+
 }  // namespace
 }  // namespace stk::app

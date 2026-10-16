@@ -1323,11 +1323,14 @@ void Screen::run_deferred()
 {
   /* Calls may defer more calls; run until drained (bounded against runaway loops). */
   for (int round = 0; round < 8 && !deferred_.empty(); round++) {
+    const auto epoch = deferred_epoch_;
     std::vector<std::function<void()>> calls = std::move(deferred_);
     deferred_.clear();
     for (auto &fn : calls) {
+      if (epoch != deferred_epoch_) { break; }
       fn();
     }
+    if (epoch != deferred_epoch_) { return; }
   }
 }
 
@@ -1846,6 +1849,45 @@ bool Screen::from_json(const nlohmann::json &json, std::string *r_error)
   }
   tag_redraw();
   return true;
+}
+
+void Screen::adopt_tree_from(Screen &prepared)
+{
+  if (&prepared == this) { return; }
+  auto release = [](Screen &screen) {
+    screen.ui_.reset();
+    ++screen.deferred_epoch_;
+    screen.deferred_.clear();
+    const auto forget_tree = [&screen](auto &&visit, ScreenNode *node) -> void {
+      if (!node) { return; }
+      if (node->area) { screen.forget(*node->area); }
+      for (const auto &child : node->children) { visit(visit, child.get()); }
+    };
+    forget_tree(forget_tree, screen.root_.get());
+    screen.focus_ = screen.hover_ = screen.capture_region_ = nullptr;
+    screen.active_area_ = nullptr;
+    screen.capture_ = Capture::None;
+    screen.splitters_.clear();
+  };
+  Area *maximized = prepared.maximized_;
+  release(*this);
+  release(prepared);
+  root_.reset();
+  root_ = std::move(prepared.root_);
+  next_id_ = std::max(next_id_, prepared.next_id_);
+  maximized_ = maximized;
+  prepared.maximized_ = nullptr;
+  if (root_) { root_->parent = nullptr; }
+  const auto rebind = [this](auto &&visit, ScreenNode *node) -> void {
+    if (!node) { return; }
+    if (node->area) {
+      node->area->screen_ = this;
+      node->area->node_ = node;
+    }
+    for (const auto &child : node->children) { visit(visit, child.get()); }
+  };
+  rebind(rebind, root_.get());
+  tag_redraw(); prepared.tag_redraw();
 }
 
 /** \} */

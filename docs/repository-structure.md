@@ -1,6 +1,6 @@
 # 仓库结构与归档边界
 
-更新：2026-10-14。目标依据：[开发计划](development-plan.md)与[工作台设计](design/project-workbench.md)。
+更新：2026-10-15。目标依据：[开发计划](development-plan.md)与[工作台设计](design/project-workbench.md)。
 
 ## 检查结论
 
@@ -31,6 +31,11 @@
 每页独立 UI 状态，项目/修订/撤销、Viewer 与执行服务仍共用。`stk_ui` 提供通用控件，`stk_wm` 提供真实区域交换，
 Python 文件与目录服务位于 `suan/desktop_bridge/`、`suan/project/`。具体职责、构建命令及少点击验收规则见
 [桌面模块](desktop-modules.md)。运行时加载插件、富对象单元格类型扩展不属于这组 CMake 模块的既有能力。
+
+表格文件交换在 `suan/project/table_io.py`，继续复用项目类型、事务和既有 CSV 服务。
+可移植工作空间容器与旧路径映射在 `workspace_bundle.py` / `workspace_paths.py`；原生 `workspace_state.cc`
+集中捕获／校验／采用窗口树，各编辑器独立提供参数 hooks，`workspace_transfer.cc` 提供显式传输界面。
+文件契约见[表格交换](specs/table-io-1.md)和[工作空间](specs/workspace-1.md)。
 
 ## 本轮归档与保留依据
 

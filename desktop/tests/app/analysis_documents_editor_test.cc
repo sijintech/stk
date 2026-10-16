@@ -223,6 +223,30 @@ TEST_F(AnalysisDocumentsEditor, RetainedMainShortcutsRejectChangedProjectRevisio
   EXPECT_EQ(viewer().evaluations_started(), 0); EXPECT_TRUE(store().scripts().history().empty());
 }
 
+TEST_F(AnalysisDocumentsEditor, TemplateCatalogFallbackDoesNotMutateWorkspaceAndExplicitChoiceInvalidatesOldAction)
+{
+  viewer().close(); area().set_sidebar_open(false); f.drv->frame();
+  ASSERT_NE(widget("graph_new_template"), nullptr);
+  const auto before = area().editor().save_workspace_state().at("new_preset");
+  EXPECT_EQ(before, "");  // drawing the first template has not made a user choice
+  const auto first = io::read_json_file(fs::path(STK_REPO_ROOT) / "suan/graph/presets/muferro-domains.json");
+  const auto second = io::read_json_file(fs::path(STK_REPO_ROOT) / "suan/graph/presets/volume.json");
+  viewer().set_metadata({{"presets", Json::array({first, second})}},
+      io::read_json_file(fs::path(STK_REPO_ROOT) / "docs/specs/catalog/stk-catalog-m1.json"));
+  f.drv->frame();
+  EXPECT_EQ(area().editor().save_workspace_state().at("new_preset"), before);
+  ASSERT_NE(widget("graph_new_template"), nullptr); ASSERT_GE(widget("graph_new_template")->items.size(), 2u);
+  ASSERT_NE(widget("graph_new_flow"), nullptr); const auto old_create = widget("graph_new_flow")->on_click;
+  widget("graph_new_template")->index.assign(1); f.drv->frame();
+  const auto chosen = area().editor().save_workspace_state().at("new_preset");
+  EXPECT_TRUE(chosen.is_string()); EXPECT_NE(chosen, "");
+  old_create(); loop.run_ready(); f.drv->frame();
+  EXPECT_EQ(project().project()->revision, 0);  // a user changed the choice after the old button was captured
+  for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
+  EXPECT_EQ(area().editor().save_workspace_state().at("new_preset"), chosen);
+  EXPECT_EQ(viewer().evaluations_started(), 0); EXPECT_TRUE(store().scripts().history().empty());
+}
+
 TEST_F(AnalysisDocumentsEditor, SaveShowsIndependentDefinitionAndUndoKeepsItsOldReadExplicit)
 {
   const auto before = definition();

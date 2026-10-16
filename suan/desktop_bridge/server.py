@@ -236,6 +236,10 @@ class Bridge:
             "colormaps.list": lambda p, c: self.graphs.colormaps(),
             "skills.list": lambda p, c: self.skills_list(p),
             "skills.get": lambda p, c: self.skills_get(p),
+            "workspace.export": lambda p, c: self.projects.workspace("export", p),
+            "workspace.preview": lambda p, c: self.projects.workspace("preview", p),
+            "workspace.import": lambda p, c: self.projects.workspace("import", p),
+            "workspace.open": lambda p, c: self.projects.workspace("open", p),
             "project.create": lambda p, c: self.projects.create(p),
             "project.open": lambda p, c: self.projects.open(p),
             "project.list": lambda p, c: self.projects.list(p),
@@ -253,6 +257,9 @@ class Bridge:
             "project.table.objects.list_candidates": lambda p, c: self.projects.table("objects_list_candidates", p),
             "project.table.objects.resolve": lambda p, c: self.projects.table("objects_resolve", p),
             "project.table.csv.preview": lambda p, c: self.projects.table("csv_preview", p),
+            "project.table.io.preview": lambda p, c: self.projects.table_io("preview", p),
+            "project.table.io.import": lambda p, c: self.table_io_project("import", p, c),
+            "project.table.io.export": lambda p, c: self.table_io_project("export", p, c),
             "demo.create": lambda p, c: self.demo_create(p),
             "project.drafts.save": lambda p, c: self.projects.drafts("save", p),
             "project.drafts.get": lambda p, c: self.projects.drafts("get", p),
@@ -651,6 +658,7 @@ class Bridge:
                  "project.apply", "project.preview", "project.sweep.plan", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
                  "project.table.views.list", "project.table.views.get", "project.table.query", "project.table.paste.plan",
                  "project.table.objects.list_candidates", "project.table.objects.resolve", "project.table.csv.preview",
+                 "project.table.io.preview", "project.table.io.import", "project.table.io.export",
                  "project.drafts.save", "project.drafts.get", "project.drafts.list", "project.drafts.apply", "project.drafts.discard",
                  "project.contexts.capture", "project.contexts.get", "project.contexts.list",
                  "project.discussion.add", "project.discussion.get", "project.discussion.list",
@@ -801,6 +809,12 @@ class Bridge:
 
     def csv_project(self, action, params, context):
         result = self.projects.csv(action, params)
+        if action == "import":
+            context.after(lambda: self.emit("project.changed", {"handle": params["handle"], "revision": result["revision"]}))
+        return result
+
+    def table_io_project(self, action, params, context):
+        result = self.projects.table_io(action, params)
         if action == "import":
             context.after(lambda: self.emit("project.changed", {"handle": params["handle"], "revision": result["revision"]}))
         return result

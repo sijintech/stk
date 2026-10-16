@@ -14,10 +14,10 @@
 | 模块 | 职责 | 入口 |
 |---|---|---|
 | 通用表格控件 | 选格/矩形选区、键盘/IME、内联草稿、完整 TSV、列宽/冻结/列菜单、外部排序 | `stk_ui/src/core/table_grid.cc`、`TableSpec.grid` |
-| 独立表格编辑器 | 网格与卡片布局、视图/字段/对象/CSV 表单、每实例草稿及延迟动作门禁 | `stk_app/src/table_workbench.cc`、`editors/table_editor.cc` |
+| 独立表格编辑器 | 网格与卡片布局、视图/字段/对象/文件交换表单、每实例草稿及延迟动作门禁 | `stk_app/src/table_workbench.cc`、`editors/table_editor.cc` |
 | 只读桌面控制器 | 分页查询、视图/候选/来源读取、粘贴规划；句柄/修订/会话/弱生命周期检查 | `stk_app/src/table_workbench_state.cc` |
 | 原有定义编辑器 | 字段/记录选择器、公式绑定、原始值、管理及参数扫描；接收外部网格可见 UUID | `stk_app/src/project_table_editor.cc` |
-| 项目服务 | 类型约束、视图和选项、事务及撤销、对象适配、CSV 预览与来源 SHA | `suan/project/field_types.py`、`table_workbench.py`、`object_refs.py`、`csv_io.py` |
+| 项目服务 | 类型约束、视图和选项、事务及撤销、对象适配、CSV/XLSX/JSON 预览与来源 SHA | `suan/project/field_types.py`、`table_workbench.py`、`object_refs.py`、`table_io.py` |
 
 写入统一走既有 `project.apply` / 项目服务；没有第二份项目数据库、选择状态、调度器或模型调用入口。
 普通 `TableSpec` 仍使用原有单行选择模式，其他编辑器不自动获得剪贴板写入或内联编辑。
@@ -48,7 +48,9 @@
 - 先选粘贴锚点，Ctrl/Cmd+V 查看完整批次，检查类型和目标后点“应用”；撤销恢复整批。列不会自动增加。
 - 点“视图”配置字段、分组、条件和排序，命名后点“保存视图”；之后点视图标签即可切换。看板和卡片中的“打开记录”返回对应记录详情。
 - “+字段”选择类型和单位；单选/多选选项可改名及调整顺序。对象格从同项目候选中选择，“查看来源”后再明确打开对应记录、文件或流程。
-- “更多 → CSV/TSV”选择文件并预览，逐列声明类型和单位后导入；导出使用当前视图可见列与全表筛选结果，目标必须是尚不存在的文件。
+- 工具栏“导入 / 导出”直接选择 CSV、Excel（XLSX）或 JSON。预览后明确导入；导出使用当前视图可见列与全表筛选结果，目标必须是尚不存在的文件。
+  CSV/XLSX 逐列声明类型和单位，JSON 保留类型配置和缺测语义；公式导出计算值，详细限制见[表格交换](../project-table-io.md)。
+  “更多 → CSV/TSV”继续保留兼容入口。全部窗口、参数和项目资源迁移使用[工作空间文件](portable-workspaces.md)。
 
 ## 格式 14 与协议增补
 

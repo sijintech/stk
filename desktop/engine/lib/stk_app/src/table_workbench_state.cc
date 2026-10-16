@@ -10,10 +10,10 @@
 namespace stk::app {
 using io::Json;
 namespace {
-constexpr std::array<std::string_view, 7> methods = {
+constexpr std::array<std::string_view, 8> methods = {
     "project.table.views.list", "project.table.views.get", "project.table.query",
     "project.table.paste.plan", "project.table.objects.list_candidates", "project.table.objects.resolve",
-    "project.table.csv.preview"};
+    "project.table.csv.preview", "project.table.io.preview"};
 
 bool array_member(const Json &value, const char *key)
 {
@@ -147,6 +147,7 @@ const Json &TableWorkbenchState::query_result() const { return requests_[2].resu
 const Json &TableWorkbenchState::candidates() const { return requests_[4].result; }
 const Json &TableWorkbenchState::resolved_object() const { return requests_[5].result; }
 const Json &TableWorkbenchState::csv_preview() const { return requests_[6].result; }
+const Json &TableWorkbenchState::io_preview() const { return requests_[7].result; }
 bool TableWorkbenchState::fail(const std::string &method, const std::string &message)
 {
   error_method_ = method;
@@ -229,6 +230,41 @@ bool TableWorkbenchState::valid_result(const int index, const Json &result, cons
           !std::all_of(row.begin(), row.end(), [](const Json &cell) { return cell.is_string(); })) { return false; }
     }
     return true;
+  }
+  if (index == 7) {
+    const auto format = io::get_string(result, "format");
+    if (format != io::get_string(request, "format") ||
+        (format != "csv" && format != "xlsx" && format != "json") ||
+        !array_member(result, "columns") || result.at("columns").empty() || result.at("columns").size() > 64 ||
+        !array_member(result, "rows") || result.at("rows").size() > size_t(io::get_int(request, "limit", 20)) ||
+        !valid_sha256(io::get_string(result, "source_sha256")) ||
+        io::get_int(result, "total_rows", -1) < int64_t(result.at("rows").size()) ||
+        io::get_int(result, "total_rows", -1) > 10000 || io::get_int(result, "command_count", -1) < 0 ||
+        !result.contains("can_import") || !result.at("can_import").is_boolean() ||
+        !result.contains("truncated") || !result.at("truncated").is_boolean() ||
+        !result.contains("schema_present") || !result.at("schema_present").is_boolean() ||
+        result.at("schema_present").get<bool>() != (format == "json") ||
+        !array_member(result, "sheets") || !array_member(result, "warnings")) { return false; }
+    if (!result.contains("sheet") || (format == "xlsx" ? !result.at("sheet").is_string() : !result.at("sheet").is_null())) { return false; }
+    for (const auto &sheet : result.at("sheets")) {
+      if (!sheet.is_object() || io::get_string(sheet, "name").empty()) { return false; }
+    }
+    if (format == "xlsx") {
+      const auto selected = io::get_string(result, "sheet");
+      if (selected.empty() || std::none_of(result.at("sheets").begin(), result.at("sheets").end(),
+          [&](const Json &sheet) { return io::get_string(sheet, "name") == selected; }) ||
+          (request.contains("sheet") && !request.at("sheet").is_null() && request.at("sheet") != selected)) { return false; }
+    }
+    for (const auto &column : result.at("columns")) {
+      if (!column.is_object() || io::get_string(column, "name").empty() ||
+          io::get_string(column, "type").empty() || !column.contains("unit") ||
+          !(column.at("unit").is_string() || column.at("unit").is_null())) { return false; }
+    }
+    for (const auto &row : result.at("rows")) {
+      if (!row.is_array() || row.size() != result.at("columns").size()) { return false; }
+      if (format != "json" && !std::all_of(row.begin(), row.end(), [](const Json &cell) { return cell.is_string(); })) { return false; }
+    }
+    return std::all_of(result.at("warnings").begin(), result.at("warnings").end(), [](const Json &warning) { return warning.is_string(); });
   }
   return false;
 }

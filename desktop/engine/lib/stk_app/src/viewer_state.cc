@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <set>
+#include <stdexcept>
 
 #include "stk/bridge/client.hh"
 #include "stk/core/paths.hh"
@@ -345,6 +346,9 @@ struct ViewerState::Impl {
   ViewerSource source;
   std::string label, open_error;
   bool waiting_for_metadata = false;
+  bool workspace_suspended = false;
+  bool restored_playing = false;
+  bool frozen_workspace_result = false;
   /* Parameters to apply once the form exists (open_path). */
   Json initial_params;
   /* Result directories. */
@@ -698,7 +702,7 @@ struct ViewerState::Impl {
       cancel_prefetch();
     }
     pending_reason = reason;
-    if (self.auto_evaluate && source.evaluates()) {
+    if (!workspace_suspended && self.auto_evaluate && source.evaluates()) {
       pending_at = now() + (reason == "client" ? self.client_debounce_s : self.data_debounce_s);
     }
     else {
@@ -859,6 +863,7 @@ struct ViewerState::Impl {
 
   void show_frame(const Frame &f, EvalRecord record)
   {
+    frozen_workspace_result = false;
     result = f.result;
     shown_params = f.params;
     shown_configuration = f.configuration;
@@ -957,6 +962,7 @@ struct ViewerState::Impl {
    */
   void start_eval(const std::string &reason, const bool is_prefetch = false, const Json &step = Json())
   {
+    if (workspace_suspended) { return; }
     if (!source.evaluates()) {
       return;
     }
@@ -1240,6 +1246,7 @@ struct ViewerState::Impl {
   /** Neighbours of the shown step (ahead first while playing). */
   void schedule_prefetch()
   {
+    if (workspace_suspended) { return; }
     if (!self.prefetch_neighbours || step_param.empty() || choices.size() < 2 || prefetch || main ||
         !source.evaluates() || pending_at < kInf)
     {
@@ -1788,6 +1795,9 @@ void ViewerState::close()
   m.pending_reason.clear();
   m.pending_at = kInf;
   m.waiting_for_metadata = false;
+  m.workspace_suspended = false;
+  m.restored_playing = false;
+  m.frozen_workspace_result = false;
   m.progress = EvalProgress{};
   m.job.reset();
   m.step_param.clear();
@@ -1826,6 +1836,8 @@ void ViewerState::select_preset(const std::string &id)
     }
   }
   m.open_error.clear();
+  m.workspace_suspended = false;
+  m.restored_playing = false;
   if (id == m.preset_id && !m.schema.properties.empty()) {
     return;
   }
@@ -1871,7 +1883,7 @@ void ViewerState::set_auto_evaluate(const bool enabled)
   // An explicit step selection keeps its own request; only automatically scheduled
   // parameter edits are paused. Accepted evaluations still need explicit cancellation.
   if (m.pending_reason == "data" || m.pending_reason == "client") {
-    m.pending_at = enabled && m.source.evaluates() ?
+    m.pending_at = !m.workspace_suspended && enabled && m.source.evaluates() ?
         m.now() + (m.pending_reason == "client" ? client_debounce_s : data_debounce_s) : kInf;
   }
   m.changed();
@@ -1890,6 +1902,12 @@ std::vector<std::string> ViewerState::payload_outputs() const
 void ViewerState::evaluate_now(const std::string &reason)
 {
   Impl &m = *impl_;
+  m.workspace_suspended = false;
+  m.restored_playing = false;
+  if (!m.have_metadata()) {
+    m.presets_requested = m.catalog_requested = false;
+    m.request_metadata(false);
+  }
   m.cancel_prefetch();
   if (reason == "manual") {
     /* An explicit evaluation goes to the bridge (a live run may have new frames). */
@@ -1941,7 +1959,7 @@ std::shared_ptr<const ViewerGraphInspection> ViewerState::graph_inspection() con
   snapshot->shown_result = m.result;
   snapshot->shown_evaluation = m.last;
   snapshot->shown_resolved_parameters = m.shown_resolved_parameters;
-  if (snapshot->shown_configuration && snapshot->shown_result) {
+  if (!m.frozen_workspace_result && snapshot->shown_configuration && snapshot->shown_result) {
     snapshot->shown_graph_verified = verify_shown_graph(*snapshot->shown_configuration, *snapshot->shown_result);
   }
   if (snapshot->desired && snapshot->shown_configuration && snapshot->shown_graph_verified.value_or(false)) {
@@ -2012,6 +2030,8 @@ void ViewerState::set_step_index(const int index)
   if (index < 0 || size_t(index) >= m.choices.size()) {
     return;
   }
+  m.workspace_suspended = false;
+  m.restored_playing = false;
   const Json step = m.choices[size_t(index)];
   m.step_request_at = now();
   if (m.source.kind == SourceKind::ResultDir) {
@@ -2051,6 +2071,8 @@ void ViewerState::step_by(const int delta)
 void ViewerState::step_latest()
 {
   Impl &m = *impl_;
+  m.workspace_suspended = false;
+  m.restored_playing = false;
   if (m.source.kind == SourceKind::ResultDir) {
     set_step_index(int(m.choices.size()) - 1);
     return;
@@ -2074,6 +2096,8 @@ bool ViewerState::playing() const
 void ViewerState::set_playing(const bool playing)
 {
   Impl &m = *impl_;
+  if (playing) { m.workspace_suspended = false; }
+  m.restored_playing = false;
   m.playing = playing && m.choices.size() > 1;
   m.next_frame_at = m.playing ? now() + 1.0 / std::max(0.1, fps) : kInf;
   m.changed();
@@ -2298,6 +2322,10 @@ void ViewerState::request_export()
     job.settings.sequence = false;
     job.frames.emplace_back(m.shown_step, m.display);
   }
+  if (job.settings.sequence) {
+    m.workspace_suspended = false;
+    m.restored_playing = false;
+  }
   m.job = std::move(job);
   m.export_status = std::string(store_.tr("export.status.preparing"));
   m.advance_export();
@@ -2361,9 +2389,348 @@ bool ViewerState::write_series(const ExportJob &job, std::string *r_error)
   return ok;
 }
 
+namespace {
+
+void workspace_require(bool ok, const char *message)
+{
+  if (!ok) { throw std::invalid_argument(message); }
+}
+
+void workspace_keys(const Json &value, const std::set<std::string> &keys)
+{
+  workspace_require(value.is_object() && value.size() == keys.size(), "Invalid Viewer workspace object");
+  for (const std::string &key : keys) {
+    workspace_require(value.contains(key), "Missing Viewer workspace setting");
+  }
+}
+
+std::string workspace_text(const Json &value, const size_t limit = 8192)
+{
+  workspace_require(value.is_string(), "Viewer workspace text must be a string");
+  const auto result = value.get<std::string>();
+  workspace_require(result.size() <= limit && result.find('\0') == std::string::npos,
+                    "Viewer workspace text exceeds its limit or contains NUL");
+  return result;
+}
+
+double workspace_number(const Json &value, const double low, const double high)
+{
+  workspace_require(value.is_number(), "Viewer workspace number is invalid");
+  const double result = value.get<double>();
+  workspace_require(std::isfinite(result) && result >= low && result <= high,
+                    "Viewer workspace number is outside its bounds");
+  return result;
+}
+
+int workspace_integer(const Json &value, const int low, const int high)
+{
+  workspace_require(value.is_number_integer(), "Viewer workspace integer is invalid");
+  return int(workspace_number(value, low, high));
+}
+
+bool workspace_boolean(const Json &value)
+{
+  workspace_require(value.is_boolean(), "Viewer workspace boolean is invalid");
+  return value.get<bool>();
+}
+
+Json workspace_source(const ViewerSource &source)
+{
+  return {{"kind", source_kind_name(source.kind)}, {"path", source.path}, {"field_file", source.field_file},
+          {"connection", source.connection}, {"node", source.node}, {"workspace_id", source.workspace_id},
+          {"task_id", source.task_id}, {"series", source.series}};
+}
+
+ViewerSource workspace_source(const Json &value)
+{
+  workspace_keys(value, {"kind", "path", "field_file", "connection", "node", "workspace_id", "task_id", "series"});
+  ViewerSource source;
+  const auto kind = workspace_text(value.at("kind"), 16);
+  bool found = false;
+  for (const SourceKind candidate : {SourceKind::None, SourceKind::Payload, SourceKind::ResultDir,
+                                      SourceKind::RunDir, SourceKind::Task}) {
+    if (kind == source_kind_name(candidate)) { source.kind = candidate; found = true; }
+  }
+  workspace_require(found, "Unknown Viewer workspace source kind");
+  source.path = workspace_text(value.at("path"));
+  source.field_file = workspace_text(value.at("field_file"));
+  source.connection = workspace_text(value.at("connection"));
+  source.node = workspace_text(value.at("node"));
+  source.workspace_id = workspace_text(value.at("workspace_id"));
+  source.task_id = workspace_text(value.at("task_id"));
+  source.series = workspace_boolean(value.at("series"));
+  return source;
+}
+
+Json workspace_form_value(const ui::FormValue &value)
+{
+  return {{"kind", int(value.kind)}, {"boolean", value.b}, {"number", value.num},
+          {"text", value.str}, {"array", value.arr}, {"null_mask", value.arr_null}};
+}
+
+ui::FormValue workspace_form_value(const Json &value)
+{
+  workspace_keys(value, {"kind", "boolean", "number", "text", "array", "null_mask"});
+  ui::FormValue out;
+  out.kind = ui::FormValue::Kind(workspace_integer(value.at("kind"), 0, 4));
+  out.b = workspace_boolean(value.at("boolean"));
+  out.num = workspace_number(value.at("number"), -1e308, 1e308);
+  out.str = workspace_text(value.at("text"), 1024 * 1024);
+  workspace_require(value.at("array").is_array() && value.at("array").size() <= 4096 &&
+                    value.at("null_mask").is_array() && value.at("null_mask").size() <= value.at("array").size(),
+                    "Invalid Viewer workspace array form value");
+  for (const auto &entry : value.at("array")) { out.arr.push_back(workspace_number(entry, -1e308, 1e308)); }
+  for (const auto &entry : value.at("null_mask")) { out.arr_null.push_back(workspace_boolean(entry)); }
+  return out;
+}
+
+Json workspace_configuration(const std::optional<ViewerGraphConfiguration> &configuration)
+{
+  if (!configuration) { return Json(); }
+  const auto &c = *configuration;
+  return {{"source", workspace_source(c.source)}, {"preset_id", c.preset_id}, {"graph", c.graph},
+          {"parameters", c.parameters}, {"requested_outputs", c.requested_outputs}};
+}
+
+std::optional<ViewerGraphConfiguration> workspace_configuration(const Json &value)
+{
+  if (value.is_null()) { return std::nullopt; }
+  workspace_keys(value, {"source", "preset_id", "graph", "parameters", "requested_outputs"});
+  ViewerGraphConfiguration out;
+  out.source = workspace_source(value.at("source"));
+  out.preset_id = workspace_text(value.at("preset_id"));
+  workspace_require(value.at("graph").is_object() && value.at("parameters").is_object() &&
+                    value.at("requested_outputs").is_array() && value.at("requested_outputs").size() <= 256,
+                    "Invalid Viewer workspace graph configuration");
+  out.graph = value.at("graph"); out.parameters = value.at("parameters");
+  for (const auto &entry : value.at("requested_outputs")) {
+    out.requested_outputs.push_back(workspace_text(entry));
+  }
+  return out;
+}
+
+}  // namespace
+
+Json ViewerState::save_workspace_state() const
+{
+  const Impl &m = *impl_;
+  Json presets = Json::array(), values = Json::object(), colormaps = Json::array();
+  for (const auto &p : m.presets) { presets.push_back(p.raw); }
+  for (const auto &[name, value] : m.form.values()) { values[name] = workspace_form_value(value); }
+  if (m.colormaps) {
+    for (const auto &item : *m.colormaps) {
+      Json colors = Json::array();
+      for (const auto &c : item.lut) { colors.push_back({c.r, c.g, c.b, c.a}); }
+      colormaps.push_back({{"name", item.name}, {"lut", colors}});
+    }
+  }
+  const auto &e = export_settings;
+  const auto &p = m.probe;
+  return {{"version", 1}, {"source", workspace_source(m.source)}, {"source_label", m.label},
+          {"preset_id", m.preset_id}, {"presets", presets}, {"catalog", m.catalog}, {"colormaps", colormaps},
+          {"form_values", values}, {"initial_parameters", m.initial_params},
+          {"series_document", m.series_doc}, {"series_parameter", m.series_param}, {"step_param", m.step_param},
+          {"step_choices", m.choices}, {"shown_step", m.shown_step}, {"shown_parameters", m.shown_params},
+          {"shown_resolved_parameters", m.shown_resolved_parameters},
+          {"shown_configuration", workspace_configuration(m.shown_configuration)},
+          {"shown_result", m.result ? m.result->raw : Json()},
+          {"visibility", m.visibility}, {"opacity", m.opacity}, {"overlays", m.overlays},
+          {"auto_evaluate", auto_evaluate}, {"data_debounce_s", data_debounce_s},
+          {"client_debounce_s", client_debounce_s}, {"fps", fps}, {"loop", loop},
+          {"prefetch_neighbours", prefetch_neighbours}, {"playing", m.playing || m.restored_playing},
+          {"pending_edit", m.pending_reason}, {"open_error", m.open_error}, {"eval_error", m.eval_error},
+          {"export_settings", {{"width", e.width}, {"height", e.height}, {"magnification", e.magnification},
+             {"transparent", e.transparent}, {"overlays", e.overlays}, {"path", e.path}, {"sequence", e.sequence}}},
+          {"probe", {{"status", int(p.status)}, {"pick", {{"layer_id", p.pick.layer_id},
+             {"layer_name", p.pick.layer_name}, {"layer_type", p.pick.layer_type}, {"element", p.pick.element},
+             {"physical", p.pick.physical}, {"probe_node", p.pick.probe_node}, {"probe_dataset", p.pick.probe_dataset}}},
+             {"target", p.target}, {"sample", p.sample}, {"error", p.error}}}};
+}
+
+bool ViewerState::load_workspace_state(const Json &state, std::shared_ptr<const io::Payload> payload,
+                                      std::string *error)
+{
+  try {
+    workspace_keys(state, {"version", "source", "source_label", "preset_id", "presets", "catalog", "colormaps",
+        "form_values", "initial_parameters", "series_document", "series_parameter", "step_param", "step_choices", "shown_step", "shown_parameters",
+        "shown_resolved_parameters", "shown_configuration", "shown_result", "visibility", "opacity", "overlays",
+        "auto_evaluate", "data_debounce_s", "client_debounce_s", "fps", "loop", "prefetch_neighbours", "playing",
+        "pending_edit", "open_error", "eval_error", "export_settings", "probe"});
+    workspace_require(workspace_integer(state.at("version"), 1, 1) == 1, "Unknown Viewer workspace version");
+    size_t item_count = 0;
+    std::vector<std::pair<const Json *, int>> inspect{{&state, 0}};
+    while (!inspect.empty()) {
+      const auto [item, depth] = inspect.back(); inspect.pop_back();
+      workspace_require(++item_count <= 1000000 && depth <= 64, "Viewer workspace JSON exceeds depth/item limits");
+      if (item->is_number_float()) {
+        workspace_require(std::isfinite(item->get<double>()), "Viewer workspace JSON must be finite");
+      }
+      if (item->is_structured()) {
+        for (const auto &child : *item) { inspect.emplace_back(&child, depth + 1); }
+      }
+    }
+    workspace_require(state.dump().size() <= 16 * 1024 * 1024, "Viewer workspace metadata exceeds 16 MiB");
+    const ViewerSource source = workspace_source(state.at("source"));
+    const auto label = workspace_text(state.at("source_label"));
+    const auto preset_id = workspace_text(state.at("preset_id"));
+    const auto step_param = workspace_text(state.at("step_param"));
+    const auto series_param = workspace_text(state.at("series_parameter"));
+    if (!state.at("series_document").is_null()) { (void)io::Series::from_json(state.at("series_document")); }
+    const auto pending = workspace_text(state.at("pending_edit"), 32);
+    workspace_require(pending.empty() || pending == "step" || pending == "data" || pending == "client",
+                      "Invalid Viewer workspace pending edit");
+    const auto open_error = workspace_text(state.at("open_error"), 65536);
+    const auto eval_error = workspace_text(state.at("eval_error"), 65536);
+    workspace_require(state.at("presets").is_array() && state.at("presets").size() <= 256 &&
+                      state.at("form_values").is_object() && state.at("form_values").size() <= 4096 &&
+                      state.at("step_choices").is_array() && state.at("step_choices").size() <= 100000,
+                      "Viewer workspace metadata collections exceed their limits");
+    std::set<std::string> preset_ids;
+    for (const auto &preset : state.at("presets")) {
+      workspace_require(preset.is_object() && preset.contains("id"), "Invalid Viewer workspace preset");
+      const auto identity = workspace_text(preset.at("id"));
+      workspace_require(preset_ids.insert(identity).second, "Duplicate Viewer workspace preset");
+    }
+    if (!state.at("catalog").is_null()) {
+      (void)io::Catalog::from_json(state.at("catalog"));
+      for (const auto &preset : state.at("presets")) {
+        if (io::get_string(preset, "id") == preset_id) { (void)ui::preset_schema(preset, state.at("catalog")); }
+      }
+    }
+    const auto json_parameters = [](const Json &v) { return v.is_null() || v.is_object(); };
+    workspace_require(json_parameters(state.at("initial_parameters")) && json_parameters(state.at("shown_parameters")) &&
+                      json_parameters(state.at("shown_resolved_parameters")), "Invalid Viewer workspace parameters");
+    std::map<std::string, ui::FormValue> form_values;
+    for (auto it = state.at("form_values").begin(); it != state.at("form_values").end(); ++it) {
+      (void)workspace_text(Json(it.key()));
+      form_values.emplace(it.key(), workspace_form_value(it.value()));
+    }
+    std::map<std::string, bool> visibility;
+    std::map<std::string, double> opacity;
+    workspace_require(state.at("visibility").is_object() && state.at("visibility").size() <= 10000 &&
+                      state.at("opacity").is_object() && state.at("opacity").size() <= 10000,
+                      "Invalid Viewer workspace layer settings");
+    for (auto it = state.at("visibility").begin(); it != state.at("visibility").end(); ++it) {
+      (void)workspace_text(Json(it.key())); visibility[it.key()] = workspace_boolean(it.value());
+    }
+    for (auto it = state.at("opacity").begin(); it != state.at("opacity").end(); ++it) {
+      (void)workspace_text(Json(it.key())); opacity[it.key()] = workspace_number(it.value(), 0.0, 1.0);
+    }
+    const auto configuration = workspace_configuration(state.at("shown_configuration"));
+    std::optional<io::GraphResult> result;
+    if (!state.at("shown_result").is_null()) { result = io::GraphResult::from_json(state.at("shown_result")); }
+    const bool overlays = workspace_boolean(state.at("overlays"));
+    const bool automatic = workspace_boolean(state.at("auto_evaluate"));
+    const bool restored_playing = workspace_boolean(state.at("playing"));
+    const bool restored_loop = workspace_boolean(state.at("loop"));
+    const bool restored_prefetch = workspace_boolean(state.at("prefetch_neighbours"));
+    const double data_delay = workspace_number(state.at("data_debounce_s"), 0.0, 3600.0);
+    const double client_delay = workspace_number(state.at("client_debounce_s"), 0.0, 3600.0);
+    const double restored_fps = workspace_number(state.at("fps"), 0.1, 1000.0);
+    const auto &exported = state.at("export_settings");
+    workspace_keys(exported, {"width", "height", "magnification", "transparent", "overlays", "path", "sequence"});
+    ExportSettings settings;
+    settings.width = workspace_integer(exported.at("width"), 1, 65536);
+    settings.height = workspace_integer(exported.at("height"), 1, 65536);
+    settings.magnification = workspace_integer(exported.at("magnification"), 1, 8);
+    settings.transparent = workspace_boolean(exported.at("transparent"));
+    settings.overlays = workspace_boolean(exported.at("overlays"));
+    settings.path = workspace_text(exported.at("path"));
+    settings.sequence = workspace_boolean(exported.at("sequence"));
+    const auto &probe = state.at("probe");
+    workspace_keys(probe, {"status", "pick", "target", "sample", "error"});
+    const auto &pick = probe.at("pick");
+    workspace_keys(pick, {"layer_id", "layer_name", "layer_type", "element", "physical", "probe_node", "probe_dataset"});
+    ProbeState probe_state;
+    probe_state.status = ProbeState::Status(workspace_integer(probe.at("status"), 0, 4));
+    probe_state.pick.layer_id = workspace_text(pick.at("layer_id"));
+    probe_state.pick.layer_name = workspace_text(pick.at("layer_name"));
+    probe_state.pick.layer_type = workspace_text(pick.at("layer_type"));
+    workspace_require(pick.at("element").is_number_integer(), "Invalid Viewer pick element");
+    probe_state.pick.element = uint32_t(workspace_number(pick.at("element"), 0, double(UINT32_MAX)));
+    workspace_require(pick.at("physical").is_array() && pick.at("physical").size() == 3, "Invalid Viewer pick position");
+    for (size_t i = 0; i < 3; i++) { probe_state.pick.physical[i] = workspace_number(pick.at("physical")[i], -1e308, 1e308); }
+    probe_state.pick.probe_node = workspace_text(pick.at("probe_node"));
+    probe_state.pick.probe_dataset = workspace_text(pick.at("probe_dataset"));
+    probe_state.target = probe.at("target"); probe_state.sample = probe.at("sample");
+    probe_state.error = workspace_text(probe.at("error"), 65536);
+    if (probe_state.status == ProbeState::Status::Pending) {
+      probe_state.status = ProbeState::Status::Unavailable;
+      probe_state.error = "Probe request was paused when the workspace was exported; select a point to query again.";
+    }
+    std::vector<ui::ColormapItem> colormaps;
+    workspace_require(state.at("colormaps").is_array() && state.at("colormaps").size() <= 512,
+                      "Invalid Viewer workspace colormaps");
+    for (const auto &item : state.at("colormaps")) {
+      workspace_keys(item, {"name", "lut"});
+      ui::ColormapItem out; out.name = workspace_text(item.at("name"));
+      workspace_require(item.at("lut").is_array() && item.at("lut").size() <= 4096, "Invalid Viewer workspace colormap LUT");
+      for (const auto &color : item.at("lut")) {
+        workspace_require(color.is_array() && color.size() == 4, "Invalid Viewer workspace colormap color");
+        out.lut.push_back({uint8_t(workspace_integer(color[0], 0, 255)), uint8_t(workspace_integer(color[1], 0, 255)),
+                           uint8_t(workspace_integer(color[2], 0, 255)), uint8_t(workspace_integer(color[3], 0, 255))});
+      }
+      colormaps.push_back(std::move(out));
+    }
+    // All validation precedes changes. Invalidate every old bridge callback before replacing
+    // source state; none may resume an old graph after a successful portable restore.
+    Impl &m = *impl_;
+    m.alive = std::make_shared<int>(0);
+    close();
+    m.workspace_suspended = true;
+    m.restored_playing = restored_playing;
+    m.frozen_workspace_result = true;
+    m.source = source; m.label = label; m.preset_id = preset_id;
+    m.parse_presets({{"presets", state.at("presets")}});
+    m.presets_loaded = !state.at("presets").empty();
+    m.presets_requested = m.catalog_requested = m.colormaps_requested = true;
+    m.metadata_error.clear();
+    m.catalog = state.at("catalog");
+    m.catalog_model.reset();
+    if (!m.catalog.is_null()) { m.catalog_model = io::Catalog::from_json(m.catalog); }
+    m.colormaps = std::make_shared<const std::vector<ui::ColormapItem>>(std::move(colormaps));
+    m.initial_params = state.at("initial_parameters");
+    m.build_form(false);
+    if (m.schema.properties.empty()) { m.initial_params = state.at("initial_parameters"); }
+    m.series_doc = state.at("series_document"); m.series_param = series_param;
+    m.form_quiet = true;
+    for (const auto &[name, value] : form_values) { m.form.set(name, value); }
+    m.form_quiet = false;
+    m.step_param = step_param;
+    m.choices = state.at("step_choices").get<std::vector<Json>>();
+    m.shown_step = state.at("shown_step");
+    m.shown_params = state.at("shown_parameters");
+    m.shown_resolved_parameters = state.at("shown_resolved_parameters");
+    m.shown_configuration = configuration;
+    m.result = std::move(result);
+    m.visibility = std::move(visibility); m.opacity = std::move(opacity); m.overlays = overlays;
+    m.base = std::move(payload); m.apply_display(); m.camera_serial++;
+    m.probe = std::move(probe_state); m.probe.serial++;
+    m.pending_reason = pending; m.pending_at = kInf;
+    m.open_error = open_error; m.eval_error = eval_error;
+    auto_evaluate = automatic; data_debounce_s = data_delay; client_debounce_s = client_delay;
+    fps = restored_fps; loop = restored_loop; prefetch_neighbours = restored_prefetch;
+    export_settings = std::move(settings);
+    open_dialog = false; export_dialog = false; wake_scheduled = -1.0;
+    m.changed();
+    if (error) { error->clear(); }
+    return true;
+  }
+  catch (const std::exception &e) {
+    if (error) { *error = std::string("Invalid Viewer workspace state: ") + e.what(); }
+    return false;
+  }
+}
+
+bool ViewerState::workspace_suspended() const
+{
+  return impl_->workspace_suspended;
+}
+
 double ViewerState::pump()
 {
   Impl &m = *impl_;
+  if (m.workspace_suspended) { return kInf; }
   const double t = now();
   if (m.bridge_ready() && (!m.presets_requested || !m.catalog_requested || !m.colormaps_requested)) {
     m.request_metadata(false);

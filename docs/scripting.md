@@ -150,6 +150,7 @@ print(p.selection())
 | 数据标注 | `stk.project.mark_public/mark_private/labels`，格式 12；`mark_structure_public(table_ids)`（格式 13）只公开表的结构 |
 | 本地多维表格查询/规划 | `stk.project.table.query/views_list/views_get/paste_plan/objects_list_candidates/objects_resolve/csv_preview`，只读且要求修订；新字段配置与命名视图通过 `apply` 写入格式14，见[契约](specs/project-tables-14.md) |
 | CSV/TSV 表格导入与当前值导出 | `stk.project.csv` 共用类型校验、修订和撤销，见[CSV 交换](project-csv.md) |
+| CSV / XLSX / JSON 表格交换 | `stk.project.table_io` 提供预览、明确导入与新文件导出，见[表格文件交换](project-table-io.md)；工作空间恢复入口由桌面提供 |
 | 参数扫描生成 | `stk.project.sweep(table_id, axes, expected_revision=...)` 按范围/列表生成新行，`dry_run=True` 只返回计划，见[参数扫描](project-sweeps.md) |
 | 文件索引登记、刷新、列表、路径检查 | `stk.project.files` 已实现；不复制、删除、打开或执行文件，见[文件指南](project-files.md) |
 | 不可变输入副本、历史清单和 SHA-256 校验 | `stk.project.snapshots` 已实现，格式 4；显式复制选中文件，表格撤销不删除历史，见[输入快照](project-snapshots.md) |

@@ -1,4 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include "workspace_fields.hh"
+#include "../workspace_baseline.hh"
 #include "stk/app/analysis_graph_canvas.hh"
 #include "stk/app/analysis_graph_state.hh"
 #include "stk/app/analysis_parameter_draft.hh"
@@ -31,6 +33,36 @@ namespace {
 using io::Json;
 using Rows = std::vector<std::vector<std::string>>;
 
+Json workspace_browser(const Json &encoded)
+{
+  const auto value = workspace_json_text(encoded, AnalysisResultInspection::max_result_bytes, 4);
+  if (!value.is_object()) { throw std::invalid_argument("Invalid result browser state"); }
+  if (value.empty()) { return value; }
+  const std::set<std::string> keys{"output", "path", "offset", "property", "path_page", "scalar_page", "grid",
+      "row_offset", "column_offset", "row", "column", "name_page", "unit_page", "value_page", "jump_row", "jump_column"};
+  if (value.size() != keys.size()) { throw std::invalid_argument("Invalid result browser fields"); }
+  for (const auto &[key, item] : value.items()) {
+    if (!keys.count(key)) { throw std::invalid_argument("Unknown result browser field"); }
+    if (key == "path") {
+      if (item.is_null()) { continue; }
+      if (!item.is_array() || item.size() > AnalysisResultInspection::max_depth) { throw std::invalid_argument("Invalid result path"); }
+      for (const auto &part : item) {
+        if (!part.is_string() && (!part.is_number_integer() || part.get<int64_t>() < 0 ||
+            part.get<uint64_t>() > AnalysisResultInspection::max_result_bytes)) { throw std::invalid_argument("Invalid result path component"); }
+      }
+    }
+    else if (key == "grid") { if (!item.is_boolean()) { throw std::invalid_argument("Invalid result view"); } }
+    else if (key == "jump_row" || key == "jump_column") {
+      if (!item.is_string() || item.get_ref<const std::string &>().size() > 64) { throw std::invalid_argument("Invalid table jump draft"); }
+    }
+    else if ((key == "row" || key == "column") && item.is_null()) { continue; }
+    else if (!item.is_number_integer() || (item.is_number_unsigned() && item.get<uint64_t>() > AnalysisResultInspection::max_result_bytes) ||
+        item.get<int64_t>() < (key == "output" || key == "property" ? -1 : 0) ||
+        item.get<int64_t>() > int64_t(AnalysisResultInspection::max_result_bytes)) { throw std::invalid_argument("Invalid result browser index"); }
+  }
+  return value;
+}
+
 std::string summary(const Json &value) { return project_value_summary(value, 240); }
 std::string text(const std::string &value) { return summary(Json(value)); }
 void omitted(ui::Layout &layout, EditorContext &ctx, const size_t count)
@@ -62,7 +94,12 @@ void table(ui::Layout &layout, std::string_view key, std::vector<ui::TableColumn
 class AnalysisGraphEditor final : public Editor {
  public:
   explicit AnalysisGraphEditor(const EditorType &type) : Editor(type) {}
-  bool has_unsaved_changes() const override { return parameter_edits(); }
+  bool has_unsaved_changes() const override
+  {
+    return parameter_edits() || (!workspace_restore_.is_null() &&
+      (workspace_restore_.value("parameter_changed", false) || (!workspace_restore_.at("draft").is_null() &&
+       workspace_restore_.at("draft").at("baseline") != workspace_restore_.at("draft").at("document"))));
+  }
   bool can_change_project_selection(const std::string_view project_id) const override
   {
     return !store_ || !store_->project().project() || store_->project().project()->id != project_id || !parameter_edits();
@@ -189,7 +226,8 @@ class AnalysisGraphEditor final : public Editor {
     // A new flow may be created from metadata without opening data or evaluating a node.
     if (!state_->view() && !ctx.store.viewer().presets().empty()) {
       const auto presets = ctx.store.viewer().presets();
-      if (std::none_of(presets.begin(), presets.end(), [this](const auto &p) { return p.id == new_preset_; })) { new_preset_ = presets.front().id; }
+      // Keep only an explicit user choice in workspace state. The first available template
+      // is a presentation fallback, so an arriving read-only catalog cannot change a capture.
       std::vector<std::string> names;
       size_t selected = 0;
       for (size_t i = 0; i < presets.size(); ++i) { names.push_back(presets[i].name); if (presets[i].id == new_preset_) { selected = i; } }
@@ -212,6 +250,7 @@ class AnalysisGraphEditor final : public Editor {
     }
     // A workflow step's analysis shares the caption row with the way back, so the canvas offset stays two rows.
     auto *caption_row = breadcrumb(layout, ctx);
+    if (!workspace_restore_error_.empty()) { layout.paragraph(workspace_restore_error_); }
     if (!state_->view()) {
       layout.paragraph(ctx.tr(mode == AnalysisGraphState::Source::Run ? "analysis_runs.no_frozen_graph" :
           state_->saved() ? "analysis_documents.no_document" :
@@ -404,6 +443,66 @@ class AnalysisGraphEditor final : public Editor {
     return true;
   }
 
+  nlohmann::json save_workspace_state() const override
+  {
+    if (!workspace_restore_.is_null()) { return workspace_restore_; }
+    Json position = workspace_canvas_;
+    if (position.is_null()) { if (const auto center = canvas_.center()) { position = {{"x", center->x}, {"y", center->y}, {"zoom", canvas_.zoom()}}; } }
+    const auto node = workspace_run_ && workspace_run_->frozen && !selected_id_.empty() ? selected_id_ :
+        selected_ && canvas_view_ && *selected_ < canvas_view_->nodes.size() ? canvas_view_->nodes[*selected_].id : selected_id_;
+    const auto buffer = parameter_text_active() && parameter_ui_->edit_state() ? parameter_ui_->edit_state()->text() : parameter_buffer_;
+    const auto *frozen = state_ ? state_->frozen_run() : nullptr;
+    auto layout = save_state();
+    if (workspace_run_ && workspace_run_->frozen) { layout["run"] = true; layout["displayed"] = false; layout.erase("saved"); }
+    return {{"version", 1}, {"layout", layout}, {"project", store_ && store_->project().project() ? store_->project().project()->id : std::string()},
+      {"analysis_id", state_ && !state_->document_id().empty() ? state_->document_id() : parameter_draft_.analysis_id()},
+      {"draft", parameter_draft_.save_workspace_state()},
+      {"analysis_run_id", workspace_run_ ? workspace_run_->id : runs_ ? io::get_string(runs_->run(), "id") : std::string()},
+      {"run_plan_sha256", workspace_run_ ? workspace_run_->plan : runs_ ? io::get_string(runs_->run(), "plan_sha256") : std::string()},
+      {"frozen_run_id", workspace_run_ ? workspace_run_->frozen_id : frozen ? frozen->id : std::string()},
+      {"frozen_plan_sha256", workspace_run_ ? workspace_run_->frozen_plan : frozen ? frozen->plan_sha256 : std::string()},
+      {"result_open", workspace_run_ && workspace_run_->stage < 3 ? workspace_run_->result : bool(result_view_)},
+      {"result_browser_json", io::python_json_dumps(workspace_run_ && workspace_run_->stage < 3 ? workspace_run_->browser : save_result_browser(), true, true)},
+      {"document_name", document_name_}, {"new_preset", new_preset_}, {"selected_node", node}, {"canvas", position},
+      {"parameter_key", parameter_key_.value_or("")}, {"parameter_has_key", parameter_key_.has_value()},
+      {"parameter_buffer", buffer}, {"parameter_original", parameter_original_}, {"parameter_changed", parameter_buffer_changed_ || parameter_text_active()},
+      {"saved_section", saved_section_}, {"archived", show_archived_}, {"archived_runs", show_archived_runs_},
+      {"bindings", bindings_}, {"binding_name", binding_name_}, {"binding_path", binding_path_},
+      {"snapshot_index", snapshot_index_}, {"file_index", file_index_}, {"output_index", output_index_}, {"mapping_index", mapping_index_}};
+  }
+  bool load_workspace_state(const nlohmann::json &value) override
+  {
+    if (!workspace_fields(value, {"project", "analysis_id", "document_name", "new_preset", "selected_node", "parameter_key", "parameter_buffer",
+        "parameter_original", "binding_name", "binding_path", "analysis_run_id", "run_plan_sha256", "frozen_run_id", "frozen_plan_sha256", "result_browser_json"},
+        {"saved_section", "snapshot_index", "file_index", "output_index", "mapping_index"},
+        {"parameter_has_key", "parameter_changed", "archived", "archived_runs", "result_open"}, {"layout", "draft", "canvas", "bindings"}) ||
+        !value.contains("draft") || !value.contains("layout") || !value.contains("canvas") || !value.contains("bindings") || !value.at("bindings").is_object()) { return false; }
+    AnalysisParameterDraft checked;
+    if (!value.at("draft").is_null() && !checked.load_workspace_state(value.at("draft"), "workspace-validation")) { return false; }
+    const auto run = io::get_string(value, "analysis_run_id"), plan = io::get_string(value, "run_plan_sha256");
+    if (!run.empty() && (!canonical_uuid(run) || plan.size() != 64 ||
+        !std::all_of(plan.begin(), plan.end(), [](char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'); }))) { return false; }
+    if (run.empty() && (!plan.empty() || value.value("result_open", false))) { return false; }
+    const auto frozen = io::get_string(value, "frozen_run_id"), frozen_plan = io::get_string(value, "frozen_plan_sha256");
+    if ((!frozen.empty() && (!canonical_uuid(frozen) || frozen_plan.size() != 64 ||
+        !std::all_of(frozen_plan.begin(), frozen_plan.end(), [](char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'); }))) ||
+        (frozen.empty() && !frozen_plan.empty())) { return false; }
+    try { if (value.contains("result_browser_json")) { (void)workspace_browser(value.at("result_browser_json")); } }
+    catch (const std::exception &) { return false; }
+    if (!value.at("canvas").is_null()) {
+      const auto &position = value.at("canvas");
+      if (!position.is_object() || position.size() != 3) { return false; }
+      for (const auto *key : {"x", "y", "zoom"}) {
+        if (!position.contains(key) || !position.at(key).is_number() || !std::isfinite(position.at(key).get<double>()) ||
+            std::abs(position.at(key).get<double>()) > 1e9) { return false; }
+      }
+      if (position.at("zoom").get<double>() <= 0) { return false; }
+    }
+    if (!load_state(value.at("layout"))) { return false; }
+    workspace_run_.reset(); workspace_frozen_runs_.reset(); workspace_analysis_requested_.clear();
+    workspace_restore_error_.clear(); workspace_restore_ = value; return true;
+  }
+
  private:
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::unique_ptr<AnalysisGraphState> state_;
@@ -480,6 +579,18 @@ class AnalysisGraphEditor final : public Editor {
   size_t table_grid_name_page_ = 0, table_grid_unit_page_ = 0, table_grid_value_page_ = 0;
   AnalysisGraphCanvas canvas_;
   AppStore *store_ = nullptr;
+  Json workspace_restore_, workspace_canvas_;
+  std::string workspace_analysis_requested_, workspace_restore_error_;
+  uint64_t workspace_analysis_epoch_ = 0;
+  struct WorkspaceRun {
+    std::string id, plan, project, frozen_id, frozen_plan;
+    bool result = false, frozen = false;
+    int output = -1, stage = 0;
+    uint64_t navigation = 0;
+    Json browser;
+  };
+  std::optional<WorkspaceRun> workspace_run_;
+  std::unique_ptr<ProjectAnalysisRuns> workspace_frozen_runs_;
   bool show_archived_ = false, show_archived_runs_ = false;  // the lists show only archived analyses / runs
   std::string documents_archive_, runs_archive_;  // the archive filter and version each list was read with
   std::shared_ptr<const AnalysisGraphView> canvas_view_;
@@ -1392,6 +1503,12 @@ class AnalysisGraphEditor final : public Editor {
   }
   void place_canvas(const double width, const double height)
   {
+    if (workspace_run_ && workspace_run_->frozen) { return; }
+    if (!workspace_canvas_.is_null() && canvas_view_ && canvas_.look_at(
+        {workspace_canvas_.at("x").get<double>(), workspace_canvas_.at("y").get<double>()}, workspace_canvas_.at("zoom").get<double>(),
+        width, height, ui_scale_)) {
+      workspace_canvas_ = nullptr; fit_ = false; focus_selected_ = false; return;
+    }
     if (!fit_ && !focus_selected_) { return; }
     if (!canvas_.fit(width, height, ui_scale_)) { return; }
     fit_ = false;
@@ -1415,6 +1532,14 @@ class AnalysisGraphEditor final : public Editor {
       documents_ = std::make_unique<ProjectAnalyses>(ctx.store);
       runs_ = std::make_unique<ProjectAnalysisRuns>(ctx.store);
     }
+    if (!workspace_restore_.is_null() && ctx.store.project().project() &&
+        ctx.store.project().project()->id == io::get_string(workspace_restore_, "project") &&
+        !io::get_string(workspace_restore_, "analysis_id").empty() && !parameter_edits() && !pending_open_ &&
+        !documents_->busy() && io::get_string(documents_->selected(), "id") != io::get_string(workspace_restore_, "analysis_id") &&
+        (workspace_analysis_requested_ != io::get_string(workspace_restore_, "analysis_id") || workspace_analysis_epoch_ != documents_->epoch()) &&
+        state_->document_id() != io::get_string(workspace_restore_, "analysis_id")) {
+      pending_open_ = io::get_string(workspace_restore_, "analysis_id");
+    }
     documents_->sync();
     if (document_epoch_ != documents_->epoch()) {
       if (parameter_edits()) {
@@ -1437,6 +1562,9 @@ class AnalysisGraphEditor final : public Editor {
     }
     if (pending_open_ && documents_->supported() && !documents_->busy() && !documents_->uncertain() &&
         documents_->load(*pending_open_)) {
+      if (!workspace_restore_.is_null() && *pending_open_ == io::get_string(workspace_restore_, "analysis_id")) {
+        workspace_analysis_requested_ = *pending_open_; workspace_analysis_epoch_ = documents_->epoch();
+      }
       pending_open_.reset();
       document_navigation_ = navigation_generation_;
     }
@@ -1496,7 +1624,43 @@ class AnalysisGraphEditor final : public Editor {
       result_scalar_description_.reset(); result_scalar_text_ = {}; result_path_text_ = {};
       result_path_page_ = result_scalar_page_ = 0; result_browser_error_.clear(); clear_table_grid(); ++result_browser_generation_;
     }
+    const bool workspace_definition_missing = !workspace_restore_.is_null() && !documents_->busy() && !documents_->error().empty() &&
+        workspace_analysis_requested_ == io::get_string(workspace_restore_, "analysis_id") && workspace_analysis_epoch_ == documents_->epoch();
+    if (!workspace_restore_.is_null() && ctx.store.project().project() &&
+        ctx.store.project().project()->id == io::get_string(workspace_restore_, "project") &&
+        (io::get_string(workspace_restore_, "analysis_id").empty() ||
+         state_->document_id() == io::get_string(workspace_restore_, "analysis_id") || workspace_definition_missing)) {
+      const auto value = std::move(workspace_restore_); workspace_restore_ = nullptr;
+      if (workspace_definition_missing) { workspace_restore_error_ = std::string(store_->tr("analysis_graph.workspace_restore_failed")); }
+      if (!value.at("draft").is_null()) {
+        parameter_draft_.load_workspace_state(value.at("draft"), ctx.store.project().project()->handle);
+        parameter_epoch_ = documents_->epoch(); parameter_selection_ = documents_->selected_version();
+        const auto &selected = documents_->selected();
+        parameter_detached_ = selected.is_null() || documents_->selected_revision() != parameter_draft_.revision() ||
+          !selected.contains("document") || io::python_json_dumps(selected.at("document"), true, true) !=
+              io::python_json_dumps(parameter_draft_.baseline_document(), true, true);
+      }
+      document_name_ = value.value("document_name", std::string()); new_preset_ = value.value("new_preset", std::string());
+      selected_id_ = value.value("selected_node", std::string()); workspace_canvas_ = value.at("canvas");
+      parameter_key_ = value.value("parameter_has_key", false) ? std::optional<std::string>(value.value("parameter_key", std::string())) : std::nullopt;
+      parameter_buffer_ = value.value("parameter_buffer", std::string()); parameter_original_ = value.value("parameter_original", std::string());
+      parameter_buffer_changed_ = value.value("parameter_changed", false);
+      saved_section_ = std::clamp(int(io::get_int(value, "saved_section", 0)), 0, 1);
+      show_archived_ = value.value("archived", false); show_archived_runs_ = value.value("archived_runs", false);
+      bindings_ = value.at("bindings"); binding_name_ = value.value("binding_name", std::string("data")); binding_path_ = value.value("binding_path", std::string());
+      snapshot_index_ = int(io::get_int(value, "snapshot_index", -1)); file_index_ = int(io::get_int(value, "file_index", -1));
+      output_index_ = int(io::get_int(value, "output_index", -1)); mapping_index_ = int(io::get_int(value, "mapping_index", -1));
+      if (!io::get_string(value, "analysis_run_id").empty() || !io::get_string(value, "frozen_run_id").empty()) {
+        workspace_run_ = WorkspaceRun{io::get_string(value, "analysis_run_id"), io::get_string(value, "run_plan_sha256"),
+            io::get_string(value, "project"), io::get_string(value, "frozen_run_id"), io::get_string(value, "frozen_plan_sha256"),
+            value.value("result_open", false), value.at("layout").value("run", false),
+            output_index_, 0, navigation_generation_, value.contains("result_browser_json") ?
+                workspace_browser(value.at("result_browser_json")) : Json::object()};
+      }
+    }
+    restore_workspace_run();
     advance_run_and_show(ctx);
+    if (workspace_run_ && workspace_run_->frozen) { return; }  // apply selection/camera only to the restored frozen graph
     if (const auto shown = shown_view(); canvas_view_ != shown) {
       const auto document = state_->document_id() + "@" + std::to_string(state_->document_revision()) + "/" +
           std::to_string(int(state_->source()));
@@ -1517,6 +1681,9 @@ class AnalysisGraphEditor final : public Editor {
       }
       else {
         selected_ = canvas_view_ && !canvas_view_->nodes.empty() ? std::optional<size_t>(0) : std::nullopt;
+        if (canvas_view_ && !keep.empty()) {
+          for (size_t i = 0; i < canvas_view_->nodes.size(); ++i) { if (canvas_view_->nodes[i].id == keep) { selected_ = i; break; } }
+        }
         selected_parameter_ = 0; fit_ = true; focus_selected_ = false;
       }
     }
@@ -2112,6 +2279,125 @@ class AnalysisGraphEditor final : public Editor {
       result_path_page_ = result_scalar_page_ = 0; result_browser_error_.clear(); ++result_browser_generation_; redraw();
     }
     catch (const std::exception &error) { result_browser_error_ = error.what(); redraw(); }
+  }
+
+  Json save_result_browser() const
+  {
+    Json path = nullptr;
+    if (result_path_) {
+      path = Json::array();
+      for (const auto &part : *result_path_) {
+        if (const auto *key = std::get_if<std::string>(&part)) { path.push_back(*key); }
+        else { path.push_back(std::get<size_t>(part)); }
+      }
+    }
+    return {{"output", result_output_}, {"path", path}, {"offset", result_properties_ ? result_properties_->offset : 0},
+      {"property", result_property_}, {"path_page", result_path_page_}, {"scalar_page", result_scalar_page_}, {"grid", result_grid_mode_},
+      {"row_offset", table_grid_page_ ? table_grid_page_->row_offset : 0}, {"column_offset", table_grid_page_ ? table_grid_page_->column_offset : 0},
+      {"row", table_grid_row_ ? Json(*table_grid_row_) : Json()}, {"column", table_grid_column_ ? Json(*table_grid_column_) : Json()},
+      {"name_page", table_grid_name_page_}, {"unit_page", table_grid_unit_page_}, {"value_page", table_grid_value_page_},
+      {"jump_row", table_grid_jump_row_}, {"jump_column", table_grid_jump_column_}};
+  }
+
+  void restore_result_browser(const Json &value)
+  {
+    if (value.empty() || !result_view_) { return; }
+    try {
+      const auto index = value.at("output").get<int>();
+      result_output_ = index >= 0 && size_t(index) < result_view_->outputs().size() ? index : -1;
+      if (value.at("path").is_array()) {
+        AnalysisJsonPath path;
+        for (const auto &part : value.at("path")) {
+          if (part.is_string()) { path.emplace_back(part.get<std::string>()); }
+          else { path.emplace_back(part.get<size_t>()); }
+        }
+        browse_result(std::move(path), value.at("offset").get<size_t>());
+        select_result_property(value.at("property").get<int>());
+      }
+      const auto page = [](size_t desired, const AnalysisJsonText &text) { return text.pages.empty() ? size_t(0) : std::min(desired, text.pages.size() - 1); };
+      result_path_page_ = page(value.at("path_page").get<size_t>(), result_path_text_);
+      result_scalar_page_ = page(value.at("scalar_page").get<size_t>(), result_scalar_text_);
+      if (value.at("grid").get<bool>() && result_output_ >= 0) {
+        table_grid_ = AnalysisTableGrid::from_output(result_view_, result_view_->outputs()[size_t(result_output_)].name);
+        result_grid_mode_ = true;
+        set_table_grid_page(std::min(value.at("row_offset").get<size_t>(), table_grid_->row_count()),
+            std::min(value.at("column_offset").get<size_t>(), table_grid_->columns().size()));
+        if (!value.at("column").is_null() && value.at("column").get<size_t>() < table_grid_->columns().size()) {
+          const auto row = value.at("row").is_null() || value.at("row").get<size_t>() >= table_grid_->row_count() ?
+              std::optional<size_t>() : std::optional(value.at("row").get<size_t>());
+          select_table_grid_cell(row, value.at("column").get<size_t>());
+        }
+        table_grid_name_page_ = page(value.at("name_page").get<size_t>(), table_grid_name_);
+        table_grid_unit_page_ = page(value.at("unit_page").get<size_t>(), table_grid_unit_);
+        table_grid_value_page_ = page(value.at("value_page").get<size_t>(), table_grid_value_);
+        table_grid_jump_row_ = value.at("jump_row").get<std::string>(); table_grid_jump_column_ = value.at("jump_column").get<std::string>();
+      }
+    }
+    catch (const std::exception &error) { result_browser_error_ = error.what(); }
+  }
+
+  void restore_workspace_run()
+  {
+    if (!workspace_run_) { return; }
+    auto &saved = *workspace_run_;
+    const auto &project = store_->project().project();
+    const auto clear = [this](const bool failed = false) {
+      if (failed) {
+        workspace_restore_error_ = std::string(store_->tr("analysis_graph.workspace_restore_failed"));
+        if (workspace_run_ && workspace_run_->frozen) {
+          selected_id_.clear(); workspace_canvas_ = nullptr; state_->clear_run(); state_->show_run();
+        }
+      }
+      workspace_run_.reset(); workspace_frozen_runs_.reset();
+    };
+    if (!project || project->id != saved.project || navigation_generation_ != saved.navigation) { clear(); return; }
+    if (runs_->busy()) { return; }
+    if (saved.stage == 0) {
+      if (!saved.id.empty()) {
+        if (runs_->load(saved.id, false)) { saved.stage = 1; }
+        else { clear(true); }
+        return;
+      }
+      saved.stage = 1;
+    }
+    if (!saved.id.empty() && (io::get_string(runs_->run(), "id") != saved.id || io::get_string(runs_->run(), "plan_sha256") != saved.plan)) {
+      clear(true); return;
+    }
+    if (saved.stage == 1) {
+      if (!saved.id.empty() && saved.result && !runs_->run().at("result").is_null() && runs_->read_result()) { saved.stage = 2; return; }
+      saved.stage = 3; output_index_ = saved.output;
+    }
+    if (saved.stage == 2) {
+      if (runs_->result_inspection() && (result_view_ != runs_->result_inspection() || result_generation_ != runs_->result_generation())) { return; }
+      output_index_ = saved.output;
+      if (result_view_) { restore_result_browser(saved.browser); }
+      else { workspace_restore_error_ = std::string(store_->tr("analysis_graph.workspace_restore_failed")); }
+      saved.stage = 3;
+    }
+    const auto apply_frozen = [this, &saved, &project](const Json &run) {
+      const auto source = state_->source();
+      if (!state_->open_frozen_run(project->handle, run)) { return false; }
+      if (!saved.frozen) {
+        if (source == AnalysisGraphState::Source::Saved) { state_->show_saved(); }
+        else { state_->show_displayed(source == AnalysisGraphState::Source::Displayed); }
+      }
+      return true;
+    };
+    if (saved.stage == 3) {
+      if (saved.frozen_id.empty()) { if (saved.frozen) { state_->show_run(); } clear(); return; }
+      if (saved.frozen_id == io::get_string(runs_->run(), "id") && saved.frozen_plan == io::get_string(runs_->run(), "plan_sha256")) {
+        const bool restored = apply_frozen(runs_->run()); clear(!restored); return;
+      }
+      workspace_frozen_runs_ = std::make_unique<ProjectAnalysisRuns>(*store_);
+      if (workspace_frozen_runs_->load(saved.frozen_id, false)) { saved.stage = 4; }
+      else { clear(true); }
+      return;
+    }
+    if (workspace_frozen_runs_ && !workspace_frozen_runs_->busy()) {
+      const auto &run = workspace_frozen_runs_->run();
+      const bool restored = saved.frozen_id == io::get_string(run, "id") && saved.frozen_plan == io::get_string(run, "plan_sha256") && apply_frozen(run);
+      clear(!restored);
+    }
   }
 
   void select_result_property(const int index)

@@ -539,6 +539,49 @@ class ProjectSessions:
             except FileNotFoundError:
                 raise BridgeError("not_found", "CSV source or destination directory does not exist") from None
 
+    def table_io(self, action, params):
+        with self._operation():
+            exchange = self._get(params["handle"]).table_io
+            args = {key: value for key, value in params.items() if key != "handle"}
+            try:
+                method = {"preview": exchange.preview, "import": exchange.import_file,
+                          "export": exchange.export_file}[action]
+                return method(**args)
+            except FileExistsError:
+                raise BridgeError("conflict", "Table destination already exists; choose a new file") from None
+            except FileNotFoundError:
+                raise BridgeError("not_found", "Table source or destination directory does not exist") from None
+
+    def workspace(self, action, params):
+        from suan.project.workspace_bundle import export_workspace, preview_workspace, import_workspace, open_workspace
+        with self._operation():
+            args = dict(params)
+            handle = args.pop("handle", None)
+            if action == "export":
+                if (handle is None) != ("expected_revision" not in args):
+                    raise BridgeError("invalid_params", "Workspace project export needs both handle and expected_revision")
+                store = self._get(handle) if handle is not None else None
+                resources = list(args.pop("resources", []))
+                # Exporting the whole workspace explicitly includes files registered by the person,
+                # even when they live outside the project. The bundle service excludes credentials.
+                known = {item["path"] for item in resources}
+                if store is not None and store.info()["format_version"] >= 3:
+                    for record in store.files.list()["records"]:
+                        if not str(record.get("location", "")).startswith("external:"):
+                            continue
+                        try:
+                            resolved = store.files.resolve(record["id"], expected_revision=args.get("expected_revision"))
+                        except ProjectError:
+                            continue  # The bundle records an explicit missing-resource diagnosis.
+                        path = resolved.get("path")
+                        if path and path not in known:
+                            resources.append({"id": "file-" + record["id"], "path": path})
+                            known.add(path)
+                return export_workspace(store.directory if store else None, resources=resources, **args)
+            if handle is not None:
+                raise BridgeError("invalid_params", "Only workspace export accepts a project handle")
+            return {"preview": preview_workspace, "import": import_workspace, "open": open_workspace}[action](**args)
+
     def files(self, action, params):
         with self._operation():
             index = self._get(params["handle"]).files

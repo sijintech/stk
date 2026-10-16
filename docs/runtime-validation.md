@@ -2,6 +2,55 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-15：CSV／XLSX／JSON 与 `.stkworkspace`（本机通过，精确提交 CI 待补）
+
+- 前置：main/origin/main `4c5f1b3`，此前代码 `d03366e` Desktop 38725595367 **5/5 completed/success**，Runtime 38725595362 **8/8 success**；
+  文档头 Runtime 38729204426 **8/8**、Secret 38729204398、Docs 38729204496 均成功。当前节点没有新建分支、PR 或合并无关工作。
+- 实现：表格直接工具栏三格式预览／导入／导出，计算值交换、类型／单位／SHA／CAS、一次撤销；`.stkworkspace` 携带全部窗口和隐藏标签、
+  参数与草稿、项目一致备份／冻结对象／结果、已打开 Python 和 Viewer 文件及已登记外部文件。独立模块声明资源，不从任意字符串猜测读取路径。
+  导入目标须不存在，完整校验后采用，未知路径／缺失资源带诊断；凭据／端点／网络配置、依赖程序及活进程不迁移，恢复不执行工作。
+- Critical review 与实际修复：Excel int64／15位精度边界／subnormal／负零文字保真；JSON unset/null、object 原项目来源；
+  空目录清单、标准 macOS 系统别名、重复导出旧资源／项目根 aliases、typed opaque baseline、空项目／空表选择；
+  旧 UI 回调／bridge session、deferred 同批旧树回调、真实窗口关闭与隐藏稿保护、只读模板默认值不写持久状态。
+  恢复来源核对保留全部用户参数／窗口稿，排除三项只读 Viewer 元数据缓存；独立固定 payload 身份和 serial，真实同标签换图反例曾失败，修后通过。
+  最后独立审查实修旧表格回调访问已分离 Bridge、待打开结果队列穿过工作空间采用；保留原排队意图并拒绝替换，不清除用户请求。
+  分析草稿恢复重复读取会使草稿脱离原修订，已限制为单次来源读取；冻结运行、当前列表选择、结果浏览路径、非默认画布及选中节点分别恢复。
+  已删除的分析仍可查看已有冻结运行；读取失败保留诊断与草稿，不重试执行，不恢复轮询或下载。
+- Python：首次完整因 operations/catalog 分类不一致中止，修正工作空间为 desktop-only；一次实际完整 **3009 passed/1 failed/24 skipped/2 deselected /643.46s**，
+  唯一旧 catalog 夹具漏三项 table.io 方法，补正后完整 **3010 passed/24 skipped/2 deselected/1 warning /639.79s**。
+  后续可信根别名审查追加修正，最终完整 **3019 passed/24 skipped/2 deselected/1 warning /639.23s**；相关三版本各 **235/235、零失败／跳过**
+  （3.11 7.10s、3.12 7.08s、3.14 7.28s）。24项跳过沿用15个既有offscreen probe、2个PySide6、2个可选MCP、2个STK_PERF与3个真实MuFerro配置项。
+  中断／失败的原始日志均保留，未计为完整成功。
+- 原生：首轮定向 **69/70 /47.87s**，Fresh 状态门禁实际拒绝；诊断单例记录 AnalysisGraph `new_preset` 只读默认写入，已移除。
+  后续定向 **83/84 /22.01s**，Fresh 空 Viewer、非空 packed payload／全部 buffer／独立相机跨新 Bridge 恢复、同标签换图拒绝、
+  X11／Wayland 三个真实窗口均通过；唯一 AnalysisParameters 新夹具试图销毁未保存稿，改为明确放弃原稿后恢复包内副本。
+  后续 **87/89 /51.74s** 的两项分析参数恢复失败已修重复 get，并纠正科学夹具将绝对路径放入只允许相对路径的 source 参数的问题；生产 source 校验未放宽。
+  最终编译 build13 成功；新增／原失败反例 **11/11、零跳过 /2.58s**，含三项分析稿、三项运行／结果、两项旧表格会话及三项恢复来源保护。
+  此前结果页新增夹具曾用故意包含未声明参数的文档执行而得到 graph_error，已改为单独的有效文档和新冻结运行；原参数保真夹具保留。
+  JSON 转换、缺失头文件、新测试宏标签及字符串／JSON比较的编译错误均已修。
+  最终完整 **1539/1539、零失败／跳过 /358.17s**；本节点必跑checker **97次匹配／96个独立测试**，全部实际执行成功。
+  初次人工checker用错一个完整用例名称而拒绝“no such test”，改成实际名称后通过，没有改测试或放宽通过判据。
+- 实际点击（默认 1440×1200、Viewer 并列、项目已打开；路径键入和 Enter 另计）：CSV 导出 **3 次**；首次切 Excel／JSON 格式的导出各 **5 次**；
+  JSON 已选格式的预览／导入 **4 次**。工作空间导出完成 **4 次**、关闭弹窗另 **1 次**；新会话导入 **6 次**，真实事件与计数断言已通过。
+  中英文、900/1440宽度、GL/Vulkan **32/32 图形检查通过**；实际目检 Excel 窄窗和中文工作空间导入，修正通用“预览”及跨模式旧成功提示。
+- PET 冻结证据：格式13与明确备份升级14各 **479 文件、75.8 MB**，导出→导入→再次移动均完整；离线复核各 **1/1**（2.69s／2.74s），
+  最终系统别名修正后再次独立迁移与离线复核各 **1/1**（XML 2.642s／2.702s）。原项目 SHA 未改、11 handoffs／8 density points／25 O₂ COM samples。
+  `software_complete=true`，`material_validation=false`，没有重跑 MD。
+- 最终 wheel 离线构建和仓库外 `python -I` 安装冒烟通过：**643 成员、47901176 bytes**，七项生产模块／schema与源码逐字节相同，
+  不含 archive／desktop；openpyxl 与 defusedxml 为核心依赖。真实三格式交换、int64／精度／null-unset／公式文字与类型回导通过。
+  将 socket 连接和 Popen 改为抛错后，原资源删除及连续二次导出／迁移仍保持文件索引、冻结快照、UUID／修订／历史／相机／空目录，模型与 Runtime 请求为零。
+  wheel SHA-256 `46be6989efa67e961981bf7e0bbdf4c8befd837d60316e3d9e095149c4f27f68`。
+  sdist 离线构建 **896成员、48693234 bytes**，生产模块／schema、两指南／两契约、六测试及pyproject与构建时源码逐字节一致，无archive／desktop；
+  SHA-256 `44670f4c07a89d31dbb8079f7292f632e9fb9aae6a4063e1d1fc825a0e573002`。
+  源码包是补写本段成功结果之前的文档快照，构建时文档SHA保存在仓库外verification，避免包内记录自身SHA的循环；未冒称文档结果段也已存在于该包中。
+- 规模与限制：表格文件8 MiB／64列／10000行，实际导入仍受1000命令（XLSX/JSON另1 MiB）限制；XLSX仅值交换、JSON不携带表达式或外部对象副本。
+  工作空间默认8 GiB／20000成员、桌面状态8 MiB；不携带主机凭据／依赖／运行中进程，未知路径需明确接受不完整恢复。
+  程序／JSON文本内部路径不作子串重写；字体、DPI、驱动和窗口定位仍受目标操作系统约束。
+- 证据：原生原始 `/tmp/stk-portable-20261015/`，耐久副本 `/home/mnemora/opt/stk-validation/table-workspace-20261016-native/`（含32张截图与历史失败）；
+  Python／包／PET 耐久副本 `/home/mnemora/opt/stk-validation/table-workspace-20261016-python/`。
+  i18n **2289/2289、零问题**，16份Markdown的519个本地链接均存在；差异空白检查通过。
+  暂存约590KB经`.gitleaks.toml`／redact扫描无泄漏；推送前再次核对`d03366e`桌面5项均completed/success，门禁满足。精确提交CI待推送后补记。
+
 ## 2026-10-15：本地科研多维表格（`faf3a44` / `d03366e`，修正提交跨平台CI全部通过）
 
 - Git/CI 前置：干净 main/origin/main `73e4fbe`；Runtime 38679106858 **8/8**、Secret 38679106815、Docs 38679106830 全成功。

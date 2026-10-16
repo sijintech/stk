@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include "workspace_fields.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/model_settings.hh"
@@ -143,6 +144,37 @@ class AIEditor final : public Editor {
  public:
   explicit AIEditor(const EditorType &type) : Editor(type) {}
 
+  nlohmann::json save_workspace_state() const override
+  {
+    Json drafts = Json::array();
+    for (const auto &[key, draft] : drafts_) {
+      const auto split = key.rfind('\n');
+      if (split == std::string::npos) { continue; }
+      drafts.push_back({{"project", key.substr(split + 1)}, {"text", draft.text},
+                        {"agent_text", draft.agent_text}, {"intent", draft.intent}});
+    }
+    for (const auto &[project, draft] : workspace_drafts_) {
+      drafts.push_back({{"project", project}, {"text", draft.text}, {"agent_text", draft.agent_text}, {"intent", draft.intent}});
+    }
+    return {{"version", 1}, {"drafts", drafts}};
+  }
+  bool load_workspace_state(const nlohmann::json &value) override
+  {
+    if (!workspace_fields(value, {}, {}, {}, {"drafts"}) || !value.contains("drafts") ||
+        !value.at("drafts").is_array() || value.at("drafts").size() > 128) { return false; }
+    std::unordered_map<std::string, Draft> drafts;
+    for (const auto &item : value.at("drafts")) {
+      if (!item.is_object() || !item.contains("project") || !item.at("project").is_string() ||
+          !item.contains("text") || !item.at("text").is_string() || !item.contains("agent_text") ||
+          !item.at("agent_text").is_string() || !item.contains("intent") || !item.at("intent").is_number_integer() ||
+          item.at("intent").get<int64_t>() < 0 || item.at("intent").get<int64_t>() > 3 ||
+          io::get_string(item, "project").size() > 64 || drafts.count(io::get_string(item, "project"))) { return false; }
+      Draft draft; draft.text = io::get_string(item, "text"); draft.agent_text = io::get_string(item, "agent_text");
+      draft.intent = int(io::get_int(item, "intent", 0)); drafts.emplace(io::get_string(item, "project"), std::move(draft));
+    }
+    workspace_drafts_ = std::move(drafts); return true;
+  }
+
   void draw_header(ui::Layout &row, EditorContext &ctx) override
   {
     workspace_link(row, ctx);
@@ -183,6 +215,9 @@ class AIEditor final : public Editor {
     // intentionally not part of layout JSON; only explicitly prepared questions are persisted.
     const std::string key = state.project()->directory + "\n" + state.project()->id;
     active_draft_ = key;
+    if (const auto restored = workspace_drafts_.find(state.project()->id); restored != workspace_drafts_.end()) {
+      drafts_[key] = std::move(restored->second); workspace_drafts_.erase(restored);
+    }
     auto &draft = drafts_[key];
     // Agent sessions (format 13): a fourth purpose with its own view (steps, wait cards, record).
     auto &agent = state.agent();
@@ -1358,7 +1393,7 @@ class AIEditor final : public Editor {
     }
   }
 
-  std::unordered_map<std::string, Draft> drafts_;
+  std::unordered_map<std::string, Draft> drafts_, workspace_drafts_;
   std::string active_draft_, opening_, shown_context_, shown_exchange_;
   bool opened_history_ = false;
   bool model_has_text_ = false;

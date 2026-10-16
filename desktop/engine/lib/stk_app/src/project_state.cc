@@ -550,6 +550,55 @@ void ProjectState::refresh()
   changed();
 }
 
+bool ProjectState::adopt_workspace_project(const std::optional<bridge::ProjectInfo> &info, const Json &snapshot,
+                                           std::string table_id, std::string record_id, std::string *error)
+{
+  const auto reject = [error](const char *message) { if (error) { *error = message; } return false; };
+  if (!ready() || busy() || (selection_guard_ && !selection_guard_())) {
+    return reject("The current project has active work or unsaved drafts");
+  }
+  std::vector<ProjectTable> tables;
+  Json files = Json::object();
+  int64_t undo = -1, redo = -1;
+  try {
+    if (info) {
+      if (info->handle.empty() || !snapshot.is_object() || !snapshot.contains("project") ||
+          !snapshot.at("project").is_object() || io::get_string(snapshot.at("project"), "id") != info->id ||
+          io::get_int(snapshot.at("project"), "revision", -1) != info->revision ||
+          !snapshot.contains("tables") || !snapshot.at("tables").is_array()) {
+        return reject("Workspace project snapshot does not match its opened identity and revision");
+      }
+      for (const auto &value : snapshot.at("tables")) { tables.push_back(ProjectTable::from_json(value)); }
+      files = snapshot.value("file_index", Json::object());
+      const auto history = snapshot.value("edit_history", Json::object());
+      undo = io::get_int(history, "undo_revision", -1);
+      redo = io::get_int(history, "redo_revision", -1);
+      const auto selected = std::find_if(tables.begin(), tables.end(), [&table_id](const auto &t) { return t.id == table_id; });
+      if (!table_id.empty() && selected == tables.end()) { return reject("Workspace selected table is missing"); }
+      if (!record_id.empty() && (selected == tables.end() || std::none_of(selected->records.begin(), selected->records.end(),
+          [&record_id](const auto &r) { return r.id == record_id; }))) { return reject("Workspace selected record is missing"); }
+    }
+    else if (!table_id.empty() || !record_id.empty()) { return reject("A workspace without a project cannot select table records"); }
+  }
+  catch (const std::exception &) { return reject("Invalid workspace project snapshot"); }
+  const auto old = project_;
+  ++epoch_;
+  clear();
+  error_.clear();
+  project_ = info;
+  tables_ = std::move(tables);
+  file_index_ = std::move(files);
+  table_id_ = std::move(table_id);
+  record_id_ = std::move(record_id);
+  undo_revision_ = undo; redo_revision_ = redo;
+  snapshot_ready_ = info.has_value();
+  dirty_revision_ = info ? info->revision : -1;
+  validate_selection();
+  if (old && !old->handle.empty() && (!info || old->handle != info->handle)) { client_->project_close(old->handle); }
+  changed();
+  return true;
+}
+
 bool ProjectState::apply(Json commands, const std::optional<int64_t> expected_revision)
 {
   if (!ready() || busy() || !loaded() || project_->handle.empty()) {
@@ -1311,6 +1360,50 @@ bool ProjectState::export_csv(const std::string &destination, const std::string 
   });
   changed();
   return true;
+}
+
+bool ProjectState::import_table_file(Json request)
+{
+  sync();
+  if (client_ != store_.bridge() || !ready() || client_->state() != bridge::BridgeState::Ready ||
+      busy() || !loaded() || !request.is_object()) { return false; }
+  busy_ = true; error_.clear(); notice_.clear();
+  request["handle"] = project_->handle;
+  request["expected_revision"] = project_->revision;
+  if (request.contains("table_name")) { request["name"] = request.at("table_name"); request.erase("table_name"); }
+  bridge::CallOptions options; options.retry = bridge::CallOptions::Retry::Never;
+  on(client_->call("project.table.io.import", std::move(request), options), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); }
+    else {
+      table_id_ = io::get_string(result.value(), "table_id");
+      const auto &records = result.value().at("record_ids");
+      record_id_ = records.empty() ? std::string() : records.front().get<std::string>();
+      dirty_revision_ = std::max(dirty_revision_, io::get_int(result.value(), "revision", -1));
+    }
+    refresh();
+  });
+  changed(); return true;
+}
+
+bool ProjectState::export_table_file(Json request)
+{
+  sync();
+  if (client_ != store_.bridge() || !ready() || client_->state() != bridge::BridgeState::Ready ||
+      busy() || !loaded() || !table() || !request.is_object()) { return false; }
+  if (request.contains("table_id") && request.at("table_id") != table_id_) { return false; }
+  busy_ = true; error_.clear(); notice_.clear();
+  request["handle"] = project_->handle;
+  request["expected_revision"] = project_->revision;
+  request["table_id"] = table_id_;
+  bridge::CallOptions options; options.retry = bridge::CallOptions::Retry::Never;
+  on(client_->call("project.table.io.export", std::move(request), options), [this](const bridge::Result<Json> &result) {
+    busy_ = false;
+    if (!result) { fail(result.error()); }
+    else { notice_ = store_.catalog().format("project.csv.saved", {{"path", io::get_string(result.value(), "path")}}); changed(); }
+    if (project_ && dirty_revision_ > project_->revision) { refresh(); }
+  });
+  changed(); return true;
 }
 
 bool ProjectState::edit_files(const std::vector<std::string> &items, const bool index)

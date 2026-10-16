@@ -85,6 +85,7 @@ class EditorArea : public wm::Area {
   bool on_drop(const wm::Event &event) override;
   bool handle_event(const wm::Event &event, const wm::DrawContext &ctx) override;
   nlohmann::json save_state() const override;
+  nlohmann::json save_workspace_state() const;
   bool load_state(const nlohmann::json &state) override;
 
   /** Region names. */

@@ -10,10 +10,12 @@
 #include "../wm/support.hh"
 #include "scalar_volume_support.hh"
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <thread>
 
 namespace stk::app {
 namespace {
@@ -51,6 +53,7 @@ class AnalysisGraphRunEditorPython : public ::testing::Test {
   Json document, snapshot, frozen;
   std::string file_id;
   int64_t revision = 0;
+  size_t expected_result_reads = 0, expected_run_starts = 0;
   AppStore &store() { return f.shell->store(); }
   ProjectState &project() { return store().project(); }
   ViewerState &viewer() { return store().viewer(); }
@@ -75,18 +78,25 @@ class AnalysisGraphRunEditorPython : public ::testing::Test {
     ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return condition(); }, 30)) << client->bridge_log().text();
   }
   void click(const char *key) {
-    const auto *value = widget(key); ASSERT_NE(value, nullptr); ASSERT_TRUE(value->enabled); ASSERT_TRUE(value->on_click);
+    const auto *value = widget(key);
+    ASSERT_NE(value, nullptr);
+    ASSERT_TRUE(value->enabled);
+    ASSERT_TRUE(value->on_click);
     value->on_click(); f.drv->frame();
   }
   void row(const std::string &key) {
-    const auto *value = widget("analysis_parameters"); ASSERT_NE(value, nullptr); ASSERT_TRUE(value->enabled);
+    const auto *value = widget("analysis_parameters");
+    ASSERT_NE(value, nullptr);
+    ASSERT_TRUE(value->enabled);
     const auto spec = *value->table; int selected = -1;
     for (int index = 0; index < spec.rows; ++index) { if (spec.cell(index, 0) == (key.empty() ? "\"\"" : key)) { selected = index; } }
     ASSERT_GE(selected, 0); spec.selected.assign(selected); f.drv->frame();
     ASSERT_NE(widget("analysis_parameter_value"), nullptr);
   }
   void type(const std::string &text, const bool finish = true) {
-    const auto *input = widget("analysis_parameter_value"); ASSERT_NE(input, nullptr); ASSERT_TRUE(input->enabled);
+    const auto *input = widget("analysis_parameter_value");
+    ASSERT_NE(input, nullptr);
+    ASSERT_TRUE(input->enabled);
     const auto [x, y] = f.widget_center(input->key); f.drv->click(x, y);
 #ifdef __APPLE__
     constexpr auto primary = wm::ModOS;
@@ -163,10 +173,13 @@ class AnalysisGraphRunEditorPython : public ::testing::Test {
     options.python.configured = python; options.state_dir = directory.str() + "/bridge"; options.cache_dir = directory.str() + "/cache";
     options.env["PYTHONPATH"] = STK_REPO_ROOT; options.env["STK_PROFILES_FILE"] = directory.str() + "/profiles.json";
     options.env["STK_STATE_DIR"] = directory.str() + "/runtime"; options.env["STK_TOKEN_PLAN_API_KEY"] = "";
+    options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.command = {python, "-u", core::path_to_utf8(directory.path() / "bridge.py"), directory.str(), "--stdio",
         "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
     options.executor = loop.executor(); options.strict = options.validate = true; options.call_timeout_s = 5;
-    client = bridge::Client::create(options); ASSERT_TRUE(client->start()); ASSERT_TRUE(client->wait_ready(60));
+    client = bridge::Client::create(options);
+    ASSERT_TRUE(client->start());
+    ASSERT_TRUE(client->wait_ready(60));
     loop.run_ready(); store().set_bridge(client.get()); project().sync();
     viewer().set_auto_evaluate(false); viewer().prefetch_neighbours = false;
     ASSERT_TRUE(project().create(directory.str() + "/project", "Parameter edits"));
@@ -189,7 +202,8 @@ class AnalysisGraphRunEditorPython : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(prepare(run_id, frozen));
     project().refresh();
     ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
-    ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph)); ASSERT_TRUE(area().editor().load_state({{"saved", true}}));
+    ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph));
+    ASSERT_TRUE(area().editor().load_state({{"saved", true}}));
     area().set_sidebar_open(true);
     f.screen.set_maximized(&area()); area().find_region(EditorArea::kSidebar)->set_size_1x(510); f.drv->frame();
     ASSERT_NO_FATAL_FAILURE(click("analysis_list"));
@@ -202,9 +216,9 @@ class AnalysisGraphRunEditorPython : public ::testing::Test {
   void TearDown() override {
     EXPECT_EQ(viewer().evaluations_started(), 0); EXPECT_FALSE(viewer().evaluating()); EXPECT_FALSE(viewer().payload());
     EXPECT_TRUE(calls("graph.evaluate").empty());
-    EXPECT_TRUE(calls("project.analysis_runs.result").empty());
+    EXPECT_EQ(calls("project.analysis_runs.result").size(), expected_result_reads);
     EXPECT_TRUE(calls("project.snapshots.resolve").empty());
-    EXPECT_TRUE(calls("project.analysis_runs.start").empty());
+    EXPECT_EQ(calls("project.analysis_runs.start").size(), expected_run_starts);
     viewer().close(); project().attach(nullptr); store().set_bridge(nullptr);
     if (client) { client->close(); EXPECT_EQ(client->stats().schema_violations, 0u); } loop.run_ready();
   }
@@ -272,7 +286,8 @@ TEST_F(AnalysisGraphRunEditorPython, RetainedModeAndInspectCallbacksPreserveActi
     ~ExtraScreen() { shell.forget(screen); }
   } extra(*f.shell);
   auto *target = dynamic_cast<EditorArea *>(extra.screen.find_area("a2")); ASSERT_NE(target, nullptr);
-  ASSERT_TRUE(target->set_tab_type(0, kEditorProject)); ASSERT_TRUE(target->editor().show_view("review"));
+  ASSERT_TRUE(target->set_tab_type(0, kEditorProject));
+  ASSERT_TRUE(target->editor().show_view("review"));
   extra.screen.set_maximized(target); extra.driver.frame(); loop.run_ready(); extra.driver.frame();
   if (const auto *json = extra.screen.ui()->find("a2/main/review_json")) {  // The JSON editor is folded away.
     const auto header = json->rect;
@@ -356,6 +371,154 @@ TEST_F(AnalysisGraphRunEditorPython, SelectingAnotherRunDoesNotAutomaticallyRepl
   ASSERT_NO_FATAL_FAILURE(choose_mode(2));
   ASSERT_NO_FATAL_FAILURE(click("analysis_run_inspect"));
   EXPECT_EQ(cell("graph_run_provenance", std::string(store().tr("analysis_runs.run_id"))), second_run_id);
+}
+
+TEST_F(AnalysisGraphRunEditorPython, WorkspaceRestoresIndependentFrozenCopyAndSelectedRunWithoutExecuting)
+{
+  Json second; ASSERT_NO_FATAL_FAILURE(prepare(second_run_id, second));
+  ASSERT_NO_FATAL_FAILURE(inspect());
+  ASSERT_NO_FATAL_FAILURE(choose_mode(2));
+  ASSERT_NO_FATAL_FAILURE(select_run(second_run_id));
+  ASSERT_NO_FATAL_FAILURE(choose_mode(3));
+  auto saved = area().editor().save_workspace_state();
+  ASSERT_GT(document.at("graph").at("nodes").size(), 1u);
+  const auto selected_node = document.at("graph").at("nodes")[1].at("id").get<std::string>();
+  saved["selected_node"] = selected_node;
+  saved["canvas"] = {{"x", 123.25}, {"y", -45.5}, {"zoom", 1.75}};
+  EXPECT_EQ(saved.at("analysis_run_id").get<std::string>(), second_run_id);
+  EXPECT_EQ(saved.at("run_plan_sha256").get<std::string>(), second.at("plan_sha256").get<std::string>());
+  EXPECT_EQ(saved.at("frozen_run_id").get<std::string>(), run_id);
+  EXPECT_EQ(saved.at("frozen_plan_sha256").get<std::string>(), frozen.at("plan_sha256").get<std::string>());
+  const auto identity = handle();
+  Json forbidden = Json::object();
+  for (const auto *method : {"project.analysis_runs.prepare", "project.analysis_runs.start", "project.analysis_runs.recover",
+                            "project.analysis_runs.result", "project.snapshots.resolve", "graph.evaluate", "script.execute",
+                            "download.start"}) { forbidden[method] = calls(method).size(); }
+  const auto gets = calls("project.analysis_runs.get").size();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorLogs));
+  ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph));
+  ASSERT_TRUE(area().editor().load_workspace_state(saved));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("graph_run_provenance") != nullptr; }));
+  EXPECT_EQ(widget("graph_mode")->index.value(), 3);
+  EXPECT_EQ(cell("graph_run_provenance", std::string(store().tr("analysis_runs.run_id"))), run_id);
+  EXPECT_EQ(cell("graph_run_provenance", std::string(store().tr("analysis_runs.plan_hash"))), frozen.at("plan_sha256").get<std::string>());
+  for (int i = 0; i < 12; ++i) { loop.run_ready(); f.drv->frame(); }
+  const auto restored = area().editor().save_workspace_state();
+  EXPECT_EQ(restored.at("analysis_run_id").get<std::string>(), second_run_id);
+  EXPECT_EQ(restored.at("frozen_run_id").get<std::string>(), run_id);
+  EXPECT_EQ(restored.at("selected_node").get<std::string>(), selected_node);
+  ASSERT_TRUE(restored.at("canvas").is_object());
+  EXPECT_NEAR(restored.at("canvas").at("x").get<double>(), 123.25, 1e-5);
+  EXPECT_NEAR(restored.at("canvas").at("y").get<double>(), -45.5, 1e-5);
+  EXPECT_NEAR(restored.at("canvas").at("zoom").get<double>(), 1.75, 1e-5);
+  EXPECT_EQ(handle(), identity);
+  EXPECT_GE(calls("project.analysis_runs.get").size(), gets + 2);
+  for (const auto &item : forbidden.items()) { EXPECT_EQ(calls(item.key()).size(), item.value().get<size_t>()) << item.key(); }
+  EXPECT_TRUE(store().scripts().history().empty());
+}
+
+TEST_F(AnalysisGraphRunEditorPython, WorkspaceRestoresCompletedLocalResultAndBrowserSelectionWithoutReplaying)
+{
+  // Other cases intentionally freeze undeclared metadata to test exact inspection.
+  // Execute a separate run whose overrides satisfy the actual scientific graph.
+  auto executable = document;
+  executable["parameters"] = {{"path", "input.dat"}, {"field", "input"}, {"component", 1}, {"unit", nullptr}};
+  Json updated, executable_frozen;
+  ASSERT_NO_FATAL_FAILURE(call("project.analyses.update", {{"handle", handle()}, {"analysis_id", analysis_id},
+      {"name", "Executable local analysis"}, {"document", executable}, {"expected_revision", revision}}, updated));
+  revision = updated.at("revision").get<int64_t>();
+  ASSERT_NO_FATAL_FAILURE(prepare(second_run_id, executable_frozen));
+  constexpr const char *completed_run_id = second_run_id;
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy(); }));
+  Json started, completed;
+  ASSERT_NO_FATAL_FAILURE(call("project.analysis_runs.start", {{"handle", handle()}, {"run_id", completed_run_id}}, started));
+  expected_run_starts = 1;
+  bool settled = false;
+  for (int attempt = 0; attempt < 300; ++attempt) {
+    Json response;
+    ASSERT_NO_FATAL_FAILURE(call("project.analysis_runs.get", {{"handle", handle()}, {"run_id", completed_run_id}}, response));
+    completed = response.at("run");
+    const auto status = io::get_string(completed, "status");
+    if (status == "succeeded" || status == "failed") { settled = true; break; }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(settled);
+  ASSERT_EQ(io::get_string(completed, "status"), "succeeded") << completed.dump(2);
+  ASSERT_TRUE(completed.at("result").is_object());
+  ASSERT_NO_FATAL_FAILURE(run_list());
+  ASSERT_NO_FATAL_FAILURE(select_run(completed_run_id));
+  ASSERT_NO_FATAL_FAILURE(click("analysis_run_read_result"));
+  ++expected_result_reads;
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("analysis_result_outputs") != nullptr; }));
+  const auto outputs = *widget("analysis_result_outputs")->table;
+  int output = -1;
+  for (int i = 0; i < outputs.rows; ++i) { if (outputs.cell(i, 0) == "view") { output = i; } }
+  ASSERT_GE(output, 0); outputs.selected.assign(output); f.drv->frame();
+  ASSERT_NE(widget("analysis_result_properties"), nullptr);
+  ASSERT_NE(widget("analysis_run_output"), nullptr);
+  widget("analysis_run_output")->index.assign(1); f.drv->frame();
+  const auto saved = area().editor().save_workspace_state();
+  EXPECT_EQ(saved.at("analysis_run_id").get<std::string>(), completed_run_id);
+  EXPECT_EQ(saved.at("run_plan_sha256").get<std::string>(), completed.at("plan_sha256").get<std::string>());
+  EXPECT_TRUE(saved.at("result_open").get<bool>());
+  const auto browser = io::parse_json(saved.at("result_browser_json").get<std::string>());
+  EXPECT_EQ(browser.at("output"), output); EXPECT_TRUE(browser.at("path").is_array());
+  Json forbidden = Json::object();
+  for (const auto *method : {"project.analysis_runs.prepare", "project.analysis_runs.start", "project.analysis_runs.recover",
+                            "project.snapshots.resolve", "graph.evaluate", "script.execute", "download.start"}) {
+    forbidden[method] = calls(method).size();
+  }
+  const auto gets = calls("project.analysis_runs.get").size(), reads = calls("project.analysis_runs.result").size();
+  const auto identity = handle();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorLogs));
+  ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph));
+  ASSERT_TRUE(area().editor().load_workspace_state(saved));
+  ++expected_result_reads;
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] {
+    const auto *results = widget("analysis_result_outputs");
+    const auto *properties = widget("analysis_result_properties");
+    return results && results->table && properties &&
+        io::parse_json(area().editor().save_workspace_state().at("result_browser_json").get<std::string>()) == browser;
+  }));
+  EXPECT_EQ(widget("graph_mode")->index.value(), 2);
+  EXPECT_EQ(widget("analysis_saved_section")->index.value(), 1);
+  EXPECT_EQ(widget("analysis_result_outputs")->table->selected.value(), output);
+  EXPECT_EQ(widget("analysis_run_output")->index.value(), 1);
+  EXPECT_EQ(area().editor().save_workspace_state().at("analysis_run_id").get<std::string>(), completed_run_id);
+  EXPECT_EQ(handle(), identity);
+  EXPECT_EQ(calls("project.analysis_runs.get").size(), gets + 1);
+  EXPECT_EQ(calls("project.analysis_runs.result").size(), reads + 1);
+  for (const auto &item : forbidden.items()) { EXPECT_EQ(calls(item.key()).size(), item.value().get<size_t>()) << item.key(); }
+  EXPECT_TRUE(store().scripts().history().empty());
+}
+
+TEST_F(AnalysisGraphRunEditorPython, WorkspaceRestoresAFrozenRunAfterItsSavedAnalysisWasDeleted)
+{
+  ASSERT_NO_FATAL_FAILURE(inspect());
+  Json removed;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision},
+      {"commands", Json::array({{{"op", "delete_record"}, {"id", analysis_id}}})}}, removed));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy(); }));
+  const auto saved = area().editor().save_workspace_state();
+  ASSERT_EQ(saved.at("frozen_run_id").get<std::string>(), run_id);
+  const auto prepared = calls("project.analysis_runs.prepare").size();
+  const auto reads = calls("project.analyses.get").size();
+  ASSERT_TRUE(area().set_tab_type(0, kEditorLogs));
+  ASSERT_TRUE(area().set_tab_type(0, kEditorAnalysisGraph));
+  ASSERT_TRUE(area().editor().load_workspace_state(saved));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("graph_run_provenance") != nullptr; }));
+  EXPECT_EQ(cell("graph_run_provenance", std::string(store().tr("analysis_runs.run_id"))), run_id);
+  EXPECT_EQ(cell("graph_run_provenance", std::string(store().tr("analysis_runs.plan_hash"))), frozen.at("plan_sha256").get<std::string>());
+  const auto settled = calls("project.analyses.get").size();
+  EXPECT_LE(settled, reads + 1);
+  for (int i = 0; i < 12; ++i) { loop.run_ready(); f.drv->frame(); }
+  EXPECT_EQ(calls("project.analyses.get").size(), settled) << "Missing mutable analysis is not retried on every draw";
+  EXPECT_EQ(calls("project.analysis_runs.prepare").size(), prepared);
+  EXPECT_TRUE(calls("project.analysis_runs.start").empty());
+  EXPECT_TRUE(calls("project.analysis_runs.recover").empty());
+  EXPECT_TRUE(calls("download.start").empty()); EXPECT_TRUE(store().scripts().history().empty());
 }
 
 TEST_F(AnalysisGraphRunEditorPython, ProjectReopenClearsInactiveFrozenCopyAndRejectsRetainedInspect)

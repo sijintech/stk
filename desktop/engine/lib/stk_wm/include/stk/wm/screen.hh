@@ -554,6 +554,10 @@ class Screen {
    * on any error returns false with `r_error` and leaves the screen unchanged.
    */
   bool from_json(const nlohmann::json &json, std::string *r_error = nullptr);
+  /** Move an already validated editor tree into this screen without parsing/recreating it.
+   * Global bars stay on each screen; transient UI bindings, queued tree actions and input
+   * capture are dropped on both screens before any old area is destroyed. */
+  void adopt_tree_from(Screen &prepared);
 
   /** \} */
 
@@ -598,6 +602,7 @@ class Screen {
   Region *hover_ = nullptr;
   Area *active_area_ = nullptr;
   std::vector<std::function<void()>> deferred_;
+  uint64_t deferred_epoch_ = 0;
   Capture capture_ = Capture::None;
   Region *capture_region_ = nullptr;
   bool needs_redraw_ = true;

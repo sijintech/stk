@@ -543,6 +543,10 @@ bool EditorArea::load_state(const nlohmann::json &state)
       (screen() && screen()->ui() && screen()->ui()->text_input_active())) {
     return false;
   }
+  if (state.contains("workspace") && !state.at("workspace").is_boolean()) { return false; }
+  const bool workspace = state.value("workspace", false);
+  if (workspace && (state.size() != 5 || !state.contains("tabs") || !state.contains("active") ||
+                    !state.contains("toolbar") || !state.contains("sidebar"))) { return false; }
   bool toolbar = toolbar_open_, sidebar = sidebar_open_;
   if (const auto t = state.find("toolbar"); t != state.end()) {
     if (!t->is_boolean()) {
@@ -563,6 +567,7 @@ bool EditorArea::load_state(const nlohmann::json &state)
     }
     std::vector<std::unique_ptr<Editor>> created;
     for (const auto &t : *tabs) {
+      if (workspace && (!t.is_object() || t.size() != 2 || !t.contains("type") || !t.contains("state"))) { return false; }
       const auto type = t.is_object() ? t.find("type") : t.end();
       if (!t.is_object() || type == t.end() || !type->is_string()) {
         return false;
@@ -572,7 +577,7 @@ bool EditorArea::load_state(const nlohmann::json &state)
         return false;
       }
       if (const auto st = t.find("state"); st != t.end()) {
-        if (!st->is_object() || !e->load_state(*st)) {
+        if (!st->is_object() || !(workspace ? e->load_workspace_state(*st) : e->load_state(*st))) {
           return false;
         }
       }
@@ -592,6 +597,16 @@ bool EditorArea::load_state(const nlohmann::json &state)
   sidebar_open_ = sidebar;
   sync_regions();
   return true;
+}
+
+nlohmann::json EditorArea::save_workspace_state() const
+{
+  nlohmann::json state = save_state();
+  for (size_t i = 0; i < tabs_.size(); ++i) {
+    state["tabs"][i]["state"] = tabs_[i]->save_workspace_state();
+  }
+  state["workspace"] = true;
+  return state;
 }
 
 /** \} */

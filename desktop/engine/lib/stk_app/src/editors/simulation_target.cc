@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include "workspace_fields.hh"
 #include "simulation_target.hh"
 #include "project_navigation.hh"
 #include "stk/app/app_store.hh"
@@ -12,6 +13,13 @@ namespace {
 using io::Json;
 const std::vector<std::string> kSimulationBackends = {"local", "slurm", "pbs"};
 }  // namespace
+
+bool SimulationTarget::load_workspace_state(const io::Json &value)
+{
+  if (!workspace_fields(value, {"options"}, {}, {}, {}, 65536)) { return false; }
+  options_ = value.value("options", std::string(R"({"backend":"local","ranks":1,"threads_per_rank":1})"));
+  return true;
+}
 
 std::string SimulationTarget::runtime_controls(ui::Layout &panel, EditorContext &ctx)
 {

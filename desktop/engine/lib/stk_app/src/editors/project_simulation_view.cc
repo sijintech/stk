@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include "workspace_fields.hh"
 #include "project_simulation_view.hh"
 #include "archive_controls.hh"
 #include "project_navigation.hh"
@@ -46,6 +47,28 @@ bool execute(ScriptState &scripts, const std::string &engine, const std::string 
 }
 }  // namespace
 
+io::Json ProjectSimulationView::save_workspace_state() const
+{
+  if (!workspace_pending_.is_null()) { return workspace_pending_; }
+  return {{"version", 1}, {"project", project_}, {"engine", engine_}, {"source", source_}, {"script", script_},
+    {"study_recipe", study_recipe_}, {"study_id", study_id_}, {"batch_id", batch_id_},
+    {"batch_member", batch_member_}, {"batch_selection", batch_selection_}, {"archived_batches", show_archived_batches_},
+    {"muferro_target", target_.save_workspace_state()}, {"lammps_target", lammps_target_.save_workspace_state()}};
+}
+bool ProjectSimulationView::load_workspace_state(const Json &value)
+{
+  if (!workspace_fields(value, {"project", "source", "script", "study_recipe", "study_id", "batch_id", "batch_member"},
+      {"engine"}, {"archived_batches"}, {"batch_selection", "muferro_target", "lammps_target"}, 1024 * 1024)) { return false; }
+  if (!value.contains("batch_selection") || !value.at("batch_selection").is_array() || value.at("batch_selection").size() > 1000 ||
+      !std::all_of(value.at("batch_selection").begin(), value.at("batch_selection").end(), [](const Json &item) {
+        return item.is_string() && item.get_ref<const std::string &>().size() <= 64;
+      })) { return false; }
+  SimulationTarget muferro, lammps;
+  if (!muferro.load_workspace_state(value.value("muferro_target", Json::object())) ||
+      !lammps.load_workspace_state(value.value("lammps_target", Json::object()))) { return false; }
+  workspace_pending_ = value; ++generation_; return true;
+}
+
 void ProjectSimulationView::select_engine(int index)
 {
   if (index < 0 || index > 1 || index == engine_) { return; }
@@ -84,6 +107,17 @@ void ProjectSimulationView::sync_project(ProjectState &state)
     study_id_.clear();
     study_create_pending_ = false;
     study_recipe_ = "{}";
+  }
+  if (!workspace_pending_.is_null() && io::get_string(workspace_pending_, "project") == project_) {
+    const auto value = std::move(workspace_pending_); workspace_pending_ = nullptr;
+    engine_ = std::clamp(int(io::get_int(value, "engine", 0)), 0, 1);
+    source_ = value.value("source", std::string()); script_ = value.value("script", std::string());
+    study_recipe_ = value.value("study_recipe", std::string("{}")); study_id_ = value.value("study_id", std::string());
+    batch_id_ = value.value("batch_id", std::string()); batch_member_ = value.value("batch_member", std::string());
+    batch_selection_ = value.at("batch_selection").get<std::vector<std::string>>();
+    show_archived_batches_ = value.value("archived_batches", false);
+    target_.load_workspace_state(value.at("muferro_target")); lammps_target_.load_workspace_state(value.at("lammps_target"));
+    observed_table_ = state.table_id(); ++generation_;
   }
   if (observed_table_ != state.table_id()) {
     observed_table_ = state.table_id();

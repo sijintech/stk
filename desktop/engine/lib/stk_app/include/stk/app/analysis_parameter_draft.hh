@@ -60,6 +60,8 @@ class AnalysisParameterDraft {
    * before changing the existing draft. Re-pinning the same baseline also fences old callbacks. */
   void pin(std::string handle, std::string analysis_id, int64_t revision,
            std::string name, const io::Json &document);
+  io::Json save_workspace_state() const;
+  bool load_workspace_state(const io::Json &value, const std::string &handle);
   void reset();
   bool pinned() const { return !handle_.empty(); }
   bool current(const std::string &handle, int64_t revision) const;

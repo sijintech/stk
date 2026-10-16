@@ -10,7 +10,8 @@ add_executable(stk-project-tests project_test.cc script_test.cc project_table_vi
   analysis_result_inspection_test.cc analysis_result_inspection_editor_test.cc
   analysis_table_grid_test.cc analysis_table_grid_editor_test.cc skills_catalog_test.cc analysis_links_editor_test.cc
   workflow_editor_test.cc workflow_draft_test.cc table_editor_test.cc project_file_tree_test.cc
-  workbench_modules_test.cc table_workbench_state_test.cc table_workbench_editor_test.cc table_object_preview_test.cc)
+  workbench_modules_test.cc table_workbench_state_test.cc table_workbench_editor_test.cc table_object_preview_test.cc
+  table_io_editor_test.cc workspace_transfer_test.cc)
 target_link_libraries(stk-project-tests PRIVATE stk_jobs_test_support GTest::gtest_main)
 if(MSVC)
   target_compile_options(stk-project-tests PRIVATE /W3 /utf-8 /bigobj)
@@ -97,6 +98,18 @@ set_target_properties(stk-analysis-graph-run-render PROPERTIES RUNTIME_OUTPUT_DI
 if(MSVC)
   target_compile_options(stk-analysis-graph-run-render PRIVATE /W3 /utf-8 /bigobj)
 endif()
+# Exchange and portable workspace dialogs: real bridge state, both window sizes and languages.
+foreach(_mode table_io_xlsx_wide table_io_xlsx_narrow table_io_json_wide table_io_json_narrow workspace_export_wide workspace_export_narrow workspace_import_wide workspace_import_narrow)
+  foreach(_lang en zh)
+    foreach(_be ${_jobs_backends})
+      add_test(NAME ${_mode}_render_${_be}_${_lang} COMMAND stk-project-render --editor ${_mode}
+        --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/${_mode}_${_be}_${_lang}.png")
+      set_tests_properties(${_mode}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120
+        ENVIRONMENT "${_jobs_env_headless}" PASS_REGULAR_EXPRESSION "wrote"
+        FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
+    endforeach()
+  endforeach()
+endforeach()
 foreach(_mode wide narrow)
   foreach(_lang en zh)
     foreach(_be ${_jobs_backends})

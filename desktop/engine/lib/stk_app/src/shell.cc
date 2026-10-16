@@ -13,6 +13,7 @@
 #include "stk/app/project_attention.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/viewer_state.hh"
+#include "stk/app/workspace_transfer.hh"
 #include "stk/core/paths.hh"
 #include "stk/gfx/fonts.hh"
 #include "stk/ui/ui.hh"
@@ -567,6 +568,7 @@ bool AppShell::has_unsaved_changes() const
 bool AppShell::can_close_screen(wm::Screen *screen) const
 {
   if (!screen || std::find(screens_.begin(), screens_.end(), screen) == screens_.end()) { return true; }
+  if (workspace_busy_) { return false; }
   if (screen->ui() && screen->ui()->text_input_active()) { return false; }
   for (const auto *base : screen->areas()) {
     const auto *area = dynamic_cast<const EditorArea *>(base);
@@ -685,6 +687,7 @@ class AppShell::TopBar final : public wm::Region {
         }
       });
     }
+    shell_.workspace_transfer().draw(ui, &screen_);
     const ui::Rect r = ui_rect();
     const ui::Style &st = ui.style();
     wm::CsdLayout csd;
@@ -886,8 +889,11 @@ AppShell::AppShell(ShellOptions options) : options_(std::move(options))
 AppShell::~AppShell()
 {
   alive_.reset();
+  workspace_transfer_.reset();
   store_.on_change = nullptr;
   store_.toast = nullptr;
+  for (const auto &screen : workspace_screens_) { std::erase(screens_, screen.get()); }
+  workspace_screens_.clear();
 }
 
 void AppShell::forget(wm::Screen &screen, wm::Window *window)
@@ -1120,6 +1126,15 @@ std::vector<ui::MenuEntry> AppShell::file_menu(wm::Screen &screen)
                  store_.viewer().open_dialog = true;
                  store_.changed();
                }});
+  m.push_back({std::string(store_.tr("workspace.transfer.export")), [this, weak, s] {
+    if (weak.lock()) { workspace_transfer().show(s, false); }
+  }});
+  m.push_back({std::string(store_.tr("workspace.transfer.import")), [this, weak, s] {
+    if (weak.lock()) { workspace_transfer().show(s, true); }
+  }});
+  m.push_back({std::string(store_.tr("workspace.transfer.open")), [this, weak, s] {
+    if (weak.lock()) { workspace_transfer().show_open(s); }
+  }});
   m.push_back({std::string(store_.tr("app.menu.file.save_layout")),
                [this, s]() { save(*s, window_, layout_path); },
                !layout_path.empty()});

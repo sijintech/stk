@@ -12,9 +12,13 @@ struct EditorContext;
 /** View-local selection/scroll content; the transient draft itself is shared by ProjectState. */
 class ProjectReviewView {
  public:
+  io::Json save_workspace_state() const;
+  bool load_workspace_state(const io::Json &value);
   void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
  private:
   void saved_drafts(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
+  io::Json workspace_pending_;
+  std::optional<std::pair<int, int>> workspace_selection_;
   std::shared_ptr<const ProjectReview> shown_;
   std::string draft_title_, selected_draft_, draft_project_;
   int selected_ = 0, category_ = 0, details_row_ = -1, details_category_ = -1;

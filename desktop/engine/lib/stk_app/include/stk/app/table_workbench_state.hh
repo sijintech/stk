@@ -52,6 +52,7 @@ class TableWorkbenchState {
   const io::Json &candidates() const;
   const io::Json &resolved_object() const;
   const io::Json &csv_preview() const;
+  const io::Json &io_preview() const;
 
   bool load_views(Complete complete = {});
   bool load_view(const std::string &id, Complete complete = {});
@@ -63,7 +64,7 @@ class TableWorkbenchState {
   bool object_candidates(io::Json request, Complete complete = {});
   /** Request keys: reference. Resolution is metadata-only and never opens or executes it. */
   bool resolve_object(io::Json request, Complete complete = {});
-  /** Only the seven documented project.table read/plan methods are accepted. The source handle
+  /** Only the eight documented project.table read/plan methods are accepted. The source handle
    * and revision are injected; supplied reserved keys must already match the current source.
    * A new call of the same method cancels the older callback, independently of other methods. */
   bool scoped_call(const std::string &method, io::Json request, Complete complete = {});
@@ -88,6 +89,6 @@ class TableWorkbenchState {
   std::string project_id_, handle_, table_id_, session_, error_, error_method_;
   int64_t revision_ = -1;
   uint64_t epoch_ = 0, version_ = 0;
-  std::array<Request, 7> requests_;
+  std::array<Request, 8> requests_;
 };
 }  // namespace stk::app

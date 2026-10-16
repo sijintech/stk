@@ -80,12 +80,17 @@ def _resolve(root, location, path):
         if not candidate.is_relative_to(root):
             raise ProjectError("Project file path now resolves outside the project; register the external file explicitly")
     elif location in {"external:posix", "external:windows"}:
-        if location != "external:" + PLATFORM:
-            raise ProjectError("External file path belongs to another platform; register its current local location")
-        syntax = PureWindowsPath(path) if PLATFORM == "windows" else PurePosixPath(path)
-        if not syntax.is_absolute():
-            raise ProjectError("External file paths must be absolute")
-        candidate = Path(path).resolve()
+        from .workspace_paths import resolve_workspace_path
+        relocated = resolve_workspace_path(root, location, path)
+        if relocated is not None:
+            candidate = relocated
+        else:
+            if location != "external:" + PLATFORM:
+                raise ProjectError("External file path belongs to another platform; register its current local location")
+            syntax = PureWindowsPath(path) if PLATFORM == "windows" else PurePosixPath(path)
+            if not syntax.is_absolute():
+                raise ProjectError("External file paths must be absolute")
+            candidate = Path(path).resolve()
     else:
         raise ProjectError("File index location must be project, external:posix or external:windows")
     name = candidate.name.casefold() if PLATFORM == "windows" else candidate.name

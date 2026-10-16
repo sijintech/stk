@@ -4,6 +4,8 @@
 #include "stk/app/skill_catalog.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/viewer_state.hh"
+#include "stk/app/workspace_transfer.hh"
+#include "stk/io/payload.hh"
 #include "stk/core/paths.hh"
 #include "stk/app/bridge_status.hh"
 #include "stk/app/shell.hh"
@@ -14,7 +16,9 @@
 #include "stk/app/jobs_state.hh"
 #include "stk/platform/file_dialog.hh"
 #include "../bridge/support.hh"
+#include "../wm/support.hh"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -42,6 +46,12 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (output.empty()) { return 2; }
+  const bool table_exchange = editor == "table_io_xlsx_wide" || editor == "table_io_xlsx_narrow" ||
+                              editor == "table_io_json_wide" || editor == "table_io_json_narrow";
+  const bool workspace_export = editor == "workspace_export_wide" || editor == "workspace_export_narrow";
+  const bool workspace_import = editor == "workspace_import_wide" || editor == "workspace_import_narrow";
+  const bool portable_ui = table_exchange || workspace_export || workspace_import;
+  const bool portable_narrow = portable_ui && editor.ends_with("_narrow");
   const bool ai_stream = editor == "ai_stream";
   const bool workspace = editor == "workspace" || editor == "workspace_narrow";
   const bool skills = editor == "skills" || editor == "skills_narrow";
@@ -55,7 +65,7 @@ int main(int argc, char **argv)
   const bool pet_study = editor == "pet_study" || editor == "pet_study_narrow";
   const bool batch_page = editor == "batches" || editor == "batches_lammps" || editor == "batches_lammps_narrow";
   const bool simulation_page = editor == "simulation" || batch_page || lammps;
-  const int canvas_width = editor == "workspace_narrow" || editor == "skills_narrow" ? 560 :
+  const int canvas_width = portable_ui ? (portable_narrow ? 900 : 1440) : editor == "workspace_narrow" || editor == "skills_narrow" ? 560 :
       editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ||
       editor == "simulation_lammps_narrow" || editor == "batches_lammps_narrow" || editor == "pet_study_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
@@ -68,7 +78,8 @@ int main(int argc, char **argv)
   bo.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
   bo.env["STK_STATE_DIR"] = dir.str() + "/runtime";
   bo.env["STK_TOKEN_PLAN_API_KEY"] = "";
-  if (!lammps) { bo.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model"; }
+  if (portable_ui) { bo.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt; }
+  else if (!lammps) { bo.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model"; }
   bo.executor = loop.executor();
   bo.strict = bo.validate = true;
   std::string error;
@@ -135,14 +146,14 @@ int main(int argc, char **argv)
       commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", temperature}, {"value", 300 + i * 25}});
       commands.push_back({{"op", "set_cell"}, {"table_id", table}, {"record_id", id}, {"field_id", label}, {"value", "Prepared / 待运行"}});
       commands.push_back({{"op", "set_expression"}, {"table_id", table}, {"record_id", id}, {"field_id", derived},
-                          {"expression", i == 4 ? "base / 0" : "base + quantity(10, \"K\")"},
+                          {"expression", i == 4 && !portable_ui ? "base / 0" : "base + quantity(10, \"K\")"},
                           {"bindings", {{"base", {{"record_id", id}, {"field_id", temperature}}}}}});
     }
     ok = ok && state.apply(commands) && loop.pump_until([&] { return !state.busy(); }, 30);
     ok = ok && state.loaded() && state.project()->revision == 1;
     if (ok) {
-      auto *area = dynamic_cast<app::EditorArea *>(screen.find_area("a2"));
-      area->set_tab_type(0, workspace ? app::kEditorWorkspace : skills ? app::kEditorSkills : editor == "python" ? app::kEditorPython :
+      auto *area = dynamic_cast<app::EditorArea *>(screen.find_area(portable_ui ? "a4" : "a2"));
+      area->set_tab_type(0, portable_ui ? app::kEditorTable : workspace ? app::kEditorWorkspace : skills ? app::kEditorSkills : editor == "python" ? app::kEditorPython :
                          ai ? app::kEditorAI : app::kEditorProject);
       if (editor == "python") {
         auto &scripts = shell.store().scripts();
@@ -403,13 +414,113 @@ int main(int argc, char **argv)
              loop.pump_until([&] { return !state.busy() && !state.recent_loading(); }, 30);
         ok = ok && state.close() && loop.pump_until([&] { return !state.busy(); }, 30);
       }
-      if (editor != "offline") { screen.set_maximized(area); }
+      if (portable_ui) {
+        state.select_table(table); state.select_record("40000000-4444-4444-8444-444444444444");
+        auto &viewer = shell.store().viewer();
+        viewer.prefetch_neighbours = false;
+        viewer.open_payload(std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) +
+            "/desktop/tests/viewer/fixtures/muferro_domains.stkp")), "Synthetic reference / 合成参考");
+        static SilentDialog portable_dialog;
+        shell.store().jobs().file_dialog = &portable_dialog;
+      }
+      if (editor != "offline" && !portable_ui) { screen.set_maximized(area); }
       wm::DrawContext ctx;
       ctx.ui_scale = 1;
       ctx.fonts = &gpu->fonts();
       ctx.rect = {0, 0, canvas_width, 900};
       ctx.now = 100;
       gfx::Image image;
+      if (portable_ui) {
+        // Actual bridge-backed inputs and actual widget events. No import is applied and no
+        // external model, graph evaluation, Runtime or simulation is started by these modes.
+        wmtest::ScreenDriver driver(screen, canvas_width, 900, 1);
+        driver.ctx.fonts = &gpu->fonts();
+        const auto render = [&] {
+          screen.run_deferred();
+          const bool drawn = gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+          if (!drawn) { ok = false; }
+          return drawn;
+        };
+        const auto visible = [&](const char *key) {
+          const auto *widget = screen.ui()->find(key);
+          const ui::Rect canvas{0, 0, float(canvas_width), 900};
+          return widget && widget->rect.intersect(widget->clip) == widget->rect &&
+                 widget->rect.intersect(canvas) == widget->rect;
+        };
+        const auto click = [&](const char *key) {
+          const auto *widget = screen.ui()->find(key);
+          if (!widget || !widget->enabled || !visible(key)) {
+            error = std::string("Unreachable portable-workspace control: ") + key; ok = false; return false;
+          }
+          const bool handled = driver.click(int(widget->rect.cx()), 899 - int(widget->rect.cy()));
+          ok = ok && handled; render(); return handled;
+        };
+        const auto type = [&](const char *key, const std::string &value) {
+          if (!click(key)) { return false; }
+          driver.key(wm::Key::A, wm::ModCtrl | wm::ModOS);
+          screen.ui()->handle_event(ui::Event::text_input(value));
+          driver.key(wm::Key::Enter); render(); return true;
+        };
+        const auto file_action = [&](const char *translation) {
+          const auto *file = screen.ui()->find("file");
+          if (!file) { ok = false; return false; }
+          const auto name = shell.store().tr(translation);
+          const auto found = std::find_if(file->menu.begin(), file->menu.end(), [&](const auto &entry) { return entry.text == name; });
+          if (found == file->menu.end()) { error = "Missing workspace file action"; ok = false; return false; }
+          const auto item = "popup/" + std::to_string(found - file->menu.begin());
+          return click("file") && click(item.c_str());
+        };
+        ok = ok && render() && loop.pump_until([&] {
+          render(); const auto *grid = screen.ui()->find("records");
+          return grid && grid->table && grid->table->rows == 5 && !state.busy();
+        }, 30);
+        auto &viewer = shell.store().viewer();
+        const auto base = viewer.base_payload();
+        const auto camera = viewer.camera_serial(), payload = viewer.payload_serial();
+        const auto revision = state.project()->revision;
+        const std::string archive = dir.str() + "/portable.stkworkspace";
+        if (table_exchange) {
+          const bool xlsx = editor.starts_with("table_io_xlsx");
+          const std::string format = xlsx ? "xlsx" : "json";
+          const std::string source = dir.str() + "/preview." + format;
+          ok = ok && state.export_table_file({{"table_id", table}, {"format", format}, {"destination", source}}) &&
+               loop.pump_until([&] { return !state.busy(); }, 30) && state.error().empty();
+          ok = ok && render() && click("table_io") && click("table_io_format");
+          ok = ok && click(xlsx ? "popup/1" : "popup/2") && type("table_csv_source", source) && click("table_csv_preview");
+          ok = ok && loop.pump_until([&] {
+            render(); const auto *preview = screen.ui()->find("table_csv_preview_grid");
+            return preview && preview->table && preview->table->rows == 5;
+          }, 30);
+          ok = ok && type("table_csv_name", lang == "zh" ? "合成科研数据" : "Synthetic observations");
+          if (xlsx) {
+            ok = ok && click("csv_column0/type") && click("popup/2") && type("csv_column0/unit", "K");
+            const auto *sheet = screen.ui()->find("table_io_sheet");
+            ok = ok && sheet && sheet->items.size() == 1;
+          }
+          else { ok = ok && screen.ui()->find("csv_column0/type") == nullptr; }
+          ok = ok && visible("table_csv_import") && visible("table_io_close") &&
+               screen.ui()->find("table_csv_import")->enabled;
+        }
+        else if (workspace_export) {
+          ok = ok && file_action("workspace.transfer.export") && type("workspace_export_path", archive) &&
+               visible("workspace_export") && visible("workspace_transfer_close");
+        }
+        else {
+          std::optional<bridge::Result<io::Json>> exported;
+          ok = ok && shell.export_workspace(archive, [&](auto result) { exported = std::move(result); }) &&
+               loop.pump_until([&] { screen.run_deferred(); return exported.has_value(); }, 30) && exported->ok();
+          ok = ok && render() && file_action("workspace.transfer.import") && type("workspace_import_source", archive) && click("workspace_preview");
+          ok = ok && loop.pump_until([&] {
+            render(); return !shell.workspace_transfer().busy() && shell.workspace_transfer().preview().is_object();
+          }, 30);
+          ok = ok && type("workspace_import_destination", dir.str() + "/restored-workspace") &&
+               visible("workspace_import") && visible("workspace_transfer_close") &&
+               shell.workspace_transfer().preview().value("complete", false) && screen.ui()->find("workspace_import")->enabled;
+        }
+        ok = ok && render() && state.project()->revision == revision && viewer.base_payload() == base &&
+             viewer.camera_serial() == camera && viewer.payload_serial() == payload && viewer.evaluations_started() == 0 &&
+             shell.store().scripts().history().empty() && screen.maximized() == nullptr && client->stats().schema_violations == 0;
+      }
       if (editor == "review" || editor == "review_errors" || editor == "drafts") {
         ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
         if (const auto *widget = screen.ui()->find("a2/main/project_view")) { widget->index.assign(1); }

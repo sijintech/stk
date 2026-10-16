@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include "stk/io/json.hh"
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -24,6 +26,8 @@ class ProjectTableEditor {
 
   bool can_change_project_selection(std::string_view project_id) const;
   bool has_unsaved_changes() const;
+  io::Json save_workspace_state() const;
+  bool load_workspace_state(const io::Json &);
   /** Select a field from a companion grid; refuses to abandon this component's draft. */
   void select_field(std::string_view id);
   /** A companion grid supplies its visible stable rows, preserving this form's stale-action fence. */

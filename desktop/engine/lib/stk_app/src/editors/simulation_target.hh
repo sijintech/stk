@@ -13,6 +13,8 @@ class JobsState;
  * shared by the simulation batch panel and the workflow run panel. */
 class SimulationTarget {
  public:
+  io::Json save_workspace_state() const { return {{"version", 1}, {"options", options_}}; }
+  bool load_workspace_state(const io::Json &value);
   /** Runtime picker (choosing one makes it the active connection). Returns the active Runtime's id when
    * it is a direct/SSH profile and not offline, else "". */
   std::string runtime_controls(ui::Layout &panel, EditorContext &ctx);

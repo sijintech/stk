@@ -16,6 +16,8 @@ struct EditorContext;
 /** Native controls call the shared built-in MuFerro/LAMMPS workflows. */
 class ProjectSimulationView {
  public:
+  io::Json save_workspace_state() const;
+  bool load_workspace_state(const io::Json &value);
   void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void draw_batches(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void draw_pet_studies(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
@@ -23,6 +25,7 @@ class ProjectSimulationView {
   void sync_project(ProjectState &state);
   void select_engine(int index);
   bool context_current(const ProjectState &state, const std::string &project, const std::string &handle, uint64_t generation) const;
+  io::Json workspace_pending_;
   SimulationTarget target_;
   SimulationTarget lammps_target_;
   int engine_ = 0;

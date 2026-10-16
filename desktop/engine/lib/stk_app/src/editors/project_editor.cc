@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include "workspace_fields.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/editor_area.hh"
@@ -70,7 +71,10 @@ class ProjectEditor final : public Editor {
   void draw_main(ui::Layout &layout, EditorContext &ctx) override
   {
     auto &state = ctx.store.project();
-    state.sync();
+    state.sync(); workspace_project_state_ = &state;
+    if (workspace_review_source_ && state.project() && state.project()->id == workspace_project_) {
+      state.set_review_source(*workspace_review_source_); workspace_review_source_.reset();
+    }
     if (!state.ready()) {
       layout.paragraph(ctx.tr("project.bridge_required"));
     }
@@ -209,6 +213,41 @@ class ProjectEditor final : public Editor {
     if (value.contains("name") && value["name"].is_string()) {
       name_ = value["name"].get<std::string>();
     }
+    return true;
+  }
+
+  nlohmann::json save_workspace_state() const override
+  {
+    return {{"version", 1}, {"directory", directory_}, {"name", name_}, {"view", project_view_},
+      {"file_project", file_project_}, {"file_paths", file_paths_}, {"input_snapshot", input_snapshot_}, {"file_preset", file_preset_},
+      {"csv_project", csv_project_}, {"csv_source", csv_source_}, {"csv_destination", csv_destination_}, {"csv_name", csv_name_},
+      {"csv_types", csv_types_}, {"csv_units", csv_units_}, {"csv_tsv", csv_tsv_},
+      {"tables", tables_.save_workspace_state()}, {"simulation", simulation_view_.save_workspace_state()},
+      {"discussion", discussion_view_.save_workspace_state()}, {"review", review_view_.save_workspace_state()},
+      {"project_id", workspace_project_state_ && workspace_project_state_->project() ? workspace_project_state_->project()->id : workspace_project_},
+      {"review_source", workspace_review_source_.value_or(workspace_project_state_ ? workspace_project_state_->review_source() : "[]")}};
+  }
+  bool load_workspace_state(const nlohmann::json &value) override
+  {
+    if (!workspace_fields(value, {"directory", "name", "file_project", "file_paths", "input_snapshot", "file_preset",
+        "csv_project", "csv_source", "csv_destination", "csv_name", "csv_types", "csv_units", "project_id", "review_source"}, {"view"}, {"csv_tsv"},
+        {"tables", "simulation", "discussion", "review"}) || !value.contains("tables") || !value.contains("simulation") ||
+        !value.contains("discussion") || !value.contains("review")) { return false; }
+    ProjectTableEditor tables;
+    ProjectSimulationView simulation; ProjectDiscussionView discussion; ProjectReviewView review;
+    if (!tables.load_workspace_state(value.at("tables")) || !simulation.load_workspace_state(value.at("simulation")) ||
+        !discussion.load_workspace_state(value.at("discussion")) || !review.load_workspace_state(value.at("review"))) { return false; }
+    directory_ = value.value("directory", std::string()); name_ = value.value("name", std::string());
+    project_view_ = std::clamp(int(io::get_int(value, "view", 0)), 0, 5);
+    file_project_ = value.value("file_project", std::string()); file_paths_ = value.value("file_paths", std::string());
+    input_snapshot_ = value.value("input_snapshot", std::string()); file_preset_ = value.value("file_preset", std::string("volume"));
+    csv_project_ = value.value("csv_project", std::string()); csv_source_ = value.value("csv_source", std::string());
+    csv_destination_ = value.value("csv_destination", std::string()); csv_name_ = value.value("csv_name", std::string());
+    csv_types_ = value.value("csv_types", std::string("{}")); csv_units_ = value.value("csv_units", std::string("{}"));
+    csv_tsv_ = value.value("csv_tsv", false);
+    tables_.load_workspace_state(value.at("tables")); simulation_view_.load_workspace_state(value.at("simulation"));
+    discussion_view_.load_workspace_state(value.at("discussion")); review_view_.load_workspace_state(value.at("review"));
+    workspace_project_ = value.value("project_id", std::string()); workspace_review_source_ = value.value("review_source", std::string("[]"));
     return true;
   }
 
@@ -531,6 +570,9 @@ class ProjectEditor final : public Editor {
   }
 
 
+  ProjectState *workspace_project_state_ = nullptr;
+  std::string workspace_project_;
+  std::optional<std::string> workspace_review_source_;
   int project_view_ = 0;
   ProjectTableEditor tables_;
   ProjectReviewView review_view_;

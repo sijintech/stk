@@ -402,6 +402,30 @@ class ProbeEditor final : public Editor {
     }
   }
 
+  nlohmann::json save_workspace_state() const override
+  {
+    return {{"version", 1}, {"typed", typed_}, {"position", position_}};
+  }
+
+  bool load_workspace_state(const nlohmann::json &state) override
+  {
+    try {
+      if (!state.is_object() || state.size() != 3 || !state.contains("version") ||
+          !state.at("version").is_number_integer() || state.at("version") != 1 ||
+          !state.contains("typed") || !state.at("typed").is_boolean() ||
+          !state.contains("position") || !state.at("position").is_array() || state.at("position").size() != 3) { return false; }
+      std::array<double, 3> position;
+      for (size_t i = 0; i < 3; i++) {
+        if (!state.at("position")[i].is_number()) { return false; }
+        position[i] = state.at("position")[i].get<double>();
+        if (!std::isfinite(position[i])) { return false; }
+      }
+      typed_ = state.at("typed").get<bool>(); position_ = position;
+      return true;
+    }
+    catch (const std::exception &) { return false; }
+  }
+
  private:
   bool typed_ = false;
   std::array<double, 3> position_{};

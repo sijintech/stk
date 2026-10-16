@@ -32,6 +32,12 @@ cmake --build build --target stk_editor_analysis
 
 这些是 CMake 对象库，允许逐模块修改和编译；还不是运行时加载的二进制插件 ABI。
 模块间的共享服务留在 `stk_app`：项目 UUID/修订/选择/撤销、Viewer 状态、Python worker、运行与来源记录。
+`Editor::save_workspace_state/load_workspace_state` 为各模块独立定义可移植参数；`EditorArea` 捕获全部标签，
+`AppShell` 校验并恢复整组窗口，`WorkspaceTransfer` 负责显式预览与传输交互。普通布局保存继续使用原有 hooks。
+`Editor::workspace_resource_paths` 让各模块声明已明确打开的本地输入文件；Python 页声明已打开的 `.py`，
+未打开的路径输入、保存目标和目录浏览根不自动变成递归打包资源。
+表格文件解析在 `suan/project/table_io.py`，工作空间容器和路径重定位在 `workspace_bundle.py` / `workspace_paths.py`；
+格式和边界见[表格交换](project-table-io.md)与[工作空间](design/portable-workspaces.md)。
 Python 服务仍在 `suan/`，目录列举和程序文件读写经同一桌面桥完成。UI 每帧不遍历目录，
 各编辑器不另建数据库、调度器或模型客户端。通用单元格点击能力位于 `stk_ui`，区域交换位于 `stk_wm`。
 

@@ -4,7 +4,8 @@
 字面量、稳定引用、轻量公式、错误定位、数据库备份/升级、修订冲突检查和持久撤销/重做。
 Python 接口支持 Linux/macOS/Windows，不需要启动 Runtime 或安装科学/Qt 可选依赖。
 文件登记、元数据检查与外部编辑入口见[项目文件索引](project-files.md)，同样使用普通类型化表格和撤销。
-表格 CSV/TSV 导入、类型声明、当前值导出和原子撤销见[CSV 交换](project-csv.md)。
+表格 CSV/TSV、Excel（XLSX）和类型化 JSON 的导入、预览、当前值导出和原子撤销见[表格文件交换](project-table-io.md)。
+全部窗口、参数、草稿及项目资源的跨机器打包使用 [`.stkworkspace` 工作空间](design/portable-workspaces.md)。
 按范围或取值列表一次生成多行参数见[参数扫描生成](project-sweeps.md)，整次生成可一次撤销。
 不可变文件副本见[输入快照](project-snapshots.md)，参数与远端任务关联见[运行记录](project-runs.md)。
 独立 Table 页提供格内编辑、批量粘贴、保存视图与项目对象字段，详见[本地科研多维表格](design/multidimensional-tables.md)。

@@ -175,5 +175,28 @@ TEST_F(ProjectFileTreePython, CodeActionReusesRightEditorAndRejectsHiddenOriginW
   EXPECT_EQ(f.screen.maximized(), nullptr);
   app.set_bridge(nullptr); loop.run_ready();
 }
+TEST_F(ProjectFileTreePython, WorkspaceRestoresExpandedDirectoriesAndSelectionAtTheNewOpening)
+{
+  ASSERT_TRUE(tree->refresh()); ASSERT_NO_FATAL_FAILURE(loaded(*tree));
+  ASSERT_TRUE(tree->toggle("inputs")); ASSERT_NO_FATAL_FAILURE(loaded(*tree));
+  tree->select(tree->pages().at("inputs").at("entries").at(0));
+  const auto saved = tree->save_workspace_state(); EXPECT_FALSE(saved.contains("handle"));
+  ProjectFileTree restored(store);
+  ASSERT_TRUE(restored.load_workspace_state(saved));
+  ASSERT_TRUE(loop.pump_until([&] {
+    restored.sync(); return !restored.busy() && io::get_string(restored.selected(), "path") == "inputs/case.py";
+  }, 30));
+  EXPECT_TRUE(restored.expanded("inputs")); EXPECT_EQ(project().project()->revision, 0);
+}
+
+TEST_F(ProjectFileTreePython, WorkspaceRejectsEscapingTreePathsAndImportedHandles)
+{
+  auto saved = tree->save_workspace_state(); saved["expanded"] = {"../outside"};
+  EXPECT_FALSE(tree->load_workspace_state(saved));
+  saved = tree->save_workspace_state(); saved["handle"] = "old-opening";
+  EXPECT_FALSE(tree->load_workspace_state(saved));
+  EXPECT_FALSE(tree->busy()); EXPECT_EQ(project().project()->revision, 0);
+}
+
 }  // namespace
 }  // namespace stk::app

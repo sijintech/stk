@@ -51,6 +51,8 @@ class TableEditor final : public Editor {
   }
   nlohmann::json save_state() const override { return tables_.save_state(); }
   bool load_state(const nlohmann::json &state) override { return tables_.load_state(state); }
+  nlohmann::json save_workspace_state() const override { return tables_.save_workspace_state(); }
+  bool load_workspace_state(const nlohmann::json &state) override { return tables_.load_workspace_state(state); }
 
  private:
   TableWorkbench tables_;

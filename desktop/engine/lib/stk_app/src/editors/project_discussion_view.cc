@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "project_discussion_view.hh"
+#include "workspace_fields.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/project_discussion.hh"
@@ -9,6 +10,7 @@
 #include "editor_text.hh"
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 namespace stk::app {
 namespace {
@@ -25,6 +27,25 @@ int index(const std::vector<std::string> &ids, const std::string &id)
   return it == ids.end() ? -1 : int(it - ids.begin());
 }
 }  // namespace
+
+io::Json ProjectDiscussionView::save_workspace_state() const
+{
+  if (!workspace_pending_.is_null()) { return workspace_pending_; }
+  return {{"version", 1}, {"project", project_}, {"title", title_}, {"text", text_}, {"table", table_},
+    {"row", row_}, {"field", field_}, {"selected", selected_}, {"rows", rows_}, {"fields", fields_},
+    {"category", category_}, {"captured_selected", captured_selected_},
+    {"context", shown_context_}, {"message", shown_message_}, {"request", shown_request_}};
+}
+bool ProjectDiscussionView::load_workspace_state(const io::Json &value)
+{
+  if (!workspace_fields(value, {"project", "title", "text", "table", "row", "field", "selected", "context", "message", "request"},
+      {"category", "captured_selected"}, {}, {"rows", "fields"}, 512 * 1024)) { return false; }
+  for (const auto *name : {"rows", "fields"}) {
+    if (!value.contains(name) || !value.at(name).is_array() || value.at(name).size() > 100) { return false; }
+    for (const auto &item : value.at(name)) { if (!item.is_string() || item.get_ref<const std::string &>().size() > 64) { return false; } }
+  }
+  workspace_pending_ = value; return true;
+}
 
 void ProjectDiscussionView::capture_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
 {
@@ -149,6 +170,21 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
     captured_.reset(); captured_error_.clear();
     model_.clear(); model_initialized_ = false;
   }
+  if (!workspace_pending_.is_null() && io::get_string(workspace_pending_, "project") == project_) {
+    const auto value = std::move(workspace_pending_); workspace_pending_ = nullptr;
+    title_ = value.value("title", std::string()); text_ = value.value("text", std::string());
+    table_ = value.value("table", std::string()); row_ = value.value("row", std::string()); field_ = value.value("field", std::string());
+    selected_ = value.value("selected", std::string()); rows_ = value.at("rows").get<std::vector<std::string>>();
+    fields_ = value.at("fields").get<std::vector<std::string>>(); category_ = std::clamp(int(io::get_int(value, "category", 0)), 0, 3);
+    workspace_cell_ = std::max(0, int(io::get_int(value, "captured_selected", 0)));
+    workspace_open_ = io::get_string(value, category_ == 0 ? "context" : category_ == 1 ? "message" : category_ == 3 ? "request" : "context");
+  }
+  if (!workspace_open_.empty() && discussion.supported() && !discussion.busy() && !state.busy()) {
+    const auto id = std::exchange(workspace_open_, std::string());
+    if (category_ == 1) { discussion.load_message(id); }
+    else if (category_ == 3) { discussion.load_request(id); }
+    else { discussion.load_context(id); }
+  }
   layout.paragraph(ctx.tr("discussion.hint"));
   if (!discussion.supported()) { layout.paragraph(ctx.tr("discussion.unsupported")); return; }
   const bool enabled = !state.busy() && !discussion.busy();
@@ -243,7 +279,7 @@ void ProjectDiscussionView::draw(ui::Layout &layout, EditorContext &ctx, Project
       context_details_ = ui::LogBuffer(std::numeric_limits<size_t>::max());
       context_details_.append(context.dump(2));
       captured_.reset(); captured_error_.clear();
-      captured_selected_ = 0; captured_detail_ = -1;
+      captured_selected_ = workspace_cell_.value_or(0); workspace_cell_.reset(); captured_detail_ = -1;
       try { captured_ = std::make_shared<CapturedProjectTable>(project_context_table(context)); }
       catch (const std::exception &error) { captured_error_ = error.what(); }
     }

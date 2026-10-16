@@ -17,6 +17,8 @@ class TableWorkbench {
   void draw(ui::Layout &, EditorContext &);
   io::Json save_state() const;
   bool load_state(const io::Json &);
+  io::Json save_workspace_state() const;
+  bool load_workspace_state(const io::Json &);
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

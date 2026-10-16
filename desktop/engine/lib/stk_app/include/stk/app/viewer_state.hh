@@ -375,6 +375,14 @@ class ViewerState {
   /** Writes the stk.series/1 manifest of a finished sequence (called by the exporter). */
   static bool write_series(const ExportJob &job, std::string *r_error = nullptr);
 
+  /** Portable, inert workspace state. Payload bytes are carried separately by the bundle.
+   * Import never opens the recorded source, resumes playback, probes or evaluates. */
+  io::Json save_workspace_state() const;
+  bool load_workspace_state(const io::Json &state, std::shared_ptr<const io::Payload> payload,
+                            std::string *error = nullptr);
+  /** Automatic edits/prefetch remain paused until an explicit run/step/play action. */
+  bool workspace_suspended() const;
+
   /* ---- Main loop ---- */
 
   /** Runs due work (debounced edits, playback, prefetch, metadata); returns the absolute time

@@ -259,9 +259,9 @@ bool ProjectAnalysisRuns::read(const std::string &id, const bool begin_following
     }
   });
 }
-bool ProjectAnalysisRuns::load(const std::string &id)
+bool ProjectAnalysisRuns::load(const std::string &id, const bool begin_following)
 {
-  const bool accepted = read(id, true);
+  const bool accepted = read(id, begin_following);
   if (accepted) {
     ++selection_generation_; following_ = false;
     reusable_inputs_.reset(); ++reusable_inputs_generation_;

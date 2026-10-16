@@ -3,6 +3,9 @@
 CSV 用于准备小型参数表、交换文本和导出计算值。项目本身仍保存在 SQLite 中；CSV 不包含稳定 ID、
 公式、引用、单位、输入快照或运行记录，不能作为项目备份。
 
+表格工具栏现可直接选择 CSV、Excel（XLSX）与 JSON 的导入／导出，见[表格文件交换](project-table-io.md)。
+本文保留既有 CSV API／CLI 的规则和兼容入口；完整桌面迁移使用 [`.stkworkspace`](design/portable-workspaces.md)。
+
 ## 桌面操作
 
 独立表格页从 **更多 → CSV/TSV** 打开对话框：先选择输入文件并“预览”，逐列选择类型和数值单位，再“导入”。

@@ -143,6 +143,13 @@ class Editor {
   {
     return true;
   }
+  /** Explicit portable workspace capture includes parameter drafts. Implementations must not
+   * include credentials, live handles or callbacks, and restoring must never execute work. */
+  virtual nlohmann::json save_workspace_state() const { return save_state(); }
+  virtual bool load_workspace_state(const nlohmann::json &state) { return load_state(state); }
+  /** Explicitly opened local input files to include with a workspace. This must return only
+   * known input paths, never destinations, browser roots, credentials or arbitrary text. */
+  virtual std::vector<std::string> workspace_resource_paths() const { return {}; }
 
  private:
   const EditorType *type_;

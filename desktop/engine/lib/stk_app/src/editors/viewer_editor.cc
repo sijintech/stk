@@ -19,6 +19,8 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <set>
+#include <stdexcept>
 
 #include "viewer_common.hh"
 
@@ -80,6 +82,48 @@ const char *tool_glyph(const Tool t)
     case Tool::Pick: return "\xe2\x8a\x99";
   }
   return "?";
+}
+
+io::Json workspace_camera(const viewer::CameraPose &pose)
+{
+  return {{"position", {pose.position.x, pose.position.y, pose.position.z}},
+          {"focal_point", {pose.focal_point.x, pose.focal_point.y, pose.focal_point.z}},
+          {"view_up", {pose.view_up.x, pose.view_up.y, pose.view_up.z}},
+          {"view_angle_deg", pose.view_angle_deg}, {"parallel", pose.parallel},
+          {"parallel_scale", pose.parallel_scale}};
+}
+
+viewer::CameraPose workspace_camera(const nlohmann::json &value)
+{
+  const std::set<std::string> keys = {"position", "focal_point", "view_up", "view_angle_deg", "parallel", "parallel_scale"};
+  if (!value.is_object() || value.size() != keys.size()) { throw std::invalid_argument("Invalid workspace camera"); }
+  for (const auto &key : keys) { if (!value.contains(key)) { throw std::invalid_argument("Missing camera setting"); } }
+  auto vector = [](const nlohmann::json &v) {
+    if (!v.is_array() || v.size() != 3) { throw std::invalid_argument("Invalid camera vector"); }
+    viewer::dvec3 out;
+    double *coordinates[] = {&out.x, &out.y, &out.z};
+    for (int i = 0; i < 3; i++) {
+      if (!v[i].is_number()) { throw std::invalid_argument("Invalid camera coordinate"); }
+      const double number = v[i].get<double>();
+      if (!std::isfinite(number) || std::abs(number) > 1e140) { throw std::invalid_argument("Invalid camera coordinate"); }
+      *coordinates[i] = number;
+    }
+    return out;
+  };
+  viewer::CameraPose out;
+  out.position = vector(value.at("position")); out.focal_point = vector(value.at("focal_point"));
+  out.view_up = vector(value.at("view_up"));
+  if (!value.at("view_angle_deg").is_number() || !value.at("parallel_scale").is_number() ||
+      !value.at("parallel").is_boolean()) { throw std::invalid_argument("Invalid camera projection"); }
+  out.view_angle_deg = value.at("view_angle_deg").get<double>();
+  out.parallel_scale = value.at("parallel_scale").get<double>(); out.parallel = value.at("parallel").get<bool>();
+  if (!std::isfinite(out.view_angle_deg) || out.view_angle_deg <= 0.0 || out.view_angle_deg >= 180.0 ||
+      !std::isfinite(out.parallel_scale) || out.parallel_scale <= 0.0 || out.parallel_scale > 1e140 ||
+      out.distance() <= 1e-20 || viewer::length(out.view_up) <= 1e-20 ||
+      viewer::length(viewer::cross(out.direction(), viewer::normalize(out.view_up))) <= 1e-12) {
+    throw std::invalid_argument("Degenerate workspace camera");
+  }
+  return out;
 }
 
 class ViewerEditor final : public Editor {
@@ -193,6 +237,9 @@ class ViewerEditor final : public Editor {
       ui::Layout &row = l.row(false);
       row.alignment(ui::LayoutAlign::Left);
       row.label(src).backdrop().width(fit_units(ctx, src)).tip(vs.source().path.empty() ? vs.source_label() : vs.source().path);
+    }
+    if (vs.workspace_suspended()) {
+      l.paragraph(ctx.tr("viewer.workspace.suspended"));
     }
     if (vs.progress().running || !vs.eval_error().empty()) {
       draw_eval_status(l, ctx, true);
@@ -574,6 +621,11 @@ class ViewerEditor final : public Editor {
         saved_camera_.reset();
       }
     }
+    if (workspace_camera_ && vs.payload()) {
+      gpu_->set_camera(*workspace_camera_);
+      cam_ = *workspace_camera_;
+      workspace_camera_.reset();
+    }
     if (pending_preset_ && vs.payload()) {
       if (const auto viewport = main_viewport()) {
         gpu_->set_camera_preset(*pending_preset_, *viewport);
@@ -914,6 +966,55 @@ class ViewerEditor final : public Editor {
     return true;
   }
 
+  nlohmann::json save_workspace_state() const override
+  {
+    const auto camera = workspace_camera_ ? *workspace_camera_ : gpu_ ? gpu_->camera() : cam_;
+    return {{"version", 1}, {"tool", tool_key(tool_)},
+            {"navigation", nav_ == viewer::NavigationStyle::ParaView ? "paraview" : "blender"},
+            {"lighting", lighting_}, {"camera", workspace_camera(camera)},
+            {"saved_camera", saved_camera_ ? workspace_camera(*saved_camera_) : io::Json()},
+            {"pending_preset", pending_preset_ ? io::Json(viewer::camera_preset_name(*pending_preset_)) : io::Json()},
+            {"export_sized", export_sized_}};
+  }
+
+  bool load_workspace_state(const nlohmann::json &state) override
+  {
+    try {
+      const std::set<std::string> keys = {"version", "tool", "navigation", "lighting", "camera", "saved_camera", "pending_preset", "export_sized"};
+      if (!state.is_object() || state.size() != keys.size()) { return false; }
+      for (const auto &key : keys) { if (!state.contains(key)) { return false; } }
+      if (!state.at("version").is_number_integer() || state.at("version") != 1 ||
+          !state.at("tool").is_string() || !state.at("navigation").is_string() ||
+          !state.at("lighting").is_string() || !state.at("export_sized").is_boolean()) { return false; }
+      const auto tool = state.at("tool").get<std::string>();
+      const auto navigation = state.at("navigation").get<std::string>();
+      const auto lighting = state.at("lighting").get<std::string>();
+      if ((tool != "orbit" && tool != "pan" && tool != "zoom" && tool != "pick") ||
+          (navigation != "blender" && navigation != "paraview") ||
+          (!lighting.empty() && lighting != "three_point" && lighting != "headlight" && lighting != "none")) { return false; }
+      const auto camera = workspace_camera(state.at("camera"));
+      std::optional<viewer::CameraPose> saved;
+      if (!state.at("saved_camera").is_null()) { saved = workspace_camera(state.at("saved_camera")); }
+      std::optional<viewer::CameraPreset> preset;
+      if (!state.at("pending_preset").is_null()) {
+        if (!state.at("pending_preset").is_string()) { return false; }
+        preset = viewer::parse_camera_preset(state.at("pending_preset").get<std::string>());
+        if (!preset) { return false; }
+      }
+      // Keep GPU camera application deferred until the verified payload has been uploaded.
+      for (const Tool candidate : {Tool::Orbit, Tool::Pan, Tool::Zoom, Tool::Pick}) {
+        if (tool == tool_key(candidate)) { tool_ = candidate; }
+      }
+      nav_ = navigation == "paraview" ? viewer::NavigationStyle::ParaView : viewer::NavigationStyle::Blender;
+      lighting_ = lighting; cam_ = camera; saved_camera_ = saved; workspace_camera_ = camera;
+      pending_preset_ = preset; export_sized_ = state.at("export_sized").get<bool>();
+      camera_reset_pending_ = true;
+      dragging_ = moved_ = false;
+      return true;
+    }
+    catch (const std::exception &) { return false; }
+  }
+
  private:
   ViewerState *vs_ = nullptr;
   EditorArea *area_ = nullptr;
@@ -922,6 +1023,7 @@ class ViewerEditor final : public Editor {
   uint64_t payload_serial_ = 0, camera_serial_ = 0;
   bool camera_reset_pending_ = false;
   std::optional<viewer::CameraPose> saved_camera_;
+  std::optional<viewer::CameraPose> workspace_camera_;
   std::optional<viewer::CameraPreset> pending_preset_;
   viewer::CameraPose cam_;
   std::array<double, 3> origin_{};

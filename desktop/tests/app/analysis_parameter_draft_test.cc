@@ -861,5 +861,62 @@ TEST(AnalysisCandidateValidation, RepliesBindToTheLatestTicketAndCountOnlyForThe
   EXPECT_TRUE(check.error(key).empty());
 }
 
+TEST(AnalysisParameterDraft, WorkspaceKeepsCandidateAndBaselineWithoutReusingOpeningHandle)
+{
+  auto model = draft({{"gain", 2}, {"remove", 1}});
+  ASSERT_TRUE(model.set("gain", 3.5, model.generation()).accepted);
+  ASSERT_TRUE(model.remove("remove", model.generation()).accepted);
+  ASSERT_TRUE(model.move_nodes({{"source", {120, 80}}}, model.generation()).accepted);
+  const auto state = model.save_workspace_state();
+  EXPECT_EQ(state.dump().find("project-opening"), std::string::npos);
+  auto restored = draft(); const auto generation = restored.generation();
+  ASSERT_TRUE(restored.load_workspace_state(state, "new-opening"));
+  EXPECT_GT(restored.generation(), generation); EXPECT_EQ(restored.handle(), "new-opening");
+  EXPECT_EQ(restored.revision(), model.revision()); EXPECT_TRUE(restored.dirty());
+  EXPECT_EQ(exact(restored.baseline_document()), exact(model.baseline_document()));
+  EXPECT_EQ(exact(restored.candidate_document()), exact(model.candidate_document()));
+  EXPECT_FALSE(restored.set("gain", 10, generation).accepted);
+}
+
+TEST(AnalysisParameterDraft, MalformedWorkspaceCandidateDoesNotReplaceAnExistingDraft)
+{
+  auto model = draft(); ASSERT_TRUE(model.set("gain", 3, model.generation()).accepted);
+  const auto before = model.save_workspace_state(); const auto generation = model.generation();
+  auto invalid = before; invalid["document"]["graph"] = "invalid";
+  EXPECT_FALSE(model.load_workspace_state(invalid, "other"));
+  EXPECT_EQ(model.save_workspace_state(), before); EXPECT_EQ(model.generation(), generation);
+  invalid = before; invalid["handle"] = "old-opening";
+  EXPECT_FALSE(model.load_workspace_state(invalid, "other")); EXPECT_EQ(model.save_workspace_state(), before);
+}
+
+TEST(AnalysisParameterDraft, WorkspaceRelocatesCandidateWithoutChangingDatabaseComparisonBaseline)
+{
+  const auto original = definition({{"path", "/first-machine/project/input.dat"}, {"integer", uint64_t(-1)}, {"float", 1.0}});
+  Draft model; model.pin("old-opening", identity, 7, "Saved scalar", original);
+  auto state = model.save_workspace_state();
+  state["baseline"]["parameters"]["path"] = "/new-machine/project/input.dat";
+  state["document"]["parameters"]["path"] = "/new-machine/project/input.dat";
+  auto restored = draft(); ASSERT_TRUE(restored.load_workspace_state(state, "new-opening"));
+  EXPECT_FALSE(restored.matches(identity, "Saved scalar", original));  // the relocated candidate remains an explicit edit
+  EXPECT_EQ(exact(restored.baseline_document()), exact(original));
+  EXPECT_EQ(restored.parameters().at("path"), "/new-machine/project/input.dat");
+  EXPECT_TRUE(restored.dirty()); EXPECT_TRUE(restored.current("new-opening", 7));
+  EXPECT_FALSE(restored.current("old-opening", 7)); EXPECT_FALSE(restored.current("new-opening", 8));
+  auto legacy = model.save_workspace_state(); legacy.erase("baseline_json");
+  ASSERT_TRUE(restored.load_workspace_state(legacy, "legacy-opening"));
+  EXPECT_EQ(exact(restored.baseline_document()), exact(original));
+}
+
+TEST(AnalysisParameterDraft, InvalidOpaqueWorkspaceBaselineIsRejectedAtomically)
+{
+  auto model = draft(); const auto before = model.save_workspace_state(); const auto generation = model.generation();
+  for (const Json bad : {Json(nullptr), Json("{} {}"), Json("{\"a\":1,\"a\":2}"),
+                        Json(std::string(100, '[') + std::string(100, ']')), Json(std::string(Draft::max_document_bytes + 1, ' '))}) {
+    auto state = before; state["baseline_json"] = bad;
+    EXPECT_FALSE(model.load_workspace_state(state, "other-opening"));
+    EXPECT_EQ(model.save_workspace_state(), before); EXPECT_EQ(model.generation(), generation);
+  }
+}
+
 }  // namespace
 }  // namespace stk::app
