@@ -2,7 +2,7 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
-## 2026-10-15：CSV／XLSX／JSON 与 `.stkworkspace`（本机通过，精确提交 CI 待补）
+## 2026-10-15–16：CSV／XLSX／JSON 与 `.stkworkspace`（070f81e跨平台CI通过）
 
 - 前置：main/origin/main `4c5f1b3`，此前代码 `d03366e` Desktop 38725595367 **5/5 completed/success**，Runtime 38725595362 **8/8 success**；
   文档头 Runtime 38729204426 **8/8**、Secret 38729204398、Docs 38729204496 均成功。当前节点没有新建分支、PR 或合并无关工作。
@@ -97,6 +97,18 @@
   SHA-256 `6e2e4d6941b44baed6fb7b9f20e00c5e0cd03457f066051960712562773c1995`；包为写入本段自身SHA之前的文档快照，构建时文档摘要保存在仓库外verification。
   i18n2289/2289零问题，六份Markdown350个本地链接存在；暂存改动经`.gitleaks.toml`／redact扫描无泄漏。
   推送前再次核对HEAD／origin/main仍为2299b2a，其Desktop5个job全部completed；精确新提交CI继续补记，Windows尚未记为成功。
+- 测试修正 **`070f81e76d4109d6df98a266ffc67036621e2918` 已推送 main**；精确[Runtime 38952649174](https://github.com/sijintech/stk/actions/runs/38952649174) **8/8 completed/success**；[Desktop 38952649245](https://github.com/sijintech/stk/actions/runs/38952649245) **5/5 completed/success**，发布包与全新Ubuntu解包两种GPU后端冒烟已通过。
+  Secret 38952649187与Docs 38952649179均completed/success；本轮原生与源码包证据在上述portable-tests目录，不覆盖前两轮历史。
+  新源码包在仓库外解压，python -I且禁用pytest自动插件，明确断言workspace模块来自解包目录；迁移／路径夹具 **103/103、零跳过 /2.16s**，没有回落工作树。
+  精确Runtime的Windows3.11／3.12各 **2533 passed/95 skipped/317 deselected**（541.69s／428.79s），无失败／错误；前两轮夹具问题均修复。
+  Linux3.11／3.14各 **3033 passed/11 skipped/4 deselected/1 warning**（606.20s／530.36s），Linux3.12 **3037 passed/7 skipped/4 deselected/1 warning /657.82s**；五矩阵完整日志与计数保存在ci-070f81e。
+  Linux原生 **1539/1539 /386.60s**；Mac CPU **991/991 /291.49s**、Metal **226/226 /347.72s**；Windows **936/936 /369.08s**，全部零跳过。
+  实际下载Linux／Mac三份JUnit核对零失败／跳过；Windows完整日志逐项核对8个ViewerWorkspace全Passed，required gate **673**匹配成功（Linux **717**、Mac **693**）。
+  Linux32张GL/Vulkan、Mac16张Metal新表格／工作空间图形、X11／Wayland真实窗口、Mac应用包解压启动均成功；所有job于2026-10-16T19:34:29Z前结束。
+  完整元数据、原始日志、JUnit、截图与python-counts／native-junit-summary保存在portable-tests/ci-070f81e；下载网络超时重试不计作CI失败。
+- 视觉复核修正导出提示两处中英文文案：“已安装窗口 / installed window”改为“已打开窗口 / open window”，准确描述用户当前打开的窗口。
+  build18完成，i18n **2289/2289、零问题**，导出中英文宽窄GL/Vulkan **8/8、零跳过 /11.67s**；目检中文900宽度完整显示。
+  八张新图另存native/copy-frames，不覆盖070f81e的32张图形证据。070f81e桌面于2026-10-16T19:34:29Z全部结束，新文案随后提交推送；不改状态格式或执行逻辑。
 
 ## 2026-10-15：本地科研多维表格（`faf3a44` / `d03366e`，修正提交跨平台CI全部通过）
 

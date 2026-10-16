@@ -2279,7 +2279,7 @@
   "workspace.transfer.incomplete": "部分资源未包含，无法完整复刻。请先补齐诊断中的资源。",
   "workspace.transfer.allow_incomplete": "保留资源诊断并恢复现有状态",
   "workspace.transfer.new_directory": "导入创建新目录，不覆盖现有目录。不会自动运行脚本、模型或模拟。",
-  "workspace.transfer.export_hint": "保存所有已安装窗口的参数与草稿，并复制项目和本地资源。凭据与运行中进程不随文件保存。",
+  "workspace.transfer.export_hint": "保存所有已打开窗口的参数与草稿，并复制项目和本地资源。凭据与运行中进程不随文件保存。",
   "workspace.transfer.invalid_response": "工作空间预览响应无效。",
   "workspace.transfer.path": "请选择单个绝对路径。",
   "workspace.transfer.diagnostics": "资源诊断",

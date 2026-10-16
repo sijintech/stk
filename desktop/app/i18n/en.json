@@ -2280,7 +2280,7 @@
   "workspace.transfer.incomplete": "Some resources are missing. Resolve the listed diagnostics before restoring.",
   "workspace.transfer.allow_incomplete": "Restore available state and retain resource diagnostics",
   "workspace.transfer.new_directory": "Import creates a new directory and never replaces an existing directory. Scripts, models and simulations do not run automatically.",
-  "workspace.transfer.export_hint": "Save parameters and drafts from every installed window, together with project and local resources. Credentials and running processes are excluded.",
+  "workspace.transfer.export_hint": "Save parameters and drafts from every open window, together with project and local resources. Credentials and running processes are excluded.",
   "workspace.transfer.invalid_response": "Invalid workspace preview response.",
   "workspace.transfer.path": "Choose one absolute path.",
   "workspace.transfer.diagnostics": "Resource diagnostics",
