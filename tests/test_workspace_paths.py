@@ -70,10 +70,22 @@ def test_old_windows_source_works_on_posix_without_editing_the_imported_database
 
 def test_posix_sources_parse_independently_of_current_file_index_platform(workspace, monkeypatch):
     store, _, external, _ = workspace
+    path, saved = descriptor(store)
+    original = "/original-posix/measurements/external.dat"
+    saved["resources"][0]["source"] = original
+    write(path, saved)
+    before, history = store.snapshot(), store.history()
+    external.unlink()
     from suan.project import files
     monkeypatch.setattr(files, "PLATFORM", "windows")
-    resolved = _resolve(store.directory, "external:posix", str(external))
+    resolved = _resolve(store.directory, "external:posix", original)
     assert resolved.read_bytes() == b"scientific source"
+    assert store.snapshot() == before and store.history() == history
+    # The stored flavor remains authoritative even when this host is Windows.
+    for location, source in [("external:posix", r"Q:\Research\external.dat"),
+                             ("external:windows", original)]:
+        with pytest.raises(ProjectError, match="absolute"):
+            _resolve(store.directory, location, source)
 
 
 def test_longest_component_prefix_selects_specific_resource_and_file_resources_have_no_children(workspace):
@@ -150,9 +162,14 @@ def test_parent_traversal_and_database_sources_cannot_bypass_file_index_guards(w
     with pytest.raises(ProjectError, match="parent"):
         resolve_workspace_path(store.directory, "external:posix", "/old/data/../.ssh/id_rsa")
     path, saved = descriptor(store)
-    original = saved["project"]["source_root"] + "/project.sqlite3"
-    with pytest.raises(ProjectError, match="database"):
-        _resolve(store.directory, "external:posix", original)
+    saved["project"]["aliases"] = ["/original-posix/project", r"Q:\OriginalProject"]
+    write(path, saved)
+    for location, original in [
+            ("external:" + PLATFORM, saved["project"]["source_root"] + "/project.sqlite3"),
+            ("external:posix", "/original-posix/project/project.sqlite3"),
+            ("external:windows", r"Q:\OriginalProject\project.sqlite3")]:
+        with pytest.raises(ProjectError, match="database"):
+            _resolve(store.directory, location, original)
 
 
 def test_primary_current_path_and_multiple_old_platform_aliases_resolve_the_same_copy(workspace):
@@ -198,13 +215,15 @@ def test_project_root_aliases_survive_multiple_platform_and_directory_migrations
     store, _, _, _ = workspace
     path, saved = descriptor(store)
     original = saved["project"]["source_root"]
-    saved["project"]["aliases"] = [original, r"E:\\OldProject\\Study"]
+    posix_origin = "/original-posix/project"
+    saved["project"]["aliases"] = [original, posix_origin, r"E:\\OldProject\\Study"]
     saved["project"]["source_root"] = str(store.directory)
     (store.directory / "inputs").mkdir()
     actual = store.directory / "inputs" / "raw.dat"; actual.write_bytes(b"project data")
     write(path, saved)
     before = store.snapshot()
-    assert resolve_workspace_path(store.directory, "external:posix", original + "/inputs/raw.dat") == actual
+    assert resolve_workspace_path(store.directory, "external:" + PLATFORM, original + "/inputs/raw.dat") == actual
+    assert resolve_workspace_path(store.directory, "external:posix", posix_origin + "/inputs/raw.dat") == actual
     assert resolve_workspace_path(store.directory, "external:windows", r"e:\\oldproject\\study\\inputs\\raw.dat") == actual
     assert store.snapshot() == before
 

@@ -1069,8 +1069,9 @@ TEST_F(WorkflowEditorPython, WorkspaceBundleRelocatesAbsoluteCandidateAndRebinds
   const auto destination = directory.path() / "restored";
   ASSERT_NO_FATAL_FAILURE(call("workspace.import", {{"path", archive}, {"destination", core::path_to_utf8(destination)}}, out));
   const auto relocated = out.at("state").at("editor");
-  const auto new_source = core::path_to_utf8(destination / "project" / "field.vtk");
-  ASSERT_EQ(relocated.at("draft").at("document").at("steps")[2].at("parameters").at("path"), new_source);
+  const auto new_source = (destination / "project" / "field.vtk").lexically_normal();
+  const auto relocated_path = relocated.at("draft").at("document").at("steps")[2].at("parameters").at("path").get<std::string>();
+  ASSERT_EQ(core::path_from_utf8(relocated_path).lexically_normal(), new_source);
   ASSERT_EQ(relocated.at("draft").at("baseline_json"), captured.at("draft").at("baseline_json"));
   ASSERT_TRUE(project().close()); ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
   ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
@@ -1082,7 +1083,8 @@ TEST_F(WorkflowEditorPython, WorkspaceBundleRelocatesAbsoluteCandidateAndRebinds
   for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
   const auto restored = area().editor().save_workspace_state();
   EXPECT_EQ(restored.at("draft").at("baseline"), saved_document);
-  EXPECT_EQ(restored.at("draft").at("document").at("steps")[2].at("parameters").at("path"), new_source);
+  const auto restored_path = restored.at("draft").at("document").at("steps")[2].at("parameters").at("path").get<std::string>();
+  EXPECT_EQ(core::path_from_utf8(restored_path).lexically_normal(), new_source);
   EXPECT_EQ(restored.at("draft").at("document").at("steps")[2].at("parameters").at("colormap"), "viridis");
   EXPECT_EQ(project().project()->revision, before_revision);
   EXPECT_EQ(io::python_json_dumps(stored().at("document"), true, true), io::python_json_dumps(saved_document, true, true));

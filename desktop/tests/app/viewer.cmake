@@ -38,30 +38,48 @@ if(TARGET stk-bridge-fake)
     test_viewer_forms.cc
     ${CMAKE_SOURCE_DIR}/tests/wm/support.cc
   )
-  add_executable(stk_workspace_viewer_tests
-    viewer_support.cc
-    viewer_workspace_state_test.cc
-    ${CMAKE_SOURCE_DIR}/tests/wm/support.cc
-  )
-  foreach(_app_viewer_cpu_target stk_app_viewer_tests stk_workspace_viewer_tests)
-    target_include_directories(${_app_viewer_cpu_target} PRIVATE ${CMAKE_SOURCE_DIR}/tests/wm)
-    target_link_libraries(${_app_viewer_cpu_target} PRIVATE stk_app stk_wm GTest::gtest_main)
-    target_compile_definitions(${_app_viewer_cpu_target} PRIVATE
-      STK_REPO_ROOT="${_app_repo}"
-      STK_DESKTOP_DIR="${CMAKE_SOURCE_DIR}"
-      STK_BRIDGE_FAKE="$<TARGET_FILE:stk-bridge-fake>"
-      STK_APP_TEST_SCRATCH="${_app_scratch}"
-      STK_APP_GOLDEN_DIR="${_app_golden}")
-    add_dependencies(${_app_viewer_cpu_target} stk-bridge-fake)
-    if(NOT MSVC)
-      target_compile_options(${_app_viewer_cpu_target} PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
-    endif()
-  endforeach()
+  target_include_directories(stk_app_viewer_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/wm)
+  target_link_libraries(stk_app_viewer_tests PRIVATE stk_app stk_wm GTest::gtest_main)
+  target_compile_definitions(stk_app_viewer_tests PRIVATE
+    STK_REPO_ROOT="${_app_repo}"
+    STK_DESKTOP_DIR="${CMAKE_SOURCE_DIR}"
+    STK_BRIDGE_FAKE="$<TARGET_FILE:stk-bridge-fake>"
+    STK_APP_TEST_SCRATCH="${_app_scratch}"
+    STK_APP_GOLDEN_DIR="${_app_golden}")
+  add_dependencies(stk_app_viewer_tests stk-bridge-fake)
+  if(NOT MSVC)
+    target_compile_options(stk_app_viewer_tests PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+  endif()
   gtest_discover_tests(stk_app_viewer_tests DISCOVERY_TIMEOUT 60 NO_PRETTY_VALUES
     PROPERTIES LABELS "app" TIMEOUT 300)
-  gtest_discover_tests(stk_workspace_viewer_tests DISCOVERY_TIMEOUT 60 NO_PRETTY_VALUES
-    PROPERTIES LABELS "unit" TIMEOUT 300)
 endif()
+
+# The general scripted bridge exercises POSIX process groups and is intentionally unavailable on
+# Windows. Workspace restore needs only a synchronous payload bridge, so keep its fixture and all
+# eight required tests independent of that target on every platform.
+add_executable(stk-workspace-viewer-bridge workspace_viewer_bridge.cc)
+target_link_libraries(stk-workspace-viewer-bridge PRIVATE stk_io stk_core)
+add_executable(stk_workspace_viewer_tests
+  viewer_support.cc
+  viewer_workspace_state_test.cc
+  ${CMAKE_SOURCE_DIR}/tests/wm/support.cc
+)
+target_include_directories(stk_workspace_viewer_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/wm)
+target_link_libraries(stk_workspace_viewer_tests PRIVATE stk_app stk_wm GTest::gtest_main)
+target_compile_definitions(stk_workspace_viewer_tests PRIVATE
+  STK_REPO_ROOT="${_app_repo}"
+  STK_DESKTOP_DIR="${CMAKE_SOURCE_DIR}"
+  STK_BRIDGE_FAKE="$<TARGET_FILE:stk-workspace-viewer-bridge>"
+  STK_APP_TEST_SCRATCH="${_app_scratch}"
+  STK_APP_GOLDEN_DIR="${_app_golden}")
+add_dependencies(stk_workspace_viewer_tests stk-workspace-viewer-bridge)
+if(MSVC)
+  target_compile_options(stk_workspace_viewer_tests PRIVATE /utf-8 /bigobj)
+else()
+  target_compile_options(stk_workspace_viewer_tests PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+endif()
+gtest_discover_tests(stk_workspace_viewer_tests DISCOVERY_TIMEOUT 60 NO_PRETTY_VALUES
+  PROPERTIES LABELS "unit" TIMEOUT 300)
 
 # ---------------------------------------------------------------------------------------------
 # GPU: image comparison tool, the Python-bridge integration test, the e2e golden, live windows.

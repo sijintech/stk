@@ -312,7 +312,16 @@ TEST_F(AnalysisParametersEditorPython, WorkspaceBundleRelocatesAbsoluteInputButR
   ASSERT_TRUE(out.at("complete").get<bool>()) << out.at("diagnostics");
   const auto destination = directory.path() / "restored";
   ASSERT_NO_FATAL_FAILURE(call("workspace.import", {{"path", archive}, {"destination", core::path_to_utf8(destination)}}, out));
-  const auto relocated = out.at("state").at("editor"); const auto new_source = out.at("path_map").at(source);
+  const auto relocated = out.at("state").at("editor");
+  // Python resolves native separators; compare paths rather than the spelling of the map key.
+  std::string new_source;
+  for (auto it = out.at("path_map").begin(); it != out.at("path_map").end(); ++it) {
+    if (core::path_from_utf8(it.key()).lexically_normal() == core::path_from_utf8(source).lexically_normal()) {
+      new_source = it.value().get<std::string>();
+      break;
+    }
+  }
+  ASSERT_FALSE(new_source.empty());
   ASSERT_EQ(relocated.at("draft").at("document").at("parameters").at("precision_record").at("asset_path"), new_source);
   ASSERT_EQ(relocated.at("draft").at("baseline_json"), captured.at("draft").at("baseline_json"));
   // Construct a fresh editor before opening the restored project; its old callbacks and draft

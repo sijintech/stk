@@ -75,7 +75,28 @@
   SHA-256 `348d1d5f28910bd9337d04944579fdd507c75b5c12171b8b9b2032b934f72e84`，文档快照与包外自身SHA记录遵循上文同样规则。
   修正证据 `/home/mnemora/opt/stk-validation/table-workspace-20261016-ci-fix-29e9fe9/`（含native子目录）；本机原始CPU日志另在`/tmp/stk-portable-20261015/`。
   修正i18n2289/2289零问题，6份Markdown的348个本地链接均存在，差异检查通过；暂存约13KB经配置化redact密钥扫描无泄漏。
-  推送前重新读取精确旧头Desktop attempt1为completed/failure，updated_at为2026-10-16T02:50:07Z；远端main仍29e9fe9，门禁满足。修正提交和新精确CI待收口。
+  推送前重新读取精确旧头Desktop attempt1为completed/failure，updated_at为2026-10-16T02:50:07Z；远端main仍29e9fe9，门禁满足。
+  修正 **`2299b2a6f79c67b15ce90a9d9aa226c4b28c4869` 已推送 main**，精确修正CI结果待收口；未在旧代码桌面仍进行时推送。
+- 第二次精确[Runtime 38943609861](https://github.com/sijintech/stk/actions/runs/38943609861) **6/8成功、2/8失败，全部completed**。
+  Linux3.12 **3037 passed/7 skipped/4 deselected/1 warning /625.35s**，3.14 **3033/11/4/1 /659.68s**，3.11 **3033/11/4/1 /592.39s**。
+  Windows3.11 **3 failed/2530 passed/95 skipped/317 deselected /425.51s**，3.12 **5 failed/2528 passed/95 skipped/317 deselected /826.27s**，不再有首轮EBADF／身份误拒／长ID错误。
+  三项路径夹具将宿主Windows绝对路径标为external:posix，生产校验正确拒绝；两项3.12专属失败由扫描替身只有上下文接口、无法供stdlib清理器迭代导致。
+  只修改两份测试：POSIX与Windows来源明确声明，原数据库／父目录拒绝保留，并补错类型拒绝；扫描替身完整实现迭代／close／上下文协议。
+  三版本相关 **103/103、零跳过**（3.11 2.16s、3.12 2.14s、3.14 2.25s），未修改生产路径解析、校验或其他运行文件。
+  第二次[Desktop 38943609849](https://github.com/sijintech/stk/actions/runs/38943609849) **4/5成功、1/5失败，全部completed**，Windows于2026-10-16T18:32:05Z结束。
+  Mac CPU **991/991 /311.72s**、Metal **226/226 /400.55s**，含8项Viewer恢复、required gate693匹配及Mac应用包／解包启动成功；Linux **1539/1539、零跳过 /371.59s**，两项发布包作业均success。
+  Windows原生 **926 passed/2 failed、零跳过 /452.25s**；两项失败均为测试对迁移路径的字符串／map key比较不兼容混合斜杠，导出导入已完成。
+  审查同时发现8项ViewerWorkspace目标仍被POSIX fake目标条件挡住，Windows未构建，不能用本机CPU筛选通过宣称其Windows覆盖。
+  本轮改用独立可移植同步payload测试桥，保留unit标签与全部必跑检查；路径比较保留数据库baseline／草稿／单次读取／不执行等原断言。
+  第二次Secret 38943609965与Docs 38943610085均completed/success；前代码桌面推送门禁现已满足。
+- 本轮跨平台夹具收口：统一build16／17成功，定向 **10/10、零跳过 /1.99s**；完整原生 **1539/1539、零失败／跳过 /1300.44s**（本次串行执行，不作性能比较）。
+  本节点required checker **74/74**，含32张中英文GL/Vulkan表格／工作空间图形、两种真实窗口及8项Viewer恢复；CPU筛选登记1001项，8项Viewer均为unit。
+  Critical review核对路径以文件语义比较，数据库baseline仍逐字节／类型匹配；同步payload测试桥没有网络、Python或作业执行能力，Windows目标不再依赖POSIX fake。
+  七项wheel生产模块／schema SHA与2299b2a已验包相同；未改生产解析、运行权限或端点。证据保存在`/home/mnemora/opt/stk-validation/table-workspace-20261016-portable-tests/`。
+  新sdist离线重建 **48697258 bytes／896成员**，七项生产模块／schema及12项构建时源码／测试／契约／文档逐字节相同；不含archive／desktop。
+  SHA-256 `6e2e4d6941b44baed6fb7b9f20e00c5e0cd03457f066051960712562773c1995`；包为写入本段自身SHA之前的文档快照，构建时文档摘要保存在仓库外verification。
+  i18n2289/2289零问题，六份Markdown350个本地链接存在；暂存改动经`.gitleaks.toml`／redact扫描无泄漏。
+  推送前再次核对HEAD／origin/main仍为2299b2a，其Desktop5个job全部completed；精确新提交CI继续补记，Windows尚未记为成功。
 
 ## 2026-10-15：本地科研多维表格（`faf3a44` / `d03366e`，修正提交跨平台CI全部通过）
 

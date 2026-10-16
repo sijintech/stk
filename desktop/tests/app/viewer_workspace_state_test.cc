@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/** Inert portable Viewer restore and independent per-window cameras, with the fake bridge. */
+/** Inert Viewer restore and independent per-window cameras, with the portable payload bridge. */
 #include <cmath>
 #include <limits>
 

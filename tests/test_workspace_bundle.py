@@ -3,7 +3,6 @@ import hashlib
 import json
 import os
 import errno
-from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import stat
@@ -138,13 +137,23 @@ def test_export_checks_full_path_identity_when_scandir_omits_it(project, tmp_pat
                 def __getattr__(self, name):
                     return getattr(info, name)
             return Info()
-    @contextmanager
-    def scanned(path):
-        with original_scandir(path) as entries:
-            if isinstance(path, (str, os.PathLike)) and Path(path).is_relative_to(store.directory):
-                yield (Entry(entry) for entry in entries)
-            else:
-                yield entries
+    class Scan:
+        """Keep scandir's iterator and context-manager APIs for stdlib cleanup."""
+        def __init__(self, path="."):
+            self.entries = original_scandir(path)
+            self.wrap = isinstance(path, (str, os.PathLike)) and Path(path).is_relative_to(store.directory)
+        def __iter__(self):
+            return self
+        def __next__(self):
+            entry = next(self.entries)
+            return Entry(entry) if self.wrap else entry
+        def close(self):
+            self.entries.close()
+        def __enter__(self):
+            self.entries.__enter__()
+            return self
+        def __exit__(self, *exc):
+            return self.entries.__exit__(*exc)
     changed = []
     def written(archive, name, source, remaining):
         result = original_write(archive, name, source, remaining)
@@ -152,7 +161,7 @@ def test_export_checks_full_path_identity_when_scandir_omits_it(project, tmp_pat
             source.write_bytes(b"source changed after the file was archived")
             changed.append(name)
         return result
-    monkeypatch.setattr(os, "scandir", scanned)
+    monkeypatch.setattr(os, "scandir", Scan)
     monkeypatch.setattr(bundle, "_write_member", written)
     target = tmp_path / "identity.stkworkspace"
     if change_source:

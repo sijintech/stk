@@ -10,7 +10,11 @@
 #include <sstream>
 #include <thread>
 
-#include <unistd.h> /* getpid (the tests using this file are POSIX-only) */
+#ifdef _WIN32
+#  include <process.h>
+#else
+#  include <unistd.h>
+#endif
 
 #include <gtest/gtest.h>
 
@@ -94,7 +98,12 @@ TempDir::TempDir(const std::string &tag)
   const fs::path base = fs::path(STK_APP_TEST_SCRATCH);
   std::error_code ec;
   fs::create_directories(base, ec);
-  path_ = base / (tag + "-" + std::to_string(::getpid()) + "-" + std::to_string(counter++));
+#ifdef _WIN32
+  const int pid = ::_getpid();
+#else
+  const int pid = ::getpid();
+#endif
+  path_ = base / (tag + "-" + std::to_string(pid) + "-" + std::to_string(counter++));
   fs::remove_all(path_, ec);
   fs::create_directories(path_, ec);
 }
