@@ -2,6 +2,8 @@
 import hashlib
 import json
 import os
+import errno
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import stat
@@ -94,6 +96,74 @@ def test_empty_workspace_is_valid_and_no_model_or_execution_imports(tmp_path, mo
     assert bundle.preview_workspace(result["path"])["file_count"] == 1
     imported = bundle.import_workspace(result["path"], tmp_path / "empty")
     assert imported["state"] == state()
+
+
+def test_export_flushes_a_writable_archive_before_publication(tmp_path, monkeypatch):
+    """Windows rejects fsync on a read-only CRT descriptor; keep the flush mandatory."""
+    original_open, original_fsync = Path.open, os.fsync
+    archives, flushed = {}, []
+    def opened(path, *args, **kwargs):
+        stream = original_open(path, *args, **kwargs)
+        if path.name == "bundle.zip" and path.parent.name.startswith(".stk-workspace-"):
+            archives[stream.fileno()] = stream
+        return stream
+    def synced(descriptor):
+        stream = archives.get(descriptor)
+        if stream is not None and not stream.closed:
+            if not stream.writable():
+                raise OSError(errno.EBADF, "Windows cannot flush a read-only descriptor")
+            flushed.append(descriptor)
+        return original_fsync(descriptor)
+    monkeypatch.setattr(Path, "open", opened)
+    monkeypatch.setattr(os, "fsync", synced)
+    exported = bundle.export_workspace(None, tmp_path / "flushed.stkworkspace", state=state())
+    assert flushed and Path(exported["path"]).is_file()
+    assert bundle.preview_workspace(exported["path"])["sha256"] == exported["sha256"]
+
+
+@pytest.mark.parametrize("change_source", [False, True], ids=["unchanged", "changed"])
+def test_export_checks_full_path_identity_when_scandir_omits_it(project, tmp_path, monkeypatch, change_source):
+    """Windows DirEntry.stat omits dev/inode, unlike a fresh path lstat."""
+    store, _ = project
+    original_scandir, original_write = os.scandir, bundle._write_member
+    class Entry:
+        def __init__(self, entry):
+            self.entry = entry
+        def __getattr__(self, name):
+            return getattr(self.entry, name)
+        def stat(self, *args, **kwargs):
+            info = self.entry.stat(*args, **kwargs)
+            class Info:
+                st_dev = st_ino = 0
+                def __getattr__(self, name):
+                    return getattr(info, name)
+            return Info()
+    @contextmanager
+    def scanned(path):
+        with original_scandir(path) as entries:
+            if isinstance(path, (str, os.PathLike)) and Path(path).is_relative_to(store.directory):
+                yield (Entry(entry) for entry in entries)
+            else:
+                yield entries
+    changed = []
+    def written(archive, name, source, remaining):
+        result = original_write(archive, name, source, remaining)
+        if change_source and name == "project/inputs/source.dat":
+            source.write_bytes(b"source changed after the file was archived")
+            changed.append(name)
+        return result
+    monkeypatch.setattr(os, "scandir", scanned)
+    monkeypatch.setattr(bundle, "_write_member", written)
+    target = tmp_path / "identity.stkworkspace"
+    if change_source:
+        with pytest.raises(ProjectError, match="project files changed"):
+            bundle.export_workspace(store.directory, target, state=state())
+        assert changed and not target.exists()
+    else:
+        exported = bundle.export_workspace(store.directory, target, state=state())
+        assert exported["complete"]
+        restored = bundle.import_workspace(target, tmp_path / "restored-identity")
+        assert (Path(restored["project_directory"]) / "inputs/source.dat").read_bytes() == b"frozen project source"
 
 
 def test_external_explicit_file_is_packed_but_unknown_absolute_path_never_read(project, tmp_path, monkeypatch):

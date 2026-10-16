@@ -1,6 +1,11 @@
 # STK 开发交接（Codex / Claude / 后续开发者）
 
-2026-10-15 表格文件交换与工作空间迁移已完成本机验收，代码提交与精确 CI 待推送后补记。
+2026-10-15 表格文件交换与工作空间迁移代码 **`29e9fe9` 已推送 main**；首轮 Runtime 6/8成功，两个Windows矩阵失败，桌面CI尚未全部结束。
+Windows工作空间只读fsync和DirEntry元数据差异已最小修正，Excel边界测试改短参数ID；修正尚未提交。
+修后相关三版本各238/238、完整Python3022 passed/24 skipped/2 deselected、原生迁移21/21通过；上一个代码头桌面5项均已结束，推送门禁满足。
+首轮桌面Linux1539/1539通过；macOS CPU983/983、Metal226/226通过，但Viewer恢复测试未进入CPU标签筛选导致必跑gate失败。
+Windows桌面918/928通过，10项在导出阶段失败；已修后端两处兼容问题，另将Viewer恢复8项拆为独立unit测试目标。
+修后按原Mac／Windows CPU筛选 **1001/1001、零跳过 /133.79s**，41项必跑检查（含全部8项Viewer恢复）实际通过；新wheel／sdist、仓库外连续迁移和PET离线复核通过，待提交推送与新精确CI收口。
 表格工具栏直接导入／导出 CSV、Excel（XLSX）、类型化 JSON；工作空间使用 `.stkworkspace`，
 携带全部窗口、隐藏标签、参数、未保存稿、项目数据库和已声明资源，导入到新目录并可再次搬移。
 编辑器独立 workspace hooks；已打开的外部 Python 文件、Viewer 来源和已登记外部文件一并打包。

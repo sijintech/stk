@@ -265,7 +265,9 @@ def _project_files(directory, diagnostics, directories=None, *, project=True):
                 diagnostics.append(_diagnostic("excluded_hidden_file", path=name))
                 continue
             try:
-                info = entry.stat(follow_symlinks=False)
+                # Windows DirEntry.stat omits dev/inode; use the same full path
+                # identity as the final consistency check, without following links.
+                info = Path(entry.path).lstat()
             except FileNotFoundError:
                 raise ProjectError("Workspace project tree changed during export") from None
             if _link(info):
@@ -664,7 +666,9 @@ def export_workspace(directory, path, *, state, expected_revision=None, resource
         if store is not None and store.info()["revision"] != project["revision"]:
             raise RevisionConflict("Project changed during workspace export; refresh and try again")
         sha256, archive_bytes = _digest(archive_path, max_bytes + MAX_MANIFEST_BYTES + 64 * 1024 ** 2)
-        with archive_path.open("rb") as stream:
+        # Windows _commit (fsync) requires a writable descriptor. This is our
+        # private staging output; input assets remain strictly read-only.
+        with archive_path.open("r+b") as stream:
             os.fsync(stream.fileno())
         _publish_file(archive_path, destination)
     return {"path": str(destination), "sha256": sha256, "archive_bytes": archive_bytes,

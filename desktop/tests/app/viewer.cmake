@@ -6,6 +6,8 @@
 #                             preservation, playback, probe, layer overrides, sequence export),
 #                             result / series folders, and layout goldens of the Properties forms
 #                             of all 8 presets (zh / en; STK_UPDATE_GOLDENS=1 rewrites golden/).
+#   stk_workspace_viewer_tests  gtest, no GPU (label "unit"): portable Viewer state,
+#                             independent editor cameras and inert workspace restoration.
 #   stk_app_viewer_gpu_tests  gtest with a GPU and the real Python bridge (labels "app;gpu;bridge"):
 #                             muferro-domains on a fake muFerro run; a client-stage change re-runs
 #                             no data node and re-renders; a data-stage change re-runs data nodes;
@@ -34,23 +36,31 @@ if(TARGET stk-bridge-fake)
     viewer_support.cc
     test_viewer_state.cc
     test_viewer_forms.cc
+    ${CMAKE_SOURCE_DIR}/tests/wm/support.cc
+  )
+  add_executable(stk_workspace_viewer_tests
+    viewer_support.cc
     viewer_workspace_state_test.cc
     ${CMAKE_SOURCE_DIR}/tests/wm/support.cc
   )
-  target_include_directories(stk_app_viewer_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/wm)
-  target_link_libraries(stk_app_viewer_tests PRIVATE stk_app stk_wm GTest::gtest_main)
-  target_compile_definitions(stk_app_viewer_tests PRIVATE
-    STK_REPO_ROOT="${_app_repo}"
-    STK_DESKTOP_DIR="${CMAKE_SOURCE_DIR}"
-    STK_BRIDGE_FAKE="$<TARGET_FILE:stk-bridge-fake>"
-    STK_APP_TEST_SCRATCH="${_app_scratch}"
-    STK_APP_GOLDEN_DIR="${_app_golden}")
-  add_dependencies(stk_app_viewer_tests stk-bridge-fake)
-  if(NOT MSVC)
-    target_compile_options(stk_app_viewer_tests PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
-  endif()
+  foreach(_app_viewer_cpu_target stk_app_viewer_tests stk_workspace_viewer_tests)
+    target_include_directories(${_app_viewer_cpu_target} PRIVATE ${CMAKE_SOURCE_DIR}/tests/wm)
+    target_link_libraries(${_app_viewer_cpu_target} PRIVATE stk_app stk_wm GTest::gtest_main)
+    target_compile_definitions(${_app_viewer_cpu_target} PRIVATE
+      STK_REPO_ROOT="${_app_repo}"
+      STK_DESKTOP_DIR="${CMAKE_SOURCE_DIR}"
+      STK_BRIDGE_FAKE="$<TARGET_FILE:stk-bridge-fake>"
+      STK_APP_TEST_SCRATCH="${_app_scratch}"
+      STK_APP_GOLDEN_DIR="${_app_golden}")
+    add_dependencies(${_app_viewer_cpu_target} stk-bridge-fake)
+    if(NOT MSVC)
+      target_compile_options(${_app_viewer_cpu_target} PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+    endif()
+  endforeach()
   gtest_discover_tests(stk_app_viewer_tests DISCOVERY_TIMEOUT 60 NO_PRETTY_VALUES
     PROPERTIES LABELS "app" TIMEOUT 300)
+  gtest_discover_tests(stk_workspace_viewer_tests DISCOVERY_TIMEOUT 60 NO_PRETTY_VALUES
+    PROPERTIES LABELS "unit" TIMEOUT 300)
 endif()
 
 # ---------------------------------------------------------------------------------------------

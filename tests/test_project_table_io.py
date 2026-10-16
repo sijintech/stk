@@ -344,7 +344,8 @@ def test_export_rechecks_revision_before_publication(store, typed, tmp_path, for
     assert not path.exists()
 
 
-@pytest.mark.parametrize("value", ["x" * 32768, "contains\x00control", "contains\x0bvertical-tab"])
+@pytest.mark.parametrize("value", ["x" * 32768, "contains\x00control", "contains\x0bvertical-tab"],
+                         ids=["overlong-text", "nul-control", "vertical-tab-control"])
 def test_excel_rejects_unrepresentable_text_instead_of_silent_truncation(store, tmp_path, value):
     ids = [uid() for _ in range(3)]
     store.apply([{"op": "create_table", "id": ids[0], "name": "Text"},

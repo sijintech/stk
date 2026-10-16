@@ -49,7 +49,33 @@
 - 证据：原生原始 `/tmp/stk-portable-20261015/`，耐久副本 `/home/mnemora/opt/stk-validation/table-workspace-20261016-native/`（含32张截图与历史失败）；
   Python／包／PET 耐久副本 `/home/mnemora/opt/stk-validation/table-workspace-20261016-python/`。
   i18n **2289/2289、零问题**，16份Markdown的519个本地链接均存在；差异空白检查通过。
-  暂存约590KB经`.gitleaks.toml`／redact扫描无泄漏；推送前再次核对`d03366e`桌面5项均completed/success，门禁满足。精确提交CI待推送后补记。
+  暂存约590KB经`.gitleaks.toml`／redact扫描无泄漏；推送前再次核对`d03366e`桌面5项均completed/success，门禁满足。
+- 代码 **`29e9fe9b9014da93411100e3f4f6951784743e62` 已推送 main**。
+  精确头Secret 38838889114、Docs 38838889189已完成成功；[Runtime 38838889023](https://github.com/sijintech/stk/actions/runs/38838889023) **6/8成功，2/8失败，全部completed**。
+  Linux3.11／3.14各3030 passed/11 skipped/4 deselected（540.57s／777.91s），3.12 3034/7/4（654.71s），各1warning；三矩阵新专项各166/166、PET各7/7、doctor／wheel／sdist／上传全成功，三个精确头artifact实际存在。
+  Python桌面3 passed/6.33s、控制协议24 passed/11.97s、Web构建成功。Windows3.11／3.12各46 failed/2452 passed/94 skipped/317 deselected/34 errors（423.35s／500.07s），client入口因前置pytest失败未执行。
+  原因是工作空间自有staging只读fd上fsync返回EBADF，以及DirEntry.stat与Path.lstat的Windows身份值不等；[Python官方说明](https://docs.python.org/3.11/library/os.html#os.DirEntry.stat)明确Windows DirEntry的st_ino／st_dev／st_nlink为0。
+  另两项Excel边界测试因32768字符自动参数ID撑爆Windows环境变量长度，业务体尚未运行；改短ID后原边界值与拒绝断言保持。
+  最小生产修正仅自有staging使用r+b同步、扫描统一Path.lstat，不跳fsync、不删身份字段、不放宽源变动／链接／无覆盖。
+  三项确定性Windows模拟修前2 failed/1 passed、修后3/3；相关三版本各238/238（7.04／6.90／7.11s），原生迁移 **21/21、零跳过 /3.64s**。
+  修正完整Python **3022 passed/24 skipped/2 deselected/1 warning /640.05s**，无失败；原3019及Windows失败证据保留。
+  [桌面38838889641](https://github.com/sijintech/stk/actions/runs/38838889641) Linux **1539/1539 /405.43s**，新必跑检查和发布包／全新Ubuntu解包启动成功。
+  macOS CPU **983/983 /367.11s**、Metal **226/226 /443.54s**均成功且零跳过；required gate因`ViewerWorkspace.*: no such test`失败，后续Mac打包／解包启动未执行。
+  原Viewer CPU目标只有app标签，Mac／Windows的unit／wm／ui／bridge／project筛选未选中这8项；正在拆独立纯CPU目标补unit标签，不删除或放宽必跑checker。
+  Windows桌面 **918 passed/10 failed/928 /806.61s**；其中两个跨包草稿明确报告项目签名不等，另8项在共享导出等待中超时，尚未进入恢复断言。
+  原生表格8+1、WorkspaceTree3、WorkspaceDesktop5与运行恢复3项均通过；Windows必跑gate因前置CTest失败未执行，未冒称通过。
+  首轮桌面 **3/5成功、2/5失败，全部completed**，Windows结束于`2026-10-16T02:50:06Z`，后续代码推送门禁满足。
+  初次本机标签修正的CPU筛选993/993通过，但checker仍拒绝漏选的ViewerWorkspace；gtest属性中的复合标签被拆分，改为独立目标的单一unit标签，不放宽checker。
+  最终统一build15成功，按原Mac／Windows筛选的完整本机CPU **1001/1001、零失败／跳过 /133.79s**；required checker **41/41**，8项ViewerWorkspace全部实际执行通过。
+  修复后的新wheel **47901296 bytes／643成员**、离线构建与仓库外三格式／连续迁移冒烟通过，七项生产模块／schema逐字节一致；
+  SHA-256 `e9d00a80b40503c69b706600115199f3ed72764763575539e40354d9511c9218`，旧包作为首轮历史快照保留。
+  修后PET格式13／明确升级14各479文件、迁移完整，离线各1/1（XML2.716s／2.523s），原DB SHA未变；仍为software_complete=true／material_validation=false，没有重跑MD。
+  独立CR确认两处后端修正保留完整源签名／目录／修订复核、链接拒绝、强制fsync及原子无覆盖发布，新增反例可区分原Windows缺陷。
+  新sdist离线构建 **48695715 bytes／896成员**，七项生产模块／schema和12项构建时源码／指南／契约／测试逐字节一致，无archive／desktop；
+  SHA-256 `348d1d5f28910bd9337d04944579fdd507c75b5c12171b8b9b2032b934f72e84`，文档快照与包外自身SHA记录遵循上文同样规则。
+  修正证据 `/home/mnemora/opt/stk-validation/table-workspace-20261016-ci-fix-29e9fe9/`（含native子目录）；本机原始CPU日志另在`/tmp/stk-portable-20261015/`。
+  修正i18n2289/2289零问题，6份Markdown的348个本地链接均存在，差异检查通过；暂存约13KB经配置化redact密钥扫描无泄漏。
+  推送前重新读取精确旧头Desktop attempt1为completed/failure，updated_at为2026-10-16T02:50:07Z；远端main仍29e9fe9，门禁满足。修正提交和新精确CI待收口。
 
 ## 2026-10-15：本地科研多维表格（`faf3a44` / `d03366e`，修正提交跨平台CI全部通过）
 
