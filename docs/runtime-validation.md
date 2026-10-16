@@ -2,7 +2,7 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
-## 2026-10-15–16：CSV／XLSX／JSON 与 `.stkworkspace`（070f81e跨平台CI通过）
+## 2026-10-15–16：CSV／XLSX／JSON 与 `.stkworkspace`（76715e4跨平台CI全部通过）
 
 - 前置：main/origin/main `4c5f1b3`，此前代码 `d03366e` Desktop 38725595367 **5/5 completed/success**，Runtime 38725595362 **8/8 success**；
   文档头 Runtime 38729204426 **8/8**、Secret 38729204398、Docs 38729204496 均成功。当前节点没有新建分支、PR 或合并无关工作。
@@ -108,7 +108,16 @@
   完整元数据、原始日志、JUnit、截图与python-counts／native-junit-summary保存在portable-tests/ci-070f81e；下载网络超时重试不计作CI失败。
 - 视觉复核修正导出提示两处中英文文案：“已安装窗口 / installed window”改为“已打开窗口 / open window”，准确描述用户当前打开的窗口。
   build18完成，i18n **2289/2289、零问题**，导出中英文宽窄GL/Vulkan **8/8、零跳过 /11.67s**；目检中文900宽度完整显示。
-  八张新图另存native/copy-frames，不覆盖070f81e的32张图形证据。070f81e桌面于2026-10-16T19:34:29Z全部结束，新文案随后提交推送；不改状态格式或执行逻辑。
+  八张新图另存native/copy-frames，不覆盖070f81e的32张图形证据。070f81e桌面于2026-10-16T19:34:29Z全部结束；i18n2289/2289、350个本地链接、暂存配置化redact密钥扫描通过。
+  文案修正 **76715e45713554b2fa5619e615e5db62795e33d6** 已随验收文档推送main；不改状态格式或执行逻辑。
+  精确[Runtime 38956470955](https://github.com/sijintech/stk/actions/runs/38956470955) **8/8 completed/success**，Secret 38956470972／Docs 38956470956均成功；[Desktop 38956471084](https://github.com/sijintech/stk/actions/runs/38956471084) **5/5 completed/success**，Windows于2026-10-16T20:14:24Z结束，后续推送门禁满足。
+  Windows3.11／3.12各2533 passed/95 skipped/317 deselected（500.18s／667.49s），Linux3.11／3.14各3033 passed/11 skipped/4 deselected/1 warning（587.54s／538.91s），3.12 3037/7/4/1（717.35s）；五矩阵日志已保存。
+  最终Linux **1539/1539 /417.68s**、Mac CPU **991/991 /363.16s**与Metal **226/226 /372.44s**、Windows **936/936 /447.98s**，全部零失败／跳过。
+  Linux／Mac三份JUnit再次逐项核对；Windows从完整workflow日志包提取，8个ViewerWorkspace全Passed、required gate673匹配成功，Linux／Mac gate717／693亦通过。
+  32张GL/Vulkan、16张Metal新图形、真实X11／Wayland窗口、Linux／Mac发布包与全新目录解包启动均成功；目检CI中文窄窗已使用新提示且完整显示。
+  最终元数据／日志／JUnit／截图／python-counts／native-junit-summary保存在portable-tests/ci-76715e4；Linux图形下载重试存linux-frames-retry1，Windows单job下载超时改取完整日志包，不混淆为CI失败。
+  Critical review补核对编辑器装载先保留各自本地视图／稿件、采用阶段统一绑定项目选择；新目标目录浏览使用SaveFile指定未创建名称，保留后端不覆盖约束。
+  本轮功能与文案验收完成；前述大小／命令预算、未知路径、凭据／环境／活进程和原始程序文字路径限制保留，PET仍为software_complete=true／material_validation=false，无MD重跑。
 
 ## 2026-10-15：本地科研多维表格（`faf3a44` / `d03366e`，修正提交跨平台CI全部通过）
 
