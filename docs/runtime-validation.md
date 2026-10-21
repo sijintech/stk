@@ -12,7 +12,9 @@
 - 修正后 missing／stale／orphan／unbaselined 均 0，pending_transactions=0、recovery_pending=false、third_party_conflict=false、network_accessed=false。机器预算 142654 tokens、healthy、违规 0；E scale 1031 条检查、错配 0。16 项跳过原因及完整原始结果保存在 `reviewed-verify.json`／`reviewed-check.json`／`reviewed-guide.json`。
 - 宿主完整读取曾在合并输出时截断，已停止该认知链，未声称完整系统认知校验通过；这不等于上述索引完整性或对齐检查失败。
 - 接入资产独立审查：原 AGENTS 规则逐字节保留，运行时日志／事务／UI 凭据不进入白名单；公开配置关闭 AI，未发现可证缺陷。生成的 AGENTS 备份移到仓库外，原初始化顺序恢复证据亦保留。
-- 本轮只改索引与文档，未把旧产品回归数量当作新测试；所有命令清空 `STK_TOKEN_PLAN_API_KEY`、取消 `STK_TOKEN_PLAN_MODEL`，未发外部模型请求或读取产品密钥。暂存 gitleaks、最终文档对齐、提交与精确 CI 待收尾补记。
+- 本轮只改索引与文档，未把旧产品回归数量当作新测试；本地 AOCI／校验进程清空 `STK_TOKEN_PLAN_API_KEY`、取消 `STK_TOKEN_PLAN_MODEL`，未发外部模型请求或读取产品密钥。
+- 最终四文档变更后按完整机器批次维护，Verify／Check／Guide 再次退出 0、1031 条完整对齐；此时范围 1050 index／2338 observe／170 exclude（生成的 AGENTS 备份已移到仓库外，策略身份未变）。暂存 gitleaks 8.30.1 使用 `.gitleaks.toml`、`--redact` 扫描零发现；`git diff --cached --check` 与新增 4 项本地链接检查通过。MCP 搜索及三条精确读取冒烟通过，旧 `append_log` 错误已不在检索结果中。
+- 交付：索引 **`fd73f48b8ab529e262b48e2a92ee233777435862` 已推送 main**；精确 [Runtime 39595993694](https://github.com/sijintech/stk/actions/runs/39595993694) **8/8 completed/success**，含 Linux 三版本、Windows 两版本、web、desktop 桥与 control 协议；[Secret 39595993567](https://github.com/sijintech/stk/actions/runs/39595993567)、[Docs 39595993557](https://github.com/sijintech/stk/actions/runs/39595993557) 均 completed/success。本轮未触发独立 Desktop 工作流，前产品代码仍为 `76715e4`。
 - 本机证据目录：`/home/mnemora/opt/stk-validation/aoci-20261021/`（含 `critical-review/`）。[面板](http://127.0.0.1:43999/)实际 HTTP 200；仅回环服务，不是远程共享地址，带访问凭据的入口不写入仓库。
 - 限制：技术跳过、观察／排除范围和未配置数据库均单列；索引不能替代源码、CI、真实模型／GUI或材料科学验证。后续受管字节变化后需按当前 Guide 再维护，产品待验收事项沿用既有记录。
 

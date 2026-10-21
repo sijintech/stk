@@ -7,7 +7,8 @@
 修正后的 Verify／Check／Guide 均退出 0、完整对齐；missing／stale／orphan／unbaselined、预算违规及未决事务均为零。
 本机面板：[AOCI](http://127.0.0.1:43999/)；服务仅监听本机，访问凭据不进入仓库。正式资产为 `aoci.txt`、`aoci.meta.txt`、`aoci.code.txt` 与 `.aoci` 的版本化白名单。
 本轮只改索引与文档，未发外部模型请求、未读取产品密钥。前产品代码 `76715e4` 的 Desktop 38956471084 已完成成功（5/5）。
-本次提交与精确 CI 待推送后补记；详细检查、证据与限制见[验收记录](docs/runtime-validation.md)。
+索引提交 **`fd73f48` 已推送 main**；精确 Runtime 39595993694 **8/8**、Secret 39595993567、Docs 39595993557 均 completed/success；本轮未触发 Desktop 工作流。
+最终文档维护后仍为 1031 条完整对齐，暂存 gitleaks 零发现、链接和空白检查通过；详细证据与限制见[验收记录](docs/runtime-validation.md)。
 后续受管文件稳定变更后按当前 AOCI Guide 维护；索引不替代源码、Git／CI 或材料科学验证，尚未配置 Database 卷。
 
 2026-10-16 表格文件交换与工作空间迁移 **`29e9fe9`、`2299b2a`、`070f81e`、`76715e4` 已推送 main**。
