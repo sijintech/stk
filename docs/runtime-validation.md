@@ -2,6 +2,20 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-21：AOCI MCP 接入与首次索引
+
+- 前置：main／origin/main 基线 `2bb0aba`；前产品代码 `76715e4` 的 [Desktop 38956471084](https://github.com/sijintech/stk/actions/runs/38956471084) 已 completed/success（5/5）。本轮未创建分支／PR、未合并无关工作。
+- 接入：当前宿主动态重载后实际发现 9 个 AOCI MCP 工具，调用成功；无需 Agent 重启。服务版本 `0.1.0-rc21`，布局 Volumes v1 Root／Meta／Code，未配置数据库连接或 Database 卷。
+- 覆盖：修正验收快照为 1050 index／2338 observe／171 exclude；排除计数包含实时运行产物，策略身份保持一致。1047 个源对象减 16 个确定性技术跳过，正式条目 **1031／1031**；不把 observe／exclude 算作语义覆盖。
+- 作者化与 review：全部草稿由模型依据实际文件及必要关联撰写；327 条原生公开 API 全面核对，修复 25 个路径的名称／可见性错误。213 条 R 分隔符逐条确认，保留原有关系；另修专用 LAMMPS 节点关系和少量字段表达。240 项正式差异经受控完整批次全部写入，最终稿与正式条目逐条一致。
+- 首次及修正后顺序执行 `aoci verify --json`、`aoci check --json`、`aoci index agent guide --agent codex --json`，均退出 0；修正后 structure_valid／governance_aligned 为 true，Check ok=true，Guide stage=aligned／complete=true／next_action=none。
+- 修正后 missing／stale／orphan／unbaselined 均 0，pending_transactions=0、recovery_pending=false、third_party_conflict=false、network_accessed=false。机器预算 142654 tokens、healthy、违规 0；E scale 1031 条检查、错配 0。16 项跳过原因及完整原始结果保存在 `reviewed-verify.json`／`reviewed-check.json`／`reviewed-guide.json`。
+- 宿主完整读取曾在合并输出时截断，已停止该认知链，未声称完整系统认知校验通过；这不等于上述索引完整性或对齐检查失败。
+- 接入资产独立审查：原 AGENTS 规则逐字节保留，运行时日志／事务／UI 凭据不进入白名单；公开配置关闭 AI，未发现可证缺陷。生成的 AGENTS 备份移到仓库外，原初始化顺序恢复证据亦保留。
+- 本轮只改索引与文档，未把旧产品回归数量当作新测试；所有命令清空 `STK_TOKEN_PLAN_API_KEY`、取消 `STK_TOKEN_PLAN_MODEL`，未发外部模型请求或读取产品密钥。暂存 gitleaks、最终文档对齐、提交与精确 CI 待收尾补记。
+- 本机证据目录：`/home/mnemora/opt/stk-validation/aoci-20261021/`（含 `critical-review/`）。[面板](http://127.0.0.1:43999/)实际 HTTP 200；仅回环服务，不是远程共享地址，带访问凭据的入口不写入仓库。
+- 限制：技术跳过、观察／排除范围和未配置数据库均单列；索引不能替代源码、CI、真实模型／GUI或材料科学验证。后续受管字节变化后需按当前 Guide 再维护，产品待验收事项沿用既有记录。
+
 ## 2026-10-15–16：CSV／XLSX／JSON 与 `.stkworkspace`（76715e4跨平台CI全部通过）
 
 - 前置：main/origin/main `4c5f1b3`，此前代码 `d03366e` Desktop 38725595367 **5/5 completed/success**，Runtime 38725595362 **8/8 success**；
