@@ -1021,7 +1021,8 @@ TEST(AnalysisParameterDraft, HistoryNoOpsRefusalsBranchingAndCleanCandidatesPres
   ASSERT_TRUE(model.set("gain", 1, generation).accepted);
   EXPECT_FALSE(model.dirty()); EXPECT_TRUE(model.can_undo());  // editing back is still an action
   ASSERT_TRUE(model.undo(generation).accepted);
-  const auto version = model.version(), bytes = model.history_bytes();
+  const auto version = model.version();
+  const auto bytes = model.history_bytes();
   ASSERT_TRUE(model.set("gain", 2, generation).accepted);
   ASSERT_TRUE(model.remove("missing", generation).accepted);
   EXPECT_FALSE(model.set_text("gain", "NaN", Draft::TextMode::Json, generation).accepted);
@@ -1061,7 +1062,8 @@ TEST(AnalysisParameterDraft, HistoryIsBoundedByBothActionCountAndActualSnapshotC
 TEST(AnalysisParameterDraft, HistoryIsSessionLocalAndFailedIdentityChangesKeepIt)
 {
   auto model = draft(); ASSERT_TRUE(model.set("gain", 4, model.generation()).accepted);
-  const auto generation = model.generation(), bytes = model.history_bytes();
+  const auto generation = model.generation();
+  const auto bytes = model.history_bytes();
   const auto state = model.save_workspace_state();
   auto bad = state; bad["document"]["outputs"] = {"missing"};
   EXPECT_FALSE(model.load_workspace_state(bad, "other"));
@@ -1095,7 +1097,8 @@ TEST(AnalysisParameterDraft, GroupedLayoutAndNodeChangesAreOneAtomicHistoryActio
   const auto candidate = exact(model.candidate_document());
   ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(exact(model.candidate_document()), original);
   ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(exact(model.candidate_document()), candidate);
-  const auto before = model.version(), bytes = model.history_bytes();
+  const auto before = model.version();
+  const auto bytes = model.history_bytes();
   EXPECT_FALSE(model.edit_group(generation, [](Draft &temporary) {
     temporary.move_nodes({{"source", {800, 20}}}, temporary.generation());
     return temporary.remove_node("absent", temporary.generation());
@@ -1117,7 +1120,8 @@ TEST(AnalysisParameterDraft, GroupedFinalNoOpKeepsRedoAndPositionOnlyPreservesEv
 {
   auto model = draft(); const auto generation = model.generation();
   ASSERT_TRUE(model.set("gain", 2, generation).accepted); ASSERT_TRUE(model.undo(generation).accepted);
-  const auto version = model.version(), bytes = model.history_bytes(), evaluation = model.evaluation_version();
+  const auto version = model.version(), evaluation = model.evaluation_version();
+  const auto bytes = model.history_bytes();
   ASSERT_TRUE(model.edit_group(generation, [](Draft &temporary) {
     auto changed = temporary.set("gain", 5, temporary.generation());
     if (!changed.accepted) { return changed; }
@@ -1143,7 +1147,8 @@ TEST(AnalysisParameterDraft, GroupedFailedLastNodeDeletionDoesNotLeaveFrozenLayo
   auto model = draft(); const auto generation = model.generation();
   ASSERT_TRUE(model.set("gain", 4, generation).accepted); ASSERT_TRUE(model.undo(generation).accepted);
   const auto original = exact(model.candidate_document());
-  const auto version = model.version(), evaluation = model.evaluation_version(), bytes = model.history_bytes();
+  const auto version = model.version(), evaluation = model.evaluation_version();
+  const auto bytes = model.history_bytes();
   const auto result = model.edit_group(generation, [](Draft &temporary) {
     auto moved = temporary.move_nodes({{"source", {100, 40}}}, temporary.generation());
     if (!moved.accepted) { return moved; }

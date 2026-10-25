@@ -248,7 +248,8 @@ TEST(WorkflowDraft, HistoryNoOpsRefusalsBranchesAndLayoutKeepTheCheckContract)
   ASSERT_TRUE(model.undo(generation).accepted); ASSERT_TRUE(model.redo(generation).accepted);
   EXPECT_EQ(model.check_version(), check); EXPECT_EQ(exact(model.document()), moved);
   ASSERT_TRUE(model.set_name("Other", generation).accepted); ASSERT_TRUE(model.undo(generation).accepted);
-  const auto bytes = model.history_bytes(), version = model.version();
+  const auto bytes = model.history_bytes();
+  const auto version = model.version();
   ASSERT_TRUE(model.move_steps({{"view", {600, 40}}}, generation).accepted);
   ASSERT_TRUE(model.set_name("Temperature scan", generation).accepted);
   EXPECT_FALSE(model.set_name(" ", generation).accepted);
@@ -289,7 +290,8 @@ TEST(WorkflowDraft, HistoryIsBoundedByBothActionCountAndSnapshotCapacity)
 TEST(WorkflowDraft, HistoryKeepsAnUnchangedRebaseButNotAReplacementOrWorkspaceSession)
 {
   auto model = pinned(); ASSERT_TRUE(model.set_name("Draft", model.generation()).accepted);
-  const auto generation = model.generation(), bytes = model.history_bytes();
+  const auto generation = model.generation();
+  const auto bytes = model.history_bytes();
   EXPECT_FALSE(model.rebase(5, "Another", saved()));
   ASSERT_TRUE(model.rebase(5, "Temperature scan", saved()));
   EXPECT_EQ(model.history_bytes(), bytes); EXPECT_TRUE(model.can_undo());
@@ -324,7 +326,8 @@ TEST(WorkflowDraft, GroupedLayoutAndStepChangesCommitOneActionAndRollbackEveryFa
   const auto changed = exact(model.document());
   ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(exact(model.document()), original);
   ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(exact(model.document()), changed);
-  const auto before = model.version(), bytes = model.history_bytes();
+  const auto before = model.version();
+  const auto bytes = model.history_bytes();
   EXPECT_FALSE(model.edit_group(generation, [](WorkflowDraft &candidate) {
     candidate.move_steps({{"fields", {800, 0}}}, candidate.generation());
     return candidate.remove_step("absent", candidate.generation());
@@ -349,7 +352,8 @@ TEST(WorkflowDraft, GroupedFinalNoOpKeepsRedoAndLayoutOrNameChangesKeepChecks)
 {
   auto model = pinned(); const auto generation = model.generation();
   ASSERT_TRUE(model.set_name("Changed", generation).accepted); ASSERT_TRUE(model.undo(generation).accepted);
-  const auto version = model.version(), bytes = model.history_bytes(), check = model.check_version();
+  const auto version = model.version(), check = model.check_version();
+  const auto bytes = model.history_bytes();
   ASSERT_TRUE(model.edit_group(generation, [](WorkflowDraft &candidate) {
     auto changed = candidate.set_parameter("view", "gain", 5, candidate.generation());
     if (!changed.accepted) { return changed; }
@@ -381,7 +385,8 @@ TEST(WorkflowDraft, GroupedFailedAdditionAtCapacityDoesNotLeaveLayoutOrDropRenam
   WorkflowDraft model; model.pin("opening", id, 4, "At capacity", document);
   const auto generation = model.generation();
   ASSERT_TRUE(model.set_name("Renamed", generation).accepted);
-  const auto version = model.version(), check = model.check_version(), bytes = model.history_bytes();
+  const auto version = model.version(), check = model.check_version();
+  const auto bytes = model.history_bytes();
   const auto result = model.edit_group(generation, [](WorkflowDraft &temporary) {
     auto moved = temporary.move_steps({{"s0", {100, 40}}}, temporary.generation());
     if (!moved.accepted) { return moved; }

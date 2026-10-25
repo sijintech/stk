@@ -2,6 +2,52 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：表格按需查询与平台修正
+
+编辑器／工具交付提交为 `4f919c752a9f8472e9f736ff91234a935acf4e51`，已推送；
+暂存 gitleaks 8.30.1 使用 `.gitleaks.toml` 并 redact 扫描通过。推送前复核 `76715e4` 的 Desktop 已完成 **5/5 成功**。
+该新提交 Runtime [40154110795](https://github.com/sijintech/stk/actions/runs/40154110795) **8/8**、
+Docs [40154110805](https://github.com/sijintech/stk/actions/runs/40154110805)、
+Secret [40154110886](https://github.com/sijintech/stk/actions/runs/40154110886) 均成功。
+Desktop [40154110887](https://github.com/sijintech/stk/actions/runs/40154110887) 已全部结束，结论 failure：Windows CPU、Linux 桌面、Linux 打包及新容器冒烟通过；
+macOS Build 失败，`analysis_parameter_draft_test.cc` 的 `auto` 混合声明在该平台推导为不同类型。
+原日志 `/tmp/stk-editor-macos-ci-20261025.log`；拆开分析与工作流测试各五处相同模式，本机重建退出 0，
+`/tmp/stk-query-build-20261025.log`。这项修正未以 Linux 通过冒称 macOS 已通过。
+
+本批后端查询修改仍在工作树。相关 Python 3.12／3.11／3.14 各 **154 passed**（4.55／12.49／8.71 秒），
+日志 `/tmp/stk-query-focused-20261025-2.log`、`/tmp/stk-query-python311-20261025.log`、`python314` 对应日志。
+新增查询专门回归 **16 passed**（0.86 秒），包含随后增加的 1100 层离页依赖，
+`/tmp/stk-query-regression-20261025-2.log`。覆盖坏缓存、跨表与循环、缺省／null／负零、旧格式、WAL 并发修订一致性、
+大值离页与无关表不物化；读后库字节／缓存不变。
+完整 Python：**3040 passed、22 skipped、4 deselected、1 warning，683.25 秒**，
+`/tmp/stk-query-python-full-20261025.log`；命令为 `python -m pytest -m 'not desktop and not perf' -q`。
+本次排除两个桌面标记用例，因此相较前轮跳过数少 2、deselected 多 2；本次收集之后新增的深链用例
+已在最终 16 项查询回归以及 Python 3.11／3.14 单项补验中通过。
+原生完整：**1592/1592、零失败、零跳过，370.81 秒**，
+`/tmp/stk-query-native-20261025.log` 与 `.xml`；JUnit 的 skipped=0，包含修正后的两套历史测试。
+
+性能复现（只创建并删除临时合成项目；不读取用户项目）：
+
+```bash
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= \
+  /home/mnemora/opt/stk-venv/bin/python tools/benchmark_table_query.py --rows 10000
+```
+
+Python 3.12.14，2 张表各 10000 行、8 列，其中 7 列为重复公开文字；offset=100、limit=200。
+参考路径先 `snapshot()` 整项目再用原筛选／比较器分页，新路径为公开 `table.query`；两者记录和总数完全一致。
+下表是**启用 tracemalloc 时**的耗时与 Python 分配峰值，不含 SQLite 原生内存，不等同于进程 RSS 或交互帧率。
+原始报告 `/tmp/stk-query-benchmark-20261025.json`。
+
+| 查询 | 全快照参考耗时／峰值 | 按需查询耗时／峰值 |
+|---|---|---|
+| 普通分页 | 7.3027 s／102.79 MiB | 0.0456 s／1.68 MiB |
+| 数值筛选 | 7.6367 s／102.75 MiB | 0.6151 s／1.71 MiB |
+| 数值倒序 | 8.1125 s／102.75 MiB | 0.8127 s／7.06 MiB |
+
+筛选仍遍历目标表行；排序保留匹配行的排序字段，公式依赖按需要展开，最坏可达全表或多表。
+桌面初始共享快照、粘贴规划和表格导出尚未全部改成增量读取；本批无 UI 交互变更，沿用下节固定起点点击证据，
+不宣称百万行桌面验收完成。全程清空产品 key 并移除 model 环境，未调用收费模型或更改网络／端点。
+
 ## 2026-10-25：通用编辑器本机验收
 
 基线 `7e0e6b1bc59ef252af72f9aca5f82a9708f7e0de` 加本批工作树；Ninja / RelWithDebInfo，

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .field_types import check, options
 from .store import ProjectError, RevisionConflict, _expected_revision, _id, _json, _text, _version
+from .table_reader import READ_BATCH, TableReader
 
 MAX_TEXT_BYTES = 1024 * 1024
 MAX_QUERY_BYTES = 8 * 1024 * 1024
@@ -178,6 +179,52 @@ def compare_records(a, b, sorts):
     return 0  # Stable sort retains the original record order for equal keys.
 
 
+def query_page(db, reader, definition, offset, limit):
+    """Page first for an unfiltered view; otherwise scan only filter/sort cells."""
+    sorts = definition["sorts"]
+    if definition["group_field_id"] is not None:
+        sorts = [{"field_id": definition["group_field_id"], "direction": "asc", "nulls": "last"}, *sorts]
+    filters = definition["filters"]
+    if not sorts and filters == {"op": "and", "conditions": []}:
+        total = db.execute("SELECT count(*) FROM records WHERE table_id=?", (reader.table_id,)).fetchone()[0]
+        identities = [row[0] for row in db.execute(
+            "SELECT id FROM records WHERE table_id=? ORDER BY rowid LIMIT ? OFFSET ?",
+            (reader.table_id, limit, offset))]
+        return total, reader.records(identities)
+
+    sort_fields = {sort["field_id"] for sort in sorts}
+    field_ids = set(sort_fields)
+
+    def filter_fields(node):
+        if node["op"] in {"and", "or"}:
+            for child in node["conditions"]:
+                filter_fields(child)
+        else:
+            field_ids.add(node["field_id"])
+
+    filter_fields(filters)
+    cursor = db.execute("SELECT id FROM records WHERE table_id=? ORDER BY rowid", (reader.table_id,))
+    total, selected, sortable = 0, [], []
+    while identities := [row[0] for row in cursor.fetchmany(READ_BATCH)]:
+        for record in reader.records(identities, field_ids):
+            if matches(record, filters):
+                if sorts:
+                    # Drop formula definitions/results after inspecting their
+                    # state. Sorting needs only typed values and error markers.
+                    sortable.append({"id": record["id"], "values": {key: value for key, value in
+                                                                     record["values"].items() if key in sort_fields},
+                                     "evaluations": {key: {"state": "error"} for key, value in
+                                                     record.get("evaluations", {}).items()
+                                                     if key in sort_fields and value["state"] == "error"}})
+                elif offset <= total < offset + limit:
+                    selected.append(record["id"])
+                total += 1
+    if sorts:
+        sortable.sort(key=cmp_to_key(lambda a, b: compare_records(a, b, sorts)))
+        selected = [record["id"] for record in sortable[offset:offset + limit]]
+    return total, reader.records(selected)
+
+
 def paste_value(text, field):
     kind = field["type"]
     if kind == "text":
@@ -256,10 +303,9 @@ class TableWorkbench:
             raise ProjectError("Use either view_id or an explicit view definition")
         with self.store._connect() as db:
             revision = self._revision(db, expected_revision)
-            model = self.store._snapshot(db)
-            table = next((t for t in model["tables"] if t["id"] == table_id), None)
-            if table is None:
+            if db.execute("SELECT 1 FROM tables WHERE id=?", (table_id,)).fetchone() is None:
                 raise ProjectError("Table is missing")
+            reader = TableReader(db, table_id, revision, _version(db))
             if view_id is not None:
                 _id(view_id)
                 row = db.execute("SELECT * FROM table_views WHERE id=? AND table_id=?", (view_id, table_id)).fetchone() if _version(db) >= 14 else None
@@ -268,18 +314,13 @@ class TableWorkbench:
                 definition = json.loads(row["definition"])
             if definition is None:
                 definition = {"version": 1, "kind": "grid"}
-            definition, issues = view_definition(definition, table["fields"], allow_missing=view_id is not None)
-            rows = [] if issues else [r for r in table["records"] if matches(r, definition["filters"])]
-            sorts = definition["sorts"]
-            if definition["group_field_id"] is not None:
-                sorts = [{"field_id": definition["group_field_id"], "direction": "asc", "nulls": "last"}, *sorts]
-            rows.sort(key=cmp_to_key(lambda a, b: compare_records(a, b, sorts)))
-            page = rows[offset:offset + limit]
-            by_id = {f["id"]: f for f in table["fields"]}
+            definition, issues = view_definition(definition, reader.fields, allow_missing=view_id is not None)
+            total, page = (0, []) if issues else query_page(db, reader, definition, offset, limit)
+            by_id = {f["id"]: f for f in reader.fields}
             fields = [by_id[c["field_id"]] for c in definition["columns"] if c["field_id"] in by_id]
             result = {"revision": revision, "table_id": table_id, "view_id": view_id, "definition": definition,
-                      "fields": fields, "total": len(rows), "record_ids": [r["id"] for r in page], "records": page,
-                      "next_offset": offset + limit if offset + limit < len(rows) else None, "issues": issues}
+                      "fields": fields, "total": total, "record_ids": [r["id"] for r in page], "records": page,
+                      "next_offset": offset + limit if offset + limit < total else None, "issues": issues}
             if len(_json(result).encode("utf-8")) > MAX_QUERY_BYTES:
                 raise ProjectError("Table query exceeds 8 MiB; reduce the page size")
             return result

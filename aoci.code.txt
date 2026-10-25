@@ -9,7 +9,7 @@ AGENTS.md[SG9S]: F:约定仓库开发、交接、按需代码导航与正式认�
 CLAUDE.md[SG7T]: F:指向统一开发交接入口 | R:code:AGENTS.md,code:handoff.md | A:Claude开发入口 | S:-
 LICENSE[SG7T]: F:声明Python主项目MIT授权 | R:code:desktop/LICENSE | A:MIT License | S:desktop有独立GPL许可边界，不能由根MIT声明推断整仓库均为MIT。
 README.md[SG8S]: F:介绍STK架构与使用入口 | R:code:docs/repository-structure.md,code:docs/quickstart-linux.md,code:docs/development-plan.md | A:项目使用与架构导览 | S:服务器端仅Linux，Windows/macOS为客户端；旧Qt、Synorder与当前原生桌面须区分，设计目标以计划实际状态为准。
-handoff.md[SG8S]: F:维护当前交接快照、通用开发目标、待决项、工作树与验证状态、代码导航和构建入口。 | R:code:AGENTS.md,code:docs/development-plan.md,code:docs/runtime-validation.md,code:docs/ai-development.md | A:- | S:开始先核真实Git和CI，发布契约优先；保护未提交修改。当前编辑器验收不完成整份计划，PET新专项后移，待决选项仍需决定。刷新和测试不发收费请求；独立MCP验收不证明宿主热加载。
+handoff.md[SG8S]: F:维护当前交接快照、通用开发目标、待决项、工作树与验证状态、代码导航和构建入口。 | R:code:AGENTS.md,code:docs/development-plan.md,code:docs/runtime-validation.md,code:docs/ai-development.md | A:- | S:开始先核真实Git和CI，发布契约优先；保护未提交修改。编辑器及后端查询只是局部交付，PET新专项后移，待决选项仍需决定。刷新和测试不发收费请求；独立MCP验收不证明宿主热加载。
 poetry.lock[FV4L]: F:保存Poetry生成的Python依赖解析、来源及分发文件摘要，供对应声明版本重复安装。 | R:code:pyproject.toml | A:lock-version,content-hash | S:锁Python>=3.9,<3.12与主声明>=3.11,<3.15漂移，不能据锁推定兼容。
 pyproject.toml[FV8M]: F:定义Python发行包、嵌套兼容源码映射、功能extras、CLI入口、默认测试发现与旧GUI打包配置。 | R:code:suan/cli/main.py,code:suan/control/cli.py,code:toolkits/smesh/src/structure-generator/pyproject.toml,code:poetry.lock | A:suan,suan-control,suan-node,suan-synorder-node,science,visualization | S:具体嵌套package映射须先于toolkits，Poetry按首个匹配去重；archive、desktop和工具测试不进入包。默认pytest仅tests，examples手动验收独立执行。Python支持范围以本声明为准，历史lock元数据存在漂移。
 
@@ -485,7 +485,7 @@ quickstart-linux.md[SU5S]: F:提供Linux安装、合成示例浏览、无头Pyth
 repository-structure.md[SV7S]: F:界定原生桌面、共享Python、兼容toolkits、可选插件、网页和归档的活动职责与迁移门槛。 | R:code:archive/manifest.json,code:docs/desktop-modules.md | A:- | S:目录旧不等于可删；toolkits/Qt仍有公开入口和打包依赖。迁移按职责保持兼容并验发布物，archive不得进构建、模块搜索或默认测试。
 runtime-mupro.md[SW7L]: F:说明MuFerro独立程序的Runtime启动、MPI布局、许可环境、逐次产物核验与真实验收步骤。 | R:code:suan/mupro/run.py,code:docs/runtime.md | A:suan mupro submit,python -m suan.mupro run,python -m suan.mupro verify,python -m suan.mupro check | S:不导入muprosdk服务；退出0不足成功，完整有限输出需核验。分配外MPI须服务环境显式允许，srun限Slurm分配；令牌客户端本就可执行程序，保护不是沙箱。
 runtime-paratera.md[SW5M]: F:列出并行云站点环境、部署候选、待确认权限与Slurm/MuPRO分步验收清单。 | R:code:docs/runtime.md,code:docs/runtime-mupro.md | A:suan server doctor | S:未作真实站点验收；常驻登录节点须书面允许，默认local后端可能违站点规则。明确时限/计费与许可，远端SSH调度后端尚未实现。
-runtime-validation.md[SQ8L]: F:保存每次交付的真实测试、失败修正、CI、AOCI治理、图形与固定起点点击及材料适用性证据。 | R:code:docs/development-log.md,code:docs/development-plan.md | A:- | S:本机/CI/合成输入/真机分别记录；生成金样时skip不算验证。认知交付与治理对齐分开，旧Challenge不覆盖新索引。软件成功不证明科学收敛，截图不代读屏或真机交互。
+runtime-validation.md[SQ8L]: F:保存每次交付的真实测试、失败修正、CI、AOCI治理、图形与固定起点点击及材料适用性证据。 | R:code:docs/development-log.md,code:docs/development-plan.md | A:- | S:本机、CI、合成和真机分别记录；skip不算验证，旧Challenge不覆盖新索引。查询tracemalloc峰值不含SQLite内存，不代表RSS或桌面端到端性能；软件通过不证明科学收敛。
 runtime.md[SW8L]: F:介绍Linux持久Runtime及跨平台客户端的安装、资源调度、输入快照、任务事件与恢复合同。 | R:code:suan/runtime/service.py,code:suan/runtime/models.py | A:RuntimeClient,TaskSpec,suan server,suan jobs,suan workspaces | S:仅回环监听，远程经SSH；202只表示登记。重试同键同spec，不确定调度不盲目重交；输入复制后核哈希。API/supervisor/worker寿命独立，取消意图不等于退出，非多租户沙箱。
 scalar-volume.md[SA6S]: F:指导显式选择字段与零起始分量进行有符号体渲染，说明单位标签、值域、相机操作及桌面和Web载荷的数值精度边界。 | R:code:suan/graph/presets/scalar-volume.json,code:docs/analysis-graphs.md,code:docs/scripting-viewer.md,code:docs/project-analyses.md | A:scalar-volume,stk.viewer.open,stk.viewer.configure,stk.viewer.evaluate,stk.viewer.wait | S:unit只改标签不换算，默认volume仍取模；字段缺失不回退，分量不推断物理基。float32和Web量化不是原始精度存档，GPU归一化不改载荷；截图不能代替独立数组验收。
 scripting-graphs.md[SA6T]: F:说明Python图目录、校验、明确求值、blob读取、探针与本机和Hub取消边界。 | R:code:suan/scripting/graph.py,code:docs/specs/stk-graph-v1.md | A:stk.graph.catalog,stk.graph.validate,stk.graph.evaluate,stk.graph.ensure_blobs,stk.graph.probe,stk.graph.cancel | S:本机eval_id只标活动求值不是持久记录；不自动重试或改变Viewer。Hub待审核不自动批准，中断本机等待不取消远端；缓存路径不当持久文件或摘要证明。
@@ -512,7 +512,7 @@ literature-lending-evaluation-2026-10.md[SN5L]: F:评估持有者节点渲染页
 live-share-evaluation-2026-10.md[SN5L]: F:比较结构化会话共享、原生窗口视频及自托管媒体服务的协作候选。 | R:code:docs/design/sijin-platform-2026-10.md | A:- | S:未实现且无网络实测；结构化共享与视频分开，文献借阅不能默用SFU中继，跨机构共享需逐次明确同意。
 materials-models-s3.md[SA6T]: F:规定合成P–E回线和SOH曲线的数据集、CPU训练、门槛登记与预测首版范围。 | R:code:suan/materials/service.py,code:suan/materials/datasets.py | A:stk.dataset/1,materials.* | S:合成链路不证明材料预测准确；训练依赖可选，任务仅内存，模型在服务目录而非项目；真实数据需独立授权与评价。
 model-gateway.md[SS7S]: F:说明统一端点网关、数据标注、网络准入、本机模型安装与可解释候选回退。 | R:code:suan/models/gateway.py,code:suan/models/routing.py | A:models.endpoints.*,models.policy.*,models.local.* | S:默认私有；外发按发送时当前表标注核对，不能据此声称自由问题全链隔离。端点与网络只经桌面配置，确定未发出的失败才可换请求回退。
-multidimensional-tables.md[SU7T]: F:界定本地科研多维表格的网格、强类型、视图、对象及交换能力和剩余范围。 | R:code:docs/specs/project-tables-14.md,code:docs/project-table-io.md | A:- | S:首版本地单机；格式13不自动升级。当前页搜索统计不同于整表筛选排序；对象浏览不授权执行，公式编辑不可隐式变常量。
+multidimensional-tables.md[SU7T]: F:界定本地科研多维表格的网格、强类型、视图、对象、交换及按需查询能力和剩余范围。 | R:code:docs/specs/project-tables-14.md,code:docs/project-table-io.md | A:- | S:查询优化不覆盖桌面首次全量快照或粘贴规划；搜索统计仍限当前页。格式13不自动升级，对象查看不授权执行。
 multiscale-engines.md[SW7M]: F:规划并记录MuPRO之外LAMMPS、PET建模与分析、ABACUS及跨尺度串联的分期边界。 | R:code:docs/pet-model.md,code:docs/design/pet-materials-data-loop.md | A:stk.engines,stk.pet-study-recipe/1 | S:仅进度标交付项实现；后续授权采用完整OPLS-AA/MK2022，不沿用历史ipso碳0.0推断。软件链通过不代表物性收敛，E2/E3仍按依赖推进。
 nat-traversal-evaluation-2026-10.md[SN5L]: F:研究会合、打洞、加密中继与强制代理限制，提出STK原生会话层和站点测量。 | R:code:docs/design/node-networking-evaluation-2026-10.md | A:- | S:未实测不保证直连；不嵌RustDesk/ZeroTier、不建校园代理；文献失败回退与机构许可按所有者决定，不能擅自穿透。
 node-networking-evaluation-2026-10.md[SN5M]: F:比较校园节点应用通道与虚拟组网，提出WSS基础层、文献机制和机会性直连。 | R:code:docs/hub.md,code:docs/design/sijin-platform-2026-10.md | A:- | S:调研不是实现；基础层先补显式代理，付费文献不复用落盘blob中继；直连默认关，校方批准后逐站验证。
@@ -1104,11 +1104,12 @@ snapshots.py[PR9M]: F:冻结并校验输入文件快照 | R:code:suan/project/fi
 store.py[PD9L]: F:管理SQLite项目修订与原子编辑 | R:code:suan/project/evaluation.py,code:suan/project/journal.py,code:suan/project/field_types.py | A:ProjectStore, ProjectError, RevisionConflict, UnsupportedProjectFormat | S:每操作独立连接，批次按expected_revision全成全败；项目库独立于Runtime库。只解释有界表达式，持久化不提交任务。
 sweep.py[KW7S]: F:规划参数扫描新增行 | R:code:suan/project/store.py,code:suan/project/parameter_sweep.py | A:axis_values, plan_sweep | S:仅从给定快照规划最多1000编辑命令；复制表达式时将基准行自引用迁移到新行，不在规划阶段写库或求值。
 table_io.py[ID8L]: F:交换CSV、XLSX与类型化JSON表格 | R:code:suan/project/csv_io.py,code:suan/project/field_types.py | A:TableIO | S:JSON保留缺省与null并物化成功求值结果；对象引用仍绑定原项目。Excel不计算公式，导入创建新身份，非项目备份。
-table_workbench.py[AD8M]: F:查询表格视图与规划批量粘贴 | R:code:suan/project/store.py,code:suan/project/field_types.py,code:suan/project/object_refs.py | A:TableWorkbench, view_definition, apply_view | S:视图与批量操作共用ProjectStore；粘贴先产生可验证的原子编辑计划，富对象仅解析元数据，不另建业务状态。
+table_workbench.py[AD8M]: F:校验持久视图、按需筛选排序分页并提供原子粘贴计划和对象元数据查询。 | R:code:suan/project/store.py,code:suan/project/table_reader.py,code:suan/project/field_types.py,code:suan/project/object_refs.py | A:TableWorkbench,view_definition,apply_view,query_page | S:所有读取校验精确修订；无条件视图先SQL分页，筛选扫描字段投影，排序保留匹配键且同键按原行序。页面仍含完整记录及依赖结果，最多500行/8MiB。粘贴仍读全快照并预览最多1000命令，不写库；对象只读元数据。
 workflow_runs.py[PW9L]: F:冻结逐行流程与重试尝试 | R:code:suan/project/workflows.py,code:suan/desktop_bridge/workflow_runs.py | A:WorkflowRuns | S:每步×每行是任务，每次执行是冻结计划上的编号attempt；过期attempt不能完结任务。计划与哈希链不进入编辑撤销。
 workflows.py[DW8L]: F:保存并只读校验项目工作流，解析对象、端口和字段绑定，提供带声明约束的参数摘要。 | R:code:suan/project/managed.py,code:suan/project/workflow_runs.py,code:suan/graph/schema.py | A:Workflows.list,get,create,update,choices,validate | S:保存只检形状；validate解析当前引用/端口/字段兼容，字面参数到准备运行才校验。摘要仅透传声明的choices/minimum/maximum/description，不补约束或改图；读取不求图、不读数据、不准备任务或联系模型。
 workspace_bundle.py[IR9L]: F:封装并恢复可搬迁工作空间 | R:code:suan/project/store.py,code:suan/project/workspace_paths.py,code:docs/design/portable-workspaces.md | A:export_workspace, preview_workspace, import_workspace, open_workspace | S:SQLite用在线备份保留原版本，不重放日志；验证清单摘要后向新目录原子发布。仅搬迁显式资源，不恢复凭据、网络策略或活进程。
 workspace_paths.py[ID8S]: F:重定位搬迁后的外部文件引用 | R:code:suan/project/workspace_bundle.py,code:suan/project/files.py | A:resolve_workspace_path | S:独立解析Windows/POSIX原路径语法，只读映射元数据；不改SQLite、历史签名，不探测旧机器原路径。畸形已有描述符必须报错。
+table_reader.py[PD8S]: F:按记录和字段投影读取类型值，迭代展开精确单元格依赖并复用求值器组装只读记录。 | R:code:suan/project/evaluation.py,code:suan/project/field_types.py,code:suan/project/table_workbench.py | A:TableReader,records,READ_BATCH | S:调用者持有同一读事务和修订；缓存有效也读取祖先闭包以发现损坏并传播失效，重建不写库。只返回请求记录，完整页包含隐藏字段及定义；依赖可跨表且无总量上限，128项批次兼容旧SQLite变量上限。
 
 ===/home/mnemora/xcheng/sijin/stk/suan/render/===
 __init__.py[LG5T]: F:声明共享渲染包边界 | R:code:suan/render/payload.py | A:- | S:包导入不加载NumPy或VTK。
@@ -1398,3 +1399,6 @@ jscpd.json[FQ4T]: F:限定Python、原生C++含头文件和网页源码的重复
 knip-web.json[FQ4T]: F:为web未用代码检查声明应用、Service Worker、测试入口和Vite及Playwright配置。 | R:code:web/src/main.tsx,code:web/public/sw.js | A:entry,project,vite,playwright | S:动态注册的Service Worker必须作为入口，避免被误报为未用文件。
 package-lock.json[FV4L]: F:锁定独立jscpd与Knip检查工具的依赖解析、平台二进制及完整性摘要。 | R:code:tools/ai/package.json | A:lockfileVersion,packages | S:包含平台可选二进制，本机安装不证明其他平台已验收。
 package.json[FV4T]: F:声明独立私有开发检查包，固定jscpd和Knip版本。 | R:code:tools/ai/package-lock.json,code:tools/ai/dev.py | A:devDependencies | S:检查依赖不进入产品包；通过同目录锁文件执行npm ci。
+
+===/home/mnemora/xcheng/sijin/stk/tools/===
+benchmark_table_query.py[XP5T]: F:以临时合成两表比较完整快照与分页查询的耗时和Python分配峰值，并断言筛选排序结果相等。 | R:code:suan/project/table_workbench.py,code:docs/runtime-validation.md | A:benchmark,measure,--rows | S:直接种入字面存储排除写历史开销；tracemalloc不计SQLite内存或RSS，不能外推桌面全链性能。
