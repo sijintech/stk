@@ -90,6 +90,8 @@ OPERATIONS = {
     "project.skills.pin": ("project_edit", "changes the project"),
     "project.skills.publish_analysis": ("project_edit", "publishes a user-owned method version; never an agent tool"),
     "project.skills.publish_workflow": ("project_edit", "publishes a frozen workflow method; never an agent tool"),
+    "project.skills.publish_global": ("project_edit", "writes an immutable method to this computer's user library; never an agent tool"),
+    "skills.publication.get": ("read", "checks a local publication receipt without replaying the write"),
     "project.skills.upgrade": ("project_edit", "changes the project"),
     "project.skills.restore": ("project_edit", "changes the project"),
     "project.skills.create_analysis": ("project_edit", "changes the project"),

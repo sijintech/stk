@@ -45,6 +45,12 @@ SHUTDOWN_GRACE = 5.0
 LOCK_NAME = "bridge.lock"
 
 
+def _skill_error(error):
+    """Keep local catalog diagnostics within the stable bridge error vocabulary."""
+    code = "conflict" if error.code == "invalid_definition" else error.code
+    return BridgeError(code, str(error), data={**error.data, "catalog_code": error.code}, retryable=False)
+
+
 def with_kind(record):
     """A hub action record with a top-level ``kind`` (the hub keeps it in ``request.kind`` only)."""
     if isinstance(record, dict) and "kind" not in record and isinstance(record.get("request"), dict):
@@ -173,8 +179,10 @@ class Bridge:
         # Workflow runs register outputs as ordinary edits in the background; open handles hear about them.
         self.workflow_executor = WorkflowRunExecutor(self.analysis_executor, changed=self._announce,
                                                      scripting=self._workflow_scripting, poll_seconds=_poll_seconds())
+        from suan.skills.user_catalog import UserSkillLibrary
+        self.skill_library = UserSkillLibrary(root=self.state_dir / "skills")
         self.projects = ProjectSessions(self.state_dir, analysis_executor=self.analysis_executor,
-                                        workflow_executor=self.workflow_executor)
+                                        workflow_executor=self.workflow_executor, skill_catalog=self._skill_catalog)
         self.projects.local.emit = self.emit
         self._local_started = False
         self.project_runs = ProjectRuns(self.projects, self.connections.backend)
@@ -236,6 +244,7 @@ class Bridge:
             "colormaps.list": lambda p, c: self.graphs.colormaps(),
             "skills.list": lambda p, c: self.skills_list(p),
             "skills.get": lambda p, c: self.skills_get(p),
+            "skills.publication.get": lambda p, c: self.skills_publication(p),
             "workspace.export": lambda p, c: self.projects.workspace("export", p),
             "workspace.preview": lambda p, c: self.projects.workspace("preview", p),
             "workspace.import": lambda p, c: self.projects.workspace("import", p),
@@ -313,6 +322,7 @@ class Bridge:
             "project.skills.pin": lambda p, c: self.edit_project_skills("pin", p, c),
             "project.skills.publish_analysis": lambda p, c: self.edit_project_skills("publish_analysis", p, c),
             "project.skills.publish_workflow": lambda p, c: self.edit_project_skills("publish_workflow", p, c),
+            "project.skills.publish_global": lambda p, c: self.publish_global_skill(p, c),
             "project.skills.upgrade": lambda p, c: self.edit_project_skills("upgrade", p, c),
             "project.skills.restore": lambda p, c: self.edit_project_skills("restore", p, c),
             "project.skills.create_analysis": lambda p, c: self.edit_project_skills("create_analysis", p, c),
@@ -688,6 +698,7 @@ class Bridge:
                  "project.skills.restore", "project.skills.create_analysis",
                  "project.skills.publish_analysis",
                  "project.skills.publish_workflow", "project.skills.create_workflow",
+                 "project.skills.publish_global", "skills.publication.get",
                  "project.workflows.create", "project.workflows.update", "project.workflows.get",
                  "project.workflows.list", "project.workflows.validate", "project.workflows.choices",
                  "project.workflow_runs.prepare", "project.workflow_runs.get", "project.workflow_runs.list",
@@ -754,9 +765,41 @@ class Bridge:
         return result
 
     def _skill_catalog(self):
-        # Reread per request: definitions are small and availability follows the environment.
+        # A catalog read must not initialize the executable registry or load entry-point plugins.
         from suan.skills.catalog import load_catalog
-        return load_catalog(self.graphs.registry())
+        return load_catalog(user_library=self.skill_library)
+
+    def publish_global_skill(self, params, context):
+        from suan.skills.catalog import MAX_VERSION, SkillCatalogError
+        source = self.projects.skill_publication_source(params)
+        try:
+            try:
+                receipt = self.skill_library.publication(params["publication_id"])
+            except SkillCatalogError as exc:
+                if exc.code != "not_found":
+                    raise
+            else:
+                if receipt["source"] != source or receipt["mode"] != params["mode"]:
+                    raise SkillCatalogError("conflict", "Publication identity belongs to another request")
+                return receipt
+            captured = self.projects.skills("export_snapshot", {
+                key: params[key] for key in ("handle", "project_skill_id", "content_sha256", "expected_revision")})
+            if params["mode"] == "new_version" and captured["max_version"] >= MAX_VERSION:
+                raise SkillCatalogError("conflict", "User skill has exhausted its supported version range")
+            receipt = self.skill_library.publish(captured["snapshot"], publication_id=params["publication_id"],
+                source=source, mode=params["mode"],
+                minimum_version=captured["max_version"] + 1 if params["mode"] == "new_version" else 1)
+            context.after(lambda: self.emit("skills.changed", {}))
+            return receipt
+        except SkillCatalogError as exc:
+            raise _skill_error(exc) from None
+
+    def skills_publication(self, params):
+        from suan.skills.catalog import SkillCatalogError
+        try:
+            return self.skill_library.publication(params["publication_id"])
+        except SkillCatalogError as exc:
+            raise _skill_error(exc) from None
 
     def skills_list(self, params):
         from suan.skills.catalog import DEFAULT_LIMIT, SkillCatalogError
@@ -764,14 +807,14 @@ class Bridge:
             return self._skill_catalog().page(offset=params.get("offset", 0), limit=params.get("limit", DEFAULT_LIMIT),
                                               query=params.get("query"))
         except SkillCatalogError as exc:
-            raise BridgeError(exc.code, str(exc), data=exc.data) from None
+            raise _skill_error(exc) from None
 
     def skills_get(self, params):
         from suan.skills.catalog import SkillCatalogError
         try:
             return {"skill": self._skill_catalog().get(params["id"], params.get("version"))}
         except SkillCatalogError as exc:
-            raise BridgeError(exc.code, str(exc), data=exc.data) from None
+            raise _skill_error(exc) from None
 
     def task_logs(self, params, context):
         import base64

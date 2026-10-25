@@ -214,23 +214,23 @@ class ProjectSkills:
                     "table_id": TABLE_ID, "skill": self._read(db, project_skill_id)}
 
     @staticmethod
-    def _capture(skill_id, version, content_sha256):
+    def _capture(skill_id, version, content_sha256, *, catalog=None):
         from suan.skills.catalog import SkillCatalogError, load_catalog
         _hash(content_sha256)
         if type(version) is not int or version < 1:
             raise ProjectError("Pinning a skill requires an explicit positive version")
         try:
-            content = load_catalog().freeze(skill_id, version, content_sha256)
+            content = (load_catalog if catalog is None else catalog)().freeze(skill_id, version, content_sha256)
         except SkillCatalogError as exc:
             if exc.code == "conflict":
                 raise RevisionConflict(str(exc)) from None
             raise ProjectError(str(exc)) from None
         return {**content, "content_sha256": content_sha256}
 
-    def pin(self, skill_id, version, content_sha256, *, project_skill_id, expected_revision):
+    def pin(self, skill_id, version, content_sha256, *, project_skill_id, expected_revision, catalog=None):
         _id(project_skill_id)
         _expected_revision(expected_revision)
-        item = self._capture(skill_id, version, content_sha256)
+        item = self._capture(skill_id, version, content_sha256, **({"catalog": catalog} if catalog is not None else {}))
         document = _document({"format": DOCUMENT_FORMAT, "active": content_sha256, "versions": [item]})
         with self.store._connect(write=True) as db:
             _TABLE.require(db, "project skills")
@@ -245,6 +245,20 @@ class ProjectSkills:
         if item["state"] != "readable":
             raise ProjectError(item["error"])
         return item
+
+    def export_snapshot(self, project_skill_id, content_sha256, *, expected_revision):
+        """Capture the reviewed active version and history maximum in one read transaction."""
+        _id(project_skill_id)
+        _hash(content_sha256)
+        _expected_revision(expected_revision)
+        with self.store._connect() as db:
+            current = self._current(db, project_skill_id, expected_revision)
+            if current["document"]["active"] != content_sha256:
+                raise RevisionConflict("The active skill version changed; review it before publishing")
+            versions = current["document"]["versions"]
+            return {"snapshot": next(item for item in versions if item["content_sha256"] == content_sha256),
+                    "max_version": max(item["definition"]["version"] for item in versions),
+                    "project_id": db.execute("SELECT id FROM project").fetchone()[0]}
 
     def publish_analysis(self, analysis_id, *, project_skill_id, create, name, description, expected_revision):
         """Publish one saved definition as a new user skill or append an immutable user version."""
@@ -268,15 +282,16 @@ class ProjectSkills:
             if source["state"] != "readable":
                 raise ProjectError(source["error"])
             analysis = source["document"]
-            skill_id = "user.s" + project_skill_id.replace("-", "")
             versions = [] if create else self._current(db, project_skill_id, expected_revision)["document"]["versions"]
-            if any(v["definition"]["id"] != skill_id or v["definition"]["entry"]["kind"] != "graph.document" for v in versions):
+            if any(v["definition"]["entry"]["kind"] != "graph.document" for v in versions):
                 raise ProjectError("Publish a new user skill instead of replacing a catalog skill")
+            template_id = versions[0]["template"]["id"] if versions else project_skill_id.replace("-", "")
+            skill_id = versions[0]["definition"]["id"] if versions else "user.s" + template_id
             version = 1 + max((v["definition"]["version"] for v in versions), default=0)
             content = {
                 "definition": {"schema": "stk.skill/1", "id": skill_id, "version": version,
                                "title": {"en": title}, "summary": {"en": description}, "entry": {"kind": "graph.document"}},
-                "template": {"id": project_skill_id.replace("-", ""), "name": title, "description": description,
+                "template": {"id": template_id, "name": title, "description": description,
                              "bindings": _analysis_bindings(analysis), "graph": analysis["graph"],
                              "parameters": analysis["parameters"], "outputs": analysis["outputs"],
                              "source": {"project_id": db.execute("SELECT id FROM project").fetchone()[0],
@@ -289,7 +304,7 @@ class ProjectSkills:
             return _TABLE.write(self.store, db, project_skill_id, {"name": title, **document}, expected_revision,
                                 create=create, document_format=DOCUMENT_FORMAT)
 
-    def upgrade(self, project_skill_id, version, content_sha256, *, expected_revision):
+    def upgrade(self, project_skill_id, version, content_sha256, *, expected_revision, catalog=None):
         _id(project_skill_id)
         _expected_revision(expected_revision)
         # Resolve outside the write lock, then check the same revision again inside the transaction.
@@ -298,7 +313,8 @@ class ProjectSkills:
             raise RevisionConflict("Project changed; refresh the saved skill before upgrading")
         if before["skill"]["state"] != "readable":
             raise ProjectError(before["skill"]["error"])
-        item = self._capture(before["skill"]["active"]["skill_id"], version, content_sha256)
+        item = self._capture(before["skill"]["active"]["skill_id"], version, content_sha256,
+                             **({"catalog": catalog} if catalog is not None else {}))
         with self.store._connect(write=True) as db:
             current = self._current(db, project_skill_id, expected_revision)
             document = current["document"]

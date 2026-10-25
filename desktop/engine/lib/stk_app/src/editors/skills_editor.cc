@@ -55,6 +55,7 @@ class SkillsEditor final : public Editor {
     auto &top = layout.row();
     workspace_link(top, ctx);
     top.label(ctx.tr("skills.title"));
+    publication_status(layout, ctx);
     auto &tabs = layout.row();
     tabs.button("skills_library_tab", ctx.tr("skills.library"), [this] { project_view_ = false; });
     tabs.button("skills_project_tab", ctx.tr("skills.project.title"), [this] { project_view_ = true; });
@@ -136,7 +137,8 @@ class SkillsEditor final : public Editor {
   bool writable(EditorContext &ctx) const
   {
     return project_skills_ && project_skills_->supported() && !project_skills_->busy() &&
-        !project_skills_->uncertain() && !ctx.store.project().busy() &&
+        !project_skills_->uncertain() && !ctx.store.skills().publication_busy() && !ctx.store.skills().publication_uncertain() &&
+        !ctx.store.project().busy() &&
         !ctx.area.shell().has_unsaved_changes() && !ctx.area.shell().text_input_active();
   }
   std::function<void()> mutation(EditorContext &ctx, std::string action, io::Json params,
@@ -164,6 +166,56 @@ class SkillsEditor final : public Editor {
       if (action == "create_workflow" && binding_version_ != source_version) { return; }
       if (project_skills_->write(action, params, epoch)) { project_view_ = true; }
     };
+  }
+  void publication_status(ui::Layout &layout, EditorContext &ctx)
+  {
+    auto &catalog = ctx.store.skills();
+    if (!catalog.publication_error().empty()) { layout.paragraph(catalog.publication_error()); }
+    if (catalog.publication_busy()) { layout.label(ctx.tr("skills.user.publishing")); }
+    if (catalog.publication_uncertain()) {
+      layout.paragraph(ctx.store.catalog().format("skills.user.uncertain", {
+          {"id", io::get_string(catalog.publication_pending(), "publication_id")}}));
+      const auto publication_id = io::get_string(catalog.publication_pending(), "publication_id");
+      layout.button("skill_publication_check", ctx.tr("skills.user.check"), [&catalog, publication_id] {
+        if (io::get_string(catalog.publication_pending(), "publication_id") == publication_id) { catalog.check_publication(); }
+      })
+          .disable(catalog.publication_busy());
+    }
+    if (!catalog.publication_notice().empty()) { layout.paragraph(ctx.tr(catalog.publication_notice())); }
+    if (catalog.publication().is_object()) {
+      layout.label(io::get_string(catalog.publication().at("skill"), "ref"));
+    }
+  }
+  void publish_global(ui::Layout &layout, EditorContext &ctx)
+  {
+    auto &saved = *project_skills_;
+    auto &catalog = ctx.store.skills();
+    if (!catalog.publication_supported()) { return; }
+    const auto epoch = saved.epoch();
+    const auto digest = io::get_string(saved.selected().at("active"), "content_sha256");
+    const auto selected = saved.selected_id();
+    const auto revision = saved.revision();
+    const auto publication_generation = catalog.publication_generation();
+    auto *area = &ctx.area;
+    const auto weak = lifetime(), shell_weak = area->shell().lifetime();
+    const auto action = [this, weak, shell_weak, area, &catalog, epoch, selected, revision, digest, publication_generation](const std::string &mode) {
+      return [this, weak, shell_weak, area, &catalog, epoch, selected, revision, digest, publication_generation, mode] {
+        if (weak.expired() || shell_weak.expired() || &area->editor() != this ||
+            area->shell().has_unsaved_changes() || area->shell().text_input_active()) { return; }
+        project_skills_->sync();
+        if (catalog.publication_generation() != publication_generation || project_skills_->selected_id() != selected ||
+            project_skills_->revision() != revision) { return; }
+        catalog.publish(*project_skills_, mode, epoch, digest);
+      };
+    };
+    layout.paragraph(ctx.tr("skills.user.publish_hint"));
+    layout.button("project_skill_publish_global", ctx.tr("skills.user.publish"), action("exact"))
+        .disable(!writable(ctx) || !saved.current());
+    if (catalog.publication_conflict(saved)) {
+      layout.paragraph(ctx.tr("skills.user.conflict"));
+      layout.button("project_skill_publish_global_new_version", ctx.tr("skills.user.new_version"), action("new_version"))
+          .disable(!writable(ctx) || !saved.current());
+    }
   }
   void publish_analysis(ui::Layout &layout, EditorContext &ctx)
   {
@@ -452,6 +504,7 @@ class SkillsEditor final : public Editor {
       break;
     }
     const bool enabled = writable(ctx) && saved.current();
+    publish_global(layout, ctx);
     if (auto *versions = layout.panel("project_skills_versions", ctx.tr("skills.project.versions"), true)) {
       for (const auto &version : item.at("versions")) {
         const auto digest = io::get_string(version, "content_sha256");
@@ -636,7 +689,8 @@ class SkillsEditor final : public Editor {
       spec.text = [catalog, &items, language](const int i) {
         if (i < 0 || size_t(i) >= items.size()) { return std::string(); }  // a reply replaced the rows
         const auto &row = items[size_t(i)];
-        return skill_text(row.title, language) + "  ·  " + row.ref + "  ·  " + status_text(*catalog, row.status);
+        return skill_text(row.title, language) + "  ·  " + row.ref + "  ·  " +
+            source_text(*catalog, row.source) + "  ·  " + kind_text(*catalog, row.entry_kind) + "  ·  " + status_text(*catalog, row.status);
       };
       spec.selected = {[&items, &skills] {
                          const auto found = std::find_if(items.begin(), items.end(), [&](const SkillSummary &row) {
@@ -657,9 +711,28 @@ class SkillsEditor final : public Editor {
         .disable(!skills.has_next() || skills.loading());
   }
 
+  static std::string bounded_default(const io::Json &value)
+  {
+    if (value.is_object()) { return "{…} (" + std::to_string(value.size()) + ")"; }
+    if (value.is_array()) { return "[…] (" + std::to_string(value.size()) + ")"; }
+    if (!value.is_string()) { return value.dump(); }
+    const auto &text = value.get_ref<const std::string &>();
+    size_t end = std::min(size_t(160), text.size());
+    while (end > 0 && end < text.size() && (static_cast<unsigned char>(text[end]) & 0xc0) == 0x80) { --end; }
+    return io::Json(text.substr(0, end)).dump() + (end < text.size() ? " …" : "");
+  }
+  static std::string source_text(const ui::Catalog &catalog, const std::string &source)
+  {
+    return source == "builtin" || source == "user" ? std::string(catalog.tr("skills.source." + source)) : source;
+  }
+  static std::string kind_text(const ui::Catalog &catalog, const std::string &kind)
+  {
+    return kind == "graph.preset" || kind == "graph.document" || kind == "workflow.document" ?
+        std::string(catalog.tr("skills.kind." + kind)) : kind;
+  }
   static std::string status_text(const ui::Catalog &catalog, const std::string &status)
   {
-    if (status == "available" || status == "limited" || status == "unavailable") {
+    if (status == "available" || status == "limited" || status == "unavailable" || status == "unchecked") {
       return std::string(catalog.tr("skills.status." + status));
     }
     return status;
@@ -694,6 +767,8 @@ class SkillsEditor final : public Editor {
     auto &head = layout.box();
     head.label(skill_text(member(skill, "title"), language));
     head.label(io::get_string(skill, "ref"));
+    head.label(source_text(catalog, io::get_string(skill, "source")) + " · " +
+               kind_text(catalog, io::get_string(member(skill, "entry"), "kind")));
     head.paragraph(catalog.format("skills.content_hash", {{"hash", io::get_string(skill, "content_sha256")}}));
     head.paragraph(skill_text(member(skill, "summary"), language));
     if (project_skills_->supported()) {
@@ -719,10 +794,22 @@ class SkillsEditor final : public Editor {
     const auto &entry = member(skill, "entry");
     auto &run = layout.box();
     run.label(ctx.tr("skills.entry"));
-    run.paragraph(catalog.format("skills.entry_text", {{"kind", io::get_string(entry, "kind")},
-                                                       {"preset", io::get_string(entry, "preset")},
-                                                       {"operation", io::get_string(entry, "operation")}}));
-    run.paragraph(ctx.tr("skills.run_hint"));
+    if (io::get_string(entry, "kind") == "graph.preset") {
+      run.paragraph(catalog.format("skills.entry_text", {{"kind", io::get_string(entry, "kind")},
+          {"preset", io::get_string(entry, "preset")}, {"operation", io::get_string(entry, "operation")}}));
+      run.paragraph(ctx.tr("skills.run_hint"));
+    }
+    else { run.paragraph(ctx.tr("skills.user.use_hint")); }
+    if (const auto &method = member(skill, "method"); method.is_object()) {
+      run.paragraph(catalog.format("skills.project.workflow_closure", {
+          {"workflows", std::to_string(io::get_int(method, "workflow_count", 0))},
+          {"analyses", std::to_string(io::get_int(method, "analysis_count", 0))}}));
+      const auto &data = member(method, "data_dependencies");
+      run.paragraph(catalog.format("skills.user.data_dependencies", {
+          {"tables", std::to_string(io::get_int(data, "tables", 0))},
+          {"fields", std::to_string(io::get_int(data, "fields", 0))},
+          {"snapshots", std::to_string(io::get_int(data, "snapshots", 0))}}));
+    }
     const auto &guide = member(skill, "guide");
     run.paragraph(guide.is_object() ? catalog.format("skills.guide", {{"pack", io::get_string(guide, "pack")}}) :
                                       std::string(ctx.tr("skills.no_guide")));
@@ -738,7 +825,13 @@ class SkillsEditor final : public Editor {
       for (const auto &parameter : member(skill, "parameters")) {
         std::string line = io::get_string(parameter, "name") + " : " + io::get_string(parameter, "type");
         const auto &fallback = member(parameter, "default");
-        if (parameter.is_object() && parameter.contains("default")) { line += " = " + fallback.dump(); }
+        if (parameter.is_object() && parameter.contains("default")) {
+          const auto cache_key = io::get_string(skill, "ref") + ":" + io::get_string(skill, "content_sha256");
+          if (default_cache_key_ != cache_key) { default_cache_key_ = cache_key; default_previews_.clear(); }
+          const auto name = io::get_string(parameter, "name");
+          if (!default_previews_.count(name)) { default_previews_[name] = bounded_default(fallback); }
+          line += " = " + default_previews_.at(name);
+        }
         panel->label(line);
         const auto label = io::get_string(parameter, "label"), description = io::get_string(parameter, "description");
         if (!label.empty() || !description.empty()) {
@@ -791,7 +884,8 @@ class SkillsEditor final : public Editor {
     }
   }
 
-  std::string query_;
+  std::string query_, default_cache_key_;
+  std::map<std::string, std::string> default_previews_;
   std::unique_ptr<ProjectSkills> project_skills_;
   std::unique_ptr<ProjectAnalyses> analysis_source_;
   std::string source_selected_id_;

@@ -7092,7 +7092,7 @@
         }
       },
       "skills.list": {
-        "description": "Bounded page of the versioned built-in skill catalog (experimental stk.skill/1), filtered by a case-insensitive text query. Reads definitions only: never evaluates graphs, starts workers, touches projects or calls models.",
+        "description": "Bounded page of the versioned built-in and local user skill catalog (experimental stk.skill/1), filtered by a case-insensitive text query. Reads definitions only: never evaluates graphs, starts workers, touches projects or calls models.",
         "params": {
           "type": "object",
           "properties": {
@@ -11790,6 +11790,67 @@
         "result": {
           "$ref": "#/$defs/projectAnalysisWriteResult"
         }
+      },
+      "project.skills.publish_global": {
+        "description": "Explicitly save the reviewed project method to this computer's immutable user library. Does not change the project revision or run the method. New versions require the explicit new_version mode.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "publication_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "mode": {
+              "enum": [
+                "exact",
+                "new_version"
+              ]
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id",
+            "content_sha256",
+            "expected_revision",
+            "publication_id",
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/skillPublicationReceipt"
+        }
+      },
+      "skills.publication.get": {
+        "description": "Read a previously accepted local publication receipt by its original identity, without reopening a project or replaying publication.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "publication_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "publication_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/skillPublicationReceipt"
+        }
       }
     },
     "events": {
@@ -12221,6 +12282,12 @@
           "state",
           "stage"
         ],
+        "additionalProperties": false
+      },
+      "skills.changed": {
+        "type": "object",
+        "properties": {},
+        "required": [],
         "additionalProperties": false
       }
     },
@@ -16286,14 +16353,15 @@
       ]
     },
     "skillAvailability": {
-      "description": "Computed from the installed node types and Python modules without importing or running them. 'limited' lists the outputs that cannot be delivered; declared runtime capabilities are not probed.",
+      "description": "Built-in availability uses static node metadata and module discovery, without loading third-party entry points or running nodes. User methods remain unchecked until explicit runtime validation.",
       "type": "object",
       "properties": {
         "status": {
           "enum": [
             "available",
             "limited",
-            "unavailable"
+            "unavailable",
+            "unchecked"
           ]
         },
         "unavailable_outputs": {
@@ -16452,7 +16520,7 @@
       ]
     },
     "skill": {
-      "description": "A resolved stk.skill/1 definition (experimental). Inputs, parameters and outputs come from the entry's graph template; content_sha256 covers the definition and that template.",
+      "description": "A resolved built-in or frozen user method. Public interfaces are bounded summaries; content_sha256 binds the complete definition and template used when pinning.",
       "type": "object",
       "properties": {
         "schema": {
@@ -16530,7 +16598,7 @@
             },
             "name": {
               "type": "string",
-              "maxLength": 512
+              "maxLength": 4096
             }
           },
           "required": [
@@ -16573,7 +16641,7 @@
         },
         "outputs": {
           "type": "array",
-          "maxItems": 64,
+          "maxItems": 256,
           "items": {
             "type": "object",
             "properties": {
@@ -16723,6 +16791,53 @@
               "outputs"
             ]
           }
+        },
+        "method": {
+          "type": "object",
+          "properties": {
+            "workflow_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "analysis_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "data_dependencies": {
+              "type": "object",
+              "properties": {
+                "tables": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000
+                },
+                "fields": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000
+                },
+                "snapshots": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000
+                }
+              },
+              "required": [
+                "tables",
+                "fields",
+                "snapshots"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "workflow_count",
+            "analysis_count",
+            "data_dependencies"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -20910,6 +21025,91 @@
         "description",
         "bindings",
         "graph"
+      ],
+      "additionalProperties": false
+    },
+    "skillPublicationReceipt": {
+      "type": "object",
+      "properties": {
+        "publication_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "mode": {
+          "enum": [
+            "exact",
+            "new_version"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "project_id",
+            "project_skill_id",
+            "revision",
+            "content_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "skill": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 96,
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 104
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "source": {
+              "const": "user"
+            }
+          },
+          "required": [
+            "id",
+            "version",
+            "ref",
+            "content_sha256",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "created": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "publication_id",
+        "mode",
+        "source",
+        "skill",
+        "created"
       ],
       "additionalProperties": false
     }

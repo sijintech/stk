@@ -38,7 +38,7 @@ MAX_OFFSET = 1_000_000
 MAX_VERSION = 1_000_000
 MAX_PROBLEMS = 50
 MAX_DEFINITION_BYTES = 256 * 1024
-ENTRY_KINDS = ("graph.preset",)
+ENTRY_KINDS = ("graph.preset", "graph.document", "workflow.document")
 RUNTIME_CAPABILITIES = ("offscreen_rendering",)
 SKILL_ID_PATTERN = r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,3}$"
 
@@ -180,6 +180,10 @@ def _resolve(definition, registry, guides, problems, source, file):
                      f"Entry kind {entry['kind']!r} is not supported by this STK (supported: {', '.join(ENTRY_KINDS)})",
                      "/entry/kind", definition)
         return None
+    if entry["kind"] != "graph.preset":
+        problems.add(source, file, "invalid_definition", "Document skills require a complete frozen user library snapshot",
+                     "/entry", definition)
+        return None
     if "preset" not in entry:
         problems.add(source, file, "invalid_definition", "A graph.preset entry needs 'preset'", "/entry", definition)
         return None
@@ -300,13 +304,61 @@ def _summary(skill):
         "entry": {key: skill["entry"][key] for key in ("kind", "preset") if key in skill["entry"]}}
 
 
+def unchecked_availability():
+    return {"status": "unchecked", "unavailable_outputs": [], "issues": [{"code": "environment_unchecked",
+            "message": "Execution environment and external bindings are checked when explicitly preparing a run.",
+            "subject": "", "outputs": []}]}
+
+
+def describe_snapshot(snapshot):
+    """A frozen method's interface, without resolving plugins or inspecting source project data."""
+    definition, template = snapshot["definition"], snapshot["template"]
+    kind = definition["entry"]["kind"]
+    method = {}
+    if kind == "graph.document":
+        inputs = [{**binding, "kind": "binding"} for binding in template["bindings"]]
+        parameters = [{**parameter, **({"default": template["parameters"][parameter["name"]]}
+                      if parameter["name"] in template["parameters"] else {})}
+                      for parameter in template["graph"].get("parameters", [])]
+        outputs = [{"name": name, "from": template["graph"]["outputs"][name], "type": None}
+                   for name in template["outputs"]]
+        operation = "project.skills.create_analysis"
+    else:
+        boundary = template["workflows"][template["root"]]["document"].get("interface", {})
+        inputs = [{"name": name, "kind": value["type"], "description": value.get("description", "")}
+                  for name, value in boundary.get("inputs", {}).items()]
+        parameters = boundary.get("parameters", [])
+        outputs = [{"name": name, "from": value["from"], "type": value["type"]}
+                   for name, value in boundary.get("outputs", {}).items()]
+        operation = "project.skills.create_workflow"
+        method = {"method": {"workflow_count": len(template["workflows"]), "analysis_count": len(template["analyses"]),
+                             "data_dependencies": {key: len(values) for key, values in template["dependencies"].items()}}}
+    return {"schema": SCHEMA, "id": definition["id"], "version": definition["version"],
+            "ref": f"{definition['id']}@{definition['version']}", "content_sha256": snapshot["content_sha256"],
+            "source": "user", "title": definition["title"], "summary": definition["summary"], "guide": None,
+            "entry": {"kind": kind, "operation": operation, "name": template["name"]},
+            "inputs": inputs, "parameters": parameters, "outputs": outputs,
+            "dependencies": {"nodes": [], "python": [], "runtime": []},
+            "examples": [{"title": example["title"], "parameters": example.get("parameters", {}),
+                          "outputs": example.get("outputs", [])} for example in definition.get("examples", [])],
+            "availability": unchecked_availability(), **method}
+
+
+def _check_selection(skill_id, version):
+    if not isinstance(skill_id, str) or not skill_id or len(skill_id) > 96:
+        raise SkillCatalogError("invalid_params", "id must be a skill id of at most 96 characters")
+    if version is not None and (type(version) is not int or not 1 <= version <= MAX_VERSION):
+        raise SkillCatalogError("invalid_params", f"version must be an integer from 1 to {MAX_VERSION}")
+
+
 class SkillCatalog:
     """Resolved skills (sorted by id, then version) and the problems of unusable definitions."""
 
-    def __init__(self, skills, problems, contents=None):
+    def __init__(self, skills, problems, contents=None, *, user_library=None):
         self.skills = skills
         self.problems = problems
         self._contents = contents or {}
+        self._user_library = user_library
 
     def freeze(self, skill_id, version, content_sha256):
         """Detach the exact definition/template pair observed in this catalog read.
@@ -314,6 +366,14 @@ class SkillCatalog:
         Environment availability is deliberately excluded. The caller must provide the version
         and digest it reviewed; never reread the preset after checking the catalog's digest.
         """
+        _check_selection(skill_id, version)
+        if self._user_library is not None and any(skill["id"] == skill_id and skill["version"] == version and
+                                                 skill["source"] == "user" and skill["entry"]["kind"] != "graph.preset"
+                                                 for skill in self.skills):
+            snapshot = self._user_library.snapshot(skill_id, version)
+            if snapshot["content_sha256"] != content_sha256:
+                raise SkillCatalogError("conflict", "Skill content changed; refresh and review it again")
+            return {key: snapshot[key] for key in ("definition", "template")}
         skill = self.get(skill_id, version)
         if skill["content_sha256"] != content_sha256:
             raise SkillCatalogError("conflict", "Skill content changed; refresh and review it again")
@@ -342,16 +402,19 @@ class SkillCatalog:
 
     def get(self, skill_id, version=None):
         """The full skill document (latest version unless ``version``)."""
-        if not isinstance(skill_id, str) or not skill_id or len(skill_id) > 96:
-            raise SkillCatalogError("invalid_params", "id must be a skill id of at most 96 characters")
-        if version is not None and (type(version) is not int or not 1 <= version <= MAX_VERSION):
-            raise SkillCatalogError("invalid_params", f"version must be an integer from 1 to {MAX_VERSION}")
+        _check_selection(skill_id, version)
         versions = [skill for skill in self.skills if skill["id"] == skill_id]
         known = [skill["version"] for skill in versions]
         if version is not None:
             versions = [skill for skill in versions if skill["version"] == version]
         if versions:
-            return versions[-1]
+            skill = versions[-1]
+            if skill["source"] == "user" and skill["entry"]["kind"] != "graph.preset" and self._user_library is not None:
+                snapshot = self._user_library.snapshot(skill["id"], skill["version"])
+                if snapshot["content_sha256"] != skill["content_sha256"]:
+                    raise SkillCatalogError("conflict", "User skill changed after this catalog was read")
+                return describe_snapshot(snapshot)
+            return skill
         broken = [problem for problem in self.problems if problem.get("id") == skill_id]
         if version is not None and known:
             message = f"Skill {skill_id} has no version {version}; known versions: {', '.join(map(str, known))}"
@@ -363,22 +426,23 @@ class SkillCatalog:
                                                        "problems": broken[:MAX_PROBLEMS]})
 
 
-def load_catalog(registry=None, *, directories=None):
+def load_catalog(registry=None, *, directories=None, user_library=None):
     """Read and resolve definitions; ``directories`` (``[(source label, directory)]``) replaces the built-ins.
 
-    ``registry`` defaults to the process-wide node registry. Definitions are reread on every call, so
-    availability follows the current environment.
+    ``registry`` defaults to built-in node metadata, without loading plugin entry points. An explicit
+    ``user_library`` adds immutable document skills; there is no implicit user state directory.
     """
-    from suan.graph.catalog import default_registry
+    from suan.graph.catalog import build_registry
     from suan.graph.schema import check_value
     from . import list_skills
 
-    registry = registry if registry is not None else default_registry()
+    registry = registry if registry is not None else build_registry(entry_points=False)
     roots = directories if directories is not None else [("builtin", _builtin_root())]
     guides = {item["name"]: item["description"] for item in list_skills()}
     problems = _Problems()
     skills = {}
     contents = {}
+    conflicts = set()
     for source, root in roots:
         root = Path(root) if isinstance(root, str) else root
         for entry in _definition_files(root):
@@ -406,20 +470,41 @@ def load_catalog(registry=None, *, directories=None):
                              definition)
                 continue
             key = (definition["id"], definition["version"])
-            if key in skills:
-                problems.add(source, file, "duplicate_skill",
-                             f"{definition['id']}@{definition['version']} is already defined by "
-                             f"{skills[key]['source']}", "/id", definition)
-                continue
             try:
                 skill = _resolve(definition, registry, guides, problems, source, file)
             except Exception as exc:  # a broken preset or plugin must not hide the other skills
                 problems.add(source, file, "invalid_definition", f"{type(exc).__name__}: {exc}", "", definition)
                 continue
             if skill is not None:
+                if key in conflicts:
+                    continue
+                if key in skills:
+                    same = skills[key]["content_sha256"] == skill["content_sha256"]
+                    problems.add(source, file, "duplicate_skill" if same else "conflicting_skill",
+                                 f"{skill['ref']} is defined more than once" + ("" if same else " with different content"),
+                                 "/id", definition)
+                    if not same:
+                        del skills[key]
+                        contents.pop(skill["ref"], None)
+                        conflicts.add(key)
+                    continue
                 contents[skill["ref"]] = skill.pop("_content")
                 skills[key] = skill
-    return SkillCatalog([skills[key] for key in sorted(skills)], problems.items, contents)
+    if user_library is not None:
+        summaries, user_problems = user_library.summaries()
+        problems.items.extend(user_problems)
+        for skill in summaries:
+            key = (skill["id"], skill["version"])
+            if key in conflicts:
+                continue
+            if key in skills:
+                if skills[key]["content_sha256"] != skill["content_sha256"]:
+                    problems.add("user", "catalog.sqlite", "conflicting_skill", f"{skill['ref']} has conflicting content")
+                    del skills[key]
+                    contents.pop(skill["ref"], None)
+                continue
+            skills[key] = skill
+    return SkillCatalog([skills[key] for key in sorted(skills)], problems.items, contents, user_library=user_library)
 
 
 def lock_document(catalog):

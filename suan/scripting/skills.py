@@ -21,3 +21,7 @@ class Skills:
         if version is not None:
             params["version"] = version
         return self._call("skills.get", params)["skill"]
+
+    def publication(self, publication_id):
+        """Read the original local publication receipt; never retry or publish another version."""
+        return self._call("skills.publication.get", {"publication_id": publication_id})

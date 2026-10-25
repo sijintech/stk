@@ -287,12 +287,13 @@ def publish_workflow(service, workflow_id, *, project_skill_id, create, name, de
         if db.execute("SELECT revision FROM project").fetchone()[0] != expected_revision:
             raise RevisionConflict("Project changed; review the workflow before publishing a skill")
         skills._TABLE.require(db, "project skills")
-        skill_id = "user.s" + project_skill_id.replace("-", "")
         versions = [] if create else service._current(db, project_skill_id, expected_revision)["document"]["versions"]
-        if any(item["definition"]["id"] != skill_id or item["definition"]["entry"]["kind"] != "workflow.document" for item in versions):
+        if any(item["definition"]["entry"]["kind"] != "workflow.document" for item in versions):
             raise ProjectError("Publish a new workflow skill instead of replacing another skill kind")
+        template_id = versions[0]["template"]["id"] if versions else project_skill_id.replace("-", "")
+        skill_id = versions[0]["definition"]["id"] if versions else "user.s" + template_id
         captured = _capture(service.store, db, workflow_id)
-        template = {"id": project_skill_id.replace("-", ""), "name": title, "description": description, **captured,
+        template = {"id": template_id, "name": title, "description": description, **captured,
                     "source": {"project_id": service.store._project_id, "workflow_id": workflow_id,
                                "revision": expected_revision,
                                "content_sha256": captured["workflows"][workflow_id]["content_sha256"]}}

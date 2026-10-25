@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** \file
- * SkillCatalogState: read-only browsing of the bridge's versioned skill catalog (skills.list and
- * skills.get, bridge spec §16, experimental stk.skill/1). Shared by every Skills editor through
- * AppStore::skills(). It only reads: it never evaluates an entry, prepares a run, touches a
- * project or calls a model. Replies are applied only to the request generation, bridge client and
- * bridge process that sent them; a bridge restart or replacement clears the catalog.
+ * SkillCatalogState: versioned skill browsing and explicit local user-library publication.
+ * Shared by every Skills editor through AppStore::skills(), including unconfirmed publication
+ * identities. Publication never changes project history or evaluates, prepares or runs a method.
+ * Replies are bound to request generation, bridge process and reviewed source identity; a bridge
+ * restart clears catalog reads while keeping an unconfirmed publication available for inspection.
  * Main thread only.
  */
 #pragma once
@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "stk/bridge/future.hh"
+#include "stk/bridge/client.hh"
 #include "stk/io/json.hh"
 
 namespace stk::bridge {
@@ -25,6 +25,7 @@ class Client;
 namespace stk::app {
 
 class AppStore;
+class ProjectSkills;
 
 /** One skills.list row. Texts are {"en", "zh_CN"?} objects; see #skill_text. */
 struct SkillSummary {
@@ -34,6 +35,7 @@ struct SkillSummary {
   std::string content_sha256;
   std::string entry_kind;
   std::string preset;
+  std::string source;
   io::Json title;
   io::Json summary;
   std::string status; /**< available | limited | unavailable (another value is shown verbatim) */
@@ -91,25 +93,45 @@ class SkillCatalogState {
   /** The selected skill's skills.get document, or null. */
   const io::Json &detail() const { return detail_; }
 
+  /** Explicit local-library publication is independent of project revisions and undo. */
+  bool publication_supported() const;
+  uint64_t publication_generation() const { return publication_request_; }
+  bool publication_busy() const { return publication_future_.has_value(); }
+  bool publication_uncertain() const { return !publication_pending_.is_null(); }
+  const io::Json &publication_pending() const { return publication_pending_; }
+  const io::Json &publication() const { return publication_; }
+  const std::string &publication_error() const { return publication_error_; }
+  const std::string &publication_notice() const { return publication_notice_; }
+  bool publication_conflict(const ProjectSkills &skills) const;
+  bool publish(ProjectSkills &skills, const std::string &mode, uint64_t expected_epoch, const std::string &digest);
+  bool check_publication();
+
  private:
   bool load(int64_t offset, std::string query);
   bool load_detail();
   void clear();
+  void invalidate();
+  bool publication_call(const std::string &method, io::Json params);
+  void accept_publication(const io::Json &result);
 
   AppStore &store_;
   bridge::Client *client_ = nullptr;
   std::string session_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
-  uint64_t list_request_ = 0, detail_request_ = 0;
+  uint64_t list_request_ = 0, detail_request_ = 0, publication_request_ = 0;
+  bridge::ListenerHandle changed_listener_;
   std::optional<bridge::Future<io::Json>> list_future_, detail_future_;
-  bool loaded_ = false, requested_ = false;
-  std::string error_, detail_error_, query_, selected_, selected_id_;
+  bool loaded_ = false, requested_ = false, dirty_ = false;
+  std::string error_, detail_error_, query_, selected_, selected_id_, selected_digest_, selected_source_;
   int64_t selected_version_ = 0;
   int64_t offset_ = 0, total_ = 0, problem_count_ = 0;
   std::optional<int64_t> next_offset_;
   std::vector<SkillSummary> skills_;
   io::Json problems_ = io::Json::array();
   io::Json detail_;
+  std::optional<bridge::Future<io::Json>> publication_future_;
+  io::Json publication_pending_, publication_, publication_conflict_;
+  std::string publication_error_, publication_notice_;
 };
 
 }  // namespace stk::app

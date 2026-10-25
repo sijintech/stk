@@ -15,14 +15,15 @@ namespace stk::app {
 namespace {
 using io::Json;
 
-// All SQLite edits and schema checks remain real. Alter only an already committed write receipt
-// or a read's version summary, to check that the native browser refuses inconsistent observations.
+// SQLite/library writes and schema checks remain real. Inject receipt/read drift or one definite
+// pre-write conflict to exercise observation recovery and the explicit new-version choice.
 constexpr const char *kSkillBridge = R"PY(
 import copy
 from pathlib import Path
 import sys
 from suan.desktop_bridge.server import Bridge
 from suan.desktop_bridge.__main__ import main
+from suan.desktop_bridge.protocol import BridgeError
 from suan.skills import catalog
 control = Path(sys.argv.pop(1))
 original_catalog = catalog.load_catalog
@@ -32,6 +33,24 @@ def load_catalog(*args, **kwargs):
     kwargs['directories'] = [('builtin', catalog._builtin_root()), ('test', control.parent / 'definitions')]
     return original_catalog(*args, **kwargs)
 catalog.load_catalog = load_catalog
+original_init = Bridge.__init__
+def controlled_init(self, *args, **kwargs):
+    original_init(self, *args, **kwargs)
+    publish = self.methods['project.skills.publish_global']
+    def controlled_publish(params, context):
+        mode = control.read_text(encoding='utf-8') if control.exists() else ''
+        if mode == 'global_conflict' and params['mode'] == 'exact':
+            raise BridgeError('conflict', 'Test occupied library version')
+        return publish(params, context)
+    self.methods['project.skills.publish_global'] = controlled_publish
+    publication = self.methods['skills.publication.get']
+    def controlled_publication(params, context):
+        mode = control.read_text(encoding='utf-8') if control.exists() else ''
+        if mode == 'global_query_conflict':
+            raise BridgeError('conflict', 'Test unreadable publication receipt', data={'catalog_code': 'invalid_definition'})
+        return publication(params, context)
+    self.methods['skills.publication.get'] = controlled_publication
+Bridge.__init__ = controlled_init
 original = Bridge.send
 def send(self, message, method=None):
     mode = control.read_text(encoding='utf-8') if control.exists() else ''
@@ -39,6 +58,12 @@ def send(self, message, method=None):
         if method in ('project.skills.pin', 'project.skills.create_workflow') and mode == 'receipt':
             message = copy.deepcopy(message)
             message['result']['record_id'] = '00000000-0000-4000-8000-000000000000'
+        if method == 'project.skills.publish_global' and mode == 'global_receipt':
+            message = copy.deepcopy(message)
+            message['result']['publication_id'] = '00000000-0000-4000-8000-000000000000'
+        if method == 'skills.get' and mode in ('catalog_digest', 'catalog_source'):
+            message = copy.deepcopy(message)
+            message['result']['skill']['content_sha256' if mode == 'catalog_digest' else 'source'] = '0' * 64 if mode == 'catalog_digest' else 'user'
         if method == 'project.skills.get' and mode == 'summary':
             message = copy.deepcopy(message)
             message['result']['skill']['versions'][0]['ref'] = 'stk.other@1'
@@ -180,6 +205,41 @@ class ProjectSkillsPython : public ::testing::Test {
     EXPECT_EQ(second.at("active").at("version"), 2);
     EXPECT_EQ(second.at("document").at("versions").at(0), first.at("document").at("versions").at(0));
     EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
+  }
+  std::string user_analysis_skill()
+  {
+    const auto source = ProjectSkills::new_id(), id = ProjectSkills::new_id();
+    create_source(source);
+    if (!skills->write("publish_analysis", {{"analysis_id", source}, {"project_skill_id", id}, {"create", true},
+        {"name", "User method"}, {"description", "Explicit local method"},
+        {"expected_revision", project().project()->revision}}, skills->epoch())) { ADD_FAILURE(); return {}; }
+    settle();
+    if (!skills->select(id)) { ADD_FAILURE(); return {}; }
+    settle(); return id;
+  }
+  void show_project_skill(const std::string &id, const std::string &language = "en", float scale = 1, int width = 1280)
+  {
+    store().set_language(language);
+    f.drv = std::make_unique<wmtest::ScreenDriver>(f.screen, int(width * scale), int(1800 * scale), scale);
+    auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorSkills));
+    ASSERT_TRUE(area.editor().load_workspace_state({{"version", 1}, {"project_view", true},
+        {"project_id", project().project()->id}, {"selected_id", id}}));
+    f.screen.set_maximized(&area);
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_publish_global", project().project()->revision));
+  }
+  void settle_publication()
+  {
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !store().skills().publication_busy(); }, 30));
+  }
+  void select_library(const std::string &ref)
+  {
+    auto &library = store().skills();
+    ASSERT_NO_FATAL_FAILURE(click("skills_library_tab"));
+    ASSERT_TRUE(library.search(ref));
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !library.loading(); }, 30));
+    ASSERT_TRUE(library.select(ref));
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !library.detail_loading(); }, 30));
+    ASSERT_TRUE(library.detail().is_object()) << library.detail_error();
   }
   void create_workflow_source(const std::string &id, const std::string &child)
   {
@@ -569,6 +629,191 @@ TEST_F(ProjectSkillsPython, RetainedWorkflowPublishCannotFollowAnotherSourceSele
   retained(); f.drv->frame(); loop.run_ready();
   EXPECT_EQ(project().project()->revision, 2);
   EXPECT_EQ(call("project.skills.list", {{"handle", project().project()->handle}}).at("total"), 0);
+}
+
+TEST_F(ProjectSkillsPython, PublishesGlobalAnalysisInOneClickAndCopiesIntoAnotherProject)
+{
+  const auto id = user_analysis_skill(); ASSERT_FALSE(id.empty());
+  const auto original = saved_skill(id);
+  ASSERT_NO_FATAL_FAILURE(show_project_skill(id));
+  const auto viewer = store().viewer().save_workspace_state();
+  const auto retained = f.screen.ui()->find("project_skill_publish_global")->on_click;
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_publish_global"));
+  ASSERT_NO_FATAL_FAILURE(settle_publication());
+  auto &library = store().skills();
+  ASSERT_TRUE(library.publication().is_object()) << library.publication_error();
+  EXPECT_EQ(project().project()->revision, 2); EXPECT_EQ(saved_skill(id), original);
+  const auto receipt = library.publication();
+  retained(); f.drv->frame(); loop.run_ready();
+  EXPECT_EQ(library.publication(), receipt); EXPECT_FALSE(library.publication_busy());
+  const auto ref = io::get_string(receipt.at("skill"), "ref");
+  ASSERT_NO_FATAL_FAILURE(select_library(ref));
+  EXPECT_EQ(library.detail().at("source"), "user");
+  EXPECT_EQ(library.detail().at("entry").at("kind"), "graph.document");
+  EXPECT_EQ(library.detail().at("availability").at("status"), "unchecked");
+  ASSERT_TRUE(project().close()); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(project().create(dir.str() + "/target", "Target")); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_pin", 0));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_pin"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_create_analysis", 1));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_create_analysis"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_open_analysis", 2));
+  const auto analyses = call("project.analyses.list", {{"handle", project().project()->handle}}).at("analyses");
+  ASSERT_EQ(analyses.size(), 1u);
+  const auto copied = call("project.analyses.get", {{"handle", project().project()->handle}, {"analysis_id", analyses[0].at("id")}})
+      .at("analysis").at("document");
+  EXPECT_EQ(copied.at("parameters").at("large"), INT64_C(9007199254740993));
+  EXPECT_TRUE(copied.at("outputs").empty());
+  EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
+}
+
+TEST_F(ProjectSkillsPython, GlobalWorkflowChineseRequiresExplicitForeignDataMapping)
+{
+  const auto table = ProjectSkills::new_id(), source = ProjectSkills::new_id(), id = ProjectSkills::new_id();
+  ASSERT_TRUE(call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", 0},
+      {"commands", {{{"op", "create_table"}, {"id", table}, {"name", "Source data"}}}}}).is_object());
+  const Json document = {{"format", "stk.workflow/1"}, {"ui", Json::object()},
+      {"steps", {{{"id", "data"}, {"kind", "table"}, {"ref", {{"table", table}}}}}}};
+  ASSERT_TRUE(call("project.workflows.create", {{"handle", project().project()->handle}, {"workflow_id", source},
+      {"name", "Data method"}, {"document", document}, {"expected_revision", 1}}).is_object());
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(skills->write("publish_workflow", {{"workflow_id", source}, {"project_skill_id", id}, {"create", true},
+      {"name", "Data method"}, {"description", "Explicit data references"}, {"expected_revision", 2}}, skills->epoch()));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_NO_FATAL_FAILURE(show_project_skill(id, "zh_CN", 2, 560));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_publish_global"));
+  ASSERT_NO_FATAL_FAILURE(settle_publication());
+  auto &library = store().skills(); ASSERT_TRUE(library.publication().is_object()) << library.publication_error();
+  EXPECT_EQ(project().project()->revision, 3);
+  const auto ref = io::get_string(library.publication().at("skill"), "ref");
+  ASSERT_NO_FATAL_FAILURE(select_library(ref));
+  EXPECT_EQ(library.detail().at("entry").at("kind"), "workflow.document");
+  EXPECT_EQ(library.detail().at("method").at("data_dependencies").at("tables"), 1);
+  ASSERT_TRUE(project().close()); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(project().create(dir.str() + "/target", "Target")); ASSERT_NO_FATAL_FAILURE(settle());
+  const auto target = ProjectSkills::new_id();
+  ASSERT_TRUE(call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", 0},
+      {"commands", {{{"op", "create_table"}, {"id", target}, {"name", "Target data"}}}}}).is_object());
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_pin", 1));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_pin"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_workflow_bindings", 2));
+  const auto *mapping = f.screen.ui()->find("project_skill_workflow_bindings"); ASSERT_NE(mapping, nullptr);
+  auto bindings = Json::parse(mapping->string.get()); EXPECT_EQ(bindings.at("tables").at(table), "");
+  ASSERT_FALSE(f.screen.ui()->find("project_skill_create_workflow")->enabled);
+  bindings["tables"][table] = target; mapping->string.set(bindings.dump(2)); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_create_workflow"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_open_workflow", 3));
+  const auto list = call("project.workflows.list", {{"handle", project().project()->handle}}).at("workflows");
+  ASSERT_EQ(list.size(), 1u);
+  const auto copied = call("project.workflows.get", {{"handle", project().project()->handle}, {"workflow_id", list[0].at("id")}})
+      .at("workflow").at("document");
+  EXPECT_EQ(copied.at("steps").at(0).at("ref").at("table"), target);
+}
+
+TEST_F(ProjectSkillsPython, GlobalLostReceiptCanBeCheckedAfterSourceProjectCloses)
+{
+  const auto id = user_analysis_skill(); ASSERT_FALSE(id.empty());
+  auto &library = store().skills(); library.sync();
+  const auto digest = io::get_string(skills->selected().at("active"), "content_sha256");
+  ASSERT_NO_FATAL_FAILURE(mode("global_receipt"));
+  ASSERT_TRUE(library.publish(*skills, "exact", skills->epoch(), digest));
+  const auto publication_id = library.publication_pending().at("publication_id");
+  ASSERT_NO_FATAL_FAILURE(settle_publication());
+  ASSERT_TRUE(library.publication_uncertain());
+  EXPECT_FALSE(library.publish(*skills, "exact", skills->epoch(), digest));
+  ASSERT_TRUE(project().close()); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_NO_FATAL_FAILURE(mode("global_query_conflict"));
+  ASSERT_TRUE(library.check_publication()); ASSERT_NO_FATAL_FAILURE(settle_publication());
+  EXPECT_TRUE(library.publication_uncertain());
+  EXPECT_EQ(library.publication_pending().at("publication_id"), publication_id);
+  EXPECT_FALSE(library.publication_error().empty());
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_TRUE(library.check_publication()); ASSERT_NO_FATAL_FAILURE(settle_publication());
+  EXPECT_FALSE(library.publication_uncertain()); ASSERT_TRUE(library.publication().is_object()) << library.publication_error();
+  EXPECT_EQ(library.publication().at("publication_id"), publication_id);
+  EXPECT_EQ(library.publication().at("skill").at("version"), 1);
+  EXPECT_FALSE(project().project());
+}
+
+TEST_F(ProjectSkillsPython, GlobalConflictOffersAnExplicitNewVersionWithoutChangingProjectHistory)
+{
+  const auto id = user_analysis_skill(); ASSERT_FALSE(id.empty());
+  const auto original = saved_skill(id);
+  ASSERT_NO_FATAL_FAILURE(show_project_skill(id));
+  ASSERT_NO_FATAL_FAILURE(mode("global_conflict"));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_publish_global"));
+  ASSERT_NO_FATAL_FAILURE(settle_publication());
+  auto &library = store().skills(); EXPECT_FALSE(library.publication_uncertain());
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_publish_global_new_version", 2));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_publish_global_new_version"));
+  ASSERT_NO_FATAL_FAILURE(settle_publication());
+  ASSERT_TRUE(library.publication().is_object()) << library.publication_error();
+  EXPECT_EQ(library.publication().at("mode"), "new_version");
+  EXPECT_GT(library.publication().at("skill").at("version").get<int64_t>(), 1);
+  EXPECT_EQ(saved_skill(id), original); EXPECT_EQ(project().project()->revision, 2);
+}
+
+TEST_F(ProjectSkillsPython, CatalogDetailRejectsSameRefWithChangedDigestOrSource)
+{
+  auto &library = store().skills(); library.sync(); ASSERT_TRUE(library.ensure_loaded());
+  ASSERT_TRUE(loop.pump_until([&] { return !library.loading(); }, 30));
+  ASSERT_NO_FATAL_FAILURE(mode("catalog_digest"));
+  ASSERT_TRUE(library.select("stk.muferro.energy_trace@1"));
+  ASSERT_TRUE(loop.pump_until([&] { return !library.detail_loading(); }, 30));
+  EXPECT_TRUE(library.detail().is_null()); EXPECT_FALSE(library.detail_error().empty());
+  ASSERT_NO_FATAL_FAILURE(mode("catalog_source")); ASSERT_TRUE(library.refresh());
+  ASSERT_TRUE(loop.pump_until([&] { return !library.loading() && !library.detail_loading(); }, 30));
+  EXPECT_TRUE(library.detail().is_null()); EXPECT_FALSE(library.detail_error().empty());
+  ASSERT_NO_FATAL_FAILURE(mode("")); ASSERT_TRUE(library.refresh());
+  ASSERT_TRUE(loop.pump_until([&] { return !library.loading() && !library.detail_loading(); }, 30));
+  ASSERT_TRUE(library.detail().is_object()) << library.detail_error();
+  EXPECT_EQ(library.detail().at("source"), "builtin"); EXPECT_EQ(project().project()->revision, 0);
+}
+
+TEST_F(ProjectSkillsPython, SkillsChangedRefreshesTheVisibleLibraryAfterExternalPublication)
+{
+  const auto id = user_analysis_skill(); ASSERT_FALSE(id.empty());
+  auto &library = store().skills(); library.sync(); ASSERT_TRUE(library.ensure_loaded());
+  ASSERT_TRUE(loop.pump_until([&] { return !library.loading(); }, 30));
+  const auto before = library.total();
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorSkills));
+  f.screen.set_maximized(&area); f.drv->frame();
+  ASSERT_TRUE(call("project.skills.publish_global", {{"handle", project().project()->handle}, {"project_skill_id", id},
+      {"content_sha256", skills->selected().at("active").at("content_sha256")}, {"expected_revision", 2},
+      {"publication_id", ProjectSkills::new_id()}, {"mode", "exact"}}).is_object());
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return !library.loading() && library.total() == before + 1; }, 30));
+  EXPECT_EQ(project().project()->revision, 2);
+}
+
+TEST_F(ProjectSkillsPython, GlobalLargeJsonDefaultHasBoundedVisiblePreview)
+{
+  const auto source = ProjectSkills::new_id(), id = ProjectSkills::new_id();
+  const Json document = {{"format", "stk.analysis-document/1"},
+      {"graph", {{"schema", "stk.graph/1"},
+          {"nodes", {{{"id", "source"}, {"type", "missing.source.node@1"}, {"params", {{"binding", "data"}}}}}},
+          {"outputs", {{"view", "source.payload"}}},
+          {"parameters", {{{"name", "config"}, {"type", "json"}, {"default", {{"payload", std::string(32000, 'x')}}}}}}}},
+      {"parameters", Json::object()}, {"outputs", Json::array()}};
+  ASSERT_TRUE(call("project.analyses.create", {{"handle", project().project()->handle}, {"analysis_id", source},
+      {"name", "Large default"}, {"document", document}, {"expected_revision", 0}}).is_object());
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(skills->write("publish_analysis", {{"analysis_id", source}, {"project_skill_id", id}, {"create", true},
+      {"name", "Large default"}, {"description", "Bounded user interface"}, {"expected_revision", 1}}, skills->epoch()));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_NO_FATAL_FAILURE(show_project_skill(id));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_publish_global"));
+  ASSERT_NO_FATAL_FAILURE(settle_publication());
+  auto &library = store().skills(); ASSERT_TRUE(library.publication().is_object()) << library.publication_error();
+  ASSERT_NO_FATAL_FAILURE(select_library(io::get_string(library.publication().at("skill"), "ref")));
+  ASSERT_EQ(library.detail().at("parameters").at(0).at("default").at("payload").get<std::string>().size(), 32000u);
+  for (int i = 0; i < 3; ++i) {
+    f.drv->frame();
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &widget : block->widgets()) { EXPECT_LT(widget.text.size(), 2048u); }
+    }
+  }
+  EXPECT_EQ(project().project()->revision, 2);
 }
 
 TEST_F(ProjectSkillsPython, RejectsSummaryDriftAndOldOpenEpoch)

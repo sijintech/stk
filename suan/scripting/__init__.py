@@ -658,6 +658,12 @@ class ProjectSkills:
             "project_skill_id": project_skill_id, "create": create, "name": name, "description": description,
             "expected_revision": expected_revision})
 
+    def publish_global(self, project_skill_id, content_sha256, *, publication_id, mode, expected_revision):
+        """Explicitly save a reviewed method to this computer's library; project history is unchanged."""
+        return self._call("project.skills.publish_global", {"handle": self.handle,
+            "project_skill_id": project_skill_id, "content_sha256": content_sha256,
+            "publication_id": publication_id, "mode": mode, "expected_revision": expected_revision})
+
     def upgrade(self, project_skill_id, version, content_sha256, *, expected_revision):
         return self._call("project.skills.upgrade", {"handle": self.handle, "project_skill_id": project_skill_id,
             "version": version, "content_sha256": content_sha256, "expected_revision": expected_revision})

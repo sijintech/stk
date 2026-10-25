@@ -41,7 +41,7 @@ def _person():
 
 
 class ProjectSessions:
-    def __init__(self, state_dir=None, *, analysis_executor=None, workflow_executor=None):
+    def __init__(self, state_dir=None, *, analysis_executor=None, workflow_executor=None, skill_catalog=None):
         self._recent = RecentProjects(state_dir)
         self._viewed = AttentionViews(state_dir)
         self._lock = threading.RLock()
@@ -59,6 +59,7 @@ class ProjectSessions:
         self.agents = AgentExecutor(self.models, self._executor, self.local)
         self._analysis_executor = analysis_executor
         self._workflow_executor = workflow_executor
+        self._skill_catalog = skill_catalog
 
     @contextmanager
     def _operation(self):
@@ -259,7 +260,16 @@ class ProjectSessions:
         with self._operation():
             skills = self._get(params["handle"]).skills
             values = {key: value for key, value in params.items() if key != "handle"}
+            if action in ("pin", "upgrade") and self._skill_catalog is not None:
+                values["catalog"] = self._skill_catalog
             return getattr(skills, action)(**values)
+
+    def skill_publication_source(self, params):
+        """Stable request identity, without rereading mutable skill contents for a receipt replay."""
+        with self._operation():
+            return {"project_id": self._get(params["handle"])._project_id,
+                    "project_skill_id": params["project_skill_id"],
+                    "revision": params["expected_revision"], "content_sha256": params["content_sha256"]}
 
     def analyses(self, action, params):
         with self._operation():

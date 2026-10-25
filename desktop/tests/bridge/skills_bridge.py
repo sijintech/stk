@@ -26,8 +26,9 @@ elif mode == "catalog":
     fixtures = Path(sys.argv.pop(1))
     original_load = catalog.load_catalog
 
-    def load_with_fixtures(registry=None, *, directories=None):
-        return original_load(registry, directories=[("builtin", catalog._builtin_root()), ("fixture", fixtures)])
+    def load_with_fixtures(registry=None, *, directories=None, user_library=None):
+        return original_load(registry, directories=[("builtin", catalog._builtin_root()), ("fixture", fixtures)],
+                             user_library=user_library)
 
     catalog.load_catalog = load_with_fixtures
 else:
