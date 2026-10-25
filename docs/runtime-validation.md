@@ -2,6 +2,25 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：报告资源读回与原生显示证据（本机验收完成）
+
+源码 `84d918b` 已提交 main，记录与索引同批交付。基线 `841910f`。前头 `841910f` 的 Desktop `40237659778` 已全部结束并 **5/5 成功**，含 Windows 旧菜单夹具修正后的回归；Runtime `40237659904` **8/8 成功**，Docs `40237659836`、Secret `40237659794` 成功。前头推送等待条件满足，这些结果不代表本批新源码通过 CI。
+
+- 控制器独立准备净化入口和全部栅格图片，源入口／显示入口／图片各自核摘要，按冻结顺序串行读取，64 项与 32 MiB 预算核对后才一次发布；不改原文选择、Viewer、修订或历史，不自动重试或恢复。桥 Client、pid:spawned、句柄、项目、修订、报告、来源 SHA 和本次代次共同隔离晚到回复。
+- 新专项 24 项真实桥测试首轮 **22/24**：工作空间测试把正常首次元数据加载误判为 Viewer 被改；另一个对 Ready Client 调用 restart 实为无操作。已先明确完成三份只读 Viewer 元数据，再冻结基线；由夹具持有回复线程自退出触发同一 Client 真实进程代次变化，保留完整 Viewer／零求值断言。测试编译时重复 GTest 宏标签和 string/JSON 比较已修正，没有修改业务门禁来满足测试。
+- 修后控制器 24 项、像素判据 3 项及 X11／Wayland × OpenGL／Vulkan 4 项合计 **31/31、零跳过／7.72 秒**，JUnit `/tmp/stk-preview-preparation-focused.xml`；对应必跑检查通过。后四项验证 Linux 的 Unsupported 生命周期，不能证明原生浏览器显示。
+- 新建关闭 Blender 的独立构建，资源和像素判据 **17/17、零跳过／0.12 秒**，JUnit `/tmp/stk-preview-evidence-cpu.xml`。Linux 显式 native 验收入口实际返回 1，JSON 为 failed、完成 0 轮、图像 0，原因 Unsupported；没有伪造通过或创建浏览器。证据 `/tmp/stk-preview-unavailable-evidence/result.json`。
+- Mac 用当前进程窗口的 ScreenCaptureKit，Windows 用指定自身 HWND 的 WGC，仅采原型父窗口客户区；两页各有宿主 GPU 不生成的六色色条，每阶段两次独立采样匹配。20 轮八阶段加最终父关闭前一帧共 161 张最终 PNG，JSON 记录 SHA、几何、导航代次、会话、关闭和旧 URL。Windows 提前统一 DPI 并预检 GL 4.3，缺显示、Runtime、权限或匹配像素均失败并保留证据；不自动安装 Runtime／驱动或修改权限。OS 合成截图不证明物理 scanout、PDF／IME、跨屏 DPI 或浏览器进程内存稳定。
+- Screen 提供可取消的布局完成／立即失效订阅：弱注册表、复制回调、显式 active、重入／代次保护，销毁先失效再断开；隐藏所有者仍被通知，无 UI 回执为 null。标签切换、实际几何／缩放变化、清空及布局采用均先失效，普通重绘不撤焦；跨 Screen 须重新订阅。16 项 CPU 用例覆盖 clear 时 Editor 与 token 析构、取消自身／后续监听、新监听延后、Screen 先死、adopt、隐藏页及 noUI。专项合计 **47/47、零跳过／11.46 秒**，JUnit `/tmp/stk-preview-layout-focused.xml`。
+- 随后候选实际使用布局订阅，移除主循环外部全 Host 同步；新增标签／最大化的下一帧前立即隐藏及关闭取消 token 断言，所有 Modal 隐藏、相交浮层暂隐藏。候选仍占整个 main 区域，正式报告需独立预览视口；同批原生输入、快捷键和 IME 尚未证明。
+- 最终完整构建退出 0，完整原生 **1791/1791、零失败／错误／跳过／428.09 秒**，JUnit `/tmp/stk-preview-layout-native-full.xml`。逐字核对既有 Linux 必跑脚本未变化后，485 条现行规则匹配 **1321 项全部实际运行**，证据 `/tmp/stk-preview-layout-required.log`。本次没有生产 Python 变更，Python 行为由真实桥原生用例覆盖，不把上一批完整 Python 结果写成本批重新运行。
+- 三平台 CI 追加新控制器、布局与像素必跑项。Mac 原生捕获放在既有 STK.app 打包验收／上传之后，Windows 独立作业消费同头候选包；均保留失败 JSON、图像和 JUnit。真实 Mac／Windows 作业尚未执行本批，不能按编译或 Linux Unsupported 认作显示验收。
+- i18n **2445/2445、零问题**与差异空白检查通过；源码暂存 gitleaks 使用 `.gitleaks.toml`、`--redact`，扫描 **163187 bytes、零发现**，日志 `/tmp/stk-preview-layout-source-gitleaks.log`。没有新的正式 UI 点击交付，自动调用 API 的循环不换算为用户点击数。
+
+本轮 AOCI 压缩刷新在第 4/22 块被宿主截断，已停止本次链，不自动重试或修改配置；后续为绑定源码开发与最终稳定内容的增量维护。
+
+P4 和整个通用目标仍未完成；保留原文／PNG 阅读器、Viewer 和草稿。额外来源选择、完整浏览器／PDF、AI 报告、LaTeX、视频和报告模式继续，PET 新专项后置。
+
 ## 2026-10-25：报告预览资源准备（本机验收完成）
 
 源码 `31c1e06` 已提交 main。前头 `78f51b2` Desktop `40234644345` 已全部结束，4/5 成功：Linux、macOS、打包与干净容器成功；Windows 1107/1108，唯一失败 `WorkModeLayouts.ActiveTextAndDeferredOldMenusCannotHideOrCommitInput`，析构 SEH `0xc0000005`，没有栈。[失败作业](https://github.com/sijintech/stk/actions/runs/40234644345/job/121293477909)。Runtime `40234644378`、Docs `40234644456`、Secret `40234644394` 成功，前头推送等待条件满足；本批新头 CI 待确认。
