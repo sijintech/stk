@@ -2,11 +2,42 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：看板拖动
+
+源码提交 `752d1ea9016ff6730fa7cb3df4a22e9ecfd5a811`，基线 `35637ea5eb95b1922ff11d36814b0f1696cd898a`。
+前头 Desktop [40163712446](https://github.com/sijintech/stk/actions/runs/40163712446) 已完成 **5/5 成功**；
+Runtime [40163712511](https://github.com/sijintech/stk/actions/runs/40163712511) **8/8**、Docs／Secret 成功，满足本批 push 前等待条件。
+新 CI 待推送后确认，不能以旧 CI 或本机结果替代。
+
+- 首次构建及最后一次增量链接均退出 0；`/tmp/stk-board-drag-build-20261025.log`、`/tmp/stk-board-drag-build-final-20261025.log`。链接全部完成后才测试。
+- 定向 **64/64、零跳过，11.82 秒**，`/tmp/stk-board-drag-focused-20261025.log` 与 `.xml`。
+- 完整原生 **1619/1619、零失败、零跳过，360.29 秒**，`/tmp/stk-board-drag-full-20261025.log` 与 `.xml`。
+- 必跑检查 **64/64**，`/tmp/stk-board-drag-required-20261025.log`。新增 `ContainerDrag` 四例加入 Linux／macOS／Windows 必跑；三项应用用例由已有 `TableWorkbenchEditorPython` 必跑覆盖。
+- 中英文 **2315 键**一致，`git diff --check` 通过。暂存源码 gitleaks 8.30.1 按 `.gitleaks.toml` redact 扫描 **46.40 KB、零泄漏**。
+
+固定起点：默认四区域 1440×1200、en／1×，表格区域已选择保存的状态看板，三条合成记录，Viewer 已显示公开合成载荷。
+从首张卡片文字拖入空的另一个状态列，**0 次额外点击＋1 次拖动**；从默认网格进入这个保存看板另需 **1 次点击**，不计入已在看板的起点。
+移动中修订不变，左键松开后仅增加 1，准确写入该状态 UUID，另一记录的缺省值和共享选择不变；一次撤销恢复原状态。
+Viewer 载荷、payload／camera 序列均保持，求值启动数为 0。原列拖放和 Esc 取消均无写入。
+
+核心事件在 1×／2× 验证文字／背景拖放与空列下部命中，按钮和下拉框不被拖动抢占；
+验证按下时回调跨帧保留、非左键不提交、仅一次提交，以及修订／分组漂移、禁用、消失、模态、弹出菜单、失焦、Esc、裁剪和遮挡。
+真实桥用例另通过保留回调验证未知目标拒绝、缺省与 null 区分、旧修订／视图拒绝、跨编辑器草稿保护和派生状态只读。
+这些类型与旧回调检查不是额外的人工鼠标验收；尚未宣称 macOS／Windows 真机拖放体验通过。
+
+只修改当前页单张记录的单选分组字段，不重排卡片或跨页拖动；缺省／null 列只在已有对应记录时显示，仍可用状态下拉框设置。
+无停留边缘定时滚动；富对象预览和首次大表快照仍待后续。本批没有 Python 实现、项目格式或桥协议变更，
+测试清空产品 key、移除 model 环境，不发收费模型请求、不改变模型端点或网络策略。
+
 ## 2026-10-25：表格填充柄
 
 源码提交 `b2b076d669e6089fd700d4ff02097aaee60adb0b`，基线 `d1493fa337b9768046a15b78d64a32796a1555be`。
 前头 Desktop [40160203772](https://github.com/sijintech/stk/actions/runs/40160203772) **5/5 成功且全部结束**，已满足本批 push 等待条件；
-Runtime **8/8**、Docs、Secret 亦成功，链接见下节。本批新 CI 待推送后确认。
+Runtime **8/8**、Docs、Secret 亦成功，链接见下节。
+记录／索引头 `35637ea5eb95b1922ff11d36814b0f1696cd898a` 的 Desktop [40163712446](https://github.com/sijintech/stk/actions/runs/40163712446)
+已全部结束并 **5/5 成功**，包含 Windows CPU、macOS Metal、Linux 桌面、打包和新容器冒烟。
+Runtime [40163712511](https://github.com/sijintech/stk/actions/runs/40163712511) **8/8**、
+Docs [40163712431](https://github.com/sijintech/stk/actions/runs/40163712431)、Secret [40163712458](https://github.com/sijintech/stk/actions/runs/40163712458) 均成功。
 
 - 首次构建失败来自新测试调用错误的模态接口，修正后完整重建退出 0；日志 `/tmp/stk-table-fill-build-20261025.log` 与 `build-final` 对应日志。
 - 定向首轮 **56/57**：有序 JSON 键顺序导致对象断言失败；改为规范内容比较，值与身份未改。再次构建、目录暂存均退出 0，`/tmp/stk-table-fill-build-fix-20261025.log`、`build-catalog` 对应日志。
