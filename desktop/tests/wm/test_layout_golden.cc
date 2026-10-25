@@ -42,6 +42,12 @@ TEST_P(DefaultScreenGolden, MatchesGolden)
   const Case c = GetParam();
   const int w = int(std::lround(1280 * c.scale)), h = int(std::lround(800 * c.scale));
   AppFixture f(c.lang, c.scale, w, h);
+  // History must not squeeze the Viewer navigation down to an unusable sliver.
+  for (const char *key : {"analysis_graph_undo", "analysis_graph_redo", "graph_fit", "graph_focus_node", "graph_viewer"}) {
+    const auto *button = f.screen.ui()->find(key);
+    ASSERT_NE(button, nullptr) << key;
+    EXPECT_GE(button->rect.w, 3 * f.screen.ui()->style().unit - 0.5f) << key;
+  }
   const std::string got = stk::wmtest::dump_screen(f.screen);
   const std::string path = std::string(STK_WM_GOLDEN_DIR) + "/layout_default_" + case_name(c) + ".json";
   if (const char *u = std::getenv("STK_UPDATE_GOLDENS"); u && *u == '1') {

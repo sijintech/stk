@@ -177,6 +177,17 @@ class _Issues:
             self.omitted += 1
 
 
+def _parameter_summary(parameter):
+    """The stable five-key summary, plus declared form constraints when present.
+
+    This is descriptive metadata, not normalization or validation of parameter values.
+    Keeping optional metadata absent preserves replies from older/simple definitions.
+    """
+    return {"name": parameter["name"], "type": parameter["type"], "label": parameter.get("label"),
+            "unit": parameter.get("unit"), "default": parameter.get("default"),
+            **{key: parameter[key] for key in ("choices", "minimum", "maximum", "description") if key in parameter}}
+
+
 def _analysis_ports(graph):
     """(inputs, parameters, outputs) a saved analysis graph declares, plus bindings given by $param."""
     bindings, dynamic = [], []
@@ -190,8 +201,7 @@ def _analysis_ports(graph):
                 bindings.append(value)
         elif node.get("id") not in dynamic:
             dynamic.append(node.get("id"))
-    parameters = [{"name": p["name"], "type": p["type"], "label": p.get("label"), "unit": p.get("unit"),
-                   "default": p.get("default")} for p in graph.get("parameters", [])]
+    parameters = [_parameter_summary(p) for p in graph.get("parameters", [])]
     outputs = list(graph.get("outputs", {}))
     return bindings, dynamic, parameters, outputs
 
@@ -213,8 +223,7 @@ def _resolve(db, step, model, templates, read_analysis):
         if template is None:
             return summary, ("unknown_template", f"Simulation template {target!r} is not registered")
         # A template's declared parameters (graph-parameter vocabulary) can be bound like an analysis's.
-        parameters = [{"name": p["name"], "type": p["type"], "label": p.get("label"), "unit": p.get("unit"),
-                       "default": p.get("default")} for p in getattr(template, "parameters", [])]
+        parameters = [_parameter_summary(p) for p in getattr(template, "parameters", [])]
         summary.update(name=template.name, parameters=parameters, inputs=[{"name": "rows", "type": "rows", "required": True}],
                        outputs=[{"name": "files", "type": "files"}])
         return summary, None

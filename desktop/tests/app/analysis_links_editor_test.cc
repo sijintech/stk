@@ -401,6 +401,43 @@ TEST_F(AnalysisLinksEditorPython, AddedNodeIsShownSelectedAndMustPassValidationB
   EXPECT_FALSE(shows("Unsaved candidate"));
 }
 
+TEST_F(AnalysisLinksEditorPython, HeaderHistoryMakesStructuralGesturesAtomicAndRejectsOldButtons)
+{
+  const auto candidate = [this] { return Json(area().editor().save_workspace_state().at("draft").at("document")); };
+  const auto pointer = [this](const char *key) {
+    const auto *button = widget(key); ASSERT_NE(button, nullptr); ASSERT_TRUE(button->enabled) << key;
+    const auto [x, y] = f.widget_center(key); f.drv->click(x, y); f.drv->frame();
+  };
+  const auto baseline = exact(candidate());
+  EXPECT_FALSE(widget("analysis_graph_undo")->enabled); EXPECT_FALSE(widget("analysis_graph_redo")->enabled);
+  ASSERT_NO_FATAL_FAILURE(open_panel("analysis_graph_edit_panel"));
+  ASSERT_NO_FATAL_FAILURE(select_node("component"));
+  ASSERT_NO_FATAL_FAILURE(choose("analysis_graph_add_type", "(stk.filter.slice@1)"));
+  ASSERT_NO_FATAL_FAILURE(pointer("analysis_graph_add_node"));
+  const auto added = exact(candidate());
+  ASSERT_NE(added, baseline);
+  EXPECT_EQ(candidate().at("graph").at("ui").at("positions").size(), candidate().at("graph").at("nodes").size());
+  const auto stale_undo = widget("analysis_graph_undo")->on_click;
+  ASSERT_NO_FATAL_FAILURE(pointer("analysis_graph_remove_node"));
+  const auto removed = exact(candidate()); ASSERT_NE(removed, added);
+  stale_undo(); f.drv->frame(); EXPECT_EQ(exact(candidate()), removed);
+  ASSERT_NO_FATAL_FAILURE(pointer("analysis_graph_undo")); EXPECT_EQ(exact(candidate()), added);
+  // The layout freeze and addition are one user action, so one more Undo restores the exact baseline.
+  ASSERT_NO_FATAL_FAILURE(pointer("analysis_graph_undo")); EXPECT_EQ(exact(candidate()), baseline);
+  EXPECT_FALSE(area().editor().has_unsaved_changes()); EXPECT_FALSE(widget("analysis_graph_undo")->enabled);
+  EXPECT_TRUE(widget("analysis_graph_redo")->enabled);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  f.drv->key(wm::Key::Z, primary | wm::ModShift); f.drv->frame(); EXPECT_EQ(exact(candidate()), added);
+  f.drv->key(wm::Key::Z, primary); f.drv->frame(); EXPECT_EQ(exact(candidate()), baseline);
+  f.drv->key(wm::Key::Y, primary); f.drv->frame(); EXPECT_EQ(exact(candidate()), added);
+  EXPECT_EQ(project().project()->revision, revision); EXPECT_TRUE(calls("project.analyses.update").empty());
+  Json persisted; ASSERT_NO_FATAL_FAILURE(read(persisted)); EXPECT_EQ(exact(persisted.at("analysis").at("document")), exact(document));
+}
+
 TEST_F(AnalysisLinksEditorPython, NodeParamsAreEditedThroughTheCatalogFormAndCheckedAtOnce)
 {
   ASSERT_NO_FATAL_FAILURE(open_panel("analysis_graph_edit_panel"));

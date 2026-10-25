@@ -1,0 +1,29 @@
+{
+  "path": [
+    "../../suan",
+    "../../desktop/engine/lib",
+    "../../desktop/app",
+    "../../web/src"
+  ],
+  "ignore": [
+    "**/node_modules/**",
+    "**/third_party/**",
+    "**/pyqode/**",
+    "**/*_rc.py",
+    "**/pkg_tools/hooks/**"
+  ],
+  "format": [
+    "python",
+    "cpp",
+    "cpp-header",
+    "typescript",
+    "tsx",
+    "javascript"
+  ],
+  "minTokens": 100,
+  "minLines": 10,
+  "reporters": [
+    "json"
+  ],
+  "output": ".ai-tools/reports/duplicates"
+}

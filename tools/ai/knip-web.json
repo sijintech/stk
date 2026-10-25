@@ -1,0 +1,6 @@
+{
+  "entry": ["src/main.tsx", "public/sw.js"],
+  "project": ["src/**/*.{ts,tsx}", "public/**/*.js", "tests/**/*.ts"],
+  "vite": {"config": ["vite.config.ts"]},
+  "playwright": {"config": ["playwright.config.ts"], "entry": ["tests/**/*.ts"]}
+}

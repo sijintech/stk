@@ -6,6 +6,7 @@
 #include <cmath>
 #include <set>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace stk::app {
@@ -16,6 +17,71 @@ void require(bool condition, const char *message)
   if (!condition) { throw std::invalid_argument(message); }
 }
 
+/** SAX preserves duplicate-key and integer-token failures that a DOM parser would erase. */
+class StrictParameterValue final : public nlohmann::json_sax<Json> {
+ public:
+  Json result;
+  std::string error;
+
+  bool null() override { return value(nullptr); }
+  bool boolean(bool v) override { return value(v); }
+  bool number_integer(number_integer_t v) override { return value(v); }
+  bool number_unsigned(number_unsigned_t v) override { return value(v); }
+  bool number_float(number_float_t v, const string_t &token) override
+  {
+    if (!std::isfinite(v) || token.find_first_of(".eE") == std::string::npos) {
+      return fail("JSON integer tokens must fit signed or unsigned 64 bits, and numbers must be finite");
+    }
+    return value(v);
+  }
+  bool string(string_t &v) override { return value(std::move(v)); }
+  bool binary(binary_t &) override { return fail("Binary data is not a JSON parameter value"); }
+  bool start_object(size_t) override { return start(true); }
+  bool start_array(size_t) override { return start(false); }
+  bool end_object() override { return finish(); }
+  bool end_array() override { return finish(); }
+  bool key(string_t &key) override
+  {
+    auto &frame = stack_.back();
+    if (!frame.keys.insert(key).second) { return fail("JSON objects must not contain duplicate keys"); }
+    frame.key = std::move(key);
+    return true;
+  }
+  bool parse_error(size_t, const std::string &, const nlohmann::detail::exception &) override
+  {
+    return fail("Enter one valid finite JSON value with no trailing data");
+  }
+
+ private:
+  struct Frame {
+    Json data;
+    std::set<std::string> keys;
+    std::string key;
+  };
+  std::vector<Frame> stack_;
+
+  bool fail(const char *message) { error = message; return false; }
+  bool start(bool object)
+  {
+    if (stack_.size() > AnalysisDocumentLimits::max_depth) { return fail("Analysis JSON exceeds its depth limit"); }
+    stack_.push_back({object ? Json::object() : Json::array(), {}, {}});
+    return true;
+  }
+  bool value(Json v)
+  {
+    if (stack_.size() > AnalysisDocumentLimits::max_depth) { return fail("Analysis JSON exceeds its depth limit"); }
+    if (stack_.empty()) { result = std::move(v); }
+    else if (stack_.back().data.is_array()) { stack_.back().data.push_back(std::move(v)); }
+    else { stack_.back().data[stack_.back().key] = std::move(v); }
+    return true;
+  }
+  bool finish()
+  {
+    auto completed = std::move(stack_.back().data); stack_.pop_back();
+    return value(std::move(completed));
+  }
+};
+
 bool space(char32_t c)
 {
   // Python str.isspace(), also used by the backend's name.strip() check.
@@ -24,6 +90,18 @@ bool space(char32_t c)
       c == 0x202f || c == 0x205f || c == 0x3000;
 }
 }  // namespace
+
+Json parse_parameter_json(const std::string_view text)
+{
+  require(text.size() <= AnalysisDocumentLimits::max_document_bytes, "Parameter text exceeds its 384 KiB limit");
+  require(core::utf8::is_valid(text), "Parameter text must be valid UTF-8");
+  require(!text.starts_with("\xef\xbb\xbf"), "JSON text must not begin with a UTF-8 byte order mark");
+  StrictParameterValue parser;
+  const bool ok = Json::sax_parse(text.begin(), text.end(), &parser, Json::input_format_t::json, true);
+  require(ok, parser.error.empty() ? "Invalid JSON parameter value" : parser.error.c_str());
+  check_analysis_json_bounds(parser.result);
+  return std::move(parser.result);
+}
 
 bool canonical_uuid(std::string_view value)
 {

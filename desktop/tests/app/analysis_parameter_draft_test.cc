@@ -150,6 +150,49 @@ TEST(AnalysisParameterDraft, StrictJsonRejectsMalformedDuplicateTrailingAndNonfi
   EXPECT_TRUE(model.override_value("gain")->at("list")[2].is_number_float());
 }
 
+TEST(AnalysisParameterDraft, SharedParameterParserPreservesExactNumericAndNestedValueTypes)
+{
+  const auto parsed = parse_parameter_json(
+      R"({"min":-9223372036854775808,"max":18446744073709551615,"i":1,"f":1.0,"zero":-0.0,"nested":[null,false,"温度",{"value":1e2}]})");
+  EXPECT_EQ(parsed.at("min").get<int64_t>(), std::numeric_limits<int64_t>::min());
+  EXPECT_EQ(parsed.at("max").get<uint64_t>(), std::numeric_limits<uint64_t>::max());
+  EXPECT_TRUE(parsed.at("i").is_number_integer()); EXPECT_TRUE(parsed.at("f").is_number_float());
+  EXPECT_TRUE(parsed.at("zero").is_number_float()); EXPECT_TRUE(std::signbit(parsed.at("zero").get<double>()));
+  EXPECT_TRUE(parsed.at("nested")[0].is_null()); EXPECT_TRUE(parsed.at("nested")[1].is_boolean());
+  EXPECT_EQ(parsed.at("nested")[2], "温度"); EXPECT_TRUE(parsed.at("nested")[3].at("value").is_number_float());
+  EXPECT_EQ(exact(parse_parameter_json(exact(parsed))), exact(parsed));
+  EXPECT_TRUE(parse_parameter_json("null").is_null()); EXPECT_EQ(parse_parameter_json(" \"\"\n"), "");
+}
+
+TEST(AnalysisParameterDraft, SharedParameterParserRejectsErasedSyntaxAndInvalidNumberEvidence)
+{
+  for (const auto &text : {std::string(), std::string("{} {}"), std::string("[1,]"),
+      std::string("{\"a\":1,\"a\":2}"), std::string(R"({"a":1,"\u0061":2})"),
+      std::string("{\"nested\":{\"\":1,\"\":2}}"), std::string("NaN"), std::string("Infinity"), std::string("-Infinity"),
+      std::string("1e309"), std::string("18446744073709551616"), std::string("-9223372036854775809"),
+      std::string("\"\\ud800\""), std::string("//comment\n1"), std::string("\xef\xbb\xbf") + "1",
+      std::string(" \xef\xbb\xbf") + "1", std::string("\"\xff\"", 3)}) {
+    EXPECT_THROW((void)parse_parameter_json(text), std::invalid_argument) << text.size();
+  }
+}
+
+TEST(AnalysisParameterDraft, SharedParameterParserEnforcesTextDepthAndCallerStorageBudgetsSeparately)
+{
+  constexpr size_t bytes = AnalysisDocumentLimits::max_document_bytes, depth = AnalysisDocumentLimits::max_depth;
+  const auto exact_limit = '"' + std::string(bytes - 2, 'p') + '"';
+  EXPECT_EQ(parse_parameter_json(exact_limit).get_ref<const std::string &>().size(), bytes - 2);
+  EXPECT_THROW((void)parse_parameter_json(exact_limit + ' '), std::invalid_argument);
+  const auto nested = std::string(depth, '[') + "0" + std::string(depth, ']');
+  EXPECT_NO_THROW((void)parse_parameter_json(nested));
+  EXPECT_THROW((void)parse_parameter_json('[' + nested + ']'), std::invalid_argument);
+  // Standalone JSON parsing does not impose the smaller 64 KiB submitted-parameter budget.
+  const auto parameter_text = '"' + std::string(AnalysisDocumentLimits::max_parameters_bytes, 'p') + '"';
+  EXPECT_NO_THROW((void)parse_parameter_json(parameter_text));
+  auto model = draft();
+  EXPECT_FALSE(model.set_text("gain", parameter_text, Draft::TextMode::Json, model.generation()).accepted);
+  EXPECT_FALSE(model.dirty()); EXPECT_FALSE(model.can_undo());
+}
+
 TEST(AnalysisParameterDraft, InvalidUtf8AndTypedNonJsonValuesAreRejectedBeforeCopies)
 {
   auto model = draft({{"gain", 8}}); const auto version = model.version();
@@ -916,6 +959,201 @@ TEST(AnalysisParameterDraft, InvalidOpaqueWorkspaceBaselineIsRejectedAtomically)
     EXPECT_FALSE(model.load_workspace_state(state, "other-opening"));
     EXPECT_EQ(model.save_workspace_state(), before); EXPECT_EQ(model.generation(), generation);
   }
+}
+
+TEST(AnalysisParameterDraft, HistoryRestoresTypedOverridesMissingValuesAndEmptyOutputs)
+{
+  auto model = draft({{"gain", 1}, {"opaque", {1.0, -0.0, nullptr, false}}});
+  const auto original = exact(model.candidate_document());
+  const auto generation = model.generation();
+  std::vector<std::string> states{original};
+  ASSERT_TRUE(model.set("gain", 1.0, generation).accepted); states.push_back(exact(model.candidate_document()));
+  ASSERT_TRUE(model.set("gain", -0.0, generation).accepted); states.push_back(exact(model.candidate_document()));
+  ASSERT_TRUE(model.set("nullable", nullptr, generation).accepted); states.push_back(exact(model.candidate_document()));
+  ASSERT_TRUE(model.remove("gain", generation).accepted); states.push_back(exact(model.candidate_document()));
+  ASSERT_TRUE(model.set_outputs(Json::array(), generation).accepted); states.push_back(exact(model.candidate_document()));
+  ASSERT_EQ(model.undo_depth(), 5u); EXPECT_FALSE(model.can_redo());
+  auto version = model.version(), evaluation = model.evaluation_version();
+  for (size_t i = states.size() - 1; i > 0; --i) {
+    ASSERT_TRUE(model.undo(generation).accepted);
+    EXPECT_EQ(exact(model.candidate_document()), states[i - 1]);
+    EXPECT_EQ(model.version(), ++version); EXPECT_EQ(model.evaluation_version(), ++evaluation);
+    EXPECT_EQ(model.generation(), generation);
+  }
+  EXPECT_FALSE(model.dirty()); EXPECT_FALSE(model.can_undo()); EXPECT_TRUE(model.can_redo());
+  EXPECT_FALSE(model.undo(generation).accepted);
+  for (size_t i = 1; i < states.size(); ++i) {
+    ASSERT_TRUE(model.redo(generation).accepted);
+    EXPECT_EQ(exact(model.candidate_document()), states[i]);
+    EXPECT_EQ(model.version(), ++version); EXPECT_EQ(model.evaluation_version(), ++evaluation);
+  }
+  EXPECT_FALSE(model.redo(generation).accepted); EXPECT_EQ(model.generation(), generation);
+}
+
+TEST(AnalysisParameterDraft, HistoryRestoresCascadingDeletionAndKeepsLayoutChecksIndependent)
+{
+  auto document = definition();
+  document["graph"]["nodes"].push_back({{"id", "other"}, {"type", "fixture.filter.scalar@1"},
+      {"inputs", {{"in", {{"from", "source.value"}}}}}, {"x-note", {1, 1.0, -0.0, nullptr}}});
+  document["graph"]["outputs"]["other"] = "other.value"; document["outputs"].push_back("other");
+  Draft model; model.pin("opening", identity, 4, "Cascade", document);
+  const auto generation = model.generation(), evaluation = model.evaluation_version();
+  ASSERT_TRUE(model.move_nodes({{"source", {120, 40}}, {"other", {400, 40}}}, generation).accepted);
+  const auto positioned = exact(model.candidate_document());
+  EXPECT_EQ(model.evaluation_version(), evaluation);
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(exact(model.candidate_document()), exact(document));
+  EXPECT_EQ(model.evaluation_version(), evaluation);
+  ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(model.evaluation_version(), evaluation);
+  ASSERT_TRUE(model.remove_node("source", generation).accepted);
+  EXPECT_FALSE(model.graph().at("outputs").contains("value"));
+  EXPECT_EQ(model.outputs(), Json::array({"other"}));
+  const auto removed = exact(model.candidate_document());
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(exact(model.candidate_document()), positioned);
+  EXPECT_EQ(model.evaluation_version(), evaluation + 2);
+  ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(exact(model.candidate_document()), removed);
+  EXPECT_EQ(model.evaluation_version(), evaluation + 3);
+}
+
+TEST(AnalysisParameterDraft, HistoryNoOpsRefusalsBranchingAndCleanCandidatesPreserveIntent)
+{
+  auto model = draft({{"gain", 1}}); const auto generation = model.generation();
+  ASSERT_TRUE(model.set("gain", 2, generation).accepted);
+  ASSERT_TRUE(model.set("gain", 1, generation).accepted);
+  EXPECT_FALSE(model.dirty()); EXPECT_TRUE(model.can_undo());  // editing back is still an action
+  ASSERT_TRUE(model.undo(generation).accepted);
+  const auto version = model.version(), bytes = model.history_bytes();
+  ASSERT_TRUE(model.set("gain", 2, generation).accepted);
+  ASSERT_TRUE(model.remove("missing", generation).accepted);
+  EXPECT_FALSE(model.set_text("gain", "NaN", Draft::TextMode::Json, generation).accepted);
+  EXPECT_FALSE(model.set_outputs(Json::array({"unknown"}), generation).accepted);
+  EXPECT_FALSE(model.remove_node("absent", generation).accepted);
+  EXPECT_FALSE(model.undo(generation + 1).accepted); EXPECT_FALSE(model.redo(generation + 1).accepted);
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(model.history_bytes(), bytes);
+  EXPECT_EQ(model.undo_depth(), 1u); EXPECT_EQ(model.redo_depth(), 1u);
+  ASSERT_TRUE(model.set("gain", 3, generation).accepted);
+  EXPECT_FALSE(model.can_redo()); EXPECT_EQ(model.undo_depth(), 2u);
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(*model.override_value("gain"), 2);
+}
+
+TEST(AnalysisParameterDraft, HistoryIsBoundedByBothActionCountAndActualSnapshotCapacity)
+{
+  auto small = draft(); const auto generation = small.generation();
+  for (size_t i = 0; i < Draft::max_history_steps + 12; ++i) {
+    ASSERT_TRUE(small.set("gain", i, generation).accepted);
+    EXPECT_LE(small.history_bytes(), Draft::max_history_bytes);
+  }
+  EXPECT_EQ(small.undo_depth(), Draft::max_history_steps);
+  for (size_t i = 0; i < Draft::max_history_steps; ++i) { ASSERT_TRUE(small.undo(generation).accepted); }
+  EXPECT_FALSE(small.can_undo()); EXPECT_EQ(*small.override_value("gain"), 11);
+  auto document = definition(); document["graph"]["x-padding"] = std::string(128 * 1024, 'p');
+  Draft large; large.pin("opening", identity, 4, "Large", document);
+  for (size_t i = 0; i < 40; ++i) {
+    ASSERT_TRUE(large.set("gain", i, large.generation()).accepted);
+    EXPECT_LE(large.history_bytes(), Draft::max_history_bytes);
+  }
+  EXPECT_GT(large.undo_depth(), 0u); EXPECT_LT(large.undo_depth(), 40u);
+  const auto bytes = large.history_bytes();
+  while (large.can_undo()) { ASSERT_TRUE(large.undo(large.generation()).accepted); }
+  while (large.can_redo()) { ASSERT_TRUE(large.redo(large.generation()).accepted); }
+  EXPECT_EQ(large.history_bytes(), bytes); EXPECT_EQ(*large.override_value("gain"), 39);
+}
+
+TEST(AnalysisParameterDraft, HistoryIsSessionLocalAndFailedIdentityChangesKeepIt)
+{
+  auto model = draft(); ASSERT_TRUE(model.set("gain", 4, model.generation()).accepted);
+  const auto generation = model.generation(), bytes = model.history_bytes();
+  const auto state = model.save_workspace_state();
+  auto bad = state; bad["document"]["outputs"] = {"missing"};
+  EXPECT_FALSE(model.load_workspace_state(bad, "other"));
+  EXPECT_THROW(model.pin("", identity, 4, "Invalid", definition()), std::invalid_argument);
+  EXPECT_EQ(model.history_bytes(), bytes); EXPECT_EQ(model.undo_depth(), 1u); EXPECT_EQ(model.generation(), generation);
+  ASSERT_TRUE(model.load_workspace_state(state, "new-opening"));
+  EXPECT_TRUE(model.dirty()); EXPECT_FALSE(model.can_undo()); EXPECT_FALSE(model.can_redo());
+  EXPECT_EQ(model.history_bytes(), 0u); EXPECT_GT(model.generation(), generation);
+  EXPECT_FALSE(model.undo(generation).accepted);
+  ASSERT_TRUE(model.set("gain", 5, model.generation()).accepted);
+  ASSERT_TRUE(model.revert(model.generation())); EXPECT_EQ(model.history_bytes(), 0u);
+  ASSERT_TRUE(model.set("gain", 1, model.generation()).accepted);
+  model.pin("opening", identity, 7, "Repinned", definition());
+  EXPECT_EQ(model.history_bytes(), 0u); EXPECT_FALSE(model.can_undo());
+  ASSERT_TRUE(model.set("gain", 1, model.generation()).accepted); model.reset();
+  EXPECT_EQ(model.history_bytes(), 0u); EXPECT_FALSE(model.can_undo()); EXPECT_FALSE(model.can_redo());
+}
+
+TEST(AnalysisParameterDraft, GroupedLayoutAndNodeChangesAreOneAtomicHistoryAction)
+{
+  auto model = draft(); const auto original = exact(model.candidate_document());
+  const auto generation = model.generation(), version = model.version(), evaluation = model.evaluation_version();
+  auto result = model.edit_group(generation, [](Draft &candidate) {
+    auto moved = candidate.move_nodes({{"source", {100, 20}}}, candidate.generation());
+    if (!moved.accepted) { return moved; }
+    return candidate.add_node("fixture.filter.scalar@1", std::pair{400.0, 20.0}, candidate.generation());
+  });
+  ASSERT_TRUE(result.accepted) << result.error; EXPECT_EQ(result.id, "scalar");
+  EXPECT_EQ(model.undo_depth(), 1u); EXPECT_EQ(model.version(), version + 1);
+  EXPECT_EQ(model.evaluation_version(), evaluation + 1);
+  const auto candidate = exact(model.candidate_document());
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(exact(model.candidate_document()), original);
+  ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(exact(model.candidate_document()), candidate);
+  const auto before = model.version(), bytes = model.history_bytes();
+  EXPECT_FALSE(model.edit_group(generation, [](Draft &temporary) {
+    temporary.move_nodes({{"source", {800, 20}}}, temporary.generation());
+    return temporary.remove_node("absent", temporary.generation());
+  }).accepted);
+  EXPECT_FALSE(model.edit_group(generation, [](Draft &temporary) -> Draft::EditResult {
+    temporary.set("gain", 8, temporary.generation()); throw std::runtime_error("Rejected grouped edit");
+  }).accepted);
+  EXPECT_FALSE(model.edit_group(generation, [](Draft &temporary) -> Draft::EditResult {
+    temporary.reset(); return {true, {}};
+  }).accepted);
+  EXPECT_EQ(exact(model.candidate_document()), candidate); EXPECT_EQ(model.version(), before);
+  EXPECT_EQ(model.history_bytes(), bytes); EXPECT_EQ(model.undo_depth(), 1u);
+  bool called = false;
+  EXPECT_FALSE(model.edit_group(generation + 1, [&called](Draft &) -> Draft::EditResult { called = true; return {true, {}}; }).accepted);
+  EXPECT_FALSE(called);
+}
+
+TEST(AnalysisParameterDraft, GroupedFinalNoOpKeepsRedoAndPositionOnlyPreservesEvaluation)
+{
+  auto model = draft(); const auto generation = model.generation();
+  ASSERT_TRUE(model.set("gain", 2, generation).accepted); ASSERT_TRUE(model.undo(generation).accepted);
+  const auto version = model.version(), bytes = model.history_bytes(), evaluation = model.evaluation_version();
+  ASSERT_TRUE(model.edit_group(generation, [](Draft &temporary) {
+    auto changed = temporary.set("gain", 5, temporary.generation());
+    if (!changed.accepted) { return changed; }
+    return temporary.remove("gain", temporary.generation());
+  }).accepted);
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(model.history_bytes(), bytes); EXPECT_TRUE(model.can_redo());
+  ASSERT_TRUE(model.edit_group(generation, [](Draft &temporary) {
+    auto changed = temporary.set("gain", 5, temporary.generation());
+    if (!changed.accepted) { return changed; }
+    changed = temporary.remove("gain", temporary.generation());
+    if (!changed.accepted) { return changed; }
+    return temporary.move_nodes({{"source", {80, 40}}}, temporary.generation());
+  }).accepted);
+  EXPECT_EQ(model.evaluation_version(), evaluation); EXPECT_EQ(model.version(), version + 1);
+  EXPECT_EQ(model.undo_depth(), 1u); EXPECT_FALSE(model.can_redo());
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(model.evaluation_version(), evaluation);
+  ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(model.evaluation_version(), evaluation);
+  ASSERT_TRUE(model.revert(generation)); EXPECT_EQ(model.evaluation_version(), evaluation);
+}
+
+TEST(AnalysisParameterDraft, GroupedFailedLastNodeDeletionDoesNotLeaveFrozenLayoutOrClearRedo)
+{
+  auto model = draft(); const auto generation = model.generation();
+  ASSERT_TRUE(model.set("gain", 4, generation).accepted); ASSERT_TRUE(model.undo(generation).accepted);
+  const auto original = exact(model.candidate_document());
+  const auto version = model.version(), evaluation = model.evaluation_version(), bytes = model.history_bytes();
+  const auto result = model.edit_group(generation, [](Draft &temporary) {
+    auto moved = temporary.move_nodes({{"source", {100, 40}}}, temporary.generation());
+    if (!moved.accepted) { return moved; }
+    return temporary.remove_node("source", temporary.generation());
+  });
+  EXPECT_FALSE(result.accepted); EXPECT_FALSE(result.error.empty());
+  EXPECT_EQ(exact(model.candidate_document()), original); EXPECT_FALSE(model.dirty());
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(model.evaluation_version(), evaluation); EXPECT_EQ(model.history_bytes(), bytes);
+  EXPECT_FALSE(model.can_undo()); EXPECT_TRUE(model.can_redo());
+  ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(*model.override_value("gain"), 4);
 }
 
 }  // namespace

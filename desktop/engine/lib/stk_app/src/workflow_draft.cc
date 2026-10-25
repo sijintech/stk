@@ -159,7 +159,7 @@ void WorkflowDraft::pin(std::string handle, std::string workflow_id, const int64
   Json detached = document;
   handle_ = std::move(handle); workflow_id_ = std::move(workflow_id); revision_ = revision;
   baseline_name_ = std::move(name); baseline_ = std::move(detached);
-  document_.reset(); name_.reset();
+  document_.reset(); name_.reset(); clear_history();
   ++generation_; ++version_; ++check_version_;
 }
 
@@ -192,7 +192,7 @@ bool WorkflowDraft::load_workspace_state(const Json &value, const std::string &h
 void WorkflowDraft::reset()
 {
   handle_.clear(); workflow_id_.clear(); baseline_name_.clear(); revision_ = -1;
-  baseline_ = nullptr; document_.reset(); name_.reset();
+  baseline_ = nullptr; document_.reset(); name_.reset(); clear_history();
   ++generation_; ++version_; ++check_version_;
 }
 
@@ -243,6 +243,7 @@ WorkflowDraft::EditResult WorkflowDraft::edit(const uint64_t generation, const b
     if (ui.contains("positions") && ui.at("positions").empty() && !baseline_.at("ui").contains("positions")) { ui.erase("positions"); }
     check_workflow_document(next);
     if (same_json(next, document())) { return {true, {}}; }
+    record_history(next, name(), affects_check);
     if (same_json(next, baseline_)) { document_.reset(); }
     else { document_ = std::move(next); }
     ++version_;
@@ -257,6 +258,7 @@ WorkflowDraft::EditResult WorkflowDraft::set_name(const std::string &name, const
   if (!accepts(generation)) { return {false, "The workflow draft has changed or is unavailable"}; }
   if (!valid_name(name)) { return {false, "A workflow name has 1 to 256 characters without NUL"}; }
   if (name == this->name()) { return {true, {}}; }
+  record_history(document(), name, false);
   if (name == baseline_name_) { name_.reset(); }
   else { name_ = name; }
   ++version_;
@@ -409,12 +411,89 @@ bool WorkflowDraft::rebase(const int64_t revision, const std::string &name, cons
 bool WorkflowDraft::revert(const uint64_t expected_generation)
 {
   if (!accepts(expected_generation)) { return false; }
-  if (!dirty()) { return true; }
-  const bool checked = document_.has_value();
+  if (!dirty()) { clear_history(); return true; }
+  auto before = document(), after = baseline_;
+  before.erase("ui"); after.erase("ui");
+  const bool checked = !same_json(before, after);
   document_.reset(); name_.reset();
+  clear_history();
   ++version_;
   if (checked) { ++check_version_; }
   return true;
+}
+
+void WorkflowDraft::clear_history()
+{
+  history_.clear(); history_cursor_ = history_bytes_ = 0;
+}
+
+void WorkflowDraft::record_history(const Json &next, const std::string &next_name, const bool affects_check)
+{
+  if (suppress_history_) { return; }
+  HistoryEdit edit{io::python_json_dumps(Json{{"document", document()}, {"name", name()}}, true, true),
+      io::python_json_dumps(Json{{"document", next}, {"name", next_name}}, true, true), affects_check};
+  for (size_t i = history_cursor_; i < history_.size(); ++i) { history_bytes_ -= history_[i].bytes(); }
+  history_.erase(history_.begin() + history_cursor_, history_.end());
+  history_bytes_ += edit.bytes(); history_.push_back(std::move(edit));
+  while (history_.size() > max_history_steps || history_bytes_ > max_history_bytes) {
+    history_bytes_ -= history_.front().bytes(); history_.erase(history_.begin());
+  }
+  history_cursor_ = history_.size();
+}
+
+WorkflowDraft::EditResult WorkflowDraft::restore_history(const bool forward, const uint64_t generation)
+{
+  if (!accepts(generation)) { return {false, "The workflow draft has changed or is unavailable"}; }
+  if (forward ? !can_redo() : !can_undo()) { return {false, forward ? "Nothing to redo" : "Nothing to undo"}; }
+  try {
+    const auto &edit = history_[forward ? history_cursor_ : history_cursor_ - 1];
+    const auto state = Json::parse(forward ? edit.after : edit.before);
+    std::optional<Json> document;
+    std::optional<std::string> name;
+    if (!same_json(state.at("document"), baseline_)) { document = state.at("document"); }
+    if (state.at("name").get_ref<const std::string &>() != baseline_name_) { name = state.at("name").get<std::string>(); }
+    document_.swap(document); name_.swap(name);
+    if (forward) { ++history_cursor_; } else { --history_cursor_; }
+    ++version_; if (edit.affects_check) { ++check_version_; }
+    return {true, {}};
+  }
+  catch (const std::exception &error) { return {false, error.what()}; }
+}
+
+WorkflowDraft::EditResult WorkflowDraft::undo(const uint64_t generation)
+{
+  return restore_history(false, generation);
+}
+
+WorkflowDraft::EditResult WorkflowDraft::redo(const uint64_t generation)
+{
+  return restore_history(true, generation);
+}
+
+WorkflowDraft::EditResult WorkflowDraft::edit_group(
+    const uint64_t generation, const std::function<EditResult(WorkflowDraft &)> &change)
+{
+  if (!accepts(generation)) { return {false, "The workflow draft has changed or is unavailable"}; }
+  try {
+    WorkflowDraft candidate;
+    candidate.handle_ = handle_; candidate.workflow_id_ = workflow_id_; candidate.revision_ = revision_;
+    candidate.baseline_name_ = baseline_name_; candidate.baseline_ = baseline_; candidate.document_ = document_; candidate.name_ = name_;
+    candidate.generation_ = generation_; candidate.version_ = version_; candidate.check_version_ = check_version_;
+    candidate.suppress_history_ = true;
+    auto result = change(candidate);
+    if (!result.accepted) { return result; }
+    if (candidate.generation_ != generation_ || candidate.handle_ != handle_ || candidate.workflow_id_ != workflow_id_ ||
+        candidate.revision_ != revision_) { return {false, "A grouped edit cannot replace the workflow draft identity"}; }
+    if (name() == candidate.name() && same_json(document(), candidate.document())) { return result; }
+    auto before = document(), after = candidate.document();
+    before.erase("ui"); after.erase("ui");
+    const bool affects_check = !same_json(before, after);
+    record_history(candidate.document(), candidate.name(), affects_check);
+    document_.swap(candidate.document_); name_.swap(candidate.name_);
+    ++version_; if (affects_check) { ++check_version_; }
+    return result;
+  }
+  catch (const std::exception &error) { return {false, error.what()}; }
 }
 
 bool WorkflowDraft::matches(const std::string &workflow_id, const std::string &name, const Json &document) const

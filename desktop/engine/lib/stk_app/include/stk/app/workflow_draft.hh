@@ -39,6 +39,7 @@ void check_workflow_document(const io::Json &document);
  * Every accepted document passes check_workflow_document, so storage accepts what is saved. */
 class WorkflowDraft {
  public:
+  static constexpr size_t max_history_steps = 100, max_history_bytes = 8 * 1024 * 1024;
   struct EditResult {
     bool accepted = false;
     std::string error;
@@ -66,6 +67,22 @@ class WorkflowDraft {
   uint64_t version() const { return version_; }
   uint64_t check_version() const { return check_version_; }
   bool dirty() const { return document_.has_value() || name_.has_value(); }
+
+  /** Bounded editor-local accepted actions; no-ops and refusals preserve undo and redo. Snapshot
+   * string capacities total at most max_history_bytes, with at most max_history_steps actions;
+   * oldest actions are evicted first. pin/reset, successful workspace restore and explicit
+   * revert clear history. Workspace exports retain candidate/baseline, without session history. */
+  bool can_undo() const { return pinned() && history_cursor_ > 0; }
+  bool can_redo() const { return pinned() && history_cursor_ < history_.size(); }
+  size_t undo_depth() const { return history_cursor_; }
+  size_t redo_depth() const { return history_.size() - history_cursor_; }
+  size_t history_bytes() const { return history_bytes_; }
+  EditResult undo(uint64_t expected_generation);
+  EditResult redo(uint64_t expected_generation);
+  /** Atomically combine temporary edits into one accepted action/version; refusal, exception or
+   * identity changes leave this draft intact. The callback must not perform external I/O. */
+  EditResult edit_group(uint64_t expected_generation,
+                        const std::function<EditResult(WorkflowDraft &)> &change);
 
   /** The candidate document (the saved one while it has no edits) and name. */
   const io::Json &document() const;
@@ -106,6 +123,14 @@ class WorkflowDraft {
   bool matches(const std::string &workflow_id, const std::string &name, const io::Json &document) const;
 
  private:
+  struct HistoryEdit {
+    std::string before, after;
+    bool affects_check = false;
+    size_t bytes() const { return before.capacity() + after.capacity(); }
+  };
+  void clear_history();
+  void record_history(const io::Json &next, const std::string &name, bool affects_check);
+  EditResult restore_history(bool forward, uint64_t generation);
   bool accepts(uint64_t generation) const { return pinned() && generation == generation_; }
   /** Applies `change` to a copy of the candidate, tidies keys emptied that the saved step lacked,
    * checks the shape and commits only an actual difference. */
@@ -117,6 +142,9 @@ class WorkflowDraft {
   io::Json baseline_;
   std::optional<io::Json> document_;
   std::optional<std::string> name_;
+  std::vector<HistoryEdit> history_;
+  size_t history_cursor_ = 0, history_bytes_ = 0;
+  bool suppress_history_ = false;
 };
 
 }  // namespace stk::app

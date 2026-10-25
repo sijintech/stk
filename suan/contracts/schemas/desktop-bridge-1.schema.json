@@ -15441,7 +15441,20 @@
                   "null"
                 ]
               },
-              "default": true
+              "default": true,
+              "choices": {
+                "type": "array",
+                "minItems": 1
+              },
+              "minimum": {
+                "type": "number"
+              },
+              "maximum": {
+                "type": "number"
+              },
+              "description": {
+                "type": "string"
+              }
             },
             "required": [
               "name",

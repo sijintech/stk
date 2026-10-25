@@ -150,13 +150,14 @@ class AnalysisGraphEditor final : public Editor {
   {
     workspace_link(row, ctx);
     attach(ctx);
+    history_controls(row, ctx);
     const std::weak_ptr<bool> weak = alive_;
     row.button("graph_fit", ctx.tr("analysis_graph.fit"), [this, weak] {
       if (const auto live = weak.lock(); live && *live) { fit_ = true; focus_selected_ = false; redraw(); }
     }).width(3).disable(!state_->view());
     row.button("graph_focus_node", ctx.tr("analysis_graph.focus_node"), [this, weak] {
       if (const auto live = weak.lock(); live && *live) { focus_selected_ = true; redraw(); }
-    }).width(5).disable(!selected_);
+    }).width(4).disable(!selected_);
     auto *shell = &ctx.area.shell();
     auto *screen = ctx.area.screen();
     row.button("graph_viewer", ctx.tr("analysis_graph.view_3d"), [weak, shell, screen] {
@@ -401,12 +402,24 @@ class AnalysisGraphEditor final : public Editor {
 
   bool on_key(const wm::Event &event, EditorContext &ctx) override
   {
+    if (event.type == wm::EventType::KeyDown && !(event.modifiers & wm::ModAlt) &&
+        (event.modifiers & (wm::ModCtrl | wm::ModOS)) && (event.key == wm::Key::Z || event.key == wm::Key::Y)) {
+      attach(ctx);
+      if (!history_ready(ctx.area.shell())) { return false; }
+      const bool forward = event.key == wm::Key::Y || (event.modifiers & wm::ModShift);
+      apply_history(forward);
+      return true;
+    }
     if (event.type == wm::EventType::KeyDown && event.key == wm::Key::Delete) {
       attach(ctx);
       // Delete removes the selected node of an edited saved analysis (same as the panel button).
       if (!canvas_editable() || !selected_ || !canvas_view_ || *selected_ >= canvas_view_->nodes.size() ||
-          canvas_view_->nodes[*selected_].ambiguous_id || !freeze_layout()) { return false; }
-      const auto result = parameter_draft_.remove_node(canvas_view_->nodes[*selected_].id, parameter_draft_.generation());
+          canvas_view_->nodes[*selected_].ambiguous_id || ctx.area.shell().text_input_active() ||
+          store_->project().busy()) { return false; }
+      const auto id = canvas_view_->nodes[*selected_].id;
+      const auto result = structural_edit([&id](AnalysisParameterDraft &draft) {
+        return draft.remove_node(id, draft.generation());
+      });
       if (result.accepted) { selected_.reset(); }
       else { refuse(result.error); }
       redraw(); return true;
@@ -635,6 +648,40 @@ class AnalysisGraphEditor final : public Editor {
         parameter_draft_.current(project->handle, project->revision) &&
         parameter_draft_.analysis_id() == io::get_string(documents_->selected(), "id");
   }
+  bool history_ready(const AppShell &shell) const
+  {
+    return canvas_editable() && canvas_drag_ == CanvasDrag::None && !store_->project().busy() &&
+        !shell.text_input_active() && state_->source() != AnalysisGraphState::Source::Run;
+  }
+  void apply_history(const bool forward)
+  {
+    if (forward ? !parameter_draft_.can_redo() : !parameter_draft_.can_undo()) { return; }
+    const auto evaluation = parameter_draft_.evaluation_version();
+    const auto result = forward ? parameter_draft_.redo(parameter_draft_.generation()) :
+                                  parameter_draft_.undo(parameter_draft_.generation());
+    if (!result.accepted) { refuse(result.error); return; }
+    if (parameter_draft_.evaluation_version() != evaluation) { candidate_check_.reset(); }
+    parameter_buffer_from_value(); node_form_key_.clear();
+    graph_edit_error_.clear(); link_error_.clear();
+    redraw();
+  }
+  void history_controls(ui::Layout &row, EditorContext &ctx)
+  {
+    const std::weak_ptr<bool> weak = alive_;
+    auto *shell = &ctx.area.shell();
+    const auto generation = parameter_draft_.generation(), version = parameter_draft_.version();
+    const auto ready = [this, weak, shell, shell_weak = shell->lifetime(), generation, version] {
+      const auto live = weak.lock();
+      return live && *live && !shell_weak.expired() && parameter_draft_.generation() == generation &&
+          parameter_draft_.version() == version && history_ready(*shell);
+    };
+    row.button("analysis_graph_undo", ctx.tr("editor_history.undo"), [this, ready] {
+      if (ready()) { apply_history(false); }
+    }).width(3).disable(!ready() || !parameter_draft_.can_undo()).tip(ctx.tr("editor_history.undo.tip"));
+    row.button("analysis_graph_redo", ctx.tr("editor_history.redo"), [this, ready] {
+      if (ready()) { apply_history(true); }
+    }).width(3).disable(!ready() || !parameter_draft_.can_redo()).tip(ctx.tr("editor_history.redo.tip"));
+  }
   void clear_parameter_draft()
   {
     parameter_draft_.reset(); parameter_key_.reset(); draft_output_key_.reset(); parameter_buffer_.clear(); parameter_original_.clear();
@@ -722,9 +769,9 @@ class AnalysisGraphEditor final : public Editor {
     if (!panel) { return; }
     const std::weak_ptr<bool> weak = alive_;
     const auto generation = parameter_draft_.generation(), version = parameter_draft_.version();
-    const auto valid = [this, weak, generation] {
+    const auto valid = [this, weak, generation, version] {
       const auto live = weak.lock();
-      if (!live || !*live || parameter_draft_.generation() != generation) { return false; }
+      if (!live || !*live || parameter_draft_.generation() != generation || parameter_draft_.version() != version) { return false; }
       documents_->sync();
       return true;
     };
@@ -892,17 +939,23 @@ class AnalysisGraphEditor final : public Editor {
 
   /** Before adding or removing a node, write the shown layout of every unplaced node so the
    * automatic layout of the rest cannot rearrange under the user (positions never affect evaluation). */
-  bool freeze_layout()
+  AnalysisParameterDraft::EditResult freeze_layout(AnalysisParameterDraft &draft) const
   {
-    if (!canvas_view_) { return false; }
+    if (!canvas_view_) { return {false, "The graph view is no longer available"}; }
     std::map<std::string, std::pair<double, double>> positions;
     for (const auto &node : canvas_view_->nodes) {
       if (!node.supplied_position && !node.ambiguous_id) { positions[node.id] = {node.rect.x, node.rect.y}; }
     }
-    if (positions.empty()) { return true; }
-    const auto result = parameter_draft_.move_nodes(positions, parameter_draft_.generation());
-    if (!result.accepted) { graph_edit_error_ = result.error; }
-    return result.accepted;
+    if (positions.empty()) { return {true, {}}; }
+    return draft.move_nodes(positions, draft.generation());
+  }
+  AnalysisParameterDraft::EditResult structural_edit(
+      const std::function<AnalysisParameterDraft::EditResult(AnalysisParameterDraft &)> &change)
+  {
+    return parameter_draft_.edit_group(parameter_draft_.generation(), [this, &change](AnalysisParameterDraft &draft) {
+      const auto positioned = freeze_layout(draft);
+      return positioned.accepted ? change(draft) : positioned;
+    });
   }
 
   /** An ordered list input (multi port): each link can be moved or removed, and any declared
@@ -1085,7 +1138,7 @@ class AnalysisGraphEditor final : public Editor {
       auto &add = panel->prop(ctx.tr("analysis_graph_edit.add_type")).row(true);
       add.dropdown("analysis_graph_add_type", std::move(labels), ui::bind(add_type_index_)).disable(disabled || ids.empty());
       add.button("analysis_graph_add_node", ctx.tr("analysis_graph_edit.add_node"), [this, valid, ids] {
-        if (!graph_edit_ready(valid) || add_type_index_ < 0 || size_t(add_type_index_) >= ids.size() || !freeze_layout()) { return; }
+        if (!graph_edit_ready(valid) || add_type_index_ < 0 || size_t(add_type_index_) >= ids.size()) { return; }
         // Right of the selected node (else of the whole graph), moved down past any node it would cover.
         std::pair<double, double> at{0, 0};
         if (selected_ && canvas_view_ && *selected_ < canvas_view_->nodes.size()) {
@@ -1104,7 +1157,9 @@ class AnalysisGraphEditor final : public Editor {
             at.second += 116;
           }
         }
-        const auto result = parameter_draft_.add_node(ids[size_t(add_type_index_)], at, parameter_draft_.generation());
+        const auto result = structural_edit([&](AnalysisParameterDraft &draft) {
+          return draft.add_node(ids[size_t(add_type_index_)], at, draft.generation());
+        });
         graph_edit_error_ = result.accepted ? std::string() : result.error;
         if (result.accepted) { selected_id_ = result.id; selected_parameter_ = 0; }
         redraw();
@@ -1116,8 +1171,10 @@ class AnalysisGraphEditor final : public Editor {
       const auto &node = view->nodes[*selected_];
       panel->label(catalog.format("analysis_graph_edit.selected", {{"node", text(node.id)}}));
       panel->button("analysis_graph_remove_node", ctx.tr("analysis_graph_edit.remove_node"), [this, valid, id = node.id] {
-        if (!graph_edit_ready(valid) || !freeze_layout()) { return; }
-        const auto result = parameter_draft_.remove_node(id, parameter_draft_.generation());
+        if (!graph_edit_ready(valid)) { return; }
+        const auto result = structural_edit([&id](AnalysisParameterDraft &draft) {
+          return draft.remove_node(id, draft.generation());
+        });
         graph_edit_error_ = result.accepted ? std::string() : result.error;
         if (result.accepted) { selected_.reset(); }
         redraw();

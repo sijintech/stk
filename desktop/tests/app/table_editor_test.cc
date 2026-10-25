@@ -137,7 +137,7 @@ class TableEditorPython : public ::testing::Test {
     spec.selected.assign(row);
     spec.on_cell_select(row, column);
     f.drv->frame();
-    if (!widget("cell_field")) { click("table_details"); }
+    if (!widget("table_detail_field")) { click("table_details"); }
   }
 };
 
@@ -153,7 +153,7 @@ TEST_F(TableEditorPython, OpensAsIndependentTableOnlyPageWithoutCreatingProject)
   populated();
   EXPECT_NE(widget("table"), nullptr);
   EXPECT_NE(widget("records"), nullptr);
-  EXPECT_NE(widget("cell_field"), nullptr);
+  EXPECT_NE(widget("table_detail_field"), nullptr);
   EXPECT_EQ(widget("project_simulation"), nullptr);
   EXPECT_EQ(widget("project_files"), nullptr);
   EXPECT_EQ(widget("project_snapshots"), nullptr);
@@ -210,11 +210,11 @@ TEST_F(TableEditorPython, DirtyDraftBlocksOtherRowFieldTableAndHiddenTabNavigati
   ASSERT_TRUE(area().editor().has_unsaved_changes());
   cell(1, 2);
   EXPECT_EQ(state().record_id(), record_id);
-  EXPECT_EQ(widget("cell_field")->index.value(), 0);
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 0);
   EXPECT_EQ(widget("cell_value")->string.value(), "345");
-  widget("cell_field")->index.assign(1);
+  widget("table_detail_field")->index.assign(1);
   f.drv->frame();
-  EXPECT_EQ(widget("cell_field")->index.value(), 0);
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 0);
   const auto table_dropdown = widget("table")->index;
   table_dropdown.assign(1);
   f.drv->frame();
@@ -231,7 +231,7 @@ TEST_F(TableEditorPython, DirtyDraftBlocksOtherRowFieldTableAndHiddenTabNavigati
   EXPECT_FALSE(area().editor().has_unsaved_changes());
   cell(1, 2);
   EXPECT_EQ(state().record_id(), second_id);
-  EXPECT_EQ(widget("cell_field")->index.value(), 1);
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 1);
 }
 
 TEST_F(TableEditorPython, RetainedGridCallbacksRefuseChangedFilterRevisionAndDestroyedEditor)
@@ -266,7 +266,8 @@ TEST_F(TableEditorPython, RetainedManagementCallbacksCannotModifyAnotherProjectO
   ASSERT_NE(widget("save_table_name"), nullptr);
   const auto old_rename = widget("save_table_name")->on_click;
   const auto old_delete = widget("delete_table")->on_click;
-  const auto old_field = widget("manage_field")->index;
+  ASSERT_NE(widget("table_detail_field"), nullptr);
+  const auto old_field = widget("table_detail_field")->index;
   ASSERT_TRUE(state().create(dir.str() + "/project-b", "Other project"));
   settled();
   ASSERT_TRUE(state().apply(Json::array({
@@ -277,7 +278,7 @@ TEST_F(TableEditorPython, RetainedManagementCallbacksCannotModifyAnotherProjectO
   settled();
   state().select_table(table_id); state().select_record(record_id); f.drv->frame();
   settled();
-  if (!widget("cell_field")) { click("table_details"); }
+  if (!widget("table_detail_field")) { click("table_details"); }
   if (!widget("rename_table")) { panel("manage_objects"); }
   ASSERT_NE(widget("rename_table"), nullptr);
   widget("rename_table")->string.assign("Unsaved name");

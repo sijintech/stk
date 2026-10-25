@@ -39,6 +39,7 @@ class AnalysisParameterDraft {
   // Typed editing text may exceed canonical parameter bytes (for example many -0.0 values).
   static constexpr size_t max_text_bytes = max_document_bytes;
   static constexpr size_t max_depth = AnalysisDocumentLimits::max_depth;
+  static constexpr size_t max_history_steps = 100, max_history_bytes = 8 * 1024 * 1024;
 
   enum class TextMode { Json, LiteralString };
   struct EditResult {
@@ -79,6 +80,24 @@ class AnalysisParameterDraft {
    * validation of the candidate stays valid while nodes are only moved. */
   uint64_t evaluation_version() const { return evaluation_version_; }
   bool dirty() const { return !edits_.empty() || outputs_override_.has_value() || graph_.has_value(); }
+
+  /** Editor-local accepted actions, including edits that return to the baseline. Stored JSON
+   * snapshot capacities total at most max_history_bytes, with at most max_history_steps actions;
+   * older actions are evicted first. No-ops and refused edits leave both directions intact.
+   * pin/reset, successful workspace restore and explicit revert clear history; workspace exports
+   * carry the candidate and baseline only. Undo/redo never touch project storage or execution. */
+  bool can_undo() const { return pinned() && history_cursor_ > 0; }
+  bool can_redo() const { return pinned() && history_cursor_ < history_.size(); }
+  size_t undo_depth() const { return history_cursor_; }
+  size_t redo_depth() const { return history_.size() - history_cursor_; }
+  size_t history_bytes() const { return history_bytes_; }
+  EditResult undo(uint64_t expected_generation);
+  EditResult redo(uint64_t expected_generation);
+  /** An atomic user action (for example freeze layout then delete). The callback edits a temporary
+   * candidate without history; refusal, exception or identity changes preserve this entire draft.
+   * Only the final difference creates one action/version. Never perform external I/O here. */
+  EditResult edit_group(uint64_t expected_generation,
+                        const std::function<EditResult(AnalysisParameterDraft &)> &change);
 
   bool has_override(const std::string &name) const;
   /** Disengaged means no override; an engaged JSON null is an explicit submitted null. */
@@ -161,6 +180,14 @@ class AnalysisParameterDraft {
                const io::Json &document) const;
 
  private:
+  struct HistoryEdit {
+    std::string before, after;
+    bool evaluative = false;
+    size_t bytes() const { return before.capacity() + after.capacity(); }
+  };
+  void clear_history();
+  void record_history(const io::Json &next, bool evaluative);
+  EditResult restore_history(bool forward, uint64_t generation);
   bool accepts(uint64_t generation) const;
   io::Json document_with(const io::Json &parameters) const;
   /** Applies `change` to copies of the candidate graph and requested outputs, checks bounds and
@@ -174,6 +201,9 @@ class AnalysisParameterDraft {
   std::map<std::string, std::optional<io::Json>> edits_;
   std::optional<io::Json> outputs_override_;
   std::optional<io::Json> graph_;
+  std::vector<HistoryEdit> history_;
+  size_t history_cursor_ = 0, history_bytes_ = 0;
+  bool suppress_history_ = false;
 };
 
 /** Everything a graph validation reply about a candidate is bound to. A reply applies only while

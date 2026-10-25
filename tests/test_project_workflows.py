@@ -281,6 +281,72 @@ def test_choices_list_referencable_objects_only(store, project):
     assert [a["id"] for a in store.workflows.choices()["analyses"]] == [project["volume"], project["threshold"]]
 
 
+def test_parameter_summaries_keep_declared_form_metadata_without_mutating_saved_graph(store, project):
+    graph = deepcopy(VOLUME["graph"])
+    graph["parameters"].append({"name": "offset", "type": "number", "default": -0.0,
+                                "minimum": -1.0, "maximum": 1.0, "description": "Signed measurement offset"})
+    store.analyses.update(project["volume"], "Typed volume", analysis_document(graph),
+                          expected_revision=store.info()["revision"])
+    before, history = store.snapshot(), store.history()
+    checked = store.workflows.validate(flow(project))
+    parameters = next(s["parameters"] for s in checked["steps"] if s["id"] == "view")
+    by_name = {p["name"]: p for p in parameters}
+    expected = next(p for p in graph["parameters"] if p["name"] == "colormap")
+    assert by_name["colormap"]["choices"] == expected["choices"]
+    assert by_name["path"]["description"] == next(p["description"] for p in graph["parameters"] if p["name"] == "path")
+    assert "description" not in by_name["colormap"]
+    assert by_name["offset"] == {"name": "offset", "type": "number", "default": -0.0, "label": None,
+                                  "unit": None, "minimum": -1.0, "maximum": 1.0,
+                                  "description": "Signed measurement offset"}
+    assert "minimum" not in by_name["colormap"]
+    assert store.snapshot() == before and store.history() == history
+    # A consumer can edit its local metadata; nothing is written back to the saved analysis.
+    by_name["colormap"]["choices"].append("local-only")
+    assert store.analyses.get(project["volume"])["analysis"]["document"]["graph"] == graph
+
+
+def test_engine_parameter_summaries_keep_the_same_optional_metadata(store, monkeypatch):
+    from types import SimpleNamespace
+    from suan.workflows import templates
+    engine = SimpleNamespace(id="typed/1", name="Typed engine", table_id=None, parameters=[
+        {"name": "method", "type": "enum", "default": "fast", "choices": ["fast", "accurate"],
+         "description": "Solver method"},
+        {"name": "count", "type": "integer", "default": 2, "minimum": 1, "maximum": 8}])
+    monkeypatch.setattr(templates, "workflow_templates", lambda: {engine.id: engine})
+    checked = store.workflows.validate(document({"id": "solve", "kind": "simulation", "ref": {"template": engine.id}}))
+    parameters = checked["steps"][0]["parameters"]
+    assert parameters[0] == {"name": "method", "type": "enum", "label": None, "unit": None,
+                             "default": "fast", "choices": ["fast", "accurate"], "description": "Solver method"}
+    assert parameters[1]["minimum"] == 1 and parameters[1]["maximum"] == 8
+    assert "description" not in parameters[1] and store.info()["revision"] == 0
+
+
+def test_bridge_preserves_and_strictly_validates_optional_parameter_metadata(inproc, tmp_path):
+    from suan.desktop_bridge.schema import validate_outgoing
+    h = inproc()
+    info = h.call("project.create", {"directory": str(tmp_path / "typed-project"), "name": "Typed parameters"})["project"]
+    identity = str(uuid4())
+    graph = deepcopy(VOLUME["graph"])
+    graph["parameters"].append({"name": "offset", "type": "number", "default": -0.0,
+                                "minimum": -1.0, "maximum": 1.0, "description": "Offset"})
+    h.call("project.analyses.create", {"handle": info["handle"], "analysis_id": identity, "name": "Typed volume",
+                                      "document": analysis_document(graph), "expected_revision": 0})
+    checked = h.call("project.workflows.validate", {"handle": info["handle"], "document": document(
+        {"id": "view", "kind": "analysis", "ref": {"analysis": identity}})})
+    parameters = checked["steps"][0]["parameters"]
+    by_name = {p["name"]: p for p in parameters}
+    assert by_name["colormap"]["choices"] == next(p["choices"] for p in graph["parameters"] if p["name"] == "colormap")
+    assert by_name["offset"]["minimum"] == -1.0 and by_name["offset"]["description"] == "Offset"
+    envelope = {"id": "test-reply", "result": checked}
+    assert validate_outgoing(envelope, "project.workflows.validate") == []
+    for key, wrong in (("choices", "fast"), ("minimum", "0"), ("maximum", None), ("description", {})):
+        malformed = deepcopy(envelope)
+        malformed["result"]["steps"][0]["parameters"][0][key] = wrong
+        assert validate_outgoing(malformed, "project.workflows.validate"), key
+    assert not h.violations
+    h.close()
+
+
 def test_bridge_methods_scripting_api_and_events(inproc, tmp_path):
     h = inproc()
     info = h.call("project.create", {"directory": str(tmp_path / "project"), "name": "Bridge"})["project"]

@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #include "stk/app/workflow_draft.hh"
 
+#include <cmath>
+#include <stdexcept>
 #include <string>
 
 namespace stk::app {
@@ -208,6 +210,187 @@ TEST(WorkflowDraft, InvalidOpaqueBaselineIsRejectedAtomically)
     EXPECT_FALSE(model.load_workspace_state(state, "other-opening"));
     EXPECT_EQ(model.save_workspace_state(), before); EXPECT_EQ(model.generation(), generation);
   }
+}
+
+TEST(WorkflowDraft, HistoryRestoresNamesTypedParametersDependenciesAndCascadingDeletion)
+{
+  auto model = pinned(); const auto generation = model.generation();
+  std::vector<std::pair<std::string, std::string>> states{{model.name(), exact(model.document())}};
+  ASSERT_TRUE(model.set_parameter("view", "gain", Json::array({1, 1.0, -0.0, nullptr, false}), generation).accepted);
+  states.push_back({model.name(), exact(model.document())});
+  ASSERT_TRUE(model.set_after("view", {"fields"}, generation).accepted); states.push_back({model.name(), exact(model.document())});
+  ASSERT_TRUE(model.set_name("Customer workflow", generation).accepted); states.push_back({model.name(), exact(model.document())});
+  ASSERT_TRUE(model.remove_step("fields", generation).accepted); states.push_back({model.name(), exact(model.document())});
+  auto version = model.version(), check = model.check_version();
+  for (size_t i = states.size() - 1; i > 0; --i) {
+    ASSERT_TRUE(model.undo(generation).accepted);
+    EXPECT_EQ(model.name(), states[i - 1].first); EXPECT_EQ(exact(model.document()), states[i - 1].second);
+    EXPECT_EQ(model.version(), ++version);
+    if (i != 3) { ++check; }  // the rename never affects validation
+    EXPECT_EQ(model.check_version(), check); EXPECT_EQ(model.generation(), generation);
+  }
+  EXPECT_FALSE(model.dirty()); EXPECT_FALSE(model.can_undo()); EXPECT_TRUE(model.can_redo());
+  for (size_t i = 1; i < states.size(); ++i) {
+    ASSERT_TRUE(model.redo(generation).accepted);
+    EXPECT_EQ(model.name(), states[i].first); EXPECT_EQ(exact(model.document()), states[i].second);
+    EXPECT_EQ(model.version(), ++version);
+    if (i != 3) { ++check; }
+    EXPECT_EQ(model.check_version(), check);
+  }
+  EXPECT_FALSE(model.redo(generation).accepted);
+}
+
+TEST(WorkflowDraft, HistoryNoOpsRefusalsBranchesAndLayoutKeepTheCheckContract)
+{
+  auto model = pinned(); const auto generation = model.generation(), check = model.check_version();
+  ASSERT_TRUE(model.move_steps({{"view", {600, 40}}}, generation).accepted);
+  const auto moved = exact(model.document());
+  ASSERT_TRUE(model.undo(generation).accepted); ASSERT_TRUE(model.redo(generation).accepted);
+  EXPECT_EQ(model.check_version(), check); EXPECT_EQ(exact(model.document()), moved);
+  ASSERT_TRUE(model.set_name("Other", generation).accepted); ASSERT_TRUE(model.undo(generation).accepted);
+  const auto bytes = model.history_bytes(), version = model.version();
+  ASSERT_TRUE(model.move_steps({{"view", {600, 40}}}, generation).accepted);
+  ASSERT_TRUE(model.set_name("Temperature scan", generation).accepted);
+  EXPECT_FALSE(model.set_name(" ", generation).accepted);
+  EXPECT_FALSE(model.remove_step("missing", generation).accepted);
+  EXPECT_FALSE(model.move_steps({{"view", {std::nan(""), 1}}}, generation).accepted);
+  EXPECT_FALSE(model.undo(generation + 1).accepted); EXPECT_FALSE(model.redo(generation + 1).accepted);
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(model.history_bytes(), bytes);
+  EXPECT_EQ(model.undo_depth(), 1u); EXPECT_EQ(model.redo_depth(), 1u);
+  ASSERT_TRUE(model.set_label("view", std::string("Selected"), generation).accepted);
+  EXPECT_FALSE(model.can_redo()); EXPECT_EQ(model.undo_depth(), 2u);
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(exact(model.document()), moved);
+  EXPECT_EQ(model.check_version(), check + 2);
+}
+
+TEST(WorkflowDraft, HistoryIsBoundedByBothActionCountAndSnapshotCapacity)
+{
+  auto small = pinned();
+  for (size_t i = 0; i < WorkflowDraft::max_history_steps + 12; ++i) {
+    ASSERT_TRUE(small.set_name("Workflow " + std::to_string(i), small.generation()).accepted);
+    EXPECT_LE(small.history_bytes(), WorkflowDraft::max_history_bytes);
+  }
+  EXPECT_EQ(small.undo_depth(), WorkflowDraft::max_history_steps);
+  while (small.can_undo()) { ASSERT_TRUE(small.undo(small.generation()).accepted); }
+  EXPECT_EQ(small.name(), "Workflow 11");
+  auto document = saved(); document["ui"]["x-padding"] = std::string(128 * 1024, 'p');
+  WorkflowDraft large; large.pin("opening", id, 4, "Large", document);
+  for (size_t i = 0; i < 40; ++i) {
+    ASSERT_TRUE(large.set_name("Large " + std::to_string(i), large.generation()).accepted);
+    EXPECT_LE(large.history_bytes(), WorkflowDraft::max_history_bytes);
+  }
+  EXPECT_GT(large.undo_depth(), 0u); EXPECT_LT(large.undo_depth(), 40u);
+  const auto bytes = large.history_bytes();
+  while (large.can_undo()) { ASSERT_TRUE(large.undo(large.generation()).accepted); }
+  while (large.can_redo()) { ASSERT_TRUE(large.redo(large.generation()).accepted); }
+  EXPECT_EQ(large.history_bytes(), bytes); EXPECT_EQ(large.name(), "Large 39");
+}
+
+TEST(WorkflowDraft, HistoryKeepsAnUnchangedRebaseButNotAReplacementOrWorkspaceSession)
+{
+  auto model = pinned(); ASSERT_TRUE(model.set_name("Draft", model.generation()).accepted);
+  const auto generation = model.generation(), bytes = model.history_bytes();
+  EXPECT_FALSE(model.rebase(5, "Another", saved()));
+  ASSERT_TRUE(model.rebase(5, "Temperature scan", saved()));
+  EXPECT_EQ(model.history_bytes(), bytes); EXPECT_TRUE(model.can_undo());
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(model.name(), "Temperature scan"); EXPECT_EQ(model.revision(), 5);
+  ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(model.name(), "Draft");
+  auto state = model.save_workspace_state(), bad = state; bad["document"]["format"] = "other";
+  EXPECT_FALSE(model.load_workspace_state(bad, "new-opening"));
+  EXPECT_THROW(model.pin("", id, 5, "Invalid", saved()), std::invalid_argument);
+  EXPECT_EQ(model.history_bytes(), bytes); EXPECT_EQ(model.undo_depth(), 1u); EXPECT_EQ(model.generation(), generation);
+  ASSERT_TRUE(model.load_workspace_state(state, "new-opening"));
+  EXPECT_TRUE(model.dirty()); EXPECT_EQ(model.history_bytes(), 0u); EXPECT_FALSE(model.can_undo()); EXPECT_FALSE(model.can_redo());
+  EXPECT_GT(model.generation(), generation); EXPECT_FALSE(model.undo(generation).accepted);
+  ASSERT_TRUE(model.set_name("Next", model.generation()).accepted);
+  ASSERT_TRUE(model.revert(model.generation())); EXPECT_EQ(model.history_bytes(), 0u);
+  ASSERT_TRUE(model.set_name("Next", model.generation()).accepted);
+  model.pin("opening", id, 6, "Repinned", saved()); EXPECT_EQ(model.history_bytes(), 0u);
+  ASSERT_TRUE(model.set_name("Next", model.generation()).accepted); model.reset();
+  EXPECT_EQ(model.history_bytes(), 0u); EXPECT_FALSE(model.can_undo()); EXPECT_FALSE(model.can_redo());
+}
+
+TEST(WorkflowDraft, GroupedLayoutAndStepChangesCommitOneActionAndRollbackEveryFailure)
+{
+  auto model = pinned(); const auto generation = model.generation(), version = model.version(), check = model.check_version();
+  const auto original = exact(model.document());
+  auto result = model.edit_group(generation, [](WorkflowDraft &candidate) {
+    auto moved = candidate.move_steps({{"fields", {260, 0}}}, candidate.generation());
+    if (!moved.accepted) { return moved; }
+    return candidate.add_step("analysis", "analysis", "44444444-4444-4444-8444-444444444444", std::pair{800.0, 0.0}, candidate.generation());
+  });
+  ASSERT_TRUE(result.accepted) << result.error; EXPECT_EQ(result.id, "analysis");
+  EXPECT_EQ(model.undo_depth(), 1u); EXPECT_EQ(model.version(), version + 1); EXPECT_EQ(model.check_version(), check + 1);
+  const auto changed = exact(model.document());
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(exact(model.document()), original);
+  ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(exact(model.document()), changed);
+  const auto before = model.version(), bytes = model.history_bytes();
+  EXPECT_FALSE(model.edit_group(generation, [](WorkflowDraft &candidate) {
+    candidate.move_steps({{"fields", {800, 0}}}, candidate.generation());
+    return candidate.remove_step("absent", candidate.generation());
+  }).accepted);
+  EXPECT_FALSE(model.edit_group(generation, [](WorkflowDraft &candidate) -> WorkflowDraft::EditResult {
+    candidate.set_name("Temporary", candidate.generation()); throw std::runtime_error("Rejected grouped edit");
+  }).accepted);
+  EXPECT_FALSE(model.edit_group(generation, [](WorkflowDraft &candidate) -> WorkflowDraft::EditResult {
+    candidate.reset(); return {true, {}};
+  }).accepted);
+  EXPECT_FALSE(model.edit_group(generation, [](WorkflowDraft &candidate) -> WorkflowDraft::EditResult {
+    candidate.rebase(5, "Temperature scan", saved()); return {true, {}};
+  }).accepted);
+  EXPECT_EQ(exact(model.document()), changed); EXPECT_EQ(model.name(), "Temperature scan");
+  EXPECT_EQ(model.version(), before); EXPECT_EQ(model.history_bytes(), bytes); EXPECT_EQ(model.undo_depth(), 1u);
+  bool called = false;
+  EXPECT_FALSE(model.edit_group(generation + 1, [&called](WorkflowDraft &) -> WorkflowDraft::EditResult { called = true; return {true, {}}; }).accepted);
+  EXPECT_FALSE(called);
+}
+
+TEST(WorkflowDraft, GroupedFinalNoOpKeepsRedoAndLayoutOrNameChangesKeepChecks)
+{
+  auto model = pinned(); const auto generation = model.generation();
+  ASSERT_TRUE(model.set_name("Changed", generation).accepted); ASSERT_TRUE(model.undo(generation).accepted);
+  const auto version = model.version(), bytes = model.history_bytes(), check = model.check_version();
+  ASSERT_TRUE(model.edit_group(generation, [](WorkflowDraft &candidate) {
+    auto changed = candidate.set_parameter("view", "gain", 5, candidate.generation());
+    if (!changed.accepted) { return changed; }
+    return candidate.set_parameter("view", "gain", std::nullopt, candidate.generation());
+  }).accepted);
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(model.history_bytes(), bytes); EXPECT_TRUE(model.can_redo());
+  ASSERT_TRUE(model.edit_group(generation, [](WorkflowDraft &candidate) {
+    auto changed = candidate.set_parameter("view", "gain", 5, candidate.generation());
+    if (!changed.accepted) { return changed; }
+    changed = candidate.set_parameter("view", "gain", std::nullopt, candidate.generation());
+    if (!changed.accepted) { return changed; }
+    changed = candidate.move_steps({{"fields", {300, 20}}}, candidate.generation());
+    if (!changed.accepted) { return changed; }
+    return candidate.set_name("Customer layout", candidate.generation());
+  }).accepted);
+  EXPECT_EQ(model.version(), version + 1); EXPECT_EQ(model.check_version(), check);
+  EXPECT_EQ(model.undo_depth(), 1u); EXPECT_FALSE(model.can_redo());
+  ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(model.check_version(), check);
+  ASSERT_TRUE(model.redo(generation).accepted); EXPECT_EQ(model.check_version(), check);
+  ASSERT_TRUE(model.revert(generation)); EXPECT_EQ(model.check_version(), check);
+}
+
+TEST(WorkflowDraft, GroupedFailedAdditionAtCapacityDoesNotLeaveLayoutOrDropRenameHistory)
+{
+  auto document = saved(); document["steps"] = Json::array(); document["ui"] = Json::object();
+  for (size_t i = 0; i < WorkflowDocumentLimits::max_steps; ++i) {
+    document["steps"].push_back({{"id", "s" + std::to_string(i)}, {"kind", "table"}, {"ref", {{"table", "t"}}}});
+  }
+  WorkflowDraft model; model.pin("opening", id, 4, "At capacity", document);
+  const auto generation = model.generation();
+  ASSERT_TRUE(model.set_name("Renamed", generation).accepted);
+  const auto version = model.version(), check = model.check_version(), bytes = model.history_bytes();
+  const auto result = model.edit_group(generation, [](WorkflowDraft &temporary) {
+    auto moved = temporary.move_steps({{"s0", {100, 40}}}, temporary.generation());
+    if (!moved.accepted) { return moved; }
+    return temporary.add_step("table", "table", "other", std::nullopt, temporary.generation());
+  });
+  EXPECT_FALSE(result.accepted); EXPECT_FALSE(result.error.empty());
+  EXPECT_EQ(exact(model.document()), exact(document)); EXPECT_EQ(model.name(), "Renamed");
+  EXPECT_EQ(model.version(), version); EXPECT_EQ(model.check_version(), check); EXPECT_EQ(model.history_bytes(), bytes);
+  EXPECT_EQ(model.undo_depth(), 1u); ASSERT_TRUE(model.undo(generation).accepted); EXPECT_EQ(model.name(), "At capacity");
 }
 
 }  // namespace

@@ -27,6 +27,32 @@ struct ProjectTableEditor::Impl {
   }
   bool has_unsaved_changes() const { return draft_dirty_ || manage_dirty_; }
 
+  template<class T> ui::Binding<T> view_input(T &value, std::function<bool()> current)
+  {
+    auto *target = &value;
+    return {[weak = std::weak_ptr<void>(lifetime_), target] { return weak.expired() ? T{} : *target; },
+            [weak = std::weak_ptr<void>(lifetime_), target, current](T next) {
+              if (!weak.expired() && current()) { *target = std::move(next); }
+            }};
+  }
+
+  template<class T> ui::Binding<T> cell_input(T &value, std::function<bool()> current)
+  {
+    auto *target = &value;
+    return {[weak = std::weak_ptr<void>(lifetime_), target] { return weak.expired() ? T{} : *target; },
+            [this, weak = std::weak_ptr<void>(lifetime_), target, current](T next) {
+              if (!weak.expired() && current()) { *target = std::move(next); draft_dirty_ = true; literal_error_.clear(); }
+            }};
+  }
+  ui::Binding<std::string> manage_input(std::string &value, std::function<bool()> current)
+  {
+    auto *target = &value;
+    return {[weak = std::weak_ptr<void>(lifetime_), target] { return weak.expired() ? std::string() : *target; },
+            [this, weak = std::weak_ptr<void>(lifetime_), target, current](std::string next) {
+              if (!weak.expired() && current()) { *target = std::move(next); manage_dirty_ = true; }
+            }};
+  }
+
   std::function<bool()> current_context(const ProjectState &state) const
   {
     return [weak = std::weak_ptr<void>(lifetime_), &state, handle = state.project()->handle,
@@ -97,7 +123,7 @@ struct ProjectTableEditor::Impl {
       }
     }
     auto &row = box.row();
-    row.text_field("table_name", ui::bind(table_name_), {.placeholder = std::string(ctx.tr("project.table_name"))});
+    row.text_field("table_name", view_input(table_name_, current_context(state)), {.placeholder = std::string(ctx.tr("project.table_name"))});
     row.button("add_table", ctx.tr("project.add_table"), [this, &state, current = current_context(state)] {
       if (!current()) { return; }
       state.apply(Json::array({{{"op", "create_table"}, {"name", table_name_}}}));
@@ -110,17 +136,18 @@ struct ProjectTableEditor::Impl {
     if (!panel) {
       return;
     }
-    panel->prop(ctx.tr("project.field_name")).text_field("field_name", ui::bind(field_name_));
+    const auto current = current_context(state);
+    panel->prop(ctx.tr("project.field_name")).text_field("field_name", view_input(field_name_, current));
     std::vector<std::string> types;
     for (const auto &type : field_types) {
       types.emplace_back(ctx.tr("project.type." + type));
     }
-    panel->prop(ctx.tr("project.field_type")).dropdown("field_type", std::move(types), ui::bind(field_type_));
+    panel->prop(ctx.tr("project.field_type")).dropdown("field_type", std::move(types), view_input(field_type_, current));
     const bool numeric = field_type_ == 1 || field_type_ == 2;
-    panel->prop(ctx.tr("project.unit")).text_field("unit", ui::bind(unit_)).disable(!numeric);
+    panel->prop(ctx.tr("project.unit")).text_field("unit", view_input(unit_, current)).disable(!numeric);
     const std::string table = state.table_id();
     panel->button("add_field", ctx.tr("project.add_field"), [this, &state, table, current = current_context(state)] {
-      if (!current()) { return; }
+      if (!current() || field_type_ < 0 || size_t(field_type_) >= field_types.size()) { return; }
       Json command = {{"op", "add_field"}, {"table_id", table}, {"name", field_name_}, {"type", field_types[field_type_]}};
       if ((field_type_ == 1 || field_type_ == 2) && !unit_.empty()) {
         command["unit"] = unit_;
@@ -137,13 +164,23 @@ struct ProjectTableEditor::Impl {
   };
   static constexpr size_t kSweepAxes = 4;
 
-  ui::Binding<std::string> sweep_text(const size_t index, std::string SweepInput::*member)
+  ui::Binding<std::string> sweep_text(const size_t index, std::string SweepInput::*member, std::function<bool()> current)
   {
-    return {[this, index, member] { return index < sweep_.size() ? sweep_[index].*member : std::string(); },
-            [this, index, member](std::string text) { if (index < sweep_.size()) { sweep_[index].*member = std::move(text); } }};
+    return {[this, weak = std::weak_ptr<void>(lifetime_), index, member] { return !weak.expired() && index < sweep_.size() ? sweep_[index].*member : std::string(); },
+            [this, index, member, current](std::string text) {
+              if (current() && index < sweep_.size()) { sweep_[index].*member = std::move(text); }
+            }};
+  }
+  template<class T> ui::Binding<T> sweep_input(T &value, std::function<bool()> current)
+  {
+    auto *target = &value;
+    return {[weak = std::weak_ptr<void>(lifetime_), target] { return weak.expired() ? T{} : *target; },
+            [this, weak = std::weak_ptr<void>(lifetime_), target, current](T next) {
+              if (!weak.expired() && current()) { *target = std::move(next); }
+            }};
   }
 
-  void sweep_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  void sweep_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable, std::function<bool()> still_current = {})
   {
     const auto &table = *state.table();
     if (table.id == kAnalysesTable || table.id == io::get_string(state.file_index(), "table_id")) { return; }
@@ -156,8 +193,11 @@ struct ProjectTableEditor::Impl {
       sweep_identity_ = identity;
       sweep_.assign(1, {});
       sweep_zip_ = sweep_waiting_ = false;
-      sweep_result_.clear();
+      sweep_result_.clear(); ++sweep_epoch_;
     }
+    const auto current = [base = current_context(state), this, epoch = sweep_epoch_, still_current] {
+      return base() && epoch == sweep_epoch_ && (!still_current || still_current());
+    };
     auto *panel = layout.panel("project_sweep", ctx.tr("project.sweep.title"), false);
     if (!panel) { return; }
     if (!state.supports_sweep()) {
@@ -177,7 +217,6 @@ struct ProjectTableEditor::Impl {
       panel->paragraph(ctx.tr("project.sweep.no_fields"));
       return;
     }
-    Json axes = Json::array();
     std::vector<size_t> counts;
     std::string error;
     for (size_t i = 0; i < sweep_.size(); ++i) {
@@ -197,30 +236,30 @@ struct ProjectTableEditor::Impl {
       auto &box = panel->scope("axis" + std::to_string(i)).box();
       auto &head = box.row();
       head.label(ctx.store.catalog().format("project.sweep.axis", {{"n", std::to_string(i + 1)}}));
-      head.button("remove", ctx.tr("project.sweep.remove"), [this, i] {
-        if (i < sweep_.size() && sweep_.size() > 1) { sweep_.erase(sweep_.begin() + std::ptrdiff_t(i)); }
+      head.button("remove", ctx.tr("project.sweep.remove"), [this, i, current] {
+        if (current() && i < sweep_.size() && sweep_.size() > 1) { sweep_.erase(sweep_.begin() + std::ptrdiff_t(i)); ++sweep_epoch_; }
       }).width(6).disable(sweep_.size() < 2);
       box.prop(ctx.tr("project.sweep.field")).dropdown("field", names, {
-        [this, i, ids] {
-          if (i >= sweep_.size()) { return -1; }
+        [this, weak = std::weak_ptr<void>(lifetime_), i, ids] {
+          if (weak.expired() || i >= sweep_.size()) { return -1; }
           const auto it = std::find(ids.begin(), ids.end(), sweep_[i].field_id);
           return it == ids.end() ? -1 : int(it - ids.begin());
         },
-        [this, i, ids](int index) { if (i < sweep_.size() && index >= 0 && size_t(index) < ids.size()) { sweep_[i].field_id = ids[size_t(index)]; } }
+        [this, i, ids, current](int index) { if (current() && i < sweep_.size() && index >= 0 && size_t(index) < ids.size() && sweep_[i].field_id != ids[size_t(index)]) { sweep_[i].field_id = ids[size_t(index)]; ++sweep_epoch_; } }
       });
       box.prop(ctx.tr("project.sweep.kind")).dropdown("kind", {std::string(ctx.tr("project.sweep.kind_range")),
                                                                 std::string(ctx.tr("project.sweep.kind_list"))}, {
-        [this, i] { return i < sweep_.size() ? sweep_[i].kind : 0; },
-        [this, i](int kind) { if (i < sweep_.size()) { sweep_[i].kind = kind; } }
+        [this, weak = std::weak_ptr<void>(lifetime_), i] { return !weak.expired() && i < sweep_.size() ? sweep_[i].kind : 0; },
+        [this, i, current](int kind) { if (current() && i < sweep_.size() && kind >= 0 && kind <= 1 && sweep_[i].kind != kind) { sweep_[i].kind = kind; ++sweep_epoch_; } }
       }).disable(!numeric);
       if (input.kind == 0) {
         auto &range = box.prop(ctx.tr("project.sweep.range")).row(true);
-        range.text_field("start", sweep_text(i, &SweepInput::start), {.placeholder = std::string(ctx.tr("project.sweep.start")), .max_length = 64});
-        range.text_field("stop", sweep_text(i, &SweepInput::stop), {.placeholder = std::string(ctx.tr("project.sweep.stop")), .max_length = 64});
-        range.text_field("count", sweep_text(i, &SweepInput::count), {.placeholder = std::string(ctx.tr("project.sweep.count")), .max_length = 8});
+        range.text_field("start", sweep_text(i, &SweepInput::start, current), {.placeholder = std::string(ctx.tr("project.sweep.start")), .max_length = 64});
+        range.text_field("stop", sweep_text(i, &SweepInput::stop, current), {.placeholder = std::string(ctx.tr("project.sweep.stop")), .max_length = 64});
+        range.text_field("count", sweep_text(i, &SweepInput::count, current), {.placeholder = std::string(ctx.tr("project.sweep.count")), .max_length = 8});
       }
       else {
-        box.prop(ctx.tr("project.sweep.values")).text_field("values", sweep_text(i, &SweepInput::list), {
+        box.prop(ctx.tr("project.sweep.values")).text_field("values", sweep_text(i, &SweepInput::list, current), {
             .placeholder = std::string(ctx.tr(type == "text" ? "project.sweep.values_text" :
                                               type == "boolean" ? "project.sweep.values_boolean" : "project.sweep.values_number")),
             .max_length = 65536});
@@ -235,22 +274,21 @@ struct ProjectTableEditor::Impl {
         if (error.empty()) { error = ctx.store.catalog().format(key, {{"n", std::to_string(i + 1)}}); }
         continue;
       }
-      axis->axis["field_id"] = input.field_id;
-      axes.push_back(std::move(axis->axis));
       counts.push_back(axis->values);
     }
     auto &more = panel->row();
-    more.button("add_axis", ctx.tr("project.sweep.add"), [this] { if (sweep_.size() < kSweepAxes) { sweep_.emplace_back(); } })
+    more.button("add_axis", ctx.tr("project.sweep.add"), [this, current] { if (current() && sweep_.size() < kSweepAxes) { sweep_.emplace_back(); ++sweep_epoch_; } })
         .width(10).disable(sweep_.size() >= kSweepAxes || sweep_.size() >= ids.size());
     if (sweep_.size() > 1) {
       panel->prop(ctx.tr("project.sweep.combine")).dropdown("combine", {std::string(ctx.tr("project.sweep.product")),
                                                                          std::string(ctx.tr("project.sweep.zip"))}, {
-        [this] { return sweep_zip_ ? 1 : 0; }, [this](int index) { sweep_zip_ = index == 1; }
+        [this, weak = std::weak_ptr<void>(lifetime_)] { return !weak.expired() && sweep_zip_ ? 1 : 0; },
+        [this, current](int index) { if (current() && index >= 0 && index <= 1) { sweep_zip_ = index == 1; } }
       });
     }
     const bool zip = sweep_zip_ && sweep_.size() > 1;
     const bool has_base = state.selected_record() >= 0;
-    panel->checkbox("copy_selected", ctx.tr("project.sweep.copy_selected"), ui::bind(sweep_copy_))
+    panel->checkbox("copy_selected", ctx.tr("project.sweep.copy_selected"), sweep_input(sweep_copy_, current))
         .tip(ctx.tr("project.sweep.copy_tip")).disable(!has_base);
     const std::string base = sweep_copy_ && has_base ? state.record_id() : std::string();
     size_t rows = 0;
@@ -286,10 +324,24 @@ struct ProjectTableEditor::Impl {
     const std::string table_id = table.id;
     panel->button("apply_sweep", error.empty() ? ctx.store.catalog().format("project.sweep.apply", {{"rows", std::to_string(rows)}}) :
                                                  std::string(ctx.tr("project.sweep.apply_blocked")),
-                  [this, &state, table_id, axes, base, zip, current = current_context(state)] {
+                  [this, &state, table_id, current, store = &ctx.store] {
                     if (!current()) { return; }
+                    // A button click can commit its active text field first. Build from the live
+                    // inputs so that this first click never submits the previous frame's axes.
+                    Json requested = Json::array();
+                    for (size_t i = 0; i < sweep_.size(); ++i) {
+                      const auto &input = sweep_[i];
+                      const auto &fields = state.table()->fields;
+                      const auto f = std::find_if(fields.begin(), fields.end(), [&](const auto &field) { return field.id == input.field_id; });
+                      if (f == fields.end()) { return; }
+                      std::string key;
+                      auto axis = project_sweep_axis(f->type, input.kind == 0, input.start, input.stop, input.count, input.list, key);
+                      if (!axis) { sweep_result_ = store->catalog().format(key, {{"n", std::to_string(i + 1)}}); return; }
+                      axis->axis["field_id"] = input.field_id; requested.push_back(std::move(axis->axis));
+                    }
+                    const auto base_record = sweep_copy_ && state.selected_record() >= 0 ? state.record_id() : std::string();
                     sweep_result_.clear();
-                    sweep_waiting_ = state.sweep(table_id, axes, base, zip ? "zip" : "product");
+                    sweep_waiting_ = state.sweep(table_id, requested, base_record, sweep_zip_ && sweep_.size() > 1 ? "zip" : "product");
                   })
         .disable(!editable || !error.empty());
     // The outcome next to the button as well as at the top of the page, which may be scrolled away.
@@ -319,10 +371,11 @@ struct ProjectTableEditor::Impl {
       query_revision_ = -1;
     }
     auto &search = layout.row();
-    search.text_field("table_search", ui::bind(query_.text), {
+    const auto query_current = current_context(state);
+    search.text_field("table_search", view_input(query_.text, query_current), {
         .placeholder = std::string(ctx.tr("project.filter.search")), .max_length = 256});
-    search.checkbox("table_errors_only", ctx.tr("project.filter.errors"), ui::bind(query_.errors_only));
-    search.button("table_clear_search", ctx.tr("project.filter.clear"), [this] { query_ = {}; })
+    search.checkbox("table_errors_only", ctx.tr("project.filter.errors"), view_input(query_.errors_only, query_current));
+    search.button("table_clear_search", ctx.tr("project.filter.clear"), [this, query_current] { if (query_current()) { query_ = {}; } })
         .disable(query_.text.empty() && !query_.errors_only);
     if (query_revision_ != state.project()->revision || query_cached_text_ != query_.text || query_cached_errors_ != query_.errors_only) {
       query_revision_ = state.project()->revision;
@@ -427,8 +480,11 @@ struct ProjectTableEditor::Impl {
     const auto *value = state.table()->cell(state.selected_record(), column);
     cell_text_ = !value ? std::string() : value->is_string() ? value->get<std::string>() : value->dump();
     // JSON fields containing a string need JSON quotes; text fields do not.
-    if (value && field.type == "json") {
+    if (value && (field.type == "json" || field.type == "object" || field.type == "multi_select")) {
       cell_text_ = value->dump();
+    }
+    if (value && value->is_null() && (field.type == "date" || field.type == "url" || field.type == "single_select")) {
+      cell_text_.clear();
     }
     cell_mode_ = 0;
     expression_.clear();
@@ -460,7 +516,7 @@ struct ProjectTableEditor::Impl {
     literal_error_.clear();
   }
 
-  void source_controls(ui::Layout &box, EditorContext &ctx, ProjectState &state)
+  void source_controls(ui::Layout &box, EditorContext &ctx, ProjectState &state, const std::function<bool()> &current)
   {
     std::vector<std::string> tables{std::string(ctx.tr("project.source_pick"))}, table_ids{""};
     const ProjectTable *source = nullptr;
@@ -470,12 +526,13 @@ struct ProjectTableEditor::Impl {
       if (table.id == source_table_) { source = &table; }
     }
     box.prop(ctx.tr("project.source_table")).dropdown("source_table", std::move(tables), {
-      [this, table_ids] {
+      [this, weak = std::weak_ptr<void>(lifetime_), table_ids] {
+        if (weak.expired()) { return 0; }
         const auto found = std::find(table_ids.begin(), table_ids.end(), source_table_);
         return found == table_ids.end() ? 0 : int(found - table_ids.begin());
       },
-      [this, table_ids](int index) {
-        if (index >= 0 && size_t(index) < table_ids.size()) {
+      [this, table_ids, current](int index) {
+        if (current() && index >= 0 && size_t(index) < table_ids.size()) {
           source_table_ = table_ids[index]; source_record_.clear(); source_field_.clear(); draft_dirty_ = true;
         }
       }
@@ -493,12 +550,13 @@ struct ProjectTableEditor::Impl {
       record_ids.push_back(source->records[i].id);
     }
     box.prop(ctx.tr("project.source_record")).dropdown("source_record", std::move(records), {
-      [this, record_ids] {
+      [this, weak = std::weak_ptr<void>(lifetime_), record_ids] {
+        if (weak.expired()) { return 0; }
         const auto found = std::find(record_ids.begin(), record_ids.end(), source_record_);
         return found == record_ids.end() ? 0 : int(found - record_ids.begin());
       },
-      [this, record_ids](int index) {
-        if (index >= 0 && size_t(index) < record_ids.size()) { source_record_ = record_ids[index]; draft_dirty_ = true; }
+      [this, record_ids, current](int index) {
+        if (current() && index >= 0 && size_t(index) < record_ids.size()) { source_record_ = record_ids[index]; draft_dirty_ = true; }
       }
     });
     std::vector<std::string> fields{std::string(ctx.tr("project.source_pick"))}, field_ids{""};
@@ -507,17 +565,18 @@ struct ProjectTableEditor::Impl {
       field_ids.push_back(field.id);
     }
     box.prop(ctx.tr("project.source_field")).dropdown("source_field", std::move(fields), {
-      [this, field_ids] {
+      [this, weak = std::weak_ptr<void>(lifetime_), field_ids] {
+        if (weak.expired()) { return 0; }
         const auto found = std::find(field_ids.begin(), field_ids.end(), source_field_);
         return found == field_ids.end() ? 0 : int(found - field_ids.begin());
       },
-      [this, field_ids](int index) {
-        if (index >= 0 && size_t(index) < field_ids.size()) { source_field_ = field_ids[index]; draft_dirty_ = true; }
+      [this, field_ids, current](int index) {
+        if (current() && index >= 0 && size_t(index) < field_ids.size()) { source_field_ = field_ids[index]; draft_dirty_ = true; }
       }
     });
   }
 
-  void binding_table(ui::Layout &box, EditorContext &ctx, ProjectState &state)
+  void binding_table(ui::Layout &box, EditorContext &ctx, ProjectState &state, const std::function<bool()> &current)
   {
     std::vector<std::string> names;
     std::vector<std::vector<std::string>> rows;
@@ -559,14 +618,16 @@ struct ProjectTableEditor::Impl {
     spec.data_version = state.version() + uint64_t(std::hash<std::string>{}(bindings_));
     spec.cell = [rows](int row, int col) { return rows[size_t(row)][size_t(col)]; };
     spec.selected = {
-      [this, names] {
+      [this, weak = std::weak_ptr<void>(lifetime_), names] {
+        if (weak.expired()) { return -1; }
         const auto found = std::find(names.begin(), names.end(), selected_binding_);
         return found == names.end() ? -1 : int(found - names.begin());
       },
-      [this, names](int index) { if (index >= 0 && size_t(index) < names.size()) { selected_binding_ = names[index]; } }
+      [this, names, current](int index) { if (current() && index >= 0 && size_t(index) < names.size()) { selected_binding_ = names[index]; } }
     };
     box.table("binding_rows", std::move(spec));
-    box.button("remove_binding", ctx.tr("project.remove_binding"), [this] {
+    box.button("remove_binding", ctx.tr("project.remove_binding"), [this, current] {
+      if (!current()) { return; }
       try {
         Json bindings = io::parse_json(bindings_);
         if (!bindings.is_object()) { return; }
@@ -579,17 +640,22 @@ struct ProjectTableEditor::Impl {
     }).disable(std::find(names.begin(), names.end(), selected_binding_) == names.end());
   }
 
-  void draw_cell(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  void draw_cell(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable,
+                 const bool field_selector = true, std::function<bool()> still_current = {})
   {
-    const auto &table = *state.table();
-    if (table.fields.empty() || state.selected_record() < 0) {
-      layout.paragraph(ctx.tr("project.empty_table"));
-      return;
-    }
-    if (restored_draft_ && draft_dirty_ && (draft_identity_ != state.project()->id + table.id + state.record_id() + cell_field_ || std::none_of(table.fields.begin(), table.fields.end(), [this](const auto &field) { return field.id == cell_field_; }))) {
+    const auto *snapshot = state.table();
+    if (draft_dirty_ && (!snapshot || draft_identity_ != state.project()->id + snapshot->id + state.record_id() + cell_field_ || std::none_of(snapshot->fields.begin(), snapshot->fields.end(), [this](const auto &field) { return field.id == cell_field_; }))) {
       layout.paragraph(ctx.tr("project.draft_stale"));
       layout.paragraph(cell_mode_ == 2 ? expression_ : cell_text_);
-      layout.button("table_advanced_discard", ctx.tr("table.discard_draft"), [this] { draft_dirty_ = false; restored_draft_ = false; draft_identity_.clear(); });
+      layout.button("table_advanced_discard", ctx.tr("table.discard_draft"), [this, weak = std::weak_ptr<void>(lifetime_), identity = draft_identity_, still_current] {
+        if (!weak.expired() && (!still_current || still_current()) && draft_identity_ == identity) { draft_dirty_ = false; restored_draft_ = false; draft_identity_.clear(); }
+      });
+      return;
+    }
+    if (!snapshot) { return; }
+    const auto &table = *snapshot;
+    if (table.fields.empty() || state.selected_record() < 0) {
+      layout.paragraph(ctx.tr("project.empty_table"));
       return;
     }
     std::vector<std::string> names, ids;
@@ -603,6 +669,7 @@ struct ProjectTableEditor::Impl {
       it = ids.begin();
     }
     const auto &field = table.fields[size_t(it - ids.begin())];
+    const auto current = [base = current_context(state), still_current] { return base() && (!still_current || still_current()); };
     const std::string identity = state.project()->id + table.id + state.record_id() + field.id;
     if (identity != draft_identity_ || (!draft_dirty_ && draft_revision_ != state.project()->revision)) {
       draft_identity_ = identity;
@@ -618,41 +685,36 @@ struct ProjectTableEditor::Impl {
     auto &box = layout.box();
     box.label(std::string(ctx.tr("project.cell_editor")) + "  ·  " + row_label(ctx.store, &table, state.record_id()))
         .tip(state.record_id());
-    box.prop(ctx.tr("project.field")).dropdown("cell_field", std::move(names), {
-      [this, ids] { return int(std::find(ids.begin(), ids.end(), cell_field_) - ids.begin()); },
-      [this, current = current_context(state), &state, shell = &ctx.area.shell(), ids](int i) {
-        if (current() && i >= 0 && size_t(i) < ids.size() &&
-            (cell_field_ == ids[size_t(i)] || selection_available(*shell, state))) { cell_field_ = ids[size_t(i)]; }
-      }
-    });
+    if (field_selector) {
+      box.prop(ctx.tr("project.field")).dropdown("cell_field", std::move(names), {
+        [this, weak = std::weak_ptr<void>(lifetime_), ids] { return weak.expired() ? -1 : int(std::find(ids.begin(), ids.end(), cell_field_) - ids.begin()); },
+        [this, current, &state, shell = &ctx.area.shell(), ids](int i) {
+          if (current() && i >= 0 && size_t(i) < ids.size() &&
+              (cell_field_ == ids[size_t(i)] || selection_available(*shell, state))) { cell_field_ = ids[size_t(i)]; }
+        }
+      });
+    }
     const bool version2 = state.project()->format_version >= 2;
     if (version2) {
       box.prop(ctx.tr("project.definition")).dropdown("cell_mode", {
         std::string(ctx.tr("project.mode.literal")), std::string(ctx.tr("project.mode.reference")),
-        std::string(ctx.tr("project.mode.expression"))}, {
-        [this] { return cell_mode_; }, [this](int mode) { cell_mode_ = mode; draft_dirty_ = true; literal_error_.clear(); }
-      });
+            std::string(ctx.tr("project.mode.expression"))}, cell_input(cell_mode_, current));
     }
     if (cell_mode_ == 0) {
-      box.prop(ctx.tr("project.value")).text_field("cell_value", {
-        [this] { return cell_text_; },
-        [this](std::string text) { cell_text_ = std::move(text); draft_dirty_ = true; literal_error_.clear(); }
-      }, {.mono = field.type != "text"});
+      box.prop(ctx.tr("project.value")).text_field("cell_value", cell_input(cell_text_, current), {.mono = field.type != "text"});
     }
     else if (cell_mode_ == 1) {
-      source_controls(box, ctx, state);
+      source_controls(box, ctx, state, current);
     }
     else {
-      box.prop(ctx.tr("project.expression")).text_field("expression", {
-        [this] { return expression_; },
-        [this](std::string text) { expression_ = std::move(text); draft_dirty_ = true; literal_error_.clear(); }
-      }, {.max_length = 4096, .mono = true});
+      box.prop(ctx.tr("project.expression")).text_field("expression", cell_input(expression_, current), {.max_length = 4096, .mono = true});
       box.label(ctx.tr("project.bindings"));
-      binding_table(box, ctx, state);
+      binding_table(box, ctx, state, current);
       if (auto *panel = box.panel("add_binding", ctx.tr("project.add_binding"), false)) {
-        panel->prop(ctx.tr("project.binding_name")).text_field("binding_name", ui::bind(binding_name_));
-        source_controls(*panel, ctx, state);
-        panel->button("insert_binding", ctx.tr("project.insert_binding"), [this] {
+        panel->prop(ctx.tr("project.binding_name")).text_field("binding_name", cell_input(binding_name_, current));
+        source_controls(*panel, ctx, state, current);
+        panel->button("insert_binding", ctx.tr("project.insert_binding"), [this, current] {
+          if (!current()) { return; }
           try {
             Json bindings = io::parse_json(bindings_);
             if (!bindings.is_object()) { literal_error_ = "project.error.bindings"; return; }
@@ -666,10 +728,7 @@ struct ProjectTableEditor::Impl {
         }).disable(source_record_.empty() || source_field_.empty() || binding_name_.empty());
       }
       if (auto *panel = box.panel("bindings_raw", ctx.tr("project.bindings_advanced"), false)) {
-        panel->text_area("bindings", {
-          [this] { return bindings_; },
-          [this](std::string text) { bindings_ = std::move(text); draft_dirty_ = true; literal_error_.clear(); }
-        }, {.max_length = 32768, .mono = true, .visible_lines = 4});
+        panel->text_area("bindings", cell_input(bindings_, current), {.max_length = 32768, .mono = true, .visible_lines = 4});
       }
     }
     const int column = int(&field - table.fields.data());
@@ -706,8 +765,9 @@ struct ProjectTableEditor::Impl {
     }
     const Json target = {{"op", "set_cell"}, {"table_id", table.id}, {"record_id", state.record_id()}, {"field_id", field.id}};
     const std::string type = field.type;
-    const auto target_current = [this, weak = std::weak_ptr<void>(lifetime_), &state, target, handle = state.project()->handle, query_version = query_version_] {
+    const auto target_current = [this, weak = std::weak_ptr<void>(lifetime_), &state, target, handle = state.project()->handle, query_version = query_version_, still_current] {
       return !weak.expired() && state.loaded() && state.project()->handle == handle && query_version_ == query_version && selected_visible(state) &&
+             (!still_current || still_current()) &&
              state.table_id() == io::get_string(target, "table_id") && state.record_id() == io::get_string(target, "record_id") &&
              cell_field_ == io::get_string(target, "field_id");
     };
@@ -716,7 +776,9 @@ struct ProjectTableEditor::Impl {
       if (!target_current() || state.busy() || draft_revision_ != state.project()->revision) { return; }
       Json command = target;
       if (cell_mode_ == 0) {
-        auto value = project_literal(type, cell_text_, literal_error_);
+        const bool text_type = type == "date" || type == "url" || type == "single_select";
+        auto value = text_type ? std::optional<Json>(cell_text_.empty() ? Json(nullptr) : Json(cell_text_)) :
+            project_literal(type == "object" || type == "multi_select" ? "json" : type, cell_text_, literal_error_);
         if (!value) { return; }
         command["value"] = *value;
       }
@@ -759,28 +821,31 @@ struct ProjectTableEditor::Impl {
       }).disable(!editable || draft_revision_ != state.project()->revision);
     }
     buttons.button("reload_cell", ctx.tr("project.reload_cell"), [this, target_current] {
-      if (target_current()) { draft_identity_.clear(); }
+      if (target_current()) { draft_identity_.clear(); draft_dirty_ = false; }
     });
     box.paragraph(ctx.tr(cell_mode_ == 0 ? "project.cell_hint" : "project.expression_hint"));
     box.button("review_cell", ctx.tr("project.review.cell_action"), [edit] { edit(true); })
         .disable(!editable || !state.preview_supported() || draft_revision_ != state.project()->revision);
   }
-  void manage_objects(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable)
+  void manage_objects(ui::Layout &layout, EditorContext &ctx, ProjectState &state, const bool editable,
+                      std::function<bool()> still_current = {}, bool field_selector = true)
   {
     const auto *table = state.table();
-    if (!table) { return; }
-    if (std::none_of(table->fields.begin(), table->fields.end(), [this](const auto &field) { return field.id == cell_field_; })) {
+    if (table && !has_unsaved_changes() && std::none_of(table->fields.begin(), table->fields.end(), [this](const auto &field) { return field.id == cell_field_; })) {
       cell_field_ = table->fields.empty() ? std::string() : table->fields.front().id;
     }
     // Name/delete drafts have the same revision precondition as cell edits. Switching the
     // target resets them; a background revision change keeps a dirty draft for review.
-    const std::string identity = state.project()->id + table->id + cell_field_ + state.record_id();
-    if (restored_manage_ && manage_dirty_ && identity != manage_identity_) {
+    const std::string identity = state.project()->id + state.table_id() + cell_field_ + state.record_id();
+    if (manage_dirty_ && (!table || identity != manage_identity_)) {
       layout.paragraph(ctx.tr("project.draft_stale"));
       layout.paragraph(rename_table_ + " / " + rename_field_);
-      layout.button("table_manage_discard", ctx.tr("table.discard_draft"), [this] { manage_dirty_ = false; restored_manage_ = false; manage_identity_.clear(); });
+      layout.button("table_manage_discard", ctx.tr("table.discard_draft"), [this, weak = std::weak_ptr<void>(lifetime_), identity = manage_identity_, still_current] {
+        if (!weak.expired() && (!still_current || still_current()) && manage_identity_ == identity) { manage_dirty_ = false; restored_manage_ = false; manage_identity_.clear(); }
+      });
       return;
     }
+    if (!table) { return; }
     if (identity != manage_identity_ || (!manage_dirty_ && manage_revision_ != state.project()->revision)) {
       manage_identity_ = identity;
       manage_revision_ = state.project()->revision;
@@ -794,7 +859,7 @@ struct ProjectTableEditor::Impl {
     }
     else if (pending_manage_ && !state.busy()) {
       pending_manage_ = false;
-      if (state.error().empty()) { manage_identity_.clear(); }
+      if (state.error().empty()) { manage_identity_.clear(); manage_dirty_ = false; }
     }
     auto *panel = layout.panel("manage_objects", ctx.tr("project.manage"), false);
     if (!panel) { return; }
@@ -802,14 +867,11 @@ struct ProjectTableEditor::Impl {
     if (manage_revision_ != state.project()->revision) {
       panel->paragraph(ctx.tr("project.draft_stale"));
     }
-    panel->prop(ctx.tr("project.table")).text_field("rename_table", {
-      [this] { return rename_table_; },
-      [this](std::string value) { rename_table_ = std::move(value); manage_dirty_ = true; }
-    });
     const std::string table_id = table->id;
-    const auto target_current = [this, current = current_context(state), identity = manage_identity_] {
-      return current() && manage_identity_ == identity;
+    const auto target_current = [this, current = current_context(state), identity = manage_identity_, field = cell_field_, still_current] {
+      return current() && (!still_current || still_current()) && manage_identity_ == identity && cell_field_ == field;
     };
+    panel->prop(ctx.tr("project.table")).text_field("rename_table", manage_input(rename_table_, target_current));
     panel->button("save_table_name", ctx.tr("project.rename_table"), [this, &state, table_id, target_current] {
       if (!target_current()) { return; }
       pending_manage_ = state.apply(Json::array({{{"op", "rename_table"}, {"id", table_id}, {"name", rename_table_}}}), manage_revision_);
@@ -817,17 +879,16 @@ struct ProjectTableEditor::Impl {
     if (!table->fields.empty()) {
       std::vector<std::string> names, ids;
       for (const auto &field : table->fields) { names.push_back(field.name); ids.push_back(field.id); }
-      panel->prop(ctx.tr("project.field")).dropdown("manage_field", std::move(names), {
-        [this, ids] { return int(std::find(ids.begin(), ids.end(), cell_field_) - ids.begin()); },
-        [this, current = current_context(state), &state, shell = &ctx.area.shell(), ids](int index) {
-          if (current() && index >= 0 && size_t(index) < ids.size() &&
-              (cell_field_ == ids[size_t(index)] || selection_available(*shell, state))) { cell_field_ = ids[size_t(index)]; }
-        }
-      });
-      panel->prop(ctx.tr("project.field_name")).text_field("rename_field", {
-        [this] { return rename_field_; },
-        [this](std::string value) { rename_field_ = std::move(value); manage_dirty_ = true; }
-      });
+      if (field_selector) {
+        panel->prop(ctx.tr("project.field")).dropdown("manage_field", std::move(names), {
+          [this, weak = std::weak_ptr<void>(lifetime_), ids] { return weak.expired() ? -1 : int(std::find(ids.begin(), ids.end(), cell_field_) - ids.begin()); },
+          [this, target_current, &state, shell = &ctx.area.shell(), ids](int index) {
+            if (target_current() && index >= 0 && size_t(index) < ids.size() &&
+                (cell_field_ == ids[size_t(index)] || selection_available(*shell, state))) { cell_field_ = ids[size_t(index)]; }
+          }
+        });
+      }
+      panel->prop(ctx.tr("project.field_name")).text_field("rename_field", manage_input(rename_field_, target_current));
       const std::string field_id = cell_field_;
       panel->button("save_field_name", ctx.tr("project.rename_field"), [this, &state, field_id, target_current] {
         if (!target_current()) { return; }
@@ -835,7 +896,7 @@ struct ProjectTableEditor::Impl {
       }).disable(!current || rename_field_.empty());
     }
     panel->button("reload_names", ctx.tr("project.reload_names"), [this, target_current] {
-      if (target_current()) { manage_identity_.clear(); }
+      if (target_current()) { manage_identity_.clear(); manage_dirty_ = false; }
     });
     if (state.project()->format_version >= 3) {
       hint(*panel, ctx, "project.delete_hint");
@@ -873,6 +934,7 @@ struct ProjectTableEditor::Impl {
   int64_t draft_revision_ = -1;
   bool draft_dirty_ = false, pending_cell_ = false;
   std::vector<SweepInput> sweep_ = std::vector<SweepInput>(1);
+  uint64_t sweep_epoch_ = 0;
   std::string sweep_identity_, sweep_result_;
   bool sweep_zip_ = false, sweep_copy_ = true, sweep_waiting_ = false;
   std::string manage_identity_, rename_table_, rename_field_;
@@ -973,9 +1035,9 @@ void ProjectTableEditor::set_visible_records(std::vector<std::string> ids)
 }
 void ProjectTableEditor::controls(ui::Layout &l, EditorContext &c, ProjectState &s, bool e) { impl_->table_controls(l, c, s, e); }
 void ProjectTableEditor::fields(ui::Layout &l, EditorContext &c, ProjectState &s, bool e, bool expanded) { impl_->field_controls(l, c, s, e, expanded); }
-void ProjectTableEditor::sweep(ui::Layout &l, EditorContext &c, ProjectState &s, bool e) { impl_->sweep_controls(l, c, s, e); }
+void ProjectTableEditor::sweep(ui::Layout &l, EditorContext &c, ProjectState &s, bool e, std::function<bool()> still_current) { impl_->sweep_controls(l, c, s, e, std::move(still_current)); }
 void ProjectTableEditor::grid(ui::Layout &l, EditorContext &c, ProjectState &s) { impl_->draw_table(l, c, s); }
 bool ProjectTableEditor::selected_visible(const ProjectState &s) const { return impl_->selected_visible(s); }
-void ProjectTableEditor::cell(ui::Layout &l, EditorContext &c, ProjectState &s, bool e, std::function<void()> review) { impl_->open_review_ = std::move(review); impl_->draw_cell(l, c, s, e); }
-void ProjectTableEditor::management(ui::Layout &l, EditorContext &c, ProjectState &s, bool e) { impl_->manage_objects(l, c, s, e); }
+void ProjectTableEditor::cell(ui::Layout &l, EditorContext &c, ProjectState &s, bool e, std::function<void()> review, bool field_selector, std::function<bool()> still_current) { impl_->open_review_ = std::move(review); impl_->draw_cell(l, c, s, e, field_selector, std::move(still_current)); }
+void ProjectTableEditor::management(ui::Layout &l, EditorContext &c, ProjectState &s, bool e, std::function<bool()> still_current, bool field_selector) { impl_->manage_objects(l, c, s, e, std::move(still_current), field_selector); }
 }  // namespace stk::app

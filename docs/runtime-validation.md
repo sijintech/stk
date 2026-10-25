@@ -2,6 +2,200 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：通用编辑器本机验收
+
+基线 `7e0e6b1bc59ef252af72f9aca5f82a9708f7e0de` 加本批工作树；Ninja / RelWithDebInfo，
+构建目录 `/home/mnemora/opt/stk-build/merge-check`。最终构建退出 0 后才启动完整 CTest，未并发重链测试程序。
+所有测试均清空 `STK_TOKEN_PLAN_API_KEY` 并移除 `STK_TOKEN_PLAN_MODEL`；未更改端点、网络设置或调用收费模型。
+
+| 项目 | 实际结果及本机证据 |
+|---|---|
+| 最终原生完整回归 | **1592/1592，零失败、零跳过，374 秒**；`/tmp/stk-general-native-full-20261025-2.log` 与同名 `.xml` |
+| 编辑器必跑检查 | **164/164** 实际执行；`check_required_tests.py` 检查上述 XML，`/tmp/stk-general-native-required-20261025.log` |
+| Python 完整回归 | **3025 passed、24 skipped、2 deselected、1 warning，684.97 秒**；`/tmp/stk-general-python-full-20261024.log` |
+| Python 3.11／3.14 | 工作流、契约和项目桥相关分别 **49 passed**，7.87／7.48 秒；`/tmp/stk-general-python311-focused-20261025.log`、`python314` 对应日志 |
+| 默认布局 | en／zh × 1／1.5／2 共六项在最终完整回归实际通过；生成阶段的六次 skip 只是更新金样，不算验证 |
+| 前产品桌面 CI | `76715e4` 的 `38956471084` 本轮复核 completed/success，**5/5**；本批尚待提交，新 CI 未开始 |
+
+保留失败与修正：初次定向 150/164；第二轮定向 161/164，工作流用例须明确放弃受保护草稿后才能替换标签，
+另两例不能仅等项目修订变化，还须等异步详情字段控件就绪。最后三例 3/3 通过。
+首轮完整回归 1586/1592，剩余六例均为默认布局金样差异；检查发现新增历史按钮使“三维”入口仅余 6 px（1×）。
+将历史按钮从 4 单位缩为 3、定位按钮从 5 缩为 4，并断言五个导航／历史控件至少 3 单位宽。
+修复后六个布局的新宽度断言通过，审阅差异只影响 `a3/header` 后更新金样；最终完整回归再验证全部通过。
+失败证据为 `/tmp/stk-general-native-focused-20261024.log`、`/tmp/stk-general-native-focused-20261025-2.log`、
+`/tmp/stk-general-native-last3-20261025.log`、`/tmp/stk-general-native-full-20261025.log`、`/tmp/stk-general-layout-check-20261025.log`。
+
+点击验收使用测试中的真实指针事件合成，**不是操作系统真机人工验收**：
+
+| 固定起点 | 实际点击与结果 |
+|---|---|
+| 英文 1×、1440×1200、表格区 `a4` 已显示三条记录的看板，目标 Date 字段隐藏 | **3 次**：打开记录卡→展开字段选择→选隐藏 Date；随后键入并明确 Save。保持原记录 UUID、只改所选字段；非法 URL 留稿，合法 URL 可保存，多选可撤销；Viewer payload／相机序列不变 |
+| 同尺寸看板，记录详情已打开 | **2 次**：状态选择器→Wet；仅一次 CAS 修订，记录选择不变，一次撤销恢复，unset／null 分组仍分开；Viewer 不变 |
+| 工作流已选步骤，note 参数输入仍活动且文字为 single click | **1 次 Apply** 收取当前文字并应用到本地候选；没有隐式数据库保存或运行，start 调用为 0 |
+
+完整回归覆盖本地历史与文字输入门禁、恢复、归档、陈旧回调和类型保真。macOS／Windows 新代码 CI、
+平台文件对话框、IME 与真实输入设备人工验收尚未完成；计划后续工作台、报告、训练、联邦和文献能力未据此宣称交付。
+
+## 2026-10-24：AI 开发工具配置与上下文测量
+
+依据所有者“按照建议执行”完成官方固定版本的本地接入，不依赖先前未取得的 ZIP。
+安装 Serena 2.1.0（Python 3.13 隔离环境）、jscpd 5.4.2、Knip 6.42.1；检查器有独立 package-lock。
+项目 Serena 只读、六工具、三语言，使用 ide 单项目 context／tools interface；本机 Codex 配置已生成，
+Cursor／VS Code 的 Serena 路径已改为可移植命令。其他服务未冒称全部配置完成。
+
+实际 MCP 验证三例定义正文与源码一致，Python／C++／TypeScript 引用均非空并抽查调用点。
+初次 C++ 查询用了错误的符号路径；从 .cc 定义查引用又得到空集，改从 .hh 声明后找到编辑器与测试。
+health exit 0；全量预热在 684/1039、约 4 分钟时主动中断，默认按需使用，不宣称完整索引完成。
+clangd 首次下载失败已用官方包与安装代码中的 SHA-256 修复；未改产品网络／端点／密钥设置。
+
+jscpd exit 0：531 源文件、27 组重复、484 重复行；增加 cpp-header 避免漏掉头文件。
+Knip web exit 1 为问题报告：23 项 export、11 项 type export；显式登记动态 Service Worker 后消除未用文件误报。
+三个候选 accessorInfo／viewCamera／FRAME 在模块内仍被调用，未删除实现或建立债务基线。
+docs 扫描也产生报告，但依赖未完整安装，缺工具与动态组件发现仍需按文档站环境复核。
+
+小函数已知位置查询没有显示 Serena 比精确 rg 更省返回文本；语义引用提供了更丰富的上下文。
+handoff 48045→12788 字节（−73.4%），计划 85489→78018；两份共减少 42728 字节。
+AOCI 单轮约 430 KB、21 块，工具估算 143015 tokens，并经历上下文压缩重复加载；这些不是模型账单测量。
+详细命令、各例字节／时间、初次失败和平台限制见[工具指南](ai-development.md)。
+
+main／origin/main 为 `7e0e6b1`；原有 22 产品文件 SHA-256 全部保持，未构建产品、未提交推送、无新 CI。
+前产品 Desktop 38956471084 本轮复核 5/5 completed/success；当前工作稿已知编译失败仍待产品任务解决。
+Python 脚本与 JSON 语法、编译数据库绑定幂等检查通过。缓存、日志、下载及本机配置均忽略提交。
+当前聊天未热加载 Serena；独立 MCP 成功不代替 Codex／Cursor／VS Code GUI 验收。
+受管文档／工具文件的 AOCI 收尾按实时 Guide 执行，机器结果留本地审计记录；未更改完整覆盖或认知合同。
+
+本轮是工具与文档交付，无 UI 修改，所以没有新增点击数或真机交互声明。
+原始结果位于 `.ai-tools/reports/navigation/summary.json`、`health.log`、`index.log`、
+`duplicates/jscpd-report.json`、`knip-web.json`、`knip-docs.json`。这些本机产物不进版本库。
+测量是一次运行的 UTF-8 输出字节和墙钟时间；MCP 信封、工具定义和初始说明另计，不能换算为已节省 token 百分比。
+
+## 2026-10-24：AOCI 完整接续与工作树维护
+
+本轮范围是正式 AOCI 读取、当前工作树认知维护和状态交接；历史的完整读取前置阻塞已解除。保留既有产品改动，不提交、不推送。
+
+| 验收项 | 本轮实际证据 |
+|---|---|
+| Git | fetch 后 main／origin/main 同为 `7e0e6b1bc59ef252af72f9aca5f82a9708f7e0de`；开始有 28 个修改路径，无暂存内容 |
+| 完整传输 | AOCI MCP `0.1.0-rc21`；普通 Whole-Index 连续 21/21 块、1031/1031 条，正文 429566 UTF-8 bytes，机器估算 142832 tokens，结束标记已观察、Host 交付确认成功 |
+| 严格认知校验 | Challenge **10/10**、覆盖率 100%、系统框架掌握度自评 90%；首次参数校验只纠正字段名一次，答案语义不变。此结果绑定维护前索引 `acb1f12f1d2214add146ffbf5efb7deedfe46a6a5de3bcd02f66f4e23716f08c` |
+| 初始治理 | 16 条 code_stale、7 个 observe 测试路径待复核；结构有效，无未决事务／Recovery／第三方冲突。16 项既有技术跳过保持原判定 |
+| Observe | 阅读 7 个测试路径及受影响行为后明确 acknowledge；后续 Guide 的 observed_pending_review=0、stage=authoring_required。确认指纹不表示测试已执行 |
+| 正式维护与终态 | 使用无参数 Maintain 的完整机器批次及候选／源码 SHA 绑定写入；末批后依次 Verify、Aggregate Check、Guide，实际退出码和完整 JSON 归档为本节证据目录中的 final-verify／final-check／final-guide 文件 |
+| 改动保护 | 本轮前后核对 22 个既有产品源码／测试文件 SHA；本轮不修复或重跑产品稿，已知原生编译失败仍待后续产品任务处理 |
+| 边界 | 未读取密钥、未发产品模型请求、未改端点／网络／宿主／AOCI 配置；没有本轮 UI 点击、图形、材料或产品回归验收结论 |
+
+CI 已重新查询：当前提交的 [Runtime 39598657750](https://github.com/sijintech/stk/actions/runs/39598657750) **8/8**、[Secret 39598658037](https://github.com/sijintech/stk/actions/runs/39598658037)、[Docs 39598657687](https://github.com/sijintech/stk/actions/runs/39598657687)，以及前产品 `76715e4` 的 [Desktop 38956471084](https://github.com/sijintech/stk/actions/runs/38956471084) **5/5**，均 completed/success。当前未提交工作稿没有新 CI，不据历史绿色替代其验收。
+
+模型审查发现历史索引的“历史 UI 未接入”“参数摘要缺枚举／边界”“完整记录编辑与状态修改未完成”等表述已经落后于工作稿，更新为有源码依据的职责和约束；不将新增测试文本当作通过证据。词典、范围、预算与 Database 未配置状态保持既有治理事实。
+证据目录 `/home/mnemora/opt/stk-validation/aoci-20261024/` 保存本轮源码 SHA、认知交付状态摘要、Observe 审查、机器批次及终态验证。维护后索引身份改变，本次 Challenge 不能证明新身份已经重新全量认知校验；后续 Run 按 AGENTS 加载当前索引。下列较早停止记录仅是历史证据。
+
+## 2026-10-23：AI 上下文工具再次接续的停止记录
+
+2026-10-23 AI 上下文工具方案再次接续：**仍停在前置边界，工具试用未验收；本轮不提交、不推送**。
+依赖范围澄清：交付 ZIP 仅是 AI 上下文工具试用的材料前提；表格／节点编辑器开发本身无需等待该 ZIP，其当前停点是 AOCI 完整认知前置。宿主条件恢复后可继续产品开发，不将工具试用包设为额外开发门禁。
+同日宿主只读诊断：本机 CLI 0.163.0，运行中的本机 app-server 0.160.1；已用 0.160.1 二进制生成仓库外静态协议 schema。所查接口未明确提供按字段读取三项当前上下文设置的方式；未执行 config/read 或 thread/read，未启动／重启服务、读取认证／配置／聊天正文或发起模型请求。该版本差异不证明当前会话绑定关系或压缩原因，不能视为 AOCI 前置已解除。诊断证据在同日目录 resumed-host-diagnostic/。
+进一步核对 0.160.1 静态协议：ConfigReadParams 仅有 cwd／includeLayers，Config 响应允许 additionalProperties=true；未证明存在排除凭据的逐字段读取，故未实际调用 config/read。这不是发现了真实泄漏或断言配置含密钥，只记录无法满足本轮安全读取要求的边界；未取得当前上下文有效值。
+同日 17:08，本次 16:54 恢复后的三轮现场检查均未解除同一 AOCI 前置阻塞，旧 blocked 审计不计入；最新 Check 仍 exit 1、结构有效／治理未对齐，24 个原有非文档修改文件 SHA 未变。已达到重新标记 blocked 的门槛，停止继续扩展宿主诊断，完整产品目标保持未完成。恢复条件仍为宿主能够完成并保留按现有规则进行的正式 AOCI 流程；所询问配置值只是诊断证据，不另增审批或永久门禁。证据为 resumed-host-diagnostic/third-turn-audit/。
+同日 08:50 UTC，本次恢复后的第三次现场复核仍为 Check exit 1、结构有效／治理未对齐；24 个原有非文档修改文件 SHA 保留。独立状态审查确认达到本次恢复后的连续受阻门槛，旧 2026-10-22 审计不计入；等待宿主条件的非敏感有效值与交付材料路径，不扩大产品完成声明。
+重新确认 main／origin/main 本地引用均为 `7e0e6b1bc59ef252af72f9aca5f82a9708f7e0de`；28 个修改路径、24 个既有非文档修改文件 SHA 均保留，当前主树并不干净。
+本轮文档更新前的 `aoci check --json` 退出 1：结构有效、治理未对齐，16 项 code_stale（含四文档变化）、1 组 observed_pending；另有 16 项既有技术跳过，不能计作新增故障。未完成当前完整认知或 Attestation，不重复上次受宿主压缩打断的完整加载。
+候选脚本／Serena 项目配置／工具指南及所查常见 Codex／Claude 项目配置仍不存在；Cursor／VS Code 配置存在，正文未读、未改。当前宿主列出 9 个 AOCI 工具，无 Serena 工具匹配；Serena 安装及运行状态未验收。
+交付 ZIP 在仓库、`/home/mnemora/xcheng`、`/tmp` 的可读取范围未找到；后两处搜索均退出 2，有权限缺口，不能断言全盘不存在。Downloads 与 `/mnt/data` 当前不存在；已询问所有者包的本地路径，尚未取得答复。
+未检查交付包 README／manifest／补丁、未核对 13 文件、未建独立工作树或应用补丁；不根据摘要重建。安装、index／health、真实客户端验收、两项代码查询、duplicates／Knip 均未执行。
+本轮只记录停止事实；AOCI 正式维护及收尾仍未完成，生产功能与上下文工具均不宣称验收通过。证据目录：`/home/mnemora/opt/stk-validation/ai-context-trial-20261023/`。
+
+本轮相应结果与覆盖缺口：
+
+| 验收项 | 当前实际结果 |
+|---|---|
+| AOCI | 当前宿主有 9 个已出现的工具；本轮执行 CLI Check，未建立新的完整模型认知，不把 CLI 结构／治理检查代替 Overview 或 Attestation |
+| AOCI 状态 | `ok=false`、`structure_valid=true`、`governance_aligned=false`；pending_transactions=0、recovery_pending=false、third_party_conflict=false、network_accessed=false；observed_pending 只核实为 1 组 finding，未从本轮报告取得组内确切数量 |
+| 材料 | 当前树 `tools/ai/dev.py`、`.serena/project.yml`、`docs/ai-development.md`、`.codex/config.toml`、根 `.mcp.json`、`.claude/settings.json`、`.claude/settings.local.json` 无文件；不据此推断全局配置或任意其他路径 |
+| ZIP 查找 | 仓库 exit 1／0.158s，xcheng exit 2／22.821s（4 目录权限不足），tmp exit 2／0.233s（8 目录权限不足），均无匹配；这两个 exit 2 是搜索不完整，不算完整成功 |
+| 准备和安装 | 交付包尚未取得，未读 README／manifest／patch；未执行 `git apply --check`，未创建独立工作树／应用补丁。Python 3.12、Node >=22.12、固定三工具版本及 Web 锁文件安装未验收 |
+| index／health／真实客户端 | 均未执行；当前没有 Serena 工具匹配，不能判定其启动失败，也不能标记 Codex／Claude 客户端加载与符号概览／定义／引用验收通过 |
+| 项目边界说明与两项查询 | 未按要求重新取证；TaskSpec 与 cameraSignature 均 0 次，尚无新定义／消费者／契约／状态／测试结论，不用历史摘要替代正式认知 |
+| 原生代码 | 未配置或验收 C/C++ 语义解析、构建变体 compile_commands／clangd／宏／生成头，不能宣称完整语义覆盖 |
+| 精简审查 | duplicates／Knip 均 0 次，无执行退出码、原始分析报告或实际候选；不自动删改／合并，不建立债务基线 |
+
+计量范围为本次用户重提请求之后的准备工作：AOCI CLI Check **1 次／5.242 秒／stdout 17,245 bytes／stderr 0**，原始退出码 **1**。
+文件名定位 **3 次 rg**，并行总耗时 **22.824 秒**；没有匹配不代表权限不足目录已查。上述工具耗时不相加冒充端到端任务时间。
+Serena、两项目标查询、duplicates、Knip 各 **0 次**；未测量日常查询成本或上下文 token 收益。本次没有新的 Overview 块交付，不复用 2026-10-21 的传输量作为新结果。
+原始 Check 在 `aoci-check.stdout.json`／`aoci-check.stderr.txt`，调用耗时／源码身份／退出状态整理在 `preflight-record.json`，治理 finding 分组在 `governance-counts.json`；精确文件名搜索范围、命令、退出码和权限缺口在 `material-search/material-search.json` 及同目录原始输出。
+本轮没有运行分析，所以 `.ai-tools/reports` 没有本轮 duplicates／Knip 输出可交付；停止记录不是原始索引正文或聊天全文。
+
+补充宿主诊断的限度：此前只运行本机 `codex --version`／相关 `--help`，确认被调用 CLI 为 0.163.0；这不证明当前宿主采用该二进制或其配置。未运行 doctor 检查、未读认证／全局配置／聊天日志、未调用 API 或修改配置。
+[官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)分别定义 `model_context_window` 与 `model_auto_compact_token_limit`；本会话实际有效值尚未取得，不能由 AOCI 估算 token 数断言精确最小阈值，也不能证明单改阈值即可解除故障。
+恢复仍需取得交付材料，并有当前宿主能够完成和保留正式完整认知的证据；不改门禁或用 Serena、旧收据补认知。四份文档的治理收尾同样待恢复前置后完成。
+
+## 2026-10-22：连续受阻复核
+
+2026-10-22 连续受阻复核：原始请求及随后两次续接均停在同一 AOCI 前置条件；本轮没有产品功能进展。
+最新 `aoci check --json` 退出 1，`structure_valid=true`、`governance_aligned=false`；AGENTS 与 24 个原有非文档修改文件 SHA 未变化。
+未再次全量加载、未修改业务代码或提交推送；现有停止记录的 AOCI 维护仍未完成。生产级表格／节点编辑器目标未缩小、未验收。
+恢复需要能够完成并保留完整当前认知的宿主条件，再完成正式流程与维护；不以反复检查替代开发进展。
+本轮证据：`/home/mnemora/opt/stk-validation/aoci-stop-recheck-20261022/blocked-audit/`。
+
+上轮 goal 续接分类为无进展；本轮现场检查证据未改变下一步的受阻边界，不算验证等待或功能进展。
+独立状态审查确认原始用户回合加两次自动续接达到三回合门槛；不标记完成或暂停。
+
+## 2026-10-21：AI 上下文工具试用前置受阻
+
+本轮结论：**仅完成准备检查与停止记录；AOCI 前置未满足，工具试用未验收，不提交、不推送**。以下是本次停点，不沿用较早成功记录作为当前认知。
+
+- Git：本地 main／origin/main 均为 `7e0e6b1bc59ef252af72f9aca5f82a9708f7e0de`，与给定补丁基线一致；开始时已有 28 个修改路径，不能把当前主工作树当作干净补丁应用目标。未创建分支、独立工作树或 PR。
+- 规则：已检查根 AGENTS；先前限定路径搜索仅发现根文件。本轮不改规则、模型端点／网络策略或 MCP 配置，不读取密钥，不发收费模型请求。
+- AOCI 与 Serena 分开：AOCI MCP `0.1.0-rc21` 已可实际调用；Serena 尚未安装／调用验收，运行状态未知。预检语义过期 **12**、observe 待复核 **7**（不合并成 19 项语义漂移）；`governance_aligned=false`，`current_system_cognition_reliable=false`。
+- 正式重载尝试 `ai-context-trial-20261021-formal-1`：21 块／1031 条，正文 429566 UTF-8 bytes。收到第 4 块后、第 5 块前发生宿主上下文压缩；已收前四块没有工具响应截断，但此前正文不再可靠保留，不能继续完成当前认知证明。未提交 Host 交付确认或 Attestation，也未发生本次 Attestation 判题失败。
+- 遵用户明确要求停止：不循环重载，不沿用旧 Attestation／摘要／历史收据，不使用 Serena／源码／局部索引补全正式认知。压缩后只补读一次运行合同，未重新发起 Overview；没有修改 `overview_delivery.chunk_tokens` 或其他认知配置。该故障为宿主压缩，不能宣称减小单块即可解决总容量问题。
+
+材料检查只读取文件存在性，不读配置内容：
+
+| 路径／材料 | 本次实际结果 |
+|---|---|
+| `tools/ai/dev.py`、`.serena/project.yml`、`docs/ai-development.md` | 当前树无文件 |
+| `.codex/config.toml`、根 `.mcp.json`、`.claude/settings.json`、`.claude/settings.local.json` | 所查常见项目路径无文件；不代表客户端其他层级配置状态 |
+| `.cursor/mcp.json`、`.vscode/mcp.json` | 文件存在，未读取正文、未修改 |
+| `STK_AI_Context_Trial_Review_20261021.zip` | 仓库根、`/home/mnemora/Downloads/`、`/home/mnemora/xcheng/sijin/` 三处未找到；其他位置未查 |
+| ZIP 内 `README_ZH.md`／`manifest.json`／补丁及 13 文件 | 未取得、未检查；未执行 `git apply --check`／应用，不根据摘要重建 |
+
+受前置阻塞的实际状态：
+
+| 项目 | 结果／覆盖缺口 |
+|---|---|
+| Python／Node 前提及 Serena 2.1.0、jscpd 5.4.2、Knip 6.42.1 固定安装 | 未执行；现有版本亦未验收 |
+| `index`、`health`、Web 锁文件安装 | 未执行，无退出码可报 |
+| 真实 Codex／Claude 配置加载及 Serena 符号概览／定义／引用 | 未调用，客户端验收未通过；尚无可核实的重启续接配置 |
+| Python runtime／Web／原生／插件结构说明 | 未重新取证，不以历史摘要补认知 |
+| `TaskSpec`、`cameraSignature` 两项查询 | 均未执行；定义、消费者、契约和测试未形成新结论 |
+| duplicates、Knip | 均未执行，无原始分析输出或退出码；不能判定候选报告、执行故障或零问题 |
+| 最多三个精简候选 | 未审查；不删改、不合并实现，不接受新债务基线 |
+| 原生语义覆盖 | 未启用 C/C++，未准备编译数据库／clangd 解析验收，不能宣称完整覆盖 |
+
+准备成本和测量：Overview 预检 **1 次**，完整取块 **4 次**，压缩后 `aoci_rules` **1 次**；Serena／两个目标查询／duplicates／Knip 各 **0 次**。
+前四块共 **83,356 bytes／171 条**，占总正文约 19.40%／总 Entry 约 16.59%；仅是已收传输量，不能作为有效认知覆盖率。
+四次取块耗时分别约 9600／9992／9589／9730 ms，合计约 **38.9 秒**；首值近似，不包含其他准备或完整任务时间，不计算总任务耗时。
+日常查询成本和上下文 token 收益均**未测量**，不从 AOCI 字节／估算 token 推算 Serena 收益。
+
+证据在 `/home/mnemora/opt/stk-validation/ai-context-trial-20261021/`：`blocked-attempt-record.json` 为停止事实整理（不是原始 Overview、正式认知或 Attestation）；`file-inventory.txt` 为本轮存在性检查输出，`reporting-critical-review.txt` 为独立报告审查，`preexisting-document-changes.patch` 保留写停止记录前已有文档改动。
+本轮没有运行分析，因此 `.ai-tools/reports` 下没有本轮 duplicates／Knip 原始报告，不能虚构报告路径或退出码。
+四份现有文档只记录本次受阻事实；**AOCI 维护、Verify／Check／Guide 收尾未执行，治理未对齐，后续必须在前置恢复后完成**，本次不构成功能交付。
+此前产品原生构建进程的实际终态为 exit 1，`analysis_parameters_editor_test.cc:701` 同行两次 GoogleTest 宏产生重复标签；这不是本轮工具试用测试，未重跑，不套用历史 CI 或测试数证明本地稿通过。
+续接需要交付包实际位置，以及能完成并保留完整 AOCI 认知的宿主条件；届时按正式流程重新建立当前认知、处理已有漂移，再核对候选与基线，在规则允许的干净独立工作树先检查后应用。本轮不替用户修改前置要求。
+
+## 2026-10-21：AOCI 当前宿主及工作树复核
+
+- 基线 main／origin/main `7e0e6b1bc59ef252af72f9aca5f82a9708f7e0de`；实际发现 9 个 MCP 工具并成功调用，服务 `0.1.0-rc21`，动态加载已生效，无需重启。
+- 完整 Overview：1031／1031 条、21／21 块、机器估算 142654 tokens，无截断；Host 交付确认，Challenge **9/10、pass**。读取覆盖与框架自评分开；当时治理有漂移，未宣称当前完整系统认知可靠。
+- 当前未提交稿带来 8 项生产源码 stale、3 项 observe 测试变化。最初 Maintain 因 observe 待复核而 stopped，返回候选 0、正式索引未写入，且 pending/recovery/conflict 均为零；闭环证据保存在 `initial-maintain-zero-write-closure.json`。
+- 阅读 3 份测试完整改动和 8 份生产文件及关联后明确 acknowledge，随后按新机器完整批次提交 8／8 条；applied、aligned=true、remaining=0、finding_count=0。Root／Meta 和范围策略未改变。
+- 源码批次按 **Verify → Check → Guide** 顺序执行，均退出 0；structure_valid／governance_aligned 为 true、Check ok=true、Guide complete=true／stage=aligned／next_action=none。1031 条，missing／stale／orphan／unbaselined 和 observe 待复核均 0，预算违规和未决事务 0。
+- Critical review 明确当前稿限制：undo/redo 模型 API 不等于 UI 接入；workflow 参数摘要缺 choices/bounds、文字未贯穿 save/run、恢复文字待修；`analysis_parameter_draft_test.cc:923` 有混合类型 auto 声明编译问题。新增 13 项 draft 单测及 3 项真实桥表格测试**未执行**，不算通过；索引任务没有运行产品构建／回归或 PET MD。
+- 保留原 11 个 desktop 文件，开始/结束 SHA 核对 11/11 相同。首次索引 `fd73f48` 已提交推送；本次增量与相应未提交源码留在工作树，待产品节点修复／测试后一并交付，远端不发布脱离源码的索引快照。
+- 重新核对已提交 `7e0e6b1`：[Runtime 39598657750](https://github.com/sijintech/stk/actions/runs/39598657750)、[Secret 39598658037](https://github.com/sijintech/stk/actions/runs/39598658037)、[Docs 39598657687](https://github.com/sijintech/stk/actions/runs/39598657687) 均 completed/success；前产品 `76715e4` [Desktop 38956471084](https://github.com/sijintech/stk/actions/runs/38956471084) **5/5 completed/success**。这些不覆盖本地未提交稿。
+- [本机面板](http://127.0.0.1:43999/)实际 HTTP 200，已运行的同版本服务直接复用。访问凭据不写仓库；本机回环地址不能作为其他机器的公开链接。
+- 本地命令清空 `STK_TOKEN_PLAN_API_KEY` 并取消 `STK_TOKEN_PLAN_MODEL`，无外部模型请求；证据位于 `/home/mnemora/opt/stk-validation/aoci-20261021-refresh/`。四文档更新后仍须按返回完整批次维护并再执行最终三项检查，最终原始结果保存在该目录 `final-*.json`。
+
 ## 2026-10-21：AOCI MCP 接入与首次索引
 
 - 前置：main／origin/main 基线 `2bb0aba`；前产品代码 `76715e4` 的 [Desktop 38956471084](https://github.com/sijintech/stk/actions/runs/38956471084) 已 completed/success（5/5）。本轮未创建分支／PR、未合并无关工作。

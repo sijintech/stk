@@ -16,6 +16,13 @@ struct AnalysisDocumentLimits {
   static constexpr size_t max_depth = 64;
 };
 
+/** Parse one finite JSON parameter value with no duplicate keys, trailing data, UTF-8 BOM or
+ * integer-token overflow. Keeps integer/float and signed zero distinct. Text is bounded to
+ * max_document_bytes, with max_depth nesting and the same plain-JSON resource guards below.
+ * Throws invalid_argument for invalid input; parameter schemas and their smaller storage
+ * budgets remain the caller's responsibility. No files, project state or execution are touched. */
+io::Json parse_parameter_json(std::string_view text);
+
 /** Check finite plain JSON, UTF-8, depth and raw storage budgets without copying or recursive
  * serialization. Throws invalid_argument. This is a resource guard, not a structural schema. */
 void check_analysis_json_bounds(const io::Json &value);

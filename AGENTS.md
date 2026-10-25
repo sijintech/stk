@@ -20,6 +20,11 @@
 
 # Handoff
 
+- For known text and file locations, use scoped `rg` and bounded reads. Use Serena for symbol
+  definitions and references when semantic navigation helps; keep its responses bounded.
+  Setup, measured costs and on-demand jscpd/Knip commands are in `docs/ai-development.md`.
+  Do not load full scan reports or create a second whole-repository memory by default.
+
 - Read `handoff.md` before starting: it is the current handoff snapshot (state, pending owner decisions, how to build and
   test, code entry points). Check the real Git state and CI before trusting it, and update it when the state changes.
 - Keep `handoff.md`, `docs/development-plan.md`, `docs/development-log.md` and `docs/runtime-validation.md` current at each

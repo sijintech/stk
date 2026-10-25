@@ -34,11 +34,15 @@ class ProjectTableEditor {
   void set_visible_records(std::vector<std::string> ids);
   void controls(ui::Layout &, EditorContext &, ProjectState &, bool editable);
   void fields(ui::Layout &, EditorContext &, ProjectState &, bool editable, bool expanded = false);
-  void sweep(ui::Layout &, EditorContext &, ProjectState &, bool editable);
+  void sweep(ui::Layout &, EditorContext &, ProjectState &, bool editable, std::function<bool()> still_current = {});
   void grid(ui::Layout &, EditorContext &, ProjectState &);
   bool selected_visible(const ProjectState &) const;
-  void cell(ui::Layout &, EditorContext &, ProjectState &, bool editable, std::function<void()> open_review);
-  void management(ui::Layout &, EditorContext &, ProjectState &, bool editable);
+  /** A companion record form can own field navigation; other clients keep this form's selector. */
+  void cell(ui::Layout &, EditorContext &, ProjectState &, bool editable,
+            std::function<void()> open_review, bool field_selector = true,
+            std::function<bool()> still_current = {});
+  void management(ui::Layout &, EditorContext &, ProjectState &, bool editable,
+                  std::function<bool()> still_current = {}, bool field_selector = true);
 
  private:
   struct Impl;

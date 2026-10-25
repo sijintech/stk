@@ -33,6 +33,21 @@ const std::string dry = "caaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const std::string batches = "cbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const std::string batch_label = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const std::string batch_row = "cddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const std::string wet = "d1111111-1111-4111-8111-111111111111";
+const std::string board_view = "d2222222-2222-4222-8222-222222222222";
+const std::string observed_date = "d3333333-3333-4333-8333-333333333333";
+const std::string observed_url = "d4444444-4444-4444-8444-444444444444";
+const std::string tags_field = "d5555555-5555-4555-8555-555555555555";
+
+std::vector<Json> json_roundtrip_values()
+{
+  return {Json("123"), Json("true"), Json("false"), Json("null"), Json("ordinary scientific text"),
+          Json("中文、\"引号\"、\\路径\n第二行\t制表符"), Json(""), Json("[1,true]"), Json("{\"id\":7}"),
+          Json(nullptr), Json(true), Json(INT64_MAX), Json(INT64_MIN), Json(1.25),
+          Json::object({{"count", INT64_MAX}, {"label", "true"}, {"nested", Json::array({nullptr, "null", false})}}),
+          Json::array({1, "123", true, nullptr, Json::object({{"label", "科学数据"}})}),
+          Json(std::string(5000, 'x') + "\nfull JSON string")};
+}
 
 class TableWorkbenchEditorPython : public ::testing::Test {
  protected:
@@ -44,10 +59,22 @@ class TableWorkbenchEditorPython : public ::testing::Test {
   std::shared_ptr<const io::Payload> existing_payload;
   uint64_t payload_serial = 0, camera_serial = 0;
   double event_time = 500;
+  int clicks = 0;
   ProjectState &project() { return f.shell->store().project(); }
   ViewerState &viewer() { return f.shell->store().viewer(); }
   EditorArea &area() { return f.area("a4"); }
   const ui::Widget *widget(const char *key) { return f.screen.ui()->find(key); }
+  std::string card_key(const char *key) const { return "card" + row_a + "/" + key; }
+  const ui::Widget *card_widget(const char *key) { return widget(card_key(key).c_str()); }
+  bool has_text_prefix(const std::string &prefix)
+  {
+    for (const auto &block : f.screen.ui()->blocks()) {
+      for (const auto &item : block->widgets()) {
+        if (item.text.starts_with(prefix)) { return true; }
+      }
+    }
+    return false;
+  }
   void frame() { f.screen.run_deferred(); f.drv->frame(); }
   bool pump(const std::function<bool()> &predicate)
   {
@@ -71,12 +98,25 @@ class TableWorkbenchEditorPython : public ::testing::Test {
   {
     send(ui::Event::mouse_down(point));
     send(ui::Event::mouse_up(point));
+    ++clicks;
   }
   void click(const char *key)
   {
+    for (int attempt = 0; attempt < 32; ++attempt) {
+      const auto *candidate = widget(key);
+      ASSERT_NE(candidate, nullptr) << key;
+      if (candidate->clip.contains({candidate->rect.cx(), candidate->rect.cy()})) { break; }
+      ASSERT_FALSE(candidate->clip.empty()) << key;
+      const auto clip = candidate->clip;
+      const auto unit = f.screen.ui()->style().unit;
+      const float padding = std::min(.25f * unit, .25f * clip.w);
+      const float x = std::clamp(candidate->rect.cx(), clip.x + padding, clip.x1() - padding);
+      send(ui::Event::wheel({x, clip.cy()}, candidate->rect.cy() < clip.y ? 3 : -3));
+    }
     const auto *w = widget(key);
     ASSERT_NE(w, nullptr) << key;
     ASSERT_TRUE(w->enabled) << key;
+    ASSERT_TRUE(w->clip.contains({w->rect.cx(), w->rect.cy()})) << key;
     point({w->rect.cx(), w->rect.cy()});
   }
   void action(const char *key)
@@ -128,6 +168,51 @@ class TableWorkbenchEditorPython : public ::testing::Test {
     const auto *w = widget(key);
     ASSERT_NE(w, nullptr) << key;
     w->index.assign(value); frame();
+  }
+  void choose(const char *key, int value)
+  {
+    ASSERT_NO_FATAL_FAILURE(click(key));
+    const auto option = "popup/" + std::to_string(value);
+    ASSERT_NO_FATAL_FAILURE(click(option.c_str()));
+  }
+  void type(const char *key, const std::string &text)
+  {
+    ASSERT_NO_FATAL_FAILURE(click(key));
+    send(ui::Event::key_down(ui::Key::A, ui::MOD_CTRL));
+    send(ui::Event::text_input(text));
+    send(ui::Event::key_down(ui::Key::Enter));
+  }
+  Json choice_options() const
+  {
+    return {{"version", 1}, {"choices", Json::array({
+        {{"id", dry}, {"label", "Dry"}, {"color", "#123456"}},
+        {{"id", wet}, {"label", "Wet"}, {"color", "#234567"}}})}};
+  }
+  void add_record_fields()
+  {
+    ASSERT_TRUE(project().apply(Json::array({
+      {{"op", "set_field_schema"}, {"id", phase}, {"type", "single_select"}, {"unit", nullptr}, {"options", choice_options()}},
+      {{"op", "add_field"}, {"table_id", samples}, {"id", observed_date}, {"name", "Observed date"}, {"type", "date"}},
+      {{"op", "add_field"}, {"table_id", samples}, {"id", observed_url}, {"name", "Evidence URL"}, {"type", "url"}},
+      {{"op", "add_field"}, {"table_id", samples}, {"id", tags_field}, {"name", "Tags"}, {"type", "multi_select"}, {"options", choice_options()}},
+    })));
+    ASSERT_NO_FATAL_FAILURE(settled());
+  }
+  void show_board(bool hide_fields = false)
+  {
+    Json columns = Json::array();
+    for (const auto &f : project().table()->fields) {
+      columns.push_back({{"field_id", f.id}, {"width", 160}, {"hidden", hide_fields && f.id != temperature}});
+    }
+    ASSERT_TRUE(project().apply(Json::array({
+      {{"op", "put_table_view"}, {"id", board_view}, {"table_id", samples}, {"name", "Sample status"},
+       {"definition", {{"version", 1}, {"kind", "board"}, {"group_field_id", phase}, {"columns", columns}}}}
+    })));
+    ASSERT_NO_FATAL_FAILURE(settled());
+    ASSERT_TRUE(pump([&] { const auto *tabs = widget("table_views"); return tabs && tabs->items.size() == 2; }));
+    const auto *tabs = widget("table_views");
+    point({tabs->rect.x + tabs->rect.w * .75f, tabs->rect.cy()});
+    ASSERT_TRUE(pump([&] { return !project().busy() && !widget("records") && card_widget("table_board_state"); }));
   }
   void edit_field(int column)
   {
@@ -268,6 +353,652 @@ TEST_F(TableWorkbenchEditorPython, InlineTypingSuspendsOnBlurAndOnlyEnterWritesT
   EXPECT_FALSE(area().editor().has_unsaved_changes());
   EXPECT_EQ(project().record_id(), row_b);
   EXPECT_EQ(widget("records")->table->grid->selection.value().active, (ui::TableCell{1, 1}));
+}
+
+TEST_F(TableWorkbenchEditorPython, JsonF2EnterPreservesEveryScalarStringAndCompoundValueExactly)
+{
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_field_schema"}, {"id", temperature},
+      {"type", "json"}, {"unit", nullptr}, {"options", {{"version", 1}}}}})));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  for (const auto &value : json_roundtrip_values()) {
+    SCOPED_TRACE(value.dump().substr(0, 180));
+    const Json previous = *project().table()->cell(0, 0);
+    ASSERT_TRUE(project().apply(Json::array({{{"op", "set_cell"}, {"table_id", samples},
+        {"record_id", row_a}, {"field_id", temperature}, {"value", value}}})));
+    ASSERT_NO_FATAL_FAILURE(settled());
+    const Json expected = *project().table()->cell(0, 0);
+    const auto revision = project().project()->revision;
+    cell(0, 1);
+    send(ui::Event::key_down(ui::Key::F2));
+    ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
+    EXPECT_EQ(f.screen.ui()->edit_state()->text(), expected.dump());
+    EXPECT_EQ(project().project()->revision, revision);
+    send(ui::Event::key_down(ui::Key::Enter));
+    ASSERT_NO_FATAL_FAILURE(settled());
+    ASSERT_NE(project().table()->cell(0, 0), nullptr);
+    EXPECT_EQ(project().table()->cell(0, 0)->type(), expected.type());
+    EXPECT_EQ(project().table()->cell(0, 0)->dump(), expected.dump());
+    EXPECT_EQ(project().project()->revision, revision + 1);
+    EXPECT_FALSE(area().editor().has_unsaved_changes());
+    ASSERT_TRUE(project().undo());
+    ASSERT_NO_FATAL_FAILURE(settled());
+    // Reapplying an identical value advances the revision without adding a history delta.
+    EXPECT_EQ(project().table()->cell(0, 0)->dump(), previous.dump());
+    ASSERT_TRUE(project().redo());
+    ASSERT_NO_FATAL_FAILURE(settled());
+    EXPECT_EQ(project().table()->cell(0, 0)->dump(), expected.dump());
+  }
+}
+
+TEST_F(TableWorkbenchEditorPython, JsonClipboardRectanglePreservesTypesAndInt64WithOneApplyAndUndo)
+{
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_field_schema"}, {"id", temperature},
+      {"type", "json"}, {"unit", nullptr}, {"options", {{"version", 1}}}}})));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  for (const auto &value : json_roundtrip_values()) {
+    SCOPED_TRACE(value.dump().substr(0, 180));
+    ASSERT_TRUE(project().apply(Json::array({{{"op", "set_cell"}, {"table_id", samples},
+        {"record_id", row_a}, {"field_id", temperature}, {"value", value}}})));
+    ASSERT_NO_FATAL_FAILURE(settled());
+    const Json expected = *project().table()->cell(0, 0);
+    const auto revision = project().project()->revision;
+    ASSERT_TRUE(project().table()->cell(1, 0)->is_null());
+    ASSERT_EQ(project().table()->cell(1, 1), nullptr);
+    cell(0, 1);
+    send(ui::Event::key_down(ui::Key::Right, ui::MOD_SHIFT));
+    send(ui::Event::key_down(ui::Key::C, ui::MOD_CTRL));
+    ASSERT_FALSE(clipboard.text.empty());
+    cell(1, 1);
+    send(ui::Event::key_down(ui::Key::V, ui::MOD_CTRL));
+    ASSERT_TRUE(pump([&] { const auto *apply = widget("table_paste_apply"); return apply && apply->enabled; }));
+    EXPECT_EQ(project().project()->revision, revision);
+    EXPECT_EQ(widget("table_paste_cells")->table->rows, 2);
+    click("table_paste_apply");
+    ASSERT_NO_FATAL_FAILURE(settled());
+    EXPECT_EQ(project().project()->revision, revision + 1);
+    ASSERT_NE(project().table()->cell(1, 0), nullptr);
+    EXPECT_EQ(project().table()->cell(1, 0)->type(), expected.type());
+    EXPECT_EQ(project().table()->cell(1, 0)->dump(), expected.dump());
+    ASSERT_NE(project().table()->cell(1, 1), nullptr);
+    EXPECT_EQ(project().table()->cell(1, 1)->get<int64_t>(), INT64_MAX);
+    EXPECT_EQ(project().table()->cell(0, 0)->dump(), expected.dump());
+    ASSERT_TRUE(project().undo());
+    ASSERT_NO_FATAL_FAILURE(settled());
+    ASSERT_NE(project().table()->cell(1, 0), nullptr);
+    EXPECT_TRUE(project().table()->cell(1, 0)->is_null());
+    EXPECT_EQ(project().table()->cell(1, 1), nullptr);
+    EXPECT_EQ(project().table()->cell(0, 0)->dump(), expected.dump());
+  }
+}
+
+TEST_F(TableWorkbenchEditorPython, InvalidJsonInlineEditKeepsItsDraftAndNeverChangesTheTypedValue)
+{
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_field_schema"}, {"id", temperature},
+      {"type", "json"}, {"unit", nullptr}, {"options", {{"version", 1}}}},
+      {{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", temperature}, {"value", "null"}}})));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  const auto revision = project().project()->revision;
+  cell(0, 1);
+  send(ui::Event::key_down(ui::Key::F2));
+  send(ui::Event::key_down(ui::Key::A, ui::MOD_CTRL));
+  send(ui::Event::text_input("{"));
+  send(ui::Event::key_down(ui::Key::Enter));
+  ASSERT_NE(f.screen.ui()->edit_state(), nullptr);
+  EXPECT_EQ(f.screen.ui()->edit_state()->text(), "{");
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(*project().table()->cell(0, 0), "null");
+  send(ui::Event::key_down(ui::Key::Escape));
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(*project().table()->cell(0, 0), "null");
+}
+
+TEST_F(TableWorkbenchEditorPython, BoardRecordEditsHiddenTypedFieldsWithoutSwitchingViews)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board(true));
+  const auto revision = project().project()->revision;
+  const int navigation_start = clicks;
+  ASSERT_NO_FATAL_FAILURE(click(card_key("open").c_str()));
+  ASSERT_NE(widget("table_detail_field"), nullptr);
+  EXPECT_EQ(widget("table_detail_field")->items.size(), 8u);
+  EXPECT_EQ(widget("cell_field"), nullptr) << "the record form owns one stable field selector";
+  choose("table_detail_field", 5);
+  EXPECT_EQ(clicks - navigation_start, 3) << "open record, open field list, choose hidden field";
+  EXPECT_EQ(project().record_id(), row_a);
+  ASSERT_NE(widget("cell_value"), nullptr);
+  type("cell_value", "2026-10-21");
+  EXPECT_EQ(project().project()->revision, revision);
+  click("save_cell");
+  ASSERT_TRUE(pump([&] { return widget("table_detail_field") && !project().busy() && !area().editor().has_unsaved_changes() && project().project()->revision == revision + 1; }));
+  EXPECT_EQ(*project().table()->cell(0, 5), "2026-10-21");
+  EXPECT_EQ(project().table()->cell(1, 5), nullptr);
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 5);
+  EXPECT_EQ(widget("records"), nullptr);
+
+  choose("table_detail_field", 6);
+  type("cell_value", "not-a-url");
+  click("save_cell");
+  ASSERT_TRUE(pump([&] { return !project().busy() && !project().error().empty(); }));
+  EXPECT_EQ(project().project()->revision, revision + 1);
+  EXPECT_EQ(project().table()->cell(0, 6), nullptr);
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(widget("cell_value")->string.value(), "not-a-url");
+  type("cell_value", "https://example.org/measurements/1");
+  click("save_cell");
+  ASSERT_TRUE(pump([&] { return widget("table_detail_field") && !project().busy() && !area().editor().has_unsaved_changes() && project().project()->revision == revision + 2; }));
+  EXPECT_EQ(*project().table()->cell(0, 6), "https://example.org/measurements/1");
+
+  choose("table_detail_field", 7);
+  const auto choice = "choice" + wet;
+  click(choice.c_str());
+  ASSERT_TRUE(pump([&] { return !project().busy() && project().project()->revision == revision + 3; }));
+  EXPECT_EQ(*project().table()->cell(0, 7), Json::array({wet}));
+  ASSERT_TRUE(project().undo());
+  ASSERT_TRUE(pump([&] { return widget("table_detail_field") && !project().busy() && project().table()->cell(0, 7) == nullptr; }));
+  EXPECT_EQ(*project().table()->cell(0, 5), "2026-10-21");
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 7);
+  expect_viewer();
+}
+
+TEST_F(TableWorkbenchEditorPython, TypedReferencesAndExpressionsKeepTheirDefinitionsInRecordDetails)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_TRUE(project().apply(Json::array({
+    {{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", tags_field}, {"value", Json::array({dry})}},
+    {{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", evidence},
+     {"value", {{"version", 1}, {"project_id", project().project()->id}, {"kind", "record"}, {"table_id", batches}, {"id", batch_row}}}},
+    {{"op", "set_reference"}, {"table_id", samples}, {"record_id", row_b}, {"field_id", phase}, {"source", {{"record_id", row_a}, {"field_id", phase}}}},
+    {{"op", "set_reference"}, {"table_id", samples}, {"record_id", row_b}, {"field_id", evidence}, {"source", {{"record_id", row_a}, {"field_id", evidence}}}},
+    {{"op", "set_reference"}, {"table_id", samples}, {"record_id", row_b}, {"field_id", tags_field}, {"source", {{"record_id", row_a}, {"field_id", tags_field}}}},
+    {{"op", "set_expression"}, {"table_id", samples}, {"record_id", row_c}, {"field_id", phase}, {"expression", Json(dry).dump()}, {"bindings", Json::object()}}
+  })));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  const auto revision = project().project()->revision;
+  cell(1, 4);
+  click("table_details");
+  ASSERT_NE(widget("cell_mode"), nullptr);
+  EXPECT_EQ(widget("cell_mode")->index.value(), 1);
+  EXPECT_EQ(widget("table_choice"), nullptr);
+  const auto old_source_table = widget("source_table")->index;
+  const auto old_source_record = widget("source_record")->index;
+  const auto old_source_field = widget("source_field")->index;
+  const auto source_state = area().editor().save_workspace_state();
+  ASSERT_TRUE(area().editor().load_workspace_state(source_state));
+  ASSERT_TRUE(pump([&] { return widget("source_field") && widget("table_detail_field"); }));
+  EXPECT_EQ(old_source_table.value(), 0);
+  EXPECT_EQ(old_source_record.value(), 0);
+  EXPECT_EQ(old_source_field.value(), 0);
+  old_source_table.assign(1); old_source_record.assign(1); old_source_field.assign(1); frame();
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
+  const auto phase_definition = *project().table()->definition(1, 3);
+  choose("table_detail_field", 7);
+  EXPECT_EQ(widget("cell_mode")->index.value(), 1);
+  EXPECT_EQ(widget(("choice" + dry).c_str()), nullptr);
+  choose("table_detail_field", 4);
+  EXPECT_EQ(widget("cell_mode")->index.value(), 1);
+  EXPECT_EQ(widget("table_pick_object"), nullptr);
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(*project().table()->definition(1, 3), phase_definition);
+  click("save_cell");  // Explicitly saving a reference remains a reference, including object fields.
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(io::get_string(*project().table()->definition(1, 4), "kind"), "reference");
+  EXPECT_EQ(*project().table()->cell(1, 4), *project().table()->cell(0, 4));
+  cell(2, 4);
+  send(ui::Event::key_down(ui::Key::F2));
+  ASSERT_NE(widget("cell_mode"), nullptr);
+  EXPECT_EQ(widget("cell_mode")->index.value(), 2);
+  EXPECT_EQ(widget("table_choice"), nullptr);
+  EXPECT_EQ(io::get_string(*project().table()->definition(2, 3), "kind"), "expression");
+  EXPECT_EQ(project().project()->revision, revision + 1);
+  ASSERT_NE(widget("binding_rows"), nullptr);
+  const auto old_binding = widget("binding_rows")->table->selected;
+  const auto expression_state = area().editor().save_workspace_state();
+  ASSERT_TRUE(area().editor().load_workspace_state(expression_state));
+  ASSERT_TRUE(pump([&] { return widget("binding_rows") != nullptr; }));
+  EXPECT_EQ(old_binding.value(), -1);
+  old_binding.assign(0); frame();
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision + 1);
+}
+
+TEST_F(TableWorkbenchEditorPython, BoardStateHasEmptyChoiceLanesAndChangesOneRecordInOneUndoableEdit)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board());
+  const auto has_empty_wet = [&] { return has_text_prefix("Wet · 0 "); };
+  EXPECT_TRUE(has_empty_wet());
+  const auto revision = project().project()->revision;
+  const auto selected = project().record_id();
+  const int start = clicks;
+  choose(card_key("table_board_state").c_str(), 3);
+  EXPECT_EQ(clicks - start, 2) << "visible card status picker and target status";
+  ASSERT_TRUE(pump([&] { return !project().busy() && project().project()->revision == revision + 1 && card_widget("table_board_state"); }));
+  EXPECT_EQ(*project().table()->cell(0, 3), wet);
+  EXPECT_EQ(project().table()->cell(1, 3), nullptr);
+  EXPECT_EQ(project().record_id(), selected);
+  ASSERT_TRUE(project().undo());
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_state") && *project().table()->cell(0, 3) == dry; }));
+  EXPECT_EQ(project().table()->cell(1, 3), nullptr);
+  EXPECT_TRUE(has_empty_wet());
+  choose(card_key("table_board_state").c_str(), 0);
+  ASSERT_TRUE(pump([&] { return !project().busy() && project().table()->cell(0, 3) == nullptr; }));
+  ASSERT_TRUE(project().undo());
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_state") && project().table()->cell(0, 3) && *project().table()->cell(0, 3) == dry; }));
+  choose(card_key("table_board_state").c_str(), 1);
+  ASSERT_TRUE(pump([&] { return !project().busy() && project().table()->cell(0, 3) && project().table()->cell(0, 3)->is_null(); }));
+  ASSERT_TRUE(project().undo());
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_state") && project().table()->cell(0, 3) && *project().table()->cell(0, 3) == dry; }));
+  expect_viewer();
+}
+
+TEST_F(TableWorkbenchEditorPython, RetainedDetailSettersAndSaveCannotWriteAfterClosingOrChangingFields)
+{
+  cell(0, 1);
+  click("table_details");
+  ASSERT_NE(widget("cell_value"), nullptr);
+  const auto stale_text = widget("cell_value")->string;
+  const auto stale_save = widget("save_cell")->on_click;
+  const auto stale_field = widget("table_detail_field")->index;
+  const auto revision = project().project()->revision;
+  click("table_detail_close");
+  stale_text.assign("999"); stale_save(); stale_field.assign(3); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(*project().table()->cell(0, 0), 300);
+  click("table_details");
+  EXPECT_EQ(widget("cell_value")->string.value(), "300");
+  stale_text.assign("999"); stale_save(); stale_field.assign(3); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 0);
+  EXPECT_EQ(widget("cell_value")->string.value(), "300");
+  choose("table_detail_field", 3);
+  stale_text.assign("999"); stale_save(); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 3);
+  EXPECT_EQ(*project().table()->cell(0, 3), dry);
+}
+
+TEST_F(TableWorkbenchEditorPython, BoardStatusCallbacksRejectNewRevisionsDerivedCellsAndAnotherEditorsDraft)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board());
+  const auto stale_status = card_widget("table_board_state")->index;
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", counter}, {"value", 7}}})));
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_state"); }));
+  const auto revision = project().project()->revision;
+  stale_status.assign(3); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(*project().table()->cell(0, 3), dry);
+
+  auto &other = f.area("a3");
+  ASSERT_TRUE(other.add_tab(kEditorTable)); frame();
+  ASSERT_TRUE(pump([&] { return widget("records") && widget("records")->table->rows == 3; }));
+  cell(0, 1);
+  send(ui::Event::text_input("321"));
+  ASSERT_TRUE(other.editor().has_unsaved_changes());
+  const auto guarded_status = card_widget("table_board_state")->index;
+  guarded_status.assign(3); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(*project().table()->cell(0, 3), dry);
+  EXPECT_TRUE(other.editor().has_unsaved_changes());
+  send(ui::Event::key_down(ui::Key::Escape));
+  ASSERT_FALSE(other.editor().has_unsaved_changes());
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_expression"}, {"table_id", samples}, {"record_id", row_a},
+      {"field_id", phase}, {"expression", Json(dry).dump()}, {"bindings", Json::object()}}})));
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_state") && !card_widget("table_board_state")->enabled; }));
+  const auto derived_revision = project().project()->revision;
+  card_widget("table_board_state")->index.assign(3); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, derived_revision);
+  EXPECT_EQ(io::get_string(*project().table()->definition(0, 3), "kind"), "expression");
+}
+
+TEST_F(TableWorkbenchEditorPython, HiddenRecordFieldAndDraftSurviveWorkspaceRestoreWithoutAnyWrite)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board(true));
+  ASSERT_NO_FATAL_FAILURE(click(card_key("open").c_str()));
+  choose("table_detail_field", 5);
+  type("cell_value", "2026-11-02");
+  const auto revision = project().project()->revision;
+  const auto old_save = widget("save_cell")->on_click;
+  const auto saved = area().editor().save_workspace_state();
+  EXPECT_EQ(saved.at("layout").at("detail_field_id"), observed_date);
+  EXPECT_EQ(saved.at("advanced").at("cell_field"), observed_date);
+  EXPECT_EQ(saved.at("advanced").at("cell_text"), "2026-11-02");
+  ASSERT_TRUE(area().editor().load_workspace_state(saved));
+  ASSERT_TRUE(pump([&] { return widget("cell_value") && widget("table_detail_field"); }));
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 5);
+  EXPECT_EQ(widget("cell_value")->string.value(), "2026-11-02");
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(project().table()->cell(0, 5), nullptr);
+  old_save(); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, revision);
+  click("save_cell");
+  ASSERT_TRUE(pump([&] { return widget("table_detail_field") && !project().busy() && !area().editor().has_unsaved_changes() && project().project()->revision == revision + 1; }));
+  EXPECT_EQ(*project().table()->cell(0, 5), "2026-11-02");
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 5);
+  const auto before_invalid = area().editor().save_workspace_state();
+  auto invalid = before_invalid;
+  invalid["layout"]["detail_field_id"] = 17;
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  EXPECT_EQ(area().editor().save_workspace_state(), before_invalid);
+  expect_viewer();
+}
+
+TEST_F(TableWorkbenchEditorPython, HiddenObjectPickerBindsTheOriginalRecordFieldAndAllowedKinds)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board(true));
+  ASSERT_NO_FATAL_FAILURE(click(card_key("open").c_str()));
+  choose("table_detail_field", 4);
+  const auto old_field = widget("table_detail_field")->index;
+  click("table_pick_object");
+  ASSERT_NE(widget("table_object_kind"), nullptr);
+  EXPECT_EQ(widget("table_object_kind")->items.size(), 2u) << "only the field's record/file kinds are offered";
+  choose("table_object_table", 1);
+  ASSERT_TRUE(pump([&] { const auto *w = widget("table_object_candidates"); return w && w->list && w->list->count == 1; }));
+  const auto old_selection = widget("table_object_candidates")->list->selected;
+  old_selection.assign(0); frame();
+  const auto old_use = widget("table_object_set")->on_click;
+  const auto revision = project().project()->revision;
+  old_field.assign(5); frame();  // Simulate an external field-navigation callback while the picker exists.
+  EXPECT_EQ(widget("table_object_set"), nullptr);
+  old_use(); old_selection.assign(0); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(project().table()->cell(0, 4), nullptr);
+  choose("table_detail_field", 4);
+  click("table_pick_object");
+  ASSERT_TRUE(pump([&] { const auto *w = widget("table_object_candidates"); return w && w->list && w->list->count == 1; }));
+  old_selection.assign(0); old_use(); frame();
+  EXPECT_EQ(widget("table_object_candidates")->list->selected.value(), -1);
+  widget("table_object_candidates")->list->selected.assign(0); frame();
+  const auto wrong_record_use = widget("table_object_set")->on_click;
+  ASSERT_TRUE(project().request_select(project().project()->handle, revision, samples, row_b)); frame();
+  wrong_record_use(); frame();
+  EXPECT_EQ(widget("table_object_set"), nullptr);
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(project().table()->cell(0, 4), nullptr);
+  EXPECT_EQ(project().table()->cell(1, 4), nullptr);
+}
+
+TEST_F(TableWorkbenchEditorPython, BoardWithoutVisibleColumnsStillOpensAndEditsTheStableRecord)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board(true));
+  auto definition = area().editor().save_state().at("view");
+  for (auto &column : definition["columns"]) { column["hidden"] = true; }
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "put_table_view"}, {"id", board_view}, {"table_id", samples},
+      {"name", "Sample status"}, {"definition", definition}}})));
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("open") && area().editor().save_state().at("view") == definition; }));
+  const auto revision = project().project()->revision;
+  ASSERT_NO_FATAL_FAILURE(click(card_key("open").c_str()));
+  ASSERT_NE(widget("table_detail_field"), nullptr);
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 0);
+  ASSERT_NE(widget("cell_value"), nullptr);
+  EXPECT_EQ(widget("cell_value")->string.value(), "300");
+  type("cell_value", "305");
+  click("save_cell");
+  ASSERT_TRUE(pump([&] { return !project().busy() && !area().editor().has_unsaved_changes() && project().project()->revision == revision + 1; }));
+  EXPECT_EQ(*project().table()->cell(0, 0), 305);
+  EXPECT_TRUE(project().table()->cell(1, 0)->is_null());
+}
+
+TEST_F(TableWorkbenchEditorPython, BoardGroupingKeepsJsonStringsAndNumbersInDifferentLanes)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board());
+  auto definition = area().editor().save_state().at("view");
+  definition["group_field_id"] = temperature;
+  ASSERT_TRUE(project().apply(Json::array({
+      {{"op", "set_field_schema"}, {"id", temperature}, {"type", "json"}, {"unit", nullptr}, {"options", {{"version", 1}}}},
+      {{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", temperature}, {"value", 1}},
+      {{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_b}, {"field_id", temperature}, {"value", "1"}},
+      {{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_c}, {"field_id", temperature}, {"value", nullptr}},
+      {{"op", "put_table_view"}, {"id", board_view}, {"table_id", samples}, {"name", "Typed JSON groups"}, {"definition", definition}}
+  })));
+  const auto has_lane = [&](const std::string &prefix) { return has_text_prefix(prefix); };
+  ASSERT_TRUE(pump([&] { return !project().busy() && has_lane("1 · 1 ") && has_lane("\"1\" · 1 "); }));
+  EXPECT_EQ(card_widget("table_board_state"), nullptr);
+  EXPECT_TRUE(has_lane(std::string(f.shell->store().tr("table.value_null")) + " · 1 "));
+  EXPECT_EQ(*project().table()->cell(0, 0), 1);
+  EXPECT_EQ(*project().table()->cell(1, 0), "1");
+}
+
+TEST_F(TableWorkbenchEditorPython, InlineTabKeepsGridRecordFormAndSaveTargetOnTheNextField)
+{
+  cell(0, 1);
+  click("table_details");
+  cell(0, 1);
+  send(ui::Event::key_down(ui::Key::F2));
+  send(ui::Event::key_down(ui::Key::A, ui::MOD_CTRL));
+  send(ui::Event::text_input("315"));
+  send(ui::Event::key_down(ui::Key::Tab));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(widget("records")->table->grid->selection.value().active, (ui::TableCell{0, 2}));
+  ASSERT_NE(widget("table_detail_field"), nullptr);
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 1);
+  EXPECT_EQ(area().editor().save_state().at("detail_field_id"), counter);
+  EXPECT_EQ(area().editor().save_workspace_state().at("advanced").at("cell_field"), counter);
+  EXPECT_EQ(widget("cell_value")->string.value(), std::to_string(INT64_MAX));
+  type("cell_value", "9223372036854775806");
+  click("save_cell");
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(*project().table()->cell(0, 0), 315);
+  EXPECT_EQ(project().table()->cell(0, 1)->get<int64_t>(), INT64_C(9223372036854775806));
+}
+
+TEST_F(TableWorkbenchEditorPython, AllHiddenGridColumnsUseSafeRecordSelectionAndOpenTheWholeRecord)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board(true));
+  auto definition = area().editor().save_state().at("view");
+  definition["kind"] = "grid";
+  for (auto &column : definition["columns"]) { column["hidden"] = true; }
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "put_table_view"}, {"id", board_view}, {"table_id", samples},
+      {"name", "Record identities"}, {"definition", definition}}})));
+  ASSERT_TRUE(pump([&] { return !project().busy() && widget("records") && !widget("records")->table->grid && widget("records")->table->rows == 3; }));
+  const auto *grid = widget("records");
+  const auto &style = f.screen.ui()->style();
+  point({grid->rect.x + style.unit, grid->rect.y + style.pixel + 2.5f * style.unit * grid->table->row_height});
+  EXPECT_EQ(project().record_id(), row_b);
+  ASSERT_NE(widget("table_detail_field"), nullptr);
+  EXPECT_EQ(widget("table_detail_field")->items.size(), 8u);
+  choose("table_detail_field", 5);
+  type("cell_value", "2026-10-22");
+  click("save_cell");
+  ASSERT_TRUE(pump([&] { return !project().busy() && project().table()->cell(1, 5); }));
+  EXPECT_EQ(*project().table()->cell(1, 5), "2026-10-22");
+  EXPECT_EQ(project().table()->cell(0, 5), nullptr);
+}
+
+TEST_F(TableWorkbenchEditorPython, ManagementBindingsCannotRenameAnotherFieldOrSurviveWorkspaceReplacement)
+{
+  cell(0, 1);
+  click("table_details");
+  click("manage_objects");
+  ASSERT_NE(widget("rename_field"), nullptr);
+  EXPECT_EQ(widget("manage_field"), nullptr);
+  const auto old_name = widget("rename_field")->string;
+  const auto old_save = widget("save_field_name")->on_click;
+  choose("table_detail_field", 3);
+  ASSERT_NE(widget("rename_field"), nullptr);
+  EXPECT_EQ(widget("rename_field")->string.value(), "State");
+  const auto revision = project().project()->revision;
+  old_name.assign("Wrong field name"); old_save(); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(widget("rename_field")->string.value(), "State");
+  assign("rename_field", "Condition");  // Binding safety test; no pointer-click metric is claimed here.
+  ASSERT_TRUE(area().editor().has_unsaved_changes());
+  const auto saved = area().editor().save_workspace_state();
+  const auto replaced_name = widget("rename_field")->string;
+  ASSERT_TRUE(area().editor().load_workspace_state(saved));
+  ASSERT_TRUE(pump([&] { return widget("rename_field") != nullptr; }));
+  EXPECT_TRUE(replaced_name.value().empty());
+  replaced_name.assign("Dangling rename"); old_name.assign("Another dangling rename"); old_save(); frame();
+  EXPECT_EQ(widget("rename_field")->string.value(), "Condition");
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
+  ASSERT_TRUE(pump([&] { return widget("save_field_name") && widget("save_field_name")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(action("save_field_name"));
+  ASSERT_TRUE(pump([&] { return !project().busy() && !area().editor().has_unsaved_changes() && project().project()->revision == revision + 1; }));
+  EXPECT_EQ(project().table()->fields[0].name, "Temperature");
+  EXPECT_EQ(project().table()->fields[3].name, "Condition");
+  EXPECT_EQ(*project().table()->cell(0, 3), dry);
+}
+
+TEST_F(TableWorkbenchEditorPython, SweepReadsLiveInputsAndOldBindingsCannotRetargetOrSurviveRestore)
+{
+  cell(0, 1);
+  click("table_details");
+  click("project_sweep");
+  ASSERT_NE(widget("start"), nullptr);
+  assign("start", "300"); assign("stop", "310"); assign("count", "2");
+  ASSERT_NE(widget("apply_sweep"), nullptr);
+  ASSERT_TRUE(widget("apply_sweep")->enabled);
+  const auto old_start = widget("start")->string;
+  const auto old_copy = widget("copy_selected")->boolean;
+  const auto old_apply = widget("apply_sweep")->on_click;
+  const auto revision = project().project()->revision;
+  choose("table_detail_field", 1);
+  ASSERT_NE(widget("start"), nullptr);
+  old_start.assign("999"); old_copy.assign(false); old_apply(); frame();
+  EXPECT_EQ(widget("start")->string.value(), "300");
+  EXPECT_TRUE(widget("copy_selected")->boolean.value());
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, revision);
+  const auto old_axis_apply = widget("apply_sweep")->on_click;
+  choose("field", 1);
+  old_axis_apply(); frame();
+  EXPECT_FALSE(project().busy());
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(project().table()->records.size(), 3);
+  const auto saved = area().editor().save_workspace_state();
+  const auto replaced_start = widget("start")->string;
+  const auto replaced_field = widget("field")->index;
+  ASSERT_TRUE(area().editor().load_workspace_state(saved));
+  ASSERT_TRUE(pump([&] { return widget("start") && widget("apply_sweep"); }));
+  EXPECT_TRUE(replaced_start.value().empty());
+  EXPECT_EQ(replaced_field.value(), -1);
+  replaced_start.assign("777"); old_apply(); frame();
+  EXPECT_EQ(widget("start")->string.value(), "300");
+  EXPECT_EQ(project().project()->revision, revision);
+  // Keep a valid previous count, edit without Enter, then click Apply once. The click
+  // commits the active text first and must plan three rows, never the old count of two.
+  click("count");
+  send(ui::Event::key_down(ui::Key::A, ui::MOD_CTRL));
+  send(ui::Event::text_input("3"));
+  const auto *button = widget("apply_sweep"); ASSERT_NE(button, nullptr);
+  ASSERT_TRUE(button->enabled);
+  click("apply_sweep");
+  ASSERT_TRUE(pump([&] { return !project().busy() && project().table()->records.size() == 6; }));
+  EXPECT_EQ(project().project()->revision, revision + 1);
+  ASSERT_TRUE(project().undo());
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(*project().table()->cell(0, 0), 300);
+  EXPECT_EQ(project().table()->cell(0, 1)->get<int64_t>(), INT64_MAX);
+}
+
+TEST_F(TableWorkbenchEditorPython, LegacyWorkspaceRestoresItsAdvancedDraftFieldInsteadOfTheOldGridCursor)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board(true));
+  ASSERT_NO_FATAL_FAILURE(click(card_key("open").c_str()));
+  choose("table_detail_field", 5);
+  type("cell_value", "2026-12-03");
+  auto legacy = area().editor().save_workspace_state();
+  legacy["layout"].erase("detail_field_id");
+  legacy["parameters"]["active_field_id"] = temperature;
+  legacy["parameters"]["anchor_row"] = 0; legacy["parameters"]["active_row"] = 0;
+  legacy["parameters"]["anchor_column"] = 1; legacy["parameters"]["active_column"] = 1;
+  const auto revision = project().project()->revision;
+  ASSERT_TRUE(area().editor().load_workspace_state(legacy));
+  ASSERT_TRUE(pump([&] { return widget("cell_value") && widget("table_detail_field"); }));
+  EXPECT_EQ(widget("table_detail_field")->index.value(), 5);
+  EXPECT_EQ(area().editor().save_state().at("detail_field_id"), observed_date);
+  EXPECT_EQ(widget("cell_value")->string.value(), "2026-12-03");
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
+  click("save_cell");
+  ASSERT_TRUE(pump([&] { return !project().busy() && !area().editor().has_unsaved_changes() && project().project()->revision == revision + 1; }));
+  EXPECT_EQ(*project().table()->cell(0, 5), "2026-12-03");
+  EXPECT_EQ(*project().table()->cell(0, 0), 300);
+}
+
+TEST_F(TableWorkbenchEditorPython, RemovedFieldsOrRecordsKeepTheOriginalDraftVisibleUntilExplicitDiscard)
+{
+  cell(0, 1);
+  click("table_details");
+  type("cell_value", "321");
+  const auto old_save = widget("save_cell")->on_click;
+  Json commands = Json::array();
+  for (const auto &field : project().table()->fields) { commands.push_back({{"op", "delete_field"}, {"id", field.id}}); }
+  ASSERT_TRUE(project().apply(commands));
+  ASSERT_TRUE(pump([&] { return !project().busy() && widget("table_advanced_discard"); }));
+  EXPECT_TRUE(project().table()->fields.empty());
+  EXPECT_EQ(area().editor().save_workspace_state().at("advanced").at("cell_text"), "321");
+  EXPECT_EQ(area().editor().save_workspace_state().at("advanced").at("cell_field"), temperature);
+  const auto field_revision = project().project()->revision;
+  old_save(); frame();
+  EXPECT_EQ(project().project()->revision, field_revision);
+  click("table_advanced_discard");
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  ASSERT_TRUE(project().undo());
+  ASSERT_NO_FATAL_FAILURE(settled());
+
+  cell(0, 1);
+  type("cell_value", "322");
+  commands = Json::array();
+  for (const auto &record : project().table()->records) { commands.push_back({{"op", "delete_record"}, {"id", record.id}}); }
+  ASSERT_TRUE(project().apply(commands));
+  ASSERT_TRUE(pump([&] { return !project().busy() && widget("table_advanced_discard"); }));
+  EXPECT_TRUE(project().table()->records.empty());
+  EXPECT_EQ(area().editor().save_workspace_state().at("advanced").at("cell_text"), "322");
+  EXPECT_EQ(area().editor().save_workspace_state().at("advanced").at("cell_field"), temperature);
+  const auto record_revision = project().project()->revision;
+  click("table_advanced_discard");
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, record_revision);
+  ASSERT_TRUE(project().undo());
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(*project().table()->cell(0, 0), 300);
+}
+
+TEST_F(TableWorkbenchEditorPython, RemovedTablesKeepTheirDraftAndIdentityRecoverableWithoutATablePane)
+{
+  cell(0, 1);
+  click("table_details");
+  type("cell_value", "323");
+  const auto old_save = widget("save_cell")->on_click;
+  Json commands = Json::array();
+  for (const auto &table : project().tables()) { commands.push_back({{"op", "delete_table"}, {"id", table.id}}); }
+  ASSERT_TRUE(project().apply(commands));
+  ASSERT_TRUE(pump([&] { return !project().busy() && widget("table_advanced_discard"); }));
+  ASSERT_EQ(project().table(), nullptr);
+  EXPECT_EQ(area().editor().save_workspace_state().at("advanced").at("cell_text"), "323");
+  EXPECT_EQ(area().editor().save_workspace_state().at("advanced").at("cell_field"), temperature);
+  const auto revision = project().project()->revision;
+  old_save(); frame();
+  EXPECT_EQ(project().project()->revision, revision);
+  click("table_advanced_discard");
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(project().project()->revision, revision);
 }
 
 TEST_F(TableWorkbenchEditorPython, PasteFitsTheActualRectanglePreviewsAndUndoesAsOneEdit)

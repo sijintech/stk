@@ -1,0 +1,9 @@
+{
+  "name": "stk-development-checks",
+  "private": true,
+  "description": "On-demand developer checks, separate from product dependencies",
+  "devDependencies": {
+    "jscpd": "5.4.2",
+    "knip": "6.42.1"
+  }
+}

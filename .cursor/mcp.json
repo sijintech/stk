@@ -10,8 +10,21 @@
         }
       },
         "serena": {
-            "command": "C:\\Users\\zhou\\AppData\\Roaming\\Python\\Python311\\Scripts\\uv.exe",
-            "args": ["run", "--directory", "D:\\stk\\work\\serena", "serena-mcp-server"]
-      }
+  "command": "serena",
+  "args": [
+    "start-mcp-server",
+    "--context",
+    "ide",
+    "--project-from-cwd",
+    "--enable-web-dashboard",
+    "false",
+    "--open-web-dashboard",
+    "false"
+  ],
+  "env": {
+    "SERENA_USAGE_REPORTING": "false",
+    "STK_TOKEN_PLAN_API_KEY": ""
+  }
+}
     }
   }

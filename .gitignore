@@ -31,3 +31,10 @@ build/
 
 # STK desktop engine build trees
 /desktop/build*/
+
+# Local developer tooling: caches, reports and machine-specific MCP paths
+/.ai-tools/
+/.serena/*
+!/.serena/project.yml
+/.codex/config.toml
+/tools/ai/node_modules/

@@ -25,6 +25,8 @@ using io::Json;
 using Reply = bridge::Result<Json>;
 namespace fs = std::filesystem;
 
+std::string exact(const Json &value) { return io::python_json_dumps(value, true, true); }
+
 Json port(const std::string &name, const std::string &type, const bool required = false)
 {
   Json value = {{"name", name}, {"type", type}};
@@ -322,6 +324,40 @@ class WorkflowEditorPython : public ::testing::Test {
     std::string reason;
     ASSERT_TRUE(area().editor().navigate({{"workflow_id", workflow_id}, {"step", step}}, {}, reason));
     f.drv->frame();
+  }
+  /** Real text events, preserving the editor's explicit Apply boundary. */
+  void type_parameter(const std::string &name, const std::string &text, bool finish = true)
+  {
+    const auto key = "workflow_param/" + name + "/value";
+    const auto *input = widget(key); ASSERT_NE(input, nullptr) << key; ASSERT_TRUE(input->enabled);
+    const auto [x, y] = f.widget_center(input->key); f.drv->click(x, y);
+#ifdef __APPLE__
+    constexpr auto primary = wm::ModOS;
+#else
+    constexpr auto primary = wm::ModCtrl;
+#endif
+    f.drv->key(wm::Key::A, primary); f.drv->key(wm::Key::BackSpace);
+    if (!text.empty()) { f.drv->key(wm::Key::Unknown, wm::ModNone, text); }
+    f.drv->frame(); ASSERT_TRUE(f.screen.ui()->text_input_active());
+    ASSERT_EQ(f.screen.ui()->edit_state()->text(), text);
+    if (finish) { f.drv->key(wm::Key::Enter); f.drv->frame(); ASSERT_FALSE(f.screen.ui()->text_input_active()); }
+  }
+  void install_parameters(Json declarations, Json values = Json::object())
+  {
+    auto definition = analysis_document();
+    for (const auto &declaration : declarations) { definition["graph"]["parameters"].push_back(declaration); }
+    Json out;
+    ASSERT_NO_FATAL_FAILURE(call("project.analyses.update", {{"handle", handle()}, {"analysis_id", analysis_id},
+        {"name", "Temperature field"}, {"document", definition}, {"expected_revision", revision}}, out));
+    auto document = stored().at("document"); document["steps"][2]["parameters"] = values;
+    ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id},
+        {"name", "Temperature scan"}, {"document", document}, {"expected_revision", revision}}, out));
+    project().refresh();
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision == revision; }));
+    ASSERT_NO_FATAL_FAILURE(select("temperature"));
+    const auto name = declarations.at(0).at("name").get<std::string>();
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/" + name + "/mode") &&
+        widget("workflow_param/" + name + "/mode")->enabled && shows("All references and links are valid."); }));
   }
 };
 
@@ -636,7 +672,9 @@ TEST_F(WorkflowEditorPython, EditsAddLinkBindAndSaveTheCandidate)
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("After the changes all references and links are valid."); }));
   ASSERT_NO_FATAL_FAILURE(choose("workflow_param/colormap/mode", "Parameter table field"));
   ASSERT_NE(widget("workflow_param/colormap/field"), nullptr) << sidebar();
-  EXPECT_EQ(widget("workflow_param/colormap/field")->items.at(0), "Cases · Colormap");
+  EXPECT_EQ(widget("workflow_param/colormap/field")->index.value(), 0);  // no arbitrary default binding
+  EXPECT_EQ(widget("workflow_param/colormap/field")->items.at(1), "Cases · Colormap");
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_param/colormap/field", "Cases · Colormap"));
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
   const auto before = project().project()->revision;
   ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
@@ -649,6 +687,253 @@ TEST_F(WorkflowEditorPython, EditsAddLinkBindAndSaveTheCandidate)
   EXPECT_EQ(step.at("inputs").at("data").at("from"), "fields.files");
   EXPECT_EQ(step.at("parameters").at("colormap"), Json({{"$field", field_id}}));
   EXPECT_TRUE(saved.at("document").at("ui").at("positions").contains("analysis"));
+}
+
+TEST_F(WorkflowEditorPython, TypedParameterControlsSaveBooleansEnumsAndPlainStringsWithoutExecution)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({
+      {{"name", "enabled"}, {"type", "boolean"}, {"default", true}},
+      {{"name", "note"}, {"type", "string"}, {"default", "initial"}, {"description", "Experiment note"}}
+    }), {{"enabled", true}, {"note", "initial"}, {"colormap", "viridis"}}));
+  ASSERT_NE(widget("workflow_param/enabled/boolean"), nullptr);
+  widget("workflow_param/enabled/boolean")->boolean.assign(false); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_param/colormap/choice", "cividis"));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("note", "中文 value without JSON quotes"));
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/note/apply"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+  const auto before = project().project()->revision;
+  ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().project()->revision == before + 1 && !area().editor().has_unsaved_changes(); }));
+  const auto parameters = stored().at("document").at("steps")[2].at("parameters");
+  EXPECT_EQ(parameters.at("enabled"), false); EXPECT_EQ(parameters.at("colormap"), "cividis");
+  EXPECT_EQ(parameters.at("note"), "中文 value without JSON quotes");
+  EXPECT_EQ(calls("project.workflow_runs.prepare"), 0u); EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, ParameterFieldModeWaitsForAnExplicitCompatibleTypeAndUnit)
+{
+  const std::string temperature = "44444444-4444-4444-8444-444444444444";
+  const std::string wrong_unit = "45454545-4545-4545-8545-454545454545";
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
+      {{"op", "add_field"}, {"id", temperature}, {"table_id", table_id}, {"name", "Temperature"}, {"type", "number"}, {"unit", "K"}},
+      {{"op", "add_field"}, {"id", wrong_unit}, {"table_id", table_id}, {"name", "Energy"}, {"type", "number"}, {"unit", "eV"}}
+    }}}, out));
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({{{"name", "temperature"}, {"type", "number"}, {"unit", "K"}, {"default", 300}}})));
+  const auto before = area().editor().save_workspace_state().at("draft").at("document");
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_param/temperature/mode", "Parameter table field"));
+  const auto *picker = widget("workflow_param/temperature/field"); ASSERT_NE(picker, nullptr);
+  ASSERT_EQ(picker->items.size(), 2u); EXPECT_EQ(picker->items[1], "Cases · Temperature");
+  EXPECT_EQ(picker->index.value(), 0);
+  EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document"), before);
+  EXPECT_FALSE(area().editor().has_unsaved_changes());
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_param/temperature/field", "Cases · Temperature"));
+  EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document").at("steps")[2].at("parameters").at("temperature"),
+      Json({{"$field", temperature}}));
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+}
+
+TEST_F(WorkflowEditorPython, IncompatibleStoredFieldRemainsVisibleUntilExplicitlyRebound)
+{
+  const std::string temperature = "46464646-4646-4646-8646-464646464646";
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", {
+      {{"op", "add_field"}, {"id", temperature}, {"table_id", table_id}, {"name", "Temperature"}, {"type", "number"}, {"unit", "K"}}
+    }}}, out));
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({{{"name", "temperature"}, {"type", "number"}, {"unit", "K"}, {"default", 300}}})));
+  auto state = area().editor().save_workspace_state();
+  state["draft"]["document"]["steps"][2]["parameters"]["temperature"] = {{"$field", field_id}};
+  ASSERT_TRUE(area().editor().load_workspace_state(state));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/temperature/field") != nullptr; }));
+  const auto *picker = widget("workflow_param/temperature/field");
+  ASSERT_EQ(picker->items.size(), 3u); EXPECT_EQ(picker->index.value(), 2);
+  EXPECT_NE(picker->items[2].find("Cases · Colormap"), std::string::npos);
+  EXPECT_TRUE(shows("The current field is missing or incompatible"));
+  EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document").at("steps")[2].at("parameters").at("temperature"),
+      Json({{"$field", field_id}}));
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_param/temperature/field", "Cases · Temperature"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return shows("After the changes all references and links are valid."); }));
+  EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document").at("steps")[2].at("parameters").at("temperature"),
+      Json({{"$field", temperature}}));
+}
+
+TEST_F(WorkflowEditorPython, NumericParameterTextPreservesInt64AndNegativeZeroAndRejectsOverflow)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({
+      {{"name", "count"}, {"type", "integer"}, {"default", 1}, {"minimum", 0}},
+      {{"name", "offset"}, {"type", "number"}, {"default", 0.0}, {"minimum", -10}, {"maximum", 10}}
+    }), {{"count", 1}, {"offset", 0.0}}));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("count", "9223372036854775807"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/count/apply"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/offset/value") && widget("workflow_param/offset/value")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("offset", "-0.0"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/offset/apply"));
+  auto parameters = area().editor().save_workspace_state().at("draft").at("document").at("steps")[2].at("parameters");
+  ASSERT_TRUE(parameters.at("count").is_number_integer()); EXPECT_EQ(parameters.at("count").get<int64_t>(), INT64_MAX);
+  ASSERT_TRUE(parameters.at("offset").is_number_float()); EXPECT_TRUE(std::signbit(parameters.at("offset").get<double>()));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/count/value") && widget("workflow_param/count/value")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("count", "18446744073709551616"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/count/apply"));
+  EXPECT_EQ(widget("workflow_param/count/value")->string.value(), "18446744073709551616");
+  EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document").at("steps")[2].at("parameters"), parameters);
+  ASSERT_NE(widget("workflow_save"), nullptr); EXPECT_FALSE(widget("workflow_save")->enabled);
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/count/discard"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+  const auto before = project().project()->revision; ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return project().project()->revision == before + 1; }));
+  parameters = stored().at("document").at("steps")[2].at("parameters");
+  EXPECT_EQ(parameters.at("count").get<int64_t>(), INT64_MAX);
+  EXPECT_TRUE(std::signbit(parameters.at("offset").get<double>()));
+}
+
+TEST_F(WorkflowEditorPython, InvalidParameterTextSurvivesOtherEditsAndWorkspaceRestore)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({
+      {{"name", "count"}, {"type", "integer"}, {"default", 1}},
+      {{"name", "enabled"}, {"type", "boolean"}, {"default", true}}
+    }), {{"count", 1}, {"enabled", true}}));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("count", "invalid integer"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/count/apply"));
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  ASSERT_NE(widget("workflow_param/enabled/boolean"), nullptr);
+  widget("workflow_param/enabled/boolean")->boolean.assign(false); f.drv->frame();
+  EXPECT_EQ(widget("workflow_param/count/value")->string.value(), "invalid integer");
+  EXPECT_EQ(widget("workflow_param/count/mode")->index.value(), 1);
+  EXPECT_FALSE(widget("workflow_param/count/mode")->enabled);
+  auto workspace = area().editor().save_workspace_state();
+  ASSERT_TRUE(area().editor().load_workspace_state(workspace));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/count/value") &&
+      widget("workflow_param/count/value")->string.value() == "invalid integer"; }));
+  for (int i = 0; i < 5; ++i) { f.drv->frame(); loop.run_ready(); }
+  EXPECT_EQ(widget("workflow_param/count/value")->string.value(), "invalid integer");
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_FALSE(widget("workflow_save")->enabled);
+  EXPECT_EQ(calls("project.workflows.update"), 1u);  // only the explicit fixture setup
+  EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, RetainedParameterApplyCannotOverwriteANewerCandidate)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({
+      {{"name", "count"}, {"type", "integer"}, {"default", 1}},
+      {{"name", "enabled"}, {"type", "boolean"}, {"default", true}}
+    }), {{"count", 1}, {"enabled", true}}));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("count", "2"));
+  const auto *apply = widget("workflow_param/count/apply"); ASSERT_NE(apply, nullptr); ASSERT_TRUE(apply->enabled);
+  const auto retained = apply->on_click;
+  widget("workflow_param/enabled/boolean")->boolean.assign(false); f.drv->frame();
+  retained(); f.drv->frame();
+  auto document = area().editor().save_workspace_state().at("draft").at("document");
+  EXPECT_EQ(document.at("steps")[2].at("parameters").at("count"), 1);
+  EXPECT_EQ(document.at("steps")[2].at("parameters").at("enabled"), false);
+  EXPECT_EQ(widget("workflow_param/count/value")->string.value(), "2");
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/count/apply"));
+  document = area().editor().save_workspace_state().at("draft").at("document");
+  EXPECT_EQ(document.at("steps")[2].at("parameters").at("count"), 2);
+  EXPECT_FALSE(widget("workflow_param/count/apply")->enabled);
+}
+
+TEST_F(WorkflowEditorPython, RetainedParameterTextBindingCannotReplaceARestoredDraft)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({{{"name", "note"}, {"type", "string"}, {"default", "initial"}}}),
+      {{"note", "initial"}}));
+  const auto *input = widget("workflow_param/note/value"); ASSERT_NE(input, nullptr);
+  const auto old_binding = input->string;
+  auto saved = area().editor().save_workspace_state();
+  saved["literal_text"]["temperature/note"] = "restored draft";
+  ASSERT_TRUE(area().editor().load_workspace_state(saved));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/note/value") &&
+      widget("workflow_param/note/value")->string.value() == "restored draft"; }));
+  old_binding.assign("obsolete callback"); f.drv->frame();
+  EXPECT_EQ(widget("workflow_param/note/value")->string.value(), "restored draft");
+  EXPECT_EQ(area().editor().save_workspace_state().at("literal_text").at("temperature/note"), "restored draft");
+  EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, ActiveParameterTextIsCapturedWithoutApplyingOrRunning)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({{{"name", "note"}, {"type", "string"}, {"default", "initial"}}}),
+      {{"note", "initial"}}));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("note", "unfinished draft", false));
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  auto workspace = area().editor().save_workspace_state();
+  EXPECT_EQ(workspace.at("literal_text").at("temperature/note"), "unfinished draft");
+  EXPECT_EQ(workspace.at("literal_modes").at("temperature/note"), "string");
+  EXPECT_EQ(workspace.at("draft").at("document").at("steps")[2].at("parameters").at("note"), "initial");
+  f.drv->key(wm::Key::Esc); f.drv->frame();
+  EXPECT_EQ(widget("workflow_param/note/value")->string.value(), "initial");
+  EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, ActiveParameterTextAppliesWithOneMouseClickWithoutEnter)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({{{"name", "note"}, {"type", "string"}, {"default", "initial"}}}),
+      {{"note", "initial"}}));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("note", "single click", false));
+  const auto *apply = widget("workflow_param/note/apply"); ASSERT_NE(apply, nullptr); ASSERT_TRUE(apply->enabled);
+  const auto [x, y] = f.widget_center(apply->key);
+  // Clicking the explicit action ends the text edit, then applies that same text in one event.
+  f.drv->click(x, y); f.drv->frame();
+  EXPECT_FALSE(f.screen.ui()->text_input_active());
+  EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document").at("steps")[2].at("parameters").at("note"),
+      "single click");
+  EXPECT_TRUE(area().editor().save_workspace_state().at("literal_text").empty());
+  EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, InactiveWorkflowTabCannotCaptureAnotherTabsActiveParameterText)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({{{"name", "note"}, {"type", "string"}, {"default", "initial"}}}),
+      {{"note", "initial"}}));
+  const auto first = area().active_tab(); auto *first_editor = &area().editor();
+  ASSERT_TRUE(area().add_tab(kEditorWorkflow)); f.drv->frame();
+  const auto second = area().active_tab(); ASSERT_NE(first, second);
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/note/value") && widget("workflow_param/note/value")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("note", "second tab only", false));
+  EXPECT_FALSE(first_editor->has_unsaved_changes());
+  EXPECT_TRUE(first_editor->save_workspace_state().at("literal_text").empty());
+  const auto state = area().save_workspace_state();
+  EXPECT_TRUE(state.at("tabs")[first].at("state").at("literal_text").empty());
+  EXPECT_EQ(state.at("tabs")[second].at("state").at("literal_text").at("temperature/note"), "second tab only");
+  EXPECT_EQ(state.at("tabs")[first].at("state").at("draft").at("document").at("steps")[2].at("parameters").at("note"), "initial");
+  f.drv->key(wm::Key::Esc); f.drv->frame();
+  EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, BrowsingMoreThanTwoHundredCleanParametersDoesNotCreateWorkspaceDrafts)
+{
+  Json declarations = Json::array(), values = Json::object();
+  // The five preset parameters plus 59 customer parameters reach the published 64 limit.
+  for (int i = 0; i < 59; ++i) {
+    const auto name = "p" + std::to_string(i);
+    declarations.push_back({{"name", name}, {"type", "integer"}, {"default", i}}); values[name] = i;
+  }
+  ASSERT_NO_FATAL_FAILURE(install_parameters(declarations, values));
+  auto document = stored().at("document");
+  for (int i = 1; i < 4; ++i) {
+    document["steps"].push_back({{"id", "extra_" + std::to_string(i)}, {"kind", "analysis"}, {"ref", {{"analysis", analysis_id}}},
+        {"inputs", {{"data", {{"from", "fields.files"}}}}}, {"parameters", values}});
+  }
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id},
+      {"name", "Temperature scan"}, {"document", document}, {"expected_revision", revision}}, out));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision == revision &&
+      shows("Temperature scan · 6 steps"); }));
+  for (const auto &step : {"temperature", "extra_1", "extra_2", "extra_3"}) {
+    ASSERT_NO_FATAL_FAILURE(select(step));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/p58/value") != nullptr; }));
+    EXPECT_FALSE(area().editor().has_unsaved_changes());
+  }
+  // 236 visited fixed values exceed the old cache-entry cap, but none is an edit.
+  const auto state = area().editor().save_workspace_state();
+  EXPECT_TRUE(state.at("literal_text").empty()); EXPECT_TRUE(state.at("literal_modes").empty());
+  ASSERT_TRUE(area().editor().load_workspace_state(state));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/p58/value") != nullptr &&
+      !area().editor().has_unsaved_changes(); }));
+  EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
 }
 
 TEST_F(WorkflowEditorPython, CanvasGesturesRefuseMismatchedTypesOrderStepsAndMove)
@@ -1016,6 +1301,28 @@ TEST_F(WorkflowEditorPython, HomeArchivesAFailedRun)
   EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
 
+TEST_F(WorkflowEditorPython, HiddenRestoredStepLabelProtectsDraftBeforeFirstFrame)
+{
+  ASSERT_NO_FATAL_FAILURE(select("temperature"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_step_label"); }));
+  const auto saved = area().editor().save_workspace_state();
+  auto hidden = f.shell->registry().create(kEditorWorkflow);
+  ASSERT_NE(hidden, nullptr);
+  ASSERT_TRUE(hidden->load_workspace_state(saved));
+  EXPECT_FALSE(hidden->has_unsaved_changes());
+  EXPECT_TRUE(hidden->can_change_project_selection(project().project()->id));
+
+  auto edited = saved;
+  edited["label_text"] = "Unapplied hidden step label";
+  ASSERT_TRUE(hidden->load_workspace_state(edited));
+  EXPECT_TRUE(hidden->has_unsaved_changes());
+  EXPECT_FALSE(hidden->can_change_project_selection(project().project()->id));
+  EXPECT_TRUE(hidden->can_change_project_selection("another-project"));
+  EXPECT_EQ(hidden->save_workspace_state(), edited);
+  EXPECT_EQ(calls("project.workflows.update"), 0u);
+  EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
 TEST_F(WorkflowEditorPython, WorkspaceReopensCandidateAndUnappliedTextWithoutNextFrameResetOrExecution)
 {
   ASSERT_NO_FATAL_FAILURE(select("temperature"));
@@ -1026,6 +1333,9 @@ TEST_F(WorkflowEditorPython, WorkspaceReopensCandidateAndUnappliedTextWithoutNex
   saved["draft"]["document"]["steps"][2]["parameters"]["colormap"] = "viridis";
   saved["literal_text"]["temperature/colormap"] = "\"cividis\"";
   const auto before = project().project()->revision;
+  EXPECT_FALSE(area().set_tab_type(0, kEditorWorkspace));
+  f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("workflow_discard"));
   ASSERT_TRUE(area().set_tab_type(0, kEditorWorkspace)); f.drv->frame();
   ASSERT_TRUE(area().set_tab_type(0, kEditorWorkflow));
   ASSERT_TRUE(area().editor().load_workspace_state(saved));
@@ -1120,6 +1430,70 @@ TEST_F(WorkflowEditorPython, WorkspaceBaselineIgnoresObjectOrderButRejectsChange
   EXPECT_EQ(area().editor().save_workspace_state().at("draft").at("document").at("steps")[2].at("parameters").at("colormap"), "viridis");
   EXPECT_EQ(project().project()->revision, before_revision);
   EXPECT_EQ(calls("project.workflows.update"), 0u); EXPECT_EQ(calls("project.workflow_runs.start"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, LocalHistoryRestoresStructuralEditsAndRejectsOldCallbacksWithoutSaving)
+{
+  const auto candidate = [this] { return Json(area().editor().save_workspace_state().at("draft").at("document")); };
+  const auto pointer = [this](const char *key) {
+    const auto *button = widget(key); ASSERT_NE(button, nullptr); ASSERT_TRUE(button->enabled) << key;
+    const auto [x, y] = f.widget_center(key); f.drv->click(x, y); f.drv->frame();
+  };
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_add_step") && widget("workflow_add_step")->enabled; }));
+  const auto baseline = exact(candidate()); const auto before = project().project()->revision;
+  EXPECT_FALSE(widget("workflow_undo")->enabled); EXPECT_FALSE(widget("workflow_redo")->enabled);
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_add_kind", "Analysis"));
+  ASSERT_NO_FATAL_FAILURE(choose("workflow_add_object", "Other analysis"));
+  ASSERT_NO_FATAL_FAILURE(pointer("workflow_add_step"));
+  const auto added = exact(candidate()); ASSERT_NE(added, baseline);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_undo") && widget("workflow_undo")->enabled; }));
+  const auto old_undo = widget("workflow_undo")->on_click;
+  ASSERT_NO_FATAL_FAILURE(pointer("workflow_remove_step"));
+  const auto removed = exact(candidate()); ASSERT_NE(removed, added);
+  old_undo(); f.drv->frame(); EXPECT_EQ(exact(candidate()), removed);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_undo") && widget("workflow_undo")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(pointer("workflow_undo")); EXPECT_EQ(exact(candidate()), added);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_undo") && widget("workflow_undo")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(pointer("workflow_undo")); EXPECT_EQ(exact(candidate()), baseline);
+  EXPECT_FALSE(area().editor().has_unsaved_changes()); EXPECT_TRUE(widget("workflow_redo")->enabled);
+#ifdef __APPLE__
+  constexpr auto primary = wm::ModOS;
+#else
+  constexpr auto primary = wm::ModCtrl;
+#endif
+  f.drv->key(wm::Key::Z, primary | wm::ModShift); f.drv->frame(); EXPECT_EQ(exact(candidate()), added);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_undo") && widget("workflow_undo")->enabled; }));
+  f.drv->key(wm::Key::Z, primary); f.drv->frame(); EXPECT_EQ(exact(candidate()), baseline);
+  EXPECT_EQ(project().project()->revision, before); EXPECT_EQ(exact(stored().at("document")), baseline);
+  EXPECT_EQ(calls("project.workflows.update"), 0u);
+}
+
+TEST_F(WorkflowEditorPython, UndoPreservesCleanHistoryAndUnappliedNamesBlockNavigationAndSave)
+{
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_name") && widget("workflow_rename") && !widget("workflow_rename")->enabled; }));
+  const auto pointer = [this](const char *key) {
+    const auto *button = widget(key); ASSERT_NE(button, nullptr); ASSERT_TRUE(button->enabled) << key;
+    const auto [x, y] = f.widget_center(key); f.drv->click(x, y); f.drv->frame();
+  };
+  widget("workflow_name")->string.assign("Renamed"); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_rename") && widget("workflow_rename")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(pointer("workflow_rename"));
+  widget("workflow_name")->string.assign("Temperature scan"); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_rename") && widget("workflow_rename")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(pointer("workflow_rename"));
+  EXPECT_FALSE(area().editor().has_unsaved_changes()); EXPECT_TRUE(widget("workflow_undo")->enabled);
+  ASSERT_NO_FATAL_FAILURE(pointer("workflow_undo")); EXPECT_EQ(widget("workflow_name")->string.value(), "Renamed");
+  widget("workflow_name")->string.assign("Pending name"); f.drv->frame();
+  EXPECT_TRUE(area().editor().has_unsaved_changes()); EXPECT_FALSE(widget("workflow_save")->enabled);
+  EXPECT_FALSE(widget("workflow_undo")->enabled); EXPECT_FALSE(widget("workflow_new")->enabled);
+  EXPECT_FALSE(widget("workflow_copy")->enabled); EXPECT_FALSE(widget("workflow_reload")->enabled);
+  std::string reason;
+  EXPECT_FALSE(area().editor().navigate({{"workflow_id", broken_id}}, {}, reason));
+  EXPECT_EQ(reason, "workflow.navigate_unsaved"); EXPECT_EQ(widget("workflow_name")->string.value(), "Pending name");
+  ASSERT_NO_FATAL_FAILURE(pointer("workflow_discard"));
+  EXPECT_FALSE(area().editor().has_unsaved_changes()); EXPECT_EQ(widget("workflow_name")->string.value(), "Temperature scan");
+  EXPECT_FALSE(widget("workflow_undo")->enabled); EXPECT_FALSE(widget("workflow_redo")->enabled);
+  EXPECT_EQ(calls("project.workflows.update"), 0u);
 }
 
 }  // namespace

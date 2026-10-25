@@ -28,83 +28,6 @@ bool same_json(const Json &a, const Json &b)
   return io::python_json_dumps(a, true, true) == io::python_json_dumps(b, true, true);
 }
 
-/** SAX avoids both duplicate-key replacement and the DOM parser's integer-overflow-to-double
- * fallback. Parsing is bounded before recursive serializers or copies are used. */
-class StrictValue final : public nlohmann::json_sax<Json> {
- public:
-  Json result;
-  std::string error;
-
-  bool null() override { return value(nullptr); }
-  bool boolean(bool v) override { return value(v); }
-  bool number_integer(number_integer_t v) override { return value(v); }
-  bool number_unsigned(number_unsigned_t v) override { return value(v); }
-  bool number_float(number_float_t v, const string_t &token) override
-  {
-    if (!std::isfinite(v) || token.find_first_of(".eE") == std::string::npos) {
-      return fail("JSON integer tokens must fit signed or unsigned 64 bits, and numbers must be finite");
-    }
-    return value(v);
-  }
-  bool string(string_t &v) override { return value(std::move(v)); }
-  bool binary(binary_t &) override { return fail("Binary data is not a JSON parameter value"); }
-  bool start_object(size_t) override { return start(true); }
-  bool start_array(size_t) override { return start(false); }
-  bool end_object() override { return finish(); }
-  bool end_array() override { return finish(); }
-  bool key(string_t &key) override
-  {
-    auto &frame = stack_.back();
-    if (!frame.keys.insert(key).second) { return fail("JSON objects must not contain duplicate keys"); }
-    frame.key = std::move(key);
-    return true;
-  }
-  bool parse_error(size_t, const std::string &, const nlohmann::detail::exception &) override
-  {
-    return fail("Enter one valid finite JSON value with no trailing data");
-  }
-
- private:
-  struct Frame {
-    Json data;
-    std::set<std::string> keys;
-    std::string key;
-  };
-  std::vector<Frame> stack_;
-
-  bool fail(const char *message) { error = message; return false; }
-  bool start(bool object)
-  {
-    if (stack_.size() > Draft::max_depth) { return fail("Analysis JSON exceeds its depth limit"); }
-    stack_.push_back({object ? Json::object() : Json::array(), {}, {}});
-    return true;
-  }
-  bool value(Json v)
-  {
-    if (stack_.size() > Draft::max_depth) { return fail("Analysis JSON exceeds its depth limit"); }
-    if (stack_.empty()) { result = std::move(v); }
-    else if (stack_.back().data.is_array()) { stack_.back().data.push_back(std::move(v)); }
-    else { stack_.back().data[stack_.back().key] = std::move(v); }
-    return true;
-  }
-  bool finish()
-  {
-    auto completed = std::move(stack_.back().data); stack_.pop_back();
-    return value(std::move(completed));
-  }
-};
-
-Json strict_value(std::string_view text)
-{
-  require(text.size() <= Draft::max_text_bytes, "Parameter text exceeds its 384 KiB limit");
-  require(core::utf8::is_valid(text), "Parameter text must be valid UTF-8");
-  require(!text.starts_with("\xef\xbb\xbf"), "JSON text must not begin with a UTF-8 byte order mark");
-  StrictValue parser;
-  const bool ok = Json::sax_parse(text.begin(), text.end(), &parser, Json::input_format_t::json, true);
-  require(ok, parser.error.empty() ? "Invalid JSON parameter value" : parser.error.c_str());
-  return std::move(parser.result);
-}
-
 void parameter_key(const std::string &name)
 {
   require(name.size() <= Draft::max_parameters_bytes && core::utf8::is_valid(name),
@@ -157,7 +80,7 @@ void AnalysisParameterDraft::pin(std::string handle, std::string analysis_id, in
   Json detached = document;
   handle_ = std::move(handle); analysis_id_ = std::move(analysis_id); revision_ = revision;
   name_ = std::move(name); baseline_ = std::move(detached); edits_.clear(); outputs_override_.reset();
-  graph_.reset(); ++generation_; ++version_; ++evaluation_version_;
+  graph_.reset(); clear_history(); ++generation_; ++version_; ++evaluation_version_;
 }
 
 io::Json AnalysisParameterDraft::save_workspace_state() const
@@ -200,7 +123,8 @@ bool AnalysisParameterDraft::load_workspace_state(const Json &value, const std::
 void AnalysisParameterDraft::reset()
 {
   handle_.clear(); analysis_id_.clear(); name_.clear(); revision_ = -1;
-  baseline_ = nullptr; edits_.clear(); outputs_override_.reset(); graph_.reset(); ++generation_; ++version_; ++evaluation_version_;
+  baseline_ = nullptr; edits_.clear(); outputs_override_.reset(); graph_.reset(); clear_history();
+  ++generation_; ++version_; ++evaluation_version_;
 }
 
 bool AnalysisParameterDraft::current(const std::string &handle, int64_t revision) const
@@ -272,9 +196,11 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::set(const std::string
   try {
     parameter_key(name); check_analysis_json_bounds(value);
     Json next = parameters(); next[name] = value;
-    check_analysis_document_bounds(document_with(next));
+    const auto candidate = document_with(next);
+    check_analysis_document_bounds(candidate);
     const auto current = override_value(name);
     if (current && same_json(*current, value)) { return {true, {}}; }
+    record_history(candidate, true);
     const auto &base = baseline_.at("parameters");
     if (base.contains(name) && same_json(base.at(name), value)) { edits_.erase(name); }
     else { edits_[name] = value; }
@@ -291,7 +217,7 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::set_text(const std::s
     require(text.size() <= max_text_bytes && core::utf8::is_valid(text),
             "Parameter text must be valid UTF-8 of at most 384 KiB");
     require(mode == TextMode::Json || mode == TextMode::LiteralString, "Invalid parameter text mode");
-    return set(name, mode == TextMode::Json ? strict_value(text) : Json(std::string(text)), generation);
+    return set(name, mode == TextMode::Json ? parse_parameter_json(text) : Json(std::string(text)), generation);
   }
   catch (const std::invalid_argument &error) { return {false, error.what()}; }
 }
@@ -302,6 +228,8 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::remove(const std::str
   try {
     parameter_key(name);
     if (!has_override(name)) { return {true, {}}; }
+    auto next = parameters(); next.erase(name);
+    record_history(document_with(next), true);
     if (baseline_.at("parameters").contains(name)) { edits_[name] = std::nullopt; }
     else { edits_.erase(name); }
     ++version_; ++evaluation_version_; return {true, {}};
@@ -328,6 +256,7 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::set_outputs(const Jso
     Json candidate = candidate_document(); candidate["outputs"] = values;
     check_analysis_document_bounds(candidate);
     if (values == outputs()) { return {true, {}}; }
+    record_history(candidate, true);
     if (values == baseline_.at("outputs")) { outputs_override_.reset(); }
     else { outputs_override_ = values; }
     ++version_; ++evaluation_version_; return {true, {}};
@@ -416,6 +345,7 @@ AnalysisParameterDraft::EditResult AnalysisParameterDraft::edit_graph(
     Json before = graph(), after = next;
     before.erase("ui"); after.erase("ui");
     const bool evaluative = !outputs_same || !same_json(before, after);
+    record_history(candidate, evaluative);
     if (same_json(next, baseline_.at("graph"))) { graph_.reset(); }
     else { graph_ = std::move(next); }
     if (same_json(requested, baseline_.at("outputs"))) { outputs_override_.reset(); }
@@ -803,8 +733,96 @@ std::map<AnalysisParameterDraft::LinkKey, std::optional<std::string>> AnalysisPa
 bool AnalysisParameterDraft::revert(uint64_t generation)
 {
   if (!accepts(generation)) { return false; }
-  if (dirty()) { edits_.clear(); outputs_override_.reset(); graph_.reset(); ++version_; ++evaluation_version_; }
+  if (dirty()) {
+    const bool evaluative = !edits_.empty() || outputs_override_.has_value() || evaluative_graph_edits();
+    edits_.clear(); outputs_override_.reset(); graph_.reset(); ++version_;
+    if (evaluative) { ++evaluation_version_; }
+  }
+  clear_history();
   return true;
+}
+
+void AnalysisParameterDraft::clear_history()
+{
+  history_.clear(); history_cursor_ = history_bytes_ = 0;
+}
+
+void AnalysisParameterDraft::record_history(const Json &next, const bool evaluative)
+{
+  if (suppress_history_) { return; }
+  HistoryEdit edit{io::python_json_dumps(candidate_document(), true, true), io::python_json_dumps(next, true, true), evaluative};
+  for (size_t i = history_cursor_; i < history_.size(); ++i) { history_bytes_ -= history_[i].bytes(); }
+  history_.erase(history_.begin() + history_cursor_, history_.end());
+  history_bytes_ += edit.bytes(); history_.push_back(std::move(edit));
+  while (history_.size() > max_history_steps || history_bytes_ > max_history_bytes) {
+    history_bytes_ -= history_.front().bytes(); history_.erase(history_.begin());
+  }
+  history_cursor_ = history_.size();
+}
+
+AnalysisParameterDraft::EditResult AnalysisParameterDraft::restore_history(const bool forward, const uint64_t generation)
+{
+  if (!accepts(generation)) { return {false, "The analysis draft has changed or is unavailable"}; }
+  if (forward ? !can_redo() : !can_undo()) { return {false, forward ? "Nothing to redo" : "Nothing to undo"}; }
+  try {
+    const auto &edit = history_[forward ? history_cursor_ : history_cursor_ - 1];
+    const auto candidate = Json::parse(forward ? edit.after : edit.before);
+    std::map<std::string, std::optional<Json>> edits;
+    const auto &parameters = candidate.at("parameters");
+    for (const auto &[key, old] : baseline_.at("parameters").items()) {
+      (void)old;
+      if (!parameters.contains(key)) { edits[key] = std::nullopt; }
+    }
+    for (const auto &[key, value] : parameters.items()) {
+      if (!baseline_.at("parameters").contains(key) || !same_json(value, baseline_.at("parameters").at(key))) { edits[key] = value; }
+    }
+    std::optional<Json> graph, outputs;
+    if (!same_json(candidate.at("graph"), baseline_.at("graph"))) { graph = candidate.at("graph"); }
+    if (!same_json(candidate.at("outputs"), baseline_.at("outputs"))) { outputs = candidate.at("outputs"); }
+    edits_.swap(edits); graph_.swap(graph); outputs_override_.swap(outputs);
+    if (forward) { ++history_cursor_; } else { --history_cursor_; }
+    ++version_; if (edit.evaluative) { ++evaluation_version_; }
+    return {true, {}};
+  }
+  catch (const std::exception &error) { return {false, error.what()}; }
+}
+
+AnalysisParameterDraft::EditResult AnalysisParameterDraft::undo(const uint64_t generation)
+{
+  return restore_history(false, generation);
+}
+
+AnalysisParameterDraft::EditResult AnalysisParameterDraft::redo(const uint64_t generation)
+{
+  return restore_history(true, generation);
+}
+
+AnalysisParameterDraft::EditResult AnalysisParameterDraft::edit_group(
+    const uint64_t generation, const std::function<EditResult(AnalysisParameterDraft &)> &change)
+{
+  if (!accepts(generation)) { return {false, "The analysis draft has changed or is unavailable"}; }
+  try {
+    AnalysisParameterDraft candidate;
+    candidate.handle_ = handle_; candidate.analysis_id_ = analysis_id_; candidate.name_ = name_; candidate.revision_ = revision_;
+    candidate.generation_ = generation_; candidate.version_ = version_; candidate.evaluation_version_ = evaluation_version_;
+    candidate.baseline_ = baseline_; candidate.edits_ = edits_; candidate.outputs_override_ = outputs_override_; candidate.graph_ = graph_;
+    candidate.suppress_history_ = true;
+    auto result = change(candidate);
+    if (!result.accepted) { return result; }
+    if (candidate.generation_ != generation_ || candidate.handle_ != handle_ || candidate.analysis_id_ != analysis_id_ ||
+        candidate.revision_ != revision_) { return {false, "A grouped edit cannot replace the analysis draft identity"}; }
+    const auto next = candidate.candidate_document();
+    auto before = candidate_document();
+    if (same_json(before, next)) { return result; }
+    auto after = next;
+    before["graph"].erase("ui"); after["graph"].erase("ui");
+    const bool evaluative = !same_json(before, after);
+    record_history(next, evaluative);
+    edits_.swap(candidate.edits_); outputs_override_.swap(candidate.outputs_override_); graph_.swap(candidate.graph_);
+    ++version_; if (evaluative) { ++evaluation_version_; }
+    return result;
+  }
+  catch (const std::exception &error) { return {false, error.what()}; }
 }
 
 bool AnalysisParameterDraft::matches(const std::string &analysis_id, const std::string &name,
