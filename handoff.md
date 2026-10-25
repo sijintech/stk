@@ -6,6 +6,8 @@
 
 ## 当前工作树和下一步
 
+- 项目技能版本源码提交 `073c608a271c4dea001a49432879f174f2afab7c`：固定完整方法定义与图模板、升级保留历史、恢复和创建保存分析，含共享 Python／桥接口、原生技能页与同项目选择恢复。本机完整原生 **1639/1639、零跳过**，技能定向及必跑 **33/33**；完整 Python **3083 passed、24 skipped、2 deselected**，三 Python 版本相关各 **74 passed**。中英文宽窄／1×与2×升级恢复及16项图形用例通过。版本不包含执行环境，创建不运行；详情见[技能验收](docs/runtime-validation.md#2026-10-25项目技能版本)。源码已提交；本批新跨平台 CI 待确认。
+- 实查 `c6c39f3856189530db983d3c6f4dba4704c477e4`：Desktop `40171064126`、Docs `40171064146`、Secret `40171064141` 均已完成成功；Runtime `40171064147` 为 **6/8 成功**，两个 Windows 客户端作业失败。附件预览测试应比较原始 UTF-8 字节，不能用会规范化 CRLF 的 `read_text()` 作为预期；修正及 LF／CRLF 夹具已包含在 `073c608`，待新 Windows CI 确认。上一代码头 Desktop 等待条件已满足。
 - 附件详情预览源码提交 `bc2896a89f2e357d30ea8bda3a246190604cc411`：明确读取本地 PNG／UTF-8 文本，冻结附件校验完整摘要；已选对象格起点 **2 次点击**，保留修订、选择与 Viewer。最终原生相关及必跑 **59/59、零跳过**，Python 修正后相关 **25/25**；首次完整回归的两处测试断言失败和复验见[验收](docs/runtime-validation.md#2026-10-25附件详情预览)。新 CI 待推送后确认。更多格式／缩略图、首次大表读取、子流程、技能版本管理及 P4–S7 仍待完成。
 - 看板拖动源码提交 `752d1ea9016ff6730fa7cb3df4a22e9ecfd5a811`：定向及必跑 **64/64**、完整原生 **1619/1619、零跳过**。从当前看板拖入空状态列，**0 次额外点击＋1 次拖动**，一次修订／撤销，保留 Viewer 与选择；旧回调、修订变化、公式和其他编辑器草稿均受保护。记录头 `b1673ee` 的 Desktop `40167186317` **5/5**、Runtime `40167186293` **8/8**、Docs／Secret 均已完成成功，满足附件预览批次的推送等待条件；见[本批验收](docs/runtime-validation.md#2026-10-25看板拖动)。
 - 表格填充柄源码提交 `b2b076d669e6089fd700d4ff02097aaee60adb0b`：定向及必跑 **57/57**、完整原生 **1612/1612、零跳过**。按可见顺序重复选区，保留类型／空值／对象／公式，一次 CAS 和撤销；固定起点 **1 次选格＋1 次拖动**，Viewer 保持。`35637ea` 的 Desktop `40163712446` **5/5**、Runtime `40163712511` **8/8**、Docs／Secret 均成功，见[本批验收](docs/runtime-validation.md#2026-10-25表格填充柄)。看板拖动已推进到上述本批；其余工作继续。
@@ -108,9 +110,9 @@ env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemo
 
 ```bash
 env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ctest --test-dir /home/mnemora/opt/stk-build/merge-check \
-  -R '^(SkillCatalog\.|SkillsCatalogPython\.|project_skills|WorkspaceNavigation(Python)?\.|AnalysisParametersEditorPython\.|FocusNavigation\.|ScriptPython\.)' \
+  -R '^(SkillCatalog\.|SkillsCatalogPython\.|ProjectSkillsPython\.|project_skills|WorkspaceNavigation(Python)?\.|AnalysisParametersEditorPython\.|FocusNavigation\.|ScriptPython\.)' \
   --parallel 4 --output-on-failure --output-junit /tmp/stk-claude-focused.xml
-python3 desktop/tests/check_required_tests.py /tmp/stk-claude-focused.xml 'SkillCatalog\..*' 'SkillsCatalogPython\..*' \
+python3 desktop/tests/check_required_tests.py /tmp/stk-claude-focused.xml 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' \
   'WorkspaceNavigation(Python)?\..*' 'AnalysisParametersEditorPython\..*' 'FocusNavigation\..*' 'ScriptPython\..*'
 python3 desktop/app/i18n/check_i18n.py
 git diff --check

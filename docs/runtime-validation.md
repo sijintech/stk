@@ -2,6 +2,37 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：项目技能版本
+
+源码提交 `073c608a271c4dea001a49432879f174f2afab7c`，基线 `c6c39f3856189530db983d3c6f4dba4704c477e4`。
+前头 Desktop [40171064126](https://github.com/sijintech/stk/actions/runs/40171064126)、
+Docs [40171064146](https://github.com/sijintech/stk/actions/runs/40171064146)、Secret [40171064141](https://github.com/sijintech/stk/actions/runs/40171064141) 均完成成功。
+Runtime [40171064147](https://github.com/sijintech/stk/actions/runs/40171064147) **6/8 成功**，两个Windows客户端作业失败：
+附件返回原始换行，而测试read_text会规范化CRLF。本批改用原始字节解码作预期，并按字节写出LF／CRLF夹具。
+上一代码头桌面等待条件已满足；源码已提交；本批新 CI 待确认，不以本机结果替代Windows复验。
+
+- 最终构建退出0，`/tmp/stk-skills-build.log`；链接完成后才测试。
+- Python定向 **74 passed，17.28 秒**，`/tmp/stk-skills-python.log`；3.11／3.14同集合各 **74 passed，31.01／31.04 秒**，对应`/tmp/stk-skills-python311.log`与`python314`日志。
+- 完整Python **3083 passed、24 skipped、2 deselected、1 warning，678.04 秒**，`/tmp/stk-skills-full-python.log`。warning为Starlette旧httpx TestClient弃用提示，跳过不算通过。
+- 原生技能相关及必跑 **33/33、零跳过，7.62 秒**，`/tmp/stk-project-skills-native.log`、`.xml`和`/tmp/stk-skills-required.log`。8个ProjectSkillsPython用例已加入三平台必跑。
+- 完整原生 **1639/1639、零失败、零跳过，375.61 秒**，`/tmp/stk-skills-full-native.log`与`.xml`。
+- 16项技能OpenGL／Vulkan宽窄、中英图形测试通过，新增项目技能8项。已查看`project_skills_saved_narrow_vulkan_zh.png`与`project_skills_saved_opengl_en.png`（构建目录`tests/app/out/`）；不代表macOS／Windows真机GPU或输入法验收。
+- 中英 **2336键**一致，`git diff --check`通过；源码暂存gitleaks按`.gitleaks.toml` redact扫描 **144.16 KB、零泄漏**。
+
+固定起点为最大化技能区域、空白项目、已查看`stk.muferro.energy_trace@1`；en／zh_CN、1×／2×，逻辑宽560或1280、高1000。
+“将此版本保存到项目” **1次点击**进入项目页，增加1个修订；目录选择属于起点准备，不称整个流程仅1次。
+项目页已选该技能且更新的目录版本已载入时，“升级并保留旧版” **1次点击**保留两版和原始内容。
+随后使目录不可用，“恢复此版本” **1次点击**恢复原摘要，再“创建保存分析” **1次点击**生成带来源草稿，各写入增加1个修订。
+这些计数仅对应明确起点的按钮，不把程序准备新目录当作用户升级导航验收。
+重新创建编辑器并恢复保存状态仍选择同项目技能；换新项目清选择且不写。Viewer保存状态保持、求值启动0、协议违规0。
+“打开分析编辑器”只进入页面，仍须选择新建分析，不自动执行。
+
+后端另验空读不建表、六内置技能、一次编辑撤销／重做、摘要漂移/CAS冲突、冻结深复制、损坏拒绝、
+工作空间包往返后目录缺失仍可创建分析，以及技能表不作为工作流参数表。丢回执只读取原UUID，不重放。
+上限为128条／4MiB，每条16版本／384KiB；保存方法定义，不包含节点实现、Python环境、说明包正文或科学输入。
+读取与恢复不求值或加载插件；全部测试清空产品key、移除model环境，不发收费请求，不改端点、密钥和网络策略。
+用户技能、自定义流程封装、子流程及直接技能执行仍待开发；本批不结束通用目标，PET新专项后移。
+
 ## 2026-10-25：附件详情预览
 
 源码提交 `bc2896a89f2e357d30ea8bda3a246190604cc411`，基线 `b1673ee12dfe29722d6545463689948a66a8e75e`。
