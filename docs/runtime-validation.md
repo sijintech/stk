@@ -2,6 +2,33 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：真实窗口大项目性能（本机验收完成）
+
+前头 `f9a78c2702399064f16abbf5426f3befaad8160f` 的 Desktop `40213263506` 已全部结束并 **5/5 成功**，包括 Windows、macOS、Linux、打包及干净容器冒烟；Runtime `40213263592`、Docs `40213263886`、Secret `40213263583` 也已成功。本机方法库源码 `6fa8994` 与记录／索引 `cf2b40d` 的推送等待条件已满足。
+
+方法库源码及记录头 `cf2b40df0e7562ce09774008c9a3e280af202049` 已成功推送，其 Desktop `40216687457` 已全部结束并 **5/5 成功**；Runtime `40216687448`、Docs `40216687646`、Secret `40216687630` 均成功。本批基准源码 `639614b29ad26e5f7536e3333b82e1806200ceaf` 已本地提交，待记录和索引收尾后推送；前代码头等待条件已满足。下节“尚未推送”是当时的方法库验收记录。
+
+`stk-project-open-window-benchmark` 与原 CPU 目标均构建成功（`/tmp/stk-project-window-benchmark-build.log`）。正式测量使用真实 GHOST 窗口、生产字体和桥，固定英文默认布局 **1440×1200、1×**，两张各 **10000 行、8 列**的公开合成表。每组合按旧快照／分页模式交替顺序各运行三次，共 **24 次**全部退出 0；建库、桥及显示服务启动不计入打开时间。原生基准直接调用明确打开动作，本批没有用户导航点击数变更。
+
+下表是每模式三次中位数，左为旧快照，右为分页；RSS 单位 MiB。
+
+| 显示／后端 | 绘制与交换调用返回（秒） | 原生采样峰值 RSS | 原生及桥进程树 RSS | 关闭前响应量（MiB） |
+|---|---:|---:|---:|---:|
+| X11／OpenGL | 3.053 → 0.821 | 370.06 → 210.82 | 476.46 → 313.68 | 9.88 → 1.23 |
+| X11／Vulkan | 2.905 → 0.711 | 355.81 → 196.98 | 458.59 → 297.45 | 9.14 → 0.50 |
+| Wayland／OpenGL | 3.070 → 0.846 | 391.89 → 229.41 | 501.27 → 335.71 | 9.88 → 1.23 |
+| Wayland／Vulkan | 2.935 → 0.690 | 355.95 → 195.56 | 459.86 → 291.50 | 9.14 → 0.50 |
+
+全部运行总记录数 20000；旧快照共享缓存 20000 条，分页共享缓存 200 条，独立网格页 500 条。`visible_rows` 是网格可查询页长度，**不是屏幕实际可见的 500 行**。首值为 0，项目修订、脚本运行、Viewer 求值、schema／协议错误和重启次数全部为 0。CPU 与窗口各一对 100 行初始冒烟通过；加入最终能力预检后各一对再次通过，不重复声称整套性能矩阵覆盖该前置检查改动。
+
+正式证据在 `/tmp/stk-window-bench-20261025-{xvfb,weston}-{opengl,vulkan}10000/`，含每次 `result.json`、`stdout.log`、`stderr.log`、响应字节摘要和 `window.png`，以及合并 `report.json`。已查看 X11 OpenGL 冒烟、X11 Vulkan 和 Wayland Vulkan 万行分页图，表格显示首行数据和 500／10000 页状态，Viewer 保持未打开结果。日志只复制明确名单，不复制项目、桥状态、profiles 或显示授权文件。
+
+测量边界：`Window::frames_drawn` 无条件递增，不能证明交换成功或屏幕呈现；兼容字段 `first_visible_seconds` 明确绑定 `timing_boundary=post_data_ready_draw_and_swap_release_return`，包含一次数据就绪后的显式重绘。截图是停止计时／RSS 采样后对当前窗口状态的离屏重绘，不是合成器已呈现帧。驱动为 Mesa 26.0.8、LLVM 21.1.8，OpenGL llvmpipe、Vulkan lvp ICD（设备名仍报告 llvmpipe），全部属于软件渲染。操作系统缓存已热；RSS 每约 5ms 采样，会重复计算共享页，不包括显示服务器或独立显存；响应量统计到桥关闭，包含晚于计时点的 UI 元数据。硬件 GPU、macOS／Windows 原生窗口、真实 scan-out 和冷启动仍未验证。
+
+异常路径：父仍存活时用 pidfd 核对身份、冻结父子树后终止独立进程组／session 后代；根已经退出而重挂的后代无法由该 helper 发现，此处不声称完整崩溃清理。启动被测命令前检查 API、内核能力及权限，缺失时不创建命令。Python 定向 **15 passed、3.23 秒**，包含真实超时子孙、无关进程存活及日志保留；六个预检失败用例注入 API 缺失、ENOSYS、EPERM，不是实际受限内核测量。显示／工作空间 CTest **12/12、零失败／错误／跳过、19.91 秒**，必跑检查匹配全部 12 项，证据 `/tmp/stk-window-benchmark-display-regression.log`／`.xml`。源码暂存 gitleaks 扫描 **43827 bytes、零发现**，差异空白检查通过。
+
+重现入口为 `tools/benchmark_project_open.py` 的 `--gpu-backend opengl|vulkan --artifacts-dir NEW_DIR`，整个 driver 置于 `desktop/tests/wm/run_with_display.py --size 1440x1200 --server xvfb|weston ... --` 内；不能只包 native 子进程，否则 RSS 采样对象改变。沿用本机 sysroot、软件 GPU 环境和空测试密钥，`--rows 10000 --repeat 3`；两个可选目标需要显式构建，不安装进产品、不加入日常性能断言。下一步进入 P4 嵌入验证；本批不等于第 3–8 项完成。
+
 ## 2026-10-25：全局用户技能目录（在研）
 
 本批源码 `6fa89943b8011730146c52e8cc339f21aa05c6d4` 已本地提交，尚未推送。基线为已推送记录头 `f9a78c2702399064f16abbf5426f3befaad8160f`（工作流技能源码 `bc964f2`）。该头 Desktop `40213263506` 尚在运行，三项 Linux 与 macOS 作业已成功，Windows 尚未结束；Runtime `40213263592`、Docs `40213263886` 与 Secret `40213263583` 已成功。前批 23 条 AOCI 语义更新已通过 Verify／Check／Guide；记录暂存 gitleaks 扫描 **128977 bytes、零发现**。这些结果不覆盖当前全局目录工作树。
