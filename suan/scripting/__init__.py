@@ -652,6 +652,12 @@ class ProjectSkills:
             "project_skill_id": project_skill_id, "create": create, "name": name, "description": description,
             "expected_revision": expected_revision})
 
+    def publish_workflow(self, workflow_id, *, project_skill_id, create, name, description, expected_revision):
+        """Freeze a workflow, its subflows and analyses as one reviewed method version."""
+        return self._call("project.skills.publish_workflow", {"handle": self.handle, "workflow_id": workflow_id,
+            "project_skill_id": project_skill_id, "create": create, "name": name, "description": description,
+            "expected_revision": expected_revision})
+
     def upgrade(self, project_skill_id, version, content_sha256, *, expected_revision):
         return self._call("project.skills.upgrade", {"handle": self.handle, "project_skill_id": project_skill_id,
             "version": version, "content_sha256": content_sha256, "expected_revision": expected_revision})
@@ -664,6 +670,12 @@ class ProjectSkills:
         return self._call("project.skills.create_analysis", {"handle": self.handle, "project_skill_id": project_skill_id,
             "content_sha256": content_sha256, "analysis_id": analysis_id, "name": name,
             "expected_revision": expected_revision})
+
+    def create_workflow(self, project_skill_id, content_sha256, *, workflow_id, name, bindings, expected_revision):
+        """Copy the frozen method in one undoable edit, explicitly mapping its data dependencies."""
+        return self._call("project.skills.create_workflow", {"handle": self.handle, "project_skill_id": project_skill_id,
+            "content_sha256": content_sha256, "workflow_id": workflow_id, "name": name,
+            "bindings": bindings, "expected_revision": expected_revision})
 
 
 class ProjectAnalyses:

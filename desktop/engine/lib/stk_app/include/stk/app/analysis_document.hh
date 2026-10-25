@@ -25,7 +25,7 @@ io::Json parse_parameter_json(std::string_view text);
 
 /** Check finite plain JSON, UTF-8, depth and raw storage budgets without copying or recursive
  * serialization. Throws invalid_argument. This is a resource guard, not a structural schema. */
-void check_analysis_json_bounds(const io::Json &value);
+void check_analysis_json_bounds(const io::Json &value, size_t byte_limit = AnalysisDocumentLimits::max_document_bytes);
 
 /** Check the saved document shape and storage bounds before copying it. The backend remains
  * authoritative for the complete graph schema, and catalog validation is a separate operation. */

@@ -100,7 +100,7 @@ class WorkflowEditor final : public Editor {
   {
     return store_ && store_->project().project() && draft_.pinned() &&
         store_->project().project()->handle == draft_.handle() &&
-        io::get_string(member(target, "breadcrumb"), "handle") == draft_.handle() &&
+        io::get_string(target, "handle", io::get_string(member(target, "breadcrumb"), "handle")) == draft_.handle() &&
         io::get_string(target, "workflow_id") == draft_.workflow_id();
   }
 

@@ -11696,6 +11696,100 @@
         "result": {
           "$ref": "#/$defs/projectAnalysisWriteResult"
         }
+      },
+      "project.skills.publish_workflow": {
+        "description": "Explicitly freeze a saved workflow and its complete subworkflow/analysis closure as a project-owned method version. Records external data dependencies; never loads engines or executes.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "workflow_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id",
+            "expected_revision",
+            "workflow_id",
+            "create",
+            "name",
+            "description"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
+      },
+      "project.skills.create_workflow": {
+        "description": "Instantiate the reviewed active workflow skill and its subworkflow/analysis closure with explicit data bindings, in one revision-checked undoable edit. Never runs or prepares tasks.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "workflow_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "bindings": {
+              "$ref": "#/$defs/projectWorkflowSkillBindings"
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id",
+            "content_sha256",
+            "workflow_id",
+            "name",
+            "expected_revision",
+            "bindings"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
       }
     },
     "events": {
@@ -19835,94 +19929,14 @@
           "additionalProperties": false
         },
         "template": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectAnalysisSkillTemplate"
             },
-            "name": {
-              "type": "string",
-              "maxLength": 4096
-            },
-            "description": {
-              "type": "string",
-              "maxLength": 4096
-            },
-            "bindings": {
-              "type": "array",
-              "maxItems": 32,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 64
-                  },
-                  "description": {
-                    "type": "string",
-                    "maxLength": 4096
-                  }
-                },
-                "required": [
-                  "name",
-                  "description"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "graph": {
-              "$ref": "#/$defs/projectAnalysisGraph"
-            },
-            "parameters": {
-              "type": "object",
-              "maxProperties": 64
-            },
-            "outputs": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[a-z][a-z0-9_]{0,63}$"
-              },
-              "maxItems": 256,
-              "uniqueItems": true
-            },
-            "source": {
-              "type": "object",
-              "properties": {
-                "project_id": {
-                  "$ref": "#/$defs/projectUuid"
-                },
-                "analysis_id": {
-                  "$ref": "#/$defs/projectUuid"
-                },
-                "revision": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9223372036854775807
-                },
-                "content_sha256": {
-                  "$ref": "#/$defs/sha256"
-                }
-              },
-              "required": [
-                "project_id",
-                "analysis_id",
-                "revision",
-                "content_sha256"
-              ],
-              "additionalProperties": false
+            {
+              "$ref": "#/$defs/projectWorkflowSkillTemplate"
             }
-          },
-          "required": [
-            "id",
-            "name",
-            "description",
-            "bindings",
-            "graph"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -19956,7 +19970,7 @@
         "versions"
       ],
       "additionalProperties": false,
-      "description": "Experimental project-owned snapshots. At most 384 KiB, depth 64; each definition/template digest, version uniqueness, binding identity and active digest checked by storage. Reading never loads the global catalog."
+      "description": "Experimental project-owned method snapshots. At most 8 MiB per complete history and per skill collection, 16 versions, depth 64; final project snapshot remains limited to 12 MiB. Storage validates digests, version and source identities, full workflow closure, dependencies and active digest. Reads never load the global catalog or execution plugins."
     },
     "projectSkillSummary": {
       "type": "object",
@@ -20521,6 +20535,383 @@
       ],
       "additionalProperties": false,
       "description": "Frozen executable expansion, not an editable source workflow. At most 1000 steps; source documents and instance paths accompany the run."
+    },
+    "projectWorkflowSkillBindings": {
+      "type": "object",
+      "properties": {
+        "tables": {
+          "type": "object",
+          "maxProperties": 1000,
+          "propertyNames": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/projectUuid"
+          }
+        },
+        "fields": {
+          "type": "object",
+          "maxProperties": 1000,
+          "propertyNames": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/projectUuid"
+          }
+        },
+        "snapshots": {
+          "type": "object",
+          "maxProperties": 1000,
+          "propertyNames": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/projectUuid"
+          }
+        }
+      },
+      "required": [
+        "tables",
+        "fields",
+        "snapshots"
+      ],
+      "additionalProperties": false
+    },
+    "projectWorkflowSkillDependencies": {
+      "type": "object",
+      "properties": {
+        "tables": {
+          "type": "object",
+          "maxProperties": 1000,
+          "propertyNames": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "fields": {
+          "type": "object",
+          "maxProperties": 1000,
+          "propertyNames": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "table_id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "type": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "table_id",
+              "name",
+              "type",
+              "unit"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "snapshots": {
+          "type": "object",
+          "maxProperties": 1000,
+          "propertyNames": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "files": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "maxLength": 4096
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sha256": {
+                      "$ref": "#/$defs/sha256"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "size",
+                    "sha256"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "sha256",
+              "files"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "tables",
+        "fields",
+        "snapshots"
+      ],
+      "additionalProperties": false
+    },
+    "projectWorkflowSkillTemplate": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "workflow_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "project_id",
+            "workflow_id",
+            "revision",
+            "content_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "root": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "workflows": {
+          "type": "object",
+          "maxProperties": 128,
+          "propertyNames": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "document": {
+                "$ref": "#/$defs/projectWorkflowDocument"
+              },
+              "content_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            },
+            "required": [
+              "name",
+              "document",
+              "content_sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "analyses": {
+          "type": "object",
+          "maxProperties": 128,
+          "propertyNames": {
+            "$ref": "#/$defs/projectUuid"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "document": {
+                "$ref": "#/$defs/projectAnalysisDocument"
+              },
+              "content_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            },
+            "required": [
+              "name",
+              "document",
+              "content_sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "dependencies": {
+          "$ref": "#/$defs/projectWorkflowSkillDependencies"
+        },
+        "templates": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "source",
+        "root",
+        "workflows",
+        "analyses",
+        "dependencies",
+        "templates"
+      ],
+      "additionalProperties": false
+    },
+    "projectAnalysisSkillTemplate": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "bindings": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "name",
+              "description"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "graph": {
+          "$ref": "#/$defs/projectAnalysisGraph"
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "analysis_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "project_id",
+            "analysis_id",
+            "revision",
+            "content_sha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "bindings",
+        "graph"
+      ],
+      "additionalProperties": false
     }
   }
 }

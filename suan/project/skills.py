@@ -22,9 +22,9 @@ FIELDS = {"name": ("Name", "text"), "format": ("Format", "text"),
           "active": ("Active content", "text"), "versions": ("Saved versions", "json")}
 FIELD_IDS = {key: str(uuid5(NAMESPACE_URL, "urn:stk:project:skills:1:" + key)) for key in FIELDS}
 MAX_VERSIONS = 16
-MAX_DOCUMENT_BYTES = 384 * 1024
+MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 MAX_SKILLS = 128
-MAX_COLLECTION_BYTES = 4 * 1024 * 1024
+MAX_COLLECTION_BYTES = 8 * 1024 * 1024
 
 
 class ProjectSkillNotFound(ProjectError):
@@ -34,7 +34,8 @@ class ProjectSkillNotFound(ProjectError):
 _TABLE = ManagedTable(table_id=TABLE_ID, table_name="Project skills", fields=FIELDS, field_ids=FIELD_IDS,
                       subject="Project skill", not_found=ProjectSkillNotFound,
                       limits=lambda: (MAX_SKILLS, MAX_COLLECTION_BYTES, 12 * 1024 * 1024),
-                      limit_text="128 records or 4 MiB", max_cell_bytes=2 * MAX_DOCUMENT_BYTES)
+                      limit_text="128 records or 8 MiB", max_cell_bytes=2 * MAX_DOCUMENT_BYTES,
+                      max_json_bytes=MAX_DOCUMENT_BYTES)
 
 
 def _hash(value):
@@ -69,6 +70,13 @@ def _snapshot(value):
     if check_value(definition, DEFINITION_SCHEMA):
         raise ProjectError("Saved skill definition is invalid")
     kind = definition["entry"].get("kind")
+    if kind == "workflow.document":
+        from .workflow_skills import check_template
+        check_template(template, definition)
+        content = {"definition": definition, "template": template}
+        if hashlib.sha256(_canonical(content).encode("utf-8")).hexdigest() != _hash(value["content_sha256"]):
+            raise ProjectError("Saved skill content digest does not match its definition and template")
+        return value
     keys = {"id", "name", "description", "bindings", "graph"}
     if kind == "graph.document":
         keys |= {"parameters", "outputs", "source"}
@@ -109,7 +117,7 @@ def _snapshot(value):
 
 
 def _document(value):
-    value = clone(value, "Project skill")
+    value = clone(value, "Project skill", max_bytes=MAX_DOCUMENT_BYTES)
     if type(value) is not dict or set(value) != {"format", "active", "versions"}:
         raise ProjectError("Project skill requires exactly format, active and versions")
     if value["format"] != DOCUMENT_FORMAT:
@@ -117,13 +125,16 @@ def _document(value):
     versions = value["versions"]
     if type(versions) is not list or not 1 <= len(versions) <= MAX_VERSIONS:
         raise ProjectError("Project skill must keep between 1 and 16 versions")
-    skill_id, numbers, digests = None, set(), set()
+    skill_id, entry_kind, numbers, digests = None, None, set(), set()
     for item in versions:
         _snapshot(item)
         definition = item["definition"]
         if skill_id is not None and definition["id"] != skill_id:
             raise ProjectError("Saved versions must belong to the same skill")
+        if entry_kind is not None and definition["entry"]["kind"] != entry_kind:
+            raise ProjectError("Saved versions must use the same entry kind")
         skill_id = definition["id"]
+        entry_kind = definition["entry"]["kind"]
         if definition["version"] in numbers or item["content_sha256"] in digests:
             raise ProjectError("Saved skill versions must have unique versions and digests")
         numbers.add(definition["version"])
@@ -131,7 +142,7 @@ def _document(value):
     if _hash(value["active"]) not in digests:
         raise ProjectError("Active skill version is not saved in this project")
     if len(_canonical(value).encode("utf-8")) > MAX_DOCUMENT_BYTES:
-        raise ProjectError("Project skill document exceeds 384 KiB")
+        raise ProjectError("Project skill document exceeds 8 MiB")
     return value
 
 
@@ -323,6 +334,8 @@ class ProjectSkills:
             if current["active"]["content_sha256"] != content_sha256:
                 raise RevisionConflict("The active skill version changed; review it before creating an analysis")
             saved = next(item for item in current["document"]["versions"] if item["content_sha256"] == content_sha256)
+            if saved["definition"]["entry"]["kind"] == "workflow.document":
+                raise ProjectError("A workflow skill creates a workflow, not an analysis")
             graph = saved["template"]["graph"]
             graph.setdefault("ui", {})["project_skill"] = {"id": project_skill_id, "ref": current["active"]["ref"],
                                                            "content_sha256": content_sha256}
@@ -331,3 +344,13 @@ class ProjectSkills:
                                            "outputs": saved["template"].get("outputs", list(graph["outputs"]))})
             return analyses._TABLE.write(self.store, db, analysis_id, {"name": title, **document}, expected_revision,
                                          create=True, document_format=analyses.DOCUMENT_FORMAT)
+
+    def publish_workflow(self, workflow_id, *, project_skill_id, create, name, description, expected_revision):
+        from .workflow_skills import publish_workflow
+        return publish_workflow(self, workflow_id, project_skill_id=project_skill_id, create=create,
+                                name=name, description=description, expected_revision=expected_revision)
+
+    def create_workflow(self, project_skill_id, content_sha256, *, workflow_id, name, bindings, expected_revision):
+        from .workflow_skills import create_workflow
+        return create_workflow(self, project_skill_id, content_sha256, workflow_id=workflow_id,
+                               name=name, bindings=bindings, expected_revision=expected_revision)

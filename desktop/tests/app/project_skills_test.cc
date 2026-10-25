@@ -36,7 +36,7 @@ original = Bridge.send
 def send(self, message, method=None):
     mode = control.read_text(encoding='utf-8') if control.exists() else ''
     if 'result' in message:
-        if method == 'project.skills.pin' and mode == 'receipt':
+        if method in ('project.skills.pin', 'project.skills.create_workflow') and mode == 'receipt':
             message = copy.deepcopy(message)
             message['result']['record_id'] = '00000000-0000-4000-8000-000000000000'
         if method == 'project.skills.get' and mode == 'summary':
@@ -179,6 +179,78 @@ class ProjectSkillsPython : public ::testing::Test {
     const auto second = saved_skill(id);
     EXPECT_EQ(second.at("active").at("version"), 2);
     EXPECT_EQ(second.at("document").at("versions").at(0), first.at("document").at("versions").at(0));
+    EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
+  }
+  void create_workflow_source(const std::string &id, const std::string &child)
+  {
+    const Json interface = {{"inputs", Json::object()}, {"outputs", Json::object()}, {"parameters", Json::array()}};
+    const Json child_document = {{"format", "stk.workflow/2"}, {"steps", Json::array()},
+                                 {"ui", Json::object()}, {"interface", interface}};
+    ASSERT_TRUE(call("project.workflows.create", {{"handle", project().project()->handle}, {"workflow_id", child},
+        {"name", "Z child workflow"}, {"document", child_document},
+        {"expected_revision", project().project()->revision}}).is_object());
+    project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+    const Json document = {{"format", "stk.workflow/2"},
+        {"steps", {{{"id", "nested"}, {"kind", "workflow"}, {"ref", {{"workflow", child}}}}}},
+        {"ui", Json::object()}, {"interface", interface}};
+    ASSERT_TRUE(call("project.workflows.create", {{"handle", project().project()->handle}, {"workflow_id", id},
+        {"name", "A reusable workflow"}, {"document", document},
+        {"expected_revision", project().project()->revision}}).is_object());
+    project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  }
+  void workflow_clicks(const std::string &language, float scale, int width)
+  {
+    const auto source = ProjectSkills::new_id(), child = ProjectSkills::new_id();
+    ASSERT_NO_FATAL_FAILURE(create_workflow_source(source, child));
+    store().set_language(language);
+    f.drv = std::make_unique<wmtest::ScreenDriver>(f.screen, int(width * scale), int(1800 * scale), scale);
+    auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorSkills));
+    f.screen.set_maximized(&area); f.drv->frame();
+    const auto viewer = store().viewer().save_workspace_state();
+    int clicks = 0;
+    ASSERT_NO_FATAL_FAILURE(click("skills_project_tab")); ++clicks;
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_workflow_publish")); ++clicks;
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_workflow_sources", 2));
+    // Insertion order is child, then parent. Click the parent row's actual screen coordinates.
+    const auto *sources = f.screen.ui()->find("project_skill_workflow_sources"); ASSERT_NE(sources, nullptr);
+    const auto &style = f.screen.ui()->style();
+    const int source_x = int(sources->rect.x + sources->rect.w * 0.5f);
+    const int source_y = f.screen.rect().ymax - 1 - int(sources->rect.y + style.pixel + style.unit * 1.5f);
+    f.drv->click(source_x, source_y); f.drv->frame(); ++clicks;
+    ASSERT_EQ(f.screen.ui()->find("project_skill_workflow_sources")->list->selected.get(), 1);
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_workflow_publish_new", 2));
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_workflow_publish_new")); ++clicks;
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_create_workflow", 3));
+    EXPECT_EQ(clicks, 4);
+    const auto id = area.editor().save_workspace_state().at("selected_id").get<std::string>();
+    const auto first = saved_skill(id);
+    const auto &templ = first.at("document").at("versions").at(0).at("template");
+    EXPECT_EQ(templ.at("source").at("workflow_id"), source);
+    EXPECT_EQ(templ.at("workflows").size(), 2u);
+    EXPECT_TRUE(templ.at("workflows").contains(child));
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_workflow_publish_version", 3));
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_workflow_publish_version"));
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_create_workflow", 4));
+    EXPECT_EQ(saved_skill(id).at("active").at("version"), 2);
+    EXPECT_EQ(saved_skill(id).at("document").at("versions").at(0), first.at("document").at("versions").at(0));
+    const auto retained = f.screen.ui()->find("project_skill_create_workflow")->on_click;
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_create_workflow"));
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_open_workflow", 5));
+    retained(); f.drv->frame(); loop.run_ready(); EXPECT_EQ(project().project()->revision, 5);
+    const auto workflows = call("project.workflows.list", {{"handle", project().project()->handle}}).at("workflows");
+    ASSERT_EQ(workflows.size(), 4u);
+    std::string copied;
+    for (const auto &workflow : workflows) {
+      const auto candidate = io::get_string(workflow, "id");
+      if (candidate != source && candidate != child && io::get_string(workflow, "name") == "A reusable workflow") { copied = candidate; }
+    }
+    ASSERT_FALSE(copied.empty());
+    const auto copied_document = call("project.workflows.get", {{"handle", project().project()->handle}, {"workflow_id", copied}})
+        .at("workflow").at("document");
+    EXPECT_NE(copied_document.at("steps").at(0).at("ref").at("workflow"), child);
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_open_workflow"));
+    ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return area.editor().type().id == kEditorWorkflow &&
+        area.editor().shows_navigation_target({{"workflow_id", copied}, {"handle", project().project()->handle}}); }, 30));
     EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
   }
   void upgrade_restore(const std::string &language, float scale, int width)
@@ -332,6 +404,171 @@ TEST_F(ProjectSkillsPython, RetainedPublishButtonCannotFollowAnotherSourceSelect
   EXPECT_EQ(project().project()->revision, 2);
   const auto page = call("project.skills.list", {{"handle", project().project()->handle}});
   EXPECT_EQ(page.at("total"), 0);
+}
+
+TEST_F(ProjectSkillsPython, PublishesWorkflowInFourClicksEnglishAndCreatesFrozenClosure)
+{
+  ASSERT_NO_FATAL_FAILURE(workflow_clicks("en", 1, 1280));
+}
+
+TEST_F(ProjectSkillsPython, PublishesWorkflowInFourClicksChineseAndCreatesFrozenClosure)
+{
+  ASSERT_NO_FATAL_FAILURE(workflow_clicks("zh_CN", 2, 560));
+}
+
+TEST_F(ProjectSkillsPython, WorkflowLostReceiptChecksOriginalRootWithoutCreatingAgain)
+{
+  const auto source = ProjectSkills::new_id(), child = ProjectSkills::new_id(), id = ProjectSkills::new_id();
+  ASSERT_NO_FATAL_FAILURE(create_workflow_source(source, child));
+  ASSERT_TRUE(skills->can_publish_workflow()); ASSERT_TRUE(skills->can_create_workflow());
+  ASSERT_TRUE(skills->write("publish_workflow", {{"workflow_id", source}, {"project_skill_id", id}, {"create", true},
+      {"name", "Frozen workflow"}, {"description", "Complete method"}, {"expected_revision", 2}}, skills->epoch()));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(skills->select(id)); ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_TRUE(skills->current()) << skills->error();
+  ASSERT_NO_FATAL_FAILURE(mode("receipt"));
+  const auto copy = ProjectSkills::new_id();
+  const Json params = {{"project_skill_id", id}, {"workflow_id", copy}, {"name", "New workflow"},
+      {"content_sha256", skills->selected().at("active").at("content_sha256")}, {"expected_revision", 3},
+      {"bindings", {{"tables", Json::object()}, {"fields", Json::object()}, {"snapshots", Json::object()}}}};
+  ASSERT_TRUE(skills->write("create_workflow", params, skills->epoch())); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(skills->uncertain()); EXPECT_FALSE(skills->write("create_workflow", params, skills->epoch()));
+  ASSERT_TRUE(skills->check_pending()); ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_FALSE(skills->uncertain()); EXPECT_EQ(skills->workflow_id(), copy);
+  EXPECT_EQ(project().project()->revision, 4);
+  EXPECT_EQ(call("project.workflows.list", {{"handle", project().project()->handle}}).at("total"), 4);
+}
+
+TEST_F(ProjectSkillsPython, WorkflowMappingsPreserveInvalidDraftAndRejectRetainedCreate)
+{
+  const auto table = ProjectSkills::new_id(), source = ProjectSkills::new_id(), id = ProjectSkills::new_id();
+  ASSERT_TRUE(call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", 0},
+      {"commands", {{{"op", "create_table"}, {"id", table}, {"name", "Measurements"}}}}}).is_object());
+  const Json document = {{"format", "stk.workflow/1"}, {"steps", {{{"id", "data"}, {"kind", "table"}, {"ref", {{"table", table}}}}}},
+      {"ui", Json::object()}};
+  ASSERT_TRUE(call("project.workflows.create", {{"handle", project().project()->handle}, {"workflow_id", source},
+      {"name", "Data method"}, {"document", document}, {"expected_revision", 1}}).is_object());
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(skills->write("publish_workflow", {{"workflow_id", source}, {"project_skill_id", id}, {"create", true},
+      {"name", "Data method"}, {"description", "Reviewed references"}, {"expected_revision", 2}}, skills->epoch()));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  f.drv = std::make_unique<wmtest::ScreenDriver>(f.screen, 1280, 1600, 1);
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorSkills));
+  ASSERT_TRUE(area.editor().load_workspace_state({{"version", 1}, {"project_view", true},
+      {"project_id", project().project()->id}, {"selected_id", id}}));
+  f.screen.set_maximized(&area); ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_create_workflow", 3));
+  const auto *field = f.screen.ui()->find("project_skill_workflow_bindings"); ASSERT_NE(field, nullptr);
+  EXPECT_EQ(Json::parse(field->string.get()).at("tables").at(table), table);
+  const auto retained = f.screen.ui()->find("project_skill_create_workflow")->on_click;
+  field->string.set("{ unfinished mapping"); f.drv->frame();
+  ASSERT_FALSE(f.screen.ui()->find("project_skill_create_workflow")->enabled);
+  retained(); loop.run_ready(); EXPECT_EQ(project().project()->revision, 3);
+  const auto workspace = area.editor().save_workspace_state();
+  ASSERT_EQ(workspace.at("binding_drafts").size(), 1u);
+  EXPECT_EQ(workspace.at("binding_drafts").begin().value(), "{ unfinished mapping");
+  ASSERT_NO_FATAL_FAILURE(click("project_skills_refresh"));
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); const auto *mapping = f.screen.ui()->find("project_skill_workflow_bindings");
+      return mapping && mapping->string.get() == "{ unfinished mapping" && !project().busy(); }, 30));
+  ASSERT_TRUE(area.editor().load_workspace_state(workspace)); f.drv->frame();
+  EXPECT_EQ(area.editor().save_workspace_state().at("binding_drafts"), workspace.at("binding_drafts"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_workflow_bindings", 3));
+  const auto old_get = f.screen.ui()->find("project_skill_workflow_bindings")->string.get;
+  const auto old_set = f.screen.ui()->find("project_skill_workflow_bindings")->string.set;
+  const auto second = ProjectSkills::new_id();
+  ASSERT_TRUE(call("project.skills.publish_workflow", {{"handle", project().project()->handle}, {"workflow_id", source},
+      {"project_skill_id", second}, {"create", true}, {"name", "Another method"},
+      {"description", "Different selected skill"}, {"expected_revision", 3}}).is_object());
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); const auto *list = f.screen.ui()->find("project_skills_list");
+      return list && list->list && list->list->count == 2; }, 30));
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skills_list", 4));
+  f.screen.ui()->find("project_skills_list")->list->selected.set(1);
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_create_workflow", 4));
+  const auto before = area.editor().save_workspace_state().at("binding_drafts");
+  EXPECT_EQ(old_get(), ""); old_set("late edit from another skill");
+  EXPECT_EQ(area.editor().save_workspace_state().at("binding_drafts"), before);
+  const auto current_get = f.screen.ui()->find("project_skill_workflow_bindings")->string.get;
+  const auto current_set = f.screen.ui()->find("project_skill_workflow_bindings")->string.set;
+  ASSERT_TRUE(area.editor().load_workspace_state({{"version", 1}, {"project_view", true},
+      {"project_id", project().project()->id}, {"selected_id", second}}));
+  EXPECT_NO_THROW(EXPECT_EQ(current_get(), ""));
+  current_set("late edit after workspace restore");
+  EXPECT_TRUE(area.editor().save_workspace_state().at("binding_drafts").empty());
+}
+
+TEST_F(ProjectSkillsPython, LargeWorkflowDependenciesStayBrowsableAndMappingsRemainEditable)
+{
+  // A valid structural method may collect independent tables without being ready for a run.
+  // This package exceeds the old 64 KiB text limit while staying inside all storage budgets.
+  Json commands = Json::array(), child_steps = Json::array();
+  std::vector<std::string> tables;
+  for (int i = 0; i < 800; ++i) {
+    tables.push_back(ProjectSkills::new_id());
+    commands.push_back({{"op", "create_table"}, {"id", tables.back()}, {"name", "Dataset " + std::to_string(i)}});
+  }
+  ASSERT_TRUE(call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", 0},
+      {"commands", commands}}).is_object());
+  int64_t revision = 1;
+  const Json interface = {{"inputs", Json::object()}, {"outputs", Json::object()}, {"parameters", Json::array()}};
+  for (int group = 0; group < 8; ++group) {
+    const auto child = ProjectSkills::new_id();
+    Json steps = Json::array();
+    for (int i = 0; i < 100; ++i) {
+      steps.push_back({{"id", "data_" + std::to_string(i)}, {"kind", "table"}, {"ref", {{"table", tables[size_t(group * 100 + i)]}}}});
+    }
+    const Json document = {{"format", "stk.workflow/2"}, {"steps", steps}, {"ui", Json::object()}, {"interface", interface}};
+    ASSERT_TRUE(call("project.workflows.create", {{"handle", project().project()->handle}, {"workflow_id", child},
+        {"name", "Data group " + std::to_string(group)}, {"document", document}, {"expected_revision", revision++}}).is_object());
+    child_steps.push_back({{"id", "group_" + std::to_string(group)}, {"kind", "workflow"}, {"ref", {{"workflow", child}}}});
+  }
+  const auto source = ProjectSkills::new_id(), id = ProjectSkills::new_id();
+  const Json document = {{"format", "stk.workflow/2"}, {"steps", child_steps}, {"ui", Json::object()}, {"interface", interface}};
+  ASSERT_TRUE(call("project.workflows.create", {{"handle", project().project()->handle}, {"workflow_id", source},
+      {"name", "Many datasets"}, {"document", document}, {"expected_revision", revision++}}).is_object());
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(skills->write("publish_workflow", {{"workflow_id", source}, {"project_skill_id", id}, {"create", true},
+      {"name", "Many datasets"}, {"description", "Explicit table references"}, {"expected_revision", revision++}}, skills->epoch()));
+  ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_FALSE(skills->uncertain()) << skills->error();
+  f.drv = std::make_unique<wmtest::ScreenDriver>(f.screen, 1280, 1600, 1);
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorSkills));
+  ASSERT_TRUE(area.editor().load_workspace_state({{"version", 1}, {"project_view", true},
+      {"project_id", project().project()->id}, {"selected_id", id}}));
+  f.screen.set_maximized(&area); ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_create_workflow", revision));
+  const auto *field = f.screen.ui()->find("project_skill_workflow_bindings"); ASSERT_NE(field, nullptr);
+  const auto text = field->string.get();
+  ASSERT_GT(text.size(), 65536u); EXPECT_GE(field->text_opts.max_length, text.size());
+  EXPECT_EQ(Json::parse(text).at("tables").size(), 800u);
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_workflow_dependencies"));
+  const auto *list = f.screen.ui()->find("project_skill_dependencies_tables"); ASSERT_NE(list, nullptr);
+  ASSERT_TRUE(list->list); EXPECT_EQ(list->list->count, 800); EXPECT_LE(list->list->rows, 5);
+  EXPECT_NE(list->list->text(799).find("Dataset "), std::string::npos);
+  size_t visible_widgets = 0;
+  for (const auto &block : f.screen.ui()->blocks()) { visible_widgets += block->widgets().size(); }
+  EXPECT_LT(visible_widgets, 100u);
+  field = f.screen.ui()->find("project_skill_workflow_bindings"); ASSERT_NE(field, nullptr);
+  field->string.set(text + " unfinished"); f.drv->frame();
+  ASSERT_FALSE(f.screen.ui()->find("project_skill_create_workflow")->enabled);
+  f.screen.ui()->find("project_skill_workflow_bindings")->string.set(text); f.drv->frame();
+  EXPECT_TRUE(f.screen.ui()->find("project_skill_create_workflow")->enabled);
+  const auto workspace = area.editor().save_workspace_state();
+  EXPECT_EQ(workspace.at("binding_drafts").begin().value(), text);
+  EXPECT_EQ(project().project()->revision, revision);
+}
+
+TEST_F(ProjectSkillsPython, RetainedWorkflowPublishCannotFollowAnotherSourceSelection)
+{
+  ASSERT_NO_FATAL_FAILURE(create_workflow_source(ProjectSkills::new_id(), ProjectSkills::new_id()));
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorSkills));
+  f.screen.set_maximized(&area); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("skills_project_tab"));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_workflow_publish"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_workflow_sources", 2));
+  const auto select = f.screen.ui()->find("project_skill_workflow_sources")->list->selected.set;
+  select(0); ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_workflow_publish_new", 2));
+  const auto retained = f.screen.ui()->find("project_skill_workflow_publish_new")->on_click;
+  select(1); ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_workflow_publish_new", 2));
+  retained(); f.drv->frame(); loop.run_ready();
+  EXPECT_EQ(project().project()->revision, 2);
+  EXPECT_EQ(call("project.skills.list", {{"handle", project().project()->handle}}).at("total"), 0);
 }
 
 TEST_F(ProjectSkillsPython, RejectsSummaryDriftAndOldOpenEpoch)

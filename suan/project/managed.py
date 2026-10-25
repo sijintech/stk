@@ -27,14 +27,14 @@ def name(value, subject):
     return value
 
 
-def clone(value, subject):
+def clone(value, subject, *, max_bytes=MAX_JSON_BYTES):
     """Detach plain JSON iteratively, bounding work before recursive JSON/schema helpers."""
     budget, count, ancestors = 0, 0, set()
 
     def item(source, depth):
         nonlocal budget, count
         count += 1
-        if count > MAX_JSON_BYTES or depth > MAX_DEPTH:
+        if count > max_bytes or depth > MAX_DEPTH:
             raise ProjectError(f"{subject} JSON exceeds the depth or item limit")
         kind = type(source)
         if kind in (dict, list):
@@ -44,7 +44,7 @@ def clone(value, subject):
             target = {} if kind is dict else []
             return target, (source, target, iter(source.items() if kind is dict else source), depth)
         if kind is str:
-            if len(source) > MAX_JSON_BYTES:
+            if len(source) > max_bytes:
                 raise ProjectError(f"{subject} JSON exceeds the document byte limit")
             budget += len(source.encode("utf-8")) + 2
         elif kind is int:
@@ -86,19 +86,19 @@ def clone(value, subject):
                 target[key] = copied
             else:
                 target.append(copied)
-            if budget > MAX_JSON_BYTES:
+            if budget > max_bytes:
                 raise ProjectError(f"{subject} JSON exceeds the document byte limit")
             if frame:
                 ancestors.add(id(frame[0]))
                 stack.append(frame)
-        if budget > MAX_JSON_BYTES:
+        if budget > max_bytes:
             raise ProjectError(f"{subject} JSON exceeds the document byte limit")
         return result
     except (UnicodeError, RuntimeError):
         raise ProjectError(f"{subject} JSON must be valid UTF-8 and stable while being captured") from None
 
 
-def strict_decode(raw, subject):
+def strict_decode(raw, subject, *, max_bytes=MAX_JSON_BYTES):
     """Bound raw nesting before json.loads; reject ambiguous or lossy JSON literals."""
     try:
         text = raw.decode("utf-8")
@@ -146,7 +146,7 @@ def strict_decode(raw, subject):
             raise ValueError("nonfinite")
 
         return clone(json.loads(text, object_pairs_hook=pairs, parse_int=integer,
-                                 parse_float=number, parse_constant=constant), subject)
+                                 parse_float=number, parse_constant=constant), subject, max_bytes=max_bytes)
     except (UnicodeError, ValueError, TypeError, RecursionError):
         raise ProjectError(f"{subject} cell contains invalid, ambiguous or excessively nested JSON") from None
 
@@ -165,12 +165,13 @@ def snapshot_limit(store, db, subject, max_bytes=MAX_SNAPSHOT_BYTES):
 
 class ManagedTable:
     def __init__(self, *, table_id, table_name, fields, field_ids, subject, not_found, limits, limit_text, max_cell_bytes,
-                 optional_fields=()):
+                 optional_fields=(), max_json_bytes=MAX_JSON_BYTES):
         """`limits()` returns (max records, max managed JSON bytes, max project snapshot bytes) at write time;
         `limit_text` names the first two in errors, for example "128 records or 4 MiB"."""
         self.table_id, self.table_name, self.fields, self.field_ids = table_id, table_name, fields, field_ids
         self.subject, self.not_found, self.limits, self.limit_text = subject, not_found, limits, limit_text
         self.max_cell_bytes = max_cell_bytes
+        self.max_json_bytes = max_json_bytes
         self.optional_fields = frozenset(optional_fields)
 
     def require(self, db, documents):
@@ -201,7 +202,7 @@ class ManagedTable:
             raise ProjectError(f"{self.subject} cell exceeds the bounded stored JSON limit")
         raw = db.execute("SELECT CAST(value AS BLOB) FROM cells WHERE table_id=? AND record_id=? AND field_id=?",
                          identity).fetchone()[0]
-        return strict_decode(raw, self.subject)
+        return strict_decode(raw, self.subject, max_bytes=self.max_json_bytes)
 
     def indirect(self, db, record_id):
         return any(row[0] in self.field_ids.values() for row in db.execute(

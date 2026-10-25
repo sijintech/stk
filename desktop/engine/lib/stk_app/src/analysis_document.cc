@@ -129,9 +129,9 @@ bool visible_text(std::string_view text)
 
 /** Match the storage clone's raw budget/depth before copying or recursively serializing JSON.
  * Object keys count as values at depth+1. The raw budget deliberately precedes canonical bytes. */
-void check_analysis_json_bounds(const Json &value)
+void check_analysis_json_bounds(const Json &value, const size_t byte_limit)
 {
-  constexpr size_t byte_limit = AnalysisDocumentLimits::max_document_bytes;
+  require(byte_limit > 0, "JSON byte limit must be positive");
   struct Item { const Json *value; size_t depth; };
   std::vector<Item> pending{{&value, 0}};
   size_t scheduled = 1, budget = 0;
@@ -149,7 +149,7 @@ void check_analysis_json_bounds(const Json &value)
     if (current->is_object() || current->is_array()) {
       add_bytes(2);
       const size_t multiplier = current->is_object() ? 2 : 1;
-      require(current->size() <= (AnalysisDocumentLimits::max_document_bytes - scheduled) / multiplier,
+      require(current->size() <= (byte_limit - scheduled) / multiplier,
               "Analysis JSON exceeds its item limit");
       scheduled += current->size() * multiplier;
       for (auto it = current->begin(); it != current->end(); ++it) {

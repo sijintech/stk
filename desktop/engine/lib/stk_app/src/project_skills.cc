@@ -39,7 +39,7 @@ void ProjectSkills::sync()
   log_pending(); ++epoch_;
   client_ = client; handle_ = handle; session_ = session;
   page_ = selected_ = pending_ = nullptr;
-  selected_id_.clear(); analysis_id_.clear(); error_.clear(); notice_.clear();
+  selected_id_.clear(); analysis_id_.clear(); workflow_id_.clear(); error_.clear(); notice_.clear();
   page_attempt_ = selected_attempt_ = selected_revision_ = -1;
   busy_ = false;
   auto old = std::move(future_); future_.reset();
@@ -65,6 +65,16 @@ bool ProjectSkills::can_publish() const
 {
   const auto hello = supported() ? client_->hello_info() : std::nullopt;
   return hello && hello->has_method("project.skills.publish_analysis");
+}
+bool ProjectSkills::can_publish_workflow() const
+{
+  const auto hello = supported() ? client_->hello_info() : std::nullopt;
+  return hello && hello->has_method("project.skills.publish_workflow");
+}
+bool ProjectSkills::can_create_workflow() const
+{
+  const auto hello = supported() ? client_->hello_info() : std::nullopt;
+  return hello && hello->has_method("project.skills.create_workflow");
 }
 bool ProjectSkills::current() const
 {
@@ -129,7 +139,7 @@ void ProjectSkills::accept_read(const Json &response, const std::string &id)
   if (item.at("id") != id) { throw std::runtime_error("Saved skill response belongs to another object"); }
   if (item.at("state") == "readable") {
     const auto &document = item.at("document");
-    check_analysis_json_bounds(document);
+    check_analysis_json_bounds(document, 8 * 1024 * 1024);
     std::set<int64_t> versions;
     Json summaries = Json::array();
     bool active = false;
@@ -187,6 +197,7 @@ bool ProjectSkills::select(const std::string &id)
 {
   sync();
   if (!supported() || busy_ || uncertain() || !canonical_uuid(id)) { return false; }
+  if (selected_id_ != id) { analysis_id_.clear(); workflow_id_.clear(); }
   selected_id_ = id; selected_ = nullptr; selected_revision_ = selected_attempt_ = -1;
   return load_selected();
 }
@@ -200,23 +211,26 @@ bool ProjectSkills::write(const std::string &action, Json params, const uint64_t
 {
   sync();
   const auto rev = revision();
-  const bool publishing = action == "publish_analysis";
+  const bool publishing = action == "publish_analysis" || action == "publish_workflow";
   const bool creating = action == "pin" || (publishing && params.value("create", false));
   if (!supported() || busy_ || project_.busy() || uncertain() || expected_epoch != epoch_ || rev < 0 ||
       rev == std::numeric_limits<int64_t>::max() || io::get_int(params, "expected_revision", -1) != rev ||
-      (action != "pin" && action != "upgrade" && action != "restore" && action != "create_analysis" && !publishing) ||
-      (publishing && !can_publish())) { return false; }
+      (action != "pin" && action != "upgrade" && action != "restore" && action != "create_analysis" && action != "create_workflow" && !publishing) ||
+      (action == "publish_analysis" && !can_publish()) ||
+      (action == "publish_workflow" && !can_publish_workflow()) ||
+      (action == "create_workflow" && !can_create_workflow())) { return false; }
   if (!creating && (!current() || io::get_string(params, "project_skill_id") != selected_id_)) { return false; }
-  const auto id = io::get_string(params, action == "create_analysis" ? "analysis_id" : "project_skill_id");
+  const auto id = io::get_string(params, action == "create_analysis" ? "analysis_id" : action == "create_workflow" ? "workflow_id" : "project_skill_id");
   if (!canonical_uuid(id)) { return false; }
   const auto method = "project.skills." + action;
-  pending_ = {{"method", method}, {"id", id}, {"analysis", action == "create_analysis"}};
+  pending_ = {{"method", method}, {"id", id}, {"kind", action == "create_analysis" ? "analysis" : action == "create_workflow" ? "workflow" : "skill"}};
   const bool accepted = call(method, params, [this, rev, id, action](const Json &result) {
     if (io::get_int(result, "revision", -1) != rev + 1 || io::get_string(result, "record_id") != id) {
       throw std::runtime_error("Invalid saved skill write receipt; check its existing identity");
     }
     pending_ = nullptr; page_attempt_ = selected_attempt_ = -1;
     if (action == "create_analysis") { analysis_id_ = id; }
+    else if (action == "create_workflow") { workflow_id_ = id; }
     else { selected_id_ = id; selected_ = nullptr; }
     notice_ = "skills.project.saved"; project_.refresh();
   }, [this](const bridge::Error &error) {
@@ -232,12 +246,13 @@ bool ProjectSkills::check_pending()
   sync();
   if (!uncertain()) { return false; }
   const auto id = pending_.at("id").get<std::string>();
-  const bool analysis = pending_.at("analysis").get<bool>();
-  return call(analysis ? "project.analyses.get" : "project.skills.get",
-      {{analysis ? "analysis_id" : "project_skill_id", id}}, [this, id, analysis](const Json &result) {
-        if (analysis) {
-          if (result.at("analysis").at("id") != id) { throw std::runtime_error("Analysis identity mismatch"); }
-          analysis_id_ = id;
+  const auto kind = pending_.at("kind").get<std::string>();
+  return call(kind == "analysis" ? "project.analyses.get" : kind == "workflow" ? "project.workflows.get" : "project.skills.get",
+      {{kind == "analysis" ? "analysis_id" : kind == "workflow" ? "workflow_id" : "project_skill_id", id}}, [this, id, kind](const Json &result) {
+        if (kind == "analysis" || kind == "workflow") {
+          if (result.at(kind).at("id") != id) { throw std::runtime_error("Created object identity mismatch"); }
+          if (kind == "analysis") { analysis_id_ = id; }
+          else { workflow_id_ = id; }
         }
         else { selected_id_ = id; accept_read(result, id); }
         pending_ = nullptr; page_attempt_ = selected_attempt_ = -1;

@@ -16,6 +16,8 @@ class ProjectSkills {
   void sync();
   bool supported() const;
   bool can_publish() const;
+  bool can_publish_workflow() const;
+  bool can_create_workflow() const;
   bool busy() const { return busy_; }
   bool uncertain() const { return !pending_.is_null(); }
   uint64_t epoch() const { return epoch_; }
@@ -26,6 +28,7 @@ class ProjectSkills {
   const std::string &notice() const { return notice_; }
   const std::string &selected_id() const { return selected_id_; }
   const std::string &analysis_id() const { return analysis_id_; }
+  const std::string &workflow_id() const { return workflow_id_; }
   bool current() const;
   void ensure_loaded();
   bool refresh();
@@ -47,7 +50,7 @@ class ProjectSkills {
   ProjectState &project_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   bridge::Client *client_ = nullptr;
-  std::string handle_, session_, selected_id_, analysis_id_, error_, notice_;
+  std::string handle_, session_, selected_id_, analysis_id_, workflow_id_, error_, notice_;
   uint64_t epoch_ = 0;
   int64_t page_attempt_ = -1, selected_attempt_ = -1, selected_revision_ = -1;
   bool busy_ = false;

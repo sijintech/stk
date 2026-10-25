@@ -62,6 +62,18 @@ TEST(AnalysisDocumentBounds, ExtractedGuardRejectsMalformedOrUnboundedDataBefore
   EXPECT_THROW(check_analysis_json_bounds(deep), std::invalid_argument);
 }
 
+TEST(AnalysisDocumentBounds, LargerSkillHistoryBudgetKeepsAnalysisAndDepthGuards)
+{
+  const Json history = {{"content", std::string(512 * 1024, 'a')}};
+  EXPECT_THROW(check_analysis_json_bounds(history), std::invalid_argument);
+  EXPECT_NO_THROW(check_analysis_json_bounds(history, 8 * 1024 * 1024));
+  EXPECT_THROW(check_analysis_json_bounds(history, 0), std::invalid_argument);
+  Json deep = 0;
+  for (int i = 0; i < 65; ++i) { deep = Json::array({std::move(deep)}); }
+  EXPECT_THROW(check_analysis_json_bounds(deep, 8 * 1024 * 1024), std::invalid_argument);
+  EXPECT_THROW(check_analysis_json_bounds(Json(std::numeric_limits<double>::infinity()), 8 * 1024 * 1024), std::invalid_argument);
+}
+
 class AnalysisGraphRunState : public ::testing::Test {
  protected:
   bridge::test::ManualLoop loop;
