@@ -131,6 +131,10 @@ class Project:
         return ProjectFiles(self._call, self.handle)
 
     @property
+    def skills(self):
+        return ProjectSkills(self._call, self.handle)
+
+    @property
     def analyses(self):
         return ProjectAnalyses(self._call, self.handle)
 
@@ -607,6 +611,36 @@ class ProjectSnapshots:
         """Verify frozen bytes and return their path, irrespective of later source/index edits."""
         return self._call("project.snapshots.resolve", {"handle": self.handle, "snapshot_id": snapshot_id,
                                                        "record_id": record_id})
+
+
+class ProjectSkills:
+    """Project-owned version snapshots. Reads/recovery never consult the installed catalog or run code."""
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def list(self, *, offset=0, limit=50):
+        return self._call("project.skills.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def get(self, project_skill_id):
+        return self._call("project.skills.get", {"handle": self.handle, "project_skill_id": project_skill_id})
+
+    def pin(self, skill_id, version, content_sha256, *, project_skill_id, expected_revision):
+        return self._call("project.skills.pin", {"handle": self.handle, "skill_id": skill_id, "version": version,
+            "content_sha256": content_sha256, "project_skill_id": project_skill_id, "expected_revision": expected_revision})
+
+    def upgrade(self, project_skill_id, version, content_sha256, *, expected_revision):
+        return self._call("project.skills.upgrade", {"handle": self.handle, "project_skill_id": project_skill_id,
+            "version": version, "content_sha256": content_sha256, "expected_revision": expected_revision})
+
+    def restore(self, project_skill_id, content_sha256, *, expected_revision):
+        return self._call("project.skills.restore", {"handle": self.handle, "project_skill_id": project_skill_id,
+            "content_sha256": content_sha256, "expected_revision": expected_revision})
+
+    def create_analysis(self, project_skill_id, content_sha256, *, analysis_id, name, expected_revision):
+        return self._call("project.skills.create_analysis", {"handle": self.handle, "project_skill_id": project_skill_id,
+            "content_sha256": content_sha256, "analysis_id": analysis_id, "name": name,
+            "expected_revision": expected_revision})
 
 
 class ProjectAnalyses:

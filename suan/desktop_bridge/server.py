@@ -305,6 +305,12 @@ class Bridge:
             "project.analyses.update": lambda p, c: self.edit_project_analyses("update", p, c),
             "project.analyses.get": lambda p, c: self.projects.analyses("get", p),
             "project.analyses.list": lambda p, c: self.projects.analyses("list", p),
+            "project.skills.list": lambda p, c: self.projects.skills("list", p),
+            "project.skills.get": lambda p, c: self.projects.skills("get", p),
+            "project.skills.pin": lambda p, c: self.edit_project_skills("pin", p, c),
+            "project.skills.upgrade": lambda p, c: self.edit_project_skills("upgrade", p, c),
+            "project.skills.restore": lambda p, c: self.edit_project_skills("restore", p, c),
+            "project.skills.create_analysis": lambda p, c: self.edit_project_skills("create_analysis", p, c),
             "project.workflows.create": lambda p, c: self.edit_project_workflows("create", p, c),
             "project.workflows.update": lambda p, c: self.edit_project_workflows("update", p, c),
             "project.workflows.get": lambda p, c: self.projects.workflows("get", p),
@@ -671,6 +677,8 @@ class Bridge:
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
                  "project.files.children", "project.files.resolve_path",
                  "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
+                 "project.skills.list", "project.skills.get", "project.skills.pin", "project.skills.upgrade",
+                 "project.skills.restore", "project.skills.create_analysis",
                  "project.workflows.create", "project.workflows.update", "project.workflows.get",
                  "project.workflows.list", "project.workflows.validate", "project.workflows.choices",
                  "project.workflow_runs.prepare", "project.workflow_runs.get", "project.workflow_runs.list",
@@ -861,6 +869,12 @@ class Bridge:
 
     def edit_project_files(self, action, params, context):
         result = self.projects.files(action, params)
+        context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                            "revision": result["revision"]}))
+        return result
+
+    def edit_project_skills(self, action, params, context):
+        result = self.projects.skills(action, params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
         return result

@@ -9,11 +9,11 @@ from suan.project import object_preview as module
 from test_desktop_bridge import bridge_env, inproc  # noqa: F401
 
 
-@pytest.fixture
-def attachment(tmp_path):
+@pytest.fixture(params=["\n", "\r\n"], ids=["lf", "crlf"])
+def attachment(tmp_path, request):
     store = ProjectStore.create(tmp_path / "project", "Synthetic attachments")
     path = store.directory / "note.md"
-    path.write_text("# 合成记录\n<script>never executed</script>\n", encoding="utf-8")
+    path.write_bytes(("# 合成记录" + request.param + "<script>never executed</script>" + request.param).encode("utf-8"))
     identity = store.files.index([str(path)], expected_revision=0)["record_ids"][0]
     ref = {"version": 1, "project_id": store.info()["id"], "kind": "file", "id": identity}
     return store, path, ref
@@ -23,7 +23,7 @@ def test_text_is_literal_and_read_does_not_edit_or_refresh_index(attachment):
     store, path, ref = attachment
     before, history = store.snapshot(), store.history()
     result = store.table.objects_preview(ref, expected_revision=1)
-    assert result["kind"] == "text" and result["data"] == path.read_text(encoding="utf-8")
+    assert result["kind"] == "text" and result["data"] == path.read_bytes().decode("utf-8")
     assert result["content_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
     assert result["size"] == len(path.read_bytes()) and not result["truncated"]
     assert store.snapshot() == before and store.history() == history
@@ -115,7 +115,7 @@ def test_bridge_discovers_and_validates_explicit_preview(attachment, inproc):
     bridge = inproc()
     info = bridge.call("project.open", {"directory": str(store.directory)})["project"]
     result = bridge.call("project.table.objects.preview", {"handle": info["handle"], "expected_revision": 1, "reference": ref})
-    assert result["data"] == path.read_text(encoding="utf-8")
+    assert result["data"] == path.read_bytes().decode("utf-8")
     assert bridge.call("project.snapshot", {"handle": info["handle"]})["snapshot"] == store.snapshot()
     from suan.scripting import API
     api = API(bridge.call)

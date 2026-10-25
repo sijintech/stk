@@ -1,6 +1,7 @@
-# 技能目录（首版，实验性）
+# 技能目录与项目版本（实验性）
 
-更新：2026-10-11。状态：**只读内置目录及原生浏览页已实现**；契约 `stk.skill/1` 仍是实验格式，未冻结。
+更新：2026-10-25。只读内置目录及原生浏览页已交付；项目版本固定、升级、恢复和创建分析草稿已通过本机验收，
+提交与实际结果见[当前交接](../handoff.md)。`stk.skill/1` 与 `stk.project-skill/1` 仍是实验格式，未冻结。
 产品方向见[项目工作台设计](design/project-workbench.md)，存储边界见[项目数据模型](design/project-model.md)。
 
 ## 三类内容不要混用
@@ -47,8 +48,23 @@
 2. 确属更正时，运行 `python -m suan.skills.catalog --lock --output tests/data/skill-catalog.lock.json`
    刷新锁文件，并在[开发交接记录](development-log.md)写明原因。CI 在锁文件不一致时失败。
 
-内置目录当前每个 ID 只发布一个版本。项目以后要采用固定版本时，应把解析后的技能内容随项目保存，
-而不是依赖全局目录长期保留旧版本；这一持久引用、迁移和备份规则**尚未实现**。
+内置目录当前每个 ID 只发布一个版本。项目版本保存完整定义与图模板及对应摘要，采用独立的稳定 UUID。
+读取、恢复已保存版本和创建分析草稿都不重新查询安装目录；本机目录更新不会改变项目的活动版本。
+明确升级时追加比全部历史版本都新的版本；恢复仅选择已有版本，不删除历史。
+
+## 项目版本
+
+在技能库中查看确切版本后，点击“将此版本保存到项目”，进入“项目技能版本”。每次写入都核对项目修订；保存与升级还核对刚查看的内容摘要。
+项目页显示活动版本、摘要和已保存版本。要升级，先在技能库查看同一技能的新版本，再回项目页明确升级；
+“恢复此版本”和“创建保存分析”各是独立操作。草稿带来源技能 UUID、版本与摘要，后续编辑不会改写已保存技能或历史运行。
+“打开分析编辑器”进入分析页面，仍须从列表选择刚创建的分析；创建不绑定输入或启动求值。
+
+这些操作复用普通项目编辑事务和撤销／重做。工作空间包中的数据库备份保留完整版本内容，恢复编辑器仅还原同一项目的选择。
+**保存的是方法定义，不是可执行环境**：不打包节点实现、Python 依赖、说明包正文或科学输入；实际运行仍需对应依赖、输入绑定和明确启动。
+失去写入回执时先按原对象 UUID 检查当前状态，不自动重放。损坏或不支持的记录保留错误说明，不能创建分析或恢复。
+
+每个项目最多 128 条技能记录、内容总量 4 MiB；每条最多 16 个版本、384 KiB。
+这些是有界方法快照，不用于保存大型结果。
 
 ## 使用
 
@@ -61,7 +77,7 @@ suan skills show stk.muferro.domains@1   # 精确版本
 
 ```python
 page = stk.skills.list(limit=20, query="volume")   # 有界分页，最多 200 行
-skill = stk.skills.get("stk.visualize.scalar_volume", version=1)
+skill = stk.skills.get("stk.visualize.scalar_volume", version=2)
 print(skill["ref"], skill["content_sha256"], skill["availability"]["status"])
 ```
 
@@ -70,8 +86,25 @@ print(skill["ref"], skill["content_sha256"], skill["availability"]["status"])
 
 原生桌面从 **文件 → 技能** 或工作台“技能库”打开同一目录，用法见[桌面指南](desktop.md#技能目录)。
 
+脚本通过已打开项目的 `p.skills` 访问相同操作；列表和详情是纯读，四种写入均要求 `expected_revision`：
+
+```python
+from uuid import uuid4
+
+skill = stk.skills.get("stk.muferro.energy_trace", version=1)
+project_skill_id = str(uuid4())
+# p 为已打开的项目；revision 为刚检查过的该项目修订。
+receipt = p.skills.pin(skill["id"], skill["version"], skill["content_sha256"],
+                       project_skill_id=project_skill_id, expected_revision=revision)
+saved = p.skills.get(project_skill_id)["skill"]
+receipt = p.skills.create_analysis(project_skill_id, saved["active"]["content_sha256"],
+                                  analysis_id=str(uuid4()), name="能量分析", expected_revision=receipt["revision"])
+```
+
+这里只保存分析，不准备输入或执行图。`p.skills.upgrade(id, version, content_sha256, expected_revision=...)`
+与 `p.skills.restore(id, content_sha256, expected_revision=...)` 分别追加新版本和切换已保存版本。
+
 ## 尚未实现
 
-- 项目采用技能的持久引用、版本固定、迁移与备份；
 - 从技能直接准备或运行、对话附件、工作流封装为技能；
 - 用户或第三方技能目录、更多入口类型（批次模板、Python 操作等）。

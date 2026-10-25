@@ -379,6 +379,11 @@ class ProjectStore:
         return FileIndex(self)
 
     @property
+    def skills(self):
+        from .skills import ProjectSkills
+        return ProjectSkills(self)
+
+    @property
     def analyses(self):
         from .analyses import Analyses
         return Analyses(self)

@@ -12,6 +12,7 @@ from uuid import uuid4
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 from suan.project.analyses import AnalysisNotFound
+from suan.project.skills import ProjectSkillNotFound
 from suan.project.analysis_runs import AnalysisRunNotFound
 from suan.project.workflows import WorkflowNotFound
 from suan.project.workflow_runs import WorkflowRunNotFound
@@ -73,7 +74,7 @@ class ProjectSessions:
             yield
         except (RevisionConflict, Archived, PolicyDenied) as exc:
             raise BridgeError("conflict", str(exc)) from None
-        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound, AgentSessionNotFound) as exc:
+        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound, AgentSessionNotFound, ProjectSkillNotFound) as exc:
             raise BridgeError("not_found", str(exc)) from None
         except AgentBusy as exc:
             raise BridgeError("busy", str(exc)) from None
@@ -245,6 +246,12 @@ class ProjectSessions:
     def history(self, params):
         with self._operation():
             return {"history": self._get(params["handle"]).history()}
+
+    def skills(self, action, params):
+        with self._operation():
+            skills = self._get(params["handle"]).skills
+            values = {key: value for key, value in params.items() if key != "handle"}
+            return getattr(skills, action)(**values)
 
     def analyses(self, action, params):
         with self._operation():

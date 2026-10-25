@@ -54,7 +54,8 @@ int main(int argc, char **argv)
   const bool portable_narrow = portable_ui && editor.ends_with("_narrow");
   const bool ai_stream = editor == "ai_stream";
   const bool workspace = editor == "workspace" || editor == "workspace_narrow";
-  const bool skills = editor == "skills" || editor == "skills_narrow";
+  const bool saved_skills = editor == "skills_saved" || editor == "skills_saved_narrow";
+  const bool skills = editor == "skills" || editor == "skills_narrow" || saved_skills;
   const bool ai_proposal = editor == "ai_proposal" || editor == "ai_proposal_narrow";
   const bool ai_focus = editor == "ai_focus";
   const bool ai_scope = editor == "ai_scope" || editor == "ai_scope_narrow";
@@ -65,7 +66,7 @@ int main(int argc, char **argv)
   const bool pet_study = editor == "pet_study" || editor == "pet_study_narrow";
   const bool batch_page = editor == "batches" || editor == "batches_lammps" || editor == "batches_lammps_narrow";
   const bool simulation_page = editor == "simulation" || batch_page || lammps;
-  const int canvas_width = portable_ui ? (portable_narrow ? 900 : 1440) : editor == "workspace_narrow" || editor == "skills_narrow" ? 560 :
+  const int canvas_width = portable_ui ? (portable_narrow ? 900 : 1440) : editor == "workspace_narrow" || (skills && editor.ends_with("_narrow")) ? 560 :
       editor == "ai_narrow" || editor == "ai_proposal_narrow" || editor == "ai_scope_narrow" || ai_focus ||
       editor == "simulation_lammps_narrow" || editor == "batches_lammps_narrow" || editor == "pet_study_narrow" ? 760 : 1280;
   bridge::test::TempDir dir{"project-render"};
@@ -78,7 +79,7 @@ int main(int argc, char **argv)
   bo.env["STK_PROFILES_FILE"] = dir.str() + "/profiles.json";
   bo.env["STK_STATE_DIR"] = dir.str() + "/runtime";
   bo.env["STK_TOKEN_PLAN_API_KEY"] = "";
-  if (portable_ui) { bo.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt; }
+  if (portable_ui || skills) { bo.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt; }
   else if (!lammps) { bo.env["STK_TOKEN_PLAN_MODEL"] = "fixture-model"; }
   bo.executor = loop.executor();
   bo.strict = bo.validate = true;
@@ -762,6 +763,15 @@ int main(int argc, char **argv)
         ok = ok && catalog.select("stk.visualize.scalar_volume@2") &&
              loop.pump_until([&] { return !catalog.detail_loading(); }, 30) && catalog.detail().is_object();
         ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        if (saved_skills) {
+          const auto *pin = screen.ui()->find("project_skill_pin");
+          if (pin && pin->enabled) { pin->on_click(); } else { ok = false; }
+          ok = ok && loop.pump_until([&] {
+            if (!gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error)) { return false; }
+            const auto *create = screen.ui()->find("project_skill_create_analysis");
+            return create && create->enabled && state.project()->revision == 2;
+          }, 30);
+        }
       }
       ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
       if (ai) {
@@ -844,13 +854,22 @@ int main(int argc, char **argv)
         }
         ok = ok && state.project()->revision == 1 && client->stats().schema_violations == 0;
       }
-      if (skills) {
+      if (skills && !saved_skills) {
         const auto &catalog = shell.store().skills();
         const auto *list = screen.ui()->find("skills_list");
         const auto *parameters = screen.ui()->find("skills_parameters");
         ok = ok && list && list->list && list->list->count == 6 && list->list->selected.value() == 5 &&
              parameters && parameters->rect.w > 0 && catalog.problem_count() == 0 && catalog.error().empty() &&
              state.project()->revision == 1 && shell.store().viewer().evaluations_started() == 0 &&
+             client->stats().schema_violations == 0;
+      }
+      if (saved_skills) {
+        const auto *list = screen.ui()->find("project_skills_list");
+        const auto *create = screen.ui()->find("project_skill_create_analysis");
+        ok = ok && list && list->list && list->list->count == 1 && list->list->selected.value() == 0 &&
+             create && create->enabled && create->rect.w > 0 && create->rect.x >= 0 && create->rect.y >= 0 &&
+             create->rect.x + create->rect.w <= canvas_width && create->rect.y + create->rect.h <= 900 &&
+             state.project()->revision == 2 && shell.store().viewer().evaluations_started() == 0 &&
              client->stats().schema_violations == 0;
       }
       if (ai_focus) {

@@ -35,6 +35,7 @@ add_library(stk_app STATIC
   src/jobs_state.cc
   src/project_state.cc
   src/project_analyses.cc
+  src/project_skills.cc
   src/project_workflows.cc
   src/model_settings.cc
   src/project_archive.cc

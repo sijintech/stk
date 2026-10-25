@@ -271,6 +271,7 @@ def _resolve(definition, registry, guides, problems, source, file):
                for name, reference in (graph.get("outputs") or {}).items()]
     digest = hashlib.sha256(_canonical({"definition": definition, "template": preset}).encode("utf-8")).hexdigest()
     return {
+        "_content": {"definition": definition, "template": preset},
         "schema": SCHEMA,
         "id": definition["id"],
         "version": definition["version"],
@@ -302,9 +303,24 @@ def _summary(skill):
 class SkillCatalog:
     """Resolved skills (sorted by id, then version) and the problems of unusable definitions."""
 
-    def __init__(self, skills, problems):
+    def __init__(self, skills, problems, contents=None):
         self.skills = skills
         self.problems = problems
+        self._contents = contents or {}
+
+    def freeze(self, skill_id, version, content_sha256):
+        """Detach the exact definition/template pair observed in this catalog read.
+
+        Environment availability is deliberately excluded. The caller must provide the version
+        and digest it reviewed; never reread the preset after checking the catalog's digest.
+        """
+        skill = self.get(skill_id, version)
+        if skill["content_sha256"] != content_sha256:
+            raise SkillCatalogError("conflict", "Skill content changed; refresh and review it again")
+        content = self._contents.get(skill["ref"])
+        if content is None or hashlib.sha256(_canonical(content).encode("utf-8")).hexdigest() != content_sha256:
+            raise SkillCatalogError("conflict", "The reviewed skill content is unavailable")
+        return json.loads(_canonical(content))
 
     def page(self, *, offset=0, limit=DEFAULT_LIMIT, query=None):
         """``{skills: [summary], total, offset, next_offset, problems, problem_count}``."""
@@ -362,6 +378,7 @@ def load_catalog(registry=None, *, directories=None):
     guides = {item["name"]: item["description"] for item in list_skills()}
     problems = _Problems()
     skills = {}
+    contents = {}
     for source, root in roots:
         root = Path(root) if isinstance(root, str) else root
         for entry in _definition_files(root):
@@ -400,8 +417,9 @@ def load_catalog(registry=None, *, directories=None):
                 problems.add(source, file, "invalid_definition", f"{type(exc).__name__}: {exc}", "", definition)
                 continue
             if skill is not None:
+                contents[skill["ref"]] = skill.pop("_content")
                 skills[key] = skill
-    return SkillCatalog([skills[key] for key in sorted(skills)], problems.items)
+    return SkillCatalog([skills[key] for key in sorted(skills)], problems.items, contents)
 
 
 def lock_document(catalog):

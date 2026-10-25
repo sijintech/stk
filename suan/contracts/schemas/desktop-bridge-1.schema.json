@@ -11152,6 +11152,212 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.skills.list": {
+        "description": "Read saved skill summaries without loading the installed catalog or evaluating cells.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectSkillListResult"
+        }
+      },
+      "project.skills.get": {
+        "description": "Read hash-checked project-owned skill versions; no catalog, file access or execution.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectSkillGetResult"
+        }
+      },
+      "project.skills.pin": {
+        "description": "Explicitly pin a reviewed exact catalog version and content digest as one undoable project edit.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "skill_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 96
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id",
+            "skill_id",
+            "version",
+            "content_sha256",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
+      },
+      "project.skills.upgrade": {
+        "description": "Explicitly save a newer reviewed catalog version, keeping every previously saved version. No execution.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id",
+            "version",
+            "content_sha256",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
+      },
+      "project.skills.restore": {
+        "description": "Explicitly select a saved digest as active without consulting the installed catalog. One undoable edit.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id",
+            "content_sha256",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
+      },
+      "project.skills.create_analysis": {
+        "description": "Copy the reviewed active snapshot into a new saved analysis with version provenance; never evaluates or starts a run.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "content_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "analysis_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id",
+            "content_sha256",
+            "analysis_id",
+            "name",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
       }
     },
     "events": {
@@ -18866,6 +19072,575 @@
         "table_id",
         "name",
         "definition"
+      ],
+      "additionalProperties": false
+    },
+    "projectSkillVersion": {
+      "type": "object",
+      "properties": {
+        "skill_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "ref": {
+          "type": "string",
+          "maxLength": 104
+        },
+        "title": {
+          "$ref": "#/$defs/skillText"
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "skill_id",
+        "version",
+        "ref",
+        "title",
+        "content_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "projectSkillSnapshot": {
+      "type": "object",
+      "properties": {
+        "content_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "stk.skill/1"
+            },
+            "id": {
+              "type": "string",
+              "maxLength": 96,
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "title": {
+              "type": "object",
+              "properties": {
+                "en": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "zh_CN": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                }
+              },
+              "required": [
+                "en"
+              ],
+              "additionalProperties": false
+            },
+            "summary": {
+              "type": "object",
+              "properties": {
+                "en": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "zh_CN": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                }
+              },
+              "required": [
+                "en"
+              ],
+              "additionalProperties": false
+            },
+            "guide": {
+              "type": "object",
+              "properties": {
+                "pack": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                }
+              },
+              "required": [
+                "pack"
+              ],
+              "additionalProperties": false
+            },
+            "entry": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "preset": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "dependencies": {
+              "type": "object",
+              "properties": {
+                "python": {
+                  "type": "array",
+                  "maxItems": 16,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "module": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "outputs": {
+                        "type": "array",
+                        "maxItems": 32,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "purpose": {
+                        "type": "object",
+                        "properties": {
+                          "en": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300
+                          },
+                          "zh_CN": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300
+                          }
+                        },
+                        "required": [
+                          "en"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "module",
+                      "purpose"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "runtime": {
+                  "type": "array",
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "capability": {
+                        "enum": [
+                          "offscreen_rendering"
+                        ]
+                      },
+                      "outputs": {
+                        "type": "array",
+                        "maxItems": 32,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "purpose": {
+                        "type": "object",
+                        "properties": {
+                          "en": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300
+                          },
+                          "zh_CN": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300
+                          }
+                        },
+                        "required": [
+                          "en"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "capability",
+                      "purpose"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "examples": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "object",
+                    "properties": {
+                      "en": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "zh_CN": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "en"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "parameters": {
+                    "type": "object",
+                    "maxProperties": 64
+                  },
+                  "outputs": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    }
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "id",
+            "version",
+            "title",
+            "summary",
+            "entry"
+          ],
+          "additionalProperties": false
+        },
+        "template": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "bindings": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 4096
+                  }
+                },
+                "required": [
+                  "name",
+                  "description"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "graph": {
+              "$ref": "#/$defs/projectAnalysisGraph"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "description",
+            "bindings",
+            "graph"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "content_sha256",
+        "definition",
+        "template"
+      ],
+      "additionalProperties": false
+    },
+    "projectSkillDocument": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.project-skill/1"
+        },
+        "active": {
+          "$ref": "#/$defs/sha256"
+        },
+        "versions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/projectSkillSnapshot"
+          }
+        }
+      },
+      "required": [
+        "format",
+        "active",
+        "versions"
+      ],
+      "additionalProperties": false,
+      "description": "Experimental project-owned snapshots. At most 384 KiB, depth 64; each definition/template digest, version uniqueness, binding identity and active digest checked by storage. Reading never loads the global catalog."
+    },
+    "projectSkillSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "state": {
+          "enum": [
+            "readable",
+            "invalid",
+            "unsupported"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "active": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/projectSkillVersion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "versions": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/projectSkillVersion"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "format",
+        "state",
+        "error",
+        "active",
+        "versions"
+      ],
+      "additionalProperties": false
+    },
+    "projectSkill": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "state": {
+          "enum": [
+            "readable",
+            "invalid",
+            "unsupported"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "active": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/projectSkillVersion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "versions": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/projectSkillVersion"
+          }
+        },
+        "document": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/projectSkillDocument"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "format",
+        "state",
+        "error",
+        "active",
+        "versions",
+        "document"
+      ],
+      "additionalProperties": false
+    },
+    "projectSkillListResult": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "compatible": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "skills": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/projectSkillSummary"
+          }
+        }
+      },
+      "required": [
+        "revision",
+        "table_id",
+        "compatible",
+        "error",
+        "offset",
+        "total",
+        "skills"
+      ],
+      "additionalProperties": false
+    },
+    "projectSkillGetResult": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "skill": {
+          "$ref": "#/$defs/projectSkill"
+        }
+      },
+      "required": [
+        "revision",
+        "table_id",
+        "skill"
       ],
       "additionalProperties": false
     }

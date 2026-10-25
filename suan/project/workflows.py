@@ -14,7 +14,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from suan.graph.schema import canonical_json
 
-from . import analyses, files
+from . import analyses, files, skills
 from .managed import ManagedTable, clone, name as _valid_name
 from .store import ProjectError, UnsupportedProjectFormat, _expected_revision, _id, _version
 from . import archive
@@ -233,7 +233,7 @@ def _resolve(db, step, model, templates, read_analysis):
         return summary, ("invalid_reference", f"The {key} reference must be a UUID")
     if kind == "table":
         table = model["tables"].get(target)
-        if table is None or target in (TABLE_ID, analyses.TABLE_ID, files.TABLE_ID):
+        if table is None or target in (TABLE_ID, analyses.TABLE_ID, files.TABLE_ID, skills.TABLE_ID):
             return summary, ("missing_reference", "The referenced parameter table does not exist")
         summary.update(name=table["name"], outputs=[{"name": "rows", "type": "rows"}])
     elif kind == "files":
@@ -359,10 +359,10 @@ class Workflows:
 
     def choices(self):
         """What a step can reference now, for an editor: parameter tables (not the managed analysis,
-        workflow or file-index tables), input snapshots (newest first), readable saved analyses and
+        workflow, skill or file-index tables), input snapshots (newest first), readable saved analyses and
         registered simulation templates. Read-only; nothing is evaluated or created."""
         from suan.workflows.templates import workflow_templates  # Registered versions only; never loads project code.
-        managed = {TABLE_ID, analyses.TABLE_ID, files.TABLE_ID}
+        managed = {TABLE_ID, analyses.TABLE_ID, files.TABLE_ID, skills.TABLE_ID}
         with self.store._connect() as db:
             revision = db.execute("SELECT revision FROM project").fetchone()[0]
             tables = [{"id": row["id"], "name": row["name"]}

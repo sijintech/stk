@@ -8,7 +8,7 @@ add_executable(stk-project-tests project_test.cc script_test.cc project_table_vi
   analysis_graph_run_state_test.cc analysis_graph_run_editor_test.cc analysis_outputs_editor_test.cc
   analysis_input_reuse_test.cc analysis_input_reuse_editor_test.cc
   analysis_result_inspection_test.cc analysis_result_inspection_editor_test.cc
-  analysis_table_grid_test.cc analysis_table_grid_editor_test.cc skills_catalog_test.cc analysis_links_editor_test.cc
+  analysis_table_grid_test.cc analysis_table_grid_editor_test.cc skills_catalog_test.cc project_skills_test.cc analysis_links_editor_test.cc
   workflow_editor_test.cc workflow_draft_test.cc table_editor_test.cc project_file_tree_test.cc
   workbench_modules_test.cc table_workbench_state_test.cc table_workbench_editor_test.cc table_object_preview_test.cc
   table_io_editor_test.cc workspace_transfer_test.cc)
@@ -27,7 +27,7 @@ set_target_properties(stk-project-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 # Reuse the software-GPU environment and supported backends established in jobs.cmake.
 foreach(_lang en zh)
   foreach(_be ${_jobs_backends})
-    foreach(_review review review_errors drafts discussion requests filter simulation batches simulation_lammps simulation_lammps_narrow batches_lammps batches_lammps_narrow pet_study pet_study_narrow ai ai_narrow ai_stream ai_proposal ai_proposal_narrow ai_scope ai_scope_narrow ai_focus workspace workspace_narrow skills skills_narrow)
+    foreach(_review review review_errors drafts discussion requests filter simulation batches simulation_lammps simulation_lammps_narrow batches_lammps batches_lammps_narrow pet_study pet_study_narrow ai ai_narrow ai_stream ai_proposal ai_proposal_narrow ai_scope ai_scope_narrow ai_focus workspace workspace_narrow skills skills_narrow skills_saved skills_saved_narrow)
       add_test(NAME project_${_review}_render_${_be}_${_lang} COMMAND stk-project-render --editor ${_review}
         --gpu-backend ${_be} --lang ${_lang} --export "${_jobs_out}/project_${_review}_${_be}_${_lang}.png")
       set_tests_properties(project_${_review}_render_${_be}_${_lang} PROPERTIES LABELS "project;gpu" TIMEOUT 120

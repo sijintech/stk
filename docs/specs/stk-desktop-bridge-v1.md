@@ -1551,3 +1551,41 @@ methods and the client must show the catalog as unavailable rather than guess.
   only as an unusable definition. Out-of-range params are `invalid_params`.
 - The entry names what executes the skill (`graph.preset` run by `graph.evaluate`); the catalog
   does not execute it. The Python console exposes both methods as `stk.skills.list/get`.
+
+### 16.1 Project-owned skill versions (additive extension, experimental)
+
+Discover the following six methods through `hello.methods`. Every request contains the current
+project `handle`; every write also contains `expected_revision`. The Python facade is `p.skills`.
+
+| Method | Additional params | Result |
+|---|---|---|
+| `project.skills.list` | `offset?: 0, limit?: 50 (1–100)` | `{revision, table_id, compatible, error, offset, total, skills}` |
+| `project.skills.get` | `project_skill_id` | `{revision, table_id, skill}` |
+| `project.skills.pin` | `project_skill_id, skill_id, version, content_sha256` | Ordinary project edit receipt, including `record_id` and `revision` |
+| `project.skills.upgrade` | `project_skill_id, version, content_sha256` | Ordinary project edit receipt |
+| `project.skills.restore` | `project_skill_id, content_sha256` | Ordinary project edit receipt |
+| `project.skills.create_analysis` | `project_skill_id, content_sha256, analysis_id, name` | Ordinary edit receipt; `record_id` is the new analysis UUID |
+
+`project_skill_id` and `analysis_id` are stable project UUIDs. A readable detail contains
+`{id, name, format, state, error, active, versions, document}`; list items omit `document`.
+Each version summary contains `{skill_id, version, ref, title, content_sha256}`. The experimental
+`stk.project-skill/1` document contains `{format, active, versions}`, where `active` is a saved
+content digest and each version contains `{definition, template, content_sha256}`.
+The hash covers the complete definition/template pair, using the catalog's canonical UTF-8 JSON;
+integer/float distinctions and negative zero are retained. Environment availability is not saved.
+
+Pin and upgrade resolve exactly the reviewed version and digest from one catalog observation.
+Upgrade must exceed all saved version numbers; restore only selects a digest already saved.
+Reads, restore and analysis creation never consult the installed catalog or execute nodes.
+Analysis creation copies the active graph, selects its declared outputs, and records
+`graph.ui.project_skill = {id, ref, content_sha256}`. It creates no run or model request.
+
+Writes use the shared CAS transaction and undo journal, followed by `project.changed` after the
+reply. They are not automatically replayed after a missing reply: inspect the original UUID first.
+An unknown project skill is `not_found`; a stale revision or reviewed digest is `conflict`.
+Malformed or unsupported saved documents remain visible as `state: invalid | unsupported` with
+an error and cannot be restored or copied. The JSON Schema fixes the exact response shapes.
+
+Limits: 128 project skills, 4 MiB of collection content, at most 16 versions and 384 KiB per
+document. SQLite backups and portable workspaces preserve the records; neither carries the
+node implementation, dependencies, guide body or scientific input needed for a later run.
