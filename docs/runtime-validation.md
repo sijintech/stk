@@ -2,10 +2,36 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：表格填充柄
+
+源码提交 `b2b076d669e6089fd700d4ff02097aaee60adb0b`，基线 `d1493fa337b9768046a15b78d64a32796a1555be`。
+前头 Desktop [40160203772](https://github.com/sijintech/stk/actions/runs/40160203772) **5/5 成功且全部结束**，已满足本批 push 等待条件；
+Runtime **8/8**、Docs、Secret 亦成功，链接见下节。本批新 CI 待推送后确认。
+
+- 首次构建失败来自新测试调用错误的模态接口，修正后完整重建退出 0；日志 `/tmp/stk-table-fill-build-20261025.log` 与 `build-final` 对应日志。
+- 定向首轮 **56/57**：有序 JSON 键顺序导致对象断言失败；改为规范内容比较，值与身份未改。再次构建、目录暂存均退出 0，`/tmp/stk-table-fill-build-fix-20261025.log`、`build-catalog` 对应日志。
+- 最终定向 **57/57、零跳过，8.34 秒**；`/tmp/stk-table-fill-focused-final-20261025.log` 与 `.xml`。必跑检查 **57/57**，`/tmp/stk-table-fill-required-20261025.log`。
+- 完整原生 **1612/1612、零失败、零跳过，365.81 秒**；`/tmp/stk-table-fill-native-20261025.log` 与 `.xml`；新增必跑 **8/8**。`TableGrid` 与 `TableWorkbenchEditorPython` 已在三平台 CI 必跑集合，无需放宽跳过条件。
+- 中英文目录 **2314 键**一致，`git diff --check` 通过。暂存源码 gitleaks 8.30.1 使用 `.gitleaks.toml` redact 扫描 **31.03 KB，无泄漏**。
+
+固定起点：默认四区域布局、1440×1200、en、1×，三条合成记录、整数首行 `INT64_MAX`，Viewer 已显示公开合成载荷且未最大化。
+单击整数格 **1 次**，再从右下角拖至第三行 **1 次拖动**；拖动中修订不变，松开后仅增加 1，后两行精确保留 int64，
+选中记录不变；一次撤销恢复两个缺省格。Viewer 载荷、payload／camera 序列不变，求值启动数为 0。
+核心控件另在 1×／2× 验证排序后模型行映射、矩形与向上／左重复、行标签排除；验证取消、版本／选择变化、禁用、模态、消失、非左键及离表松开，超限 1197 格整体拒绝、999 格完整交付。
+真实 Python 桥还验证 null 与缺省、选择 UUID、对象链接、公式定义及同源行重绑定、外行引用不变、旧回调拒绝、混合批次不部分写入与草稿保护。
+
+只作用于当前页已有记录，最多 1000 个目标格；类型、单位及选项须一致，不推断数列、不按列偏移公式字段。
+静止指针定时滚动、看板拖动、富对象预览及桌面首次全量快照仍待后续。自动事件与既有图形回归不替代 macOS／Windows 真机人工体验验收。
+本批没有 Python 实现或项目格式变更；测试清空产品 key、移除 model 环境，不发收费模型请求，不改端点或网络策略。
+
 ## 2026-10-25：工作模式布局
 
 源码提交 `85630acbb04f419ac7a13b0d5f99e08990cd91f9`，基线为 `027798ff0d5ca914b947401d14c47e4787430133`。
-本节记录提交前本机验证；本批新 CI 结果待回填。源码暂存 gitleaks 8.30.1 按 `.gitleaks.toml` redact 扫描约 **64.57 KB，无泄漏**。
+本节记录提交前本机验证；随后记录／索引提交为 `d1493fa337b9768046a15b78d64a32796a1555be`。
+该头 Desktop [40160203772](https://github.com/sijintech/stk/actions/runs/40160203772) 已全部结束且 **5/5 成功**，覆盖 macOS Metal、Windows CPU、Linux 桌面、可重定位包和新容器冒烟。
+Runtime [40160203774](https://github.com/sijintech/stk/actions/runs/40160203774) **8/8 成功**；
+Docs [40160203773](https://github.com/sijintech/stk/actions/runs/40160203773)、Secret [40160203795](https://github.com/sijintech/stk/actions/runs/40160203795) 均成功。
+源码暂存 gitleaks 8.30.1 按 `.gitleaks.toml` redact 扫描约 **64.57 KB，无泄漏**。
 推送前已复核前代码头 Desktop [40156836215](https://github.com/sijintech/stk/actions/runs/40156836215) 全部结束，**5/5 成功**。
 构建 `/tmp/stk-work-mode-build-20261025.log`、最终增量 `/tmp/stk-work-mode-build-final-20261025.log` 均退出 0。
 构建结束后运行定向 **72/72、零失败、零跳过，10.19 秒**；
