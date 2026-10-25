@@ -130,6 +130,7 @@ OPERATIONS = {
     "project.analysis_runs.recover": ("submit_run", "recovery is explicit, by a person"),
     "project.analysis_runs.result": ("read", "not needed in v1"),
     "project.snapshots.list": ("read", "not needed in v1"),
+    "project.snapshots.list_summaries": ("read", "bounded input snapshot metadata; not needed in v1"),
     "project.snapshots.capture": ("project_edit", "advances the revision"),
     "project.snapshots.get": ("read", "not needed in v1"),
     "project.snapshots.verify": ("read", "not needed in v1"),

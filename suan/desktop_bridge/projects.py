@@ -639,6 +639,9 @@ class ProjectSessions:
             snapshots = self._get(params["handle"]).snapshots
             if action == "list":
                 return snapshots.list()
+            if action == "list_summaries":
+                return snapshots.list_summaries(expected_revision=params["expected_revision"],
+                                                offset=params.get("offset", 0), limit=params.get("limit", 64))
             if action == "capture":
                 kwargs = {"expected_revision": params["expected_revision"]}
                 if "max_bytes" in params:

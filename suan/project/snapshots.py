@@ -18,6 +18,7 @@ from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _ex
 DEFAULT_MAX_BYTES = 256 * 1024 * 1024
 MAX_BYTES = 1024 ** 4
 CHUNK = 1024 * 1024
+MAX_SUMMARY_MANIFEST_BYTES = 2 * 1024 * 1024
 
 
 def _canonical(value):
@@ -170,6 +171,63 @@ class Snapshots:
             self._require(db)
             return {"revision": db.execute("SELECT revision FROM project").fetchone()[0],
                     "snapshots": [self._decode(row) for row in db.execute("SELECT * FROM project_snapshots ORDER BY rowid")]}
+
+    def list_summaries(self, *, expected_revision, offset=0, limit=64):
+        """Page stored metadata in one read snapshot; selecting an item still requires get().
+
+        JSON is inspected only inside SQLite for this page. Complete manifest checksums and
+        file descriptors are validated by get(), never implied by a summary. Malformed page
+        metadata fails the page instead of silently changing its offset or total.
+        """
+        if (type(expected_revision) is not int or not 0 <= expected_revision < 2**63
+                or type(offset) is not int or not 0 <= offset < 2**63
+                or type(limit) is not int or not 1 <= limit <= 64):
+            raise ProjectError("Snapshot summaries require a nonnegative revision/offset and limit from 1 to 64")
+        with self.store._connect() as db:
+            self._require(db)
+            revision = db.execute("SELECT revision FROM project").fetchone()[0]
+            if revision != expected_revision:
+                raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {revision}")
+            total = db.execute("SELECT count(*) FROM project_snapshots").fetchone()[0]
+            # LIMIT/OFFSET are inside the page subquery. No manifest leaves SQLite, and no
+            # JSON operation touches an unselected row. CASE also bounds malformed/large JSON
+            # before invoking JSON functions (available in the supported SQLite builds).
+            rows = db.execute("""
+                SELECT id, kind, revision, sha256, created_at,
+                    CASE WHEN length(CAST(manifest AS BLOB)) > ? THEN NULL
+                         WHEN NOT json_valid(manifest) THEN NULL
+                         WHEN json_type(manifest) != 'object'
+                           OR json_type(manifest, '$.format') IS NOT 'integer'
+                           OR json_extract(manifest, '$.format') IS NOT 1
+                           OR json_extract(manifest, '$.kind') IS NOT 'files'
+                           OR json_extract(manifest, '$.project_id') IS NOT ?
+                           OR json_type(manifest, '$.source_revision') IS NOT 'integer'
+                           OR json_extract(manifest, '$.source_revision') < 0
+                           OR json_extract(manifest, '$.source_revision') >= revision
+                           OR json_type(manifest, '$.files') IS NOT 'array' THEN NULL
+                         ELSE json_array_length(manifest, '$.files') END AS file_count
+                FROM (SELECT rowid AS summary_order, id, kind, revision, sha256, created_at, manifest
+                      FROM project_snapshots ORDER BY rowid LIMIT ? OFFSET ?)
+                ORDER BY summary_order
+                """, (MAX_SUMMARY_MANIFEST_BYTES, self.store._project_id, limit, offset))
+            snapshots = []
+            for row in rows:
+                item = dict(row)
+                try:
+                    _id(item["id"])
+                    if (item["kind"] != "files" or type(item["revision"]) is not int
+                            or not 0 <= item["revision"] <= revision
+                            or type(item["sha256"]) is not str or re.fullmatch("[0-9a-f]{64}", item["sha256"]) is None
+                            or type(item["created_at"]) is not str or not 1 <= len(item["created_at"]) <= 64
+                            or type(item["file_count"]) is not int or not 1 <= item["file_count"] <= 100):
+                        raise ValueError("invalid metadata")
+                    if item["id"] != str(uuid5(UUID(self.store._project_id), item["sha256"])):
+                        raise ValueError("snapshot identity does not match its stored checksum")
+                    datetime.fromisoformat(item["created_at"])
+                except (ProjectError, ValueError, TypeError):
+                    raise ProjectError("Invalid input snapshot summary in the selected page; repair its stored metadata") from None
+                snapshots.append(item)
+            return {"revision": revision, "offset": offset, "total": total, "snapshots": snapshots}
 
     def get(self, snapshot_id):
         _id(snapshot_id)

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/** Real frozen report -> ReportsEditor -> explicit read -> GPU screenshot. No mock controls. */
+/** Real frozen report -> ReportsEditor reading or unsaved creation form -> GPU screenshot. No mock controls. */
 #include "stk/app/bridge_status.hh"
 #include "stk/app/editor_area.hh"
 #include "stk/app/jobs_state.hh"
@@ -85,9 +85,9 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (output.empty() || (language != "en" && language != "zh") ||
-      (width_mode != "wide" && width_mode != "narrow") || (view != "text" && view != "png")) { return 2; }
+      (width_mode != "wide" && width_mode != "narrow") || (view != "text" && view != "png" && view != "create")) { return 2; }
   const int width = width_mode == "narrow" ? 560 : 1440, height = 1000;
-  const bool chinese = language == "zh", png_view = view == "png";
+  const bool chinese = language == "zh", png_view = view == "png", create_view = view == "create";
   bridge::test::TempDir directory{"reports-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions options;
@@ -99,8 +99,31 @@ int main(int argc, char **argv)
   options.env["STK_TOKEN_PLAN_API_KEY"] = "";
   options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
   options.executor = loop.executor(); options.strict = options.validate = true;
-  auto client = bridge::Client::create(options);
   std::string error;
+  if (create_view) {
+    // Keep the real bridge and services. Observe content requests separately so a visually
+    // empty widget cannot hide an accidental asset/preview read during form preparation.
+    write_text(directory.path() / "observe_content.py", R"PY(
+from pathlib import Path
+import sys
+from suan.desktop_bridge.projects import ProjectSessions
+from suan.desktop_bridge.__main__ import main
+marker = Path(sys.argv.pop(1))
+reports = ProjectSessions.reports
+def observed(self, action, params):
+    if action in ('asset', 'preview'):
+        with marker.open('a', encoding='utf-8') as output:
+            output.write(action + '\n')
+    return reports(self, action, params)
+ProjectSessions.reports = observed
+main()
+)PY");
+    const auto python = bridge::find_python(options.python, error);
+    if (!python) { fprintf(stderr, "FAIL: %s\n", error.c_str()); return 1; }
+    options.command = {*python, "-u", directory.str() + "/observe_content.py", directory.str() + "/content.calls",
+        "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+  }
+  auto client = bridge::Client::create(options);
   if (!client->start(&error) || !client->wait_ready(60)) {
     fprintf(stderr, "FAIL: bridge: %s\n%s", error.c_str(), client->bridge_log().text().c_str()); return 1;
   }
@@ -200,8 +223,28 @@ int main(int argc, char **argv)
       auto wait = [&](const std::function<bool()> &predicate, const char *description) {
         require(loop.pump_until([&] { frame(); return predicate(); }, 45), description);
       };
-      int clicks = 0;
+      int clicks = 0, scroll_steps = 0;
+      auto fully_visible = [width, height](const ui::Widget *item) {
+        if (!item) { return false; }
+        const auto visible = item->rect.intersect(item->clip).intersect(ui::Rect{0, 0, float(width), float(height)});
+        return !visible.empty() && visible.h >= item->rect.h - 1 && visible.w >= item->rect.w - 1;
+      };
+      auto scroll_to = [&](const char *key) {
+        frame();
+        const auto main = area->find_region(app::EditorArea::kMain)->ui_rect();
+        for (int step = 0; step < 80 && !fully_visible(widget(key)); ++step) {
+          const auto *item = widget(key);
+          require(item, std::string("missing scroll target: ") + key);
+          // Use the main region edge, outside inner virtual lists, so its scrollbar receives
+          // the real wheel event. Never change production layout or stored scroll offsets.
+          screen.ui()->handle_event(ui::Event::wheel({main.x1() - 2, main.cy()},
+              item->rect.cy() > main.cy() ? -1.0f : 1.0f, context.now + 0.001));
+          ++scroll_steps; frame();
+        }
+        require(fully_visible(widget(key)), std::string("control cannot fit in viewport: ") + key);
+      };
       auto click = [&](const char *key, int row = -1) {
+        if (create_view) { scroll_to(key); }
         frame(); const auto *item = widget(key);
         require(item && item->enabled, std::string("control unavailable: ") + key);
         ui::Vec2 point{item->rect.cx(), item->rect.cy()};
@@ -227,72 +270,123 @@ int main(int argc, char **argv)
       require(area->tab(1).has_unsaved_changes(), "Python draft must be unsaved before report interaction");
       const auto draft_state = area->tab(1).save_workspace_state();
       require(draft_state.at("source") == draft && draft_state.at("baseline") != draft, "exact Python draft");
-      area->set_active_tab(0); frame(); clicks = 0;
+      area->set_active_tab(0); frame(); clicks = scroll_steps = 0;
       wait([&] { const auto *item = widget("reports_list"); return item && item->enabled && item->list && item->list->count == 1; }, "report summary loaded");
       require(!widget("reports_text_page") && !widget("reports_image"), "listing must not read report assets");
-      click("reports_list", 0);
-      wait([&] { const auto *item = widget("reports_assets"); return item && item->enabled && item->list && item->list->count == 3; }, "frozen report manifest loaded");
-      const auto selected_state = area->editor().save_workspace_state();
-      require(selected_state.at("report_id") == kReport && selected_state.at("source_sha256") == saved.at("source_sha256"), "selected manifest identity");
-      require(!widget("reports_text_page") && !widget("reports_image"), "selection must not read report assets");
-      click("reports_sources");
-      const auto *source = widget("reports_source_list");
-      require(source && source->list && source->list->count == 1, "frozen provenance visible");
-      const auto source_text = source->list->text(0);
-      require(source_text.find(kContext) != std::string::npos, "complete provenance UUID");
-      require(screen.ui()->measurer().width(source_text, screen.ui()->style().font) + 2 * screen.ui()->style().text_margin <= source->rect.w,
-          "provenance UUID must fit without horizontal clipping");
-      if (png_view) { click("reports_assets", 1); }
-      click("reports_read_asset");
-      wait([&] {
-        const auto *read = widget("reports_read_asset");
-        const auto *content = widget(png_view ? "reports_image" : "reports_text_page");
-        return read && read->enabled && content && (!png_view || content->image.texture != 0);
-      }, "explicit frozen content read completed");
-      const auto expected_path = png_view ? "plot.png" : "report.md";
-      require(area->editor().save_workspace_state().at("asset_path") == expected_path, "selected asset identity");
-      const auto *assets = widget("reports_assets");
-      require(assets && assets->list && assets->list->text(png_view ? 1 : 0).find(expected_path) != std::string::npos,
-          "asset name remains visible");
-      bool raw_notice = false, exact_source = false;
-      for (const auto &block : screen.ui()->blocks()) {
-        for (const auto &item : block->widgets()) {
-          const auto visible = item.rect.intersect(item.clip);
-          if (visible.empty()) { continue; }
-          const bool fully_visible = visible.h >= item.rect.h - 1 && visible.w >= item.rect.w - 1;
-          raw_notice |= fully_visible && item.text == shell.store().tr("reports.raw_text");
-          exact_source |= fully_visible && item.text == markdown;
+      if (create_view) {
+        click("reports_create_panel");
+        click("reports_create_snapshots");
+        wait([&] { const auto *item = widget("reports_create_snapshot_list");
+          return item && item->enabled && item->list && item->list->count == 1; }, "snapshot summary page loaded");
+        click("reports_create_snapshot_list", 0);
+        wait([&] { const auto *item = widget("reports_create_title"); return item && item->enabled; }, "selected snapshot reviewed");
+        const std::string title = chinese ? "温度比较 · 新报告草稿" : "Temperature comparison · new report draft";
+        click("reports_create_title");
+        screen.ui()->handle_event(ui::Event::text_input(title, context.now + 0.001));
+        screen.ui()->handle_event(ui::Event::key_down(ui::Key::Enter, 0, context.now + 0.002)); frame();
+        click("reports_create_files", 0);
+        click("reports_create_include");
+        wait([&] { const auto *item = widget("reports_create_entry"); return item && item->enabled; }, "entry selection enabled");
+        click("reports_create_entry");
+        wait([&] { const auto *item = widget("reports_create_submit"); return item && item->enabled; }, "creation form ready");
+        scroll_to("reports_create_submit");
+        const auto state = area->editor().save_workspace_state();
+        require(state.at("version") == 2 && state.contains("create_draft"), "creation workspace contains its draft");
+        const auto &creation = state.at("create_draft");
+        require(creation.at("name") == title && creation.at("project_id") == project.project()->id &&
+            creation.at("snapshot_id") == captured.at("snapshot").at("id") &&
+            creation.at("snapshot_sha256") == captured.at("snapshot").at("sha256") &&
+            creation.at("assets").size() == 1 && creation.at("assets")[0].at("record_id") == ids.at(0) &&
+            creation.at("assets")[0].at("path") == "report.md" && creation.at("entry_record_id") == ids.at(0) &&
+            creation.at("pending").is_null(), "unsaved form matches the exact frozen snapshot, selected file and entry");
+        require(area->editor().has_unsaved_changes(), "creation form must remain an unsaved draft");
+        for (const char *key : {"reports_create_title", "reports_create_files", "reports_create_include", "reports_create_path",
+                               "reports_create_entry", "reports_create_asset_review", "reports_create_submit"}) {
+          require(fully_visible(widget(key)), std::string("creation control must be fully visible: ") + key);
         }
+        require(widget("reports_create_title")->string.value() == title &&
+            widget("reports_create_path")->string.value() == "report.md" &&
+            widget("reports_create_include")->boolean.value() && !widget("reports_create_entry")->enabled,
+            "visible title, virtual path, checked file and selected entry");
+        const auto *files = widget("reports_create_files"), *review = widget("reports_create_asset_review");
+        require(files->list && files->list->count == 3 && files->list->selected.value() == 0 &&
+            files->list->text(0).starts_with("☑ ") && files->list->text(0).find("report.md") != std::string::npos &&
+            review->list && review->list->count == 1 && review->list->text(0).starts_with("▶ report.md"),
+            "selected filename and unique entry must be visible");
+        for (const auto *list : {files, review}) {
+          require(screen.ui()->measurer().width(list->list->text(0), screen.ui()->style().font) +
+              2 * screen.ui()->style().text_margin <= list->rect.w, "selected asset text must fit without horizontal clipping");
+        }
+        require(!widget("reports_image") && !widget("reports_text_page") && !fs::exists(directory.path() / "content.calls"),
+                "creation preparation must not read or render asset content");
+        require(clicks == 7, "fixed-start creation form preparation requires seven mouse clicks; Create is not clicked");
       }
-      if (!png_view) { require(raw_notice && exact_source, "full raw Markdown and explicit unrendered notice"); }
       else {
-        const auto *preview = widget("reports_image");
-        require(preview && preview->image.texture && preview->image.width == 480 && preview->image.height == 200,
-            "verified PNG uploaded as a real GPU texture");
-        const auto visible = preview->rect.intersect(preview->clip);
-        require(visible.h >= preview->rect.h - 1 && visible.w >= preview->rect.w - 1, "PNG must fit in the viewport");
-        size_t blue_pixels = 0;
-        for (int y = std::max(0, int(std::ceil(visible.y))); y < std::min(height, int(visible.y1())); ++y) {
-          for (int x = std::max(0, int(std::ceil(visible.x))); x < std::min(width, int(visible.x1())); ++x) {
-            const auto *pixel = image.px(x, y);
-            blue_pixels += pixel[2] > int(pixel[0]) + 35 && pixel[2] > int(pixel[1]) + 35 && pixel[3] > 200;
+        click("reports_list", 0);
+        wait([&] { const auto *item = widget("reports_assets"); return item && item->enabled && item->list && item->list->count == 3; }, "frozen report manifest loaded");
+        const auto selected_state = area->editor().save_workspace_state();
+        require(selected_state.at("report_id") == kReport && selected_state.at("source_sha256") == saved.at("source_sha256"), "selected manifest identity");
+        require(!widget("reports_text_page") && !widget("reports_image"), "selection must not read report assets");
+        click("reports_sources");
+        const auto *source = widget("reports_source_list");
+        require(source && source->list && source->list->count == 1, "frozen provenance visible");
+        const auto source_text = source->list->text(0);
+        require(source_text.find(kContext) != std::string::npos, "complete provenance UUID");
+        require(screen.ui()->measurer().width(source_text, screen.ui()->style().font) + 2 * screen.ui()->style().text_margin <= source->rect.w,
+            "provenance UUID must fit without horizontal clipping");
+        if (png_view) { click("reports_assets", 1); }
+        click("reports_read_asset");
+        wait([&] {
+          const auto *read = widget("reports_read_asset");
+          const auto *content = widget(png_view ? "reports_image" : "reports_text_page");
+          return read && read->enabled && content && (!png_view || content->image.texture != 0);
+        }, "explicit frozen content read completed");
+        const auto expected_path = png_view ? "plot.png" : "report.md";
+        require(area->editor().save_workspace_state().at("asset_path") == expected_path, "selected asset identity");
+        const auto *assets = widget("reports_assets");
+        require(assets && assets->list && assets->list->text(png_view ? 1 : 0).find(expected_path) != std::string::npos,
+            "asset name remains visible");
+        bool raw_notice = false, exact_source = false;
+        for (const auto &block : screen.ui()->blocks()) {
+          for (const auto &item : block->widgets()) {
+            const auto visible = item.rect.intersect(item.clip);
+            if (visible.empty()) { continue; }
+            const bool fully_visible = visible.h >= item.rect.h - 1 && visible.w >= item.rect.w - 1;
+            raw_notice |= fully_visible && item.text == shell.store().tr("reports.raw_text");
+            exact_source |= fully_visible && item.text == markdown;
           }
         }
-        require(blue_pixels > 100, "screenshot contains the frozen PNG's blue bars");
+        if (!png_view) { require(raw_notice && exact_source, "full raw Markdown and explicit unrendered notice"); }
+        else {
+          const auto *preview = widget("reports_image");
+          require(preview && preview->image.texture && preview->image.width == 480 && preview->image.height == 200,
+              "verified PNG uploaded as a real GPU texture");
+          const auto visible = preview->rect.intersect(preview->clip);
+          require(visible.h >= preview->rect.h - 1 && visible.w >= preview->rect.w - 1, "PNG must fit in the viewport");
+          size_t blue_pixels = 0;
+          for (int y = std::max(0, int(std::ceil(visible.y))); y < std::min(height, int(visible.y1())); ++y) {
+            for (int x = std::max(0, int(std::ceil(visible.x))); x < std::min(width, int(visible.x1())); ++x) {
+              const auto *pixel = image.px(x, y);
+              blue_pixels += pixel[2] > int(pixel[0]) + 35 && pixel[2] > int(pixel[1]) + 35 && pixel[3] > 200;
+            }
+          }
+          require(blue_pixels > 100, "screenshot contains the frozen PNG's blue bars");
+        }
       }
       require(viewer.base_payload() == shown && viewer.payload_serial() == payload_serial &&
           viewer.camera_serial() == camera_serial && viewer.save_workspace_state() == viewer_state &&
-          viewer.evaluations_started() == 0, "report reading must preserve Viewer state");
+          viewer.evaluations_started() == 0, "report interaction must preserve Viewer state");
       require(area->tab(1).has_unsaved_changes() && area->tab(1).save_workspace_state() == draft_state &&
-          shell.store().scripts().history().empty(), "report reading must preserve the hidden, unexecuted Python draft");
-      require(call("project.history", {{"handle", handle}}) == history, "reading must not edit project history");
+          shell.store().scripts().history().empty(), "report interaction must preserve the hidden, unexecuted Python draft");
+      require(call("project.history", {{"handle", handle}}) == history, "reading or preparing an unsaved report must not edit project history");
       for (const char *method : {"project.runs.list", "project.analysis_runs.list", "project.workflow_runs.list"}) {
-        require(call(method, {{"handle", handle}}).at("runs").empty(), "reading must not prepare or execute a run");
+        require(call(method, {{"handle", handle}}).at("runs").empty(), "report interaction must not prepare or execute a run");
       }
+      if (create_view) { require(!fs::exists(directory.path() / "content.calls"), "no late asset/preview content request"); }
       require(client->stats().schema_violations == 0, "bridge schema violations");
       require(gfx::png_write(output, image), "write report screenshot");
-      printf("wrote %s (%dx%d, %s, %s, %s; report clicks=%d; frozen sources; unchanged Viewer/draft)\n",
-          output.c_str(), width, height, language.c_str(), view.c_str(), gpu->backend_name(), clicks);
+      printf("wrote %s (%dx%d, %s, %s, %s; report clicks=%d; wheel steps=%d; frozen sources; unchanged Viewer/Python draft)\n",
+          output.c_str(), width, height, language.c_str(), view.c_str(), gpu->backend_name(), clicks, scroll_steps);
     }
     catch (const std::exception &exception) {
       fprintf(stderr, "FAIL: %s\n%s", exception.what(), client->bridge_log().text().c_str()); result = 1;

@@ -56,6 +56,34 @@ suan project snapshots resolve /path/to/project SNAPSHOT_UUID FILE_RECORD_UUID
 上传完成后，可将清单中的 SHA-256 放入 TaskSpec 的 `input_hashes`，由支持 `input_checksums` 的 Runtime
 检查实际复制到任务目录的内容，见[Runtime 输入检查](runtime.md)。这项检查不会自动上传文件或提交任务。
 
+## 分页读取快照摘要
+
+快照较多时，可先读取有界摘要，再对选中的 UUID 调用 `get`。桥和桌面 Python 均提供
+`project.snapshots.list_summaries`；直接 Python 库也使用同名方法。它需要明确的当前项目修订，
+默认 `offset=0`、`limit=64`，每页允许 1–64 项：
+
+```python
+# 接续上面的捕获示例；期间有其他写入时，先刷新当前项目修订。
+page = p.snapshots.list_summaries(expected_revision=captured["revision"], offset=0, limit=64)
+print(page["revision"], page["offset"], page["total"])
+for summary in page["snapshots"]:
+    print(summary["id"], summary["revision"], summary["file_count"])
+if page["snapshots"]:
+    selected = p.snapshots.get(page["snapshots"][0]["id"])
+    print(selected["manifest"]["files"])
+```
+
+每项摘要只有 `id`、`kind`、`revision`、`sha256`、`created_at`、`file_count`，不返回文件清单、
+路径或资产字节。当前修订、总数和当前页在同一只读事务内读取，按保存顺序分页。
+继续读取时令 `offset` 增加本页项数，并保留相同 `expected_revision`；修订变化会返回 `conflict`，
+应刷新后从第一页重新选择。当前页有损坏元数据或超过 2 MiB 的清单时，整页报 `invalid_params`，
+不会跳过条目或改变分页计数；其他页可独立读取。
+
+摘要的 `sha256` 是已存清单摘要，不代表本次已验证完整清单或副本内容。`get` 读取并校验一个完整
+清单的身份和哈希；`verify` 或 `resolve` 才会读取并校验冻结资产字节。这些读取不会增加修订。
+原有 `list()` 与 CLI `snapshots list` 仍返回全部完整清单，行为保持不变。桥参数和响应见
+[桌面桥契约](specs/stk-desktop-bridge-v1.md)。
+
 ## 保存与一致性边界
 
 - 格式 4 新增只追加的 `project_snapshots` 表，保存清单、清单哈希、创建时间和保存修订。

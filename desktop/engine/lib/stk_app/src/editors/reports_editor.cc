@@ -10,6 +10,7 @@
 #include "stk/io/png.hh"
 #include "path_picker.hh"
 #include "project_navigation.hh"
+#include "reports_create_view.hh"
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +19,21 @@
 namespace stk::app {
 namespace {
 using io::Json;
+// Workspace hooks receive sorted JSON. Inspect bounded scalar fields directly before
+// any conversion to ordered RPC JSON, which would otherwise copy the complete draft.
+bool reading_state_shape(const nlohmann::json &state, int version)
+{
+  if (!state.is_object() || state.size() != size_t(version == 2 ? 7 : 6) ||
+      !state.contains("version") || !state.at("version").is_number_integer() || state.at("version") != version ||
+      !state.contains("text_page") || !state.at("text_page").is_number_integer()) { return false; }
+  const auto &page = state.at("text_page");
+  if (page < 0 || page > 4096) { return false; }
+  for (const char *key : {"project_id", "report_id", "source_sha256", "asset_path"}) {
+    if (!state.contains(key) || !state.at(key).is_string() ||
+        state.at(key).get_ref<const std::string &>().size() > (std::string_view(key) == "asset_path" ? 1024u : 64u)) { return false; }
+  }
+  return true;
+}
 std::string short_text(const std::string &text, size_t bytes = 256)
 {
   return text.size() <= bytes ? text : std::string(core::utf8::truncate_bytes(text, bytes)) + "…";
@@ -26,7 +42,7 @@ class ReportsEditor final : public Editor {
  public:
   explicit ReportsEditor(const EditorType &type) : Editor(type) {}
   ~ReportsEditor() override { release_image(); }
-  bool has_unsaved_changes() const override { return reports_ && reports_->exporting(); }
+  bool has_unsaved_changes() const override { return create_.dirty() || (reports_ && reports_->exporting()); }
 
   void draw_header(ui::Layout &row, EditorContext &ctx) override
   {
@@ -62,6 +78,15 @@ class ReportsEditor final : public Editor {
     if (!reports.error().empty()) { layout.paragraph(reports.error()); }
     if (!reports.notice().empty()) { layout.paragraph(ctx.tr(reports.notice())); }
     if (!project_id_.empty() && project_id_ != reports.project_id()) { layout.paragraph(ctx.tr("reports.other_project")); }
+    create_.draw(layout, ctx, [this, weak = lifetime()] {
+      return !weak.expired() && reports_ && !reports_->busy();
+    });
+    if (const auto created = create_.take_created(); created && created->project_id == reports.project_id()) {
+      ++generation_; release_image(); text_offsets_.clear(); destination_.clear();
+      project_id_ = created->project_id; report_id_ = created->report_id; source_sha_ = created->source_sha256;
+      asset_path_.clear(); text_page_ = 0; pending_load_ = restore_asset_ = restored_ = true;
+      reports.clear(); // Open only verified metadata after the explicit create; no asset read.
+    }
     const auto current = guard();
     draw_list(layout, ctx, current);
     if (!reports.selected().is_object()) { return; }
@@ -90,14 +115,12 @@ class ReportsEditor final : public Editor {
       return load_state({{"version", 1}, {"project_id", ""}, {"report_id", ""},
           {"source_sha256", ""}, {"asset_path", ""}, {"text_page", 0}});
     }
-    if (!state.is_object() || state.size() != 6 || io::get_int(state, "version", -1) != 1 ||
-        !state.contains("text_page") || !state.at("text_page").is_number_integer()) { return false; }
-    for (const char *key : {"project_id", "report_id", "source_sha256", "asset_path"}) {
-      if (!state.contains(key) || !state.at(key).is_string()) { return false; }
-    }
-    const auto project = io::get_string(state, "project_id"), report = io::get_string(state, "report_id");
-    const auto digest = io::get_string(state, "source_sha256"), path = io::get_string(state, "asset_path");
-    const auto page = io::get_int(state, "text_page", 0);
+    if (!reading_state_shape(state, 1)) { return false; }
+    const auto &project = state.at("project_id").get_ref<const std::string &>();
+    const auto &report = state.at("report_id").get_ref<const std::string &>();
+    const auto &digest = state.at("source_sha256").get_ref<const std::string &>();
+    const auto &path = state.at("asset_path").get_ref<const std::string &>();
+    const auto page = state.at("text_page").get<int64_t>();
     if ((!project.empty() && !canonical_uuid(project)) || (!report.empty() && !canonical_uuid(report)) ||
         (!digest.empty() && !core::is_sha256_hex(digest)) || (!report.empty() && (project.empty() || digest.empty())) ||
         path.size() > 1024 || !core::utf8::is_valid(path) || path.find('\0') != std::string::npos || page < 0 || page > 4096) { return false; }
@@ -106,6 +129,27 @@ class ReportsEditor final : public Editor {
     project_id_ = project; report_id_ = report; source_sha_ = digest; asset_path_ = path; text_page_ = size_t(page);
     pending_load_ = !report.empty(); restore_asset_ = true; restored_ = true;
     return true;
+  }
+  nlohmann::json save_workspace_state() const override
+  {
+    auto state = save_state();
+    const auto draft = create_.save_workspace_state();
+    if (!draft.empty()) { state["version"] = 2; state["create_draft"] = draft; }
+    return state;
+  }
+  bool load_workspace_state(const nlohmann::json &state) override
+  {
+    if (state.is_object() && state.contains("version") && state.at("version").is_number_integer() && state.at("version") == 2) {
+      if (!reading_state_shape(state, 2) || !state.contains("create_draft") ||
+          !ReportsCreateView::valid_workspace_state(state.at("create_draft"))) { return false; }
+      nlohmann::json reading = {{"version", 1}};
+      for (const char *key : {"project_id", "report_id", "source_sha256", "asset_path", "text_page"}) { reading[key] = state.at(key); }
+      // Validate both payloads before mutating this tab. Reader validation is atomic.
+      if (!load_state(reading)) { return false; }
+      return create_.load_workspace_state(state.at("create_draft"));
+    }
+    if (!load_state(state)) { return false; }
+    return create_.load_workspace_state(nlohmann::json::object());
   }
   bool shows_navigation_target(const nlohmann::json &target) const override
   {
@@ -325,6 +369,7 @@ class ReportsEditor final : public Editor {
     else { layout.paragraph(ctx.tr("reports.binary_asset")); }
   }
 
+  ReportsCreateView create_;
   std::unique_ptr<ProjectReports> reports_;
   uint64_t epoch_ = std::numeric_limits<uint64_t>::max(), generation_ = 0;
   uint64_t asset_version_ = std::numeric_limits<uint64_t>::max();

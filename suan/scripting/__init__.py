@@ -618,6 +618,11 @@ class ProjectSnapshots:
     def list(self):
         return self._call("project.snapshots.list", {"handle": self.handle})
 
+    def list_summaries(self, *, expected_revision, offset=0, limit=64):
+        """Explicit bounded metadata page; does not read asset bytes or verify full manifests."""
+        return self._call("project.snapshots.list_summaries", {"handle": self.handle,
+                         "expected_revision": expected_revision, "offset": offset, "limit": limit})
+
     def capture(self, record_ids, *, expected_revision, max_bytes=256 * 1024 * 1024):
         """Explicitly copy selected input bytes; immutable manifests are outside table undo."""
         return self._call("project.snapshots.capture", {"handle": self.handle, "record_ids": record_ids,

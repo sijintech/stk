@@ -40,6 +40,8 @@ import sys
 import threading
 import time
 from suan.project.reports import Reports
+from suan.project.reports import ReportNotFound
+from suan.project.snapshots import Snapshots
 from suan.desktop_bridge.server import Bridge
 from suan.desktop_bridge.__main__ import main
 control = Path(sys.argv.pop(1))
@@ -64,9 +66,31 @@ def controlled_export(self, *args, **kwargs):
         result['report_id'] = '00000000-0000-4000-8000-000000000000'
     return result
 Reports.export_file = controlled_export
+create_report = Reports.create
+def controlled_create(self, *args, **kwargs):
+    result = create_report(self, *args, **kwargs)
+    count('create')
+    if mode() == 'bad_create_receipt':
+        result['record_id'] = '00000000-0000-4000-8000-000000000000'
+    return result
+Reports.create = controlled_create
+get_report = Reports.get
+def controlled_get(self, report_id):
+    if mode() == 'hide_created' and report_id != 'a1111111-1111-4111-8111-111111111111':
+        raise ReportNotFound('Report not found')
+    return get_report(self, report_id)
+Reports.get = controlled_get
+summaries = Snapshots.list_summaries
+def controlled_summaries(self, *args, **kwargs):
+    result = summaries(self, *args, **kwargs)
+    count('summaries')
+    return result
+Snapshots.list_summaries = controlled_summaries
 send = Bridge.send
 def controlled_send(self, message, method=None):
-    if method == 'project.reports.asset' and 'result' in message and mode() == 'hold':
+    hold = {'project.reports.asset': 'hold', 'project.snapshots.list_summaries': 'hold_summaries',
+            'project.reports.create': 'hold_create'}
+    if method in hold and 'result' in message and mode() == hold[method]:
         control.with_suffix('.held').write_text('ready', encoding='utf-8')
         def deliver():
             deadline = time.monotonic() + 30
@@ -304,6 +328,23 @@ class ReportsEditorPython : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(wait_widget("reports_list"));
     clicks = 0; // The recorded flow starts on Reports with the established hidden draft.
   }
+  void prepare_create(const std::string &title = "Native new report")
+  {
+    ASSERT_NO_FATAL_FAILURE(show_reports());
+    ASSERT_NO_FATAL_FAILURE(click("reports_create_panel"));
+    EXPECT_EQ(count("summaries"), 0);
+    ASSERT_NO_FATAL_FAILURE(click("reports_create_snapshots"));
+    ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_snapshot_list"));
+    ASSERT_NO_FATAL_FAILURE(click_row("reports_create_snapshot_list", 0));
+    ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_title"));
+    ASSERT_NO_FATAL_FAILURE(text("reports_create_title", title));
+    ASSERT_NO_FATAL_FAILURE(click_row("reports_create_files", 0));
+    ASSERT_NO_FATAL_FAILURE(click("reports_create_include"));
+    ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_entry"));
+    ASSERT_NO_FATAL_FAILURE(click("reports_create_entry"));
+    ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+    ASSERT_TRUE(area().editor().has_unsaved_changes());
+  }
 };
 
 TEST_F(ReportsEditorPython, FrozenBytesSurviveLiveRemovalAndZipRequiresAnExplicitAction)
@@ -474,6 +515,195 @@ TEST_F(ReportsEditorPython, SelectedPngUsesItsFrozenBytesAndTheReportsImageWidge
   ASSERT_NO_FATAL_FAILURE(wait_widget("reports_image"));
   EXPECT_EQ(count("asset"), 1); EXPECT_EQ(widget("reports_text_page"), nullptr);
   expect_viewer();
+}
+
+TEST_F(ReportsEditorPython, EightMouseClicksCreateFrozenReportWithoutReadingAssetsOrChangingHiddenDraft)
+{
+  const auto history = call("project.history", {{"handle", project().project()->handle}});
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  auto *draft = &area().tab(1); const auto draft_state = draft->save_workspace_state();
+  const auto create_count = count("create");
+  RecordProperty("starting_layout", "1440x1000 scale=1; maximized Reports; hidden Python draft; existing Viewer payload");
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_submit"));
+  ASSERT_TRUE(loop.pump_until([&] {
+    frame();
+    return project().project()->revision == 4 && !project().busy() &&
+        !area().editor().has_unsaved_changes() && widget("reports_read_asset");
+  }, 30));
+  EXPECT_EQ(clicks, 8); RecordProperty("actual_mouse_clicks", clicks);
+  EXPECT_EQ(count("create"), create_count + 1); EXPECT_EQ(count("summaries"), 1);
+  EXPECT_EQ(count("asset"), 0); EXPECT_EQ(count("export"), 0);
+  const auto state = area().editor().save_workspace_state();
+  ASSERT_EQ(state.at("version"), 1); EXPECT_FALSE(state.contains("create_draft"));
+  const auto id = state.at("report_id").get<std::string>();
+  ASSERT_FALSE(id.empty()); EXPECT_NE(id, report_id);
+  const auto result = call("project.reports.get", {{"handle", project().project()->handle}, {"report_id", id}});
+  ASSERT_TRUE(result.is_object()); const auto &report = result.at("report");
+  EXPECT_EQ(report.at("name"), "Native new report");
+  EXPECT_EQ(report.at("manifest").at("snapshot_id"), manifest.at("snapshot_id"));
+  EXPECT_EQ(report.at("manifest").at("entry_path"), "report.md");
+  EXPECT_EQ(report.at("manifest").at("assets").size(), 1u);
+  EXPECT_EQ(report.at("manifest").at("source_revision"), 3);
+  EXPECT_EQ(report.at("manifest").at("sources"), Json::array());
+  EXPECT_EQ(report.at("source_sha256"), state.at("source_sha256"));
+  EXPECT_EQ(call("project.history", {{"handle", project().project()->handle}}).at("history").size(),
+            history.at("history").size() + 1);
+  EXPECT_EQ(draft->save_workspace_state(), draft_state); EXPECT_TRUE(draft->has_unsaved_changes());
+  expect_viewer();
+}
+
+TEST_F(ReportsEditorPython, CreationDraftRestoresWithoutRequestsAndNeedsExplicitSnapshotReview)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_create("Keep creation draft"));
+  const auto state = area().editor().save_workspace_state();
+  ASSERT_EQ(state.at("version"), 2); ASSERT_EQ(state.size(), 7u);
+  const auto &draft = state.at("create_draft");
+  ASSERT_EQ(draft.size(), 8u); EXPECT_EQ(draft.at("name"), "Keep creation draft");
+  EXPECT_EQ(draft.at("pending"), nullptr); EXPECT_EQ(draft.at("assets").size(), 1u);
+  for (const char *key : {"handle", "session_id", "url", "data", "bytes"}) { EXPECT_FALSE(draft.contains(key)); }
+  const auto before = count("create"), pages = count("summaries");
+  const auto old_title = widget("reports_create_title")->string;
+  const auto old_submit = widget("reports_create_submit")->on_click;
+  ASSERT_TRUE(area().editor().load_workspace_state(state)); frame();
+  old_title.assign("Obsolete title"); old_submit(); frame();
+  EXPECT_EQ(area().editor().save_workspace_state(), state);
+  EXPECT_EQ(count("create"), before); EXPECT_EQ(count("summaries"), pages);
+  ASSERT_NE(widget("reports_create_submit"), nullptr); EXPECT_FALSE(widget("reports_create_submit")->enabled);
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_review"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+  EXPECT_EQ(widget("reports_create_title")->string.value(), "Keep creation draft");
+  EXPECT_EQ(count("create"), before); EXPECT_EQ(count("asset"), 0);
+  auto invalid = state; invalid["create_draft"]["unknown"] = true;
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  EXPECT_EQ(area().editor().save_workspace_state(), state);
+}
+
+TEST_F(ReportsEditorPython, UncertainCreationKeepsOriginalUuidAcrossNotFoundAndNeverReplays)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  const auto original_submit = widget("reports_create_submit")->on_click;
+  const auto before = count("create");
+  ASSERT_NO_FATAL_FAILURE(mode("bad_create_receipt"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_submit"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_check"));
+  const auto state = area().editor().save_workspace_state();
+  ASSERT_EQ(state.at("version"), 2); const auto pending = state.at("create_draft").at("pending");
+  ASSERT_TRUE(pending.is_object()); const auto id = pending.at("report_id");
+  EXPECT_EQ(pending.at("expected_revision"), 3);
+  EXPECT_EQ(count("create"), before + 1);
+  ASSERT_NO_FATAL_FAILURE(mode("hide_created"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_check"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_check"));
+  EXPECT_EQ(area().editor().save_workspace_state().at("create_draft").at("pending"), pending);
+  original_submit(); frame(); EXPECT_EQ(count("create"), before + 1);
+  ASSERT_TRUE(area().editor().load_workspace_state(state)); frame();
+  EXPECT_EQ(area().editor().save_workspace_state().at("create_draft").at("pending").at("report_id"), id);
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_check"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_check"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return !area().editor().has_unsaved_changes(); }, 30));
+  EXPECT_EQ(area().editor().save_workspace_state().at("report_id"), id);
+  EXPECT_EQ(count("create"), before + 1); EXPECT_EQ(count("asset"), 0);
+}
+
+TEST_F(ReportsEditorPython, NewProjectCannotAdoptAnOldSnapshotSummaryReply)
+{
+  ASSERT_NO_FATAL_FAILURE(show_reports());
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_panel"));
+  ASSERT_NO_FATAL_FAILURE(mode("hold_summaries"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_snapshots"));
+  ASSERT_TRUE(bridge::test::wait_until([&] { return fs::exists(dir.path() / "mode.held"); }, 15));
+  ASSERT_TRUE(project().create(dir.str() + "/other-create-project", "Other report project"));
+  ASSERT_NO_FATAL_FAILURE(settle_project()); frame();
+  ASSERT_NO_FATAL_FAILURE(drain_held(*client)); frame();
+  EXPECT_EQ(widget("reports_create_snapshot_list"), nullptr);
+  EXPECT_EQ(count("summaries"), 1); EXPECT_EQ(count("asset"), 0);
+  const auto state = area().editor().save_workspace_state();
+  EXPECT_EQ(state.at("version"), 1); EXPECT_FALSE(state.contains("create_draft"));
+  EXPECT_NE(project().project()->id, project_id);
+}
+
+TEST_F(ReportsEditorPython, WorkspaceRejectsOversizedDeepAndMismatchedCreationStateAtomically)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  const auto state = area().editor().save_workspace_state();
+  const auto before = count("create"), pages = count("summaries");
+  auto invalid = state; invalid["create_draft"]["name"] = std::string(300 * 1024, 'a');
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  EXPECT_EQ(area().editor().save_workspace_state(), state);
+  nlohmann::json deep = nullptr;
+  for (int i = 0; i < 512; ++i) { deep = nlohmann::json::array({std::move(deep)}); }
+  invalid = state; invalid["create_draft"]["pending"] = std::move(deep);
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  EXPECT_EQ(area().editor().save_workspace_state(), state);
+  invalid = state; invalid["asset_path"] = std::string(2 * 1024 * 1024, 'b');
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  invalid = state; invalid["version"] = uint64_t(-1);
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  EXPECT_EQ(area().editor().save_workspace_state(), state);
+  ASSERT_NO_FATAL_FAILURE(mode("bad_create_receipt"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_submit"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_check"));
+  const auto pending = area().editor().save_workspace_state();
+  invalid = pending; invalid["create_draft"]["pending"]["manifest"]["source_revision"] = 0;
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  EXPECT_EQ(area().editor().save_workspace_state(), pending);
+  invalid = pending; invalid["create_draft"]["pending"]["source_sha256"] = std::string(64, '0');
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  EXPECT_EQ(area().editor().save_workspace_state(), pending);
+  EXPECT_EQ(count("create"), before + 1); EXPECT_EQ(count("summaries"), pages); EXPECT_EQ(count("asset"), 0);
+}
+
+TEST_F(ReportsEditorPython, CreationFieldBindingsKeepSiblingEditsAndRejectUsedOrRevisedCallbacks)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  const auto title = widget("reports_create_title")->string;
+  const auto path = widget("reports_create_path")->string;
+  const auto submit = widget("reports_create_submit")->on_click;
+  title.assign("Sibling title"); path.assign("nested/report.md");
+  EXPECT_EQ(title.value(), ""); EXPECT_EQ(path.value(), "");
+  title.assign("obsolete"); path.assign("obsolete.md"); submit(); frame();
+  auto state = area().editor().save_workspace_state();
+  EXPECT_EQ(state.at("create_draft").at("name"), "Sibling title");
+  EXPECT_EQ(state.at("create_draft").at("assets").at(0).at("path"), "nested/report.md");
+  EXPECT_EQ(count("create"), 1); // Only fixture setup, never the retained submit.
+  const auto current_title = widget("reports_create_title")->string;
+  const auto current_path = widget("reports_create_path")->string;
+  const auto current_submit = widget("reports_create_submit")->on_click;
+  call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", 3},
+      {"commands", Json::array({{{"op", "create_table"}, {"id", "f6666666-6666-4666-8666-666666666666"}, {"name", "Later"}}})}});
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle_project()); frame();
+  current_title.assign("stale revision"); current_path.assign("stale.md"); current_submit(); frame();
+  EXPECT_EQ(current_title.value(), ""); EXPECT_EQ(current_path.value(), "");
+  EXPECT_EQ(area().editor().save_workspace_state(), state); EXPECT_EQ(count("create"), 1);
+  ASSERT_NE(widget("reports_create_submit"), nullptr); EXPECT_FALSE(widget("reports_create_submit")->enabled);
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_review"));
+}
+
+TEST_F(ReportsEditorPython, BridgeReplacementPreservesUnconfirmedCreationAndIgnoresOldReceipt)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  const auto before = count("create");
+  ASSERT_NO_FATAL_FAILURE(mode("hold_create"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_submit"));
+  ASSERT_TRUE(bridge::test::wait_until([&] { return fs::exists(dir.path() / "mode.held"); }, 15));
+  frame(); const auto pending = area().editor().save_workspace_state().at("create_draft").at("pending");
+  const auto old_handle = project().project()->handle;
+  auto old = std::move(client);
+  project().attach(nullptr); store().set_bridge(nullptr); frame();
+  ASSERT_NO_FATAL_FAILURE(mode("")); ASSERT_TRUE(start_client("creation-second"));
+  ASSERT_NO_FATAL_FAILURE(settle_project()); frame();
+  ASSERT_NE(project().project()->handle, old_handle);
+  ASSERT_NO_FATAL_FAILURE(drain_held(*old)); frame();
+  EXPECT_EQ(area().editor().save_workspace_state().at("create_draft").at("pending"), pending);
+  EXPECT_EQ(count("create"), before + 1); EXPECT_EQ(count("asset"), 0);
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_check"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_create_check"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return !area().editor().has_unsaved_changes(); }, 30));
+  EXPECT_EQ(area().editor().save_workspace_state().at("report_id"), pending.at("report_id"));
+  EXPECT_EQ(count("create"), before + 1); EXPECT_EQ(count("asset"), 0);
+  old->close(); EXPECT_EQ(old->stats().schema_violations, 0u);
 }
 
 }  // namespace

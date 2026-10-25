@@ -612,6 +612,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.analysis_runs.result` | `{handle, run_id}` | `{run: analysisRun, result: graphResult, blob_dir: absolute-local-path}` |
 | `project.snapshots.capture` | `{handle, expected_revision, record_ids, max_bytes?}` | `{revision, snapshot: inputManifest}` |
 | `project.snapshots.list` | `{handle}` | `{revision, snapshots: [inputManifest]}` |
+| `project.snapshots.list_summaries` | `{handle, expected_revision, offset?, limit?}` | `{revision, offset, total, snapshots: [{id, kind, revision, sha256, created_at, file_count}]}` |
 | `project.snapshots.get` | `{handle, snapshot_id}` | `{snapshot: inputManifest}` |
 | `project.snapshots.verify` | `{handle, snapshot_id}` | `{snapshot_id, ok, files: [{record_id, sha256, state, error}]}` |
 | `project.snapshots.resolve` | `{handle, snapshot_id, record_id}` | `{snapshot_id, record_id, name, path, location, sha256, size}` |
@@ -621,6 +622,16 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.reports.asset` | `{handle, report_id, path, expected_revision, expected_source_sha256}` | Complete base64 bytes with asset hash/size, MIME and report identity |
 | `project.reports.preview` | `{handle, report_id, expected_revision, expected_source_sha256}` | Derived bytes with a fresh preview session and separate original-source and rendered hashes |
 | `project.reports.export_file` | `{handle, report_id, destination (absolute), expected_revision, expected_source_sha256}` | `{project_id, report_id, source_sha256, path, sha256, size}` (new source ZIP) |
+
+The optional `project.snapshots.list_summaries` capability reads format-4 snapshot metadata with an exact
+current `expected_revision`; discover it through `hello` before use. `offset` defaults to 0 and `limit`
+defaults to 64 (allowed range 1–64). Revision, total count and the page share one read transaction;
+insertion order is stable and a stale revision returns `conflict`. Only selected rows are inspected,
+with a 2 MiB manifest limit per selected row; malformed stored metadata or a selected manifest exceeding
+that limit fails the page with `invalid_params`, without silently skipping rows. No manifest or asset
+bytes are returned, no project event is emitted, and no migration is needed. The summary's stored digest
+is not a full manifest-integrity verdict: use the existing `project.snapshots.get` before consuming a
+selection. Existing `list` and `get` behavior is unchanged.
 
 The optional `project.reports.*` methods use [the frozen report contract](report-1.md).
 Metadata reads never open assets; explicit asset/preview/export operations validate frozen objects and the exact
