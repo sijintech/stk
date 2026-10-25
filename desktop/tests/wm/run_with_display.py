@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Run a command against a private, throw-away display server.
 
-    run_with_display.py --server xvfb|weston --workdir DIR [--sysroot DIR] -- CMD...
+    run_with_display.py --server xvfb|weston --workdir DIR [--sysroot DIR] [--size WxH] -- CMD...
 
 * ``xvfb``: Xvfb with ``-nolisten tcp`` (unix sockets only), an MIT-MAGIC-COOKIE
   Xauthority file and a display number chosen by the server (``-displayfd``).
@@ -31,7 +31,20 @@ import sys
 import time
 from pathlib import Path
 
+from process_tree import require_process_tree_support, stop_process_tree
+
 SKIP = 77
+
+
+def display_size(value):
+    """Keep the existing 1280x800 default and bound explicit benchmark display allocations."""
+    try:
+        width, height = (int(part) for part in value.split("x"))
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("size must be WxH") from None
+    if not 320 <= width <= 4096 or not 240 <= height <= 4096 or width * height > 4096 * 2160:
+        raise argparse.ArgumentTypeError("size must be 320..4096 by 240..4096, at most 4096x2160 pixels")
+    return width, height
 
 
 def skip(msg: str) -> int:
@@ -145,8 +158,9 @@ def start_xvfb(args, env: dict, workdir: Path):
     auth = workdir / "Xauthority"
     # Written before start-up: the server loads its cookies from this file when it starts.
     write_xauthority(auth, secrets.token_bytes(16))
+    width, height = getattr(args, "size", (1280, 800))
     cmd = [str(xvfb), "-displayfd", str(write_fd), "-nolisten", "tcp", "-auth", str(auth),
-           "-screen", "0", "1280x800x24", "-dpi", "96", "-nocursor"] + extra
+           "-screen", "0", f"{width}x{height}x24", "-dpi", "96", "-nocursor"] + extra
     log = open(workdir / "server.log", "wb")
     proc = subprocess.Popen(cmd, cwd=workdir, env=cmd_env, stdout=log, stderr=subprocess.STDOUT,
                             pass_fds=(write_fd,))
@@ -207,8 +221,9 @@ def start_weston(args, env: dict, workdir: Path):
     cmd_env["XDG_RUNTIME_DIR"] = str(rt)
     cmd_env.pop("DISPLAY", None)
     cmd_env.pop("WAYLAND_DISPLAY", None)
+    width, height = getattr(args, "size", (1280, 800))
     cmd = [str(weston), "--backend=headless", "--renderer=pixman", f"--socket={sock}",
-           "--width=1280", "--height=800", f"--shell={args.weston_shell}", "--idle-time=0"]
+           f"--width={width}", f"--height={height}", f"--shell={args.weston_shell}", "--idle-time=0"]
     if args.weston_shell == "desktop":
         # The desktop shell starts its panel client; point it at the sysroot copy when the
         # compiled-in libexec path does not exist.
@@ -255,12 +270,16 @@ def stop(proc: subprocess.Popen) -> None:
 
 def run_command(cmd: list[str], env: dict, timeout: float) -> int:
     """Keep child failures visible even when CTest requires a matching PASS line."""
+    require_process_tree_support()
+    process = subprocess.Popen(cmd, env=env)
     try:
-        result = subprocess.run(cmd, env=env, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        print(f"FAIL: command timed out after {timeout:g} s", flush=True)
-        return 1
-    code = result.returncode
+        try:
+            code = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(f"FAIL: command timed out after {timeout:g} s", flush=True)
+            return 1
+    finally:
+        stop_process_tree(process)
     if code < 0:
         try:
             name = signal.Signals(-code).name
@@ -280,6 +299,7 @@ def main() -> int:
     ap.add_argument("--workdir", type=Path, required=True)
     ap.add_argument("--sysroot", type=Path, default=None)
     ap.add_argument("--timeout", type=float, default=120)
+    ap.add_argument("--size", type=display_size, default=(1280, 800), help="private display size (default 1280x800)")
     ap.add_argument("--weston-shell", choices=("kiosk", "desktop"), default="kiosk")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()

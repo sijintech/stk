@@ -5,6 +5,8 @@
 import subprocess
 import signal
 import sys
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -64,6 +66,39 @@ class CommandExitTests(unittest.TestCase):
         result = self.run_child("import time; time.sleep(10)", 0.5)
         self.assertEqual(result.returncode, 1)
         self.assertIn("FAIL: command timed out after 0.5 s", result.stdout)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process metadata and pidfds")
+    def test_timeout_stops_other_groups_and_sessions_without_touching_an_unrelated_child(self):
+        unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        identities = []
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                leaf = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
+                branch = (
+                    "import os,json,subprocess,sys,time; from pathlib import Path; "
+                    f"p=subprocess.Popen([sys.executable,'-c',{leaf!r}],start_new_session=True); "
+                    "Path(sys.argv[1]).write_text(json.dumps([os.getpid(),p.pid])); time.sleep(30)"
+                )
+                paths = [str(Path(directory) / str(index)) for index in range(2)]
+                source = (
+                    "import subprocess,sys,time; "
+                    f"subprocess.Popen([sys.executable,'-c',{branch!r},{paths[0]!r}],start_new_session=True); "
+                    f"subprocess.Popen([sys.executable,'-c',{branch!r},{paths[1]!r}],process_group=0); "
+                    "time.sleep(30)"
+                )
+                result = self.run_child(source, timeout=2)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("FAIL: command timed out after 2 s", result.stdout)
+                for path in paths:
+                    identities.extend(json.loads(Path(path).read_text()))
+                for pid in identities:
+                    path = Path(f"/proc/{pid}/stat")
+                    self.assertTrue(not path.exists() or path.read_text().rsplit(")", 1)[1].split()[0] == "Z",
+                                    f"owned descendant {pid} is still running")
+                self.assertIsNone(unrelated.poll())
+        finally:
+            unrelated.kill()
+            unrelated.wait()
 
 
 if __name__ == "__main__":

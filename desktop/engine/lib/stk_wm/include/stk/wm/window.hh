@@ -98,7 +98,7 @@ class Window {
 
   void request_redraw();
   bool needs_redraw() const;
-  /** Frames presented so far (for tests and diagnostics). */
+  /** Completed draw/swap calls (for diagnostics); does not verify presentation success. */
   uint64_t frames_drawn() const
   {
     return frames_drawn_;
