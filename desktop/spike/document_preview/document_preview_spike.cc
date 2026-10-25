@@ -9,6 +9,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <optional>
@@ -17,6 +18,8 @@
 #include "stk/core/paths.hh"
 #include "stk/core/sha256.hh"
 #include <stdexcept>
+
+#include "MEM_guardedalloc.h"
 
 #include "stk/app/editor_area.hh"
 #include "stk/app/shell.hh"
@@ -196,6 +199,7 @@ struct Options {
   bool require_native = false;
   int cycles = 2;
   std::filesystem::path evidence_dir;
+  std::string_view memory_gate_selftest;
 };
 
 void check(bool condition, const char *message)
@@ -302,13 +306,28 @@ class Evidence {
     report_["parent_closed"] = true;
     save();
   }
+  void stop_capture() { capture_.reset(); }
+  void runtime_shutdown(unsigned int blocks)
+  {
+    // Live first-use engine statics are not leaks yet; preserve the pre-exit diagnostic.
+    report_["guarded_stk_blocks_after_runtime"] = blocks;
+    save();
+  }
+  void final_memory(unsigned int blocks, size_t bytes)
+  {
+    report_["guarded_stk_leaks"] = blocks;
+    report_["guarded_stk_bytes"] = bytes;
+    report_["guarded_stk_check_boundary"] = "after_engine_static_destructors";
+    save();
+  }
   void finish()
   {
-    if (report_["completed_cycles"] != 20 || report_["images"].size() != 161 ||
+    if (report_["guarded_stk_leaks"] != 0 || report_["guarded_stk_bytes"] != 0 ||
+        report_["guarded_stk_check_boundary"] != "after_engine_static_destructors" ||
+        report_["completed_cycles"] != 20 || report_["images"].size() != 161 ||
         report_["closed_sessions"].size() != 20 || report_["parent_closed"] != true) {
       throw std::runtime_error("Native evidence is incomplete");
     }
-    report_["guarded_stk_leaks"] = 0;
     report_["status"] = "passed";
     save();
   }
@@ -329,6 +348,105 @@ class Evidence {
   std::unique_ptr<WindowEvidenceCapture> capture_;
   int consecutive_ = 0;
 };
+
+struct FinalGate {
+  std::unique_ptr<Evidence> evidence;
+  bool completed = false;
+};
+
+FinalGate &final_gate()
+{
+  // Construct this std-only owner before Runtime: it must outlive the at-exit gate and
+  // allocator counters. Evidence retains no engine/GPU objects; capture is stopped first.
+  static FinalGate gate;
+  return gate;
+}
+
+struct LateGuardedStatic {
+  void *allocation = MEM_new_uninitialized(64, "stk-document-preview-spike late-static self-test");
+  LateGuardedStatic()
+  {
+    if (!allocation) { throw std::runtime_error("Cannot allocate late guarded static self-test"); }
+    static_cast<unsigned char *>(allocation)[0] = 0x5a;
+    std::printf("self-test: late guarded static constructed after gate registration\n");
+  }
+  ~LateGuardedStatic()
+  {
+    MEM_delete_void(allocation);
+    std::printf("self-test: late guarded static destroyed before final gate\n");
+  }
+};
+
+LateGuardedStatic &late_guarded_static()
+{
+  static LateGuardedStatic allocation;
+  return allocation;
+}
+
+int run_memory_gate_selftest(std::string_view mode)
+{
+  // Exercise the same Runtime/at-exit path without creating a WM, GPU or native view.
+  (void)late_guarded_static();
+  if (mode == "leak") {
+    void *leaked = MEM_new_uninitialized(64, "stk-document-preview-spike deliberate self-test leak");
+    if (!leaked) { throw std::runtime_error("Cannot allocate deliberate guarded self-test leak"); }
+    static_cast<unsigned char *>(leaked)[0] = 0x6b;
+    std::printf("self-test: deliberate 64-byte guarded leak allocated\n");
+  }
+  else if (mode == "early-failure") {
+    throw std::runtime_error("controlled early memory-gate self-test failure");
+  }
+  return 0;
+}
+
+void record_failure(Evidence *evidence, const char *message) noexcept
+{
+  if (evidence) {
+    try { evidence->failed(message); }
+    catch (const std::exception &error) {
+      std::fprintf(stderr, "FAIL: writing native evidence result: %s\n", error.what());
+    }
+    catch (...) { std::fprintf(stderr, "FAIL: writing native evidence result raised an unknown error\n"); }
+  }
+  std::fprintf(stderr, "FAIL: %s\n", message);
+}
+
+void final_memory_gate() noexcept
+{
+  auto &gate = final_gate();
+  try {
+    // Registered after Runtime initializes guardedalloc, but before run() can construct
+    // Metal's first-use statics. Reverse exit order is engine statics -> this gate ->
+    // guardedalloc's MemLeakPrinter -> allocator counters. Never subtract a baseline.
+    const auto blocks = gfx::Runtime::memory_blocks_in_use();
+    const auto bytes = MEM_get_memory_in_use();
+    std::printf("guardedalloc: final blocks=%u bytes=%zu after engine static destruction\n", blocks, bytes);
+    if (blocks != 0) { MEM_printmemlist(); }
+    if (gate.evidence) { gate.evidence->final_memory(blocks, bytes); }
+    if (blocks != 0 || bytes != 0) { throw std::runtime_error("guarded STK allocations remain after engine static destruction"); }
+    if (!gate.completed) {
+      // main already recorded an earlier run failure. Zero final blocks must not turn
+      // a failed lifecycle/capture into passed evidence, even if a caller exits with 0.
+      std::printf("guardedalloc: final zero does not override earlier run failure\n");
+      std::fflush(stdout); std::fflush(stderr);
+      std::_Exit(EXIT_FAILURE);
+    }
+    if (gate.evidence) {
+      gate.evidence->finish();
+      std::printf("PASS: native document evidence; cycles=20; OS client images=161; guarded STK leaks=0\n");
+    }
+    std::printf("ok: no guarded STK allocation leaks after engine static destruction\n");
+    std::fflush(stdout); std::fflush(stderr);
+    // The existing fail-on-leak MemLeakPrinter still runs after this successful gate.
+    return;
+  }
+  catch (const std::exception &error) { record_failure(gate.evidence.get(), error.what()); }
+  catch (...) { record_failure(gate.evidence.get(), "Final guarded STK memory validation raised an unknown error"); }
+  std::fflush(stdout); std::fflush(stderr);
+  // at-exit callbacks cannot return an exit status. A failed final gate must override
+  // main's otherwise-successful return and must never emit successful evidence.
+  std::_Exit(EXIT_FAILURE);
+}
 
 int run(const Options &options, Evidence *evidence)
 {
@@ -509,6 +627,15 @@ int main(int argc, char **argv)
     const std::string_view arg = argv[i];
     if (arg == "--smoke") { options.smoke = true; }
     else if (arg == "--require-native") { options.require_native = true; }
+    else if (arg == "--memory-gate-selftest" && i + 1 < argc) {
+      options.memory_gate_selftest = argv[++i];
+      if (argc != 3 || (options.memory_gate_selftest != "late-static" &&
+                        options.memory_gate_selftest != "leak" &&
+                        options.memory_gate_selftest != "early-failure")) {
+        std::fprintf(stderr, "memory-gate self-test requires exactly one mode: late-static, leak or early-failure\n");
+        return 2;
+      }
+    }
     else if (arg == "--gpu-backend" && i + 1 < argc) {
       if (!gfx::parse_backend(argv[++i], options.backend)) { std::fprintf(stderr, "unknown GPU backend\n"); return 2; }
     }
@@ -522,7 +649,7 @@ int main(int argc, char **argv)
           options.cycles < 1 || options.cycles > 100) { std::fprintf(stderr, "cycles must be 1..100\n"); return 2; }
     }
     else {
-      std::fprintf(stderr, "usage: stk-document-preview-spike [--smoke] [--require-native] [--cycles 1..100] [--gpu-backend BACKEND] [--evidence-dir DIR]\n");
+      std::fprintf(stderr, "usage: stk-document-preview-spike [--smoke] [--require-native] [--cycles 1..100] [--gpu-backend BACKEND] [--evidence-dir DIR] | --memory-gate-selftest {late-static|leak|early-failure}\n");
       return arg == "--help" ? 0 : 2;
     }
   }
@@ -531,30 +658,46 @@ int main(int argc, char **argv)
     std::fprintf(stderr, "native acceptance requires --smoke --require-native --cycles 20 --evidence-dir DIR\n");
     return 2;
   }
-  std::unique_ptr<Evidence> evidence;
+  auto &gate = final_gate();
   try {
-    if (!options.evidence_dir.empty()) { evidence = std::make_unique<Evidence>(options.evidence_dir); }
-    if (evidence) {
+    if (!options.evidence_dir.empty()) { gate.evidence = std::make_unique<Evidence>(options.evidence_dir); }
+    if (gate.evidence) {
       const auto environment_error = native_evidence_environment_error();
       if (!environment_error.empty()) { throw std::runtime_error(environment_error); }
     }
     int result;
-    { gfx::Runtime runtime; result = run(options, evidence.get()); }
-    check(gfx::Runtime::memory_blocks_in_use() == 0, "no guarded STK allocation leaks");
-    if (evidence) {
-      evidence->finish();
-      std::printf("PASS: native document evidence; cycles=20; OS client images=161; guarded STK leaks=0\n");
+    {
+      gfx::Runtime runtime;
+      if (std::atexit(final_memory_gate) != 0) {
+        throw std::runtime_error("Cannot register final guarded STK memory validation");
+      }
+      try {
+        result = options.memory_gate_selftest.empty() ? run(options, gate.evidence.get()) :
+                                                       run_memory_gate_selftest(options.memory_gate_selftest);
+      }
+      catch (...) {
+        if (gate.evidence) { gate.evidence->stop_capture(); }
+        throw;
+      }
+      if (gate.evidence) { gate.evidence->stop_capture(); }
     }
+    const auto blocks = gfx::Runtime::memory_blocks_in_use();
+    std::printf("guardedalloc: %u live block(s) before engine static destruction; final gate pending\n", blocks);
+    if (blocks != 0) { MEM_printmemlist(); } // Allocation labels, not user document bytes.
+    if (gate.evidence) { gate.evidence->runtime_shutdown(blocks); }
+    if (!options.memory_gate_selftest.empty()) {
+      check(blocks >= 1 && MEM_get_memory_in_use() >= 64 &&
+                static_cast<unsigned char *>(late_guarded_static().allocation)[0] == 0x5a,
+            "guarded self-test static remains live after Runtime");
+    }
+    if (result != 0) { throw std::runtime_error("Native document lifecycle did not complete successfully"); }
+    gate.completed = true;
     return result;
   }
-  catch (const std::exception &e) {
-    if (evidence) {
-      try { evidence->failed(e.what()); }
-      catch (const std::exception &write_error) {
-        std::fprintf(stderr, "FAIL: writing native evidence result: %s\n", write_error.what());
-      }
-      catch (...) { std::fprintf(stderr, "FAIL: writing native evidence result raised an unknown error\n"); }
-    }
-    std::fprintf(stderr, "FAIL: %s\n", e.what()); return 1;
+  catch (const std::exception &error) {
+    record_failure(gate.evidence.get(), error.what()); return EXIT_FAILURE;
+  }
+  catch (...) {
+    record_failure(gate.evidence.get(), "Native document validation raised an unknown error"); return EXIT_FAILURE;
   }
 }

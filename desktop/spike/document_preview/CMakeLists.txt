@@ -130,6 +130,20 @@ if(MSVC)
   target_compile_options(stk-document-preview-spike PRIVATE /utf-8 /bigobj)
 endif()
 
+# No display/graphics setup is performed by these modes. Verify the exact exit code and
+# diagnostics; WILL_FAIL would also accept unrelated crashes and missing-DLL failures.
+foreach(_memory_mode late-static leak early-failure)
+  string(REPLACE "-" "_" _memory_name "${_memory_mode}")
+  add_test(NAME document_preview_memory_${_memory_name}
+    COMMAND ${CMAKE_COMMAND}
+      "-DPROGRAM=$<TARGET_FILE:stk-document-preview-spike>" "-DMODE=${_memory_mode}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/check_memory_gate.cmake")
+  set_tests_properties(document_preview_memory_${_memory_name} PROPERTIES
+    LABELS "unit;document_preview" TIMEOUT 30
+    ENVIRONMENT "STK_TOKEN_PLAN_API_KEY="
+    ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:")
+endforeach()
+
 if(APPLE OR WIN32)
   if(APPLE)
     set(_native_backend metal)

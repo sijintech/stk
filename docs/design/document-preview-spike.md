@@ -1,8 +1,8 @@
 # 文档预览技术验证计划
 
 状态：2026-10-25 **已实现默认关闭的原生嵌入候选源码，正在等待本机与跨平台验收，尚未完成选型**。
-当前没有 macOS／Windows 的实际运行验收证据。这是 P0 的验证任务，不表示 P4 的 Markdown、HTML 报告、
-PDF 阅读体验或 LaTeX 已交付。
+macOS 已有 20 轮／161 张自身窗口 OS 图与关闭证据，但最终 guarded 内存门禁失败，候选仍未通过完整验收；
+Windows 尚无实际显示验收。这是 P0 的验证任务，不表示 P4 的 Markdown、HTML 报告、PDF 阅读体验或 LaTeX 已交付。
 产品范围见[项目工作台](project-workbench.md)，当前文件入口见[项目文件](../project-files.md)。
 
 ## 当前约束
@@ -113,7 +113,17 @@ ctest --test-dir build-document-cpu -C RelWithDebInfo -R '^(DocumentResources|Do
 ```
 
 CTest 资源测试入口将模型 key 置空并移除模型配置。关闭 Blender 时，文档预览部分只生成资源与像素判据测试，不生成窗口候选目标。
-自动打开／关闭循环末尾的 guarded STK 分配检查，只覆盖该分配器管理的对象；
+guarded STK 分配检查在引擎的函数局部静态对象析构后执行：在 Runtime 初始化分配器之后、首次启动引擎之前登记退出检查，
+只有最终零块／零字节与完整生命周期及图像证据都成立，才保存成功 JSON。Runtime 作用域结束时的计数只作诊断，
+不能把 Metal 仍活着的懒静态对象提前判为泄漏；最终真实泄漏仍失败，先前运行错误也不能被最终零计数覆盖。
+启用原型且保留 Blender 时，可在没有显示设备的环境验证这三个严格退出码自检：
+
+```sh
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ctest --test-dir build-desktop -C RelWithDebInfo -R '^document_preview_memory_' --output-on-failure
+```
+
+正例实际持有晚析构的 guarded 分配；反例分别故意泄漏与提前失败，包装器要求准确退出码与诊断，崩溃或超时不能算通过。
+该检查只覆盖 guarded 分配器管理的对象；
 它不证明 WebKit／WebView2 子进程内存没有持续增长，浏览器内存与进程释放还需独立采样。
 本段是复现入口，不是任何平台已经通过的记录；实际结果另写入[运行验收](../runtime-validation.md)。
 
