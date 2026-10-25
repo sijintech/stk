@@ -2,12 +2,47 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：附件详情预览
+
+源码提交 `bc2896a89f2e357d30ea8bda3a246190604cc411`，基线 `b1673ee12dfe29722d6545463689948a66a8e75e`。
+前头 Desktop [40167186317](https://github.com/sijintech/stk/actions/runs/40167186317) 已完成 **5/5 成功**，
+Runtime [40167186293](https://github.com/sijintech/stk/actions/runs/40167186293) **8/8**、Docs／Secret 成功，满足本批 push 前等待条件。
+新 CI 待推送后确认；不以旧头结果替代。
+
+- 构建最终退出 0：`/tmp/stk-attachment-build-20261025.log`、`/tmp/stk-attachment-build-final-20261025.log`。最初编译缺少 `get_int` 默认参数，已补齐。
+- Python 初期新测试暴露重复开启读事务及门面使用错误，分别去掉重复 BEGIN、改为明确打开项目后修正；定向 **75 passed，12.00 秒**，`/tmp/stk-attachment-python-focused-20261025.log`。
+- Python 3.11／3.14 附件与表格相关各 **48 passed，3.14／2.76 秒**，`/tmp/stk-attachment-python311-20261025.log` 与 `python314` 对应日志。
+- 完整 Python 首轮 **3052 passed、1 failed、24 skipped、2 deselected、1 warning，689.26 秒**，`/tmp/stk-attachment-python-full-20261025.log`。
+  唯一失败为脚本操作清单漏列新方法，修正后完整脚本测试及附件测试 **25 passed，7.26 秒**，`/tmp/stk-attachment-python-final-20261025.log`。
+- 完整原生首轮 **1622/1623、1 失败、零跳过，398.43 秒**，`/tmp/stk-attachment-native-full-20261025.log` 与 `.xml`。
+  唯一失败为新损坏 PNG 用例限定 `PNG header:` 前缀；解码器可能在读取后续块时校验 CRC，改为检查 PNG 解码错误且没有图像。
+- 最终原生相关 **59/59、零失败、零跳过，11.27 秒**，`/tmp/stk-attachment-native-final-20261025.log` 与 `.xml`；必跑检查 **59/59**。
+  包含全部 4 个新增附件用例，已有 Linux／macOS／Windows 的 `TableWorkbenchEditorPython` 必跑规则覆盖；未放宽跳过条件。
+- 最后两处修正仅是测试清单／断言；产品源码未变，未再重复完整回归。保留初轮失败，不把组合证据标为一次完整全绿。
+- 中英文 **2318 键**一致、`git diff --check` 通过；源码暂存 gitleaks 8.30.1 按 `.gitleaks.toml` redact 扫描 **47.98 KB、零泄漏**。
+
+固定起点：默认四区域 1440×1200、en／1×，公开合成文件已登记并绑定到当前选中记录的对象格，Viewer 已显示公开合成载荷。
+选格与文件登记属于起点准备；鼠标点击“记录详情”再点“预览附件”，共 **2 次点击**。
+文字原样显示 `<script>` 等标记；2×2 PNG 的解码像素与输入一致，纹理只创建一次且关闭详情释放。
+项目修订、表和记录 UUID、Viewer 载荷及 payload／camera 序列不变，求值启动数为 0；关闭重开详情不自动读附件。
+保持旧按钮并切换记录、延迟完成原请求后再回原记录均不会出现旧预览。
+
+后端验证当前文件变化、完整冻结 SHA、同大小损坏、搬迁、UTF-8 边界截断、非普通文件、读取期间变化、
+错误项目／缺失对象／不支持格式及冻结目录链接。Python 只检查 PNG 头与资源界限，原生负责完整解码。
+图片验收使用真实 Python 桥、libspng 和模拟 GPU hooks；未新增真实 GPU 截图或 macOS／Windows 人工图片显示验收。
+单文件最多 1 MiB，文本前 64 KiB，PNG 单边最多 4096、像素总数最多 4194304；当前索引文件读取现有字节而不刷新元数据。
+不支持 PDF／视频、Markdown／HTML 渲染或卡片缩略图；本批不表示 P4 完成。
+所有测试清空产品 key 并移除 model 环境，不发收费模型请求，不改端点、密钥或网络策略。
+
 ## 2026-10-25：看板拖动
 
 源码提交 `752d1ea9016ff6730fa7cb3df4a22e9ecfd5a811`，基线 `35637ea5eb95b1922ff11d36814b0f1696cd898a`。
 前头 Desktop [40163712446](https://github.com/sijintech/stk/actions/runs/40163712446) 已完成 **5/5 成功**；
 Runtime [40163712511](https://github.com/sijintech/stk/actions/runs/40163712511) **8/8**、Docs／Secret 成功，满足本批 push 前等待条件。
-新 CI 待推送后确认，不能以旧 CI 或本机结果替代。
+记录／索引头 `b1673ee12dfe29722d6545463689948a66a8e75e` 的 Desktop [40167186317](https://github.com/sijintech/stk/actions/runs/40167186317)
+已全部结束并 **5/5 成功**，包含 Windows CPU、macOS Metal、Linux 桌面、可重定位包及新容器冒烟。
+Runtime [40167186293](https://github.com/sijintech/stk/actions/runs/40167186293) **8/8**、
+Docs [40167186299](https://github.com/sijintech/stk/actions/runs/40167186299)、Secret [40167186297](https://github.com/sijintech/stk/actions/runs/40167186297) 均完成成功。
 
 - 首次构建及最后一次增量链接均退出 0；`/tmp/stk-board-drag-build-20261025.log`、`/tmp/stk-board-drag-build-final-20261025.log`。链接全部完成后才测试。
 - 定向 **64/64、零跳过，11.82 秒**，`/tmp/stk-board-drag-focused-20261025.log` 与 `.xml`。
