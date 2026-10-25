@@ -2,6 +2,7 @@
 
 更新：2026-10-25。只读内置目录及原生浏览页已交付；项目版本固定、升级、恢复和创建分析草稿已通过本机验收，
 保存分析及完整工作流发布为用户技能、追加版本与恢复已完成本机验收，最新批次跨平台 CI 待确认；
+本机全局用户库与跨项目固定已完成本机验收，源码 `6fa8994` 已本地提交，尚未推送与跨平台验收。
 提交与实际结果见[当前交接](../handoff.md)。`stk.skill/1` 与 `stk.project-skill/1` 仍是实验格式，未冻结。
 产品方向见[项目工作台设计](design/project-workbench.md)，存储边界见[项目数据模型](design/project-model.md)。
 
@@ -28,14 +29,15 @@
 
 ## 契约要点
 
-- **身份**：`ref = id@version`，另有 `content_sha256`：定义 JSON 与其图模板的规范 JSON 的 SHA-256。
-  同一 `ref` 内容不同即为不同定义。目录总是重新读取定义；不缓存旧结果。
-- **执行入口**：内置目录支持 `graph.preset`；项目用户技能支持完整保存的 `graph.document`。均通过保存分析和已有图求值服务使用，本身不执行、不准备运行、不调用模型。
-  输入（绑定）、参数和输出直接取自图模板，不另存一份可能偏离的说明。
-- **依赖与可用性**：节点类型按已安装节点目录检查；Python 模块用 `importlib.util.find_spec` 查找，**不导入**。
+- **身份**：`ref = id@version`，另有 `content_sha256`：定义 JSON 与完整方法模板的规范 JSON 的 SHA-256。
+  同一 `ref` 不得保存不同内容；显式新版本不会覆盖旧版。
+- **执行入口**：目录支持内置 `graph.preset`、保存分析 `graph.document` 和完整工作流 `workflow.document`。
+  用户方法先固定到项目，再明确创建可编辑副本；目录读取不执行、不准备运行、不调用模型。接口摘要来自冻结定义。
+- **依赖与可用性**：内置技能按静态节点元数据检查，不加载第三方节点入口；Python 模块用 `importlib.util.find_spec` 查找，**不导入**。
   模块可限定只影响部分输出，例如缺少 matplotlib 时能量曲线不可用，但表格和三维仍可用，状态为 `limited`。
   离屏渲染等运行能力只声明、标记 `checked: false`，不在查询时探测；需要时运行 `suan graph doctor`。
   `tests/test_skill_catalog.py` 在子进程中屏蔽模块实际求值，核对每个声明的影响范围。
+  用户方法标记为 `unchecked`：结构完整不表示当前机器具备运行环境，准备运行时再核实。
 - **坏定义可解释**：无法读取、JSON 错误、字段不合格、文件名与 ID 不一致、重复、未知入口类型、未知预设/说明包、
   例子或依赖引用不存在的参数/输出时，该文件列入 `problems`，其他技能照常显示。
 - **未知 ID 或版本**：`skills.get` 返回 `not_found`，`data.known_versions` 给出已知版本；
@@ -82,7 +84,7 @@
 
 创建分析时完整恢复该版本的图、提交参数和输出，并附上技能版本来源；之后编辑分析不会修改技能。
 恢复旧版本不删除新版本，随后追加仍从历史最大版本继续。普通项目撤销、数据库备份和工作空间迁移保留所有版本。
-当前是项目内用户技能；跨项目独立发布和用户／第三方全局目录仍待接入。
+项目内版本可进一步明确保存到本机用户库，供其他项目固定使用；本批实现与验收状态见下。
 
 ## 从保存工作流创建用户技能
 
@@ -99,6 +101,22 @@
 整套创建是一次修订和一次撤销，失败不留下部分对象。创建后进入工作流编辑器继续检查和编辑，
 运行仍须明确准备与启动。读取、恢复和创建不加载计算引擎，也不保证目标机器具备执行环境。
 本批桌面与端到端验收结果见[运行验收](runtime-validation.md)。
+
+## 本机用户技能库
+
+在项目技能详情中明确“保存到本机技能库”，将已审阅的活动版本保存到当前桌面桥状态目录的
+`skills/catalog.sqlite`。库不依赖源项目继续存在；其他项目可在技能目录选择确切版本，先保存到项目，
+再创建分析或工作流。项目技能记录 UUID 与方法 ID 各自独立，目标项目追加版本仍保留原方法身份。
+
+相同 `id@version` 和摘要可重复确认；同版本不同内容会拒绝，需明确选择“发布新版本”。
+新版本分配同时考虑库内和来源项目保留的历史，不覆盖旧版，也不改来源项目的活动版本或撤销历史。
+全局发布使用独立 `publication_id`；回执丢失时只查询这个身份，关闭源项目后仍可查询，不能自动重放。
+桌面在当前应用会话内保留待确认身份，跨页面关闭和桥重启仍可查询；退出应用后尚无自动恢复入口。
+
+当前库限 1024 个版本、快照总量 64 MiB、单版 8 MiB、4096 条发布回执。
+列表读取最多 1024 条、每条至多 16 KiB 的摘要后分页，不展开完整方法；选定详情与固定版本才核验完整快照。
+源文件字节、执行环境及本机库本身不随项目自动迁移，项目已经固定的版本仍随数据库和工作空间保存。
+这是本机方法复用；第三方分发、远端共享和库管理界面仍属后续范围。独立 CLI 默认仍查看内置目录。
 
 ## 使用
 
@@ -120,7 +138,7 @@ print(skill["ref"], skill["content_sha256"], skill["availability"]["status"])
 
 原生桌面从 **文件 → 技能** 或工作台“技能库”打开同一目录，用法见[桌面指南](desktop.md#技能目录)。
 
-脚本通过已打开项目的 `p.skills` 访问相同操作；列表和详情是纯读，四种写入均要求 `expected_revision`：
+脚本通过已打开项目的 `p.skills` 访问相同操作；列表和详情是纯读，项目写入及本机发布均要求 `expected_revision`：
 
 ```python
 from uuid import uuid4
@@ -147,7 +165,21 @@ receipt = p.skills.publish_analysis(analysis_id, project_skill_id=identity, crea
     name="我的分析方法", description="新版本说明", expected_revision=current_revision)
 ```
 
+```python
+# 先读取当前项目版本，保存其确切摘要；发布不增加项目修订。
+saved = p.skills.get(project_skill_id)
+publication_id = str(uuid4())
+publication = p.skills.publish_global(project_skill_id, saved["skill"]["active"]["content_sha256"],
+    publication_id=publication_id, mode="exact", expected_revision=saved["revision"])
+# 丢失回执时保留 publication_id，通过此只读入口核对。
+publication = stk.skills.publication(publication_id)
+# target 为另一个已打开项目，target_revision 为已检查的目标修订。
+method = publication["skill"]
+receipt = target.skills.pin(method["id"], method["version"], method["content_sha256"],
+    project_skill_id=str(uuid4()), expected_revision=target_revision)
+```
+
 ## 尚未实现
 
-- 从技能直接准备或运行、对话附件、工作流封装为技能；
-- 用户或第三方全局技能目录、更多入口类型（批次模板、Python 操作等）；项目内分析方法版本见上。
+- 从技能直接准备或运行、对话附件；
+- 第三方分发、远端共享、库管理界面和更多入口类型（批次模板、Python 操作等）。

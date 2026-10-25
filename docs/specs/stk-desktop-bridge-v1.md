@@ -1601,7 +1601,7 @@ See the [SSH guide](../ssh.md) for setup, restart behavior and current validatio
 
 ## 16. Versioned skill catalog (additive extension, experimental)
 
-`skills.list` and `skills.get` serve the built-in skill catalog (`stk.skill/1`, see the
+`skills.list` and `skills.get` serve the built-in and local user skill catalog (`stk.skill/1`, see the
 [skill guide](../skills.md)). The `stk.skill/1` definition format is **experimental and not frozen**;
 this section only fixes how the bridge serves it. Check `hello.methods`: an older bridge omits both
 methods and the client must show the catalog as unavailable rather than guess.
@@ -1610,16 +1610,17 @@ methods and the client must show the catalog as unavailable rather than guess.
 |---|---|---|
 | `skills.list` | `{offset?: 0, limit?: 50 (1–200), query?: string ≤ 200}` | `{skills: [skillSummary], total, offset, next_offset, problems: [skillProblem] (≤ 50), problem_count}` |
 | `skills.get` | `{id, version?}` | `{skill}` |
+| `skills.publication.get` | `{publication_id: UUID}` | Immutable local publication receipt; no project handle required |
 
-- Both are reads. They never evaluate graphs, start the graph worker, open or change projects,
-  prepare runs or call models; repeating them only answers again. Definitions are reread on every
-  call, so availability follows the environment the bridge runs in.
+- These three methods are reads. They never evaluate graphs, start the graph worker, open or change projects,
+  prepare runs or call models; repeating them only answers again. Reads do not load third-party
+  node entry points. User summaries are bounded; selected details and pinned content verify the full snapshot.
 - `query` is a case-insensitive substring over the id, `ref`, entry preset and every title and
   summary language. Rows are ordered by id, then version; `next_offset` is null on the last page.
 - A skill is `id@version` (`ref`) plus `content_sha256`, the SHA-256 of the canonical JSON of its
   definition and its graph template. The same `ref` with a different hash is a different definition.
-- `availability.status` is `available`, `limited` (`unavailable_outputs` cannot be delivered) or
-  `unavailable`. It comes from the installed node types and from locating Python modules without
+- `availability.status` is `available`, `limited` (`unavailable_outputs` cannot be delivered),
+  `unavailable`, or `unchecked` for user methods. Built-in checks use static node metadata and locate Python modules without
   importing them. Declared runtime capabilities (`dependencies.runtime`, e.g. offscreen rendering)
   are reported with `checked: false`; they are not probed.
 - Definition files that cannot be used are listed in `problems` with `{source, file, code, message,
@@ -1629,8 +1630,37 @@ methods and the client must show the catalog as unavailable rather than guess.
 - `skills.get` without `version` returns the latest version. An unknown id or version is
   `not_found` with `data: {id, known_versions, problems}`; `problems` explains an id that exists
   only as an unusable definition. Out-of-range params are `invalid_params`.
-- The entry names what executes the skill (`graph.preset` run by `graph.evaluate`); the catalog
-  does not execute it. The Python console exposes both methods as `stk.skills.list/get`.
+- The entry names `graph.preset`, `graph.document` or `workflow.document`; user entries name
+  `project.skills.create_analysis` or `project.skills.create_workflow`, which create definitions without
+  executing them. Workflow details may include bounded `method` counts for workflows, analyses and
+  table/field/snapshot dependencies. Full data-reference review follows pinning in the project page.
+  The Python console exposes `stk.skills.list/get` and `stk.skills.publication(publication_id)`.
+
+### 16.0 Local user publication (additive extension, experimental)
+
+`project.skills.publish_global` accepts `{handle, project_skill_id, content_sha256, expected_revision,
+publication_id, mode}`. The UUID publication identity binds the reviewed source; `mode` is explicitly
+`exact` or `new_version`. `exact` keeps the method's ID, version and hash, and refuses different content
+at the same reference. `new_version` allocates above both library and retained project history under
+one SQLite transaction. It does not alter the source project's version history, revision or undo stack.
+
+The receipt is `{publication_id, mode, source: {project_id, project_skill_id, revision, content_sha256},
+skill: {id, version, ref, content_sha256, source: "user"}, created}`. Reusing an identity for the same
+request returns that receipt even if the source project later changes; different request content conflicts.
+Lost replies are checked using `skills.publication.get`, never automatically replayed. A successful write
+emits `skills.changed {}` after its receipt, rather than `project.changed`. In `skills.list`, `skills.get`,
+`skills.publication.get` and `project.skills.publish_global`, a raised `invalid_definition` from the
+library becomes non-retryable `conflict` with `data.catalog_code: "invalid_definition"`; it does not prove
+that an uncertain publication was never committed. List rows with corrupt summaries are isolated in
+`problems`. Project pin/upgrade retain their project-service error mapping: invalid captured content is
+`invalid_params`, while a changed reviewed digest is `conflict`.
+
+The library belongs to the configured bridge state directory, at `skills/catalog.sqlite`; listing and
+project pin/upgrade use the same library. It stores at most 1024 versions, 64 MiB of snapshot content,
+8 MiB per snapshot and 4096 publication receipts. Listing reads a bounded summary index (16 KiB per row)
+then paginates; it does not expand the complete snapshot collection. Frozen project copies remain usable
+after the original source project or library disappears. Execution environments and scientific inputs
+remain separately supplied. These methods are explicit desktop/Python actions, not additional agent tools.
 
 ### 16.1 Project-owned skill versions (additive extension, experimental)
 
