@@ -2,6 +2,24 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：冻结报告存储与桌面读取（本机验收完成）
+
+本批源码 `3f4af5e898e8f739591bb6fb05d46e872cce0452` 已提交；前头 `b7a658978c40cd6d7a0cf706bc49182b0e72cdd2` 的 Desktop `40222998247` **completed/failure**：macOS 和三项 Linux 作业成功，Windows **1090/1091**，唯一失败是 `ProjectSkillsPython.LargeWorkflowDependenciesStayBrowsableAndMappingsRemainEditable`；Runtime `40222998233`、Docs `40222998232`、Secret `40222998221` 成功。前头全部结束，推送等待条件满足，本批新头 CI 待确认。两平台文档候选均通过编译，但 CI 没有执行原生嵌入命令，仍不能认作嵌入验收。
+
+- 功能：普通报告表引用同一输入快照中的 1–64 项资产，保存最多 16 个冻结上下文／运行状态；清单、原始资产和显示字节摘要分别验证。`get/list` 只读元数据；读取、预览、导出明确绑定项目句柄／修订／清单摘要，旧来源与坏对象拒绝。导出新 ZIP 包含清单和完整原始资产，不覆盖且不运行来源。
+- Python 最终定向：3.12 **217 passed／17.56 秒**；3.11 **204 passed／9.83 秒**，3.14 **204 passed／9.48 秒**。真实桥／worker、坏上下文、路径／摘要／CAS、原文件删除后的读回重开、没有运行或模型请求均覆盖。两段报告指南原例由严格桥直接执行，**0.51 秒**通过。
+- 原生报告最终定向 **10/10、零跳过、2.32 秒**，JUnit `/tmp/stk-reports-final-focused.xml`。固定起点是 **1440×1000、1×、已最大化的报告页**，旁有隐藏未保存 Python 稿和已有 Viewer 数据／相机；从此起点依次选报告、读取资产、定位目标输入框、导出，共 **4 次实际鼠标点击**，键入绝对路径及准备起点另计。完成后 ZIP 存在，稿件／Viewer／修订保持，未执行脚本。此数字不包含从默认布局打开报告编辑器。
+- GPU 中英宽窄文本／PNG **16/16**，OpenGL／Vulkan 软件渲染，1440 或 560×1000。每张使用真实桥和已删除原文件的冻结资产，实际点击显式读取；校验原文和未渲染提示完整可见、PNG 为真实纹理及图中像素；逐张人工查看无阻断裁切。图片位于构建树 `tests/app/out/reports_*`，日志 `/tmp/stk-reports-visual-focused.log`；该轮报告 CPU 夹具失败后已由上述 10/10 复验，不把整份旧 JUnit 写成全通过。
+- 发行检查：安装入口和现有契约／包测试 **23 passed、1 Windows-only skipped**；最终 wheel 与源码包重新构建成功，从 wheel 实际导入三个新模块，并验证 documents extra、指南、原文件删除后的冻结读取／净化预览／导出／重开及修订不变。最终构建证据 `/tmp/stk-reports-final-distribution-build.log`，产物目录由 `/tmp/stk-reports-final-dist-path.txt` 记录；隔离导入冒烟退出 0，代码从 wheel 加载。
+- 首次编译因同一行两个 `ASSERT_NO_FATAL_FAILURE` 产生重复标签失败，已分行；CPU 夹具先把 Logs 当作 Python，再遗漏全选及错误假定默认基线为空，现通过真实输入建立稿件并核对原基线不变。原生产编辑器未为测试修改。
+- Python 首轮完整 **3430 passed、4 failed、24 skipped、2 deselected／702.24 秒**：六个新方法未列入旧接口集合，另三个缺依赖提示断言是运行开始时收集的旧正则；均已同步。最终完整 **3434 passed、24 skipped、2 deselected、1 既有 Starlette 提示／711.89 秒**，日志 `/tmp/stk-reports-python-final-full.log`，退出 0。
+- 完整原生首轮 **1731/1732、零跳过／418.36 秒**，唯一失败 `App.EditorKeysExistInEveryCatalog` 仍断言 16 种编辑器；改为 17 并补报告注册断言，`stk_wm_tests` 重建退出 0。最终完整 **1732/1732、零失败／错误／跳过／414.48 秒**，当前 Linux CI 的主必跑规则及全部中英 GPU／原型循环检查 **1262/1262**；最终证据 `/tmp/stk-reports-native-final-full.log`／`.xml`、`/tmp/stk-reports-native-final-required.log`，首轮日志保留。
+- 中英语言目录 **2423/2423、零问题**，差异空白检查通过；源码暂存 gitleaks 使用 `.gitleaks.toml`、`--redact`，扫描 **306737 bytes、零发现**（`/tmp/stk-reports-source-gitleaks.log`）。
+- 独立审查复现并修正合法路径之间 1158 字节相对 URL 被错误套用 1024 字节资产键上限（输出 URL 仍受编码前后 8192 字节限制）；对重算 SHA 后的嵌套坏 context 按已发布结构验证，单条 invalid 不再拖垮严格列表回复。
+- Windows 旧失败修正仅同步测试准备写入与 800 表分页观察，等待 loaded、准确修订及无忙碌并保留诊断；本机定向已执行通过，仍需下一头 Windows CI 复验。
+
+边界：当前桌面只读原文／PNG，未交付报告创建表单、完整富文档嵌入、PDF 阅读器、AI 生成、LaTeX、视频或独立渲染 HTML 导出。Markdown／HTML 净化输入限 1 MiB，原始资产每项 4 MiB／总 32 MiB；导出是原始来源包。报告不提供认证签名，普通表编辑会重新验证。页面 CSP 和资源门禁不证明浏览器后台无网络，也不代替实机 IME／DPI／PDF／生命周期验收。P4 和第 4–8 项继续推进，PET 新专项后置。
+
 ## 2026-10-25：原生文档嵌入候选（本机验证）
 
 源码 `10e6423f5f5bfc18f66047fda686f323ae702fa1` 按 main 交付。前头 `3dc178d17c2eb32a5da48d36b4ce0224e797ecc3` 的 Desktop `40219610785` 已全部结束并 **5/5 成功**（Windows、macOS、Linux、包与干净容器），推送等待条件已满足。Runtime `40219610773`、Docs `40219610766`、Secret `40219610816` 均成功。本批后续 CI 状态以新记录为准。
