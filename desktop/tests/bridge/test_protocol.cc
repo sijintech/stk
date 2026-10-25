@@ -224,6 +224,47 @@ TEST(Schema, EmbeddedSchemaValidatesMessagesBothWays)
                   .empty());
 }
 
+TEST(Schema, ReportsSourceReviewAndOptionalCompareAndSwap)
+{
+  const auto &schema = ProtocolSchema::embedded();
+  const std::string project = "a1111111-1111-4111-8111-111111111111";
+  const std::string run = "b2222222-2222-4222-8222-222222222222";
+  const std::string snapshot = "c3333333-3333-4333-8333-333333333333";
+  const Json selections = Json::array({{{"kind", "workflow_run"}, {"id", run}}});
+  const Json params = {{"handle", std::string(32, 'a')}, {"expected_revision", 7}, {"sources", selections}};
+  const Json request = {{"id", 1}, {"method", "project.reports.review_sources"}, {"params", params}};
+  ASSERT_TRUE(schema.has_method("project.reports.review_sources"));
+  EXPECT_TRUE(schema.check_request(request).empty());
+  auto bad = request; bad["params"]["start"] = true; EXPECT_FALSE(schema.check_request(bad).empty());
+  for (const char *field : {"handle", "expected_revision", "sources"}) {
+    bad = request; bad["params"].erase(field); EXPECT_FALSE(schema.check_request(bad).empty());
+  }
+  bad = request; bad["params"]["sources"] = Json::array();
+  for (int i = 0; i < 17; ++i) { bad["params"]["sources"].push_back(selections[0]); }
+  EXPECT_FALSE(schema.check_request(bad).empty());
+  Json source = {{"kind", "workflow_run"}, {"id", run}, {"project_id", project}, {"source_revision", 3},
+      {"plan_sha256", std::string(64, 'a')}, {"captured_status", {{"status", "prepared"}, {"complete", false},
+          {"counts", {{"pending", 100}}}, {"stop_error", nullptr}}}};
+  const Json response = {{"id", 1}, {"result", {{"project_id", project}, {"revision", 7},
+      {"sources", Json::array({source})}, {"sources_sha256", std::string(64, 'b')}}}};
+  EXPECT_TRUE(schema.check_response(response, "project.reports.review_sources").empty());
+  for (const char *field : {"project_id", "revision", "sources", "sources_sha256"}) {
+    bad = response; bad["result"].erase(field);
+    EXPECT_FALSE(schema.check_response(bad, "project.reports.review_sources").empty());
+  }
+  bad = response; bad["result"]["source_sha256"] = std::string(64, 'c');
+  EXPECT_FALSE(schema.check_response(bad, "project.reports.review_sources").empty());
+  bad = response; bad["result"]["sources"][0].erase("plan_sha256");
+  EXPECT_FALSE(schema.check_response(bad, "project.reports.review_sources").empty());
+  Json create = {{"id", 2}, {"method", "project.reports.create"}, {"params", {
+      {"handle", std::string(32, 'a')}, {"report_id", project}, {"name", "Reviewed"}, {"snapshot_id", snapshot},
+      {"entry_record_id", run}, {"assets", Json::array({{{"record_id", run}, {"path", "report.md"}}})},
+      {"sources", selections}, {"expected_revision", 7}, {"expected_sources_sha256", std::string(64, 'b')}}}};
+  EXPECT_TRUE(schema.check_request(create).empty());
+  create["params"]["expected_sources_sha256"] = "bad"; EXPECT_FALSE(schema.check_request(create).empty());
+  create["params"].erase("expected_sources_sha256"); EXPECT_TRUE(schema.check_request(create).empty());
+}
+
 TEST(Schema, ReportsPreviewResources)
 {
   const auto &schema = ProtocolSchema::embedded();

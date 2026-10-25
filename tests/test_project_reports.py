@@ -588,3 +588,186 @@ def test_unavailable_or_invalid_provenance_never_saves(project, sources):
 def test_strict_pagination(project, offset, limit):
     with pytest.raises(ProjectError):
         Reports(project[0]).list(offset=offset, limit=limit)
+
+
+def _review_sources_fixture(project):
+    store, snapshot, assets, _ = project
+    table, field, row = _parameter_table(store)
+    context_id = str(uuid4())
+    context = store.contexts.capture(table, [row], [field], expected_revision=3, title="Frozen values", context_id=context_id)
+    simulation = store.runs.prepare([{"table_id": table, "record_id": row,
+        "spec": {"workspace_id": "a" * 32, "argv": ["{python}", "-c", "pass"]}}],
+        connection="runtime:Test", connection_identity="a" * 16, expected_revision=3)["run_ids"][0]
+    analysis_id, analysis_run_id, workflow_id, workflow_run_id = (str(uuid4()) for _ in range(4))
+    store.analyses.create("Unknown source", {"format": "stk.analysis-document/1", "graph": {
+        "schema": "stk.graph/1", "nodes": [{"id": "source", "type": "missing.source.node@1", "params": {"binding": "data"}}],
+        "outputs": {"view": "source.payload"}}, "parameters": {}, "outputs": ["view"]},
+        analysis_id=analysis_id, expected_revision=4)
+    run = store.analysis_runs.prepare(analysis_id, snapshot["id"], {"data": {next(item["name"] for item in snapshot["manifest"]["files"] if item["record_id"] == assets[0]["record_id"]): assets[0]["record_id"]}},
+                                      run_id=analysis_run_id, expected_revision=5)
+    store.workflows.create("Synthetic", {"format": "stk.workflow/1", "steps": [
+        {"id": "cases", "kind": "table", "ref": {"table": table}},
+        {"id": "simulate", "kind": "simulation", "ref": {"template": "demo-synthetic/1"},
+         "inputs": {"rows": {"from": "cases.rows"}}, "parameters": {"temperature": {"$field": field}}}], "ui": {}},
+        workflow_id=workflow_id, expected_revision=5)
+    workflow = store.workflow_runs.prepare(workflow_id, [row], run_id=workflow_run_id, expected_revision=6)
+    selection = [{"kind": kind, "id": identity} for kind, identity in
+                 [("context", context_id), ("simulation_run", simulation), ("analysis_run", analysis_run_id), ("workflow_run", workflow_run_id)]]
+    return selection
+
+
+def _large_workflow_source(store):
+    """A valid prepared plan duplicates a saved graph across 100 steps, without executing it."""
+    table, _, row = _parameter_table(store)
+    analysis_id, workflow_id, run_id = (str(uuid4()) for _ in range(3))
+    # Unknown node types remain valid saved graph metadata. No registry execution is needed.
+    graph = {"schema": "stk.graph/1", "nodes": [
+        {"id": f"n{i}", "type": "unavailable.report.source@1", "params": {"literal": "x" * (48 * 1024)}}
+        for i in range(3)], "outputs": {"view": "n0.payload"}}
+    store.analyses.create("Large frozen graph", {"format": "stk.analysis-document/1", "graph": graph,
+        "parameters": {}, "outputs": ["view"]}, analysis_id=analysis_id, expected_revision=store.info()["revision"])
+    document = {"format": "stk.workflow/1", "steps": [
+        {"id": "cases", "kind": "table", "ref": {"table": table}}, *[
+            {"id": f"step{i}", "kind": "analysis", "ref": {"analysis": analysis_id}}
+            for i in range(100)]], "ui": {}}
+    store.workflows.create("Large source plan", document, workflow_id=workflow_id, expected_revision=store.info()["revision"])
+    run = store.workflow_runs.prepare(workflow_id, [row], run_id=run_id, expected_revision=store.info()["revision"])
+    with store._connect() as db:
+        size = db.execute("SELECT length(CAST(payload AS BLOB)) FROM workflow_run_plans WHERE id=?", (run_id,)).fetchone()[0]
+    assert 12 * 1024 * 1024 < size < 16 * 1024 * 1024
+    return {"kind": "workflow_run", "id": run_id}, run["plan_sha256"]
+
+
+def test_source_review_reads_complete_provenance_without_assets_execution_or_edit(project, monkeypatch):
+    store = project[0]
+    selected = _review_sources_fixture(project)
+    revision, history = store.info()["revision"], store.history()
+    with monkeypatch.context() as patch:
+        patch.setattr(reports, "_read_asset", lambda *a: pytest.fail("source review read an asset"))
+        patch.setattr(store, "snapshot", lambda: pytest.fail("source review loaded the entire project"))
+        result = store.reports.review_sources(selected, expected_revision=revision)
+    assert set(result) == {"project_id", "revision", "sources", "sources_sha256"}
+    assert result["revision"] == revision and result["project_id"] == store.info()["id"]
+    assert result["sources_sha256"] == reports._hash(result["sources"])
+    assert [{k: source[k] for k in ("kind", "id")} for source in result["sources"]] == selected
+    assert result["sources"][0]["context"]["content"]["state"] == "included"
+    assert "omitted_values" in result["sources"][0]["context"]
+    identity = str(uuid4())
+    store.reports.create("Reviewed", project[1]["id"], project[2][0]["record_id"], project[2],
+        report_id=identity, expected_revision=revision, sources=selected,
+        expected_sources_sha256=result["sources_sha256"])
+    assert store.reports.get(identity)["report"]["manifest"]["sources"] == result["sources"]
+    assert len(store.history()) == len(history) + 1
+
+
+@pytest.mark.parametrize("kind", ["simulation_run", "analysis_run", "workflow_run"])
+def test_source_cas_observation_drift_conflicts_without_revision_or_asset_read(project, monkeypatch, kind):
+    store = project[0]
+    selected = _review_sources_fixture(project)
+    source = next(value for value in selected if value["kind"] == kind)
+    revision, history = store.info()["revision"], store.history()
+    reviewed = store.reports.review_sources(selected, expected_revision=revision)
+    if kind == "simulation_run":
+        store.runs.observe(source["id"], {"submission": "submitting"})
+    elif kind == "analysis_run":
+        store.analysis_runs._claim(source["id"], executor_id=str(uuid4()))
+    else:
+        store.workflow_runs.start(source["id"], executor_id=str(uuid4()))  # Bookkeeping only, no executor.
+    assert store.info()["revision"] == revision
+    identity = str(uuid4())
+    kwargs = dict(report_id=identity, expected_revision=revision, sources=selected)
+    with monkeypatch.context() as patch:
+        patch.setattr(reports, "_read_asset", lambda *a: pytest.fail("CAS conflict must precede asset reads"))
+        with pytest.raises(RevisionConflict, match="sources changed"):
+            store.reports.create("Reviewed", project[1]["id"], project[2][0]["record_id"], project[2],
+                expected_sources_sha256=reviewed["sources_sha256"], **kwargs)
+    assert store.info()["revision"] == revision and store.history() == history
+    with pytest.raises(ReportNotFound):
+        store.reports.get(identity)
+    latest = store.reports.review_sources(selected, expected_revision=revision)
+    assert latest["sources_sha256"] != reviewed["sources_sha256"]
+    store.reports.create("Reviewed", project[1]["id"], project[2][0]["record_id"], project[2],
+                         expected_sources_sha256=latest["sources_sha256"], **kwargs)
+    assert store.reports.get(identity)["report"]["manifest"]["sources"] == latest["sources"]
+
+
+def test_source_cas_freezes_the_same_capture_if_status_changes_during_asset_io(project, monkeypatch):
+    store = project[0]
+    selected = _review_sources_fixture(project)
+    simulation = next(value["id"] for value in selected if value["kind"] == "simulation_run")
+    revision = store.info()["revision"]
+    reviewed = store.reports.review_sources(selected, expected_revision=revision)
+    original = reports._read_asset
+    advanced = False
+    def read(*args):
+        nonlocal advanced
+        if not advanced:
+            advanced = True
+            store.runs.observe(simulation, {"submission": "submitting"})
+        return original(*args)
+    monkeypatch.setattr(reports, "_read_asset", read)
+    identity = str(uuid4())
+    store.reports.create("Reviewed", project[1]["id"], project[2][0]["record_id"], project[2],
+        report_id=identity, expected_revision=revision, sources=selected,
+        expected_sources_sha256=reviewed["sources_sha256"])
+    assert advanced and store.reports.get(identity)["report"]["manifest"]["sources"] == reviewed["sources"]
+
+
+def test_source_review_has_bounded_response_for_a_valid_large_workflow(project, monkeypatch):
+    store = project[0]
+    source, plan_hash = _large_workflow_source(store)
+    revision, history = store.info()["revision"], store.history()
+    monkeypatch.setattr(type(store.workflow_runs), "get", lambda *a: pytest.fail("do not serialize the whole workflow run"))
+    result = store.reports.review_sources([source], expected_revision=revision)
+    assert len(reports._json(result)) < 4096
+    assert result["sources"][0]["plan_sha256"] == plan_hash
+    assert result["sources"][0]["captured_status"] == {"status": "prepared", "complete": False,
+        "counts": {"pending": 100}, "stop_error": None}
+    assert store.history() == history and store.info()["revision"] == revision
+
+
+def test_review_rejects_too_large_full_provenance_without_silent_omissions(project):
+    store = project[0]
+    table, field = str(uuid4()), str(uuid4())
+    rows = [str(uuid4()) for _ in range(14)]
+    commands = [{"op": "create_table", "id": table, "name": "Contexts"},
+                {"op": "add_field", "id": field, "table_id": table, "name": "Text", "type": "text"}]
+    for row in rows:
+        commands += [{"op": "add_record", "id": row, "table_id": table},
+                     {"op": "set_cell", "table_id": table, "record_id": row, "field_id": field, "value": "x" * 15000}]
+    revision = store.apply(commands, expected_revision=2)["revision"]
+    selected = []
+    for _ in range(2):
+        context = store.contexts.capture(table, rows, [field], expected_revision=revision,
+                                         title="Large included context", context_id=str(uuid4()))
+        assert context["content"]["state"] == "included"
+        selected.append({"kind": "context", "id": context["id"]})
+    history = store.history()
+    with pytest.raises(ProjectError, match="384 KiB"):
+        store.reports.review_sources(selected, expected_revision=revision)
+    assert store.history() == history and store.info()["revision"] == revision
+
+
+@pytest.mark.parametrize("selected", [None, {}, [{"kind": "file", "id": str(uuid4())}],
+    [{"kind": "context", "id": str(uuid4())}] * 2,
+    [{"kind": "context", "id": str(uuid4())} for _ in range(17)]])
+def test_review_invalid_selection_never_writes(project, selected):
+    store = project[0]
+    history = store.history()
+    with pytest.raises(ProjectError):
+        store.reports.review_sources(selected, expected_revision=2)
+    assert store.info()["revision"] == 2 and store.history() == history
+
+
+def test_review_empty_and_stale_revision_and_invalid_cas(project, monkeypatch):
+    store = project[0]
+    result = store.reports.review_sources([], expected_revision=2)
+    assert result["sources"] == [] and result["sources_sha256"] == reports._hash([])
+    with pytest.raises(RevisionConflict):
+        store.reports.review_sources([], expected_revision=1)
+    with monkeypatch.context() as patch:
+        patch.setattr(reports, "_capture_sources", lambda *a: pytest.fail("invalid checksum must be rejected before source reads"))
+        with pytest.raises(ProjectError, match="checksums"):
+            store.reports.create("Invalid", project[1]["id"], project[2][0]["record_id"], project[2],
+                report_id=str(uuid4()), expected_revision=2, expected_sources_sha256="not-a-checksum")
+    assert store.info()["revision"] == 2

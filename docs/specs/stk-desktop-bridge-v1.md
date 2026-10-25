@@ -616,7 +616,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.snapshots.get` | `{handle, snapshot_id}` | `{snapshot: inputManifest}` |
 | `project.snapshots.verify` | `{handle, snapshot_id}` | `{snapshot_id, ok, files: [{record_id, sha256, state, error}]}` |
 | `project.snapshots.resolve` | `{handle, snapshot_id, record_id}` | `{snapshot_id, record_id, name, path, location, sha256, size}` |
-| `project.reports.create` | `{handle, report_id, name, snapshot_id, entry_record_id, assets: [{record_id, path}], expected_revision, sources?: [{kind, id}]}` | `{revision, commands, table_id, record_id}`; `project.changed` after success |
+| `project.reports.review_sources` | `{handle, expected_revision, sources:[{kind,id}]}` | `{project_id, revision, sources, sources_sha256}`; at most 384 KiB complete frozen provenance, read-only |
+| `project.reports.create` | `{handle, report_id, name, snapshot_id, entry_record_id, assets: [{record_id, path}], expected_revision, sources?: [{kind, id}], expected_sources_sha256?}` | `{revision, commands, table_id, record_id}`; `project.changed` after success |
 | `project.reports.get` | `{handle, report_id}` | `{revision, table_id, report}` |
 | `project.reports.list` | `{handle, offset?, limit?}` | `{revision, table_id, offset, total, reports}` (summaries) |
 | `project.reports.asset` | `{handle, report_id, path, expected_revision, expected_source_sha256}` | Complete base64 bytes with asset hash/size, MIME and report identity |
@@ -1767,3 +1768,8 @@ complete version-history document. The final project snapshot remains limited to
 and an atomic edit to 1000 commands; a legal individual source may still exceed the combined
 method or destination-project budget. SQLite backups and portable workspaces preserve the records; neither carries the
 node implementation, dependencies, guide body or scientific input needed for a later run.
+
+Report source review uses the existing typed `projectReportSource` descriptors and performs no
+execution or remote refresh. `project.reports.create.expected_sources_sha256` is an optional
+compare-and-swap guard over the exact ordered frozen sources array; a differing lifecycle
+observation conflicts before reads of assets or writes. See [report format](report-1.md).

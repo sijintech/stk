@@ -135,3 +135,31 @@ else:
     with zipfile.ZipFile(destination) as archive:
         assert archive.read(assets[0]["path"]) == originals["report.md"]
     scripts.assert_clean()
+
+
+def test_report_source_compare_and_swap_is_optional_and_preserves_the_open_handle():
+    calls = []
+    api = API(lambda method, params: calls.append((method, params)))
+    api._project_handle = "a" * 32
+    bound = api.project.reports
+    api._project_handle = "b" * 32
+    identity, snapshot, record = (str(uuid4()) for _ in range(3))
+    bound.create("Reviewed", snapshot, record, [{"record_id": record, "path": "report.md"}],
+                 report_id=identity, expected_revision=4, sources=[], expected_sources_sha256="c" * 64)
+    assert calls[-1][0] == "project.reports.create"
+    assert calls[-1][1]["handle"] == "a" * 32
+    assert calls[-1][1]["expected_sources_sha256"] == "c" * 64
+    bound.create("Legacy", snapshot, record, [{"record_id": record, "path": "report.md"}],
+                 report_id=identity, expected_revision=4)
+    assert "expected_sources_sha256" not in calls[-1][1]
+
+
+def test_source_review_facade_preserves_order_revision_and_open_handle():
+    calls = []
+    api = API(lambda method, params: calls.append((method, params)) or {"sources": []})
+    api._project_handle = "a" * 32
+    sources = [{"kind": "context", "id": str(uuid4())}, {"kind": "workflow_run", "id": str(uuid4())}]
+    selected = api.project.reports
+    api._project_handle = "b" * 32
+    assert selected.review_sources(sources, expected_revision=9) == {"sources": []}
+    assert calls == [("project.reports.review_sources", {"handle": "a" * 32, "sources": sources, "expected_revision": 9})]

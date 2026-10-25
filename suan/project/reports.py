@@ -426,9 +426,35 @@ class Reports:
                 reports.append(item)
             return {"revision": revision, "table_id": TABLE_ID, "offset": offset, "total": total, "reports": reports}
 
-    def create(self, name, snapshot_id, entry_record_id, assets, *, report_id, expected_revision, sources=None):
+    def review_sources(self, sources, *, expected_revision):
+        """Read one bounded, consistent provenance snapshot without reading source assets.
+
+        Lifecycle observations are independent of the editable project revision. The returned
+        digest can therefore guard create against observations advancing after this review.
+        """
+        _expected_revision(expected_revision)
+        selected = clone(sources, "Report source selection")
+        with self.store._connect() as db:
+            _TABLE.require(db, "reports")
+            _revision(db, expected_revision)
+            try:
+                frozen = _capture_sources(self.store, db, selected)
+                _provenance(frozen, self.store._project_id, expected_revision)
+                result = {"project_id": self.store._project_id, "revision": expected_revision,
+                          "sources": frozen, "sources_sha256": _hash(frozen)}
+                encoded_size = len(_json(result))
+            except (KeyError, TypeError, ValueError, RecursionError, UnicodeError):
+                raise ProjectError("Selected report provenance is invalid") from None
+            if encoded_size > MAX_MANIFEST_BYTES:
+                raise ProjectError("Report source review exceeds the 384 KiB metadata limit")
+            return result
+
+    def create(self, name, snapshot_id, entry_record_id, assets, *, report_id, expected_revision, sources=None,
+               expected_sources_sha256=None):
         _id(report_id); _id(snapshot_id); _id(entry_record_id)
         _expected_revision(expected_revision)
+        if expected_sources_sha256 is not None:
+            _digest(expected_sources_sha256)
         values = clone({"name": name, "assets": assets, "sources": [] if sources is None else sources}, "Report")
         from .managed import name as report_name
         title, selected, sources = report_name(values["name"], "Report"), values["assets"], values["sources"]
@@ -454,8 +480,14 @@ class Reports:
                 raise ProjectError("Report entry must be exactly one selected asset")
             try:
                 frozen_sources = _capture_sources(self.store, db, sources)
+                captured_digest = _hash(frozen_sources) if expected_sources_sha256 is not None else None
             except (KeyError, TypeError, ValueError, RecursionError, UnicodeError):
                 raise ProjectError("Selected report provenance is invalid") from None
+            # Bind the exact ordered provenance reviewed by the caller, including lifecycle
+            # observations which may advance without changing the project revision. This is
+            # the same captured value used in the manifest, before asset I/O or any write.
+            if expected_sources_sha256 is not None and captured_digest != expected_sources_sha256:
+                raise RevisionConflict("Report sources changed; explicitly review the selected sources again")
             manifest = _manifest(self.store, db, {"format": DOCUMENT_FORMAT, "project_id": self.store._project_id,
                 "snapshot_id": snapshot_id, "snapshot_sha256": snapshot["sha256"], "source_revision": expected_revision,
                 "entry_path": entry[0], "assets": entries, "sources": frozen_sources})

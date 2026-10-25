@@ -166,13 +166,27 @@ std::string native_evidence_environment_error()
   // GHOST requests PROCESS_PER_MONITOR_DPI_AWARE during its later startup. Set that same
   // process default before the probe's first HWND: changing it after any HWND is unsupported
   // and could mix virtualized client coordinates with DWM's physical capture pixels.
-  if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE) &&
-      GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext()) !=
-          DPI_AWARENESS_PER_MONITOR_AWARE) {
+  // The shared Blender target retains _WIN32_WINNT=0x0603. Resolve these newer
+  // User32 APIs only for this opt-in evidence path; neither headers nor imports should
+  // raise the main product's minimum OS. Missing APIs are a failed capability check.
+  using SetProcessContext = BOOL(WINAPI *)(DPI_AWARENESS_CONTEXT);
+  using GetThreadContext = DPI_AWARENESS_CONTEXT(WINAPI *)();
+  using GetContextAwareness = DPI_AWARENESS(WINAPI *)(DPI_AWARENESS_CONTEXT);
+  const HMODULE user32 = GetModuleHandleW(L"user32.dll"); // Borrowed; do not FreeLibrary.
+  const auto set_process_context = user32 ? reinterpret_cast<SetProcessContext>(
+      GetProcAddress(user32, "SetProcessDpiAwarenessContext")) : nullptr;
+  const auto get_thread_context = user32 ? reinterpret_cast<GetThreadContext>(
+      GetProcAddress(user32, "GetThreadDpiAwarenessContext")) : nullptr;
+  const auto get_context_awareness = user32 ? reinterpret_cast<GetContextAwareness>(
+      GetProcAddress(user32, "GetAwarenessFromDpiAwarenessContext")) : nullptr;
+  if (!set_process_context || !get_thread_context || !get_context_awareness) {
+    return "Native evidence requires User32 DPI awareness context APIs; one or more are unavailable";
+  }
+  if (!set_process_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE) &&
+      get_context_awareness(get_thread_context()) != DPI_AWARENESS_PER_MONITOR_AWARE) {
     return "Cannot establish GHOST-compatible per-monitor DPI awareness before the GL probe";
   }
-  if (GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext()) !=
-      DPI_AWARENESS_PER_MONITOR_AWARE) {
+  if (get_context_awareness(get_thread_context()) != DPI_AWARENESS_PER_MONITOR_AWARE) {
     return "The native evidence UI thread has an incompatible DPI context";
   }
   // GHOST displays a modal dialog on GL startup failure. Probe our own hidden window first

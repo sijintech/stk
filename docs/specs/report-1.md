@@ -131,3 +131,32 @@ Limits fail explicitly; source evidence is not silently truncated. Existing snap
 
 Keeping only SQLite is not a full report backup: the selected `.stk/objects` byte objects are also needed.
 The existing [workspace contract](workspace-1.md) transports that project resource closure without executing it.
+
+## Explicit source review and optional source CAS
+
+`review_sources(sources, expected_revision=...)` is read-only and returns exactly
+`{project_id, revision, sources, sources_sha256}`. It accepts the same ordered, distinct
+`{kind, id}` selections as create (at most 16) and captures complete typed provenance in one
+SQLite read transaction at the requested project revision. No source asset, live file, run
+execution, recovery, remote refresh, plugin or model is invoked. The entire canonical result
+is limited to 384 KiB; larger provenance is rejected, never truncated. Full workflow plans
+remain internal to the bounded storage read and are not serialized into the bridge response.
+
+`sources_sha256` is SHA-256 of the ordered `sources` array serialized as UTF-8 JSON with
+`ensure_ascii=False`, sorted object keys, compact separators and no nonfinite numbers. It is
+separate from the complete report manifest digest and from all plan and asset byte digests.
+
+Create accepts optional `expected_sources_sha256`. When present, it compares this digest to
+the **same** captured provenance array that enters the new manifest, before asset reads or
+any write. Mismatch returns revision conflict and changes no record/history/revision. Run
+observations can advance without changing project revision, so revision alone does not bind
+a review. The caller must explicitly review again and submit a new attempt; it must never
+weaken original-report-UUID and complete-manifest checks after an uncertain write. Omission
+preserves the existing capture-at-create behavior. A later observation does not change the
+frozen array already accepted by this comparison.
+
+The desktop creation draft v2 stores only selected source kind/UUID pairs before submission;
+reviewed payloads and session/handle/revision gates are transient. Pending writes retain the
+complete manifest and digest for exact receipt lookup. Its local workspace budget is 512 KiB
+to accommodate the existing 384 KiB report metadata limit; v1 source-free drafts still load.
+Restoration and scope/revision changes never automatically read or re-review sources.

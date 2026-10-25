@@ -724,12 +724,20 @@ class ProjectReports:
     def __init__(self, call, handle):
         self._call, self.handle = call, handle
 
-    def create(self, name, snapshot_id, entry_record_id, assets, *, report_id, expected_revision, sources=None):
+    def review_sources(self, sources, *, expected_revision):
+        """Explicitly freeze bounded provenance metadata; never execute or refresh a run."""
+        return self._call("project.reports.review_sources", {"handle": self.handle, "sources": sources,
+                                                            "expected_revision": expected_revision})
+
+    def create(self, name, snapshot_id, entry_record_id, assets, *, report_id, expected_revision, sources=None,
+               expected_sources_sha256=None):
         values = {"handle": self.handle, "name": name, "snapshot_id": snapshot_id,
                   "entry_record_id": entry_record_id, "assets": assets, "report_id": report_id,
                   "expected_revision": expected_revision}
         if sources is not None:
             values["sources"] = sources
+        if expected_sources_sha256 is not None:
+            values["expected_sources_sha256"] = expected_sources_sha256
         return self._call("project.reports.create", values)
 
     def get(self, report_id):

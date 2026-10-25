@@ -325,3 +325,92 @@ def test_report_request_contracts_keep_explicit_selection_and_reject_extra_field
     if action == "list":
         for extra in ({"offset": True}, {"offset": -1}, {"limit": 0}, {"limit": 101}):
             assert validate_params(method, {**params, **extra})
+
+
+def test_source_review_bridge_discovery_cas_and_no_write_on_observation_drift(inproc, tmp_path, monkeypatch):
+    from test_project_reports import _review_sources_fixture
+    harness = inproc()
+    project, store, snapshot, assets, originals = prepared(harness, tmp_path)
+    selected = _review_sources_fixture((store, snapshot, assets, originals))
+    revision = store.info()["revision"]
+    method = "project.reports.review_sources"
+    assert method in harness.call("hello", {"protocol": 1})["methods"]
+    operations = harness.call("script.catalog")["operations"]
+    assert "expected_sources_sha256" in operations["project.reports.create"]["params"]["properties"]
+    assert method in operations
+    before_events, history = harness.events_of("project.changed"), store.history()
+    reviewed = project.reports.review_sources(selected, expected_revision=revision)
+    assert len(report_storage._json(reviewed)) <= 384 * 1024
+    assert reviewed["sources_sha256"] == report_storage._hash(reviewed["sources"])
+    assert harness.events_of("project.changed") == before_events and store.history() == history
+    simulation = next(value["id"] for value in selected if value["kind"] == "simulation_run")
+    store.runs.observe(simulation, {"submission": "submitting"})
+    identity = str(uuid4())
+    params = {"handle": project.handle, "name": "Reviewed", "snapshot_id": snapshot["id"],
+        "entry_record_id": assets[0]["record_id"], "assets": assets, "sources": selected,
+        "report_id": identity, "expected_revision": revision, "expected_sources_sha256": reviewed["sources_sha256"]}
+    with monkeypatch.context() as patch:
+        patch.setattr(report_storage, "_read_asset", lambda *args: pytest.fail("CAS conflict read an asset"))
+        error = harness.error("project.reports.create", params)
+    assert error["code"] == "conflict"
+    assert harness.events_of("project.changed") == before_events and store.history() == history
+    assert store.info()["revision"] == revision
+    latest = project.reports.review_sources(selected, expected_revision=revision)
+    result = harness.call("project.reports.create", {**params, "expected_sources_sha256": latest["sources_sha256"]})
+    assert result["record_id"] == identity
+    harness.wait_event(lambda event: event["event"] == "project.changed" and event["data"]["revision"] == revision + 1)
+    saved = project.reports.get(identity)["report"]
+    assert saved["manifest"]["sources"] == latest["sources"]
+    assert saved["source_sha256"] == report_storage._hash(saved["manifest"])
+    harness.assert_clean()
+
+
+def test_large_workflow_source_review_crosses_strict_bridge_without_a_large_plan(inproc, tmp_path, monkeypatch):
+    from test_project_reports import _large_workflow_source
+    harness = inproc()
+    project, store, _, _, _ = prepared(harness, tmp_path)
+    source, digest = _large_workflow_source(store)
+    revision = store.info()["revision"]
+    monkeypatch.setattr(type(store.workflow_runs), "get", lambda *args: pytest.fail("do not serialize the complete workflow run"))
+    before_events = harness.events_of("project.changed")
+    result = project.reports.review_sources([source], expected_revision=revision)
+    assert len(report_storage._json(result)) < 4096
+    assert result["sources"][0]["plan_sha256"] == digest
+    assert result["sources"][0]["captured_status"]["counts"] == {"pending": 100}
+    assert harness.events_of("project.changed") == before_events
+    harness.assert_clean()
+
+
+def test_source_review_schema_rejects_unknown_inputs_and_open_handle_drift(inproc, tmp_path):
+    harness = inproc()
+    project, store, _, _, _ = prepared(harness, tmp_path)
+    method = "project.reports.review_sources"
+    params = {"handle": project.handle, "sources": [], "expected_revision": 2}
+    assert validate_params(method, params) == []
+    for extra in ({"run": True}, {"expected_revision": True}, {"expected_revision": -1},
+                  {"sources": [{"kind": "context", "id": str(uuid4())} for _ in range(17)]}):
+        assert validate_params(method, {**params, **extra})
+    assert harness.error(method, {**params, "expected_revision": 1})["code"] == "conflict"
+    harness.call("project.close", {"handle": project.handle})
+    assert harness.error(method, params)["code"] == "not_found"
+    assert store.info()["revision"] == 2
+    harness.assert_clean()
+
+
+def test_corrupt_source_observation_returns_a_public_error_before_review_serialization(inproc, tmp_path):
+    from test_project_reports import _review_sources_fixture
+    harness = inproc()
+    project, store, snapshot, assets, originals = prepared(harness, tmp_path)
+    selected = _review_sources_fixture((store, snapshot, assets, originals))
+    source = next(value for value in selected if value["kind"] == "simulation_run")
+    revision = store.info()["revision"]
+    # A damaged on-disk JSON string is legal JSON syntax but cannot form UTF-8 provenance.
+    with store._connect(write=True) as db:
+        db.execute("INSERT INTO run_observations(run_id,created_at,payload) VALUES (?,?,?)",
+                   (source["id"], "2026-01-01T00:00:00+00:00", json.dumps({"submission": "prepared", "note": "\ud800"})))
+    history = store.history()
+    error = harness.error("project.reports.review_sources", {"handle": project.handle,
+        "expected_revision": revision, "sources": [source]})
+    assert error["code"] == "invalid_params" and "provenance" in error["message"]
+    assert store.history() == history and store.info()["revision"] == revision
+    harness.assert_clean()

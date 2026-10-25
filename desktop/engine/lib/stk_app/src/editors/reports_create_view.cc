@@ -81,17 +81,93 @@ bool path(const std::string &value)
 }
 Json blank()
 {
-  return {{"version", 1}, {"project_id", ""}, {"snapshot_id", ""}, {"snapshot_sha256", ""},
-      {"name", ""}, {"entry_record_id", ""}, {"assets", Json::array()}, {"pending", nullptr}};
+  return {{"version", 2}, {"project_id", ""}, {"snapshot_id", ""}, {"snapshot_sha256", ""},
+      {"name", ""}, {"entry_record_id", ""}, {"assets", Json::array()}, {"sources", Json::array()}, {"pending", nullptr}};
 }
 std::string hash(const Json &value) { return core::Sha256::hex(io::python_json_dumps(value, true, true)); }
+constexpr const char *source_kinds[] = {"context", "simulation_run", "analysis_run", "workflow_run"};
+const char *source_list_method(int kind)
+{
+  constexpr const char *methods[] = {"project.contexts.list", "project.runs.list", "project.analysis_runs.list", "project.workflow_runs.list"};
+  return kind >= 0 && kind < 4 ? methods[kind] : "";
+}
+bool source_kind_valid(const std::string &kind)
+{
+  return kind == "context" || kind == "simulation_run" || kind == "analysis_run" || kind == "workflow_run";
+}
+bool source_selection(const Json &values)
+{
+  if (!values.is_array() || values.size() > 16) { return false; }
+  std::set<std::pair<std::string, std::string>> seen;
+  for (const auto &value : values) {
+    const auto kind = io::get_string(value, "kind"), id = io::get_string(value, "id");
+    if (!value.is_object() || value.size() != 2 || !source_kind_valid(kind) || !canonical_uuid(id) ||
+        !seen.emplace(kind, id).second) { return false; }
+  }
+  return true;
+}
+// Complete, typed provenance only. This is also used before accepting a pending workspace;
+// a digest authenticates consistency, never the author or a source's scientific validity.
+void validate_sources(const Json &sources, const Json &selected, const std::string &project, int64_t revision)
+{
+  require(source_selection(selected) && sources.is_array() && sources.size() == selected.size(), "Invalid report source selection");
+  check_analysis_json_bounds(sources, 384 * 1024);
+  for (size_t i = 0; i < sources.size(); ++i) {
+    const auto &source = sources[i]; const auto kind = io::get_string(source, "kind"), id = io::get_string(source, "id");
+    const auto source_revision = io::get_int(source, "source_revision", -1);
+    require(source.is_object() && source.size() == 6 && kind == io::get_string(selected[i], "kind") &&
+        id == io::get_string(selected[i], "id") && io::get_string(source, "project_id") == project &&
+        source_revision >= 0 && source_revision <= revision, "Frozen source identity differs from its selection");
+    if (kind == "context") {
+      const auto &context = source.at("context");
+      require(context.is_object() && context.size() == 10 && io::get_string(context, "id") == id &&
+          io::get_string(context, "project_id") == project && io::get_int(context, "source_revision", -1) == source_revision &&
+          hash(context) == io::get_string(source, "context_sha256") && context.at("diagnostics").is_object() &&
+          io::get_int(context, "omitted_values", -1) >= 0 && context.at("limits").is_object(), "Invalid frozen context descriptor");
+      const auto &content = context.at("content");
+      if (io::get_string(content, "state") == "included") {
+        const auto encoded = io::python_json_dumps(content.at("value"), true, true);
+        require(io::get_int(content, "size_bytes", -1) == int64_t(encoded.size()) &&
+            core::Sha256::hex(encoded) == io::get_string(content, "sha256"), "Frozen context value checksum differs");
+      }
+      else {
+        require(io::get_string(content, "state") == "omitted" && io::get_string(content, "reason") == "context_limit" &&
+            !content.contains("value") && core::is_sha256_hex(io::get_string(content, "sha256")), "Invalid omitted context value");
+      }
+    }
+    else {
+      require(core::is_sha256_hex(io::get_string(source, "plan_sha256")), "Invalid frozen source plan checksum");
+      const auto &state = source.at("captured_status");
+      require(state.is_object(), "Invalid frozen source status");
+      if (kind == "simulation_run") {
+        require(state.size() == 3 && io::get_int(state, "observation_id", -1) >= 0 && state.contains("observed_at") &&
+            state.at("status").is_object(), "Invalid simulation observation");
+      }
+      else if (kind == "analysis_run") {
+        require(state.size() == 8, "Invalid analysis observation");
+        for (const char *key : {"status", "updated_at", "started_at", "finished_at", "cancel_requested_at", "executor_id", "error", "result"}) {
+          require(state.contains(key), "Incomplete analysis observation");
+        }
+        const auto status = io::get_string(state, "status");
+        require(status == "prepared" || status == "running" || status == "cancel_requested" || status == "succeeded" ||
+            status == "failed" || status == "cancelled" || status == "unknown", "Unsupported analysis observation");
+      }
+      else {
+        const auto status = io::get_string(state, "status");
+        require(state.size() == 4 && state.at("complete").is_boolean() && state.at("counts").is_object() && state.contains("stop_error") &&
+            (status == "prepared" || status == "running" || status == "cancel_requested" || status == "stopped"), "Invalid workflow observation");
+        for (const auto &count : state.at("counts")) { require(count.is_number_integer() && count.get<int64_t>() >= 0, "Invalid workflow count"); }
+      }
+    }
+  }
+}
 // Workspace APIs use sorted nlohmann::json, while RPC state uses ordered_json. Bound
 // the original tree before converting it, so malformed input cannot force a large copy.
 bool workspace_budget(const nlohmann::json &state)
 {
   struct Item { const nlohmann::json *value; size_t depth; };
   std::vector<Item> pending{{&state, 0}};
-  size_t remaining = 256 * 1024, scheduled = 1;
+  size_t remaining = 512 * 1024, scheduled = 1;
   const auto consume = [&remaining](size_t count) {
     if (count > remaining) { return false; }
     remaining -= count; return true;
@@ -117,9 +193,11 @@ bool workspace_budget(const nlohmann::json &state)
 bool valid_draft(const Json &state)
 {
   try {
-    check_analysis_json_bounds(state, 256 * 1024);
+    check_analysis_json_bounds(state, 512 * 1024);
     if (state.is_object() && state.empty()) { return true; }
-    require(state.is_object() && state.size() == 8 && io::get_int(state, "version", -1) == 1,
+    const bool legacy = io::get_int(state, "version", -1) == 1;
+    require(state.is_object() && ((legacy && state.size() == 8) ||
+        (io::get_int(state, "version", -1) == 2 && state.size() == 9)),
             "Invalid report creation workspace state");
     for (const char *key : {"project_id", "snapshot_id", "snapshot_sha256", "name", "entry_record_id"}) {
       require(text(state, key, std::string_view(key) == "name" ? 1024 : 64), "Invalid report draft text");
@@ -138,6 +216,8 @@ bool valid_draft(const Json &state)
           "Invalid report draft asset");
     }
     require(entry.empty() || records.contains(entry), "Report entry is not selected");
+    const Json sources = legacy ? Json::array() : state.at("sources");
+    require(source_selection(sources) && (sources.empty() || !snapshot.empty()), "Invalid report draft sources");
     const auto &pending = state.at("pending");
     if (pending.is_null()) { return true; }
     require(valid_title(io::get_string(state, "name")) && pending.is_object() && pending.size() == 4 && canonical_uuid(io::get_string(pending, "report_id")) &&
@@ -148,8 +228,11 @@ bool valid_draft(const Json &state)
         io::get_string(manifest, "project_id") == project && io::get_string(manifest, "snapshot_id") == snapshot &&
         io::get_string(manifest, "snapshot_sha256") == digest &&
         io::get_int(manifest, "source_revision", -1) == io::get_int(pending, "expected_revision", -2) &&
-        manifest.at("sources") == Json::array() && manifest.at("assets").is_array() &&
+        manifest.at("assets").is_array() &&
         manifest.at("assets").size() == assets.size() && !assets.empty(), "Pending report does not match its draft");
+    validate_sources(manifest.at("sources"), sources, project, io::get_int(pending, "expected_revision", -1));
+    require(io::python_json_dumps(Json{{"name", state.at("name")}, {"format", "stk.report/1"}, {"manifest", manifest}}, true, true).size() <= 384 * 1024,
+            "Pending report metadata exceeds 384 KiB");
     int64_t total = 0; std::set<std::string> paths; bool found_entry = false;
     for (size_t i = 0; i < assets.size(); ++i) {
       const auto &item = manifest.at("assets")[i];
@@ -177,6 +260,7 @@ class ReportsCreateView::Impl {
   ~Impl() { *alive = false; if (future) { future->cancel(); } }
   enum class Operation { None, Read, Create, Check };
   struct Snapshot { std::string id, sha, label; };
+  struct SourceCandidate { std::string id, label; };
   Json draft = blank();
   AppStore *store = nullptr;
   bridge::Client *client = nullptr;
@@ -190,7 +274,11 @@ class ReportsCreateView::Impl {
   std::vector<Snapshot> snapshots;
   int64_t offset = 0, total = 0;
   bool list_loaded = false, abandon_pending = false;
-  Json files = Json::array();
+  Json files = Json::array(), reviewed_sources = Json::array();
+  std::vector<SourceCandidate> source_candidates;
+  int source_kind = 0, candidate_source = -1, selected_source = -1, source_detail_page = 0;
+  int64_t source_offset = 0, source_next = -1, sources_revision = -1;
+  bool sources_loaded = false;
   std::optional<Created> created;
   std::function<bool()> reader_available;
 
@@ -217,7 +305,7 @@ class ReportsCreateView::Impl {
     if (client != next_client || session != next_session || project_id != next_id || handle != next_handle) {
       ++epoch; client = next_client; session = next_session; project_id = next_id; handle = next_handle;
       cancel(); snapshots.clear(); offset = total = 0; list_loaded = abandon_pending = false; files = Json::array(); reviewed_revision = -1;
-      selected_file.clear(); error.clear(); created.reset(); form_changed();
+      selected_file.clear(); clear_source_metadata(); error.clear(); created.reset(); form_changed();
     }
     if (revision != next_revision) {
       revision = next_revision;
@@ -225,7 +313,7 @@ class ReportsCreateView::Impl {
       // Invalidate read metadata and controls, but keep the original write identity alive.
       if (operation == Operation::Read) { cancel(); }
       snapshots.clear(); offset = total = 0; list_loaded = abandon_pending = false; files = Json::array(); reviewed_revision = -1;
-      selected_file.clear(); form_changed();
+      selected_file.clear(); clear_source_metadata(); form_changed();
     }
   }
   bool supports(const char *method) const
@@ -267,7 +355,7 @@ class ReportsCreateView::Impl {
             (failure.code == bridge::ErrorCode::InvalidParams || failure.code == bridge::ErrorCode::Conflict ||
              failure.code == bridge::ErrorCode::NotFound || failure.code == bridge::ErrorCode::Unsupported ||
              failure.code == bridge::ErrorCode::Unauthorized || failure.code == bridge::ErrorCode::UnknownMethod)) {
-          draft["pending"] = nullptr; form_changed();
+          draft["pending"] = nullptr; clear_source_review(); form_changed();
         }
         if (failure.code == bridge::ErrorCode::Conflict) { store->project().refresh(); }
       }
@@ -278,6 +366,60 @@ class ReportsCreateView::Impl {
       changed();
     });
     changed(); return true;
+  }
+  void clear_source_review()
+  {
+    reviewed_sources = Json::array(); sources_revision = -1; source_detail_page = 0;
+  }
+  void clear_source_metadata()
+  {
+    clear_source_review(); source_candidates.clear(); source_offset = 0; source_next = -1;
+    sources_loaded = false; candidate_source = -1;
+  }
+  void load_sources(int64_t requested_offset = 0)
+  {
+    if (pending() || requested_offset < 0 || source_kind < 0 || source_kind >= 4) { return; }
+    const int kind = source_kind;
+    call(source_list_method(kind), {{"offset", requested_offset}, {"limit", 8}}, Operation::Read,
+      [this, kind, requested_offset](const Json &result) {
+      check_analysis_json_bounds(result, 3 * 1024 * 1024);
+      require(result.is_object() && result.contains("next_offset"), "Invalid report source page");
+      const auto &entries = result.at(kind == 0 ? "contexts" : "runs");
+      require(entries.is_array() && entries.size() <= 8, "Invalid report source page size");
+      if (kind == 1) { require(io::get_int(result, "revision", -1) == revision, "Run source list has a stale project revision"); }
+      const auto &next = result.at("next_offset");
+      require(next.is_null() || (next.is_number_integer() && next.get<int64_t>() == requested_offset + 8 && entries.size() == 8),
+              "Invalid report source page cursor");
+      std::vector<SourceCandidate> page; std::set<std::string> identities;
+      for (const auto &entry : entries) {
+        const auto id = io::get_string(entry, "id");
+        require(canonical_uuid(id) && identities.insert(id).second && io::get_int(entry, "source_revision", -1) >= 0 &&
+            io::get_int(entry, "source_revision", -1) <= revision &&
+            (kind != 0 || io::get_string(entry, "project_id") == project_id), "Source summary belongs to another identity or revision");
+        const auto name = io::get_string(entry, kind == 0 ? "title" : kind == 1 ? "label" : kind == 2 ? "analysis_name" : "workflow_name");
+        const auto status = kind == 0 ? std::string() : io::get_string(entry, kind == 1 ? "submission" : "status");
+        page.push_back({id, shortened(name, 120) + " · " + id.substr(0, 8) + (status.empty() ? "" : " · " + status)});
+      }
+      source_candidates = std::move(page); source_offset = requested_offset;
+      source_next = next.is_null() ? -1 : next.get<int64_t>(); sources_loaded = true; candidate_source = -1; form_changed();
+    });
+  }
+  void review_sources()
+  {
+    if (pending() || draft.at("sources").empty()) { return; }
+    clear_source_review();
+    const auto selection = draft.at("sources");
+    call("project.reports.review_sources", {{"sources", selection}, {"expected_revision", revision}}, Operation::Read,
+      [this, selection](const Json &result) {
+      check_analysis_json_bounds(result, 384 * 1024);
+      require(result.is_object() && result.size() == 4 && io::get_string(result, "project_id") == project_id &&
+          io::get_int(result, "revision", -1) == revision && draft.at("sources") == selection &&
+          core::is_sha256_hex(io::get_string(result, "sources_sha256")), "Report source review selection changed");
+      const auto &sources = result.at("sources");
+      validate_sources(sources, selection, project_id, revision);
+      require(hash(sources) == io::get_string(result, "sources_sha256"), "Report source review checksum differs");
+      reviewed_sources = sources; sources_revision = revision; source_detail_page = 0; form_changed();
+    });
   }
   void load_snapshots(int64_t requested_offset = 0)
   {
@@ -357,11 +499,13 @@ class ReportsCreateView::Impl {
     require(io::get_string(draft, "project_id") == project_id && reviewed_revision == revision && revision >= 0 && revision < std::numeric_limits<int64_t>::max() &&
         !io::get_string(draft, "snapshot_id").empty(), "Review the frozen snapshot at the current project revision");
     require(valid_title(io::get_string(draft, "name")), "Enter a report title of 1 to 256 characters");
+    require(draft.at("sources").empty() || sources_revision == revision, "Explicitly review the selected report sources");
+    validate_sources(reviewed_sources, draft.at("sources"), project_id, revision);
     const auto &assets = draft.at("assets");
     require(!assets.empty() && assets.size() <= 64, "Select 1 to 64 report assets");
     Json result = {{"format", "stk.report/1"}, {"project_id", project_id},
         {"snapshot_id", draft.at("snapshot_id")}, {"snapshot_sha256", draft.at("snapshot_sha256")},
-        {"source_revision", revision}, {"entry_path", ""}, {"assets", Json::array()}, {"sources", Json::array()}};
+        {"source_revision", revision}, {"entry_path", ""}, {"assets", Json::array()}, {"sources", reviewed_sources}};
     int64_t total = 0; std::set<std::string> paths;
     for (const auto &entry : assets) {
       const auto *original = file(io::get_string(entry, "record_id")); const auto target = io::get_string(entry, "path");
@@ -372,6 +516,8 @@ class ReportsCreateView::Impl {
       if (entry.at("record_id") == draft.at("entry_record_id")) { result["entry_path"] = target; }
     }
     require(total <= total_limit && !io::get_string(result, "entry_path").empty(), "Choose one entry asset; total assets must not exceed 32 MiB");
+    require(io::python_json_dumps(Json{{"name", draft.at("name")}, {"format", "stk.report/1"}, {"manifest", result}}, true, true).size() <= 384 * 1024,
+            "Report metadata exceeds 384 KiB");
     return result;
   }
   void finish()
@@ -379,7 +525,7 @@ class ReportsCreateView::Impl {
     created = Created{io::get_string(draft, "project_id"), io::get_string(draft.at("pending"), "report_id"),
         io::get_string(draft.at("pending"), "source_sha256")};
     draft = blank(); files = Json::array(); snapshots.clear(); reviewed_revision = -1; selected_file.clear();
-    form_changed(); store->project().refresh();
+    clear_source_metadata(); selected_source = -1; form_changed(); store->project().refresh();
   }
   void create()
   {
@@ -391,9 +537,10 @@ class ReportsCreateView::Impl {
     const auto expected = revision;
     draft["pending"] = {{"report_id", id}, {"expected_revision", expected}, {"manifest", manifest}, {"source_sha256", hash(manifest)}};
     form_changed();
-    const Json params = {{"report_id", id}, {"name", draft.at("name")}, {"snapshot_id", draft.at("snapshot_id")},
+    Json params = {{"report_id", id}, {"name", draft.at("name")}, {"snapshot_id", draft.at("snapshot_id")},
         {"entry_record_id", draft.at("entry_record_id")}, {"assets", draft.at("assets")},
-        {"sources", Json::array()}, {"expected_revision", expected}};
+        {"sources", draft.at("sources")}, {"expected_revision", expected}};
+    if (!draft.at("sources").empty()) { params["expected_sources_sha256"] = hash(reviewed_sources); }
     if (!call("project.reports.create", params, Operation::Create, [this, id, expected](const Json &result) {
       check_analysis_json_bounds(result);
       require(io::get_string(result, "record_id") == id && io::get_string(result, "table_id") == reports_table &&
@@ -454,7 +601,7 @@ void ReportsCreateView::Impl::draw(ui::Layout &layout, EditorContext &ctx, std::
     panel->button("reports_create_discard", ctx.tr("reports.create.discard"), [this, current, shell] {
       if (!current() || busy() || shell->text_input_active() || (pending() && !abandon_pending)) { return; }
       draft = blank(); files = Json::array(); selected_file.clear(); reviewed_revision = -1;
-      error.clear(); abandon_pending = false; form_changed();
+      clear_source_metadata(); selected_source = -1; error.clear(); abandon_pending = false; form_changed();
     }).disable(blocked || (pending() && !abandon_pending) || shell->text_input_active());
   }
   if (pending() || other_project) { return; }
@@ -575,6 +722,100 @@ void ReportsCreateView::Impl::draw(ui::Layout &layout, EditorContext &ctx, std::
     review.text = [rows](int i) { return rows.at(size_t(i)); };
     panel->virtual_list("reports_create_asset_review", std::move(review));
   }
+  if (auto *sources_panel = panel->panel("reports_create_sources_panel", ctx.tr("reports.create.sources.panel"), false)) {
+    auto &box = *sources_panel;
+    box.paragraph(ctx.tr("reports.create.sources.intro"));
+    const bool supported = supports("project.reports.review_sources");
+    if (!supported) { box.paragraph(ctx.tr("reports.create.sources.unsupported")); }
+    std::vector<std::string> kinds;
+    for (const char *kind : source_kinds) { kinds.emplace_back(ctx.tr(std::string("reports.create.sources.") + kind)); }
+    const int kind = source_kind;
+    box.prop(ctx.tr("reports.create.sources.kind")).dropdown("reports_create_source_kind", kinds,
+      {[kind] { return kind; }, [this, current, shell](int value) {
+        if (!current() || busy() || shell->text_input_active() || value < 0 || value >= 4 || value == source_kind) { return; }
+        source_kind = value; source_candidates.clear(); source_offset = 0; source_next = -1;
+        sources_loaded = false; candidate_source = -1; form_changed();
+      }}).disable(blocked || !supported);
+    box.button("reports_create_sources_load", ctx.tr("reports.create.sources.load"), [this, current, shell] {
+      if (current() && !shell->text_input_active()) { load_sources(); }
+    }).disable(blocked || !supported || !supports(source_list_method(kind)) || shell->text_input_active());
+    if (sources_loaded) {
+      if (source_candidates.empty()) { box.paragraph(ctx.tr("reports.create.sources.empty")); }
+      else {
+        ui::ListSpec items; items.count = int(source_candidates.size()); items.rows = std::min(3.0f, float(items.count));
+        const auto candidates = source_candidates; const int selected = candidate_source;
+        items.text = [candidates](int i) { return candidates.at(size_t(i)).label; };
+        items.selected = {[selected] { return selected; }, [this, current, shell, candidates](int i) {
+          if (!current() || busy() || shell->text_input_active() || i < 0 || size_t(i) >= candidates.size()) { return; }
+          candidate_source = i; form_changed();
+        }};
+        box.virtual_list("reports_create_source_candidates", std::move(items)).disable(blocked);
+      }
+      if (source_offset || source_next >= 0) {
+        auto &pages = box.row();
+        pages.button("reports_create_sources_previous", ctx.tr("reports.previous"), [this, current, shell] {
+          if (current() && !shell->text_input_active()) { load_sources(std::max(int64_t(0), source_offset - 8)); }
+        }).disable(blocked || !source_offset || shell->text_input_active());
+        pages.button("reports_create_sources_next", ctx.tr("reports.next"), [this, current, shell] {
+          if (current() && !shell->text_input_active()) { load_sources(source_next); }
+        }).disable(blocked || source_next < 0 || shell->text_input_active());
+      }
+    }
+    if (candidate_source >= 0 && size_t(candidate_source) < source_candidates.size()) {
+      const Json chosen = {{"kind", source_kinds[kind]}, {"id", source_candidates[size_t(candidate_source)].id}};
+      const auto &selected = draft.at("sources");
+      const bool included = std::any_of(selected.begin(), selected.end(), [&chosen](const Json &value) { return io::get_string(value, "kind") == io::get_string(chosen, "kind") && io::get_string(value, "id") == io::get_string(chosen, "id"); });
+      box.label(io::get_string(chosen, "id"));
+      box.button("reports_create_source_add", ctx.tr("reports.create.sources.add"), [this, current, shell, chosen] {
+        if (!current() || busy() || shell->text_input_active() || draft.at("sources").size() >= 16) { return; }
+        auto &entries = draft["sources"];
+        if (std::any_of(entries.begin(), entries.end(), [&chosen](const Json &value) { return io::get_string(value, "kind") == io::get_string(chosen, "kind") && io::get_string(value, "id") == io::get_string(chosen, "id"); })) { return; }
+        entries.push_back(chosen); selected_source = int(entries.size()) - 1; clear_source_review(); form_changed();
+      }).disable(blocked || included || selected.size() >= 16 || shell->text_input_active());
+    }
+    box.label(std::string(ctx.tr("reports.create.sources.selected")) + std::to_string(draft.at("sources").size()) + " / 16");
+    if (!draft.at("sources").empty()) {
+      const auto selections = draft.at("sources"); const int selected = selected_source;
+      std::vector<std::string> labels;
+      for (const auto &value : selections) {
+        labels.push_back(std::string(ctx.tr("reports.create.sources." + io::get_string(value, "kind"))) + " · " + io::get_string(value, "id"));
+      }
+      ui::ListSpec list; list.count = int(labels.size()); list.rows = std::min(3.0f, float(labels.size()));
+      list.text = [labels](int i) { return labels.at(size_t(i)); };
+      list.selected = {[selected] { return selected; }, [this, current, selections, shell](int i) {
+        if (!current() || busy() || shell->text_input_active() || i < 0 || size_t(i) >= selections.size()) { return; }
+        selected_source = i; source_detail_page = 0; form_changed();
+      }};
+      box.virtual_list("reports_create_sources_selected", std::move(list)).disable(blocked);
+      box.button("reports_create_source_remove", ctx.tr("reports.create.sources.remove"), [this, current, shell] {
+        if (!current() || busy() || shell->text_input_active() || selected_source < 0 || size_t(selected_source) >= draft.at("sources").size()) { return; }
+        draft["sources"].erase(size_t(selected_source)); selected_source = -1; clear_source_review(); form_changed();
+      }).disable(blocked || selected_source < 0 || shell->text_input_active());
+      box.paragraph(ctx.tr(sources_revision == revision ? "reports.create.sources.reviewed" : "reports.create.sources.review_needed"));
+      box.button("reports_create_sources_review", ctx.tr("reports.create.sources.review"), [this, current, shell] {
+        if (current() && !shell->text_input_active()) { review_sources(); }
+      }).disable(blocked || !supported || shell->text_input_active());
+      if (sources_revision == revision && selected_source >= 0 && size_t(selected_source) < reviewed_sources.size()) {
+        // Full frozen JSON, paged on UTF-8 boundaries. No value, omission or lifecycle field is silently dropped.
+        const auto detail = io::python_json_dumps(reviewed_sources[size_t(selected_source)], false, false);
+        std::vector<std::string> pages;
+        for (size_t offset = 0; offset < detail.size();) {
+          const auto part = core::utf8::truncate_bytes(std::string_view(detail).substr(offset), 2048);
+          pages.emplace_back(part); offset += part.size();
+        }
+        const int page = std::min(source_detail_page, int(pages.size()) - 1);
+        box.label(std::string(ctx.tr("reports.create.sources.details")) + std::to_string(page + 1) + " / " + std::to_string(pages.size()));
+        if (page >= 0) { box.paragraph(pages[size_t(page)]); }
+        auto &navigation = box.row();
+        navigation.button("reports_create_source_detail_previous", ctx.tr("reports.previous"), [this, current] {
+          if (current() && source_detail_page > 0) { --source_detail_page; changed(); }
+        }).disable(blocked || page <= 0);
+        navigation.button("reports_create_source_detail_next", ctx.tr("reports.next"), [this, current, count = int(pages.size())] {
+          if (current() && source_detail_page + 1 < count) { ++source_detail_page; changed(); }
+        }).disable(blocked || page + 1 >= int(pages.size()));
+      }
+    }
+  }
   panel->paragraph(ctx.tr("reports.create.limits"));
   panel->paragraph(ctx.tr("reports.create.finish_text"));
   if (validation_action != action) {
@@ -607,6 +848,8 @@ bool ReportsCreateView::load_workspace_state(const nlohmann::json &state)
 {
   if (!valid_workspace_state(state)) { return false; }
   ++impl_->epoch; impl_->cancel(); impl_->draft = state.empty() ? blank() : Json(state);
+  if (io::get_int(impl_->draft, "version", -1) == 1) { impl_->draft["version"] = 2; impl_->draft["sources"] = Json::array(); }
+  impl_->clear_source_metadata(); impl_->selected_source = -1;
   impl_->snapshots.clear(); impl_->files = Json::array(); impl_->reviewed_revision = -1;
   impl_->offset = impl_->total = 0; impl_->list_loaded = impl_->abandon_pending = false;
   impl_->selected_file.clear(); impl_->created.reset(); impl_->error.clear(); impl_->form_changed();

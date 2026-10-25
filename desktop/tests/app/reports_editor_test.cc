@@ -40,6 +40,8 @@ import sys
 import threading
 import time
 from suan.project.reports import Reports
+from suan.project import reports as report_storage
+from suan.project.store import RevisionConflict
 from suan.project.reports import ReportNotFound
 from suan.project.snapshots import Snapshots
 from suan.desktop_bridge.server import Bridge
@@ -68,6 +70,8 @@ def controlled_export(self, *args, **kwargs):
 Reports.export_file = controlled_export
 create_report = Reports.create
 def controlled_create(self, *args, **kwargs):
+    if mode() == "source_conflict":
+        raise RevisionConflict("Report sources changed; explicitly review the selected sources again")
     result = create_report(self, *args, **kwargs)
     count('create')
     if mode() == 'bad_create_receipt':
@@ -78,8 +82,22 @@ get_report = Reports.get
 def controlled_get(self, report_id):
     if mode() == 'hide_created' and report_id != 'a1111111-1111-4111-8111-111111111111':
         raise ReportNotFound('Report not found')
-    return get_report(self, report_id)
+    result = get_report(self, report_id)
+    if mode() == 'changed_found_source' and report_id != 'a1111111-1111-4111-8111-111111111111':
+        source = result['report']['manifest']['sources'][0]
+        source['context']['title'] = 'Another frozen context title'
+        source['context_sha256'] = report_storage._hash(source['context'])
+        result['report']['source_sha256'] = report_storage._hash(result['report']['manifest'])
+    return result
 Reports.get = controlled_get
+review_sources = Reports.review_sources
+def controlled_review(self, *args, **kwargs):
+    result = review_sources(self, *args, **kwargs)
+    count('source_review')
+    if mode() == 'bad_source_digest':
+        result['sources_sha256'] = '0' * 64
+    return result
+Reports.review_sources = controlled_review
 summaries = Snapshots.list_summaries
 def controlled_summaries(self, *args, **kwargs):
     result = summaries(self, *args, **kwargs)
@@ -88,8 +106,9 @@ def controlled_summaries(self, *args, **kwargs):
 Snapshots.list_summaries = controlled_summaries
 send = Bridge.send
 def controlled_send(self, message, method=None):
+    if method == 'project.contexts.list' and 'result' in message: count('source_list')
     hold = {'project.reports.asset': 'hold', 'project.snapshots.list_summaries': 'hold_summaries',
-            'project.reports.create': 'hold_create'}
+            'project.reports.create': 'hold_create', 'project.reports.review_sources': 'hold_source_review'}
     if method in hold and 'result' in message and mode() == hold[method]:
         control.with_suffix('.held').write_text('ready', encoding='utf-8')
         def deliver():
@@ -259,6 +278,10 @@ class ReportsEditorPython : public ::testing::Test {
     store().viewer().set_auto_evaluate(false); store().viewer().prefetch_neighbours = false;
     shown = std::make_shared<io::Payload>(io::read_stkp(std::string(STK_REPO_ROOT) + "/desktop/tests/viewer/fixtures/muferro_domains.stkp"));
     store().viewer().open_payload(shown, "Existing synthetic result");
+    store().viewer().refresh_metadata();
+    ASSERT_TRUE(loop.pump_until([&] {
+      return store().viewer().presets_loaded() && !store().viewer().catalog().is_null() && store().viewer().colormaps();
+    }, 30)) << store().viewer().metadata_error();
     viewer_state = store().viewer().save_workspace_state();
     camera_serial = store().viewer().camera_serial(); payload_serial = store().viewer().payload_serial();
   }
@@ -344,6 +367,47 @@ class ReportsEditorPython : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(click("reports_create_entry"));
     ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
     ASSERT_TRUE(area().editor().has_unsaved_changes());
+  }
+
+  Json context_source(int number = 0)
+  {
+    const std::string id = "c3333333-3333-4333-8333-" + std::string(12 - std::to_string(number).size(), '0') + std::to_string(number);
+    return call("project.contexts.capture", {{"handle", project().project()->handle}, {"context_id", id},
+        {"table_id", "d4444444-4444-4444-8444-444444444444"},
+        {"record_ids", Json::array({"e5555555-5555-4555-8555-555555555555"})},
+        {"field_ids", Json::array({"f6666666-6666-4666-8666-666666666666"})},
+        {"expected_revision", project().project()->revision}, {"title", "Explicit missing-selection context"}});
+  }
+  void source_scroll_to(const std::string &key)
+  {
+    frame(); const auto main = area().find_region(EditorArea::kMain)->ui_rect();
+    const auto visible = [&](const ui::Widget *item) {
+      if (!item) { return false; }
+      const auto clipped = item->rect.intersect(item->clip).intersect(ui::Rect{0, 0, 1440, 1000});
+      return !clipped.empty() && clipped.h >= item->rect.h - 1 && clipped.w >= item->rect.w - 1;
+    };
+    for (int step = 0; step < 80 && !visible(widget(key)); ++step) {
+      const auto *item = widget(key); ASSERT_NE(item, nullptr) << key;
+      f.screen.ui()->handle_event(ui::Event::wheel({main.x1() - 2, main.cy()},
+          item->rect.cy() > main.cy() ? -1.0f : 1.0f, ++clock)); frame();
+    }
+    ASSERT_TRUE(visible(widget(key))) << key;
+  }
+  void source_click(const std::string &key)
+  {
+    ASSERT_NO_FATAL_FAILURE(wait_widget(key));
+    ASSERT_NO_FATAL_FAILURE(source_scroll_to(key));
+    ASSERT_NO_FATAL_FAILURE(click(key));
+  }
+  void add_first_source()
+  {
+    ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_panel"));
+    ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_load"));
+    ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_source_candidates"));
+    ASSERT_NO_FATAL_FAILURE(source_scroll_to("reports_create_source_candidates"));
+    ASSERT_NO_FATAL_FAILURE(click_row("reports_create_source_candidates", 0));
+    ASSERT_NO_FATAL_FAILURE(source_click("reports_create_source_add"));
+    ASSERT_NE(widget("reports_create_submit"), nullptr); ASSERT_FALSE(widget("reports_create_submit")->enabled);
   }
 };
 
@@ -558,7 +622,7 @@ TEST_F(ReportsEditorPython, CreationDraftRestoresWithoutRequestsAndNeedsExplicit
   const auto state = area().editor().save_workspace_state();
   ASSERT_EQ(state.at("version"), 2); ASSERT_EQ(state.size(), 7u);
   const auto &draft = state.at("create_draft");
-  ASSERT_EQ(draft.size(), 8u); EXPECT_EQ(draft.at("name"), "Keep creation draft");
+  ASSERT_EQ(draft.size(), 9u); EXPECT_EQ(draft.at("version"), 2); EXPECT_TRUE(draft.at("sources").empty()); EXPECT_EQ(draft.at("name"), "Keep creation draft");
   EXPECT_EQ(draft.at("pending"), nullptr); EXPECT_EQ(draft.at("assets").size(), 1u);
   for (const char *key : {"handle", "session_id", "url", "data", "bytes"}) { EXPECT_FALSE(draft.contains(key)); }
   const auto before = count("create"), pages = count("summaries");
@@ -629,7 +693,7 @@ TEST_F(ReportsEditorPython, WorkspaceRejectsOversizedDeepAndMismatchedCreationSt
   ASSERT_NO_FATAL_FAILURE(prepare_create());
   const auto state = area().editor().save_workspace_state();
   const auto before = count("create"), pages = count("summaries");
-  auto invalid = state; invalid["create_draft"]["name"] = std::string(300 * 1024, 'a');
+  auto invalid = state; invalid["create_draft"]["name"] = std::string(600 * 1024, 'a');
   EXPECT_FALSE(area().editor().load_workspace_state(invalid));
   EXPECT_EQ(area().editor().save_workspace_state(), state);
   nlohmann::json deep = nullptr;
@@ -704,6 +768,199 @@ TEST_F(ReportsEditorPython, BridgeReplacementPreservesUnconfirmedCreationAndIgno
   EXPECT_EQ(area().editor().save_workspace_state().at("report_id"), pending.at("report_id"));
   EXPECT_EQ(count("create"), before + 1); EXPECT_EQ(count("asset"), 0);
   old->close(); EXPECT_EQ(old->stats().schema_violations, 0u);
+}
+
+
+TEST_F(ReportsEditorPython, SourceSelectionUsesExplicitReadsAndCreatesExactReviewedContextWithThirteenClicks)
+{
+  const auto context = context_source(); ASSERT_TRUE(context.is_object());
+  ASSERT_NO_FATAL_FAILURE(prepare_create("With frozen source"));
+  auto *hidden = &area().tab(1); ASSERT_NE(hidden, nullptr); const auto hidden_state = hidden->save_workspace_state();
+  const auto before = call("project.history", {{"handle", project().project()->handle}});
+  ASSERT_NO_FATAL_FAILURE(add_first_source());
+  EXPECT_EQ(count("source_list"), 1); EXPECT_EQ(count("source_review"), 0); EXPECT_EQ(count("asset"), 0);
+  const auto draft = area().editor().save_workspace_state().at("create_draft");
+  ASSERT_EQ(draft.at("sources").size(), 1u);
+  EXPECT_FALSE(draft.contains("reviewed_sources")); EXPECT_TRUE(draft.at("pending").is_null());
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+  const auto created_before = count("create");
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_submit"));
+  ASSERT_TRUE(loop.pump_until([&] {
+    frame(); const auto state = area().editor().save_workspace_state();
+    return !state.contains("create_draft") && !state.at("report_id").get<std::string>().empty();
+  }, 30));
+  const auto state = area().editor().save_workspace_state();
+  const auto saved = call("project.reports.get", {{"handle", project().project()->handle}, {"report_id", state.at("report_id")}});
+  ASSERT_EQ(saved.at("report").at("manifest").at("sources").size(), 1u);
+  EXPECT_EQ(nlohmann::json(saved.at("report").at("manifest").at("sources")[0].at("context")), nlohmann::json(context.at("context")));
+  EXPECT_EQ(count("source_review"), 1); EXPECT_EQ(count("create"), created_before + 1); EXPECT_EQ(count("asset"), 0);
+  EXPECT_EQ(call("project.history", {{"handle", project().project()->handle}}).at("history").size(), before.at("history").size() + 1);
+  EXPECT_EQ(hidden->save_workspace_state(), hidden_state); EXPECT_TRUE(hidden->has_unsaved_changes()); expect_viewer();
+  RecordProperty("source_create_clicks", clicks); EXPECT_EQ(clicks, 13);
+}
+
+TEST_F(ReportsEditorPython, RestoredSourceDraftNeverReadsAndRejectsRetainedReviewControls)
+{
+  ASSERT_TRUE(context_source().is_object());
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  ASSERT_NO_FATAL_FAILURE(add_first_source());
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+  const auto state = area().editor().save_workspace_state();
+  const auto old_review = widget("reports_create_sources_review")->on_click;
+  const auto old_submit = widget("reports_create_submit")->on_click;
+  const auto reads = count("source_review"), lists = count("source_list"), writes = count("create");
+  ASSERT_TRUE(area().editor().load_workspace_state(state)); frame(); old_review(); old_submit(); frame();
+  EXPECT_EQ(area().editor().save_workspace_state(), state);
+  EXPECT_EQ(count("source_review"), reads); EXPECT_EQ(count("source_list"), lists); EXPECT_EQ(count("create"), writes);
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_sources_review"));
+  EXPECT_FALSE(widget("reports_create_submit")->enabled);
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+  EXPECT_EQ(count("source_review"), reads + 1); EXPECT_EQ(count("create"), writes);
+}
+
+TEST_F(ReportsEditorPython, SourceCasConflictRequiresExplicitReviewAndNeverKeepsAnUncertainWrite)
+{
+  ASSERT_TRUE(context_source().is_object());
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  ASSERT_NO_FATAL_FAILURE(add_first_source());
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+  const auto before = call("project.history", {{"handle", project().project()->handle}});
+  const auto writes = count("create"), reads = count("source_review");
+  ASSERT_NO_FATAL_FAILURE(mode("source_conflict"));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_submit"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); const auto saved = area().editor().save_workspace_state();
+    return saved.contains("create_draft") && saved.at("create_draft").at("pending").is_null() && widget("reports_create_sources_review")->enabled;
+  }, 30));
+  EXPECT_FALSE(widget("reports_create_submit")->enabled);
+  EXPECT_EQ(count("create"), writes); EXPECT_EQ(count("source_review"), reads);
+  EXPECT_EQ(call("project.history", {{"handle", project().project()->handle}}), before);
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+  EXPECT_EQ(count("source_review"), reads + 1);
+}
+
+TEST_F(ReportsEditorPython, ValidShapeWrongReviewDigestCannotEnableSubmission)
+{
+  ASSERT_TRUE(context_source().is_object());
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  ASSERT_NO_FATAL_FAILURE(add_first_source());
+  ASSERT_NO_FATAL_FAILURE(mode("bad_source_digest"));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_sources_review"));
+  EXPECT_FALSE(widget("reports_create_submit")->enabled); EXPECT_EQ(count("source_review"), 1);
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+}
+
+TEST_F(ReportsEditorPython, RevisedProjectDiscardsHeldSourceReviewWithoutAutomaticallyReadingAgain)
+{
+  ASSERT_TRUE(context_source().is_object());
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  ASSERT_NO_FATAL_FAILURE(add_first_source());
+  ASSERT_NO_FATAL_FAILURE(mode("hold_source_review"));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_TRUE(bridge::test::wait_until([&] { return fs::exists(dir.path() / "mode.held"); }, 15));
+  ASSERT_TRUE(call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", 3},
+      {"commands", Json::array({{{"op", "create_table"}, {"id", "b2222222-2222-4222-8222-222222222222"}, {"name", "Later"}}})}}).is_object());
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(settle_project()); frame();
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(drain_held(*client)); frame();
+  EXPECT_EQ(count("source_review"), 1); EXPECT_FALSE(widget("reports_create_submit")->enabled);
+  const auto state = area().editor().save_workspace_state();
+  EXPECT_EQ(state.at("create_draft").at("sources").size(), 1u); EXPECT_TRUE(state.at("create_draft").at("pending").is_null());
+}
+
+TEST_F(ReportsEditorPython, SourceCreationUncertainReceiptStillRequiresTheExactFullManifest)
+{
+  ASSERT_TRUE(context_source().is_object());
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  ASSERT_NO_FATAL_FAILURE(add_first_source());
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_submit"));
+  const auto writes = count("create");
+  ASSERT_NO_FATAL_FAILURE(mode("bad_create_receipt"));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_submit"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_check"));
+  const auto pending = area().editor().save_workspace_state().at("create_draft").at("pending");
+  ASSERT_EQ(pending.at("manifest").at("sources").size(), 1u);
+  ASSERT_NO_FATAL_FAILURE(mode("changed_found_source"));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_check"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_check"));
+  EXPECT_EQ(area().editor().save_workspace_state().at("create_draft").at("pending"), pending);
+  EXPECT_EQ(count("create"), writes + 1);
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_check"));
+  ASSERT_TRUE(loop.pump_until([&] { frame(); return !area().editor().save_workspace_state().contains("create_draft"); }, 30));
+  EXPECT_EQ(count("create"), writes + 1);
+}
+
+TEST_F(ReportsEditorPython, SourceSelectionIsPagedAndRejectsMoreThanSixteenOrDuplicateWorkspaceKeys)
+{
+  Json selected = Json::array();
+  for (int i = 0; i < 17; ++i) {
+    const auto source = context_source(i); ASSERT_TRUE(source.is_object());
+    if (i < 16) { selected.push_back({{"kind", "context"}, {"id", source.at("context").at("id")}}); }
+  }
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  auto saved = area().editor().save_workspace_state(); saved["create_draft"]["sources"] = nlohmann::json(selected);
+  ASSERT_TRUE(area().editor().load_workspace_state(saved)); frame();
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_panel"));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_load"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_source_candidates"));
+  ASSERT_EQ(widget("reports_create_source_candidates")->list->count, 8);
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_next"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_source_candidates"));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_next"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_create_source_candidates"));
+  ASSERT_EQ(widget("reports_create_source_candidates")->list->count, 1);
+  ASSERT_NO_FATAL_FAILURE(source_scroll_to("reports_create_source_candidates"));
+  ASSERT_NO_FATAL_FAILURE(click_row("reports_create_source_candidates", 0));
+  ASSERT_NE(widget("reports_create_source_add"), nullptr); EXPECT_FALSE(widget("reports_create_source_add")->enabled);
+  EXPECT_EQ(count("source_review"), 0); EXPECT_EQ(count("source_list"), 3);
+  auto invalid = saved; invalid["create_draft"]["sources"].push_back(nlohmann::json(selected[0]));
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  invalid = saved; invalid["create_draft"]["sources"][1] = invalid["create_draft"]["sources"][0];
+  EXPECT_FALSE(area().editor().load_workspace_state(invalid));
+  EXPECT_EQ(area().editor().save_workspace_state(), saved);
+}
+
+TEST_F(ReportsEditorPython, SourceFreeVersionOneDraftMigratesWithoutReadingMetadata)
+{
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  auto legacy = area().editor().save_workspace_state();
+  legacy["create_draft"]["version"] = 1; legacy["create_draft"].erase("sources");
+  const auto reads = count("source_review"), lists = count("source_list");
+  ASSERT_TRUE(area().editor().load_workspace_state(legacy)); frame();
+  const auto state = area().editor().save_workspace_state();
+  EXPECT_EQ(state.at("create_draft").at("version"), 2); EXPECT_TRUE(state.at("create_draft").at("sources").empty());
+  EXPECT_EQ(count("source_review"), reads); EXPECT_EQ(count("source_list"), lists);
+  EXPECT_FALSE(widget("reports_create_submit")->enabled);
+}
+
+TEST_F(ReportsEditorPython, NewProjectCannotAdoptAnOldSourceReviewAndKeepsTheOriginalDraft)
+{
+  ASSERT_TRUE(context_source().is_object());
+  ASSERT_NO_FATAL_FAILURE(prepare_create());
+  ASSERT_NO_FATAL_FAILURE(add_first_source());
+  const auto draft = area().editor().save_workspace_state().at("create_draft");
+  ASSERT_NO_FATAL_FAILURE(mode("hold_source_review"));
+  ASSERT_NO_FATAL_FAILURE(source_click("reports_create_sources_review"));
+  ASSERT_TRUE(bridge::test::wait_until([&] { return fs::exists(dir.path() / "mode.held"); }, 15));
+  ASSERT_TRUE(project().create(dir.str() + "/source-other", "Other source project"));
+  ASSERT_NO_FATAL_FAILURE(settle_project()); frame();
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(drain_held(*client)); frame();
+  EXPECT_EQ(area().editor().save_workspace_state().at("create_draft"), draft);
+  EXPECT_EQ(count("source_review"), 1); EXPECT_EQ(widget("reports_create_submit"), nullptr);
+  EXPECT_EQ(widget("reports_create_sources_review"), nullptr);
 }
 
 }  // namespace

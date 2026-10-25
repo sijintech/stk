@@ -85,6 +85,7 @@ OPERATIONS = {
     "project.analyses.update": ("project_edit", "changes the project"),
     "project.analyses.get": ("read", "not needed in v1"),
     "project.analyses.list": ("read", "not needed in v1"),
+    "project.reports.review_sources": ("read", "bounded frozen report source metadata; not needed in v1"),
     "project.reports.create": ("project_edit", "saves a frozen report; never an agent tool"),
     "project.reports.get": ("read", "report metadata; not needed in v1"),
     "project.reports.list": ("read", "report metadata; not needed in v1"),

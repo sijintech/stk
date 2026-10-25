@@ -11,6 +11,7 @@
 #include "stk/gfx/gpu.hh"
 #include "stk/gfx/image.hh"
 #include "stk/gfx/offscreen.hh"
+#include "stk/io/json.hh"
 #include "stk/io/payload.hh"
 #include "stk/io/png.hh"
 #include "../bridge/support.hh"
@@ -85,9 +86,10 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (output.empty() || (language != "en" && language != "zh") ||
-      (width_mode != "wide" && width_mode != "narrow") || (view != "text" && view != "png" && view != "create")) { return 2; }
+      (width_mode != "wide" && width_mode != "narrow") || (view != "text" && view != "png" && view != "create" && view != "sources")) { return 2; }
   const int width = width_mode == "narrow" ? 560 : 1440, height = 1000;
-  const bool chinese = language == "zh", png_view = view == "png", create_view = view == "create";
+  const bool chinese = language == "zh", png_view = view == "png", sources_view = view == "sources";
+  const bool create_view = view == "create" || sources_view;
   bridge::test::TempDir directory{"reports-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions options;
@@ -109,11 +111,23 @@ import sys
 from suan.desktop_bridge.projects import ProjectSessions
 from suan.desktop_bridge.__main__ import main
 marker = Path(sys.argv.pop(1))
+source_marker = Path(sys.argv.pop(1))
 reports = ProjectSessions.reports
+contexts = ProjectSessions.contexts
+def record_source(action):
+    with source_marker.open('a', encoding='utf-8') as output:
+        output.write(action + '\n')
+def observed_contexts(self, action, params):
+    if action == 'list':
+        record_source('list')
+    return contexts(self, action, params)
+ProjectSessions.contexts = observed_contexts
 def observed(self, action, params):
-    if action in ('asset', 'preview'):
+    if action in ('asset', 'preview', 'preview_resources', 'export_file'):
         with marker.open('a', encoding='utf-8') as output:
             output.write(action + '\n')
+    if action in ('review_sources', 'create'):
+        record_source(action)
     return reports(self, action, params)
 ProjectSessions.reports = observed
 main()
@@ -121,7 +135,7 @@ main()
     const auto python = bridge::find_python(options.python, error);
     if (!python) { fprintf(stderr, "FAIL: %s\n", error.c_str()); return 1; }
     options.command = {*python, "-u", directory.str() + "/observe_content.py", directory.str() + "/content.calls",
-        "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+        directory.str() + "/source.calls", "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
   }
   auto client = bridge::Client::create(options);
   if (!client->start(&error) || !client->wait_ready(60)) {
@@ -273,7 +287,16 @@ main()
       area->set_active_tab(0); frame(); clicks = scroll_steps = 0;
       wait([&] { const auto *item = widget("reports_list"); return item && item->enabled && item->list && item->list->count == 1; }, "report summary loaded");
       require(!widget("reports_text_page") && !widget("reports_image"), "listing must not read report assets");
+      auto source_calls = [&](const std::string &action) {
+        std::ifstream input(directory.path() / "source.calls");
+        size_t count = 0; std::string line;
+        while (std::getline(input, line)) { count += line == action; }
+        return count;
+      };
+      const auto initial_creates = source_calls("create");
       if (create_view) {
+        require(source_calls("list") == 0 && source_calls("review_sources") == 0,
+            "opening Reports must not list or review creation sources");
         click("reports_create_panel");
         click("reports_create_snapshots");
         wait([&] { const auto *item = widget("reports_create_snapshot_list");
@@ -320,6 +343,66 @@ main()
         require(!widget("reports_image") && !widget("reports_text_page") && !fs::exists(directory.path() / "content.calls"),
                 "creation preparation must not read or render asset content");
         require(clicks == 7, "fixed-start creation form preparation requires seven mouse clicks; Create is not clicked");
+        if (sources_view) {
+          // Five more real clicks: expand, explicitly list, select row, add, explicitly review.
+          // No workspace load, setter injection or direct callback is used to prepare this scene.
+          click("reports_create_sources_panel");
+          require(source_calls("list") == 0 && source_calls("review_sources") == 0,
+              "expanding the sources panel must not read metadata");
+          click("reports_create_sources_load");
+          wait([&] { const auto *item = widget("reports_create_source_candidates");
+            return item && item->enabled && item->list && item->list->count == 1; }, "explicit context list loaded");
+          click("reports_create_source_candidates", 0);
+          click("reports_create_source_add");
+          require(widget("reports_create_submit") && !widget("reports_create_submit")->enabled,
+              "selecting a source must require explicit review before creation");
+          require(source_calls("list") == 1 && source_calls("review_sources") == 0,
+              "selection reads exactly one source page and does not review automatically");
+          const auto selected = area->editor().save_workspace_state().at("create_draft");
+          const auto expected_sources = Json::array({{{"kind", "context"}, {"id", kContext}}});
+          require(selected.at("sources") == nlohmann::json(expected_sources) && selected.at("pending").is_null() &&
+              !selected.contains("reviewed_sources"), "only exact source selectors belong in the unsaved workspace");
+          click("reports_create_sources_review");
+          wait([&] { const auto *item = widget("reports_create_submit"); return item && item->enabled; },
+              "complete selected provenance reviewed");
+          require(source_calls("list") == 1 && source_calls("review_sources") == 1,
+              "explicit review must make exactly one request without reloading the list");
+          scroll_to("reports_create_source_detail_next");
+          for (const char *key : {"reports_create_sources_selected", "reports_create_source_remove",
+                                 "reports_create_sources_review", "reports_create_source_detail_previous",
+                                 "reports_create_source_detail_next"}) {
+            require(fully_visible(widget(key)), std::string("reviewed source control must be visible: ") + key);
+          }
+          const auto *sources = widget("reports_create_sources_selected");
+          require(sources->list && sources->list->count == 1 && sources->list->selected.value() == 0 &&
+              sources->list->text(0).find(kContext) != std::string::npos,
+              "selected source kind and complete stable UUID remain visible");
+          require(screen.ui()->measurer().width(sources->list->text(0), screen.ui()->style().font) +
+              2 * screen.ui()->style().text_margin <= sources->rect.w,
+              "selected source UUID must fit without horizontal clipping");
+          bool reviewed_notice = false, exact_source = false, page_label = false;
+          for (const auto &block : screen.ui()->blocks()) {
+            for (const auto &item : block->widgets()) {
+              if (!fully_visible(&item)) { continue; }
+              reviewed_notice |= item.text == shell.store().tr("reports.create.sources.reviewed");
+              page_label |= item.text == std::string(shell.store().tr("reports.create.sources.details")) + "1 / 1";
+              if (!item.text.starts_with("{")) { continue; }
+              const auto detail = Json::parse(item.text, nullptr, false);
+              // The production paragraph contains the complete single-page frozen descriptor,
+              // including values, omissions, diagnostics and SHA, rather than a mock summary.
+              exact_source |= !detail.is_discarded() &&
+                  nlohmann::json(detail) == nlohmann::json(saved.at("manifest").at("sources").at(0));
+            }
+          }
+          require(reviewed_notice && page_label && exact_source,
+              "the screenshot must show the complete reviewed provenance and its review notice");
+          require(!widget("reports_create_source_detail_previous")->enabled &&
+              !widget("reports_create_source_detail_next")->enabled,
+              "the complete small fixture occupies one source-detail page");
+          require(area->editor().save_workspace_state().at("create_draft") == selected,
+              "reviewing sources must not persist values or alter the creation draft");
+          require(clicks == 12, "fixed-start source preparation requires twelve clicks; Create is not clicked");
+        }
       }
       else {
         click("reports_list", 0);
@@ -382,7 +465,12 @@ main()
       for (const char *method : {"project.runs.list", "project.analysis_runs.list", "project.workflow_runs.list"}) {
         require(call(method, {{"handle", handle}}).at("runs").empty(), "report interaction must not prepare or execute a run");
       }
-      if (create_view) { require(!fs::exists(directory.path() / "content.calls"), "no late asset/preview content request"); }
+      if (create_view) {
+        require(!fs::exists(directory.path() / "content.calls"), "no late asset/preview/export content request");
+        require(source_calls("create") == initial_creates, "preparing the source scene must not create a report");
+        require(source_calls("list") == size_t(sources_view) && source_calls("review_sources") == size_t(sources_view),
+            "settling and screenshot preparation must not trigger additional source reads");
+      }
       require(client->stats().schema_violations == 0, "bridge schema violations");
       require(gfx::png_write(output, image), "write report screenshot");
       printf("wrote %s (%dx%d, %s, %s, %s; report clicks=%d; wheel steps=%d; frozen sources; unchanged Viewer/Python draft)\n",

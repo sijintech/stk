@@ -11917,6 +11917,38 @@
           "$ref": "#/$defs/skillPublicationReceipt"
         }
       },
+      "project.reports.review_sources": {
+        "description": "Explicitly read bounded, full frozen provenance at one project revision, without executing, recovering or refreshing any source. Lifecycle observations are guarded separately by sources_sha256.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectReportSourceSelection"
+              },
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "sources"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectReportSourceReviewResult"
+        }
+      },
       "project.reports.create": {
         "description": "Explicitly save a frozen report selection and typed source observations as one undoable ordinary-table edit. Verifies selected snapshot bytes; never executes a run or model. Repeated UUID writes conflict.",
         "params": {
@@ -11953,6 +11985,10 @@
                 "$ref": "#/$defs/projectReportSourceSelection"
               },
               "maxItems": 16
+            },
+            "expected_sources_sha256": {
+              "$ref": "#/$defs/sha256",
+              "description": "Optional CAS of the exact ordered frozen provenance array (canonical UTF-8 JSON SHA-256), including captured lifecycle state. A changed observation conflicts before asset reads or writes; omitted preserves existing capture-at-create behavior."
             },
             "expected_revision": {
               "type": "integer",
@@ -21619,6 +21655,37 @@
         }
       ],
       "description": "Frozen source observation. Run plan checksums identify plans, not output bytes or scientific validity; captured_status preserves its original lifecycle semantics."
+    },
+    "projectReportSourceReviewResult": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportSource"
+          },
+          "maxItems": 16
+        },
+        "sources_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "project_id",
+        "revision",
+        "sources",
+        "sources_sha256"
+      ],
+      "additionalProperties": false,
+      "description": "At most 384 KiB complete provenance response. sources_sha256 hashes the ordered sources array as canonical UTF-8 JSON, not the report manifest, run outputs or source asset bytes."
     },
     "projectReportManifest": {
       "type": "object",
