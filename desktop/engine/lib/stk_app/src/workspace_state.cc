@@ -181,6 +181,7 @@ struct AppShell::WorkspacePrepared {
   Json state;
   std::vector<wm::LayoutFile> layouts;
   std::vector<std::unique_ptr<wm::Screen>> trees;
+  std::vector<WorkModes> modes;
   std::shared_ptr<const io::Payload> payload;
   std::string table, record;
   bool adopt_project = false;
@@ -263,6 +264,9 @@ std::shared_ptr<AppShell::WorkspacePrepared> AppShell::prepare_workspace(const J
       });
       if (error) { error->clear(); }
       require_loaded(tree->from_json(layout.screen, error), error, "Invalid workspace editor tree");
+      WorkModes modes;
+      require_loaded(read_work_modes(*tree, layout.screen, modes, error), error, "Invalid workspace mode layouts");
+      prepared->modes.push_back(std::move(modes));
       prepared->layouts.push_back(std::move(layout));
       prepared->trees.push_back(std::move(tree));
     }
@@ -345,6 +349,7 @@ bool AppShell::commit_workspace(const std::shared_ptr<WorkspacePrepared> &prepar
       for (size_t i = 0; i < created.size(); i++) {
         install(created[i]->screen(), created[i]);
         created[i]->screen().adopt_tree_from(*prepared->trees[i]);
+        work_modes_[&created[i]->screen()] = std::move(prepared->modes[i]);
       }
       for (auto *screen : previous) { forget(*screen); }
       std::vector<wm::Window *> obsolete;
@@ -366,10 +371,14 @@ bool AppShell::commit_workspace(const std::shared_ptr<WorkspacePrepared> &prepar
     }
     else {
       for (size_t i = 0; i < prepared->trees.size(); i++) {
-        if (i < previous.size()) { previous[i]->adopt_tree_from(*prepared->trees[i]); }
+        if (i < previous.size()) {
+          previous[i]->adopt_tree_from(*prepared->trees[i]);
+          work_modes_[previous[i]] = std::move(prepared->modes[i]);
+        }
         else {
           auto screen = std::move(prepared->trees[i]);
           install(*screen, nullptr);
+          work_modes_[screen.get()] = std::move(prepared->modes[i]);
           workspace_screens_.push_back(std::move(screen));
         }
       }

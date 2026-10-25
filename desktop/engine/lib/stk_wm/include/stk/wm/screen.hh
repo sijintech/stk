@@ -549,6 +549,14 @@ class Screen {
    * "split": "horizontal"|"vertical", "children": [node, ...]}.
    */
   nlohmann::json to_json() const;
+  /** Geometry and region preferences only; never calls Area::save_state. */
+  nlohmann::json arrangement() const;
+  /** Rearrange exactly the existing leaves, retaining all Area/Region instances. No factory,
+   * state loading or on_added callbacks. Refuses input/capture and invalid/missing leaves before
+   * changing anything. Call from deferred UI work, as with other structural operations. */
+  bool rearrange(const nlohmann::json &json, std::string *error = nullptr);
+  /** Pure validation of an arrangement against these live leaves, independent of input state. */
+  bool check_arrangement(const nlohmann::json &json, std::string *error = nullptr) const;
   /**
    * Rebuilds the tree from #to_json output through the area factory. Validates everything first:
    * on any error returns false with `r_error` and leaves the screen unchanged.
@@ -565,6 +573,7 @@ class Screen {
   friend class Region;
   friend class Area;
   struct Impl;
+  bool arrangement_impl(const nlohmann::json &json, std::string *error, bool apply);
 
   void attach(Area &area, ScreenNode *node);
   void detach(Area &area);

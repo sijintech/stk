@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <map>
 #include <string>
 #include <string_view>
 
@@ -63,6 +64,7 @@ inline constexpr int kDefaultWindowHeight = 800;
 
 class AppShell {
  public:
+  enum class WorkMode { Preparation, Analysis };
   explicit AppShell(ShellOptions options = {});
   ~AppShell();
   AppShell(const AppShell &) = delete;
@@ -113,6 +115,10 @@ class AppShell {
   bool has_screen(const wm::Screen *screen) const;
   /** Swap live Viewer/editing areas without reconstructing editors or their state. */
   bool swap_visual_editors(wm::Screen &screen);
+  /** Per-window presentation preferences. Switching retains live editors and shared project,
+   * Viewer and execution state; it never runs, saves or sends product work. */
+  WorkMode work_mode(const wm::Screen &screen) const;
+  bridge::Result<io::Json> switch_work_mode(wm::Screen *screen, WorkMode mode);
   /** Lifetime fence for callbacks retained by editors or integrations. */
   std::weak_ptr<void> lifetime() const { return alive_; }
   /** Replaces the screen's tree with the default layout. */
@@ -239,6 +245,26 @@ class AppShell {
   wm::WindowManager *wm_ = nullptr;
   wm::Window *window_ = nullptr;
   std::vector<wm::Screen *> screens_;
+  struct WorkModePane {
+    std::string area;
+    std::weak_ptr<void> editor;
+    bool toolbar = true;
+    bool sidebar = false;
+  };
+  struct WorkModeLayout {
+    nlohmann::json geometry;
+    std::vector<WorkModePane> panes;
+  };
+  struct WorkModes {
+    WorkMode active = WorkMode::Analysis;
+    std::map<WorkMode, WorkModeLayout> layouts;
+  };
+  std::map<const wm::Screen *, WorkModes> work_modes_;
+  WorkModeLayout capture_work_mode(const wm::Screen &screen) const;
+  WorkModeLayout adapt_work_mode(const wm::Screen &screen, const WorkModeLayout &saved) const;
+  nlohmann::json capture_work_modes(const wm::Screen &screen) const;
+  bool read_work_modes(const wm::Screen &screen, const nlohmann::json &layout,
+                       WorkModes &modes, std::string *error) const;
   /** Expires with the shell: close listeners of windows that outlive it do nothing. */
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };

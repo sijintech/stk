@@ -200,6 +200,56 @@ TEST_F(TreeFixture, SplitAlongParentDirectionInserts)
   EXPECT_EQ(screen.root()->children[0]->area.get(), d);
 }
 
+TEST_F(TreeFixture, ArrangementMovesLiveLeavesWithoutCreatingOrLoadingAreas)
+{
+  auto &a = screen.set_root(rec("a"));
+  auto *b = screen.split(a, SplitDir::Horizontal, 0.5f); ASSERT_NE(b, nullptr);
+  auto &sidebar = a.emplace_region<RecRegion>("sidebar", RegionAlign::Right, 90.0f);
+  as_rec(&a).dropped = {"draft"};
+  const auto original = screen.arrangement();
+  auto desired = original;
+  auto &children = desired["root"]["children"];
+  std::swap(children[0], children[1]);
+  children[1]["factor"] = 0.25;
+  children[1]["area"]["regions"][0]["size"] = 140;
+  desired["maximized"] = a.id();
+  screen.set_area_factory([](const std::string &) -> std::unique_ptr<Area> {
+    ADD_FAILURE() << "Live arrangements must not call a factory"; return nullptr;
+  });
+  ASSERT_TRUE(screen.check_arrangement(desired)); EXPECT_EQ(screen.arrangement(), original);
+  ASSERT_TRUE(screen.rearrange(desired));
+  EXPECT_EQ(screen.areas()[0], b); EXPECT_EQ(screen.areas()[1], &a);
+  EXPECT_EQ(a.node()->area.get(), &a); EXPECT_EQ(a.screen(), &screen);
+  EXPECT_EQ(screen.maximized(), &a); EXPECT_EQ(sidebar.size_1x(), 140);
+  EXPECT_EQ(as_rec(&a).dropped, (std::vector<std::string>{"draft"}));
+  ASSERT_TRUE(screen.rearrange(original)); EXPECT_EQ(screen.arrangement(), original);
+}
+
+TEST_F(TreeFixture, ArrangementRefusesMissingDuplicateForeignAndStatefulLeavesAtomically)
+{
+  auto &a = screen.set_root(rec("a"));
+  ASSERT_NE(screen.split(a, SplitDir::Horizontal, 0.5f), nullptr);
+  const auto original = screen.arrangement();
+  for (int problem = 0; problem < 6; ++problem) {
+    auto invalid = original;
+    auto &children = invalid["root"]["children"];
+    if (problem == 0) { invalid["root"] = children[0]; }
+    if (problem == 1) { children[1]["area"]["id"] = children[0]["area"]["id"]; }
+    if (problem == 2) { children[1]["area"]["id"] = "absent"; }
+    if (problem == 3) { children[0]["area"]["state"] = nlohmann::json::object(); }
+    if (problem == 4) { invalid["maximized"] = "absent"; }
+    if (problem == 5) { children[0]["factor"] = 1e-300; }
+    std::string error;
+    EXPECT_FALSE(screen.rearrange(invalid, &error)) << problem;
+    EXPECT_FALSE(error.empty()); EXPECT_EQ(screen.arrangement(), original);
+  }
+  drv.frame();
+  const auto [x, y] = center(a.rect());
+  drv.down(x, y); ASSERT_NE(screen.capture(), Screen::Capture::None);
+  EXPECT_FALSE(screen.rearrange(original)); EXPECT_EQ(screen.arrangement(), original);
+  drv.up(x, y);
+}
+
 TEST_F(TreeFixture, SplitRefusedBelowMinimumSize)
 {
   drv.ctx.rect = {0, 0, 300, 200};

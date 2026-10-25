@@ -1609,7 +1609,7 @@ static double round6(const double v)
   return std::round(v * 1.0e6) / 1.0e6;
 }
 
-static nlohmann::json node_to_json(const ScreenNode &node)
+static nlohmann::json node_to_json(const ScreenNode &node, const bool include_state = true)
 {
   nlohmann::json j = nlohmann::json::object();
   j["factor"] = round6(node.factor);
@@ -1621,17 +1621,17 @@ static nlohmann::json node_to_json(const ScreenNode &node)
         regions.push_back({{"name", r->name()}, {"size", round6(r->size_1x())}, {"visible", r->visible()}});
       }
     }
-    nlohmann::json state = a.save_state();
-    if (!state.is_object()) {
-      state = nlohmann::json::object();
+    j["area"] = {{"id", a.id()}, {"type", a.type()}, {"regions", std::move(regions)}};
+    if (include_state) {
+      auto state = a.save_state();
+      j["area"]["state"] = state.is_object() ? std::move(state) : nlohmann::json::object();
     }
-    j["area"] = {{"id", a.id()}, {"type", a.type()}, {"regions", std::move(regions)}, {"state", std::move(state)}};
   }
   else {
     j["split"] = split_dir_name(node.dir);
     nlohmann::json children = nlohmann::json::array();
     for (const auto &c : node.children) {
-      children.push_back(node_to_json(*c));
+      children.push_back(node_to_json(*c, include_state));
     }
     j["children"] = std::move(children);
   }
@@ -1644,6 +1644,12 @@ nlohmann::json Screen::to_json() const
   j["maximized"] = maximized_ ? nlohmann::json(maximized_->id()) : nlohmann::json(nullptr);
   j["root"] = root_ ? node_to_json(*root_) : nlohmann::json(nullptr);
   return j;
+}
+
+nlohmann::json Screen::arrangement() const
+{
+  return {{"maximized", maximized_ ? nlohmann::json(maximized_->id()) : nlohmann::json(nullptr)},
+          {"root", root_ ? node_to_json(*root_, false) : nlohmann::json(nullptr)}};
 }
 
 namespace {
@@ -1663,6 +1669,13 @@ struct Builder {
   };
   std::vector<Leaf> leaves;
   int areas = 0;
+  bool live = false;
+  struct RegionPreference {
+    Region *region;
+    float size;
+    bool visible;
+  };
+  std::vector<RegionPreference> preferences;
 
   bool fail(std::string msg)
   {
@@ -1691,7 +1704,7 @@ struct Builder {
     node->parent = parent;
     const auto f = j.find("factor");
     if (f == j.end() || !f->is_number() || !std::isfinite(f->get<double>()) || f->get<double>() <= 0.0 ||
-        f->get<double>() > 1.0e6)
+        f->get<double>() > 1.0e6 || float(f->get<double>()) <= 0.0f)
     {
       fail("node factor must be a positive number");
       return nullptr;
@@ -1751,8 +1764,24 @@ struct Builder {
       fail("duplicate area id '" + sid + "'");
       return nullptr;
     }
-    std::unique_ptr<Area> created = screen.create_area(type->get<std::string>());
-    if (!created) {
+    std::unique_ptr<Area> created;
+    Area *target = nullptr;
+    if (live) {
+      target = screen.find_area(sid);
+      if (!target || !target->node()) {
+        fail("arrangement references an unknown area '" + sid + "'");
+        return nullptr;
+      }
+      if (a.contains("state")) {
+        fail("arrangement must not contain editor state");
+        return nullptr;
+      }
+    }
+    else {
+      created = screen.create_area(type->get<std::string>());
+      target = created.get();
+    }
+    if (!target) {
       fail("unknown area type '" + type->get<std::string>() + "'");
       return nullptr;
     }
@@ -1776,15 +1805,18 @@ struct Builder {
           fail("invalid region size or visibility");
           return nullptr;
         }
-        Region *region = created->find_region(name->get<std::string>());
+        Region *region = target->find_region(name->get<std::string>());
         if (!region) {
           continue; /* Regions of older versions are ignored. */
         }
-        if (size != r.end()) {
-          region->set_size_1x(float(size->get<double>()));
+        const float desired_size = size == r.end() ? region->size_1x() : float(size->get<double>());
+        const bool desired_visible = visible == r.end() ? region->visible() : visible->get<bool>();
+        if (live) {
+          preferences.push_back({region, desired_size, desired_visible});
         }
-        if (visible != r.end()) {
-          region->set_visible(visible->get<bool>());
+        else {
+          region->set_size_1x(desired_size);
+          region->set_visible(desired_visible);
         }
       }
     }
@@ -1798,13 +1830,75 @@ struct Builder {
         return nullptr;
       }
     }
-    leaves.push_back({created.get(), node.get(), sid});
+    leaves.push_back({target, node.get(), sid});
     node->area = std::move(created);
     return node;
   }
 };
 
 }  // namespace
+
+bool Screen::rearrange(const nlohmann::json &json, std::string *error)
+{
+  return arrangement_impl(json, error, true);
+}
+
+bool Screen::check_arrangement(const nlohmann::json &json, std::string *error) const
+{
+  return const_cast<Screen *>(this)->arrangement_impl(json, error, false);
+}
+
+bool Screen::arrangement_impl(const nlohmann::json &json, std::string *error, const bool apply)
+{
+  const auto fail = [error](const std::string &message) {
+    if (error) { *error = message; }
+    return false;
+  };
+  if (apply && (capture_ != Capture::None || (ui_ && ui_->text_input_active()))) {
+    return fail("Cannot rearrange during active input or dragging");
+  }
+  if (!json.is_object() || !json.contains("root") || !json.at("root").is_object()) {
+    return fail("Arrangement has no root node");
+  }
+  Builder builder{*this};
+  builder.live = true;
+  auto tree = builder.build(json.at("root"), nullptr, 0);
+  if (!tree) { return fail(builder.error); }
+  const auto current = areas();
+  if (builder.leaves.size() != current.size()) { return fail("Arrangement must retain every area"); }
+  Area *maximized = nullptr;
+  if (const auto m = json.find("maximized"); m != json.end() && !m->is_null()) {
+    if (!m->is_string() || !builder.ids.contains(m->get<std::string>())) {
+      return fail("Arrangement maximized area is unknown");
+    }
+    maximized = find_area(m->get<std::string>());
+  }
+  if (!apply) {
+    if (error) { error->clear(); }
+    return true;
+  }
+  // Drop retained callbacks before moving nodes, but keep every live editor and its local state.
+  Area *active = active_area_;
+  ui_.reset();
+  ++deferred_epoch_;
+  deferred_.clear();
+  for (auto *area : current) { forget(*area); }
+  splitters_.clear();
+  for (const auto &leaf : builder.leaves) {
+    leaf.node->area = std::move(leaf.area->node_->area);
+    leaf.area->node_ = leaf.node;
+  }
+  root_ = std::move(tree);
+  active_area_ = active;
+  maximized_ = maximized;
+  for (const auto &preference : builder.preferences) {
+    preference.region->set_size_1x(preference.size);
+    preference.region->set_visible(preference.visible);
+  }
+  tag_redraw();
+  if (error) { error->clear(); }
+  return true;
+}
 
 bool Screen::from_json(const nlohmann::json &json, std::string *r_error)
 {

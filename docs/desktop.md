@@ -178,8 +178,13 @@ vLLM 档（GPU 服务器上的不量化模型）目前只评估能否放下，�
 **视图 → 聚焦准备** 会激活现有 AI 标签并最大化其区域；**聚焦分析** 对 Viewer 做同样操作。
 没有对应标签时会在有空位的区域新增，已有面板和分栏比例保留。**恢复分栏布局** 显示原分栏，
 但不撤销刚才的标签选择。原窗口仍在输入文字时会先要求完成输入，其他窗口的输入保持原样。
-这是当前窗口的聚焦导航；每种模式独立保存整套工作区、以及启动默认 AI 主页仍按设计继续开发。
 切换本身不发送问题或启动求值，未发送的 AI 问题和 Python 草稿保留在原编辑器对象中。
+
+**视图 → 准备与运行布局 / 结果分析布局** 分别记住当前窗口的分栏位置、比例、最大化区域、活动标签和工具栏／侧栏。
+从默认布局进入准备模式会显示 AI，并保留 Viewer；返回分析模式恢复原视图。每次切换为菜单与菜单项共 2 次点击。
+新增或关闭区域／标签会同步影响两种模式；区域集合改变后采用当前分栏，保留所有现有草稿。
+模式偏好随“保存布局”和 `.stkworkspace` 保存。普通布局仍只保存各编辑器允许的偏好；完整草稿和资源请用工作空间。
+报告模式及默认 AI 主页尚未提供。中英文、缩放和草稿保护的实际验证见[验收记录](runtime-validation.md)。
 
 打开格式 8 的项目，从项目页头或 **文件 → AI 助手** 进入；旧项目先明确备份升级。
 用 **项目表格** 返回数据页选择一条记录，再在 AI 助手点击 **捕获选中记录**，保存该记录全部字段
@@ -598,6 +603,11 @@ log, statistics recomputed); an uncertain planner turn ends the session and is n
 data page labels a table private, structure public (names, fields, units and row counts may leave; values stay
 private) or public. Automatic workflow execution and a new default homepage remain planned.
 **View → Focus preparation / Focus analysis / Restore split layout** preserves existing editors and unsaved input.
+**View → Preparation and run layout / Results analysis layout** remembers each window's split positions and sizes,
+maximized pane, active tabs, toolbar and sidebar preferences separately for the two modes. Switching takes two clicks
+and retains live editors and Viewer state without running or sending work. Added or closed panes and tabs are shared;
+when the pane set changes, the current split tree is kept. Preferences travel with saved layouts and `.stkworkspace` files;
+use a workspace to preserve full drafts and resources. A report mode remains planned.
 See the [acceptance record](runtime-validation.md) for verification by commit and platform.
 macOS/Windows real-account acceptance remains separate.
 

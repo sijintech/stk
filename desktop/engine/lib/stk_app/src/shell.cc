@@ -899,6 +899,7 @@ AppShell::~AppShell()
 void AppShell::forget(wm::Screen &screen, wm::Window *window)
 {
   std::erase(screens_, &screen);
+  work_modes_.erase(&screen);
   if (window && window == window_) {
     window_ = nullptr;
   }
@@ -995,6 +996,7 @@ void AppShell::build_default_layout(wm::Screen &screen)
   for (auto *base : screen.areas()) {
     if (auto *area = dynamic_cast<EditorArea *>(base)) { area->set_sidebar_open(false); }
   }
+  work_modes_.erase(&screen);
 }
 
 void AppShell::reset_layout(wm::Screen &screen)
@@ -1013,6 +1015,7 @@ wm::LayoutFile AppShell::capture_layout(const wm::Screen &screen, const wm::Wind
   f.language = store_.language();
   f.ui_scale = store_.ui_scale();
   f.screen = screen.to_json();
+  f.screen["work_modes"] = capture_work_modes(screen);
   f.window.width = kDefaultWindowWidth;
   f.window.height = kDefaultWindowHeight;
   if (window) {
@@ -1035,9 +1038,14 @@ bool AppShell::apply_layout(wm::Screen &screen, const wm::LayoutFile &file, std:
     if (r_error) { *r_error = std::string(store_.tr("app.unsaved")); }
     return false;
   }
-  if (!screen.from_json(file.screen, r_error)) {
+  wm::Screen prepared;
+  prepared.set_area_factory([&screen](const std::string &type) { return screen.create_area(type); });
+  WorkModes modes;
+  if (!prepared.from_json(file.screen, r_error) || !read_work_modes(prepared, file.screen, modes, r_error)) {
     return false;
   }
+  screen.adopt_tree_from(prepared);
+  work_modes_[&screen] = std::move(modes);
   const std::vector<std::string> langs = store_.catalog().languages();
   if (!file.language.empty() && std::find(langs.begin(), langs.end(), file.language) != langs.end()) {
     set_language(file.language);
@@ -1167,6 +1175,19 @@ std::vector<ui::MenuEntry> AppShell::view_menu(wm::Screen &screen)
   m.push_back({std::string(store_.tr("app.menu.view.focus_analysis")), [focus] { focus(kEditorViewer); }});
   m.push_back({std::string(store_.tr("app.menu.view.restore_split_layout")), [focus] { focus(""); },
                screen.maximized() != nullptr});
+  const WorkMode original_mode = work_mode(screen);
+  const auto mode_action = [this, weak, s, original_mode](WorkMode mode) {
+    if (!weak.lock() || !has_screen(s) || work_mode(*s) != original_mode) { return; }
+    s->defer([this, weak, s, original_mode, mode] {
+      if (!weak.lock() || !has_screen(s) || work_mode(*s) != original_mode) { return; }
+      const auto result = switch_work_mode(s, mode);
+      if (!result && s->ui()) { s->ui()->toast(result.error().message, ui::ToastKind::Warning); }
+    });
+  };
+  m.push_back({mark(original_mode == WorkMode::Preparation, store_.tr("app.menu.view.mode_preparation")),
+               [mode_action] { mode_action(WorkMode::Preparation); }});
+  m.push_back({mark(original_mode == WorkMode::Analysis, store_.tr("app.menu.view.mode_analysis")),
+               [mode_action] { mode_action(WorkMode::Analysis); }});
   m.push_back({std::string(store_.tr("editor.analysis_graph.title")), [this, weak, s] {
     if (weak.lock()) { activate_editor_later(s, kEditorAnalysisGraph, false); }
   }});

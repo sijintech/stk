@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 add_executable(stk-project-tests project_test.cc script_test.cc project_table_view_test.cc
-  project_context_selection_test.cc saved_review_test.cc focus_test.cc workspace_navigation_test.cc analysis_graph_view_test.cc
+  project_context_selection_test.cc saved_review_test.cc focus_test.cc work_mode_layout_test.cc workspace_navigation_test.cc analysis_graph_view_test.cc
   analysis_graph_canvas_test.cc viewer_graph_inspection_test.cc
   analysis_graph_state_test.cc analysis_graph_editor_test.cc viewer_graph_configuration_test.cc
   project_analyses_test.cc analysis_documents_editor_test.cc project_analysis_runs_test.cc

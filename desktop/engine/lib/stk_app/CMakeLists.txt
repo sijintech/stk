@@ -54,6 +54,7 @@ add_library(stk_app STATIC
   src/scripting_viewer.cc
   src/shell.cc
   src/workspace_state.cc
+  src/work_mode_layouts.cc
   src/workspace_transfer.cc
   src/viewer_export.cc
   src/viewer_state.cc
