@@ -3,6 +3,7 @@
 
 #include "stk/app/app_store.hh"
 #include "stk/app/project_state.hh"
+#include "stk/core/sha256.hh"
 
 #include <algorithm>
 #include <stdexcept>
@@ -10,10 +11,10 @@
 namespace stk::app {
 using io::Json;
 namespace {
-constexpr std::array<std::string_view, 8> methods = {
+constexpr std::array<std::string_view, 9> methods = {
     "project.table.views.list", "project.table.views.get", "project.table.query",
     "project.table.paste.plan", "project.table.objects.list_candidates", "project.table.objects.resolve",
-    "project.table.csv.preview", "project.table.io.preview"};
+    "project.table.csv.preview", "project.table.io.preview", "project.table.objects.preview"};
 
 bool array_member(const Json &value, const char *key)
 {
@@ -148,6 +149,7 @@ const Json &TableWorkbenchState::candidates() const { return requests_[4].result
 const Json &TableWorkbenchState::resolved_object() const { return requests_[5].result; }
 const Json &TableWorkbenchState::csv_preview() const { return requests_[6].result; }
 const Json &TableWorkbenchState::io_preview() const { return requests_[7].result; }
+const Json &TableWorkbenchState::attachment_preview() const { return requests_[8].result; }
 bool TableWorkbenchState::fail(const std::string &method, const std::string &message)
 {
   error_method_ = method;
@@ -230,6 +232,26 @@ bool TableWorkbenchState::valid_result(const int index, const Json &result, cons
           !std::all_of(row.begin(), row.end(), [](const Json &cell) { return cell.is_string(); })) { return false; }
     }
     return true;
+  }
+  if (index == 8) {
+    const auto kind = io::get_string(result, "kind");
+    const auto sha = io::get_string(result, "content_sha256");
+    const auto size = io::get_int(result, "size", -1);
+    if (io::get_int(result, "version", 0) != 1 || !object_member(result, "reference") ||
+        !request.contains("reference") || result.at("reference") != request.at("reference") ||
+        io::get_string(result.at("reference"), "project_id") != project_id_ ||
+        !valid_sha256(sha) || size < 0 || size > 1024 * 1024 ||
+        !result.contains("data") || !result.at("data").is_string() ||
+        !result.contains("truncated") || !result.at("truncated").is_boolean()) { return false; }
+    const auto &data = result.at("data").get_ref<const std::string &>();
+    if (kind == "text") {
+      return data.size() <= 65536 && data.size() <= size_t(size) &&
+          (result.at("truncated").get<bool>() ? size > 65536 :
+              (data.size() == size_t(size) && core::Sha256::hex(data) == sha));
+    }
+    if (kind != "png" || result.at("truncated").get<bool>() || data.size() > 1398104) { return false; }
+    const auto bytes = bridge::decode_base64(data);
+    return bytes && bytes->size() == size_t(size) && core::Sha256::hex(*bytes) == sha;
   }
   if (index == 7) {
     const auto format = io::get_string(result, "format");

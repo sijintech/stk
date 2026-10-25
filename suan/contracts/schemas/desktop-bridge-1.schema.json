@@ -9819,6 +9819,82 @@
           "additionalProperties": false
         }
       },
+      "project.table.objects.preview": {
+        "description": "Explicit local PNG or UTF-8 attachment preview; never executes work or changes the Viewer.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reference": {
+              "$ref": "#/$defs/projectObjectReference"
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "reference"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reference": {
+              "$ref": "#/$defs/projectObjectReference"
+            },
+            "label": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "text",
+                "png"
+              ]
+            },
+            "content_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1048576
+            },
+            "data": {
+              "type": "string",
+              "maxLength": 1398104
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "version",
+            "revision",
+            "reference",
+            "label",
+            "kind",
+            "content_sha256",
+            "size",
+            "data",
+            "truncated"
+          ],
+          "additionalProperties": false
+        }
+      },
       "project.table.csv.preview": {
         "description": "Explicit bounded table metadata/query/plan; never edits or executes work.",
         "params": {

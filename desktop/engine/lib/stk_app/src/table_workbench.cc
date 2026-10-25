@@ -9,7 +9,9 @@
 #include "stk/app/project_table_editor.hh"
 #include "stk/app/project_table_view.hh"
 #include "stk/app/jobs_spec.hh"
+#include "stk/app/jobs_state.hh"
 #include "stk/app/viewer_state.hh"
+#include "stk/io/png.hh"
 #include "editors/project_navigation.hh"
 #include "editors/path_picker.hh"
 
@@ -159,6 +161,61 @@ struct TableWorkbench::Impl {
   int filter_field = 0, filter_op = 0, sort_field = 0, sort_direction = 0;
   bool filter_or = false;
   std::unordered_map<std::string, float> widths;
+  struct Attachment {
+    Json result;
+    std::optional<io::Image> image;
+    std::string error;
+    uint64_t texture = 0;
+    std::function<void(uint64_t)> release;
+    ~Attachment() { if (texture && release) { release(texture); } }
+  };
+  std::unique_ptr<Attachment> attachment;
+  std::function<bool()> attachment_current;
+
+  void attachment_detail(ui::Layout &layout, EditorContext &ctx, ProjectState &state,
+                         const Json &reference, const std::function<bool()> &current)
+  {
+    const auto kind = io::get_string(reference, "kind");
+    if (kind != "file" && kind != "snapshot_file") { return; }
+    constexpr auto method = "project.table.objects.preview";
+    layout.button("table_attachment_preview", ctx.tr("table.attachment_preview"), [this, current, reference] {
+      if (!current()) { return; }
+      attachment.reset(); attachment_current = current;
+      reads->scoped_call("project.table.objects.preview", {{"reference", reference}}, [this, current](const Json &result) {
+        if (!current()) { return; }
+        auto next = std::make_unique<Attachment>(); next->result = result;
+        if (io::get_string(result, "kind") == "png") {
+          try {
+            const auto bytes = bridge::decode_base64(io::get_string(result, "data"));
+            if (!bytes) { throw std::runtime_error("Invalid PNG encoding"); }
+            next->image = io::decode_png(*bytes, {4096, 4096, 4 * 1024 * 1024});
+          }
+          catch (const std::exception &e) { next->error = e.what(); }
+        }
+        attachment = std::move(next);
+      });
+    }).disable(state.busy() || !reads->supports(method) || reads->pending(method));
+    if (!attachment_current || !attachment_current()) { return; }
+    if (reads->pending(method)) { layout.label(ctx.tr("table.attachment_loading")); }
+    if (reads->error_method() == method) { layout.paragraph(reads->error()); }
+    if (!attachment || attachment->result.value("reference", Json()) != reference) { return; }
+    const auto &result = attachment->result;
+    layout.paragraph(io::get_string(result, "label") + " · " + std::to_string(io::get_int(result, "size", 0)) + " B");
+    if (!attachment->error.empty()) { layout.paragraph(attachment->error); return; }
+    if (attachment->image) {
+      auto &jobs = ctx.store.jobs();
+      if (!attachment->texture && jobs.create_texture && jobs.free_texture) {
+        attachment->release = jobs.free_texture;
+        attachment->texture = jobs.create_texture(*attachment->image);
+      }
+      const auto &img = *attachment->image;
+      layout.image("table_attachment_image", {attachment->texture, int(img.width), int(img.height), 8.0f});
+      layout.label(std::to_string(img.width) + " × " + std::to_string(img.height));
+    }
+    else { layout.paragraph(io::get_string(result, "data")); }
+    if (result.value("truncated", false)) { layout.paragraph(ctx.tr("table.attachment_truncated")); }
+    layout.paragraph("SHA-256: " + io::get_string(result, "content_sha256"));
+  }
 
   template<class T> ui::Binding<T> bind(T &member)
   {
@@ -264,6 +321,7 @@ struct TableWorkbench::Impl {
     store = &ctx.store;
     if (!reads) { reads = std::make_unique<TableWorkbenchState>(ctx.store); }
     reads->sync();
+    if (attachment_current && !attachment_current()) { attachment.reset(); attachment_current = {}; }
     if (ui_complete && !state.busy()) {
       auto complete = std::move(ui_complete); ui_complete = {};
       if (state.error().empty() && state.project()->handle == ui_handle && state.project()->revision == ui_base_revision + 1) { complete(); }
@@ -1112,6 +1170,7 @@ struct TableWorkbench::Impl {
       }
       const auto *v = cell_value;
       if (v && v->is_object()) {
+        attachment_detail(layout, ctx, state, *v, current);
         layout.paragraph(project_value_summary(*v, 4096));
         layout.button("table_resolve_object", ctx.tr("table.object_resolve"), [this, current, reference = *v] { if (current()) { reads->resolve_object({{"reference", reference}}); } });
         const auto &resolved = reads->resolved_object();

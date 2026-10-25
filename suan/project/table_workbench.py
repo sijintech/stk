@@ -391,6 +391,12 @@ class TableWorkbench:
             revision = self._revision(db, expected_revision)
             return {"revision": revision, **resolve(self.store, db, value)}
 
+    def objects_preview(self, value, *, expected_revision):
+        from .object_preview import preview
+        with self.store._connect() as db:
+            revision = self._revision(db, expected_revision)
+            return {"revision": revision, **preview(self.store, db, value)}
+
     def objects_list_candidates(self, kind, *, expected_revision, table_id=None, offset=0, limit=100):
         from .object_refs import candidates
         with self.store._connect() as db:

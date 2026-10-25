@@ -2,12 +2,14 @@
 #include <gtest/gtest.h>
 
 #include "stk/app/project_state.hh"
+#include "stk/app/jobs_state.hh"
 #include "stk/app/script_state.hh"
 #include "stk/app/table_workbench.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
 #include "stk/core/paths.hh"
 #include "stk/io/payload.hh"
+#include "stk/io/png.hh"
 #include "../bridge/support.hh"
 #include "../wm/support.hh"
 
@@ -236,6 +238,21 @@ class TableWorkbenchEditorPython : public ::testing::Test {
     EXPECT_EQ(viewer().camera_serial(), camera_serial);
     EXPECT_EQ(viewer().evaluations_started(), 0);
   }
+  void link_attachment(const std::filesystem::path &path)
+  {
+    ASSERT_TRUE(project().index_files({core::path_to_utf8(path)}));
+    ASSERT_TRUE(pump([&] { return !project().busy(); }));
+    ASSERT_TRUE(project().selected_file());
+    const Json reference = {{"version", 1}, {"project_id", project().project()->id},
+                            {"kind", "file"}, {"id", project().record_id()}};
+    ASSERT_TRUE(project().apply(Json::array({
+      {{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", evidence}, {"value", reference}}
+    })));
+    ASSERT_TRUE(pump([&] { return !project().busy(); }));
+    project().select_table(samples); project().select_record(row_a);
+    ASSERT_NO_FATAL_FAILURE(settled());
+    select(0, 5);
+  }
   void SetUp() override
   {
     std::string python = STK_BRIDGE_TEST_PYTHON_DEFAULT;
@@ -310,6 +327,98 @@ class TableWorkbenchEditorPython : public ::testing::Test {
     loop.run_ready();
   }
 };
+
+TEST_F(TableWorkbenchEditorPython, AttachmentTextNeedsTwoClicksFromSelectedCellAndNeverRunsMarkup)
+{
+  const auto path = dir.path() / "project" / "public-note.md";
+  const std::string text = "# Public synthetic note\n<script>never executed</script>\n";
+  { std::ofstream out(path, std::ios::binary); out << text; }
+  ASSERT_NO_FATAL_FAILURE(link_attachment(path));
+  const auto revision = project().project()->revision;
+  const int before = clicks;
+  click("table_details");
+  click("table_attachment_preview");
+  ASSERT_TRUE(pump([&] { return has_text_prefix(text); }));
+  EXPECT_EQ(clicks - before, 2);
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(project().table_id(), samples); EXPECT_EQ(project().record_id(), row_a);
+  expect_viewer();
+  click("table_detail_close");
+  EXPECT_FALSE(has_text_prefix(text));
+  click("table_details");
+  EXPECT_FALSE(has_text_prefix(text)) << "reopening details must not read attachment bytes implicitly";
+}
+
+TEST_F(TableWorkbenchEditorPython, AttachmentPngDecodesPixelsAndReleasesItsOwnTexture)
+{
+  const auto path = dir.path() / "project" / "public-image.png";
+  io::Image expected(2, 2);
+  expected.pixels = {255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 128};
+  io::write_png(path, expected);
+  ASSERT_NO_FATAL_FAILURE(link_attachment(path));
+  struct TextureAudit { int created = 0, freed = 0; io::Image image; };
+  const auto audit = std::make_shared<TextureAudit>();
+  auto &jobs = f.shell->store().jobs();
+  jobs.create_texture = [audit](const io::Image &image) {
+    ++audit->created; audit->image = image; return uint64_t(123);
+  };
+  jobs.free_texture = [audit](uint64_t texture) { EXPECT_EQ(texture, 123u); ++audit->freed; };
+  const auto revision = project().project()->revision;
+  click("table_details"); click("table_attachment_preview");
+  ASSERT_TRUE(pump([&] { return widget("table_attachment_image") != nullptr; }));
+  EXPECT_EQ(audit->created, 1); EXPECT_EQ(audit->freed, 0);
+  EXPECT_EQ(audit->image.width, 2u); EXPECT_EQ(audit->image.height, 2u);
+  EXPECT_EQ(audit->image.pixels, expected.pixels);
+  frame(); EXPECT_EQ(audit->created, 1);
+  EXPECT_EQ(project().project()->revision, revision);
+  expect_viewer();
+  click("table_detail_close");
+  EXPECT_EQ(audit->freed, 1);
+  EXPECT_EQ(widget("table_attachment_image"), nullptr);
+}
+
+TEST_F(TableWorkbenchEditorPython, AttachmentOldCallbacksAndLateReadCannotFollowChangedRecord)
+{
+  const auto path = dir.path() / "project" / "public-note.txt";
+  const std::string text = "Public stale attachment must not appear";
+  { std::ofstream out(path, std::ios::binary); out << text; }
+  ASSERT_NO_FATAL_FAILURE(link_attachment(path));
+  click("table_details");
+  const auto *button = widget("table_attachment_preview");
+  ASSERT_NE(button, nullptr);
+  auto retained = button->on_click;
+  retained();  // Do not pump the UI executor until the source has changed.
+  project().select_record(row_b); frame();
+  retained();
+  EXPECT_FALSE(has_text_prefix(text));
+  EXPECT_EQ(widget("table_attachment_preview"), nullptr);
+  EXPECT_EQ(project().record_id(), row_b);
+  project().select_record(row_a); frame();
+  ASSERT_TRUE(pump([&] {
+    const auto *current = widget("table_attachment_preview");
+    return current && current->enabled;
+  }));  // The original read has completed, even though its content is no longer applicable.
+  retained(); frame();
+  EXPECT_FALSE(has_text_prefix(text));
+  EXPECT_FALSE(has_text_prefix("Loading attachment"));
+  expect_viewer();
+}
+
+TEST_F(TableWorkbenchEditorPython, CorruptAttachmentPngIsRejectedByTheNativeDecoder)
+{
+  const auto path = dir.path() / "project" / "corrupt.png";
+  io::Image image(2, 2);
+  auto bytes = io::encode_png(image);
+  ASSERT_GT(bytes.size(), 32u);
+  bytes[29] ^= 1;  // IHDR CRC: dimensions still pass the bridge's lightweight header check.
+  { std::ofstream out(path, std::ios::binary); out.write(reinterpret_cast<const char *>(bytes.data()), std::streamsize(bytes.size())); }
+  ASSERT_NO_FATAL_FAILURE(link_attachment(path));
+  click("table_details"); click("table_attachment_preview");
+  // libspng may verify the header CRC when the following chunk is consumed.
+  ASSERT_TRUE(pump([&] { return has_text_prefix("PNG "); }));
+  EXPECT_EQ(widget("table_attachment_image"), nullptr);
+  expect_viewer();
+}
 
 TEST_F(TableWorkbenchEditorPython, DefaultGridUsesMostOfTheTablePaneAndBooleanChangesInOnePointerClick)
 {

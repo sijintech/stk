@@ -487,6 +487,10 @@ class ProjectTable:
     def objects_resolve(self, reference, *, expected_revision):
         return self._read("objects.resolve", expected_revision, reference=reference)
 
+    def objects_preview(self, reference, *, expected_revision):
+        """Read a bounded local PNG or UTF-8 attachment; never execute or open Viewer."""
+        return self._read("objects.preview", expected_revision, reference=reference)
+
     def csv_preview(self, source, *, expected_revision, delimiter=",", limit=20):
         return self._read("csv.preview", expected_revision, source=str(Path(source).expanduser().absolute()),
                           delimiter=delimiter, limit=limit)

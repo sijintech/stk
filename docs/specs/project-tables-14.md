@@ -84,7 +84,8 @@ reject table_id/path. source_sha256 may pin an observed descriptor on other kind
 changed observations then return stale. Same-project only; cross-project refs reject.
 File means an existing FileIndex record (live observation, not frozen content).
 Snapshot_file names a frozen snapshot + manifest path/hash. Other IDs resolve through
-existing stores, not a parallel object DB. No contents/process/model/graph execution.
+existing stores, not a parallel object DB. Metadata discovery and resolution do not
+read contents or execute processes, models or graphs.
 
 `project.table.objects.list_candidates {handle,kind,expected_revision,table_id?:UUID,
  offset?:0,limit?:100}` (limit1..200)
@@ -93,6 +94,38 @@ existing stores, not a parallel object DB. No contents/process/model/graph execu
  -> `{revision,reference,state:'available'|'missing'|'stale',label,summary,reason:null|string}`.
 Unknown/mismatched sources cannot resolve as available. Missing/stale references remain
 diagnosable after target removal. Candidates include complete references ready for set_cell.
+
+### Explicit local attachment preview (additive, 2026-10-25)
+
+`project.table.objects.preview {handle,reference,expected_revision}`
+ -> `{version:1,revision,reference,label,kind:'text'|'png',content_sha256:64hex,
+ size:integer,data:string,truncated:boolean}`.
+This separate read accepts only an available same-project `file` or `snapshot_file`.
+The Python facade is `project.table.objects_preview(reference, expected_revision=...)`.
+It does not refresh the file index, change project revision/history, invoke a model,
+execute code, download resources or open/replace Viewer. Agent tools do not expose it.
+
+The file must be regular and no larger than 1 MiB. Reading pins one descriptor and
+checks its identity, size and timestamps before/after; directory and file replacement
+during the read rejects. Indexed paths use the existing FileIndex/workspace relocation
+rules and return current local bytes, which may differ from the last indexed observation.
+Frozen files are read from the content store and must match the manifest size and SHA-256.
+Missing/stale references, unsupported types, read races and corrupt frozen bytes fail.
+
+PNG `data` contains base64 of the complete original file. Header dimensions must be
+positive, at most 4096 per axis and at most 4194304 pixels. The bridge checks the header;
+the native client also validates the byte checksum and decodes PNG with these limits,
+rejecting corrupt/unsupported encoding before display. `truncated` is always false.
+
+Text suffixes: `.txt`, `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`,
+`.toml`, `.xml`, `.html`, `.htm`, `.tex`, `.rst`, `.py`, `.log` (case-insensitive).
+The entire bounded file must be strict UTF-8 without C0 controls other than tab/CR/LF.
+`data` shows at most the first 64 KiB, cut at a UTF-8 boundary; `truncated` reports omitted
+bytes. `size` and `content_sha256` describe the complete file, including when truncated.
+Markup and code are literal text. This operation does not implement embedded HTML,
+Markdown rendering, PDF or video preview. The desktop keeps one temporary preview per
+table editor; changing its source or closing details discards it. Workspace restore
+does not persist or automatically reload attachment content.
 
 ## Persistence and compatibility
 

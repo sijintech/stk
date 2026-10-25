@@ -20,6 +20,11 @@ new revisioned commands, CSV preview/source-checksum and view-export parameters.
 remains v1; method discovery gates use of new methods. Format 13 remains readable; using new
 stored field schemas/views requires the explicit backup-first upgrade to format 14.
 
+2026-10-25 additive attachment read: `project.table.objects.preview` explicitly reads a
+bounded local PNG or UTF-8 attachment; the [table contract](project-tables-14.md#explicit-local-attachment-preview-additive-2026-10-25)
+defines content checks, truncation and source semantics. Existing object resolution
+remains metadata-only. Discover the new method before use; project format remains 14.
+
 The bridge replaces the file-queue bridge of the Blender workbench (`suan/blender_client/bridge.py`,
 archived at D1 exit under the tag `archive/blender-workbench-2026-09`).
 
