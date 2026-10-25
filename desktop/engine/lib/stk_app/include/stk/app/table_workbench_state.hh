@@ -8,6 +8,7 @@
 namespace stk::app {
 class AppStore;
 class ProjectState;
+struct ProjectTable;
 
 /** A source token for a read or a deferred UI action. An opened handle is never persisted. */
 struct TableWorkbenchScope {
@@ -49,6 +50,11 @@ class TableWorkbenchState {
   const io::Json &views() const;
   const io::Json &selected_view() const;
   const io::Json &query_result() const;
+  /** The current query's complete records in display order, independent of the shared snapshot.
+   * Null while loading or after its project, revision, table or bridge session changes. */
+  const ProjectTable *query_table() const;
+  /** Select a record from this editor's current verified query without another read. */
+  bool select_record(const std::string &id);
   const io::Json &candidates() const;
   const io::Json &resolved_object() const;
   const io::Json &csv_preview() const;
@@ -91,5 +97,6 @@ class TableWorkbenchState {
   int64_t revision_ = -1;
   uint64_t epoch_ = 0, version_ = 0;
   std::array<Request, 9> requests_;
+  std::unique_ptr<ProjectTable> query_table_;
 };
 }  // namespace stk::app

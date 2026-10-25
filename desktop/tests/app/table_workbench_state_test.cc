@@ -57,7 +57,7 @@ class TableWorkbenchPython : public ::testing::Test {
   std::unique_ptr<TableWorkbenchState> table;
   std::string python;
   ProjectState &project() { return store.project(); }
-  bridge::ClientOptions options()
+  virtual bridge::ClientOptions options()
   {
     bridge::ClientOptions value;
     value.python.configured = python;
@@ -113,6 +113,199 @@ class TableWorkbenchPython : public ::testing::Test {
   }
 };
 
+class ProjectPagingPython : public TableWorkbenchPython {
+ protected:
+  bridge::ClientOptions options() override
+  {
+    auto value = TableWorkbenchPython::options();
+    const auto script = directory.path() / "paged_bridge.py";
+    std::ofstream out(script);
+    out << R"PY(
+from suan.project import ProjectStore
+from suan.desktop_bridge.__main__ import main
+from pathlib import Path
+def forbidden_snapshot(self):
+    raise AssertionError('Native opening must not request a full snapshot')
+ProjectStore.snapshot = forbidden_snapshot
+original_read = ProjectStore.read_table
+def concurrent_read(self, table_id, **kwargs):
+    marker = Path(__file__).with_name('concurrent-edit')
+    if marker.exists():
+        if marker.read_text() != 'continuous':
+            marker.unlink()
+        self.apply([{'op': 'rename_table', 'id': table_id, 'name': 'Concurrent edit'}],
+                   expected_revision=kwargs['expected_revision'])
+    return original_read(self, table_id, **kwargs)
+ProjectStore.read_table = concurrent_read
+main()
+)PY";
+    out.close();
+    value.command = {python, "-u", script.string(), "--stdio", "--state-dir", value.state_dir,
+                     "--cache-dir", value.cache_dir, "--strict"};
+    return value;
+  }
+  std::string identity(int n, char prefix = 'a') const
+  {
+    const auto tail = std::to_string(n);
+    return std::string(1, prefix) + "0000000-0000-4000-8000-" + std::string(12 - tail.size(), '0') + tail;
+  }
+  void many_records()
+  {
+    for (int batch = 0; batch < 3; ++batch) {
+      Json commands = Json::array();
+      for (int i = batch * 300; i < (batch + 1) * 300; ++i) {
+        commands.push_back({{"op", "add_record"}, {"table_id", table_a}, {"id", identity(i)}});
+        commands.push_back({{"op", "set_cell"}, {"table_id", table_a}, {"record_id", identity(i)},
+                            {"field_id", counter}, {"value", INT64_MAX - int64_t(i)}});
+      }
+      ASSERT_TRUE(project().apply(commands)); ASSERT_NO_FATAL_FAILURE(idle());
+    }
+  }
+  bridge::Result<Json> choose(const std::string &table_id, const std::string &record_id)
+  {
+    std::optional<bridge::Result<Json>> result;
+    project().request_select_async(project().project()->handle, project().project()->revision,
+        table_id, record_id, [&](auto value) { result = std::move(value); });
+    if (!loop.pump_until([&] { return result.has_value(); }, 30)) {
+      return bridge::Error::make(bridge::ErrorCode::Timeout, "Selection did not complete");
+    }
+    return std::move(*result);
+  }
+};
+
+TEST_F(ProjectPagingPython, OpeningLargeProjectReadsCatalogAndOnlySelectedRecordPage)
+{
+  ASSERT_NO_FATAL_FAILURE(many_records());
+  ASSERT_TRUE(project().close()); ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_TRUE(project().open(directory.str() + "/project")); ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_TRUE(project().loaded());
+  ASSERT_EQ(project().tables().size(), 2u);
+  EXPECT_EQ(project().tables()[0].total_records(), 902);
+  EXPECT_EQ(project().tables()[0].records.size(), 200u);
+  EXPECT_FALSE(project().tables()[0].records_complete);
+  EXPECT_EQ(project().tables()[1].total_records(), 1);
+  EXPECT_TRUE(project().tables()[1].records.empty());
+  EXPECT_EQ(project().tables()[1].fields.front().name, "Batch");
+  const auto selected = choose(table_a, identity(899));
+  ASSERT_TRUE(selected) << selected.error().describe();
+  EXPECT_EQ(project().record_id(), identity(899));
+  EXPECT_EQ(project().table()->record_offset, 800);
+  EXPECT_EQ(project().table()->records.size(), 102u);
+  EXPECT_EQ(project().table()->cell(project().selected_record(), 1)->get<int64_t>(), INT64_MAX - 899);
+  const auto missing = choose(table_a, identity(9999));
+  ASSERT_FALSE(missing); EXPECT_EQ(missing.error().code, bridge::ErrorCode::NotFound);
+  EXPECT_EQ(project().record_id(), identity(899));
+  EXPECT_EQ(project().table()->record_offset, 800);
+  ASSERT_TRUE(choose(table_b, row_b));
+  EXPECT_EQ(project().record_id(), row_b);
+  EXPECT_EQ(project().table()->text(0, 0), "Synthetic batch B");
+}
+
+TEST_F(ProjectPagingPython, ConcurrentEditBetweenCatalogAndRecordsReloadsOneConsistentRevision)
+{
+  const auto revision = project().project()->revision;
+  { std::ofstream marker(directory.path() / "concurrent-edit"); marker << "synthetic change"; }
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_TRUE(project().loaded());
+  EXPECT_EQ(project().project()->revision, revision + 1);
+  ASSERT_NE(project().table(), nullptr);
+  EXPECT_EQ(project().table()->name, "Concurrent edit");
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(project().table()->cell(project().selected_record(), 1)->get<int64_t>(), INT64_MAX);
+}
+
+TEST_F(ProjectPagingPython, ContinuousConcurrentEditsStopAfterBoundedReadsAndAllowExplicitRefresh)
+{
+  const auto revision = project().project()->revision;
+  const auto marker_path = directory.path() / "concurrent-edit";
+  { std::ofstream marker(marker_path); marker << "continuous"; }
+  project().refresh();
+  ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
+  EXPECT_FALSE(project().loaded());
+  EXPECT_FALSE(project().error().empty());
+  EXPECT_EQ(project().project()->revision, revision); // No partial revision was published.
+  std::filesystem::remove(marker_path);
+  project().refresh();
+  ASSERT_TRUE(loop.pump_until([&] { return !project().busy(); }, 30));
+  ASSERT_TRUE(project().loaded());
+  EXPECT_EQ(project().project()->revision, revision + 4); // Initial attempt plus three fresh reads.
+  EXPECT_EQ(project().record_id(), row_a);
+}
+
+TEST_F(ProjectPagingPython, CatalogContinuesAcrossStructurePagesAtOneRevision)
+{
+  Json commands = Json::array();
+  for (int i = 0; i < 201; ++i) {
+    commands.push_back({{"op", "create_table"}, {"id", identity(i, 'b')}, {"name", "Table " + std::to_string(i)}});
+  }
+  ASSERT_TRUE(project().apply(commands)); ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_EQ(project().tables().size(), 203u);
+  EXPECT_EQ(project().tables().back().id, identity(200, 'b'));
+  EXPECT_TRUE(project().tables().back().records_complete);
+  EXPECT_EQ(project().tables().back().total_records(), 0);
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(project().project()->revision, 2);
+}
+
+TEST_F(ProjectPagingPython, CancelledUnloadedSelectionLeavesSelectionAndCacheUnchanged)
+{
+  ASSERT_TRUE(project().tables()[1].records.empty());
+  std::optional<bridge::Result<Json>> result;
+  bool caller_live = true;
+  project().request_select_async(project().project()->handle, project().project()->revision, table_b, row_b,
+      [&](auto value) { result = std::move(value); }, [&] { return caller_live; });
+  EXPECT_TRUE(project().busy());
+  caller_live = false;
+  ASSERT_TRUE(loop.pump_until([&] { return result.has_value(); }, 30));
+  ASSERT_FALSE(*result); EXPECT_EQ(result->error().code, bridge::ErrorCode::Cancelled);
+  EXPECT_EQ(project().table_id(), table_a); EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_TRUE(project().tables()[1].records.empty());
+  EXPECT_FALSE(project().busy());
+}
+
+TEST_F(ProjectPagingPython, RefreshOfDeletedSelectionFallsBackWithinTheNewRevision)
+{
+  ASSERT_NO_FATAL_FAILURE(many_records());
+  ASSERT_TRUE(choose(table_a, identity(899)));
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "delete_record"}, {"id", identity(899)}}})));
+  ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(project().table()->record_offset, 0);
+  EXPECT_EQ(project().table()->total_records(), 901);
+  EXPECT_EQ(project().table()->records.size(), 200u);
+}
+
+TEST_F(ProjectPagingPython, ReadingAnotherPagePreservesSelectionWithOneExtraRecord)
+{
+  ASSERT_NO_FATAL_FAILURE(many_records());
+  ASSERT_TRUE(project().load_table_page(table_a, 400)); ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(project().table()->record_offset, 400);
+  EXPECT_EQ(project().table()->loaded_records(), 200u);
+  EXPECT_EQ(project().table()->records.size(), 201u);
+  EXPECT_EQ(project().table()->cell(project().selected_record(), 0)->get<int>(), 300);
+  project().sync(); EXPECT_FALSE(project().busy());
+  ASSERT_TRUE(project().load_table_page(table_a, 600)); ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_EQ(project().table()->records.size(), 201u);
+  EXPECT_EQ(project().table()->total_records(), 902);
+}
+
+TEST_F(ProjectPagingPython, IndependentPageReadKeepsSharedSelectionAndCache)
+{
+  ASSERT_NO_FATAL_FAILURE(many_records());
+  std::optional<bridge::Result<ProjectTable>> result;
+  ASSERT_TRUE(project().read_table_page(table_a, 0, 8, identity(899), [&](auto value) { result = std::move(value); }));
+  EXPECT_FALSE(project().busy());
+  ASSERT_TRUE(loop.pump_until([&] { return result.has_value(); }, 30));
+  ASSERT_TRUE(*result) << result->error().describe();
+  EXPECT_EQ(result->value().record_offset, 896);
+  EXPECT_EQ(result->value().records.size(), 6u);
+  EXPECT_EQ(result->value().records.back().values.at(counter).get<int64_t>(), INT64_MAX - 899);
+  EXPECT_EQ(project().table_id(), table_a); EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(project().table()->record_offset, 0); EXPECT_EQ(project().table()->records.size(), 200u);
+}
+
 TEST_F(TableWorkbenchPython, QueriesTypedValuesAndFieldOptionsWithoutEditingOrOpeningViewer)
 {
   const auto revision = project().project()->revision;
@@ -130,6 +323,114 @@ TEST_F(TableWorkbenchPython, QueriesTypedValuesAndFieldOptionsWithoutEditingOrOp
   EXPECT_FALSE(result.at("records").at(1).at("values").contains(counter));
   EXPECT_EQ(project().project()->revision, revision);
   EXPECT_EQ(project().table_id(), table_a);
+}
+
+TEST_F(TableWorkbenchPython, IndependentRecordPagesPreserveTypesAndExpireOnSourceChanges)
+{
+  const auto revision = project().project()->revision;
+  TableWorkbenchState other(store);
+  ASSERT_TRUE(table->query({{"offset", 1}, {"limit", 1}}));
+  ASSERT_TRUE(other.query({{"offset", 0}, {"limit", 1},
+      {"definition", {{"version", 1}, {"kind", "grid"},
+                       {"columns", Json::array({{{"field_id", counter}}})}}}}));
+  EXPECT_EQ(table->query_table(), nullptr);
+  ASSERT_NO_FATAL_FAILURE(read());
+  ASSERT_TRUE(loop.pump_until([&] { return !other.busy(); }, 30));
+  ASSERT_TRUE(other.error().empty()) << other.error();
+  ASSERT_NE(table->query_table(), nullptr);
+  ASSERT_NE(other.query_table(), nullptr);
+  ASSERT_EQ(table->query_table()->records.size(), 1u);
+  ASSERT_EQ(other.query_table()->records.size(), 1u);
+  EXPECT_EQ(table->query_table()->records[0].id, row_a2);
+  EXPECT_EQ(other.query_table()->records[0].id, row_a);
+  EXPECT_TRUE(table->query_table()->cell(0, 0)->is_null());
+  EXPECT_EQ(table->query_table()->cell(0, 1), nullptr);
+  EXPECT_EQ(other.query_table()->cell(0, 1)->get<int64_t>(), INT64_MAX);
+  // Omitted view columns remain available in record details without loading other rows.
+  EXPECT_EQ(other.query_table()->fields.size(), 3u);
+  EXPECT_EQ(*other.query_table()->cell(0, 0), 300);
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(project().project()->revision, revision);
+  ASSERT_TRUE(table->query({{"offset", 0}, {"limit", 1}}));
+  EXPECT_EQ(table->query_table(), nullptr);
+  table->cancel();
+  ASSERT_TRUE(loop.pump_until([&] { return !table->busy(); }, 30));
+  EXPECT_EQ(table->query_table(), nullptr);
+  EXPECT_NE(other.query_table(), nullptr);
+  project().select_table(table_b);
+  EXPECT_EQ(other.query_table(), nullptr);
+  other.sync();
+  EXPECT_EQ(other.query_table(), nullptr);
+}
+
+TEST_F(TableWorkbenchPython, QuerySelectionCachesOneExtraRecordAndHonorsDraftAndRevisionGuards)
+{
+  std::optional<bridge::Result<Json>> snapshot;
+  client->project_snapshot(project().project()->handle).then([&](auto value) { snapshot = std::move(value); });
+  ASSERT_TRUE(loop.pump_until([&] { return snapshot.has_value(); }, 30));
+  ASSERT_TRUE(snapshot->ok());
+  auto metadata = snapshot->value();
+  metadata["tables"][0]["records"] = Json::array();
+  const auto info = project().project();
+  ASSERT_TRUE(project().adopt_workspace_project(info, metadata, table_a, {}));
+  ASSERT_TRUE(table->query());
+  ASSERT_NO_FATAL_FAILURE(read());
+  ASSERT_TRUE(table->select_record(row_a2));
+  EXPECT_EQ(project().record_id(), row_a2);
+  ASSERT_EQ(project().table()->records.size(), 1u);
+  EXPECT_TRUE(project().table()->cell(project().selected_record(), 0)->is_null());
+  project().set_selection_guard([] { return false; });
+  EXPECT_FALSE(table->select_record(row_a));
+  EXPECT_EQ(project().record_id(), row_a2);
+  EXPECT_EQ(project().table()->records.size(), 1u);
+  project().set_selection_guard({});
+  EXPECT_FALSE(project().select_read_record(info->handle, info->revision + 1, table_a, table->query_table()->records[0]));
+  EXPECT_FALSE(project().select_read_record(info->handle, info->revision, table_b, table->query_table()->records[0]));
+  ASSERT_TRUE(table->select_record(row_a));
+  EXPECT_EQ(project().record_id(), row_a);
+  ASSERT_EQ(project().table()->records.size(), 1u);
+  EXPECT_EQ(project().table()->cell(0, 1)->get<int64_t>(), INT64_MAX);
+  EXPECT_FALSE(table->select_record(row_b));
+  EXPECT_EQ(project().project()->revision, info->revision);
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_cell"}, {"table_id", table_a},
+      {"record_id", row_a}, {"field_id", temperature}, {"value", 301}}})));
+  EXPECT_FALSE(table->select_record(row_a2));
+  ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_FALSE(table->select_record(row_a2));
+  // Refresh replaces the cache; later selection must not erase a freshly loaded real row.
+  project().select_record(row_a2);
+  EXPECT_EQ(project().table()->records.size(), 2u);
+  EXPECT_EQ(project().record_id(), row_a2);
+}
+
+TEST_F(TableWorkbenchPython, ReviewReadsCompleteBaseInsteadOfTreatingUncachedRecordsAsAdded)
+{
+  std::optional<bridge::Result<Json>> snapshot;
+  client->project_snapshot(project().project()->handle).then([&](auto value) { snapshot = std::move(value); });
+  ASSERT_TRUE(loop.pump_until([&] { return snapshot.has_value(); }, 30));
+  ASSERT_TRUE(snapshot->ok());
+  auto partial = snapshot->value();
+  partial["tables"][0]["records"].erase(partial["tables"][0]["records"].begin() + 1);
+  partial["tables"][1]["records"] = Json::array();
+  const auto info = project().project();
+  ASSERT_TRUE(project().adopt_workspace_project(info, partial, table_a, row_a));
+  ASSERT_EQ(project().tables()[0].records.size(), 1u);
+  ASSERT_TRUE(project().tables()[1].records.empty());
+  project().set_review_source(Json::array({{{"op", "set_cell"}, {"table_id", table_a},
+      {"record_id", row_a}, {"field_id", temperature}, {"value", 305}}}).dump());
+  ASSERT_TRUE(project().preview());
+  ASSERT_NO_FATAL_FAILURE(idle());
+  ASSERT_TRUE(project().review()) << project().review_error();
+  ASSERT_EQ(project().review()->differences.size(), 1u);
+  const auto &change = project().review()->differences.front();
+  EXPECT_EQ(change.kind, "cell");
+  EXPECT_EQ(change.record_id, row_a);
+  EXPECT_EQ(change.before->at("value"), 300);
+  EXPECT_EQ(change.after->at("value"), 305);
+  EXPECT_EQ(project().project()->revision, info->revision);
+  EXPECT_EQ(project().tables()[0].records.size(), 1u);
+  EXPECT_TRUE(project().tables()[1].records.empty());
+  EXPECT_TRUE(project().can_apply_review());
 }
 
 TEST_F(TableWorkbenchPython, PasteOnlyPlansUntilExplicitApplyAndUndoRestoresExactValues)
@@ -191,6 +492,7 @@ TEST_F(TableWorkbenchPython, ReplacementAndTableSwitchDropOldCallbacks)
   table->sync();
   EXPECT_FALSE(table->current(source));
   EXPECT_TRUE(table->query_result().is_null());
+  ASSERT_NO_FATAL_FAILURE(idle()); // Shared selected-row page is asynchronous after switching tables.
   ASSERT_TRUE(table->query());
   ASSERT_NO_FATAL_FAILURE(read());
   EXPECT_FALSE(old_called);

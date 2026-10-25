@@ -14,10 +14,12 @@ struct EditorContext;
 
 class ProjectDiscussionView {
  public:
+  ~ProjectDiscussionView() { alive_.reset(); }
   io::Json save_workspace_state() const;
   bool load_workspace_state(const io::Json &value);
   void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state, int &project_view);
  private:
+  std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   void capture_controls(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
   void captured_cells(ui::Layout &layout, EditorContext &ctx);
   void request_details(ui::Layout &layout, EditorContext &ctx, ProjectState &state);

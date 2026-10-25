@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "project_discussion_view.hh"
+#include "project_record_pages.hh"
 #include "workspace_fields.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
@@ -76,8 +77,11 @@ void ProjectDiscussionView::capture_controls(ui::Layout &layout, EditorContext &
   });
   const auto table = std::find_if(state.tables().begin(), state.tables().end(), [&](const auto &value) { return value.id == table_; });
   if (table != state.tables().end()) {
+    project_record_pages(*panel, ctx, state, *table, [this, weak = std::weak_ptr<bool>(alive_), &state, handle = state.project()->handle, id = table->id] {
+      return !weak.expired() && state.project() && state.project()->handle == handle && table_ == id;
+    });
     std::vector<std::string> row_ids, row_names, field_ids, field_names;
-    for (size_t i = 0; i < table->records.size(); ++i) {
+    for (size_t i = 0; i < table->loaded_records(); ++i) {
       row_ids.push_back(table->records[i].id);
       row_names.push_back(table->records[i].id.substr(0, 8) + " · " + table->text(int(i), 0).substr(0, 80));
     }
@@ -91,7 +95,8 @@ void ProjectDiscussionView::capture_controls(ui::Layout &layout, EditorContext &
     });
     auto &rows = panel->row();
     rows.button("toggle_row", ctx.tr("discussion.toggle_row"), [this] { toggle(rows_, row_, 100); }).disable(!enabled || row_.empty());
-    rows.button("all_rows", ctx.tr("discussion.all_rows"), [this, row_ids] { rows_ = row_ids; }).disable(!enabled || row_ids.size() > 100);
+    rows.button("all_rows", ctx.tr("discussion.all_rows"), [this, row_ids] { rows_ = row_ids; })
+        .disable(!enabled || !table->records_complete || table->total_records() > 100);
     rows.button("clear_rows", ctx.tr("discussion.clear"), [this] { rows_.clear(); }).disable(!enabled);
     panel->prop(ctx.tr("discussion.field")).dropdown("field", std::move(field_names), {
       [this, field_ids] { return index(field_ids, field_); }, [this, field_ids](int selected) {

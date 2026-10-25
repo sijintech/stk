@@ -72,7 +72,7 @@ void ProjectFileTree::sync()
     expanded_ = workspace_pending_.at("expanded").get<std::set<std::string>>(); expanded_.insert("");
     workspace_selection_ = workspace_pending_.at("selection"); workspace_pending_ = nullptr;
   }
-  if (supported() && !busy() && !workspace_selection_.is_null()) {
+  if (supported() && !busy() && !project_.busy() && !workspace_selection_.is_null()) {
     for (const auto &path : expanded_) {
       if (!pages_.count(path)) { load(path, 0); return; }
     }
@@ -183,7 +183,40 @@ bool ProjectFileTree::select_record(const std::string &id)
       select(std::move(item)); return true;
     }
   }
-  return false;
+  // Search results and restored selections may point outside the shared record page.
+  // Resolve just this registered record, leaving shared project selection untouched.
+  const auto hello = client_->hello_info();
+  if (busy() || project_.busy() || !hello || !hello->has_method("project.table.read")) { return false; }
+  const auto epoch = epoch_;
+  const auto previous = selected_;
+  const auto fields = index.at("fields");
+  const auto table_id = io::get_string(index, "table_id");
+  const auto project_id = project_.project()->id;
+  const std::weak_ptr<bool> weak = alive_;
+  bridge::CallOptions options; options.retry = bridge::CallOptions::Retry::Never;
+  future_ = client_->call("project.table.read", {{"handle", handle_}, {"expected_revision", revision_},
+      {"table_id", table_id}, {"record_id", id}, {"limit", 1}}, options);
+  future_->then([this, weak, epoch, previous, fields, table_id, project_id, id](const bridge::Result<Json> &result) {
+    const auto live = weak.lock(); if (!live || !*live || (owner_valid_ && !owner_valid_())) { return; }
+    sync(); if (epoch != epoch_) { return; }
+    future_.reset();
+    if (!result) { error_ = result.error().describe(); changed(); return; }
+    if (selected_ != previous || project_.busy()) { changed(); return; }
+    try {
+      const auto &value = result.value();
+      if (value.at("project_id") != project_id || value.at("revision") != revision_ ||
+          value.at("table").at("id") != table_id || value.at("table").at("records").size() != 1 ||
+          value.at("table").at("records")[0].at("id") != id) { throw std::invalid_argument("Invalid file record page"); }
+      const auto &values = value.at("table").at("records")[0].at("values");
+      Json item = {{"id", id}, {"index_only", true}};
+      for (const auto *name : {"name", "path", "location", "kind", "state"}) {
+        item[name] = values.value(io::get_string(fields, name), Json(nullptr));
+      }
+      select(std::move(item));
+    }
+    catch (const std::exception &error) { error_ = error.what(); changed(); }
+  });
+  changed(); return true;
 }
 bool ProjectFileTree::resolve(std::function<void(const std::string &)> complete)
 {

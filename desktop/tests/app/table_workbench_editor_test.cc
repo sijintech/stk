@@ -328,6 +328,57 @@ class TableWorkbenchEditorPython : public ::testing::Test {
   }
 };
 
+TEST_F(TableWorkbenchEditorPython, QueryRecordsRenderAndSortWithoutLookingUpSharedSnapshotRows)
+{
+  std::optional<bridge::Result<Json>> snapshot;
+  client->project_snapshot(project().project()->handle).then([&](auto value) { snapshot = std::move(value); });
+  ASSERT_TRUE(pump([&] { return snapshot.has_value(); }));
+  ASSERT_TRUE(snapshot->ok());
+  auto partial = snapshot->value();
+  partial["tables"][0]["records"] = Json::array({partial["tables"][0]["records"][0]});
+  const auto info = project().project();
+  ASSERT_TRUE(project().adopt_workspace_project(info, partial, samples, row_a));
+  ASSERT_EQ(project().table()->records.size(), 1u);
+  // A fresh editor must read its own page, not inherit the previous editor's cached query.
+  ASSERT_TRUE(area().add_tab(kEditorTable));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  ASSERT_NE(widget("records"), nullptr);
+  EXPECT_EQ(widget("records")->table->cell(2, 1), "350");
+  EXPECT_EQ(widget("records")->table->cell(0, 2), "9223372036854775807");
+  const auto old_cell = widget("records")->table->cell;
+  widget("records")->table->on_sort(1, false);
+  frame();
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_TRUE(old_cell(0, 1).empty());
+  EXPECT_EQ(widget("records")->table->cell(0, 1), "350");
+  EXPECT_EQ(widget("records")->table->cell(1, 1), "300");
+  select(1, 1);
+  action("table_details");
+  ASSERT_NE(widget("cell_value"), nullptr);
+  EXPECT_EQ(widget("cell_value")->string.value(), "300");
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(project().project()->revision, info->revision);
+  EXPECT_EQ(project().table()->records.size(), 1u);
+  // The first displayed row is absent from the shared cache. Selecting it supplies only
+  // that verified record to the shared detail editor, without hydrating the whole table.
+  const int before = clicks;  // Sorted grid and record details already visible.
+  cell(0, 1);
+  EXPECT_EQ(clicks - before, 1);
+  ASSERT_EQ(project().record_id(), row_c);
+  ASSERT_NE(widget("cell_value"), nullptr);
+  EXPECT_EQ(widget("cell_value")->string.value(), "350");
+  EXPECT_EQ(project().table()->records.size(), 2u);
+  select(2, 1);
+  EXPECT_EQ(project().record_id(), row_b);
+  EXPECT_EQ(project().table()->records.size(), 2u);
+  EXPECT_TRUE(std::none_of(project().table()->records.begin(), project().table()->records.end(),
+      [](const auto &record) { return record.id == row_c; }));
+  select(1, 1);
+  EXPECT_EQ(project().record_id(), row_a);
+  EXPECT_EQ(project().table()->records.size(), 1u);
+  expect_viewer();
+}
+
 TEST_F(TableWorkbenchEditorPython, AttachmentTextNeedsTwoClicksFromSelectedCellAndNeverRunsMarkup)
 {
   const auto path = dir.path() / "project" / "public-note.md";

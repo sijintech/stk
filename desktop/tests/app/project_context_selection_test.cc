@@ -32,6 +32,64 @@ ProjectTable table(size_t rows = 3, size_t fields = 3)
   return result;
 }
 
+ProjectTable page(size_t offset, size_t count = 8)
+{
+  auto result = table(0, 2);
+  result.record_count = 1000; result.record_offset = int64_t(offset);
+  result.records_complete = false; result.page_size = count;
+  for (size_t i = offset; i < offset + count; ++i) {
+    result.records.push_back({row_id(i), {{field_id(0), INT64_MAX - int64_t(i)}, {field_id(1), nullptr}},
+        {{field_id(1), {{"kind", "expression"}, {"source", "null"}}}},
+        {{field_id(1), {{"state", "ok"}, {"value", nullptr}}}}});
+  }
+  return result;
+}
+
+TEST(ProjectContextSelection, PagesKeepOnlyCurrentRowsAndCheckedFrozenValuesInGlobalOrder)
+{
+  ProjectContextSelection selection;
+  selection.pin("opening", 7, page(800), row_id(803));
+  EXPECT_FALSE(selection.all_rows(selection.generation()));
+  ASSERT_TRUE(selection.merge_page("opening", 7, page(0), selection.generation()));
+  ASSERT_TRUE(selection.set_row(row_id(2), true, selection.generation()));
+  for (size_t offset = 8; offset < 800; offset += 8) {
+    ASSERT_TRUE(selection.merge_page("opening", 7, page(offset), selection.generation()));
+    EXPECT_LE(selection.table().records.size(), 10u);
+    EXPECT_EQ(selection.table().loaded_records(), 8u);
+  }
+  EXPECT_EQ(selection.rows(), (std::vector<std::string>{row_id(2), row_id(803)}));
+  EXPECT_EQ(selection.row_position(row_id(803)), 803);
+  EXPECT_EQ(selection.table().total_records(), 1000);
+  const auto &retained = selection.table().records.back();
+  EXPECT_EQ(retained.id, row_id(803));
+  EXPECT_EQ(retained.values.at(field_id(0)).get<int64_t>(), INT64_MAX - 803);
+  EXPECT_EQ(retained.definitions.at(field_id(1)).at("source"), "null");
+  EXPECT_TRUE(retained.evaluations.at(field_id(1)).at("value").is_null());
+  ASSERT_TRUE(selection.set_row(row_id(803), false, selection.generation()));
+  ASSERT_TRUE(selection.merge_page("opening", 7, page(880), selection.generation()));
+  EXPECT_EQ(selection.table().records.size(), 9u);
+  EXPECT_EQ(selection.row_position(row_id(803)), -1);
+}
+
+TEST(ProjectContextSelection, PageIdentityRevisionPositionsAndMetadataFailWithoutChangingDraft)
+{
+  ProjectContextSelection selection;
+  selection.pin("opening", 7, page(800), row_id(803));
+  const auto generation = selection.generation();
+  EXPECT_FALSE(selection.merge_page("reopened", 7, page(0), generation));
+  EXPECT_FALSE(selection.merge_page("opening", 8, page(0), generation));
+  EXPECT_FALSE(selection.merge_page("opening", 7, page(0), generation - 1));
+  auto wrong = page(0); wrong.records[0].id = row_id(803);
+  EXPECT_FALSE(selection.merge_page("opening", 7, wrong, generation));
+  wrong = page(0); wrong.fields.front().type = "text";
+  EXPECT_FALSE(selection.merge_page("opening", 7, wrong, generation));
+  wrong = page(800); wrong.records[3].id = row_id(999);
+  EXPECT_FALSE(selection.merge_page("opening", 7, wrong, generation));
+  EXPECT_EQ(selection.generation(), generation);
+  EXPECT_EQ(selection.table().record_offset, 800);
+  EXPECT_EQ(selection.rows(), (std::vector<std::string>{row_id(803)}));
+}
+
 TEST(ProjectContextSelection, EmptyScopeCannotBeEditedOrCaptured)
 {
   ProjectContextSelection selection;

@@ -223,7 +223,7 @@ class AppShell {
   void handle_ui_request(const std::string &operation, const io::Json &params, int64_t expires_at,
                          std::function<bool()> valid, ScriptState::Completion complete);
   void perform_ui_request(wm::Screen &screen, const std::string &operation, const io::Json &params,
-                          ScriptState::Completion complete);
+                          ScriptState::Completion complete, std::function<bool()> valid);
 
   void perform_viewer_request(wm::Screen &screen, const std::string &operation, const io::Json &params,
                               ScriptState::Completion complete);

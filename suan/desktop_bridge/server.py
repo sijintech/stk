@@ -247,6 +247,8 @@ class Bridge:
             "project.forget": lambda p, c: self.projects.forget(p),
             "project.close": self.close_project,
             "project.snapshot": lambda p, c: self.projects.snapshot(p),
+            "project.catalog": lambda p, c: self.projects.catalog(p),
+            "project.table.read": lambda p, c: self.projects.read_table(p),
             "project.apply": self.apply_project,
             "project.preview": lambda p, c: self.projects.preview(p),
             "project.sweep.plan": lambda p, c: self.projects.sweep_plan(p),
@@ -662,6 +664,7 @@ class Bridge:
         # Deliberate initial coverage. In particular, scripts cannot recursively dispatch their
         # own lifecycle, attach arbitrary executors, or subscribe without owning a subscription.
         names = ("project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot",
+                 "project.catalog", "project.table.read",
                  "project.apply", "project.preview", "project.sweep.plan", "project.history", "project.backup", "project.upgrade", "project.undo", "project.redo",
                  "project.table.views.list", "project.table.views.get", "project.table.query", "project.table.paste.plan",
                  "project.table.objects.list_candidates", "project.table.objects.resolve", "project.table.objects.preview", "project.table.csv.preview",

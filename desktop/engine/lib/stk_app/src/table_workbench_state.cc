@@ -61,6 +61,7 @@ void TableWorkbenchState::changed()
 void TableWorkbenchState::reset()
 {
   ++epoch_;
+  query_table_.reset();
   for (auto &request : requests_) {
     ++request.generation;
     auto old = std::move(request.future);
@@ -145,6 +146,19 @@ void TableWorkbenchState::cancel() { reset(); }
 const Json &TableWorkbenchState::views() const { return requests_[0].result; }
 const Json &TableWorkbenchState::selected_view() const { return requests_[1].result; }
 const Json &TableWorkbenchState::query_result() const { return requests_[2].result; }
+const ProjectTable *TableWorkbenchState::query_table() const
+{
+  return supported() && !requests_[2].future ? query_table_.get() : nullptr;
+}
+bool TableWorkbenchState::select_record(const std::string &id)
+{
+  sync();
+  const auto *page = query_table();
+  if (!page || project_.busy()) { return false; }
+  const auto at = std::find_if(page->records.begin(), page->records.end(),
+      [&](const auto &record) { return record.id == id; });
+  return at != page->records.end() && project_.select_read_record(handle_, revision_, table_id_, *at);
+}
 const Json &TableWorkbenchState::candidates() const { return requests_[4].result; }
 const Json &TableWorkbenchState::resolved_object() const { return requests_[5].result; }
 const Json &TableWorkbenchState::csv_preview() const { return requests_[6].result; }
@@ -313,6 +327,7 @@ bool TableWorkbenchState::scoped_call(const std::string &method, Json params, Co
   auto old = std::move(request.future);
   request.future.reset();
   request.result = nullptr;
+  if (index == 2) { query_table_.reset(); }
   if (old) { old->cancel(); }
   if (error_method_ == method) { error_.clear(); error_method_.clear(); }
   const auto epoch = epoch_;
@@ -331,6 +346,18 @@ bool TableWorkbenchState::scoped_call(const std::string &method, Json params, Co
     if (!response) { fail(method, response.error().describe()); return; }
     if (project_.busy()) { fail(method, "Project changed during table read; refresh the table"); return; }
     if (!valid_result(index, response.value(), params)) { fail(method, "Invalid or stale table response"); return; }
+    if (index == 2) {
+      try {
+        const auto &value = response.value();
+        query_table_ = std::make_unique<ProjectTable>(ProjectTable::from_json({
+            {"id", table_id_}, {"name", project_.table()->name},
+            {"fields", Json::array()}, {"records", value.at("records")}}));
+        // Query fields describe the view projection. Record details also need hidden and
+        // omitted fields, whose metadata is already pinned to this same project revision.
+        query_table_->fields = project_.table()->fields;
+      }
+      catch (const std::exception &) { fail(method, "Invalid table page"); return; }
+    }
     // Keep a local value: a callback may start a replacement request or destroy this editor.
     const Json value = std::move(response.value());
     if (index != 3) { request.result = value; }

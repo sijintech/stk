@@ -23,8 +23,10 @@ inline std::string formula_error_label(const AppStore &store, const std::string 
 inline std::string row_label(const AppStore &store, const ProjectTable *table, const std::string &record_id)
 {
   if (table) {
-    for (size_t i = 0; i < table->records.size(); ++i) {
-      if (table->records[i].id == record_id) { return store.catalog().format("project.row", {{"n", std::to_string(i + 1)}}); }
+    for (size_t i = 0; i < table->loaded_records(); ++i) {
+      if (table->records[i].id == record_id) {
+        return store.catalog().format("project.row", {{"n", std::to_string(table->record_offset + int64_t(i) + 1)}});
+      }
     }
   }
   return record_id.substr(0, 8);

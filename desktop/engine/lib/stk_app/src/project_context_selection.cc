@@ -35,9 +35,18 @@ void ProjectContextSelection::pin(std::string handle, int64_t revision, const Pr
   if (handle.empty() || revision < 0 || table.id.empty()) {
     throw std::invalid_argument("Context selection requires an opening handle, revision and table");
   }
-  auto row_order = object_order(table.records);
-  auto field_order = object_order(table.fields);
   ProjectTable snapshot = table;
+  if (table.loaded_records() > table.records.size() || table.record_offset < 0 ||
+      table.record_offset > table.total_records() ||
+      int64_t(table.loaded_records()) > table.total_records() - table.record_offset) {
+    throw std::invalid_argument("Invalid context table page");
+  }
+  // A shared selection may append a row from another page without its global ordinal.
+  // The picker reads that row's actual page before seeding the independent scope.
+  snapshot.records.resize(table.loaded_records());
+  auto row_order = object_order(snapshot.records);
+  for (auto &[id, position] : row_order) { position += size_t(table.record_offset); }
+  auto field_order = object_order(table.fields);
   std::vector<std::string> rows, fields;
   if (row_order.contains(seed_record) && !table.fields.empty() && table.fields.size() <= max_fields) {
     rows.push_back(seed_record);
@@ -51,6 +60,47 @@ void ProjectContextSelection::pin(std::string handle, int64_t revision, const Pr
   rows_ = std::move(rows);
   fields_ = std::move(fields);
   ++generation_;
+}
+
+int64_t ProjectContextSelection::row_position(const std::string &id) const
+{
+  const auto found = row_order_.find(id);
+  return found == row_order_.end() ? -1 : int64_t(found->second);
+}
+
+bool ProjectContextSelection::merge_page(const std::string &handle, int64_t revision,
+                                          const ProjectTable &page, uint64_t generation)
+{
+  if (!accepts(generation) || !current(handle, revision) || page.id != table_.id ||
+      page.total_records() != table_.total_records() || page.record_offset < 0 ||
+      page.record_offset > page.total_records() || page.loaded_records() != page.records.size() ||
+      int64_t(page.records.size()) > page.total_records() - page.record_offset ||
+      page.fields.size() != table_.fields.size()) { return false; }
+  for (size_t i = 0; i < page.fields.size(); ++i) {
+    const auto &a = page.fields[i], &b = table_.fields[i];
+    if (a.id != b.id || a.name != b.name || a.type != b.type || a.unit != b.unit || a.options != b.options) { return false; }
+  }
+  std::unordered_map<std::string, size_t> order;
+  ProjectTable next = page;
+  for (size_t i = 0; i < page.records.size(); ++i) {
+    const auto &id = page.records[i].id;
+    const auto position = size_t(page.record_offset) + i;
+    if (id.empty() || !order.emplace(id, position).second ||
+        (row_order_.contains(id) && row_order_.at(id) != position)) { return false; }
+    for (const auto &selected : rows_) {
+      if (row_order_.at(selected) == position && selected != id) { return false; }
+    }
+  }
+  for (const auto &row : table_.records) {
+    if (row_checked(row.id) && !order.contains(row.id)) {
+      next.records.push_back(row);
+      order.emplace(row.id, row_order_.at(row.id));
+    }
+  }
+  table_ = std::move(next);
+  row_order_ = std::move(order);
+  ++generation_;
+  return true;
 }
 
 void ProjectContextSelection::reset()
@@ -126,7 +176,7 @@ bool ProjectContextSelection::set_field(const std::string &id, bool checked, uin
 
 bool ProjectContextSelection::all_rows(uint64_t generation)
 {
-  if (!accepts(generation) || table_.records.size() > max_rows) { return false; }
+  if (!accepts(generation) || !table_.records_complete || table_.records.size() > max_rows) { return false; }
   return replace(rows_, object_ids(table_.records));
 }
 

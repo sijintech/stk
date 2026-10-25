@@ -294,7 +294,7 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
     project.sync();
     if ((project.project() ? project.project()->handle : std::string()) != handle) { return; }
     const bool management = page == "project" || page == "workspace";
-    if (!management && (!project.loaded() || !project.ready() || project.busy())) { return; }
+    if (!management && (!project.loaded() || !project.ready() || (project.busy() && !project.table_page_loading()))) { return; }
     if (text_input_active()) {
       if (store_.toast) { store_.toast(std::string(store_.tr("app.focus.busy")), ui::ToastKind::Warning); }
       return;

@@ -24,6 +24,13 @@ if(MSVC)
   target_compile_options(stk-project-render PRIVATE /W3 /utf-8 /bigobj)
 endif()
 set_target_properties(stk-project-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${STK_DESKTOP_BIN_DIR}")
+# Opt-in measurement tool; it is not installed with the product or run by CTest.
+add_executable(stk-project-open-benchmark EXCLUDE_FROM_ALL project_open_benchmark.cc)
+target_link_libraries(stk-project-open-benchmark PRIVATE stk_jobs_test_support)
+if(MSVC)
+  target_compile_options(stk-project-open-benchmark PRIVATE /W3 /utf-8 /bigobj)
+endif()
+set_target_properties(stk-project-open-benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${STK_DESKTOP_BIN_DIR}")
 # Reuse the software-GPU environment and supported backends established in jobs.cmake.
 foreach(_lang en zh)
   foreach(_be ${_jobs_backends})

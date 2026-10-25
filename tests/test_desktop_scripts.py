@@ -77,7 +77,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
     assert {name for name in operations if name.startswith("project.") and not name.startswith(("project.snapshots.", "project.runs."))} == {
         "project.create", "project.open", "project.list", "project.recent", "project.forget", "project.close", "project.snapshot", "project.apply", "project.preview", "project.history",
         "project.backup", "project.upgrade", "project.undo", "project.redo", "project.csv.import", "project.csv.export",
-        "project.sweep.plan",
+        "project.sweep.plan", "project.catalog", "project.table.read",
         "project.table.views.list", "project.table.views.get", "project.table.query", "project.table.paste.plan",
         "project.table.objects.list_candidates", "project.table.objects.resolve", "project.table.objects.preview", "project.table.csv.preview",
         "project.table.io.preview", "project.table.io.import", "project.table.io.export",

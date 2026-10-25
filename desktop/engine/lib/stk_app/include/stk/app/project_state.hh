@@ -3,6 +3,7 @@
 
 #include "stk/bridge/client.hh"
 #include "stk/app/project_review.hh"
+#include <set>
 
 namespace stk::app {
 
@@ -30,14 +31,42 @@ struct ProjectTable {
   std::string id, name;
   std::vector<ProjectField> fields;
   std::vector<ProjectRecord> records;
+  // Metadata describes the whole table; records may only hold one page plus a selected row.
+  int64_t record_count = 0, record_offset = 0;
+  std::string first_record_id;
+  bool records_complete = true;
+  size_t page_size = 0;
+  size_t loaded_records() const { return records_complete ? records.size() : page_size; }
+  int64_t total_records() const { return records_complete ? int64_t(records.size()) : record_count; }
 
   static ProjectTable from_json(const io::Json &value);
+  static ProjectTable from_catalog(const io::Json &value);
   const io::Json *cell(int row, int column) const;
   const io::Json *definition(int row, int column) const;
   const io::Json *evaluation(int row, int column) const;
   std::string text(int row, int column) const;
   int compare(int row_a, int row_b, int column) const;
 };
+
+/** A consistent, pre-read project view. Metadata covers every table; records may be paged.
+ * A saved workspace selection must be present in the read before desktop adoption. */
+struct ProjectRead {
+  bridge::ProjectInfo project;
+  std::vector<ProjectTable> tables;
+  io::Json file_index = io::Json::object(), edit_history = io::Json::object();
+  std::string table_id, record_id;
+  void validate() const;
+  static ProjectRead from_snapshot(const bridge::ProjectInfo &info, const io::Json &snapshot,
+                                   std::string table, std::string record);
+};
+using ProjectPageRequest = std::function<void(const std::string &, io::Json,
+    std::function<void(const bridge::Result<io::Json> &)>)>;
+/** Read all structure pages and one selected record page. Exact reads pin the opened revision
+ * and saved selection; refresh reads may restart after a conflict or replace a deleted selection.
+ * The caller binds each request to its bridge/session and owner lifetime. */
+void read_project_pages(ProjectPageRequest request, const bridge::ProjectInfo &project,
+                        std::string table, std::string record, bool exact,
+                        std::function<void(bridge::Result<ProjectRead>)> complete);
 
 /** Parse a literal editor value without lossy double conversion of int64 values. Text stays raw;
  * other types use JSON syntax. Explicit null is allowed for every field (via the UI's null action).
@@ -73,6 +102,8 @@ class ProjectState {
   /** UI host fence for project/selection changes, independent of persistence semantics. */
   void set_selection_guard(std::function<bool()> guard) { selection_guard_ = std::move(guard); }
   bool busy() const { return busy_ || fetching_; }
+  bool table_page_loading() const { return table_page_loading_; }
+  bool table_page_failed(const std::string &id) const { return failed_pages_.contains(id); }
   bool loaded() const { return project_.has_value() && snapshot_ready_; }
   const std::optional<bridge::ProjectInfo> &project() const { return project_; }
   const std::vector<ProjectTable> &tables() const { return tables_; }
@@ -95,7 +126,16 @@ class ProjectState {
    * edits or execution are dispatched; pending callbacks for the old handle become stale. */
   bool adopt_workspace_project(const std::optional<bridge::ProjectInfo> &info, const io::Json &snapshot,
                                std::string table_id, std::string record_id, std::string *error = nullptr);
+  bool adopt_workspace_project(std::optional<ProjectRead> read, std::string *error = nullptr);
   void refresh();
+  bool paged_reads_supported() const;
+  /** Load one table page at the current revision without changing shared selection. */
+  bool load_table_page(const std::string &table_id, int64_t offset = 0, const std::string &record_id = {});
+  /** Read an editor-owned page without replacing shared records or selection. The callback
+   * receives only same-revision data and is discarded after closing/reopening the project. */
+  bool read_table_page(const std::string &table_id, int64_t offset, int64_t limit,
+                       const std::string &record_id,
+                       std::function<void(bridge::Result<ProjectTable>)> complete);
   bool apply(io::Json commands, std::optional<int64_t> expected_revision = std::nullopt);
   /** Whether the Python service builds the offline example project (demo.create). */
   bool supports_demo() const;
@@ -126,6 +166,10 @@ class ProjectState {
   bridge::Result<io::Json> request_selection(const std::string &handle) const;
   bridge::Result<io::Json> request_select(const std::string &handle, int64_t expected_revision,
                                         const std::string &table_id, const std::string &record_id);
+  void request_select_async(const std::string &handle, int64_t expected_revision,
+                            const std::string &table_id, const std::string &record_id,
+                            std::function<void(bridge::Result<io::Json>)> complete,
+                            std::function<bool()> still_current = {});
   bool can_apply_review() const;
   bool apply_review();
   void discard_review();
@@ -195,6 +239,10 @@ class ProjectState {
   const std::string &record_id() const { return record_id_; }
   void select_table(std::string id);
   void select_record(std::string id);
+  /** Select a record supplied by a verified, revision-bound table read. At most one extra
+   * record is cached for shared detail editors; this never edits the persisted project. */
+  bool select_read_record(const std::string &handle, int64_t expected_revision,
+                          const std::string &table_id, const ProjectRecord &record);
   int selected_record() const;
 
  private:
@@ -209,6 +257,10 @@ class ProjectState {
   void clear_review();
   void clear_drafts();
   void validate_selection();
+  void release_read_record();
+  void load_catalog();
+  void page_request(const std::string &method, io::Json params,
+                    std::function<void(const bridge::Result<io::Json> &)> complete);
   bool restore_edit(bool redo);
   bool run_operation(const std::string &action, const std::string &id, bool allow_stale = false);
   void clear_runs();
@@ -227,6 +279,9 @@ class ProjectState {
   std::string recent_error_;
   bool recent_loaded_ = false, recent_loading_ = false, recent_dirty_ = false;
   bool busy_ = false, fetching_ = false, snapshot_ready_ = false;
+  bool table_page_loading_ = false;
+  std::set<std::string> failed_pages_;
+  bool selection_read_failed_ = false;
   int64_t dirty_revision_ = -1;
   int64_t undo_revision_ = -1, redo_revision_ = -1;
   std::optional<bridge::ProjectInfo> project_;
@@ -249,6 +304,7 @@ class ProjectState {
   int64_t runs_offset_ = 0, runs_next_offset_ = -1;
   bool runs_loaded_ = false, runs_dirty_ = false;
   std::string table_id_, record_id_, error_, notice_;
+  std::string read_table_id_, read_record_id_;
 };
 
 }  // namespace stk::app

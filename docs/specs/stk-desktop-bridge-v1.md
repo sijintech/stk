@@ -531,6 +531,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `models.route` | `{handle, context_id, prompt_version?}` | `{task, public, candidates, excluded, choice}` (reads only; nothing is started or sent) |
 | `project.sweep.plan` | `{handle, table_id, axes, base_record_id?, mode?}` | `{plan: {table_id, rows, record_ids, commands}, revision}` |
 | `project.snapshot` | `{handle}` | `{snapshot}` |
+| `project.catalog` | `{handle, expected_revision?, offset?, limit?}` | `{format_version, project, tables, total, offset, next_offset, edit_history?, file_index?}` |
+| `project.table.read` | `{handle, table_id, expected_revision, offset?, limit?, record_id?}` | `{project_id, revision, format_version, table, total, offset, next_offset}` |
 | `project.apply` | `{handle, expected_revision, commands}` | `{revision, commands}` |
 | `project.preview` | `{handle, expected_revision, commands}` | `{persisted: false, base_revision, proposed_revision, commands, snapshot}` |
 | `project.drafts.save` | `{handle, draft_id, expected_revision, title, commands}` | `{draft}` |
@@ -848,6 +850,23 @@ for native navigation, explicit import into an empty shared Viewer, and project-
   An indexed file table adds `file_index: {table_id, fields: {field_name: field_uuid}, compatible: boolean}`.
   The built-in view is recognized by fixed UUIDs/types, not editable display names. File rows remain ordinary
   records and may participate in references/expressions/undo. Incompatible fixed fields require explicit repair.
+- `project.catalog` reads structure without loading cells, definitions or evaluations. Its tables
+  contain `id`, `name`, `fields`, `record_count` and nullable `first_record_id`, without `records`.
+  Tables use insertion order; `offset` defaults to 0 and `limit` to 200 (maximum 200).
+  The first page may omit `expected_revision`; subsequent pages must use that first page's project
+  revision. A changed revision returns `conflict`; callers must not combine pages from different
+  revisions. The file-index descriptor is independent of which table page contains its table.
+- `project.table.read` returns complete typed records in insertion order, with the same values,
+  definitions and evaluations as `snapshot`, including required dependencies outside the page.
+  It requires `expected_revision`; `offset` defaults to 0 and `limit` to 200 (maximum 500).
+  Optional `record_id` locates the page containing that exact table's record and requires offset 0;
+  missing or foreign records return `not_found`, never a fallback selection. The returned `offset`
+  is the located page's position. Offsets are revision-bound observations, not persistent identities.
+  Both methods return nullable `next_offset`, use one consistent read transaction per call, and
+  reject an encoded response above 8 MiB with a request to reduce page size. They do not write
+  caches, emit `project.changed`, read resource contents or execute work. These are additive
+  protocol-1 methods, not a new project storage format; `project.snapshot` remains available for
+  explicitly requested complete reads such as modification review.
 - `commands` contains 1–1000 closed command objects. Supported operations are `create_table`,
   `add_field`, `add_record`, `set_cell`, `rename_table`, `rename_field`, `set_reference`, `set_expression`,
   `unset_cell`, `delete_record`, `delete_field`, and `delete_table`; the exact required and

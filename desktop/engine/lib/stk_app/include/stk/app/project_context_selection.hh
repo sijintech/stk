@@ -11,7 +11,7 @@
 
 namespace stk::app {
 
-/** Editor-local context selection against one frozen table and opening handle/revision.
+/** Editor-local context selection against frozen table pages and one opening handle/revision.
  * This is a view draft, not a saved context or shared project selection. It never reads a bridge,
  * edits data, follows references, or updates itself when the live project changes. Callers must
  * check current() before edits and capture; a stale draft remains inspectable until an explicit pin.
@@ -26,6 +26,10 @@ class ProjectContextSelection {
    * the existing draft. Re-pinning even the same scope invalidates old widget generations. */
   void pin(std::string handle, int64_t revision, const ProjectTable &table,
            const std::string &seed_record = {});
+  /** Accept a verified page at the pinned revision; retain only this page and checked rows.
+   * Returns false atomically for stale generations or incompatible identities/positions. */
+  bool merge_page(const std::string &handle, int64_t revision, const ProjectTable &page, uint64_t generation);
+  int64_t row_position(const std::string &id) const;
   void reset();
 
   uint64_t generation() const { return generation_; }

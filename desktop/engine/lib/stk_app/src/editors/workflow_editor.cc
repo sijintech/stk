@@ -13,6 +13,7 @@
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
+#include "project_record_pages.hh"
 #include "stk/app/project_workflows.hh"
 #include "stk/app/shell.hh"
 #include "stk/app/workflow_draft.hh"
@@ -456,7 +457,7 @@ class WorkflowEditor final : public Editor {
       view_.reset(); canvas_.set_view(nullptr); selected_id_.clear(); view_error_.clear(); shown_ = {};
       auto_selected_ = false; refreshed_revision_ = page_revision_ = choices_revision_ = listed_revision_ = -1;
       runs_listed_.clear(); page_archive_.clear(); runs_archive_.clear();
-      run_unchecked_.clear(); run_rows_table_.clear(); run_row_ = -1;
+      run_unchecked_.clear(); run_only_.reset(); run_rows_table_.clear(); run_row_ = -1;
       checked_document_ = checked_validation_ = nullptr;
       draft_.reset(); workspace_detached_ = false; requested_.reset(); cancel_drag();
     }
@@ -1332,39 +1333,51 @@ class WorkflowEditor final : public Editor {
     else if (!table) { blocked = "workflow.run.no_table"; }
     if (!blocked.empty()) { panel->paragraph(ctx.tr(blocked)); }
     if (table) {
+      if (!project_record_pages(*panel, ctx, ctx.store.project(), *table, ok, 100)) { return; }
       // Rows are chosen unless unchecked here, so rows added later are included too.
-      if (run_rows_table_ != table->id) { run_rows_table_ = table->id; run_unchecked_.clear(); }
+      if (run_rows_table_ != table->id) { run_rows_table_ = table->id; run_unchecked_.clear(); run_only_.reset(); }
       if (!want_rows_.empty() && table->id == want_rows_table_ && want_table_.empty()) {
-        // Only the rows an AI sweep added are checked (rows not yet read stay unchecked until they are).
-        bool all_known = true;
-        for (const auto &row : want_rows_) {
-          all_known &= std::any_of(table->records.begin(), table->records.end(), [&](const auto &record) { return record.id == row; });
-        }
-        if (all_known) {
-          run_unchecked_.clear();
-          for (const auto &record : table->records) { if (!want_rows_.count(record.id)) { run_unchecked_.insert(record.id); } }
-          want_rows_.clear();
+        // An explicit handoff remains a whitelist across pages; unloaded rows must never
+        // cause this to fall back to running every record on the currently visible page.
+        run_only_ = std::move(want_rows_); want_rows_.clear(); run_unchecked_.clear();
+        if (std::none_of(table->records.begin(), table->records.end(), [&](const auto &r) { return run_only_->count(r.id); })) {
+          ctx.store.project().load_table_page(table->id, 0, *run_only_->begin());
         }
       }
-      for (size_t i = 0; i < table->records.size() && i < 100; ++i) {
+      for (size_t i = 0; i < table->loaded_records() && i < 100; ++i) {
         const auto id = table->records[i].id;
-        panel->checkbox("workflow_run_row/" + std::to_string(i + 1), row_text(ctx, *table, table->records[i], i + 1),
-            {[this, id] { return run_unchecked_.count(id) == 0; }, [this, id](const bool on) {
-              if (on) { run_unchecked_.erase(id); } else { run_unchecked_.insert(id); }
+        panel->checkbox("workflow_run_row/" + std::to_string(i + 1), row_text(ctx, *table, table->records[i], size_t(table->record_offset) + i + 1),
+            {[this, id] { return run_only_ ? run_only_->count(id) != 0 : run_unchecked_.count(id) == 0; }, [this, ok, id](const bool on) {
+              if (!ok()) { return; }
+              if (run_only_) { if (on && run_only_->size() < 100) { run_only_->insert(id); } else if (!on) { run_only_->erase(id); } }
+              else if (on) { run_unchecked_.erase(id); } else { run_unchecked_.insert(id); }
               redraw();
-            }});
+            }}).disable(ctx.store.project().busy() || (run_only_ && run_only_->size() >= 100 && !run_only_->count(id)));
       }
-      if (table->records.size() > 100) { panel->paragraph(ctx.tr("workflow.run.row_limit")); }
+      if (table->total_records() > 100) { panel->paragraph(ctx.tr("workflow.run.row_limit")); }
       auto &choose = panel->row();
-      choose.button("workflow_run_all", ctx.tr("workflow.run.all"), [this] { run_unchecked_.clear(); redraw(); }).width(4);
       std::vector<std::string> all;
-      for (const auto &record : table->records) { all.push_back(record.id); }
-      choose.button("workflow_run_none", ctx.tr("workflow.run.none"), [this, all] {
-        run_unchecked_.insert(all.begin(), all.end()); redraw();
-      }).width(4);
+      for (size_t i = 0; i < table->loaded_records() && i < 100; ++i) { all.push_back(table->records[i].id); }
+      size_t combined = run_only_ ? run_only_->size() : 0;
+      if (run_only_) { for (const auto &id : all) { combined += !run_only_->count(id); } }
+      choose.button("workflow_run_all", ctx.tr("workflow.run.all"), [this, ok, all, combined] {
+        if (!ok() || combined > 100) { return; }
+        for (const auto &id : all) { if (run_only_) { run_only_->insert(id); } else { run_unchecked_.erase(id); } }
+        redraw();
+      }).width(4).disable(ctx.store.project().busy() || combined > 100);
+      choose.button("workflow_run_none", ctx.tr("workflow.run.none"), [this, ok, all] {
+        if (!ok()) { return; }
+        if (run_only_) { for (const auto &id : all) { run_only_->erase(id); } }
+        else { run_unchecked_.insert(all.begin(), all.end()); }
+        redraw();
+      }).width(4).disable(ctx.store.project().busy());
       std::vector<std::string> rows;
-      for (size_t i = 0; i < table->records.size() && i < 100; ++i) {
-        if (!run_unchecked_.count(table->records[i].id)) { rows.push_back(table->records[i].id); }
+      if (run_only_) { rows.assign(run_only_->begin(), run_only_->end()); }
+      else {
+        for (size_t i = 0; i < table->loaded_records() && i < 100; ++i) {
+          const auto &id = table->records[i].id;
+          if (!run_unchecked_.count(id)) { rows.push_back(id); }
+        }
       }
       // MuFerro steps run on a Runtime connection chosen here and frozen in the run (W5).
       Json simulation;
@@ -1382,9 +1395,13 @@ class WorkflowEditor final : public Editor {
         }
         else { panel->paragraph(ctx.tr("workflow.run.choose_runtime")); }
       }
-      panel->button("workflow_run_start", start_text, [this, ok, rows, simulation] {
-        if (ok() && !draft_.dirty() && !unapplied_text_edits()) { run_row_ = -1; workflows_->run_rows(rows, simulation); }
-      }).disable(!blocked.empty() || rows.empty() || !idle || !target_ready);
+      panel->button("workflow_run_start", start_text, [this, ok, rows, simulation, state = &ctx.store.project(),
+                    table_id = table->id, offset = table->record_offset] {
+        if (!ok() || state->busy() || draft_.dirty() || unapplied_text_edits()) { return; }
+        for (const auto &live : state->tables()) {
+          if (live.id == table_id && live.record_offset == offset) { run_row_ = -1; workflows_->run_rows(rows, simulation); return; }
+        }
+      }).disable(!blocked.empty() || rows.empty() || rows.size() > 100 || !idle || ctx.store.project().busy() || !target_ready);
     }
     runs_list(*panel, ctx);
     run_detail(*panel, ctx);
@@ -1395,14 +1412,24 @@ class WorkflowEditor final : public Editor {
   void results_question(ui::Layout &panel, EditorContext &ctx, const Json &run)
   {
     std::vector<std::string> results;
+    std::string result_table;
     for (const auto &task : member(run, "tasks")) {
       const auto record = io::get_string(member(task, "produced"), "result_record_id");
-      if (io::get_string(task, "status") == "succeeded" && !record.empty()) { results.push_back(record); }
+      if (io::get_string(task, "status") != "succeeded" || record.empty()) { continue; }
+      const auto step = io::get_string(task, "step");
+      const auto engine = io::get_string(member(member(run, "steps"), step.c_str()), "template");
+      const std::string table = engine == "muferro/1" ? "04d7cc6c-5da5-5c92-a860-f3368f7b376d" :
+          engine == "lammps/1" ? "3f63a5bf-fc98-5c23-b211-7dcb31a5b173" : "";
+      if (table.empty() || (!result_table.empty() && result_table != table)) { return; }
+      result_table = table;
+      if (std::find(results.begin(), results.end(), record) == results.end()) { results.push_back(record); }
     }
     if (results.empty() || results.size() > 100) { return; }
     const ProjectTable *table = nullptr;
     for (const auto &candidate : ctx.store.project().tables()) {
-      if (std::any_of(candidate.records.begin(), candidate.records.end(), [&](const auto &record) { return record.id == results.front(); })) {
+      // The frozen execution identifies its engine's result table; row pages are
+      // irrelevant to finding its field metadata or capturing exact produced IDs.
+      if (candidate.id == result_table) {
         table = &candidate;
       }
     }
@@ -2073,6 +2100,7 @@ class WorkflowEditor final : public Editor {
   bool show_archived_ = false, show_archived_runs_ = false;  // the lists show only archived objects
   std::string page_archive_, runs_archive_;  // the archive filter and version each list was read with
   std::set<std::string> run_unchecked_;
+  std::optional<std::set<std::string>> run_only_;
   std::string run_rows_table_, run_finished_, stale_key_;
   int run_row_ = -1;
   std::chrono::steady_clock::time_point last_poll_{};

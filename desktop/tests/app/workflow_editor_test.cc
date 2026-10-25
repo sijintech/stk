@@ -1087,6 +1087,48 @@ TEST_F(WorkflowEditorPython, RunPanelRunsChosenRowsAndOpensTheirAnalysisRuns)
   EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
 }
 
+TEST_F(WorkflowEditorPython, ExplicitRowsAcrossPagesRemainTheWholeRunSelection)
+{
+  const std::string temperature = "14141414-1414-4141-8141-141414141414";
+  const auto row = [](int i) { return std::to_string(40000000 + i) + "-4444-4444-8444-444444444444"; };
+  Json commands = Json::array({{{"op", "add_field"}, {"id", temperature}, {"table_id", table_id},
+      {"name", "T"}, {"type", "number"}, {"unit", "K"}}});
+  for (int i = 0; i < 240; ++i) {
+    commands.push_back({{"op", "add_record"}, {"id", row(i)}, {"table_id", table_id}});
+    commands.push_back({{"op", "set_cell"}, {"table_id", table_id}, {"record_id", row(i)},
+        {"field_id", temperature}, {"value", 300 + i}});
+  }
+  Json out;
+  ASSERT_NO_FATAL_FAILURE(call("project.apply", {{"handle", handle()}, {"expected_revision", revision}, {"commands", commands}}, out));
+  const Json runnable = {{"format", "stk.workflow/1"}, {"ui", Json::object()}, {"steps", {
+      {{"id", "cases"}, {"kind", "table"}, {"ref", {{"table", table_id}}}},
+      {{"id", "simulate"}, {"kind", "simulation"}, {"ref", {{"template", "demo-synthetic/1"}}},
+       {"inputs", {{"rows", {{"from", "cases.rows"}}}}}, {"parameters", {{"temperature", {{"$field", temperature}}}}}}}}};
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id},
+      {"name", "Explicit rows"}, {"document", runnable}, {"expected_revision", revision}}, out));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_run_start") && widget("workflow_run_start")->enabled; }));
+  std::string reason;
+  ASSERT_TRUE(area().editor().navigate({{"table_id", table_id}, {"rows", {row(0), row(239)}}}, {}, reason)) << reason;
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_run_start") && widget("workflow_run_start")->enabled &&
+      widget("workflow_run_start")->text == "Run the 2 selected rows"; }));
+  ASSERT_NO_FATAL_FAILURE(click("records_next"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && widget("workflow_run_start") && widget("workflow_run_start")->enabled; }));
+  EXPECT_EQ(widget("workflow_run_start")->text, "Run the 2 selected rows"); // Neither selected row is displayed on this page.
+  ASSERT_NO_FATAL_FAILURE(click("workflow_run_start"));
+  ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); f.drv->frame(); return shows("All done · 2/2 done"); }, 60))
+      << sidebar() << "\nprepare=" << calls("project.workflow_runs.prepare") << " start=" << calls("project.workflow_runs.start")
+      << "\n" << client->bridge_log().text();
+  ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.list", {{"handle", handle()}, {"workflow_id", workflow_id}}, out));
+  ASSERT_EQ(out.at("runs").size(), 1u);
+  const auto run_id = out.at("runs")[0].at("id");
+  ASSERT_NO_FATAL_FAILURE(call("project.workflow_runs.get", {{"handle", handle()}, {"run_id", run_id}}, out));
+  const auto &rows = out.at("run").at("rows");
+  ASSERT_EQ(rows.size(), 2u);
+  EXPECT_EQ(rows[0].at("id"), row(0)); EXPECT_EQ(rows[1].at("id"), row(239));
+  EXPECT_EQ(calls("project.workflow_runs.prepare"), 1u); EXPECT_EQ(calls("project.workflow_runs.start"), 1u);
+}
+
 TEST_F(WorkflowEditorPython, ChangedValuesMarkRowsStaleAndOnlyThoseRunAgain)
 {
   const std::string temperature = "14141414-1414-4141-8141-141414141414", first = "15151515-1515-4151-8151-151515151515",

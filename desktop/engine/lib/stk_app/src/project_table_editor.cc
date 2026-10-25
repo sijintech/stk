@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "stk/app/project_table_editor.hh"
+#include "editors/project_record_pages.hh"
 #include "stk/app/app_store.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/editor_area.hh"
@@ -372,13 +373,16 @@ struct ProjectTableEditor::Impl {
     }
     auto &search = layout.row();
     const auto query_current = current_context(state);
+    if (!project_record_pages(layout, ctx, state, table, query_current)) { return; }
     search.text_field("table_search", view_input(query_.text, query_current), {
         .placeholder = std::string(ctx.tr("project.filter.search")), .max_length = 256});
     search.checkbox("table_errors_only", ctx.tr("project.filter.errors"), view_input(query_.errors_only, query_current));
     search.button("table_clear_search", ctx.tr("project.filter.clear"), [this, query_current] { if (query_current()) { query_ = {}; } })
         .disable(query_.text.empty() && !query_.errors_only);
-    if (query_revision_ != state.project()->revision || query_cached_text_ != query_.text || query_cached_errors_ != query_.errors_only) {
+    if (query_revision_ != state.project()->revision || query_offset_ != table.record_offset ||
+        query_page_size_ != table.loaded_records() || query_cached_text_ != query_.text || query_cached_errors_ != query_.errors_only) {
       query_revision_ = state.project()->revision;
+      query_offset_ = table.record_offset; query_page_size_ = table.loaded_records();
       query_cached_text_ = query_.text;
       query_cached_errors_ = query_.errors_only;
       ++query_version_;
@@ -388,6 +392,7 @@ struct ProjectTableEditor::Impl {
       auto cells = std::make_shared<std::unordered_map<uint64_t, std::string>>();
       try { *rows = project_table_rows(table, query_); }
       catch (const std::exception &error) { query_error_ = error.what(); }
+      std::erase_if(*rows, [&](int row) { return size_t(row) >= table.loaded_records(); });
       for (const auto row : *rows) { ids->push_back(table.records[size_t(row)].id); }
       visible_rows_ = std::move(rows);
       visible_ids_ = std::move(ids);
@@ -395,7 +400,7 @@ struct ProjectTableEditor::Impl {
     }
     if (!query_error_.empty()) { layout.paragraph(query_error_); }
     layout.label(ctx.store.catalog().format("project.filter.count", {
-      {"shown", std::to_string(visible_rows_->size())}, {"total", std::to_string(table.records.size())}}));
+      {"shown", std::to_string(visible_rows_->size())}, {"total", std::to_string(table.total_records())}}));
     const auto rows = visible_rows_;
     const auto ids = visible_ids_;
     const auto cells = visible_cells_;
@@ -545,9 +550,13 @@ struct ProjectTableEditor::Impl {
       return;
     }
     std::vector<std::string> records{std::string(ctx.tr("project.source_pick"))}, record_ids{""};
-    for (size_t i = 0; i < source->records.size(); ++i) {
-      records.push_back(std::to_string(i + 1) + " · " + source->records[i].id.substr(0, 8));
+    if (!project_record_pages(box, ctx, state, *source, current)) { return; }
+    for (size_t i = 0; i < source->loaded_records(); ++i) {
+      records.push_back(std::to_string(source->record_offset + int64_t(i) + 1) + " · " + source->records[i].id.substr(0, 8));
       record_ids.push_back(source->records[i].id);
+    }
+    if (!source_record_.empty() && std::find(record_ids.begin(), record_ids.end(), source_record_) == record_ids.end()) {
+      records.push_back(source_record_.substr(0, 8)); record_ids.push_back(source_record_);
     }
     box.prop(ctx.tr("project.source_record")).dropdown("source_record", std::move(records), {
       [this, weak = std::weak_ptr<void>(lifetime_), record_ids] {
@@ -590,10 +599,14 @@ struct ProjectTableEditor::Impl {
         for (const auto &table : state.tables()) {
           for (size_t c = 0; c < table.fields.size(); ++c) {
             if (table.fields[c].id != field) { continue; }
+            if (!table.records_complete) {
+              row[1] = table.name; row[3] = table.fields[c].name;
+              row[4] = std::string(ctx.tr("project.record_not_loaded"));
+            }
             for (size_t r = 0; r < table.records.size(); ++r) {
               if (table.records[r].id == record) {
                 row[1] = table.name;
-                row[2] = std::to_string(r + 1) + " · " + record.substr(0, 8);
+                row[2] = r < table.loaded_records() ? std::to_string(table.record_offset + int64_t(r) + 1) + " · " + record.substr(0, 8) : record.substr(0, 8);
                 row[3] = table.fields[c].name;
                 row[4] = table.text(int(r), int(c));
               }
@@ -922,6 +935,8 @@ struct ProjectTableEditor::Impl {
   std::string query_handle_, query_identity_, query_cached_text_, query_error_;
   bool query_cached_errors_ = false;
   int64_t query_revision_ = -1;
+  int64_t query_offset_ = -1;
+  size_t query_page_size_ = 0;
   uint64_t query_version_ = 0;
   std::shared_ptr<const std::vector<int>> visible_rows_ = std::make_shared<std::vector<int>>();
   std::shared_ptr<const std::vector<std::string>> visible_ids_ = std::make_shared<std::vector<std::string>>();

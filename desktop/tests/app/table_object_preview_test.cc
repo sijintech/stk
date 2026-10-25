@@ -125,6 +125,10 @@ class TableObjectPreviewPython : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(idle());
     project().select_table(samples);
     project().select_record(row_a);
+    project().sync();
+    ASSERT_NO_FATAL_FAILURE(idle());
+    ASSERT_NE(project().table(), nullptr);
+    ASSERT_GE(project().selected_record(), 0);
     ASSERT_FALSE(project().selected_file());
     TableWorkbenchState reads(store);
     ASSERT_TRUE(reads.resolve_object({{"reference", reference}}));

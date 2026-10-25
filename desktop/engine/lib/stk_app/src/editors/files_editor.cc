@@ -48,7 +48,7 @@ class FilesEditor final : public Editor {
     layout.paragraph(project.project()->directory);
     if (!tree_->supported()) { layout.paragraph(ctx.tr("files.unsupported")); return; }
     if (!tree_->loaded() && !tree_->busy() && tree_->error().empty()) { tree_->refresh(); }
-    if (!pending_record_.empty() && project.loaded()) {
+    if (!pending_record_.empty() && project.loaded() && !project.busy() && !tree_->busy()) {
       if (pending_handle_ != project.project()->handle || pending_revision_ != project.project()->revision ||
           !tree_->select_record(pending_record_)) { navigation_error_ = std::string(ctx.tr("files.record_missing")); }
       pending_record_.clear();

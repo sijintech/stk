@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import stat
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat
+from .store import ProjectError, RevisionConflict, UnsupportedProjectFormat, _version
 
 
 TABLE_ID = str(uuid5(NAMESPACE_URL, "urn:stk:project:files:1"))
@@ -132,15 +132,26 @@ class FileIndex:
         return resolve_path(self, path, expected_revision=expected_revision)
 
     def _read(self, expected_revision=_UNSET):
-        snapshot = self.store.snapshot()
-        if expected_revision is not _UNSET:
-            if type(expected_revision) is not int or expected_revision < 0:
-                raise ProjectError("expected_revision must be a nonnegative integer")
-            if snapshot["project"]["revision"] != expected_revision:
-                raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {snapshot['project']['revision']}")
-        if snapshot["format_version"] < 3:
-            raise UnsupportedProjectFormat("Upgrade this project to format 3 before using the file index")
-        return snapshot
+        from .table_reader import TableReader
+        # Opening the file tree must not materialize every scientific table. Keep the
+        # index and its reference/expression dependencies in one read transaction.
+        with self.store._connect() as db:
+            project = dict(db.execute("SELECT * FROM project").fetchone())
+            if expected_revision is not _UNSET:
+                if type(expected_revision) is not int or expected_revision < 0:
+                    raise ProjectError("expected_revision must be a nonnegative integer")
+                if project["revision"] != expected_revision:
+                    raise RevisionConflict(f"Expected revision {expected_revision}, current revision is {project['revision']}")
+            version = _version(db)
+            if version < 3:
+                raise UnsupportedProjectFormat("Upgrade this project to format 3 before using the file index")
+            snapshot = {"project": project, "format_version": version, "tables": []}
+            row = db.execute("SELECT * FROM tables WHERE id=?", (TABLE_ID,)).fetchone()
+            if row is not None:
+                reader = TableReader(db, TABLE_ID, project["revision"], version)
+                identities = [row[0] for row in db.execute("SELECT id FROM records WHERE table_id=? ORDER BY rowid", (TABLE_ID,))]
+                snapshot["tables"].append({**dict(row), "fields": reader.fields, "records": reader.records(identities)})
+            return snapshot
 
     @staticmethod
     def _table(snapshot):

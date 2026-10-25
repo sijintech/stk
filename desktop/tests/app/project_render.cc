@@ -620,20 +620,31 @@ int main(int argc, char **argv)
       }
       if (simulation_page) {
         auto &scripts = shell.store().scripts();
-        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        // A draw can start a record-page read. Capture the settled controls, including
+        // panels opened later, instead of treating script completion as UI readiness.
+        const auto settled_frame = [&] {
+          bool rendered = true;
+          const bool settled = loop.pump_until([&] {
+            screen.run_deferred();
+            rendered = gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+            return !rendered || (!scripts.busy() && !state.busy());
+          }, 30);
+          return settled && rendered;
+        };
+        ok = ok && settled_frame();
         ok = ok && loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30);
         if (lammps) {
           if (const auto *widget = screen.ui()->find("a2/main/project_simulation/simulation_engine")) {
             widget->index.assign(1);
           }
           else { ok = false; }
-          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && settled_frame();
         }
         if (const auto *widget = screen.ui()->find("a2/main/project_simulation/simulation_source")) {
           widget->string.assign(dir.str() + "/case");
         }
         else { ok = false; }
-        ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+        ok = ok && settled_frame();
         if (const auto *widget = screen.ui()->find("a2/main/project_simulation/simulation_import"); widget && widget->enabled) {
           widget->on_click();
         }
@@ -641,7 +652,7 @@ int main(int argc, char **argv)
         ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
         ok = ok && scripts.status().at("run").at("state") == "succeeded";
         state.select_table(lammps ? "a70a9da3-fb57-5d06-9ab3-5de529a82882" : "27e50c45-2d61-523c-a56b-f505bbd595c5");
-        ok = ok && state.table() && state.table()->records.size() == 1;
+        ok = ok && settled_frame() && state.table() && state.table()->records.size() == 1;
         if (pet_study) {
           ok = ok && scripts.execute("from suan.desktop_bridge.connections import ConnectionStore\n"
               "ConnectionStore(" + io::Json(dir.str() + "/bridge").dump() + ").add_runtime('pet-demo', "
@@ -651,7 +662,7 @@ int main(int argc, char **argv)
           ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
           ok = ok && scripts.status().at("run").at("state") == "succeeded";
           for (const auto *key : {"a2/main/project_simulation", "a2/main/project_pet_study"}) {
-            ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+            ok = ok && settled_frame();
             if (const auto *widget = screen.ui()->find(key)) {
               const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
               screen.ui()->handle_event(ui::Event::mouse_down(center));
@@ -659,7 +670,7 @@ int main(int argc, char **argv)
             }
             else { ok = false; }
           }
-          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && settled_frame();
           if (const auto *widget = screen.ui()->find("a2/main/project_pet_study/pet_study_recipe")) {
             widget->string.assign("{\"diffusion\":{\"group\":\"o2_com\"}}");
           }
@@ -679,7 +690,7 @@ int main(int argc, char **argv)
               ", row], 'runtime:lab', expected_revision=p.snapshot()['project']['revision']); None");
           ok = ok && loop.pump_until([&] { screen.run_deferred(); return !scripts.busy() && !state.busy(); }, 30);
           ok = ok && scripts.status().at("run").at("state") == "succeeded";
-          ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+          ok = ok && settled_frame();
           for (const auto *key : {"a2/main/project_simulation", "a2/main/project_batches"}) {
             if (const auto *widget = screen.ui()->find(key)) {
               const ui::Vec2 center{widget->rect.x + widget->rect.w / 2, widget->rect.y + widget->rect.h / 2};
@@ -687,7 +698,7 @@ int main(int argc, char **argv)
               screen.ui()->handle_event(ui::Event::mouse_up(center));
             }
             else { ok = false; }
-            ok = ok && gfx::render_offscreen(canvas_width, 900, [&] { screen.draw(ctx); }, image, error);
+            ok = ok && settled_frame();
           }
         }
       }

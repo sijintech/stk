@@ -54,7 +54,7 @@ class WorkspaceEditor final : public Editor {
       for (const auto &table : project.tables()) {
         if (table.id == kAnalysesTable || table.id == kFilesTable || table.id == kWorkflowsTable) { continue; }
         ++tables;
-        records += table.records.size();
+        records += size_t(table.total_records());
       }
     }
     const auto *runtime = jobs.active();

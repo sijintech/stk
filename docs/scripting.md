@@ -68,10 +68,10 @@ stk.close()                                            # 结束服务；已提�
 ```python
 # 当前执行开始时选中的项目；切换焦点不会改变已经持有的 p。
 p = stk.project
-snapshot = p.snapshot()
+structure = p.catalog()
 result = p.apply(
     [{"op": "create_table", "name": "Temperature sweep"}],
-    expected_revision=snapshot["project"]["revision"],
+    expected_revision=structure["project"]["revision"],
 )
 print(result["revision"])
 ```
@@ -79,6 +79,25 @@ print(result["revision"])
 `apply` 必须明确给出读取时的修订号。UI、CLI 或其他脚本修改了项目时，旧修订会得到 `conflict`；
 不能只提高修订号后盲目重试。事务命令、类型和稳定 ID 见[项目指南](project.md)。
 项目修改会发出与原生表格相同的 `project.changed` 通知，打开该项目的视图可以刷新。
+
+大项目可先读取结构，再按页取记录，避免 `snapshot()` 一次加载全部单元格：
+
+```python
+catalog = p.catalog(limit=100)  # 表名、字段、记录数和首条记录 UUID，不含单元格
+revision = catalog["project"]["revision"]
+if catalog["tables"]:
+    table_id = catalog["tables"][0]["id"]
+    page = p.table.read(table_id, expected_revision=revision, limit=100)
+    print(page["table"]["records"])
+    if page["next_offset"] is not None:
+        page = p.table.read(table_id, expected_revision=revision,
+                            offset=page["next_offset"], limit=100)
+```
+
+结构后续页也要带同一个 `expected_revision`。`p.table.read(..., record_id=已有记录UUID)`
+可定位该记录所在页；不能同时指定非零 `offset`，缺失或属于别表的记录会报错。
+记录页保留类型、空值、引用与公式求值；页外依赖按需读取。修订冲突时重新检查，不能混合前后两版数据。
+筛选和排序继续使用 `p.table.query()`；这些读取不运行计算任务或模型请求。
 
 ```python
 p = stk.projects.create("/absolute/path/to/new-project", "Simulation")

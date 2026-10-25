@@ -566,6 +566,16 @@ class ProjectStore:
                     ON CONFLICT(record_id, field_id) DO UPDATE SET result=excluded.result""", (*key, _json(cache[key])))
         return definitions, cache, affected
 
+    def catalog(self, *, expected_revision=None, offset=0, limit=200):
+        """Read paged structure without values; pin continuation pages to the returned revision."""
+        from .catalog import catalog
+        return catalog(self, expected_revision=expected_revision, offset=offset, limit=limit)
+
+    def read_table(self, table_id, *, expected_revision, offset=0, limit=200, record_id=None):
+        """Read one table page, optionally locating the page containing a stable record ID."""
+        from .catalog import read_table
+        return read_table(self, table_id, expected_revision=expected_revision, offset=offset, limit=limit, record_id=record_id)
+
     def snapshot(self):
         """Read all tables at one revision; UUID keys do not depend on names or display order."""
         with self._connect() as db:

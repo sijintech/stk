@@ -51,7 +51,7 @@ def run(self, identity, method, params):
     if method == 'project.analysis_runs.get' and mode() == 'orphan':
         self.projects._get(params['handle']).analysis_runs._claim(
             params['run_id'], executor_id='6a731019-49cd-48ef-a508-8ee3fc2cda3e')
-    if method == 'project.snapshot' and mode() == 'legacy':
+    if method in {'project.snapshot', 'project.catalog'} and mode() == 'legacy':
         store = self.projects._get(params['handle'])
         with store._connect(write=True) as database:
             database.execute('DROP TABLE table_views')

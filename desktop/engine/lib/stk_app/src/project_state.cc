@@ -42,6 +42,9 @@ ProjectTable ProjectTable::from_json(const Json &value)
     table.records.push_back({io::get_string(record, "id"), record.at("values"),
                              record.value("definitions", Json::object()), record.value("evaluations", Json::object())});
   }
+  table.record_count = int64_t(table.records.size());
+  table.page_size = table.records.size();
+  if (!table.records.empty()) { table.first_record_id = table.records.front().id; }
   return table;
 }
 
@@ -221,7 +224,7 @@ template<class T, class F> void ProjectState::on(bridge::Future<T> future, F fn)
   std::weak_ptr<bool> weak = alive_;
   const uint64_t epoch = epoch_;
   future.then([this, weak, epoch, fn = std::move(fn)](bridge::Result<T> result) mutable {
-    if (weak.lock() && epoch == epoch_) {
+    if (weak.lock() && epoch == epoch_ && client_ == store_.bridge()) {
       fn(result);
     }
   });
@@ -242,7 +245,7 @@ void ProjectState::fail(const bridge::Error &error)
 
 bool ProjectState::ready() const
 {
-  if (!client_ || bridge_state_ != bridge::BridgeState::Ready) {
+  if (!client_ || client_ != store_.bridge() || bridge_state_ != bridge::BridgeState::Ready) {
     return false;
   }
   const auto hello = client_->hello_info();
@@ -255,6 +258,10 @@ void ProjectState::sync()
     attach(store_.bridge());
   }
   sync_archive();
+  if (ready() && loaded() && !busy() && !selection_read_failed_ && !record_id_.empty() &&
+      selected_record() < 0 && paged_reads_supported()) {
+    load_table_page(table_id_, 0, record_id_);
+  }
   if (runs_loaded_ && runs_dirty_ && ready() && loaded() && !busy()) {
     load_runs(runs_offset_);
   }
@@ -277,6 +284,8 @@ void ProjectState::attach(bridge::Client *client)
   recent_.clear();
   recent_error_.clear();
   busy_ = fetching_ = snapshot_ready_ = false;
+  table_page_loading_ = false; failed_pages_.clear();
+  selection_read_failed_ = false;
   if (project_) {
     project_->handle.clear();
   }
@@ -331,6 +340,7 @@ void ProjectState::on_state(const bridge::BridgeState state)
     recent_.clear();
     recent_error_.clear();
     busy_ = fetching_ = snapshot_ready_ = false;
+    table_page_loading_ = false; failed_pages_.clear();
     if (project_) {
       project_->handle.clear();
     }
@@ -448,6 +458,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
        dirty_revision_ = project_->revision;
        if (!same) {
          tables_.clear();
+         read_table_id_.clear(); read_record_id_.clear();
          clear_runs();
          input_snapshots_ = Json::array();
          input_verification_ = Json::object();
@@ -464,12 +475,14 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
 
 void ProjectState::clear()
 {
+  table_page_loading_ = selection_read_failed_ = false; failed_pages_.clear();
   clear_review();
   clear_drafts();
   notice_.clear();
   project_.reset();
   clear_runs();
   tables_.clear();
+  read_table_id_.clear(); read_record_id_.clear();
   file_index_ = Json::object();
   input_snapshots_ = Json::array();
   input_verification_ = Json::object();
@@ -521,6 +534,9 @@ void ProjectState::refresh()
     return;
   }
   fetching_ = true;
+  selection_read_failed_ = false;
+  table_page_loading_ = false; failed_pages_.clear();
+  if (paged_reads_supported()) { load_catalog(); changed(); return; }
   on(client_->project_snapshot(project_->handle), [this](const bridge::Result<Json> &result) {
     fetching_ = false;
     if (!result.ok()) {
@@ -533,6 +549,7 @@ void ProjectState::refresh()
       tables.push_back(ProjectTable::from_json(value));
     }
     tables_ = std::move(tables);
+    read_table_id_.clear(); read_record_id_.clear();
     file_index_ = result.value().value("file_index", Json::object());
     project_->revision = io::get_int(result.value().at("project"), "revision", 0);
     project_->format_version = int(io::get_int(result.value(), "format_version", 1));
@@ -553,48 +570,43 @@ void ProjectState::refresh()
 bool ProjectState::adopt_workspace_project(const std::optional<bridge::ProjectInfo> &info, const Json &snapshot,
                                            std::string table_id, std::string record_id, std::string *error)
 {
-  const auto reject = [error](const char *message) { if (error) { *error = message; } return false; };
-  if (!ready() || busy() || (selection_guard_ && !selection_guard_())) {
-    return reject("The current project has active work or unsaved drafts");
-  }
-  std::vector<ProjectTable> tables;
-  Json files = Json::object();
-  int64_t undo = -1, redo = -1;
+  std::optional<ProjectRead> read;
   try {
-    if (info) {
-      if (info->handle.empty() || !snapshot.is_object() || !snapshot.contains("project") ||
-          !snapshot.at("project").is_object() || io::get_string(snapshot.at("project"), "id") != info->id ||
-          io::get_int(snapshot.at("project"), "revision", -1) != info->revision ||
-          !snapshot.contains("tables") || !snapshot.at("tables").is_array()) {
-        return reject("Workspace project snapshot does not match its opened identity and revision");
-      }
-      for (const auto &value : snapshot.at("tables")) { tables.push_back(ProjectTable::from_json(value)); }
-      files = snapshot.value("file_index", Json::object());
-      const auto history = snapshot.value("edit_history", Json::object());
-      undo = io::get_int(history, "undo_revision", -1);
-      redo = io::get_int(history, "redo_revision", -1);
-      const auto selected = std::find_if(tables.begin(), tables.end(), [&table_id](const auto &t) { return t.id == table_id; });
-      if (!table_id.empty() && selected == tables.end()) { return reject("Workspace selected table is missing"); }
-      if (!record_id.empty() && (selected == tables.end() || std::none_of(selected->records.begin(), selected->records.end(),
-          [&record_id](const auto &r) { return r.id == record_id; }))) { return reject("Workspace selected record is missing"); }
+    if (info) { read = ProjectRead::from_snapshot(*info, snapshot, std::move(table_id), std::move(record_id)); }
+    else if (!table_id.empty() || !record_id.empty()) {
+      if (error) { *error = "A workspace without a project cannot select table records"; }
+      return false;
     }
-    else if (!table_id.empty() || !record_id.empty()) { return reject("A workspace without a project cannot select table records"); }
   }
-  catch (const std::exception &) { return reject("Invalid workspace project snapshot"); }
+  catch (const std::exception &) { if (error) { *error = "Invalid workspace project snapshot"; } return false; }
+  return adopt_workspace_project(std::move(read), error);
+}
+
+bool ProjectState::adopt_workspace_project(std::optional<ProjectRead> read, std::string *error)
+{
+  if (!ready() || busy() || (selection_guard_ && !selection_guard_())) {
+    if (error) { *error = "The current project has active work or unsaved drafts"; }
+    return false;
+  }
+  try { if (read) { read->validate(); } }
+  catch (const std::exception &) { if (error) { *error = "Invalid workspace project read"; } return false; }
   const auto old = project_;
   ++epoch_;
   clear();
   error_.clear();
-  project_ = info;
-  tables_ = std::move(tables);
-  file_index_ = std::move(files);
-  table_id_ = std::move(table_id);
-  record_id_ = std::move(record_id);
-  undo_revision_ = undo; redo_revision_ = redo;
-  snapshot_ready_ = info.has_value();
-  dirty_revision_ = info ? info->revision : -1;
+  if (read) {
+    project_ = std::move(read->project);
+    tables_ = std::move(read->tables);
+    file_index_ = std::move(read->file_index);
+    table_id_ = std::move(read->table_id); record_id_ = std::move(read->record_id);
+    undo_revision_ = io::get_int(read->edit_history, "undo_revision", -1);
+    redo_revision_ = io::get_int(read->edit_history, "redo_revision", -1);
+  }
+  else { project_.reset(); }
+  snapshot_ready_ = read.has_value();
+  dirty_revision_ = project_ ? project_->revision : -1;
   validate_selection();
-  if (old && !old->handle.empty() && (!info || old->handle != info->handle)) { client_->project_close(old->handle); }
+  if (old && !old->handle.empty() && (!project_ || old->handle != project_->handle)) { client_->project_close(old->handle); }
   changed();
   return true;
 }
@@ -769,19 +781,45 @@ bool ProjectState::preview()
   const auto generation = review_generation_;
   const auto base = project_->revision;
   const auto id = project_->id;
-  on(client_->project_preview(project_->handle, base, commands),
-     [this, generation, base, id, before = tables_](const bridge::Result<Json> &result) {
-    busy_ = false;
-    if (generation == review_generation_) {
-      if (!result.ok()) { review_error_ = result.error().describe(); }
-      else {
-        try { review_ = std::make_shared<ProjectReview>(ProjectReview::from_preview(id, base, before, result.value())); }
-        catch (const std::exception &) { review_error_ = std::string(store_.tr("project.review.invalid_result")); }
-      }
+  const auto handle = project_->handle;
+  // A view may only cache a page of records. Review explicitly reads its complete base;
+  // comparing a page against the full proposed snapshot would invent added records/cells.
+  on(client_->project_snapshot(handle),
+     [this, generation, base, id, handle, commands = std::move(commands)](const bridge::Result<Json> &snapshot) {
+    std::vector<ProjectTable> before;
+    if (generation != review_generation_) {
+      busy_ = false; changed();
+      if (project_ && dirty_revision_ > project_->revision) { refresh(); }
+      return;
     }
-    changed();
-    // Read conflicts and queued external edits, without replaying or rebasing this draft.
-    if (!result.ok() || dirty_revision_ > project_->revision) { refresh(); }
+    if (!snapshot.ok()) { review_error_ = snapshot.error().describe(); }
+    else {
+      try {
+        if (client_ != store_.bridge() || !ready() || !project_ || project_->handle != handle ||
+            project_->id != id || project_->revision != base || dirty_revision_ > base ||
+            snapshot.value().at("project").at("id") != id ||
+            snapshot.value().at("project").at("revision") != base || !snapshot.value().at("tables").is_array()) {
+          throw std::invalid_argument("Review base changed");
+        }
+        for (const auto &table : snapshot.value().at("tables")) { before.push_back(ProjectTable::from_json(table)); }
+      }
+      catch (const std::exception &) { review_error_ = std::string(store_.tr("project.review.invalid_result")); }
+    }
+    if (!review_error_.empty()) { busy_ = false; changed(); refresh(); return; }
+    on(client_->project_preview(handle, base, commands),
+       [this, generation, base, id, before = std::move(before)](const bridge::Result<Json> &result) {
+      busy_ = false;
+      if (generation == review_generation_) {
+        if (!result.ok()) { review_error_ = result.error().describe(); }
+        else {
+          try { review_ = std::make_shared<ProjectReview>(ProjectReview::from_preview(id, base, before, result.value())); }
+          catch (const std::exception &) { review_error_ = std::string(store_.tr("project.review.invalid_result")); }
+        }
+      }
+      changed();
+      // Read conflicts and queued external edits, without replaying or rebasing this draft.
+      if (!result.ok() || dirty_revision_ > project_->revision) { refresh(); }
+    });
   });
   changed();
   return true;
@@ -836,8 +874,13 @@ bridge::Result<Json> ProjectState::request_select(const std::string &handle, con
   // Validate both identities first. The interactive setters may fall back to the first row;
   // an explicit Python request must instead either select its exact target or change nothing.
   if (table_id_ != table_id || record_id_ != record_id) {
+    if (selection_guard_ && !selection_guard_()) {
+      return Error::make(ErrorCode::Busy, "Finish unsaved edits before changing project selection");
+    }
+    if (table_id != read_table_id_ || record_id != read_record_id_) { release_read_record(); }
     table_id_ = table_id;
     record_id_ = record_id;
+    selection_read_failed_ = false;
     changed();
   }
   return request_selection(handle);
@@ -1655,10 +1698,13 @@ const ProjectTable *ProjectState::table() const
 
 void ProjectState::select_table(std::string id)
 {
+  if (busy()) { return; }
   if (id != table_id_ && selection_guard_ && !selection_guard_()) {
     error_ = std::string(store_.tr("app.unsaved")); changed(); return;
   }
   if (id != table_id_) {
+    selection_read_failed_ = false;
+    release_read_record();
     table_id_ = std::move(id);
     record_id_.clear();
     validate_selection();
@@ -1668,12 +1714,48 @@ void ProjectState::select_table(std::string id)
 
 void ProjectState::select_record(std::string id)
 {
+  if (busy()) { return; }
   if (id != record_id_ && selection_guard_ && !selection_guard_()) {
     error_ = std::string(store_.tr("app.unsaved")); changed(); return;
   }
+  if (id != record_id_) { selection_read_failed_ = false; }
+  if (id != read_record_id_) { release_read_record(); }
   record_id_ = std::move(id);
   validate_selection();
   changed();
+}
+
+void ProjectState::release_read_record()
+{
+  if (read_record_id_.empty()) { return; }
+  for (auto &table : tables_) {
+    if (table.id == read_table_id_) {
+      std::erase_if(table.records, [this](const auto &record) { return record.id == read_record_id_; });
+      break;
+    }
+  }
+  read_table_id_.clear(); read_record_id_.clear();
+}
+
+bool ProjectState::select_read_record(const std::string &handle, const int64_t expected_revision,
+                                      const std::string &table_id, const ProjectRecord &record)
+{
+  if (!request_selection(handle).ok() || project_->revision != expected_revision || table_id_ != table_id ||
+      !canonical_project_uuid(record.id) || !record.values.is_object() ||
+      !record.definitions.is_object() || !record.evaluations.is_object()) { return false; }
+  if (record.id != record_id_ && selection_guard_ && !selection_guard_()) {
+    error_ = std::string(store_.tr("app.unsaved")); changed(); return false;
+  }
+  const auto table = std::find_if(tables_.begin(), tables_.end(), [&](const auto &t) { return t.id == table_id; });
+  if (table == tables_.end()) { return false; }
+  if (record.id != read_record_id_) { release_read_record(); }
+  if (std::none_of(table->records.begin(), table->records.end(), [&](const auto &r) { return r.id == record.id; })) {
+    table->records.push_back(record);
+    read_table_id_ = table_id; read_record_id_ = record.id;
+  }
+  record_id_ = record.id;
+  changed();
+  return true;
 }
 
 int ProjectState::selected_record() const
@@ -1695,7 +1777,9 @@ void ProjectState::validate_selection()
     table_id_ = tables_.empty() ? std::string() : tables_.front().id;
   }
   if (const auto *t = table()) {
-    if (selected_record() < 0) { record_id_ = t->records.empty() ? std::string() : t->records.front().id; }
+    if (record_id_.empty() || (t->records_complete && selected_record() < 0)) {
+      record_id_ = t->first_record_id.empty() && !t->records.empty() ? t->records.front().id : t->first_record_id;
+    }
   }
   else { record_id_.clear(); }
 }

@@ -2,6 +2,44 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：大项目分页接入（进行中）
+
+基线 `fe083a3d4f7296182f178fa3e7390e5fb311cc07`；本批工作稿未提交、未推送。
+结构目录不读取单元格，记录页按同修订分页或稳定 UUID 定位；工作台消费独立记录页，选择最多补充一条共享缓存。
+审阅另读完整基线；文件树只读索引与依赖。下方区分前一轮验证与原生首次打开接入后的新结果。
+
+- Python 文件索引／目录树／输入快照／目录与记录页／表格查询共 **87 passed**：3.12 **2.90 秒**、3.11 **3.35 秒**、3.14 **3.03 秒**；日志为 `/tmp/stk-paged-project-python.log`、`python311.log`、`python314.log`。均清空产品模型密钥、取消模型环境变量。
+- 最终构建退出 0，`/tmp/stk-paged-table-build.log`；原生表格／详情／审阅／文件树／交换／草稿恢复相关 **109/109、零跳过，22.10 秒**，日志 `/tmp/stk-paged-table-final.log` 与 `.xml`。必跑检查 **109/109**，`/tmp/stk-paged-table-required.log`；中英 **2336 键、零问题**，`git diff --check` 通过。
+- 新增用例核对：编辑器页隔离、完整 int64／空值／未设置值、隐藏字段、取消／换表失效、部分共享缓存下的完整审阅基线，以及文件索引依赖求值不读无关单元格。
+- 鼠标验收固定起点：CPU 事件测试、英文 1×、1440×1200，排序网格与详情并列可见，共享缓存只有原首行；实际 **1 次点击**当前页未缓存记录后显示正确详情，项目修订与 Viewer 保持。继续切换记录最多只有一条额外缓存，切回原缓存记录后释放额外记录。
+- 首次打开接入后两次构建退出 0：`/tmp/stk-project-open-build.log`、`/tmp/stk-project-open-build-incremental.log`。扩大的原生相关回归 **249/257，85.96 秒**，`/tmp/stk-project-open-focused.log`／`.xml`；新增 `ProjectPagingPython` **5/5** 全部通过，包装桥主动禁止 `ProjectStore.snapshot`，验证 902 行仅初读 200、203 张表结构跨页、页外精确 UUID／缺失不回退、取消不改选择、删除后刷新和单条额外缓存。已加入三平台必跑。
+- 首轮 8 项失败保留：上下文换到未加载表时空控件崩溃；示例计数误用缓存行数；导入／换表仍按同步读取断言；批次未加载；文件搜索在目录忙时丢失定位；导航被自动读页的 busy 拦住；对象定位仍用同步选择。对应修复在后续扩大回归中通过；该回归整体仍为 **262/268**，`/tmp/stk-project-open-recheck.log`／`.xml`，不能报作全绿。
+- 后续仿真定向仍曾 **5/7**，两项精确复验 **1/2**；`/tmp/stk-project-open-result-fix.log`、`/tmp/stk-project-open-diagnosed.log` 保留失败。诊断确认导入会在目录和记录读取间改变修订（预期 3、实际 4），旧处理停止加载；结果入口还错误要求查询响应包含 project_id。前者现最多三次重新读取整组目录与记录，连续修改超限停止，后者按真实查询契约检查表／修订／记录／运行身份。只重试读取，不重放修改。
+- 最新构建退出 0：`/tmp/stk-project-open-consistent-build.log`、`/tmp/stk-project-open-consistent-verify-build.log`；定向及必跑 **16/16、零跳过，40.59 秒**，`/tmp/stk-project-open-consistent-focused.log`／`.xml`。包含 8 项 `ProjectPagingPython`，一次并发修改恢复、持续修改有界停止，LAMMPS／MuFerro 原生流程、跨页工作流明确两条记录，以及脚本在 452 行表中选择末行且不改变布局／Viewer。中英 **2339 键、零问题**，差异格式检查通过。
+- 较早跨页工作流用例曾遇到桥断连；后续两次精确复验、最新定向和下述完整原生中的该用例通过，但未取得断连的确定根因，不能据此宣称已证明同一缺陷被修复。
+- 完整 Python：**3102 passed、1 failed、24 skipped、2 deselected、1 warning，673.76 秒**，`/tmp/stk-project-pages-full-python.log`。唯一失败是脚本操作清单的精确期望漏列新增的 `project.catalog` 与 `project.table.read`；保持精确集合比较并补齐这两项后，脚本及分页协议 **32 passed，7.29 秒**，`/tmp/stk-project-pages-python-recheck.log`。warning 是既有 Starlette/httpx 弃用提示；没有把跳过计为通过，也没有把局部复验改写成另一次完整套件结果。
+- 首次完整原生：**1619/1656、零跳过，381 秒**，`/tmp/stk-project-pages-full-native.log`／`.xml`。37 项失败包括 32 项仿真图形夹具、导入及三项对象预览仍按同步记录加载准备状态；旧格式测试替身只拦截旧快照接口，未在目录读取时降级夹具。保留既有字段值、旧格式／备份、Viewer 保护断言，改为等待实际异步记录与绘制稳定，并扩充替身覆盖目录入口。
+- 上述修正后构建成功，`/tmp/stk-project-pages-full-fixes-build.log`；37 项复验及必跑 **37/37、零跳过，15.38 秒**，`/tmp/stk-project-pages-full-fixes.log`／`.xml`，包含 32 项 OpenGL／Vulkan、中英、宽窄图形测试。已查看 `tests/app/out/project_batches_lammps_narrow_opengl_zh.png` 和 `project_simulation_lammps_vulkan_en.png`（本机构建目录）；不替代 Mac／Windows 真机验收。最终完整原生 **1656/1656、零失败、零跳过，391.15 秒**，`/tmp/stk-project-pages-final-native.log`／`.xml`；相关必跑 **342/342**，`/tmp/stk-project-pages-final-required.log`。最终中英 **2339 键、零问题**，`git diff --check` 通过。
+- 后端首读测量：Python 3.12.14，2 表各 10000 行、8 列，公开合成文字；命令 `env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= /home/mnemora/opt/stk-venv/bin/python tools/benchmark_table_query.py --rows 10000 --mode opening`。原始 `/tmp/stk-project-opening-benchmark.json`。完整快照 **7.473183 秒、107779725 字节 Python 分配峰值、46920072 字节 JSON**；目录＋200 条记录 **0.056649 秒、1766253 字节峰值、472556 字节 JSON**；元信息与首批记录逐项一致。启用 tracemalloc，运行时有并行编译；不含 SQLite 原生内存、RPC 封装或原生窗口，不能解释为桌面 RSS／帧率／端到端耗时。
+- 工作空间预读现复用有类型的目录／记录读取器；按打开时的项目身份与修订读取全部目录和所选记录页，全部验证成功才替换桌面。缺失记录和修订冲突不回退到其他记录，不重试采用；新桥禁止全快照，旧桥保留兼容读取。归档仍备份完整数据库，分页缓存不裁剪导出内容。
+- 工作空间及分页相关首轮 **23/24**，`/tmp/stk-workspace-pages-focused.log`／`.xml`。大项目用例在新窗口脚本服务尚未就绪时发起导入，被既有忙碌门禁拒绝；补充等待服务就绪，未放宽产品保护。重新构建退出 0，`/tmp/stk-workspace-pages-recheck-build.log`；定向及必跑 **24/24、零跳过，9.01 秒**，`/tmp/stk-workspace-pages-recheck.log`／`.xml` 与 `required.log`。三项新测试加入三平台必跑：204 张表、451 行的页外末行及精确 int64 恢复；修订冲突／缺失记录保留当前桌面并关闭新句柄；读页期间修改 Viewer 后拒绝采用。隐藏 Python 草稿保留，脚本和 Viewer 求值均未启动；首次只读两页目录及一页记录，另读首行证明归档没有丢失未缓存数据。此批直接调用恢复入口，未新增鼠标点击数结论。
+- 原生 CPU 首屏测量已完成：可选目标 `stk-project-open-benchmark` 使用真实 Python 桥和默认 1440×1200、英文 1× 布局；同一公开合成数据库两表各 10000 行、8 列，以能力协商切换全快照／分页读取。交替顺序各运行 3 次，每次新建进程；测量时没有并行编译或测试。原始报告 `/tmp/stk-native-project-open-benchmark.json`；20 行冒烟通过。首次万行测量因基准把网格页大小错写为 200 失败，按实际独立网格的 500 修正断言后重跑通过，共享缓存仍只读 200。
+- 上述 3 次中位数：从明确打开到第一帧网格有数据 **2.670650→0.448939 秒**；原生进程采样峰值 RSS **190.40→31.17 MiB**；进程树 RSS 和峰值 **257.14→108.29 MiB**；测量标记后至桥关闭的响应 UTF-8 字节数 **9.75→1.10 MiB**。两种模式均显示 500 条网格记录，项目总数 20000，首值和修订一致，脚本运行／Viewer 求值／协议违规／桥重启均为 0。分页共享记录为 200，全快照为 20000。
+- 测量边界：CPU UI 使用替代文字度量，不含 GPU、真实系统窗口、IME 或桥启动；打开时尚可有 UI 元数据初始化响应。使用暖 OS 缓存，RSS 约每 5 ms 采样，进程树相加会重复统计共享页，不是 PSS；响应计数到关闭，范围宽于首帧计时。此夹具短文本与上方后端长文本不同，不能直接比较两个基准的绝对传输量。尚不能据此宣称真实窗口、其他平台或全部大项目路径已验收。
+- 工作空间接入后的完整原生回归 **1659/1659、零失败、零跳过，386.77 秒**，`/tmp/stk-workspace-pages-full-native.log`／`.xml`；按当前 Desktop CI 的 Linux 必跑表达式检查 **829/829**，`/tmp/stk-workspace-pages-full-required.log`。中英 **2339 键、零问题**，`git diff --check` 通过。本批跨平台 CI 和 AOCI 最终对齐尚未完成。完整 Python 的失败与定向复验已如上保留，未重复完整套件；本次未改 Python 产品实现。
+
+原生 CPU 测量复现（Linux，产物不安装、不加入日常 CTest）：
+
+```bash
+cmake --build /home/mnemora/opt/stk-build/merge-check --target stk-project-open-benchmark --parallel 4
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= /home/mnemora/opt/stk-venv/bin/python tools/benchmark_project_open.py \
+  --binary /home/mnemora/opt/stk-build/merge-check/bin/stk-project-open-benchmark --rows 10000 --repeat 3
+```
+
+前提交的实际 CI 已结束：Desktop [40177991251](https://github.com/sijintech/stk/actions/runs/40177991251) **5/5 成功**；
+Runtime [40177991233](https://github.com/sijintech/stk/actions/runs/40177991233)、Docs [40177991272](https://github.com/sijintech/stk/actions/runs/40177991272)、
+Secret [40177991359](https://github.com/sijintech/stk/actions/runs/40177991359) 均成功，包含先前 Windows 换行修正的复验；下一次推送前置等待已满足。
+
 ## 2026-10-25：项目技能版本
 
 源码提交 `073c608a271c4dea001a49432879f174f2afab7c`，基线 `c6c39f3856189530db983d3c6f4dba4704c477e4`。

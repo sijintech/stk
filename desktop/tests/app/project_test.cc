@@ -320,6 +320,16 @@ class ProjectPython : public ::testing::Test {
     ASSERT_TRUE(loop.pump_until([&] { return !state().busy() && !state().discussion().busy(); }, 30)) << client->bridge_log().text();
   }
 
+  void settled_ui()
+  {
+    // Drawing may request the selected row or an editor's own table page. A quiet
+    // script alone does not mean that these separately fetched controls are ready.
+    ASSERT_TRUE(loop.pump_until([&] {
+      f.screen.run_deferred(); f.drv->frame();
+      return !state().busy() && !state().discussion().busy();
+    }, 30)) << state().error();
+  }
+
   void populated()
   {
     ASSERT_TRUE(state().create(dir.str() + "/project", "扫描"));
@@ -956,6 +966,7 @@ TEST_F(ProjectScope, SwitchingTablesClearsScopeWithoutRetargetingSharedSelection
   const auto old_capture = widget("ai_scope_capture")->on_click;
   widget("ai_scope_table")->index.assign(1); f.drv->frame();
   EXPECT_FALSE(widget("ai_scope_capture")->enabled);
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("ai_scope_row/" + second_row) != nullptr; }, 30));
   widget("ai_scope_row/" + second_row)->boolean.assign(true); f.drv->frame();
   widget("ai_scope_kind")->index.assign(1); f.drv->frame();
   widget("ai_scope_field/" + second_field)->boolean.assign(true); f.drv->frame();
@@ -995,6 +1006,38 @@ TEST_F(ProjectScope, PaginatedSelectionRejectsOversizeProductThenAllowsExplicitS
   EXPECT_EQ(state().project()->revision, 2);
 }
 
+TEST_F(ProjectScope, ReadsBeyondInitialPageAndCapturesFrozenSelectionWithoutMovingSharedTable)
+{
+  populated();
+  const auto row = [](int i) { return std::to_string(40000000 + i) + "-4444-4444-8444-444444444444"; };
+  Json commands = Json::array();
+  for (int i = 1; i <= 240; ++i) {
+    commands.push_back({{"op", "add_record"}, {"table_id", table_id}, {"id", row(i)}});
+    commands.push_back({{"op", "set_cell"}, {"table_id", table_id}, {"record_id", row(i)},
+        {"field_id", field_id}, {"value", 300 + i}});
+  }
+  ASSERT_TRUE(state().apply(commands)); settled(); open_picker();
+  ASSERT_EQ(state().table()->records.size(), 200u);
+  ASSERT_FALSE(widget("ai_scope_all")->enabled);
+  const auto old_capture = widget("ai_scope_capture")->on_click;
+  for (int i = 0; i < 25; ++i) {
+    ASSERT_NE(widget("ai_scope_next"), nullptr); ASSERT_TRUE(widget("ai_scope_next")->enabled);
+    widget("ai_scope_next")->on_click(); f.drv->frame();
+  }
+  ASSERT_TRUE(loop.pump_until([&] { f.drv->frame(); return widget("ai_scope_row/" + row(200)) != nullptr; }, 30));
+  widget("ai_scope_row/" + row(200))->boolean.assign(true); f.drv->frame();
+  ASSERT_NE(widget("ai_scope_cells"), nullptr);
+  EXPECT_EQ(widget("ai_scope_cells")->table->rows, 2);
+  EXPECT_EQ(widget("ai_scope_cells")->table->cell(0, 2), "300");
+  EXPECT_EQ(widget("ai_scope_cells")->table->cell(1, 2), "500");
+  EXPECT_EQ(state().table()->record_offset, 0); EXPECT_EQ(state().table()->records.size(), 200u);
+  EXPECT_EQ(state().record_id(), record_id);
+  old_capture(); EXPECT_TRUE(state().discussion().context().empty());
+  widget("ai_scope_capture")->on_click(); ai_frame();
+  EXPECT_EQ(state().discussion().context().at("selection").at("record_ids"), Json::array({record_id, row(200)}));
+  EXPECT_EQ(state().discussion().context().at("source_revision"), 2);
+}
+
 TEST_F(ProjectPython, HomeCreatesTheOfflineExampleProjectAndOpensIt)
 {
   auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorWorkspace));
@@ -1017,7 +1060,7 @@ TEST_F(ProjectPython, HomeCreatesTheOfflineExampleProjectAndOpensIt)
   EXPECT_EQ(core::path_to_utf8(made.filename()).rfind("stk-example-", 0), 0u) << state().project()->directory;
   size_t parameter_rows = 0;
   for (const auto &table : state().tables()) {
-    if (table.name == "Cases / 算例" || table.name == "Results / 结果") { parameter_rows += table.records.size(); }
+    if (table.name == "Cases / 算例" || table.name == "Results / 结果") { parameter_rows += size_t(table.total_records()); }
   }
   EXPECT_EQ(parameter_rows, 6u);
   f.drv->frame();
@@ -3606,6 +3649,7 @@ TEST_F(ProjectPython, MuFerroImportButtonUsesTheSharedWorkflowAndBindsProjectIde
   ASSERT_TRUE(loop.pump_until([&] { f.screen.run_deferred(); return !scripts.busy() && !state().busy(); }, 30));
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
   state().select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+  state().sync(); settled();
   ASSERT_NE(state().table(), nullptr);
   EXPECT_EQ(state().table()->records.size(), 1u);
   EXPECT_EQ(state().table()->text(0, 1), "298");
@@ -3677,6 +3721,7 @@ TEST_F(LammpsProjectPython, NativeImportRequiresAnExplicitScriptAndFencesEngineA
   ASSERT_NO_FATAL_FAILURE(done());
   ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
   state().select_table("a70a9da3-fb57-5d06-9ab3-5de529a82882");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
   ASSERT_NE(state().table(), nullptr);
   ASSERT_EQ(state().table()->records.size(), 1u);
   EXPECT_EQ(state().table()->records[0].values.at("86dea4a7-7896-57ba-b888-743fcc70782f"), "in.pet");
@@ -3788,6 +3833,7 @@ TEST_F(LammpsSimulationPython, NativePetStudyFreezesWithoutExecutionAndRejectsRe
     ASSERT_TRUE(scripts.error().empty()) << scripts.error();
     ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
     f.drv->frame();
+    ASSERT_NO_FATAL_FAILURE(settled_ui());
   };
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   ASSERT_TRUE(scripts.execute("import sys\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
@@ -3913,6 +3959,7 @@ TEST_F(LammpsSimulationPython, NativeButtonsPrepareSubmitCollectAndViewTheSavedR
     ASSERT_TRUE(scripts.error().empty()) << scripts.error();
     ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded") << output;
     f.drv->frame();
+    ASSERT_NO_FATAL_FAILURE(settled_ui());
   };
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   ASSERT_TRUE(scripts.execute("import sys\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
@@ -3944,7 +3991,9 @@ TEST_F(LammpsSimulationPython, NativeButtonsPrepareSubmitCollectAndViewTheSavedR
     ASSERT_TRUE(loop.pump_until([&] {
       f.screen.run_deferred(); f.drv->frame();
       const auto *w = widget(id); return w && w->enabled;
-    }, 30)) << id;
+    }, 30)) << id << " loaded=" << state().loaded() << " project_error=" << state().error()
+            << " project_busy=" << state().busy() << " run=" << state().run().dump()
+            << " script=" << scripts.status().dump() << " bridge=" << client->bridge_log().text();
     widget(id)->on_click();
   };
   widget("project_simulation/simulation_engine")->index.assign(1);
@@ -3952,7 +4001,11 @@ TEST_F(LammpsSimulationPython, NativeButtonsPrepareSubmitCollectAndViewTheSavedR
   widget("project_simulation/simulation_source")->string.assign(source);
   ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_import"));  // Empty script selects the sole input.
   ASSERT_NO_FATAL_FAILURE(done());
+  Json catalog = Json::array();
+  for (const auto &table : state().tables()) { catalog.push_back({{"id", table.id}, {"name", table.name}, {"count", table.total_records()}}); }
   state().select_table("a70a9da3-fb57-5d06-9ab3-5de529a82882");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
+  ASSERT_EQ(state().table_id(), "a70a9da3-fb57-5d06-9ab3-5de529a82882") << state().error() << "\n" << catalog.dump();
   ASSERT_NE(state().table(), nullptr);
   ASSERT_EQ(state().table()->records.size(), 1u);
   EXPECT_EQ(state().table()->records[0].values.at("445cc0d4-1514-517f-a00e-b73b36005fb7"), 20);
@@ -4034,6 +4087,7 @@ TEST_F(LammpsSimulationPython, NativeButtonsPrepareSubmitCollectAndViewTheSavedR
   EXPECT_NE(output.find("\"units\": \"real\""), std::string::npos);
   EXPECT_FALSE(f.shell->store().viewer().payload());  // The metadata summary is not a MuFerro domain viewer.
   ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_results"));
+  ASSERT_NO_FATAL_FAILURE(done()); // Result navigation reads the exact UUID page asynchronously.
   EXPECT_EQ(state().table_id(), "3f63a5bf-fc98-5c23-b211-7dcb31a5b173");
   ASSERT_NE(state().table(), nullptr);
   ASSERT_EQ(state().table()->records.size(), 1u);
@@ -4063,6 +4117,7 @@ TEST_F(LammpsSimulationPython, NativeBatchRunReusesTwoTasksAndEngineSwitchClears
     ASSERT_TRUE(scripts.error().empty()) << scripts.error();
     ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded");
     f.drv->frame();
+    ASSERT_NO_FATAL_FAILURE(settled_ui());
   };
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   ASSERT_TRUE(scripts.execute("import sys, time\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
@@ -4084,6 +4139,8 @@ TEST_F(LammpsSimulationPython, NativeBatchRunReusesTwoTasksAndEngineSwitchClears
   { std::ifstream file(core::path_from_utf8(dir.str() + "/lammps-batch-runtime/program.txt")); std::getline(file, program); }
   ASSERT_FALSE(program.empty());
   state().select_table("a70a9da3-fb57-5d06-9ab3-5de529a82882");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
+  ASSERT_EQ(state().table_id(), "a70a9da3-fb57-5d06-9ab3-5de529a82882");
   auto &area = f.area("a2");
   ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
   f.screen.set_maximized(&area);
@@ -4157,6 +4214,8 @@ TEST_F(LammpsSimulationPython, NativeBatchRunReusesTwoTasksAndEngineSwitchClears
   ASSERT_TRUE(state().close()); settled();
   ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
   state().select_table("a70a9da3-fb57-5d06-9ab3-5de529a82882");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
+  ASSERT_EQ(state().table_id(), "a70a9da3-fb57-5d06-9ab3-5de529a82882");
   f.drv->frame();
   ASSERT_NE(widget("members"), nullptr);
   ASSERT_TRUE(widget("members")->table);
@@ -4202,6 +4261,7 @@ TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOf
     for (size_t i = 0; i < scripts.output().line_count(); ++i) { output += scripts.output().line(i); output += '\n'; }
     ASSERT_TRUE(scripts.error().empty()) << scripts.error();
     ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded") << output;
+    ASSERT_NO_FATAL_FAILURE(settled_ui());
   };
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   ASSERT_TRUE(scripts.execute("import sys\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
@@ -4245,6 +4305,9 @@ TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOf
   ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_import"));
   ASSERT_NO_FATAL_FAILURE(python_done());
   state().select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
+  ASSERT_EQ(state().table_id(), "27e50c45-2d61-523c-a56b-f505bbd595c5")
+      << "loaded=" << state().loaded() << " error=" << state().error();
   ASSERT_NE(state().table(), nullptr);
   ASSERT_EQ(state().table()->records.size(), 1u);
   ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_prepare"));
@@ -4277,6 +4340,8 @@ TEST_F(SimulationPython, NativeMuFerroButtonsPrepareSubmitCollectViewAndReopenOf
   ASSERT_NO_FATAL_FAILURE(click("project_simulation/simulation_collect"));
   ASSERT_NO_FATAL_FAILURE(python_done());
   state().select_table("04d7cc6c-5da5-5c92-a860-f3368f7b376d");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
+  ASSERT_EQ(state().table_id(), "04d7cc6c-5da5-5c92-a860-f3368f7b376d");
   ASSERT_NE(state().table(), nullptr);
   ASSERT_EQ(state().table()->records.size(), 1u);
   const double energy = state().table()->records[0].values.at("782e3845-2a32-5871-a1d6-d6d5b82451e1");
@@ -4312,6 +4377,7 @@ TEST_F(SimulationPython, NativeBatchButtonsPersistAndSubmitEachMemberOnce)
     std::string output;
     for (size_t i = 0; i < scripts.output().line_count(); ++i) { output += scripts.output().line(i); output += '\n'; }
     ASSERT_EQ(scripts.status().at("run").at("state"), "succeeded") << output;
+    ASSERT_NO_FATAL_FAILURE(settled_ui());
   };
   ASSERT_TRUE(loop.pump_until([&] { return scripts.ready() && !scripts.busy(); }, 30));
   ASSERT_TRUE(scripts.execute("import sys, time\nsys.path.insert(0, " + Json(std::string(STK_REPO_ROOT) + "/desktop/tests/app").dump() +
@@ -4329,6 +4395,8 @@ TEST_F(SimulationPython, NativeBatchButtonsPersistAndSubmitEachMemberOnce)
   }, 30));
   jobs.select_connection("runtime:batch-test");
   state().select_table("27e50c45-2d61-523c-a56b-f505bbd595c5");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
+  ASSERT_EQ(state().table_id(), "27e50c45-2d61-523c-a56b-f505bbd595c5");
   auto &area = f.area("a2");
   ASSERT_TRUE(area.set_tab_type(0, kEditorProject));
   f.screen.set_maximized(&area);
@@ -4374,11 +4442,14 @@ TEST_F(SimulationPython, NativeBatchButtonsPersistAndSubmitEachMemberOnce)
   ASSERT_TRUE(state().close()); settled();
   ASSERT_TRUE(state().open(dir.str() + "/project")); settled();
   f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
   const auto *members = f.screen.ui()->find("a2/main/project_batches/members");
   ASSERT_NE(members, nullptr);
   ASSERT_TRUE(members->table);
   EXPECT_EQ(members->table->rows, 3);
   state().select_table("04d7cc6c-5da5-5c92-a860-f3368f7b376d");
+  ASSERT_NO_FATAL_FAILURE(settled_ui());
+  ASSERT_EQ(state().table_id(), "04d7cc6c-5da5-5c92-a860-f3368f7b376d");
   ASSERT_NE(state().table(), nullptr);
   EXPECT_EQ(state().table()->records.size(), 3u);
   EXPECT_EQ(client->stats().schema_violations, 0u);

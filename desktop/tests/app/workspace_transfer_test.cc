@@ -35,6 +35,7 @@ class WorkspaceTransferPython : public ::testing::Test {
   std::string python;
   int clicks = 0;
   double clock = 10000;
+  virtual bool paged_bridge() const { return false; }
   ProjectState &project() { return app->shell->store().project(); }
   WorkspaceTransfer &transfer() { return app->shell->workspace_transfer(); }
   const ui::Widget *widget(const char *key) { return app->screen.ui()->find(key); }
@@ -83,6 +84,54 @@ class WorkspaceTransferPython : public ::testing::Test {
     options.env["STK_PROFILES_FILE"] = directory.str() + "/" + tag + "/profiles.json";
     options.env["STK_TOKEN_PLAN_API_KEY"] = ""; options.env["STK_TOKEN_PLAN_MODEL"] = std::nullopt;
     options.strict = options.validate = true;
+    if (paged_bridge()) {
+      const auto script = directory.path() / ("paged-" + tag + ".py");
+      std::ofstream source(script);
+      source << R"PY(
+import json
+import sys
+import threading
+import time
+from pathlib import Path
+from suan.project import ProjectStore
+from suan.desktop_bridge.server import Bridge
+from suan.desktop_bridge.__main__ import main
+control = Path(sys.argv.pop(1))
+tag = sys.argv.pop(1)
+lock = threading.Lock()
+original_run, original_read = Bridge._run, ProjectStore.read_table
+def forbidden_snapshot(self):
+    raise AssertionError('Workspace opening must not read a full project snapshot')
+ProjectStore.snapshot = forbidden_snapshot
+def run(self, identity, method, params):
+    if method in {'project.catalog', 'project.table.read', 'project.snapshot'}:
+        with lock, (control / (tag + '-reads.jsonl')).open('a') as log:
+            log.write(json.dumps({'method': method, 'params': params}) + '\n')
+    return original_run(self, identity, method, params)
+Bridge._run = run
+def read(self, table_id, **kwargs):
+    marker = control / 'read-mode'
+    mode = marker.read_text() if marker.exists() and self.directory != control / 'project' else ''
+    if mode == 'conflict':
+        marker.unlink()
+        self.apply([{'op': 'rename_table', 'id': table_id, 'name': 'Concurrent workspace edit'}],
+                   expected_revision=kwargs['expected_revision'])
+    if mode == 'hold':
+        (control / 'held').touch()
+        deadline = time.monotonic() + 30
+        while not (control / 'release').exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    result = original_read(self, table_id, **kwargs)
+    if mode == 'missing':
+        result['table']['records'] = []
+    return result
+ProjectStore.read_table = read
+main()
+)PY";
+      source.close();
+      options.command = {python, "-u", core::path_to_utf8(script), directory.str(), tag,
+                         "--stdio", "--state-dir", options.state_dir, "--cache-dir", options.cache_dir, "--strict"};
+    }
     return bridge::Client::create(options);
   }
   void export_file(const std::filesystem::path &path)
@@ -149,6 +198,131 @@ class WorkspaceTransferPython : public ::testing::Test {
     loop.run_ready();
   }
 };
+
+class WorkspacePagingPython : public WorkspaceTransferPython {
+ protected:
+  bool paged_bridge() const override { return true; }
+  std::string row_id(int index) const
+  {
+    const auto tail = std::to_string(index);
+    return "e0000000-0000-4000-8000-" + std::string(12 - tail.size(), '0') + tail;
+  }
+  std::vector<Json> reads(const std::string &tag)
+  {
+    std::ifstream file(directory.path() / (tag + "-reads.jsonl"));
+    std::vector<Json> result;
+    for (std::string line; std::getline(file, line);) { result.push_back(Json::parse(line)); }
+    return result;
+  }
+  void set_mode(const char *mode)
+  {
+    std::ofstream marker(directory.path() / "read-mode"); marker << mode;
+  }
+};
+
+TEST_F(WorkspacePagingPython, LargeWorkspaceRestoresExactOffPageSelectionWithoutFullSnapshot)
+{
+  Json commands = Json::array();
+  for (int index = 0; index < 450; ++index) {
+    commands.push_back({{"op", "add_record"}, {"table_id", table_id}, {"id", row_id(index)}});
+    commands.push_back({{"op", "set_cell"}, {"table_id", table_id}, {"record_id", row_id(index)},
+                        {"field_id", field_id}, {"value", int64_t(9007199254740993LL) + index}});
+  }
+  ASSERT_TRUE(project().apply(commands)); ASSERT_TRUE(pump([&] { return !project().busy(); }));
+  commands = Json::array();
+  for (int index = 1000; index < 1203; ++index) {
+    commands.push_back({{"op", "create_table"}, {"id", row_id(index)}, {"name", "Synthetic structure page"}});
+  }
+  ASSERT_TRUE(project().apply(commands)); ASSERT_TRUE(pump([&] { return !project().busy(); }));
+  std::optional<bridge::Result<Json>> selection;
+  project().request_select_async(project().project()->handle, project().project()->revision, table_id, row_id(449),
+      [&](auto result) { selection = std::move(result); });
+  ASSERT_TRUE(pump([&] { return selection.has_value(); })); ASSERT_TRUE(selection->ok());
+  const auto revision = project().project()->revision;
+  const auto archive = directory.path() / "large.stkworkspace";
+  ASSERT_NO_FATAL_FAILURE(add_hidden_draft());
+  ASSERT_NO_FATAL_FAILURE(export_file(archive));
+  wmtest::AppFixture fresh{"en", 1, 1440, 1200};
+  auto fresh_client = bridge("fresh"); ASSERT_TRUE(fresh_client->start()); ASSERT_TRUE(fresh_client->wait_ready(60)); loop.run_ready();
+  fresh.shell->store().set_bridge(fresh_client.get()); fresh.shell->store().project().sync();
+  app = &fresh; frame();
+  ASSERT_TRUE(pump([&] { return project().ready() && !project().busy() && !fresh.shell->store().scripts().busy(); }));
+  std::optional<bridge::Result<Json>> result;
+  ASSERT_TRUE(fresh.shell->import_workspace(core::path_to_utf8(archive), directory.str() + "/paged-import", "",
+      [&](auto value) { result = std::move(value); }));
+  ASSERT_TRUE(pump([&] { return result.has_value(); })); ASSERT_TRUE(result->ok()) << result->error().describe();
+  ASSERT_TRUE(project().loaded()); EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(project().tables().size(), 204u);
+  EXPECT_EQ(project().table_id(), table_id); EXPECT_EQ(project().record_id(), row_id(449));
+  ASSERT_NE(project().table(), nullptr); EXPECT_EQ(project().table()->total_records(), 451);
+  EXPECT_EQ(project().table()->record_offset, 400); EXPECT_EQ(project().table()->records.size(), 51u);
+  EXPECT_EQ(project().table()->cell(project().selected_record(), 0)->get<int64_t>(), 9007199254741442LL);
+  EXPECT_FALSE(project().table()->records_complete);
+  EXPECT_TRUE(std::all_of(project().tables().begin() + 1, project().tables().end(), [](const auto &table) { return table.records.empty(); }));
+  ASSERT_NE(python_editor(fresh), nullptr); EXPECT_EQ(python_editor(fresh)->save_state().at("source"), draft);
+  EXPECT_TRUE(fresh.shell->store().scripts().history().empty());
+  EXPECT_EQ(fresh.shell->store().viewer().evaluations_started(), 0u);
+  const auto requests = reads("fresh");
+  EXPECT_EQ(std::count_if(requests.begin(), requests.end(), [](const auto &item) { return item.at("method") == "project.catalog"; }), 2);
+  EXPECT_EQ(std::count_if(requests.begin(), requests.end(), [](const auto &item) { return item.at("method") == "project.table.read"; }), 1);
+  for (const auto &item : requests) {
+    EXPECT_NE(item.at("method"), "project.snapshot");
+    EXPECT_EQ(item.at("params").at("expected_revision"), revision);
+    EXPECT_LE(item.at("params").at("limit").get<int>(), 200);
+  }
+  // A partial desktop cache must still export the full database: verify an unselected page.
+  std::optional<bridge::Result<Json>> page;
+  fresh_client->call("project.table.read", {{"handle", project().project()->handle}, {"table_id", table_id},
+      {"expected_revision", revision}, {"offset", 0}, {"limit", 2}}).then([&](auto value) { page = std::move(value); });
+  ASSERT_TRUE(pump([&] { return page.has_value(); })); ASSERT_TRUE(page->ok());
+  EXPECT_EQ(page->value().at("table").at("records")[0].at("values").at(field_id), 300);
+  EXPECT_EQ(page->value().at("table").at("records")[1].at("values").at(field_id), 9007199254740993LL);
+  fresh.shell->store().project().attach(nullptr); fresh.shell->store().set_bridge(nullptr);
+  fresh_client->close(); loop.run_ready(); app = &original;
+}
+
+TEST_F(WorkspacePagingPython, ConflictOrMissingSavedRecordPreservesCurrentDesktopAndClosesTheNewHandle)
+{
+  const auto archive = directory.path() / "atomic.stkworkspace";
+  ASSERT_NO_FATAL_FAILURE(export_file(archive));
+  original.shell->store().viewer().set_overlays(true); frame();
+  const auto handle = project().project()->handle;
+  const auto revision = project().project()->revision;
+  const auto before = original.shell->capture_workspace();
+  std::vector<std::string> closed;
+  auto listener = client->on_event("project.closed", [&](const auto &, const auto &data) { closed.push_back(io::get_string(data, "handle")); });
+  for (const auto *mode : {"conflict", "missing"}) {
+    set_mode(mode);
+    std::optional<bridge::Result<Json>> result;
+    ASSERT_TRUE(original.shell->import_workspace(core::path_to_utf8(archive), directory.str() + "/import-" + mode, "",
+        [&](auto value) { result = std::move(value); }));
+    ASSERT_TRUE(pump([&] { return result.has_value(); })); ASSERT_FALSE(result->ok());
+    EXPECT_EQ(result->error().code, std::string(mode) == "conflict" ? bridge::ErrorCode::Conflict : bridge::ErrorCode::InvalidParams);
+    ASSERT_TRUE(pump([&] { return !closed.empty(); }));
+    EXPECT_NE(closed.back(), handle); closed.clear();
+    EXPECT_EQ(project().project()->handle, handle); EXPECT_EQ(project().project()->revision, revision);
+    EXPECT_EQ(project().record_id(), record_id); EXPECT_EQ(original.shell->capture_workspace(), before);
+  }
+}
+
+TEST_F(WorkspacePagingPython, ChangingTheDesktopWhileItsSavedPageIsHeldRejectsTheRestore)
+{
+  const auto archive = directory.path() / "held.stkworkspace";
+  ASSERT_NO_FATAL_FAILURE(export_file(archive));
+  set_mode("hold");
+  const auto handle = project().project()->handle;
+  std::optional<bridge::Result<Json>> result;
+  ASSERT_TRUE(original.shell->import_workspace(core::path_to_utf8(archive), directory.str() + "/held-import", "",
+      [&](auto value) { result = std::move(value); }));
+  ASSERT_TRUE(pump([&] { return std::filesystem::exists(directory.path() / "held"); }));
+  original.shell->store().viewer().set_overlays(true); frame();
+  const auto changed = original.shell->capture_workspace();
+  { std::ofstream release(directory.path() / "release"); release << "continue"; }
+  ASSERT_TRUE(pump([&] { return result.has_value(); })); ASSERT_FALSE(result->ok());
+  EXPECT_EQ(result->error().code, bridge::ErrorCode::Conflict);
+  EXPECT_EQ(project().project()->handle, handle); EXPECT_EQ(original.shell->capture_workspace(), changed);
+  EXPECT_EQ(original.shell->store().viewer().evaluations_started(), 0u);
+}
 
 TEST_F(WorkspaceTransferPython, ExportFromFileMenuPreservesAHiddenProgramDraftAndNeverRunsIt)
 {

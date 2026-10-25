@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "workspace_fields.hh"
 #include "project_simulation_view.hh"
+#include "project_record_pages.hh"
 #include "archive_controls.hh"
 #include "project_navigation.hh"
 #include "project_labels.hh"
 #include "stk/app/app_store.hh"
+#include "stk/app/analysis_document.hh"
 #include "stk/app/editor.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/app/jobs_spec.hh"
@@ -13,6 +15,7 @@
 #include "stk/platform/file_dialog.hh"
 #include "editor_text.hh"
 #include <algorithm>
+#include <stdexcept>
 
 namespace stk::app {
 namespace {
@@ -213,18 +216,75 @@ void ProjectSimulationView::draw(ui::Layout &layout, EditorContext &ctx, Project
       if (!context_current(state, project, handle, generation) || state.run_id() != run) { return; }
       execute(scripts, "lammps/1", "view_structure", {{"project_id", project}, {"expected_revision", revision}, {"run_id", run}});
     }).disable(!enabled || !succeeded || !scripts.desktop_ready());
-    std::string result_record;
-    for (const auto &table : state.tables()) {
-      if (table.id != selected_engine->results) { continue; }
-      for (const auto &row : table.records) {
-        if (io::get_string(row.values, selected_engine->result_run) == run) { result_record = row.id; break; }
+    // The selected run's result may live on any page. Query its run identity instead
+    // of interpreting an unloaded result table as an absent result.
+    const auto key = handle + "/" + std::to_string(revision) + "/" + std::to_string(generation) + "/" + run;
+    if (result_key_ != key && !state.busy()) {
+      result_key_ = key; result_record_.clear(); result_error_.clear(); result_loading_ = false;
+      const auto table = std::find_if(state.tables().begin(), state.tables().end(), [](const auto &t) { return t.id == engines[1].results; });
+      auto *client = ctx.store.bridge();
+      const auto hello = client ? client->hello_info() : std::nullopt;
+      if (table != state.tables().end() && hello && hello->has_method("project.table.query")) {
+        result_loading_ = true;
+        const std::weak_ptr<bool> weak = alive_;
+        bridge::CallOptions options; options.retry = bridge::CallOptions::Retry::Never;
+        client->call("project.table.query", {{"handle", handle}, {"expected_revision", revision},
+            {"table_id", engines[1].results}, {"limit", 1}, {"definition", {{"version", 1}, {"kind", "grid"},
+            {"filters", {{"field_id", engines[1].result_run}, {"op", "eq"}, {"value", run}}}}}}, options).then(
+            [this, weak, key, &state, store = &ctx.store, client, project, handle, generation, revision, run]
+            (const bridge::Result<Json> &result) {
+          if (weak.expired() || result_key_ != key) { return; }
+          result_loading_ = false;
+          store->changed();
+          if (store->bridge() != client || !context_current(state, project, handle, generation) ||
+              state.project()->revision != revision || state.run_id() != run) { return; }
+          if (!result) { result_error_ = result.error().describe(); return; }
+          try {
+            const auto &page = result.value();
+            // Table queries bind the project through the handle; the response contains
+            // the table identity and revision, unlike project.table.read's envelope.
+            if (page.at("revision") != revision || page.at("table_id") != engines[1].results ||
+                !page.at("records").is_array() || page.at("records").size() > 1 ||
+                !page.at("record_ids").is_array() || page.at("record_ids").size() != page.at("records").size() ||
+                !page.at("issues").is_array() || !page.at("issues").empty()) {
+              throw std::invalid_argument("Invalid result record query");
+            }
+            if (!page.at("records").empty()) {
+              const auto &row = page.at("records")[0];
+              if (!canonical_uuid(io::get_string(row, "id")) || row.at("id") != page.at("record_ids")[0] ||
+                  row.at("values").at(engines[1].result_run) != run) { throw std::invalid_argument("Result belongs to another run"); }
+              result_record_ = row.at("id").get<std::string>();
+            }
+          }
+          catch (const std::exception &error) { result_error_ = error.what(); }
+          store->changed();
+        });
+      }
+      else if (table != state.tables().end()) {
+        for (const auto &row : table->records) {
+          if (io::get_string(row.values, engines[1].result_run) == run) { result_record_ = row.id; break; }
+        }
       }
     }
-    actions.button("simulation_results", ctx.tr("simulation.results"), [this, &state, project, handle, generation, run, result_record] {
-      if (!context_current(state, project, handle, generation) || state.run_id() != run) { return; }
-      state.select_table(engines[1].results);
-      state.select_record(result_record);
-    }).disable(!enabled || result_record.empty());
+    const std::weak_ptr<bool> weak = alive_;
+    const auto current_result = [this, weak, &state, project, handle, generation, run, revision, key] {
+      return !weak.expired() && result_key_ == key && context_current(state, project, handle, generation) &&
+          state.project()->revision == revision && state.run_id() == run;
+    };
+    actions.button("simulation_results", ctx.tr("simulation.results"),
+        [this, &state, handle, revision, current_result, result_record = result_record_, store = &ctx.store] {
+      if (!current_result() || state.busy()) { return; }
+      state.request_select_async(handle, revision, engines[1].results, result_record,
+          [store](const bridge::Result<Json> &result) {
+            if (!result && store->toast) { store->toast(result.error().message, ui::ToastKind::Warning); }
+          }, current_result);
+    }).disable(!enabled || result_loading_ || result_key_ != key || result_record_.empty());
+    if (!result_error_.empty()) {
+      panel->paragraph(result_error_);
+      panel->button("simulation_results_retry", ctx.tr("files.refresh"), [this, current_result] {
+        if (current_result()) { result_key_.clear(); }
+      }).disable(!enabled || result_loading_);
+    }
     hint(*panel, ctx, "simulation.lammps_result_hint");
   }
   panel->label(ctx.tr(scripts.busy() ? "simulation.busy" : "simulation.output"));
@@ -283,14 +343,18 @@ void ProjectSimulationView::draw_pet_studies(ui::Layout &layout, EditorContext &
   std::vector<std::string> ids, names;
   for (const auto &table : state.tables()) {
     if (table.id != table_id) { continue; }
-    for (const auto &row : table.records) {
+    project_record_pages(*panel, ctx, state, table, [this, weak = std::weak_ptr<bool>(alive_), &state, project, handle, generation] {
+      return !weak.expired() && context_current(state, project, handle, generation);
+    }, 200, study_id_);
+    for (size_t i = 0; i < table.loaded_records(); ++i) {
+      const auto &row = table.records[i];
       ids.push_back(row.id);
       names.push_back(row_label(ctx.store, &table, row.id) + " · " + io::get_string(row.values, name_id, row.id));
     }
   }
   const bool selection_found = std::find(ids.begin(), ids.end(), study_id_) != ids.end();
   if (selection_found) { study_create_pending_ = false; }
-  if (!study_create_pending_ && !ids.empty() && !selection_found) { study_id_ = ids.back(); }
+  if (!study_create_pending_ && !ids.empty() && study_id_.empty()) { study_id_ = ids.back(); }
   panel->prop(ctx.tr("pet_study.saved")).dropdown("pet_study_saved", std::move(names), {
     [this, ids] { const auto found = std::find(ids.begin(), ids.end(), study_id_); return found == ids.end() ? -1 : int(found - ids.begin()); },
     [this, &state, project, handle, generation, ids](int index) {
@@ -368,11 +432,11 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
     if (!context_current(state, project, handle, generation) || state.table_id() != engine.cases) { return; }
     batch_selection_.clear();
     for (const auto &table : state.tables()) {
-      if (table.id == engine.cases && table.records.size() <= 100) {
+      if (table.id == engine.cases && table.records_complete && table.total_records() <= 100) {
         for (const auto &row : table.records) { batch_selection_.push_back(row.id); }
       }
     }
-  }).disable(!enabled || !case_selected || state.table()->records.size() > 100);
+  }).disable(!enabled || !case_selected || !state.table()->records_complete || state.table()->total_records() > 100);
   selection.button("clear", ctx.tr("batch.clear"), [this, &state, project, handle, generation] {
     if (context_current(state, project, handle, generation)) { batch_selection_.clear(); }
   }).disable(!enabled || batch_selection_.empty());
@@ -385,11 +449,11 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
   const ProjectTable *cases = nullptr;
   for (const auto &table : state.tables()) { if (table.id == engine.cases) { cases = &table; } }
   if (cases) {
-    for (const auto &row : cases->records) {
-      if (std::find(batch_selection_.begin(), batch_selection_.end(), row.id) != batch_selection_.end()) {
-        selected_cells.push_back({row_label(ctx.store, cases, row.id) + " · " + io::get_string(row.values, engine.case_name),
-            row.values.value(engine.temperature, Json()).dump()});
-      }
+    for (const auto &id : batch_selection_) {
+      const auto row = std::find_if(cases->records.begin(), cases->records.end(), [&](const auto &r) { return r.id == id; });
+      if (row == cases->records.end()) { selected_cells.push_back({id, std::string(ctx.tr("project.record_not_loaded"))}); }
+      else { selected_cells.push_back({row_label(ctx.store, cases, id) + " · " + io::get_string(row->values, engine.case_name),
+          row->values.value(engine.temperature, Json()).dump()}); }
     }
   }
   if (!selected_cells.empty()) {
@@ -441,7 +505,10 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
   const auto filter = archive_filter(ctx, show_archived_batches_);
   archive_switch(*panel, ctx, "batch", show_archived_batches_, "batches_show_archived", false);
   if (batches) {
-    for (size_t i = 0; i < batches->records.size(); ++i) {
+    project_record_pages(*panel, ctx, state, *batches, [this, weak = std::weak_ptr<bool>(alive_), &state, project, handle, generation] {
+      return !weak.expired() && context_current(state, project, handle, generation);
+    }, 200, batch_id_);
+    for (size_t i = 0; i < batches->loaded_records(); ++i) {
       const auto &row = batches->records[i];
       const auto intent = row.values.value(intent_id, Json());
       const auto template_id = intent.is_object() ? io::get_string(intent, "template") : std::string();
@@ -452,7 +519,11 @@ void ProjectSimulationView::draw_batches(ui::Layout &layout, EditorContext &ctx,
       ids.push_back(row.id); names.push_back(io::get_string(row.values, name_id, row.id)); rows.push_back(i);
     }
   }
-  if (!ids.empty() && std::find(ids.begin(), ids.end(), batch_id_) == ids.end()) { batch_id_ = ids.back(); batch_member_.clear(); }
+  const bool batch_known = batches && (batches->records_complete || std::any_of(batches->records.begin(), batches->records.end(),
+      [this](const auto &row) { return row.id == batch_id_; }));
+  if (!ids.empty() && (batch_id_.empty() || batch_known) && std::find(ids.begin(), ids.end(), batch_id_) == ids.end()) {
+    batch_id_ = ids.back(); batch_member_.clear();
+  }
   panel->prop(ctx.tr("batch.saved")).dropdown("saved", std::move(names), {
     [this, ids] { const auto it = std::find(ids.begin(), ids.end(), batch_id_); return it == ids.end() ? -1 : int(it - ids.begin()); },
     [this, &state, project, handle, generation, ids](int row) {

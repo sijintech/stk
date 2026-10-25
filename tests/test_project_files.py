@@ -2,6 +2,7 @@
 import shutil
 import sqlite3
 import json
+from uuid import uuid4
 
 from click.testing import CliRunner
 
@@ -40,6 +41,40 @@ def test_index_uses_shared_table_and_stable_ids_with_relative_and_external_paths
     assert again["record_ids"] == answer["record_ids"][:1]
     assert len(store.files.list()["records"]) == 2
     assert ProjectStore(store.directory).files.list() == store.files.list()
+
+
+def test_file_navigation_reads_only_index_and_required_dependencies(files, monkeypatch):
+    store, inside, _ = files
+    record = store.files.index([str(inside)], expected_revision=0)["record_ids"][0]
+    table, field, source, unrelated = [str(uuid4()) for _ in range(4)]
+    store.apply([
+        {"op": "create_table", "id": table, "name": "Large scientific data"},
+        {"op": "add_field", "table_id": table, "id": field, "name": "Path", "type": "text"},
+        {"op": "add_record", "table_id": table, "id": source},
+        {"op": "add_record", "table_id": table, "id": unrelated},
+        {"op": "set_cell", "table_id": table, "record_id": source, "field_id": field, "value": "inputs/参数.json"},
+        {"op": "set_cell", "table_id": table, "record_id": unrelated, "field_id": field, "value": "unused"},
+        {"op": "set_reference", "table_id": TABLE_ID, "record_id": record, "field_id": FIELD_IDS["path"],
+         "source": {"record_id": source, "field_id": field}},
+    ], expected_revision=1)
+    expected = store.files.list()
+    with store._connect(write=True) as db:
+        db.execute("DELETE FROM evaluations")
+        # A whole-project read would decode this unrelated value and fail.
+        db.execute("UPDATE cells SET value='invalid json' WHERE record_id=?", (unrelated,))
+    before = store.path.read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("File navigation must not load a whole-project snapshot")
+
+    monkeypatch.setattr(store, "snapshot", forbidden)
+    assert store.files.list() == expected
+    assert store.files.resolve(record, expected_revision=2)["path"] == str(inside)
+    children = store.files.children("inputs", expected_revision=2)
+    assert children["revision"] == 2
+    assert children["entries"][0]["record_id"] == record
+    assert store.files.resolve_path("inputs/参数.json", expected_revision=2)["path"] == str(inside)
+    assert store.path.read_bytes() == before
 
 
 def test_project_relocation_preserves_relative_paths_and_external_locations(files, tmp_path):

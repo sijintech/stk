@@ -11358,6 +11358,199 @@
         "result": {
           "$ref": "#/$defs/projectAnalysisWriteResult"
         }
+      },
+      "project.catalog": {
+        "description": "Read revision-bound project structure without cell values. Continuation pages require expected_revision. No evaluation or resource reads.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "format_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "project": {
+              "$ref": "#/$defs/projectSnapshot/properties/project"
+            },
+            "tables": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "fields": {
+                    "$ref": "#/$defs/projectSnapshot/properties/tables/items/properties/fields"
+                  },
+                  "record_count": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "first_record_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/projectUuid"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "fields",
+                  "record_count",
+                  "first_record_id"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "edit_history": {
+              "$ref": "#/$defs/projectSnapshot/properties/edit_history"
+            },
+            "file_index": {
+              "$ref": "#/$defs/projectSnapshot/properties/file_index"
+            }
+          },
+          "required": [
+            "format_version",
+            "project",
+            "tables",
+            "total",
+            "offset",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.read": {
+        "description": "Read a typed record page at one revision, optionally locating an exact record UUID. No writes or execution; only requested rows and their scalar dependencies are read.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "table_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "record_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "table_id",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "format_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "table": {
+              "$ref": "#/$defs/projectSnapshot/properties/tables/items"
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "next_offset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "project_id",
+            "revision",
+            "format_version",
+            "table",
+            "total",
+            "offset",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "events": {

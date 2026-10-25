@@ -53,7 +53,10 @@ void AppShell::handle_ui_request(const std::string &operation, const Json &param
       return;
     }
     try {
-      perform_ui_request(*screen, operation, params, complete);
+      perform_ui_request(*screen, operation, params, complete, [this, weak, screen, valid, expires_at] {
+        return !weak.expired() && valid() && !expired(expires_at) &&
+            std::find(screens_.begin(), screens_.end(), screen) != screens_.end();
+      });
     }
     catch (const std::exception &error) {
       complete(Error::make(ErrorCode::InvalidParams, error.what()));
@@ -62,7 +65,7 @@ void AppShell::handle_ui_request(const std::string &operation, const Json &param
 }
 
 void AppShell::perform_ui_request(wm::Screen &screen, const std::string &operation, const Json &params,
-                                  ScriptState::Completion complete)
+                                  ScriptState::Completion complete, std::function<bool()> valid)
 {
   if (operation.rfind("viewer.", 0) == 0) {
     perform_viewer_request(screen, operation, params, std::move(complete));
@@ -102,9 +105,17 @@ void AppShell::perform_ui_request(wm::Screen &screen, const std::string &operati
       }
     }
     auto &project = store_.project();
-    complete(select ? project.request_select(params["handle"].get<std::string>(), params["expected_revision"].get<int64_t>(),
-                                             params["table_id"].get<std::string>(), params["record_id"].get<std::string>()) :
-                      project.request_selection(params["handle"].get<std::string>()));
+    if (select) {
+      project.request_select_async(params["handle"].get<std::string>(), params["expected_revision"].get<int64_t>(),
+          params["table_id"].get<std::string>(), params["record_id"].get<std::string>(), std::move(complete),
+          [this, valid = std::move(valid)] {
+        if (!valid()) { return false; }
+        return std::none_of(screens_.begin(), screens_.end(), [](const auto *target) {
+          return target->ui() && target->ui()->text_input_active();
+        });
+      });
+    }
+    else { complete(project.request_selection(params["handle"].get<std::string>())); }
     return;
   }
   if (operation == "project.review") {

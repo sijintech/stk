@@ -134,26 +134,17 @@ void require_workspace_editors(const nlohmann::json &root)
     }
   }
 }
-void check_snapshot(const std::optional<bridge::ProjectInfo> &project, const Json &snapshot,
-                    const std::string &table, const std::string &record)
+void check_project_read(const std::optional<bridge::ProjectInfo> &project, const std::optional<ProjectRead> &read,
+                         const std::string &table, const std::string &record)
 {
   if (!project) {
-    require(table.empty() && record.empty(), "A workspace without a project cannot select a table record");
+    require(!read && table.empty() && record.empty(), "A workspace without a project cannot select a table record");
     return;
   }
-  require(!project->handle.empty() && snapshot.is_object() && snapshot.contains("project") &&
-      io::get_string(snapshot.at("project"), "id") == project->id &&
-      io::get_int(snapshot.at("project"), "revision", -1) == project->revision &&
-      snapshot.contains("tables") && snapshot.at("tables").is_array(), "Workspace project snapshot is inconsistent");
-  bool found_table = table.empty(), found_record = record.empty();
-  for (const auto &raw : snapshot.at("tables")) {
-    const auto parsed = ProjectTable::from_json(raw);
-    if (parsed.id == table) {
-      found_table = true;
-      for (const auto &row : parsed.records) { if (row.id == record) { found_record = true; } }
-    }
-  }
-  require(found_table && found_record, "Workspace selected table or record is missing");
+  require(read && read->project.handle == project->handle && read->project.id == project->id &&
+      read->project.revision == project->revision && read->project.format_version == project->format_version &&
+      read->table_id == table && read->record_id == record, "Workspace project read is inconsistent");
+  read->validate();
 }
 struct Staging {
   fs::path directory;
@@ -186,7 +177,7 @@ struct AppShell::WorkspacePrepared {
   std::string table, record;
   bool adopt_project = false;
   std::optional<bridge::ProjectInfo> project;
-  Json snapshot;
+  std::optional<ProjectRead> project_read;
 };
 
 WorkspaceTransfer &AppShell::workspace_transfer()
@@ -290,7 +281,7 @@ bool AppShell::commit_workspace(const std::shared_ptr<WorkspacePrepared> &prepar
     require(prepared && !text_input_active() && !has_unsaved_changes() && !store_.project().busy() && !store_.scripts().busy() &&
             !store_.has_open_result(),
             "Current work changed or has unsaved drafts; restore was not applied");
-    if (prepared->adopt_project) { check_snapshot(prepared->project, prepared->snapshot, prepared->table, prepared->record); }
+    if (prepared->adopt_project) { check_project_read(prepared->project, prepared->project_read, prepared->table, prepared->record); }
     else {
       const auto &project = store_.project();
       if (!prepared->table.empty()) {
@@ -323,8 +314,7 @@ bool AppShell::commit_workspace(const std::shared_ptr<WorkspacePrepared> &prepar
     }
     require(!store_.has_open_result(), "A Viewer source is waiting to open; restore was not applied");
     if (prepared->adopt_project) {
-      if (!store_.project().adopt_workspace_project(prepared->project, prepared->snapshot,
-            prepared->table, prepared->record, error)) { cleanup(); return false; }
+      if (!store_.project().adopt_workspace_project(prepared->project_read, error)) { cleanup(); return false; }
     }
     else if (store_.project().project()) {
       const auto &project = *store_.project().project();
@@ -640,20 +630,49 @@ bool AppShell::receive_workspace(const std::string &method, Json params, ScriptS
             if (store_.bridge() == client && workspace_session(client) == session) { client->project_close(prepared->project->handle); }
             finish(workspace_error("Workspace target changed while opening its project (" + changed + ")")); return;
           }
-          client->call("project.snapshot", {{"handle", prepared->project->handle}}, options).then(
-            [this, weak, client, session, finish, prepared, schedule_adopt](bridge::Result<Json> snapshot) mutable {
+          const auto read_complete = [this, weak, client, session, finish, prepared, schedule_adopt]
+              (bridge::Result<ProjectRead> read) {
+            if (weak.expired()) { return; }
+            if (!read) {
+              if (store_.bridge() == client && workspace_session(client) == session) { client->project_close(prepared->project->handle); }
+              finish(read.error()); return;
+            }
+            prepared->project_read = std::move(read.value());
+            schedule_adopt();
+          };
+          const auto hello = client->hello_info();
+          if (hello && hello->has_method("project.catalog") && hello->has_method("project.table.read")) {
+            read_project_pages([weak, client, options, current](const std::string &method, Json params, auto complete) {
               if (weak.expired()) { return; }
-              if (!snapshot) {
-                if (store_.bridge() == client && workspace_session(client) == session) { client->project_close(prepared->project->handle); }
-                finish(snapshot.error()); return;
+              std::string changed;
+              if (!current(&changed)) {
+                complete(workspace_error("Workspace target changed while reading its project (" + changed + ")")); return;
               }
-              try { prepared->snapshot = snapshot.value().at("snapshot"); }
+              client->call(method, std::move(params), options).then(
+                  [weak, current, complete = std::move(complete)](const bridge::Result<Json> &response) {
+                if (weak.expired()) { return; }
+                std::string changed;
+                if (!current(&changed)) {
+                  complete(workspace_error("Workspace target changed while reading its project (" + changed + ")")); return;
+                }
+                complete(response);
+              });
+            }, *prepared->project, prepared->table, prepared->record, true, read_complete);
+          }
+          else {
+            // Older services retain the published full-snapshot fallback.
+            client->call("project.snapshot", {{"handle", prepared->project->handle}}, options).then(
+                [weak, prepared, read_complete](const bridge::Result<Json> &snapshot) mutable {
+              if (weak.expired()) { return; }
+              if (!snapshot) { read_complete(snapshot.error()); return; }
+              std::optional<ProjectRead> read;
+              try { read = ProjectRead::from_snapshot(*prepared->project, snapshot.value().at("snapshot"), prepared->table, prepared->record); }
               catch (const std::exception &) {
-                if (store_.bridge() == client && workspace_session(client) == session) { client->project_close(prepared->project->handle); }
-                finish(workspace_error("Invalid workspace project snapshot response")); return;
+                read_complete(workspace_error("Invalid workspace project snapshot response")); return;
               }
-              schedule_adopt();
+              read_complete(std::move(*read));
             });
+          }
         });
     });
   store_.changed();

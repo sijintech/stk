@@ -312,6 +312,42 @@ assert p.snapshot() == before and len(p.history()) == 1
   EXPECT_EQ(project.project()->revision, 1);
 }
 
+TEST_F(ScriptPython, ProjectSelectionLoadsAnExactRowOutsideTheInitialPage)
+{
+  ASSERT_NO_FATAL_FAILURE(selection_project());
+  execute(R"PY(
+extra_rows = [str(uuid4()) for _ in range(450)]
+commands = []
+for index, row in enumerate(extra_rows):
+    commands.extend([
+        {'op': 'add_record', 'table_id': t1, 'id': row},
+        {'op': 'set_cell', 'table_id': t1, 'record_id': row, 'field_id': f1, 'value': f'Page row {index}'},
+    ])
+p.apply(commands, expected_revision=1)
+)PY");
+  auto &project = f.shell->store().project();
+  ASSERT_TRUE(pump([&] { return project.loaded() && !project.busy() && project.project()->revision == 2; }));
+  ASSERT_NE(project.table(), nullptr);
+  ASSERT_EQ(project.table()->total_records(), 452);
+  ASSERT_EQ(project.table()->records.size(), 200u);
+  const auto layout = f.screen.to_json();
+  const auto evaluations = f.shell->store().viewer().evaluations_started();
+  execute(R"PY(
+selected = p.select(t1, extra_rows[-1], expected_revision=2)
+assert selected == p.selection()
+assert selected['record_id'] == extra_rows[-1] and selected['revision'] == 2
+selection_rejected(dict(select_request, expected_revision=2, record_id=str(uuid4())), 'not_found')
+assert p.selection() == selected
+)PY");
+  ASSERT_NE(project.table(), nullptr);
+  EXPECT_EQ(project.table()->record_offset, 400);
+  EXPECT_EQ(project.table()->records.size(), 52u);
+  EXPECT_EQ(project.table()->text(project.selected_record(), 0), "Page row 449");
+  EXPECT_EQ(f.screen.to_json(), layout);
+  EXPECT_EQ(f.shell->store().viewer().evaluations_started(), evaluations);
+  EXPECT_EQ(project.project()->revision, 2);
+}
+
 TEST_F(ScriptPython, ProjectSelectionClearsDeletedRecordsAndTables)
 {
   ASSERT_NO_FATAL_FAILURE(selection_project());

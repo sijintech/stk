@@ -265,8 +265,8 @@ struct TableWorkbench::Impl {
   }
   int detail_column(const ProjectState &state) const
   {
-    if (!state.table()) { return -1; }
-    const auto &fs = state.table()->fields;
+    if (!display_table(state)) { return -1; }
+    const auto &fs = display_table(state)->fields;
     const auto at = std::find_if(fs.begin(), fs.end(), [this](const auto &f) { return f.id == detail_field_id; });
     return at == fs.end() ? -1 : int(at - fs.begin());
   }
@@ -283,9 +283,9 @@ struct TableWorkbench::Impl {
     advanced.select_field(id);
     selection = {};
     for (size_t r = 0; r < rows.size(); ++r) {
-      if (state.table()->records[size_t(rows[r])].id != state.record_id()) { continue; }
+      if (display_table(state)->records[size_t(rows[r])].id != state.record_id()) { continue; }
       for (size_t c = 0; c < columns.size(); ++c) {
-        if (state.table()->fields[size_t(columns[c])].id == id) { selection = {{int(r), int(c + 1)}, {int(r), int(c + 1)}}; }
+        if (display_table(state)->fields[size_t(columns[c])].id == id) { selection = {{int(r), int(c + 1)}, {int(r), int(c + 1)}}; }
       }
     }
     return true;
@@ -315,6 +315,26 @@ struct TableWorkbench::Impl {
   {
     view = default_view(); view_id.clear(); view_name.clear(); search.clear(); offset = 0;
     configure(); query_needed = true; view_changed = false; ++mapping_epoch;
+  }
+  const ProjectTable *display_table(const ProjectState &state) const
+  {
+    if (!query_needed && reads) {
+      if (const auto *page = reads->query_table()) { return page; }
+    }
+    return state.table();
+  }
+  void select_record(ProjectState &state, const std::string &id)
+  {
+    if (!query_needed && reads && reads->query_table()) { reads->select_record(id); }
+    else { state.select_record(id); }
+  }
+  int selected_row(const ProjectState &state) const
+  {
+    const auto *table = display_table(state);
+    if (!table) { return -1; }
+    const auto at = std::find_if(table->records.begin(), table->records.end(),
+        [&](const auto &record) { return record.id == state.record_id(); });
+    return at == table->records.end() ? -1 : int(at - table->records.begin());
   }
   void sync(EditorContext &ctx, ProjectState &state)
   {
@@ -347,9 +367,9 @@ struct TableWorkbench::Impl {
       settings = new_field = new_table = paste_modal = object_modal = csv_modal = false;
     }
     if (restored_cell_draft && state.project()->id == restored_draft_project_id && state.table_id() == table_id &&
-        state.project()->revision == draft_revision && state.table() &&
-        std::any_of(state.table()->fields.begin(), state.table()->fields.end(), [this](const auto &f) { return f.id == draft_field; }) &&
-        std::any_of(state.table()->records.begin(), state.table()->records.end(), [this](const auto &r) { return r.id == draft_record; })) {
+        state.project()->revision == draft_revision && display_table(state) &&
+        std::any_of(display_table(state)->fields.begin(), display_table(state)->fields.end(), [this](const auto &f) { return f.id == draft_field; }) &&
+        std::any_of(display_table(state)->records.begin(), display_table(state)->records.end(), [this](const auto &r) { return r.id == draft_record; })) {
       draft_handle = state.project()->handle; restored_cell_draft = false;
     }
     if (pending_edit && !state.busy()) {
@@ -357,7 +377,7 @@ struct TableWorkbench::Impl {
       if (state.error().empty() && state.project()->handle == draft_handle && state.project()->revision == draft_revision + 1) {
         dirty = false; draft_text.clear();
         if (!pending_record.empty()) {
-          state.select_record(pending_record);
+          select_record(state, pending_record);
           if (state.record_id() == pending_record) { active_field_id = detail_field_id = pending_field; ++selection_epoch; }
         }
       }
@@ -367,9 +387,9 @@ struct TableWorkbench::Impl {
       seen_revision = state.project()->revision; handle = state.project()->handle;
       query_needed = true; ++mapping_epoch;
     }
-    if (state.table()) {
-      column_config(*state.table());
-      view["frozen_columns"] = std::min(view.value("frozen_columns", 1), int(state.table()->fields.size()));
+    if (display_table(state)) {
+      column_config(*display_table(state));
+      view["frozen_columns"] = std::min(view.value("frozen_columns", 1), int(display_table(state)->fields.size()));
     }
     if (reads->views().is_null() && !reads->pending("project.table.views.list")) { reads->load_views(); }
     if (reads->views().is_object()) {
@@ -379,7 +399,7 @@ struct TableWorkbench::Impl {
         if (at == views.end()) { reset_view(); }
         else {
           auto definition = at->at("definition");
-          for (const auto &f : state.table()->fields) {
+          for (const auto &f : display_table(state)->fields) {
             auto &cs = definition["columns"];
             if (std::none_of(cs.begin(), cs.end(), [&](const auto &c) { return io::get_string(c, "field_id") == f.id; })) { cs.push_back({{"field_id", f.id}, {"width", 160}, {"hidden", false}}); }
           }
@@ -392,12 +412,13 @@ struct TableWorkbench::Impl {
       Json request = {{"offset", offset}, {"limit", 500}};
       if (!view_id.empty() && !view_changed) { request["view_id"] = view_id; }
       else { request["definition"] = view; }
-      reads->query(request);
+      ++mapping_epoch;
+      reads->query(request, [this](const Json &) { ++mapping_epoch; });
     }
   }
   void rebuild(const ProjectState &state)
   {
-    const auto &table = *state.table();
+    const auto &table = *display_table(state);
     const auto old_rows = rows, old_columns = columns;
     group_column = -1;
     if (view.contains("group_field_id") && view["group_field_id"].is_string()) {
@@ -406,13 +427,10 @@ struct TableWorkbench::Impl {
     rows.clear(); columns.clear();
     const auto &result = reads->query_result();
     total = int(table.records.size()); next_offset = -1;
-    const bool queried = result.is_object() && result.value("revision", int64_t(-1)) == state.project()->revision &&
+    const bool queried = reads->query_table() && result.is_object() && result.value("revision", int64_t(-1)) == state.project()->revision &&
                          io::get_string(result, "table_id") == table.id && !query_needed && !reads->pending("project.table.query");
     if (queried) {
-      const auto &ids = result.at("record_ids");
-      std::unordered_map<std::string, int> indices;
-      for (size_t i = 0; i < table.records.size(); ++i) { indices[table.records[i].id] = int(i); }
-      for (const auto &id : ids) { auto it = indices.find(id.get<std::string>()); if (it != indices.end()) { rows.push_back(it->second); } }
+      rows.resize(table.records.size()); std::iota(rows.begin(), rows.end(), 0);
       total = result.value("total", int(rows.size()));
       if (result.contains("next_offset") && result["next_offset"].is_number_integer()) { next_offset = result["next_offset"].get<int>(); }
     }
@@ -458,8 +476,8 @@ struct TableWorkbench::Impl {
   }
   bool valid(ui::TableCell c) const
   { return c.row >= 0 && size_t(c.row) < rows.size() && c.column > 0 && size_t(c.column - 1) < columns.size(); }
-  const ProjectField &field(const ProjectState &s, ui::TableCell c) const { return s.table()->fields[size_t(columns[size_t(c.column - 1)])]; }
-  std::string record(const ProjectState &s, ui::TableCell c) const { return s.table()->records[size_t(rows[size_t(c.row)])].id; }
+  const ProjectField &field(const ProjectState &s, ui::TableCell c) const { return display_table(s)->fields[size_t(columns[size_t(c.column - 1)])]; }
+  std::string record(const ProjectState &s, ui::TableCell c) const { return display_table(s)->records[size_t(rows[size_t(c.row)])].id; }
   Json target(const ProjectState &s, ui::TableCell c, const std::string &op = "set_cell") const
   { return {{"op", op}, {"table_id", s.table_id()}, {"record_id", record(s, c)}, {"field_id", field(s, c).id}}; }
   bool select(AppShell &shell, ProjectState &state, ui::TableSelection selected)
@@ -470,7 +488,7 @@ struct TableWorkbench::Impl {
       return false;
     }
     if (!valid(selected.active) || !available(shell, state)) { return false; }
-    state.select_record(record(state, selected.active));
+    select_record(state, record(state, selected.active));
     if (state.record_id() != record(state, selected.active)) { return false; }
     selection = selected;
     ++selection_epoch;
@@ -483,7 +501,7 @@ struct TableWorkbench::Impl {
   {
     if (!valid(cell)) { return {}; }
     if (dirty && draft_record == record(state, cell) && draft_field == field(state, cell).id) { return draft_text; }
-    const auto *value = state.table()->cell(rows[size_t(cell.row)], columns[size_t(cell.column - 1)]);
+    const auto *value = display_table(state)->cell(rows[size_t(cell.row)], columns[size_t(cell.column - 1)]);
     const auto &type = field(state, cell).type;
     if (value && value->is_null() && (type == "date" || type == "url" || type == "single_select")) { return {}; }
     return literal_text(value, field(state, cell));
@@ -539,8 +557,8 @@ struct TableWorkbench::Impl {
   {
     if (unsaved() || state.busy() || first_column < 1) { error = "project.table.selection_dirty"; return; }
     Json rs = Json::array(), fs = Json::array();
-    for (const auto r : indices) { if (r >= 0 && size_t(r) < rows.size()) { rs.push_back(state.table()->records[size_t(rows[size_t(r)])].id); } }
-    for (size_t c = size_t(first_column - 1); c < columns.size(); ++c) { fs.push_back(state.table()->fields[size_t(columns[c])].id); }
+    for (const auto r : indices) { if (r >= 0 && size_t(r) < rows.size()) { rs.push_back(display_table(state)->records[size_t(rows[size_t(r)])].id); } }
+    for (size_t c = size_t(first_column - 1); c < columns.size(); ++c) { fs.push_back(display_table(state)->fields[size_t(columns[c])].id); }
     paste_plan = nullptr; paste_modal = true; const auto generation = ++paste_epoch;
     reads->plan_paste({{"record_ids", rs}, {"field_ids", fs}, {"text", text}, {"append_rows", append_paste}, {"fit_targets", true}},
       [this, weak = std::weak_ptr<void>(alive), generation](const Json &plan) { if (!weak.expired() && paste_modal && generation == paste_epoch) { paste_plan = plan; } });
@@ -591,7 +609,7 @@ struct TableWorkbench::Impl {
   }
   void grid(ui::Layout &layout, EditorContext &ctx, ProjectState &state, float height)
   {
-    const auto &t = *state.table();
+    const auto &t = *display_table(state);
     auto current = fence(state, true);
     ui::TableSpec spec;
     spec.columns.push_back({group_column >= 0 ? std::string(ctx.tr("table.group")) + " / #" : "#", group_column >= 0 ? 8.0f : 2.5f, false, false, "__record_number"});
@@ -604,25 +622,25 @@ struct TableWorkbench::Impl {
     spec.frozen_columns = view.value("frozen_columns", 1);
     spec.cell = [this, current, &state](int r, int c) {
       if (!current() || r < 0 || size_t(r) >= rows.size()) { return std::string(); }
-      return c == 0 ? (group_column < 0 ? "" : display(*state.table(), rows[size_t(r)], group_column) + " · ") + std::to_string(offset + r + 1)
-                    : valid({r, c}) ? display(*state.table(), rows[size_t(r)], columns[size_t(c - 1)]) : std::string();
+      return c == 0 ? (group_column < 0 ? "" : display(*display_table(state), rows[size_t(r)], group_column) + " · ") + std::to_string(offset + r + 1)
+                    : valid({r, c}) ? display(*display_table(state), rows[size_t(r)], columns[size_t(c - 1)]) : std::string();
     };
     spec.compare = [this, current, &state](int a, int b, int c) {
-      return current() && valid({a, c}) && valid({b, c}) ? state.table()->compare(rows[size_t(a)], rows[size_t(b)], columns[size_t(c - 1)]) : 0;
+      return current() && valid({a, c}) && valid({b, c}) ? display_table(state)->compare(rows[size_t(a)], rows[size_t(b)], columns[size_t(c - 1)]) : 0;
     };
     spec.on_sort = [this, current, &state](int c, bool ascending) {
       if (!current() || selection_dirty() || c <= 0 || size_t(c - 1) >= columns.size()) { return; }
-      sort_rows = Json::array({{{"field_id", state.table()->fields[size_t(columns[size_t(c - 1)])].id},
+      sort_rows = Json::array({{{"field_id", display_table(state)->fields[size_t(columns[size_t(c - 1)])].id},
                                 {"direction", ascending ? "asc" : "desc"}, {"nulls", "last"}}}); changed_view();
     };
     spec.selected = {[this, current, &state] {
-      if (!current()) { return -1; } for (size_t i = 0; i < rows.size(); ++i) { if (state.table()->records[size_t(rows[i])].id == state.record_id()) { return int(i); } } return -1;
+      if (!current()) { return -1; } for (size_t i = 0; i < rows.size(); ++i) { if (display_table(state)->records[size_t(rows[i])].id == state.record_id()) { return int(i); } } return -1;
     }, [this, current, shell = &ctx.area.shell(), &state](int r) {
       if (!current() || r < 0 || size_t(r) >= rows.size()) { return; }
       if (!columns.empty()) { select(*shell, state, {{r, 1}, {r, 1}}); }
       else if (available(*shell, state)) {
-        const auto id = state.table()->records[size_t(rows[size_t(r)])].id;
-        state.select_record(id);
+        const auto id = display_table(state)->records[size_t(rows[size_t(r)])].id;
+        select_record(state, id);
         if (state.record_id() == id) { selection = {}; ++selection_epoch; show_details(true); }
       }
     }};
@@ -632,24 +650,24 @@ struct TableWorkbench::Impl {
     };
     spec.on_column_width = [this, current, &state](std::string_view key, float w) {
       if (!current() || key == "__record_number") { return; } widths[std::string(key)] = std::clamp(w * 20.0f, 48.0f, 2048.0f);
-      column_config(*state.table()); for (auto &c : view["columns"]) { if (io::get_string(c, "field_id") == key) { c["width"] = widths[std::string(key)]; } } view_changed = true;
+      column_config(*display_table(state)); for (auto &c : view["columns"]) { if (io::get_string(c, "field_id") == key) { c["width"] = widths[std::string(key)]; } } view_changed = true;
     };
     spec.column_menu = [this, current, &state, store = &ctx.store](int c) {
       std::vector<ui::MenuEntry> entries;
       if (!current() || c <= 0 || size_t(c - 1) >= columns.size()) { return entries; }
-      const auto id = state.table()->fields[size_t(columns[size_t(c - 1)])].id;
+      const auto id = display_table(state)->fields[size_t(columns[size_t(c - 1)])].id;
       for (const auto &[label, direction] : std::vector<std::pair<std::string, std::string>>{{"table.sort_asc", "asc"}, {"table.sort_desc", "desc"}}) {
         entries.push_back({std::string(store->tr(label)), [this, current, id, direction] {
           if (current() && !selection_dirty()) { sort_rows = Json::array({{{"field_id", id}, {"direction", direction}, {"nulls", "last"}}}); changed_view(); }
         }});
       }
       entries.push_back({std::string(store->tr("table.hide_column")), [this, current, id, &state] {
-        if (!current() || selection_dirty()) { return; } column_config(*state.table());
+        if (!current() || selection_dirty()) { return; } column_config(*display_table(state));
         for (auto &col : view["columns"]) { if (io::get_string(col, "field_id") == id) { col["hidden"] = true; } } changed_view();
       }});
       entries.push_back({std::string(store->tr("table.edit_field")), [this, current, id, &state] {
         if (!current() || selection_dirty()) { return; }
-        for (const auto &f : state.table()->fields) { if (f.id == id) {
+        for (const auto &f : display_table(state)->fields) { if (f.id == id) {
           edit_field_id = id; field_name = f.name; field_unit = f.unit; edit_field_options = f.options;
           const auto at = std::find(types.begin(), types.end(), f.type); field_type = at == types.end() ? 0 : int(at - types.begin());
           choices_text.clear(); for (const auto &choice : f.options.value("choices", Json::array())) { choices_text += io::get_string(choice, "label") + "\n"; }
@@ -665,7 +683,7 @@ struct TableWorkbench::Impl {
         [this, current, shell = &ctx.area.shell(), &state](ui::TableSelection s) { if (current()) { select(*shell, state, s); } }};
     grid.editable = [this, current, &state](ui::TableCell c) {
       if (!current() || state.busy() || !valid(c) || advanced.has_unsaved_changes()) { return false; }
-      if (state.table()->definition(rows[size_t(c.row)], columns[size_t(c.column - 1)])) {
+      if (display_table(state)->definition(rows[size_t(c.row)], columns[size_t(c.column - 1)])) {
         show_details(true); advanced.select_field(field(state, c).id); return false;
       }
       return true;
@@ -679,7 +697,7 @@ struct TableWorkbench::Impl {
     grid.on_commit = [this, current, &state](ui::TableCell c, std::string s) { return current() && commit(state, c, std::move(s)); };
     grid.on_cancel = [this, current](ui::TableCell) { if (current() && !pending_edit) { dirty = false; draft_text.clear(); error.clear(); } };
     grid.export_cell = [this, current, &state](int r, int c) {
-      return current() && valid({r, c}) ? literal_text(state.table()->cell(rows[size_t(r)], columns[size_t(c - 1)]), field(state, {r, c})) : std::string();
+      return current() && valid({r, c}) ? literal_text(display_table(state)->cell(rows[size_t(r)], columns[size_t(c - 1)]), field(state, {r, c})) : std::string();
     };
     grid.on_paste = [this, current, &state](const std::vector<int> &rs, int c, std::string text) {
       if (!current()) { return false; } paste(state, rs, c, std::move(text)); return true;
@@ -693,8 +711,8 @@ struct TableWorkbench::Impl {
     };
     grid.on_toggle = [this, current, shell = &ctx.area.shell(), &state](ui::TableCell c) {
       if (!current() || !valid(c) || !available(*shell, state) || field(state, c).type != "boolean") { return false; }
-      if (state.table()->definition(rows[size_t(c.row)], columns[size_t(c.column - 1)])) { show_details(true); return false; }
-      const auto *v = state.table()->cell(rows[size_t(c.row)], columns[size_t(c.column - 1)]);
+      if (display_table(state)->definition(rows[size_t(c.row)], columns[size_t(c.column - 1)])) { show_details(true); return false; }
+      const auto *v = display_table(state)->cell(rows[size_t(c.row)], columns[size_t(c.column - 1)]);
       auto cmd = target(state, c); cmd["value"] = !(v && v->is_boolean() && v->get<bool>()); return state.apply(Json::array({cmd}));
     };
     if (!state.busy() && !unsaved()) {
@@ -710,7 +728,7 @@ struct TableWorkbench::Impl {
           const auto &source_field = field(state, cell.source), &destination_field = field(state, cell.target);
           if (source_field.type != destination_field.type || source_field.unit != destination_field.unit ||
               source_field.options != destination_field.options) { error = "table.fill_incompatible"; return false; }
-          const auto &source = state.table()->records[size_t(rows[size_t(cell.source.row)])];
+          const auto &source = display_table(state)->records[size_t(rows[size_t(cell.source.row)])];
           const auto rebind = [&](Json address) {
             if (io::get_string(address, "record_id") == source.id) {
               address["record_id"] = record(state, cell.target);
@@ -742,12 +760,12 @@ struct TableWorkbench::Impl {
     grid.cell_style = [this, current, &state](int r, int c) {
       if (!current() || !valid({r, c})) { return ui::TableCellStyle::Text; }
       const auto &type = field(state, {r, c}).type;
-      const auto *v = state.table()->cell(rows[size_t(r)], columns[size_t(c - 1)]);
+      const auto *v = display_table(state)->cell(rows[size_t(r)], columns[size_t(c - 1)]);
       return type == "boolean" && v && v->is_boolean() ? ui::TableCellStyle::Checkbox
            : type == "single_select" || type == "multi_select" || type == "object" ? ui::TableCellStyle::Badge : ui::TableCellStyle::Text;
     };
     grid.checked = [this, current, &state](int r, int c) {
-      if (!current() || !valid({r, c})) { return false; } const auto *v = state.table()->cell(rows[size_t(r)], columns[size_t(c - 1)]); return v && v->is_boolean() && v->get<bool>();
+      if (!current() || !valid({r, c})) { return false; } const auto *v = display_table(state)->cell(rows[size_t(r)], columns[size_t(c - 1)]); return v && v->is_boolean() && v->get<bool>();
     };
     spec.grid = std::move(grid);
     layout.table("records", std::move(spec));
@@ -765,8 +783,8 @@ struct TableWorkbench::Impl {
       if (f.type == "number" || f.type == "integer") {
         long double sum = 0; int n = 0, missing = 0, errors = 0;
         for (const auto r : rows) {
-          const auto *v = state.table()->cell(r, columns[size_t(selection.active.column - 1)]);
-          const auto *e = state.table()->evaluation(r, columns[size_t(selection.active.column - 1)]);
+          const auto *v = display_table(state)->cell(r, columns[size_t(selection.active.column - 1)]);
+          const auto *e = display_table(state)->evaluation(r, columns[size_t(selection.active.column - 1)]);
           if (e && io::get_string(*e, "state") == "error") { ++errors; }
           else if (v && v->is_number()) { sum += v->get<long double>(); ++n; }
           else { ++missing; }
@@ -797,7 +815,7 @@ struct TableWorkbench::Impl {
       }, [this, current, kind_ids](int i) { if (current() && !selection_dirty() && i >= 0 && i < 3) { view["kind"] = kind_ids[size_t(i)]; changed_view(); } }
     });
     std::vector<std::string> names, ids;
-    for (const auto &f : state.table()->fields) { names.push_back(f.name); ids.push_back(f.id); }
+    for (const auto &f : display_table(state)->fields) { names.push_back(f.name); ids.push_back(f.id); }
     auto group_names = names; group_names.insert(group_names.begin(), std::string(ctx.tr("table.no_group")));
     box.prop(ctx.tr("table.group")).dropdown("table_group", group_names, {
       [this, weak = std::weak_ptr<void>(alive), ids] {
@@ -823,7 +841,7 @@ struct TableWorkbench::Impl {
       r.dropdown("table_filter_field", names, {[this, weak = std::weak_ptr<void>(alive)] { return weak.expired() ? 0 : filter_field; },
         [this, current](int i) { if (current()) { filter_field = i; filter_value.clear(); } }});
       r.dropdown("table_filter_op", op_labels, bind(filter_op));
-      const ProjectField *selected_field = filter_field >= 0 && size_t(filter_field) < state.table()->fields.size() ? &state.table()->fields[size_t(filter_field)] : nullptr;
+      const ProjectField *selected_field = filter_field >= 0 && size_t(filter_field) < display_table(state)->fields.size() ? &display_table(state)->fields[size_t(filter_field)] : nullptr;
       const bool choice_filter = selected_field && (selected_field->type == "single_select" || (selected_field->type == "multi_select" && filter_op == 2));
       if (choice_filter && filter_op < 7) {
         const auto choices = selected_field->options.value("choices", Json::array());
@@ -845,7 +863,7 @@ struct TableWorkbench::Impl {
         const auto id = ids[size_t(filter_field)];
         Json condition = {{"field_id", id}, {"op", operators[size_t(filter_op)]}};
         if (filter_op < 7) {
-          const auto &f = state.table()->fields[size_t(filter_field)];
+          const auto &f = display_table(state)->fields[size_t(filter_field)];
           if (f.type == "text" || f.type == "date" || f.type == "url" || f.type == "single_select" || filter_op == 2) { condition["value"] = filter_value; }
           else { try { condition["value"] = io::parse_json(filter_value); } catch (...) { error = "table.filter_invalid"; return; } }
         }
@@ -878,7 +896,7 @@ struct TableWorkbench::Impl {
       }
     }
     if (auto *cols = box.panel("table_columns", ctx.tr("table.columns"), false)) {
-      column_config(*state.table());
+      column_config(*display_table(state));
       for (size_t i = 0; i < view["columns"].size(); ++i) {
         const auto id = io::get_string(view["columns"][i], "field_id");
         const auto at = std::find(ids.begin(), ids.end(), id); if (at == ids.end()) { continue; }
@@ -1028,11 +1046,11 @@ struct TableWorkbench::Impl {
   {
     if (!object_modal) { return; }
     const int column = detail_column(state);
-    if (!details || state.selected_record() < 0 || column < 0 || state.record_id() != object_record_id || detail_field_id != object_field_id) {
+    if (!details || selected_row(state) < 0 || column < 0 || state.record_id() != object_record_id || detail_field_id != object_field_id) {
       object_modal = false; ++object_epoch; return;
     }
-    const auto &f = state.table()->fields[size_t(column)];
-    if (f.type != "object" || state.table()->definition(state.selected_record(), column)) { object_modal = false; ++object_epoch; return; }
+    const auto &f = display_table(state)->fields[size_t(column)];
+    if (f.type != "object" || display_table(state)->definition(selected_row(state), column)) { object_modal = false; ++object_epoch; return; }
     const auto current = [base = detail_fence(state), this, generation = object_epoch] { return base() && object_modal && generation == object_epoch; };
     auto close = [this, weak = std::weak_ptr<void>(alive), generation = object_epoch] { if (!weak.expired() && generation == object_epoch) { ++object_epoch; object_modal = false; } };
     auto &box = ctx.ui->modal("table_object_dialog", ctx.tr("table.object_picker"), close, {.width_units = 36});
@@ -1088,19 +1106,19 @@ struct TableWorkbench::Impl {
   }
   void record_detail(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
   {
-    const int row = state.selected_record();
+    const int row = selected_row(state);
     const bool outside_view = std::find(rows.begin(), rows.end(), row) == rows.end();
-    if (advanced.has_unsaved_changes() && (row < 0 || state.table()->fields.empty() || detail_column(state) < 0 || outside_view)) {
+    if (advanced.has_unsaved_changes() && (row < 0 || display_table(state)->fields.empty() || detail_column(state) < 0 || outside_view)) {
       layout.paragraph(ctx.tr("project.draft_stale"));
       const auto current = detail_fence(state);
       advanced.cell(layout, ctx, state, false, project_navigation_action(ctx, "review"), false, current);
       advanced.management(layout, ctx, state, false, current, false);
       return;
     }
-    if (row < 0 || state.table()->fields.empty()) { layout.paragraph(ctx.tr("table.select_cell")); return; }
+    if (row < 0 || display_table(state)->fields.empty()) { layout.paragraph(ctx.tr("table.select_cell")); return; }
     if (outside_view) { layout.paragraph(ctx.tr("table.record_outside_view")); return; }
     if (detail_column(state) < 0) {
-      const auto &fs = state.table()->fields;
+      const auto &fs = display_table(state)->fields;
       const auto at = std::find_if(fs.begin(), fs.end(), [this](const auto &f) { return f.id == active_field_id; });
       detail_field_id = at == fs.end() ? fs.front().id : at->id;
     }
@@ -1111,8 +1129,8 @@ struct TableWorkbench::Impl {
     head.label(ctx.tr("table.detail"));
     head.button("table_detail_close", "×", [this, current] { if (current()) { show_details(false); } }).width(2);
     std::vector<std::string> field_names, field_ids;
-    for (const auto &f : state.table()->fields) {
-      const bool hidden = std::none_of(columns.begin(), columns.end(), [&](int c) { return state.table()->fields[size_t(c)].id == f.id; });
+    for (const auto &f : display_table(state)->fields) {
+      const bool hidden = std::none_of(columns.begin(), columns.end(), [&](int c) { return display_table(state)->fields[size_t(c)].id == f.id; });
       field_names.push_back(f.name + (hidden ? " · " + std::string(ctx.tr("table.field_hidden")) : "")); field_ids.push_back(f.id);
     }
     layout.prop(ctx.tr("project.field")).dropdown("table_detail_field", field_names, {
@@ -1122,11 +1140,11 @@ struct TableWorkbench::Impl {
       }, [this, current, &state, field_ids, shell = &ctx.area.shell()](int i) {
         if (current() && i >= 0 && size_t(i) < field_ids.size()) { select_detail_field(*shell, state, field_ids[size_t(i)]); }
       }}).disable(state.busy() || selection_dirty());
-    const auto &f = state.table()->fields[size_t(column)];
+    const auto &f = display_table(state)->fields[size_t(column)];
     const auto rec = state.record_id();
     layout.paragraph(f.name + " · " + f.type + (f.unit.empty() ? "" : " · " + f.unit));
-    const auto *cell_value = state.table()->cell(row, column);
-    const bool derived = state.table()->definition(row, column) != nullptr;
+    const auto *cell_value = display_table(state)->cell(row, column);
+    const bool derived = display_table(state)->definition(row, column) != nullptr;
     if (!derived && (f.type == "single_select" || f.type == "multi_select")) {
       const auto choices = f.options.value("choices", Json::array());
       std::vector<std::string> labels = {std::string(ctx.tr("table.empty"))};
@@ -1180,7 +1198,13 @@ struct TableWorkbench::Impl {
           if (resolved.contains("reason") && resolved["reason"].is_string()) { layout.paragraph(resolved["reason"].get<std::string>()); }
           if (io::get_string(*v, "kind") == "record" && io::get_string(resolved, "state") == "available") {
             layout.button("table_object_locate", ctx.tr("table.object_locate"), [this, current, &state, reference = *v, shell = &ctx.area.shell()] {
-              if (current() && available(*shell, state)) { state.request_select(state.project()->handle, state.project()->revision, io::get_string(reference, "table_id"), io::get_string(reference, "id")); }
+              if (current() && available(*shell, state)) {
+                state.request_select_async(state.project()->handle, state.project()->revision,
+                    io::get_string(reference, "table_id"), io::get_string(reference, "id"),
+                    [shell](const bridge::Result<Json> &result) {
+                      if (!result && shell->store().toast) { shell->store().toast(result.error().message, ui::ToastKind::Warning); }
+                    }, current);
+              }
             });
           }
           if (io::get_string(*v, "kind") == "file" && io::get_string(resolved, "state") == "available") {
@@ -1225,8 +1249,8 @@ struct TableWorkbench::Impl {
       layout.button("table_duplicate_record", ctx.tr("table.duplicate"), [this, current, &state, rec, shell = &ctx.area.shell()] {
         if (!current() || !available(*shell, state)) { return; }
         const auto id = uuid(); Json cmds = Json::array({{{"op", "add_record"}, {"table_id", state.table_id()}, {"id", id}}});
-        const auto &record = state.table()->records[size_t(state.selected_record())];
-        for (const auto &field : state.table()->fields) {
+        const auto &record = display_table(state)->records[size_t(selected_row(state))];
+        for (const auto &field : display_table(state)->fields) {
           Json c = {{"table_id", state.table_id()}, {"record_id", id}, {"field_id", field.id}};
           if (record.definitions.contains(field.id) && io::get_string(record.definitions[field.id], "kind") == "reference") { c["op"] = "set_reference"; c["source"] = record.definitions[field.id]["source"]; }
           else if (record.definitions.contains(field.id) && io::get_string(record.definitions[field.id], "kind") == "expression") { c["op"] = "set_expression"; c["expression"] = record.definitions[field.id]["expression"]; c["bindings"] = record.definitions[field.id]["bindings"]; }
@@ -1241,7 +1265,7 @@ struct TableWorkbench::Impl {
   void cards(ui::Layout &layout, EditorContext &ctx, ProjectState &state)
   {
     const auto current = fence(state, true);
-    const auto &t = *state.table();
+    const auto &t = *display_table(state);
     int group = -1;
     if (view.contains("group_field_id") && view["group_field_id"].is_string()) {
       for (size_t i = 0; i < t.fields.size(); ++i) { if (t.fields[i].id == view["group_field_id"].get<std::string>()) { group = int(i); } }
@@ -1339,9 +1363,9 @@ struct TableWorkbench::Impl {
         }
         card.button("open", ctx.tr("table.open_record"), [this, current, &state, shell = &ctx.area.shell(), record_id] {
           if (!current() || !available(*shell, state)) { return; }
-          state.select_record(record_id);
+          select_record(state, record_id);
           if (state.record_id() != record_id) { return; }
-          if (detail_column(state) < 0 && !state.table()->fields.empty()) { detail_field_id = state.table()->fields.front().id; }
+          if (detail_column(state) < 0 && !display_table(state)->fields.empty()) { detail_field_id = display_table(state)->fields.front().id; }
           active_field_id = detail_field_id; selection = {}; ++selection_epoch;
           advanced.select_field(detail_field_id); show_details(true);
         });
@@ -1494,7 +1518,7 @@ struct TableWorkbench::Impl {
       Json request = {{"format", format}, {"destination", csv_destination}, {"table_id", state.table_id()}, {"definition", view}};
       if (format == "csv") { request["delimiter"] = delimiter; }
       state.export_table_file(std::move(request));
-    }).disable(state.busy() || selection_dirty() || !state.table() || csv_destination.empty());
+    }).disable(state.busy() || selection_dirty() || !display_table(state) || csv_destination.empty());
     }
     box.button("table_io_close", ctx.tr("table.done"), close);
   }
@@ -1502,7 +1526,7 @@ struct TableWorkbench::Impl {
   {
     auto &state = ctx.store.project();
     sync(ctx, state);
-    if (!state.table()) {
+    if (!display_table(state)) {
       if (advanced.has_unsaved_changes()) {
         const auto current = fence(state);
         advanced.cell(layout, ctx, state, false, project_navigation_action(ctx, "review"), false, current);

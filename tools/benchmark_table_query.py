@@ -2,6 +2,7 @@
 
 Run from the repository root with an installed STK Python environment:
   python tools/benchmark_table_query.py --rows 10000
+  python tools/benchmark_table_query.py --rows 10000 --mode opening
 No user project, model endpoint, or external resource is opened.
 """
 import argparse
@@ -32,7 +33,7 @@ def measure(operation):
     return result, {'seconds': round(elapsed, 6), 'python_peak_bytes': peak}
 
 
-def benchmark(rows):
+def benchmark(rows, mode='query'):
     serial = 0
 
     def identity():
@@ -62,11 +63,32 @@ def benchmark(rows):
                         (table, record, field, json.dumps(index if column == 0 else 'public synthetic text; ' * 12))
                         for column, field in enumerate(fields)])
         reports = []
-        for mode in ('page', 'filter', 'sort'):
+        if mode in {'opening', 'all'}:
+            before, baseline = measure(store.snapshot)
+
+            def first_page():
+                structure = store.catalog()
+                records = store.read_table(tables[0], expected_revision=structure['project']['revision'], limit=200)
+                return structure, records
+
+            (structure, records), paged = measure(first_page)
+            assert records['table']['records'] == before['tables'][0]['records'][:200]
+            assert structure['project'] == before['project']
+            for metadata, table in zip(structure['tables'], before['tables'], strict=True):
+                assert metadata['fields'] == table['fields']
+                assert metadata['record_count'] == len(table['records'])
+            wire_bytes = lambda result: len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode('utf-8'))
+            baseline['response_json_bytes'] = wire_bytes(before)
+            paged['response_json_bytes'] = wire_bytes(structure) + wire_bytes(records)
+            reports.append({'mode': 'opening', 'full_snapshot_reference': baseline, 'catalog_and_record_page': paged,
+                            'equal_records_and_metadata': True, 'returned_records': len(records['table']['records']),
+                            'total_records': 2 * rows, 'paged_requests': 2})
+            del before, structure, records
+        for query_mode in (() if mode == 'opening' else ('page', 'filter', 'sort')):
             definition = {'version': 1, 'kind': 'grid'}
-            if mode == 'filter':
+            if query_mode == 'filter':
                 definition['filters'] = {'field_id': field_sets[0][0], 'op': 'gte', 'value': rows // 2}
-            if mode == 'sort':
+            if query_mode == 'sort':
                 definition['sorts'] = [{'field_id': field_sets[0][0], 'direction': 'desc'}]
 
             def reference():
@@ -80,18 +102,19 @@ def benchmark(rows):
             after, paged = measure(lambda: store.table.query(tables[0], expected_revision=0,
                                                              definition=definition, offset=100, limit=200))
             assert before == (after['total'], after['records'])
-            reports.append({'mode': mode, 'full_snapshot_reference': baseline, 'paged_query': paged,
+            reports.append({'mode': query_mode, 'full_snapshot_reference': baseline, 'paged_query': paged,
                             'equal_records': True, 'returned_records': len(after['records'])})
         return {'python': platform.python_version(), 'tables': 2, 'rows_per_table': rows,
-                'fields_per_table': 8, 'offset': 100, 'limit': 200,
-                'measurement': 'elapsed time and traced Python allocations; excludes SQLite native memory',
+                'fields_per_table': 8, 'offset': 0 if mode == 'opening' else 100, 'limit': 200,
+                'measurement': 'backend elapsed time and traced Python allocations; excludes SQLite native memory and native UI',
                 'results': reports}
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rows', type=int, default=10000)
+    parser.add_argument('--mode', choices=('query', 'opening', 'all'), default='query')
     args = parser.parse_args()
     if not 1000 <= args.rows <= 100000:
         parser.error('--rows must be between 1000 and 100000')
-    print(json.dumps(benchmark(args.rows), indent=2))
+    print(json.dumps(benchmark(args.rows, args.mode), indent=2))

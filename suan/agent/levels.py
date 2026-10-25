@@ -27,6 +27,8 @@ OPERATIONS = {
     "project.forget": ("project_edit", "changes this computer's list of recent projects"),
     "project.close": ("project_edit", "ends the project opening"),
     "project.snapshot": ("read", "reads every value of every table; project_outline reads the structure only"),
+    "project.catalog": ("read", "paged project structure only; not used by agent tools"),
+    "project.table.read": ("read", "revision-bound record page; not used by agent tools"),
     "project.apply": ("project_edit", "changes the project: only through drafts a person applies"),
     "project.preview": ("read", "not needed: proposals go through requests and drafts"),
     "project.table.views.list": ("read", "bounded table metadata; not used by agent tools"),

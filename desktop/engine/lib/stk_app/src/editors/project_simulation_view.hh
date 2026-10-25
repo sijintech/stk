@@ -4,6 +4,7 @@
 #include "path_picker.hh"
 #include "simulation_target.hh"
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@ struct EditorContext;
 /** Native controls call the shared built-in MuFerro/LAMMPS workflows. */
 class ProjectSimulationView {
  public:
+  ~ProjectSimulationView() { alive_.reset(); }
   io::Json save_workspace_state() const;
   bool load_workspace_state(const io::Json &value);
   void draw(ui::Layout &layout, EditorContext &ctx, ProjectState &state);
@@ -40,5 +42,8 @@ class ProjectSimulationView {
   std::vector<std::string> batch_selection_;
   std::string batch_id_, batch_member_;
   bool show_archived_batches_ = false;  // the saved batches show only archived ones
+  std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+  std::string result_key_, result_record_, result_error_;
+  bool result_loading_ = false;
 };
 }  // namespace stk::app

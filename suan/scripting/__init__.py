@@ -38,6 +38,13 @@ class Project:
     def snapshot(self):
         return self._call("project.snapshot", {"handle": self.handle})["snapshot"]
 
+    def catalog(self, *, expected_revision=None, offset=0, limit=200):
+        """Read structure only; pin subsequent pages to the first response's revision."""
+        params = {"handle": self.handle, "offset": offset, "limit": limit}
+        if expected_revision is not None:
+            params["expected_revision"] = expected_revision
+        return self._call("project.catalog", params)
+
     def selection(self):
         """Read shared table/record UUIDs and the desktop's observed revision.
 
@@ -463,6 +470,13 @@ class ProjectTable:
     def _read(self, method, expected_revision, **params):
         return self._call("project.table." + method, {"handle": self.handle,
                           "expected_revision": expected_revision, **params})
+
+    def read(self, table_id, *, expected_revision, offset=0, limit=200, record_id=None):
+        """Read one insertion-order page, optionally locating a stable record identity."""
+        params = {"table_id": table_id, "offset": offset, "limit": limit}
+        if record_id is not None:
+            params["record_id"] = record_id
+        return self._read("read", expected_revision, **params)
 
     def query(self, table_id, *, expected_revision, view_id=None, definition=None, offset=0, limit=200):
         params = {"table_id": table_id, "offset": offset, "limit": limit}

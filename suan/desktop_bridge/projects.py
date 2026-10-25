@@ -163,6 +163,14 @@ class ProjectSessions:
         with self._operation():
             return {"snapshot": self._get(params["handle"]).snapshot()}
 
+    def catalog(self, params):
+        with self._operation():
+            return self._get(params["handle"]).catalog(**{key: value for key, value in params.items() if key != "handle"})
+
+    def read_table(self, params):
+        with self._operation():
+            return self._get(params["handle"]).read_table(**{key: value for key, value in params.items() if key != "handle"})
+
     def apply(self, params):
         with self._operation():
             store = self._get(params["handle"])
