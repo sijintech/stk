@@ -2,6 +2,19 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：报告预览资源准备（本机验收完成）
+
+源码 `31c1e06` 已提交 main。前头 `78f51b2` Desktop `40234644345` 已全部结束，4/5 成功：Linux、macOS、打包与干净容器成功；Windows 1107/1108，唯一失败 `WorkModeLayouts.ActiveTextAndDeferredOldMenusCannotHideOrCommitInput`，析构 SEH `0xc0000005`，没有栈。[失败作业](https://github.com/sijintech/stk/actions/runs/40234644345/job/121293477909)。Runtime `40234644378`、Docs `40234644456`、Secret `40234644394` 成功，前头推送等待条件满足；本批新头 CI 待确认。
+
+- 新增可发现只读 `project.reports.preview_resources`，响应只有净化入口、四种栅格图片描述符和实际入口加声明图片大小；32 MiB 总量、入口输入 1 MiB／显示 4 MiB，各资产读取保持原预算，不把整包放进一条桥响应。次级文档不进入相对链接映射，CSP 限具体图片路径；宿主仍须逐项核验原图字节，全部通过后原子建立并按生命周期失效会话。
+- 独立审查发现新响应直接复用旧宽类型，Schema 本身可接受 PDF／identity 或 HTML 资源；现仅在新结果用 allOf 收窄，旧 preview 定义不变。Python 与真实 C++ 嵌入 Schema 均检查禁止类型、缺失来源、额外键、63／64 项及 32 MiB 边界；Linux、macOS、Windows 必跑规则追加 `Schema.ReportsPreviewResources`。
+- Python 3.12 相关 **232 passed／18.58 秒**；初轮 230 passed／1 failed 是旧脚本目录精确集合漏新方法，已同步。3.11／3.14 最终新接口与脚本专项各 **28 passed／11.95、11.92 秒**。完整 Python 3.12 **3483 passed、24 skipped、2 deselected、1 既有 Starlette 提示／721.04 秒**，日志 `/tmp/stk-report-preview-python-full.log`。
+- 完整原生 **1748/1748、零失败／错误／跳过／436.85 秒**，JUnit `/tmp/stk-report-preview-native-full.xml`；当前 Linux CI 的 481 条必跑规则核对 **1278 项全部实际运行**，证据 `/tmp/stk-report-preview-required.log`。新增 C++ Schema 场景实际运行 0.0247 秒。
+- 随后核对 Windows 失败：测试显式 `shell.reset()` 使共享 ViewerState 先释放，仍存活 ViewerEditor 析构访问借用指针；普通 fixture 和生产退出顺序没有这处倒置。已先 `screen.clear()`，保留 shell 销毁后复制 action 的原验证；重建实际承载目标 `stk-project-tests` 后，工作模式／旧回调／焦点／导航相关及必跑 **45/45、零跳过／2.05 秒**，JUnit `/tmp/stk-report-preview-fixture-focused.xml`。这是确定夹具缺陷的修正；无 Windows 栈和新头结果，不能宣称复现并解决同一崩溃。
+- wheel 与源码包重新构建，使用 `python -I` 从 wheel 隔离导入新模块及 Schema，经真实无界面服务创建报告、删除实时入口和图片、关闭并重开后净化入口、逐项读取图片并验证 SHA，总修订保持 3；源码包指南存在。证据 `/tmp/stk-report-preview-dist-build.log`、`/tmp/stk-report-preview-wheel-smoke.log`。源码暂存 gitleaks 采用 `.gitleaks.toml`、`--redact`，扫描 **56322 bytes、零发现**；差异空白检查通过。
+
+本批为后端与协议交付，没有新增 UI 点击动作。原生浏览器嵌入、完整 PDF、AI 报告、额外来源选择、LaTeX、视频和报告模式仍未完成；macOS／Windows 候选尚无实际嵌入证据，Linux 未选后端。P4 和第 4–8 项继续推进，PET 新专项后置。
+
 ## 2026-10-25：桌面创建冻结报告（本机验收完成）
 
 源码 `a10025587fb0b85d386c31f7980f10b2fa2cf01b` 已提交 main，记录与索引按同批交付。前代码头 `93d3a064a31358b4a31ac6355fee333d7e5338c6` 的 Desktop `40230875886` 已全部结束并 **5/5 成功**（Windows、macOS 与三项 Linux）；Runtime `40230875833`、Docs `40230875895`、Secret `40230875843` 成功。前头推送等待条件已满足；这些结果不代表本批新源码的 CI。
