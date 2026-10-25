@@ -660,6 +660,105 @@ TEST_F(TableWorkbenchEditorPython, TypedReferencesAndExpressionsKeepTheirDefinit
   EXPECT_EQ(project().project()->revision, revision + 1);
 }
 
+TEST_F(TableWorkbenchEditorPython, BoardDragMovesToEmptyLaneInOneGestureAndOneUndoWithViewerPreserved)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board());
+  const auto source = [&] {
+    const auto *card = card_widget("table_board_drag");
+    return ui::Vec2{card->rect.cx(), card->rect.y + f.screen.ui()->style().box_space + .5f * f.screen.ui()->style().unit};
+  };
+  const auto target = [&](const std::string &choice) {
+    const auto *lane = widget(("table_board_lane_value:" + Json(choice).dump()).c_str());
+    return ui::Vec2{lane->rect.cx(), lane->rect.y + .5f * f.screen.ui()->style().unit};
+  };
+  ASSERT_NE(card_widget("table_board_drag"), nullptr);
+  ASSERT_TRUE(card_widget("table_board_drag")->clip.contains(source()));
+  const auto wet_target = target(wet);
+  ASSERT_TRUE(card_widget("table_board_drag")->clip.contains(wet_target));
+  const auto revision = project().project()->revision;
+  const auto selected = project().record_id();
+  const int clicks_before = clicks;
+  send(ui::Event::mouse_down(source()));
+  send(ui::Event::mouse_move(wet_target));
+  EXPECT_EQ(project().project()->revision, revision);
+  send(ui::Event::mouse_up(wet_target));
+  ASSERT_TRUE(pump([&] { return !project().busy() && project().project()->revision == revision + 1 && card_widget("table_board_drag"); }));
+  EXPECT_EQ(clicks, clicks_before) << "one drag, no navigation or status-picker clicks";
+  EXPECT_EQ(*project().table()->cell(0, 3), wet);
+  EXPECT_EQ(project().table()->cell(1, 3), nullptr);
+  EXPECT_EQ(project().record_id(), selected);
+  expect_viewer();
+  ASSERT_TRUE(project().undo());
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_drag") && *project().table()->cell(0, 3) == dry; }));
+  const auto after_undo = project().project()->revision;
+  send(ui::Event::mouse_down(source()));
+  send(ui::Event::mouse_move(target(dry)));
+  send(ui::Event::mouse_up(target(dry)));
+  EXPECT_FALSE(project().busy()); EXPECT_EQ(project().project()->revision, after_undo);
+  send(ui::Event::mouse_down(source()));
+  send(ui::Event::mouse_move(target(wet)));
+  send(ui::Event::key_down(ui::Key::Escape));
+  send(ui::Event::mouse_up(target(wet)));
+  EXPECT_FALSE(project().busy()); EXPECT_EQ(project().project()->revision, after_undo);
+}
+
+TEST_F(TableWorkbenchEditorPython, BoardDragRejectsRevisionsViewChangesDerivedStatusAndOtherEditorsDraft)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board());
+  const auto original = card_widget("table_board_drag")->drag_source->on_drop;
+  const auto box = card_widget("table_board_drag")->rect;
+  send(ui::Event::mouse_down({box.cx(), box.y + 10}));
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", counter}, {"value", 7}}})));
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_drag"); }));
+  const auto revision = project().project()->revision;
+  EXPECT_EQ(f.screen.ui()->active(), 0u);
+  original("value:" + Json(wet).dump()); frame();
+  EXPECT_FALSE(project().busy()); EXPECT_EQ(project().project()->revision, revision);
+  const auto before_view = card_widget("table_board_drag")->drag_source->on_drop;
+  index("table_views", 0);
+  ASSERT_NO_FATAL_FAILURE(settled());
+  before_view("value:" + Json(wet).dump()); frame();
+  EXPECT_FALSE(project().busy()); EXPECT_EQ(project().project()->revision, revision);
+  index("table_views", 1);
+  ASSERT_TRUE(pump([&] { return card_widget("table_board_drag") != nullptr; }));
+  auto &other = f.area("a3");
+  ASSERT_TRUE(other.add_tab(kEditorTable)); frame();
+  ASSERT_TRUE(pump([&] { return widget("records") && widget("records")->table->rows == 3; }));
+  cell(0, 1); send(ui::Event::text_input("321"));
+  ASSERT_TRUE(other.editor().has_unsaved_changes());
+  card_widget("table_board_drag")->drag_source->on_drop("value:" + Json(wet).dump()); frame();
+  EXPECT_FALSE(project().busy()); EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_TRUE(other.editor().has_unsaved_changes());
+  send(ui::Event::key_down(ui::Key::Escape));
+  ASSERT_FALSE(other.editor().has_unsaved_changes());
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_expression"}, {"table_id", samples}, {"record_id", row_a},
+      {"field_id", phase}, {"expression", Json(dry).dump()}, {"bindings", Json::object()}}})));
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_drag") && !card_widget("table_board_drag")->enabled; }));
+  const auto derived_revision = project().project()->revision;
+  card_widget("table_board_drag")->drag_source->on_drop("value:" + Json(wet).dump()); frame();
+  EXPECT_FALSE(project().busy()); EXPECT_EQ(project().project()->revision, derived_revision);
+  EXPECT_EQ(io::get_string(*project().table()->definition(0, 3), "kind"), "expression");
+}
+
+TEST_F(TableWorkbenchEditorPython, BoardDragPreservesUnsetAndNullAndRejectsUnknownTargets)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  ASSERT_NO_FATAL_FAILURE(show_board());
+  const auto revision = project().project()->revision;
+  card_widget("table_board_drag")->drag_source->on_drop("value:\"unknown\""); frame();
+  EXPECT_FALSE(project().busy()); EXPECT_EQ(project().project()->revision, revision);
+  card_widget("table_board_drag")->drag_source->on_drop("null"); frame();
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_drag") && project().table()->cell(0, 3) && project().table()->cell(0, 3)->is_null(); }));
+  EXPECT_EQ(project().table()->cell(1, 3), nullptr);
+  card_widget("table_board_drag")->drag_source->on_drop("unset"); frame();
+  ASSERT_TRUE(pump([&] { return !project().busy() && card_widget("table_board_drag") && !project().table()->cell(0, 3); }));
+  EXPECT_EQ(project().project()->revision, revision + 2);
+  ASSERT_TRUE(project().undo());
+  ASSERT_TRUE(pump([&] { return !project().busy() && project().table()->cell(0, 3) && project().table()->cell(0, 3)->is_null(); }));
+}
+
 TEST_F(TableWorkbenchEditorPython, BoardStateHasEmptyChoiceLanesAndChangesOneRecordInOneUndoableEdit)
 {
   ASSERT_NO_FATAL_FAILURE(add_record_fields());

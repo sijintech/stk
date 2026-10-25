@@ -188,6 +188,7 @@ void Context::end_frame()
     commit_edit();
   }
   if (drag_.id && (!find_id(drag_.id) ||
+      (drag_.kind == DragState::Kind::Container && !container_drag_current()) ||
       (drag_.kind == DragState::Kind::TableFill && !table_fill_current(*find_id(drag_.id))))) {
     drag_ = {};
   }
@@ -421,7 +422,7 @@ const Widget *Context::hit(Vec2 p, Block **r_block) const
       }
       const auto &ws = b.widgets();
       for (auto wi = ws.rbegin(); wi != ws.rend(); ++wi) {
-        if (wi->rect.contains(p) && wi->clip.contains(p)) {
+        if (!wi->layout_region && wi->rect.contains(p) && wi->clip.contains(p)) {
           return &*wi;
         }
       }
@@ -440,6 +441,29 @@ bool Context::in_modal_scope(const Widget &w) const
     }
   }
   return !top || w.block == top;
+}
+
+bool Context::container_drag_current() const
+{
+  const auto *w = find_id(drag_.id);
+  return w && w->enabled && w->drag_source && in_modal_scope(*w) && !popup_.owner &&
+         w->drag_source->group == drag_.source.group &&
+         w->drag_source->version == drag_.source.version && bool(w->drag_source->on_drop);
+}
+
+const Widget *Context::container_drop_target(Vec2 p) const
+{
+  if (!container_drag_current()) { return nullptr; }
+  Block *block = nullptr;
+  hit(p, &block); // Respect clipping, modal focus trapping and overlapping blocks.
+  if (!block) { return nullptr; }
+  for (auto it = block->widgets().rbegin(); it != block->widgets().rend(); ++it) {
+    if (it->enabled && it->drop_target && it->rect.contains(p) && it->clip.contains(p) &&
+        it->drop_target->group == drag_.source.group && it->drop_target->version == drag_.source.version) {
+      return &*it;
+    }
+  }
+  return nullptr;
 }
 
 /* -------------------------------------------------------------------- */
@@ -1303,6 +1327,9 @@ EventResult Context::mouse_move(const Event &e)
     }
     drag_.moved = true;
     switch (drag_.kind) {
+      case DragState::Kind::Container:
+        if (!container_drag_current()) { drag_ = {}; }
+        break;
       case DragState::Kind::Number:
       case DragState::Kind::Slider:
         drag_number(*w, e);
@@ -1452,6 +1479,19 @@ EventResult Context::mouse_down(const Event &e)
     commit_edit();
   }
   tooltip_forced_ = 0;
+  if (e.button == MouseButton::Left && blk && (!w || w->type == WidgetType::Label || w->type == WidgetType::Paragraph)) {
+    for (auto it = blk->widgets().rbegin(); it != blk->widgets().rend(); ++it) {
+      if (it->drag_source && it->enabled && it->drag_source->on_drop &&
+          it->rect.contains(e.pos) && it->clip.contains(e.pos)) {
+        drag_ = {};
+        drag_.id = it->id;
+        drag_.kind = DragState::Kind::Container;
+        drag_.start = drag_.last = e.pos;
+        drag_.source = *it->drag_source;
+        return {true, true};
+      }
+    }
+  }
   if (!w) {
     if (!blk) {
       focus_ = 0;
@@ -1649,6 +1689,16 @@ EventResult Context::mouse_up(const Event &e)
 {
   if (!drag_.id) {
     return {false, false};
+  }
+  if (drag_.kind == DragState::Kind::Container) {
+    if (e.button != MouseButton::Left) { return {true, false}; }
+    const Widget *target = drag_.moved ? container_drop_target(e.pos) : nullptr;
+    const auto drop = drag_.source.on_drop;
+    const std::string value = target ? target->drop_target->value : std::string();
+    const bool accepted = target != nullptr;
+    drag_ = {}; // Clear before calling application code, which may rebuild the frame.
+    if (accepted && drop) { drop(value); }
+    return {true, true};
   }
   if (drag_.kind == DragState::Kind::TableFill) {
     if (e.button != MouseButton::Left) { return {true, false}; }
@@ -1861,7 +1911,7 @@ bool Context::handle_popup_event(const Event &e, EventResult &res)
 
 EventResult Context::key_down(const Event &e)
 {
-  if (drag_.kind == DragState::Kind::TableFill) {
+  if (drag_.kind == DragState::Kind::TableFill || drag_.kind == DragState::Kind::Container) {
     if (e.key == Key::Escape) { drag_ = {}; }
     return {true, true};
   }

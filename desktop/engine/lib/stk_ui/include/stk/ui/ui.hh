@@ -249,6 +249,20 @@ class Block;
 class Context;
 class Layout;
 
+/** Container drag-and-drop. Applications own payloads and reject stale writes in on_drop.
+ * group identifies compatible targets; version must change with the displayed mapping/data.
+ * The callback from pointer-down is invoked once, only after a valid left-button release. */
+struct DragSourceSpec {
+  std::string group;
+  uint64_t version = 0;
+  std::function<void(std::string)> on_drop;
+};
+struct DropTargetSpec {
+  std::string group;
+  uint64_t version = 0;
+  std::string value;
+};
+
 /** One button (Blender "uiBut"): resolved rect plus the bindings used by event handling. */
 struct Widget {
   WidgetType type = WidgetType::Label;
@@ -261,6 +275,9 @@ struct Widget {
   Align align = Align::Left;
   bool enabled = true;
   bool label_backdrop = false; /**< Label only: opaque tooltip-theme background, paired text. */
+  bool layout_region = false; /**< Invisible container geometry; never obscures child controls. */
+  std::optional<DragSourceSpec> drag_source;
+  std::optional<DropTargetSpec> drop_target;
   uint8_t corners = CORNER_ALL;
   float height = 0.0f;      /**< Pixels; set at creation (width-dependent types at layout). */
   float table_base_height = 0.0f; /**< Requested rows + header; excludes a width-dependent horizontal scrollbar. */
@@ -325,6 +342,10 @@ class Layout {
   Layout &scale_y(float s);
   Layout &alignment(LayoutAlign a);
   Layout &enabled(bool e);
+  /** Draggable background/text, excluding interactive child widgets. Call before children. */
+  Widget &drag_source(std::string_view key, DragSourceSpec spec);
+  /** Whole container target, including unused height in its grid row. */
+  Widget &drop_target(std::string_view key, DropTargetSpec spec);
 
   /* Widgets. */
   Widget &label(std::string_view text, Align align = Align::Left);
@@ -385,6 +406,8 @@ class Layout {
   int auto_key_ = 0;
   /* Panel. */
   Widget *header_ = nullptr;
+  Widget *drag_source_ = nullptr;
+  Widget *drop_target_ = nullptr;
   bool open_ = true;
   /* Layout pass scratch. */
   float pref_w_ = 0.0f;
@@ -547,7 +570,7 @@ class Context {
   };
   struct DragState {
     enum class Kind : uint8_t {
-      None, Press, Number, Slider, TextSelect, Scroll, TableScroll, ColumnResize, Splitter, ImagePan, Header, TableSelect, TableFill,
+      None, Press, Number, Slider, TextSelect, Scroll, TableScroll, ColumnResize, Splitter, ImagePan, Header, TableSelect, TableFill, Container,
     };
     WidgetId id = 0;
     Kind kind = Kind::None;
@@ -558,6 +581,7 @@ class Context {
     int column = -1;
     int zone = 0; /**< Number field: -1 left arrow, 1 right arrow, 0 middle. */
     bool moved = false;
+    DragSourceSpec source;
     TableSelection fill_selection;
     TableCell fill_target;
     uint64_t table_version = 0;
@@ -605,6 +629,8 @@ class Context {
   Block &new_block(Block::Kind kind, std::string_view name, Rect region);
   const Widget *hit(Vec2 p, Block **r_block = nullptr) const;
   const Widget *find_id(WidgetId id) const;
+  bool container_drag_current() const;
+  const Widget *container_drop_target(Vec2 p) const;
   bool in_modal_scope(const Widget &w) const;
   void set_hover(const Widget *w, Vec2 p);
   void begin_edit(const Widget &w, bool select_all, std::string initial = {}, bool use_initial = false);

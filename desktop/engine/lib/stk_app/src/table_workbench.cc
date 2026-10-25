@@ -1216,15 +1216,51 @@ struct TableWorkbench::Impl {
     }
     const auto *region = ctx.area.find_region("main");
     const int count = std::clamp(int((region ? region->rect().width() : 600) / (11 * ctx.ui->style().unit)), 1, 4);
+    const auto drag_group = layout.block().name() + "/board/" + state.project()->handle + "/" +
+                            state.table_id() + "/" + std::to_string(mapping_epoch);
+    const auto revision = state.project()->revision;
+    if (status_board) { layout.paragraph(ctx.tr("table.board_drag")); }
     auto &container = layout.grid(board ? std::max(1, std::min(count, int(groups.size()))) : count);
     for (const auto &group_data : groups) {
       const auto &group_label = group_data.label;
       const auto &indices = group_data.indices;
       auto *lane = board ? &container.column() : &container;
+      if (status_board && !group_data.key.starts_with("error:")) {
+        lane->drop_target("table_board_lane_" + group_data.key, {drag_group, uint64_t(revision), group_data.key})
+            .disable(state.busy() || unsaved());
+      }
       if (board) { lane->label(group_label + " · " + std::to_string(indices.size()) + " " + std::string(ctx.tr("table.on_page"))); }
       for (const int r : indices) {
         const auto record_id = t.records[size_t(rows[size_t(r)])].id;
         auto &card = lane->scope("card" + record_id).box();
+        std::function<void(int)> change_status;
+        if (status_board) {
+          const auto *value = t.cell(rows[size_t(r)], group);
+          const Json observed = value ? *value : Json(nullptr);
+          const bool unset = !value;
+          const bool derived = t.definition(rows[size_t(r)], group) != nullptr;
+          const auto field_id = t.fields[size_t(group)].id;
+          change_status = [this, current, &state, shell = &ctx.area.shell(), choices, record_id, field_id,
+                           observed, unset, derived, revision](int i) {
+            if (!current() || state.busy() || unsaved() || derived || i < 0 || size_t(i) > choices.size() + 1 ||
+                !available(*shell, state)) { return; }
+            const Json next = i < 2 ? Json(nullptr) : choices[size_t(i - 2)].at("id");
+            if ((i == 0 && unset) || (i != 0 && !unset && observed == next)) { return; }
+            Json command = {{"op", i == 0 ? "unset_cell" : "set_cell"}, {"table_id", state.table_id()},
+                            {"record_id", record_id}, {"field_id", field_id}};
+            if (i != 0) { command["value"] = next; }
+            state.apply(Json::array({command}), revision);
+          };
+          card.drag_source("table_board_drag", {drag_group, uint64_t(revision), [change_status, choices](std::string target) {
+            if (target == "unset") { change_status(0); }
+            else if (target == "null") { change_status(1); }
+            else {
+              for (size_t i = 0; i < choices.size(); ++i) {
+                if (target == "value:" + choices[i].at("id").dump()) { change_status(int(i + 2)); return; }
+              }
+            }
+          }}).disable(state.busy() || unsaved() || derived);
+        }
         card.label(columns.empty() ? record_id.substr(0, 8) : display(t, rows[size_t(r)], columns.front()));
         for (size_t c = 1; c < std::min<size_t>(columns.size(), 5); ++c) {
           const auto &f = t.fields[size_t(columns[c])]; card.paragraph(f.name + ": " + display(t, rows[size_t(r)], columns[c]));
@@ -1234,22 +1270,13 @@ struct TableWorkbench::Impl {
           const Json observed = value ? *value : Json(nullptr);
           const bool unset = !value;
           const bool derived = t.definition(rows[size_t(r)], group) != nullptr;
-          const auto field_id = t.fields[size_t(group)].id;
           std::vector<std::string> labels = {std::string(ctx.tr("table.value_unset")), std::string(ctx.tr("table.value_null"))};
           for (const auto &choice : choices) { labels.push_back(io::get_string(choice, "label")); }
           card.prop(ctx.tr("table.board_state")).dropdown("table_board_state", labels, {
             [observed, unset, choices] {
               if (unset) { return 0; } if (observed.is_null()) { return 1; }
               for (size_t i = 0; i < choices.size(); ++i) { if (choices[i].at("id") == observed) { return int(i + 2); } } return -1;
-            }, [this, current, &state, shell = &ctx.area.shell(), choices, record_id, field_id,
-                observed, unset, derived, revision = state.project()->revision](int i) {
-              if (!current() || derived || i < 0 || size_t(i) > choices.size() + 1 || !available(*shell, state)) { return; }
-              const Json next = i < 2 ? Json(nullptr) : choices[size_t(i - 2)].at("id");
-              if ((i == 0 && unset) || (i != 0 && !unset && observed == next)) { return; }
-              Json command = {{"op", i == 0 ? "unset_cell" : "set_cell"}, {"table_id", state.table_id()}, {"record_id", record_id}, {"field_id", field_id}};
-              if (i != 0) { command["value"] = next; }
-              state.apply(Json::array({command}), revision);
-            }}).disable(state.busy() || selection_dirty() || derived).tip(ctx.tr(derived ? "table.board_derived" : "table.board_state"));
+            }, change_status}).disable(state.busy() || unsaved() || derived).tip(ctx.tr(derived ? "table.board_derived" : "table.board_state"));
         }
         card.button("open", ctx.tr("table.open_record"), [this, current, &state, shell = &ctx.area.shell(), record_id] {
           if (!current() || !available(*shell, state)) { return; }
@@ -1260,6 +1287,7 @@ struct TableWorkbench::Impl {
           advanced.select_field(detail_field_id); show_details(true);
         });
       }
+      if (board && indices.empty()) { lane->separator(5); }
     }
   }
   void csv_dialog(EditorContext &ctx, ProjectState &state)

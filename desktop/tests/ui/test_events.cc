@@ -18,6 +18,138 @@ using stk::ui::test::Harness;
 static const std::string ZHONG = "\xe4\xb8\xad";
 static const std::string WEN = "\xe6\x96\x87";
 
+TEST(ContainerDrag, CardTextAndBackgroundReachEmptyLaneWithoutTakingChildControls)
+{
+  for (const float scale : {1.0f, 2.0f}) {
+    Harness h(scale);
+    h.window = {800 * scale, 600 * scale};
+    int drops = 0, opened = 0, choice = 0;
+    std::string target;
+    h.ui = [&](Context &ctx) {
+      auto &grid = ctx.block("board", {0, 0, h.window.x, h.window.y}).layout().grid(2);
+      auto &lane = grid.column();
+      auto &card = lane.box();
+      card.drag_source("card", {"board", 7, [&](std::string value) { ++drops; target = value; }});
+      card.label("Record");
+      card.paragraph("Description");
+      card.button("open", "Open", [&] { ++opened; });
+      card.dropdown("status", {"A", "B"}, bind(choice));
+      card.separator(6);
+      auto &empty = grid.column();
+      empty.drop_target("lane", {"board", 7, "choice-id"});
+      empty.label("Empty status column");
+    };
+    h.frame();
+    const auto rect = h.w("card").rect;
+    EXPECT_GE(h.w("lane").rect.h, rect.h);
+    const Vec2 blank{h.w("lane").rect.cx(), rect.y1() - scale};
+    const Vec2 title{rect.cx(), rect.y + h.ctx->style().box_space + h.ctx->style().unit / 2};
+    h.drag(title, blank);
+    EXPECT_EQ(drops, 1); EXPECT_EQ(target, "choice-id");
+    h.drag({rect.x + scale, rect.y + scale}, blank);
+    EXPECT_EQ(drops, 2);
+    h.click("open"); EXPECT_EQ(opened, 1);
+    h.drag(h.center("open"), blank);
+    EXPECT_EQ(opened, 1); EXPECT_EQ(drops, 2);
+    h.click("status"); EXPECT_TRUE(h.ctx->popup_open());
+    h.key(Key::Escape); EXPECT_FALSE(h.ctx->popup_open());
+    EXPECT_EQ(choice, 0); EXPECT_EQ(drops, 2);
+  }
+}
+
+TEST(ContainerDrag, KeepsPointerDownCallbackAndCommitsOnlyOnceOnLeftRelease)
+{
+  Harness h;
+  int generation = 1, delivered = 0, calls = 0;
+  h.ui = [&](Context &ctx) {
+    auto &grid = ctx.block("board", {0, 0, 400, 600}).layout().grid(2);
+    auto &card = grid.box();
+    card.drag_source("card", {"board", 3, [&, captured = generation](std::string) { delivered = captured; ++calls; }});
+    card.label("Card");
+    auto &lane = grid.column();
+    lane.drop_target("lane", {"board", 3, "B"}); lane.label("B");
+  };
+  h.frame();
+  h.send(Event::mouse_down(h.center("card")));
+  generation = 2; h.frame();
+  h.move(h.center("lane"));
+  EXPECT_EQ(calls, 0);
+  h.send(Event::mouse_up(h.center("lane"), MouseButton::Right));
+  EXPECT_NE(h.ctx->active(), 0u); EXPECT_EQ(calls, 0);
+  h.send(Event::mouse_up(h.center("lane")));
+  EXPECT_EQ(calls, 1); EXPECT_EQ(delivered, 1); EXPECT_EQ(h.ctx->active(), 0u);
+  h.send(Event::mouse_up(h.center("lane")));
+  EXPECT_EQ(calls, 1);
+}
+
+TEST(ContainerDrag, CancelsOnDriftDisappearanceDisabledModalPopupFocusLossOrEscape)
+{
+  for (int change = 0; change < 10; ++change) {
+    SCOPED_TRACE(change);
+    Harness h;
+    bool show = true, enabled = true, modal = false;
+    uint64_t version = 1, target_version = 1;
+    std::string group = "board", target_group = "board";
+    int drops = 0;
+    h.ui = [&](Context &ctx) {
+      auto &layout = ctx.block("board", {0, 0, 400, 600}).layout();
+      auto &grid = layout.grid(2);
+      auto &card = grid.box();
+      if (show) { card.drag_source("card", {group, version, [&](std::string) { ++drops; }}).disable(!enabled); }
+      card.label("Card");
+      auto &lane = grid.column();
+      lane.drop_target("lane", {target_group, target_version, "B"}); lane.label("B");
+      layout.menu_button("menu", "Menu", {{"Entry", [] {}}});
+      if (modal) { ctx.modal("dialog", "Dialog", [] {}).label("Modal"); }
+    };
+    h.frame();
+    h.send(Event::mouse_down(h.center("card")));
+    h.move(h.center("lane"));
+    switch (change) {
+      case 0: ++version; break;
+      case 1: group = "other"; break;
+      case 2: show = false; break;
+      case 3: enabled = false; break;
+      case 4: modal = true; break;
+      case 5: h.ctx->open_popup("menu"); break;
+      case 6: { Event event; event.type = EventType::FocusLost; h.send(event); break; }
+      case 7: h.key(Key::Escape); break;
+      case 8: ++target_version; break;
+      case 9: target_group = "other"; break;
+    }
+    h.frame();
+    h.send(Event::mouse_up(h.center("lane")));
+    EXPECT_EQ(drops, 0); EXPECT_EQ(h.ctx->active(), 0u);
+  }
+}
+
+TEST(ContainerDrag, ClippedOccludedOutsideOrUnmovedReleaseNeverDrops)
+{
+  Harness h;
+  int drops = 0;
+  bool cover = false;
+  h.ui = [&](Context &ctx) {
+    auto &grid = ctx.block("board", {0, 0, 400, 180}).layout().grid(2);
+    auto &card = grid.box();
+    card.drag_source("card", {"board", 1, [&](std::string) { ++drops; }}); card.label("Card");
+    auto &lane = grid.column();
+    lane.drop_target("lane", {"board", 1, "B"}); lane.label("B"); lane.separator(30);
+    if (cover) { ctx.block("cover", {200, 0, 200, 180}).layout().label("Covered"); }
+  };
+  h.frame();
+  const Vec2 target{h.w("lane").rect.cx(), 80};
+  h.click("card"); EXPECT_EQ(drops, 0);
+  h.send(Event::mouse_down(h.center("card")));
+  h.send(Event::mouse_up(target)); // A release elsewhere is insufficient without a drag.
+  EXPECT_EQ(drops, 0);
+  h.drag(h.center("card"), {target.x, 300}); EXPECT_EQ(drops, 0);
+  h.drag(h.center("card"), {450, 80}); EXPECT_EQ(drops, 0);
+  cover = true; h.frame();
+  h.drag(h.center("card"), target); EXPECT_EQ(drops, 0);
+  cover = false; h.frame();
+  h.drag(h.center("card"), target); EXPECT_EQ(drops, 1);
+}
+
 TEST(TextArea, MultilinePasteImeNavigationAndExplicitSubmit)
 {
   Harness h;

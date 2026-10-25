@@ -100,6 +100,26 @@ Context &Layout::ctx() const
   return block_->ctx();
 }
 
+Widget &Layout::drag_source(std::string_view key, DragSourceSpec spec)
+{
+  Widget &w = add_widget(WidgetType::Label, key);
+  items_.pop_back(); // Geometry follows this container; it consumes no layout space.
+  w.layout_region = true;
+  w.drag_source = std::move(spec);
+  drag_source_ = &w;
+  return w;
+}
+
+Widget &Layout::drop_target(std::string_view key, DropTargetSpec spec)
+{
+  Widget &w = add_widget(WidgetType::Label, key);
+  items_.pop_back();
+  w.layout_region = true;
+  w.drop_target = std::move(spec);
+  drop_target_ = &w;
+  return w;
+}
+
 Layout &Layout::add_child(Kind kind, bool align)
 {
   block_->layouts_.emplace_back();
@@ -754,6 +774,8 @@ void LayoutEngine::place_y(Context &ctx, Layout &l, float y)
   const Style &st = ctx.style();
   const float sp = space(l, st);
   l.rect.y = std::round(y);
+  if (l.drag_source_) { l.drag_source_->rect = l.rect; }
+  if (l.drop_target_) { l.drop_target_->rect = l.rect; }
   auto set = [&](Layout::Item &it, float cy, float ch_override = -1.0f) {
     if (it.layout) {
       place_y(ctx, *it.layout, cy);
@@ -819,6 +841,10 @@ void LayoutEngine::place_y(Context &ctx, Layout &l, float y)
           Layout::Item &it = l.items_[r * cols + c];
           set(it, cy);
           row_h = std::max(row_h, item_h(it));
+        }
+        for (size_t c = 0; c < cols && r * cols + c < l.items_.size(); ++c) {
+          const auto *child = l.items_[r * cols + c].layout;
+          if (child && child->drop_target_) { child->drop_target_->rect.h = row_h; }
         }
         cy += row_h + st.space_y;
       }

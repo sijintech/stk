@@ -173,7 +173,8 @@ void Context::draw_layout(const Layout &l, const Block &b)
   const Rect clip = b.kind() == Block::Kind::Region ? b.rect() : b.frame();
   for (const auto &it : LayoutEngine::items(l)) {
     if (it.layout) {
-      if (it.layout->rect.y > clip.y1() || it.layout->rect.y1() < clip.y) {
+      const Rect area = it.layout->drop_target_ ? it.layout->drop_target_->rect : it.layout->rect;
+      if (area.y > clip.y1() || area.y1() < clip.y) {
         continue;
       }
       draw_layout(*it.layout, b);
@@ -184,6 +185,15 @@ void Context::draw_layout(const Layout &l, const Block &b)
         continue;
       }
       draw_widget(*it.widget);
+    }
+  }
+  if (drag_.kind == DragState::Kind::Container && drag_.moved) {
+    const Widget *target = l.drop_target_ ? container_drop_target(mouse_) : nullptr;
+    if (l.drop_target_ && target == l.drop_target_) {
+      draw_.round_box(target->rect, 0, CORNER_ALL, {0, 0, 0, 0}, th.menu.inner_sel);
+    }
+    if (l.drag_source_ && drag_.id == l.drag_source_->id) {
+      draw_.round_box(l.rect, 0, CORNER_ALL, {0, 0, 0, 0}, th.menu.inner_sel);
     }
   }
 }

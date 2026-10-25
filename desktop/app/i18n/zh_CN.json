@@ -20,6 +20,7 @@
   "table.value_unset": "未设置",
   "table.value_null": "空值 (null)",
   "table.board_state": "修改状态",
+  "table.board_drag": "拖动卡片到状态列，或使用“修改状态”。按 Esc 取消拖动。",
   "table.board_derived": "派生状态；请在记录详情编辑其定义。",
   "table.on_page": "条，本页",
   "app.drop.unhandled": "{editor}不接受拖放的文件（{count} 个）",

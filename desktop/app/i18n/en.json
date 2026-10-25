@@ -20,6 +20,7 @@
   "table.value_unset": "Not set",
   "table.value_null": "Null",
   "table.board_state": "Change status",
+  "table.board_drag": "Drag a card into a status column, or use Change status. Press Esc to cancel.",
   "table.board_derived": "Derived status; edit its definition in record details.",
   "table.on_page": "on this page",
   "app.drop.unhandled": "{editor} does not accept dropped files ({count})",
