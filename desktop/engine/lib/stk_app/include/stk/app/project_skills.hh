@@ -15,6 +15,7 @@ class ProjectSkills {
   ~ProjectSkills();
   void sync();
   bool supported() const;
+  bool can_publish() const;
   bool busy() const { return busy_; }
   bool uncertain() const { return !pending_.is_null(); }
   uint64_t epoch() const { return epoch_; }

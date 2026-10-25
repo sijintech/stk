@@ -61,6 +61,11 @@ int64_t ProjectSkills::revision() const
 {
   return supported() ? project_.project()->revision : -1;
 }
+bool ProjectSkills::can_publish() const
+{
+  const auto hello = supported() ? client_->hello_info() : std::nullopt;
+  return hello && hello->has_method("project.skills.publish_analysis");
+}
 bool ProjectSkills::current() const
 {
   return supported() && selected_.is_object() && selected_revision_ == revision() &&
@@ -195,10 +200,13 @@ bool ProjectSkills::write(const std::string &action, Json params, const uint64_t
 {
   sync();
   const auto rev = revision();
+  const bool publishing = action == "publish_analysis";
+  const bool creating = action == "pin" || (publishing && params.value("create", false));
   if (!supported() || busy_ || project_.busy() || uncertain() || expected_epoch != epoch_ || rev < 0 ||
       rev == std::numeric_limits<int64_t>::max() || io::get_int(params, "expected_revision", -1) != rev ||
-      (action != "pin" && action != "upgrade" && action != "restore" && action != "create_analysis")) { return false; }
-  if (action != "pin" && (!current() || io::get_string(params, "project_skill_id") != selected_id_)) { return false; }
+      (action != "pin" && action != "upgrade" && action != "restore" && action != "create_analysis" && !publishing) ||
+      (publishing && !can_publish())) { return false; }
+  if (!creating && (!current() || io::get_string(params, "project_skill_id") != selected_id_)) { return false; }
   const auto id = io::get_string(params, action == "create_analysis" ? "analysis_id" : "project_skill_id");
   if (!canonical_uuid(id)) { return false; }
   const auto method = "project.skills." + action;

@@ -107,7 +107,7 @@ class ProjectSkillsPython : public ::testing::Test {
     std::optional<bridge::Result<Json>> response;
     client->call(method, std::move(params)).then([&](auto result) { response = std::move(result); });
     if (!loop.pump_until([&] { return response.has_value(); }, 30) || !response->ok()) {
-      ADD_FAILURE() << method << " failed"; return nullptr;
+      ADD_FAILURE() << method << " failed: " << (response ? response->error().describe() : "timed out"); return nullptr;
     }
     return response->value();
   }
@@ -141,6 +141,45 @@ class ProjectSkillsPython : public ::testing::Test {
   Json saved_skill(const std::string &id)
   {
     return call("project.skills.get", {{"handle", project().project()->handle}, {"project_skill_id", id}}).at("skill");
+  }
+  void create_source(const std::string &id)
+  {
+    const auto document = Json::parse(R"({"format":"stk.analysis-document/1","graph":{"schema":"stk.graph/1","id":"user-method","name":"User method","parameters":[{"name":"large","type":"integer","default":1}],"nodes":[{"id":"source","type":"missing.source.node@1","params":{"binding":"data"}}],"outputs":{"view":"source.payload"}},"parameters":{"large":9007199254740993},"outputs":[]})");
+    const auto result = call("project.analyses.create", {{"handle", project().project()->handle}, {"analysis_id", id},
+        {"name", "My saved analysis"}, {"document", document}, {"expected_revision", project().project()->revision}});
+    ASSERT_TRUE(result.is_object());
+    project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  }
+  void publish_clicks(const std::string &language, float scale, int width)
+  {
+    const auto source = ProjectSkills::new_id(); ASSERT_NO_FATAL_FAILURE(create_source(source));
+    store().set_language(language);
+    f.drv = std::make_unique<wmtest::ScreenDriver>(f.screen, int(width * scale), int(1200 * scale), scale);
+    auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorSkills));
+    f.screen.set_maximized(&area); f.drv->frame();
+    const auto viewer = store().viewer().save_workspace_state();
+    int clicks = 0;
+    ASSERT_NO_FATAL_FAILURE(click("skills_project_tab")); ++clicks;
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_publish")); ++clicks;
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_sources", 1));
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_sources")); ++clicks;
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_publish_new", 1));
+    const auto retained = f.screen.ui()->find("project_skill_publish_new")->on_click;
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_publish_new")); ++clicks;
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_create_analysis", 2));
+    EXPECT_EQ(clicks, 4);
+    const auto id = area.editor().save_workspace_state().at("selected_id").get<std::string>();
+    const auto first = saved_skill(id);
+    ASSERT_EQ(first.at("active").at("version"), 1);
+    EXPECT_EQ(first.at("document").at("versions").at(0).at("template").at("source").at("analysis_id"), source);
+    retained(); f.drv->frame(); loop.run_ready(); EXPECT_EQ(project().project()->revision, 2);
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_publish_version", 2));
+    ASSERT_NO_FATAL_FAILURE(click("project_skill_publish_version"));
+    ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_create_analysis", 3));
+    const auto second = saved_skill(id);
+    EXPECT_EQ(second.at("active").at("version"), 2);
+    EXPECT_EQ(second.at("document").at("versions").at(0), first.at("document").at("versions").at(0));
+    EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
   }
   void upgrade_restore(const std::string &language, float scale, int width)
   {
@@ -242,6 +281,57 @@ TEST_F(ProjectSkillsPython, UncertainReceiptIsInspectedWithoutReplayingTheWrite)
   EXPECT_FALSE(skills->uncertain()); EXPECT_TRUE(skills->current()) << skills->error();
   EXPECT_EQ(skills->selected_id(), id); EXPECT_EQ(project().project()->revision, 1);
   ASSERT_TRUE(skills->load_page()); ASSERT_NO_FATAL_FAILURE(settle()); EXPECT_EQ(skills->page().at("total"), 1);
+}
+
+TEST_F(ProjectSkillsPython, PublishesUserAnalysisAndCopiesExactSubmissionWithoutCatalog)
+{
+  const auto source = ProjectSkills::new_id(), id = ProjectSkills::new_id();
+  ASSERT_NO_FATAL_FAILURE(create_source(source));
+  ASSERT_NO_FATAL_FAILURE(mode("catalog_absent"));
+  ASSERT_TRUE(skills->can_publish());
+  ASSERT_TRUE(skills->write("publish_analysis", {{"analysis_id", source}, {"project_skill_id", id}, {"create", true},
+      {"name", "User method"}, {"description", "Explicit local method"}, {"expected_revision", 1}}, skills->epoch()));
+  ASSERT_NO_FATAL_FAILURE(settle()); EXPECT_FALSE(skills->uncertain()) << skills->error();
+  ASSERT_TRUE(skills->select(id)); ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_TRUE(skills->current()) << skills->error();
+  const auto copy = ProjectSkills::new_id();
+  ASSERT_TRUE(skills->write("create_analysis", {{"project_skill_id", id},
+      {"content_sha256", skills->selected().at("active").at("content_sha256")}, {"analysis_id", copy},
+      {"name", "Copied user method"}, {"expected_revision", 2}}, skills->epoch()));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  const auto result = call("project.analyses.get", {{"handle", project().project()->handle}, {"analysis_id", copy}});
+  const auto &document = result.at("analysis").at("document");
+  EXPECT_EQ(document.at("parameters").at("large"), INT64_C(9007199254740993));
+  EXPECT_TRUE(document.at("outputs").empty());
+  EXPECT_EQ(document.at("graph").at("ui").at("project_skill").at("id"), id);
+}
+
+TEST_F(ProjectSkillsPython, PublishesUserSkillInFourClicksEnglishAndAppendsVersion)
+{
+  ASSERT_NO_FATAL_FAILURE(publish_clicks("en", 1, 1280));
+}
+
+TEST_F(ProjectSkillsPython, PublishesUserSkillInFourClicksChineseAndAppendsVersion)
+{
+  ASSERT_NO_FATAL_FAILURE(publish_clicks("zh_CN", 2, 560));
+}
+
+TEST_F(ProjectSkillsPython, RetainedPublishButtonCannotFollowAnotherSourceSelection)
+{
+  ASSERT_NO_FATAL_FAILURE(create_source(ProjectSkills::new_id()));
+  ASSERT_NO_FATAL_FAILURE(create_source(ProjectSkills::new_id()));
+  auto &area = f.area("a2"); ASSERT_TRUE(area.set_tab_type(0, kEditorSkills));
+  f.screen.set_maximized(&area); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("skills_project_tab"));
+  ASSERT_NO_FATAL_FAILURE(click("project_skill_publish"));
+  ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_sources", 2));
+  const auto select = f.screen.ui()->find("project_skill_sources")->list->selected.set;
+  select(0); ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_publish_new", 2));
+  const auto retained = f.screen.ui()->find("project_skill_publish_new")->on_click;
+  select(1); ASSERT_NO_FATAL_FAILURE(wait_for("project_skill_publish_new", 2));
+  retained(); f.drv->frame(); loop.run_ready();
+  EXPECT_EQ(project().project()->revision, 2);
+  const auto page = call("project.skills.list", {{"handle", project().project()->handle}});
+  EXPECT_EQ(page.at("total"), 0);
 }
 
 TEST_F(ProjectSkillsPython, RejectsSummaryDriftAndOldOpenEpoch)

@@ -2340,5 +2340,11 @@
   "skills.project.check": "检查原对象",
   "skills.project.uncertain": "写入回执未确认。请先检查原对象，再进行修改。",
   "skills.project.observed": "已读取原对象。这是当前状态，不是原写入回执。",
-  "skills.project.missing": "未找到原对象。尚未重试写入。"
+  "skills.project.missing": "未找到原对象。尚未重试写入。",
+  "skills.project.publish": "从保存分析创建技能",
+  "skills.project.publish_hint": "选择已保存的分析，将名称、说明、图、提交参数和所选输出保存为不可变的项目技能版本。实际运行分析时仍须提供输入、依赖并明确启动。",
+  "skills.project.no_analyses": "先保存一份分析，再在这里选择。",
+  "skills.project.publish_new": "保存为新的项目技能",
+  "skills.project.publish_version": "向所选技能追加版本",
+  "skills.project.contract": "保存的方法接口"
 }

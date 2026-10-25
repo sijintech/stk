@@ -2,9 +2,22 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：用户分析技能（进行中）
+
+基线 `e9f5fb6e255572d204a8a44c3204fac647913123`；本节记录当前用户技能交付批次。用户技能 `graph.document` 完整保存分析图、提交参数、输出选择和源项目／分析／修订／摘要。
+同一 CAS 事务读取源并创建或追加版本；不替换目录技能、不自动执行，恢复旧版本后版本号仍递增。复用版本能脱离安装目录，随工作空间迁移。
+原生入口复用保存分析读取器；输入名按保存参数解析，未绑定实际文件；旧来源按钮、晚响应与项目变化不能改投另一对象。未知节点可保存方法定义，执行仍按现有图服务校验。
+
+- Python 首轮 **36 passed、1 failed**，`/tmp/stk-user-skills-python.log`；失败夹具删除了图参数必须具备的默认值，改为结构合法但引用未声明参数的绑定，继续验证发布拒绝且无写入。一次扩大命令误写不存在的 `tests/test_agent_tools.py`，**未运行任何测试**（`python-recheck.log`）；已改为实际 `test_agent.py`，未计作通过。
+- 修正后相关 **77 passed、27.01 秒**（`/tmp/stk-user-skills-python-final.log`）；扩大技能／脚本／智能体／分析回归，Python 3.12 **145 passed、29.29 秒**、3.11 **145 passed、42.46 秒**、3.14 **145 passed、42.96 秒**，分别为 `python-expanded.log`、`python311.log`、`python314.log`。
+- 新增真实 GraphWorker 验证：保存公开合成带符号场分析→发布用户技能→复制分析→冻结输入→改变原分析与删除原文件→明确运行，成功输出原参数 `K` 的三维 payload，原准备运行仍未启动。三 Python 版本各 **1 passed**（0.83／1.29／1.30 秒），`/tmp/stk-user-skills-real-run.log`、`real-run311.log`、`real-run314.log`。没有模型请求。
+- 原生产品首轮构建退出 0；新增测试编译曾因把返回 void 的 refresh 放入断言失败，修正后构建通过。原生首轮相关 **24/28**，4 项新用例均在不合法的两段节点类型名处被结构校验拒绝；改为规范三段名称，未放宽产品校验。最终构建 `/tmp/stk-user-skills-native-fix-build.log` 退出 0，相关及必跑 **28/28、零跳过、4.81 秒**，`/tmp/stk-user-skills-native-recheck.log`／`.xml`。现有三平台 ProjectSkillsPython 必跑通配覆盖新增用例。
+- 点击验收：CPU 事件测试；已打开项目且有一份保存分析，技能库页可见。英文 1×、1280×1200；中文 2×、逻辑 560×1200。点击“项目技能版本”→展开“从保存分析创建技能”→选分析→“保存为新的项目技能”，共 **4 次点击**；随后在同一选中技能／来源下追加版本 **1 次点击**。旧版本字节保留，项目修订各增加 1，Viewer 状态不变；切换来源后保留的旧按钮不写入。这不替代真实系统窗口／GPU 截图验收。
+- 中英 **2347 键、零问题**，`git diff --check` 通过；完整原生 **1666/1666、零失败／错误／跳过、393.74 秒**（`/tmp/stk-user-skills-full-native.log`／`.xml`）；按 Linux CI 的完整必跑表达式核对 **836/836**，`/tmp/stk-user-skills-full-required.log`。新跨平台 CI 尚待完成。
+
 ## 2026-10-25：图像附件与卡片缩略图（进行中）
 
-基线 `e30150bb47c7064c945a4c561d99e02fdea5ae69`；本节记录当前图像预览交付批次，新跨平台 CI 尚待验证。
+基线 `e30150bb47c7064c945a4c561d99e02fdea5ae69`；源码 `e9f5fb6e255572d204a8a44c3204fac647913123` 已提交并推送 main。
 JPEG／WebP／GIF／BMP／TIFF 在本地转成有独立摘要的 PNG；PNG 原样预览与 UTF-8 文本兼容入口保留。
 原文件仍限 1 MiB、4096 单边／4194304 像素；新格式和缩略图依赖 visualization extra 的 Pillow（本机 12.3.0）。
 按 EXIF 处理方向，多帧只显示第一帧并标明总帧数；原文件与显示像素分别校验，不复制源 EXIF／ICC／文本元数据。
@@ -17,6 +30,7 @@ JPEG／WebP／GIF／BMP／TIFF 在本地转成有独立摘要的 PNG；PNG 原�
 - 实际点击验收：CPU 事件测试、英文 1×、1440×1200，已有文件对象的看板卡片为起点；**1 次点击“加载缩略图”**后显示 256×128 合成图像，未进入详情或改变记录选择、项目修订、Viewer 数据／相机。切回网格释放纹理，再回看板不自动读取；新修订拒绝已排队响应和保留的旧按钮动作。另验证 BMP 转换后原生解码像素一致。CPU 点击与像素验证不替代真机 GPU 截图。
 - 中英 **2341 键、零问题**；完整原生 **1662/1662、零失败／错误／跳过，386.38 秒**，`/tmp/stk-image-previews-full-native.log`／`.xml`。按 Linux CI 完整必跑表达式核对 **832/832**，`/tmp/stk-image-previews-full-required.log`（首次误选 Windows 命令得到 791 项，已纠正选择入口，未重跑或跳过测试）。收尾再次读取 XML 与日志确认计数，没有重复运行测试。
 - AOCI 21 个受影响条目已分两批维护，3 个观察测试文件已复核确认；Verify／Check／Guide 对齐、complete=true、next_action=none。这是索引与源码的治理对齐，不代表全量模型认知校验通过。前代码头 `e30150b` 的 Desktop 已结束成功，满足本批推送前等待条件。
+- 提交前暂存 gitleaks（`.gitleaks.toml`、redact）约 **157 KB、零发现**，差异格式检查通过。源码的 [Runtime 40196571054](https://github.com/sijintech/stk/actions/runs/40196571054)、[Docs 40196570995](https://github.com/sijintech/stk/actions/runs/40196570995)、[Secret 40196571044](https://github.com/sijintech/stk/actions/runs/40196571044) 已成功；[Desktop 40196571079](https://github.com/sijintech/stk/actions/runs/40196571079) **5/5 全部结束且成功**，包含 Windows、macOS、Linux、Linux 打包与干净容器冒烟。后续用户技能批次推送前的等待条件已满足。
 
 ## 2026-10-25：大项目分页接入（进行中）
 

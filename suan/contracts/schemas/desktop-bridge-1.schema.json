@@ -11648,6 +11648,54 @@
           ],
           "additionalProperties": false
         }
+      },
+      "project.skills.publish_analysis": {
+        "description": "Explicitly publish a saved analysis as a new project-owned user skill or append a version. Copies the graph, overrides and selected outputs in one revision-checked edit; never executes.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "project_skill_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "analysis_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "handle",
+            "project_skill_id",
+            "expected_revision",
+            "analysis_id",
+            "create",
+            "name",
+            "description"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
       }
     },
     "events": {
@@ -19687,6 +19735,45 @@
             },
             "graph": {
               "$ref": "#/$defs/projectAnalysisGraph"
+            },
+            "parameters": {
+              "type": "object",
+              "maxProperties": 64
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              "maxItems": 256,
+              "uniqueItems": true
+            },
+            "source": {
+              "type": "object",
+              "properties": {
+                "project_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "analysis_id": {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9223372036854775807
+                },
+                "content_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              },
+              "required": [
+                "project_id",
+                "analysis_id",
+                "revision",
+                "content_sha256"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [

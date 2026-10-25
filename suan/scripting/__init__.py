@@ -647,6 +647,11 @@ class ProjectSkills:
         return self._call("project.skills.pin", {"handle": self.handle, "skill_id": skill_id, "version": version,
             "content_sha256": content_sha256, "project_skill_id": project_skill_id, "expected_revision": expected_revision})
 
+    def publish_analysis(self, analysis_id, *, project_skill_id, create, name, description, expected_revision):
+        return self._call("project.skills.publish_analysis", {"handle": self.handle, "analysis_id": analysis_id,
+            "project_skill_id": project_skill_id, "create": create, "name": name, "description": description,
+            "expected_revision": expected_revision})
+
     def upgrade(self, project_skill_id, version, content_sha256, *, expected_revision):
         return self._call("project.skills.upgrade", {"handle": self.handle, "project_skill_id": project_skill_id,
             "version": version, "content_sha256": content_sha256, "expected_revision": expected_revision})

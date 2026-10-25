@@ -1574,7 +1574,7 @@ methods and the client must show the catalog as unavailable rather than guess.
 
 ### 16.1 Project-owned skill versions (additive extension, experimental)
 
-Discover the following six methods through `hello.methods`. Every request contains the current
+Discover these methods through `hello.methods`. Every request contains the current
 project `handle`; every write also contains `expected_revision`. The Python facade is `p.skills`.
 
 | Method | Additional params | Result |
@@ -1585,6 +1585,7 @@ project `handle`; every write also contains `expected_revision`. The Python faca
 | `project.skills.upgrade` | `project_skill_id, version, content_sha256` | Ordinary project edit receipt |
 | `project.skills.restore` | `project_skill_id, content_sha256` | Ordinary project edit receipt |
 | `project.skills.create_analysis` | `project_skill_id, content_sha256, analysis_id, name` | Ordinary edit receipt; `record_id` is the new analysis UUID |
+| `project.skills.publish_analysis` | `analysis_id, project_skill_id, create, name, description` | Ordinary edit receipt; new user skill or appended version, selected explicitly by `create` |
 
 `project_skill_id` and `analysis_id` are stable project UUIDs. A readable detail contains
 `{id, name, format, state, error, active, versions, document}`; list items omit `document`.
@@ -1597,8 +1598,21 @@ integer/float distinctions and negative zero are retained. Environment availabil
 Pin and upgrade resolve exactly the reviewed version and digest from one catalog observation.
 Upgrade must exceed all saved version numbers; restore only selects a digest already saved.
 Reads, restore and analysis creation never consult the installed catalog or execute nodes.
-Analysis creation copies the active graph, selects its declared outputs, and records
+Analysis creation copies the active graph, uses all declared outputs for catalog presets or the exact saved overrides/output selection for user methods, and records
 `graph.ui.project_skill = {id, ref, content_sha256}`. It creates no run or model request.
+
+Publishing reads the saved analysis within the same revision-checked write transaction. `create: true`
+requires a new UUID; false requires an existing user method and never overwrites a catalog skill.
+The user definition has ID `user.s` plus the UUID without hyphens and entry `{kind: "graph.document"}`.
+Its template extends `{id, name, description, bindings, graph}` with `parameters`, `outputs` and
+`source: {project_id, analysis_id, revision, content_sha256}`. The source digest covers the complete
+`stk.analysis-document/1` document in canonical JSON. Input names are resolved from the saved parameter
+values without loading files or node implementations; unresolved binding names are rejected.
+New versions start at 1 and increase beyond all stored versions, even after restoring an older active version.
+Empty output selections and large integer overrides are preserved. Structural validity does not imply
+runtime node availability or successful graph validation; these checks still apply before execution.
+Names are 1–120 characters and descriptions 1–1000, with nonblank text and no NUL. All existing
+collection, version and document limits apply atomically.
 
 Writes use the shared CAS transaction and undo journal, followed by `project.changed` after the
 reply. They are not automatically replayed after a missing reply: inspect the original UUID first.

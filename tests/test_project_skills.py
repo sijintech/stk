@@ -238,3 +238,191 @@ def test_bridge_and_script_share_contract_without_running(inproc, tmp_path):
     assert harness.error("project.skills.restore", {"handle": handle, "project_skill_id": identity,
         "content_sha256": item["content_sha256"], "expected_revision": 1})["code"] == "conflict"
     assert harness.error("project.skills.get", {"handle": handle, "project_skill_id": str(uuid4())})["code"] == "not_found"
+
+
+def user_analysis(store, *, outputs=None):
+    from test_project_analyses import document
+    value = document()
+    value["parameters"]["level"] = 9007199254740993
+    value["graph"]["nodes"][0]["params"]["binding"] = {"$param": "input"}
+    value["graph"]["parameters"].append({"name": "input", "type": "string", "default": "data"})
+    value["parameters"]["input"] = "chosen"
+    if outputs is not None:
+        value["outputs"] = outputs
+    identity = str(uuid4())
+    store.analyses.create("User method", value, analysis_id=identity, expected_revision=store.info()["revision"])
+    return identity, value
+
+
+def publish(store, analysis_id, *, identity=None, create=True, revision=None):
+    return store.skills.publish_analysis(analysis_id, project_skill_id=identity or str(uuid4()), create=create,
+        name="My reusable method", description="An explicitly saved local method",
+        expected_revision=store.info()["revision"] if revision is None else revision)["record_id"]
+
+
+@pytest.mark.parametrize("outputs", [[], ["view"]])
+def test_user_skill_copies_exact_overrides_outputs_and_source_without_catalog(store, monkeypatch, outputs):
+    from suan.desktop_bridge.schema import validate_outgoing
+    analysis_id, original = user_analysis(store, outputs=outputs)
+    monkeypatch.setattr(catalog, "load_catalog", unavailable)
+    identity = publish(store, analysis_id)
+    result = store.skills.get(identity)
+    validate_outgoing({"id": 1, "result": result}, "project.skills.get")
+    item = result["skill"]["document"]["versions"][0]
+    template = item["template"]
+    assert item["definition"]["entry"] == {"kind": "graph.document"}
+    assert template["graph"] == original["graph"]
+    assert template["parameters"] == original["parameters"]
+    assert template["outputs"] == outputs
+    assert template["bindings"] == [{"name": "chosen", "description": ""}]
+    assert template["source"] == {"project_id": store.info()["id"], "analysis_id": analysis_id, "revision": 1,
+                                   "content_sha256": hashlib.sha256(catalog._canonical(original).encode()).hexdigest()}
+    copy_id = str(uuid4())
+    store.skills.create_analysis(identity, item["content_sha256"], analysis_id=copy_id, name="Copy", expected_revision=2)
+    copied = store.analyses.get(copy_id)["analysis"]["document"]
+    assert copied["parameters"] == original["parameters"] and copied["outputs"] == outputs
+    copied["graph"]["ui"].pop("project_skill")
+    if not copied["graph"]["ui"]:
+        copied["graph"].pop("ui")
+    assert copied == original
+    assert saved(store, identity)["document"]["versions"][0] == item
+    assert store.analysis_runs.list()["runs"] == []
+    assert saved(ProjectStore(store.directory), identity)["state"] == "readable"
+
+
+def test_user_skill_append_restore_and_undo_keep_frozen_versions(store):
+    analysis_id, original = user_analysis(store)
+    identity = publish(store, analysis_id)
+    first = saved(store, identity)
+    revised = deepcopy(original)
+    revised["parameters"]["level"] = 4
+    store.analyses.update(analysis_id, "Revised", revised, expected_revision=2)
+    publish(store, analysis_id, identity=identity, create=False)
+    second = saved(store, identity)
+    assert second["active"]["version"] == 2
+    assert second["document"]["versions"][0] == first["document"]["versions"][0]
+    store.skills.restore(identity, first["active"]["content_sha256"], expected_revision=4)
+    assert saved(store, identity)["active"] == first["active"]
+    publish(store, analysis_id, identity=identity, create=False)
+    assert saved(store, identity)["active"]["version"] == 3  # Restoring does not reuse version 2.
+    store.undo(expected_revision=6)
+    assert saved(store, identity)["active"] == first["active"]
+    store.redo(expected_revision=7)
+    assert saved(store, identity)["active"]["version"] == 3
+
+
+def test_user_publish_rejects_stale_missing_duplicate_and_catalog_targets_atomically(store):
+    analysis_id, _ = user_analysis(store)
+    identity = publish(store, analysis_id)
+    before = store.snapshot()
+    for aid, sid, create, rev in [(analysis_id, identity, False, 1), (analysis_id, identity, True, 2),
+                                 (str(uuid4()), str(uuid4()), True, 2), (analysis_id, str(uuid4()), False, 2)]:
+        with pytest.raises(ProjectError):
+            publish(store, aid, identity=sid, create=create, revision=rev)
+        assert store.snapshot() == before
+    builtin = pin(store)
+    before = store.snapshot()
+    with pytest.raises(ProjectError, match="catalog skill"):
+        publish(store, analysis_id, identity=builtin, create=False)
+    assert store.snapshot() == before
+
+
+def test_user_skill_validates_binding_and_source_when_reading(store):
+    analysis_id, original = user_analysis(store)
+    identity = publish(store, analysis_id)
+    item = saved(store, identity)["document"]["versions"][0]
+    item["template"]["parameters"]["level"] = 7
+    # Even a recomputed outer checksum cannot hide a mismatched source receipt.
+    item["content_sha256"] = hashlib.sha256(catalog._canonical({k: item[k] for k in ("definition", "template")}).encode()).hexdigest()
+    store.apply([{"op": "set_cell", "table_id": TABLE_ID, "record_id": identity,
+                  "field_id": FIELD_IDS["versions"], "value": [item]}], expected_revision=2)
+    assert saved(store, identity)["state"] == "invalid"
+    original["graph"]["nodes"][0]["params"]["binding"] = {"$param": "missing"}
+    store.analyses.update(analysis_id, "Unresolved", original, expected_revision=3)
+    before = store.snapshot()
+    with pytest.raises(ProjectError, match="unresolved"):
+        publish(store, analysis_id)
+    assert store.snapshot() == before
+
+
+def test_user_publish_bridge_and_script_are_explicit_project_edits(inproc, tmp_path):
+    from suan.scripting import Project
+    from test_project_analyses import document
+    harness = inproc()
+    harness.call("hello", {"protocol": 1})
+    opened = harness.call("project.create", {"directory": str(tmp_path / "user-skills"), "name": "User skills"})
+    handle = opened["project"]["handle"]
+    aid, identity = str(uuid4()), str(uuid4())
+    harness.call("project.analyses.create", {"handle": handle, "analysis_id": aid, "name": "My analysis",
+                 "document": document(), "expected_revision": 0})
+    p = Project(harness.call, handle)
+    receipt = p.skills.publish_analysis(aid, project_skill_id=identity, create=True, name="My method",
+                                        description="Local reusable analysis", expected_revision=1)
+    assert receipt["revision"] == 2 and receipt["record_id"] == identity
+    assert p.skills.get(identity)["skill"]["active"]["version"] == 1
+    assert harness.bridge.graphs.worker._child is None
+    from suan.agent.levels import level
+    assert level("project.skills.publish_analysis") == "project_edit"
+
+
+def test_user_skill_survives_workspace_transfer_and_version_limit_is_atomic(store, tmp_path, monkeypatch):
+    from suan.project import skills, workspace_bundle as bundle
+    analysis_id, original = user_analysis(store, outputs=[])
+    identity = publish(store, analysis_id)
+    before = saved(store, identity)
+    monkeypatch.setattr(skills, "MAX_VERSIONS", 1)
+    snapshot = store.snapshot()
+    with pytest.raises(ProjectError, match="versions"):
+        publish(store, analysis_id, identity=identity, create=False)
+    assert store.snapshot() == snapshot
+    state = {"format": "stk.desktop.workspace-state", "version": 1, "windows": [], "app": {}}
+    exported = bundle.export_workspace(store.directory, tmp_path / "user.stkworkspace", state=state)
+    imported = bundle.import_workspace(exported["path"], tmp_path / "moved", expected_sha256=exported["sha256"])
+    moved = ProjectStore(imported["project_directory"])
+    monkeypatch.setattr(catalog, "load_catalog", unavailable)
+    assert saved(moved, identity) == before
+    copy_id = str(uuid4())
+    moved.skills.create_analysis(identity, before["active"]["content_sha256"], analysis_id=copy_id,
+                                 name="Recovered user method", expected_revision=moved.info()["revision"])
+    document = moved.analyses.get(copy_id)["analysis"]["document"]
+    assert document["parameters"] == original["parameters"] and document["outputs"] == []
+
+
+def test_published_user_method_executes_its_frozen_parameters_after_source_changes(tmp_path):
+    import io
+    from suan.graph.catalog import load_preset
+    from suan.desktop_bridge.analysis_runs import AnalysisRunExecutor
+    from suan.desktop_bridge.graph_worker import GraphWorker
+    from test_analysis_run_executor import prepared, settled
+    np = pytest.importorskip("numpy")
+    data = io.BytesIO()
+    np.save(data, np.arange(24, dtype=np.float64).reshape(2, 3, 4) - 15)
+    document = {"format": "stk.analysis-document/1", "graph": load_preset("scalar-volume"),
+                "parameters": {"path": "field.npy", "field": "field", "unit": "K"}, "outputs": ["view"]}
+    store, original_run, source = prepared(tmp_path, document=document, content=data.getvalue(), filename="field.npy")
+    identity = publish(store, original_run["analysis_id"])
+    skill = saved(store, identity)
+    copy_id = str(uuid4())
+    store.skills.create_analysis(identity, skill["active"]["content_sha256"], analysis_id=copy_id,
+                                 name="Reusable signed field", expected_revision=store.info()["revision"])
+    selection = {binding: {path: item["record_id"] for path, item in files.items()}
+                 for binding, files in original_run["bindings"].items()}
+    run = store.analysis_runs.prepare(copy_id, original_run["snapshot_id"], selection,
+                                     run_id=str(uuid4()), expected_revision=store.info()["revision"])
+    document["parameters"]["unit"] = "changed source"
+    store.analyses.update(original_run["analysis_id"], "Changed original", document, expected_revision=store.info()["revision"])
+    source.unlink()
+    worker = GraphWorker(tmp_path / "cache")
+    executor = AnalysisRunExecutor(worker, tmp_path / "cache/blobs")
+    try:
+        executor.start(store, run["id"])
+        final = settled(executor, store, run, timeout=20)
+        assert final["status"] == "succeeded", final["error"]
+        result = executor.result(store, run["id"])["result"]
+        assert final["result"]["has_payload"] and result["parameters"]["unit"]["value"] == "K"
+        assert list(result["outputs"]) == ["view"]
+        assert store.analysis_runs.get(original_run["id"])["status"] == "prepared"
+        assert saved(store, identity) == skill
+    finally:
+        executor.shutdown(wait=True)
+        worker.close()

@@ -2340,5 +2340,11 @@
   "skills.project.check": "Check existing object",
   "skills.project.uncertain": "The write reply was not confirmed. Check the original object before making another change.",
   "skills.project.observed": "Read the existing object. This shows its current state; it does not recover the original write receipt.",
-  "skills.project.missing": "The original object was not found. No write was retried."
+  "skills.project.missing": "The original object was not found. No write was retried.",
+  "skills.project.publish": "Create a skill from a saved analysis",
+  "skills.project.publish_hint": "Select a saved analysis. Its name, description, graph, submitted parameters and chosen outputs become an immutable project skill version. Inputs and dependencies are still supplied when explicitly running an analysis.",
+  "skills.project.no_analyses": "Save an analysis first, then select it here.",
+  "skills.project.publish_new": "Save as a new project skill",
+  "skills.project.publish_version": "Append a version to the selected skill",
+  "skills.project.contract": "Saved method interface"
 }

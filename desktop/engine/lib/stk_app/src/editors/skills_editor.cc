@@ -9,6 +9,7 @@
 
 #include "stk/app/skill_catalog.hh"
 #include "stk/app/project_skills.hh"
+#include "stk/app/project_analyses.hh"
 #include "stk/app/analysis_document.hh"
 #include "editor_text.hh"
 
@@ -118,7 +119,7 @@ class SkillsEditor final : public Editor {
         !ctx.area.shell().has_unsaved_changes() && !ctx.area.shell().text_input_active();
   }
   std::function<void()> mutation(EditorContext &ctx, std::string action, io::Json params,
-                                  std::string catalog_ref = {}, std::string catalog_hash = {})
+                                  std::string catalog_ref = {}, std::string catalog_hash = {}, uint64_t source_version = 0)
   {
     const auto weak = lifetime();
     auto *area = &ctx.area;
@@ -126,13 +127,111 @@ class SkillsEditor final : public Editor {
     const auto epoch = project_skills_->epoch();
     auto *store = &ctx.store;
     return [this, weak, shell_weak, area, store, epoch, action = std::move(action), params = std::move(params),
-            catalog_ref = std::move(catalog_ref), catalog_hash = std::move(catalog_hash)] {
+            catalog_ref = std::move(catalog_ref), catalog_hash = std::move(catalog_hash), source_version] {
       if (weak.expired() || shell_weak.expired() || &area->editor() != this ||
           area->shell().has_unsaved_changes() || area->shell().text_input_active()) { return; }
       if (!catalog_ref.empty() && (store->skills().selected() != catalog_ref ||
           io::get_string(store->skills().detail(), "content_sha256") != catalog_hash)) { return; }
+      if (action == "publish_analysis" && (!analysis_source_ || analysis_source_->busy() || analysis_source_->stale() ||
+          analysis_source_->selected_version() != source_version ||
+          source_selected_id_ != io::get_string(params, "analysis_id") ||
+          io::get_string(analysis_source_->selected(), "id") != io::get_string(params, "analysis_id"))) { return; }
       if (project_skills_->write(action, params, epoch)) { project_view_ = true; }
     };
+  }
+  void publish_analysis(ui::Layout &layout, EditorContext &ctx)
+  {
+    auto &saved = *project_skills_;
+    if (!saved.can_publish()) { return; }
+    auto *panel = layout.panel("project_skill_publish", ctx.tr("skills.project.publish"), false);
+    if (!panel) { return; }
+    if (!analysis_source_) { analysis_source_ = std::make_unique<ProjectAnalyses>(ctx.store); }
+    auto &source = *analysis_source_;
+    source.sync(); source.set_archive_filter(false);
+    if (source.epoch() != source_epoch_) {
+      source_epoch_ = source.epoch(); source_page_revision_ = source_detail_revision_ = -1; source_selected_id_.clear();
+    }
+    if (!source.busy() && !ctx.store.project().busy()) {
+      if (source_page_revision_ != saved.revision()) {
+        source_page_revision_ = saved.revision(); source.load_page();
+      }
+      else if (!source_selected_id_.empty() && source.stale() && source_detail_revision_ != saved.revision()) {
+        source_detail_revision_ = saved.revision(); source.load(source_selected_id_);
+      }
+    }
+    panel->paragraph(ctx.tr("skills.project.publish_hint"));
+    const auto weak = lifetime();
+    const auto source_epoch = source.epoch();
+    panel->button("project_skill_sources_refresh", ctx.tr("skills.refresh"), [this, weak, source_epoch] {
+      if (weak.expired() || !analysis_source_) { return; }
+      analysis_source_->sync();
+      if (analysis_source_->epoch() != source_epoch || analysis_source_->busy()) { return; }
+      source_page_revision_ = source_detail_revision_ = -1;
+    }).disable(source.busy());
+    if (source.busy()) { panel->label(ctx.tr("skills.loading")); }
+    if (!source.error().empty()) { panel->paragraph(source.error()); }
+    const auto &page = source.page();
+    if (page.is_object()) {
+      const auto items = page.at("analyses");
+      if (items.empty()) { panel->paragraph(ctx.tr("skills.project.no_analyses")); }
+      else {
+        const auto epoch = source.epoch();
+        ui::ListSpec spec;
+        spec.count = int(items.size()); spec.rows = std::min(4.0f, float(items.size()));
+        spec.text = [items](int i) {
+          return i >= 0 && size_t(i) < items.size() ? io::get_string(items[size_t(i)], "name") : std::string();
+        };
+        spec.selected = {[this, weak, items] {
+          if (weak.expired()) { return -1; }
+          for (size_t i = 0; i < items.size(); ++i) {
+            if (io::get_string(items[i], "id") == source_selected_id_) { return int(i); }
+          }
+          return -1;
+        }, [this, weak, items, epoch](int i) {
+          if (weak.expired() || !analysis_source_) { return; }
+          auto &source = *analysis_source_;
+          source.sync();
+          if (source.epoch() == epoch && !source.busy() && i >= 0 && size_t(i) < items.size()) {
+            source_selected_id_ = io::get_string(items[size_t(i)], "id");
+            source.load(source_selected_id_);
+          }
+        }};
+        panel->virtual_list("project_skill_sources", std::move(spec));
+      }
+      const auto offset = io::get_int(page, "offset", 0);
+      const auto load_page = [this, weak, source_epoch](int64_t target) {
+        if (weak.expired() || !analysis_source_) { return; }
+        analysis_source_->sync();
+        if (analysis_source_->epoch() == source_epoch) { analysis_source_->load_page(target); }
+      };
+      auto &pages = panel->row();
+      pages.button("project_skill_sources_previous", ctx.tr("skills.previous"), [load_page, offset] { load_page(std::max(int64_t(0), offset - 50)); })
+          .disable(source.busy() || offset == 0);
+      pages.button("project_skill_sources_next", ctx.tr("skills.next"), [load_page, offset] { load_page(offset + 50); })
+          .disable(source.busy() || offset + int64_t(items.size()) >= io::get_int(page, "total", 0));
+    }
+    const auto &item = source.selected();
+    if (!item.is_object() || io::get_string(item, "id") != source_selected_id_) { return; }
+    if (io::get_string(item, "state") != "readable") { panel->paragraph(io::get_string(item, "error")); return; }
+    const auto title = io::get_string(item, "name");
+    const auto &document = item.at("document");
+    auto description = io::get_string(document.at("graph"), "description");
+    if (description.empty()) { description = title; }
+    panel->label(title); panel->paragraph(description);
+    const bool enabled = writable(ctx) && !source.busy() && !source.stale() && source.error().empty();
+    const auto params = [&](bool create) {
+      return io::Json{{"analysis_id", item.at("id")}, {"project_skill_id", create ? ProjectSkills::new_id() : saved.selected_id()},
+          {"create", create}, {"name", title}, {"description", description}, {"expected_revision", saved.revision()}};
+    };
+    panel->button("project_skill_publish_new", ctx.tr("skills.project.publish_new"),
+        mutation(ctx, "publish_analysis", params(true), {}, {}, source.selected_version())).disable(!enabled);
+    if (saved.current()) {
+      const auto &versions = saved.selected().at("document").at("versions");
+      if (!versions.empty() && io::get_string(versions.front().at("definition").at("entry"), "kind") == "graph.document") {
+        panel->button("project_skill_publish_version", ctx.tr("skills.project.publish_version"),
+            mutation(ctx, "publish_analysis", params(false), {}, {}, source.selected_version())).disable(!enabled);
+      }
+    }
   }
   void project_view(ui::Layout &layout, EditorContext &ctx)
   {
@@ -158,6 +257,7 @@ class SkillsEditor final : public Editor {
     if (saved.busy()) { layout.label(ctx.tr("skills.loading")); }
     if (!saved.error().empty()) { layout.paragraph(saved.error()); }
     if (!saved.notice().empty()) { layout.paragraph(ctx.tr(saved.notice())); }
+    publish_analysis(layout, ctx);
     const auto &page = saved.page();
     if (page.is_object()) {
       const auto &items = page.at("skills");
@@ -196,6 +296,23 @@ class SkillsEditor final : public Editor {
     layout.label(skill_text(active.at("title"), ctx.store.language()));
     layout.label(io::get_string(active, "ref"));
     layout.paragraph(ctx.store.catalog().format("skills.content_hash", {{"hash", io::get_string(active, "content_sha256")}}));
+    for (const auto &snapshot : item.at("document").at("versions")) {
+      if (snapshot.at("content_sha256") != active.at("content_sha256")) { continue; }
+      const auto &definition = snapshot.at("definition");
+      const auto &templ = snapshot.at("template");
+      layout.paragraph(skill_text(definition.at("summary"), ctx.store.language()));
+      if (auto *contract = layout.panel("project_skill_contract", ctx.tr("skills.project.contract"), false)) {
+        contract->label(ctx.tr("skills.inputs"));
+        for (const auto &binding : templ.at("bindings")) { contract->label(io::get_string(binding, "name")); }
+        contract->label(ctx.tr("skills.parameters"));
+        const auto &graph = templ.at("graph");
+        for (const auto &parameter : member(graph, "parameters")) { contract->label(io::get_string(parameter, "name")); }
+        contract->label(ctx.tr("skills.outputs"));
+        if (templ.contains("outputs")) { contract->paragraph(joined(templ.at("outputs"), "—")); }
+        else { for (const auto &output : graph.at("outputs").items()) { contract->label(output.key()); } }
+      }
+      break;
+    }
     const bool enabled = writable(ctx) && saved.current();
     if (auto *versions = layout.panel("project_skills_versions", ctx.tr("skills.project.versions"), true)) {
       for (const auto &version : item.at("versions")) {
@@ -402,6 +519,10 @@ class SkillsEditor final : public Editor {
 
   std::string query_;
   std::unique_ptr<ProjectSkills> project_skills_;
+  std::unique_ptr<ProjectAnalyses> analysis_source_;
+  std::string source_selected_id_;
+  uint64_t source_epoch_ = 0;
+  int64_t source_page_revision_ = -1, source_detail_revision_ = -1;
   bool project_view_ = false, restore_selection_ = false;
   std::string saved_project_id_, saved_skill_id_;
 };

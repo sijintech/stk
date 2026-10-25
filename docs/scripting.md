@@ -186,6 +186,7 @@ print(p.selection())
 | Viewer 打开/关闭、状态、预设参数、图层、求值、时间步/播放和相机重置 | `stk.viewer` 已接入共享原生状态，见[Viewer Python 指南](scripting-viewer.md) |
 | 分析图目录、连接校验、求值/取消、blob 与原场探针 | `stk.graph` 已接入现有图服务，保留 Hub 审核和结果，见[分析图 Python 指南](scripting-graphs.md) |
 | 版本化技能目录（实验性 `stk.skill/1`） | `stk.skills.list(offset=, limit=, query=)`、`stk.skills.get(id, version=)` 只读查询；不执行入口、不准备运行或调用模型，见[技能目录](skills.md) |
+| 项目技能与用户方法版本 | `p.skills.list/get/pin/upgrade/restore/create_analysis`；`publish_analysis(analysis_id, project_skill_id=, create=, name=, description=, expected_revision=)` 从保存分析创建或追加用户版本，完整保留图、参数与所选输出；写入要求明确修订，不自动执行，见[用户技能](skills.md#从保存分析创建用户技能) |
 | 项目分析定义保存、替换、分页查询与纯 Viewer 配置捕获 | `stk.project.analyses`、`stk.viewer.graph_configuration()`，不运行节点，见[分析文档指南](project-analyses.md) |
 | 项目工作流（实验）保存、分页查询与只读校验 | `stk.project.workflows`，不运行任何步骤，见[项目工作流](project-workflows.md) |
 | AI 请求用量（实验） | `stk.project.requests.usage()` 只读合计已完成回复的服务商 token 回执（总计与按模型），不估算金额，见[请求指南](project-requests.md) |

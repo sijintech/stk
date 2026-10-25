@@ -8,7 +8,7 @@ import hashlib
 import re
 from uuid import NAMESPACE_URL, uuid5
 
-from suan.graph.schema import check_value
+from suan.graph.schema import ID_RE, check_value, parameter_values, substitute_params
 from suan.skills.catalog import DEFINITION_SCHEMA, _canonical
 
 from . import analyses
@@ -43,16 +43,38 @@ def _hash(value):
     return value
 
 
+def _analysis_bindings(document):
+    """Describe input names under the saved overrides, without reading files or loading nodes."""
+    values = parameter_values(document["graph"], document["parameters"])
+    names = []
+    try:
+        for node in document["graph"]["nodes"]:
+            params = node.get("params", {})
+            if "binding" not in params:
+                continue
+            binding = substitute_params(params["binding"], values)
+            if type(binding) is not str or not ID_RE.fullmatch(binding):
+                raise ProjectError("Saved analysis needs valid input binding names")
+            if binding not in names:
+                names.append(binding)
+    except (KeyError, TypeError):
+        raise ProjectError("Saved analysis has an unresolved input binding parameter") from None
+    return [{"name": binding, "description": ""} for binding in names]
+
+
 def _snapshot(value):
     if type(value) is not dict or set(value) != {"definition", "template", "content_sha256"}:
         raise ProjectError("Saved skill requires definition, template and content_sha256")
     definition, template = value["definition"], value["template"]
     if check_value(definition, DEFINITION_SCHEMA):
         raise ProjectError("Saved skill definition is invalid")
-    if (definition["entry"].get("kind") != "graph.preset" or type(template) is not dict or
-            set(template) != {"id", "name", "description", "bindings", "graph"} or
-            template["id"] != definition["entry"].get("preset")):
-        raise ProjectError("Saved skill must contain its complete graph preset")
+    kind = definition["entry"].get("kind")
+    keys = {"id", "name", "description", "bindings", "graph"}
+    if kind == "graph.document":
+        keys |= {"parameters", "outputs", "source"}
+    if (kind not in {"graph.preset", "graph.document"} or type(template) is not dict or set(template) != keys or
+            (kind == "graph.preset" and template["id"] != definition["entry"].get("preset"))):
+        raise ProjectError("Saved skill must contain its complete graph template")
     if (any(type(template[key]) is not str or len(template[key]) > 4096 for key in ("name", "description")) or
             type(template["bindings"]) is not list or len(template["bindings"]) > 32):
         raise ProjectError("Saved skill preset metadata is invalid")
@@ -65,8 +87,21 @@ def _snapshot(value):
             raise ProjectError("Saved skill binding declarations are invalid")
         bindings.add(binding["name"])
     # Only the shipped structural schema: no registry, optional dependency or original preset read.
-    analyses._document({"format": analyses.DOCUMENT_FORMAT, "graph": template["graph"],
-                        "parameters": {}, "outputs": []})
+    document = analyses._document({"format": analyses.DOCUMENT_FORMAT, "graph": template["graph"],
+                                  "parameters": template.get("parameters", {}), "outputs": template.get("outputs", [])})
+    if kind == "graph.document":
+        source = template["source"]
+        if (definition["entry"] != {"kind": "graph.document"} or type(template["id"]) is not str or
+                re.fullmatch(r"[0-9a-f]{32}", template["id"]) is None or
+                definition["id"] != "user.s" + template["id"] or type(source) is not dict or
+                set(source) != {"project_id", "analysis_id", "revision", "content_sha256"}):
+            raise ProjectError("User skill identity or source is invalid")
+        _id(source["project_id"])
+        _id(source["analysis_id"])
+        _expected_revision(source["revision"])
+        if (hashlib.sha256(_canonical(document).encode("utf-8")).hexdigest() != _hash(source["content_sha256"]) or
+                template["bindings"] != _analysis_bindings(document)):
+            raise ProjectError("User skill source or input boundary does not match its saved analysis")
     content = {"definition": definition, "template": template}
     if hashlib.sha256(_canonical(content).encode("utf-8")).hexdigest() != _hash(value["content_sha256"]):
         raise ProjectError("Saved skill content digest does not match its definition and template")
@@ -200,6 +235,49 @@ class ProjectSkills:
             raise ProjectError(item["error"])
         return item
 
+    def publish_analysis(self, analysis_id, *, project_skill_id, create, name, description, expected_revision):
+        """Publish one saved definition as a new user skill or append an immutable user version."""
+        _id(analysis_id)
+        _id(project_skill_id)
+        _expected_revision(expected_revision)
+        if type(create) is not bool:
+            raise ProjectError("Publishing requires an explicit create choice")
+        title = analyses._name(name)
+        if len(title) > 120 or type(description) is not str or not description.strip() or len(description) > 1000 or "\0" in description:
+            raise ProjectError("User skill title must be at most 120 characters and description 1 to 1000")
+        with self.store._connect(write=True) as db:
+            if db.execute("SELECT revision FROM project").fetchone()[0] != expected_revision:
+                raise RevisionConflict("Project changed; review the analysis before publishing a skill")
+            _TABLE.require(db, "project skills")
+            analyses._require(db)
+            if db.execute("SELECT 1 FROM records WHERE table_id=? AND id=?", (analyses.TABLE_ID, analysis_id)).fetchone() is None:
+                raise analyses.AnalysisNotFound("Analysis document not found")
+            _, compatible, error = analyses._schema(db)
+            source = analyses._record(db, analysis_id, compatible, error)
+            if source["state"] != "readable":
+                raise ProjectError(source["error"])
+            analysis = source["document"]
+            skill_id = "user.s" + project_skill_id.replace("-", "")
+            versions = [] if create else self._current(db, project_skill_id, expected_revision)["document"]["versions"]
+            if any(v["definition"]["id"] != skill_id or v["definition"]["entry"]["kind"] != "graph.document" for v in versions):
+                raise ProjectError("Publish a new user skill instead of replacing a catalog skill")
+            version = 1 + max((v["definition"]["version"] for v in versions), default=0)
+            content = {
+                "definition": {"schema": "stk.skill/1", "id": skill_id, "version": version,
+                               "title": {"en": title}, "summary": {"en": description}, "entry": {"kind": "graph.document"}},
+                "template": {"id": project_skill_id.replace("-", ""), "name": title, "description": description,
+                             "bindings": _analysis_bindings(analysis), "graph": analysis["graph"],
+                             "parameters": analysis["parameters"], "outputs": analysis["outputs"],
+                             "source": {"project_id": db.execute("SELECT id FROM project").fetchone()[0],
+                                        "analysis_id": analysis_id, "revision": expected_revision,
+                                        "content_sha256": hashlib.sha256(_canonical(analysis).encode("utf-8")).hexdigest()}},
+            }
+            digest = hashlib.sha256(_canonical(content).encode("utf-8")).hexdigest()
+            versions.append({**content, "content_sha256": digest})
+            document = _document({"format": DOCUMENT_FORMAT, "active": digest, "versions": versions})
+            return _TABLE.write(self.store, db, project_skill_id, {"name": title, **document}, expected_revision,
+                                create=create, document_format=DOCUMENT_FORMAT)
+
     def upgrade(self, project_skill_id, version, content_sha256, *, expected_revision):
         _id(project_skill_id)
         _expected_revision(expected_revision)
@@ -249,6 +327,7 @@ class ProjectSkills:
             graph.setdefault("ui", {})["project_skill"] = {"id": project_skill_id, "ref": current["active"]["ref"],
                                                            "content_sha256": content_sha256}
             document = analyses._document({"format": analyses.DOCUMENT_FORMAT, "graph": graph,
-                                           "parameters": {}, "outputs": list(graph["outputs"])})
+                                           "parameters": saved["template"].get("parameters", {}),
+                                           "outputs": saved["template"].get("outputs", list(graph["outputs"]))})
             return analyses._TABLE.write(self.store, db, analysis_id, {"name": title, **document}, expected_revision,
                                          create=True, document_format=analyses.DOCUMENT_FORMAT)
