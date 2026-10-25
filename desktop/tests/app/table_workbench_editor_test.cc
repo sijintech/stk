@@ -331,6 +331,102 @@ TEST_F(TableWorkbenchEditorPython, DefaultGridUsesMostOfTheTablePaneAndBooleanCh
   EXPECT_FALSE(area().editor().has_unsaved_changes());
 }
 
+TEST_F(TableWorkbenchEditorPython, FillHandlePreservesInt64WithOneRevisionAndUndo)
+{
+  cell(0, 2);
+  const auto *grid = widget("records");
+  ASSERT_NE(grid, nullptr);
+  ASSERT_TRUE(grid->table->grid->on_fill);
+  const auto &style = f.screen.ui()->style();
+  float right = grid->rect.x + style.pixel;
+  float last_width = 0;
+  for (int c = 0; c <= 2; ++c) {
+    const auto &col = grid->table->columns[size_t(c)];
+    const auto width = grid->table->column_width(col.key);
+    last_width = std::round(width.value_or(col.width) * style.unit);
+    right += last_width;
+  }
+  const float row_height = style.unit * grid->table->row_height;
+  const ui::Vec2 handle{right - style.pixel - .175f * style.unit,
+                       grid->rect.y + style.pixel + 2 * row_height - style.pixel - .175f * style.unit};
+  const ui::Vec2 destination{right - .5f * last_width, grid->rect.y + style.pixel + 3.5f * row_height};
+  const auto revision = project().project()->revision;
+  send(ui::Event::mouse_down(handle));
+  send(ui::Event::mouse_move(destination));
+  EXPECT_EQ(project().project()->revision, revision);
+  send(ui::Event::mouse_up(destination));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(clicks, 1); // Select once, then one fill drag without a dialog.
+  EXPECT_EQ(project().project()->revision, revision + 1);
+  for (int row : {1, 2}) {
+    ASSERT_NE(project().table()->cell(row, 1), nullptr);
+    EXPECT_EQ(project().table()->cell(row, 1)->get<int64_t>(), INT64_MAX);
+  }
+  EXPECT_EQ(project().record_id(), row_a);
+  ASSERT_TRUE(project().undo());
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(project().table()->cell(1, 1), nullptr);
+  EXPECT_EQ(project().table()->cell(2, 1), nullptr);
+}
+
+TEST_F(TableWorkbenchEditorPython, FillKeepsNullUnsetChoicesObjectsAndFormulaDefinitions)
+{
+  const std::string derived = "d6666666-6666-4666-8666-666666666666";
+  const Json object = {{"version", 1}, {"project_id", project().project()->id}, {"kind", "record"}, {"table_id", batches}, {"id", batch_row}};
+  ASSERT_TRUE(project().apply(Json::array({
+    {{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", evidence}, {"value", object}},
+    {{"op", "add_field"}, {"table_id", samples}, {"id", derived}, {"name", "Derived"}, {"type", "number"}, {"unit", "K"}},
+    {{"op", "set_expression"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", derived}, {"expression", "base + fixed"},
+     {"bindings", {{"base", {{"record_id", row_a}, {"field_id", temperature}}}, {"fixed", {{"record_id", row_c}, {"field_id", temperature}}}}}},
+    {{"op", "set_reference"}, {"table_id", samples}, {"record_id", row_a}, {"field_id", accepted},
+     {"source", {{"record_id", row_b}, {"field_id", accepted}}}}
+  })));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  const auto revision = project().project()->revision;
+  auto fill = widget("records")->table->grid->on_fill;
+  ASSERT_TRUE(fill({{{1, 1}, {0, 1}}, {{1, 2}, {0, 2}}, {{0, 4}, {2, 4}}, {{0, 5}, {2, 5}},
+                    {{0, 6}, {2, 6}}, {{0, 3}, {2, 3}}}));
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(project().project()->revision, revision + 1);
+  ASSERT_NE(project().table()->cell(0, 0), nullptr);
+  EXPECT_TRUE(project().table()->cell(0, 0)->is_null());
+  EXPECT_EQ(project().table()->cell(0, 1), nullptr);
+  EXPECT_EQ(*project().table()->cell(2, 3), dry);
+  EXPECT_EQ(io::canonical_json(*project().table()->cell(2, 4)), io::canonical_json(object));
+  const auto *definition = project().table()->definition(2, 5);
+  ASSERT_NE(definition, nullptr);
+  EXPECT_EQ(definition->at("kind"), "expression");
+  EXPECT_EQ(definition->at("expression"), "base + fixed");
+  EXPECT_EQ(definition->at("bindings").at("base").at("record_id"), row_c);
+  EXPECT_EQ(definition->at("bindings").at("fixed").at("record_id"), row_c);
+  EXPECT_EQ(*project().table()->cell(2, 5), 700);
+  ASSERT_NE(project().table()->definition(2, 2), nullptr);
+  EXPECT_EQ(project().table()->definition(2, 2)->at("source").at("record_id"), row_b);
+  EXPECT_FALSE(fill({{{0, 4}, {1, 4}}})) << "a captured callback cannot be replayed after a revision";
+  ASSERT_TRUE(project().undo());
+  ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(*project().table()->cell(0, 0), 300);
+  EXPECT_EQ(project().table()->cell(0, 1)->get<int64_t>(), INT64_MAX);
+  EXPECT_EQ(project().table()->definition(2, 5), nullptr);
+}
+
+TEST_F(TableWorkbenchEditorPython, FillRejectsEntireMixedBatchAndProtectsDrafts)
+{
+  const auto revision = project().project()->revision;
+  const auto fill = widget("records")->table->grid->on_fill;
+  ASSERT_TRUE(fill);
+  EXPECT_FALSE(fill({{{0, 2}, {1, 2}}, {{0, 1}, {1, 2}}})); // K number into a unitless integer.
+  frame();
+  EXPECT_EQ(project().project()->revision, revision);
+  EXPECT_EQ(project().table()->cell(1, 1), nullptr);
+  cell(0, 1);
+  send(ui::Event::text_input("317"));
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_FALSE(widget("records")->table->grid->on_fill);
+  EXPECT_FALSE(fill({{{0, 2}, {1, 2}}}));
+  EXPECT_EQ(project().project()->revision, revision);
+}
+
 TEST_F(TableWorkbenchEditorPython, InlineTypingSuspendsOnBlurAndOnlyEnterWritesTheRetainedDraft)
 {
   const auto revision = project().project()->revision;

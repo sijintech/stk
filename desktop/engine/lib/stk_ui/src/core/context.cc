@@ -187,7 +187,8 @@ void Context::end_frame()
   if (edit_.id && (!find_id(edit_.id) || (edit_.table && !table_edit_current()))) {
     commit_edit();
   }
-  if (drag_.id && !find_id(drag_.id)) {
+  if (drag_.id && (!find_id(drag_.id) ||
+      (drag_.kind == DragState::Kind::TableFill && !table_fill_current(*find_id(drag_.id))))) {
     drag_ = {};
   }
   if (focus_ && !find_id(focus_)) {
@@ -1331,7 +1332,10 @@ EventResult Context::mouse_move(const Event &e)
         }
         break;
       }
+      case DragState::Kind::TableFill:
       case DragState::Kind::TableSelect: {
+        const bool fill = drag_.kind == DragState::Kind::TableFill;
+        if (fill && !table_fill_current(*w)) { drag_ = {}; break; }
         const Rect body = list_body(*w);
         if (body.empty()) { break; }
         if (e.pos.y < body.y || e.pos.y >= body.y1()) {
@@ -1339,7 +1343,8 @@ EventResult Context::mouse_move(const Event &e)
         }
         const Vec2 point{std::clamp(e.pos.x, body.x, std::max(body.x, body.x1() - style_.scrollbar - 1)),
                          std::clamp(e.pos.y, body.y, std::max(body.y, body.y1() - 1))};
-        table_select(*w, table_hit_cell(*w, point), true);
+        if (fill) { drag_.fill_target = table_hit_cell(*w, point); }
+        else { table_select(*w, table_hit_cell(*w, point), true); }
         break;
       }
       case DragState::Kind::ColumnResize: {
@@ -1579,6 +1584,16 @@ EventResult Context::mouse_down(const Event &e)
       }
       if (!body.contains(e.pos)) { break; }
       if (w->table && w->table->grid) {
+        if (table_fill_handle(*w).contains(e.pos)) {
+          drag_.kind = DragState::Kind::TableFill;
+          drag_.fill_selection = w->table->grid->selection.value();
+          drag_.table_version = w->table->data_version;
+          drag_.table_columns = w->table->columns.size();
+          drag_.fill_order = table_perm(*w);
+          drag_.fill = w->table->grid->on_fill; // Preserve the application's source fence from press.
+          drag_.fill_limit = w->table->grid->on_fill_limit;
+          break;
+        }
         const auto cell = table_hit_cell(*w, e.pos);
         if (edit_.table && edit_.cell == cell) {
           edit_click(*w, e.pos, shift, dbl);
@@ -1634,6 +1649,23 @@ EventResult Context::mouse_up(const Event &e)
 {
   if (!drag_.id) {
     return {false, false};
+  }
+  if (drag_.kind == DragState::Kind::TableFill) {
+    if (e.button != MouseButton::Left) { return {true, false}; }
+    const Widget *w = find_id(drag_.id);
+    std::vector<TableFillCell> cells;
+    bool over_limit = false;
+    if (w && drag_.moved && w->clip.contains(e.pos) && list_body(*w).contains(e.pos)) {
+      drag_.fill_target = table_hit_cell(*w, e.pos);
+      drag_.last = e.pos;
+      cells = table_fill_cells(*w, &over_limit);
+    }
+    const auto fill = drag_.fill;
+    const auto limit = drag_.fill_limit;
+    drag_ = {};
+    if (over_limit && limit) { limit(); }
+    else if (!cells.empty() && fill) { fill(cells); }
+    return {true, true};
   }
   const DragState d = drag_;
   drag_ = {};
@@ -1829,6 +1861,10 @@ bool Context::handle_popup_event(const Event &e, EventResult &res)
 
 EventResult Context::key_down(const Event &e)
 {
+  if (drag_.kind == DragState::Kind::TableFill) {
+    if (e.key == Key::Escape) { drag_ = {}; }
+    return {true, true};
+  }
   EventResult res;
   if (popup_.owner && handle_popup_event(e, res)) {
     return res;

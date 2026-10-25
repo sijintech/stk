@@ -79,6 +79,72 @@ TableCell Context::table_hit_cell(const Widget &w, const Vec2 position)
   return {};
 }
 
+Rect Context::table_fill_handle(const Widget &w)
+{
+  if (!w.enabled || edit_.id || !w.table || !w.table->grid || !w.table->grid->on_fill ||
+      w.table->rows > int(selection_limit)) { return {}; }
+  const auto &grid = *w.table->grid;
+  const auto s = grid.selection.value();
+  if (!valid(*w.table, s.anchor) || !valid(*w.table, s.active) ||
+      std::min(s.anchor.column, s.active.column) < std::max(0, grid.first_column)) { return {}; }
+  const int a = table_view_row(w, s.anchor.row), b = table_view_row(w, s.active.row);
+  if (a < 0 || b < 0) { return {}; }
+  const int column = std::max(s.anchor.column, s.active.column);
+  const Rect cell = table_cell_rect(w, {table_perm(w)[size_t(std::max(a, b))], column});
+  const float side = std::max(3 * style_.pixel, .35f * style_.unit);
+  const Rect handle{cell.x1() - side - style_.pixel, cell.y1() - side - style_.pixel, side, side};
+  const Rect clip = table_column_clip(w, column).intersect(list_body(w)).intersect(w.clip);
+  if (handle.x < clip.x || handle.y < clip.y || handle.x1() > clip.x1() || handle.y1() > clip.y1()) { return {}; }
+  return handle;
+}
+
+bool Context::table_fill_current(const Widget &w)
+{
+  if (drag_.kind != DragState::Kind::TableFill || drag_.id != w.id || !w.enabled || edit_.id ||
+      popup_.owner || !w.table || !w.table->grid || !w.table->grid->on_fill ||
+      w.table->data_version != drag_.table_version || w.table->columns.size() != drag_.table_columns ||
+      w.table->grid->selection.value() != drag_.fill_selection || table_perm(w) != drag_.fill_order) { return false; }
+  for (auto it = blocks_.rbegin(); it != blocks_.rend(); ++it) {
+    if ((*it)->kind() == Block::Kind::Modal) { return it->get() == w.block; }
+  }
+  return true;
+}
+
+std::vector<TableFillCell> Context::table_fill_cells(const Widget &w, bool *over_limit)
+{
+  if (over_limit) { *over_limit = false; }
+  if (!table_fill_current(w) || !valid(*w.table, drag_.fill_target)) { return {}; }
+  const auto s = drag_.fill_selection;
+  const int a = table_view_row(w, s.anchor.row), b = table_view_row(w, s.active.row);
+  const int row = table_view_row(w, drag_.fill_target.row), col = drag_.fill_target.column;
+  const int top = std::min(a, b), bottom = std::max(a, b);
+  const int left = std::min(s.anchor.column, s.active.column), right = std::max(s.anchor.column, s.active.column);
+  if (top < 0 || row < 0 || left < std::max(0, w.table->grid->first_column)) { return {}; }
+  const int dy = row < top ? row - top : row > bottom ? row - bottom : 0;
+  const int dx = col < left ? col - left : col > right ? col - right : 0;
+  if (!dy && !dx) { return {}; }
+  // A diagonal gesture extends only its dominant physical axis.
+  const bool vertical = dy && (!dx || std::fabs(drag_.last.y - drag_.start.y) >= std::fabs(drag_.last.x - drag_.start.x));
+  const int r0 = vertical ? (dy < 0 ? row : bottom + 1) : top;
+  const int r1 = vertical ? (dy < 0 ? top - 1 : row) : bottom;
+  const int c0 = vertical ? left : (dx < 0 ? col : right + 1);
+  const int c1 = vertical ? right : (dx < 0 ? left - 1 : col);
+  if (c0 < std::max(0, w.table->grid->first_column)) { return {}; }
+  if (int64_t(r1 - r0 + 1) * int64_t(c1 - c0 + 1) > 1000) {
+    if (over_limit) { *over_limit = true; }
+    return {};
+  }
+  const auto mod = [](int n, int d) { return (n % d + d) % d; };
+  std::vector<TableFillCell> result;
+  for (int r = r0; r <= r1; ++r) {
+    for (int c = c0; c <= c1; ++c) {
+      result.push_back({{drag_.fill_order[size_t(top + mod(r - top, bottom - top + 1))],
+                         left + mod(c - left, right - left + 1)}, {drag_.fill_order[size_t(r)], c}});
+    }
+  }
+  return result;
+}
+
 bool Context::table_select(const Widget &w, const TableCell cell, const bool extend)
 {
   if (!w.table->grid || !valid(*w.table, cell)) { return false; }

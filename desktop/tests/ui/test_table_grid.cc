@@ -23,16 +23,21 @@ struct Grid {
   int frozen = 0, first_column = 0;
   float width = 480;
   uint64_t version = 1;
+  bool fill_enabled = false, enabled = true, modal = false;
+  int fills = 0;
+  int fill_limits = 0;
+  float visible_rows = 4;
+  std::vector<TableFillCell> filled;
 
   explicit Grid(float scale = 1) : h(scale)
   {
     h.window = {600 * scale, 600 * scale};
     h.ui = [this](Context &ctx) {
-      auto &layout = ctx.block("r", {0, 0, width * h.ctx->scale(), 550 * h.ctx->scale()}).layout();
+      auto &layout = ctx.block("r", {0, 0, width * h.ctx->scale(), h.window.y - 50 * h.ctx->scale()}).layout();
       if (!visible) { return; }
       TableSpec spec;
       spec.columns = columns;
-      spec.rows = int(values.size()); spec.visible_rows = 4;
+      spec.rows = int(values.size()); spec.visible_rows = visible_rows;
       spec.data_version = version; spec.frozen_columns = frozen;
       spec.cell = [](int, int) { return std::string("short"); };
       spec.compare = [this](int a, int b, int column) { return values[size_t(a)][size_t(column)].compare(values[size_t(b)][size_t(column)]); };
@@ -75,13 +80,16 @@ struct Grid {
         value = value == "true" ? "false" : "true";
         return true;
       };
+      if (fill_enabled) { grid.on_fill = [this](const std::vector<TableFillCell> &cells) { ++fills; filled = cells; return true; }; }
+      grid.on_fill_limit = [this] { ++fill_limits; };
       if (styles) {
         grid.cell_style = [](int, int column) { return column == 2 ? TableCellStyle::Checkbox : column == 1 ? TableCellStyle::Badge : TableCellStyle::Text; };
         grid.checked = [this](int row, int column) { return values[size_t(row)][size_t(column)] == "true"; };
       }
       spec.grid = std::move(grid);
-      layout.table("t", std::move(spec));
+      layout.table("t", std::move(spec)).disable(!enabled);
       layout.text_field("outside", bind(outside));
+      if (modal) { ctx.modal("modal", "Modal", [this] { modal = false; }).label("Modal"); }
     };
     h.frame();
   }
@@ -94,8 +102,98 @@ struct Grid {
   Vec2 header(int column) {
     auto result = cell(0, column); result.y -= h.ctx->style().unit; return result;
   }
+  Vec2 handle(int row, int column) {
+    const auto &rect = h.w("t").rect;
+    const float u = h.ctx->style().unit;
+    return {rect.x + (column + 1) * 6 * u - .175f * u, rect.y + (row + 2) * u - .175f * u};
+  }
 };
 }  // namespace
+
+TEST(TableGrid, FillRepeatsSortedRectangleOnceOnReleaseWithoutChangingSelection)
+{
+  for (const float scale : {1.0f, 2.0f}) {
+    Grid g(scale); g.fill_enabled = true; g.h.frame();
+    g.h.click(g.header(0)); // Visible a,b,c => model 1,2,0.
+    g.h.drag(g.cell(0, 0), g.cell(1, 1));
+    const auto selected = g.selected;
+    g.h.send(Event::mouse_down(g.handle(1, 1)));
+    g.h.move(g.cell(2, 1));
+    EXPECT_EQ(g.fills, 0);
+    EXPECT_EQ(g.selected, selected);
+    g.h.send(Event::mouse_up(g.cell(2, 1)));
+    EXPECT_EQ(g.fills, 1);
+    EXPECT_EQ(g.filled, (std::vector<TableFillCell>{{{1, 0}, {0, 0}}, {{1, 1}, {0, 1}}}));
+    EXPECT_EQ(g.selected, selected);
+    EXPECT_EQ(g.commits, 0);
+  }
+}
+
+TEST(TableGrid, FillUpAndLeftRepeatPatternAndNeverIncludeRowLabels)
+{
+  Grid g; g.fill_enabled = true; g.h.frame();
+  g.h.drag(g.cell(1, 1), g.cell(2, 1));
+  g.h.drag(g.handle(2, 1), g.cell(0, 1));
+  EXPECT_EQ(g.filled, (std::vector<TableFillCell>{{{2, 1}, {0, 1}}}));
+  g.h.drag(g.cell(0, 1), g.cell(0, 2));
+  g.h.drag(g.handle(0, 2), g.cell(0, 0));
+  EXPECT_EQ(g.filled, (std::vector<TableFillCell>{{{0, 2}, {0, 0}}}));
+  EXPECT_EQ(g.fills, 2);
+  g.first_column = 1; g.h.frame();
+  g.h.drag(g.handle(0, 2), g.cell(0, 0));
+  EXPECT_EQ(g.fills, 2);
+}
+
+TEST(TableGrid, FillCancelsOnEscapeFocusLossVersionSelectionDisabledAndModal)
+{
+  for (int reason = 0; reason < 7; ++reason) {
+    SCOPED_TRACE(reason);
+    Grid g; g.fill_enabled = true; g.h.frame();
+    g.h.send(Event::mouse_down(g.handle(0, 0)));
+    g.h.move(g.cell(2, 0));
+    switch (reason) {
+      case 0: g.h.key(Key::Escape); break;
+      case 1: { Event e; e.type = EventType::FocusLost; g.h.send(e); break; }
+      case 2: ++g.version; break;
+      case 3: g.selected = {{1, 0}, {1, 0}}; break;
+      case 4: g.enabled = false; break;
+      case 5: g.modal = true; break;
+      case 6: g.visible = false; break;
+    }
+    g.h.frame();
+    g.h.send(Event::mouse_up({60, 80}));
+    EXPECT_EQ(g.fills, 0);
+  }
+}
+
+TEST(TableGrid, FillIgnoresNonLeftReleaseAndReleaseOutsideOrWithoutExtension)
+{
+  Grid g; g.fill_enabled = true; g.h.frame();
+  g.h.click(g.handle(0, 0));
+  EXPECT_EQ(g.fills, 0);
+  g.h.send(Event::mouse_down(g.handle(0, 0)));
+  g.h.move(g.cell(2, 0));
+  g.h.send(Event::mouse_up(g.cell(2, 0), MouseButton::Right));
+  EXPECT_EQ(g.fills, 0);
+  EXPECT_NE(g.h.ctx->active(), 0);
+  g.h.send(Event::mouse_up({590, 590}));
+  EXPECT_EQ(g.fills, 0);
+  EXPECT_EQ(g.h.ctx->active(), 0);
+}
+
+TEST(TableGrid, FillLimitReportsWithoutSendingAPartialBatch)
+{
+  Grid g; g.fill_enabled = true; g.values.resize(400, {"a", "A", "false"});
+  g.visible_rows = 400; g.h.window.y = 10000; g.h.frame();
+  g.h.drag(g.cell(0, 0), g.cell(0, 2));
+  g.h.drag(g.handle(0, 2), g.cell(399, 2));
+  EXPECT_EQ(g.fills, 0);
+  EXPECT_EQ(g.fill_limits, 1);
+  g.h.drag(g.handle(0, 2), g.cell(333, 2));
+  EXPECT_EQ(g.fills, 1);
+  EXPECT_EQ(g.filled.size(), 999u);
+  EXPECT_EQ(g.fill_limits, 1);
+}
 
 TEST(TableGrid, SortedRectangleExportsCompleteQuotedValuesAndPlansPasteWithoutMutation)
 {

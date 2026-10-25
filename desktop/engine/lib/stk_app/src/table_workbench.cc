@@ -639,6 +639,48 @@ struct TableWorkbench::Impl {
       const auto *v = state.table()->cell(rows[size_t(c.row)], columns[size_t(c.column - 1)]);
       auto cmd = target(state, c); cmd["value"] = !(v && v->is_boolean() && v->get<bool>()); return state.apply(Json::array({cmd}));
     };
+    if (!state.busy() && !unsaved()) {
+      grid.on_fill_limit = [this, current] { if (current()) { error = "table.batch_limit"; } };
+      grid.on_fill = [this, current, shell = &ctx.area.shell(), &state](const std::vector<ui::TableFillCell> &cells) {
+        if (!current() || state.busy() || unsaved() || !available(*shell, state)) { return false; }
+        if (cells.size() > 1000) { error = "table.batch_limit"; return false; }
+        const auto revision = state.project()->revision;
+        Json commands = Json::array();
+        for (const auto &cell : cells) {
+          if (!valid(cell.source) || !valid(cell.target)) { return false; }
+          if (cell.source == cell.target) { continue; }
+          const auto &source_field = field(state, cell.source), &destination_field = field(state, cell.target);
+          if (source_field.type != destination_field.type || source_field.unit != destination_field.unit ||
+              source_field.options != destination_field.options) { error = "table.fill_incompatible"; return false; }
+          const auto &source = state.table()->records[size_t(rows[size_t(cell.source.row)])];
+          const auto rebind = [&](Json address) {
+            if (io::get_string(address, "record_id") == source.id) {
+              address["record_id"] = record(state, cell.target);
+            }
+            return address;
+          };
+          auto command = target(state, cell.target);
+          if (const auto at = source.definitions.find(source_field.id); at != source.definitions.end()) {
+            const auto &definition = *at;
+            if (io::get_string(definition, "kind") == "reference") {
+              command["op"] = "set_reference"; command["source"] = rebind(definition.at("source"));
+            }
+            else if (io::get_string(definition, "kind") == "expression") {
+              command["op"] = "set_expression"; command["expression"] = definition.at("expression");
+              command["bindings"] = definition.at("bindings");
+              for (auto &address : command["bindings"].items()) { address.value() = rebind(address.value()); }
+            }
+            else { return false; }
+          }
+          else if (const auto value = source.values.find(source_field.id); value != source.values.end()) { command["value"] = *value; }
+          else { command["op"] = "unset_cell"; }
+          commands.push_back(std::move(command));
+        }
+        if (commands.empty()) { return false; }
+        error.clear();
+        return state.apply(commands, revision);
+      };
+    }
     grid.cell_style = [this, current, &state](int r, int c) {
       if (!current() || !valid({r, c})) { return ui::TableCellStyle::Text; }
       const auto &type = field(state, {r, c}).type;

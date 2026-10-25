@@ -760,6 +760,16 @@ void Context::draw_widget(const Widget &w)
           }
         }
       }
+      if (table && grid) {
+        for (const auto &fill : table_fill_cells(w)) {
+          const Rect cell = table_cell_rect(w, fill.target);
+          draw_.clip_push(table_column_clip(w, fill.target.column).intersect(body));
+          draw_.round_box(cell.inset(px, px), 0, CORNER_ALL, none, th.menu.inner_sel);
+          draw_.clip_pop();
+        }
+        const Rect handle = table_fill_handle(w);
+        if (!handle.empty()) { draw_.rect(handle, th.menu.inner_sel); }
+      }
       draw_.clip_pop();
       if (table && editing && edit_.table && table_edit_current()) {
         const Rect cell = table_cell_rect(w, edit_.cell);

@@ -157,6 +157,11 @@ struct TableSelection {
   bool operator==(const TableSelection &) const = default;
 };
 
+struct TableFillCell {
+  TableCell source, target;
+  bool operator==(const TableFillCell &) const = default;
+};
+
 enum class TableCellStyle : uint8_t { Text, Badge, Checkbox };
 
 /** Opt-in spreadsheet interaction. The application owns selection and persistent drafts.
@@ -179,6 +184,11 @@ struct TableGridSpec {
   std::function<bool(const std::vector<int> &model_rows, int first_column, std::string)> on_paste;
   std::function<bool(const std::vector<int> &model_rows, int first_column, int columns)> on_clear;
   std::function<bool(TableCell)> on_toggle;
+  /** Repeat the selected rectangle along one axis, in visible row order (at most 1000
+   * destinations). Called once on release; the application preserves typed definitions and
+   * validates/applies the entire batch. No numeric series or formula inference occurs here. */
+  std::function<bool(const std::vector<TableFillCell> &)> on_fill;
+  std::function<void()> on_fill_limit; /**< Report an oversized gesture without a partial batch. */
   std::function<TableCellStyle(int row, int column)> cell_style;
   std::function<bool(int row, int column)> checked;
   int first_column = 0; /**< First selectable/exportable data column; preceding columns are row labels. */
@@ -537,7 +547,7 @@ class Context {
   };
   struct DragState {
     enum class Kind : uint8_t {
-      None, Press, Number, Slider, TextSelect, Scroll, TableScroll, ColumnResize, Splitter, ImagePan, Header, TableSelect,
+      None, Press, Number, Slider, TextSelect, Scroll, TableScroll, ColumnResize, Splitter, ImagePan, Header, TableSelect, TableFill,
     };
     WidgetId id = 0;
     Kind kind = Kind::None;
@@ -548,6 +558,13 @@ class Context {
     int column = -1;
     int zone = 0; /**< Number field: -1 left arrow, 1 right arrow, 0 middle. */
     bool moved = false;
+    TableSelection fill_selection;
+    TableCell fill_target;
+    uint64_t table_version = 0;
+    size_t table_columns = 0;
+    std::vector<int> fill_order;
+    std::function<bool(const std::vector<TableFillCell> &)> fill;
+    std::function<void()> fill_limit;
   };
   struct PopupState {
     WidgetId owner = 0;
@@ -623,6 +640,9 @@ class Context {
   Rect table_column_clip(const Widget &w, int column);
   Rect table_cell_rect(const Widget &w, TableCell cell);
   TableCell table_hit_cell(const Widget &w, Vec2 position);
+  Rect table_fill_handle(const Widget &w);
+  bool table_fill_current(const Widget &w);
+  std::vector<TableFillCell> table_fill_cells(const Widget &w, bool *over_limit = nullptr);
   int table_view_row(const Widget &w, int model_row);
   bool table_select(const Widget &w, TableCell cell, bool extend);
   void table_reveal(const Widget &w, TableCell cell);
