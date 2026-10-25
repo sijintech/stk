@@ -20,6 +20,7 @@ from . import archive
 
 
 MAX_ROWS = 100
+MAX_TASKS = 20000
 MAX_PLAN_BYTES = 16 * 1024 * 1024
 MAX_EVENT_BYTES = 64 * 1024
 RUN_EVENTS = ("prepared", "started", "cancel_requested", "stopped")
@@ -84,9 +85,9 @@ def _order(steps):
     return [identity for identity in order if kinds[identity] != "table"]
 
 
-def _value(value, row_values, what):
+def _value(value, row_values, what, *, resolve_field=True):
     """A step parameter for one row: a literal, or the row's frozen value of a $field."""
-    if type(value) is dict and set(value) == {"$field"}:
+    if resolve_field and type(value) is dict and set(value) == {"$field"}:
         if value["$field"] not in row_values:
             raise ProjectError(f"{what} takes a field the run did not freeze")
         return row_values[value["$field"]]
@@ -149,16 +150,23 @@ class WorkflowRuns:
         if record["state"] != "readable":
             raise ProjectError("The workflow cannot be read: " + record["error"])
         document = record["document"]
-        checked = self.store.workflows.validate(document)
+        checked, composition = self.store.workflows._validated(document)
         if checked["revision"] != revision:
             raise RevisionConflict(f"Expected revision {revision}, current revision is {checked['revision']}")
         if not checked["ok"]:
             codes = ", ".join(sorted({issue["code"] for issue in checked["issues"]}))
             raise ProjectError(f"The workflow has problems ({codes}); fix them before running it")
+        source_document = document
+        if composition is not None:
+            if source_document["interface"]["inputs"]:
+                raise ProjectError("A workflow with external inputs must be called by a parent workflow before running")
+            document = composition["document"]
         model = self.store.snapshot()
         if model["project"]["revision"] != revision:
             raise RevisionConflict(f"Expected revision {revision}, current revision is {model['project']['revision']}")
         steps = document["steps"]
+        if len(rows) * sum(step["kind"] != "table" for step in steps) > MAX_TASKS:
+            raise ProjectError(f"A workflow run allows at most {MAX_TASKS} step-by-row tasks; select fewer rows")
         tables = [step for step in steps if step["kind"] == "table"]
         if len(tables) != 1:
             raise ProjectError("A workflow run needs exactly one parameter table step to take its rows from")
@@ -177,8 +185,14 @@ class WorkflowRuns:
         table_id = tables[0]["ref"]["table"]
         table = next(table for table in model["tables"] if table["id"] == table_id)
         records = {entry["id"]: (number, entry) for number, entry in enumerate(table["records"], start=1)}
-        fields = {value["$field"] for step in steps for value in step.get("parameters", {}).values()
-                  if type(value) is dict and set(value) == {"$field"}}
+        def resolve_field(step, name):
+            return composition is None or name in composition["field_parameters"].get(step["id"], ())
+
+        fields = {value["$field"] for step in steps for name, value in step.get("parameters", {}).items()
+                  if resolve_field(step, name) and type(value) is dict and set(value) == {"$field"}}
+        if composition is not None:
+            from .workflow_composition import check_bound_values
+            fields.update(item["value"]["$field"] for item in composition["parameter_checks"] if item["field_binding"])
         for step in remote:
             fields |= set(templates[step["ref"]["template"]].field_ids)  # the case fields an engine step freezes
         frozen_rows = []
@@ -190,6 +204,8 @@ class WorkflowRuns:
                 if entry.get("evaluations", {}).get(field, {"state": "ok"})["state"] != "ok":
                     raise ProjectError(f"Row {number} has a formula error in a field this workflow uses")
             frozen_rows.append({"id": row, "number": number, "values": {field: entry["values"].get(field) for field in sorted(fields)}})
+            if composition is not None:
+                check_bound_values(composition, frozen_rows[-1]["values"])
         frozen_steps, parameters = {}, {}
         for step in steps:
             kind, identity = step["kind"], step["id"]
@@ -212,7 +228,8 @@ class WorkflowRuns:
                     values = {}
                     for name, item in declared.items():
                         if name in step.get("parameters", {}):
-                            values[name] = _value(step["parameters"][name], row["values"], f"Step {identity}")
+                            values[name] = _value(step["parameters"][name], row["values"], f"Step {identity}",
+                                                  resolve_field=resolve_field(step, name))
                         elif "default" in item:
                             values[name] = item["default"]
                         else:
@@ -238,7 +255,8 @@ class WorkflowRuns:
                     "kind": kind, "analysis_id": analysis["id"], "name": analysis["name"], "document": analysis["document"],
                     "sha256": hashlib.sha256(canonical_json(analysis["document"])).hexdigest(),
                     "source": next(iter(sources), None), "bindings": sorted(step.get("inputs", {}))}
-                parameters[identity] = {row["id"]: {name: _value(value, row["values"], f"Step {identity}")
+                parameters[identity] = {row["id"]: {name: _value(value, row["values"], f"Step {identity}",
+                                                               resolve_field=resolve_field(step, name))
                                                     for name, value in step.get("parameters", {}).items()}
                                         for row in frozen_rows}
         for identity, frozen in frozen_steps.items():
@@ -251,6 +269,9 @@ class WorkflowRuns:
                 "source_revision": revision, "created_at": _now(), "table_id": table_id, "rows": frozen_rows,
                 "order": _order(steps), "steps": frozen_steps, "parameters": parameters,
                 "directory": f"{RESULTS_DIRECTORY}/{run_id}"}
+        if composition is not None:
+            plan["workflow_document"] = source_document
+            plan["composition"] = {key: composition[key] for key in ("sources", "instances", "step_paths", "outputs", "field_parameters")}
         # A registered local coordinator may explicitly consume a frozen Runtime
         # intent without itself being a remote solver. Its child plans compare
         # this fingerprint before starting; ordinary local templates ignore it.
@@ -367,8 +388,12 @@ class WorkflowRuns:
         model = self.store.snapshot()
         try:
             current = self.store.workflows.get(plan["workflow_id"])["workflow"]
-            current_steps = ({step["id"]: step for step in current["document"]["steps"]}
-                             if current["state"] == "readable" else None)
+            current_document = current["document"] if current["state"] == "readable" else None
+            if "composition" in plan and current_document is not None:
+                from .workflow_composition import unchanged_steps
+                current_steps = unchanged_steps(self.store.workflows, plan, current_document)
+            else:
+                current_steps = {step["id"]: step for step in current_document["steps"]} if current_document else None
         except workflows.WorkflowNotFound:
             current_steps = None
         frozen_steps = {step["id"]: step for step in plan["document"]["steps"]}
@@ -396,8 +421,10 @@ class WorkflowRuns:
             if frozen.get("remote"):
                 template = templates.get(frozen["template"])
                 return list(template.field_ids) if template is not None else []  # unavailable: reported below
-            return [value["$field"] for value in step.get("parameters", {}).values()
-                    if type(value) is dict and set(value) == {"$field"}]
+            bound = plan.get("composition", {}).get("field_parameters")
+            return [value["$field"] for name, value in step.get("parameters", {}).items()
+                    if (bound is None or name in bound.get(step["id"], ())) and
+                    type(value) is dict and set(value) == {"$field"}]
 
         step_reasons = {}
         for identity in plan["order"]:

@@ -682,6 +682,64 @@ registered simulation templates `{id, name, table_id}` (`table_id` null: rows of
 local `demo-synthetic/1`). It reads only and creates nothing. A simulation step's summary lists its template's
 declared parameters, which bind like an analysis's (`$field` type and unit checks; undeclared names are `unknown_parameter`).
 
+**Workflow composition (`stk.workflow/2`, implementation in progress).** Version 1 remains readable and
+is never implicitly migrated by reads. Version 2 adds a required `interface` to `{format, steps, ui}`:
+
+```json
+{
+  "inputs": {"rows": {"type": "rows"}},
+  "outputs": {"files": {"type": "files", "from": "simulate.files"}},
+  "parameters": [{"name": "temperature", "type": "number", "unit": "K", "default": 300}]
+}
+```
+
+Inputs have type `rows` or `files`; outputs have type `rows`, `files` or `result`. Each direction is
+limited to 32 named ports. The at most 64 parameter declarations use the graph parameter vocabulary,
+including defaults, constraints and units. Inside a version 2 document, an input link can name
+`$input.rows`, and a whole step parameter value can be `{"$param": "temperature"}`. These references
+are resolved only at their explicit binding positions, not by substituting inside literal JSON.
+Interface defaults are always literals. A whole version 2 step parameter may use `{"$literal": value}`
+to preserve a literal whose shape would otherwise mean `$field`, `$param` or `$literal`; the wrapper
+is removed once. This literal identity survives nested forwarding and parameter freezing.
+An output maps to an internal `step.port` or a passthrough `$input.port`.
+
+A `workflow` step references `{workflow: UUID}` of another readable version 2 workflow. Its links must
+bind every declared input, and its parameter overrides use literals, `$field`, or the enclosing
+workflow's `$param`. Omitted overrides use the declared defaults. Validation checks both sides of the
+boundary, declared types/units, references, dependency cycles and recursive workflow references.
+Interface constraints are also checked against the actual frozen row values before preparation writes
+anything. Missing or malformed dependencies remain editable drafts; they cannot run.
+`choices` adds optional `workflows: [{id, name}]` (readable, active version 2 documents, bounded to the first
+128 active workflow records) and `omitted_workflows` (active records beyond that bounded scan).
+Successful composition validation also describes `execution: {requires_runtime, table_id}`: the Runtime
+requirement and the sole parameter table, or null when there is no unique table, are derived from the
+expanded steps. This lets the desktop configure a run whose table or simulation is inside a child.
+
+Storage uses one optional managed JSON field `interface`. An explicit version 2 save adds the field,
+if absent, in the same CAS/undo transaction as the document. Existing version 1 records remain readable.
+A version 2 document cannot be saved back as version 1 by discarding its interface; an intentional
+interface edit preserves version 2. No project format upgrade, node loading or execution accompanies a save.
+
+Composition is bounded to eight nested calls, 1000 visited steps (including call sites), 128 referenced
+workflow documents, 4 MiB of unique source documents and 4 MiB of expanded steps/dependencies. Repeated
+calls have distinct stable instance-path identities. Call prerequisites guard every child task;
+consuming an output or waiting for the call waits for the complete child, including non-output branches.
+Empty passthrough calls retain their dependency gates. A root with external inputs must be called by
+a parent; an executable root still supplies exactly one parameter table. A run remains bounded to
+100 rows, 20000 step-by-row tasks and 16 MiB of frozen plan JSON.
+
+For composed runs, `document` has internal format `stk.workflow-expanded/1` and contains the executable
+steps; it is not an editable workflow document. `workflow_document` preserves the version 2 root,
+and `composition` preserves source documents and SHA-256 hashes, call instances, step paths and resolved
+outputs. Its optional `field_parameters` maps expanded step IDs to parameter names that actually bind
+fields, so literal defaults never create false stale results. Existing version 1 run shapes are unchanged. Execution, retry and cancellation consume this
+frozen expansion without reloading child definitions. Staleness compares source branches independently
+and propagates to their downstream tasks; labels, names and layout changes alone do not stale results.
+
+The Python service, bridge and native draft/service layer implement this contract. Desktop interface
+controls and subworkflow entry/return navigation are implemented in the current worktree and undergoing
+regression checks. Workflow-to-skill publishing remains pending; this is not a completed platform delivery.
+
 Optional `parameter_overrides` (1–64 declared graph parameter names, at most 64 KiB) set values for this run only,
 for example a workflow row's: they are frozen in the plan as `parameter_overrides` and evaluated over the frozen
 document's submitted parameters, which stay the saved analysis verbatim; they are part of the request identity.

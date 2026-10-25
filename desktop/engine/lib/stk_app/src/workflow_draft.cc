@@ -3,6 +3,8 @@
 
 #include "stk/app/analysis_document.hh"
 #include "stk/core/utf8.hh"
+#include "stk/bridge/schema.hh"
+#include "stk/io/graph.hh"
 #include "workspace_baseline.hh"
 
 #include <cmath>
@@ -37,16 +39,16 @@ bool text(const Json &value, const size_t limit)
 }
 
 /** "step.port" split into its identifiers, else nullopt. */
-std::optional<std::pair<std::string, std::string>> port_ref(std::string_view value)
+std::optional<std::pair<std::string, std::string>> port_ref(std::string_view value, bool composite = false)
 {
   const auto dot = value.find('.');
   if (dot == std::string_view::npos) { return std::nullopt; }
   const auto step = value.substr(0, dot), port = value.substr(dot + 1);
-  if (!workflow_identifier(step) || !workflow_identifier(port)) { return std::nullopt; }
+  if ((!workflow_identifier(step) && !(composite && step == "$input")) || !workflow_identifier(port)) { return std::nullopt; }
   return std::pair{std::string(step), std::string(port)};
 }
 
-void check_step(const Json &step)
+void check_step(const Json &step, bool composite = false)
 {
   require(step.is_object(), "Workflow steps must be objects");
   for (const auto &[key, value] : step.items()) {
@@ -69,7 +71,7 @@ void check_step(const Json &step)
     require(inputs.is_object() && inputs.size() <= Limits::max_inputs, "Workflow step inputs must be an object with at most 32 ports");
     for (const auto &[port, link] : inputs.items()) {
       require(workflow_identifier(port) && link.is_object() && link.size() == 1 && link.contains("from") &&
-              link.at("from").is_string() && port_ref(link.at("from").get_ref<const std::string &>()),
+              link.at("from").is_string() && port_ref(link.at("from").get_ref<const std::string &>(), composite),
               "Workflow inputs must be exactly {\"from\": \"step.port\"}");
     }
   }
@@ -127,12 +129,24 @@ bool workflow_identifier(std::string_view value)
 void check_workflow_document(const Json &document)
 {
   check_analysis_json_bounds(document);
-  require(document.is_object() && document.size() == 3 && document.contains("format") && document.contains("steps") &&
+  const bool composite = document.is_object() && io::get_string(document, "format") == "stk.workflow/2";
+  require(document.is_object() && document.size() == (composite ? 4 : 3) && document.contains("format") && document.contains("steps") &&
           document.contains("ui"), "Workflow document requires exactly format, steps and ui");
-  require(document.at("format") == "stk.workflow/1", "Unsupported workflow document format");
+  require(composite || document.at("format") == "stk.workflow/1", "Unsupported workflow document format");
+  if (composite) {
+    require(document.contains("interface"), "Version 2 workflows require an explicit interface");
+    const auto &boundary = document.at("interface");
+    require(io::check_value(boundary, bridge::ProtocolSchema::embedded().resolved("#/$defs/projectWorkflowInterface")).empty(),
+            "Invalid workflow interface declaration");
+    std::set<std::string> names;
+    for (const auto &parameter : boundary.at("parameters")) {
+      require(names.insert(parameter.at("name").get<std::string>()).second, "Workflow parameter names must be unique");
+      require(io::check_value(parameter.at("default"), io::parameter_schema(parameter)).empty(), "Invalid workflow parameter default");
+    }
+  }
   const auto &steps = document.at("steps");
   require(steps.is_array() && steps.size() <= Limits::max_steps, "Workflow steps must be a list of at most 200 steps");
-  for (const auto &step : steps) { check_step(step); }
+  for (const auto &step : steps) { check_step(step, composite); }
   const auto &ui = document.at("ui");
   require(ui.is_object(), "Workflow ui must be an object");
   if (ui.contains("positions")) {
@@ -279,6 +293,10 @@ WorkflowDraft::EditResult WorkflowDraft::add_step(const std::string &kind, const
   for (int suffix = 2; taken.count(id); ++suffix) { id = kind + "_" + std::to_string(suffix); }
   if (id.size() > 64) { return {false, "No free step id is left for this kind"}; }
   auto result = edit(generation, true, [&](Json &next) -> std::string {
+    if (kind == "workflow" && next.at("format") == "stk.workflow/1") {
+      next["format"] = "stk.workflow/2";
+      next["interface"] = {{"inputs", Json::object()}, {"outputs", Json::object()}, {"parameters", Json::array()}};
+    }
     next["steps"].push_back(Json{{"id", id}, {"kind", kind}, {"ref", {{ref_key, ref_value}}}});
     if (position) {
       const auto [x, y] = *position;
@@ -327,15 +345,30 @@ WorkflowDraft::EditResult WorkflowDraft::set_link(const std::string &step, const
   if (unique_step(document(), step) < 0) { return {false, "Only a uniquely named step can be linked"}; }
   if (!workflow_identifier(port)) { return {false, "An input port is a lowercase identifier"}; }
   if (source) {
-    const auto parsed = port_ref(*source);
+    const bool composite = document().at("format") == "stk.workflow/2";
+    const auto parsed = port_ref(*source, composite);
     if (!parsed) { return {false, "A link source is \"step.port\""}; }
     if (parsed->first == step) { return {false, "A step cannot take its own output"}; }
-    if (unique_step(document(), parsed->first) < 0) { return {false, "A link source must be a uniquely named step"}; }
+    if (parsed->first == "$input") {
+      if (!document().at("interface").at("inputs").contains(parsed->second)) {
+        return {false, "A link source must be a declared workflow input"};
+      }
+    }
+    else if (unique_step(document(), parsed->first) < 0) { return {false, "A link source must be a uniquely named step"}; }
   }
   return edit(generation, true, [&](Json &next) -> std::string {
     auto &target = next["steps"][size_t(unique_step(next, step))];
     if (source) { target["inputs"][port] = Json{{"from", *source}}; }
     else if (target.contains("inputs")) { target["inputs"].erase(port); }
+    return {};
+  });
+}
+
+WorkflowDraft::EditResult WorkflowDraft::set_interface(const Json &boundary, const uint64_t generation)
+{
+  return edit(generation, true, [&](Json &next) -> std::string {
+    next["format"] = "stk.workflow/2";
+    next["interface"] = boundary;
     return {};
   });
 }

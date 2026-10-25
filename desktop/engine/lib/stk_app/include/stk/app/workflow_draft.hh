@@ -16,7 +16,7 @@
 
 namespace stk::app {
 
-/** The stk.workflow/1 bounds storage enforces (suan/project/workflows.py). */
+/** Editable stk.workflow/1 and /2 bounds enforced by storage (suan/project/workflows.py). */
 struct WorkflowDocumentLimits {
   static constexpr size_t max_steps = 200, max_document_bytes = 256 * 1024, max_parameters_bytes = 64 * 1024;
   static constexpr size_t max_inputs = 32, max_parameters = 64, max_after = 64, max_ref_entries = 8;
@@ -25,8 +25,8 @@ struct WorkflowDocumentLimits {
 /** A lowercase identifier ("^[a-z][a-z0-9_]{0,63}$"): step ids, kinds, ports and parameter names. */
 bool workflow_identifier(std::string_view value);
 
-/** Throws invalid_argument unless `document` has the stk.workflow/1 shape storage accepts: exactly
- * format/steps/ui, identifier ids and keys, `x-` step keys, {"from": "step.port"} inputs, bounded
+/** Throws invalid_argument unless `document` has an editable workflow shape: format/steps/ui,
+ * plus a typed interface in version 2; identifier ids and keys, `x-` step keys, bounded
  * ref/label/parameters/after, finite positions within 1e6, and the byte limits. References and
  * links are not resolved here (that is project.workflows.validate). */
 void check_workflow_document(const io::Json &document);
@@ -94,6 +94,8 @@ class WorkflowDraft {
 
   /** Valid no-ops are accepted without changing version; rejected edits keep all state. */
   EditResult set_name(const std::string &name, uint64_t generation);
+  /** Declare a reusable workflow's inputs, outputs and parameters; explicitly upgrades version 1. */
+  EditResult set_interface(const io::Json &boundary, uint64_t generation);
   /** Append a step {"id", "kind", "ref": {ref_key: ref_value}} at an optional position. Its id
    * derives from the kind and never collides: analysis, analysis_2, ... */
   EditResult add_step(const std::string &kind, const std::string &ref_key, const std::string &ref_value,

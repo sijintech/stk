@@ -155,9 +155,10 @@ class AppShell {
                                std::function<bool()> valid = {}, std::string table_id = {}, std::string record_id = {});
   /** Deferred: show `target` (Editor::navigate) in an `editor_id` tab of the same area while
    * `origin` is still that area's active editor, reusing such a tab or adding one. A refusing
-   * editor leaves the area as it was and its reason is shown as a toast. */
+   * editor leaves the area as it was and its reason is shown as a toast. separate_object preserves
+   * other objects' tabs, reusing only a different instance that already shows this target. */
   void open_in_area_later(EditorArea *area, std::weak_ptr<void> origin, std::string editor_id,
-                          io::Json target, std::function<bool()> valid = {});
+                          io::Json target, std::function<bool()> valid = {}, bool separate_object = false);
   /** Deferred: from the active editor `from`, activate the tab of `area` whose editor is `origin`;
    * when that tab is gone, show `fallback` in an `editor_id` tab instead. */
   void return_in_area_later(EditorArea *area, std::weak_ptr<void> from, std::weak_ptr<void> origin,

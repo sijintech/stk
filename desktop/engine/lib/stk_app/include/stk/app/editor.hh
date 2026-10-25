@@ -125,6 +125,9 @@ class Editor {
   {
     return false;
   }
+  /** Whether this instance already holds the requested object in the same project opening.
+   * Used when navigation must preserve other objects' tabs and their local drafts. */
+  virtual bool shows_navigation_target(const nlohmann::json &target) const { return false; }
   /** Whether navigation may change a project's table/record selection without losing a draft. */
   virtual bool can_change_project_selection(std::string_view project_id) const { return true; }
   /** Local work that must be saved or explicitly discarded before this editor is destroyed.

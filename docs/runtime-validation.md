@@ -2,6 +2,27 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：子流程与工作流封装（在研）
+
+基线 `fc14bc6ec945a2b5218323098a14eafa43614f18`；本批为未提交工作树，不是已交付桌面功能。
+版本 2 接口与递归展开复用现有冻结运行；新内部展开格式与来源、实例路径随计划保存，旧格式／旧运行继续可读。
+保存／校验不执行；全部测试清空模型密钥并取消模型变量，没有模型请求。
+
+- 首轮 Python **35 passed、1 failed**（`/tmp/stk-subworkflow-first.log`）：旧“未知格式”夹具使用本次新增的 `/2`，已改为 `/99`。初次新增套件 **48 passed、2 failed**（`core.log`）：修正新桥字段缺失，以及测试误 patch 每次重新创建的服务实例；未放松产品校验。
+- 桥接回归 **59 passed、6.69 秒**（`/tmp/stk-subworkflow-bridge.log`），补升级／分支／透传／真实工作器后 **63 passed、8.10 秒**（`bounds.log`）。扩大至工作流、分析、技能、桥契约、工作空间、归档和脚本，Python 3.12 **268 passed、72.26 秒**（`expanded.log`）。
+- 后续依赖检查修正并复验：核心四文件 **71 passed、9.49 秒**（`/tmp/stk-subworkflow-final-core.log`），最终新增模板表约束／字节预算后组合模块 **29 passed、3.41 秒**（`extra-bounds.log`）。真实 VTK／GraphWorker 将嵌套合成模拟结果转为三维 payload；没有依赖缺失跳过。
+- Python 3.11／3.14 早期核心各 **71 passed**，分别 **13.15／12.81 秒**（`/tmp/stk-subworkflow-311.log`、`314.log`）；后续最终四文件（含新增模板表／预算边界）各 **74 passed**，分别 **14.08／14.36 秒**（`/tmp/stk-subworkflow-final311.log`、`final314.log`）。
+- 原生构建与新增真实桥测试编译均退出 0（`/tmp/stk-subworkflow-native-build.log`、`native-rebuild.log`）。原生相关 **90/90、零失败／错误／跳过、36.17 秒**（`/tmp/stk-subworkflow-native.log`／`.xml`）；WorkflowDraft 与 WorkflowEditorPython 必跑 **54/54**（`required.log`），现有三平台通配已包含新增用例。
+- 桌面首轮 **90/94**（`/tmp/stk-subworkflow-ui-native.log`／`.xml`）：两项新测试把有序 JSON 的字段顺序当作语义差异，一项折叠面板错误地调用按钮回调；子流程导航暴露 `nlohmann::json` 到 `io::Json` 临时转换的悬空引用。修正断言、实际面板点击和导航对象复制后，四项复验 **3/4**，剩余为子页异步读取期间提前操作重命名。相关扩大回归 **115/116**（`ui-regression.log`）；补齐等待后新增五项复验 **4/5**（`ui-five.log`），父子导航已通过，新增 JSON 参数移除测试需等待候选校验完成后保存，已补等待并继续复验。
+- 点击验收：CPU 实际鼠标事件；当前工作流已打开、选中 `cases` 表格步骤、右侧检查器可见。英文 1×、逻辑 1440×1800；中文 2×、逻辑 640×1800，侧栏宽度分别 560／560。点击“设为输出”→“保存”，共 **2 次点击**，得到版本 2 的 `rows ← cases.rows` 输出，项目修订只增加 1，Viewer 不变。不替代真实系统窗口／GPU 验收。
+- JSON 默认值补测首轮 **2 passed、1 failed**（`/tmp/stk-subworkflow-literal-first.log`），证明形如 `$field` 的字面量被误当成字段引用。修正来源传播、显式 `$literal`、默认值移除和冻结过期判断后，Python 3.12 核心四文件 **78 passed、8.99 秒**（`literal-stale.log`）；3.11／3.14 各 **78 passed、13.69／13.53 秒**（`ui311.log`、`ui314.log`）。覆盖 `$field`、`$param`、`$literal` 字面量经多层调用后保持原值且没有虚假过期。
+- 最终构建退出 0（`/tmp/stk-subworkflow-ui-stable-build.log`）；新增桌面五项及必跑 **5/5、零失败／错误／跳过、1.64 秒**（`ui-final-five.log`／`.xml`）。父子未保存草稿、重入复用、默认值文本迁移／撤销和 JSON 字面量移除后保存均已通过。中英 2364 键、零问题，补充[子流程使用说明](project-workflows.md#可复用子流程版本-2在研)。
+- 完整 Python **3166 passed、24 skipped、2 deselected、690.10 秒**（`/tmp/stk-subworkflow-full-python.log`）。该完整运行启动后补充了冻结字段来源元数据及过期修正，因此最终相关代码另由上述三版本各 78 项覆盖；没有把运行中的旧导入状态当作最后修正的完整复验。
+- 最终完整原生 **1674/1674、零失败／错误／跳过、398.37 秒**（`/tmp/stk-subworkflow-full-native.log`／`.xml`）；从 Linux CI 当前必跑命令提取表达式核对 **844/844**（`full-required.log`），工作流草稿／桌面必跑 **59/59**（`ui-required.log`）。新用例由三个桌面平台现有通配覆盖；本批跨平台结果尚待提交后的 CI。
+- 覆盖重复／多层调用、冻结参数、删除子流程后执行、接口约束、精确大整数、原子升级与撤销、循环、修订漂移、大小边界、独立分支过期、空透传门禁。尚未 AOCI 收尾、暂存密钥扫描或提交／推送，工作流技能封装仍待完成。
+
+基线 CI 已核对：Desktop `40199278362` **5/5、全部完成成功**；Runtime `40199278388`、Docs `40199278457`、Secret `40199278445` 均完成成功。下一批推送的前代码头桌面门禁已满足；这些结果不覆盖当前未提交修改。
+
 ## 2026-10-25：用户分析技能（进行中）
 
 基线 `e9f5fb6e255572d204a8a44c3204fac647913123`；本节记录当前用户技能交付批次。用户技能 `graph.document` 完整保存分析图、提交参数、输出选择和源项目／分析／修订／摘要。
@@ -13,7 +34,7 @@
 - 新增真实 GraphWorker 验证：保存公开合成带符号场分析→发布用户技能→复制分析→冻结输入→改变原分析与删除原文件→明确运行，成功输出原参数 `K` 的三维 payload，原准备运行仍未启动。三 Python 版本各 **1 passed**（0.83／1.29／1.30 秒），`/tmp/stk-user-skills-real-run.log`、`real-run311.log`、`real-run314.log`。没有模型请求。
 - 原生产品首轮构建退出 0；新增测试编译曾因把返回 void 的 refresh 放入断言失败，修正后构建通过。原生首轮相关 **24/28**，4 项新用例均在不合法的两段节点类型名处被结构校验拒绝；改为规范三段名称，未放宽产品校验。最终构建 `/tmp/stk-user-skills-native-fix-build.log` 退出 0，相关及必跑 **28/28、零跳过、4.81 秒**，`/tmp/stk-user-skills-native-recheck.log`／`.xml`。现有三平台 ProjectSkillsPython 必跑通配覆盖新增用例。
 - 点击验收：CPU 事件测试；已打开项目且有一份保存分析，技能库页可见。英文 1×、1280×1200；中文 2×、逻辑 560×1200。点击“项目技能版本”→展开“从保存分析创建技能”→选分析→“保存为新的项目技能”，共 **4 次点击**；随后在同一选中技能／来源下追加版本 **1 次点击**。旧版本字节保留，项目修订各增加 1，Viewer 状态不变；切换来源后保留的旧按钮不写入。这不替代真实系统窗口／GPU 截图验收。
-- 中英 **2347 键、零问题**，`git diff --check` 通过；完整原生 **1666/1666、零失败／错误／跳过、393.74 秒**（`/tmp/stk-user-skills-full-native.log`／`.xml`）；按 Linux CI 的完整必跑表达式核对 **836/836**，`/tmp/stk-user-skills-full-required.log`。新跨平台 CI 尚待完成。
+- 中英 **2347 键、零问题**，`git diff --check` 通过；完整原生 **1666/1666、零失败／错误／跳过、393.74 秒**（`/tmp/stk-user-skills-full-native.log`／`.xml`）；按 Linux CI 的完整必跑表达式核对 **836/836**，`/tmp/stk-user-skills-full-required.log`。源码 `fc14bc6ec945a2b5218323098a14eafa43614f18` 已推送；Desktop `40199278362` 5/5、Runtime `40199278388`、Docs `40199278457`、Secret `40199278445` 均已完成成功。
 
 ## 2026-10-25：图像附件与卡片缩略图（进行中）
 

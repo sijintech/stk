@@ -164,12 +164,14 @@ def snapshot_limit(store, db, subject, max_bytes=MAX_SNAPSHOT_BYTES):
 
 
 class ManagedTable:
-    def __init__(self, *, table_id, table_name, fields, field_ids, subject, not_found, limits, limit_text, max_cell_bytes):
+    def __init__(self, *, table_id, table_name, fields, field_ids, subject, not_found, limits, limit_text, max_cell_bytes,
+                 optional_fields=()):
         """`limits()` returns (max records, max managed JSON bytes, max project snapshot bytes) at write time;
         `limit_text` names the first two in errors, for example "128 records or 4 MiB"."""
         self.table_id, self.table_name, self.fields, self.field_ids = table_id, table_name, fields, field_ids
         self.subject, self.not_found, self.limits, self.limit_text = subject, not_found, limits, limit_text
         self.max_cell_bytes = max_cell_bytes
+        self.optional_fields = frozenset(optional_fields)
 
     def require(self, db, documents):
         if _version(db) < 3:
@@ -182,6 +184,8 @@ class ManagedTable:
         fields = {row["id"]: row for row in db.execute("SELECT id,type,unit FROM fields WHERE table_id=?", (self.table_id,))}
         for key, (_, kind) in self.fields.items():
             field = fields.get(self.field_ids[key])
+            if field is None and key in self.optional_fields:
+                continue
             if field is None or field["type"] != kind or field["unit"] is not None:
                 return True, False, (f"{self.subject} table has missing or incompatible fields; "
                                      "undo or explicitly repair the structural edit")
@@ -203,7 +207,7 @@ class ManagedTable:
         return any(row[0] in self.field_ids.values() for row in db.execute(
             "SELECT field_id FROM definitions WHERE table_id=? AND record_id=?", (self.table_id, record_id)))
 
-    def write(self, store, db, identity, values, revision, *, create, document_format):
+    def write(self, store, db, identity, values, revision, *, create, document_format, supported_formats=None):
         """Create or replace one record's managed cells inside an open write transaction."""
         current = db.execute("SELECT revision FROM project").fetchone()[0]
         if current != revision:
@@ -224,7 +228,7 @@ class ManagedTable:
                 old_format = self.literal(db, identity, "format")
             except ProjectError:
                 old_format = None
-            if type(old_format) is str and old_format != document_format:
+            if type(old_format) is str and old_format not in (supported_formats or (document_format,)):
                 raise UnsupportedProjectFormat(f"Cannot replace an unsupported {lower} document format")
         serialized = {key: _json(value) for key, value in values.items()}
         count = db.execute("SELECT count(*) FROM records WHERE table_id=?", (self.table_id,)).fetchone()[0] + int(create)
@@ -246,6 +250,16 @@ class ManagedTable:
             commands.append({"op": "create_table", "id": self.table_id, "name": self.table_name})
             commands.extend({"op": "add_field", "table_id": self.table_id, "id": self.field_ids[key], "name": title, "type": kind}
                             for key, (title, kind) in self.fields.items())
+        else:
+            # An explicitly written version may introduce optional managed fields. Add them in
+            # the same undoable edit as its cells; reads never migrate an old project.
+            for key in self.fields:
+                if key not in self.optional_fields or key not in values:
+                    continue
+                if db.execute("SELECT 1 FROM fields WHERE id=?", (self.field_ids[key],)).fetchone() is None:
+                    title, kind = self.fields[key]
+                    commands.append({"op": "add_field", "table_id": self.table_id, "id": self.field_ids[key],
+                                     "name": title, "type": kind})
         if create:
             commands.append({"op": "add_record", "table_id": self.table_id, "id": identity})
         commands.extend({"op": "set_cell", "table_id": self.table_id, "record_id": identity,

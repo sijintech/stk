@@ -359,7 +359,163 @@ class WorkflowEditorPython : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/" + name + "/mode") &&
         widget("workflow_param/" + name + "/mode")->enabled && shows("All references and links are valid."); }));
   }
+
+  void publish_output_clicks(const std::string &language, float scale, int width)
+  {
+    store().set_language(language);
+    f.drv = std::make_unique<wmtest::ScreenDriver>(f.screen, int(width * scale), int(1800 * scale), scale);
+    area().find_region(EditorArea::kSidebar)->set_size_1x(std::min(width - 80, 560));
+    ASSERT_NO_FATAL_FAILURE(select("cases"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_publish_output/rows") &&
+        widget("workflow_publish_output/rows")->enabled; }));
+    const auto viewer = store().viewer().save_workspace_state();
+    int clicks = 0;
+    const auto mouse = [&](const std::string &key) {
+      const auto *item = widget(key); ASSERT_NE(item, nullptr) << key; ASSERT_TRUE(item->enabled) << key;
+      const auto [x, y] = f.widget_center(item->key);
+      ASSERT_GE(x, 0); ASSERT_LT(x, int(width * scale)); ASSERT_GE(y, 0); ASSERT_LT(y, int(1800 * scale));
+      f.drv->click(x, y); f.screen.run_deferred(); f.drv->frame(); ++clicks;
+    };
+    ASSERT_NO_FATAL_FAILURE(mouse("workflow_publish_output/rows"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+    const auto before = project().project()->revision;
+    ASSERT_NO_FATAL_FAILURE(mouse("workflow_save"));
+    ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision == before + 1 &&
+        !area().editor().has_unsaved_changes(); }));
+    EXPECT_EQ(clicks, 2);
+    const auto doc = stored().at("document");
+    EXPECT_EQ(doc.at("format"), "stk.workflow/2");
+    EXPECT_EQ(doc.at("interface").at("outputs").at("rows").at("type"), "rows");
+    EXPECT_EQ(doc.at("interface").at("outputs").at("rows").at("from"), "cases.rows");
+    EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
+  }
 };
+
+TEST_F(WorkflowEditorPython, ExposesAndSavesAnOutputInTwoClicksEnglish)
+{
+  ASSERT_NO_FATAL_FAILURE(publish_output_clicks("en", 1, 1440));
+}
+
+TEST_F(WorkflowEditorPython, ExposesAndSavesAnOutputInTwoClicksChineseAtDoubleScale)
+{
+  ASSERT_NO_FATAL_FAILURE(publish_output_clicks("zh_CN", 2, 640));
+}
+
+TEST_F(WorkflowEditorPython, InterfaceInputsAndDefaultsKeepDraftsAndUndo)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({
+      {{"name", "count"}, {"type", "integer"}, {"default", 7}}}), {{"count", int64_t(9007199254740993LL)}}));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_input/data/publish"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_publish_output/view"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/count/publish"));
+  auto candidate = area().editor().save_workspace_state().at("draft").at("document");
+  EXPECT_EQ(candidate.at("steps")[2].at("inputs").at("data").at("from"), "$input.data");
+  EXPECT_EQ(candidate.at("steps")[2].at("parameters").at("count"), Json({{"$param", "count"}}));
+  EXPECT_EQ(candidate.at("interface").at("parameters")[0].at("default"), int64_t(9007199254740993LL));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && !area().editor().has_unsaved_changes(); }));
+  ASSERT_NE(widget("workflow_interface"), nullptr);
+  const auto [panel_x, panel_y] = f.widget_center(widget("workflow_interface")->key);
+  f.drv->click(panel_x, panel_y); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_interface_defaults/workflow_param/count/value"); }));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("count", "not an integer"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_interface_defaults/workflow_param/count/apply"));
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  EXPECT_EQ(stored().at("document").at("interface").at("parameters")[0].at("default"), int64_t(9007199254740993LL));
+  const auto workspace = area().editor().save_workspace_state();
+  EXPECT_EQ(workspace.at("literal_text").at("$interface/count"), "not an integer");
+  ASSERT_TRUE(area().editor().load_workspace_state(workspace));
+  EXPECT_TRUE(area().editor().has_unsaved_changes());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_interface_defaults/workflow_param/count/value") &&
+      widget("workflow_interface_defaults/workflow_param/count/value")->string.value() == "not an integer"; }));
+  ASSERT_NO_FATAL_FAILURE(type_parameter("count", "17"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_interface_defaults/workflow_param/count/apply"));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_interface_remove/parameters/count"));
+  candidate = area().editor().save_workspace_state().at("draft").at("document");
+  EXPECT_TRUE(candidate.at("interface").at("parameters").empty());
+  EXPECT_EQ(candidate.at("steps")[2].at("parameters").at("count"), 17);
+  ASSERT_NO_FATAL_FAILURE(click("workflow_undo"));
+  candidate = area().editor().save_workspace_state().at("draft").at("document");
+  EXPECT_EQ(candidate.at("interface").at("parameters")[0].at("default"), 17);
+  EXPECT_EQ(candidate.at("steps")[2].at("parameters").at("count"), Json({{"$param", "count"}}));
+}
+
+TEST_F(WorkflowEditorPython, RemovingJsonInterfaceParameterPreservesItsLiteralDefault)
+{
+  ASSERT_NO_FATAL_FAILURE(install_parameters(Json::array({
+      {{"name", "payload"}, {"type", "json"}, {"default", Json::object()}}}), {{"payload", Json::object()}}));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_param/payload/publish"));
+  ASSERT_NE(widget("workflow_interface"), nullptr);
+  const auto [x, y] = f.widget_center(widget("workflow_interface")->key);
+  f.drv->click(x, y); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_interface_defaults/workflow_param/payload/value") &&
+      widget("workflow_interface_defaults/workflow_param/payload/value")->enabled; }));
+  const Json literal = {{"$field", field_id}};
+  ASSERT_NO_FATAL_FAILURE(type_parameter("payload", literal.dump()));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_interface_defaults/workflow_param/payload/apply"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_interface_remove/parameters/payload") &&
+      widget("workflow_interface_remove/parameters/payload")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_interface_remove/parameters/payload"));
+  const auto doc = area().editor().save_workspace_state().at("draft").at("document");
+  EXPECT_TRUE(doc.at("interface").at("parameters").empty());
+  EXPECT_EQ(doc.at("steps")[2].at("parameters").at("payload"), Json({{"$literal", literal}}));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_param/payload/value") &&
+      widget("workflow_param/payload/value")->enabled && shows("All references and links are valid."); }));
+  EXPECT_EQ(widget("workflow_param/payload/value")->string.value(), literal.dump());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_save") && widget("workflow_save")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_save"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && !area().editor().has_unsaved_changes(); }));
+  EXPECT_EQ(stored().at("document").at("steps")[2].at("parameters").at("payload"), Json({{"$literal", literal}}));
+}
+
+TEST_F(WorkflowEditorPython, SubworkflowNavigationKeepsAndReusesBothDirtyTabs)
+{
+  const std::string child = "cf8310b6-d1be-4c9e-92af-57386284cf17";
+  Json out;
+  const Json boundary = {{"inputs", {{"data", {{"type", "files"}}}}},
+      {"outputs", {{"view", {{"type", "result"}, {"from", "view.view"}}}}}, {"parameters", Json::array()}};
+  const Json doc = {{"format", "stk.workflow/2"}, {"ui", Json::object()}, {"interface", boundary}, {"steps", Json::array({
+      {{"id", "view"}, {"kind", "analysis"}, {"ref", {{"analysis", analysis_id}}},
+       {"inputs", {{"data", {{"from", "$input.data"}}}}}}})}};
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.create", {{"handle", handle()}, {"workflow_id", child},
+      {"name", "Child method"}, {"document", doc}, {"expected_revision", revision}}, out));
+  auto parent = stored().at("document"); parent["format"] = "stk.workflow/2";
+  parent["interface"] = {{"inputs", Json::object()}, {"outputs", Json::object()}, {"parameters", Json::array()}};
+  parent["steps"].push_back({{"id", "nested"}, {"kind", "workflow"}, {"ref", {{"workflow", child}}},
+      {"inputs", {{"data", {{"from", "fields.files"}}}}}});
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.update", {{"handle", handle()}, {"workflow_id", workflow_id},
+      {"name", "Temperature scan"}, {"document", parent}, {"expected_revision", revision}}, out));
+  project().refresh();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().busy() && project().project()->revision == revision; }));
+  ASSERT_NO_FATAL_FAILURE(select("nested"));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_enter_subworkflow") && widget("workflow_enter_subworkflow")->enabled; }));
+  auto *parent_editor = &area().editor();
+  widget("workflow_name")->string.assign("Parent draft"); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(click("workflow_rename"));
+  const auto viewer = store().viewer().save_workspace_state();
+  const auto parent_draft = parent_editor->save_workspace_state().at("draft");
+  const auto tabs = area().tab_count();
+  ASSERT_NO_FATAL_FAILURE(click("workflow_enter_subworkflow"));
+  ASSERT_EQ(area().tab_count(), tabs + 1);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_breadcrumb_parent") && shows("Child method"); }));
+  EXPECT_EQ(area().tab_count(), tabs + 1);
+  auto *child_editor = &area().editor(); EXPECT_NE(child_editor, parent_editor);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_name") && widget("workflow_name")->enabled; }));
+  widget("workflow_name")->string.assign("Child draft"); f.drv->frame();
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return widget("workflow_rename") && widget("workflow_rename")->enabled; }));
+  ASSERT_NO_FATAL_FAILURE(click("workflow_rename"));
+  const auto child_draft = child_editor->save_workspace_state().at("draft");
+  ASSERT_NO_FATAL_FAILURE(click("workflow_breadcrumb_parent"));
+  EXPECT_EQ(&area().editor(), parent_editor);
+  EXPECT_EQ(parent_editor->save_workspace_state().at("draft"), parent_draft);
+  ASSERT_NO_FATAL_FAILURE(click("workflow_enter_subworkflow"));
+  EXPECT_EQ(&area().editor(), child_editor);
+  EXPECT_EQ(area().tab_count(), tabs + 1);
+  EXPECT_EQ(child_editor->save_workspace_state().at("draft"), child_draft);
+  EXPECT_TRUE(child_editor->has_unsaved_changes()); EXPECT_TRUE(parent_editor->has_unsaved_changes());
+  EXPECT_EQ(store().viewer().save_workspace_state(), viewer);
+}
 
 TEST_F(WorkflowEditorPython, ShowsStepsAndEntersAndLeavesTheAnalysisInTheSameArea)
 {
@@ -577,6 +733,30 @@ TEST_F(WorkflowEditorPython, ClosingTheProjectBeforeTheAnalysisIsReadLeavesNoWay
   for (int i = 0; i < 5; ++i) { loop.run_ready(); f.drv->frame(); }
   EXPECT_EQ(widget("analysis_breadcrumb_workflow"), nullptr);
   EXPECT_EQ(calls("project.analyses.get"), reads);
+}
+
+TEST_F(WorkflowEditorPython, VersionTwoInterfaceSavesThroughNativeServiceWithoutExecuting)
+{
+  ProjectWorkflows workflows(store());
+  ASSERT_TRUE(workflows.load(workflow_id));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !workflows.validation().is_null(); }));
+  WorkflowDraft draft;
+  draft.pin(handle(), workflow_id, workflows.selected_revision(), "Reusable analysis", workflows.selected().at("document"));
+  const Json boundary = {{"inputs", Json::object()},
+      {"outputs", {{"view", {{"type", "result"}, {"from", "temperature.view"}}}}},
+      {"parameters", Json::array({{{"name", "exact"}, {"type", "integer"}, {"default", int64_t(9007199254740993LL)}}})}};
+  ASSERT_TRUE(draft.set_interface(boundary, draft.generation()).accepted);
+  const auto executes = calls("project.workflow_runs.start");
+  ASSERT_TRUE(workflows.update(draft.name(), draft.document(), workflows.selected_version()));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !project().busy(); }));
+  EXPECT_EQ(workflows.selected().at("format"), "stk.workflow/2");
+  EXPECT_EQ(exact(workflows.selected().at("document")), exact(draft.document()));
+  Json result;
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.get", {{"handle", handle()}, {"workflow_id", workflow_id}}, result));
+  EXPECT_EQ(exact(result.at("workflow").at("document")), exact(draft.document()));
+  ASSERT_NO_FATAL_FAILURE(call("project.workflows.validate", {{"handle", handle()}, {"document", draft.document()}}, result));
+  EXPECT_TRUE(result.at("ok").get<bool>()) << result.dump();
+  EXPECT_EQ(calls("project.workflow_runs.start"), executes);
 }
 
 TEST_F(WorkflowEditorPython, DraftEditsSaveExactlyAndCandidateChecksAreKeyed)

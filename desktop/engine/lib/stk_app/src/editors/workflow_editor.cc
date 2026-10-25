@@ -59,10 +59,11 @@ const char *ref_key(const std::string &kind)
   if (kind == "table") { return "table"; }
   if (kind == "files") { return "snapshot"; }
   if (kind == "simulation") { return "template"; }
+  if (kind == "workflow") { return "workflow"; }
   return "analysis";
 }
 
-constexpr const char *kKinds[] = {"table", "files", "simulation", "analysis"};
+constexpr const char *kKinds[] = {"table", "files", "simulation", "analysis", "workflow"};
 
 /** What a workflow showed when it was last on screen (UX package U4): the graph point in the middle of
  * the canvas and the zoom (independent of window size and UI scale), the selected step and the shown run. */
@@ -95,10 +96,18 @@ class WorkflowEditor final : public Editor {
   bool has_sidebar() const override { return true; }
   ui::Color main_background(const ui::Theme &) const override { return {0, 0, 0, 0}; }
 
+  bool shows_navigation_target(const nlohmann::json &target) const override
+  {
+    return store_ && store_->project().project() && draft_.pinned() &&
+        store_->project().project()->handle == draft_.handle() &&
+        io::get_string(member(target, "breadcrumb"), "handle") == draft_.handle() &&
+        io::get_string(target, "workflow_id") == draft_.workflow_id();
+  }
+
   /** {"workflow_id", "step"?, "run_id"?}: show that workflow (read on the next sync) and select the step;
    * or {"table_id", "rows"} (P2 L2, rows an AI sweep added): show a workflow over that table with only those rows
    * checked to run. Refused while unsaved edits of another workflow are pending. Never starts a run. */
-  bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &, std::string &reason) override
+  bool navigate(const nlohmann::json &target, const std::weak_ptr<void> &origin, std::string &reason) override
   {
     if (!target.is_object()) { return false; }
     std::set<std::string> rows;
@@ -127,6 +136,13 @@ class WorkflowEditor final : public Editor {
       reason = "workflow.edit.unapplied_text";
       return false;
     }
+    breadcrumb_ = nullptr;
+    if (const auto crumb = member(target, "breadcrumb"); crumb.is_object()) {
+      breadcrumb_ = crumb; breadcrumb_child_ = id; breadcrumb_origin_ = origin;
+      if (shows_navigation_target(target) && !target.contains("step") && !target.contains("run_id")) {
+        redraw(); return true;  // Keep this child's selection, view and any unapplied text.
+      }
+    }
     reopen_.reset();  // an explicit target wins over the workflow the layout last showed
     if (workflows_ && io::get_string(workflows_->selected(), "id") != id) { leave(); }
     want_step_ = io::get_string(target, "step");
@@ -142,6 +158,7 @@ class WorkflowEditor final : public Editor {
   {
     workspace_link(row, ctx);
     attach(ctx);
+    breadcrumb(row, ctx);
     history_controls(row, ctx);
     const std::weak_ptr<bool> weak = alive_;
     row.button("workflow_fit", ctx.tr("analysis_graph.fit"), [this, weak] {
@@ -196,6 +213,7 @@ class WorkflowEditor final : public Editor {
     if (workflows_->selected().is_null()) { return; }
     status(body, ctx);
     edit_panel(body, ctx);
+    interface_panel(body, ctx);
     run_panel(body, ctx);
     issues_panel(body, ctx);
     step_panel(body, ctx);
@@ -326,7 +344,7 @@ class WorkflowEditor final : public Editor {
         if (std::string_view(key) == "literal_modes") {
           if (!item.is_string() || (item != "json" && item != "string")) { return false; }
         }
-        else if (!item.is_number_integer() || item.get<int64_t>() < 0 || item.get<int64_t>() > 2) { return false; }
+        else if (!item.is_number_integer() || item.get<int64_t>() < 0 || item.get<int64_t>() > 3) { return false; }
       }
     }
     WorkflowDraft checked;
@@ -483,7 +501,8 @@ class WorkflowEditor final : public Editor {
         for (const auto &[key, text] : literal_text_) {
           const auto slash = key.find('/');
           const auto *step = slash == std::string::npos ? nullptr : draft_.step(key.substr(0, slash));
-          const auto &current = step ? member(member(*step, "parameters"), key.substr(slash + 1).c_str()) : Json();
+          const auto current = key.rfind("$interface/", 0) == 0 ? interface_default(key.substr(11)) :
+              step ? parameter_value(member(member(*step, "parameters"), key.substr(slash + 1).c_str())) : Json();
           // Legacy workspace text was always JSON. New plain strings declare their mode explicitly.
           if (!literal_modes_.contains(key)) { literal_modes_[key] = "json"; }
           const bool plain = literal_modes_.at(key) == "string" && current.is_string();
@@ -504,7 +523,7 @@ class WorkflowEditor final : public Editor {
         for (const auto &[key, text] : literal_text_) {
           (void)text; literal_source_[key] = std::make_tuple(key, draft_.generation(), draft_.version());
         }
-        add_kind_ = std::clamp(int(io::get_int(value, "add_kind", 3)), 0, 3); add_object_ = int(io::get_int(value, "add_object", 0));
+        add_kind_ = std::clamp(int(io::get_int(value, "add_kind", 3)), 0, int(std::size(kKinds)) - 1); add_object_ = int(io::get_int(value, "add_object", 0));
         show_archived_ = value.value("archived", false); show_archived_runs_ = value.value("archived_runs", false);
         target_.load_workspace_state(value.at("target"));
       }
@@ -814,6 +833,151 @@ class WorkflowEditor final : public Editor {
   {
     remember();
     restore_.reset();
+  }
+
+  void breadcrumb(ui::Layout &row, EditorContext &ctx)
+  {
+    if (!breadcrumb_.is_object()) { return; }
+    const auto &project = ctx.store.project().project();
+    if (!project || project->handle != io::get_string(breadcrumb_, "handle")) { breadcrumb_ = nullptr; return; }
+    const auto shown = io::get_string(workflows_->selected(), "id");
+    if (shown != breadcrumb_child_ && pending_ != breadcrumb_child_) { return; }
+    auto *shell = &ctx.area.shell(); auto *area = &ctx.area;
+    const auto self = lifetime(), origin = breadcrumb_origin_;
+    const auto crumb = breadcrumb_;
+    row.button("workflow_breadcrumb_parent", ctx.store.catalog().format("workflow.interface.back",
+        {{"name", io::get_string(crumb, "workflow_name")}}), [this, shell, area, self, origin, crumb, ok = valid()] {
+      if (!ok() || !store_->project().project() || store_->project().project()->handle != io::get_string(crumb, "handle")) { return; }
+      shell->return_in_area_later(area, self, origin, kEditorWorkflow,
+          {{"workflow_id", io::get_string(crumb, "workflow_id")}, {"step", io::get_string(crumb, "step")}});
+    }).width(7).disable(shell->text_input_active());
+  }
+
+  Json interface_value() const
+  {
+    if (draft_.pinned() && member(draft_.document(), "interface").is_object()) { return draft_.document().at("interface"); }
+    return {{"inputs", Json::object()}, {"outputs", Json::object()}, {"parameters", Json::array()}};
+  }
+
+  Json interface_default(const std::string &name) const
+  {
+    const auto boundary = interface_value();
+    for (const auto &item : boundary.at("parameters")) {
+      if (io::get_string(item, "name") == name) { return member(item, "default"); }
+    }
+    return nullptr;
+  }
+
+  bool composed_document() const { return draft_.pinned() && member(draft_.document(), "format") == "stk.workflow/2"; }
+  bool wrapped_literal(const Json &value) const
+  {
+    return composed_document() && value.is_object() && value.size() == 1 && value.contains("$literal");
+  }
+  Json parameter_value(const Json &value) const { return wrapped_literal(value) ? value.at("$literal") : value; }
+  Json parameter_literal(const Json &value) const
+  {
+    return composed_document() && value.is_object() && value.size() == 1 &&
+        (value.contains("$field") || value.contains("$param") || value.contains("$literal")) ? Json{{"$literal", value}} : value;
+  }
+
+  static std::string interface_name(const Json &items, const std::string &base)
+  {
+    std::set<std::string> names;
+    if (items.is_object()) { for (const auto &[name, value] : items.items()) { (void)value; names.insert(name); } }
+    else { for (const auto &item : items) { names.insert(io::get_string(item, "name")); } }
+    if (!names.contains(base)) { return base; }
+    for (int i = 2; ; ++i) {
+      auto name = base.substr(0, 56) + "_" + std::to_string(i);
+      if (!names.contains(name)) { return name; }
+    }
+  }
+
+  static bool interface_parameter_fits(const Json &origin, const Json &target)
+  {
+    const auto type = io::get_string(origin, "type"), wanted = io::get_string(target, "type");
+    const bool compatible = type == wanted || (type == "integer" && (wanted == "number" || wanted == "step")) ||
+        (type == "json" && (wanted == "vector3" || wanted == "int3" || wanted == "range"));
+    return compatible && (io::get_string(target, "unit").empty() || io::get_string(origin, "unit") == io::get_string(target, "unit"));
+  }
+
+  void remove_interface(const std::string &direction, const std::string &name)
+  {
+    auto boundary = interface_value();
+    const auto result = draft_.edit_group(draft_.generation(), [&](WorkflowDraft &draft) -> WorkflowDraft::EditResult {
+      if (direction == "parameters") {
+        Json kept = Json::array(), fallback;
+        for (const auto &item : boundary.at("parameters")) {
+          if (io::get_string(item, "name") == name) { fallback = item.at("default"); }
+          else { kept.push_back(item); }
+        }
+        boundary["parameters"] = kept;
+        const auto steps = draft.document().at("steps");
+        for (const auto &step : steps) {
+          for (const auto &[parameter, value] : member(step, "parameters").items()) {
+            if (value == Json{{"$param", name}}) {
+              const auto edit = draft.set_parameter(io::get_string(step, "id"), parameter, parameter_literal(fallback), draft.generation());
+              if (!edit.accepted) { return edit; }
+            }
+          }
+        }
+      }
+      else {
+        boundary[direction].erase(name);
+        if (direction == "inputs") {
+          const auto steps = draft.document().at("steps");
+          for (const auto &step : steps) {
+            for (const auto &[port, link] : member(step, "inputs").items()) {
+              if (io::get_string(link, "from") == "$input." + name) {
+                const auto edit = draft.set_link(io::get_string(step, "id"), port, std::nullopt, draft.generation());
+                if (!edit.accepted) { return edit; }
+              }
+            }
+          }
+          auto &outputs = boundary["outputs"];
+          for (auto it = outputs.begin(); it != outputs.end();) {
+            if (io::get_string(it.value(), "from") == "$input." + name) { it = outputs.erase(it); }
+            else { ++it; }
+          }
+        }
+      }
+      return draft.set_interface(boundary, draft.generation());
+    });
+    edited(result);
+  }
+
+  void interface_panel(ui::Layout &layout, EditorContext &ctx)
+  {
+    if (!draft_.pinned()) { return; }
+    auto *panel = layout.panel("workflow_interface", ctx.tr("workflow.interface.title"), false);
+    if (!panel) { return; }
+    panel->paragraph(ctx.tr("workflow.interface.hint"));
+    const auto boundary = interface_value();
+    const auto guard = edit_guard(ctx);
+    const bool can = editable(ctx);
+    for (const char *direction : {"inputs", "outputs"}) {
+      panel->label(ctx.tr(std::string("workflow.interface.") + direction));
+      for (const auto &[name, port] : boundary.at(direction).items()) {
+        auto &row = panel->row();
+        row.label(name + " · " + io::get_string(port, "type") +
+                  (port.contains("from") ? " ← " + io::get_string(port, "from") : std::string()));
+        row.button(std::string("workflow_interface_remove/") + direction + "/" + name, ctx.tr("workflow.interface.remove"),
+            [this, guard, direction = std::string(direction), name] {
+          if (guard() && !unapplied_text_edits()) { remove_interface(direction, name); }
+        }).width(4).disable(!can || unapplied_text_edits());
+      }
+    }
+    Json defaults = Json::object();
+    for (const auto &parameter : boundary.at("parameters")) {
+      const auto name = io::get_string(parameter, "name");
+      defaults[name] = member(parameter, "default");
+      panel->button("workflow_interface_remove/parameters/" + name,
+          ctx.store.catalog().format("workflow.interface.remove_parameter", {{"name", name}}), [this, guard, name] {
+        if (guard() && !unapplied_text_edits()) { remove_interface("parameters", name); }
+      }).disable(!can || unapplied_text_edits());
+    }
+    auto &scope = panel->scope("workflow_interface_defaults");
+    parameters(scope, ctx, guard, {{"id", "$interface"}, {"parameters", defaults}},
+               {{"parameters", boundary.at("parameters")}}, can, true);
   }
 
   std::function<bool()> valid() const
@@ -1195,6 +1359,12 @@ class WorkflowEditor final : public Editor {
         labels.push_back(io::get_string(item, "name") + " (" + io::get_string(item, "id") + ")"); values.push_back(io::get_string(item, "id"));
       }
     }
+    else if (kind == "workflow") {
+      for (const auto &item : list("workflows")) {
+        if (io::get_string(item, "id") == draft_.workflow_id()) { continue; }
+        labels.push_back(clipped(io::get_string(item, "name"), 60)); values.push_back(io::get_string(item, "id"));
+      }
+    }
     else {
       for (const auto &analysis : list("analyses")) { labels.push_back(clipped(io::get_string(analysis, "name"), 60)); values.push_back(io::get_string(analysis, "id")); }
     }
@@ -1261,19 +1431,33 @@ class WorkflowEditor final : public Editor {
   }
 
   /** "simulate: T 325 → 330 K" and the like, for a stale task. */
+  std::string run_step_label(const std::string &step) const
+  {
+    const auto &path = member(member(member(workflows_->run(), "composition"), "step_paths"), step.c_str());
+    if (!path.is_array()) { return step; }
+    std::string label;
+    for (const auto &part : path) { if (part.is_string()) { label += (label.empty() ? "" : " › ") + part.get<std::string>(); } }
+    return label.empty() ? step : label;
+  }
+
   std::string reason_text(EditorContext &ctx, const std::string &step, const Json &reason) const
   {
     auto &catalog = ctx.store.catalog();
     const auto code = io::get_string(reason, "code");
     const auto value = [](const Json &v) { return v.is_string() ? v.get<std::string>() : v.dump(); };
-    return catalog.format("workflow.run.reason." + code, {{"step", step}, {"name", io::get_string(reason, "name")},
+    return catalog.format("workflow.run.reason." + code, {{"step", run_step_label(step)}, {"name", io::get_string(reason, "name")},
         {"before", value(member(reason, "before"))}, {"after", value(member(reason, "after"))},
-        {"upstream", io::get_string(reason, "step")}});
+        {"upstream", run_step_label(io::get_string(reason, "step"))}});
   }
 
   /** The parameter table of the saved workflow's single table step (runs take their rows from it). */
   const ProjectTable *run_table(EditorContext &ctx) const
   {
+    if (member(workflows_->validation(), "execution").is_object()) {
+      const auto id = io::get_string(workflows_->validation().at("execution"), "table_id");
+      for (const auto &table : ctx.store.project().tables()) { if (table.id == id) { return &table; } }
+      return nullptr;
+    }
     const auto &document = member(workflows_->selected(), "document");
     const Json *only = nullptr;
     int count = 0;
@@ -1329,6 +1513,7 @@ class WorkflowEditor final : public Editor {
     std::string blocked;
     if (unapplied_text_edits()) { blocked = "workflow.edit.unapplied_text"; }
     else if (draft_.dirty()) { blocked = "workflow.run.save_first"; }
+    else if (!member(member(member(workflows_->selected(), "document"), "interface"), "inputs").empty()) { blocked = "workflow.interface.run_parent"; }
     else if (!io::get_bool(workflows_->validation(), "ok", false)) { blocked = "workflow.run.fix_first"; }
     else if (!table) { blocked = "workflow.run.no_table"; }
     if (!blocked.empty()) { panel->paragraph(ctx.tr(blocked)); }
@@ -1398,6 +1583,7 @@ class WorkflowEditor final : public Editor {
       panel->button("workflow_run_start", start_text, [this, ok, rows, simulation, state = &ctx.store.project(),
                     table_id = table->id, offset = table->record_offset] {
         if (!ok() || state->busy() || draft_.dirty() || unapplied_text_edits()) { return; }
+        if (!member(member(member(workflows_->selected(), "document"), "interface"), "inputs").empty()) { return; }
         for (const auto &live : state->tables()) {
           if (live.id == table_id && live.record_offset == offset) { run_row_ = -1; workflows_->run_rows(rows, simulation); return; }
         }
@@ -1458,6 +1644,7 @@ class WorkflowEditor final : public Editor {
    * remote (any registered engine; docs/design/multiscale-engines.md), or muferro/1 for services older than that flag. */
   bool remote_steps() const
   {
+    if (io::get_bool(member(workflows_->validation(), "execution"), "requires_runtime", false)) { return true; }
     const auto &templates = member(workflows_->choices(), "templates");
     for (const auto &step : member(member(workflows_->selected(), "document"), "steps")) {
       if (io::get_string(step, "kind") != "simulation") { continue; }
@@ -1566,7 +1753,7 @@ class WorkflowEditor final : public Editor {
     }
     ui::TableSpec spec;
     spec.columns = {{std::string(ctx.tr("workflow.run.row_column")), 4}};
-    for (const auto &step : order) { spec.columns.push_back({step.get<std::string>(), 6}); }
+    for (const auto &step : order) { spec.columns.push_back({run_step_label(step.get<std::string>()), 6}); }
     spec.rows = int(rows.size()); spec.visible_rows = float(std::min(8, spec.rows));
     spec.data_version = workflows_->run_version();
     spec.cell = [cells](const int row, const int column) { return cells.at(size_t(row)).at(size_t(column)); };
@@ -1596,12 +1783,12 @@ class WorkflowEditor final : public Editor {
         const auto &task = *found->second;
         const auto &error = member(task, "error");
         if (error.is_object()) {
-          panel.paragraph(catalog.format("workflow.run.task_error", {{"step", step.get<std::string>()},
+          panel.paragraph(catalog.format("workflow.run.task_error", {{"step", run_step_label(step.get<std::string>())},
               {"message", clipped(io::get_string(error, "message"), 300)}}));
         }
         if (const auto &progress = member(task, "progress"); progress.is_object() && !io::get_string(progress, "simulation_run_id").empty()) {
           const auto task_id = io::get_string(progress, "task_id");
-          panel.paragraph(catalog.format("workflow.run.remote_detail", {{"step", step.get<std::string>()},
+          panel.paragraph(catalog.format("workflow.run.remote_detail", {{"step", run_step_label(step.get<std::string>())},
               {"run", io::get_string(progress, "simulation_run_id").substr(0, 8)},
               {"task", task_id.empty() ? std::string("—") : task_id.substr(0, 12)},
               {"state", std::string(ctx.tr(io::get_string(task, "status") == "running" ? "workflow.run.stage." + io::get_string(progress, "stage")
@@ -1615,7 +1802,7 @@ class WorkflowEditor final : public Editor {
           const auto self = lifetime();
           const Json target = {{"analysis_id", io::get_string(frozen, "analysis_id")}, {"analysis_run_id", analysis_run}};
           panel.button("workflow_run_open/" + step.get<std::string>(),
-              catalog.format("workflow.run.open_analysis", {{"step", step.get<std::string>()}}), [shell, area, self, target] {
+              catalog.format("workflow.run.open_analysis", {{"step", run_step_label(step.get<std::string>())}}), [shell, area, self, target] {
             shell->open_in_area_later(area, self, kEditorAnalysisGraph, target);
           }).disable(shell->text_input_active());
         }
@@ -1734,6 +1921,17 @@ class WorkflowEditor final : public Editor {
     inputs(*panel, ctx, guard, step, summary, can);
     for (const auto &port : member(summary, "outputs")) {
       panel->paragraph(catalog.format("workflow.output", {{"port", io::get_string(port, "name")}, {"type", io::get_string(port, "type")}}));
+      const auto name = io::get_string(port, "name"), type = io::get_string(port, "type");
+      const auto boundary = interface_value();
+      bool published = false;
+      for (const auto &value : boundary.at("outputs")) { published |= io::get_string(value, "from") == id + "." + name; }
+      panel->button("workflow_publish_output/" + name, ctx.tr("workflow.interface.publish_output"), [this, guard, id, name, type] {
+        if (!guard() || unapplied_text_edits()) { return; }
+        auto next = interface_value();
+        const auto public_name = interface_name(next.at("outputs"), name);
+        next["outputs"][public_name] = {{"type", type}, {"from", id + "." + name}};
+        edited(draft_.set_interface(next, draft_.generation()));
+      }).disable(!can || published || unapplied_text_edits() || boundary.at("outputs").size() >= 32);
     }
     after_editor(*panel, ctx, guard, step, can);
     parameters(*panel, ctx, guard, step, summary, can);
@@ -1783,6 +1981,13 @@ class WorkflowEditor final : public Editor {
       }
       // Same-type outputs of other steps; an unlisted current link stays visible.
       std::vector<std::string> values{std::string()}, labels{std::string(ctx.tr("workflow.edit.not_linked"))};
+      const auto boundary = interface_value();
+      for (const auto &[name, input] : boundary.at("inputs").items()) {
+        if (io::get_string(input, "type") == type) {
+          values.push_back("$input." + name);
+          labels.push_back(catalog.format("workflow.interface.input_source", {{"name", name}}));
+        }
+      }
       for (const auto &other : summaries) {
         const auto other_id = io::get_string(other, "id");
         if (other_id == id) { continue; }
@@ -1803,6 +2008,16 @@ class WorkflowEditor final : public Editor {
         const auto &value = values[size_t(choice)];
         edited(draft_.set_link(id, port_name, value.empty() ? std::nullopt : std::optional<std::string>(value), draft_.generation()));
       }});
+      scope.button("publish", ctx.tr("workflow.interface.publish_input"), [this, guard, id, port_name, type] {
+        if (!guard() || unapplied_text_edits()) { return; }
+        auto boundary = interface_value();
+        const auto name = interface_name(boundary.at("inputs"), port_name);
+        boundary["inputs"][name] = {{"type", type}};
+        edited(draft_.edit_group(draft_.generation(), [&](WorkflowDraft &draft) {
+          const auto result = draft.set_interface(boundary, draft.generation());
+          return result.accepted ? draft.set_link(id, port_name, "$input." + name, draft.generation()) : result;
+        }));
+      }).disable(!can || unapplied_text_edits() || current.rfind("$input.", 0) == 0 || boundary.at("inputs").size() >= 32);
     }
   }
 
@@ -1870,7 +2085,7 @@ class WorkflowEditor final : public Editor {
    * compatible field. Text is independent of the candidate until Apply, and survives focus loss,
    * edits of other parameters and workspace migration. */
   void parameters(ui::Layout &panel, EditorContext &ctx, const std::function<bool()> &guard, const Json &step, const Json &summary,
-                  const bool can)
+                  const bool can, const bool interface_defaults = false)
   {
     auto &catalog = ctx.store.catalog();
     const auto id = io::get_string(step, "id");
@@ -1879,9 +2094,9 @@ class WorkflowEditor final : public Editor {
     const auto active_key = active ? parameter_inputs_.at(parameter_ui_->editing()) : std::string();
     if (!can && !active) {
       for (const auto &[name, value] : values.items()) {
-        const bool field = value.is_object() && value.size() == 1 && value.contains("$field") && value.at("$field").is_string();
+        const bool field = !interface_defaults && value.is_object() && value.size() == 1 && value.contains("$field") && value.at("$field").is_string();
         panel.paragraph(field ? catalog.format("workflow.parameter_field", {{"name", name}, {"field", field_name(ctx, value.at("$field").get<std::string>())}}) :
-                                catalog.format("workflow.parameter_value", {{"name", name}, {"value", clipped(value.dump(), 80)}}));
+                                catalog.format("workflow.parameter_value", {{"name", name}, {"value", clipped((interface_defaults ? value : parameter_value(value)).dump(), 80)}}));
       }
       return;
     }
@@ -1895,11 +2110,14 @@ class WorkflowEditor final : public Editor {
       const auto version = draft_.version();
       const auto current = [this, guard, version] { return guard() && draft_.version() == version; };
       const auto fields = workflow_fields(ctx, parameter);
-      const auto &value = member(values, name.c_str());
+      const auto &raw_value = member(values, name.c_str());
+      const auto value = interface_defaults ? raw_value : parameter_value(raw_value);
       const bool bound = values.is_object() && values.contains(name);
-      const bool field = bound && value.is_object() && value.size() == 1 && value.contains("$field") && value.at("$field").is_string();
-      const int stored_mode = !bound ? 0 : field ? 2 : 1;
-      const int mode = parameter_modes_.contains(key) ? parameter_modes_.at(key) : stored_mode;
+      const bool reference = bound && !interface_defaults && !wrapped_literal(raw_value);
+      const bool field = reference && value.is_object() && value.size() == 1 && value.contains("$field") && value.at("$field").is_string();
+      const bool forwarded = reference && composed_document() && value.is_object() && value.size() == 1 && value.contains("$param") && value.at("$param").is_string();
+      const int stored_mode = !bound ? 0 : field ? 2 : forwarded ? 3 : 1;
+      const int mode = interface_defaults ? 1 : parameter_modes_.contains(key) ? parameter_modes_.at(key) : stored_mode;
       auto &scope = panel.scope("workflow_param/" + name);
       const auto label = io::get_string(parameter, "label");
       scope.label(catalog.format("workflow.edit.parameter", {{"name", name}, {"type", io::get_string(parameter, "type")},
@@ -1913,17 +2131,38 @@ class WorkflowEditor final : public Editor {
       }
       if (!bounds.empty()) { scope.label(bounds); }
       std::vector<std::string> modes{std::string(ctx.tr("workflow.edit.mode_default")), std::string(ctx.tr("workflow.edit.mode_literal")),
-                                     std::string(ctx.tr("workflow.edit.mode_field"))};
+                                     std::string(ctx.tr("workflow.edit.mode_field")), std::string(ctx.tr("workflow.interface.parameter_mode"))};
       const auto fallback = member(parameter, "default");
-      scope.dropdown("mode", std::move(modes), {[mode] { return mode; }, [this, current, id, name, key, fallback, mode](const int choice) {
-        if (!current() || choice < 0 || choice > 2 || choice == mode) { return; }
+      if (!interface_defaults) {
+        auto &mode_row = scope.row();
+        mode_row.dropdown("mode", std::move(modes), {[mode] { return mode; }, [this, current, id, name, key, fallback, mode](const int choice) {
+        if (!current() || choice < 0 || choice > 3 || choice == mode) { return; }
         if (literal_dirty_.contains(key)) { refuse(std::string(store_->tr("workflow.edit.parameter_unapplied"))); return; }
-        if (choice == 2) { parameter_modes_[key] = choice; }
+        if (choice >= 2) { parameter_modes_[key] = choice; }
         else { parameter_modes_.erase(key); }
         if (choice == 0) { edited(draft_.set_parameter(id, name, std::nullopt, draft_.generation())); }
-        else if (choice == 1) { edited(draft_.set_parameter(id, name, fallback, draft_.generation())); }
+        else if (choice == 1) { edited(draft_.set_parameter(id, name, parameter_literal(fallback), draft_.generation())); }
         else { redraw(); }  // Selecting a mode is not consent to bind an arbitrary first field.
-      }}).disable(!can || literal_dirty_.contains(key));
+      }}).width(6).disable(!can || literal_dirty_.contains(key));
+        bool publishable = bound && !field && !forwarded;
+        try { publishable &= io::check_value(value, io::parameter_schema(parameter)).empty(); }
+        catch (const std::exception &) { publishable = false; }
+        mode_row.button("publish", ctx.tr("workflow.interface.publish_parameter"), [this, current, id, name, parameter, value] {
+          if (!current() || unapplied_text_edits()) { return; }
+          auto boundary = interface_value();
+          const auto public_name = interface_name(boundary.at("parameters"), name);
+          Json declaration = {{"name", public_name}, {"type", parameter.at("type")}, {"default", value}};
+          for (const char *key : {"label", "unit", "description", "minimum", "maximum", "choices"}) {
+            if (parameter.contains(key) && !parameter.at(key).is_null()) { declaration[key] = parameter.at(key); }
+          }
+          boundary["parameters"].push_back(declaration);
+          edited(draft_.edit_group(draft_.generation(), [&](WorkflowDraft &draft) {
+            const auto changed = draft.set_interface(boundary, draft.generation());
+            return changed.accepted ? draft.set_parameter(id, name, Json{{"$param", public_name}}, draft.generation()) : changed;
+          }));
+        }).width(5).disable(!can || !publishable || unapplied_text_edits() || interface_value().at("parameters").size() >= 64)
+          .tip(ctx.tr("workflow.interface.publish_parameter.tip"));
+      }
       if (mode == 1) {
         auto &buffer = literal_text_[key];
         const auto source = std::make_tuple(key, draft_.generation(), draft_.version());
@@ -1932,7 +2171,7 @@ class WorkflowEditor final : public Editor {
           buffer = literal_modes_[key] == "string" ? value.get<std::string>() : value.dump();
           literal_original_[key] = buffer; literal_source_[key] = source;
         }
-        const auto commit = [this, current, id, name, key, parameter](const Json &next) {
+        const auto commit = [this, current, id, name, key, parameter, interface_defaults](const Json &next) {
           if (!current()) { return; }
           try {
             if (!io::check_value(next, io::parameter_schema(parameter)).empty()) {
@@ -1940,7 +2179,15 @@ class WorkflowEditor final : public Editor {
             }
           }
           catch (const io::GraphModelError &) { /* An unknown schema remains an editable draft. */ }
-          const auto result = draft_.set_parameter(id, name, next, draft_.generation());
+          WorkflowDraft::EditResult result;
+          if (interface_defaults) {
+            auto boundary = interface_value();
+            for (auto &item : boundary["parameters"]) {
+              if (io::get_string(item, "name") == name) { item["default"] = next; }
+            }
+            result = draft_.set_interface(boundary, draft_.generation());
+          }
+          else { result = draft_.set_parameter(id, name, parameter_literal(next), draft_.generation()); }
           if (result.accepted) { literal_dirty_.erase(key); literal_source_.erase(key); }
           edited(result);
         };
@@ -2019,6 +2266,26 @@ class WorkflowEditor final : public Editor {
           edited(draft_.set_parameter(id, name, Json{{"$field", fields[size_t(choice - 1)].first}}, draft_.generation()));
         }}).disable(!can);
       }
+      else if (mode == 3) {
+        std::vector<std::string> labels{std::string(ctx.tr("workflow.interface.choose_parameter"))}, names;
+        int selected = 0;
+        const auto boundary = interface_value();
+        for (const auto &item : boundary.at("parameters")) {
+          if (!interface_parameter_fits(item, parameter)) { continue; }
+          const auto candidate = io::get_string(item, "name");
+          names.push_back(candidate); labels.push_back(candidate);
+          if (forwarded && value.at("$param") == candidate) { selected = int(names.size()); }
+        }
+        if (forwarded && selected == 0) {
+          labels.push_back(value.at("$param").get<std::string>() + " · " + std::string(ctx.tr("analysis_links.unlisted")));
+          selected = int(labels.size()) - 1;
+        }
+        scope.dropdown("workflow_parameter", std::move(labels), {[selected] { return selected; }, [this, current, id, name, key, names](int choice) {
+          if (!current() || choice <= 0 || size_t(choice) > names.size()) { return; }
+          parameter_modes_.erase(key);
+          edited(draft_.set_parameter(id, name, Json{{"$param", names[size_t(choice - 1)]}}, draft_.generation()));
+        }}).disable(!can);
+      }
     }
   }
 
@@ -2027,6 +2294,20 @@ class WorkflowEditor final : public Editor {
     const auto kind = io::get_string(step, "kind");
     const auto &ref = member(step, "ref");
     const bool resolved = !member(summary, "inputs").empty() || !member(summary, "outputs").empty();
+    if (kind == "workflow") {
+      auto *shell = &ctx.area.shell();
+      auto *area = &ctx.area;
+      const auto self = lifetime();
+      const auto &project = ctx.store.project().project();
+      const Json target = {{"workflow_id", io::get_string(ref, "workflow")}, {"breadcrumb", {
+          {"handle", project ? project->handle : std::string()}, {"workflow_id", draft_.workflow_id()},
+          {"workflow_name", draft_.name()}, {"step", io::get_string(step, "id")}}}};
+      const auto guard = edit_guard(ctx);
+      panel.button("workflow_enter_subworkflow", ctx.tr("workflow.interface.enter"), [shell, area, self, target, guard] {
+        shell->open_in_area_later(area, self, kEditorWorkflow, target, guard, true);
+      }).disable(member(summary, "name").is_null() || workflows_->busy() || shell->text_input_active());
+      return;
+    }
     if (kind == "analysis") {
       auto *shell = &ctx.area.shell();
       auto *area = &ctx.area;
@@ -2066,6 +2347,9 @@ class WorkflowEditor final : public Editor {
   }
 
   AppStore *store_ = nullptr;
+  Json breadcrumb_;
+  std::string breadcrumb_child_;
+  std::weak_ptr<void> breadcrumb_origin_;
   std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
   std::unique_ptr<ProjectWorkflows> workflows_;
   WorkflowDraft draft_;

@@ -402,12 +402,12 @@ void AppShell::open_target_later(wm::Screen *screen, std::string editor_id, io::
 }
 
 void AppShell::open_in_area_later(EditorArea *area, std::weak_ptr<void> origin, std::string editor_id, io::Json target,
-                                 std::function<bool()> valid)
+                                 std::function<bool()> valid, const bool separate_object)
 {
   if (!area || !has_area(area) || !area->screen() || (valid && !valid())) { return; }
   const std::weak_ptr<bool> weak = alive_;
   area->screen()->defer([this, weak, area, origin = std::move(origin), editor_id = std::move(editor_id),
-                         target = std::move(target), valid = std::move(valid)] {
+                         target = std::move(target), valid = std::move(valid), separate_object] {
     if (!weak.lock() || !has_area(area) || origin.expired() || (valid && !valid()) ||
         area_tab(*area, origin) != area->active_tab()) { return; }
     if (text_input_active()) {
@@ -416,7 +416,8 @@ void AppShell::open_in_area_later(EditorArea *area, std::weak_ptr<void> origin, 
     }
     int index = -1;
     for (int i = 0; i < area->tab_count() && index < 0; ++i) {
-      if (area->tab(i).type().id == editor_id) { index = i; }
+      if (area->tab(i).type().id == editor_id && (!separate_object ||
+          (i != area->active_tab() && area->tab(i).shows_navigation_target(target)))) { index = i; }
     }
     const bool added = index < 0;
     if (added) {
@@ -448,6 +449,10 @@ void AppShell::return_in_area_later(EditorArea *area, std::weak_ptr<void> from, 
   area->screen()->defer([this, weak, area, from = std::move(from), origin = std::move(origin),
                          editor_id = std::move(editor_id), fallback = std::move(fallback)] {
     if (!weak.lock() || !has_area(area) || from.expired() || area_tab(*area, from) != area->active_tab()) { return; }
+    if (text_input_active()) {
+      if (store_.toast) { store_.toast(std::string(store_.tr("app.focus.busy")), ui::ToastKind::Warning); }
+      return;
+    }
     if (const int index = area_tab(*area, origin); index >= 0) {
       area->set_active_tab(index);
       store_.changed();

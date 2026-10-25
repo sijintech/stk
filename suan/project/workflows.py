@@ -21,9 +21,11 @@ from . import archive
 
 
 DOCUMENT_FORMAT = "stk.workflow/1"
+COMPOSITE_FORMAT = "stk.workflow/2"
+SUPPORTED_FORMATS = (DOCUMENT_FORMAT, COMPOSITE_FORMAT)
 TABLE_ID = str(uuid5(NAMESPACE_URL, "urn:stk:project:workflows:1"))
 FIELDS = {"name": ("Name", "text"), "format": ("Format", "text"),
-          "steps": ("Steps", "json"), "ui": ("UI", "json")}
+          "steps": ("Steps", "json"), "ui": ("UI", "json"), "interface": ("Interface", "json")}
 FIELD_IDS = {key: str(uuid5(NAMESPACE_URL, "urn:stk:project:workflows:1:" + key)) for key in FIELDS}
 MAX_STEPS = 200
 MAX_DOCUMENT_BYTES = 256 * 1024
@@ -44,6 +46,7 @@ FIELD_PARAMETER_TYPES = {"number": {"number"}, "integer": {"integer", "number", 
                          "json": {"json", "vector3", "int3", "range"}}
 _IDENT = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 _PORT_REF = re.compile(r"([a-z][a-z0-9_]{0,63})\.([a-z][a-z0-9_]{0,63})\Z")
+_INPUT_REF = re.compile(r"\$input\.([a-z][a-z0-9_]{0,63})\Z")
 _MAX_CELL_BYTES = 2 * MAX_DOCUMENT_BYTES
 _TEXT = 256
 
@@ -55,7 +58,7 @@ class WorkflowNotFound(ProjectError):
 _TABLE = ManagedTable(table_id=TABLE_ID, table_name="Workflows", fields=FIELDS, field_ids=FIELD_IDS,
                       subject="Workflow", not_found=WorkflowNotFound,
                       limits=lambda: (MAX_WORKFLOWS, MAX_COLLECTION_BYTES, MAX_SNAPSHOT_BYTES),
-                      limit_text="128 records or 4 MiB", max_cell_bytes=_MAX_CELL_BYTES)
+                      limit_text="128 records or 4 MiB", max_cell_bytes=_MAX_CELL_BYTES, optional_fields=("interface",))
 
 
 def _text(value, what, limit=_TEXT):
@@ -70,7 +73,7 @@ def _ident(value, what):
     return value
 
 
-def _step(step):
+def _step(step, *, composite=False):
     if type(step) is not dict:
         raise ProjectError("Workflow steps must be objects")
     if any(key not in STEP_KEYS and not (key.startswith("x-") and len(key) <= 64) for key in step):
@@ -91,7 +94,8 @@ def _step(step):
     for port, link in inputs.items():
         _ident(port, "input port")
         if type(link) is not dict or set(link) != {"from"} or type(link["from"]) is not str or \
-                _PORT_REF.fullmatch(link["from"]) is None:
+                (_PORT_REF.fullmatch(link["from"]) is None and
+                 not (composite and _INPUT_REF.fullmatch(link["from"]))):
             raise ProjectError('Workflow inputs must be exactly {"from": "step.port"}')
     parameters = step.get("parameters", {})
     if type(parameters) is not dict or len(parameters) > 64 or len(canonical_json(parameters)) > MAX_PARAMETERS_BYTES:
@@ -107,15 +111,21 @@ def _step(step):
 
 def _document(value):
     value = clone(value, "Workflow")
-    if type(value) is not dict or set(value) != {"format", "steps", "ui"}:
+    if type(value) is not dict:
         raise ProjectError("Workflow document requires exactly format, steps and ui")
-    if value["format"] != DOCUMENT_FORMAT:
+    composite = value.get("format") == COMPOSITE_FORMAT
+    if set(value) != ({"format", "steps", "ui", "interface"} if composite else {"format", "steps", "ui"}):
+        raise ProjectError("Workflow document requires format, steps, ui and, for version 2, interface")
+    if value["format"] not in SUPPORTED_FORMATS:
         raise UnsupportedProjectFormat("Unsupported workflow document format")
+    if composite:
+        from .workflow_composition import check_interface
+        check_interface(value["interface"])
     steps, ui = value["steps"], value["ui"]
     if type(steps) is not list or len(steps) > MAX_STEPS:
         raise ProjectError(f"Workflow steps must be a list of at most {MAX_STEPS} steps")
     for step in steps:
-        _step(step)
+        _step(step, composite=composite)
     if type(ui) is not dict:
         raise ProjectError("Workflow ui must be an object")
     positions = ui.get("positions", {})
@@ -149,14 +159,15 @@ def _record(db, identity, compatible, schema_error):
         entry["error"] = schema_error
     elif _TABLE.indirect(db, identity):
         entry["error"] = "Workflow managed cells must be literals; undo or explicitly replace the formula/reference"
-    elif entry["format"] is not None and entry["format"] != DOCUMENT_FORMAT:
+    elif entry["format"] is not None and entry["format"] not in SUPPORTED_FORMATS:
         entry.update(state="unsupported", error="Unsupported workflow document format")
     else:
         try:
-            if entry["name"] is None or entry["format"] != DOCUMENT_FORMAT:
+            if entry["name"] is None or entry["format"] not in SUPPORTED_FORMATS:
                 raise ProjectError("Workflow record has an invalid or missing name/format")
             entry["document"] = _document({"format": entry["format"],
-                **{key: _TABLE.literal(db, identity, key) for key in ("steps", "ui")}})
+                **{key: _TABLE.literal(db, identity, key) for key in
+                   (("steps", "ui", "interface") if entry["format"] == COMPOSITE_FORMAT else ("steps", "ui"))}})
             entry["state"] = "readable"
             # The parameter table its rows come from, when it has exactly one (what a run takes rows of).
             tables = [step["ref"].get("table") for step in entry["document"]["steps"] if step["kind"] == "table"]
@@ -206,12 +217,15 @@ def _analysis_ports(graph):
     return bindings, dynamic, parameters, outputs
 
 
-def _resolve(db, step, model, templates, read_analysis):
+def _resolve(db, step, model, templates, read_analysis, *, interface_inputs=False):
     """Describe one step's referenced object and ports; issues are added by the caller."""
     kind, ref = step["kind"], step["ref"]
     summary = {"id": step["id"], "kind": kind, "name": None, "content_sha256": None, "file_count": None,
                "inputs": [], "outputs": [], "parameters": []}
     problem = None
+    if interface_inputs and kind == "workflow_input":
+        summary["outputs"] = [{"name": "value", "type": ref["type"]}]
+        return summary, None
     if kind not in KINDS:
         return summary, ("unknown_kind", f"Unknown step kind {kind!r}; this version knows {', '.join(KINDS)}")
     key = REF_KEYS[kind]
@@ -354,8 +368,15 @@ class Workflows:
         name, document = _valid_name(name, "Workflow"), _document(document)
         with self.store._connect(write=True) as db:
             _require(db)
+            if not create and document["format"] == DOCUMENT_FORMAT:
+                try:
+                    old_format = _TABLE.literal(db, identity, "format")
+                except ProjectError:
+                    old_format = None
+                if old_format == COMPOSITE_FORMAT:
+                    raise UnsupportedProjectFormat("A version 2 workflow cannot be downgraded; keep its explicit interface")
             return _TABLE.write(self.store, db, identity, {"name": name, **document}, revision,
-                                create=create, document_format=DOCUMENT_FORMAT)
+                                create=create, document_format=document["format"], supported_formats=SUPPORTED_FORMATS)
 
     def choices(self):
         """What a step can reference now, for an editor: parameter tables (not the managed analysis,
@@ -382,8 +403,18 @@ class Workflows:
                 entry = analyses._record(db, row[0], compatible, error)
                 if entry["state"] == "readable":
                     readable.append({"id": entry["id"], "name": entry["name"]})
+            reusable = []
+            _, compatible, error = _TABLE.schema(db)
+            where, extra = archive.where(db, "workflow", False, existing="table_id=?")
+            total = db.execute("SELECT count(*) FROM records" + where, (TABLE_ID, *extra)).fetchone()[0]
+            for row in db.execute("SELECT id FROM records" + where + " ORDER BY rowid LIMIT ?",
+                                  (TABLE_ID, *extra, MAX_WORKFLOWS)):
+                entry = _record(db, row[0], compatible, error)
+                if entry["state"] == "readable" and entry["format"] == COMPOSITE_FORMAT:
+                    reusable.append({"id": entry["id"], "name": entry["name"]})
         return {"revision": revision, "tables": tables[:MAX_CHOICE_TABLES], "omitted_tables": max(0, len(tables) - MAX_CHOICE_TABLES),
-                "snapshots": snapshots, "analyses": readable,
+                "snapshots": snapshots, "analyses": readable, "workflows": reusable,
+                "omitted_workflows": max(0, total - MAX_WORKFLOWS),
                 "templates": [{"id": template.id, "name": template.name, "table_id": template.table_id,
                                "remote": bool(getattr(template, "remote", False)), "local": bool(getattr(template, "local", False))}
                               for template in workflow_templates().values()]}
@@ -393,7 +424,17 @@ class Workflows:
 
         Returns {revision, ok, issues, omitted_issues, steps}: one summary per step in document order
         (referenced object name, analysis content hash, typed ports and graph parameters)."""
+        checked, _ = self._validated(document)
+        return checked
+
+    def _validated(self, document):
         document = _document(document)
+        if document["format"] == COMPOSITE_FORMAT:
+            from .workflow_composition import validate_composition
+            return validate_composition(self, document)
+        return self._validate_flat(document), None
+
+    def _validate_flat(self, document, *, interface_inputs=False, field_parameters=None):
         from suan.workflows.templates import workflow_templates  # Registered versions only; never loads project code.
         templates = workflow_templates()
         with self.store._connect() as db:
@@ -424,7 +465,7 @@ class Workflows:
                 counts[step["id"]] = counts.get(step["id"], 0) + 1
             summaries = []
             for i, step in enumerate(steps):
-                summary, problem = _resolve(db, step, model, templates, read_analysis)
+                summary, problem = _resolve(db, step, model, templates, read_analysis, interface_inputs=interface_inputs)
                 summaries.append(summary)
                 if counts[step["id"]] > 1:
                     issues.add("duplicate_step", step["id"], f"steps/{i}/id", "Step id is used more than once")
@@ -465,7 +506,8 @@ class Workflows:
                 elif step["kind"] == "simulation" and port == "rows":
                     template = templates.get(step["ref"].get("template"))
                     source_step = steps[unique[source][0]]
-                    if template is not None and template.table_id is not None and source_step["ref"].get("table") != template.table_id:
+                    if (template is not None and template.table_id is not None and
+                            source_step["kind"] != "workflow_input" and source_step["ref"].get("table") != template.table_id):
                         issues.add("template_table", here, path,
                                    f"Template {template.id} runs rows of its own case table only")
             for port in declared.values():
@@ -484,7 +526,8 @@ class Workflows:
                                else "Only parameters the template declares can be set" if step["kind"] == "simulation"
                                else f"A {step['kind']} step takes no parameters")
                     continue
-                if type(value) is not dict or set(value) != {"$field"}:
+                if (field_parameters is not None and name not in field_parameters.get(here, ())) or \
+                        type(value) is not dict or set(value) != {"$field"}:
                     continue  # Literal values are checked by graph validation when a run is prepared.
                 field_id = value["$field"]
                 field = table_fields.get(field_id) if type(field_id) is str else None

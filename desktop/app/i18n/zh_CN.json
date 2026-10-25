@@ -2346,5 +2346,22 @@
   "skills.project.no_analyses": "先保存一份分析，再在这里选择。",
   "skills.project.publish_new": "保存为新的项目技能",
   "skills.project.publish_version": "向所选技能追加版本",
-  "skills.project.contract": "保存的方法接口"
+  "skills.project.contract": "保存的方法接口",
+  "workflow.kind.workflow": "子流程",
+  "workflow.interface.title": "子流程接口",
+  "workflow.interface.hint": "从所选步骤公开输入、输出和已设置的参数值。父流程提供公开输入；请保留可复用方法实际需要的步骤。",
+  "workflow.interface.inputs": "公开输入",
+  "workflow.interface.outputs": "公开输出",
+  "workflow.interface.remove": "移除",
+  "workflow.interface.remove_parameter": "移除 {name}，子步骤改用其默认值",
+  "workflow.interface.publish_input": "设为输入",
+  "workflow.interface.publish_output": "设为输出",
+  "workflow.interface.publish_parameter": "设为参数",
+  "workflow.interface.publish_parameter.tip": "先设置参数值，再将其作为公开默认值；父流程可以覆盖。",
+  "workflow.interface.parameter_mode": "工作流参数",
+  "workflow.interface.choose_parameter": "选择类型与单位匹配的工作流参数",
+  "workflow.interface.input_source": "父流程输入：{name}",
+  "workflow.interface.enter": "进入子流程",
+  "workflow.interface.back": "返回 {name}",
+  "workflow.interface.run_parent": "请从父流程运行此子流程，由父流程提供输入。"
 }

@@ -15687,29 +15687,14 @@
       "description": "One workflow step referencing an existing project object: kind table {table: UUID}, files {snapshot: UUID}, simulation {template: id}, analysis {analysis: UUID}. Unknown kinds and missing references are kept and reported by validation. Parameters hold literals or {\"$field\": field UUID}."
     },
     "projectWorkflowDocument": {
-      "type": "object",
-      "properties": {
-        "format": {
-          "const": "stk.workflow/1"
+      "oneOf": [
+        {
+          "$ref": "#/$defs/projectWorkflowDocumentV1"
         },
-        "steps": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/projectWorkflowStep"
-          },
-          "maxItems": 200
-        },
-        "ui": {
-          "type": "object"
+        {
+          "$ref": "#/$defs/projectWorkflowDocumentV2"
         }
-      },
-      "required": [
-        "format",
-        "steps",
-        "ui"
-      ],
-      "additionalProperties": false,
-      "description": "Experimental editable workflow document (docs/design/project-workflows.md); readability is not validation. Document<=256 KiB, step parameters<=64 KiB, maximum depth 64; ui.positions maps step ids to finite [x, y] within 1e6. Bytes and cross-field limits are checked by storage."
+      ]
     },
     "projectWorkflowSummary": {
       "type": "object",
@@ -16126,7 +16111,7 @@
               },
               "path": {
                 "type": "string",
-                "maxLength": 512
+                "maxLength": 1024
               },
               "message": {
                 "type": "string",
@@ -16153,6 +16138,29 @@
             "$ref": "#/$defs/projectWorkflowStepSummary"
           },
           "maxItems": 200
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "requires_runtime": {
+              "type": "boolean"
+            },
+            "table_id": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/projectUuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "requires_runtime",
+            "table_id"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -16768,6 +16776,32 @@
             ],
             "additionalProperties": false
           }
+        },
+        "workflows": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/projectUuid"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "omitted_workflows": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -16925,7 +16959,14 @@
           "maxLength": 1024
         },
         "document": {
-          "$ref": "#/$defs/projectWorkflowDocument"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/projectWorkflowDocumentV1"
+            },
+            {
+              "$ref": "#/$defs/projectWorkflowExpandedDocument"
+            }
+          ]
         },
         "document_sha256": {
           "type": "string",
@@ -16971,18 +17012,18 @@
         },
         "order": {
           "type": "array",
-          "maxItems": 200,
+          "maxItems": 1000,
           "items": {
             "$ref": "#/$defs/projectAnalysisGraphIdentifier"
           }
         },
         "steps": {
           "type": "object",
-          "maxProperties": 200
+          "maxProperties": 1000
         },
         "parameters": {
           "type": "object",
-          "maxProperties": 200
+          "maxProperties": 1000
         },
         "directory": {
           "type": "string",
@@ -17097,6 +17138,104 @@
             "connection",
             "connection_identity",
             "options"
+          ],
+          "additionalProperties": false
+        },
+        "workflow_document": {
+          "$ref": "#/$defs/projectWorkflowDocumentV2"
+        },
+        "composition": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "object",
+              "maxProperties": 128,
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "document": {
+                    "$ref": "#/$defs/projectWorkflowDocumentV2"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "name",
+                  "document",
+                  "sha256"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "instances": {
+              "type": "object",
+              "maxProperties": 1000,
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "workflow_id": {
+                    "$ref": "#/$defs/projectUuid"
+                  },
+                  "path": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 9,
+                    "items": {
+                      "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+                    }
+                  }
+                },
+                "required": [
+                  "workflow_id",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "field_parameters": {
+              "type": "object",
+              "maxProperties": 1000,
+              "additionalProperties": {
+                "type": "array",
+                "maxItems": 64,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+                }
+              }
+            },
+            "step_paths": {
+              "type": "object",
+              "maxProperties": 1000,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 9,
+                "items": {
+                  "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+                }
+              }
+            },
+            "outputs": {
+              "type": "object",
+              "maxProperties": 32,
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^(?:[a-z][a-z0-9_]{0,63}|\\$input)\\.[a-z][a-z0-9_]{0,63}$"
+              }
+            }
+          },
+          "required": [
+            "sources",
+            "instances",
+            "step_paths",
+            "outputs"
           ],
           "additionalProperties": false
         }
@@ -17216,7 +17355,7 @@
               },
               "steps": {
                 "type": "object",
-                "maxProperties": 200,
+                "maxProperties": 1000,
                 "additionalProperties": {
                   "type": "array",
                   "maxItems": 64,
@@ -20087,6 +20226,301 @@
         "frame",
         "thumbnail"
       ]
+    },
+    "projectWorkflowDocumentV1": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.workflow/1"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectWorkflowStep"
+          },
+          "maxItems": 200
+        },
+        "ui": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "format",
+        "steps",
+        "ui"
+      ],
+      "additionalProperties": false,
+      "description": "Experimental editable workflow document (docs/design/project-workflows.md); readability is not validation. Document<=256 KiB, step parameters<=64 KiB, maximum depth 64; ui.positions maps step ids to finite [x, y] within 1e6. Bytes and cross-field limits are checked by storage."
+    },
+    "projectWorkflowCompositeStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+        },
+        "kind": {
+          "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+        },
+        "ref": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 8,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "inputs": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "pattern": "^(?:[a-z][a-z0-9_]{0,63}|\\$input)\\.[a-z][a-z0-9_]{0,63}$"
+              }
+            },
+            "required": [
+              "from"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          }
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+          },
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "ref"
+      ],
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false,
+      "description": "One workflow step referencing an existing project object: kind table {table: UUID}, files {snapshot: UUID}, simulation {template: id}, analysis {analysis: UUID}. Unknown kinds and missing references are kept and reported by validation. Parameters hold literals or {\"$field\": field UUID}."
+    },
+    "projectWorkflowInterface": {
+      "type": "object",
+      "properties": {
+        "inputs": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "rows",
+                  "files"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "outputs": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "rows",
+                  "files",
+                  "result"
+                ]
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^(?:[a-z][a-z0-9_]{0,63}|\\$input)\\.[a-z][a-z0-9_]{0,63}$"
+              }
+            },
+            "required": [
+              "type",
+              "from"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "parameters": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/projectAnalysisGraphParameter"
+          }
+        }
+      },
+      "required": [
+        "inputs",
+        "outputs",
+        "parameters"
+      ],
+      "additionalProperties": false,
+      "description": "Parameter declarations use the graph parameter vocabulary; defaults, constraints and units are checked without loading nodes."
+    },
+    "projectWorkflowDocumentV2": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.workflow/2"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectWorkflowCompositeStep"
+          },
+          "maxItems": 200
+        },
+        "ui": {
+          "type": "object"
+        },
+        "interface": {
+          "$ref": "#/$defs/projectWorkflowInterface"
+        }
+      },
+      "required": [
+        "format",
+        "steps",
+        "ui",
+        "interface"
+      ],
+      "additionalProperties": false,
+      "description": "Experimental editable workflow document (docs/design/project-workflows.md); readability is not validation. Document<=256 KiB, step parameters<=64 KiB, maximum depth 64; ui.positions maps step ids to finite [x, y] within 1e6. Bytes and cross-field limits are checked by storage."
+    },
+    "projectWorkflowExpandedStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+        },
+        "kind": {
+          "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+        },
+        "ref": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 8,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "inputs": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "$ref": "#/$defs/projectAnalysisGraphPortRef"
+              }
+            },
+            "required": [
+              "from"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          }
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectAnalysisGraphIdentifier"
+          },
+          "maxItems": 1000,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "ref"
+      ],
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false,
+      "description": "One workflow step referencing an existing project object: kind table {table: UUID}, files {snapshot: UUID}, simulation {template: id}, analysis {analysis: UUID}. Unknown kinds and missing references are kept and reported by validation. Parameters hold literals or {\"$field\": field UUID}."
+    },
+    "projectWorkflowExpandedDocument": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.workflow-expanded/1"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectWorkflowExpandedStep"
+          },
+          "maxItems": 1000
+        },
+        "ui": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "format",
+        "steps",
+        "ui"
+      ],
+      "additionalProperties": false,
+      "description": "Frozen executable expansion, not an editable source workflow. At most 1000 steps; source documents and instance paths accompany the run."
     }
   }
 }

@@ -112,7 +112,7 @@ def test_round_trip_keeps_exact_json_and_shares_project_undo(store, project):
 
 
 @pytest.mark.parametrize("mutate, error", [
-    (lambda d: d.update(format="stk.workflow/2"), UnsupportedProjectFormat),
+    (lambda d: d.update(format="stk.workflow/99"), UnsupportedProjectFormat),
     (lambda d: d.update(extra=1), ProjectError),
     (lambda d: d.pop("ui"), ProjectError),
     (lambda d: d["steps"][0].update(id="Cases"), ProjectError),
@@ -366,7 +366,7 @@ def test_bridge_methods_scripting_api_and_events(inproc, tmp_path):
     assert p.workflows.list()["workflows"][0]["name"] == "One step"
     assert p.workflows.validate(document(step))["issues"][0]["code"] == "missing_reference"
     assert p.workflows.choices() == {"revision": p.snapshot()["project"]["revision"], "tables": [], "omitted_tables": 0,
-                                     "snapshots": [], "analyses": [],
+                                     "snapshots": [], "analyses": [], "workflows": [], "omitted_workflows": 0,
                                      "templates": [{"id": "muferro/1", "name": "MuFerro", "table_id": muferro.TABLE_ID,
                                                     "remote": True, "local": False},
                                                    {"id": "lammps/1", "name": "LAMMPS", "table_id": lammps.TABLE_ID,

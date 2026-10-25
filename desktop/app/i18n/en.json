@@ -2346,5 +2346,22 @@
   "skills.project.no_analyses": "Save an analysis first, then select it here.",
   "skills.project.publish_new": "Save as a new project skill",
   "skills.project.publish_version": "Append a version to the selected skill",
-  "skills.project.contract": "Saved method interface"
+  "skills.project.contract": "Saved method interface",
+  "workflow.kind.workflow": "Subworkflow",
+  "workflow.interface.title": "Subworkflow interface",
+  "workflow.interface.hint": "Publish inputs, outputs and literal parameters from the selected step. A parent supplies public inputs; keep only the steps the reusable method needs.",
+  "workflow.interface.inputs": "Public inputs",
+  "workflow.interface.outputs": "Public outputs",
+  "workflow.interface.remove": "Remove",
+  "workflow.interface.remove_parameter": "Remove {name}; use its default in child steps",
+  "workflow.interface.publish_input": "Expose input",
+  "workflow.interface.publish_output": "Expose output",
+  "workflow.interface.publish_parameter": "Expose parameter",
+  "workflow.interface.publish_parameter.tip": "First set a literal value. It becomes the public default; a parent can override it.",
+  "workflow.interface.parameter_mode": "Workflow parameter",
+  "workflow.interface.choose_parameter": "Choose a compatible workflow parameter",
+  "workflow.interface.input_source": "Parent input: {name}",
+  "workflow.interface.enter": "Enter subworkflow",
+  "workflow.interface.back": "Back to {name}",
+  "workflow.interface.run_parent": "Run this subworkflow from its parent, which supplies the inputs."
 }

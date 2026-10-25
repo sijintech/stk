@@ -30,6 +30,48 @@ WorkflowDraft pinned()
   return draft;
 }
 
+TEST(WorkflowDraft, ReusableInterfaceKeepsExactValuesAndLocalUndo)
+{
+  auto draft = pinned();
+  const auto generation = draft.generation();
+  const Json boundary = {{"inputs", {{"data", {{"type", "files"}}}}},
+      {"outputs", {{"result", {{"type", "result"}, {"from", "view.view"}}}}},
+      {"parameters", Json::array({{{"name", "count"}, {"type", "integer"}, {"default", int64_t(9007199254740993LL)}}})}};
+  ASSERT_TRUE(draft.set_interface(boundary, generation).accepted);
+  EXPECT_EQ(draft.document().at("format"), "stk.workflow/2");
+  EXPECT_EQ(exact(draft.document().at("interface")), exact(boundary));
+  ASSERT_TRUE(draft.set_link("view", "data", std::string("$input.data"), generation).accepted);
+  EXPECT_EQ(draft.step("view")->at("inputs").at("data").at("from"), "$input.data");
+  EXPECT_FALSE(draft.set_link("view", "data", std::string("$input.absent"), generation).accepted);
+  ASSERT_TRUE(draft.undo(generation).accepted);
+  ASSERT_TRUE(draft.undo(generation).accepted);
+  EXPECT_EQ(exact(draft.document()), exact(saved()));
+  ASSERT_TRUE(draft.redo(generation).accepted);
+  EXPECT_EQ(exact(draft.document().at("interface")), exact(boundary));
+  auto invalid = boundary;
+  invalid["parameters"][0]["default"] = true;
+  const auto before = exact(draft.document());
+  EXPECT_FALSE(draft.set_interface(invalid, generation).accepted);
+  EXPECT_EQ(exact(draft.document()), before);
+  invalid = boundary;
+  invalid["parameters"].push_back(invalid["parameters"][0]);
+  EXPECT_FALSE(draft.set_interface(invalid, generation).accepted);
+}
+
+TEST(WorkflowDraft, AddingSubworkflowUpgradesInOneReversibleEdit)
+{
+  auto draft = pinned();
+  const auto generation = draft.generation();
+  const auto added = draft.add_step("workflow", "workflow", id, std::nullopt, generation);
+  ASSERT_TRUE(added.accepted) << added.error;
+  EXPECT_EQ(draft.document().at("format"), "stk.workflow/2");
+  EXPECT_TRUE(draft.document().at("interface").at("inputs").empty());
+  ASSERT_TRUE(draft.undo(generation).accepted);
+  EXPECT_EQ(exact(draft.document()), exact(saved()));
+  ASSERT_TRUE(draft.redo(generation).accepted);
+  EXPECT_EQ(draft.step(added.id)->at("ref").at("workflow"), id);
+}
+
 TEST(WorkflowDraft, StartsAsTheSavedDocumentAndDropsEditsThatReturnToIt)
 {
   auto draft = pinned();

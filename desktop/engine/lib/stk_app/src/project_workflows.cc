@@ -219,7 +219,7 @@ bool ProjectWorkflows::write(const std::string &method, const std::string &id, c
       throw std::runtime_error("Invalid workflow save receipt; read the workflow again before saving");
     }
     // The receipt confirms exactly this document; it is checked again by validate_selected().
-    selected_ = {{"id", id}, {"name", name}, {"format", "stk.workflow/1"}, {"state", "readable"}, {"error", ""},
+    selected_ = {{"id", id}, {"name", name}, {"format", document.at("format")}, {"state", "readable"}, {"error", ""},
                  {"document", document}};
     selected_revision_ = result.at("revision").get<int64_t>();
     validation_ = nullptr; ++selected_version_;
