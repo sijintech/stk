@@ -2,6 +2,24 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：原生文档嵌入候选（本机验证）
+
+源码 `10e6423f5f5bfc18f66047fda686f323ae702fa1` 按 main 交付。前头 `3dc178d17c2eb32a5da48d36b4ce0224e797ecc3` 的 Desktop `40219610785` 已全部结束并 **5/5 成功**（Windows、macOS、Linux、包与干净容器），推送等待条件已满足。Runtime `40219610773`、Docs `40219610766`、Secret `40219610816` 均成功。本批后续 CI 状态以新记录为准。
+
+原型选项 `STK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON` 只添加开发目标，不安装进产品；默认关闭。Linux 构建日志 `/tmp/stk-document-preview-{configure,build,final-build}.log`，真实窗口使用英文默认工作台 **1440×1000、1×**，右上为文档/Python 标签，Viewer 显式加载公开 payload 夹具。没有桥、用户项目或模型请求。冒烟直接调用标签、最大化、导航及关闭 API，**没有人工点击数验收**，不能由此推断导航点击减少。
+
+- 资源清单 **14/14**：四种身份、UTF-8／空格／`#`／`%` 路径、跨项目／版本拒绝、越界与编码攻击、MIME／预算、HEAD 和关闭失效。
+- X11／Wayland × OpenGL／Vulkan 原型 **4/4**：每项两次标签关闭及重开，再创建一份供父窗口关闭检查；实际 GHOST 窗口中的隐藏／恢复、旧会话失效、Viewer 来源保持，脚本历史和 Viewer 求值均未增加。Linux 明确 `Unsupported`／`native=0`，未创建浏览器子视图。
+- 同次既有窗口回归 **10/10**；总计 **28/28、零失败／错误／跳过、21.12 秒**，必跑检查匹配 28 项。日志 `/tmp/stk-document-preview-final.log`、JUnit `/tmp/stk-document-preview-final.xml`。
+- 独立 `STK_DESKTOP_WITH_BLENDER=OFF` 配置和资源目标构建通过，资源测试 **14/14、0.14 秒**。证据 `/tmp/stk-document-preview-cpu-{configure,build,test}.log`、`.xml`；未生成浏览器或窗口目标。
+- 独立审查修复未初始化错误字符串、HEAD 误报零长度和 Windows 旧 Starting/Completed 事件污染新导航状态。Windows 改为等待当前 Starting 绑定，再提交替代 URL；相同冻结 URL 请求幂等。PNG 夹具由 Pillow 解码为 16×16 RGBA；两页 PDF 尚未实际平台显示。
+
+首轮 **16 passed、2 failed**：Wayland 首帧 1440×1000 超过私有 kiosk 显示 1280×800。`WAYLAND_DEBUG` 明确返回 `xdg_wm_base error 4`，不是浏览器失败或 compositor 先崩溃。仅将测试 runner 的固定显示改为 1440×1000，未扩改 GHOST；修后四组合通过。日志 `/tmp/stk-document-preview-focused.log`、`/tmp/stk-document-preview-wayland-debug.log` 保留失败证据，不复制显示授权文件。
+
+macOS／Windows 尚无本批编译或运行结果。CI 将显式编译候选及运行资源测试，原生运行命令单独生成；须在真实平台检查父视图附着、菜单／输入／PDF／跨屏 DPI 与生命周期。`parent_attached`／`visible` 从平台读取，导航 Ready 和帧计数仍不能证明 scanout；本机 Linux 软件 GPU 结果不扩展成跨平台支持。菜单相交及边界拖拽时暂时隐藏子视图，是未解决的体验限制。没有 Markdown 转换、PDF.js、LaTeX、项目关联或文档导出。
+
+浏览器页面资源门禁不证明 Runtime 更新／遥测完全无网络流量；guarded STK 分配零泄漏不证明浏览器进程内存没有增长。20 次真机循环、独立内存采样、离线部署及 OS 截图仍待执行，P0 尚未选型。操作命令见[原型计划](design/document-preview-spike.md)。暂存 gitleaks 使用 `.gitleaks.toml`、`--redact`，扫描 **153963 bytes、零发现**；差异空白检查通过。当前 AOCI 全量读取被宿主截断后已停止链，只进行源码绑定开发；正式索引按最终稳定内容增量维护，机器对齐不证明完整认知可靠。
+
 ## 2026-10-25：真实窗口大项目性能（本机验收完成）
 
 前头 `f9a78c2702399064f16abbf5426f3befaad8160f` 的 Desktop `40213263506` 已全部结束并 **5/5 成功**，包括 Windows、macOS、Linux、打包及干净容器冒烟；Runtime `40213263592`、Docs `40213263886`、Secret `40213263583` 也已成功。本机方法库源码 `6fa8994` 与记录／索引 `cf2b40d` 的推送等待条件已满足。
