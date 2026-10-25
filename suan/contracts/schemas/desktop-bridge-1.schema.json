@@ -11851,6 +11851,220 @@
         "result": {
           "$ref": "#/$defs/skillPublicationReceipt"
         }
+      },
+      "project.reports.create": {
+        "description": "Explicitly save a frozen report selection and typed source observations as one undoable ordinary-table edit. Verifies selected snapshot bytes; never executes a run or model. Repeated UUID writes conflict.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "report_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "snapshot_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "entry_record_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "assets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectReportAssetSelection"
+              },
+              "minItems": 1,
+              "maxItems": 64
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/projectReportSourceSelection"
+              },
+              "maxItems": 16
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [
+            "handle",
+            "report_id",
+            "name",
+            "snapshot_id",
+            "entry_record_id",
+            "assets",
+            "expected_revision"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
+      },
+      "project.reports.get": {
+        "description": "Read report metadata at the observed revision; invalid managed cells remain inspectable. Does not read assets or live input files.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "report_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "report_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectReportGetResult"
+        }
+      },
+      "project.reports.list": {
+        "description": "Read bounded report summaries without assets, table creation or execution.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectReportListResult"
+        }
+      },
+      "project.reports.asset": {
+        "description": "Explicitly read one manifest-admitted immutable asset, validating actual bytes and selected project/manifest revision; no path or whole-directory grants.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "report_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "expected_source_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "handle",
+            "report_id",
+            "expected_revision",
+            "expected_source_sha256",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectReportAssetResult"
+        }
+      },
+      "project.reports.preview": {
+        "description": "Explicitly render a frozen Markdown/HTML entry offline, or return the original PDF/image/text entry, for a fresh four-identity native view session. Requires documents extra for Markdown/HTML; no browser, model or filesystem write.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "report_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "expected_source_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "handle",
+            "report_id",
+            "expected_revision",
+            "expected_source_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectReportPreviewResult"
+        }
+      },
+      "project.reports.export_file": {
+        "description": "Explicitly export a complete verified source-asset ZIP and frozen provenance to a new file; no overwrite, project revision change or execution. This is a source bundle, not an installed browser/PDF reader.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "report_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "expected_source_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "destination": {
+              "$ref": "#/$defs/absPath"
+            }
+          },
+          "required": [
+            "handle",
+            "report_id",
+            "expected_revision",
+            "expected_source_sha256",
+            "destination"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectReportExportResult"
+        }
       }
     },
     "events": {
@@ -21110,6 +21324,579 @@
         "source",
         "skill",
         "created"
+      ],
+      "additionalProperties": false
+    },
+    "projectReportSourceSelection": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "context",
+            "simulation_run",
+            "analysis_run",
+            "workflow_run"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "projectReportAssetSelection": {
+      "type": "object",
+      "properties": {
+        "record_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "record_id",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "projectReportAsset": {
+      "type": "object",
+      "properties": {
+        "record_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "mime": {
+          "enum": [
+            "text/markdown; charset=utf-8",
+            "text/html; charset=utf-8",
+            "text/css; charset=utf-8",
+            "text/plain; charset=utf-8",
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "application/pdf"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4194304
+        }
+      },
+      "required": [
+        "record_id",
+        "path",
+        "mime",
+        "sha256",
+        "size"
+      ],
+      "additionalProperties": false
+    },
+    "projectReportSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "source_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "kind": {
+              "const": "context"
+            },
+            "context_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "context": {
+              "$ref": "#/$defs/projectContext"
+            }
+          },
+          "required": [
+            "id",
+            "project_id",
+            "source_revision",
+            "kind",
+            "context_sha256",
+            "context"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "project_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "source_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "kind": {
+              "enum": [
+                "simulation_run",
+                "analysis_run",
+                "workflow_run"
+              ]
+            },
+            "plan_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "captured_status": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "id",
+            "project_id",
+            "source_revision",
+            "kind",
+            "plan_sha256",
+            "captured_status"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "description": "Frozen source observation. Run plan checksums identify plans, not output bytes or scientific validity; captured_status preserves its original lifecycle semantics."
+    },
+    "projectReportManifest": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.report/1"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "entry_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportAsset"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportSource"
+          },
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "format",
+        "project_id",
+        "snapshot_id",
+        "snapshot_sha256",
+        "source_revision",
+        "entry_path",
+        "assets",
+        "sources"
+      ],
+      "additionalProperties": false,
+      "description": "Explicit same-snapshot asset selection; metadata <=384 KiB, individual asset <=4 MiB, all assets <=32 MiB. Backend checks portable path collisions, declared entry, MIME correspondence and frozen source identities."
+    },
+    "projectReportSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "state": {
+          "enum": [
+            "readable",
+            "invalid"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "source_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "format",
+        "state",
+        "error",
+        "source_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "projectReport": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "state": {
+          "enum": [
+            "readable",
+            "invalid"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "source_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manifest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectReportManifest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "format",
+        "state",
+        "error",
+        "source_sha256",
+        "manifest"
+      ],
+      "additionalProperties": false
+    },
+    "projectReportGetResult": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "report": {
+          "$ref": "#/$defs/projectReport"
+        }
+      },
+      "required": [
+        "revision",
+        "table_id",
+        "report"
+      ],
+      "additionalProperties": false
+    },
+    "projectReportListResult": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "table_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "reports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportSummary"
+          },
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "revision",
+        "table_id",
+        "offset",
+        "total",
+        "reports"
+      ],
+      "additionalProperties": false
+    },
+    "projectReportAssetResult": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "report_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "mime": {
+          "enum": [
+            "text/markdown; charset=utf-8",
+            "text/html; charset=utf-8",
+            "text/css; charset=utf-8",
+            "text/plain; charset=utf-8",
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "application/pdf"
+          ]
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4194304
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 5592408,
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+        }
+      },
+      "required": [
+        "project_id",
+        "report_id",
+        "source_sha256",
+        "path",
+        "mime",
+        "content_sha256",
+        "size",
+        "data"
+      ],
+      "additionalProperties": false,
+      "description": "One complete verified source asset; source_sha256 is the manifest version, content_sha256 is the byte digest."
+    },
+    "projectReportPreviewResult": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "report_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "mime": {
+          "enum": [
+            "text/markdown; charset=utf-8",
+            "text/html; charset=utf-8",
+            "text/css; charset=utf-8",
+            "text/plain; charset=utf-8",
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "application/pdf"
+          ]
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4194304
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 5592408,
+          "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "session_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "renderer": {
+          "enum": [
+            "identity",
+            "stk.report-renderer/1"
+          ]
+        },
+        "source_mime": {
+          "enum": [
+            "text/markdown; charset=utf-8",
+            "text/html; charset=utf-8",
+            "text/css; charset=utf-8",
+            "text/plain; charset=utf-8",
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "application/pdf"
+          ]
+        },
+        "source_content_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4194304
+        }
+      },
+      "required": [
+        "project_id",
+        "report_id",
+        "source_sha256",
+        "path",
+        "mime",
+        "content_sha256",
+        "size",
+        "data",
+        "revision",
+        "session_id",
+        "renderer",
+        "source_mime",
+        "source_content_sha256",
+        "source_size"
+      ],
+      "additionalProperties": false,
+      "description": "Derived entry bytes for a new native view session. content_sha256/size describe returned bytes; source_content_sha256/source_size describe the immutable original. No browser or model is started."
+    },
+    "projectReportExportResult": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "report_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "path": {
+          "$ref": "#/$defs/absPath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "report_id",
+        "source_sha256",
+        "path",
+        "sha256",
+        "size"
       ],
       "additionalProperties": false
     }

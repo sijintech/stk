@@ -21,6 +21,7 @@ std::unique_ptr<Editor> make_skills_editor(const EditorType &type);
 std::unique_ptr<Editor> make_workflow_editor(const EditorType &type);
 std::unique_ptr<Editor> make_table_editor(const EditorType &type);
 std::unique_ptr<Editor> make_files_editor(const EditorType &type);
+std::unique_ptr<Editor> make_reports_editor(const EditorType &type);
 
 void register_builtin_editors(EditorRegistry &registry)
 {
@@ -40,6 +41,7 @@ void register_builtin_editors(EditorRegistry &registry)
   registry.add({kEditorWorkflow, "editor.workflow.title", make_workflow_editor});
   registry.add({kEditorTable, "editor.table.title", make_table_editor});
   registry.add({kEditorFiles, "editor.files.title", make_files_editor});
+  registry.add({kEditorReports, "editor.reports.title", make_reports_editor});
 }
 
 }  // namespace stk::app

@@ -615,6 +615,20 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.snapshots.get` | `{handle, snapshot_id}` | `{snapshot: inputManifest}` |
 | `project.snapshots.verify` | `{handle, snapshot_id}` | `{snapshot_id, ok, files: [{record_id, sha256, state, error}]}` |
 | `project.snapshots.resolve` | `{handle, snapshot_id, record_id}` | `{snapshot_id, record_id, name, path, location, sha256, size}` |
+| `project.reports.create` | `{handle, report_id, name, snapshot_id, entry_record_id, assets: [{record_id, path}], expected_revision, sources?: [{kind, id}]}` | `{revision, commands, table_id, record_id}`; `project.changed` after success |
+| `project.reports.get` | `{handle, report_id}` | `{revision, table_id, report}` |
+| `project.reports.list` | `{handle, offset?, limit?}` | `{revision, table_id, offset, total, reports}` (summaries) |
+| `project.reports.asset` | `{handle, report_id, path, expected_revision, expected_source_sha256}` | Complete base64 bytes with asset hash/size, MIME and report identity |
+| `project.reports.preview` | `{handle, report_id, expected_revision, expected_source_sha256}` | Derived bytes with a fresh preview session and separate original-source and rendered hashes |
+| `project.reports.export_file` | `{handle, report_id, destination (absolute), expected_revision, expected_source_sha256}` | `{project_id, report_id, source_sha256, path, sha256, size}` (new source ZIP) |
+
+The optional `project.reports.*` methods use [the frozen report contract](report-1.md).
+Metadata reads never open assets; explicit asset/preview/export operations validate frozen objects and the exact
+selected revision and manifest digest. Creating a report is one ordinary undoable edit. Export creates a new file
+without overwriting, changes no project revision and is not undone by project undo. No report operation starts a
+run or sends a model request. Preview preserves separate manifest, original-source and displayed-byte digest
+fields; identity previews retain the original bytes and their content hash.
+Reports remain optional capabilities; neither source preview nor a native-browser prototype proves complete P4.
 
 The optional `project.analyses.*` methods save editable analysis documents in ordinary project tables
 (project format 3 or later; no new database format). The document is exactly

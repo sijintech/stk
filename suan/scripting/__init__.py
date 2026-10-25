@@ -146,6 +146,10 @@ class Project:
         return ProjectAnalyses(self._call, self.handle)
 
     @property
+    def reports(self):
+        return ProjectReports(self._call, self.handle)
+
+    @property
     def analysis_runs(self):
         return ProjectAnalysisRuns(self._call, self.handle)
 
@@ -707,6 +711,40 @@ class ProjectAnalyses:
     def list(self, *, offset=0, limit=50, archived=None):
         """archived: True lists only archived objects, False only the others (format 11); None lists all."""
         return self._call("project.analyses.list", _listing(self.handle, offset, limit, archived))
+
+
+class ProjectReports:
+    """Explicit frozen report selections. Reopening and reading never run a model or workflow."""
+
+    def __init__(self, call, handle):
+        self._call, self.handle = call, handle
+
+    def create(self, name, snapshot_id, entry_record_id, assets, *, report_id, expected_revision, sources=None):
+        values = {"handle": self.handle, "name": name, "snapshot_id": snapshot_id,
+                  "entry_record_id": entry_record_id, "assets": assets, "report_id": report_id,
+                  "expected_revision": expected_revision}
+        if sources is not None:
+            values["sources"] = sources
+        return self._call("project.reports.create", values)
+
+    def get(self, report_id):
+        return self._call("project.reports.get", {"handle": self.handle, "report_id": report_id})
+
+    def list(self, *, offset=0, limit=50):
+        return self._call("project.reports.list", {"handle": self.handle, "offset": offset, "limit": limit})
+
+    def asset(self, report_id, path, *, expected_revision, expected_source_sha256):
+        return self._call("project.reports.asset", {"handle": self.handle, "report_id": report_id,
+            "path": path, "expected_revision": expected_revision, "expected_source_sha256": expected_source_sha256})
+
+    def preview(self, report_id, *, expected_revision, expected_source_sha256):
+        return self._call("project.reports.preview", {"handle": self.handle, "report_id": report_id,
+            "expected_revision": expected_revision, "expected_source_sha256": expected_source_sha256})
+
+    def export_file(self, report_id, destination, *, expected_revision, expected_source_sha256):
+        return self._call("project.reports.export_file", {"handle": self.handle, "report_id": report_id,
+            "destination": str(destination), "expected_revision": expected_revision,
+            "expected_source_sha256": expected_source_sha256})
 
 
 class ProjectWorkflows:

@@ -26,6 +26,7 @@ cmake --build build --target stk_editor_analysis
 | `table` | `TableWorkbench` 多维表格、独立只读控制器和可复用定义编辑器；传统项目页继续共用 `ProjectTableEditor` |
 | `files` | 独立真实目录页和 `ProjectFileTree` 异步控制器 |
 | `python` | 程序文档、显式保存与运行，`src/editors/python_editor.cc` |
+| `reports` | 冻结报告清单、显式资产读取和导出，`src/editors/reports_editor.cc`；当前显示原文及 PNG |
 | `project` | 项目管理、复核、讨论与仿真 |
 | `jobs` | Runtime、任务、日志和传输 |
 | `workspace` / `skills` / `ai` | 工作台、技能目录、AI 对话 |

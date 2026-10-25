@@ -23,7 +23,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri libosmesa6 openssh-server
       - run: sudo mkdir -p /run/sshd
       # Every non-desktop test runs here, including control, workbench and MuPRO end-to-end tests.
-      - run: python -m pip install ".[server,science,control,visualization,test]" build
+      - run: python -m pip install ".[server,science,control,visualization,documents,test]" build
       # Materials models (S3) train with PyTorch, an optional dependency installed separately (CPU build); on the
       # reference version only, so the other versions also check that everything else works without it.
       - if: matrix.python == '3.12'
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install ".[science,test]"
+      - run: python -m pip install ".[science,documents,test]"
       # No PYTHONUTF8 or PYTHONIOENCODING, so the cp1252 pipes are exercised.
       - run: python -m pytest -m "not server and not desktop" -rs
       - name: Client entry points and server refusal

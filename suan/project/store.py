@@ -389,6 +389,11 @@ class ProjectStore:
         return Analyses(self)
 
     @property
+    def reports(self):
+        from .reports import Reports
+        return Reports(self)
+
+    @property
     def analysis_runs(self):
         from .analysis_runs import AnalysisRuns
         return AnalysisRuns(self)

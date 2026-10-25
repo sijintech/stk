@@ -11,7 +11,7 @@ add_executable(stk-project-tests project_test.cc script_test.cc project_table_vi
   analysis_table_grid_test.cc analysis_table_grid_editor_test.cc skills_catalog_test.cc project_skills_test.cc analysis_links_editor_test.cc
   workflow_editor_test.cc workflow_draft_test.cc table_editor_test.cc project_file_tree_test.cc
   workbench_modules_test.cc table_workbench_state_test.cc table_workbench_editor_test.cc table_object_preview_test.cc
-  table_io_editor_test.cc workspace_transfer_test.cc)
+  table_io_editor_test.cc workspace_transfer_test.cc reports_editor_test.cc)
 target_link_libraries(stk-project-tests PRIVATE stk_jobs_test_support GTest::gtest_main)
 if(MSVC)
   target_compile_options(stk-project-tests PRIVATE /W3 /utf-8 /bigobj)
@@ -24,6 +24,29 @@ if(MSVC)
   target_compile_options(stk-project-render PRIVATE /W3 /utf-8 /bigobj)
 endif()
 set_target_properties(stk-project-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${STK_DESKTOP_BIN_DIR}")
+
+# Frozen report reading: real Python bridge, production GPU textures, explicit native UI actions.
+add_executable(stk-reports-render reports_render.cc)
+target_link_libraries(stk-reports-render PRIVATE stk_jobs_test_support stk_gfx)
+set_target_properties(stk-reports-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${STK_DESKTOP_BIN_DIR}")
+if(MSVC)
+  target_compile_options(stk-reports-render PRIVATE /W3 /utf-8 /bigobj)
+endif()
+foreach(_view text png)
+  foreach(_width wide narrow)
+    foreach(_lang en zh)
+      foreach(_be ${_jobs_backends})
+        add_test(NAME reports_${_view}_${_width}_render_${_be}_${_lang} COMMAND stk-reports-render
+          --view ${_view} --width ${_width} --gpu-backend ${_be} --lang ${_lang}
+          --export "${_jobs_out}/reports_${_view}_${_width}_${_be}_${_lang}.png")
+        set_tests_properties(reports_${_view}_${_width}_render_${_be}_${_lang} PROPERTIES
+          LABELS "project;gpu" TIMEOUT 180 ENVIRONMENT "${_jobs_env_headless}"
+          PASS_REGULAR_EXPRESSION "wrote" FAIL_REGULAR_EXPRESSION "leaked|Error: Not freed memory|FAIL")
+      endforeach()
+    endforeach()
+  endforeach()
+endforeach()
+
 # Opt-in measurement tool; it is not installed with the product or run by CTest.
 add_executable(stk-project-open-benchmark EXCLUDE_FROM_ALL project_open_benchmark.cc)
 target_link_libraries(stk-project-open-benchmark PRIVATE stk_jobs_test_support)

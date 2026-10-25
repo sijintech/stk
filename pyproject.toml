@@ -22,6 +22,7 @@ include = [
     { path = "docs/visualization.md", format = "sdist" },
     { path = "docs/hub.md", format = "sdist" },
     { path = "docs/project.md", format = "sdist" },
+    { path = "docs/project-reports.md", format = "sdist" },
     { path = "docs/project-table-io.md", format = "sdist" },
     { path = "docs/design/portable-workspaces.md", format = "sdist" },
     { path = "docs/lammps*.md", format = "sdist" },
@@ -64,6 +65,7 @@ pathspec = { version = ">=0.12,<2", optional = true }
 pyinstaller-hooks-contrib = { version = ">=2024", optional = true }
 tqdm = { version = ">=4.27,<5", optional = true }
 markdown = { version = ">=3,<4", optional = true }
+nh3 = { version = ">=0.3.7,<0.4", optional = true }
 packaging = { version = ">=23,<27", optional = true }
 mcp = { version = ">=1,<2", optional = true }
 pytest = { version = ">=8,<10", optional = true }
@@ -83,6 +85,7 @@ build = ["pyinstaller", "pyinstaller-hooks-contrib"]
 test = ["pytest", "jsonschema"]
 control = ["fastapi", "uvicorn", "httpx", "websockets"]
 visualization = ["numpy", "vtk", "h5py", "Pillow"]
+documents = ["markdown", "nh3"]
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]

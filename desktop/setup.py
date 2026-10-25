@@ -188,7 +188,7 @@ def setup(args, *, repo=REPO, system=None, machine=None, runner_factory=Runner):
             runner.run([sys.executable, "-m", "venv", venv], cwd=repo)
         # No global Python/tool install and no legacy Qt extras.
         runner.run([python, "-m", "pip", "install", "--disable-pip-version-check", "-e",
-                    f"{repo}[science,visualization,control]", "cmake>=3.24,<4", "ninja>=1.11,<2"], cwd=repo)
+                    f"{repo}[science,visualization,control,documents]", "cmake>=3.24,<4", "ninja>=1.11,<2"], cwd=repo)
         runner.run([python, "-c", "import numpy, vtk, suan.desktop_bridge; print('STK Python bridge dependencies ready')"], cwd=repo)
         runner.mkdir(binary_cache)
         if not (vcpkg / ".git").is_dir():

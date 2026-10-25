@@ -402,7 +402,8 @@ TEST(App, EditorKeysExistInEveryCatalog)
   {
     keys.emplace_back(app::bridge_state_key(st));
   }
-  EXPECT_EQ(f.shell->registry().types().size(), 16u);
+  EXPECT_EQ(f.shell->registry().types().size(), 17u);
+  ASSERT_NE(f.shell->registry().find(app::kEditorReports), nullptr);
   for (const std::string &k : keys) {
     EXPECT_TRUE(cat.has("zh_CN", k)) << k;
     EXPECT_TRUE(cat.has("en", k)) << k;

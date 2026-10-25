@@ -70,3 +70,8 @@ stk_editor_module(files
   src/project_file_tree.cc
   src/editors/files_editor.cc
 )
+
+stk_editor_module(reports
+  src/project_reports.cc
+  src/editors/reports_editor.cc
+)

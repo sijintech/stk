@@ -317,6 +317,12 @@ class Bridge:
             "project.analyses.update": lambda p, c: self.edit_project_analyses("update", p, c),
             "project.analyses.get": lambda p, c: self.projects.analyses("get", p),
             "project.analyses.list": lambda p, c: self.projects.analyses("list", p),
+            "project.reports.create": lambda p, c: self.edit_project_reports(p, c),
+            "project.reports.get": lambda p, c: self.projects.reports("get", p),
+            "project.reports.list": lambda p, c: self.projects.reports("list", p),
+            "project.reports.asset": lambda p, c: self.projects.reports("asset", p),
+            "project.reports.preview": lambda p, c: self.projects.reports("preview", p),
+            "project.reports.export_file": lambda p, c: self.projects.reports("export_file", p),
             "project.skills.list": lambda p, c: self.projects.skills("list", p),
             "project.skills.get": lambda p, c: self.projects.skills("get", p),
             "project.skills.pin": lambda p, c: self.edit_project_skills("pin", p, c),
@@ -694,6 +700,8 @@ class Bridge:
                  "project.files.list", "project.files.index", "project.files.refresh", "project.files.resolve",
                  "project.files.children", "project.files.resolve_path",
                  "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
+                 "project.reports.create", "project.reports.get", "project.reports.list",
+                 "project.reports.asset", "project.reports.preview", "project.reports.export_file",
                  "project.skills.list", "project.skills.get", "project.skills.pin", "project.skills.upgrade",
                  "project.skills.restore", "project.skills.create_analysis",
                  "project.skills.publish_analysis",
@@ -933,6 +941,12 @@ class Bridge:
 
     def edit_project_analyses(self, action, params, context):
         result = self.projects.analyses(action, params)
+        context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
+                                                            "revision": result["revision"]}))
+        return result
+
+    def edit_project_reports(self, params, context):
+        result = self.projects.reports("create", params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
         return result

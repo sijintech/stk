@@ -192,6 +192,7 @@ inline constexpr const char *kEditorSkills = "skills";
 inline constexpr const char *kEditorWorkflow = "workflow";
 inline constexpr const char *kEditorTable = "table";
 inline constexpr const char *kEditorFiles = "files";
+inline constexpr const char *kEditorReports = "reports";
 
 /** Registers the built-in desktop editors. */
 void register_builtin_editors(EditorRegistry &registry);

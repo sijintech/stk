@@ -12,6 +12,7 @@ from uuid import uuid4
 from suan.project import ProjectError, ProjectStore, RevisionConflict
 from suan.project.store import DATABASE_NAME, UnsupportedProjectFormat
 from suan.project.analyses import AnalysisNotFound
+from suan.project.reports import ReportNotFound
 from suan.project.skills import ProjectSkillNotFound
 from suan.project.analysis_runs import AnalysisRunNotFound
 from suan.project.workflows import WorkflowNotFound
@@ -75,7 +76,7 @@ class ProjectSessions:
             yield
         except (RevisionConflict, Archived, PolicyDenied) as exc:
             raise BridgeError("conflict", str(exc)) from None
-        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound, AgentSessionNotFound, ProjectSkillNotFound) as exc:
+        except (AnalysisNotFound, AnalysisRunNotFound, WorkflowNotFound, WorkflowRunNotFound, AgentSessionNotFound, ProjectSkillNotFound, ReportNotFound) as exc:
             raise BridgeError("not_found", str(exc)) from None
         except AgentBusy as exc:
             raise BridgeError("busy", str(exc)) from None
@@ -284,6 +285,15 @@ class ProjectSessions:
                 return analyses.list(offset=params.get("offset", 0), limit=params.get("limit", 50),
                                   archived=params.get("archived"))
             return analyses.get(params["analysis_id"])
+
+    def reports(self, action, params):
+        with self._operation():
+            store = self._get(params["handle"])
+            values = {key: value for key, value in params.items() if key != "handle"}
+            if action == "preview":
+                from suan.project.report_previews import preview
+                return preview(store, **values)
+            return getattr(store.reports, action)(**values)
 
     def workflows(self, action, params):
         with self._operation():

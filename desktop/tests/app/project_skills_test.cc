@@ -559,6 +559,24 @@ TEST_F(ProjectSkillsPython, LargeWorkflowDependenciesStayBrowsableAndMappingsRem
 {
   // A valid structural method may collect independent tables without being ready for a run.
   // This package exceeds the old 64 KiB text limit while staying inside all storage budgets.
+  const auto observe_revision = [&](int64_t expected) {
+    // Raw fixture writes bypass the UI busy gate. Let the 800-table paged observer finish
+    // between writes, rather than exhausting its bounded Conflict restarts during setup.
+    // An idle observer may have failed: readiness and the exact receipt revision matter.
+    project().refresh();
+    ASSERT_TRUE(loop.pump_until([&] {
+      skills->sync();
+      return project().loaded() && !project().busy() && !project().recent_loading() &&
+          project().project()->revision == expected && !skills->busy();
+    }, 30)) << "expected revision=" << expected
+            << " actual=" << (project().project() ? project().project()->revision : -1)
+            << " loaded=" << project().loaded() << " busy=" << project().busy()
+            << " skills_supported=" << skills->supported() << " skills_busy=" << skills->busy()
+            << " project_error=" << project().error() << " skills_error=" << skills->error();
+    ASSERT_TRUE(project().error().empty()) << project().error();
+    ASSERT_TRUE(skills->supported());
+    ASSERT_EQ(skills->revision(), expected);
+  };
   Json commands = Json::array(), child_steps = Json::array();
   std::vector<std::string> tables;
   for (int i = 0; i < 800; ++i) {
@@ -568,6 +586,7 @@ TEST_F(ProjectSkillsPython, LargeWorkflowDependenciesStayBrowsableAndMappingsRem
   ASSERT_TRUE(call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", 0},
       {"commands", commands}}).is_object());
   int64_t revision = 1;
+  ASSERT_NO_FATAL_FAILURE(observe_revision(revision));
   const Json interface = {{"inputs", Json::object()}, {"outputs", Json::object()}, {"parameters", Json::array()}};
   for (int group = 0; group < 8; ++group) {
     const auto child = ProjectSkills::new_id();
@@ -578,13 +597,14 @@ TEST_F(ProjectSkillsPython, LargeWorkflowDependenciesStayBrowsableAndMappingsRem
     const Json document = {{"format", "stk.workflow/2"}, {"steps", steps}, {"ui", Json::object()}, {"interface", interface}};
     ASSERT_TRUE(call("project.workflows.create", {{"handle", project().project()->handle}, {"workflow_id", child},
         {"name", "Data group " + std::to_string(group)}, {"document", document}, {"expected_revision", revision++}}).is_object());
+    ASSERT_NO_FATAL_FAILURE(observe_revision(revision));
     child_steps.push_back({{"id", "group_" + std::to_string(group)}, {"kind", "workflow"}, {"ref", {{"workflow", child}}}});
   }
   const auto source = ProjectSkills::new_id(), id = ProjectSkills::new_id();
   const Json document = {{"format", "stk.workflow/2"}, {"steps", child_steps}, {"ui", Json::object()}, {"interface", interface}};
   ASSERT_TRUE(call("project.workflows.create", {{"handle", project().project()->handle}, {"workflow_id", source},
       {"name", "Many datasets"}, {"document", document}, {"expected_revision", revision++}}).is_object());
-  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_NO_FATAL_FAILURE(observe_revision(revision));
   ASSERT_TRUE(skills->write("publish_workflow", {{"workflow_id", source}, {"project_skill_id", id}, {"create", true},
       {"name", "Many datasets"}, {"description", "Explicit table references"}, {"expected_revision", revision++}}, skills->epoch()));
   ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_FALSE(skills->uncertain()) << skills->error();
