@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "fixture.hh"
+#include "evidence_pixels.hh"
 
 #include <array>
 #include <atomic>
@@ -66,6 +67,18 @@ footer { border-top: 4px solid #cf6225; padding: 24px 0 40px; }
 </style>
 )HTML";
 
+std::string evidence_stripe(int page)
+{
+  std::string result = "<div aria-label=\"Native capture marker\" style=\"display:flex;height:24px;overflow:hidden\">";
+  for (int i = 0; i < 6; ++i) {
+    const auto &c = kEvidenceColors[page == 1 ? i : 5 - i];
+    result += "<span style=\"flex:none;width:20px;height:24px;background:rgb(" +
+        std::to_string(c[0]) + "," + std::to_string(c[1]) + "," + std::to_string(c[2]) +
+        ")\"></span>";
+  }
+  return result + "</div>";
+}
+
 std::string index_html()
 {
   std::string html = R"HTML(<!doctype html>
@@ -74,7 +87,8 @@ std::string index_html()
 <title>STK 离线文档嵌入验收夹具</title>
 )HTML";
   html += kStyle;
-  html += R"HTML(</head><body>
+  html += "</head><body>" + evidence_stripe(1);
+  html += R"HTML(
 <header><h1>STK 文档预览 · 合成验收夹具</h1>
 <p>中文 / English — static content, no scripts or external assets</p></header>
 <main>
@@ -136,7 +150,8 @@ std::string next_html()
 <title>STK 本地导航第二页</title>
 )HTML";
   html += kStyle;
-  html += R"HTML(</head><body>
+  html += "</head><body>" + evidence_stripe(2);
+  html += R"HTML(
 <header style="background:#88470f"><h1>第二页 / Local page two</h1></header>
 <main><section><h2>本地导航成功后应看到橙色标题</h2>
 <p>内容仍来自此次预览会话内的清单。这里没有脚本、远程图片或字体。</p>

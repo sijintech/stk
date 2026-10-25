@@ -17,7 +17,9 @@
 #                   headless Metal goldens, viewer and e2e tests on the runner's paravirtual Metal
 #                   device; STK.app (unsigned, ad-hoc signed), zipped, then run headless from the zip.
 #   windows       : MSVC build of every target (OpenGL backend, Win32 GHOST); CPU, CLI, UI and bridge
-#                   tests (no GPU on the runner). Packaging is milestone M-D2.
+#                   tests. A separate native-preview job attempts real STK child composition and
+#                   fails explicitly when this runner lacks OpenGL/WGC/Runtime capabilities.
+#                   Packaging is milestone M-D2.
 #
 # No secrets are used; the token is read-only; actions are pinned by commit SHA.
 
@@ -134,7 +136,7 @@ jobs:
         if: success() || failure()
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-junit.xml \
-            'Schema\.ReportsPreviewResources' 'DocumentResources\..*' \
+            'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'LayoutObserver(Test|Lifetime)\..*' \
             'PythonBridge\..*' 'ProjectPython\..*' 'LammpsProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'AgentPython\..*' 'ModulesPython\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'WorkModeLayouts\..*' 'LanguagesAndScale/WorkModeLayoutClicks\..*' 'TreeFixture\.Arrangement.*' 'WorkspaceNavigation(Python)?\..*' 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'AnalysisGraphCatalogPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'Camera\..*' 'LabelBackdrop\..*' 'ScalarVolumePython\..*' 'VolumeFloatTexture\..*' 'FormSchema\.(JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization|NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)' 'FormBuilder\.ScalarVolumeNullableUnitAndStrictFieldRoundTrip' 'ViewerGraphConfiguration(Test|Python)\..*' 'AnalysisDocumentsEditor\..*' 'AnalysisParameterDraft\..*' 'AnalysisOutputDraft\..*' 'AnalysisInputReuse\..*' 'AnalysisResultInspection\..*' 'AnalysisResultInspectionEditorPython\..*' 'AnalysisTableGrid\..*' 'AnalysisTableGridEditorPython\..*' 'Json\..*' 'Region\..*' 'AnalysisInputReuseEditorPython\..*' 'AnalysisOutputsEditorPython\..*' 'AnalysisParametersEditorPython\..*' 'AnalysisLinkDraft\..*' 'AnalysisCandidateValidation\..*' 'AnalysisLinksEditorPython\..*' 'WorkflowView\..*' 'WorkflowDraft\..*' 'WorkflowEditorPython\..*' 'AnalysisDocumentBounds\..*' 'AnalysisGraphRunState\..*' 'AnalysisGraphRunEditorPython\..*' 'ProjectAnalysesPython\..*' 'ReportsEditorPython\..*' 'ProjectAnalysisRunsPython\..*' 'Rows/ProjectAnalysesUnreadable\..*' 'Replies/ProjectAnalysesUncertain\..*' 'SimulationPython\..*' 'LammpsSimulationPython\..*' 'ScriptPython\..*' 'TableEditorPython\..*' 'ProjectFileTreePython\..*' 'ProjectDraftRecoveryPython\..*' 'WorkbenchModules(Clicks)?\..*' 'TableCellSelection\..*' 'TableGrid\..*' 'ContainerDrag\..*' 'ProjectPagingPython\..*' 'TableWorkbench(Python|EditorPython|Layout)\..*' 'TableObjectPreviewPython\..*' 'AppStoreOpenResult\..*' 'TableIOEditorPython\..*' 'TableIOWorkspaceState\..*' 'WorkspaceTransferPython\..*' 'WorkspacePagingPython\..*' 'ViewerWorkspace\..*' 'WorkspaceTree\..*' 'WorkspaceDesktop\..*' 'PosixEventThread\..*' 'JobsPython\..*' 'app_viewer_python_(vulkan|opengl)' \
             'ui_label_backdrop_(opengl|vulkan)' 'viewer_(vulkan|opengl)_NonFinite' 'app_viewer_e2e_(vulkan|opengl)' 'app_viewer_window_(xvfb|weston)' 'workspace_window_(xvfb|weston)' 'package_install_check'
           for server in xvfb weston; do
@@ -390,10 +392,8 @@ jobs:
             -DSTK_BRIDGE_TEST_PYTHON="$STK_VENV/bin/python" -DSTK_APP_TEST_PYTHON="$STK_VENV/bin/python"
 
       - name: Build
+        id: macos-build
         run: cmake --build build --parallel
-
-      - name: Native preview validation command (requires a separate interactive Mac; not executed)
-        run: cat build/spike/document_preview/native-smoke-RelWithDebInfo.txt
 
       - name: Test (CPU unit tests, CLI, leak self-test, UI core, bridge)
         run: ctest --test-dir build --output-on-failure -L "unit|wm|ui|bridge|project" -LE "gpu|window" --output-junit "$PWD/build/ctest-cpu.xml"
@@ -409,7 +409,7 @@ jobs:
         if: success() || failure()
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-cpu.xml \
-            'Schema\.ReportsPreviewResources' 'DocumentResources\..*' \
+            'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'LayoutObserver(Test|Lifetime)\..*' \
             'PythonBridge\.(HelloListsTheProtocol|ColormapsList|GraphPresets|LocalGraphEvaluateOnAFakeMuferroRun|ManagedSSHProfileRoundTripDoesNotConnectImplicitly)' 'ProjectPython\..*' 'LammpsProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'AgentPython\..*' 'ModulesPython\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'WorkModeLayouts\..*' 'LanguagesAndScale/WorkModeLayoutClicks\..*' 'TreeFixture\.Arrangement.*' 'WorkspaceNavigation(Python)?\..*' 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'AnalysisGraphCatalogPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'Camera\..*' 'LabelBackdrop\..*' 'ScalarVolumePython\..*' 'VolumeFloatTexture\..*' 'FormSchema\.(JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization|NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)' 'FormBuilder\.ScalarVolumeNullableUnitAndStrictFieldRoundTrip' 'ViewerGraphConfiguration(Test|Python)\..*' 'AnalysisDocumentsEditor\..*' 'AnalysisParameterDraft\..*' 'AnalysisOutputDraft\..*' 'AnalysisInputReuse\..*' 'AnalysisResultInspection\..*' 'AnalysisResultInspectionEditorPython\..*' 'AnalysisTableGrid\..*' 'AnalysisTableGridEditorPython\..*' 'Json\..*' 'Region\..*' 'AnalysisInputReuseEditorPython\..*' 'AnalysisOutputsEditorPython\..*' 'AnalysisParametersEditorPython\..*' 'AnalysisLinkDraft\..*' 'AnalysisCandidateValidation\..*' 'AnalysisLinksEditorPython\..*' 'WorkflowView\..*' 'WorkflowDraft\..*' 'WorkflowEditorPython\..*' 'AnalysisDocumentBounds\..*' 'AnalysisGraphRunState\..*' 'AnalysisGraphRunEditorPython\..*' 'ProjectAnalysesPython\..*' 'ReportsEditorPython\..*' 'ProjectAnalysisRunsPython\..*' 'Rows/ProjectAnalysesUnreadable\..*' 'Replies/ProjectAnalysesUncertain\..*' 'ScriptPython\..*' 'TableEditorPython\..*' 'ProjectFileTreePython\..*' 'ProjectDraftRecoveryPython\..*' 'WorkbenchModules(Clicks)?\..*' 'TableCellSelection\..*' 'TableGrid\..*' 'ContainerDrag\..*' 'ProjectPagingPython\..*' 'TableWorkbench(Python|EditorPython|Layout)\..*' 'TableObjectPreviewPython\..*' 'AppStoreOpenResult\..*' 'TableIOEditorPython\..*' 'TableIOWorkspaceState\..*' 'WorkspaceTransferPython\..*' 'WorkspacePagingPython\..*' 'ViewerWorkspace\..*' 'WorkspaceTree\..*' 'WorkspaceDesktop\..*' 'PosixEventThread\..*'
           python3 desktop/tests/check_required_tests.py build/ctest-metal.xml \
             'ui_label_backdrop_metal' 'viewer_metal_NonFinite' 'app_viewer_python_metal' 'app_viewer_e2e_metal' 'package_install_check'
@@ -466,6 +466,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Native WKWebView in the STK window (20 cycles, OS screenshot evidence)
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        # Requires the runner's real window server, Metal and ScreenCaptureKit permission.
+        # Missing capability fails; there is no Unsupported/skip fallback or TCC modification.
+        run: |
+          ctest --test-dir build --output-on-failure -R '^document_preview_native_metal$' --timeout 600 --output-junit "$PWD/build/ctest-native-preview.xml"
+          python3 desktop/tests/check_required_tests.py build/ctest-native-preview.xml 'document_preview_native_metal'
+
       - name: Upload rendered frames
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -480,11 +488,16 @@ jobs:
             build/stk-render-metal.png
             build/ctest-cpu.xml
             build/ctest-metal.xml
+            build/ctest-native-preview.xml
+            build/spike/document_preview/native-evidence/**
+            build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14
 
   windows:
     name: Windows (MSVC, CPU tests)
+    outputs:
+      native_bundle: ${{ steps.native-bundle.outputs.ready }}
     runs-on: windows-2022
     timeout-minutes: 90
     env:
@@ -549,10 +562,34 @@ jobs:
           cmake --build build --config Release --parallel
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Native preview validation command (requires Windows GPU and Runtime; not executed)
-        run: Get-Content build/spike/document_preview/native-smoke-Release.txt
+      - name: Stage native preview candidate for its independent validation job
+        id: native-bundle
+        run: |
+          $bundle = Join-Path $PWD 'build/native-preview-bundle'
+          New-Item -ItemType Directory -Force $bundle | Out-Null
+          $exe = Join-Path $PWD 'build/bin/Release/stk-document-preview-spike.exe'
+          if (-not (Test-Path $exe)) { throw 'Native preview executable was not built' }
+          Copy-Item $exe $bundle
+          # vcpkg's app-local deployment puts linked runtime DLLs beside each executable.
+          Get-ChildItem (Split-Path $exe) -Filter '*.dll' | Copy-Item -Destination $bundle
+          Copy-Item 'build/bin/datafiles' $bundle -Recurse
+          Copy-Item 'build/bin/i18n' $bundle -Recurse
+          Copy-Item 'docs/specs/examples/payload-v2' (Join-Path $bundle 'document-preview-payload') -Recurse
+          @'
+          add_test(document_preview_native_opengl "${CMAKE_CURRENT_LIST_DIR}/stk-document-preview-spike.exe" --smoke --require-native --cycles 20 --evidence-dir "${CMAKE_CURRENT_LIST_DIR}/evidence" --gpu-backend opengl)
+          set_tests_properties(document_preview_native_opengl PROPERTIES TIMEOUT 600 ENVIRONMENT "STK_TOKEN_PLAN_API_KEY=" ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:" PASS_REGULAR_EXPRESSION "PASS: native document evidence" FAIL_REGULAR_EXPRESSION "FAIL:|leaked|Error: Not freed memory")
+          '@ | Set-Content -Encoding utf8 (Join-Path $bundle 'CTestTestfile.cmake')
+          'ready=true' >> $env:GITHUB_OUTPUT
 
-      - name: Test (CPU unit tests, CLI, UI core, bridge; no GPU on the runner)
+      - name: Upload native preview candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-windows-native-candidate
+          path: build/native-preview-bundle/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Test (CPU unit tests, CLI, UI core, bridge)
         run: |
           $junitPath = Join-Path $PWD 'build/ctest-cpu.xml'
           ctest --test-dir build -C Release --output-on-failure -L "unit|wm|ui|bridge|project" -LE "gpu|window" --timeout 600 --output-junit "$junitPath"
@@ -560,5 +597,69 @@ jobs:
 
       - name: Local project tests ran with the real Python bridge
         run: |
-          python desktop/tests/check_required_tests.py build/ctest-cpu.xml 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'ProjectPython\..*' 'LammpsProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'AgentPython\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'WorkModeLayouts\..*' 'LanguagesAndScale/WorkModeLayoutClicks\..*' 'TreeFixture\.Arrangement.*' 'WorkspaceNavigation(Python)?\..*' 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'AnalysisGraphCatalogPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'Camera\..*' 'LabelBackdrop\..*' 'ScalarVolumePython\..*' 'VolumeFloatTexture\..*' 'FormSchema\.(JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization|NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)' 'FormBuilder\.ScalarVolumeNullableUnitAndStrictFieldRoundTrip' 'ViewerGraphConfiguration(Test|Python)\..*' 'AnalysisDocumentsEditor\..*' 'AnalysisParameterDraft\..*' 'AnalysisOutputDraft\..*' 'AnalysisInputReuse\..*' 'AnalysisResultInspection\..*' 'AnalysisResultInspectionEditorPython\..*' 'AnalysisTableGrid\..*' 'AnalysisTableGridEditorPython\..*' 'Json\..*' 'Region\..*' 'AnalysisInputReuseEditorPython\..*' 'AnalysisOutputsEditorPython\..*' 'AnalysisParametersEditorPython\..*' 'AnalysisLinkDraft\..*' 'AnalysisCandidateValidation\..*' 'AnalysisLinksEditorPython\..*' 'WorkflowView\..*' 'WorkflowDraft\..*' 'WorkflowEditorPython\..*' 'AnalysisDocumentBounds\..*' 'AnalysisGraphRunState\..*' 'AnalysisGraphRunEditorPython\..*' 'ProjectAnalysesPython\..*' 'ReportsEditorPython\..*' 'ProjectAnalysisRunsPython\..*' 'Rows/ProjectAnalysesUnreadable\..*' 'Replies/ProjectAnalysesUncertain\..*' 'ScriptPython\..*' 'TableEditorPython\..*' 'ProjectFileTreePython\..*' 'ProjectDraftRecoveryPython\..*' 'WorkbenchModules(Clicks)?\..*' 'TableCellSelection\..*' 'TableGrid\..*' 'ContainerDrag\..*' 'ProjectPagingPython\..*' 'TableWorkbench(Python|EditorPython|Layout)\..*' 'TableObjectPreviewPython\..*' 'AppStoreOpenResult\..*' 'TableIOEditorPython\..*' 'TableIOWorkspaceState\..*' 'WorkspaceTransferPython\..*' 'WorkspacePagingPython\..*' 'ViewerWorkspace\..*' 'WorkspaceTree\..*' 'WorkspaceDesktop\..*' 'PythonBridge\.ManagedSSHProfileRoundTripDoesNotConnectImplicitly'
+          python desktop/tests/check_required_tests.py build/ctest-cpu.xml 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'LayoutObserver(Test|Lifetime)\..*' 'ProjectPython\..*' 'LammpsProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'AgentPython\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'WorkModeLayouts\..*' 'LanguagesAndScale/WorkModeLayoutClicks\..*' 'TreeFixture\.Arrangement.*' 'WorkspaceNavigation(Python)?\..*' 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'AnalysisGraphCatalogPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'Camera\..*' 'LabelBackdrop\..*' 'ScalarVolumePython\..*' 'VolumeFloatTexture\..*' 'FormSchema\.(JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization|NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)' 'FormBuilder\.ScalarVolumeNullableUnitAndStrictFieldRoundTrip' 'ViewerGraphConfiguration(Test|Python)\..*' 'AnalysisDocumentsEditor\..*' 'AnalysisParameterDraft\..*' 'AnalysisOutputDraft\..*' 'AnalysisInputReuse\..*' 'AnalysisResultInspection\..*' 'AnalysisResultInspectionEditorPython\..*' 'AnalysisTableGrid\..*' 'AnalysisTableGridEditorPython\..*' 'Json\..*' 'Region\..*' 'AnalysisInputReuseEditorPython\..*' 'AnalysisOutputsEditorPython\..*' 'AnalysisParametersEditorPython\..*' 'AnalysisLinkDraft\..*' 'AnalysisCandidateValidation\..*' 'AnalysisLinksEditorPython\..*' 'WorkflowView\..*' 'WorkflowDraft\..*' 'WorkflowEditorPython\..*' 'AnalysisDocumentBounds\..*' 'AnalysisGraphRunState\..*' 'AnalysisGraphRunEditorPython\..*' 'ProjectAnalysesPython\..*' 'ReportsEditorPython\..*' 'ProjectAnalysisRunsPython\..*' 'Rows/ProjectAnalysesUnreadable\..*' 'Replies/ProjectAnalysesUncertain\..*' 'ScriptPython\..*' 'TableEditorPython\..*' 'ProjectFileTreePython\..*' 'ProjectDraftRecoveryPython\..*' 'WorkbenchModules(Clicks)?\..*' 'TableCellSelection\..*' 'TableGrid\..*' 'ContainerDrag\..*' 'ProjectPagingPython\..*' 'TableWorkbench(Python|EditorPython|Layout)\..*' 'TableObjectPreviewPython\..*' 'AppStoreOpenResult\..*' 'TableIOEditorPython\..*' 'TableIOWorkspaceState\..*' 'WorkspaceTransferPython\..*' 'WorkspacePagingPython\..*' 'ViewerWorkspace\..*' 'WorkspaceTree\..*' 'WorkspaceDesktop\..*' 'PythonBridge\.ManagedSSHProfileRoundTripDoesNotConnectImplicitly'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows CPU test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-windows-cpu-results
+          path: |
+            build/ctest-cpu.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  windows-native-preview:
+    name: Windows native document composition (20 cycles, OS evidence)
+    needs: windows
+    if: ${{ always() && !cancelled() && needs.windows.outputs.native_bundle == 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: desktop-windows-native-candidate
+          path: native-preview
+
+      - name: Record native display capability context
+        run: |
+          New-Item -ItemType Directory -Force 'native-preview/evidence' | Out-Null
+          # Hardware/session metadata only; no registry profiles, process command lines or screen reads.
+          $context = [ordered]@{
+            os_version = [Environment]::OSVersion.Version.ToString()
+            interactive = [Environment]::UserInteractive
+            process_session = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            display_drivers = @(Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion, Status)
+            note = 'Actual GL 4.3/WGC/Runtime checks follow. No driver or WebView2 Runtime is installed here.'
+          }
+          $context | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 'native-preview/evidence/environment.json'
+
+      - name: Native WebView2 in the STK window (20 cycles, OS screenshot evidence)
+        # The prototype probes GL 4.3 before GHOST can open a modal unsupported-driver dialog.
+        # An absent interactive display, WGC, driver or Runtime FAILS this independent job.
+        run: |
+          $junitPath = Join-Path $PWD 'native-preview/ctest-native-preview.xml'
+          ctest --test-dir native-preview --output-on-failure -R '^document_preview_native_opengl$' --timeout 600 --output-junit "$junitPath"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python desktop/tests/check_required_tests.py native-preview/ctest-native-preview.xml 'document_preview_native_opengl'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload native preview evidence and test logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-windows-native-preview
+          path: |
+            native-preview/ctest-native-preview.xml
+            native-preview/evidence/**
+            native-preview/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14

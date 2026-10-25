@@ -165,6 +165,9 @@ void EditorArea::sync_regions()
   if (tabs_.empty() || !tabs_[size_t(active_)]) {
     return;
   }
+  // The current editor can change without changing any region rectangle. Withdraw native
+  // child views now; a post-layout observer will resolve the new tab at the next UI frame.
+  if (screen()) { screen()->invalidate_layout(); }
   Editor &ed = editor();
   find_region(kToolbar)->set_visible(ed.has_toolbar() && toolbar_open_);
   find_region(kSidebar)->set_visible(ed.has_sidebar() && sidebar_open_);

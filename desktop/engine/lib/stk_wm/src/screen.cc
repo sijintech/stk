@@ -8,6 +8,7 @@
 #include <limits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "GPU_framebuffer.hh"
 #include "GPU_state.hh"
@@ -81,6 +82,123 @@ struct Screen::Impl {
   double timer_at = 0.0;
 };
 
+struct Screen::LayoutObserverSlot {
+  std::function<void(const DrawContext &)> ready;
+  std::function<void()> invalidated;
+  uint64_t first_round = 0;
+  bool active = true;
+  bool invalid = false;
+};
+
+Screen::LayoutObserver::LayoutObserver(std::shared_ptr<LayoutObserverSlot> slot)
+    : slot_(std::move(slot))
+{
+}
+Screen::LayoutObserver::~LayoutObserver() { reset(); }
+Screen::LayoutObserver::LayoutObserver(LayoutObserver &&other) noexcept
+    : slot_(std::move(other.slot_))
+{
+}
+Screen::LayoutObserver &Screen::LayoutObserver::operator=(LayoutObserver &&other) noexcept
+{
+  if (this != &other) {
+    reset();
+    slot_ = std::move(other.slot_);
+  }
+  return *this;
+}
+void Screen::LayoutObserver::reset() noexcept
+{
+  if (slot_) {
+    slot_->active = false;
+    slot_->ready = {};
+    slot_->invalidated = {};
+    slot_.reset();
+  }
+}
+Screen::LayoutObserver::operator bool() const noexcept
+{
+  return slot_ && slot_->active;
+}
+
+Screen::LayoutObserver Screen::observe_layout(std::function<void(const DrawContext &)> ready,
+                                             std::function<void()> invalidated)
+{
+  if (destroying_ || (!ready && !invalidated)) { return {}; }
+  std::erase_if(layout_observers_, [](const auto &weak) {
+    const auto slot = weak.lock();
+    return !slot || !slot->active;
+  });
+  auto slot = std::make_shared<LayoutObserverSlot>();
+  slot->ready = std::move(ready);
+  slot->invalidated = std::move(invalidated);
+  slot->first_round = layout_round_ + (layout_notification_depth_ ? 1 : 0);
+  layout_observers_.push_back(slot);
+  return LayoutObserver(std::move(slot));
+}
+
+namespace {
+struct LayoutNotificationScope {
+  unsigned &depth;
+  explicit LayoutNotificationScope(unsigned &value) : depth(value) { ++depth; }
+  ~LayoutNotificationScope() { --depth; }
+};
+}  // namespace
+
+void Screen::invalidate_layout()
+{
+  ++layout_epoch_;  // Also prevents later ready callbacks from consuming withdrawn geometry.
+  if (invalidating_layout_) { return; }
+  const auto observers = layout_observers_;  // Weak: a previous callback may destroy an owner.
+  LayoutNotificationScope notification(layout_notification_depth_);
+  struct ResetFlag {
+    bool &flag;
+    ~ResetFlag() { flag = false; }
+  } reset{invalidating_layout_};
+  invalidating_layout_ = true;
+  for (const auto &weak : observers) {
+    const auto slot = weak.lock();
+    if (!slot || !slot->active || slot->invalid ||
+        (!destroying_ && slot->first_round > layout_round_)) { continue; }
+    slot->invalid = true;
+    const auto callback = slot->invalidated;  // reset() may clear the stored callable in itself.
+    if (callback) { callback(); }
+  }
+}
+
+void Screen::notify_layout(const DrawContext &ctx)
+{
+  if (destroying_ || layout_notification_depth_) { return; }
+  std::erase_if(layout_observers_, [](const auto &weak) { return weak.expired(); });
+  const auto observers = layout_observers_;
+  const auto epoch = layout_epoch_;
+  DrawContext resolved = ctx;
+  resolved.rect = rect_;
+  resolved.ui_scale = scale_;
+  resolved.ui = ui_.get();
+  LayoutNotificationScope notification(layout_notification_depth_);
+  for (const auto &weak : observers) {
+    if (epoch != layout_epoch_) { break; }
+    const auto slot = weak.lock();
+    if (!slot || !slot->active || slot->first_round > layout_round_) { continue; }
+    slot->invalid = false;
+    const auto callback = slot->ready;
+    if (callback) { callback(resolved); }
+  }
+}
+
+void Screen::disconnect_layout_observers() noexcept
+{
+  for (const auto &weak : layout_observers_) {
+    if (const auto slot = weak.lock()) {
+      slot->active = false;
+      slot->ready = {};
+      slot->invalidated = {};
+    }
+  }
+  layout_observers_.clear();
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -108,6 +226,7 @@ void Region::set_size_1x(float size)
   }
   size = std::max(0.0f, size);
   if (size != size_1x_) {
+    if (Screen *s = screen()) { s->invalidate_layout(); }
     size_1x_ = size;
     tag_redraw();
   }
@@ -121,6 +240,7 @@ int Region::size_px(const float ui_scale) const
 void Region::set_visible(const bool visible)
 {
   if (visible != visible_) {
+    if (Screen *s = screen()) { s->invalidate_layout(); }
     visible_ = visible;
     if (Screen *s = screen()) {
       s->tag_redraw();
@@ -185,6 +305,7 @@ float Area::weight() const
 void Area::set_weight(const float weight)
 {
   const float w = std::isfinite(weight) ? std::max(weight, 0.0f) : 0.0f;
+  if (screen_ && w != this->weight()) { screen_->invalidate_layout(); }
   if (node_) {
     node_->factor = w;
   }
@@ -204,6 +325,7 @@ void Area::tag_redraw()
 
 Region &Area::add_region(std::unique_ptr<Region> region)
 {
+  if (screen_) { screen_->invalidate_layout(); }
   region->area_ = this;
   regions_.push_back(std::move(region));
   if (screen_) {
@@ -279,6 +401,7 @@ void Area::on_added() {}
 
 void Area::layout(const Rect &rect, const DrawContext &ctx)
 {
+  if (screen_ && rect_ != rect) { screen_->invalidate_layout(); }
   rect_ = rect;
   Rect free = rect;
   /* Docked regions are carved in insertion order; Fill regions take what is left, whatever
@@ -321,6 +444,7 @@ void Area::layout(const Rect &rect, const DrawContext &ctx)
       }
     }
     const bool changed = !(rr == r->rect_);
+    if (changed && screen_) { screen_->invalidate_layout(); }
     r->rect_ = rr;
     if (changed) {
       r->redraw_ = true;
@@ -343,6 +467,9 @@ Screen::Screen() : impl_(std::make_unique<Impl>()) {}
 
 Screen::~Screen()
 {
+  destroying_ = true;
+  invalidate_layout();
+  disconnect_layout_observers();
   if (impl_->timer && impl_->timer_wm) {
     impl_->timer_wm->remove_timer(impl_->timer);
   }
@@ -441,6 +568,7 @@ void Screen::attach(Area &area, ScreenNode *node)
 
 void Screen::forget(const Area &area)
 {
+  invalidate_layout();
   for (const auto &r : area.regions()) {
     if (focus_ == r.get()) {
       focus_ = nullptr;
@@ -470,6 +598,7 @@ void Screen::forget(const Area &area)
 
 void Screen::clear()
 {
+  invalidate_layout();
   /* Retained widget bindings and the active text edit may point into editor objects in this
    * tree. Drop them before destroying those owners, including when a script replaces the
    * layout while the user is typing. A rejected layout never reaches this commit boundary. */
@@ -502,6 +631,7 @@ Area &Screen::add_area(std::unique_ptr<Area> area)
     root_->factor = w;
     return a;
   }
+  invalidate_layout();
   if (root_->leaf() || root_->dir != SplitDir::Horizontal) {
     auto split = std::make_unique<ScreenNode>();
     split->dir = SplitDir::Horizontal;
@@ -557,6 +687,7 @@ bool Screen::swap_areas(Area &first, Area &second)
       (ui_ && ui_->text_input_active())) {
     return false;
   }
+  invalidate_layout();
   auto *left = first.node_;
   auto *right = second.node_;
   std::swap(left->area, right->area);
@@ -610,6 +741,7 @@ Area *Screen::split(Area &area, const SplitDir dir, float factor, const bool new
   ScreenNode *new_node = node.get();
   ScreenNode *parent = leaf->parent;
   if (parent && parent->dir == dir) {
+    invalidate_layout();
     const int idx = index_in_parent(leaf);
     node->factor = leaf->factor * factor;
     leaf->factor *= 1.0f - factor;
@@ -621,6 +753,7 @@ Area *Screen::split(Area &area, const SplitDir dir, float factor, const bool new
     if (!slot) {
       return nullptr;
     }
+    invalidate_layout();
     auto split = std::make_unique<ScreenNode>();
     split->dir = dir;
     split->factor = leaf->factor;
@@ -677,6 +810,7 @@ bool Screen::join(Area &keep, Area &remove)
   if (!can_join(keep, remove)) {
     return false;
   }
+  invalidate_layout();
   ScreenNode *parent = keep.node_->parent;
   keep.node_->factor += remove.node_->factor;
   forget(remove);
@@ -716,6 +850,7 @@ bool Screen::join(Area &keep, Area &remove)
 
 Area &Screen::set_global_area(const RegionAlign edge, std::unique_ptr<Area> area)
 {
+  invalidate_layout();
   std::unique_ptr<Area> &slot = edge == RegionAlign::Bottom ? bottom_ : top_;
   if (slot) {
     forget(*slot);
@@ -741,6 +876,7 @@ void Screen::set_maximized(Area *area)
     return;
   }
   if (maximized_ != area) {
+    invalidate_layout();
     maximized_ = area;
     splitters_.clear();
     capture_ = Capture::None;
@@ -818,8 +954,10 @@ void Screen::layout_node(ScreenNode &node, const Rect &r, const DrawContext &ctx
 
 void Screen::layout(const Rect &rect, const DrawContext &ctx)
 {
+  const float scale = ctx.ui_scale > 0.0f ? ctx.ui_scale : 1.0f;
+  if (rect_ != rect || scale_ != scale) { invalidate_layout(); }
   rect_ = rect;
-  scale_ = ctx.ui_scale > 0.0f ? ctx.ui_scale : 1.0f;
+  scale_ = scale;
   const int gap = scaled(area_gap_1x, scale_);
   Rect tree = rect;
   if (top_) {
@@ -886,7 +1024,9 @@ int Screen::resize_split(ScreenNode &node, const int index, const int size_px)
   const int total = sizes[a] + sizes[b];
   const int min_a = min_extent(*node.children[a], node.dir, scale_);
   const int min_b = min_extent(*node.children[b], node.dir, scale_);
-  sizes[a] = clamp_pair(total, size_px, min_a, min_b);
+  const int resized = clamp_pair(total, size_px, min_a, min_b);
+  if (sizes[a] != resized) { invalidate_layout(); }
+  sizes[a] = resized;
   sizes[b] = total - sizes[a];
   for (size_t i = 0; i < n; i++) {
     node.children[i]->factor = float(double(sizes[i]) / double(total_all));
@@ -945,6 +1085,7 @@ Region *Screen::edge_region_at(const int x, const int y) const
 
 void Screen::set_ui_config(const ui::ContextConfig &config)
 {
+  invalidate_layout();
   impl_->config = config;
   impl_->has_config = true;
   ui_.reset();
@@ -1025,11 +1166,15 @@ DrawContext Screen::region_ctx(const DrawContext &ctx, const Region &region) con
 
 void Screen::update(const DrawContext &ctx)
 {
+  // Observers may defer work, but cannot recursively rebuild their borrowed frame.
+  if (layout_notification_depth_) { return; }
+  ++layout_round_;
   run_deferred();
   layout(ctx.rect, ctx);
   ensure_ui(ctx);
   impl_->segments.clear();
   if (!ui_) {
+    notify_layout(ctx);
     return;
   }
   ui_->set_scale(ctx.ui_scale, 1.0f);
@@ -1060,6 +1205,7 @@ void Screen::update(const DrawContext &ctx)
     }
   }
   frames_built_++;
+  notify_layout(ctx);
 }
 
 void Screen::draw(const DrawContext &ctx)
@@ -1878,6 +2024,7 @@ bool Screen::arrangement_impl(const nlohmann::json &json, std::string *error, co
     return true;
   }
   // Drop retained callbacks before moving nodes, but keep every live editor and its local state.
+  invalidate_layout();
   Area *active = active_area_;
   ui_.reset();
   ++deferred_epoch_;
@@ -1949,6 +2096,7 @@ void Screen::adopt_tree_from(Screen &prepared)
 {
   if (&prepared == this) { return; }
   auto release = [](Screen &screen) {
+    screen.invalidate_layout();
     screen.ui_.reset();
     ++screen.deferred_epoch_;
     screen.deferred_.clear();

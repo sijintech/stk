@@ -7,6 +7,20 @@ namespace stk::app {
 class AppStore;
 class ProjectState;
 
+struct ReportPreviewIdentity {
+  std::string project_id, report_id, source_sha256, session_id;
+};
+struct ReportPreviewAsset {
+  std::string path, mime;
+  std::vector<uint8_t> bytes;
+};
+struct PreparedReportPreview {
+  ReportPreviewIdentity identity;
+  std::string entry_path;
+  // Sanitized entry first; verified raster images follow the frozen manifest order.
+  std::vector<ReportPreviewAsset> assets;
+};
+
 /** Tab-local frozen report reader. Every response is bound to the bridge session, opened
  * project and revision. Asset bytes are retained only after their manifest hash is verified.
  * Reads never execute a document or change the shared Viewer/table selection. */
@@ -37,6 +51,14 @@ class ProjectReports {
   bool asset_loaded() const { return asset_loaded_; }
   uint64_t asset_version() const { return asset_version_; }
 
+  /** Explicit two-stage preparation. No view/session is created and no partial assets escape. */
+  bool prepare_preview();
+  void clear_preview();
+  bool preview_busy() const { return preview_busy_; }
+  const std::string &preview_error() const { return preview_error_; }
+  uint64_t preview_version() const { return preview_version_; }
+  const std::optional<PreparedReportPreview> &prepared_preview() const { return prepared_preview_; }
+
   bool load_page(int64_t offset = 0);
   /** An expected digest is used by workspace restoration; a changed version is not adopted. */
   bool load(const std::string &report_id, const std::string &expected_source_sha256 = {});
@@ -47,6 +69,11 @@ class ProjectReports {
   void clear();
 
  private:
+  struct PreviewPreparation;
+  bool preview_call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done);
+  void accept_preview(const io::Json &result);
+  void read_preview_resource();
+  void fail_preview(const std::string &error);
   void reset();
   void clear_asset();
   void changed();
@@ -63,6 +90,11 @@ class ProjectReports {
   bool busy_ = false, exporting_ = false, asset_loaded_ = false;
   io::Json page_, selected_, export_receipt_;
   std::vector<uint8_t> asset_bytes_;
-  std::optional<bridge::Future<io::Json>> future_;
+  std::optional<bridge::Future<io::Json>> future_, preview_future_;
+  std::unique_ptr<PreviewPreparation> preview_pending_;
+  std::optional<PreparedReportPreview> prepared_preview_;
+  std::string preview_error_;
+  uint64_t preview_generation_ = 0, preview_request_ = 0, preview_version_ = 0;
+  bool preview_busy_ = false;
 };
 }  // namespace stk::app

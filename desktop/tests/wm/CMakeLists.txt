@@ -207,6 +207,7 @@ add_executable(stk_wm_tests
   test_workspace_tree.cc
   test_persistence.cc
   test_screen.cc
+  test_layout_observer.cc
 )
 target_link_libraries(stk_wm_tests PRIVATE stk_app stk_wm GTest::gtest_main)
 target_compile_definitions(stk_wm_tests PRIVATE

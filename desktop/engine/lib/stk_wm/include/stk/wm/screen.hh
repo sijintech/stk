@@ -329,7 +329,28 @@ struct Splitter {
 };
 
 class Screen {
+  struct LayoutObserverSlot;
+
  public:
+  /** UI-thread-only subscription. Cancelling is immediate, including during notification.
+   * The handle may outlive its Screen; it never keeps the Screen or an editor alive. */
+  class LayoutObserver {
+   public:
+    LayoutObserver() = default;
+    ~LayoutObserver();
+    LayoutObserver(LayoutObserver &&other) noexcept;
+    LayoutObserver &operator=(LayoutObserver &&other) noexcept;
+    LayoutObserver(const LayoutObserver &) = delete;
+    LayoutObserver &operator=(const LayoutObserver &) = delete;
+    void reset() noexcept;
+    explicit operator bool() const noexcept;
+
+   private:
+    friend class Screen;
+    explicit LayoutObserver(std::shared_ptr<LayoutObserverSlot> slot);
+    std::shared_ptr<LayoutObserverSlot> slot_;
+  };
+
   Screen();
   ~Screen();
   Screen(const Screen &) = delete;
@@ -466,6 +487,21 @@ class Screen {
 
   /** Layout plus one UI frame (every visible region's build_ui). No GPU calls. */
   void update(const DrawContext &ctx);
+  /** Observe every completed update, including hidden owners and updates without a UI.
+   * ready receives the final screen rectangle/scale and ctx.ui (nullptr when unavailable),
+   * after end_frame, draw segments and frames_built. Resolved UI pointers last only until the
+   * next update/invalidation. An observer added by a notification starts next update.
+   * invalidated runs before layout sources or owners change, once until the next ready;
+   * destruction also invalidates subscriptions still waiting for their first update.
+   * Callbacks may cancel subscriptions or synchronize an external view, but must not throw,
+   * destroy this Screen, call update recursively, or mutate its tree; use defer for mutations.
+   * This is layout synchronization, not native input routing or modal event interception. */
+  [[nodiscard]] LayoutObserver observe_layout(std::function<void(const DrawContext &)> ready,
+                                             std::function<void()> invalidated = {});
+  /** Immediately withdraw resolved geometry before an application changes its content/owner.
+   * Repeated invalidations coalesce until ready; ordinary redraws do not invalidate layout.
+   * The caller requests a frame separately (tag_redraw), or is already updating layout. */
+  void invalidate_layout();
   /**
    * #update, then paints all visible regions into the currently bound framebuffer (window back
    * buffer or offscreen). The caller has set the viewport to the full framebuffer. With a window,
@@ -592,6 +628,13 @@ class Screen {
   void after_draw(const DrawContext &ctx);
   double frame_time(const DrawContext &ctx);
   DrawContext region_ctx(const DrawContext &ctx, const Region &region) const;
+  void notify_layout(const DrawContext &ctx);
+  void disconnect_layout_observers() noexcept;
+
+  std::vector<std::weak_ptr<LayoutObserverSlot>> layout_observers_;
+  uint64_t layout_epoch_ = 0, layout_round_ = 0;
+  unsigned layout_notification_depth_ = 0;
+  bool invalidating_layout_ = false, destroying_ = false;
 
   std::unique_ptr<ScreenNode> root_;
   std::unique_ptr<Area> top_, bottom_;

@@ -78,13 +78,13 @@ Windows 构建按固定版本和摘要取得 WebView2 SDK，运行时缺少 WebV
 ```sh
 cmake -S desktop -B build-desktop -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON
 cmake --build build-desktop --config RelWithDebInfo --parallel 4 --target stk-document-preview-spike stk-document-resources-tests
-ctest --test-dir build-desktop -C RelWithDebInfo -R '^DocumentResources\.' --output-on-failure
+ctest --test-dir build-desktop -C RelWithDebInfo -R '^(DocumentResources|DocumentEvidence)\.' --output-on-failure
 ```
 
 macOS 在有真实桌面会话的机器上使用 Metal；第一条运行自动生命周期冒烟，第二条保留窗口供手工验收：
 
 ```sh
-env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ./build-desktop/bin/stk-document-preview-spike --gpu-backend metal --smoke --require-native --cycles 20
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ./build-desktop/bin/stk-document-preview-spike --gpu-backend metal --smoke --require-native --cycles 20 --evidence-dir ./native-evidence-macos
 env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ./build-desktop/bin/stk-document-preview-spike --gpu-backend metal --require-native
 ```
 
@@ -93,13 +93,14 @@ Windows 在已安装 WebView2 Runtime、具有真实桌面会话的机器上使�
 ```powershell
 $env:STK_TOKEN_PLAN_API_KEY = ''
 Remove-Item Env:STK_TOKEN_PLAN_MODEL -ErrorAction SilentlyContinue
-& .\build-desktop\bin\stk-document-preview-spike.exe --gpu-backend opengl --smoke --require-native --cycles 20
+& .\build-desktop\bin\stk-document-preview-spike.exe --gpu-backend opengl --smoke --require-native --cycles 20 --evidence-dir .\native-evidence-windows
 & .\build-desktop\bin\stk-document-preview-spike.exe --gpu-backend opengl --require-native
 ```
 
 以上程序路径按单配置生成器示例书写；Visual Studio 等多配置生成器可能有配置子目录。
 配置时还会在 `build-desktop/spike/document_preview/native-smoke-<配置>.txt` 写出该配置的准确可执行文件路径和冒烟命令，
-可在该命令后增加 `--cycles 20`。`--require-native` 防止把 Linux 的不支持状态当作原生嵌入通过。
+该命令已包含 20 轮和证据目录。自动原生验收必须同时提供 `--smoke --require-native --cycles 20 --evidence-dir DIR`；
+人工 `--require-native` 仍可运行交互窗口。`--require-native` 防止把 Linux 的不支持状态当作原生嵌入通过。
 手工窗口可使用文档栏的 `HTML`、`PDF`、`Focus`，并检查下方原验收表；冒烟不会代替人工点击数、输入和 PDF 阅读验收。
 
 只验证资源清单、路径和会话边界时，可在另一个目录关闭 Blender，不需要原生浏览器或窗口；
@@ -107,14 +108,48 @@ Remove-Item Env:STK_TOKEN_PLAN_MODEL -ErrorAction SilentlyContinue
 
 ```sh
 cmake -S desktop -B build-document-cpu -DSTK_DESKTOP_WITH_BLENDER=OFF -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON
-cmake --build build-document-cpu --config RelWithDebInfo --parallel 4 --target stk-document-resources-tests
-ctest --test-dir build-document-cpu -C RelWithDebInfo -R '^DocumentResources\.' --output-on-failure
+cmake --build build-document-cpu --config RelWithDebInfo --parallel 4 --target stk-document-resources-tests stk-document-evidence-tests
+ctest --test-dir build-document-cpu -C RelWithDebInfo -R '^(DocumentResources|DocumentEvidence)\.' --output-on-failure
 ```
 
-CTest 资源测试入口将模型 key 置空并移除模型配置。关闭 Blender 时，文档预览部分只生成资源测试，不生成窗口候选目标。
+CTest 资源测试入口将模型 key 置空并移除模型配置。关闭 Blender 时，文档预览部分只生成资源与像素判据测试，不生成窗口候选目标。
 自动打开／关闭循环末尾的 guarded STK 分配检查，只覆盖该分配器管理的对象；
 它不证明 WebKit／WebView2 子进程内存没有持续增长，浏览器内存与进程释放还需独立采样。
 本段是复现入口，不是任何平台已经通过的记录；实际结果另写入[运行验收](../runtime-validation.md)。
+
+## 布局与视图生命周期
+
+候选通过 `Screen::observe_layout` 在完整 UI 布局结束后同步本区域，不再依赖主循环外侧逐个轮询宿主。
+订阅为可取消的 RAII 句柄；切换标签、最大化、几何或布局替换先立即撤销原生可见性，完成新布局后再解析当前所有者。
+隐藏编辑器仍接收布局通知；没有 UI／窗口时隐藏，关闭编辑器或父窗口先取消订阅、关闭子视图并失效资源。
+订阅不跟随布局树迁入另一 Screen，宿主需要重新绑定；回调不得保留 Widget／Layout 指针或直接改树。
+普通重绘不触发失效，避免每帧撤焦。所有模态框隐藏子视图，其他相交浮层也暂时隐藏。
+这只是布局同步，仍没有证明同一批原生输入事件的拦截或全局快捷键／IME 路由；候选也仍占整个 main 区域，
+正式报告需要独立且经过裁剪核对的预览视口。
+
+## 自动原生显示证据
+
+自动验收直接捕获原型自己的 STK 窗口：macOS 使用 ScreenCaptureKit 的当前进程窗口与单窗口过滤，
+Windows 使用 Windows Graphics Capture 的指定 HWND；不读取整张桌面或其他应用窗口。
+macOS 的证据工具运行时要求 14.4，产品最低 13.3 与普通候选运行不因此改变。
+Windows 在创建 GHOST 窗口前核对 DPI 和 OpenGL 4.3；没有能力时记录失败，避免驱动错误对话框阻塞 CI。
+不自动安装浏览器 Runtime、显示驱动或修改截屏权限。
+
+两份 HTML 含顺序不同的六色色条，宿主 GPU 不绘制这些标记。每阶段需要两次独立 OS 捕获匹配，
+显示时在文档矩形内找到正确标记，隐藏时在整个客户区均不能找到两种标记，并要求宿主存在非空彩色采样。
+固定 20 轮覆盖显示、切换 Python、恢复、最大化 Viewer、恢复、导航第二页、缩放窗口和关闭标签；
+最后在导航期间关闭父窗口。全部成功产生 161 张最终 PNG、对应 SHA256 与 `result.json`。
+关闭时同时核对实际子视图状态和旧资源 URL 的 410；异常保留失败 JSON 和已有图像。
+
+macOS CI 实际执行原生测试；Windows 独立验证作业消费同头编译的候选包并实际执行。
+权限、显示设备、OpenGL、Runtime 缺失或像素不匹配均失败，不计为跳过或嵌入成功。
+这套证据入口仍须以具体提交的 CI／实机结果判定；编译和 CPU 像素测试不能证明 OS 捕获通过。
+OS 合成截图不证明物理屏幕扫描输出、PDF／IME／跨屏 DPI 验收或浏览器子进程内存稳定。
+仍按下方验收表记录人工输入、截图检查和浏览器进程占用。
+
+依据：[Apple 当前进程窗口](https://developer.apple.com/documentation/screencapturekit/scshareablecontent/getcurrentprocessshareablecontent(completionhandler:))、
+[Windows 指定窗口捕获](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow)、
+[Windows DPI 初始化](https://learn.microsoft.com/en-us/windows/win32/hidpi/setting-the-default-dpi-awareness-for-a-process)。
 
 ## 文档内容与资源
 

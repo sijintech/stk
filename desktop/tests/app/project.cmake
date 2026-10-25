@@ -11,7 +11,7 @@ add_executable(stk-project-tests project_test.cc script_test.cc project_table_vi
   analysis_table_grid_test.cc analysis_table_grid_editor_test.cc skills_catalog_test.cc project_skills_test.cc analysis_links_editor_test.cc
   workflow_editor_test.cc workflow_draft_test.cc table_editor_test.cc project_file_tree_test.cc
   workbench_modules_test.cc table_workbench_state_test.cc table_workbench_editor_test.cc table_object_preview_test.cc
-  table_io_editor_test.cc workspace_transfer_test.cc reports_editor_test.cc)
+  table_io_editor_test.cc workspace_transfer_test.cc reports_editor_test.cc reports_preview_test.cc)
 target_link_libraries(stk-project-tests PRIVATE stk_jobs_test_support GTest::gtest_main)
 if(MSVC)
   target_compile_options(stk-project-tests PRIVATE /W3 /utf-8 /bigobj)
