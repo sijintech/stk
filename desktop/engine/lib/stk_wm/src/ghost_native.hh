@@ -3,10 +3,14 @@
 #pragma once
 
 #include <cstdint>
+#include "stk/wm/native_window.hh"
 
 class GHOST_ISystem;
+class GHOST_IWindow;
 
 namespace stk::wm::detail {
+
+NativeWindowHandle ghost_native_window(GHOST_IWindow *window);
 
 /** Milliseconds until GHOST's next timer is due (0 when overdue), -1 when no timer is installed. */
 int64_t ghost_ms_until_next_timer(GHOST_ISystem &system);

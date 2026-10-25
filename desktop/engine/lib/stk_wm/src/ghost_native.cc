@@ -17,6 +17,9 @@
 
 #include "intern/GHOST_System.hh"
 #include "intern/GHOST_TimerManager.hh"
+#if defined(__APPLE__) || defined(_WIN32)
+#  include "intern/GHOST_Window.hh"
+#endif
 
 #if defined(WITH_GHOST_X11)
 #  include "intern/GHOST_SystemX11.hh"
@@ -25,6 +28,22 @@
 #endif
 
 namespace stk::wm::detail {
+
+NativeWindowHandle ghost_native_window(GHOST_IWindow *window)
+{
+#if defined(__APPLE__)
+  return window ? NativeWindowHandle{NativeWindowKind::Cocoa,
+                                    static_cast<GHOST_Window *>(window)->getOSWindow()} :
+                  NativeWindowHandle{};
+#elif defined(_WIN32)
+  return window ? NativeWindowHandle{NativeWindowKind::Win32,
+                                    static_cast<GHOST_Window *>(window)->getOSWindow()} :
+                  NativeWindowHandle{};
+#else
+  (void)window;
+  return {};
+#endif
+}
 
 int64_t ghost_ms_until_next_timer(GHOST_ISystem &system)
 {

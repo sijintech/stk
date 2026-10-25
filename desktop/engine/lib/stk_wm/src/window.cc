@@ -35,6 +35,11 @@ namespace stk::wm {
 
 using namespace blender;
 
+NativeWindowHandle Window::native_window_handle() const
+{
+  return detail::ghost_native_window(ghost_);
+}
+
 /* Key values mirror GHOST_TKey. */
 static_assert(int(Key::BackSpace) == GHOST_kKeyBackSpace);
 static_assert(int(Key::Enter) == GHOST_kKeyEnter);

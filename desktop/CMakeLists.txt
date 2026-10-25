@@ -26,6 +26,8 @@ endif()
 
 option(STK_DESKTOP_WITH_BLENDER "Build the vendored Blender GHOST + GPU + BLF engine" ON)
 option(STK_DESKTOP_BUILD_SPIKE "Build the Phase 0 GPU extraction spike" ON)
+option(STK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE
+  "Build the opt-in native document preview candidate and confined-resource tests" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -109,6 +111,12 @@ endif()
 # viewer.cmake WP10, jobs.cmake WP9).
 if(TARGET stk_app AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/app/CMakeLists.txt")
   add_subdirectory(tests/app)
+endif()
+
+if(STK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE)
+  # After tests/unit so the CPU-only resource suite shares its pinned GTest, even without Blender.
+  # Independent of STK_DESKTOP_BUILD_SPIKE; none of these candidate targets are installed.
+  add_subdirectory(spike/document_preview)
 endif()
 
 # install() of the executables, licences and bundle metadata; CPack (TGZ on Linux, ZIP on macOS).

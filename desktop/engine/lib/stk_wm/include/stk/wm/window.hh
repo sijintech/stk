@@ -28,6 +28,7 @@
 #include "stk/gfx/gpu.hh"
 #include "stk/gfx/image.hh"
 #include "stk/wm/event.hh"
+#include "stk/wm/native_window.hh"
 #include "stk/wm/screen.hh"
 
 class GHOST_ISystem;
@@ -160,6 +161,11 @@ class Window {
   {
     return ghost_;
   }
+
+  /** Borrowed NSWindow/HWND for native child views; unsupported backends return an empty handle.
+   * Close child views from add_close_listener before this window's platform object is destroyed.
+   */
+  NativeWindowHandle native_window_handle() const;
 
  private:
   friend class WindowManager;

@@ -1,7 +1,8 @@
 # 文档预览技术验证计划
 
-状态：2026-09-28 已核对当前代码和官方接口；**尚未实现嵌入原型，也未完成选型**。
-这是 P0 的验证任务，不表示 P4 的 Markdown、HTML、PDF 或 LaTeX 已交付。
+状态：2026-10-25 **已实现默认关闭的原生嵌入候选源码，正在等待本机与跨平台验收，尚未完成选型**。
+当前没有 macOS／Windows 的实际运行验收证据。这是 P0 的验证任务，不表示 P4 的 Markdown、HTML 报告、
+PDF 阅读体验或 LaTeX 已交付。
 产品范围见[项目工作台](project-workbench.md)，当前文件入口见[项目文件](../project-files.md)。
 
 ## 当前约束
@@ -11,10 +12,11 @@ STK 的新桌面由 GHOST 创建窗口，自有 UI 绘制菜单、表格和区�
 
 代码核对结果：
 
-- [`wm::Window`](../../desktop/engine/lib/stk_wm/include/stk/wm/window.hh) 已提供 `ghost_window()`，
-  返回 `GHOST_IWindow*`，不是平台窗口句柄；还有窗口销毁回调。
+- [`wm::Window`](../../desktop/engine/lib/stk_wm/include/stk/wm/window.hh) 提供 `native_window_handle()`，
+  在窗口仍存活时借用 `NSWindow*`／`HWND`，并提供窗口销毁前回调。原有 `ghost_window()` 返回
+  `GHOST_IWindow*`，不是平台窗口句柄。
 - GHOST 的 `getOSWindow()` 位于内部 `GHOST_Window` 类，Win32 返回窗口句柄、Cocoa 返回 `NSWindow`。
-  不应假定可以直接在 `GHOST_IWindow` 上调用它。后续适配应集中在窗口层，避免各编辑器包含 GHOST 内部头文件。
+  不应假定可以直接在 `GHOST_IWindow` 上调用它；现有适配集中在窗口层，编辑器不包含 GHOST 内部头文件。
 - [`DrawContext`](../../desktop/engine/lib/stk_wm/include/stk/wm/screen.hh) 提供窗口、区域像素矩形与 UI 比例，
   无窗口渲染时 `window` 为空。原生子视图需要窗口生命周期，不能复用现有离屏截图就宣称嵌入成功。
 - 菜单、弹窗、拖拽分隔线和最大化都由自有 UI 处理。浏览器子窗口盖住菜单、抢走快捷键，或切换标签后仍接收输入，
@@ -44,12 +46,80 @@ Windows 先测窗口承载，其输入和焦点支持可减少原型代码；如
 合成承载需要处理更多输入与图形集成，不能只换一个创建函数就认为解决了遮挡。
 不在原型前承诺安装包大小或最低内存；分别测量启动、空闲、打开文档和关闭后的进程及资源占用。
 
-Linux 继续运行现有桌面；首轮原型允许文档区明确显示暂不支持并提供已有系统打开入口。
+Linux 继续运行现有桌面；当前候选的文档后端明确返回 `Unsupported`，不会创建浏览器子视图。
+产品已有的系统打开入口不因此改变，原型不会自动启动外部应用。
 Linux 正式预览后端需单独选型，不把 macOS/Windows 方案的通过扩展成三平台能力。
+
+## 候选源码与有限使用
+
+实现位于 [`desktop/spike/document_preview/`](../../desktop/spike/document_preview/)。
+`STK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE` 默认 `OFF`；只有明确开启时才添加候选及资源测试目标。
+macOS 使用同一 GHOST 窗口中的 WKWebView，Windows 使用该窗口承载的 WebView2。
+原型在同窗 Viewer 打开仓库公开的 payload 示例，不启动桌面桥，不读取用户项目，不发起模型请求。
+
+文档资源仅为四个内存资产：`index.html`、`next.html`、`图 像#%.png` 和两页英文合成 `fixture.pdf`。
+HTML 包含中文、表格、代码、静态数学文本、输入法／剪贴板输入框、滚动内容及明确点击的拒绝动作检查。
+每次打开使用独立资源会话；没有 Markdown 转换、LaTeX 编译或 PDF.js。
+PDF 按平台现有能力尝试显示，失败须保留可读状态。
+
+资源只从显式清单提供；页面脚本、外部导航、下载、新窗口和通用主机桥被禁用。
+这些文档请求门禁**不证明浏览器 Runtime 的更新、遥测等后台活动绝对没有网络流量**，离线部署仍需实际验证。
+macOS 使用非持久网站数据，Windows 使用独立 InPrivate 预览配置；这也不是“运行过程完全不写磁盘”的承诺。
+Windows 构建按固定版本和摘要取得 WebView2 SDK，运行时缺少 WebView2 Runtime 会显示错误，**不会自动安装 Runtime**；
+离线构建可将 `STK_WEBVIEW2_SDK_URL` 指向同一归档的 `file://` URL，摘要校验仍保留。
+
+菜单或弹窗与文档区域相交，以及拖动区域边界时，候选暂时隐藏原生子视图并移出焦点，随后恢复。
+这是当前窗口承载方案的限制，不是已实现无缝菜单叠加。`parent_attached`／`visible` 查询核对实际平台状态，
+`Ready` 表示浏览器导航完成；这些状态与窗口帧计数都不证明屏幕已呈现内容，也不替代 OS 截图、IME 或跨屏 DPI 验收。
+
+在仓库根目录使用**已经配置并可构建桌面的目录**，保留原来的工具链、依赖和 GPU 设置。
+下面以 `build-desktop` 为例；先完成构建，再运行程序或测试，不并行重链正在使用的二进制：
+
+```sh
+cmake -S desktop -B build-desktop -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON
+cmake --build build-desktop --config RelWithDebInfo --parallel 4 --target stk-document-preview-spike stk-document-resources-tests
+ctest --test-dir build-desktop -C RelWithDebInfo -R '^DocumentResources\.' --output-on-failure
+```
+
+macOS 在有真实桌面会话的机器上使用 Metal；第一条运行自动生命周期冒烟，第二条保留窗口供手工验收：
+
+```sh
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ./build-desktop/bin/stk-document-preview-spike --gpu-backend metal --smoke --require-native --cycles 20
+env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ./build-desktop/bin/stk-document-preview-spike --gpu-backend metal --require-native
+```
+
+Windows 在已安装 WebView2 Runtime、具有真实桌面会话的机器上使用 OpenGL，PowerShell 命令为：
+
+```powershell
+$env:STK_TOKEN_PLAN_API_KEY = ''
+Remove-Item Env:STK_TOKEN_PLAN_MODEL -ErrorAction SilentlyContinue
+& .\build-desktop\bin\stk-document-preview-spike.exe --gpu-backend opengl --smoke --require-native --cycles 20
+& .\build-desktop\bin\stk-document-preview-spike.exe --gpu-backend opengl --require-native
+```
+
+以上程序路径按单配置生成器示例书写；Visual Studio 等多配置生成器可能有配置子目录。
+配置时还会在 `build-desktop/spike/document_preview/native-smoke-<配置>.txt` 写出该配置的准确可执行文件路径和冒烟命令，
+可在该命令后增加 `--cycles 20`。`--require-native` 防止把 Linux 的不支持状态当作原生嵌入通过。
+手工窗口可使用文档栏的 `HTML`、`PDF`、`Focus`，并检查下方原验收表；冒烟不会代替人工点击数、输入和 PDF 阅读验收。
+
+只验证资源清单、路径和会话边界时，可在另一个目录关闭 Blender，不需要原生浏览器或窗口；
+其余工具链和 CPU 依赖仍按桌面构建说明配置：
+
+```sh
+cmake -S desktop -B build-document-cpu -DSTK_DESKTOP_WITH_BLENDER=OFF -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON
+cmake --build build-document-cpu --config RelWithDebInfo --parallel 4 --target stk-document-resources-tests
+ctest --test-dir build-document-cpu -C RelWithDebInfo -R '^DocumentResources\.' --output-on-failure
+```
+
+CTest 资源测试入口将模型 key 置空并移除模型配置。关闭 Blender 时，文档预览部分只生成资源测试，不生成窗口候选目标。
+自动打开／关闭循环末尾的 guarded STK 分配检查，只覆盖该分配器管理的对象；
+它不证明 WebKit／WebView2 子进程内存没有持续增长，浏览器内存与进程释放还需独立采样。
+本段是复现入口，不是任何平台已经通过的记录；实际结果另写入[运行验收](../runtime-validation.md)。
 
 ## 文档内容与资源
 
-首轮固定使用仓库内可复现的测试文档，禁止测试时从 CDN 下载脚本或字体。候选流程是：
+首轮固定使用仓库内可复现的测试文档，禁止测试时从 CDN 下载脚本或字体。
+当前四资产夹具之外，以下仍是后续比较范围：
 
 1. Markdown 转成受约束的 HTML，覆盖中英文、代码块、表格、数学内容与项目图片。
 2. HTML 报告显示保存的页面和资产；项目表格仅显示标题、类型、版本和缩略摘要。
