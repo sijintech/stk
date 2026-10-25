@@ -1,5 +1,7 @@
 {
   "table.attachment_preview": "Preview attachment",
+  "table.thumbnail_load": "Load thumbnail",
+  "table.attachment_first_frame": "First frame; total frames: ",
   "table.attachment_loading": "Loading attachment…",
   "table.attachment_truncated": "Showing the first 64 KiB of text. The checksum covers the complete file.",
   "_comment": "STK desktop UI strings (en). Keys are stable ids; keep zh_CN.json in sync (check_i18n.py).",

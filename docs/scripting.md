@@ -99,6 +99,11 @@ if catalog["tables"]:
 记录页保留类型、空值、引用与公式求值；页外依赖按需读取。修订冲突时重新检查，不能混合前后两版数据。
 筛选和排序继续使用 `p.table.query()`；这些读取不运行计算任务或模型请求。
 
+文件对象可用 `p.table.objects_preview(reference, expected_revision=revision)` 明确读取附件，
+或用 `p.table.objects_thumbnail(reference, expected_revision=revision)` 读取图像缩略图。
+新图像格式和缩略图需要 `visualization` extra 的 Pillow；原文件摘要保留在 `content_sha256`，
+转换后的 PNG 像素另有 `render.sha256`，不能用缩略图替换冻结原文件。完整限制见[表格契约](specs/project-tables-14.md#explicit-local-attachment-preview-additive-2026-10-25)。
+
 ```python
 p = stk.projects.create("/absolute/path/to/new-project", "Simulation")
 p = stk.projects.open("/absolute/path/to/existing-project")

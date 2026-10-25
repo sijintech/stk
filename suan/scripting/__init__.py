@@ -506,8 +506,12 @@ class ProjectTable:
         return self._read("objects.resolve", expected_revision, reference=reference)
 
     def objects_preview(self, reference, *, expected_revision):
-        """Read a bounded local PNG or UTF-8 attachment; never execute or open Viewer."""
+        """Read a bounded local image or UTF-8 attachment; never execute or open Viewer."""
         return self._read("objects.preview", expected_revision, reference=reference)
+
+    def objects_thumbnail(self, reference, *, expected_revision):
+        """Read an oriented, bounded first-frame image thumbnail without changing the project."""
+        return self._read("objects.thumbnail", expected_revision, reference=reference)
 
     def csv_preview(self, source, *, expected_revision, delimiter=",", limit=20):
         return self._read("csv.preview", expected_revision, source=str(Path(source).expanduser().absolute()),

@@ -11,10 +11,11 @@
 namespace stk::app {
 using io::Json;
 namespace {
-constexpr std::array<std::string_view, 9> methods = {
+constexpr std::array<std::string_view, 10> methods = {
     "project.table.views.list", "project.table.views.get", "project.table.query",
     "project.table.paste.plan", "project.table.objects.list_candidates", "project.table.objects.resolve",
-    "project.table.csv.preview", "project.table.io.preview", "project.table.objects.preview"};
+    "project.table.csv.preview", "project.table.io.preview", "project.table.objects.preview",
+    "project.table.objects.thumbnail"};
 
 bool array_member(const Json &value, const char *key)
 {
@@ -247,7 +248,7 @@ bool TableWorkbenchState::valid_result(const int index, const Json &result, cons
     }
     return true;
   }
-  if (index == 8) {
+  if (index == 8 || index == 9) {
     const auto kind = io::get_string(result, "kind");
     const auto sha = io::get_string(result, "content_sha256");
     const auto size = io::get_int(result, "size", -1);
@@ -258,6 +259,22 @@ bool TableWorkbenchState::valid_result(const int index, const Json &result, cons
         !result.contains("data") || !result.at("data").is_string() ||
         !result.contains("truncated") || !result.at("truncated").is_boolean()) { return false; }
     const auto &data = result.at("data").get_ref<const std::string &>();
+    if (result.contains("render")) {
+      const auto &render = result.at("render");
+      if (kind != "png" || result.at("truncated").get<bool>() || !render.is_object() ||
+          !valid_sha256(io::get_string(render, "sha256")) || io::get_int(render, "frame", -1) != 0 ||
+          io::get_int(render, "frames", 0) < 1 || !render.contains("thumbnail") || !render.at("thumbnail").is_boolean() ||
+          render.at("thumbnail").get<bool>() != (index == 9) || data.size() > 1398104) { return false; }
+      const auto w = io::get_int(render, "width", 0), h = io::get_int(render, "height", 0);
+      const auto dw = io::get_int(render, "display_width", 0), dh = io::get_int(render, "display_height", 0);
+      const int edge = index == 9 ? 256 : 2048;
+      if (w < 1 || h < 1 || w > 4096 || h > 4096 || w * h > 4 * 1024 * 1024 ||
+          dw < 1 || dh < 1 || dw > edge || dh > edge) { return false; }
+      const auto bytes = bridge::decode_base64(data);
+      return bytes && bytes->size() <= 1024 * 1024 &&
+          int64_t(bytes->size()) == io::get_int(render, "size", -1) && core::Sha256::hex(*bytes) == io::get_string(render, "sha256");
+    }
+    if (index == 9) { return false; }
     if (kind == "text") {
       return data.size() <= 65536 && data.size() <= size_t(size) &&
           (result.at("truncated").get<bool>() ? size > 65536 :

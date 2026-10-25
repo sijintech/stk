@@ -1,5 +1,7 @@
 {
   "table.attachment_preview": "预览附件",
+  "table.thumbnail_load": "加载缩略图",
+  "table.attachment_first_frame": "显示第一帧；总帧数：",
   "table.attachment_loading": "正在读取附件…",
   "table.attachment_truncated": "仅显示前 64 KiB 文本，摘要对应完整文件。",
   "_comment": "STK desktop UI strings (zh_CN, default language). Keys are stable ids; keep en.json in sync (check_i18n.py).",

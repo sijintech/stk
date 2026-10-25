@@ -9820,7 +9820,7 @@
         }
       },
       "project.table.objects.preview": {
-        "description": "Explicit local PNG or UTF-8 attachment preview; never executes work or changes the Viewer.",
+        "description": "Explicit bounded local image or UTF-8 attachment preview. Converted PNG pixels have a separate render checksum; source checksum remains unchanged.",
         "params": {
           "type": "object",
           "properties": {
@@ -9879,6 +9879,9 @@
             },
             "truncated": {
               "type": "boolean"
+            },
+            "render": {
+              "$ref": "#/$defs/projectAttachmentRender"
             }
           },
           "required": [
@@ -11548,6 +11551,100 @@
             "total",
             "offset",
             "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.table.objects.thumbnail": {
+        "description": "Explicit local image thumbnail, at most 256 pixels per axis, first frame with EXIF orientation. Never changes the project or Viewer.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reference": {
+              "$ref": "#/$defs/projectObjectReference"
+            }
+          },
+          "required": [
+            "handle",
+            "expected_revision",
+            "reference"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reference": {
+              "$ref": "#/$defs/projectObjectReference"
+            },
+            "label": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "png"
+            },
+            "content_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1048576
+            },
+            "data": {
+              "type": "string",
+              "maxLength": 1398104
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "render": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/projectAttachmentRender"
+                },
+                {
+                  "properties": {
+                    "thumbnail": {
+                      "const": true
+                    },
+                    "display_width": {
+                      "maximum": 256
+                    },
+                    "display_height": {
+                      "maximum": 256
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "version",
+            "revision",
+            "reference",
+            "label",
+            "kind",
+            "content_sha256",
+            "size",
+            "data",
+            "truncated",
+            "render"
           ],
           "additionalProperties": false
         }
@@ -19836,6 +19933,73 @@
         "skill"
       ],
       "additionalProperties": false
+    },
+    "projectAttachmentRender": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "format": {
+          "enum": [
+            "PNG",
+            "JPEG",
+            "WEBP",
+            "GIF",
+            "BMP",
+            "TIFF"
+          ]
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "display_width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2048
+        },
+        "display_height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2048
+        },
+        "frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "frame": {
+          "const": 0
+        },
+        "thumbnail": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "size",
+        "format",
+        "width",
+        "height",
+        "display_width",
+        "display_height",
+        "frames",
+        "frame",
+        "thumbnail"
+      ]
     }
   }
 }

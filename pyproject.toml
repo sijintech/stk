@@ -47,6 +47,7 @@ openpyxl = ">=3.1.5,<4"
 defusedxml = ">=0.7.1,<1"
 numpy = { version = ">=1.24,<3", optional = true }
 matplotlib = { version = ">=3.6,<4", optional = true }
+Pillow = { version = ">=12.3,<14", optional = true }
 PySide6 = { version = ">=6.4,<7", optional = true }
 vtk = { version = ">=9.3,<10", optional = true }
 requests = { version = ">=2.31,<3", optional = true }
@@ -81,7 +82,7 @@ mcp = ["mcp", "numpy", "matplotlib"]
 build = ["pyinstaller", "pyinstaller-hooks-contrib"]
 test = ["pytest", "jsonschema"]
 control = ["fastapi", "uvicorn", "httpx", "websockets"]
-visualization = ["numpy", "vtk", "h5py"]
+visualization = ["numpy", "vtk", "h5py", "Pillow"]
 
 # 添加 PyTorch 官方源
 [[tool.poetry.source]]

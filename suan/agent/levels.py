@@ -38,6 +38,7 @@ OPERATIONS = {
     "project.table.objects.list_candidates": ("read", "same-project metadata only; not used by agent tools"),
     "project.table.objects.resolve": ("read", "same-project metadata only; not used by agent tools"),
     "project.table.objects.preview": ("read", "explicit bounded local attachment read; not used by agent tools"),
+    "project.table.objects.thumbnail": ("read", "explicit bounded local image thumbnail; not used by agent tools"),
     "project.table.csv.preview": ("read", "explicit local bounded file read; not used by agent tools"),
     "project.table.io.preview": ("read", "explicit local table file preview; not used by agent tools"),
     "project.table.io.import": ("project_edit", "imports a table in one explicit edit batch"),

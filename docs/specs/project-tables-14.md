@@ -99,7 +99,7 @@ diagnosable after target removal. Candidates include complete references ready f
 
 `project.table.objects.preview {handle,reference,expected_revision}`
  -> `{version:1,revision,reference,label,kind:'text'|'png',content_sha256:64hex,
- size:integer,data:string,truncated:boolean}`.
+ size:integer,data:string,truncated:boolean,render?:object}`.
 This separate read accepts only an available same-project `file` or `snapshot_file`.
 The Python facade is `project.table.objects_preview(reference, expected_revision=...)`.
 It does not refresh the file index, change project revision/history, invoke a model,
@@ -112,10 +112,33 @@ rules and return current local bytes, which may differ from the last indexed obs
 Frozen files are read from the content store and must match the manifest size and SHA-256.
 Missing/stale references, unsupported types, read races and corrupt frozen bytes fail.
 
-PNG `data` contains base64 of the complete original file. Header dimensions must be
+For a normal PNG preview, `data` contains base64 of the complete original file. Header dimensions must be
 positive, at most 4096 per axis and at most 4194304 pixels. The bridge checks the header;
 the native client also validates the byte checksum and decodes PNG with these limits,
 rejecting corrupt/unsupported encoding before display. `truncated` is always false.
+
+JPEG (`.jpg`/`.jpeg`), WebP, GIF, BMP and TIFF (`.tif`/`.tiff`) are also accepted.
+These formats require Pillow from the `visualization` extra; missing support is an explicit
+error, without affecting the original PNG/text path. Decoding accepts only the format matching
+the extension, with the same source byte and dimension limits. The first frame is oriented
+using EXIF and converted to RGBA PNG, fitted within 2048 pixels per axis and reduced further
+if needed to keep encoded pixels within 1 MiB. Derived pixels carry no source EXIF/ICC/text metadata.
+`size` and `content_sha256` still identify the complete original file, not the derived PNG.
+The additional `render` contains `sha256`, `size`, `format`, source `width`/`height`,
+`display_width`/`display_height`, `frames`, `frame:0` and `thumbnail:false`.
+Clients verify the derived byte count/checksum and decoded dimensions separately; multi-frame
+images are labelled as first-frame previews, not animation playback or complete TIFF page viewing.
+
+`project.table.objects.thumbnail {handle,reference,expected_revision}` returns the same envelope,
+with required `kind:'png'` and `render.thumbnail:true`, fitted within 256 pixels per axis.
+It accepts only the image formats above, including PNG, and always requires the decoder.
+Capability discovery is required for this additive method. Python exposes
+`project.table.objects_thumbnail(reference, expected_revision=...)`.
+Cards and boards offer an explicit load action for each visible file-object field; merely
+opening a view does not read attachments. Each editor keeps at most 32 thumbnails and releases
+their textures when its source/revision/view changes or the editor closes. Refreshing an image
+discards its old preview first; a failed read cannot retain old pixels as a new result.
+This temporary cache is neither a project resource nor part of workspace persistence.
 
 Text suffixes: `.txt`, `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`,
 `.toml`, `.xml`, `.html`, `.htm`, `.tex`, `.rst`, `.py`, `.log` (case-insensitive).

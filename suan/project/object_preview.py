@@ -1,6 +1,7 @@
 """Explicit, bounded attachment reads; metadata resolution remains content-free."""
 import base64
 import hashlib
+from io import BytesIO
 import os
 from pathlib import Path
 import stat
@@ -15,6 +16,50 @@ MAX_BYTES = 1024 * 1024
 TEXT_BYTES = 64 * 1024
 TEXT_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".yaml", ".yml",
                            ".toml", ".xml", ".html", ".htm", ".tex", ".rst", ".py", ".log"})
+IMAGE_FORMATS = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP",
+                 ".gif": "GIF", ".bmp": "BMP", ".tif": "TIFF", ".tiff": "TIFF"}
+
+
+def image_preview(data, suffix, *, thumbnail):
+    """Decode only an allowed local image, orient frame zero and emit bounded PNG pixels.
+
+    Source identity and rendered identity are separate: a thumbnail is never a
+    replacement for the original attachment or its frozen manifest checksum.
+    """
+    try:
+        from PIL import Image, ImageOps, UnidentifiedImageError
+    except ImportError:
+        raise ProjectError("Image conversion and thumbnails require the visualization extra (Pillow)") from None
+    try:
+        with Image.open(BytesIO(data), formats=[IMAGE_FORMATS[suffix]]) as source:
+            width, height = source.size
+            if not 0 < width <= 4096 or not 0 < height <= 4096 or width * height > 4 * 1024 * 1024:
+                raise ProjectError("Image preview is limited to 4096 per axis and 4 megapixels")
+            frames = getattr(source, "n_frames", 1)
+            source.seek(0)
+            image = ImageOps.exif_transpose(source).convert("RGBA")
+            edge = 256 if thumbnail else 2048
+            image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+            # Do not copy EXIF, ICC or text chunks into the derived display asset.
+            image.info.clear()
+            while True:
+                output = BytesIO()
+                image.save(output, format="PNG")
+                rendered = output.getvalue()
+                if len(rendered) <= MAX_BYTES:
+                    break
+                edge //= 2
+                if edge < 64:
+                    raise ProjectError("Converted preview exceeds 1 MiB")
+                image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+            return rendered, {"sha256": hashlib.sha256(rendered).hexdigest(), "size": len(rendered),
+                              "format": IMAGE_FORMATS[suffix], "width": width, "height": height,
+                              "display_width": image.width, "display_height": image.height,
+                              "frames": frames, "frame": 0, "thumbnail": thumbnail}
+    except (OSError, ValueError, EOFError, UnidentifiedImageError, Image.DecompressionBombError) as error:
+        if isinstance(error, ProjectError):
+            raise
+        raise ProjectError("Attachment is not a valid supported image") from None
 
 
 def read_attachment(path):
@@ -42,7 +87,7 @@ def read_attachment(path):
     return data
 
 
-def preview(store, db, value):
+def preview(store, db, value, *, thumbnail=False):
     resolved = resolve(store, db, value)
     ref, summary = resolved["reference"], resolved["summary"]
     if resolved["state"] != "available":
@@ -54,8 +99,10 @@ def preview(store, db, value):
     else:
         raise ProjectError("Attachment preview requires a file or frozen snapshot file")
     suffix = Path(summary["name"]).suffix.lower()
-    if suffix != ".png" and suffix not in TEXT_SUFFIXES:
-        raise ProjectError("Preview supports PNG and UTF-8 text attachments")
+    if thumbnail and suffix not in IMAGE_FORMATS:
+        raise ProjectError("Thumbnails require a PNG, JPEG, WebP, GIF, BMP or TIFF image")
+    if suffix not in IMAGE_FORMATS and suffix not in TEXT_SUFFIXES:
+        raise ProjectError("Preview supports PNG and UTF-8 text attachments, plus JPEG, WebP, GIF, BMP and TIFF")
     try:
         data = read_attachment(path)
     except (OSError, RuntimeError):
@@ -63,7 +110,11 @@ def preview(store, db, value):
     checksum = hashlib.sha256(data).hexdigest()
     if ref["kind"] == "snapshot_file" and (checksum != summary["sha256"] or len(data) != summary["size"]):
         raise ProjectError("Frozen attachment checksum does not match its manifest")
-    if suffix == ".png":
+    render = None
+    if suffix in IMAGE_FORMATS and (thumbnail or suffix != ".png"):
+        rendered, render = image_preview(data, suffix, thumbnail=thumbnail)
+        content, truncated, kind = base64.b64encode(rendered).decode("ascii"), False, "png"
+    elif suffix == ".png":
         if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
             raise ProjectError("Attachment is not a PNG image")
         width, height = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
@@ -78,5 +129,8 @@ def preview(store, db, value):
         if any(ord(c) < 32 and c not in "\t\r\n" for c in text):
             raise ProjectError("Text preview does not accept binary control characters")
         content, truncated, kind = data[:TEXT_BYTES].decode("utf-8", errors="ignore"), len(data) > TEXT_BYTES, "text"
-    return {"version": 1, "reference": ref, "label": resolved["label"], "kind": kind,
-            "content_sha256": checksum, "size": len(data), "data": content, "truncated": truncated}
+    result = {"version": 1, "reference": ref, "label": resolved["label"], "kind": kind,
+              "content_sha256": checksum, "size": len(data), "data": content, "truncated": truncated}
+    if render is not None:
+        result["render"] = render
+    return result

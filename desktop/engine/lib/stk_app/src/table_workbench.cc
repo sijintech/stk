@@ -171,6 +171,80 @@ struct TableWorkbench::Impl {
   };
   std::unique_ptr<Attachment> attachment;
   std::function<bool()> attachment_current;
+  std::unordered_map<std::string, std::unique_ptr<Attachment>> thumbnails;
+  std::vector<std::string> thumbnail_order;
+  std::string pending_thumbnail;
+  std::function<bool()> thumbnails_current;
+
+  static std::unique_ptr<Attachment> decode_attachment(const Json &result)
+  {
+    auto next = std::make_unique<Attachment>(); next->result = result;
+    if (io::get_string(result, "kind") == "png") {
+      try {
+        const auto bytes = bridge::decode_base64(io::get_string(result, "data"));
+        if (!bytes) { throw std::runtime_error("Invalid PNG encoding"); }
+        next->image = io::decode_png(*bytes, {4096, 4096, 4 * 1024 * 1024});
+        if (result.contains("render")) {
+          const auto &render = result.at("render");
+          if (int64_t(next->image->width) != io::get_int(render, "display_width", 0) ||
+              int64_t(next->image->height) != io::get_int(render, "display_height", 0)) {
+            throw std::runtime_error("PNG dimensions differ from the preview receipt");
+          }
+        }
+      }
+      catch (const std::exception &e) { next->image.reset(); next->error = e.what(); }
+    }
+    return next;
+  }
+  static void attachment_image(ui::Layout &layout, EditorContext &ctx, Attachment &item,
+                               const std::string &name, float height)
+  {
+    if (!item.image) { return; }
+    auto &jobs = ctx.store.jobs();
+    if (!item.texture && jobs.create_texture && jobs.free_texture) {
+      item.release = jobs.free_texture;
+      item.texture = jobs.create_texture(*item.image);
+    }
+    const auto &img = *item.image;
+    layout.image(name, {item.texture, int(img.width), int(img.height), height});
+    if (item.result.contains("render") && io::get_int(item.result.at("render"), "frames", 1) > 1) {
+      layout.label(std::string(ctx.tr("table.attachment_first_frame")) +
+                   std::to_string(io::get_int(item.result.at("render"), "frames", 1)));
+    }
+  }
+  void card_thumbnail(ui::Layout &layout, EditorContext &ctx, ProjectState &state,
+                      const Json &reference, const std::function<bool()> &current)
+  {
+    constexpr auto method = "project.table.objects.thumbnail";
+    if (!reads->supports(method)) { return; }
+    const auto key = reference.dump();
+    layout.button("table_card_thumbnail_load", ctx.tr("table.thumbnail_load"), [this, current, reference, key] {
+      if (!current()) { return; }
+      thumbnails_current = current;
+      pending_thumbnail = key;
+      thumbnails.erase(key);
+      thumbnail_order.erase(std::remove(thumbnail_order.begin(), thumbnail_order.end(), key), thumbnail_order.end());
+      reads->scoped_call("project.table.objects.thumbnail", {{"reference", reference}}, [this, current, key](const Json &result) {
+        if (!current()) { return; }
+        auto next = decode_attachment(result);
+        thumbnail_order.erase(std::remove(thumbnail_order.begin(), thumbnail_order.end(), key), thumbnail_order.end());
+        thumbnail_order.push_back(key);
+        thumbnails[key] = std::move(next);
+        while (thumbnail_order.size() > 32) {
+          thumbnails.erase(thumbnail_order.front()); thumbnail_order.erase(thumbnail_order.begin());
+        }
+      });
+    }).disable(state.busy() || (reads->pending(method) && pending_thumbnail == key));
+    if (pending_thumbnail == key) {
+      if (reads->pending(method)) { layout.label(ctx.tr("table.attachment_loading")); }
+      if (reads->error_method() == method) { layout.paragraph(reads->error()); }
+    }
+    const auto found = thumbnails.find(key);
+    if (!thumbnails_current || !thumbnails_current() || found == thumbnails.end()) { return; }
+    auto &item = *found->second;
+    if (!item.error.empty()) { layout.paragraph(item.error); }
+    else { attachment_image(layout, ctx, item, "table_card_thumbnail_image", 5.0f); }
+  }
 
   void attachment_detail(ui::Layout &layout, EditorContext &ctx, ProjectState &state,
                          const Json &reference, const std::function<bool()> &current)
@@ -183,16 +257,7 @@ struct TableWorkbench::Impl {
       attachment.reset(); attachment_current = current;
       reads->scoped_call("project.table.objects.preview", {{"reference", reference}}, [this, current](const Json &result) {
         if (!current()) { return; }
-        auto next = std::make_unique<Attachment>(); next->result = result;
-        if (io::get_string(result, "kind") == "png") {
-          try {
-            const auto bytes = bridge::decode_base64(io::get_string(result, "data"));
-            if (!bytes) { throw std::runtime_error("Invalid PNG encoding"); }
-            next->image = io::decode_png(*bytes, {4096, 4096, 4 * 1024 * 1024});
-          }
-          catch (const std::exception &e) { next->error = e.what(); }
-        }
-        attachment = std::move(next);
+        attachment = decode_attachment(result);
       });
     }).disable(state.busy() || !reads->supports(method) || reads->pending(method));
     if (!attachment_current || !attachment_current()) { return; }
@@ -203,13 +268,8 @@ struct TableWorkbench::Impl {
     layout.paragraph(io::get_string(result, "label") + " · " + std::to_string(io::get_int(result, "size", 0)) + " B");
     if (!attachment->error.empty()) { layout.paragraph(attachment->error); return; }
     if (attachment->image) {
-      auto &jobs = ctx.store.jobs();
-      if (!attachment->texture && jobs.create_texture && jobs.free_texture) {
-        attachment->release = jobs.free_texture;
-        attachment->texture = jobs.create_texture(*attachment->image);
-      }
+      attachment_image(layout, ctx, *attachment, "table_attachment_image", 8.0f);
       const auto &img = *attachment->image;
-      layout.image("table_attachment_image", {attachment->texture, int(img.width), int(img.height), 8.0f});
       layout.label(std::to_string(img.width) + " × " + std::to_string(img.height));
     }
     else { layout.paragraph(io::get_string(result, "data")); }
@@ -342,6 +402,9 @@ struct TableWorkbench::Impl {
     if (!reads) { reads = std::make_unique<TableWorkbenchState>(ctx.store); }
     reads->sync();
     if (attachment_current && !attachment_current()) { attachment.reset(); attachment_current = {}; }
+    if (thumbnails_current && (!thumbnails_current() || view.value("kind", "grid") == "grid")) {
+      thumbnails.clear(); thumbnail_order.clear(); pending_thumbnail.clear(); thumbnails_current = {};
+    }
     if (ui_complete && !state.busy()) {
       auto complete = std::move(ui_complete); ui_complete = {};
       if (state.error().empty() && state.project()->handle == ui_handle && state.project()->revision == ui_base_revision + 1) { complete(); }
@@ -1347,6 +1410,16 @@ struct TableWorkbench::Impl {
         card.label(columns.empty() ? record_id.substr(0, 8) : display(t, rows[size_t(r)], columns.front()));
         for (size_t c = 1; c < std::min<size_t>(columns.size(), 5); ++c) {
           const auto &f = t.fields[size_t(columns[c])]; card.paragraph(f.name + ": " + display(t, rows[size_t(r)], columns[c]));
+        }
+        for (const auto column : columns) {
+          if (t.fields[size_t(column)].type != "object") { continue; }
+          const auto *reference = t.cell(rows[size_t(r)], column);
+          if (!reference || !reference->is_object()) { continue; }
+          const auto kind = io::get_string(*reference, "kind");
+          if (kind != "file" && kind != "snapshot_file") { continue; }
+          auto &preview = card.scope("attachment_" + t.fields[size_t(column)].id).column();
+          preview.label(t.fields[size_t(column)].name);
+          card_thumbnail(preview, ctx, state, *reference, current);
         }
         if (status_board) {
           const auto *value = t.cell(rows[size_t(r)], group);

@@ -2,9 +2,25 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：图像附件与卡片缩略图（进行中）
+
+基线 `e30150bb47c7064c945a4c561d99e02fdea5ae69`；本节记录当前图像预览交付批次，新跨平台 CI 尚待验证。
+JPEG／WebP／GIF／BMP／TIFF 在本地转成有独立摘要的 PNG；PNG 原样预览与 UTF-8 文本兼容入口保留。
+原文件仍限 1 MiB、4096 单边／4194304 像素；新格式和缩略图依赖 visualization extra 的 Pillow（本机 12.3.0）。
+按 EXIF 处理方向，多帧只显示第一帧并标明总帧数；原文件与显示像素分别校验，不复制源 EXIF／ICC／文本元数据。
+缩略图最大 256 单边，每编辑器最多缓存 32 张；改修订／视图、关闭或重开不复用旧图，重新加载先释放旧图。
+不改项目、Viewer 或运行状态；不是文档渲染、动画播放或完整 TIFF 多页浏览。
+
+- Python 3.12 首轮附件／脚本 **59 passed，8.95 秒**，`/tmp/stk-image-previews-python.log`；覆盖格式、缩放、透明度、EXIF、多帧、源／显示双摘要、冻结内容校验、错误扩展名、越限、修订冲突、缺依赖和旧 PNG 路径。
+- Python 3.11／3.14 附件／脚本／智能体边界各 **86 passed**（24.36／23.56 秒），`/tmp/stk-image-previews-python311.log`、`python314.log`。3.12 扩大桥／表格／脚本／智能体回归 **177 passed，27.76 秒**，`/tmp/stk-image-previews-python-recheck.log`；未宣称完整 Python 已通过。
+- 原生构建退出 0（`/tmp/stk-image-previews-build.log`、`test-build.log`、`final-build.log`）；附件、卡片与读取控制器定向 **22/22、零跳过，4.00 秒**，`/tmp/stk-image-previews-native.log`／`.xml`；同范围必跑 **22/22**，`/tmp/stk-image-previews-required.log`。现有三平台必跑通配覆盖新增测试。
+- 实际点击验收：CPU 事件测试、英文 1×、1440×1200，已有文件对象的看板卡片为起点；**1 次点击“加载缩略图”**后显示 256×128 合成图像，未进入详情或改变记录选择、项目修订、Viewer 数据／相机。切回网格释放纹理，再回看板不自动读取；新修订拒绝已排队响应和保留的旧按钮动作。另验证 BMP 转换后原生解码像素一致。CPU 点击与像素验证不替代真机 GPU 截图。
+- 中英 **2341 键、零问题**；完整原生 **1662/1662、零失败／错误／跳过，386.38 秒**，`/tmp/stk-image-previews-full-native.log`／`.xml`。按 Linux CI 完整必跑表达式核对 **832/832**，`/tmp/stk-image-previews-full-required.log`（首次误选 Windows 命令得到 791 项，已纠正选择入口，未重跑或跳过测试）。收尾再次读取 XML 与日志确认计数，没有重复运行测试。
+- AOCI 21 个受影响条目已分两批维护，3 个观察测试文件已复核确认；Verify／Check／Guide 对齐、complete=true、next_action=none。这是索引与源码的治理对齐，不代表全量模型认知校验通过。前代码头 `e30150b` 的 Desktop 已结束成功，满足本批推送前等待条件。
+
 ## 2026-10-25：大项目分页接入（进行中）
 
-基线 `fe083a3d4f7296182f178fa3e7390e5fb311cc07`；本批工作稿未提交、未推送。
+基线 `fe083a3d4f7296182f178fa3e7390e5fb311cc07`；本批源码 `e30150bb47c7064c945a4c561d99e02fdea5ae69` 已提交并推送 main。
 结构目录不读取单元格，记录页按同修订分页或稳定 UUID 定位；工作台消费独立记录页，选择最多补充一条共享缓存。
 审阅另读完整基线；文件树只读索引与依赖。下方区分前一轮验证与原生首次打开接入后的新结果。
 
@@ -26,7 +42,10 @@
 - 原生 CPU 首屏测量已完成：可选目标 `stk-project-open-benchmark` 使用真实 Python 桥和默认 1440×1200、英文 1× 布局；同一公开合成数据库两表各 10000 行、8 列，以能力协商切换全快照／分页读取。交替顺序各运行 3 次，每次新建进程；测量时没有并行编译或测试。原始报告 `/tmp/stk-native-project-open-benchmark.json`；20 行冒烟通过。首次万行测量因基准把网格页大小错写为 200 失败，按实际独立网格的 500 修正断言后重跑通过，共享缓存仍只读 200。
 - 上述 3 次中位数：从明确打开到第一帧网格有数据 **2.670650→0.448939 秒**；原生进程采样峰值 RSS **190.40→31.17 MiB**；进程树 RSS 和峰值 **257.14→108.29 MiB**；测量标记后至桥关闭的响应 UTF-8 字节数 **9.75→1.10 MiB**。两种模式均显示 500 条网格记录，项目总数 20000，首值和修订一致，脚本运行／Viewer 求值／协议违规／桥重启均为 0。分页共享记录为 200，全快照为 20000。
 - 测量边界：CPU UI 使用替代文字度量，不含 GPU、真实系统窗口、IME 或桥启动；打开时尚可有 UI 元数据初始化响应。使用暖 OS 缓存，RSS 约每 5 ms 采样，进程树相加会重复统计共享页，不是 PSS；响应计数到关闭，范围宽于首帧计时。此夹具短文本与上方后端长文本不同，不能直接比较两个基准的绝对传输量。尚不能据此宣称真实窗口、其他平台或全部大项目路径已验收。
-- 工作空间接入后的完整原生回归 **1659/1659、零失败、零跳过，386.77 秒**，`/tmp/stk-workspace-pages-full-native.log`／`.xml`；按当前 Desktop CI 的 Linux 必跑表达式检查 **829/829**，`/tmp/stk-workspace-pages-full-required.log`。中英 **2339 键、零问题**，`git diff --check` 通过。本批跨平台 CI 和 AOCI 最终对齐尚未完成。完整 Python 的失败与定向复验已如上保留，未重复完整套件；本次未改 Python 产品实现。
+- 工作空间接入后的完整原生回归 **1659/1659、零失败、零跳过，386.77 秒**，`/tmp/stk-workspace-pages-full-native.log`／`.xml`；按当前 Desktop CI 的 Linux 必跑表达式检查 **829/829**，`/tmp/stk-workspace-pages-full-required.log`。中英 **2339 键、零问题**，`git diff --check` 通过。跨平台 CI 已成功，源码 AOCI 增量维护已对齐。本机完整 Python 的失败与定向复验已如上保留，未重复本机完整套件；本次未改 Python 产品实现。
+
+- 提交前复核实际 XML：1659 项、零失败／错误／跳过；必跑日志 829 项，Python 定向日志 32 passed。暂存差异 gitleaks（仓库 `.gitleaks.toml`、redact）扫描约 478 KB、零发现，差异格式检查通过。AOCI 46 个条目增量维护与 15 个观察文件复核完成；Verify／Check／Guide 确认对齐，1050 条规模标签零不匹配、无恢复待办，未声称全量模型认知已验证。
+- 本源码的 [Desktop 40193509900](https://github.com/sijintech/stk/actions/runs/40193509900) **5/5**（Windows、macOS、Linux、Linux 打包及干净容器冒烟）、[Runtime 40193509895](https://github.com/sijintech/stk/actions/runs/40193509895) **8/8**、[Docs 40193509904](https://github.com/sijintech/stk/actions/runs/40193509904)、[Secret 40193509919](https://github.com/sijintech/stk/actions/runs/40193509919) 均已完成成功。
 
 原生 CPU 测量复现（Linux，产物不安装、不加入日常 CTest）：
 

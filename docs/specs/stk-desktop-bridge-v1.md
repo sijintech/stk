@@ -20,8 +20,9 @@ new revisioned commands, CSV preview/source-checksum and view-export parameters.
 remains v1; method discovery gates use of new methods. Format 13 remains readable; using new
 stored field schemas/views requires the explicit backup-first upgrade to format 14.
 
-2026-10-25 additive attachment read: `project.table.objects.preview` explicitly reads a
-bounded local PNG or UTF-8 attachment; the [table contract](project-tables-14.md#explicit-local-attachment-preview-additive-2026-10-25)
+2026-10-25 additive attachment reads: `project.table.objects.preview` reads bounded local
+images or UTF-8 text; `project.table.objects.thumbnail` produces an explicitly requested image thumbnail.
+Converted pixels have a separate checksum from the original source. The [table contract](project-tables-14.md#explicit-local-attachment-preview-additive-2026-10-25)
 defines content checks, truncation and source semantics. Existing object resolution
 remains metadata-only. Discover the new method before use; project format remains 14.
 

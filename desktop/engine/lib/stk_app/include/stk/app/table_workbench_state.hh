@@ -96,7 +96,7 @@ class TableWorkbenchState {
   std::string project_id_, handle_, table_id_, session_, error_, error_method_;
   int64_t revision_ = -1;
   uint64_t epoch_ = 0, version_ = 0;
-  std::array<Request, 9> requests_;
+  std::array<Request, 10> requests_;
   std::unique_ptr<ProjectTable> query_table_;
 };
 }  // namespace stk::app

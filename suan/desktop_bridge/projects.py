@@ -184,7 +184,7 @@ class ProjectSessions:
                 return store.csv.preview(**args)
             if action == "views_get":
                 args["identity"] = args.pop("id")
-            if action in {"objects_resolve", "objects_preview"}:
+            if action in {"objects_resolve", "objects_preview", "objects_thumbnail"}:
                 args["value"] = args.pop("reference")
             return getattr(store.table, action)(**args)
 

@@ -428,6 +428,81 @@ TEST_F(TableWorkbenchEditorPython, AttachmentPngDecodesPixelsAndReleasesItsOwnTe
   EXPECT_EQ(widget("table_attachment_image"), nullptr);
 }
 
+TEST_F(TableWorkbenchEditorPython, CardThumbnailLoadsInOneClickWithoutSelectionAndReleasesOnViewChange)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  const auto path = dir.path() / "project" / "public-thumbnail.png";
+  io::Image image(512, 256);
+  for (size_t p = 0; p < image.pixels.size(); p += 4) {
+    image.pixels[p] = 20; image.pixels[p + 1] = 40; image.pixels[p + 2] = 60; image.pixels[p + 3] = 255;
+  }
+  io::write_png(path, image);
+  ASSERT_NO_FATAL_FAILURE(link_attachment(path));
+  ASSERT_NO_FATAL_FAILURE(show_board());
+  struct Audit { int created = 0, freed = 0; io::Image image; };
+  const auto audit = std::make_shared<Audit>();
+  f.shell->store().jobs().create_texture = [audit](const io::Image &value) { ++audit->created; audit->image = value; return uint64_t(456); };
+  f.shell->store().jobs().free_texture = [audit](uint64_t value) { EXPECT_EQ(value, 456u); ++audit->freed; };
+  const auto load = card_key(("attachment_" + evidence + "/table_card_thumbnail_load").c_str());
+  const auto picture = card_key(("attachment_" + evidence + "/table_card_thumbnail_image").c_str());
+  ASSERT_NE(widget(load.c_str()), nullptr);
+  EXPECT_EQ(widget(picture.c_str()), nullptr); EXPECT_EQ(audit->created, 0);
+  const auto revision = project().project()->revision;
+  const int before = clicks;
+  click(load.c_str());
+  ASSERT_TRUE(pump([&] { return widget(picture.c_str()) != nullptr; }));
+  EXPECT_EQ(clicks - before, 1);
+  EXPECT_EQ(audit->created, 1); EXPECT_EQ(audit->image.width, 256u); EXPECT_EQ(audit->image.height, 128u);
+  EXPECT_EQ(audit->image.pixels[0], 20); EXPECT_EQ(audit->image.pixels[1], 40); EXPECT_EQ(audit->image.pixels[2], 60);
+  frame(); EXPECT_EQ(audit->created, 1);
+  EXPECT_EQ(project().project()->revision, revision); EXPECT_EQ(project().record_id(), row_a);
+  expect_viewer();
+  index("table_views", 0); ASSERT_NO_FATAL_FAILURE(settled());
+  EXPECT_EQ(audit->freed, 1);
+  index("table_views", 1);
+  ASSERT_TRUE(pump([&] { return widget(load.c_str()) != nullptr; }));
+  EXPECT_EQ(widget(picture.c_str()), nullptr); EXPECT_EQ(audit->created, 1);
+}
+
+TEST_F(TableWorkbenchEditorPython, CardThumbnailRejectsLateResponseAndRetainedActionAfterRevisionChanges)
+{
+  ASSERT_NO_FATAL_FAILURE(add_record_fields());
+  const auto path = dir.path() / "project" / "public-thumbnail.png";
+  io::write_png(path, io::Image(2, 2));
+  ASSERT_NO_FATAL_FAILURE(link_attachment(path));
+  ASSERT_NO_FATAL_FAILURE(show_board());
+  const auto load = card_key(("attachment_" + evidence + "/table_card_thumbnail_load").c_str());
+  const auto picture = card_key(("attachment_" + evidence + "/table_card_thumbnail_image").c_str());
+  ASSERT_NE(widget(load.c_str()), nullptr);
+  const auto retained = widget(load.c_str())->on_click;
+  retained();
+  ASSERT_TRUE(project().apply(Json::array({{{"op", "set_cell"}, {"table_id", samples}, {"record_id", row_a},
+                                          {"field_id", counter}, {"value", 42}}})));
+  ASSERT_TRUE(pump([&] { return !project().busy() && widget(load.c_str()); }));
+  retained(); frame();
+  EXPECT_EQ(widget(picture.c_str()), nullptr);
+  expect_viewer();
+}
+
+TEST_F(TableWorkbenchEditorPython, ConvertedBmpUsesVerifiedPngPixelsAndPreservesTheViewer)
+{
+  const auto path = dir.path() / "project" / "public-image.bmp";
+  // Synthetic 2x2 RGB(20,40,60) BMP; no user asset or external image.
+  const auto bytes = bridge::decode_base64("Qk1GAAAAAAAAADYAAAAoAAAAAgAAAAIAAAABABgAAAAAABAAAADEDgAAxA4AAAAAAAAAAAAAPCgUPCgUAAA8KBQ8KBQAAA==");
+  ASSERT_TRUE(bytes);
+  { std::ofstream out(path, std::ios::binary); out.write(reinterpret_cast<const char *>(bytes->data()), std::streamsize(bytes->size())); }
+  ASSERT_NO_FATAL_FAILURE(link_attachment(path));
+  const auto image = std::make_shared<io::Image>();
+  f.shell->store().jobs().create_texture = [image](const io::Image &value) { *image = value; return uint64_t(789); };
+  f.shell->store().jobs().free_texture = [](uint64_t) {};
+  click("table_details"); click("table_attachment_preview");
+  ASSERT_TRUE(pump([&] { return widget("table_attachment_image") != nullptr; }));
+  EXPECT_EQ(image->width, 2u); EXPECT_EQ(image->height, 2u);
+  ASSERT_GE(image->pixels.size(), 4u);
+  EXPECT_EQ(image->pixels[0], 20); EXPECT_EQ(image->pixels[1], 40); EXPECT_EQ(image->pixels[2], 60); EXPECT_EQ(image->pixels[3], 255);
+  expect_viewer();
+}
+
 TEST_F(TableWorkbenchEditorPython, AttachmentOldCallbacksAndLateReadCannotFollowChangedRecord)
 {
   const auto path = dir.path() / "project" / "public-note.txt";
