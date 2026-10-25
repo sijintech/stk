@@ -2,6 +2,30 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：工作模式布局
+
+源码提交 `85630acbb04f419ac7a13b0d5f99e08990cd91f9`，基线为 `027798ff0d5ca914b947401d14c47e4787430133`。
+本节记录提交前本机验证；本批新 CI 结果待回填。源码暂存 gitleaks 8.30.1 按 `.gitleaks.toml` redact 扫描约 **64.57 KB，无泄漏**。
+推送前已复核前代码头 Desktop [40156836215](https://github.com/sijintech/stk/actions/runs/40156836215) 全部结束，**5/5 成功**。
+构建 `/tmp/stk-work-mode-build-20261025.log`、最终增量 `/tmp/stk-work-mode-build-final-20261025.log` 均退出 0。
+构建结束后运行定向 **72/72、零失败、零跳过，10.19 秒**；
+证据 `/tmp/stk-work-mode-focused-20261025.log` 与 `.xml`，必跑检查 **60/60**。
+新增 `WorkModeLayouts` 六例、`WorkModeLayoutClicks` 四例和 `TreeFixture.Arrangement*` 两例接入三平台必跑检查。
+完整原生回归 **1604/1604、零失败、零跳过，371.84 秒**，
+证据 `/tmp/stk-work-mode-native-20261025.log` 与 `.xml`；最终新增必跑 **12/12**。
+中英文目录 **2313 键**一致，`git diff --check` 通过。本批没有 Python 实现变更，已有桥／工作空间整链测试随原生实际运行。
+
+固定起点为默认四区域、1000×900 逻辑像素，en／zh_CN × 1／2 倍缩放，Viewer 已显示且无最大化区域。
+通过真实指针事件点击 **视图 → 准备与运行布局**，共 **2 次**；再点击 **视图 → 结果分析布局**，共 **2 次**。
+准备时显示 AI 并保留原 Viewer 实例；返回时恢复原分栏、比例和活动标签，求值启动计数为 0、脚本会话未建立。
+这属于自动事件验收，不代表 macOS／Windows 真机人工验收；有数据相机、实际时间步与 IME 操作仍应按清单人工核对。
+
+覆盖多次往返、隐藏 Python 草稿、Viewer 共享状态、重复类型与移动标签、添加区域、多窗口独立偏好、
+普通布局／工作空间状态往返、旧布局默认值和五类损坏模式的原子拒绝，以及活动输入和关闭后的延迟回调。
+区域与标签增删在两模式共享；保存模式的区域集合与当前不符时保留当前分栏，不恢复已关闭区域、不丢新草稿。
+普通布局仍不是完整草稿备份，完整内容走 `.stkworkspace`；报告模式尚未实现。
+全程清空产品 key、移除 model 环境，不发收费模型请求，不更改端点或网络策略。
+
 ## 2026-10-25：表格按需查询与平台修正
 
 编辑器／工具交付提交为 `4f919c752a9f8472e9f736ff91234a935acf4e51`，已推送；
@@ -14,7 +38,12 @@ macOS Build 失败，`analysis_parameter_draft_test.cc` 的 `auto` 混合声明�
 原日志 `/tmp/stk-editor-macos-ci-20261025.log`；拆开分析与工作流测试各五处相同模式，本机重建退出 0，
 `/tmp/stk-query-build-20261025.log`。这项修正未以 Linux 通过冒称 macOS 已通过。
 
-本批后端查询修改仍在工作树。相关 Python 3.12／3.11／3.14 各 **154 passed**（4.55／12.49／8.71 秒），
+本批后端查询及编译修正已提交并推送 `027798ff0d5ca914b947401d14c47e4787430133`。
+推送前已确认前 Desktop `40154110887` 全部结束；暂存 gitleaks 8.30.1 扫描约 69.46 KB，无泄漏。
+AOCI 完整批次 Apply 后 Verify／Check 证明治理对齐，Guide `complete=true, next_action=none`；根与 Meta 未改。
+新 Docs [40156836343](https://github.com/sijintech/stk/actions/runs/40156836343)、Secret [40156836355](https://github.com/sijintech/stk/actions/runs/40156836355) 成功；
+Runtime [40156836276](https://github.com/sijintech/stk/actions/runs/40156836276) **8/8 成功**；Desktop [40156836215](https://github.com/sijintech/stk/actions/runs/40156836215) 全部结束且 **5/5 成功**（macOS Metal、Windows CPU、三项 Linux 作业）。此前 macOS 编译失败已由本次 CI 验证修正。
+相关 Python 3.12／3.11／3.14 各 **154 passed**（4.55／12.49／8.71 秒），
 日志 `/tmp/stk-query-focused-20261025-2.log`、`/tmp/stk-query-python311-20261025.log`、`python314` 对应日志。
 新增查询专门回归 **16 passed**（0.86 秒），包含随后增加的 1100 层离页依赖，
 `/tmp/stk-query-regression-20261025-2.log`。覆盖坏缓存、跨表与循环、缺省／null／负零、旧格式、WAL 并发修订一致性、
