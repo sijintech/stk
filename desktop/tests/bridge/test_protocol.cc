@@ -224,6 +224,125 @@ TEST(Schema, EmbeddedSchemaValidatesMessagesBothWays)
                   .empty());
 }
 
+TEST(Schema, ReportsPreviewResources)
+{
+  const auto &schema = ProtocolSchema::embedded();
+  constexpr const char *method = "project.reports.preview_resources";
+  const std::string project = "a1111111-1111-4111-8111-111111111111";
+  const std::string report = "b2222222-2222-4222-8222-222222222222";
+  const std::string session = "c3333333-3333-4333-8333-333333333333";
+  const std::string manifest_hash(64, 'a'), source_hash(64, 'b'), rendered_hash(64, 'c');
+  const Json params = {{"handle", std::string(32, 'a')}, {"report_id", report},
+                       {"expected_revision", 3}, {"expected_source_sha256", manifest_hash}};
+  const Json request = {{"id", 1}, {"method", method}, {"params", params}};
+  ASSERT_TRUE(schema.has_method(method));
+  ASSERT_TRUE(schema.check_request(request).empty());
+  auto invalid_request = request;
+  invalid_request["params"]["session_id"] = session;
+  EXPECT_FALSE(schema.check_request(invalid_request).empty());
+  for (const char *field : {"handle", "report_id", "expected_revision", "expected_source_sha256"}) {
+    invalid_request = request;
+    invalid_request["params"].erase(field);
+    EXPECT_FALSE(schema.check_request(invalid_request).empty()) << field;
+  }
+
+  const Json preview = {{"revision", 3}, {"project_id", project}, {"report_id", report},
+      {"source_sha256", manifest_hash}, {"session_id", session}, {"path", "reports/report.md"},
+      {"mime", "text/html; charset=utf-8"}, {"content_sha256", rendered_hash}, {"size", 8},
+      {"data", "PHA+eDwvcD4="}, {"renderer", "stk.report-renderer/1"},
+      {"source_mime", "text/markdown; charset=utf-8"}, {"source_content_sha256", source_hash},
+      {"source_size", 4}};
+  const Json resource = {{"record_id", "d4444444-4444-4444-8444-444444444444"},
+      {"path", "images/result.png"}, {"mime", "image/png"}, {"sha256", std::string(64, 'd')}, {"size", 1}};
+  const Json result = {{"preview", preview}, {"resources", Json::array({resource})}, {"total_size", 9}};
+  auto errors = [&](const Json &value) {
+    return schema.check_response({{"id", 1}, {"result", value}}, method);
+  };
+  // The manifest, original source and rendered bytes have distinct, mandatory digests.
+  EXPECT_NE(preview["source_sha256"], preview["source_content_sha256"]);
+  EXPECT_NE(preview["source_content_sha256"], preview["content_sha256"]);
+  ASSERT_TRUE(errors(result).empty());
+  for (const char *field : {"source_sha256", "source_mime", "source_content_sha256", "source_size"}) {
+    auto invalid = result;
+    invalid["preview"].erase(field);
+    EXPECT_FALSE(errors(invalid).empty()) << field;
+  }
+  for (const char *field : {"record_id", "path", "mime", "sha256", "size"}) {
+    auto invalid = result;
+    invalid["resources"][0].erase(field);
+    EXPECT_FALSE(errors(invalid).empty()) << field;
+  }
+  auto invalid = result;
+  invalid["unexpected"] = true;
+  EXPECT_FALSE(errors(invalid).empty());
+  invalid = result;
+  invalid["preview"]["unexpected"] = true;
+  EXPECT_FALSE(errors(invalid).empty());
+  invalid = result;
+  invalid["resources"][0]["data"] = "AA==";
+  EXPECT_FALSE(errors(invalid).empty()); // Descriptors cannot quietly include unverified bodies.
+  for (const char *mime : {"text/html; charset=utf-8", "text/markdown; charset=utf-8",
+                           "text/css; charset=utf-8", "application/pdf"}) {
+    invalid = result;
+    invalid["resources"][0]["mime"] = mime;
+    EXPECT_FALSE(errors(invalid).empty()) << mime;
+  }
+  for (const char *mime : {"image/png", "image/jpeg", "image/gif", "image/webp"}) {
+    auto admitted = result;
+    admitted["resources"][0]["mime"] = mime;
+    EXPECT_TRUE(errors(admitted).empty()) << mime;
+  }
+  invalid = result;
+  invalid["preview"]["renderer"] = "identity";
+  EXPECT_FALSE(errors(invalid).empty());
+  invalid = result;
+  invalid["preview"]["mime"] = "application/pdf";
+  EXPECT_FALSE(errors(invalid).empty());
+  invalid = result;
+  invalid["preview"]["source_mime"] = "application/pdf";
+  EXPECT_FALSE(errors(invalid).empty());
+  invalid = result;
+  invalid["preview"]["source_size"] = 1024 * 1024 + 1;
+  EXPECT_FALSE(errors(invalid).empty());
+  auto html = result;
+  html["preview"]["source_mime"] = "text/html; charset=utf-8";
+  html["preview"]["source_size"] = 1024 * 1024;
+  EXPECT_TRUE(errors(html).empty());
+
+  auto maximum_count = result;
+  maximum_count["resources"] = Json::array();
+  for (int i = 1; i <= 63; ++i) {
+    auto item = resource;
+    const auto number = std::to_string(i);
+    item["record_id"] = "d4444444-4444-4444-8444-" + std::string(12 - number.size(), '0') + number;
+    item["path"] = "images/" + number + ".png";
+    maximum_count["resources"].push_back(std::move(item));
+  }
+  maximum_count["total_size"] = 8 + 63;
+  EXPECT_TRUE(errors(maximum_count).empty());
+  auto sixty_four = resource;
+  sixty_four["record_id"] = "d4444444-4444-4444-8444-000000000064";
+  sixty_four["path"] = "images/64.png";
+  maximum_count["resources"].push_back(sixty_four);
+  maximum_count["total_size"] = 8 + 64;
+  EXPECT_FALSE(errors(maximum_count).empty()); // The sanitized entry is the 64th allowed asset.
+
+  auto maximum_bytes = result;
+  maximum_bytes["resources"] = Json::array();
+  for (int i = 0; i < 8; ++i) {
+    auto item = resource;
+    item["record_id"] = "d4444444-4444-4444-8444-00000000000" + std::to_string(i);
+    item["path"] = "images/budget-" + std::to_string(i) + ".png";
+    item["size"] = 4 * 1024 * 1024 - (i == 7 ? 8 : 0);
+    maximum_bytes["resources"].push_back(std::move(item));
+  }
+  maximum_bytes["total_size"] = 32 * 1024 * 1024;
+  EXPECT_TRUE(errors(maximum_bytes).empty());
+  maximum_bytes["resources"][7]["size"] = 4 * 1024 * 1024 - 7;
+  maximum_bytes["total_size"] = 32 * 1024 * 1024 + 1;
+  EXPECT_FALSE(errors(maximum_bytes).empty());
+}
+
 TEST(Schema, ScriptAndReverseDesktopExtension)
 {
   const auto &schema = ProtocolSchema::embedded();

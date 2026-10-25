@@ -12095,6 +12095,38 @@
           "$ref": "#/$defs/projectReportPreviewResult"
         }
       },
+      "project.reports.preview_resources": {
+        "description": "Render a Markdown/HTML entry for one new resource session, admitting only that entry and frozen raster images. Returns image metadata without reading image bytes; hosts must explicitly read and verify all resources before opening the session. Actual rendered entry plus declared image sizes must fit 32 MiB. Secondary documents, CSS and PDF are excluded. Existing preview behavior is unchanged.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "report_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "expected_source_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "handle",
+            "report_id",
+            "expected_revision",
+            "expected_source_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectReportPreviewResourcesResult"
+        }
+      },
       "project.reports.export_file": {
         "description": "Explicitly export a complete verified source-asset ZIP and frozen provenance to a new file; no overwrite, project revision change or execution. This is a source bundle, not an installed browser/PDF reader.",
         "params": {
@@ -21969,6 +22001,44 @@
       ],
       "additionalProperties": false,
       "description": "Derived entry bytes for a new native view session. content_sha256/size describe returned bytes; source_content_sha256/source_size describe the immutable original. No browser or model is started."
+    },
+    "projectReportPreviewResourcesResult": {
+      "type": "object",
+      "properties": {
+        "preview": {
+          "allOf": [
+            {"$ref": "#/$defs/projectReportPreviewResult"},
+            {"properties": {
+              "renderer": {"const": "stk.report-renderer/1"},
+              "mime": {"const": "text/html; charset=utf-8"},
+              "source_mime": {"enum": ["text/markdown; charset=utf-8", "text/html; charset=utf-8"]},
+              "source_size": {"maximum": 1048576}
+            }}
+          ]
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {"$ref": "#/$defs/projectReportAsset"},
+              {"properties": {"mime": {"enum": ["image/png", "image/jpeg", "image/gif", "image/webp"]}}}
+            ]
+          },
+          "maxItems": 63
+        },
+        "total_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 33554432
+        }
+      },
+      "required": [
+        "preview",
+        "resources",
+        "total_size"
+      ],
+      "additionalProperties": false,
+      "description": "Exactly one sanitized Markdown/HTML entry plus up to 63 non-entry raster image descriptors, preserving original manifest order. Descriptors do not attest that image objects currently exist or match their checksums; retrieve them through asset with the same revision and manifest digest. total_size counts rendered entry bytes plus the declared image bytes."
     },
     "projectReportExportResult": {
       "type": "object",

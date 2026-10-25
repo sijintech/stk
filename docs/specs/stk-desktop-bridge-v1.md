@@ -621,6 +621,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.reports.list` | `{handle, offset?, limit?}` | `{revision, table_id, offset, total, reports}` (summaries) |
 | `project.reports.asset` | `{handle, report_id, path, expected_revision, expected_source_sha256}` | Complete base64 bytes with asset hash/size, MIME and report identity |
 | `project.reports.preview` | `{handle, report_id, expected_revision, expected_source_sha256}` | Derived bytes with a fresh preview session and separate original-source and rendered hashes |
+| `project.reports.preview_resources` | `{handle, report_id, expected_revision, expected_source_sha256}` | `{preview, resources: [projectReportAsset], total_size}`; sanitized Markdown/HTML entry plus raster metadata for subsequent explicit asset reads |
 | `project.reports.export_file` | `{handle, report_id, destination (absolute), expected_revision, expected_source_sha256}` | `{project_id, report_id, source_sha256, path, sha256, size}` (new source ZIP) |
 
 The optional `project.snapshots.list_summaries` capability reads format-4 snapshot metadata with an exact

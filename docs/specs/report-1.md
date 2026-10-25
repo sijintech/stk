@@ -72,7 +72,7 @@ Each summary has `{id, name, format, state, error, source_sha256}`; `get` adds `
 `state` is `readable` or `invalid`. Invalid records are isolated rather than aborting an entire list.
 These are metadata reads: readability does not prove that frozen byte objects still exist.
 
-`asset`, `preview` and `export_file` require `report_id`, `expected_revision` and
+`asset`, `preview`, `preview_resources` and `export_file` require `report_id`, `expected_revision` and
 `expected_source_sha256` in addition to the current open handle. `asset` additionally takes `path`;
 `export_file` takes an absolute `destination`. They recheck the selected revision and manifest after I/O.
 Closed handles, different projects, stale revisions and different manifest digests are rejected.
@@ -84,6 +84,30 @@ Missing assets do not fall back to working files. None of these operations start
 Markdown/HTML preview uses `stk.report-renderer/1`; other admitted MIME uses `identity`.
 The preview is derived data, creates no browser, and must not be confused with original source bytes.
 The host binds and invalidates its own resource session; a UUID is not an authorization token.
+
+`preview_resources` is an additive, optional two-stage native resource preparation method. It accepts the
+same selection arguments as `preview` and returns exactly `{preview, resources, total_size}`. `preview`
+has the existing preview result shape, with a fresh session UUID, a Markdown/HTML source entry and
+sanitized HTML display bytes. `resources` contains only non-entry PNG/JPEG/GIF/WebP descriptors copied
+from the frozen manifest, in manifest order, each exactly `{record_id, path, mime, sha256, size}`.
+Secondary HTML/Markdown, CSS, plain text and PDF are excluded from both the resource list and generated
+URL mappings. Image CSP sources identify the exact admitted raster paths under the session/project/report/
+manifest-digest URL prefix; relative references retain the entry's virtual directory. Existing `preview`
+behavior, including identity previews for other admitted MIME, is unchanged.
+
+This preparation reads and verifies the entry only. Resource descriptors do not prove that image bytes
+are available, match their digests, or decode as images. The host must call `asset` explicitly for each
+listed resource using the same open handle, expected revision and manifest digest; it must verify returned
+identity, path, MIME, size and checksum against the frozen descriptor before creating one complete native
+resource session. It must not add raw secondary documents through `asset`. A project/handle/bridge-session
+change, stale selection, failed resource read or close invalidates the pending preparation and old session.
+The native session must close on the host's lifecycle boundary; no server-side persistent session is created.
+
+`total_size` is the actual rendered entry byte count plus the declared original raster byte counts, capped
+at 32 MiB. Source and display bytes are budgeted separately: each rendered output is at most 4 MiB and
+Markdown/HTML input is at most 1 MiB; at most 63 resource descriptors accompany the one entry. No image
+body is embedded in this response. Separate, bounded `asset` responses avoid placing the 32 MiB display
+collection into one bridge line. Metadata and actual bytes still need final host verification before display.
 
 The renderer removes active content, arbitrary styles and external URLs, and admits only selected relative
 asset references. It produces a full UTF-8 HTML document with a restrictive CSP and fixed stylesheet hash.

@@ -746,6 +746,11 @@ class ProjectReports:
         return self._call("project.reports.preview", {"handle": self.handle, "report_id": report_id,
             "expected_revision": expected_revision, "expected_source_sha256": expected_source_sha256})
 
+    def preview_resources(self, report_id, *, expected_revision, expected_source_sha256):
+        """Sanitized entry and raster descriptors; explicitly read/verify each image before display."""
+        return self._call("project.reports.preview_resources", {"handle": self.handle, "report_id": report_id,
+            "expected_revision": expected_revision, "expected_source_sha256": expected_source_sha256})
+
     def export_file(self, report_id, destination, *, expected_revision, expected_source_sha256):
         return self._call("project.reports.export_file", {"handle": self.handle, "report_id": report_id,
             "destination": str(destination), "expected_revision": expected_revision,

@@ -151,6 +151,8 @@ TEST_F(WorkModeLayouts, ActiveTextAndDeferredOldMenusCannotHideOrCommitInput)
   f.drv->key(wm::Key::Esc);
   action(); f.shell->forget(f.screen); f.screen.run_deferred();
   EXPECT_EQ(f.shell->work_mode(f.screen), Mode::Analysis);
+  // Live editors borrow AppStore state; destroy them before the shell, keeping the copied action.
+  f.screen.clear();
   f.shell.reset(); action();
 }
 

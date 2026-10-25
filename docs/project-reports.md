@@ -86,6 +86,17 @@ receipt = p.reports.export_file(report_id, "/absolute/new-report.zip", **bound)
 预览接口只交付字节与新会话身份，不会创建浏览器。Markdown／HTML 渲染需安装 `documents` extra，
 例如在源码目录执行 `python -m pip install ".[documents]"`；缺依赖会明确失败。
 
+面向原生资源会话的调用方还可显式使用 `p.reports.preview_resources(report_id, **bound)`，
+返回 `{preview, resources, total_size}`。这里只接受 Markdown／HTML 入口：`preview` 是上述净化预览，
+`resources` 仅含原清单中 PNG／JPEG／GIF／WebP 图片的 `{record_id, path, mime, sha256, size}`。
+次级 HTML、Markdown、CSS、文本和 PDF 不进入资源清单或页面相对链接映射，避免从净化入口进入未净化文档。
+
+此步骤只读取入口，不读取图片正文。调用方仍须按同一修订和清单摘要逐项调用 `asset`，核对身份、
+路径、MIME、大小和实际字节哈希，全部成功后才能一次建立原生会话；不能把其他原始 HTML 加入会话。
+返回的 `total_size` 按实际净化入口字节与图片声明大小计算，上限仍为 32 MiB。
+图片元数据不代表图片副本已通过内容校验或格式解码。关闭、切换项目或句柄／桥会话变化时应废弃准备结果，
+并关闭旧资源会话，使旧 URL 失效。这个接口本身不创建浏览器，也不表示完整富文档 UI 已交付。
+
 ZIP 包含 `stk-report.json` 和选定的完整原始资产，逐项验摘要后才发布新文件，不覆盖已有目标。
 它是来源包；HTML 原文未被改造成无需其他处理即可独立展示的渲染页面。
 导出不改变项目修订，也不进入项目撤销；丢失导出回复时应先检查目标，不自动重复操作。

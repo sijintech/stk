@@ -90,6 +90,7 @@ OPERATIONS = {
     "project.reports.list": ("read", "report metadata; not needed in v1"),
     "project.reports.asset": ("read", "explicit frozen asset bytes; not needed in v1"),
     "project.reports.preview": ("read", "explicit offline document rendering; not needed in v1"),
+    "project.reports.preview_resources": ("read", "sanitized entry and image metadata; not needed in v1"),
     "project.reports.export_file": ("project_edit", "writes a file on this computer; never an agent tool"),
     "project.skills.list": ("read", "not needed in v1"),
     "project.skills.get": ("read", "not needed in v1"),

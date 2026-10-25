@@ -290,9 +290,9 @@ class ProjectSessions:
         with self._operation():
             store = self._get(params["handle"])
             values = {key: value for key, value in params.items() if key != "handle"}
-            if action == "preview":
-                from suan.project.report_previews import preview
-                return preview(store, **values)
+            if action in {"preview", "preview_resources"}:
+                from suan.project import report_previews
+                return getattr(report_previews, action)(store, **values)
             return getattr(store.reports, action)(**values)
 
     def workflows(self, action, params):
