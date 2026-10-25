@@ -737,8 +737,10 @@ frozen expansion without reloading child definitions. Staleness compares source 
 and propagates to their downstream tasks; labels, names and layout changes alone do not stale results.
 
 The Python service, bridge and native draft/service layer implement this contract. Desktop interface
-controls and subworkflow entry/return navigation are implemented in the current worktree and undergoing
-regression checks. Workflow-to-skill publishing remains pending; this is not a completed platform delivery.
+controls and subworkflow entry/return navigation in source commit `3a1204f` have passed local and
+cross-platform checks. Workflow-to-skill publishing in `bc964f2` has passed local checks; its new
+cross-platform CI remains pending. The method contract and explicit data bindings are described
+under project skills below; these deliveries do not complete the whole platform roadmap.
 
 Optional `parameter_overrides` (1–64 declared graph parameter names, at most 64 KiB) set values for this run only,
 for example a workflow row's: they are frozen in the plan as `parameter_overrides` and evaluated over the frozen
@@ -1644,6 +1646,8 @@ project `handle`; every write also contains `expected_revision`. The Python faca
 | `project.skills.restore` | `project_skill_id, content_sha256` | Ordinary project edit receipt |
 | `project.skills.create_analysis` | `project_skill_id, content_sha256, analysis_id, name` | Ordinary edit receipt; `record_id` is the new analysis UUID |
 | `project.skills.publish_analysis` | `analysis_id, project_skill_id, create, name, description` | Ordinary edit receipt; new user skill or appended version, selected explicitly by `create` |
+| `project.skills.publish_workflow` | `workflow_id, project_skill_id, create, name, description` | Ordinary edit receipt; freezes the saved workflow and its complete method closure |
+| `project.skills.create_workflow` | `project_skill_id, content_sha256, workflow_id, name, bindings` | Ordinary edit receipt; `record_id` is the new root workflow UUID |
 
 `project_skill_id` and `analysis_id` are stable project UUIDs. A readable detail contains
 `{id, name, format, state, error, active, versions, document}`; list items omit `document`.
@@ -1678,6 +1682,32 @@ An unknown project skill is `not_found`; a stale revision or reviewed digest is 
 Malformed or unsupported saved documents remain visible as `state: invalid | unsupported` with
 an error and cannot be restored or copied. The JSON Schema fixes the exact response shapes.
 
-Limits: 128 project skills, 4 MiB of collection content, at most 16 versions and 384 KiB per
-document. SQLite backups and portable workspaces preserve the records; neither carries the
+Workflow methods use entry `{kind: "workflow.document"}`. Their template contains
+`{id, name, description, source, root, workflows, analyses, dependencies, templates}`. `source` records
+`{project_id, workflow_id, revision, content_sha256}`; `root` is the original root UUID.
+`workflows` and `analyses` map each source UUID to `{name, document, content_sha256}`.
+Repeated calls share one saved definition; copying allocates fresh object identities, retains
+that sharing and rewrites only actual workflow/analysis references. Source definitions may
+be changed or deleted after publishing without changing this frozen closure.
+
+`dependencies` contains the source-UUID maps `tables`, `fields` and `snapshots`;
+`templates` separately lists exact execution-template IDs. Table entries contain `name`; fields contain
+`{table_id, name, type, unit}`; snapshot entries contain their `sha256` and file metadata.
+The method does not copy input rows or file bytes. `create_workflow.bindings` must contain
+exactly `{tables, fields, snapshots}`, each mapping every declared source UUID to a target UUID.
+No source may be omitted or guessed by name. Target field ownership, type and unit must match;
+snapshot substitutions require the named files. Only genuine parameter field bindings are
+rewritten: interface defaults and `$literal` values remain literal JSON.
+
+Publishing and copying perform structural and closure validation without loading execution
+plugins. Execution availability is checked when explicitly preparing a run. Copying the root,
+all children and analyses is one CAS transaction and one undo entry; invalid bindings, a source
+conflict or any final budget failure leave no partial objects. Read-only inspection and restore
+remain independent of the installed catalog. A method cannot change between analysis and
+workflow entry kinds when appending a version.
+
+Limits: 128 project skills, 8 MiB of collection content, at most 16 versions and 8 MiB per
+complete version-history document. The final project snapshot remains limited to 12 MiB,
+and an atomic edit to 1000 commands; a legal individual source may still exceed the combined
+method or destination-project budget. SQLite backups and portable workspaces preserve the records; neither carries the
 node implementation, dependencies, guide body or scientific input needed for a later run.

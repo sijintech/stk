@@ -2,9 +2,22 @@
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 
+## 2026-10-25：工作流技能发布与实例化（在研）
+
+源码 `bc964f26fbc233381371bb55576f166a75995107`，基线 `3a1204f4a9fa0618d0523cdca85b8b5595d1fb5e`；本批跨平台 CI 尚待推送后验证。所有测试清空 `STK_TOKEN_PLAN_API_KEY` 并取消 `STK_TOKEN_PLAN_MODEL`，不发送模型请求。
+
+- 新桥／脚本闭环首轮 **5 failed、8 passed**：新模板 `templates` 位于顶层，schema 错放到 `dependencies`，已修正。第二轮 **1 failed、12 passed**：新增测试使用错误的通用删除命令形状，改为现有 `delete_record {id}`。修正后新增桥套件 **5 passed、0.91 秒**（`/tmp/stk-workflow-skill-bridge.log`）。验证源根／子流程／分析均删除后仍能创建完整闭包、共享子流程仅复制一次、一次撤销／重做，以及缺失或非法映射／旧修订零写入；GraphWorker 没有启动。
+- 扩大回归初次路径写错为 `tests/test_workflows.py`，退出 4 且 **未运行测试**；改为真实 `tests/test_project_workflows.py` 后扩大回归 **167 passed、30.74 秒**（`/tmp/stk-workflow-skill-expanded.log`）。补齐损坏元数据／名称长度／命令预算及真实工作器后，3.12 新后端与桥 **25 passed、4.89 秒**（`final-core.log`）；3.11／3.14 相关各 **84 passed、14.04／14.69 秒**（`311.log`／`314.log`）。后者包括真实 GraphWorker：源定义全部删除后，技能实例的合成仿真与分析两任务成功并产生三维 payload，没有跳过。
+- 独立审查复现损坏字段类型为对象时技能列表抛 `TypeError`；修复类型前置检查并新增回归。闭包发布预检任何目标都无法容纳的 1000 命令上限；实际目标的集合／快照预算仍在同一事务内核验。
+- 完整 Python **3190 passed、1 failed、26 skipped、1 warning、722.54 秒**（`/tmp/stk-workflow-skill-full-python.log`）；唯一失败为 `test_scripts_share_project_commands_conflicts_and_changed_notifications` 的接口清单漏列两个新增 RPC，补齐后脚本套件 **13 passed、7.08 秒**（`scripting.log`）。没有重复完整 Python；不得把首次完整运行写成零失败。
+- 原生首轮相关 **107/109**（`/tmp/stk-workflow-skill-native.log`／`.xml`）：中英文新测试将 UI 顶左坐标直接传给窗口底左坐标事件，修正转换并立即断言选中目标。后续 **18/21** 暴露工作流目标匹配仅支持 breadcrumb，以及测试在详情读取中提前切选择。补显式项目句柄、保留原 breadcrumb 兼容和 busy 门禁，修正测试等待；映射输入另补旧 getter／setter 的完整身份和 key 存在检查。最终相关及必跑 **62/62、零失败／错误／跳过、27.38 秒**（`desktop-final.log`／`.xml`、`desktop-required.log`）。
+- 最后编译退出 0（`/tmp/stk-workflow-skill-desktop-navigation-build.log`）。最终完整原生 **1681/1681、零失败／错误／跳过、401.51 秒**（`/tmp/stk-workflow-skill-full-native.log`／`.xml`）；按当前 Linux CI 第一组必跑规则核对 **851/851**（`full-required.log`）。语言目录 **2379/2379、零问题**。
+- 实际点击：技能页 `a2` 最大化；英文 1280×1800、1×，中文逻辑 560×1800、2×。切到项目技能→展开工作流发布→选父流程→保存，共 **4 点击**；追加版本 **1 点击**、创建实例 **1 点击**、进入根工作流 **1 点击**；Viewer 不变。800 个数据依赖的映射超过 64 KiB 仍可编辑与恢复，来源列表只构造可见项（控件少于 100）；该结构用例不声称 800 表可作为单一运行的 case 表，也不替代真实系统窗口／GPU 性能验收。
+- 源码暂存 gitleaks 使用 `.gitleaks.toml` 与 `--redact`：扫描 **147182 bytes、零发现**（`/tmp/stk-workflow-skill-gitleaks.log`）。前头 Desktop `40208002864` 已结束且 **5/5 成功**；Runtime `40208002879`、Docs `40208002935`、Secret `40208003007` 均成功。源码与交付记录分开提交，最终受管对象按 AOCI 流程维护；本批新 CI 尚待确认。全局目录、真实窗口／GPU 大项目验收和计划第 3–8 项仍未完成。
+
 ## 2026-10-25：子流程与工作流封装（在研）
 
-基线 `fc14bc6ec945a2b5218323098a14eafa43614f18`；本批为未提交工作树，不是已交付桌面功能。
+基线 `fc14bc6ec945a2b5218323098a14eafa43614f18`；源码 `3a1204f4a9fa0618d0523cdca85b8b5595d1fb5e` 已推送 main；Desktop `40208002864` 已全部结束并 **5/5 成功**；Runtime `40208002879`、Docs `40208002935`、Secret `40208003007` 均已完成成功。
 版本 2 接口与递归展开复用现有冻结运行；新内部展开格式与来源、实例路径随计划保存，旧格式／旧运行继续可读。
 保存／校验不执行；全部测试清空模型密钥并取消模型变量，没有模型请求。
 
@@ -19,7 +32,7 @@
 - 最终构建退出 0（`/tmp/stk-subworkflow-ui-stable-build.log`）；新增桌面五项及必跑 **5/5、零失败／错误／跳过、1.64 秒**（`ui-final-five.log`／`.xml`）。父子未保存草稿、重入复用、默认值文本迁移／撤销和 JSON 字面量移除后保存均已通过。中英 2364 键、零问题，补充[子流程使用说明](project-workflows.md#可复用子流程版本-2在研)。
 - 完整 Python **3166 passed、24 skipped、2 deselected、690.10 秒**（`/tmp/stk-subworkflow-full-python.log`）。该完整运行启动后补充了冻结字段来源元数据及过期修正，因此最终相关代码另由上述三版本各 78 项覆盖；没有把运行中的旧导入状态当作最后修正的完整复验。
 - 最终完整原生 **1674/1674、零失败／错误／跳过、398.37 秒**（`/tmp/stk-subworkflow-full-native.log`／`.xml`）；从 Linux CI 当前必跑命令提取表达式核对 **844/844**（`full-required.log`），工作流草稿／桌面必跑 **59/59**（`ui-required.log`）。新用例由三个桌面平台现有通配覆盖；本批跨平台结果尚待提交后的 CI。
-- 覆盖重复／多层调用、冻结参数、删除子流程后执行、接口约束、精确大整数、原子升级与撤销、循环、修订漂移、大小边界、独立分支过期、空透传门禁。尚未 AOCI 收尾、暂存密钥扫描或提交／推送，工作流技能封装仍待完成。
+- 覆盖重复／多层调用、冻结参数、删除子流程后执行、接口约束、精确大整数、原子升级与撤销、循环、修订漂移、大小边界、独立分支过期、空透传门禁。源码 AOCI 先复核四个 observe 测试路径，再按机器批次提交 12＋9 条完整语义更新；Verify／Check／Guide 均对齐、无恢复事务。暂存 gitleaks 实际扫描 **271348 字节、零发现**（`/tmp/stk-subworkflow-gitleaks.log`）。首次在暂存前启动的零字节扫描不算有效扫描；已在真实暂存完成后重做。新 CI 状态见本节开头；下一次代码推送须等该 Desktop 结束。当前交付记录变动尚未提交，待 CI 稳定后完成文档索引维护与记录提交；工作流技能封装仍待完成。
 
 基线 CI 已核对：Desktop `40199278362` **5/5、全部完成成功**；Runtime `40199278388`、Docs `40199278457`、Secret `40199278445` 均完成成功。下一批推送的前代码头桌面门禁已满足；这些结果不覆盖当前未提交修改。
 
