@@ -1,6 +1,29 @@
 # STK 0.1.0a1 验收记录
 
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
+各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
+
+## 2026-10-25：报告额外来源选择（本机验收完成）
+
+源码 `b23cfc0` 与原型最终内存门禁修正 `9358ca2` 已提交 main，基线 `0268d68`。所有运行均清空产品模型密钥并取消模型变量；没有模型请求。报告来源选择完整回归通过；随后原生验收工具的最终内存门禁已修正，追加验证见下。
+
+- 新增 `project.reports.review_sources`，最多 16 个有序、去重类别／UUID，单一 SQLite 读事务核修订并捕获完整来源；结果限 384 KiB，超限明确失败。有效 12–16 MiB 工作流计划的复核回复小于 4 KiB，但内部仍读取并验证完整计划／事件，不能称作纯 SQL 摘要读取优化。
+- 创建可选比较 `expected_sources_sha256`，核对同一捕获数组后才读资产及写入；仿真、分析、工作流观察在修订不变时推进均触发零写入冲突。比较后资产读取期间的观察推进不改已接受捕获，未承诺落库时为最新。旧省略参数行为保留。
+- Python 3.12／3.11／3.14 四文件定向各 **131 passed**，分别 **20.55／21.79／21.48 秒**，日志 `/tmp/stk-report-sources-python-focused.log`、`python311-focused.log`、`python314-focused.log`。首轮 129 passed／2 failed：预算异常自抛后被 `ValueError` 捕获，已将预算判断移至捕获之外；新测试 hello 补 `protocol=1`，未放宽校验。
+- 桌面与协议定向 **27/27、零跳过／6.61 秒**，JUnit `/tmp/stk-report-sources-native-focused.xml`。覆盖明确读取、恢复与旧回调、修订／项目漂移、来源摘要错误、冲突重审、丢回执精确核对、分页与 16 项上限及 v1 草稿兼容。首轮 25/27 的两个恢复测试未等待阅读器异步就绪，修正等待后通过；此前 ordered/sorted JSON 的 push_back 编译歧义已显式转换。
+- 固定起点为 **1440×1000、1×、已最大化 Reports 页、隐藏未保存 Python 稿和已有 Viewer**；7 点击准备原有创建表单，5 点击展开／读来源页／选行／加入／核对，再 1 点击创建，共 **13 次实际鼠标点击**，键入／Enter 和起点建立另计。项目历史只增加一次，完整冻结来源匹配；元数据与复核不读取资产、不执行或刷新运行，也不改变 Viewer／隐藏稿。
+- 报告文本／PNG／创建／新来源图形共 **32/32、零跳过／63.11 秒**，JUnit `/tmp/stk-report-sources-gpu.xml`。新增来源八图覆盖 OpenGL／Vulkan×中英×1440 或 560×1000，准备与复核 **12 点击**、停在创建前；宽版 0 滚轮步，窄版英文 6／中文 5 步。四幅语言／宽度组合已目视；完整 UUID、复核提示和完整小来源 JSON 同时可见。Linux 软件 GPU 离屏证据不扩展为硬件或双平台原生浏览器证据。
+- wheel 与源码包重新构建成功，`python -I` 从 wheel 经真实无界面服务发现新接口、复核值和摘要、带来源 CAS 创建，再删除实时入口／图片、关闭重开读回冻结来源、净化入口和图片；修订保持 4，源码包指南存在。日志 `/tmp/stk-report-sources-dist-build.log`、`/tmp/stk-report-sources-wheel-smoke.log`。
+- 三平台 CPU 必跑追加新 Schema 场景，Linux／Metal GPU 必跑追加来源宽窄场景；i18n **2462/2462、零问题**及空白检查通过。完整 Python **3502 passed、24 skipped、2 deselected、1 既有 Starlette 提示／718.58 秒**，日志 `/tmp/stk-report-sources-python-full.log`。完整原生 **1809/1809、零失败／错误／跳过／451.73 秒**，JUnit `/tmp/stk-report-sources-native-full.xml`；逐条执行现行 Linux CI 必跑脚本，**1339 项实际运行通过**，日志 `/tmp/stk-report-sources-required.log`。随后全部目标构建退出 0，新主程序重链后的安装／验收 **2/2、零跳过／2.73 秒**，JUnit `/tmp/stk-report-sources-final-package.xml`。源码暂存 gitleaks 使用 `.gitleaks.toml` 和 `--redact`，扫描 **132245 bytes、零发现**，日志 `/tmp/stk-report-sources-source-gitleaks.log`。本批新头 CI 待推送后验证。
+- 前头 Desktop `40242092854` 的 Windows Build 已失败：`SetProcessDpiAwarenessContext`、`GetThreadDpiAwarenessContext`、`GetAwarenessFromDpiAwarenessContext` 在 `_WIN32_WINNT=0x0603` 下无声明，测试及 Windows native job 未运行。仅在可选证据预检动态解析 User32 三接口，缺任一接口仍明确失败；产品最低系统要求不变。macOS CPU **1207/1207**、Metal **242/242** 零跳过；真实 native 20 轮执行 **101.44 秒**后因最终 guarded 检查失败，整 run 已 completed/failure，Linux 三项成功、Windows Build 失败、Windows native skipped。Runtime `40242092844`、Docs `40242092882`、Secret `40242092819` 均成功，前头推送等待条件已满足。这些结果不代表本批修正的 Windows 或 macOS native 已通过。
+
+- macOS artifact `desktop-macos-frames` 的 161 张最终 OS PNG 已逐一校验 SHA：20 轮×8 阶段加最终父关闭前一帧，均两次连续匹配；20 条关闭记录及父关闭均 detached／hidden、旧 URL 410，运行时为 WKWebView `20621.3.11.11.3`。已目视同窗文档、旁边 Viewer、隐藏后 Python 及最终会话；结果 JSON 仍为 failed、`guarded_stk_leaks=null`。证据 `/tmp/stk-ci-40242092854-macos-desktop`，紧凑核对 `/tmp/stk-ci-40242092854-macos-evidence-check.json`。
+- 源码审查发现原型在 Runtime 返回后、Metal 函数局部静态析构前要求零块，与正式应用既有退出检查顺序不符。`9358ca2` 在 Runtime 初始化分配器后、引擎首次初始化前登记最终检查，退出时先析构晚静态，再核零块／零字节，最后保留既有 fail-on-leak 检测器；只有完整图像／生命周期证据和最终零计数才写 passed。提前失败不被最终零计数覆盖，真实泄漏仍退出 1；Runtime 后计数和分配标签仅供诊断。旧日志没有标签，不能认定全部旧块均来自 Metal 静态，也不能据本机通过认作 Mac 修正已通过。
+- 追加全部目标构建退出 0；三项纯 CPU 自检分别实际验证晚静态先持有后释放（准确退出 0）、真实 64 字节泄漏（准确退出 1）、早失败但最终零计数（准确退出 1）。包装器核对诊断及析构顺序，崩溃／超时／任意其他退出码不算通过。三项、资源／像素、四窗口及安装相关 **26/26、零跳过／3.16 秒**，JUnit `/tmp/stk-native-final-leak-gate-focused.xml`；三平台 CPU 必跑已追加。没有重新执行整套新增 1812 项原生套件；来源选择完整 1809 项与追加修正专项分别记录。源码暂存 gitleaks 扫描 **31045 bytes、零发现**，日志 `/tmp/stk-native-final-leak-gate-gitleaks.log`。
+
+- 关闭 Blender 的独立构建已重新完成；资源与像素判据 **17/17、零失败／错误／跳过**。同次扩大的 CPU 执行共有 286 项，277 passed、9 skipped；跳过的均为未配置 `STK_BRIDGE_TEST_PYTHON` 的 PythonBridge 用例，不算通过。JUnit `/tmp/stk-native-final-leak-gate-cpu.xml`，构建及执行日志 `/tmp/stk-native-final-leak-gate-cpu-build.log`、`/tmp/stk-native-final-leak-gate-cpu.log`。本项仅补证无 Blender 资源构建，不代替主构建真实桥回归。
+
+本次 AOCI 已完整交付 22 块并确认，Challenge 10/10；源码与记录按最终稳定状态增量维护，实际治理以 Verify／Check／Guide 为准，不用机器对齐替代当前完整认知可靠性或实机验收。P4 富文档／PDF、AI 报告、LaTeX、视频、报告模式与第 4–8 项继续，PET 新专项后置。
 
 ## 2026-10-25：报告资源读回与原生显示证据（本机验收完成）
 
