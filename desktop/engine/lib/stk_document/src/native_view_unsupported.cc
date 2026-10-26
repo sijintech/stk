@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-#include "native_document_view.hh"
+#include "stk/document/native_view.hh"
 
 namespace stk::document_preview {
 namespace {
@@ -20,6 +20,8 @@ class UnsupportedView final : public NativeDocumentView {
   void set_bounds(ViewBounds) override {}
   void set_visible(bool) override {}
   void focus() override {}
+  void set_focus_exit_handler(FocusExitHandler) override {}
+  bool return_focus() override { return true; }
   void close() override
   {
     if (resources_) { resources_->close(); }

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <gtest/gtest.h>
+#include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/bridge/process.hh"
@@ -369,6 +370,49 @@ TEST_F(WorkspaceNavigationPython, ReturningToConversationKeepsItsUnsentQuestion)
   ASSERT_NE(widget(key), nullptr);
   EXPECT_EQ(widget(key)->string.value(), "Compare these cases without starting a simulation.");
   EXPECT_EQ(project().project()->revision, 0);
+}
+
+TEST_F(WorkspaceNavigationPython, CapturedConversationOpensWhileOnlyTheProjectCatalogIsRefreshing)
+{
+  const std::string table = "11111111-1111-4111-8111-111111111111";
+  const std::string row = "22222222-2222-4222-8222-222222222222";
+  const std::string field = "33333333-3333-4333-8333-333333333333";
+  ASSERT_TRUE(project().apply(Json::array({
+      {{"op", "create_table"}, {"id", table}, {"name", "Frozen results"}},
+      {{"op", "add_field"}, {"id", field}, {"table_id", table}, {"name", "Value"}, {"type", "number"}},
+      {{"op", "add_record"}, {"id", row}, {"table_id", table}},
+      {{"op", "set_cell"}, {"table_id", table}, {"record_id", row}, {"field_id", field}, {"value", 300}}
+  })));
+  ASSERT_NO_FATAL_FAILURE(idle());
+  auto &discussion = project().discussion();
+  const auto opened_handle = handle();
+  bool captured = false;
+  ASSERT_TRUE(discussion.capture(table, {row}, {field}, "Frozen results", [&](bool ok) {
+    captured = ok;
+    if (ok) { f.shell->open_project_page_later(&f.screen, "conversation", opened_handle); }
+  }));
+  ASSERT_TRUE(discussion.busy());
+  // Pump bridge replies without running Screen's deferred navigation queue.
+  ASSERT_TRUE(loop.pump_until([&] { return !discussion.busy(); }, 30)) << discussion.error();
+  ASSERT_TRUE(captured); ASSERT_FALSE(discussion.context().empty());
+  const auto context = discussion.context();
+  project().refresh();
+  ASSERT_TRUE(project().busy()); // Do not pump the bridge before executing the queued navigation.
+  f.screen.run_deferred(); f.drv->frame();
+  EXPECT_EQ(f.screen.maximized(), nullptr);
+  EXPECT_EQ(destination(kEditorAI).editor().type().id, kEditorAI);
+  EXPECT_EQ(discussion.context(), context);
+  ASSERT_NO_FATAL_FAILURE(idle());
+  EXPECT_EQ(discussion.context(), context);
+}
+
+TEST_F(WorkspaceNavigationPython, ARefreshDoesNotOpenUncapturedConversationOrOtherProjectPages)
+{
+  ASSERT_TRUE(project().discussion().context().empty());
+  project().refresh(); ASSERT_TRUE(project().busy());
+  go("conversation"); EXPECT_EQ(f.screen.maximized(), &home());
+  go("files"); EXPECT_EQ(f.screen.maximized(), &home());
+  ASSERT_NO_FATAL_FAILURE(idle());
 }
 
 }  // namespace

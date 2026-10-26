@@ -102,6 +102,8 @@ class ProjectState {
   /** UI host fence for project/selection changes, independent of persistence semantics. */
   void set_selection_guard(std::function<bool()> guard) { selection_guard_ = std::move(guard); }
   bool busy() const { return busy_ || fetching_; }
+  /** A read-only refresh with no explicit open/close/edit operation in flight. */
+  bool refreshing() const { return fetching_ && !busy_; }
   bool table_page_loading() const { return table_page_loading_; }
   bool table_page_failed(const std::string &id) const { return failed_pages_.contains(id); }
   bool loaded() const { return project_.has_value() && snapshot_ready_; }

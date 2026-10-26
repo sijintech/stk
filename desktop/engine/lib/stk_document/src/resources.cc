@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-#include "document_resources.hh"
+#include "stk/document/resources.hh"
 
 #include <algorithm>
 #include <array>

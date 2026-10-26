@@ -26,6 +26,8 @@ endif()
 
 option(STK_DESKTOP_WITH_BLENDER "Build the vendored Blender GHOST + GPU + BLF engine" ON)
 option(STK_DESKTOP_BUILD_SPIKE "Build the Phase 0 GPU extraction spike" ON)
+option(STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW
+  "Enable the candidate native Markdown/HTML/PDF report view (platform acceptance required)" OFF)
 option(STK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE
   "Build the opt-in native document preview candidate and confined-resource tests" OFF)
 
@@ -88,7 +90,7 @@ endif()
 # Engine libraries owned by other work packages plug in when present. The
 # pure-CPU ones (stk_core, stk_io, stk_viewer_model) must build with
 # STK_DESKTOP_WITH_BLENDER=OFF.
-foreach(_lib stk_core stk_io stk_viewer_model stk_gfx stk_viewer_gpu stk_ui stk_wm stk_platform stk_bridge stk_app)
+foreach(_lib stk_core stk_io stk_viewer_model stk_gfx stk_viewer_gpu stk_ui stk_wm stk_platform stk_bridge stk_document stk_app)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/engine/lib/${_lib}/CMakeLists.txt")
     add_subdirectory(engine/lib/${_lib})
   endif()

@@ -64,6 +64,10 @@ class Editor {
   }
   /** Deferred navigation must not outlive the originating editor instance. */
   std::weak_ptr<void> lifetime() const { return lifetime_; }
+  /** Synchronous owner detach, including a hidden tab or a tab moved to another Area.
+   * Cancel owner-bound asynchronous work and close native resources; preserve local drafts.
+   * Called before the old Area/Screen can disappear. Must not mutate the tree or throw. */
+  virtual void on_area_removed() {}
 
   /* ---- Regions ---- */
 

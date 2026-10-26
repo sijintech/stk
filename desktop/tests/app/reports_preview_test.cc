@@ -22,6 +22,7 @@ using io::Json;
 namespace fs = std::filesystem;
 const std::string report_id = "a1111111-1111-4111-8111-111111111111";
 const std::string text_report_id = "b2222222-2222-4222-8222-222222222222";
+const std::string pdf_report_id = "c3333333-3333-4333-8333-333333333333";
 
 // Keep real services and strict schema validation. Faults retain valid wire shapes so the
 // controller must independently bind every receipt. Hold replies only after service locks end.
@@ -60,6 +61,32 @@ def altered_prepare(*args, **kwargs):
     if current == 'total': result['total_size'] += 1
     return result
 report_previews.preview_resources = altered_prepare
+identity_preview = report_previews.preview
+def altered_identity(*args, **kwargs):
+    p = identity_preview(*args, **kwargs)
+    current = mode()
+    if current == 'pdf_project': p['project_id'] = '00000000-0000-4000-8000-000000000000'
+    if current == 'pdf_report': p['report_id'] = '00000000-0000-4000-8000-000000000000'
+    if current == 'pdf_manifest': p['source_sha256'] = '0' * 64
+    if current == 'pdf_revision': p['revision'] += 1
+    if current == 'pdf_path': p['path'] = 'other.pdf'
+    if current == 'pdf_mime': p['mime'] = 'image/png'
+    if current == 'pdf_source_mime': p['source_mime'] = 'text/html; charset=utf-8'
+    if current == 'pdf_renderer': p['renderer'] = 'stk.report-renderer/1'
+    if current == 'pdf_source_hash': p['source_content_sha256'] = '0' * 64
+    if current == 'pdf_display_hash': p['content_sha256'] = '0' * 64
+    if current == 'pdf_size': p['size'] -= 1
+    if current == 'pdf_source_size': p['source_size'] -= 1
+    if current == 'pdf_bytes': p['data'] = base64.b64encode(b'x' * p['size']).decode('ascii')
+    if current == 'pdf_noncanonical':
+        alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+        encoded = p['data']
+        padding = len(encoded) - len(encoded.rstrip('='))
+        assert padding
+        index = len(encoded) - padding - 1
+        p['data'] = encoded[:index] + alphabet[alphabet.index(encoded[index]) | 1] + encoded[index + 1:]
+    return p
+report_previews.preview = altered_identity
 read = Reports.asset
 def altered_asset(self, *args, **kwargs):
     result = read(self, *args, **kwargs)
@@ -74,10 +101,15 @@ send = Bridge.send
 def observed_send(self, message, method=None):
     if method == 'hello' and 'result' in message and mode() == 'old_bridge':
         message['result']['methods'].remove('project.reports.preview_resources')
+    if method == 'hello' and 'result' in message and mode() == 'no_identity_preview':
+        message['result']['methods'].remove('project.reports.preview')
     if 'result' in message:
         if method == 'project.reports.preview_resources': count('prepare')
+        if method == 'project.reports.preview': count('pdf_prepare')
         if method == 'project.reports.asset': count('asset:' + message['result']['path'])
     held = ((method == 'project.reports.preview_resources' and mode() == 'hold_prepare') or
+            (method == 'project.reports.preview' and mode() == 'hold_pdf') or
+            (method == 'project.catalog' and mode() == 'hold_catalog') or
             (method == 'project.reports.asset' and mode() == 'hold_image') or
             (method == 'project.reports.asset' and mode() == 'hold_second' and
              message.get('result', {}).get('path') == 'images/second.png'))
@@ -108,7 +140,8 @@ class ReportsPreviewPython : public ::testing::Test {
   std::shared_ptr<const io::Payload> shown;
   std::string python, source_sha, project_id;
   const std::string markdown = "# Frozen report\n\n![Plot](../images/plot.png)\n\n[Unsafe](secondary.html)\n";
-  std::vector<uint8_t> png, second_png;
+  std::vector<uint8_t> png, second_png, pdf_bytes;
+  std::string pdf_sha;
   Json manifest, viewer_state;
   uint64_t camera_serial = 0, payload_serial = 0;
   AppStore &store() { return f.shell->store(); }
@@ -170,6 +203,33 @@ class ReportsPreviewPython : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(settle());
     ASSERT_TRUE(reports->selected().is_object()) << reports->error();
     ASSERT_FALSE(reports->prepared_preview());
+  }
+  void create_pdf(size_t exact_size = 0)
+  {
+    // Deliberately binary: this tests byte admission, not whether an OS PDF engine renders it.
+    const std::string binary = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n";
+    pdf_bytes.assign(binary.begin(), binary.end());
+    if (exact_size) { pdf_bytes.resize(exact_size, 0xff); }
+    else if (pdf_bytes.size() % 3 == 0) { pdf_bytes.push_back('\n'); }
+    { std::ofstream file(dir.path() / "project/document.pdf", std::ios::binary);
+      file.write(reinterpret_cast<const char *>(pdf_bytes.data()), std::streamsize(pdf_bytes.size())); ASSERT_TRUE(file.good()); }
+    const auto handle = project().project()->handle;
+    const auto revision = project().project()->revision;
+    const auto indexed = call("project.files.index", {{"handle", handle}, {"expected_revision", revision},
+        {"paths", Json::array({"document.pdf"})}});
+    ASSERT_TRUE(indexed.is_object()); const auto id = indexed.at("record_ids").at(0);
+    const auto image = manifest.at("assets").at(1).at("record_id");
+    const auto snapshot = call("project.snapshots.capture", {{"handle", handle}, {"expected_revision", revision + 1},
+        {"record_ids", Json::array({id, image})}});
+    ASSERT_TRUE(snapshot.is_object());
+    ASSERT_TRUE(call("project.reports.create", {{"handle", handle}, {"name", "Binary PDF"}, {"report_id", pdf_report_id},
+        {"snapshot_id", snapshot.at("snapshot").at("id")}, {"entry_record_id", id}, {"expected_revision", revision + 2},
+        {"assets", Json::array({{{"record_id", id}, {"path", "reports/document.pdf"}},
+                               {{"record_id", image}, {"path", "images/plot.png"}}})}}).is_object());
+    project().refresh(); ASSERT_NO_FATAL_FAILURE(settle_project());
+    const auto record = call("project.reports.get", {{"handle", handle}, {"report_id", pdf_report_id}});
+    ASSERT_TRUE(record.is_object()); pdf_sha = record.at("report").at("source_sha256").get<std::string>();
+    ASSERT_NO_FATAL_FAILURE(load(pdf_report_id));
   }
   void hold(const std::string &operation)
   {
@@ -314,6 +374,89 @@ TEST_F(ReportsPreviewPython, EntryWithoutImagesPublishesOneSanitizedAsset)
   EXPECT_EQ(count("asset:images/plot.png"), 0); EXPECT_EQ(count("asset:images/second.png"), 0);
 }
 
+TEST_F(ReportsPreviewPython, TakingTheCollectionMovesBytesAndLeavesTheRawReaderUntouched)
+{
+  ASSERT_NO_FATAL_FAILURE(load()); ASSERT_TRUE(reports->read_asset());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  const auto raw = reports->asset_bytes(); const auto read_version = reports->asset_version();
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepared_preview());
+  const auto *entry_data = reports->prepared_preview()->assets[0].bytes.data();
+  auto prepared = reports->take_prepared_preview();
+  ASSERT_TRUE(prepared); EXPECT_EQ(prepared->assets[0].bytes.data(), entry_data);
+  EXPECT_EQ(prepared->project_scope_epoch, store().project_scope_epoch());
+  EXPECT_FALSE(reports->prepared_preview()); EXPECT_FALSE(reports->take_prepared_preview());
+  EXPECT_EQ(reports->asset_bytes(), raw); EXPECT_EQ(reports->asset_version(), read_version);
+}
+
+TEST_F(ReportsPreviewPython, ScopeInvalidationClearsReadyPreviewWithoutPollingOrDiscardingRawBytes)
+{
+  ASSERT_NO_FATAL_FAILURE(load()); ASSERT_TRUE(reports->read_asset());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  const auto raw = reports->asset_bytes(); const auto selected = reports->selected();
+  const auto raw_version = reports->asset_version();
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_TRUE(reports->prepared_preview());
+  store().invalidate_project_scope();
+  // Do not sync, draw or pump: resource revocation is synchronous.
+  EXPECT_FALSE(reports->prepared_preview()); EXPECT_FALSE(reports->preview_busy());
+  EXPECT_EQ(reports->asset_bytes(), raw); EXPECT_EQ(reports->asset_version(), raw_version);
+  EXPECT_EQ(reports->selected(), selected); EXPECT_EQ(count("prepare"), 1);
+}
+
+TEST_F(ReportsPreviewPython, ChangedEventRevokesPreviewBeforeTheNewCatalogCanBeRead)
+{
+  ASSERT_NO_FATAL_FAILURE(load()); ASSERT_TRUE(reports->read_asset());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  const auto raw = reports->asset_bytes(); const auto raw_version = reports->asset_version();
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_TRUE(reports->prepared_preview());
+  ASSERT_NO_FATAL_FAILURE(mode("hold_catalog"));
+  ASSERT_TRUE(call("project.apply", {{"handle", reports->handle()}, {"expected_revision", 4},
+      {"commands", Json::array({{{"op", "create_table"}, {"id", "f6666666-6666-4666-8666-666666666666"}, {"name", "Changed"}}})}}).is_object());
+  ASSERT_TRUE(loop.pump_until([&] { return fs::exists(dir.path() / "mode.held"); }, 30));
+  ASSERT_TRUE(project().project()); EXPECT_EQ(project().project()->revision, 4);
+  EXPECT_TRUE(project().busy());
+  // The cached revision is still old and ProjectReports::sync was never called.
+  EXPECT_FALSE(reports->prepared_preview()); EXPECT_EQ(reports->revision(), 4);
+  EXPECT_EQ(reports->asset_bytes(), raw); EXPECT_EQ(reports->asset_version(), raw_version);
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(drain(*client));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_EQ(reports->revision(), 5); EXPECT_EQ(count("prepare"), 1);
+}
+
+TEST_F(ReportsPreviewPython, ReplacingTheBridgeRevokesReadyPreviewBeforeProjectSync)
+{
+  ASSERT_NO_FATAL_FAILURE(load()); ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepared_preview());
+  store().set_bridge(nullptr);
+  EXPECT_FALSE(reports->prepared_preview()); EXPECT_FALSE(reports->preview_busy());
+  store().set_bridge(client.get());
+}
+
+TEST_F(ReportsPreviewPython, ChangingTheLocalReportClosesItsNativeOwnerBeforeDiscardingBytes)
+{
+  ASSERT_NO_FATAL_FAILURE(load()); ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepared_preview());
+  int closed = 0;
+  reports->on_preview_invalidated = [&] {
+    ++closed;
+    // This is the last instant at which the old collection may back a native view.
+    EXPECT_TRUE(reports->prepared_preview());
+    EXPECT_EQ(reports->selected().at("id"), report_id);
+  };
+  const bool accepted = reports->load(text_report_id);
+  reports->on_preview_invalidated = nullptr;
+  ASSERT_TRUE(accepted); EXPECT_EQ(closed, 1);
+  EXPECT_FALSE(reports->prepared_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_EQ(reports->selected().at("id"), text_report_id);
+}
+
 class ReportsPreviewInvalid : public ReportsPreviewPython, public ::testing::WithParamInterface<const char *> {};
 TEST_P(ReportsPreviewInvalid, RejectsAValidWireShapeThatDoesNotMatchFrozenContent)
 {
@@ -353,6 +496,7 @@ TEST_F(ReportsPreviewPython, FullClearDropsEveryPendingByteBeforeTheFinalReply)
 TEST_F(ReportsPreviewPython, ClosingProjectInvalidatesTheFinalImageReply)
 {
   ASSERT_NO_FATAL_FAILURE(hold("hold_second")); ASSERT_TRUE(project().close());
+  EXPECT_FALSE(reports->preview_busy()); EXPECT_FALSE(reports->prepared_preview());
   ASSERT_TRUE(loop.pump_until([&] { reports->sync(); return !project().loaded() && !project().busy(); }, 30));
   ASSERT_NO_FATAL_FAILURE(mode(""));
   ASSERT_NO_FATAL_FAILURE(drain(*client));
@@ -449,5 +593,115 @@ TEST_F(ReportsPreviewPython, RestoringAReportWorkspaceDoesNotAutomaticallyPrepar
   EXPECT_EQ(count("prepare"), 0); EXPECT_EQ(count("asset:images/second.png"), 0);
   EXPECT_FALSE(reports->prepared_preview());
 }
+TEST_F(ReportsPreviewPython, PdfUsesOneIdentityResponseWithBinaryBytesAndFreshSessions)
+{
+  ASSERT_NO_FATAL_FAILURE(create_pdf()); ASSERT_TRUE(reports->supports_preview());
+  ASSERT_TRUE(reports->read_asset()); ASSERT_NO_FATAL_FAILURE(settle());
+  const auto raw = reports->asset_bytes(); const auto version = reports->asset_version();
+  const auto selection = reports->selected();
+  ASSERT_TRUE(fs::remove(dir.path() / "project/document.pdf"));
+  ASSERT_TRUE(fs::remove(dir.path() / "project/plot.png"));
+  std::string previous;
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_TRUE(reports->prepare_preview()); ASSERT_FALSE(reports->prepared_preview());
+    ASSERT_NO_FATAL_FAILURE(settle());
+    auto prepared = reports->take_prepared_preview(); ASSERT_TRUE(prepared) << reports->preview_error();
+    EXPECT_EQ(prepared->identity.project_id, project_id); EXPECT_EQ(prepared->identity.report_id, pdf_report_id);
+    EXPECT_EQ(prepared->identity.source_sha256, pdf_sha); EXPECT_NE(prepared->identity.session_id, previous);
+    previous = prepared->identity.session_id;
+    EXPECT_EQ(prepared->project_scope_epoch, store().project_scope_epoch());
+    ASSERT_EQ(prepared->assets.size(), 1u); EXPECT_EQ(prepared->entry_path, "reports/document.pdf");
+    EXPECT_EQ(prepared->assets[0].mime, "application/pdf"); EXPECT_EQ(prepared->assets[0].bytes, pdf_bytes);
+    EXPECT_EQ(reports->selected(), selection); EXPECT_EQ(reports->asset_bytes(), raw); EXPECT_EQ(reports->asset_version(), version);
+  }
+  EXPECT_EQ(count("pdf_prepare"), 2); EXPECT_EQ(count("prepare"), 0);
+  EXPECT_EQ(count("asset:reports/document.pdf"), 1); EXPECT_EQ(count("asset:images/plot.png"), 0);
+}
+
+TEST_F(ReportsPreviewPython, PdfAcceptsTheFullFourMiBBudgetWithoutTheHtmlInputLimit)
+{
+  ASSERT_NO_FATAL_FAILURE(create_pdf(4 * 1024 * 1024));
+  ASSERT_TRUE(reports->supports_preview()); ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_TRUE(reports->prepared_preview()) << reports->preview_error();
+  ASSERT_EQ(reports->prepared_preview()->assets.size(), 1u);
+  EXPECT_EQ(reports->prepared_preview()->assets[0].bytes, pdf_bytes);
+}
+
+TEST_F(ReportsPreviewPython, PdfWorksWithLegacyPreviewWhileHtmlStillRequiresResourcePreparation)
+{
+  ASSERT_NO_FATAL_FAILURE(create_pdf());
+  auto old = std::move(client); project().attach(nullptr); store().set_bridge(nullptr); reports->sync();
+  ASSERT_NO_FATAL_FAILURE(mode("old_bridge")); ASSERT_TRUE(start_client("legacy-pdf"));
+  ASSERT_NO_FATAL_FAILURE(settle_project()); reports->sync();
+  ASSERT_NO_FATAL_FAILURE(load(pdf_report_id));
+  ASSERT_FALSE(reports->supports("project.reports.preview_resources")); ASSERT_TRUE(reports->supports_preview());
+  ASSERT_TRUE(reports->prepare_preview()); ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepared_preview()); EXPECT_EQ(reports->prepared_preview()->assets[0].bytes, pdf_bytes);
+  ASSERT_NO_FATAL_FAILURE(load()); EXPECT_FALSE(reports->supports_preview()); EXPECT_FALSE(reports->prepare_preview());
+  EXPECT_EQ(count("pdf_prepare"), 1); EXPECT_EQ(count("prepare"), 0); old->close();
+}
+
+TEST_F(ReportsPreviewPython, MissingIdentityPreviewDisablesPdfWithoutDisablingHtml)
+{
+  ASSERT_NO_FATAL_FAILURE(create_pdf());
+  auto old = std::move(client); project().attach(nullptr); store().set_bridge(nullptr); reports->sync();
+  ASSERT_NO_FATAL_FAILURE(mode("no_identity_preview")); ASSERT_TRUE(start_client("no-pdf"));
+  ASSERT_NO_FATAL_FAILURE(settle_project()); reports->sync();
+  ASSERT_NO_FATAL_FAILURE(load(pdf_report_id));
+  EXPECT_FALSE(reports->supports_preview()); EXPECT_FALSE(reports->prepare_preview());
+  EXPECT_FALSE(reports->preview_error().empty()); EXPECT_EQ(count("pdf_prepare"), 0);
+  ASSERT_NO_FATAL_FAILURE(load()); ASSERT_TRUE(reports->supports_preview());
+  ASSERT_TRUE(reports->prepare_preview()); ASSERT_NO_FATAL_FAILURE(settle()); ASSERT_TRUE(reports->prepared_preview());
+  old->close();
+}
+
+class ReportsPdfInvalid : public ReportsPreviewPython, public ::testing::WithParamInterface<const char *> {};
+TEST_P(ReportsPdfInvalid, RejectsValidWireReceiptsBeforePublishingAnyPdfBytes)
+{
+  ASSERT_NO_FATAL_FAILURE(create_pdf()); const auto selected = reports->selected();
+  ASSERT_NO_FATAL_FAILURE(mode(GetParam())); ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle()); EXPECT_FALSE(reports->prepared_preview());
+  EXPECT_FALSE(reports->preview_error().empty()); EXPECT_FALSE(reports->preview_busy());
+  EXPECT_EQ(reports->selected(), selected); EXPECT_FALSE(reports->asset_loaded());
+  EXPECT_EQ(count("pdf_prepare"), 1); EXPECT_EQ(count("asset:images/plot.png"), 0);
+  ASSERT_NO_FATAL_FAILURE(mode("")); reports->sync(); EXPECT_EQ(count("pdf_prepare"), 1);
+}
+INSTANTIATE_TEST_SUITE_P(Receipts, ReportsPdfInvalid, ::testing::Values(
+    "pdf_project", "pdf_report", "pdf_manifest", "pdf_revision", "pdf_path", "pdf_mime",
+    "pdf_source_mime", "pdf_renderer", "pdf_source_hash", "pdf_display_hash", "pdf_size",
+    "pdf_source_size", "pdf_bytes", "pdf_noncanonical"));
+
+class ReportsPdfInvalidation : public ReportsPreviewPython, public ::testing::WithParamInterface<const char *> {};
+TEST_P(ReportsPdfInvalidation, HeldPdfCannotEscapeAnInvalidatedScopeOrSelection)
+{
+  ASSERT_NO_FATAL_FAILURE(create_pdf());
+  ASSERT_NO_FATAL_FAILURE(mode("hold_pdf"));
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_TRUE(loop.pump_until([&] { reports->sync(); return fs::exists(dir.path() / "mode.held"); }, 30));
+  EXPECT_FALSE(reports->prepared_preview()); std::unique_ptr<bridge::Client> old;
+  const std::string operation = GetParam();
+  if (operation == "clear") { reports->clear_preview(); }
+  else if (operation == "scope") { store().invalidate_project_scope(); }
+  else if (operation == "report") { ASSERT_NO_FATAL_FAILURE(load()); }
+  else if (operation == "close") { ASSERT_TRUE(project().close()); }
+  else if (operation == "revision") {
+    ASSERT_TRUE(call("project.apply", {{"handle", project().project()->handle}, {"expected_revision", reports->revision()},
+        {"commands", Json::array({{{"op", "create_table"}, {"id", "f6666666-6666-4666-8666-666666666666"}, {"name", "Later"}}})}}).is_object());
+    project().refresh(); ASSERT_NO_FATAL_FAILURE(settle_project());
+  }
+  else if (operation == "project") {
+    ASSERT_TRUE(project().create(dir.str() + "/other-pdf", "Other")); ASSERT_NO_FATAL_FAILURE(settle_project());
+  }
+  else if (operation == "bridge") {
+    old = std::move(client); project().attach(nullptr); store().set_bridge(nullptr); reports->sync();
+    ASSERT_TRUE(start_client("replacement-pdf")); ASSERT_NO_FATAL_FAILURE(settle_project());
+  }
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(drain(old ? *old : *client));
+  EXPECT_FALSE(reports->prepared_preview()); EXPECT_FALSE(reports->preview_busy()); EXPECT_EQ(count("pdf_prepare"), 1);
+  if (old) { old->close(); }
+}
+INSTANTIATE_TEST_SUITE_P(Scopes, ReportsPdfInvalidation,
+    ::testing::Values("clear", "scope", "report", "close", "revision", "project", "bridge"));
 }  // namespace
 }  // namespace stk::app

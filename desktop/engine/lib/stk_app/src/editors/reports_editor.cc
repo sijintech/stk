@@ -4,6 +4,7 @@
 #include "stk/app/editor.hh"
 #include "stk/app/jobs_state.hh"
 #include "stk/app/project_reports.hh"
+#include "stk/app/report_document_host.hh"
 #include "stk/app/project_state.hh"
 #include "stk/core/sha256.hh"
 #include "stk/core/utf8.hh"
@@ -41,8 +42,22 @@ std::string short_text(const std::string &text, size_t bytes = 256)
 class ReportsEditor final : public Editor {
  public:
   explicit ReportsEditor(const EditorType &type) : Editor(type) {}
-  ~ReportsEditor() override { release_image(); }
+  ~ReportsEditor() override
+  {
+    if (reports_) { reports_->on_preview_invalidated = {}; }
+    document_.reset();
+    release_image();
+  }
   bool has_unsaved_changes() const override { return create_.dirty() || (reports_ && reports_->exporting()); }
+  void on_area_removed() override
+  {
+    // An in-flight prepared response must not attach to a different owner/window later.
+    // Keep the source reader, PNG and creation draft; reopening the native page is explicit.
+    ++generation_; // Retained controls from the old area cannot reopen the moved preview.
+    if (reports_) { reports_->clear_preview(); }
+    if (document_) { document_->clear(); document_->set_visible(false); }
+    document_mode_ = false;
+  }
 
   void draw_header(ui::Layout &row, EditorContext &ctx) override
   {
@@ -72,6 +87,12 @@ class ReportsEditor final : public Editor {
       }
     }
     accept_selection();
+    if (document_mode_ && reports.selected().is_object() &&
+        io::get_string(reports.selected(), "state") == "readable") {
+      draw_document(layout, ctx, guard());
+      return;
+    }
+    document_->set_visible(false);
     layout.label(short_text(project->name));
     layout.paragraph(ctx.tr("reports.intro"));
     if (reports.busy()) { layout.label(ctx.tr("project.busy")); }
@@ -97,6 +118,12 @@ class ReportsEditor final : public Editor {
     layout.label(std::string(ctx.tr("reports.version")) + source_sha_);
     layout.label(std::string(ctx.tr("reports.snapshot")) + io::get_string(manifest, "snapshot_id") +
         " · " + std::string(ctx.tr("reports.revision")) + std::to_string(io::get_int(manifest, "source_revision", 0)));
+    layout.button("reports_preview", ctx.tr("reports.preview"), [this, current] {
+      if (!current()) { return; }
+      document_mode_ = true;
+      document_->set_visible(true);
+      if (!document_->has_content() && !reports_->preview_busy()) { reports_->prepare_preview(); }
+    }).disable(reports.busy() || reports.preview_busy() || !reports.supports_preview());
     draw_sources(layout, ctx, manifest);
     draw_assets(layout, ctx, manifest, current);
     draw_export(layout, ctx, current);
@@ -124,6 +151,8 @@ class ReportsEditor final : public Editor {
     if ((!project.empty() && !canonical_uuid(project)) || (!report.empty() && !canonical_uuid(report)) ||
         (!digest.empty() && !core::is_sha256_hex(digest)) || (!report.empty() && (project.empty() || digest.empty())) ||
         path.size() > 1024 || !core::utf8::is_valid(path) || path.find('\0') != std::string::npos || page < 0 || page > 4096) { return false; }
+    if (document_) { document_->clear(); document_->set_visible(false); }
+    document_mode_ = false;
     ++generation_; release_image(); text_offsets_.clear(); destination_.clear(); navigation_handle_.clear();
     if (reports_) { reports_->clear(); }
     project_id_ = project; report_id_ = report; source_sha_ = digest; asset_path_ = path; text_page_ = size_t(page);
@@ -178,7 +207,16 @@ class ReportsEditor final : public Editor {
   void attach(EditorContext &ctx)
   {
     if (!reports_) { reports_ = std::make_unique<ProjectReports>(ctx.store); }
+    if (!document_) {
+      document_ = std::make_unique<ReportDocumentHost>(ctx.store);
+      reports_->on_preview_invalidated = document_->invalidator();
+    }
+    document_->bind(*this, ctx);
     reports_->sync();
+    if (reports_->prepared_preview()) {
+      if (auto prepared = reports_->take_prepared_preview()) { document_->adopt(std::move(*prepared)); }
+    }
+    document_->set_visible(document_mode_);
     if (epoch_ != reports_->epoch()) {
       epoch_ = reports_->epoch(); ++generation_; release_image(); text_offsets_.clear();
       asset_version_ = std::numeric_limits<uint64_t>::max(); destination_.clear();
@@ -249,6 +287,54 @@ class ReportsEditor final : public Editor {
       }).disable(reports_->busy() || offset + int64_t(items.size()) >= total);
     }
   }
+  void draw_document(ui::Layout &layout, EditorContext &ctx, const std::function<bool()> &current)
+  {
+    using document_preview::NativeViewStatus;
+    layout.label(short_text(io::get_string(reports_->selected(), "name"), 128));
+    layout.label(std::string(ctx.tr("reports.version")) + source_sha_);
+    auto &actions = layout.row(true);
+    actions.button("reports_document_source", ctx.tr("reports.source_view"), [this, current] {
+      if (current()) { document_mode_ = false; document_->set_visible(false); }
+    });
+    actions.button("reports_document_prepare", ctx.tr("reports.preview_prepare"), [this, current] {
+      if (current()) { reports_->prepare_preview(); }
+    }).disable(reports_->busy() || reports_->preview_busy() || !reports_->supports_preview());
+    actions.button("reports_document_close", ctx.tr("reports.preview_close"), [this, current] {
+      if (current()) { reports_->clear_preview(); document_mode_ = false; document_->set_visible(false); }
+    });
+    const auto actual = document_->state();
+    auto &focus = layout.row(true);
+    const auto previous_anchor = focus.button("reports_document_focus", ctx.tr("reports.preview_focus"), [this, current] {
+      if (current()) { document_->focus(); }
+    }).disable(actual.status != NativeViewStatus::Ready || !actual.parent_attached).id;
+    focus.button("reports_document_return_focus", ctx.tr("reports.preview_return"), [this, current] {
+      if (current()) { document_->return_focus(); }
+    });
+    if (reports_->preview_busy()) { layout.label(ctx.tr("reports.preview_preparing")); }
+    else if (!reports_->preview_error().empty()) { layout.paragraph(reports_->preview_error()); }
+    else if (actual.status == NativeViewStatus::Unsupported) { layout.paragraph(ctx.tr("reports.preview_unsupported")); }
+    else if (actual.status == NativeViewStatus::Failed) { layout.paragraph(actual.message); }
+    else if (actual.status == NativeViewStatus::Ready && actual.parent_attached && actual.visible) {
+      layout.label(ctx.tr("reports.preview_ready"));
+    }
+    else if (document_->has_content()) { layout.label(ctx.tr("reports.preview_loading")); }
+    else { layout.label(ctx.tr("reports.preview_prepare_needed")); }
+    const float unit = ctx.ui ? ctx.ui->style().unit : 20.0f;
+    const float height = ctx.draw ? float(ctx.draw->rect.height()) : 0.0f;
+    ui::WidgetId viewport = 0;
+    if (height >= 12.0f * unit && document_->has_content()) {
+      // The reading mode has a fixed compact toolbar; leave an additional row below the
+      // dedicated viewport so Tab can leave forwards as well as backwards.
+      viewport = layout.native_viewport("reports_document_viewport", std::max(1.0f, height / unit - 10.0f)).id;
+    }
+    else if (document_->has_content()) { layout.label(ctx.tr("reports.preview_enlarge")); }
+    const auto next_anchor = layout.button("reports_document_after", ctx.tr("reports.source_view"), [this, current] {
+      if (current()) { document_mode_ = false; document_->set_visible(false); }
+    }).id;
+    document_->set_viewport(viewport, previous_anchor, next_anchor);
+    document_->set_visible(viewport != 0);
+  }
+
   void draw_sources(ui::Layout &layout, EditorContext &ctx, const Json &manifest)
   {
     auto *panel = layout.panel("reports_sources", ctx.tr("reports.sources"), false);
@@ -371,6 +457,8 @@ class ReportsEditor final : public Editor {
 
   ReportsCreateView create_;
   std::unique_ptr<ProjectReports> reports_;
+  std::unique_ptr<ReportDocumentHost> document_;
+  bool document_mode_ = false;
   uint64_t epoch_ = std::numeric_limits<uint64_t>::max(), generation_ = 0;
   uint64_t asset_version_ = std::numeric_limits<uint64_t>::max();
   std::string project_id_, report_id_, source_sha_, asset_path_, navigation_handle_, destination_;

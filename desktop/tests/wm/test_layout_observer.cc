@@ -98,7 +98,112 @@ void register_owner(wmtest::AppFixture &fixture, OwnerProbe &probe)
     return std::make_unique<ObserverEditor>(type, probe);
   }});
 }
+
+struct RemovalProbe {
+  int removed = 0, destroyed = 0;
+  Screen *old_screen = nullptr;
+  std::string draft_at_removal;
+};
+
+class RemovalArea final : public Area {
+ public:
+  explicit RemovalArea(RemovalProbe &probe) : Area("removal"), probe_(probe) { emplace_region<Region>("main"); }
+  ~RemovalArea() override { ++probe_.destroyed; }
+  void on_removed() override { ++probe_.removed; probe_.old_screen = screen(); }
+ private:
+  RemovalProbe &probe_;
+};
+
+class RemovalEditor final : public app::Editor {
+ public:
+  RemovalEditor(const app::EditorType &type, RemovalProbe &probe) : Editor(type), probe_(probe) {}
+  ~RemovalEditor() override { ++probe_.destroyed; }
+  void draw_main(ui::Layout &layout, app::EditorContext &) override { layout.label(draft); }
+  void on_area_removed() override { ++probe_.removed; probe_.draft_at_removal = draft; }
+  bool has_unsaved_changes() const override { return !draft.empty(); }
+  std::string draft = "unsaved source";
+ private:
+  RemovalProbe &probe_;
+};
 }  // namespace
+
+TEST(AreaRemoval, CrossScreenAdoptionNotifiesBeforeOldOwnerIsLost)
+{
+  RemovalProbe source_probe, destination_probe;
+  Screen source, destination;
+  auto &moved = source.set_root(std::make_unique<RemovalArea>(source_probe));
+  destination.set_root(std::make_unique<RemovalArea>(destination_probe));
+  destination.adopt_tree_from(source);
+  EXPECT_EQ(source_probe.removed, 1);
+  EXPECT_EQ(source_probe.old_screen, &source);
+  EXPECT_EQ(source_probe.destroyed, 0);
+  EXPECT_EQ(destination_probe.removed, 1);
+  EXPECT_EQ(destination_probe.destroyed, 1);
+  EXPECT_EQ(moved.screen(), &destination);
+  EXPECT_TRUE(source.areas().empty());
+  destination.clear();
+  EXPECT_EQ(source_probe.removed, 2);
+  EXPECT_EQ(source_probe.old_screen, &destination);
+  EXPECT_EQ(source_probe.destroyed, 1);
+}
+
+TEST(AreaRemoval, SameScreenRearrangementAndVisibilityKeepOwnerResources)
+{
+  RemovalProbe first, second;
+  Screen screen;
+  auto &a = screen.set_root(std::make_unique<RemovalArea>(first));
+  screen.add_area(std::make_unique<RemovalArea>(second));
+  auto arrangement = screen.arrangement();
+  auto &children = arrangement["root"]["children"];
+  std::swap(children[0], children[1]);
+  ASSERT_TRUE(screen.rearrange(arrangement));
+  screen.set_maximized(&a);
+  screen.set_maximized(nullptr);
+  EXPECT_EQ(first.removed, 0);
+  EXPECT_EQ(second.removed, 0);
+  screen.clear();
+  EXPECT_EQ(first.removed, 1);
+  EXPECT_EQ(second.removed, 1);
+}
+
+TEST(AreaRemoval, ScreenDestructionNotifiesTreeAndGlobalOwners)
+{
+  RemovalProbe tree, global;
+  {
+    Screen screen;
+    screen.set_root(std::make_unique<RemovalArea>(tree));
+    screen.set_global_area(RegionAlign::Top, std::make_unique<RemovalArea>(global));
+  }
+  EXPECT_EQ(tree.removed, 1);
+  EXPECT_EQ(global.removed, 1);
+  EXPECT_EQ(tree.destroyed, 1);
+  EXPECT_EQ(global.destroyed, 1);
+}
+
+TEST(AreaRemoval, HiddenTabMoveAndAreaClearNotifyWithoutDiscardingDrafts)
+{
+  RemovalProbe probe;
+  wmtest::AppFixture fixture;
+  fixture.shell->registry().add({"removal_owner", "Removal owner", [&](const app::EditorType &type) {
+    return std::make_unique<RemovalEditor>(type, probe);
+  }});
+  auto &source = fixture.area("a1");
+  auto &destination = fixture.area("a2");
+  ASSERT_TRUE(source.set_tabs({app::kEditorLogs, "removal_owner"}, 0));
+  fixture.drv->frame();
+  auto *moved = &source.tab(1);
+  const int destination_index = destination.tab_count();
+  ASSERT_TRUE(source.move_tab_to(1, destination, false));
+  EXPECT_EQ(probe.removed, 1);
+  EXPECT_EQ(probe.destroyed, 0);
+  EXPECT_EQ(&destination.tab(destination_index), moved);
+  EXPECT_TRUE(moved->has_unsaved_changes());
+  EXPECT_EQ(probe.draft_at_removal, "unsaved source");
+  fixture.screen.clear();
+  EXPECT_EQ(probe.removed, 2); // Includes the still-hidden destination tab.
+  EXPECT_EQ(probe.destroyed, 1);
+  EXPECT_EQ(probe.draft_at_removal, "unsaved source");
+}
 
 TEST_F(LayoutObserverTest, ReadySeesFinalWidgetsOverlaysAndFrameNumber)
 {
@@ -181,6 +286,46 @@ TEST_F(LayoutObserverTest, RegionVisibilityAndSizeInvalidateBeforeMutation)
   driver.frame();
   EXPECT_EQ(invalid, 2);
   subscription.reset();
+}
+
+TEST_F(LayoutObserverTest, SplitterPointerDownWithdrawsBeforeAnyMovement)
+{
+  screen.add_area(make_area());
+  driver.frame();
+  ASSERT_FALSE(screen.splitters().empty());
+  const auto rect = screen.splitters().front().rect;
+  const int x = (rect.xmin + rect.xmax) / 2;
+  const int y = (rect.ymin + rect.ymax) / 2;
+  int invalid = 0;
+  auto subscription = screen.observe_layout([](const DrawContext &) {}, [&] {
+    ++invalid;
+    EXPECT_EQ(screen.capture(), Screen::Capture::None);
+  });
+  driver.down(x, y);
+  EXPECT_EQ(invalid, 1);
+  EXPECT_EQ(screen.capture(), Screen::Capture::Splitter);
+  driver.up(x, y);
+  EXPECT_EQ(screen.capture(), Screen::Capture::None);
+}
+
+TEST_F(LayoutObserverTest, RegionEdgePointerDownWithdrawsBeforeAnyMovement)
+{
+  auto &area = *screen.areas().front();
+  auto &side = area.emplace_region<Region>("sidebar", RegionAlign::Right, 160.0f);
+  side.resizable = true;
+  driver.frame();
+  const int x = side.rect().xmin;
+  const int y = (side.rect().ymin + side.rect().ymax) / 2;
+  int invalid = 0;
+  auto subscription = screen.observe_layout([](const DrawContext &) {}, [&] {
+    ++invalid;
+    EXPECT_EQ(screen.capture(), Screen::Capture::None);
+  });
+  driver.down(x, y);
+  EXPECT_EQ(invalid, 1);
+  EXPECT_EQ(screen.capture(), Screen::Capture::RegionEdge);
+  driver.up(x, y);
+  EXPECT_EQ(screen.capture(), Screen::Capture::None);
 }
 
 TEST_F(LayoutObserverTest, AHiddenAreaStillReceivesReadyAndCanWithdrawItsView)

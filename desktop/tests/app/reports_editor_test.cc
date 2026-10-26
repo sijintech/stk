@@ -41,6 +41,7 @@ import threading
 import time
 from suan.project.reports import Reports
 from suan.project import reports as report_storage
+from suan.project import report_previews
 from suan.project.store import RevisionConflict
 from suan.project.reports import ReportNotFound
 from suan.project.snapshots import Snapshots
@@ -60,6 +61,18 @@ def controlled_asset(self, *args, **kwargs):
         result['data'] = base64.b64encode(b'x' * result['size']).decode('ascii')
     return result
 Reports.asset = controlled_asset
+prepare_preview = report_previews.preview_resources
+def controlled_preview(*args, **kwargs):
+    result = prepare_preview(*args, **kwargs)
+    count('prepare')
+    return result
+report_previews.preview_resources = controlled_preview
+identity_preview = report_previews.preview
+def controlled_identity_preview(*args, **kwargs):
+    result = identity_preview(*args, **kwargs)
+    count('pdf_prepare')
+    return result
+report_previews.preview = controlled_identity_preview
 export = Reports.export_file
 def controlled_export(self, *args, **kwargs):
     result = export(self, *args, **kwargs)
@@ -108,7 +121,8 @@ send = Bridge.send
 def controlled_send(self, message, method=None):
     if method == 'project.contexts.list' and 'result' in message: count('source_list')
     hold = {'project.reports.asset': 'hold', 'project.snapshots.list_summaries': 'hold_summaries',
-            'project.reports.create': 'hold_create', 'project.reports.review_sources': 'hold_source_review'}
+            'project.reports.create': 'hold_create', 'project.reports.review_sources': 'hold_source_review',
+            'project.reports.preview_resources': 'hold_prepare'}
     if method in hold and 'result' in message and mode() == hold[method]:
         control.with_suffix('.held').write_text('ready', encoding='utf-8')
         def deliver():
@@ -961,6 +975,127 @@ TEST_F(ReportsEditorPython, NewProjectCannotAdoptAnOldSourceReviewAndKeepsTheOri
   EXPECT_EQ(area().editor().save_workspace_state().at("create_draft"), draft);
   EXPECT_EQ(count("source_review"), 1); EXPECT_EQ(widget("reports_create_submit"), nullptr);
   EXPECT_EQ(widget("reports_create_sources_review"), nullptr);
+}
+
+TEST_F(ReportsEditorPython, PreviewButtonPreparesAnIndependentViewportAndKeepsSourceDraftAndViewer)
+{
+  ASSERT_NO_FATAL_FAILURE(show_reports());
+  ASSERT_NO_FATAL_FAILURE(click_row("reports_list", 0));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_read_asset"));
+  EXPECT_EQ(count("prepare"), 0); EXPECT_EQ(widget("reports_document_viewport"), nullptr);
+  ASSERT_NO_FATAL_FAILURE(click("reports_read_asset"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_text_page"));
+  const auto reading = area().editor().save_workspace_state();
+  const auto draft = area().tab(1).save_workspace_state();
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  EXPECT_EQ(count("prepare"), 1);
+  EXPECT_EQ(widget("reports_document_viewport")->type, ui::WidgetType::NativeViewport);
+  EXPECT_EQ(widget("reports_text_page"), nullptr);
+  EXPECT_EQ(area().editor().save_workspace_state(), reading);
+  // The CPU fixture deliberately has no parent window. A prepared viewport is not evidence
+  // of native attachment: keyboard entry stays disabled until the platform reports it.
+  ASSERT_NE(widget("reports_document_focus"), nullptr); EXPECT_FALSE(widget("reports_document_focus")->enabled);
+  const int reads = count("asset");
+  ASSERT_NO_FATAL_FAILURE(click("reports_document_source"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_text_page"));
+  EXPECT_EQ(count("asset"), reads); EXPECT_EQ(area().editor().save_workspace_state(), reading);
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  EXPECT_EQ(count("prepare"), 1); EXPECT_EQ(area().tab(1).save_workspace_state(), draft);
+  expect_viewer();
+}
+
+TEST_F(ReportsEditorPython, PreviewKeepsTheAlreadyReadPngWithoutReadingItAgainOnReturn)
+{
+  ASSERT_NO_FATAL_FAILURE(show_reports());
+  ASSERT_NO_FATAL_FAILURE(click_row("reports_list", 0));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_read_asset"));
+  ASSERT_NO_FATAL_FAILURE(click_row("reports_assets", 1));
+  ASSERT_NO_FATAL_FAILURE(click("reports_read_asset"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_image"));
+  const auto state = area().editor().save_workspace_state();
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  const int reads = count("asset");
+  ASSERT_NO_FATAL_FAILURE(click("reports_document_source"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_image"));
+  EXPECT_EQ(area().editor().save_workspace_state(), state); EXPECT_EQ(count("asset"), reads);
+  expect_viewer();
+}
+
+TEST_F(ReportsEditorPython, MovingTheReportTabRequiresNewPreparationAndInvalidatesOldControls)
+{
+  ASSERT_NO_FATAL_FAILURE(show_reports());
+  ASSERT_NO_FATAL_FAILURE(click_row("reports_list", 0));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  const auto stale_prepare = widget("reports_document_prepare")->on_click;
+  auto *editor = &area().editor(); const auto reading = editor->save_workspace_state();
+  const auto draft = area().tab(1).save_workspace_state();
+  auto &destination = f.area("a3");
+  ASSERT_TRUE(area().move_tab_to(0, destination, true));
+  EXPECT_EQ(&destination.editor(), editor);
+  stale_prepare(); // Must fail immediately, before a new frame rebuilds the old widget tree.
+  f.screen.set_maximized(&destination); frame();
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_preview"));
+  EXPECT_EQ(widget("reports_document_viewport"), nullptr); EXPECT_EQ(count("prepare"), 1);
+  EXPECT_EQ(editor->save_workspace_state(), reading);
+  EXPECT_EQ(area().tab(0).save_workspace_state(), draft);
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  EXPECT_EQ(count("prepare"), 2); expect_viewer();
+}
+
+TEST_F(ReportsEditorPython, ClosingWhilePreparationIsHeldDoesNotReopenTheDocument)
+{
+  ASSERT_NO_FATAL_FAILURE(show_reports());
+  ASSERT_NO_FATAL_FAILURE(click_row("reports_list", 0));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(mode("hold_prepare"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_TRUE(bridge::test::wait_until([&] { return fs::exists(dir.path() / "mode.held"); }, 15));
+  ASSERT_NO_FATAL_FAILURE(click("reports_document_close"));
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(drain_held(*client)); frame();
+  EXPECT_EQ(widget("reports_document_viewport"), nullptr); EXPECT_EQ(count("prepare"), 1);
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  EXPECT_EQ(count("prepare"), 2); expect_viewer();
+}
+
+TEST_F(ReportsEditorPython, PdfPreviewButtonUsesTheIdentityMethodAndKeepsTheSourceReaderAndDraft)
+{
+  const std::string pdf_id = "c3333333-3333-4333-8333-333333333333";
+  const auto handle = project().project()->handle;
+  const auto record = manifest.at("assets").at(2).at("record_id");
+  ASSERT_TRUE(call("project.reports.create", {{"handle", handle}, {"name", "PDF button fixture"},
+      {"snapshot_id", manifest.at("snapshot_id")}, {"entry_record_id", record}, {"report_id", pdf_id},
+      {"expected_revision", 3}, {"assets", Json::array({{{"record_id", record}, {"path", "paper.pdf"}}})}}).is_object());
+  project().refresh(); ASSERT_NO_FATAL_FAILURE(settle_project());
+  ASSERT_NO_FATAL_FAILURE(show_reports());
+  const auto *list = widget("reports_list"); ASSERT_NE(list, nullptr); ASSERT_TRUE(list->list);
+  int row = -1;
+  for (int i = 0; i < list->list->count; ++i) { if (list->list->text(i) == "PDF button fixture") { row = i; break; } }
+  ASSERT_GE(row, 0); ASSERT_NO_FATAL_FAILURE(click_row("reports_list", row));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_preview"));
+  EXPECT_EQ(count("pdf_prepare"), 0); EXPECT_EQ(count("asset"), 0);
+  const auto reading = area().editor().save_workspace_state();
+  const auto draft = area().tab(1).save_workspace_state();
+  ASSERT_EQ(reading.at("report_id"), pdf_id); ASSERT_EQ(reading.at("asset_path"), "paper.pdf");
+  ASSERT_NO_FATAL_FAILURE(click("reports_preview"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_document_viewport"));
+  EXPECT_EQ(count("pdf_prepare"), 1); EXPECT_EQ(count("prepare"), 0);
+  EXPECT_EQ(widget("reports_document_viewport")->type, ui::WidgetType::NativeViewport);
+  EXPECT_EQ(area().editor().save_workspace_state(), reading);
+  EXPECT_FALSE(widget("reports_document_focus")->enabled); // No native Window in this CPU fixture.
+  const int reads = count("asset");
+  ASSERT_NO_FATAL_FAILURE(click("reports_document_close"));
+  ASSERT_NO_FATAL_FAILURE(wait_widget("reports_read_asset"));
+  EXPECT_EQ(count("asset"), reads); EXPECT_EQ(area().editor().save_workspace_state(), reading);
+  EXPECT_EQ(area().tab(1).save_workspace_state(), draft); expect_viewer();
 }
 
 }  // namespace

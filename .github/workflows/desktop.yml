@@ -123,6 +123,7 @@ jobs:
         # No user sysroot on CI: system packages are used (STK_SYSROOT does not exist).
         run: |
           cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTK_SYSROOT=/nonexistent \
+            -DSTK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW=ON \
             -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON \
             -DSTK_BRIDGE_TEST_PYTHON="$STK_VENV/bin/python" -DSTK_APP_TEST_PYTHON="$STK_VENV/bin/python"
 
@@ -136,7 +137,7 @@ jobs:
         if: success() || failure()
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-junit.xml \
-            'document_preview_memory_.*' 'Schema\.ReportsSourceReviewAndOptionalCompareAndSwap' 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'LayoutObserver(Test|Lifetime)\..*' \
+            'native_evidence_gate' 'ReportDocumentHost\..*' 'NativeViewport\..*' 'NativeViewInvalidation\..*' 'AreaRemoval\..*' 'ProjectScopeNotifications\..*' 'document_preview_memory_.*' 'Schema\.ReportsSourceReviewAndOptionalCompareAndSwap' 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'Receipts/ReportsPdfInvalid\..*' 'Scopes/ReportsPdfInvalidation\..*' 'LayoutObserver(Test|Lifetime)\..*' \
             'PythonBridge\..*' 'ProjectPython\..*' 'LammpsProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'AgentPython\..*' 'ModulesPython\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'WorkModeLayouts\..*' 'LanguagesAndScale/WorkModeLayoutClicks\..*' 'TreeFixture\.Arrangement.*' 'WorkspaceNavigation(Python)?\..*' 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'AnalysisGraphCatalogPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'Camera\..*' 'LabelBackdrop\..*' 'ScalarVolumePython\..*' 'VolumeFloatTexture\..*' 'FormSchema\.(JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization|NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)' 'FormBuilder\.ScalarVolumeNullableUnitAndStrictFieldRoundTrip' 'ViewerGraphConfiguration(Test|Python)\..*' 'AnalysisDocumentsEditor\..*' 'AnalysisParameterDraft\..*' 'AnalysisOutputDraft\..*' 'AnalysisInputReuse\..*' 'AnalysisResultInspection\..*' 'AnalysisResultInspectionEditorPython\..*' 'AnalysisTableGrid\..*' 'AnalysisTableGridEditorPython\..*' 'Json\..*' 'Region\..*' 'AnalysisInputReuseEditorPython\..*' 'AnalysisOutputsEditorPython\..*' 'AnalysisParametersEditorPython\..*' 'AnalysisLinkDraft\..*' 'AnalysisCandidateValidation\..*' 'AnalysisLinksEditorPython\..*' 'WorkflowView\..*' 'WorkflowDraft\..*' 'WorkflowEditorPython\..*' 'AnalysisDocumentBounds\..*' 'AnalysisGraphRunState\..*' 'AnalysisGraphRunEditorPython\..*' 'ProjectAnalysesPython\..*' 'ReportsEditorPython\..*' 'ProjectAnalysisRunsPython\..*' 'Rows/ProjectAnalysesUnreadable\..*' 'Replies/ProjectAnalysesUncertain\..*' 'SimulationPython\..*' 'LammpsSimulationPython\..*' 'ScriptPython\..*' 'TableEditorPython\..*' 'ProjectFileTreePython\..*' 'ProjectDraftRecoveryPython\..*' 'WorkbenchModules(Clicks)?\..*' 'TableCellSelection\..*' 'TableGrid\..*' 'ContainerDrag\..*' 'ProjectPagingPython\..*' 'TableWorkbench(Python|EditorPython|Layout)\..*' 'TableObjectPreviewPython\..*' 'AppStoreOpenResult\..*' 'TableIOEditorPython\..*' 'TableIOWorkspaceState\..*' 'WorkspaceTransferPython\..*' 'WorkspacePagingPython\..*' 'ViewerWorkspace\..*' 'WorkspaceTree\..*' 'WorkspaceDesktop\..*' 'PosixEventThread\..*' 'JobsPython\..*' 'app_viewer_python_(vulkan|opengl)' \
             'ui_label_backdrop_(opengl|vulkan)' 'viewer_(vulkan|opengl)_NonFinite' 'app_viewer_e2e_(vulkan|opengl)' 'app_viewer_window_(xvfb|weston)' 'workspace_window_(xvfb|weston)' 'package_install_check'
           for server in xvfb weston; do
@@ -146,7 +147,7 @@ jobs:
           done
           for backend in opengl vulkan; do
             for language in en zh; do
-              for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_sweep project_recent project_runs project_review project_review_errors project_drafts project_discussion project_requests project_filter project_simulation project_batches project_simulation_lammps project_simulation_lammps_narrow project_batches_lammps project_batches_lammps_narrow project_pet_study project_pet_study_narrow project_ai project_ai_narrow project_ai_stream project_ai_proposal project_ai_proposal_narrow project_ai_scope project_ai_scope_narrow project_ai_focus project_workspace project_workspace_narrow project_skills project_skills_narrow analysis_graph_wide analysis_graph_narrow analysis_graph_saved_wide analysis_graph_saved_narrow analysis_runs_prepare_wide analysis_runs_prepare_narrow analysis_runs_result_wide analysis_runs_result_narrow analysis_parameters_wide analysis_parameters_narrow analysis_links_wide analysis_links_narrow analysis_graph_edit_wide analysis_graph_edit_narrow workflow_wide workflow_narrow enter_wide enter_narrow workflow_edit_wide workflow_edit_narrow workflow_run_wide workflow_run_narrow analysis_outputs_wide analysis_outputs_narrow analysis_input_reuse_wide analysis_input_reuse_narrow analysis_result_inspection_values_wide analysis_result_inspection_values_narrow analysis_result_inspection_issues_wide analysis_result_inspection_issues_narrow analysis_table_grid_wide analysis_table_grid_narrow analysis_graph_run_wide analysis_graph_run_narrow scalar_volume_wide scalar_volume_narrow workbench_modules_nodes_wide workbench_modules_nodes_narrow workbench_modules_python_wide workbench_modules_python_narrow workbench_modules_table_wide workbench_modules_table_narrow workbench_modules_table_focus workbench_modules_table_board workbench_modules_table_gallery table_io_xlsx_wide table_io_xlsx_narrow table_io_json_wide table_io_json_narrow workspace_export_wide workspace_export_narrow workspace_import_wide workspace_import_narrow reports_text_wide reports_text_narrow reports_png_wide reports_png_narrow reports_create_wide reports_create_narrow reports_sources_wide reports_sources_narrow; do
+              for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_sweep project_recent project_runs project_review project_review_errors project_drafts project_discussion project_requests project_filter project_simulation project_batches project_simulation_lammps project_simulation_lammps_narrow project_batches_lammps project_batches_lammps_narrow project_pet_study project_pet_study_narrow project_ai project_ai_narrow project_ai_stream project_ai_proposal project_ai_proposal_narrow project_ai_scope project_ai_scope_narrow project_ai_focus project_workspace project_workspace_narrow project_skills project_skills_narrow analysis_graph_wide analysis_graph_narrow analysis_graph_saved_wide analysis_graph_saved_narrow analysis_runs_prepare_wide analysis_runs_prepare_narrow analysis_runs_result_wide analysis_runs_result_narrow analysis_parameters_wide analysis_parameters_narrow analysis_links_wide analysis_links_narrow analysis_graph_edit_wide analysis_graph_edit_narrow workflow_wide workflow_narrow enter_wide enter_narrow workflow_edit_wide workflow_edit_narrow workflow_run_wide workflow_run_narrow analysis_outputs_wide analysis_outputs_narrow analysis_input_reuse_wide analysis_input_reuse_narrow analysis_result_inspection_values_wide analysis_result_inspection_values_narrow analysis_result_inspection_issues_wide analysis_result_inspection_issues_narrow analysis_table_grid_wide analysis_table_grid_narrow analysis_graph_run_wide analysis_graph_run_narrow scalar_volume_wide scalar_volume_narrow workbench_modules_nodes_wide workbench_modules_nodes_narrow workbench_modules_python_wide workbench_modules_python_narrow workbench_modules_table_wide workbench_modules_table_narrow workbench_modules_table_focus workbench_modules_table_board workbench_modules_table_gallery table_io_xlsx_wide table_io_xlsx_narrow table_io_json_wide table_io_json_narrow workspace_export_wide workspace_export_narrow workspace_import_wide workspace_import_narrow reports_text_wide reports_text_narrow reports_png_wide reports_png_narrow reports_create_wide reports_create_narrow reports_sources_wide reports_sources_narrow reports_document_wide reports_document_narrow; do
                 python3 desktop/tests/check_required_tests.py build/ctest-junit.xml "${editor}_render_${backend}_${language}"
               done
             done
@@ -386,6 +387,7 @@ jobs:
         run: |
           cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DSTK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW=ON \
             -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=arm64-osx \
@@ -409,12 +411,12 @@ jobs:
         if: success() || failure()
         run: |
           python3 desktop/tests/check_required_tests.py build/ctest-cpu.xml \
-            'document_preview_memory_.*' 'Schema\.ReportsSourceReviewAndOptionalCompareAndSwap' 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'LayoutObserver(Test|Lifetime)\..*' \
+            'native_evidence_gate' 'ReportDocumentHost\..*' 'NativeViewport\..*' 'NativeViewInvalidation\..*' 'AreaRemoval\..*' 'ProjectScopeNotifications\..*' 'document_preview_memory_.*' 'Schema\.ReportsSourceReviewAndOptionalCompareAndSwap' 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'Receipts/ReportsPdfInvalid\..*' 'Scopes/ReportsPdfInvalidation\..*' 'LayoutObserver(Test|Lifetime)\..*' \
             'PythonBridge\.(HelloListsTheProtocol|ColormapsList|GraphPresets|LocalGraphEvaluateOnAFakeMuferroRun|ManagedSSHProfileRoundTripDoesNotConnectImplicitly)' 'ProjectPython\..*' 'LammpsProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'AgentPython\..*' 'ModulesPython\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'WorkModeLayouts\..*' 'LanguagesAndScale/WorkModeLayoutClicks\..*' 'TreeFixture\.Arrangement.*' 'WorkspaceNavigation(Python)?\..*' 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'AnalysisGraphCatalogPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'Camera\..*' 'LabelBackdrop\..*' 'ScalarVolumePython\..*' 'VolumeFloatTexture\..*' 'FormSchema\.(JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization|NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)' 'FormBuilder\.ScalarVolumeNullableUnitAndStrictFieldRoundTrip' 'ViewerGraphConfiguration(Test|Python)\..*' 'AnalysisDocumentsEditor\..*' 'AnalysisParameterDraft\..*' 'AnalysisOutputDraft\..*' 'AnalysisInputReuse\..*' 'AnalysisResultInspection\..*' 'AnalysisResultInspectionEditorPython\..*' 'AnalysisTableGrid\..*' 'AnalysisTableGridEditorPython\..*' 'Json\..*' 'Region\..*' 'AnalysisInputReuseEditorPython\..*' 'AnalysisOutputsEditorPython\..*' 'AnalysisParametersEditorPython\..*' 'AnalysisLinkDraft\..*' 'AnalysisCandidateValidation\..*' 'AnalysisLinksEditorPython\..*' 'WorkflowView\..*' 'WorkflowDraft\..*' 'WorkflowEditorPython\..*' 'AnalysisDocumentBounds\..*' 'AnalysisGraphRunState\..*' 'AnalysisGraphRunEditorPython\..*' 'ProjectAnalysesPython\..*' 'ReportsEditorPython\..*' 'ProjectAnalysisRunsPython\..*' 'Rows/ProjectAnalysesUnreadable\..*' 'Replies/ProjectAnalysesUncertain\..*' 'ScriptPython\..*' 'TableEditorPython\..*' 'ProjectFileTreePython\..*' 'ProjectDraftRecoveryPython\..*' 'WorkbenchModules(Clicks)?\..*' 'TableCellSelection\..*' 'TableGrid\..*' 'ContainerDrag\..*' 'ProjectPagingPython\..*' 'TableWorkbench(Python|EditorPython|Layout)\..*' 'TableObjectPreviewPython\..*' 'AppStoreOpenResult\..*' 'TableIOEditorPython\..*' 'TableIOWorkspaceState\..*' 'WorkspaceTransferPython\..*' 'WorkspacePagingPython\..*' 'ViewerWorkspace\..*' 'WorkspaceTree\..*' 'WorkspaceDesktop\..*' 'PosixEventThread\..*'
           python3 desktop/tests/check_required_tests.py build/ctest-metal.xml \
             'ui_label_backdrop_metal' 'viewer_metal_NonFinite' 'app_viewer_python_metal' 'app_viewer_e2e_metal' 'package_install_check'
           for language in en zh; do
-            for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_sweep project_recent project_runs project_review project_review_errors project_drafts project_discussion project_requests project_filter project_simulation project_batches project_simulation_lammps project_simulation_lammps_narrow project_batches_lammps project_batches_lammps_narrow project_pet_study project_pet_study_narrow project_ai project_ai_narrow project_ai_stream project_ai_proposal project_ai_proposal_narrow project_ai_scope project_ai_scope_narrow project_ai_focus project_workspace project_workspace_narrow project_skills project_skills_narrow analysis_graph_wide analysis_graph_narrow analysis_graph_saved_wide analysis_graph_saved_narrow analysis_runs_prepare_wide analysis_runs_prepare_narrow analysis_runs_result_wide analysis_runs_result_narrow analysis_parameters_wide analysis_parameters_narrow analysis_links_wide analysis_links_narrow analysis_graph_edit_wide analysis_graph_edit_narrow workflow_wide workflow_narrow enter_wide enter_narrow workflow_edit_wide workflow_edit_narrow workflow_run_wide workflow_run_narrow analysis_outputs_wide analysis_outputs_narrow analysis_input_reuse_wide analysis_input_reuse_narrow analysis_result_inspection_values_wide analysis_result_inspection_values_narrow analysis_result_inspection_issues_wide analysis_result_inspection_issues_narrow analysis_table_grid_wide analysis_table_grid_narrow analysis_graph_run_wide analysis_graph_run_narrow scalar_volume_wide scalar_volume_narrow workbench_modules_nodes_wide workbench_modules_nodes_narrow workbench_modules_python_wide workbench_modules_python_narrow workbench_modules_table_wide workbench_modules_table_narrow workbench_modules_table_focus workbench_modules_table_board workbench_modules_table_gallery table_io_xlsx_wide table_io_xlsx_narrow table_io_json_wide table_io_json_narrow workspace_export_wide workspace_export_narrow workspace_import_wide workspace_import_narrow reports_text_wide reports_text_narrow reports_png_wide reports_png_narrow reports_create_wide reports_create_narrow reports_sources_wide reports_sources_narrow; do
+            for editor in project python expression project_manage project_files project_snapshots offline_workbench project_csv project_sweep project_recent project_runs project_review project_review_errors project_drafts project_discussion project_requests project_filter project_simulation project_batches project_simulation_lammps project_simulation_lammps_narrow project_batches_lammps project_batches_lammps_narrow project_pet_study project_pet_study_narrow project_ai project_ai_narrow project_ai_stream project_ai_proposal project_ai_proposal_narrow project_ai_scope project_ai_scope_narrow project_ai_focus project_workspace project_workspace_narrow project_skills project_skills_narrow analysis_graph_wide analysis_graph_narrow analysis_graph_saved_wide analysis_graph_saved_narrow analysis_runs_prepare_wide analysis_runs_prepare_narrow analysis_runs_result_wide analysis_runs_result_narrow analysis_parameters_wide analysis_parameters_narrow analysis_links_wide analysis_links_narrow analysis_graph_edit_wide analysis_graph_edit_narrow workflow_wide workflow_narrow enter_wide enter_narrow workflow_edit_wide workflow_edit_narrow workflow_run_wide workflow_run_narrow analysis_outputs_wide analysis_outputs_narrow analysis_input_reuse_wide analysis_input_reuse_narrow analysis_result_inspection_values_wide analysis_result_inspection_values_narrow analysis_result_inspection_issues_wide analysis_result_inspection_issues_narrow analysis_table_grid_wide analysis_table_grid_narrow analysis_graph_run_wide analysis_graph_run_narrow scalar_volume_wide scalar_volume_narrow workbench_modules_nodes_wide workbench_modules_nodes_narrow workbench_modules_python_wide workbench_modules_python_narrow workbench_modules_table_wide workbench_modules_table_narrow workbench_modules_table_focus workbench_modules_table_board workbench_modules_table_gallery table_io_xlsx_wide table_io_xlsx_narrow table_io_json_wide table_io_json_narrow workspace_export_wide workspace_export_narrow workspace_import_wide workspace_import_narrow reports_text_wide reports_text_narrow reports_png_wide reports_png_narrow reports_create_wide reports_create_narrow reports_sources_wide reports_sources_narrow reports_document_wide reports_document_narrow; do
               python3 desktop/tests/check_required_tests.py build/ctest-metal.xml "${editor}_render_metal_${language}"
             done
           done
@@ -466,13 +468,13 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Native WKWebView in the STK window (20 cycles, OS screenshot evidence)
+      - name: Native WKWebView and production ReportsEditor (OS screenshot evidence)
         if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
         # Requires the runner's real window server, Metal and ScreenCaptureKit permission.
         # Missing capability fails; there is no Unsupported/skip fallback or TCC modification.
         run: |
-          ctest --test-dir build --output-on-failure -R '^document_preview_native_metal$' --timeout 600 --output-junit "$PWD/build/ctest-native-preview.xml"
-          python3 desktop/tests/check_required_tests.py build/ctest-native-preview.xml 'document_preview_native_metal'
+          ctest --test-dir build --output-on-failure -R '^(document_preview_native_metal|reports_native_(markdown|html|pdf)_metal)$' --timeout 600 --output-junit "$PWD/build/ctest-native-preview.xml"
+          python3 desktop/tests/check_required_tests.py build/ctest-native-preview.xml 'document_preview_native_metal' 'reports_native_markdown_metal' 'reports_native_html_metal' 'reports_native_pdf_metal'
 
       - name: Upload rendered frames
         if: always()
@@ -490,6 +492,9 @@ jobs:
             build/ctest-metal.xml
             build/ctest-native-preview.xml
             build/spike/document_preview/native-evidence/**
+            build/tests/app/reports-native-markdown/**
+            build/tests/app/reports-native-html/**
+            build/tests/app/reports-native-pdf/**
             build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14
@@ -553,6 +558,7 @@ jobs:
           cmake -S desktop -B build -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows -DSTK_GPU_VULKAN=OFF `
+            -DSTK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW=ON `
             -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON `
             -DSTK_BRIDGE_TEST_PYTHON="$bridgePython"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -570,14 +576,22 @@ jobs:
           $exe = Join-Path $PWD 'build/bin/Release/stk-document-preview-spike.exe'
           if (-not (Test-Path $exe)) { throw 'Native preview executable was not built' }
           Copy-Item $exe $bundle
+          $reports = Join-Path $PWD 'build/bin/Release/stk-reports-native-window.exe'
+          if (-not (Test-Path $reports)) { throw 'Production report validation executable was not built' }
+          Copy-Item $reports $bundle
+          Copy-Item 'desktop/tests/check_native_evidence.py' $bundle
           # vcpkg's app-local deployment puts linked runtime DLLs beside each executable.
           Get-ChildItem (Split-Path $exe) -Filter '*.dll' | Copy-Item -Destination $bundle
           Copy-Item 'build/bin/datafiles' $bundle -Recurse
           Copy-Item 'build/bin/i18n' $bundle -Recurse
           Copy-Item 'docs/specs/examples/payload-v2' (Join-Path $bundle 'document-preview-payload') -Recurse
           @'
-          add_test(document_preview_native_opengl "${CMAKE_CURRENT_LIST_DIR}/stk-document-preview-spike.exe" --smoke --require-native --cycles 20 --evidence-dir "${CMAKE_CURRENT_LIST_DIR}/evidence" --gpu-backend opengl)
-          set_tests_properties(document_preview_native_opengl PROPERTIES TIMEOUT 600 ENVIRONMENT "STK_TOKEN_PLAN_API_KEY=" ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:" PASS_REGULAR_EXPRESSION "PASS: native document evidence" FAIL_REGULAR_EXPRESSION "FAIL:|leaked|Error: Not freed memory")
+          add_test(document_preview_native_opengl "$ENV{STK_REPORTS_TEST_PYTHON}" "$ENV{STK_NATIVE_TEST_DIR}/check_native_evidence.py" --success-marker "PASS: native document evidence" --timeout 570 -- "$ENV{STK_NATIVE_TEST_DIR}/stk-document-preview-spike.exe" --smoke --require-native --cycles 20 --evidence-dir "$ENV{STK_NATIVE_TEST_DIR}/evidence" --gpu-backend opengl)
+          set_tests_properties(document_preview_native_opengl PROPERTIES TIMEOUT 600 ENVIRONMENT "STK_TOKEN_PLAN_API_KEY=" ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:" FAIL_REGULAR_EXPRESSION "FAIL:|leaked|Error: Not freed memory")
+          foreach(source markdown html pdf)
+            add_test(reports_native_${source}_opengl "$ENV{STK_REPORTS_TEST_PYTHON}" "$ENV{STK_NATIVE_TEST_DIR}/check_native_evidence.py" --success-marker "PASS: production ReportsEditor native evidence" --timeout 570 -- "$ENV{STK_NATIVE_TEST_DIR}/stk-reports-native-window.exe" --python "$ENV{STK_REPORTS_TEST_PYTHON}" --source "${source}" --evidence-dir "$ENV{STK_NATIVE_TEST_DIR}/reports-${source}" --gpu-backend opengl)
+            set_tests_properties(reports_native_${source}_opengl PROPERTIES TIMEOUT 600 ENVIRONMENT "STK_TOKEN_PLAN_API_KEY=" ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:" FAIL_REGULAR_EXPRESSION "FAIL:|leaked|Error: Not freed memory")
+          endforeach()
           '@ | Set-Content -Encoding utf8 (Join-Path $bundle 'CTestTestfile.cmake')
           'ready=true' >> $env:GITHUB_OUTPUT
 
@@ -597,7 +611,7 @@ jobs:
 
       - name: Local project tests ran with the real Python bridge
         run: |
-          python desktop/tests/check_required_tests.py build/ctest-cpu.xml 'document_preview_memory_.*' 'Schema\.ReportsSourceReviewAndOptionalCompareAndSwap' 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'LayoutObserver(Test|Lifetime)\..*' 'ProjectPython\..*' 'LammpsProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'AgentPython\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'WorkModeLayouts\..*' 'LanguagesAndScale/WorkModeLayoutClicks\..*' 'TreeFixture\.Arrangement.*' 'WorkspaceNavigation(Python)?\..*' 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'AnalysisGraphCatalogPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'Camera\..*' 'LabelBackdrop\..*' 'ScalarVolumePython\..*' 'VolumeFloatTexture\..*' 'FormSchema\.(JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization|NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)' 'FormBuilder\.ScalarVolumeNullableUnitAndStrictFieldRoundTrip' 'ViewerGraphConfiguration(Test|Python)\..*' 'AnalysisDocumentsEditor\..*' 'AnalysisParameterDraft\..*' 'AnalysisOutputDraft\..*' 'AnalysisInputReuse\..*' 'AnalysisResultInspection\..*' 'AnalysisResultInspectionEditorPython\..*' 'AnalysisTableGrid\..*' 'AnalysisTableGridEditorPython\..*' 'Json\..*' 'Region\..*' 'AnalysisInputReuseEditorPython\..*' 'AnalysisOutputsEditorPython\..*' 'AnalysisParametersEditorPython\..*' 'AnalysisLinkDraft\..*' 'AnalysisCandidateValidation\..*' 'AnalysisLinksEditorPython\..*' 'WorkflowView\..*' 'WorkflowDraft\..*' 'WorkflowEditorPython\..*' 'AnalysisDocumentBounds\..*' 'AnalysisGraphRunState\..*' 'AnalysisGraphRunEditorPython\..*' 'ProjectAnalysesPython\..*' 'ReportsEditorPython\..*' 'ProjectAnalysisRunsPython\..*' 'Rows/ProjectAnalysesUnreadable\..*' 'Replies/ProjectAnalysesUncertain\..*' 'ScriptPython\..*' 'TableEditorPython\..*' 'ProjectFileTreePython\..*' 'ProjectDraftRecoveryPython\..*' 'WorkbenchModules(Clicks)?\..*' 'TableCellSelection\..*' 'TableGrid\..*' 'ContainerDrag\..*' 'ProjectPagingPython\..*' 'TableWorkbench(Python|EditorPython|Layout)\..*' 'TableObjectPreviewPython\..*' 'AppStoreOpenResult\..*' 'TableIOEditorPython\..*' 'TableIOWorkspaceState\..*' 'WorkspaceTransferPython\..*' 'WorkspacePagingPython\..*' 'ViewerWorkspace\..*' 'WorkspaceTree\..*' 'WorkspaceDesktop\..*' 'PythonBridge\.ManagedSSHProfileRoundTripDoesNotConnectImplicitly'
+          python desktop/tests/check_required_tests.py build/ctest-cpu.xml 'native_evidence_gate' 'ReportDocumentHost\..*' 'NativeViewport\..*' 'NativeViewInvalidation\..*' 'AreaRemoval\..*' 'ProjectScopeNotifications\..*' 'document_preview_memory_.*' 'Schema\.ReportsSourceReviewAndOptionalCompareAndSwap' 'Schema\.ReportsPreviewResources' 'DocumentResources\..*' 'DocumentEvidence\..*' 'ReportsPreviewPython\..*' 'Receipts/ReportsPreviewInvalid\..*' 'Receipts/ReportsPdfInvalid\..*' 'Scopes/ReportsPdfInvalidation\..*' 'LayoutObserver(Test|Lifetime)\..*' 'ProjectPython\..*' 'LammpsProjectPython\..*' 'ProjectStream\..*' 'ProjectLegacyStream\..*' 'ProjectProposal\..*' 'AgentPython\..*' 'SavedReviewPython\..*' 'ProjectScope\..*' 'ProjectContextSelection\..*' 'FocusNavigation\..*' 'WorkModeLayouts\..*' 'LanguagesAndScale/WorkModeLayoutClicks\..*' 'TreeFixture\.Arrangement.*' 'WorkspaceNavigation(Python)?\..*' 'SkillCatalog\..*' 'SkillsCatalogPython\..*' 'ProjectSkillsPython\..*' 'AnalysisGraphView\..*' 'AnalysisGraphCanvas\..*' 'ViewerGraphInspection(Test)?\..*' 'AnalysisGraphState\..*' 'AnalysisGraphPython\..*' 'AnalysisGraphCatalogPython\..*' 'Configuration/AnalysisGraphStale\..*' 'AnalysisGraphEditor(Test|Python)\..*' 'Camera\..*' 'LabelBackdrop\..*' 'ScalarVolumePython\..*' 'VolumeFloatTexture\..*' 'FormSchema\.(JsonDeclarationsKeepTypedDefaultsAfterReferenceSpecialization|NullabilityIntersectsDeclarationAndEveryReferenceInEitherOrder)' 'FormBuilder\.ScalarVolumeNullableUnitAndStrictFieldRoundTrip' 'ViewerGraphConfiguration(Test|Python)\..*' 'AnalysisDocumentsEditor\..*' 'AnalysisParameterDraft\..*' 'AnalysisOutputDraft\..*' 'AnalysisInputReuse\..*' 'AnalysisResultInspection\..*' 'AnalysisResultInspectionEditorPython\..*' 'AnalysisTableGrid\..*' 'AnalysisTableGridEditorPython\..*' 'Json\..*' 'Region\..*' 'AnalysisInputReuseEditorPython\..*' 'AnalysisOutputsEditorPython\..*' 'AnalysisParametersEditorPython\..*' 'AnalysisLinkDraft\..*' 'AnalysisCandidateValidation\..*' 'AnalysisLinksEditorPython\..*' 'WorkflowView\..*' 'WorkflowDraft\..*' 'WorkflowEditorPython\..*' 'AnalysisDocumentBounds\..*' 'AnalysisGraphRunState\..*' 'AnalysisGraphRunEditorPython\..*' 'ProjectAnalysesPython\..*' 'ReportsEditorPython\..*' 'ProjectAnalysisRunsPython\..*' 'Rows/ProjectAnalysesUnreadable\..*' 'Replies/ProjectAnalysesUncertain\..*' 'ScriptPython\..*' 'TableEditorPython\..*' 'ProjectFileTreePython\..*' 'ProjectDraftRecoveryPython\..*' 'WorkbenchModules(Clicks)?\..*' 'TableCellSelection\..*' 'TableGrid\..*' 'ContainerDrag\..*' 'ProjectPagingPython\..*' 'TableWorkbench(Python|EditorPython|Layout)\..*' 'TableObjectPreviewPython\..*' 'AppStoreOpenResult\..*' 'TableIOEditorPython\..*' 'TableIOWorkspaceState\..*' 'WorkspaceTransferPython\..*' 'WorkspacePagingPython\..*' 'ViewerWorkspace\..*' 'WorkspaceTree\..*' 'WorkspaceDesktop\..*' 'PythonBridge\.ManagedSSHProfileRoundTripDoesNotConnectImplicitly'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows CPU test evidence
@@ -612,11 +626,11 @@ jobs:
           retention-days: 14
 
   windows-native-preview:
-    name: Windows native document composition (20 cycles, OS evidence)
+    name: Windows native document composition (llvmpipe/WARP, 20 cycles, OS evidence)
     needs: windows
     if: ${{ always() && !cancelled() && needs.windows.outputs.native_bundle == 'true' }}
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 50
     defaults:
       run:
         shell: pwsh
@@ -642,14 +656,61 @@ jobs:
           }
           $context | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 'native-preview/evidence/environment.json'
 
-      - name: Native WebView2 in the STK window (20 cycles, OS screenshot evidence)
+      - name: Stage pinned process-local Mesa for software OpenGL acceptance
+        # Test executables only: no system driver, registry, DXGI or D3D replacement.
+        # This is pal1000's Mesa distribution, not an official Mesa binary release.
+        run: |
+          $mesaArchive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.4-release-msvc.7z'
+          $mesaRoot = Join-Path $env:RUNNER_TEMP 'stk-native-mesa-26.2.4'
+          $mesaUrl = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z'
+          $mesaSha = '351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695'
+          & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 180 --output $mesaArchive $mesaUrl
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Mesa archive download failed' }
+          if ((Get-Item $mesaArchive).Length -ne 70257286 -or (Get-FileHash $mesaArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $mesaSha) {
+            throw 'Pinned Mesa archive size or SHA-256 mismatch'
+          }
+          $sevenZip = (Get-Command '7z.exe' -ErrorAction Stop).Source
+          & $sevenZip l -slt $mesaArchive | Set-Content -Encoding utf8 'native-preview/evidence/mesa-archive-list.txt'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect pinned Mesa archive' }
+          & $sevenZip x -y "-o$mesaRoot" $mesaArchive 'x64/opengl32.dll' 'x64/libgallium_wgl.dll'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot extract the two process-local x64 Mesa DLLs' }
+          $mesaFiles = @()
+          foreach ($name in 'opengl32.dll', 'libgallium_wgl.dll') {
+            $source = Join-Path $mesaRoot "x64/$name"
+            if (-not (Test-Path -PathType Leaf $source)) { throw "Missing expected x64 Mesa DLL: $name" }
+            $destination = Join-Path $PWD "native-preview/$name"
+            if (Test-Path $destination) { throw "Refusing to replace a staged runtime DLL: $name" }
+            Copy-Item $source $destination
+            $mesaFiles += [ordered]@{ name = $name; size = (Get-Item $destination).Length; sha256 = (Get-FileHash $destination -Algorithm SHA256).Hash.ToLowerInvariant() }
+          }
+          [ordered]@{
+            source = $mesaUrl; archive_sha256 = $mesaSha; archive_size = 70257286
+            files = $mesaFiles; requested_gl_renderer = 'llvmpipe'; requested_capture_driver = 'warp'
+            note = 'Process-local functional acceptance; actual GL renderer and WGC adapter are recorded by the tests. No GL version override, hardware performance or browser memory claim.'
+          } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 'native-preview/evidence/mesa.json'
+
+      - name: Python for the production report fixture
+        run: |
+          python -m venv .venv-native
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $PWD '.venv-native/Scripts/python.exe'
+          & $python -m pip install '.[science,visualization,documents]'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "STK_REPORTS_TEST_PYTHON=$python" >> $env:GITHUB_ENV
+
+      - name: Native WebView2 and production ReportsEditor (OS screenshot evidence)
+        env:
+          GALLIUM_DRIVER: llvmpipe
+          STK_NATIVE_EVIDENCE_REQUIRE_LLVMPIPE: "1"
+          STK_NATIVE_EVIDENCE_D3D_DRIVER: warp
+          STK_NATIVE_TEST_DIR: ${{ github.workspace }}/native-preview
         # The prototype probes GL 4.3 before GHOST can open a modal unsupported-driver dialog.
-        # An absent interactive display, WGC, driver or Runtime FAILS this independent job.
+        # WARP capture is explicit; absent interactive display, WGC or Runtime still FAILS.
         run: |
           $junitPath = Join-Path $PWD 'native-preview/ctest-native-preview.xml'
-          ctest --test-dir native-preview --output-on-failure -R '^document_preview_native_opengl$' --timeout 600 --output-junit "$junitPath"
+          ctest --test-dir native-preview --output-on-failure -R '^(document_preview_native_opengl|reports_native_(markdown|html|pdf)_opengl)$' --timeout 600 --output-junit "$junitPath"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python desktop/tests/check_required_tests.py native-preview/ctest-native-preview.xml 'document_preview_native_opengl'
+          python desktop/tests/check_required_tests.py native-preview/ctest-native-preview.xml 'document_preview_native_opengl' 'reports_native_markdown_opengl' 'reports_native_html_opengl' 'reports_native_pdf_opengl'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload native preview evidence and test logs
@@ -660,6 +721,9 @@ jobs:
           path: |
             native-preview/ctest-native-preview.xml
             native-preview/evidence/**
+            native-preview/reports-markdown/**
+            native-preview/reports-html/**
+            native-preview/reports-pdf/**
             native-preview/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
           retention-days: 14

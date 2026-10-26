@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "evidence_pixels.hh"
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <vector>
 
 namespace stk::document_preview {
 bool evidence_marker(const io::Image &image, int page)
@@ -50,6 +52,149 @@ bool evidence_marker(const io::Image &image, int page)
       if (x == start) { ++x; }
     }
     if (!found) { rows = 0; }
+  }
+  return false;
+}
+
+namespace {
+struct TextRun {
+  int begin, end, ink;
+};
+struct TextBand {
+  int row, tone, left, right, top, bottom;
+  double cell;
+};
+constexpr std::array<std::array<int, 4>, 3> kTextRuns = {{
+    {2, 4, 3, 5}, {5, 2, 4, 3}, {3, 5, 2, 4}}};
+
+bool aligned(const TextBand &a, const TextBand &b)
+{
+  return a.tone == b.tone && std::abs(a.left - b.left) <= 2 &&
+         std::abs(a.right - b.right) <= 2 && std::abs(a.cell - b.cell) <= .25;
+}
+bool full_height(const TextBand &band)
+{
+  const int height = band.bottom - band.top;
+  return height >= std::max(6.0, .8 * band.cell) && height <= 3 * band.cell;
+}
+}  // namespace
+
+bool evidence_text_marker(const io::Image &image)
+{
+  if (image.channels != 4 || !image.width || !image.height || image.width > 8192 ||
+      image.height > 8192 || uint64_t(image.width) * image.height > 16 * 1024 * 1024 ||
+      image.pixels.size() != size_t(image.width) * image.height * 4) { return false; }
+
+  const int width = int(image.width), height = int(image.height);
+  // Keep mid-tones and colored pixels out of both foreground and background.
+  // Antialiasing may soften glyph edges; the solid block interiors must remain
+  // opaque, neutral and at least 112 levels apart from the surrounding page.
+  std::vector<int8_t> tones(size_t(width) * height);
+  for (size_t i = 0; i < tones.size(); ++i) {
+    const auto *p = image.pixels.data() + 4 * i;
+    const int low = std::min({p[0], p[1], p[2]});
+    const int high = std::max({p[0], p[1], p[2]});
+    if (p[3] >= 240 && high - low <= 24) {
+      tones[i] = high <= 72 ? -1 : low >= 184 ? 1 : 0;
+    }
+  }
+  const auto background = [&](int left, int right, int y, int tone) {
+    if (left < 0 || right > width || left >= right || y < 0 || y >= height) { return false; }
+    int count = 0;
+    for (int x = left; x < right; ++x) { count += tones[size_t(y) * width + x] == -tone; }
+    return count * 10 >= (right - left) * 9;
+  };
+
+  std::vector<TextBand> bands;
+  std::vector<size_t> prior, current;
+  std::vector<TextRun> runs;
+  for (int y = 0; y < height; ++y) {
+    current.clear();
+    for (const int tone : {-1, 1}) {
+      runs.clear();
+      const auto *line = tones.data() + size_t(y) * width;
+      for (int x = 0; x < width;) {
+        if (line[x] != tone) { ++x; continue; }
+        const int begin = x;
+        while (x < width && line[x] == tone) { ++x; }
+        // A full-block glyph can have a one/two-pixel seam at fractional/DPI
+        // boundaries. This cannot bridge the >=8px two-space separator.
+        if (!runs.empty() && begin - runs.back().end <= 2) {
+          runs.back().ink += x - begin;
+          runs.back().end = x;
+        }
+        else { runs.push_back({begin, x, x - begin}); }
+      }
+      for (size_t i = 0; i + 4 <= runs.size(); ++i) {
+        const double cell = (runs[i + 3].end - runs[i].begin) / 20.0;
+        if (cell < 4 || cell > 40) { continue; }
+        const double tolerance = std::max(2.5, .3 * cell);
+        bool gaps_ok = true;
+        for (int j = 0; j < 3; ++j) {
+          const int end = runs[i + j].end, next = runs[i + j + 1].begin;
+          const int trim = std::max(1, int(std::ceil(.2 * cell)));
+          if (std::abs(next - end - 2 * cell) > tolerance ||
+              !background(end + trim, next - trim, y, tone)) { gaps_ok = false; break; }
+        }
+        const int left = runs[i].begin, right = runs[i + 3].end;
+        const int margin = int(std::ceil(cell));
+        const int edge = std::max(2, int(std::ceil(.3 * cell)));
+        if (!gaps_ok || !background(left - margin, left - edge, y, tone) ||
+            !background(right + edge, right + margin, y, tone)) { continue; }
+        for (int row = 0; row < 3; ++row) {
+          bool widths_ok = true;
+          for (int j = 0; j < 4; ++j) {
+            const auto &run = runs[i + j];
+            const int span = run.end - run.begin;
+            if (std::abs(span - kTextRuns[row][j] * cell) > tolerance ||
+                run.ink * 5 < span * 4) { widths_ok = false; break; }
+          }
+          if (!widths_ok) { continue; }
+          TextBand candidate{row, tone, left, right, y, y + 1, cell};
+          size_t index = bands.size();
+          for (const size_t p : prior) {
+            if (bands[p].row == row && bands[p].bottom == y && aligned(bands[p], candidate)) {
+              index = p;
+              bands[p].bottom = y + 1;
+              break;
+            }
+          }
+          if (index == bands.size()) {
+            // Hostile/noisy screenshots cannot grow an unbounded candidate list.
+            if (bands.size() >= 8192) { return false; }
+            bands.push_back(candidate);
+          }
+          current.push_back(index);
+        }
+      }
+    }
+    prior.swap(current);
+  }
+
+  const auto follows = [&](const TextBand &a, const TextBand &b) {
+    const int gap = b.top - a.bottom;
+    return b.row == a.row + 1 && aligned(a, b) && full_height(b) && gap >= 1 &&
+           gap <= 2 * a.cell &&
+           std::abs((b.bottom - b.top) - (a.bottom - a.top)) <= std::max(2.0, .25 * a.cell) &&
+           background(a.left, a.right, (a.bottom + b.top) / 2, a.tone);
+  };
+  // Bands are in increasing top-row order. Require a single three-line block,
+  // not individually matching fragments at unrelated places in the viewport.
+  for (size_t i = 0; i < bands.size(); ++i) {
+    const auto &a = bands[i];
+    if (a.row != 0 || !full_height(a) || !background(a.left, a.right, a.top - 2, a.tone)) { continue; }
+    for (size_t j = i + 1; j < bands.size(); ++j) {
+      const auto &b = bands[j];
+      if (b.top > a.bottom + 2 * a.cell) { break; }
+      if (!follows(a, b)) { continue; }
+      for (size_t k = j + 1; k < bands.size(); ++k) {
+        const auto &c = bands[k];
+        if (c.top > b.bottom + 2 * b.cell) { break; }
+        if (follows(b, c) &&
+            std::abs((c.top - b.top) - (b.top - a.top)) <= std::max(2.0, .25 * a.cell) &&
+            background(c.left, c.right, c.bottom + 1, c.tone)) { return true; }
+      }
+    }
   }
   return false;
 }

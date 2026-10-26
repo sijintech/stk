@@ -3,7 +3,7 @@
  * This controls document requests, not the Runtime's own update/telemetry transport. It does not
  * install a Runtime, grant a directory to a page, or expose the desktop bridge to JavaScript.
  */
-#include "native_document_view.hh"
+#include "stk/document/native_view.hh"
 
 #ifndef NOMINMAX
 #  define NOMINMAX
@@ -83,6 +83,11 @@ std::string failure_message(std::string_view operation, HRESULT result)
   return std::string(operation) + code;
 }
 
+std::string_view document_url(std::string_view url)
+{
+  return url.substr(0, url.find('#'));
+}
+
 struct TemporaryProfile {
   std::filesystem::path path;
   bool cleanup_scheduled = false;  // Only accessed on the UI thread.
@@ -155,6 +160,9 @@ void cleanup_after_browser_exit(ICoreWebView2Environment *environment,
 
 struct View : std::enable_shared_from_this<View> {
   HWND parent = nullptr;
+  // A private child makes focus ownership unambiguous when several native views share a
+  // GHOST window. Never treat every descendant of the GHOST window as this document's focus.
+  HWND container = nullptr;
   DWORD thread = GetCurrentThreadId();
   std::shared_ptr<ResourceSession> resources;
   std::shared_ptr<TemporaryProfile> profile;
@@ -165,14 +173,17 @@ struct View : std::enable_shared_from_this<View> {
   ViewBounds bounds;
   bool visible = false;
   bool has_bounds = false;
-  bool focused = false;
+  FocusExitHandler focus_exit;
+  uint64_t focus_generation = 0;
   bool closed = false;
   bool fatal = false;
+  bool shutting_down = false;
   bool navigation_requested = false;
   bool awaiting_navigation_start = false;
   UINT64 navigation_id = 0;
   std::string pending_url;
   std::string submitted_url;
+  std::string explicit_url;
 
   bool on_thread() const
   {
@@ -180,16 +191,46 @@ struct View : std::enable_shared_from_this<View> {
     return thread == GetCurrentThreadId();
   }
 
-  void release_focus()
+  bool owns_focus() const
   {
-    if (focused && IsWindow(parent)) {
-      SetFocus(parent);
+    const auto belongs = [this](HWND current) {
+      return container && current && (current == container || IsChild(container, current));
+    };
+    if (belongs(GetFocus())) {
+      return true;
     }
-    focused = false;
+    // GetFocus only sees this thread's input queue. The Runtime can own native children on
+    // another queue; query only its focus HWND, never browser PID, titles or input contents.
+    GUITHREADINFO info{};
+    info.cbSize = sizeof(info);
+    return GetGUIThreadInfo(0, &info) && belongs(info.hwndFocus);
+  }
+
+  bool release_focus()
+  {
+    if (!owns_focus()) {
+      return true;
+    }
+    if (!IsWindow(parent)) {
+      return false;
+    }
+    // GetFocus can retain this thread's focus while another top-level window is active.
+    // Hiding/closing must clear that focus without activating a background GHOST window.
+    const HWND foreground = GetForegroundWindow();
+    const bool parent_active = foreground &&
+        (foreground == parent || GetAncestor(foreground, GA_ROOT) == parent);
+    SetFocus(parent_active ? parent : nullptr);
+    return !owns_focus();
   }
 
   void shutdown()
   {
+    if (shutting_down) {
+      return;
+    }
+    shutting_down = true;
+    ++focus_generation;
+    focus_exit = {};
     if (resources) {
       resources->close();
     }
@@ -198,6 +239,11 @@ struct View : std::enable_shared_from_this<View> {
     if (controller) {
       controller->put_IsVisible(FALSE);
       controller->Close();
+    }
+    if (container) {
+      ShowWindow(container, SW_HIDE);
+      DestroyWindow(container);
+      container = nullptr;
     }
     web.Reset();
     controller.Reset();
@@ -222,8 +268,9 @@ struct View : std::enable_shared_from_this<View> {
     if (!controller || closed || fatal) {
       return;
     }
+    const auto native_controller = controller;
     RECT client{};
-    if (!GetClientRect(parent, &client)) {
+    if (!IsWindow(container) || GetParent(container) != parent || !GetClientRect(parent, &client)) {
       fail("The document's parent window is no longer available", HRESULT_FROM_WIN32(GetLastError()));
       return;
     }
@@ -236,18 +283,36 @@ struct View : std::enable_shared_from_this<View> {
     const int64_t bottom = std::clamp<int64_t>(height - int64_t(bounds.y), 0, height);
     const RECT rectangle{LONG(left), LONG(top), LONG(right), LONG(bottom)};
     has_bounds = right > left && bottom > top;
-    HRESULT result = controller->put_Bounds(rectangle);
+    const bool show = visible && has_bounds;
+    if (!show) {
+      ++focus_generation;
+    }
+    if (!show && !release_focus()) {
+      fail("Could not relinquish WebView2 focus before hiding", E_FAIL);
+      return;
+    }
+    if (!SetWindowPos(container, nullptr, rectangle.left, rectangle.top,
+                      rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
+                      SWP_NOZORDER | SWP_NOACTIVATE)) {
+      fail("Could not update the document child window", HRESULT_FROM_WIN32(GetLastError()));
+      return;
+    }
+    if (closed || fatal) {
+      return;
+    }
+    const RECT local{0, 0, rectangle.right - rectangle.left, rectangle.bottom - rectangle.top};
+    HRESULT result = native_controller->put_Bounds(local);
     if (SUCCEEDED(result)) {
-      result = controller->NotifyParentWindowPositionChanged();
+      result = native_controller->NotifyParentWindowPositionChanged();
     }
     if (SUCCEEDED(result)) {
-      result = controller->put_IsVisible(visible && has_bounds);
+      result = native_controller->put_IsVisible(show && !closed && !fatal);
     }
     if (FAILED(result)) {
       fail("Could not update WebView2 region bounds", result);
     }
-    else if (!visible || !has_bounds) {
-      release_focus();
+    else if (!closed && !fatal) {
+      ShowWindow(container, show ? SW_SHOWNA : SW_HIDE);
     }
   }
 
@@ -417,7 +482,11 @@ struct View : std::enable_shared_from_this<View> {
                   return S_OK;
                 }
               }
-              else {
+              if (document_url(target) != document_url(self->explicit_url)) {
+                ++self->report.blocked_requests;
+                return args->put_Cancel(TRUE);
+              }
+              if (!self->navigation_requested) {
                 ++self->report.navigation_generation;
               }
               self->pending_url = target;
@@ -524,9 +593,10 @@ struct View : std::enable_shared_from_this<View> {
         Callback<ICoreWebView2FocusChangedEventHandler>(
             [weak](ICoreWebView2Controller *, IUnknown *) -> HRESULT {
               if (auto self = weak.lock()) {
-                self->focused = true;
                 if (!self->visible || !self->has_bounds || self->closed) {
-                  self->release_focus();
+                  if (!self->release_focus()) {
+                    self->fail("A hidden document retained keyboard focus", E_FAIL);
+                  }
                 }
               }
               return S_OK;
@@ -534,39 +604,46 @@ struct View : std::enable_shared_from_this<View> {
     if (FAILED(result)) {
       return result;
     }
-    result = controller->add_LostFocus(
-        Callback<ICoreWebView2FocusChangedEventHandler>(
-            [weak](ICoreWebView2Controller *, IUnknown *) -> HRESULT {
-              if (auto self = weak.lock()) {
-                self->focused = false;
-              }
-              return S_OK;
-            }).Get(), &token);
-    if (FAILED(result)) {
-      return result;
-    }
-    result = controller->add_MoveFocusRequested(
+    // Escape stays with the browser/IME; this event only represents native Tab traversal.
+    return controller->add_MoveFocusRequested(
         Callback<ICoreWebView2MoveFocusRequestedEventHandler>(
             [weak](ICoreWebView2Controller *, ICoreWebView2MoveFocusRequestedEventArgs *args) -> HRESULT {
-              if (auto self = weak.lock(); self && !self->closed) {
-                self->release_focus();
+              const HRESULT handled = args->put_Handled(TRUE);
+              auto self = weak.lock();
+              if (!self || self->closed || self->fatal || !self->visible ||
+                  !self->has_bounds || !self->owns_focus()) {
+                return handled;
               }
-              return args->put_Handled(TRUE);
-            }).Get(), &token);
-    if (FAILED(result)) {
-      return result;
-    }
-    return controller->add_AcceleratorKeyPressed(
-        Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
-            [weak](ICoreWebView2Controller *, ICoreWebView2AcceleratorKeyPressedEventArgs *args) -> HRESULT {
-              UINT key = 0;
-              if (SUCCEEDED(args->get_VirtualKey(&key)) && key == VK_ESCAPE) {
-                args->put_Handled(TRUE);
-                if (auto self = weak.lock(); self && !self->closed) {
-                  self->release_focus();
+              COREWEBVIEW2_MOVE_FOCUS_REASON reason;
+              const HRESULT read = args->get_Reason(&reason);
+              if (FAILED(read)) {
+                self->fail("Could not read document focus traversal", read);
+                return handled;
+              }
+              const auto generation = self->focus_generation;
+              if (!self->release_focus()) {
+                self->fail("Could not return document keyboard focus", E_FAIL);
+                return handled;
+              }
+              if (reason != COREWEBVIEW2_MOVE_FOCUS_REASON_NEXT &&
+                  reason != COREWEBVIEW2_MOVE_FOCUS_REASON_PREVIOUS) {
+                return handled;
+              }
+              if (self->closed || self->fatal || !self->visible || !self->has_bounds ||
+                  self->focus_generation != generation) {
+                return handled;
+              }
+              auto callback = self->focus_exit;
+              if (callback) {
+                try {
+                  callback(reason == COREWEBVIEW2_MOVE_FOCUS_REASON_NEXT ?
+                               NativeFocusExit::Next : NativeFocusExit::Previous);
+                }
+                catch (...) {
+                  self->fail("The document focus handoff failed", E_FAIL);
                 }
               }
-              return S_OK;
+              return handled;
             }).Get(), &token);
   }
 
@@ -588,6 +665,11 @@ struct View : std::enable_shared_from_this<View> {
 
   HRESULT begin()
   {
+    container = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+                                0, 0, 0, 0, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!container) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
     profile = std::make_shared<TemporaryProfile>();
     std::string error;
     if (!profile->create(error)) {
@@ -638,7 +720,7 @@ struct View : std::enable_shared_from_this<View> {
               // have no guaranteed ordering, so subscribing only inside close() can miss exit.
               cleanup_after_browser_exit(environment.Get(), temporary);
               result = modern->CreateCoreWebView2ControllerWithOptions(
-                  self->parent, controller_options.Get(),
+                  self->container, controller_options.Get(),
                   Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                       [weak, temporary, environment](HRESULT created, ICoreWebView2Controller *controller) -> HRESULT {
                         auto self = weak.lock();
@@ -686,31 +768,33 @@ class Win32DocumentView final : public NativeDocumentView {
 
   bool navigate(std::string_view path, std::string &error) override
   {
-    if (!view_->on_thread() || view_->closed || view_->fatal) {
+    const auto view = view_;  // Native focus/window calls may reenter and destroy the owner.
+    if (!view->on_thread() || view->closed || view->fatal) {
       error = "The native document view is closed or unavailable";
       return false;
     }
-    auto url = view_->resources->url(path, true);
-    if (url.empty() || !view_->resources->allows_navigation(url)) {
+    auto url = view->resources->url(path, true);
+    if (url.empty() || !view->resources->allows_navigation(url)) {
       error = "The requested document is not admitted to this preview session";
       return false;
     }
     // A session's URL identifies immutable bytes. Re-requesting the same pending/ready version
     // is idempotent; it must not introduce two indistinguishable asynchronous navigation starts.
-    if (url == view_->pending_url && (view_->report.status == NativeViewStatus::Loading ||
-                                     view_->report.status == NativeViewStatus::Ready)) {
+    if (url == view->pending_url && (view->report.status == NativeViewStatus::Loading ||
+                                    view->report.status == NativeViewStatus::Ready)) {
       error.clear();
       return true;
     }
-    view_->pending_url = std::move(url);
-    view_->navigation_requested = true;
-    view_->navigation_id = 0;
-    ++view_->report.navigation_generation;
-    view_->report.status = NativeViewStatus::Loading;
-    view_->report.message = "Loading the admitted document";
-    view_->navigate_pending();
-    if (view_->fatal) {
-      error = view_->report.message;
+    view->explicit_url = url;
+    view->pending_url = std::move(url);
+    view->navigation_requested = true;
+    view->navigation_id = 0;
+    ++view->report.navigation_generation;
+    view->report.status = NativeViewStatus::Loading;
+    view->report.message = "Loading the admitted document";
+    view->navigate_pending();
+    if (view->fatal) {
+      error = view->report.message;
       return false;
     }
     error.clear();
@@ -719,35 +803,68 @@ class Win32DocumentView final : public NativeDocumentView {
 
   void set_bounds(ViewBounds bounds) override
   {
-    if (view_->on_thread()) {
-      view_->bounds = bounds;
-      view_->layout();
+    const auto view = view_;
+    if (view->on_thread()) {
+      view->bounds = bounds;
+      view->layout();
     }
   }
 
   void set_visible(bool visible) override
   {
-    if (view_->on_thread()) {
-      view_->visible = visible;
-      view_->layout();
+    const auto view = view_;
+    if (view->on_thread()) {
+      view->visible = visible;
+      view->layout();
     }
   }
 
   void focus() override
   {
-    if (view_->on_thread() && view_->controller && view_->visible && view_->has_bounds &&
-        !view_->closed && !view_->fatal) {
-      view_->controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+    const auto view = view_;
+    const HWND foreground = GetForegroundWindow();
+    if (view->on_thread() && view->controller && view->visible && view->has_bounds &&
+        !view->closed && !view->fatal && foreground &&
+        (foreground == view->parent || GetAncestor(foreground, GA_ROOT) == view->parent)) {
+      ++view->focus_generation;
+      const auto controller = view->controller;
+      const HRESULT result = controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+      if (FAILED(result)) {
+        view->fail("Could not focus the document", result);
+      }
     }
+  }
+
+  void set_focus_exit_handler(FocusExitHandler handler) override
+  {
+    if (view_->on_thread() && !view_->closed && !view_->fatal) {
+      ++view_->focus_generation;
+      view_->focus_exit = std::move(handler);
+    }
+  }
+
+  bool return_focus() override
+  {
+    const auto view = view_;
+    if (!view->on_thread()) {
+      return false;
+    }
+    ++view->focus_generation;
+    if (!view->release_focus()) {
+      view->fail("Could not return document keyboard focus", E_FAIL);
+      return false;
+    }
+    return true;
   }
 
   void close() override
   {
-    if (view_->on_thread() && !view_->closed) {
-      view_->closed = true;
-      view_->report.status = NativeViewStatus::Closed;
-      view_->report.message = "Document preview closed";
-      view_->shutdown();
+    const auto view = view_;
+    if (view->on_thread() && !view->closed) {
+      view->closed = true;
+      view->report.status = NativeViewStatus::Closed;
+      view->report.message = "Document preview closed";
+      view->shutdown();
     }
   }
 
@@ -756,20 +873,23 @@ class Win32DocumentView final : public NativeDocumentView {
     NativeViewState result = view_->report;
     result.parent_attached = false;
     result.visible = false;
+    result.focused = false;
     if (!view_->on_thread() || view_->closed || view_->fatal || !view_->controller) {
       return result;
     }
     HWND actual_parent = nullptr;
     if (FAILED(view_->controller->get_ParentWindow(&actual_parent)) ||
-        actual_parent != view_->parent || !IsWindow(actual_parent)) {
+        actual_parent != view_->container || !IsWindow(actual_parent) ||
+        GetParent(actual_parent) != view_->parent || !IsWindow(view_->parent)) {
       return result;
     }
     result.parent_attached = true;
+    result.focused = view_->owns_focus();
     BOOL controller_visible = FALSE;
     RECT actual_bounds{}, client{}, intersection{};
     result.visible = SUCCEEDED(view_->controller->get_IsVisible(&controller_visible)) &&
                      controller_visible && IsWindowVisible(actual_parent) &&
-                     !IsIconic(actual_parent) &&
+                     !IsIconic(view_->parent) &&
                      SUCCEEDED(view_->controller->get_Bounds(&actual_bounds)) &&
                      GetClientRect(actual_parent, &client) &&
                      IntersectRect(&intersection, &actual_bounds, &client);

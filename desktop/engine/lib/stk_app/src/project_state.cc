@@ -272,6 +272,7 @@ void ProjectState::attach(bridge::Client *client)
   if (client == client_) {
     return;
   }
+  store_.invalidate_project_scope();
   state_listener_.reset();
   changed_listener_.reset();
   closed_listener_.reset();
@@ -303,6 +304,7 @@ void ProjectState::attach(bridge::Client *client)
   });
   changed_listener_ = client_->on_event("project.changed", [this, weak](const auto &, const Json &data) {
     if (weak.lock() && project_ && io::get_string(data, "handle") == project_->handle) {
+      if (io::get_int(data, "revision", -1) > project_->revision) { store_.invalidate_project_scope(); }
       dirty_revision_ = std::max(dirty_revision_, io::get_int(data, "revision", -1));
       if (dirty_revision_ > project_->revision) {
         refresh();
@@ -330,6 +332,7 @@ void ProjectState::on_state(const bridge::BridgeState state)
   if (state == bridge_state_) {
     return;
   }
+  if (state != bridge::BridgeState::Ready) { store_.invalidate_project_scope(); }
   bridge_state_ = state;
   if (state != bridge::BridgeState::Ready) {
     ++epoch_;
@@ -426,6 +429,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
   if (!ready() || busy()) {
     return false;
   }
+  store_.invalidate_project_scope();
   ++epoch_;
   busy_ = true;
   clear_review();
@@ -475,6 +479,7 @@ bool ProjectState::start_open(const std::string &directory, const std::string &n
 
 void ProjectState::clear()
 {
+  store_.invalidate_project_scope();
   table_page_loading_ = selection_read_failed_ = false; failed_pages_.clear();
   clear_review();
   clear_drafts();
@@ -502,6 +507,7 @@ bool ProjectState::close(std::function<void(bridge::Result<bool>)> complete)
   if (busy() || !project_) {
     return false;
   }
+  store_.invalidate_project_scope();
   if (!ready() || project_->handle.empty()) {
     ++epoch_;
     clear();
@@ -533,6 +539,7 @@ void ProjectState::refresh()
   if (!ready() || busy() || !project_ || project_->handle.empty()) {
     return;
   }
+  store_.invalidate_project_scope();
   fetching_ = true;
   selection_read_failed_ = false;
   table_page_loading_ = false; failed_pages_.clear();

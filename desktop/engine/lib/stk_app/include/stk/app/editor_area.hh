@@ -82,6 +82,7 @@ class EditorArea : public wm::Area {
   EditorContext context(ui::Context *ui, const wm::DrawContext *draw);
 
   /* wm::Area hooks. */
+  void on_removed() override;
   bool on_drop(const wm::Event &event) override;
   bool handle_event(const wm::Event &event, const wm::DrawContext &ctx) override;
   nlohmann::json save_state() const override;

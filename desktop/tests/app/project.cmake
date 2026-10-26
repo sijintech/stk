@@ -32,7 +32,7 @@ set_target_properties(stk-reports-render PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 if(MSVC)
   target_compile_options(stk-reports-render PRIVATE /W3 /utf-8 /bigobj)
 endif()
-foreach(_view text png create sources)
+foreach(_view text png create sources document)
   foreach(_width wide narrow)
     foreach(_lang en zh)
       foreach(_be ${_jobs_backends})

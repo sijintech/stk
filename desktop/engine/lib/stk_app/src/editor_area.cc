@@ -160,6 +160,13 @@ EditorArea::EditorArea(AppShell &shell, const std::string &type) : wm::Area(type
 
 EditorArea::~EditorArea() { alive_.reset(); }
 
+void EditorArea::on_removed()
+{
+  for (const auto &editor : tabs_) {
+    if (editor) { editor->on_area_removed(); }
+  }
+}
+
 void EditorArea::sync_regions()
 {
   if (tabs_.empty() || !tabs_[size_t(active_)]) {
@@ -231,6 +238,7 @@ bool EditorArea::move_tab_to(const int index, EditorArea &destination, const boo
   }
   try { destination.tabs_.reserve(destination.tabs_.size() + 1); }
   catch (const std::exception &) { return false; }
+  tabs_[size_t(index)]->on_area_removed();
   destination.tabs_.push_back(std::move(tabs_[size_t(index)]));
   tabs_.erase(tabs_.begin() + index);
   if (active_ >= int(tabs_.size()) || active_ > index) { active_ = std::max(0, active_ - 1); }

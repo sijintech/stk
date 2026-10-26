@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /** Opt-in native child-view experiment. It never opens a user project or starts a bridge. */
 #include "fixture.hh"
-#include "native_document_view.hh"
+#include "stk/document/native_view.hh"
 #include "window_evidence.hh"
 #include "evidence_pixels.hh"
 

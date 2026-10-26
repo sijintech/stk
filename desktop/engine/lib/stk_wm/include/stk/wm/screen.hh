@@ -281,6 +281,10 @@ class Area {
   virtual bool load_state(const nlohmann::json &state);
   /** Called after the area was put into a screen. */
   virtual void on_added();
+  /** Before detaching from its Screen or destroying this owned area, while screen() is valid.
+   * Release external child views/resources here. No tree mutation or throwing is allowed.
+   * Same-Screen geometry rearrangement and merely hiding a tab do not remove its owner. */
+  virtual void on_removed();
 
  private:
   friend class Screen;
@@ -615,7 +619,7 @@ class Screen {
   void detach(Area &area);
   void layout_node(ScreenNode &node, const Rect &rect, const DrawContext &ctx);
   int min_extent(const ScreenNode &node, SplitDir along, float scale) const;
-  void forget(const Area &area);
+  void forget(Area &area, bool removing = true);
   void ensure_ui(const DrawContext &ctx);
   bool dispatch_event(const Event &event, const DrawContext &ctx);
   bool dispatch_pointer(const Event &event, const DrawContext &ctx);

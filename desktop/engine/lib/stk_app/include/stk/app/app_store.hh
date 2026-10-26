@@ -59,6 +59,25 @@ enum class BridgeState : uint8_t { NotStarted, Starting, Ready, Restarting, Fail
 /** Catalog key of a bridge state ("app.status.bridge.ready", ...). */
 const char *bridge_state_key(BridgeState state);
 
+/** Main-thread subscription for resources bound to an opened project/bridge snapshot.
+ * Destroying the token cancels the callback, including during notification. The token may
+ * outlive AppStore; store destruction disconnects it without invoking borrowed owners. */
+class ProjectScopeSubscription {
+ public:
+  ProjectScopeSubscription() = default;
+  ~ProjectScopeSubscription();
+  ProjectScopeSubscription(ProjectScopeSubscription &&) noexcept;
+  ProjectScopeSubscription &operator=(ProjectScopeSubscription &&) noexcept;
+  ProjectScopeSubscription(const ProjectScopeSubscription &) = delete;
+  ProjectScopeSubscription &operator=(const ProjectScopeSubscription &) = delete;
+  void reset() noexcept;
+
+ private:
+  struct State;
+  std::shared_ptr<State> state_;
+  friend class AppStore;
+};
+
 class AppStore {
  public:
   AppStore();
@@ -113,6 +132,13 @@ class AppStore {
     return bridge_client_;
   }
   void set_bridge(bridge::Client *client);
+
+  /** Synchronous invalidation, before changing project/bridge identity or awaiting refresh.
+   * Callbacks close transient resources only; they must not start reads, mutate the project
+   * or throw. New listeners wait for the next notification; cancellation is immediate. */
+  ProjectScopeSubscription observe_project_scope(std::function<void()> callback);
+  void invalidate_project_scope();
+  uint64_t project_scope_epoch() const { return project_scope_epoch_; }
 
   /** Connections, workspaces, transfers and tasks of the Jobs editors (WP9, jobs_state.hh). */
   JobsState &jobs();
@@ -190,6 +216,8 @@ class AppStore {
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;
+  uint64_t project_scope_epoch_ = 0;
+  std::vector<std::weak_ptr<ProjectScopeSubscription::State>> project_scope_observers_;
 };
 
 }  // namespace stk::app

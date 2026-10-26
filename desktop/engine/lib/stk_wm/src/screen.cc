@@ -398,6 +398,7 @@ bool Area::load_state(const nlohmann::json & /*state*/)
 }
 
 void Area::on_added() {}
+void Area::on_removed() {}
 
 void Area::layout(const Rect &rect, const DrawContext &ctx)
 {
@@ -470,6 +471,10 @@ Screen::~Screen()
   destroying_ = true;
   invalidate_layout();
   disconnect_layout_observers();
+  for (Area *area : areas()) { forget(*area); }
+  for (Area *area : {top_.get(), bottom_.get()}) {
+    if (area) { forget(*area); }
+  }
   if (impl_->timer && impl_->timer_wm) {
     impl_->timer_wm->remove_timer(impl_->timer);
   }
@@ -566,9 +571,10 @@ void Screen::attach(Area &area, ScreenNode *node)
   area.tag_redraw();
 }
 
-void Screen::forget(const Area &area)
+void Screen::forget(Area &area, const bool removing)
 {
   invalidate_layout();
+  if (removing) { area.on_removed(); }
   for (const auto &r : area.regions()) {
     if (focus_ == r.get()) {
       focus_ = nullptr;
@@ -1444,7 +1450,7 @@ bool Screen::ui_widget_at(const int x, const int y) const
           for (const ui::Widget &w : b.widgets()) {
             /* Text does not take the pointer away from pass-through regions. */
             const bool passive = w.type == ui::WidgetType::Label || w.type == ui::WidgetType::Paragraph ||
-                                 w.type == ui::WidgetType::Progress;
+                                 w.type == ui::WidgetType::Progress || w.type == ui::WidgetType::NativeViewport;
             if (!passive && w.rect.contains(p) && w.clip.contains(p)) {
               return true;
             }
@@ -1659,6 +1665,7 @@ bool Screen::dispatch_pointer(const Event &e, const DrawContext &ctx)
         impl_->click_node = s->node;
         impl_->click_index = s->index;
         impl_->click_time = e.time_ms;
+        invalidate_layout();
         capture_ = Capture::Splitter;
         impl_->drag_node = s->node;
         impl_->drag_index = s->index;
@@ -1675,6 +1682,7 @@ bool Screen::dispatch_pointer(const Event &e, const DrawContext &ctx)
         clear_ui_hover();
       }
       if (down && e.button == MouseButton::Left) {
+        invalidate_layout();
         capture_ = Capture::RegionEdge;
         impl_->edge_region = r;
         impl_->drag_start_x = e.x;
@@ -1693,6 +1701,7 @@ bool Screen::dispatch_pointer(const Event &e, const DrawContext &ctx)
     if (to_ui) {
       if (send_ui(e)) {
         if (down) {
+          invalidate_layout();
           capture_ = Capture::Ui;
           if (hover_) {
             focus_ = hover_;
@@ -1710,6 +1719,7 @@ bool Screen::dispatch_pointer(const Event &e, const DrawContext &ctx)
   if (down) {
     focus_ = target;
     if (target) {
+      invalidate_layout();
       capture_ = Capture::Region;
       capture_region_ = target;
     }
@@ -2029,7 +2039,7 @@ bool Screen::arrangement_impl(const nlohmann::json &json, std::string *error, co
   ui_.reset();
   ++deferred_epoch_;
   deferred_.clear();
-  for (auto *area : current) { forget(*area); }
+  for (auto *area : current) { forget(*area, false); }
   splitters_.clear();
   for (const auto &leaf : builder.leaves) {
     leaf.node->area = std::move(leaf.area->node_->area);

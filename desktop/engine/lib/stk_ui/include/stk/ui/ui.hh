@@ -110,8 +110,18 @@ enum class WidgetType : uint8_t {
   SplitterBar,
   MenuItem,
   CurvePreview,
+  NativeViewport,
 };
 const char *widget_type_name(WidgetType t);
+
+/** Final UI pixels (top-left origin). Visibility is geometric, not an OS paint claim. */
+struct NativeViewportState {
+  Rect rect;
+  Rect clip;
+  float height = 0;
+  bool visible = false;
+  bool enabled = false;
+};
 
 enum class Align : uint8_t { Left, Center, Right };
 enum class LayoutAlign : uint8_t { Expand, Left, Center, Right };
@@ -369,6 +379,8 @@ class Layout {
   Widget &log_view(std::string_view key, const LogBuffer &log, float height_units = 8.0f);
   Widget &table(std::string_view key, TableSpec spec);
   Widget &image(std::string_view key, ImageSpec spec);
+  /** Stable geometry for a native child view; no GPU drawing, input capture or Tab stop. */
+  Widget &native_viewport(std::string_view key, float height_units);
   /** Piecewise-linear curve in [0, 1], with constant endpoint extension. */
   Widget &curve_preview(std::string_view key, std::vector<Vec2> points);
 
@@ -483,7 +495,25 @@ struct ModalOptions {
 };
 
 class Context {
+  struct NativeViewSlot;
+
  public:
+  /** Main-thread subscription. May outlive the Context; reset is safe inside a callback. */
+  class NativeViewObserver {
+   public:
+    NativeViewObserver() = default;
+    ~NativeViewObserver();
+    NativeViewObserver(const NativeViewObserver &) = delete;
+    NativeViewObserver &operator=(const NativeViewObserver &) = delete;
+    NativeViewObserver(NativeViewObserver &&) noexcept;
+    NativeViewObserver &operator=(NativeViewObserver &&) noexcept;
+    void reset() noexcept;
+    explicit operator bool() const;
+   private:
+    friend class Context;
+    std::shared_ptr<NativeViewSlot> slot_;
+  };
+
   explicit Context(ContextConfig config);
   ~Context();
   Context(const Context &) = delete;
@@ -522,6 +552,18 @@ class Context {
   bool popup_open() const { return popup_.owner != 0; }
   /** Shows the tooltip of a widget immediately (gallery, tests). */
   bool force_tooltip(std::string_view widget_key);
+  /** Hide/relinquish native focus synchronously before an overlay or pointer capture starts.
+   * Callbacks may reset subscriptions, but must not throw, destroy this Context, rebuild UI,
+   * dispatch events recursively, or open overlays. Newly added observers start next notice.
+   * This is a parent-event boundary, not interception of an OS child event already dispatched. */
+  [[nodiscard]] NativeViewObserver observe_native_view_invalidated(std::function<void()> callback);
+  /** Conservative guard: building, any overlay, or any active pointer capture blocks native UI. */
+  bool native_view_interaction_blocked() const;
+  /** Null while building, absent, or not a native viewport in a Region block. */
+  std::optional<NativeViewportState> native_viewport_state(WidgetId id) const;
+  /** Return native Tab focus to a final, visible, enabled UI control without activating it.
+   * Refuses while editing, building, dragging or showing overlays; never commits a draft. */
+  bool focus_widget(WidgetId id);
 
   /* Events. */
   EventResult handle_event(const Event &e);
@@ -627,6 +669,7 @@ class Context {
 
   /* Helpers (context.cc / widgets.cc). */
   Block &new_block(Block::Kind kind, std::string_view name, Rect region);
+  void notify_native_view_invalidated();
   const Widget *hit(Vec2 p, Block **r_block = nullptr) const;
   const Widget *find_id(WidgetId id) const;
   bool container_drag_current() const;
@@ -699,6 +742,8 @@ class Context {
   uint64_t frame_serial_ = 0;
   bool building_ = false;
   bool redraw_ = true;
+  bool notifying_native_views_ = false;
+  std::vector<std::weak_ptr<NativeViewSlot>> native_view_slots_;
 
   std::vector<std::unique_ptr<Block>> blocks_;
   DrawList draw_;

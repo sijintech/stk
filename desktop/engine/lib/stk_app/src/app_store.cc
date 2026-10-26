@@ -15,8 +15,27 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
+#include <utility>
 
 namespace stk::app {
+
+struct ProjectScopeSubscription::State {
+  bool active = true;
+  std::function<void()> callback;
+};
+ProjectScopeSubscription::~ProjectScopeSubscription() { reset(); }
+ProjectScopeSubscription::ProjectScopeSubscription(ProjectScopeSubscription &&) noexcept = default;
+ProjectScopeSubscription &ProjectScopeSubscription::operator=(ProjectScopeSubscription &&other) noexcept
+{
+  if (this != &other) { reset(); state_ = std::move(other.state_); }
+  return *this;
+}
+void ProjectScopeSubscription::reset() noexcept
+{
+  auto old = std::move(state_);
+  if (old) { old->active = false; old->callback = nullptr; }
+}
 
 const char *bridge_state_key(const BridgeState state)
 {
@@ -38,6 +57,10 @@ AppStore::~AppStore()
   /* The editors' states call changed() from their callbacks and refer to this store: drop them
    * (jobs first: its subscriptions may feed the viewer) before the rest of the store. */
   on_change = nullptr;
+  for (const auto &weak : project_scope_observers_) {
+    if (auto state = weak.lock()) { state->active = false; state->callback = nullptr; }
+  }
+  project_scope_observers_.clear();
   attention_.reset();
   archive_.reset();
   data_labels_.reset();
@@ -116,10 +139,41 @@ ScriptState &AppStore::scripts()
 
 void AppStore::set_bridge(bridge::Client *client)
 {
+  if (bridge_client_ != client) { invalidate_project_scope(); }
   bridge_client_ = client;
   if (scripts_) {
     scripts_->sync();
   }
+}
+
+ProjectScopeSubscription AppStore::observe_project_scope(std::function<void()> callback)
+{
+  ProjectScopeSubscription subscription;
+  if (!callback) { return subscription; }
+  subscription.state_ = std::make_shared<ProjectScopeSubscription::State>();
+  subscription.state_->callback = std::move(callback);
+  std::erase_if(project_scope_observers_, [](const auto &weak) { return weak.expired(); });
+  project_scope_observers_.push_back(subscription.state_);
+  return subscription;
+}
+
+void AppStore::invalidate_project_scope()
+{
+  const auto epoch = ++project_scope_epoch_;
+  const auto observers = project_scope_observers_;
+  std::erase_if(project_scope_observers_, [](const auto &weak) { return weak.expired(); });
+  std::exception_ptr failure;
+  for (const auto &weak : observers) {
+    auto state = weak.lock();
+    if (!state || !state->active || !state->callback) { continue; }
+    // A callback may destroy its own token. Keep its invocation alive independently.
+    auto callback = state->callback;
+    try { callback(); }
+    catch (...) { if (!failure) { failure = std::current_exception(); } }
+    if (project_scope_epoch_ != epoch) { break; }
+  }
+  // One misbehaving listener must not leave another owner's resource session usable.
+  if (failure) { std::rethrow_exception(failure); }
 }
 
 JobsState &AppStore::jobs()
@@ -158,6 +212,7 @@ void AppStore::set_ui_scale(const float scale)
 void AppStore::set_bridge_state(const BridgeState state)
 {
   if (state != bridge_) {
+    if (state != BridgeState::Ready) { invalidate_project_scope(); }
     bridge_ = state;
     changed();
   }

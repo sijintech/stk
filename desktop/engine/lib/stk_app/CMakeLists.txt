@@ -22,6 +22,7 @@ add_library(stk_app STATIC
   src/analysis_table_grid.cc
   src/analysis_parameter_draft.cc
   src/app_store.cc
+  src/report_document_host.cc
   src/skill_catalog.cc
   src/workflow_view.cc
   src/workflow_draft.cc
@@ -66,7 +67,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/editor_modules.cmake)
 target_include_directories(stk_app PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_compile_features(stk_app PUBLIC cxx_std_20)
 # stk_bridge (CPU only): BridgeStatus mirrors the bridge client into the status bar.
-target_link_libraries(stk_app PUBLIC stk_wm stk_ui_core stk_core stk_io stk_bridge stk_platform)
+target_link_libraries(stk_app PUBLIC stk_wm stk_ui_core stk_core stk_io stk_bridge stk_platform stk_document_native)
 # WP10: the Viewer editor draws with stk_viewer_gpu; ViewerState decodes payloads (stk_io) and
 # formats labels (stk_viewer_model).
 target_link_libraries(stk_app PUBLIC stk_viewer_gpu stk_viewer_model)

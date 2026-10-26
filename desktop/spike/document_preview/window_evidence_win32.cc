@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <d3d11.h>
+#include <dxgi1_2.h>
 #include <GL/gl.h>
 #include <cstdio>
 #include <windows.graphics.capture.interop.h>
@@ -12,7 +13,9 @@
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include "window_evidence.hh"
+#include "stk/io/json.hh"
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace stk::document_preview {
@@ -26,6 +29,16 @@ class Capture final : public WindowEvidenceCapture {
   explicit Capture(wm::NativeWindowHandle parent)
   {
     try {
+      // Test-only, explicit selection: never silently reinterpret a hardware failure as WARP.
+      wchar_t requested[16]{};
+      const auto count = GetEnvironmentVariableW(L"STK_NATIVE_EVIDENCE_D3D_DRIVER", requested, 16);
+      if (count >= 16) { throw std::runtime_error("Invalid native evidence D3D driver option"); }
+      const std::wstring_view option(requested, count);
+      const bool warp = option == L"warp";
+      if (!option.empty() && option != L"hardware" && !warp) {
+        throw std::runtime_error("STK_NATIVE_EVIDENCE_D3D_DRIVER must be hardware or warp");
+      }
+      backend_ += warp ? ";d3d11_request=warp" : ";d3d11_request=hardware";
       winrt::init_apartment(winrt::apartment_type::single_threaded);
       apartment_ = true;
       window_ = static_cast<HWND>(parent.value);
@@ -52,10 +65,23 @@ class Capture final : public WindowEvidenceCapture {
         throw std::runtime_error("Captured window geometry does not match the bounded STK client area");
       }
       // Capture has its own D3D device; the STK rendering backend remains OpenGL.
-      winrt::check_hresult(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+      // Microsoft supports WARP through this same API. WGC support and actual pixels still
+      // have to pass below; choosing WARP does not bypass any capability or image check.
+      D3D_FEATURE_LEVEL feature_level{};
+      winrt::check_hresult(D3D11CreateDevice(nullptr,
+          warp ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE, nullptr,
           D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
-          device_.put(), nullptr, context_.put()));
+          device_.put(), &feature_level, context_.put()));
       const auto dxgi = device_.as<IDXGIDevice>();
+      winrt::com_ptr<IDXGIAdapter> adapter;
+      winrt::check_hresult(dxgi->GetAdapter(adapter.put()));
+      DXGI_ADAPTER_DESC1 description{};
+      winrt::check_hresult(adapter.as<IDXGIAdapter1>()->GetDesc1(&description));
+      const bool software = (description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+      backend_ += ";adapter=" + winrt::to_string(description.Description) +
+          ";adapter_software=" + (software ? std::string("true") : std::string("false")) +
+          ";feature_level=" + std::to_string(unsigned(feature_level));
+      if (warp && !software) { throw std::runtime_error("WARP capture did not report a software DXGI adapter"); }
       winrt::com_ptr<IInspectable> inspectable;
       winrt::check_hresult(CreateDirect3D11DeviceFromDXGIDevice(dxgi.get(), inspectable.put()));
       pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(inspectable.as<IDirect3DDevice>(),
@@ -80,7 +106,7 @@ class Capture final : public WindowEvidenceCapture {
   std::optional<WindowEvidence> poll() override
   {
     WindowEvidence out;
-    out.backend = "windows-graphics-capture-window-client";
+    out.backend = backend_;
     if (!error_.empty()) { out.error = error_; return out; }
     Direct3D11CaptureFrame frame{nullptr};
     bool mapped = false;
@@ -154,6 +180,7 @@ class Capture final : public WindowEvidenceCapture {
   HWND window_ = nullptr;
   RECT client_{}, outer_{};
   std::string error_;
+  std::string backend_ = "windows-graphics-capture-window-client";
   winrt::com_ptr<ID3D11Device> device_;
   winrt::com_ptr<ID3D11DeviceContext> context_;
   GraphicsCaptureItem item_{nullptr};
@@ -163,6 +190,55 @@ class Capture final : public WindowEvidenceCapture {
 }
 std::string native_evidence_environment_error()
 {
+  wchar_t software_option[4]{};
+  const auto software_count = GetEnvironmentVariableW(
+      L"STK_NATIVE_EVIDENCE_REQUIRE_LLVMPIPE", software_option, 4);
+  if (software_count >= 4) { return "Invalid native evidence software-renderer option"; }
+  const std::wstring_view software(software_option, software_count);
+  if (!software.empty() && software != L"0" && software != L"1") {
+    return "STK_NATIVE_EVIDENCE_REQUIRE_LLVMPIPE must be 0 or 1";
+  }
+  const bool require_llvmpipe = software == L"1";
+  // Version overrides can advertise unsupported contexts. Never accept them as capability
+  // evidence, even outside the explicit software mode. Read only presence, not their values.
+  for (const auto *name : {L"MESA_GL_VERSION_OVERRIDE", L"MESA_GLSL_VERSION_OVERRIDE",
+                           L"MESA_GLES_VERSION_OVERRIDE"}) {
+    if (GetEnvironmentVariableW(name, nullptr, 0) != 0) {
+      return "Native evidence refuses Mesa GL/GLSL/GLES version overrides";
+    }
+  }
+  const auto gl_module = GetModuleHandleW(L"opengl32.dll"); // Borrowed module already imported.
+  if (!gl_module) { return "Cannot identify the loaded OpenGL module"; }
+  std::wstring module_path(32768, L'\0');
+  const auto path_size = GetModuleFileNameW(gl_module, module_path.data(), DWORD(module_path.size()));
+  if (!path_size || path_size >= module_path.size()) {
+    return "Cannot read the complete loaded opengl32.dll path";
+  }
+  module_path.resize(path_size);
+  const auto loaded_path = winrt::to_string(module_path);
+  const auto gl_text = [](GLenum name) {
+    const auto *value = reinterpret_cast<const char *>(glGetString(name));
+    if (!value) { throw std::runtime_error("OpenGL probe did not provide its driver strings"); }
+    size_t count = 0;
+    while (count < 4096 && value[count]) { ++count; }
+    if (!count || count == 4096) { throw std::runtime_error("OpenGL probe driver string is empty or exceeds metadata budget"); }
+    return std::string(value, count);
+  };
+  const auto record_gl = [&](const char *stage) {
+    const auto renderer = gl_text(GL_RENDERER);
+    const io::Json metadata = {{"format", "stk.native-gl-provenance/1"}, {"stage", stage},
+        {"require_llvmpipe", require_llvmpipe}, {"opengl32_path", loaded_path},
+        {"gl_vendor", gl_text(GL_VENDOR)}, {"gl_renderer", renderer}, {"gl_version", gl_text(GL_VERSION)}};
+    // The acceptance log is uploaded with evidence. JSON escapes driver text and paths so
+    // one probe remains one controlled line; no other process/module/environment is inspected.
+    const auto encoded = metadata.dump(-1, ' ', true, io::Json::error_handler_t::replace);
+    if (std::printf("STK_NATIVE_GL_PROVENANCE %s\n", encoded.c_str()) < 0 || std::fflush(stdout) != 0) {
+      throw std::runtime_error("Cannot write native OpenGL provenance evidence");
+    }
+    auto normalized = renderer;
+    for (auto &c : normalized) { if (c >= 'A' && c <= 'Z') { c = char(c - 'A' + 'a'); } }
+    return !require_llvmpipe || normalized.find("llvmpipe") != std::string::npos;
+  };
   // GHOST requests PROCESS_PER_MONITOR_DPI_AWARE during its later startup. Set that same
   // process default before the probe's first HWND: changing it after any HWND is unsupported
   // and could mix virtualized client coordinates with DWM's physical capture pixels.
@@ -229,6 +305,7 @@ std::string native_evidence_environment_error()
       !(p.legacy = wglCreateContext(p.dc)) || !wglMakeCurrent(p.dc, p.legacy)) {
     return "Windows runner cannot create an OpenGL context; native preview is unverified";
   }
+  if (!record_gl("legacy")) { return "The actual OpenGL renderer is not the explicitly required llvmpipe"; }
   const auto version_text = glGetString(GL_VERSION);
   const std::string legacy_version = version_text ? reinterpret_cast<const char *>(version_text) : "unknown";
   const auto address = wglGetProcAddress("wglCreateContextAttribsARB");
@@ -245,6 +322,7 @@ std::string native_evidence_environment_error()
   if (!p.modern || !wglMakeCurrent(p.dc, p.modern)) {
     return "Native STK window needs OpenGL 4.3 core; creation failed on runner GL " + legacy_version;
   }
+  if (!record_gl("core")) { return "The actual OpenGL core renderer is not the explicitly required llvmpipe"; }
   int major = 0, minor = 0;
   const auto modern_text = glGetString(GL_VERSION);
   if (!modern_text || std::sscanf(reinterpret_cast<const char *>(modern_text), "%d.%d", &major, &minor) != 2 ||

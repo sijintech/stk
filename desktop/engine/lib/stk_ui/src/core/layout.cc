@@ -46,6 +46,7 @@ const char *widget_type_name(WidgetType t)
     case WidgetType::SplitterBar: return "splitter";
     case WidgetType::MenuItem: return "menu_item";
     case WidgetType::CurvePreview: return "curve_preview";
+    case WidgetType::NativeViewport: return "native_viewport";
   }
   return "?";
 }
@@ -62,6 +63,7 @@ bool Widget::focusable() const
     case WidgetType::SplitterBar:
     case WidgetType::Image:
     case WidgetType::CurvePreview:
+    case WidgetType::NativeViewport:
       return false;
     default:
       return true;
@@ -406,6 +408,13 @@ Widget &Layout::image(std::string_view key, ImageSpec spec)
   return w;
 }
 
+Widget &Layout::native_viewport(std::string_view key, float height_units)
+{
+  Widget &w = add_widget(WidgetType::NativeViewport, key);
+  w.height = ctx().style().u(std::isfinite(height_units) ? std::clamp(height_units, 0.0f, 4096.0f) : 0.0f);
+  return w;
+}
+
 Widget &Layout::curve_preview(std::string_view key, std::vector<Vec2> points)
 {
   Widget &w = add_widget(WidgetType::CurvePreview, key);
@@ -466,6 +475,7 @@ float LayoutEngine::pref_width(const Context &ctx, const Widget &w)
     case WidgetType::LogView:
     case WidgetType::Table:
     case WidgetType::Image:
+    case WidgetType::NativeViewport:
     case WidgetType::CurvePreview:
       return 10.0f * st.unit;
     case WidgetType::SplitterBar:

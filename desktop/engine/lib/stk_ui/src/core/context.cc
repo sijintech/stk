@@ -23,7 +23,107 @@ Context::Context(ContextConfig config) : config_(std::move(config))
   style_ = Style::from_scale(1.0f);
 }
 
-Context::~Context() = default;
+struct Context::NativeViewSlot {
+  std::function<void()> callback;
+  bool active = true;
+};
+
+Context::NativeViewObserver::~NativeViewObserver() { reset(); }
+Context::NativeViewObserver::NativeViewObserver(NativeViewObserver &&other) noexcept
+    : slot_(std::move(other.slot_))
+{}
+Context::NativeViewObserver &Context::NativeViewObserver::operator=(NativeViewObserver &&other) noexcept
+{
+  if (this != &other) {
+    reset();
+    slot_ = std::move(other.slot_);
+  }
+  return *this;
+}
+void Context::NativeViewObserver::reset() noexcept
+{
+  if (slot_) {
+    slot_->active = false;
+    slot_->callback = {};
+    slot_.reset();
+  }
+}
+Context::NativeViewObserver::operator bool() const { return slot_ && slot_->active; }
+
+Context::~Context()
+{
+  notify_native_view_invalidated();
+  for (const auto &weak : native_view_slots_) {
+    if (auto slot = weak.lock()) {
+      slot->active = false;
+      slot->callback = {};
+    }
+  }
+}
+
+Context::NativeViewObserver Context::observe_native_view_invalidated(std::function<void()> callback)
+{
+  NativeViewObserver observer;
+  if (callback) {
+    observer.slot_ = std::make_shared<NativeViewSlot>();
+    observer.slot_->callback = std::move(callback);
+    native_view_slots_.push_back(observer.slot_);
+  }
+  return observer;
+}
+
+void Context::notify_native_view_invalidated()
+{
+  if (notifying_native_views_) { return; }
+  notifying_native_views_ = true;
+  struct Reset { bool &value; ~Reset() { value = false; } } reset{notifying_native_views_};
+  const auto snapshot = native_view_slots_;
+  for (const auto &weak : snapshot) {
+    if (auto slot = weak.lock(); slot && slot->active && slot->callback) {
+      const auto callback = slot->callback; // A callback may cancel itself or another observer.
+      callback();
+    }
+  }
+  native_view_slots_.erase(std::remove_if(native_view_slots_.begin(), native_view_slots_.end(),
+      [](const auto &weak) { const auto slot = weak.lock(); return !slot || !slot->active; }),
+      native_view_slots_.end());
+}
+
+bool Context::native_view_interaction_blocked() const
+{
+  const Widget *forced = tooltip_forced_ ? find_id(tooltip_forced_) : nullptr;
+  if (building_ || notifying_native_views_ || popup_.owner || drag_.id ||
+      (forced && !forced->tooltip.empty()) || !toasts_.empty()) {
+    return true;
+  }
+  return std::any_of(blocks_.begin(), blocks_.end(), [](const auto &b) {
+    return b->kind() != Block::Kind::Region;
+  });
+}
+
+std::optional<NativeViewportState> Context::native_viewport_state(WidgetId id) const
+{
+  if (building_) { return std::nullopt; }
+  const Widget *w = find_id(id);
+  if (!w || w->type != WidgetType::NativeViewport || !w->block || w->block->kind() != Block::Kind::Region) {
+    return std::nullopt;
+  }
+  const Rect clip = w->clip.intersect({0, 0, window_.x, window_.y});
+  const Rect visible = w->rect.intersect(clip);
+  return NativeViewportState{w->rect, clip, w->rect.h, visible.w > 0 && visible.h > 0, w->enabled};
+}
+
+bool Context::focus_widget(WidgetId id)
+{
+  if (native_view_interaction_blocked() || edit_.id) { return false; }
+  const Widget *w = find_id(id);
+  if (!w || w->layout_region || !w->focusable()) { return false; }
+  const Rect visible = w->rect.intersect(w->clip).intersect({0, 0, window_.x, window_.y});
+  if (visible.w <= 0 || visible.h <= 0) { return false; }
+  focus_ = id;
+  redraw_ = true;
+  return true;
+}
 
 void Context::set_scale(float dpi_scale, float user_scale)
 {
@@ -53,7 +153,9 @@ float Context::scroll_of(WidgetId id) const
 
 void Context::set_scroll(WidgetId id, float v, float max)
 {
-  scroll_[id] = std::clamp(v, 0.0f, std::max(0.0f, max));
+  const float next = std::clamp(v, 0.0f, std::max(0.0f, max));
+  if (scroll_of(id) != next) { notify_native_view_invalidated(); }
+  scroll_[id] = next;
 }
 
 /* -------------------------------------------------------------------- */
@@ -86,6 +188,7 @@ Layout &LayoutEngine::init_block(Context &ctx, Block &b)
 
 Block &Context::new_block(Block::Kind kind, std::string_view name, Rect region)
 {
+  if (kind != Block::Kind::Region) { notify_native_view_invalidated(); }
   auto b = std::make_unique<Block>();
   b->ctx_ = this;
   b->kind_ = kind;
@@ -422,7 +525,7 @@ const Widget *Context::hit(Vec2 p, Block **r_block) const
       }
       const auto &ws = b.widgets();
       for (auto wi = ws.rbegin(); wi != ws.rend(); ++wi) {
-        if (!wi->layout_region && wi->rect.contains(p) && wi->clip.contains(p)) {
+        if (!wi->layout_region && wi->type != WidgetType::NativeViewport && wi->rect.contains(p) && wi->clip.contains(p)) {
           return &*wi;
         }
       }
@@ -471,6 +574,7 @@ const Widget *Context::container_drop_target(Vec2 p) const
 
 void Context::toast(std::string text, ToastKind kind, double seconds)
 {
+  notify_native_view_invalidated();
   toasts_.push_back({std::move(text), kind, now_ + seconds, ++toast_serial_});
   redraw_ = true;
 }
@@ -500,6 +604,7 @@ void Context::close_popup()
 bool Context::force_tooltip(std::string_view widget_key)
 {
   const Widget *w = find(widget_key);
+  if (w && !w->tooltip.empty()) { notify_native_view_invalidated(); }
   tooltip_forced_ = w ? w->id : 0;
   redraw_ = true;
   return w != nullptr;
@@ -511,6 +616,7 @@ void Context::open_popup_for(const Widget &w)
     close_popup();
     return;
   }
+  notify_native_view_invalidated();
   popup_ = {};
   popup_.owner = w.id;
   popup_.owner_key = w.key;
@@ -1483,6 +1589,7 @@ EventResult Context::mouse_down(const Event &e)
     for (auto it = blk->widgets().rbegin(); it != blk->widgets().rend(); ++it) {
       if (it->drag_source && it->enabled && it->drag_source->on_drop &&
           it->rect.contains(e.pos) && it->clip.contains(e.pos)) {
+        notify_native_view_invalidated();
         drag_ = {};
         drag_.id = it->id;
         drag_.kind = DragState::Kind::Container;
@@ -1520,6 +1627,7 @@ EventResult Context::mouse_down(const Event &e)
   if (w->focusable() && w->type != WidgetType::MenuItem) {
     focus_ = w->id;
   }
+  notify_native_view_invalidated();
   drag_ = {};
   drag_.id = w->id;
   drag_.kind = DragState::Kind::Press;

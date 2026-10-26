@@ -183,10 +183,18 @@ struct ProjectReports::PreviewPreparation {
   int64_t total_size = 0, received_size = 0;
 };
 
-ProjectReports::ProjectReports(AppStore &store) : store_(store), project_(store.project()) { sync(); }
+ProjectReports::ProjectReports(AppStore &store) : store_(store), project_(store.project())
+{
+  scope_subscription_ = std::make_unique<ProjectScopeSubscription>(
+      store_.observe_project_scope([this] { clear_preview(); }));
+  sync();
+}
 ProjectReports::~ProjectReports()
 {
   *alive_ = false;
+  scope_subscription_.reset();
+  if (on_preview_invalidated) { on_preview_invalidated(); }
+  on_preview_invalidated = nullptr;
   if (exporting_) { store_.log("Report export reply unavailable; inspect the chosen destination before exporting again"); }
   if (future_) { future_->cancel(); }
   if (preview_future_) { preview_future_->cancel(); }
@@ -394,6 +402,7 @@ bool ProjectReports::export_file(const std::string &destination)
 void ProjectReports::clear_preview()
 {
   ++preview_generation_; ++preview_request_; ++preview_version_;
+  if (on_preview_invalidated) { on_preview_invalidated(); }
   preview_busy_ = false; preview_error_.clear();
   preview_pending_.reset(); prepared_preview_.reset();
   auto old = std::move(preview_future_); preview_future_.reset();
@@ -404,6 +413,16 @@ void ProjectReports::fail_preview(const std::string &error)
 {
   clear_preview(); preview_error_ = error; changed();
 }
+std::optional<PreparedReportPreview> ProjectReports::take_prepared_preview()
+{
+  sync();
+  if (!prepared_preview_ || prepared_preview_->project_scope_epoch != store_.project_scope_epoch()) {
+    return std::nullopt;
+  }
+  auto result = std::move(prepared_preview_);
+  prepared_preview_.reset();
+  return result;
+}
 bool ProjectReports::preview_call(const std::string &method, Json params,
                                   std::function<void(const Json &)> done)
 {
@@ -413,15 +432,17 @@ bool ProjectReports::preview_call(const std::string &method, Json params,
   const auto epoch = epoch_, generation = preview_generation_, request = ++preview_request_;
   const auto project = project_id_, handle = handle_, session = session_;
   const auto revision = revision_;
+  const auto scope_epoch = store_.project_scope_epoch();
   const auto report = preview_pending_->result.identity.report_id;
   const auto digest = preview_pending_->result.identity.source_sha256;
   const auto *client = client_;
   const std::weak_ptr<bool> weak = alive_;
   bridge::CallOptions options; options.retry = bridge::CallOptions::Retry::Never;
   preview_future_ = client_->call(method, params, options);
-  preview_future_->then([this, weak, epoch, generation, request, project, handle, session, revision,
+  preview_future_->then([this, weak, epoch, generation, request, project, handle, session, revision, scope_epoch,
                         report, digest, client, done = std::move(done)](bridge::Result<Json> result) {
     const auto alive = weak.lock(); if (!alive || !*alive) { return; }
+    if (scope_epoch != store_.project_scope_epoch()) { return; }
     sync();
     if (epoch != epoch_ || generation != preview_generation_ || request != preview_request_) { return; }
     if (!preview_pending_ || client != client_ || project != project_id_ || handle != handle_ ||
@@ -441,14 +462,28 @@ bool ProjectReports::preview_call(const std::string &method, Json params,
   });
   changed(); return true;
 }
+bool ProjectReports::supports_preview() const
+{
+  if (!selected_.is_object() || io::get_string(selected_, "state") != "readable") { return false; }
+  const auto &manifest = selected_.at("manifest");
+  const auto path = io::get_string(manifest, "entry_path");
+  for (const auto &asset : manifest.at("assets")) {
+    if (io::get_string(asset, "path") != path) { continue; }
+    const auto mime = io::get_string(asset, "mime");
+    const auto size = io::get_int(asset, "size", -1);
+    if (mime == "application/pdf") {
+      return size >= 0 && size <= max_asset_bytes && supports("project.reports.preview");
+    }
+    return document_mime(mime) && size >= 0 && size <= 1024 * 1024 &&
+        supports("project.reports.preview_resources") && supports("project.reports.asset");
+  }
+  return false;
+}
 bool ProjectReports::prepare_preview()
 {
   sync();
   if (busy_ || preview_busy_ || project_.busy()) { return false; }
   clear_preview();
-  if (!supports("project.reports.preview_resources") || !supports("project.reports.asset")) {
-    preview_error_ = "This bridge does not support frozen report resource previews"; changed(); return false;
-  }
   if (!selected_.is_object() || io::get_string(selected_, "state") != "readable") {
     preview_error_ = "Select a readable report before preparing its preview"; changed(); return false;
   }
@@ -458,23 +493,63 @@ bool ProjectReports::prepare_preview()
   const auto entry = std::find_if(assets.begin(), assets.end(), [&](const Json &asset) {
     return io::get_string(asset, "path") == entry_path;
   });
-  if (entry == assets.end() || !document_mime(io::get_string(*entry, "mime")) ||
-      io::get_int(*entry, "size", -1) > 1024 * 1024) {
-    preview_error_ = "Resource preview requires a Markdown or HTML entry within 1 MiB"; changed(); return false;
+  if (entry == assets.end()) {
+    preview_error_ = "The report entry is missing from its manifest"; changed(); return false;
+  }
+  const bool pdf = io::get_string(*entry, "mime") == "application/pdf";
+  if (!supports_preview()) {
+    preview_error_ = pdf ? "PDF preview requires the preview bridge method and an entry within 4 MiB" :
+        "Resource preview requires the resource bridge methods and a Markdown or HTML entry within 1 MiB";
+    changed(); return false;
   }
   preview_pending_ = std::make_unique<PreviewPreparation>();
   preview_pending_->manifest_assets = assets;
   preview_pending_->result.identity = {project_id_, io::get_string(selected_, "id"),
                                       io::get_string(selected_, "source_sha256"), {}};
   preview_pending_->result.entry_path = entry_path;
+  preview_pending_->result.project_scope_epoch = store_.project_scope_epoch();
   preview_busy_ = true;
   const auto &identity = preview_pending_->result.identity;
-  if (!preview_call("project.reports.preview_resources", {{"report_id", identity.report_id},
+  if (!preview_call(pdf ? "project.reports.preview" : "project.reports.preview_resources", {{"report_id", identity.report_id},
       {"expected_revision", revision_}, {"expected_source_sha256", identity.source_sha256}},
-      [this](const Json &result) { accept_preview(result); })) {
+      [this, pdf](const Json &result) { if (pdf) { accept_pdf_preview(result); } else { accept_preview(result); } })) {
     fail_preview("Report preview selection is no longer available"); return false;
   }
   return true;
+}
+void ProjectReports::accept_pdf_preview(const Json &preview)
+{
+  check_analysis_json_bounds(preview, 6 * 1024 * 1024);
+  require(preview_pending_ && preview.is_object() && preview.size() == 14,
+          "Invalid PDF preview response");
+  auto &pending = *preview_pending_;
+  const auto &identity = pending.result.identity;
+  const auto entry = std::find_if(pending.manifest_assets.begin(), pending.manifest_assets.end(), [&](const Json &asset) {
+    return io::get_string(asset, "path") == pending.result.entry_path;
+  });
+  require(entry != pending.manifest_assets.end() && io::get_string(*entry, "mime") == "application/pdf",
+          "The frozen PDF entry is missing from its manifest");
+  const auto session = io::get_string(preview, "session_id");
+  const auto digest = io::get_string(*entry, "sha256");
+  const auto size = io::get_int(*entry, "size", -1);
+  require(io::get_int(preview, "revision", -1) == revision_ &&
+      io::get_string(preview, "project_id") == identity.project_id &&
+      io::get_string(preview, "report_id") == identity.report_id &&
+      io::get_string(preview, "source_sha256") == identity.source_sha256 && canonical_uuid(session) &&
+      io::get_string(preview, "path") == pending.result.entry_path &&
+      io::get_string(preview, "renderer") == "identity" &&
+      io::get_string(preview, "mime") == "application/pdf" &&
+      io::get_string(preview, "source_mime") == "application/pdf" &&
+      core::is_sha256_hex(digest) && io::get_string(preview, "content_sha256") == digest &&
+      io::get_string(preview, "source_content_sha256") == digest && size >= 0 && size <= max_asset_bytes &&
+      io::get_int(preview, "size", -1) == size && io::get_int(preview, "source_size", -1) == size &&
+      pending.result.project_scope_epoch == store_.project_scope_epoch(),
+      "PDF preview identity or unchanged content differs from the frozen manifest");
+  auto bytes = verified_preview_bytes(preview, size, digest); // Binary PDF is never UTF-8 decoded.
+  pending.result.identity.session_id = session;
+  pending.result.assets.push_back({pending.result.entry_path, "application/pdf", std::move(bytes)});
+  prepared_preview_ = std::move(pending.result);
+  preview_pending_.reset(); preview_busy_ = false; ++preview_version_;
 }
 void ProjectReports::accept_preview(const Json &result)
 {
@@ -537,7 +612,8 @@ void ProjectReports::read_preview_resource()
   auto &pending = *preview_pending_;
   if (pending.next_resource == pending.resources.size()) {
     require(pending.received_size == pending.total_size && pending.result.assets.size() == pending.resources.size() + 1 &&
-        pending.result.assets.size() <= 64, "Report preview collection is incomplete");
+        pending.result.assets.size() <= 64 && pending.result.project_scope_epoch == store_.project_scope_epoch(),
+        "Report preview collection is incomplete or belongs to an invalidated scope");
     prepared_preview_ = std::move(pending.result);
     preview_pending_.reset(); preview_busy_ = false; ++preview_version_;
     return;

@@ -200,6 +200,7 @@ void Context::draw_layout(const Layout &l, const Block &b)
 
 void Context::draw_widget(const Widget &w)
 {
+  if (w.type == WidgetType::NativeViewport) { return; }
   const Theme &th = config_.theme;
   const Style &st = style_;
   const TextMeasurer &tm = measurer();
@@ -283,6 +284,8 @@ void Context::draw_widget(const Widget &w)
   };
 
   switch (w.type) {
+    case WidgetType::NativeViewport:
+      break;
     case WidgetType::Label: {
       if (w.label_backdrop) {
         /* A translucent box still inherits the scene's contrast. Keep the theme's paired RGB

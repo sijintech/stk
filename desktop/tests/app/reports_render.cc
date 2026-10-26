@@ -86,10 +86,11 @@ int main(int argc, char **argv)
     else { return 2; }
   }
   if (output.empty() || (language != "en" && language != "zh") ||
-      (width_mode != "wide" && width_mode != "narrow") || (view != "text" && view != "png" && view != "create" && view != "sources")) { return 2; }
+      (width_mode != "wide" && width_mode != "narrow") || (view != "text" && view != "png" && view != "create" && view != "sources" && view != "document")) { return 2; }
   const int width = width_mode == "narrow" ? 560 : 1440, height = 1000;
   const bool chinese = language == "zh", png_view = view == "png", sources_view = view == "sources";
   const bool create_view = view == "create" || sources_view;
+  const bool document_view = view == "document";
   bridge::test::TempDir directory{"reports-render"};
   bridge::test::ManualLoop loop;
   bridge::ClientOptions options;
@@ -258,7 +259,7 @@ main()
         require(fully_visible(widget(key)), std::string("control cannot fit in viewport: ") + key);
       };
       auto click = [&](const char *key, int row = -1) {
-        if (create_view) { scroll_to(key); }
+        if (create_view || document_view) { scroll_to(key); }
         frame(); const auto *item = widget(key);
         require(item && item->enabled, std::string("control unavailable: ") + key);
         ui::Vec2 point{item->rect.cx(), item->rect.cy()};
@@ -410,6 +411,27 @@ main()
         const auto selected_state = area->editor().save_workspace_state();
         require(selected_state.at("report_id") == kReport && selected_state.at("source_sha256") == saved.at("source_sha256"), "selected manifest identity");
         require(!widget("reports_text_page") && !widget("reports_image"), "selection must not read report assets");
+        if (document_view) {
+          click("reports_preview");
+          wait([&] { return widget("reports_document_viewport") != nullptr; }, "explicit preparation creates the production document viewport");
+          const auto *viewport = widget("reports_document_viewport");
+          require(viewport->type == ui::WidgetType::NativeViewport && fully_visible(viewport),
+              "dedicated native viewport must fit in the actual resolved reading layout");
+          for (const char *key : {"reports_document_source", "reports_document_prepare", "reports_document_close",
+                                 "reports_document_focus", "reports_document_return_focus", "reports_document_after"}) {
+            require(fully_visible(widget(key)), std::string("reading control must fit: ") + key);
+          }
+          require(!widget("reports_text_page") && !widget("reports_image"), "reading viewport is independent of source/PNG controls");
+          require(!widget("reports_document_focus")->enabled,
+              "headless layout must not claim a native browser is attached or ready for focus");
+          for (const auto &command : screen.ui()->draw_list().cmds) {
+            require(command.type != ui::CmdType::Image, "headless document viewport must not fake browser pixels with a GPU image");
+          }
+          require(area->editor().save_workspace_state() == selected_state,
+              "transient native reading state must not enter the saved workspace");
+          require(clicks == 2, "fixed report-list start to prepared reading viewport requires two clicks");
+        }
+        else {
         click("reports_sources");
         const auto *source = widget("reports_source_list");
         require(source && source->list && source->list->count == 1, "frozen provenance visible");
@@ -454,6 +476,7 @@ main()
             }
           }
           require(blue_pixels > 100, "screenshot contains the frozen PNG's blue bars");
+        }
         }
       }
       require(viewer.base_payload() == shown && viewer.payload_serial() == payload_serial &&

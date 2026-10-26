@@ -352,6 +352,7 @@ void Context::table_open_menu(const Widget &w, const int column)
   if (!w.table || !w.table->column_menu || column < 0 || size_t(column) >= w.table->columns.size()) { return; }
   auto entries = w.table->column_menu(column);
   if (entries.empty()) { return; }
+  notify_native_view_invalidated();
   popup_ = {};
   popup_.owner = w.id; popup_.owner_key = w.key;
   popup_.menu = true;

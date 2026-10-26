@@ -4601,15 +4601,22 @@ TEST_F(WorkflowSimulationPython, MuFerroWorkflowRunsEveryRowOnThePickedRuntime)
   EXPECT_TRUE(shows("simulate: simulation run "));  // the row's simulation run and Runtime task
   EXPECT_TRUE(shows(" · Done"));
   // P2 L3: the run's MuFerro result rows become a new conversation context and the AI assistant opens on it.
-  ASSERT_NE(widget("workflow_run_ask_results"), nullptr);
+  ASSERT_TRUE(loop.pump_until([&] {
+    const auto *ask = widget("workflow_run_ask_results"); return ask && ask->enabled;
+  }, 30)) << "project busy=" << state().busy() << "; error=" << state().error();
   EXPECT_EQ(widget("workflow_run_ask_results")->text, "Ask about the results of these 3 rows");
   auto &discussion = state().discussion();
   widget("workflow_run_ask_results")->on_click();
+  ASSERT_TRUE(discussion.busy()) << "The enabled Ask action must accept the capture request: " << discussion.error();
+  ASSERT_TRUE(loop.pump_until([&] { return !discussion.busy(); }, 30)) << discussion.error();
+  ASSERT_FALSE(discussion.context().empty()) << discussion.error();
   ASSERT_TRUE(loop.pump_until([&] {
     f.screen.run_deferred(); f.drv->frame();
     auto *assistant = visible_editor(f.screen, kEditorAI);
     return !discussion.busy() && !f.screen.maximized() && assistant && !discussion.context().empty();
-  }, 30));
+  }, 30)) << "project busy=" << state().busy() << "; discussion error=" << discussion.error()
+          << "; maximized=" << (f.screen.maximized() != nullptr)
+          << "; assistant visible=" << (visible_editor(f.screen, kEditorAI) != nullptr);
   const auto context = discussion.context();
   EXPECT_EQ(context.at("title"), "Results of MuFerro scan (3 rows)");
   EXPECT_EQ(context.at("selection").at("record_ids").size(), 3u);

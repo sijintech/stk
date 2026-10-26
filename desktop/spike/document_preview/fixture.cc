@@ -176,21 +176,33 @@ constexpr uint8_t kCheckerboard[] = {
     0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 };
 
+std::string pdf_stripe(int page)
+{
+  std::string result;
+  for (size_t i = 0; i < kEvidenceColors.size(); ++i) {
+    const auto &color = kEvidenceColors[page == 1 ? i : kEvidenceColors.size() - 1 - i];
+    result += "q " + std::to_string(double(color[0]) / 255.0) + " " +
+        std::to_string(double(color[1]) / 255.0) + " " + std::to_string(double(color[2]) / 255.0) +
+        " rg " + std::to_string(48 + i * 40) + " 650 40 24 re f Q\n";
+  }
+  return result;
+}
+
 std::string pdf_fixture()
 {
   // Standard Type1 Helvetica and uncompressed English text avoid a font/renderer dependency.
   // Every xref offset and stream length is computed from the actual bytes emitted below.
   const std::string first =
-      "q 0.90 0.95 1 rg 0 0 612 792 re f Q\n"
+      "q 0.90 0.95 1 rg 0 0 612 792 re f Q\n" + pdf_stripe(1) +
       "BT /F1 24 Tf 0.06 0.22 0.38 rg 48 714 Td (Synthetic PDF - page 1 of 2) Tj\n"
-      "/F1 14 Tf 0 -44 Td (Offline document preview acceptance fixture.) Tj\n"
+      "/F1 14 Tf 0 -110 Td (Offline document preview acceptance fixture.) Tj\n"
       "0 -30 Td (Select, copy, search, zoom and scroll to the next page.) Tj\n"
       "0 -30 Td (These are synthetic words, not scientific results.) Tj\n"
       "0 -30 Td (No scripts, embedded files, links or external fonts.) Tj ET\n";
   const std::string second =
-      "q 1 0.94 0.86 rg 0 0 612 792 re f Q\n"
+      "q 1 0.94 0.86 rg 0 0 612 792 re f Q\n" + pdf_stripe(2) +
       "BT /F1 24 Tf 0.47 0.22 0.04 rg 48 714 Td (Synthetic PDF - page 2 of 2) Tj\n"
-      "/F1 14 Tf 0 -44 Td (The second page has a pale orange background.) Tj\n"
+      "/F1 14 Tf 0 -110 Td (The second page has a pale orange background.) Tj\n"
       "0 -30 Td (Search marker: STK-PDF-PAGE-TWO.) Tj\n"
       "0 -30 Td (Close or hide the view and verify focus returns to STK.) Tj\n"
       "0 -30 Td (Native PDF support remains subject to platform acceptance.) Tj ET\n";
@@ -223,6 +235,11 @@ std::string pdf_fixture()
 }
 
 }  // namespace
+
+std::string make_pdf_fixture()
+{
+  return pdf_fixture();
+}
 
 std::shared_ptr<ResourceSession> make_fixture(std::string &error)
 {

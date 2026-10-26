@@ -21,6 +21,16 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   enable_testing()
 endif()
 
+# This portable CLI test needs no native window or third-party Python package.
+# Python remains optional for standalone CPU/resource builds; CI requires the test explicitly.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME native_evidence_gate
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/../test_native_evidence_gate.py)
+  set_tests_properties(native_evidence_gate PROPERTIES LABELS "unit;document_preview" TIMEOUT 60
+    ENVIRONMENT "STK_TOKEN_PLAN_API_KEY=" ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:")
+endif()
+
 set(STK_DESKTOP_DIR ${CMAKE_CURRENT_LIST_DIR}/../..)
 get_filename_component(STK_DESKTOP_DIR ${STK_DESKTOP_DIR} ABSOLUTE)
 get_filename_component(STK_REPO_ROOT ${STK_DESKTOP_DIR}/.. ABSOLUTE)
@@ -48,6 +58,9 @@ foreach(_lib stk_core stk_io stk_viewer_model)
     add_subdirectory(${STK_DESKTOP_DIR}/engine/lib/${_lib} ${CMAKE_BINARY_DIR}/engine/lib/${_lib})
   endif()
 endforeach()
+if(NOT TARGET stk_document_resources)
+  add_subdirectory(${STK_DESKTOP_DIR}/engine/lib/stk_document ${CMAKE_BINARY_DIR}/engine/lib/stk_document)
+endif()
 
 # googletest ------------------------------------------------------------------------------------
 if(TARGET GTest::gtest_main OR TARGET gtest_main)
@@ -139,3 +152,14 @@ else()
   add_test(NAME stk_payload_fuzz_smoke COMMAND stk_payload_fuzz --seconds 5 --corpus ${CMAKE_CURRENT_LIST_DIR}/fixtures/fuzz_corpus)
 endif()
 set_tests_properties(stk_payload_fuzz_smoke PROPERTIES LABELS "unit;fuzz")
+
+# Production confined report resources also work without Blender or the native candidate.
+if(TARGET stk_document_resources)
+  add_executable(stk-document-resources-tests
+    "${STK_DESKTOP_DIR}/engine/lib/stk_document/tests/resources_test.cc")
+  target_link_libraries(stk-document-resources-tests PRIVATE stk_document_resources GTest::gtest_main)
+  stk_target_warnings(stk-document-resources-tests)
+  gtest_discover_tests(stk-document-resources-tests DISCOVERY_TIMEOUT 60 DISCOVERY_MODE PRE_TEST
+    PROPERTIES LABELS "unit;document_preview" ENVIRONMENT "STK_TOKEN_PLAN_API_KEY="
+    ENVIRONMENT_MODIFICATION "STK_TOKEN_PLAN_MODEL=unset:")
+endif()

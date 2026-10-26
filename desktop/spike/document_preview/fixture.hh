@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
-#include "document_resources.hh"
+#include "stk/document/resources.hh"
 
 namespace stk::document_preview {
 
@@ -9,5 +9,9 @@ namespace stk::document_preview {
  * This is neither a Markdown renderer nor a product report/PDF reader.
  */
 std::shared_ptr<ResourceSession> make_fixture(std::string &error);
+/** Complete two-page synthetic PDF bytes; distinct vector stripes identify both pages.
+ * Shared by the standalone spike and the frozen production ReportsEditor acceptance.
+ */
+std::string make_pdf_fixture();
 
 }  // namespace stk::document_preview

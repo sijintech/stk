@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "native_document_view.hh"
+#include "stk/document/native_view.hh"
 
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
@@ -18,6 +18,10 @@ struct State {
   __strong WKWebView *view = nil;
   __strong NSObject *delegate = nil;
   __strong WKNavigation *navigation = nil;
+  __strong NSView *focus_before = nil;
+  __strong NSView *focus_after = nil;
+  FocusExitHandler focus_exit;
+  uint64_t focus_generation = 0;
   std::string requested_url;
   bool closed = false;
   bool policy_ready = false;
@@ -47,7 +51,9 @@ static bool live(const std::shared_ptr<State> &state)
 static bool admitted_url(const std::shared_ptr<State> &state, std::string_view url)
 {
   // ResourceSession also understands the Windows HTTPS form; WK must never fetch that URL.
-  return url.starts_with("stk-preview://local/") && state->resources->allows_navigation(url);
+  return url.starts_with("stk-preview://local/") && state->resources->allows_navigation(url) &&
+         url.substr(0, url.find('#')) ==
+             std::string_view(state->requested_url).substr(0, state->requested_url.find('#'));
 }
 
 static void blocked(const std::shared_ptr<State> &state)
@@ -63,25 +69,43 @@ static void fail(const std::shared_ptr<State> &state, const char *message)
   state->result.message = message;
 }
 
-static void relinquish_focus(const std::shared_ptr<State> &state)
+static bool owns_focus(const std::shared_ptr<State> &state)
 {
-  NSWindow *parent = state->parent;
-  NSResponder *responder = parent.firstResponder;
-  if ([responder isKindOfClass:[NSView class]] &&
-      (responder == state->view || [(NSView *)responder isDescendantOf:state->view])) {
-    if (![parent makeFirstResponder:parent.contentView]) {
-      [parent makeFirstResponder:nil];
-    }
-  }
+  NSResponder *responder = state->parent.firstResponder;
+  return responder &&
+         (responder == state->focus_before || responder == state->focus_after ||
+          ([responder isKindOfClass:[NSView class]] &&
+           (responder == state->view || [(NSView *)responder isDescendantOf:state->view])));
 }
+
+static bool relinquish_focus(const std::shared_ptr<State> &state)
+{
+  if (!owns_focus(state)) {
+    return true;
+  }
+  NSWindow *parent = state->parent;
+  [parent makeFirstResponder:parent.contentView];
+  if (owns_focus(state)) {
+    [parent makeFirstResponder:nil];
+  }
+  return !owns_focus(state);
+}
+
+static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus status, const char *message);
 
 static void sync_visibility(const std::shared_ptr<State> &state)
 {
   const bool show = live(state) && state->visible && state->has_bounds;
   if (!show) {
-    relinquish_focus(state);
+    ++state->focus_generation;
+    if (!relinquish_focus(state)) {
+      shutdown(state, NativeViewStatus::Failed, "Could not relinquish document keyboard focus.");
+      return;
+    }
   }
   state->view.hidden = !show;
+  state->focus_before.hidden = !show;
+  state->focus_after.hidden = !show;
 }
 
 // All calls and delegate callbacks are on the main thread. The returned WKNavigation is the
@@ -125,10 +149,92 @@ static bool current(const std::shared_ptr<State> &state,
 // The candidate intentionally has no context menu: WebKit/PDF menu items can otherwise expose
 // "download" or "open with" operations outside the document navigation policy. Copy shortcuts
 // remain native. Menu/keyboard/PDF behaviour still needs real macOS acceptance.
-@interface STKPreviewWebView : WKWebView
+// Public AppKit key-view boundaries let WebKit finish native Tab/IME handling before handing
+// focus back. They have no pixels, hit testing or key replay into the application.
+@interface STKPreviewFocusBoundary : NSView {
+ @public
+  std::weak_ptr<stk::document_preview::cocoa::State> state_;
+  stk::document_preview::NativeFocusExit direction_;
+}
+@end
+
+@implementation STKPreviewFocusBoundary
+- (BOOL)acceptsFirstResponder
+{
+  return YES;
+}
+- (BOOL)canBecomeKeyView
+{
+  auto state = state_.lock();
+  return stk::document_preview::cocoa::live(state) && state->visible && state->has_bounds &&
+         self.window == state->parent && !self.isHiddenOrHasHiddenAncestor;
+}
+- (NSView *)hitTest:(NSPoint)point
+{
+  return nil;
+}
+- (void)keyDown:(NSEvent *)event
+{
+  // The handoff is pending. Never replay a later event against an unrelated host control.
+}
+- (BOOL)becomeFirstResponder
+{
+  using namespace stk::document_preview;
+  auto state = state_.lock();
+  if (![self canBecomeKeyView] || !state) {
+    return NO;
+  }
+  const auto generation = ++state->focus_generation;
+  const auto direction = direction_;
+  std::weak_ptr<cocoa::State> weak = state;
+  __weak NSView *boundary = self;
+  // makeFirstResponder has not yet installed us while becomeFirstResponder is running.
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto target = weak.lock();
+    NSView *view = boundary;
+    if (!cocoa::live(target) || !target->visible || !target->has_bounds || !view ||
+        target->focus_generation != generation || target->parent.firstResponder != view) {
+      return;
+    }
+    if (!cocoa::relinquish_focus(target)) {
+      cocoa::shutdown(target, NativeViewStatus::Failed, "Could not return document keyboard focus.");
+      return;
+    }
+    if (!cocoa::live(target) || !target->visible || !target->has_bounds ||
+        target->focus_generation != generation) {
+      return;
+    }
+    auto callback = target->focus_exit;
+    if (callback) {
+      try {
+        callback(direction);
+      }
+      catch (...) {
+        cocoa::shutdown(target, NativeViewStatus::Failed, "The document focus handoff failed.");
+      }
+    }
+  });
+  return YES;
+}
+@end
+
+@interface STKPreviewWebView : WKWebView {
+ @public
+  std::weak_ptr<stk::document_preview::cocoa::State> state_;
+}
 @end
 
 @implementation STKPreviewWebView
+- (NSView *)nextValidKeyView
+{
+  auto state = state_.lock();
+  return state && [state->focus_after canBecomeKeyView] ? state->focus_after : [super nextValidKeyView];
+}
+- (NSView *)previousValidKeyView
+{
+  auto state = state_.lock();
+  return state && [state->focus_before canBecomeKeyView] ? state->focus_before : [super previousValidKeyView];
+}
 - (NSView *)hitTest:(NSPoint)point
 {
   NSView *hit = [super hitTest:point];
@@ -418,6 +524,44 @@ static bool current(const std::shared_ptr<State> &state,
 @end
 
 namespace stk::document_preview {
+namespace cocoa {
+
+static void shutdown(const std::shared_ptr<State> &state, NativeViewStatus status, const char *message)
+{
+  if (state->closed) {
+    return;
+  }
+  state->closed = true;
+  state->focus_exit = {};
+  ++state->focus_generation;
+  ++state->result.navigation_generation;
+  state->result.status = status;
+  state->result.message = message;
+  state->resources->close();
+  state->navigation = nil;
+  relinquish_focus(state);
+  state->view.hidden = YES;
+  state->focus_before.hidden = YES;
+  state->focus_after.hidden = YES;
+  [(STKPreviewDelegate *)state->delegate invalidate];
+  [state->view stopLoading];
+  state->view.navigationDelegate = nil;
+  state->view.UIDelegate = nil;
+  state->view.nextKeyView = nil;
+  state->focus_before.nextKeyView = nil;
+  state->focus_after.nextKeyView = nil;
+  [state->focus_before removeFromSuperview];
+  [state->focus_after removeFromSuperview];
+  [state->view removeFromSuperview];
+  state->focus_before = nil;
+  state->focus_after = nil;
+  state->view = nil;
+  state->delegate = nil;
+  state->parent = nil;
+  state->requested_url.clear();
+}
+
+}  // namespace cocoa
 namespace {
 
 class CocoaDocumentView final : public NativeDocumentView {
@@ -427,26 +571,28 @@ class CocoaDocumentView final : public NativeDocumentView {
 
   bool navigate(std::string_view asset_path, std::string &error) override
   {
+    const auto state = state_;
     error.clear();
-    if (!cocoa::live(state_) || state_->policy_failed) {
+    if (!cocoa::live(state) || state->policy_failed) {
       error = "The preview is closed or its offline policy is unavailable.";
       return false;
     }
-    const auto url = state_->resources->url(asset_path, false);
+    const auto url = state->resources->url(asset_path, false);
     if (url.empty()) {
       error = "The document is not in the current preview resource manifest.";
       return false;
     }
-    cocoa::begin_navigation(state_, url);
+    cocoa::begin_navigation(state, url);
     return true;
   }
 
   void set_bounds(ViewBounds bounds) override
   {
-    if (!cocoa::live(state_)) {
+    const auto state = state_;
+    if (!cocoa::live(state)) {
       return;
     }
-    NSView *content = state_->parent.contentView;
+    NSView *content = state->parent.contentView;
     const NSRect backing = [content convertRectToBacking:content.bounds];
     const CGFloat width = std::max(bounds.width, 0);
     const CGFloat height = std::max(bounds.height, 0);
@@ -454,48 +600,56 @@ class CocoaDocumentView final : public NativeDocumentView {
                                          NSMinY(backing) + bounds.y;
     const NSRect pixels = NSMakeRect(NSMinX(backing) + bounds.x, y, width, height);
     const NSRect frame = NSIntersectionRect([content convertRectFromBacking:pixels], content.bounds);
-    state_->has_bounds = !NSIsEmptyRect(frame);
-    state_->view.frame = frame;
-    cocoa::sync_visibility(state_);
+    state->has_bounds = !NSIsEmptyRect(frame);
+    cocoa::sync_visibility(state);
+    if (!state->closed) {
+      state->view.frame = frame;
+    }
   }
 
   void set_visible(bool visible) override
   {
-    if (!state_->closed) {
-      state_->visible = visible;
-      cocoa::sync_visibility(state_);
+    const auto state = state_;
+    if (!state->closed) {
+      state->visible = visible;
+      cocoa::sync_visibility(state);
     }
   }
 
   void focus() override
   {
-    if (cocoa::live(state_) && state_->visible && state_->has_bounds) {
-      [state_->parent makeFirstResponder:state_->view];
+    const auto state = state_;
+    if (cocoa::live(state) && state->visible && state->has_bounds && state->parent.isKeyWindow) {
+      ++state->focus_generation;
+      if (![state->parent makeFirstResponder:state->view]) {
+        cocoa::shutdown(state, NativeViewStatus::Failed, "Could not focus the document.");
+      }
     }
+  }
+
+  void set_focus_exit_handler(FocusExitHandler handler) override
+  {
+    if (!state_->closed) {
+      ++state_->focus_generation;
+      state_->focus_exit = std::move(handler);
+    }
+  }
+
+  bool return_focus() override
+  {
+    const auto state = state_;
+    ++state->focus_generation;
+    if (!cocoa::relinquish_focus(state)) {
+      cocoa::shutdown(state, NativeViewStatus::Failed, "Could not return document keyboard focus.");
+      return false;
+    }
+    return true;
   }
 
   void close() override
   {
-    if (state_->closed) {
-      return;
-    }
-    state_->closed = true;
-    ++state_->result.navigation_generation;
-    state_->result.status = NativeViewStatus::Closed;
-    state_->result.message = "Document preview closed.";
-    state_->resources->close();
-    state_->navigation = nil;
-    cocoa::relinquish_focus(state_);
-    state_->view.hidden = YES;
-    [(STKPreviewDelegate *)state_->delegate invalidate];
-    [state_->view stopLoading];
-    state_->view.navigationDelegate = nil;
-    state_->view.UIDelegate = nil;
-    [state_->view removeFromSuperview];
-    state_->view = nil;
-    state_->delegate = nil;
-    state_->parent = nil;
-    state_->requested_url.clear();
+    const auto state = state_;
+    cocoa::shutdown(state, NativeViewStatus::Closed, "Document preview closed.");
   }
 
   NativeViewState state() const override
@@ -507,6 +661,7 @@ class CocoaDocumentView final : public NativeDocumentView {
                              view.superview == parent.contentView && view.window == parent;
     result.visible = result.parent_attached && !view.isHiddenOrHasHiddenAncestor &&
                      !NSIsEmptyRect(view.visibleRect) && parent.isVisible && !parent.isMiniaturized;
+    result.focused = !state_->closed && cocoa::owns_focus(state_);
     if (!state_->closed && !cocoa::live(state_)) {
       result.status = NativeViewStatus::Failed;
       result.message = "The parent window or preview resource session is no longer available.";
@@ -550,7 +705,8 @@ std::unique_ptr<NativeDocumentView> create_native_document_view(
   configuration.allowsAirPlayForMediaPlayback = NO;
   configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAll;
   [configuration setURLSchemeHandler:delegate forURLScheme:@"stk-preview"];
-  state->view = [[STKPreviewWebView alloc] initWithFrame:NSZeroRect configuration:configuration];
+  STKPreviewWebView *web_view = [[STKPreviewWebView alloc] initWithFrame:NSZeroRect configuration:configuration];
+  state->view = web_view;
   if (!state->view) {
     error = "WKWebView could not be created.";
     return nullptr;
@@ -561,7 +717,23 @@ std::unique_ptr<NativeDocumentView> create_native_document_view(
   state->view.allowsLinkPreview = NO;
   state->view.inspectable = NO;
   state->view.hidden = YES;
+  web_view->state_ = state;
+  STKPreviewFocusBoundary *before = [[STKPreviewFocusBoundary alloc] initWithFrame:NSZeroRect];
+  STKPreviewFocusBoundary *after = [[STKPreviewFocusBoundary alloc] initWithFrame:NSZeroRect];
+  before->state_ = state;
+  after->state_ = state;
+  before->direction_ = NativeFocusExit::Previous;
+  after->direction_ = NativeFocusExit::Next;
+  before.hidden = YES;
+  after.hidden = YES;
+  state->focus_before = before;
+  state->focus_after = after;
+  [window.contentView addSubview:before];
   [window.contentView addSubview:state->view];
+  [window.contentView addSubview:after];
+  before.nextKeyView = state->view;
+  state->view.nextKeyView = after;
+  after.nextKeyView = before;
 
   // Compile a constant, non-project-specific rule list. The store may persist compiled rules;
   // website data stays nonpersistent. No resource URL or project content enters that store.

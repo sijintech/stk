@@ -11,6 +11,7 @@
 
 #include "stk/app/editor_area.hh"
 #include "stk/app/project_attention.hh"
+#include "stk/app/project_discussion.hh"
 #include "stk/app/project_state.hh"
 #include "stk/app/viewer_state.hh"
 #include "stk/app/workspace_transfer.hh"
@@ -294,7 +295,14 @@ void AppShell::open_project_page_later(wm::Screen *screen, std::string page, std
     project.sync();
     if ((project.project() ? project.project()->handle : std::string()) != handle) { return; }
     const bool management = page == "project" || page == "workspace";
-    if (!management && (!project.loaded() || !project.ready() || (project.busy() && !project.table_page_loading()))) { return; }
+    // The result context was already frozen before this deferred navigation. A catalog
+    // read can start between its reply and this callback without invalidating that context.
+    // Keep write/close/open, other pages and uncaptured conversations behind the busy fence.
+    const bool frozen_conversation = page == "conversation" && table_id.empty() && record_id.empty() &&
+        project.project() && project.refreshing() &&
+        io::get_string(project.discussion().context(), "project_id") == project.project()->id;
+    if (!management && (!project.loaded() || !project.ready() ||
+        (project.busy() && !project.table_page_loading() && !frozen_conversation))) { return; }
     if (text_input_active()) {
       if (store_.toast) { store_.toast(std::string(store_.tr("app.focus.busy")), ui::ToastKind::Warning); }
       return;

@@ -6,6 +6,7 @@
 namespace stk::app {
 class AppStore;
 class ProjectState;
+class ProjectScopeSubscription;
 
 struct ReportPreviewIdentity {
   std::string project_id, report_id, source_sha256, session_id;
@@ -17,8 +18,10 @@ struct ReportPreviewAsset {
 struct PreparedReportPreview {
   ReportPreviewIdentity identity;
   std::string entry_path;
-  // Sanitized entry first; verified raster images follow the frozen manifest order.
+  // Sanitized HTML followed by verified raster images, or one unchanged PDF entry.
   std::vector<ReportPreviewAsset> assets;
+  // Transient AppStore scope, never serialized or treated as a persistent report identity.
+  uint64_t project_scope_epoch = 0;
 };
 
 /** Tab-local frozen report reader. Every response is bound to the bridge session, opened
@@ -51,13 +54,21 @@ class ProjectReports {
   bool asset_loaded() const { return asset_loaded_; }
   uint64_t asset_version() const { return asset_version_; }
 
-  /** Explicit two-stage preparation. No view/session is created and no partial assets escape. */
+  /** Whether the selected entry's MIME/budget and advertised bridge methods permit preview. */
+  bool supports_preview() const;
+  /** Explicit preparation. HTML verifies entry plus images; PDF verifies one unchanged entry.
+   * No view/session is created and no partial assets escape. */
   bool prepare_preview();
   void clear_preview();
   bool preview_busy() const { return preview_busy_; }
   const std::string &preview_error() const { return preview_error_; }
   uint64_t preview_version() const { return preview_version_; }
   const std::optional<PreparedReportPreview> &prepared_preview() const { return prepared_preview_; }
+  /** Transfer verified bytes to their native owner without copying the collection. */
+  std::optional<PreparedReportPreview> take_prepared_preview();
+  /** One tab-local native owner. Close its session synchronously when this reader changes
+   * report or clears a preview. The handler must not throw or call back into this reader. */
+  std::function<void()> on_preview_invalidated;
 
   bool load_page(int64_t offset = 0);
   /** An expected digest is used by workspace restoration; a changed version is not adopted. */
@@ -72,6 +83,7 @@ class ProjectReports {
   struct PreviewPreparation;
   bool preview_call(const std::string &method, io::Json params, std::function<void(const io::Json &)> done);
   void accept_preview(const io::Json &result);
+  void accept_pdf_preview(const io::Json &result);
   void read_preview_resource();
   void fail_preview(const std::string &error);
   void reset();
@@ -96,5 +108,6 @@ class ProjectReports {
   std::string preview_error_;
   uint64_t preview_generation_ = 0, preview_request_ = 0, preview_version_ = 0;
   bool preview_busy_ = false;
+  std::unique_ptr<ProjectScopeSubscription> scope_subscription_;
 };
 }  // namespace stk::app
