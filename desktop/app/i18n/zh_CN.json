@@ -123,6 +123,7 @@
   "app.menu.view.focus_preparation": "聚焦准备",
   "app.menu.view.mode_preparation": "准备与运行布局",
   "app.menu.view.mode_analysis": "结果分析布局",
+  "app.menu.view.mode_report": "文档与报告布局",
   "app.menu.view.focus_analysis": "聚焦分析",
   "app.menu.view.restore_split_layout": "恢复分栏布局",
   "app.focus.closed": "目标桌面窗口已不可用。",

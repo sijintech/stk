@@ -336,9 +336,17 @@ raise SystemExit(main())
     require(reply->value().ok(), method + ": " + (reply->value() ? "" : reply->value().error().describe()));
     return reply->value().value();
   };
-  auto &project = shell.store().project(); project.sync();
+  auto &project = shell.store().project();
+  // Client::Ready precedes its queued UI listeners; wait for the project controller as well.
+  ui.wait([&] { project.sync(); return project.ready() && !project.busy(); }, "Project UI ready", 60);
   const auto folder = scratch / "project";
-  require(project.create(core::path_to_utf8(folder), "Public synthetic native report"), "Create fixture project");
+  if (!project.create(core::path_to_utf8(folder), "Public synthetic native report")) {
+    const auto hello = client->hello_info();
+    const Json diagnostics = {{"project_error", project.error()}, {"project_ready", project.ready()},
+                              {"project_busy", project.busy()},
+                              {"project_apply", hello && hello->has_method("project.apply")}};
+    require(false, "Create fixture project: " + diagnostics.dump());
+  }
   ui.wait([&] { return project.loaded() && !project.busy(); }, "Project loaded");
   const auto handle = project.project()->handle;
   const bool pdf = options.source == "pdf";

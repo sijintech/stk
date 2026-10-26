@@ -28,8 +28,9 @@ bool valid_summary(const Json &item)
       !item.contains("format") || !(item.at("format").is_string() || item.at("format").is_null()) ||
       !item.contains("error") || !item.at("error").is_string()) { return false; }
   const auto state = io::get_string(item, "state");
+  const auto format = io::get_string(item, "format");
   return state == "invalid" || (state == "readable" && item.at("name").is_string() &&
-      io::get_string(item, "format") == "stk.report/1" &&
+      (format == "stk.report/1" || format == "stk.report/2") &&
       core::is_sha256_hex(io::get_string(item, "source_sha256")));
 }
 bool valid_path(const std::string &path)
@@ -47,19 +48,106 @@ bool valid_path(const std::string &path)
   }
   return true;
 }
+bool request_identifier(const Json &value)
+{
+  if (!value.is_string()) { return false; }
+  const auto &text = value.get_ref<const std::string &>();
+  const auto alnum = [](unsigned char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+  };
+  return !text.empty() && text.size() <= 128 && alnum(text.front()) && text.find("//") == std::string::npos &&
+      std::all_of(text.begin(), text.end(), [&](unsigned char c) {
+        return alnum(c) || c == '.' || c == '_' || c == ':' || c == '/' || c == '-';
+      });
+}
+int64_t validate_generation(const Json &generation, const Json &entry, const std::string &path, int64_t revision)
+{
+  require(generation.is_object() && generation.size() == 12 &&
+      io::get_string(generation, "format") == "stk.report-generation/1" &&
+      canonical_uuid(io::get_string(generation, "request_id")) &&
+      canonical_uuid(io::get_string(generation, "message_id")) &&
+      canonical_uuid(io::get_string(generation, "assistant_message_id")) &&
+      core::is_sha256_hex(io::get_string(generation, "input_sha256")) &&
+      core::is_sha256_hex(io::get_string(generation, "report_input_sha256")) &&
+      core::is_sha256_hex(io::get_string(generation, "response_sha256")) &&
+      io::get_int(generation, "input_revision", -1) >= 0 &&
+      io::get_int(generation, "input_revision", -1) <= revision &&
+      generation.contains("edited") && generation.at("edited").is_boolean() &&
+      generation.contains("body") && generation.at("body").is_string() &&
+      generation.contains("configuration") && generation.at("configuration").is_object() &&
+      generation.contains("response_metadata") && generation.at("response_metadata").is_object(),
+      "Invalid report generation provenance");
+  const auto &body = generation.at("body").get_ref<const std::string &>();
+  require(body.size() <= 64 * 1024 && core::utf8::is_valid(body) && visible_text(body),
+          "Generated report body must be nonblank UTF-8 within 64 KiB");
+  for (size_t i = 0; i < body.size();) {
+    const auto cp = core::utf8::decode(body, i); i += cp.length;
+    require(!((cp.code_point < 32 && cp.code_point != '\t' && cp.code_point != '\r' && cp.code_point != '\n') ||
+              (cp.code_point >= 127 && cp.code_point <= 159)), "Generated report body contains control characters");
+  }
+  const auto &configuration = generation.at("configuration");
+  require(configuration.size() >= 2 && configuration.size() <= 4 && configuration.contains("adapter") &&
+      configuration.contains("model") && request_identifier(configuration.at("adapter")) &&
+      request_identifier(configuration.at("model")), "Invalid report generation configuration");
+  for (auto it = configuration.begin(); it != configuration.end(); ++it) {
+    if (it.key() == "adapter" || it.key() == "model") { continue; }
+    if (it.key() == "temperature") {
+      require(it->is_number() && it->get<double>() >= 0 && it->get<double>() <= 2,
+              "Invalid report generation temperature");
+    }
+    else {
+      require(it.key() == "max_output_tokens" && io::get_int(configuration, it.key(), -1) >= 1 &&
+          io::get_int(configuration, it.key(), -1) <= 32768, "Invalid report generation token limit");
+    }
+  }
+  const auto &metadata = generation.at("response_metadata");
+  require(metadata.size() <= 4, "Invalid report response metadata");
+  for (auto it = metadata.begin(); it != metadata.end(); ++it) {
+    if (it.key() == "model" || it.key() == "remote_request_id") {
+      require(request_identifier(it.value()), "Invalid report response identifier");
+    }
+    else {
+      require((it.key() == "input_tokens" || it.key() == "output_tokens") &&
+          io::get_int(metadata, it.key(), -1) >= 0, "Invalid report response token count");
+    }
+  }
+  const auto hash = core::Sha256::hex(body);
+  const auto slash = path.find_last_of('/'), dot = path.find_last_of('.');
+  const size_t basename = slash == std::string::npos ? 0 : slash + 1;
+  std::string suffix = dot != std::string::npos && dot > basename ? path.substr(dot) : "";
+  for (auto &c : suffix) { if (c >= 'A' && c <= 'Z') { c += 'a' - 'A'; } }
+  const std::string mime = suffix == ".md" || suffix == ".markdown" ? "text/markdown; charset=utf-8" :
+      suffix == ".html" || suffix == ".htm" ? "text/html; charset=utf-8" : "";
+  const auto record = io::get_string(entry, "record_id");
+  // The backend verifies UUIDv5(request_id, "stk.report-generated-entry/1") against its
+  // saved request journal. This reader has no SHA-1/UUIDv5 primitive: it checks the UUID
+  // metadata and all locally available content bindings, not that journal derivation.
+  require(canonical_uuid(record) && record[14] == '5' && std::string("89ab").find(record[19]) != std::string::npos &&
+      io::get_string(entry, "path") == path && !mime.empty() && io::get_string(entry, "mime") == mime &&
+      io::get_int(entry, "size", -1) == int64_t(body.size()) && io::get_string(entry, "sha256") == hash &&
+      generation.at("edited").get<bool>() == (hash != io::get_string(generation, "response_sha256")),
+      "Generated report entry or edit marker does not match its body");
+  return io::get_int(generation, "input_revision", -1);
+}
 void validate_manifest(const Json &manifest, const std::string &project, const std::string &digest, int64_t revision)
 {
   check_analysis_json_bounds(manifest);
-  require(manifest.is_object() && manifest.size() == 8 && io::get_string(manifest, "format") == "stk.report/1" &&
+  const auto format = io::get_string(manifest, "format");
+  const bool generated = format == "stk.report/2";
+  require(manifest.is_object() && manifest.size() == (generated ? 9 : 8) &&
+      (generated || format == "stk.report/1") &&
       io::get_string(manifest, "project_id") == project &&
-      canonical_uuid(io::get_string(manifest, "snapshot_id")) &&
-      core::is_sha256_hex(io::get_string(manifest, "snapshot_sha256")) &&
+      manifest.contains("snapshot_id") && manifest.contains("snapshot_sha256") &&
       io::get_int(manifest, "source_revision", -1) >= 0 &&
       io::get_int(manifest, "source_revision", -1) <= revision &&
       manifest.contains("assets") && manifest.at("assets").is_array() &&
       !manifest.at("assets").empty() && manifest.at("assets").size() <= 64 &&
       manifest.contains("sources") && manifest.at("sources").is_array() &&
       manifest.at("sources").size() <= 16, "Invalid report manifest");
+  require((generated && manifest.at("snapshot_id").is_null() && manifest.at("snapshot_sha256").is_null() &&
+              manifest.at("assets").size() == 1) ||
+      (canonical_uuid(io::get_string(manifest, "snapshot_id")) &&
+       core::is_sha256_hex(io::get_string(manifest, "snapshot_sha256"))), "Invalid report snapshot identity");
   std::set<std::string> paths, records;
   int64_t total = 0;
   for (const auto &asset : manifest.at("assets")) {
@@ -73,13 +161,21 @@ void validate_manifest(const Json &manifest, const std::string &project, const s
   }
   require(total <= 32 * 1024 * 1024 && paths.contains(io::get_string(manifest, "entry_path")),
           "Invalid report entry or total asset size");
+  int64_t source_ceiling = io::get_int(manifest, "source_revision", -1);
+  if (generated) {
+    require(manifest.contains("generation") && !manifest.at("sources").empty() &&
+        io::get_string(manifest.at("sources").front(), "kind") == "context",
+        "Generated report requires its original context and generation provenance");
+    source_ceiling = validate_generation(manifest.at("generation"), manifest.at("assets").front(),
+                                        io::get_string(manifest, "entry_path"), source_ceiling);
+  }
   std::set<std::pair<std::string, std::string>> sources;
   for (const auto &source : manifest.at("sources")) {
     const auto kind = io::get_string(source, "kind"), id = io::get_string(source, "id");
     const auto source_revision = io::get_int(source, "source_revision", -1);
     require(source.is_object() && source.size() == 6 && canonical_uuid(id) &&
         io::get_string(source, "project_id") == project && source_revision >= 0 &&
-        source_revision <= io::get_int(manifest, "source_revision", -1) && sources.emplace(kind, id).second &&
+        source_revision <= source_ceiling && sources.emplace(kind, id).second &&
         (kind == "context" || kind == "simulation_run" || kind == "analysis_run" || kind == "workflow_run"),
         "Invalid frozen report source identity");
     if (kind == "context") {
@@ -95,7 +191,9 @@ void validate_manifest(const Json &manifest, const std::string &project, const s
           source.contains("captured_status") && source.at("captured_status").is_object(), "Invalid frozen report run source");
     }
   }
-  require(core::Sha256::hex(io::python_json_dumps(manifest, true, true)) == digest,
+  const auto encoded = io::python_json_dumps(manifest, true, true);
+  require(encoded.size() <= 384 * 1024, "Report manifest exceeds its encoded byte budget");
+  require(core::Sha256::hex(encoded) == digest,
           "Report manifest checksum does not match its source version");
 }
 // The shared decoder accepts unpadded input. Report receipts use canonical RFC 4648 base64,
@@ -314,7 +412,8 @@ bool ProjectReports::load(const std::string &id, const std::string &expected)
     const auto digest = io::get_string(item, "source_sha256");
     require(expected.empty() || digest == expected, "Saved report version changed; explicitly reopen the current report");
     if (io::get_string(item, "state") == "readable") {
-      require(item.contains("manifest"), "Missing report manifest");
+      require(item.contains("manifest") && io::get_string(item.at("manifest"), "format") == io::get_string(item, "format"),
+              "Missing report manifest or mismatched row format");
       validate_manifest(item.at("manifest"), project_id_, digest, revision_);
     }
     selected_ = item;

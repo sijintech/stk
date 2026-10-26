@@ -112,6 +112,17 @@ class ModelGateway:
             raise PolicyDenied(f"The network setting ({self.policy.get()['network']}) does not allow the "
                                f"{endpoint['location']} endpoint {endpoint['name']}")
         if endpoint["location"] == "external":
+            from suan.project.requests import REPORT_PROMPT_VERSION
+            if record.get("prompt_version") == REPORT_PROMPT_VERSION:
+                from suan.project.report_inputs import external_allowed, validate
+                with store._connect() as db:
+                    inputs = frozen_input.get("report_input")
+                    validate(store, db, frozen_input["context"], inputs)
+                    if not external_allowed(store, db, frozen_input["context"], inputs):
+                        raise PolicyDenied("The report contains private sources or run observations without a public "
+                                           "label: use a local or internal model. All context tables and asset files "
+                                           "must currently be labelled public before an external report request")
+                return
             table = frozen_input["context"]["selection"]["table_id"]
             if not store.labels.is_public("table", table):
                 raise PolicyDenied("This question's data is not labelled public: its parameter table stays private and is "

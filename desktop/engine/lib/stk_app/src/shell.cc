@@ -178,7 +178,8 @@ bridge::Result<io::Json> AppShell::activate_editor(wm::Screen *screen, const std
       auto *area = dynamic_cast<EditorArea *>(base);
       if (!area || area == origin || area->editor().type().id == kEditorViewer || area->tab_count() >= 16) { continue; }
       const auto &current = area->editor().type().id;
-      if (!editing || current == kEditorAnalysisGraph || current == kEditorPython || current == kEditorWorkspace) {
+      if (!editing || current == kEditorAnalysisGraph || current == kEditorPython || current == kEditorWorkspace ||
+          current == kEditorAI || current == kEditorReports) {
         editing = area;
       }
     }
@@ -205,7 +206,8 @@ bridge::Result<io::Json> AppShell::activate_editor(wm::Screen *screen, const std
       if (!editor || editor->tab_count() >= 16) { continue; }
       const auto &current = editor->editor().type().id;
       if (editor_id != kEditorViewer && current == kEditorViewer) { continue; }
-      if (!destination || current == kEditorAnalysisGraph || current == kEditorPython || current == kEditorWorkspace) {
+      if (!destination || current == kEditorAnalysisGraph || current == kEditorPython || current == kEditorWorkspace ||
+          current == kEditorAI || current == kEditorReports) {
         destination = editor;
       }
     }
@@ -1201,6 +1203,8 @@ std::vector<ui::MenuEntry> AppShell::view_menu(wm::Screen &screen)
                [mode_action] { mode_action(WorkMode::Preparation); }});
   m.push_back({mark(original_mode == WorkMode::Analysis, store_.tr("app.menu.view.mode_analysis")),
                [mode_action] { mode_action(WorkMode::Analysis); }});
+  m.push_back({mark(original_mode == WorkMode::Report, store_.tr("app.menu.view.mode_report")),
+               [mode_action] { mode_action(WorkMode::Report); }});
   m.push_back({std::string(store_.tr("editor.analysis_graph.title")), [this, weak, s] {
     if (weak.lock()) { activate_editor_later(s, kEditorAnalysisGraph, false); }
   }});

@@ -535,7 +535,8 @@ class ProjectSessions:
             if action == "create":
                 return {"request": requests.create(params["message_id"], request_id=params["request_id"],
                                                     configuration=params["configuration"],
-                                                    prompt_version=params.get("prompt_version", "stk.text/1"))}
+                                                    prompt_version=params.get("prompt_version", "stk.text/1"),
+                                                    report_selection=params.get("report_selection"))}
             if action == "propose_edits":
                 return requests.propose_edits(params["request_id"], expected_revision=params["expected_revision"])
             if action == "edit_proposal":

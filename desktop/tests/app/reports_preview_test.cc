@@ -23,12 +23,16 @@ namespace fs = std::filesystem;
 const std::string report_id = "a1111111-1111-4111-8111-111111111111";
 const std::string text_report_id = "b2222222-2222-4222-8222-222222222222";
 const std::string pdf_report_id = "c3333333-3333-4333-8333-333333333333";
+const std::string generated_report_id = "d4444444-4444-4444-8444-444444444444";
+const std::string generated_request_id = "e5555555-5555-4555-8555-555555555555";
+const std::string generated_response = "# Frozen generated reply\n\nOnly the saved observations are evidence.\n";
 
 // Keep real services and strict schema validation. Faults retain valid wire shapes so the
 // controller must independently bind every receipt. Hold replies only after service locks end.
 constexpr const char *kPreviewBridge = R"PY(
 import base64
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -36,6 +40,7 @@ import threading
 import time
 from suan.project import report_previews
 from suan.project.reports import Reports
+from suan.project.requests import Requests
 from suan.desktop_bridge.server import Bridge
 from suan.desktop_bridge.__main__ import main
 control = Path(sys.argv.pop(1))
@@ -44,6 +49,50 @@ def mode():
 def count(name):
     with control.with_suffix('.calls').open('a', encoding='utf-8') as output:
         output.write(name + '\n')
+# Test-only deterministic journal completion. No executor, adapter, gateway or model
+# request is started; the real request input, /2 creation and report readers stay intact.
+create_request = Requests.create
+def completed_fixture_request(self, *args, **kwargs):
+    record = create_request(self, *args, **kwargs)
+    if record['configuration']['adapter'] != 'report-fixture':
+        return record
+    owner = 'f6666666-6666-4666-8666-666666666666'
+    assert self._claim(record['id'], executor_id=owner)[1]
+    count('fixture_complete')
+    return self._complete(record['id'], executor_id=owner,
+        text='# Frozen generated reply\n\nOnly the saved observations are evidence.\n',
+        metadata={'model': 'fixture/report', 'remote_request_id': 'fixture-1',
+                  'input_tokens': 9223372036854775807, 'output_tokens': 24})
+Requests.create = completed_fixture_request
+def alter_generated(item):
+    current = mode()
+    if item.get('format') != 'stk.report/2' or not current.startswith('generated_'):
+        return
+    manifest = item['manifest']
+    generation = manifest['generation']
+    entry = manifest['assets'][0]
+    if current == 'generated_body_hash': generation['body'] += 'changed'
+    if current == 'generated_entry_size': entry['size'] += 1
+    if current == 'generated_entry_mime': entry['mime'] = 'text/html; charset=utf-8'
+    if current == 'generated_edit_marker': generation['edited'] = not generation['edited']
+    if current == 'generated_null_snapshot': manifest.update(snapshot_id=None, snapshot_sha256=None)
+    if current == 'generated_half_snapshot': manifest['snapshot_sha256'] = None
+    if current == 'generated_input_revision': generation['input_revision'] = manifest['source_revision'] + 1
+    if current == 'generated_source_revision': generation['input_revision'] = manifest['sources'][0]['source_revision'] - 1
+    if current == 'generated_entry_order': manifest['assets'].reverse()
+    if current == 'generated_row_format': item['format'] = 'stk.report/1'
+    if current == 'generated_record_version': entry['record_id'] = 'f7777777-7777-4777-8777-777777777777'
+    if current in ('generated_body_limit', 'generated_body_control', 'generated_body_blank'):
+        generation['body'] = {'generated_body_limit': '\u754c' * 22000,
+                              'generated_body_control': 'unsafe\u0085body',
+                              'generated_body_blank': ' \t\u3000\n'}[current]
+        data = generation['body'].encode('utf-8')
+        entry.update(size=len(data), sha256=hashlib.sha256(data).hexdigest())
+        generation['edited'] = entry['sha256'] != generation['response_sha256']
+    # Keep the outer checksum valid: these cases exercise independent content and
+    # identity bindings beyond the strict wire schema and canonical manifest hash.
+    item['source_sha256'] = hashlib.sha256(json.dumps(manifest, sort_keys=True,
+        ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
 prepare = report_previews.preview_resources
 def altered_prepare(*args, **kwargs):
     result = prepare(*args, **kwargs)
@@ -104,10 +153,13 @@ def observed_send(self, message, method=None):
     if method == 'hello' and 'result' in message and mode() == 'no_identity_preview':
         message['result']['methods'].remove('project.reports.preview')
     if 'result' in message:
+        if method == 'project.reports.get': alter_generated(message['result']['report'])
+        if method == 'project.requests.start': count('model_start')
         if method == 'project.reports.preview_resources': count('prepare')
         if method == 'project.reports.preview': count('pdf_prepare')
         if method == 'project.reports.asset': count('asset:' + message['result']['path'])
     held = ((method == 'project.reports.preview_resources' and mode() == 'hold_prepare') or
+            (method == 'project.reports.get' and mode() == 'hold_generated') or
             (method == 'project.reports.preview' and mode() == 'hold_pdf') or
             (method == 'project.catalog' and mode() == 'hold_catalog') or
             (method == 'project.reports.asset' and mode() == 'hold_image') or
@@ -142,6 +194,7 @@ class ReportsPreviewPython : public ::testing::Test {
   const std::string markdown = "# Frozen report\n\n![Plot](../images/plot.png)\n\n[Unsafe](secondary.html)\n";
   std::vector<uint8_t> png, second_png, pdf_bytes;
   std::string pdf_sha;
+  std::string generated_sha;
   Json manifest, viewer_state;
   uint64_t camera_serial = 0, payload_serial = 0;
   AppStore &store() { return f.shell->store(); }
@@ -231,6 +284,48 @@ class ReportsPreviewPython : public ::testing::Test {
     ASSERT_TRUE(record.is_object()); pdf_sha = record.at("report").at("source_sha256").get<std::string>();
     ASSERT_NO_FATAL_FAILURE(load(pdf_report_id));
   }
+  void create_generated(const std::string &body, bool with_image = false, const std::string &entry = "report.md")
+  {
+    const auto handle = project().project()->handle;
+    const auto revision = project().project()->revision;
+    const std::string context_id = "f1111111-1111-4111-8111-111111111111";
+    const std::string message_id = "f2222222-2222-4222-8222-222222222222";
+    // Missing objects are represented explicitly in the frozen context, never replaced
+    // with live data or a fabricated file snapshot.
+    const auto context = call("project.contexts.capture", {{"handle", handle}, {"context_id", context_id},
+        {"table_id", "f3333333-3333-4333-8333-333333333333"},
+        {"record_ids", Json::array({"f4444444-4444-4444-8444-444444444444"})},
+        {"field_ids", Json::array({"f5555555-5555-4555-8555-555555555555"})},
+        {"expected_revision", revision}, {"title", "Frozen missing-object observations"}});
+    ASSERT_TRUE(context.is_object());
+    ASSERT_TRUE(call("project.discussion.add", {{"handle", handle}, {"context_id", context_id},
+        {"message_id", message_id}, {"text", "Draft a report using only this frozen context."}}).is_object());
+    const auto review = call("project.reports.review_sources", {{"handle", handle},
+        {"sources", Json::array()}, {"expected_revision", revision}});
+    ASSERT_TRUE(review.is_object());
+    Json assets = Json::array();
+    if (with_image) { assets.push_back({{"record_id", manifest.at("assets").at(1).at("record_id")}, {"path", "images/plot.png"}}); }
+    const auto prepared = call("project.requests.create", {{"handle", handle}, {"message_id", message_id},
+        {"request_id", generated_request_id}, {"prompt_version", "stk.report-draft/1"},
+        {"configuration", {{"adapter", "report-fixture"}, {"model", "fixture/report"},
+                           {"temperature", 2.0}, {"max_output_tokens", 32768}}},
+        {"report_selection", {{"expected_revision", revision}, {"sources", Json::array()},
+                              {"expected_sources_sha256", review.at("sources_sha256")},
+                              {"snapshot_id", with_image ? manifest.at("snapshot_id") : Json(nullptr)}, {"assets", assets}}}});
+    ASSERT_TRUE(prepared.is_object());
+    const auto &request = prepared.at("request"); ASSERT_EQ(request.at("status"), "completed");
+    ASSERT_TRUE(call("project.reports.create_generated", {{"handle", handle}, {"report_id", generated_report_id},
+        {"request_id", generated_request_id}, {"name", "Explicitly reviewed report"}, {"body", body}, {"entry_path", entry},
+        {"expected_revision", revision}, {"expected_input_sha256", request.at("input_sha256")},
+        {"expected_response_sha256", request.at("result").at("text_sha256")}}).is_object());
+    project().refresh();
+    ASSERT_NO_FATAL_FAILURE(settle_project());
+    const auto saved = call("project.reports.get", {{"handle", handle}, {"report_id", generated_report_id}});
+    ASSERT_TRUE(saved.is_object()); ASSERT_EQ(saved.at("report").at("state"), "readable");
+    generated_sha = saved.at("report").at("source_sha256").get<std::string>();
+    reports->sync();
+    EXPECT_EQ(count("fixture_complete"), 1); EXPECT_EQ(count("model_start"), 0);
+  }
   void hold(const std::string &operation)
   {
     ASSERT_NO_FATAL_FAILURE(load());
@@ -318,6 +413,115 @@ class ReportsPreviewPython : public ::testing::Test {
     loop.run_ready();
   }
 };
+
+TEST_F(ReportsPreviewPython, GeneratedEntryWithoutSnapshotReopensReadsAndExportsWithoutSending)
+{
+  ASSERT_NO_FATAL_FAILURE(create_generated(generated_response));
+  ASSERT_TRUE(reports->load_page());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->page().is_object()) << reports->error();
+  EXPECT_EQ(reports->page().at("total"), 3);
+  bool listed = false;
+  for (const auto &item : reports->page().at("reports")) {
+    if (item.at("id") == generated_report_id) { listed = true; EXPECT_EQ(item.at("format"), "stk.report/2"); }
+  }
+  EXPECT_TRUE(listed);
+  // A stale workspace digest cannot adopt the new body's metadata or start a read.
+  ASSERT_TRUE(reports->load(generated_report_id, std::string(64, '0')));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_TRUE(reports->selected().is_null()); EXPECT_FALSE(reports->error().empty());
+  ASSERT_TRUE(reports->load(generated_report_id, generated_sha));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->selected().is_object()) << reports->error();
+  const auto original = reports->selected();
+  const auto &saved = original.at("manifest");
+  EXPECT_EQ(saved.at("format"), "stk.report/2");
+  EXPECT_TRUE(saved.at("snapshot_id").is_null()); EXPECT_TRUE(saved.at("snapshot_sha256").is_null());
+  EXPECT_FALSE(saved.at("generation").at("edited").get<bool>());
+  EXPECT_EQ(saved.at("generation").at("body"), generated_response);
+  EXPECT_FALSE(reports->asset_loaded()); EXPECT_FALSE(reports->prepared_preview());
+  EXPECT_EQ(count("asset:report.md"), 0);
+  ASSERT_TRUE(reports->read_asset());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->asset_loaded()) << reports->error();
+  EXPECT_EQ(std::string(reports->asset_bytes().begin(), reports->asset_bytes().end()), generated_response);
+  ASSERT_TRUE(reports->export_file(dir.str() + "/generated.zip"));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_TRUE(reports->export_receipt().is_object()) << reports->error();
+  EXPECT_TRUE(fs::exists(dir.path() / "generated.zip"));
+  reports.reset(); reports = std::make_unique<ProjectReports>(store());
+  ASSERT_TRUE(reports->load(generated_report_id, generated_sha));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_EQ(reports->selected(), original);
+  EXPECT_FALSE(reports->asset_loaded()); EXPECT_FALSE(reports->prepared_preview());
+  EXPECT_EQ(count("fixture_complete"), 1); EXPECT_EQ(count("model_start"), 0);
+}
+
+TEST_F(ReportsPreviewPython, GeneratedHtmlAtUtf8ByteLimitUsesItsFrozenImageAfterLiveFilesDisappear)
+{
+  std::string body = "<h1>Reviewed \xe7\xbb\x93\xe6\x9e\x9c</h1><img src=\"images/plot.png\"><p>";
+  body.append(64 * 1024 - body.size() - 4, 'x'); body += "</p>";
+  ASSERT_EQ(body.size(), 64u * 1024);
+  ASSERT_NO_FATAL_FAILURE(create_generated(body, true, "report.HTML"));
+  for (const char *name : {"report.md", "plot.png", "second.png", "secondary.html"}) {
+    ASSERT_TRUE(fs::remove(dir.path() / "project" / name));
+  }
+  ASSERT_TRUE(reports->load(generated_report_id, generated_sha));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->selected().is_object()) << reports->error();
+  EXPECT_TRUE(reports->selected().at("manifest").at("generation").at("edited").get<bool>());
+  ASSERT_TRUE(reports->read_asset());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->asset_loaded()) << reports->error();
+  EXPECT_EQ(std::string(reports->asset_bytes().begin(), reports->asset_bytes().end()), body);
+  EXPECT_EQ(reports->asset_mime(), "text/html; charset=utf-8");
+  ASSERT_TRUE(reports->prepare_preview());
+  ASSERT_NO_FATAL_FAILURE(settle());
+  ASSERT_TRUE(reports->prepared_preview()) << reports->preview_error();
+  EXPECT_EQ(reports->prepared_preview()->assets.size(), 2u);
+  EXPECT_EQ(count("asset:images/plot.png"), 1);
+  EXPECT_EQ(count("fixture_complete"), 1); EXPECT_EQ(count("model_start"), 0);
+}
+
+class ReportsGeneratedInvalid : public ReportsPreviewPython, public ::testing::WithParamInterface<const char *> {};
+TEST_P(ReportsGeneratedInvalid, RejectsInconsistentGeneratedContentDespiteValidOuterChecksumAndWireShape)
+{
+  ASSERT_NO_FATAL_FAILURE(create_generated(generated_response, true));
+  ASSERT_NO_FATAL_FAILURE(mode(GetParam()));
+  ASSERT_TRUE(reports->load(generated_report_id));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_TRUE(reports->selected().is_null()); EXPECT_FALSE(reports->error().empty());
+  EXPECT_FALSE(reports->asset_loaded()); EXPECT_FALSE(reports->prepared_preview());
+  EXPECT_FALSE(reports->read_asset()); EXPECT_FALSE(reports->prepare_preview());
+  EXPECT_EQ(count("asset:report.md"), 0); EXPECT_EQ(count("prepare"), 0);
+  EXPECT_EQ(count("fixture_complete"), 1); EXPECT_EQ(count("model_start"), 0);
+  // Restore the genuine saved response and require an explicit new load.
+  ASSERT_NO_FATAL_FAILURE(mode("")); reports->sync();
+  EXPECT_TRUE(reports->selected().is_null());
+  ASSERT_TRUE(reports->load(generated_report_id, generated_sha));
+  ASSERT_NO_FATAL_FAILURE(settle());
+  EXPECT_TRUE(reports->selected().is_object()) << reports->error();
+}
+INSTANTIATE_TEST_SUITE_P(Generation, ReportsGeneratedInvalid, ::testing::Values(
+    "generated_body_hash", "generated_entry_size", "generated_entry_mime", "generated_edit_marker",
+    "generated_null_snapshot", "generated_half_snapshot", "generated_input_revision", "generated_source_revision",
+    "generated_entry_order", "generated_row_format", "generated_record_version", "generated_body_limit",
+    "generated_body_control", "generated_body_blank"));
+
+TEST_F(ReportsPreviewPython, ClearRejectsLateGeneratedManifestWithoutReadingInlineOrSnapshotAssets)
+{
+  ASSERT_NO_FATAL_FAILURE(create_generated(generated_response, true));
+  ASSERT_NO_FATAL_FAILURE(mode("hold_generated"));
+  ASSERT_TRUE(reports->load(generated_report_id, generated_sha));
+  ASSERT_TRUE(loop.pump_until([&] { return fs::exists(dir.path() / "mode.held"); }, 30));
+  reports->clear();
+  ASSERT_NO_FATAL_FAILURE(mode(""));
+  ASSERT_NO_FATAL_FAILURE(drain(*client));
+  EXPECT_TRUE(reports->selected().is_null()); EXPECT_FALSE(reports->busy());
+  EXPECT_FALSE(reports->asset_loaded()); EXPECT_FALSE(reports->prepared_preview());
+  EXPECT_EQ(count("asset:report.md"), 0); EXPECT_EQ(count("asset:images/plot.png"), 0);
+  EXPECT_EQ(count("fixture_complete"), 1); EXPECT_EQ(count("model_start"), 0);
+}
 
 TEST_F(ReportsPreviewPython, PublishesCompleteVerifiedCollectionWithoutChangingTheSourceReader)
 {

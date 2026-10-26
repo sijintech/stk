@@ -94,6 +94,7 @@ def test_scripts_share_project_commands_conflicts_and_changed_notifications(scri
         "project.files.children", "project.files.resolve_path",
         "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
         "project.reports.review_sources", "project.reports.create", "project.reports.get", "project.reports.list",
+        "project.reports.generation_request", "project.reports.create_generated",
         "project.reports.asset", "project.reports.preview", "project.reports.preview_resources", "project.reports.export_file",
         "project.skills.list", "project.skills.get", "project.skills.pin", "project.skills.upgrade",
         "project.skills.restore", "project.skills.create_analysis",

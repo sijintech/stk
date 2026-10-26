@@ -13,13 +13,19 @@ using WorkMode = AppShell::WorkMode;
 
 const char *mode_name(WorkMode mode)
 {
-  return mode == WorkMode::Preparation ? "preparation" : "analysis";
+  switch (mode) {
+    case WorkMode::Preparation: return "preparation";
+    case WorkMode::Analysis: return "analysis";
+    case WorkMode::Report: return "report";
+  }
+  throw std::runtime_error("Unknown work mode");
 }
 
 WorkMode parse_mode(const Json &value)
 {
   if (value == "preparation") { return WorkMode::Preparation; }
   if (value == "analysis") { return WorkMode::Analysis; }
+  if (value == "report") { return WorkMode::Report; }
   throw std::runtime_error("Unknown work mode");
 }
 
@@ -110,7 +116,9 @@ bridge::Result<io::Json> AppShell::switch_work_mode(wm::Screen *screen, WorkMode
     }
   }
   else {
-    const auto activated = activate_editor(screen, mode == WorkMode::Preparation ? kEditorAI : kEditorViewer, false);
+    const char *editor = mode == WorkMode::Preparation ? kEditorAI :
+        mode == WorkMode::Report ? kEditorReports : kEditorViewer;
+    const auto activated = activate_editor(screen, editor, false);
     if (!activated) { return activated.error(); }
     auto *area = screen->find_area(activated.value().at("area_id").get<std::string>());
     // The initial mode keeps the other panes visible and gives the main editor most of its row.
@@ -161,7 +169,7 @@ bool AppShell::read_work_modes(const wm::Screen &screen, const Json &layout, Wor
     }
     candidate.active = parse_mode(raw.at("active"));
     const auto &layouts = raw.at("layouts");
-    if (!layouts.is_object() || layouts.empty() || layouts.size() > 2 || !layouts.contains(mode_name(candidate.active))) {
+    if (!layouts.is_object() || layouts.empty() || layouts.size() > 3 || !layouts.contains(mode_name(candidate.active))) {
       throw std::runtime_error("Invalid work mode layouts");
     }
     for (auto item = layouts.begin(); item != layouts.end(); ++item) {

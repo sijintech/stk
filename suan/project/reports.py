@@ -287,6 +287,9 @@ def _provenance(value, project_id, source_revision):
 
 def _manifest(store, db, value):
     value = clone(value, "Report", max_bytes=MAX_MANIFEST_BYTES)
+    if type(value) is dict and value.get("format") == "stk.report/2":
+        from .report_generation import validate_manifest
+        return validate_manifest(store, db, value)
     keys = {"format", "project_id", "snapshot_id", "snapshot_sha256", "source_revision",
             "entry_path", "assets", "sources"}
     if type(value) is not dict or set(value) != keys or value["format"] != DOCUMENT_FORMAT:
@@ -366,6 +369,12 @@ def _read_asset(store, asset):
     return data
 
 
+def _report_asset(store, manifest, item):
+    if manifest["format"] == "stk.report/2" and item["path"] == manifest["entry_path"]:
+        return manifest["generation"]["body"].encode("utf-8")
+    return _read_asset(store, item)
+
+
 def _record(store, db, identity, compatible, error):
     result = {"id": identity, "name": None, "format": None, "state": "invalid", "error": "",
               "source_sha256": None, "manifest": None}
@@ -384,10 +393,12 @@ def _record(store, db, identity, compatible, error):
             raise ProjectError(error)
         if _TABLE.indirect(db, identity):
             raise ProjectError("Report managed cells must be literals; undo or repair the formula/reference")
-        if result["name"] is None or result["format"] != DOCUMENT_FORMAT:
+        if result["name"] is None or result["format"] not in (DOCUMENT_FORMAT, "stk.report/2"):
             raise ProjectError("Report name or format is invalid or unsupported")
         manifest = _manifest(store, db, _TABLE.literal(db, identity, "manifest"))
-        if len(_json({"name": result["name"], "format": DOCUMENT_FORMAT, "manifest": manifest})) > MAX_MANIFEST_BYTES:
+        if manifest["format"] != result["format"]:
+            raise ProjectError("Report format differs from its manifest")
+        if len(_json({"name": result["name"], "format": result["format"], "manifest": manifest})) > MAX_MANIFEST_BYTES:
             raise ProjectError("Report metadata exceeds 384 KiB")
         result.update(state="readable", manifest=manifest, source_sha256=_hash(manifest))
     except (ProjectError, ValueError, TypeError, KeyError, RecursionError, UnicodeError):
@@ -398,6 +409,17 @@ def _record(store, db, identity, compatible, error):
 class Reports:
     def __init__(self, store):
         self.store = store
+
+    def generation_request(self, request_id):
+        from .report_generation import request_details
+        return request_details(self.store, request_id)
+
+    def create_generated(self, name, request_id, body, *, report_id, expected_revision, expected_input_sha256,
+                         expected_response_sha256, entry_path="report.md"):
+        from .report_generation import create
+        return create(self.store, name, request_id, body, report_id=report_id, expected_revision=expected_revision,
+                      expected_input_sha256=expected_input_sha256,
+                      expected_response_sha256=expected_response_sha256, entry_path=entry_path)
 
     def _get(self, db, report_id):
         _TABLE.require(db, "reports")
@@ -517,7 +539,7 @@ class Reports:
         item = next((item for item in report["manifest"]["assets"] if item["path"] == path), None)
         if item is None:
             raise ReportNotFound("Asset is not in the selected report manifest")
-        data = _read_asset(self.store, item)
+        data = _report_asset(self.store, report["manifest"], item)
         self._selected(report_id, expected_revision, expected_source_sha256)
         return {"project_id": self.store._project_id, "report_id": report_id,
                 "source_sha256": report["source_sha256"], "path": path, "mime": item["mime"],
@@ -530,8 +552,11 @@ class Reports:
                 or destination == self.store.path):
             raise ProjectError("Report destination cannot be project storage or host configuration")
         # Copy each bounded source once; only complete, verified bytes enter the ZIP.
-        assets = [(item, _read_asset(self.store, item)) for item in report["manifest"]["assets"]]
-        envelope = {"format": DOCUMENT_FORMAT, "project_id": self.store._project_id, "report_id": report_id,
+        assets = [(item, _report_asset(self.store, report["manifest"], item)) for item in report["manifest"]["assets"]]
+        if report["format"] == "stk.report/2":
+            from .report_generation import exported_evidence
+            assets.extend(({"path": path}, data) for path, data in exported_evidence(self.store, report["manifest"]))
+        envelope = {"format": report["format"], "project_id": self.store._project_id, "report_id": report_id,
                     "name": report["name"], "source_sha256": report["source_sha256"], "manifest": report["manifest"]}
         temporary = ".stk-report-" + uuid4().hex + ".part"
         cleanup_parent, published, created_identity = None, False, None

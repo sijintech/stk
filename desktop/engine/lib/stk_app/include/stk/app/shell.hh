@@ -64,7 +64,7 @@ inline constexpr int kDefaultWindowHeight = 800;
 
 class AppShell {
  public:
-  enum class WorkMode { Preparation, Analysis };
+  enum class WorkMode { Preparation, Analysis, Report };
   explicit AppShell(ShellOptions options = {});
   ~AppShell();
   AppShell(const AppShell &) = delete;

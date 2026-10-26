@@ -5574,7 +5574,7 @@
         }
       },
       "project.requests.create": {
-        "description": "Save immutable model-request intent (format 8) for a saved user message and its context. No adapter is invoked; keep the caller UUID for retries. prompt_version defaults to stk.text/1; stk.parameter-edits/1 and stk.parameter-sweep/1 permit explicit later conversion to a saved review draft.",
+        "description": "Save immutable model-request intent (format 8) for a saved user message and its context. No adapter is invoked; keep the caller UUID for retries. prompt_version defaults to stk.text/1; stk.parameter-edits/1 and stk.parameter-sweep/1 permit explicit later conversion to a saved review draft. stk.report-draft/1 requires report_selection and freezes reviewed sources plus optional asset metadata; creating never sends. Other purposes reject report_selection.",
         "params": {
           "type": "object",
           "properties": {
@@ -5592,6 +5592,9 @@
             },
             "prompt_version": {
               "$ref": "#/$defs/projectRequestPromptVersion"
+            },
+            "report_selection": {
+              "$ref": "#/$defs/projectReportRequestSelection"
             }
           },
           "required": [
@@ -12198,6 +12201,140 @@
         "result": {
           "$ref": "#/$defs/projectReportExportResult"
         }
+      },
+      "project.reports.generation_request": {
+        "description": "Read the original frozen report input, saved request state and complete saved response (null until completed). Does not recapture sources, send, recover, evaluate or read live files.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "request_id": {
+              "$ref": "#/$defs/projectUuid"
+            }
+          },
+          "required": [
+            "handle",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "request": {
+              "$ref": "#/$defs/projectRequest"
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/projectContext"
+                },
+                "message": {
+                  "$ref": "#/$defs/projectDiscussionMessage"
+                },
+                "configuration": {
+                  "$ref": "#/$defs/projectRequestConfiguration"
+                },
+                "prompt_version": {
+                  "const": "stk.report-draft/1"
+                },
+                "report_input": {
+                  "$ref": "#/$defs/projectReportInput"
+                }
+              },
+              "required": [
+                "context",
+                "message",
+                "configuration",
+                "prompt_version",
+                "report_input"
+              ],
+              "additionalProperties": false
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/projectDiscussionMessage"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "revision",
+            "request",
+            "input",
+            "response"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "project.reports.create_generated": {
+        "description": "Explicitly freeze an edited completed report reply as one undoable ordinary project edit (stk.report/2). Requires the original saved input and response hashes. Never sends, starts, retries or invents a file snapshot. On a lost reply, query the original report UUID; never replay creation.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/hex32"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "request_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "body": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 65536
+            },
+            "report_id": {
+              "$ref": "#/$defs/projectUuid"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "expected_input_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "expected_response_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "entry_path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "handle",
+            "name",
+            "request_id",
+            "body",
+            "report_id",
+            "expected_revision",
+            "expected_input_sha256",
+            "expected_response_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/projectAnalysisWriteResult"
+        }
       }
     },
     "events": {
@@ -14915,7 +15052,8 @@
       "enum": [
         "stk.text/1",
         "stk.parameter-edits/1",
-        "stk.parameter-sweep/1"
+        "stk.parameter-sweep/1",
+        "stk.report-draft/1"
       ]
     },
     "uiEditorActivationParams": {
@@ -21688,58 +21826,14 @@
       "description": "At most 384 KiB complete provenance response. sources_sha256 hashes the ordered sources array as canonical UTF-8 JSON, not the report manifest, run outputs or source asset bytes."
     },
     "projectReportManifest": {
-      "type": "object",
-      "properties": {
-        "format": {
-          "const": "stk.report/1"
+      "oneOf": [
+        {
+          "$ref": "#/$defs/projectReportManifestV1"
         },
-        "project_id": {
-          "$ref": "#/$defs/projectUuid"
-        },
-        "snapshot_id": {
-          "$ref": "#/$defs/projectUuid"
-        },
-        "snapshot_sha256": {
-          "$ref": "#/$defs/sha256"
-        },
-        "source_revision": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9223372036854775807
-        },
-        "entry_path": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 1024
-        },
-        "assets": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/projectReportAsset"
-          },
-          "minItems": 1,
-          "maxItems": 64
-        },
-        "sources": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/projectReportSource"
-          },
-          "maxItems": 16
+        {
+          "$ref": "#/$defs/projectReportManifestV2"
         }
-      },
-      "required": [
-        "format",
-        "project_id",
-        "snapshot_id",
-        "snapshot_sha256",
-        "source_revision",
-        "entry_path",
-        "assets",
-        "sources"
-      ],
-      "additionalProperties": false,
-      "description": "Explicit same-snapshot asset selection; metadata <=384 KiB, individual asset <=4 MiB, all assets <=32 MiB. Backend checks portable path collisions, declared entry, MIME correspondence and frozen source identities."
+      ]
     },
     "projectReportSummary": {
       "type": "object",
@@ -22074,21 +22168,49 @@
       "properties": {
         "preview": {
           "allOf": [
-            {"$ref": "#/$defs/projectReportPreviewResult"},
-            {"properties": {
-              "renderer": {"const": "stk.report-renderer/1"},
-              "mime": {"const": "text/html; charset=utf-8"},
-              "source_mime": {"enum": ["text/markdown; charset=utf-8", "text/html; charset=utf-8"]},
-              "source_size": {"maximum": 1048576}
-            }}
+            {
+              "$ref": "#/$defs/projectReportPreviewResult"
+            },
+            {
+              "properties": {
+                "renderer": {
+                  "const": "stk.report-renderer/1"
+                },
+                "mime": {
+                  "const": "text/html; charset=utf-8"
+                },
+                "source_mime": {
+                  "enum": [
+                    "text/markdown; charset=utf-8",
+                    "text/html; charset=utf-8"
+                  ]
+                },
+                "source_size": {
+                  "maximum": 1048576
+                }
+              }
+            }
           ]
         },
         "resources": {
           "type": "array",
           "items": {
             "allOf": [
-              {"$ref": "#/$defs/projectReportAsset"},
-              {"properties": {"mime": {"enum": ["image/png", "image/jpeg", "image/gif", "image/webp"]}}}
+              {
+                "$ref": "#/$defs/projectReportAsset"
+              },
+              {
+                "properties": {
+                  "mime": {
+                    "enum": [
+                      "image/png",
+                      "image/jpeg",
+                      "image/gif",
+                      "image/webp"
+                    ]
+                  }
+                }
+              }
             ]
           },
           "maxItems": 63
@@ -22139,6 +22261,326 @@
         "size"
       ],
       "additionalProperties": false
+    },
+    "projectReportRequestSelection": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportSourceSelection"
+          },
+          "maxItems": 16
+        },
+        "expected_sources_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportAssetSelection"
+          },
+          "maxItems": 63
+        }
+      },
+      "required": [
+        "expected_revision",
+        "sources",
+        "expected_sources_sha256",
+        "snapshot_id",
+        "assets"
+      ],
+      "additionalProperties": false,
+      "description": "Explicit reviewed report selection. A real primary saved context is also counted among 16 sources; sources plus asset metadata are limited to 192 KiB before sending. Snapshot is optional only with no assets. Current public labels are independently checked at send time."
+    },
+    "projectReportInput": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.report-input/1"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportSource"
+          },
+          "maxItems": 16
+        },
+        "snapshot_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportAsset"
+          },
+          "maxItems": 63
+        }
+      },
+      "required": [
+        "format",
+        "project_id",
+        "source_revision",
+        "sources",
+        "snapshot_id",
+        "snapshot_sha256",
+        "assets"
+      ],
+      "additionalProperties": false
+    },
+    "projectReportGeneration": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.report-generation/1"
+        },
+        "request_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "message_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "assistant_message_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "report_input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "response_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "input_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "configuration": {
+          "$ref": "#/$defs/projectRequestConfiguration"
+        },
+        "response_metadata": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "$ref": "#/$defs/projectRequestIdentifier"
+            },
+            "remote_request_id": {
+              "$ref": "#/$defs/projectRequestIdentifier"
+            },
+            "input_tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "output_tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "edited": {
+          "type": "boolean"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "required": [
+        "format",
+        "request_id",
+        "message_id",
+        "assistant_message_id",
+        "input_sha256",
+        "report_input_sha256",
+        "response_sha256",
+        "input_revision",
+        "configuration",
+        "response_metadata",
+        "edited",
+        "body"
+      ],
+      "additionalProperties": false,
+      "description": "Complete original report-request provenance and explicitly edited UTF-8 body (at most 64 KiB). The backend verifies saved input/response hashes and derives edited; generation never implies scientific approval."
+    },
+    "projectReportManifestV1": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.report/1"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "entry_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportAsset"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportSource"
+          },
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "format",
+        "project_id",
+        "snapshot_id",
+        "snapshot_sha256",
+        "source_revision",
+        "entry_path",
+        "assets",
+        "sources"
+      ],
+      "additionalProperties": false,
+      "description": "Explicit same-snapshot asset selection; metadata <=384 KiB, individual asset <=4 MiB, all assets <=32 MiB. Backend checks portable path collisions, declared entry, MIME correspondence and frozen source identities."
+    },
+    "projectReportManifestV2": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.report/2"
+        },
+        "project_id": {
+          "$ref": "#/$defs/projectUuid"
+        },
+        "snapshot_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projectUuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "entry_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportAsset"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectReportSource"
+          },
+          "maxItems": 16
+        },
+        "generation": {
+          "$ref": "#/$defs/projectReportGeneration"
+        }
+      },
+      "required": [
+        "format",
+        "project_id",
+        "snapshot_id",
+        "snapshot_sha256",
+        "source_revision",
+        "entry_path",
+        "assets",
+        "sources",
+        "generation"
+      ],
+      "additionalProperties": false,
+      "description": "Frozen generated Markdown/HTML entry held inline in generation.body, plus optional real snapshot assets. Generated entry UUID is UUIDv5(request_id, stk.report-generated-entry/1), never a Files-table record. Metadata including title <=384 KiB. ZIP also carries the exact original request input and response as checksum-bound evidence."
     }
   }
 }

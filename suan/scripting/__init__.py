@@ -341,12 +341,14 @@ class ProjectRequests:
     def __init__(self, call, handle):
         self._call, self.handle = call, handle
 
-    def create(self, message_id, *, request_id, configuration, prompt_version="stk.text/1"):
+    def create(self, message_id, *, request_id, configuration, prompt_version="stk.text/1", report_selection=None):
         params = {"handle": self.handle, "message_id": message_id,
                   "request_id": request_id, "configuration": configuration}
         # Preserve the existing text-only wire shape for bridges predating structured requests.
         if prompt_version != "stk.text/1":
             params["prompt_version"] = prompt_version
+        if report_selection is not None:
+            params["report_selection"] = report_selection
         return self._call("project.requests.create", params)["request"]
 
     def get(self, request_id):
@@ -742,6 +744,18 @@ class ProjectReports:
 
     def get(self, report_id):
         return self._call("project.reports.get", {"handle": self.handle, "report_id": report_id})
+
+    def generation_request(self, request_id):
+        """Read the original frozen report input and saved response; never send or recover."""
+        return self._call("project.reports.generation_request", {"handle": self.handle, "request_id": request_id})
+
+    def create_generated(self, name, request_id, body, *, report_id, expected_revision, expected_input_sha256,
+                         expected_response_sha256, entry_path="report.md"):
+        """Freeze one explicitly edited completed reply as an undoable report; never retry."""
+        return self._call("project.reports.create_generated", {"handle": self.handle, "name": name,
+            "request_id": request_id, "body": body, "report_id": report_id, "expected_revision": expected_revision,
+            "expected_input_sha256": expected_input_sha256, "expected_response_sha256": expected_response_sha256,
+            "entry_path": entry_path})
 
     def list(self, *, offset=0, limit=50):
         return self._call("project.reports.list", {"handle": self.handle, "offset": offset, "limit": limit})

@@ -20,9 +20,12 @@ from . import archive
 PROMPT_VERSION = "stk.text/1"
 PARAMETER_EDITS_PROMPT_VERSION = "stk.parameter-edits/1"
 PARAMETER_SWEEP_PROMPT_VERSION = "stk.parameter-sweep/1"
-SUPPORTED_PROMPT_VERSIONS = frozenset({PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VERSION, PARAMETER_SWEEP_PROMPT_VERSION})
+REPORT_PROMPT_VERSION = "stk.report-draft/1"
+SUPPORTED_PROMPT_VERSIONS = frozenset({PROMPT_VERSION, PARAMETER_EDITS_PROMPT_VERSION,
+                                     PARAMETER_SWEEP_PROMPT_VERSION, REPORT_PROMPT_VERSION})
 MAX_INPUT_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 8192
+MAX_REPORT_REQUEST_BYTES = 1024 * 1024
 _SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 _HASH = re.compile(r"[a-f0-9]{64}\Z")
 SETTLEMENT_CODES = frozenset({"executor_lost", "adapter_unavailable", "adapter_failed", "response_invalid",
@@ -95,7 +98,7 @@ def _assistant_id(request_id, project_id):
     return str(uuid5(UUID(request_id), project_id + ":assistant"))
 
 
-def _request_hash(message_id, configuration, prompt_version):
+def _request_hash(message_id, configuration, prompt_version, report_selection=None):
     if not isinstance(prompt_version, str) or prompt_version not in SUPPORTED_PROMPT_VERSIONS:
         raise ProjectError("Unsupported project request prompt version")
     value = {"message_id": message_id, "configuration": configuration}
@@ -103,6 +106,11 @@ def _request_hash(message_id, configuration, prompt_version):
     # by clients that explicitly specify the previously implicit default.
     if prompt_version != PROMPT_VERSION:
         value["prompt_version"] = prompt_version
+    if prompt_version == REPORT_PROMPT_VERSION:
+        from .report_inputs import selection
+        value["report_selection"] = selection(report_selection)
+    elif report_selection is not None:
+        raise ProjectError("Report selection is only valid for a report request")
     return _digest(value)
 
 
@@ -124,6 +132,11 @@ class Requests:
                            lambda: self.store.discussion._get_message(db, identity["message_id"]))
         result = {"context": context, "message": message, "configuration": identity["configuration"],
                   "prompt_version": identity["prompt_version"]}
+        if identity["prompt_version"] == REPORT_PROMPT_VERSION:
+            from .report_inputs import validate, validate_binding
+            result["report_input"] = identity["report_input"]
+            validate(self.store, db, context, result["report_input"])
+            validate_binding(identity["report_selection"], result["report_input"])
         if (message["role"] != "user" or message["context_id"] != context["id"]
                 or context["source_revision"] != identity["source_revision"]
                 or _digest(context) != identity["context_sha256"]
@@ -137,12 +150,18 @@ class Requests:
             raise ProjectError("Project request not found")
         try:
             if (not isinstance(row["payload"], str) or not isinstance(row["state"], str)
-                    or len(row["payload"].encode("utf-8")) > MAX_REQUEST_BYTES
+                    or len(row["payload"].encode("utf-8")) > MAX_REPORT_REQUEST_BYTES
                     or len(row["state"].encode("utf-8")) > MAX_REQUEST_BYTES):
                 raise ValueError("invalid payload size")
             identity, state = json.loads(row["payload"]), json.loads(row["state"])
-            if not isinstance(identity, dict) or set(identity) != set(_IDENTITY + _PRIVATE):
+            if not isinstance(identity, dict):
                 raise ValueError("invalid identity fields")
+            report = identity.get("prompt_version") == REPORT_PROMPT_VERSION
+            private = _PRIVATE + (("report_selection", "report_input") if report else ())
+            if set(identity) != set(_IDENTITY + private):
+                raise ValueError("invalid identity fields")
+            if not report and len(row["payload"].encode("utf-8")) > MAX_REQUEST_BYTES:
+                raise ValueError("invalid payload size")
             if not isinstance(state, dict) or set(state) != set(_STATE):
                 raise ValueError("invalid state fields")
             for key in ("id", "project_id", "context_id", "message_id", "assistant_message_id"):
@@ -160,7 +179,8 @@ class Requests:
             for key in ("input_sha256", "context_sha256", "message_sha256"):
                 if not isinstance(identity[key], str) or not _HASH.fullmatch(identity[key]):
                     raise ValueError("invalid input checksum")
-            request_hash = _request_hash(identity["message_id"], identity["configuration"], identity["prompt_version"])
+            request_hash = _request_hash(identity["message_id"], identity["configuration"], identity["prompt_version"],
+                                         identity.get("report_selection"))
             if request_hash != row["request_sha256"] or _digest({"payload": identity, "request_sha256": request_hash}) != row["sha256"]:
                 raise ValueError("identity checksum mismatch")
             if _digest({"id": identity["id"], "sha256": row["sha256"], "state": state}) != row["state_sha256"]:
@@ -218,11 +238,14 @@ class Requests:
                    (state["status"], _encode(state).decode("utf-8"), digest, identity["id"]))
         return self._public(identity, state)
 
-    def create(self, message_id, *, request_id, configuration, prompt_version=PROMPT_VERSION):
+    def create(self, message_id, *, request_id, configuration, prompt_version=PROMPT_VERSION, report_selection=None):
         _id(message_id)
         _id(request_id)
         configuration = _configuration(configuration)
-        request_hash = _request_hash(message_id, configuration, prompt_version)
+        if prompt_version == REPORT_PROMPT_VERSION:
+            from .report_inputs import selection
+            report_selection = selection(report_selection)
+        request_hash = _request_hash(message_id, configuration, prompt_version, report_selection)
         with self.store._connect(write=True) as db:
             _require(db)
             existing = db.execute("SELECT * FROM project_requests WHERE id=?", (request_id,)).fetchone()
@@ -236,6 +259,9 @@ class Requests:
                 raise ProjectError("A text request must reference a user message")
             context = self.store.contexts._get(db, message["context_id"])
             selected = {"context": context, "message": message, "configuration": configuration, "prompt_version": prompt_version}
+            if prompt_version == REPORT_PROMPT_VERSION:
+                from .report_inputs import freeze
+                selected["report_input"] = freeze(self.store, db, context, report_selection)
             if len(_encode(selected)) > MAX_INPUT_BYTES:
                 raise ProjectError("Request input exceeds the 1 MiB limit")
             assistant_id = _assistant_id(request_id, self.store._project_id)
@@ -247,6 +273,8 @@ class Requests:
                         "source_revision": context["source_revision"], "configuration": configuration,
                         "prompt_version": prompt_version, "input_sha256": _digest(selected), "created_at": now,
                         "context_sha256": _digest(context), "message_sha256": _digest(message)}
+            if prompt_version == REPORT_PROMPT_VERSION:
+                identity.update(report_selection=report_selection, report_input=selected["report_input"])
             state = {"status": "pending", "cancel_requested": False, "executor_id": None, "updated_at": now,
                      "error_code": None, "result": None}
             digest = _digest({"payload": identity, "request_sha256": request_hash})

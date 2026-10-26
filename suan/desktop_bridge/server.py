@@ -319,6 +319,8 @@ class Bridge:
             "project.analyses.list": lambda p, c: self.projects.analyses("list", p),
             "project.reports.review_sources": lambda p, c: self.projects.reports("review_sources", p),
             "project.reports.create": lambda p, c: self.edit_project_reports(p, c),
+            "project.reports.generation_request": lambda p, c: self.projects.reports("generation_request", p),
+            "project.reports.create_generated": lambda p, c: self.edit_project_reports(p, c, "create_generated"),
             "project.reports.get": lambda p, c: self.projects.reports("get", p),
             "project.reports.list": lambda p, c: self.projects.reports("list", p),
             "project.reports.asset": lambda p, c: self.projects.reports("asset", p),
@@ -704,6 +706,7 @@ class Bridge:
                  "project.files.children", "project.files.resolve_path",
                  "project.analyses.create", "project.analyses.update", "project.analyses.get", "project.analyses.list",
                  "project.reports.review_sources", "project.reports.create", "project.reports.get", "project.reports.list",
+                 "project.reports.generation_request", "project.reports.create_generated",
                  "project.reports.asset", "project.reports.preview", "project.reports.preview_resources",
                  "project.reports.export_file",
                  "project.skills.list", "project.skills.get", "project.skills.pin", "project.skills.upgrade",
@@ -950,8 +953,8 @@ class Bridge:
                                                             "revision": result["revision"]}))
         return result
 
-    def edit_project_reports(self, params, context):
-        result = self.projects.reports("create", params)
+    def edit_project_reports(self, params, context, action="create"):
+        result = self.projects.reports(action, params)
         context.after(lambda: self.emit("project.changed", {"handle": params["handle"],
                                                             "revision": result["revision"]}))
         return result

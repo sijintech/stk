@@ -123,6 +123,7 @@
   "app.menu.view.focus_preparation": "Focus preparation",
   "app.menu.view.mode_preparation": "Preparation and run layout",
   "app.menu.view.mode_analysis": "Results analysis layout",
+  "app.menu.view.mode_report": "Documents and reports layout",
   "app.menu.view.focus_analysis": "Focus analysis",
   "app.menu.view.restore_split_layout": "Restore split layout",
   "app.focus.closed": "The target desktop window is no longer available.",

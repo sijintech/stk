@@ -87,6 +87,8 @@ OPERATIONS = {
     "project.analyses.list": ("read", "not needed in v1"),
     "project.reports.review_sources": ("read", "bounded frozen report source metadata; not needed in v1"),
     "project.reports.create": ("project_edit", "saves a frozen report; never an agent tool"),
+    "project.reports.generation_request": ("read", "original frozen report request; not needed in v1"),
+    "project.reports.create_generated": ("project_edit", "saves an edited completed report; never an agent tool"),
     "project.reports.get": ("read", "report metadata; not needed in v1"),
     "project.reports.list": ("read", "report metadata; not needed in v1"),
     "project.reports.asset": ("read", "explicit frozen asset bytes; not needed in v1"),

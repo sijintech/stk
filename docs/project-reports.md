@@ -71,6 +71,57 @@ Python 调用方可用 `reviewed = p.reports.review_sources(sources, expected_re
 中绑定该次复核。`sources_sha256` 只标识有序来源数组；不等于报告的 `source_sha256` 或资产摘要。
 省略该可选参数时保留既有行为，创建时捕获最新已保存的观察。
 
+## 从已完成的模型回复保存报告
+
+Python 和桥新增专用 `stk.report-draft/1` 请求与 `stk.report/2`；完整桌面生成表单仍在开发。
+普通文件报告保持 `/1`。生成报告把编辑后的正文保存在报告记录中，额外图片等资源仍来自真实文件快照，
+不把生成正文伪装成文件索引或输入快照。版本与预算见[生成报告契约](specs/report-2.md)。
+
+先明确选择一个已有冻结上下文，并用 `p.discussion.add` 保存问题；另外选择的上下文、仿真、分析和工作流运行
+须用 `review_sources` 完整复核。准备请求时传入：
+
+```python
+selection = {
+    "expected_revision": revision,
+    "sources": sources,
+    "expected_sources_sha256": reviewed["sources_sha256"],
+    "snapshot_id": snapshot_id,  # 无额外文件时为 None，assets 必须为空。
+    "assets": assets,           # [{"record_id": ..., "path": "images/plot.png"}]
+}
+request = p.requests.create(
+    message_id, request_id=request_id,
+    configuration={"adapter": existing_adapter, "model": existing_model},
+    prompt_version="stk.report-draft/1", report_selection=selection,
+)
+```
+
+这里的上下文、问题、修订、来源、资产和已有端点由调用方明确选择；代码只准备请求，尚未发送。
+准备会重新比较复核摘要，运行观察改变时要求重审。全部来源含主上下文最多 16 项，合并来源与资产元数据最多
+192 KiB；额外资产最多 63 个，保留正文所需空间。请求只向模型提供选定上下文、运行状态及资产元数据，
+不隐式读取运行结果或文件正文，也不把计划摘要当科学结果。含任何运行来源时须选择本机或机构内模型；
+外部模型还会在实际发送前重新核对所有上下文表和文件的当前公开标签，结构公开不等于公开数据值。
+
+确认后才另行明确调用 `p.requests.start(request_id)`。取消、不确定回复或重新打开都不会自动再发。
+通过 `details = p.reports.generation_request(request_id)` 读取原冻结输入和已保存回复；仅
+`details["request"]["status"] == "completed"` 时才有可用完整回复。编辑 `details["response"]["text"]`
+得到正文，并单独保存：
+
+```python
+saved = p.reports.create_generated(
+    "结果报告", request_id, edited_body,
+    report_id=report_id, expected_revision=current_revision,
+    expected_input_sha256=details["request"]["input_sha256"],
+    expected_response_sha256=details["request"]["result"]["text_sha256"],
+    entry_path="report.md",  # HTML 使用 .html；正文最多 64 KiB UTF-8。
+)
+```
+
+保存只产生一次可撤销编辑，不再问模型。清单冻结原始配置、输入与回复摘要、来源和编辑标记；
+之后运行推进也不更换这些观察。保存回执丢失时只按原 `report_id` 查询，不自动再建一份。
+读取、净化预览和 ZIP 导出沿用下方接口；ZIP 额外保存 `stk-generation-input.json` 和
+`stk-generation-response.txt`，可核对原输入、原回复与编辑后正文。两个证据路径不允许分配给附件。
+冻结来源仍依赖项目中原有请求日志；ZIP 是可检查的来源包，不是自动导入项目或已渲染网页。
+
 ## 打开、检查和导出
 
 在区域的编辑器菜单中选择 **报告 / Reports**。列表只读取元数据；选择报告后显示来源与资产清单，

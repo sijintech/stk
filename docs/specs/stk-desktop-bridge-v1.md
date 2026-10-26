@@ -549,7 +549,7 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.discussion.list` | `{handle, offset?, limit?}` | `{messages: [message summary], next_offset: integer|null}` |
 | `project.discussion.link_draft` | `{handle, proposal_id, message_id, draft_id}` | `{proposal}` |
 | `project.discussion.proposals` | `{handle, offset?, limit?, draft_id?}` | `{proposals: [proposal], next_offset: integer|null}` |
-| `project.requests.create` | `{handle, request_id, message_id, configuration, prompt_version?}` | `{request}` |
+| `project.requests.create` | `{handle, request_id, message_id, configuration, prompt_version?, report_selection?}` | `{request}`; report selection is required only for `stk.report-draft/1` |
 | `project.requests.get` | `{handle, request_id}` | `{request}` |
 | `project.requests.progress` | `{handle, request_id}` | `{request, progress: {executor_id, sequence, text, text_bytes}\|null}` (bounded unsaved text; no send) |
 | `project.requests.list` | `{handle, offset?, limit?}` | `{requests: [request], next_offset: integer|null}` |
@@ -618,6 +618,8 @@ or reverse UI RPC. The experimental storage format is described in [the project 
 | `project.snapshots.resolve` | `{handle, snapshot_id, record_id}` | `{snapshot_id, record_id, name, path, location, sha256, size}` |
 | `project.reports.review_sources` | `{handle, expected_revision, sources:[{kind,id}]}` | `{project_id, revision, sources, sources_sha256}`; at most 384 KiB complete frozen provenance, read-only |
 | `project.reports.create` | `{handle, report_id, name, snapshot_id, entry_record_id, assets: [{record_id, path}], expected_revision, sources?: [{kind, id}], expected_sources_sha256?}` | `{revision, commands, table_id, record_id}`; `project.changed` after success |
+| `project.reports.generation_request` | `{handle, request_id}` | `{revision, request, input, response}`; original frozen report input and saved reply, no send or recovery |
+| `project.reports.create_generated` | `{handle, name, request_id, body, report_id, expected_revision, expected_input_sha256, expected_response_sha256, entry_path?}` | `{revision, commands, table_id, record_id}`; explicit edited completed reply as report/2, one undoable edit |
 | `project.reports.get` | `{handle, report_id}` | `{revision, table_id, report}` |
 | `project.reports.list` | `{handle, offset?, limit?}` | `{revision, table_id, offset, total, reports}` (summaries) |
 | `project.reports.asset` | `{handle, report_id, path, expected_revision, expected_source_sha256}` | Complete base64 bytes with asset hash/size, MIME and report identity |
@@ -635,7 +637,9 @@ bytes are returned, no project event is emitted, and no migration is needed. The
 is not a full manifest-integrity verdict: use the existing `project.snapshots.get` before consuming a
 selection. Existing `list` and `get` behavior is unchanged.
 
-The optional `project.reports.*` methods use [the frozen report contract](report-1.md).
+The optional `project.reports.*` methods use [the frozen report contract](report-1.md) and
+[the generated-report extension](report-2.md). Report/2 stores the edited Markdown/HTML body inline,
+bound to the original completed report request and response; it does not create a synthetic file snapshot.
 Metadata reads never open assets; explicit asset/preview/export operations validate frozen objects and the exact
 selected revision and manifest digest. Creating a report is one ordinary undoable edit. Export creates a new file
 without overwriting, changes no project revision and is not undone by project undo. No report operation starts a
