@@ -26,7 +26,7 @@ cmake --build build --target stk_editor_analysis
 | `table` | `TableWorkbench` 多维表格、独立只读控制器和可复用定义编辑器；传统项目页继续共用 `ProjectTableEditor` |
 | `files` | 独立真实目录页和 `ProjectFileTree` 异步控制器 |
 | `python` | 程序文档、显式保存与运行，`src/editors/python_editor.cc` |
-| `reports` | 冻结报告清单、显式资产读取和导出，`src/editors/reports_editor.cc`；当前显示原文及 PNG |
+| `reports` | 冻结报告清单、创建、显式资产读取和导出，`src/editors/reports_editor.cc`；独立文档视口经 `ReportDocumentHost` 承载，原生候选默认关闭 |
 | `project` | 项目管理、复核、讨论与仿真 |
 | `jobs` | Runtime、任务、日志和传输 |
 | `workspace` / `skills` / `ai` | 工作台、技能目录、AI 对话 |
@@ -41,6 +41,12 @@ cmake --build build --target stk_editor_analysis
 格式和边界见[表格交换](project-table-io.md)与[工作空间](design/portable-workspaces.md)。
 Python 服务仍在 `suan/`，目录列举和程序文件读写经同一桌面桥完成。UI 每帧不遍历目录，
 各编辑器不另建数据库、调度器或模型客户端。通用单元格点击能力位于 `stk_ui`，区域交换位于 `stk_wm`。
+
+文档的纯 CPU 内存资源协议与可选原生适配位于 `desktop/engine/lib/stk_document/`，
+目标分别为 `stk_document_resources` 和 `stk_document_native`；平台实现不在原型和产品间复制。
+`stk_ui` 的 `NativeViewport` 只提供最终布局及裁剪，既不绘制浏览器像素，也不接管其输入。
+`ReportDocumentHost` 绑定标签所有者、项目范围与父窗口；`Area::on_removed` 经 `EditorArea` 同步通知全部标签，
+跨区域移走或移除前撤销资源。项目／桥身份变更另由 `AppStore` 的同步失效订阅通知，不能等下一帧发现。
 
 按工作模式保存布局由 `work_mode_layouts.cc` 管理：准备／分析各自保存几何与标签、面板偏好，
 `Screen::rearrange` 只重排完整的活区域集合，不调用编辑器工厂或载入草稿。标签用实例寿命身份跟踪，
@@ -73,7 +79,7 @@ Python 服务仍在 `suan/`，目录列举和程序文件读写经同一桌面�
 
 - 独立表格已有十种字段、UUID 引用、公式、单位和撤销，内联编辑/矩形粘贴/已存视图沿同一项目服务；
   新强类型、选项和命名视图使用显式格式 14，旧 13 不自动升级。
-  对象候选和来源查看不执行任务；富对象缩略图、填充柄、看板拖动和云端协作仍未实现，
+  对象候选和来源查看不执行任务；已有附件缩略图、填充柄和看板拖动，云端协作仍待实现，
   具体能力与限制见[多维表格](design/multidimensional-tables.md)。
 - 目录树按需列一层，真实磁盘观察与已登记资源分开；展开、选择、刷新不运行代码或注册文件。
 - Python 代码是主区域，输出可展开/收起；载入/保存不执行，运行缓冲区与运行保存文件有明确来源。

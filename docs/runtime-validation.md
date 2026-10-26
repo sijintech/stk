@@ -3,6 +3,28 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-25：正式报告文档视口（本机完整回归通过，平台待验）
+
+- 源码 `023aa66` 已本地提交 main；记录与认知对齐收尾后推送。`stk_document` 生产资源／平台库、正式报告独立视口、同步项目范围与区域移除清理已写入；
+  原生候选仍默认关闭，Linux 仍为 Unsupported。统一全部目标构建退出 0，新增与既有报告专项 **167/167、零失败／错误／跳过／35.91 秒**，JUnit `/tmp/stk-formal-report-focused.xml`。包含 Host 9、范围 8、UI视口／遮挡9、区域移除4、真实桥 ReportsEditor30、预览18、无效回执11、资源14、像素3、布局18、内存自检3，以及报告 GPU **40/40**。
+- 最终统一构建及 Viewer 元数据基线修正后的重建均退出 0，日志 `/tmp/stk-report-final-full-build.log`、`/tmp/stk-report-final-full-build-metadata-fix.log`。完整原生 **1903/1903、零失败／错误／跳过／454.71 秒**，JUnit `/tmp/stk-report-final-native-full.xml`。实际执行当前 Linux CI 的完整必跑脚本，405 次核对、**1433 项必跑匹配全部通过**，证据 `/tmp/stk-report-final-required.log` 与 `/tmp/stk-report-final-required-summary.json`。其中包含新增 Host、项目范围、UI 遮挡、PDF 回执及失效、正文判据和严格退出码门禁；这些本机结果不证明双平台原生呈现。
+- Mac／Windows 的原型与三格式正式窗口测试改用标准库退出码包装器：同时要求真实退出 0、成功标记和无失败／泄漏诊断，取消 CTest 的成功正则覆盖。超时回收直接子进程，日志最多 64 MiB，不承诺清理已脱离后代。Python 3.12／3.11／3.14 各 **12/12** 真实子进程自检通过，分别 **2.207／2.181／2.607 秒**；完整 CTest 中门禁自检也实际执行。Windows 暂存文件以真实 CTest JSON 解析验证四个精确测试、含空格 Python、bundle 路径、600 秒超时及无 PASS 覆盖；修正原先在手写测试文件中会解析为空的目录变量，改用明确 bundle 环境路径。
+- `git diff --check` 与 i18n **2474/2474、零问题**通过。CMake 显式开启候选的配置和统一全部目标构建均退出 0，
+  日志 `/tmp/stk-formal-report-build.log`。每批全部链接结束后才运行测试。文档八图覆盖 OpenGL／Vulkan×中英×1440或560×1000，固定报告列表起点选报告→预览 **2 点击**；目视英文窄版／中文宽版，工具栏与末行返回控件完整可见。无窗口视口不绘浏览器像素，不作为原生内容显示证据。
+- PDF 入口已复用旧 `project.reports.preview`，逐项核对 14 字段、规范 base64 与实际二进制 SHA／大小，最多 4 MiB，不作 UTF-8 解码；Host 只接单 PDF 或 HTML＋栅格图集合。新增 PDF 与既有报告专项 **97/97、零失败／错误／跳过／21.37 秒**及 97 项必跑检查通过，包含 29 个新增 PDF 场景。首轮重复宏标签编译失败已修正并重建成功；JUnit `/tmp/stk-pdf-controller-focused.xml`，构建 `/tmp/stk-pdf-controller-build-final.log`，必跑 `/tmp/stk-pdf-controller-required.log`。
+- 无 Blender、默认关闭候选的全新 `/home/mnemora/opt/stk-build/report-resources-cpu` 配置及资源目标构建均退出 0；`DocumentResources` **14/14、零失败／错误／跳过**，必跑匹配 14 项。JUnit `/tmp/stk-report-resources-cpu.xml`，日志 `/tmp/stk-report-resources-cpu-{configure,build,test}.log`。缓存确认 Blender／native candidate／spike 均 OFF，没有拉取 WebView2 SDK。
+- 正式按钮链 OS 程序已接入三格式：Markdown／HTML 各要求 20 轮／140 张合格 OS 图，PDF 要求 20 轮／160 张图；均为 21 次明确准备和不同会话。先经真实桥冻结后删除实时入口，文本同时核图片与正文，PDF 核完整二进制回执、原生滚动后第二页出现且第一页消失，隐藏／复显／弹层／关闭／重备均独立留图。Windows 测试 guard 在精确文档容器吞掉并记录未消费的上行滚轮，跨异步投递和捕获保留；调用方采用宿主相同的向内像素取整。Cocoa 只证明定向当前 WK 后代、未全局投递，不声称已证明零 responder-chain 上行。完整回归后仅对这些未注册为 Linux 显示测试的 helper／程序收尾，最终重建退出 0，日志 `/tmp/stk-report-final-harness-build.log`；Linux PDF 冒烟退出 1，失败 JSON 明确 Unsupported、0 轮／0 图，证据 `/tmp/stk-report-final-linux-unsupported/`。实际双平台呈现仍待 CI。
+- 正文像素判据 `evidence_text_marker` 已补独立三行／四段文字几何，要求同字宽、极性、对齐及行距；仅六色图片不能通过。classifier 构建退出 0，`DocumentEvidence` **13/13、零失败／错误／跳过**及 13 项必跑检查通过，含 DPI／分数字宽／明暗正例与图片、缺行、乱序、错宽、噪声、工具栏、透明及坏缓冲反例。JUnit `/tmp/stk-report-body-evidence.xml`；构建／测试 `/tmp/stk-report-body-evidence-{build,test}.log`。这是识别器 CPU 验证，正文实际浏览器图像仍待三格式正式窗口验收。
+- Windows 独立 job 已配置仅验收 exe 目录的固定 Mesa 26.2.4 双 DLL、显式 llvmpipe 与 WARP；归档 SHA、大小、实际 DLL SHA、GL vendor／renderer／version／模块路径及 WGC adapter 均留证。拒版本覆盖和自动回退，OS 像素／20 轮／关闭及最终 guarded 门禁保持。本机两个官方下载均超时，实际归档布局／DLL 依赖与平台运行尚待 CI，不声明软件路径已通过。
+- 导航竞态已新增确定回归：只泵桥回复形成冻结讨论、暂不执行 Screen 队列，再启动项目刷新后执行导航。
+  修正前 **1/2 通过**：正例 **0.63 秒**复现仍停留最大化起点，未捕获讨论／其他页面的反例通过；
+  JUnit `/tmp/stk-conversation-race-before.xml`。已增加纯只读 `refreshing()` 状态及同项目冻结讨论的窄例外，
+  仍保留写／关／打开、句柄、所有者和输入门禁。修正后工作区导航及完整工作流 **14/14、零跳过／36.41 秒**通过，JUnit `/tmp/stk-conversation-race-after.xml`，14 项必跑检查通过。工作流测试也改为先等按钮启用，
+  随即核请求被接受，再分开检查捕获与导航，未延长原有超时。
+- 前头 `43e5652` Desktop `40247654158` 已 completed/failure：Mac CPU **1220/1220**、Metal **246/246**、native **1/1**，20 轮／161 PNG 的全部 SHA 与阶段覆盖已核，引擎静态析构后 guarded **0 块／0 字节**，父关闭旧 URL 410。短回执 `/tmp/stk-ci-43-macos-evidence-summary.json`；完整图与 JUnit `/tmp/stk-ci-40247654158-macos-frames/`。Windows 编译与 CPU 成功，独立 native **0.25 秒**在预检失败：只提供 OpenGL 1.1、无 WGL_ARB_create_context，未达到 WGC／WebView2 显示；未安装驱动或 Runtime，未跳过，摘录 `/tmp/stk-ci-43-windows-native-failure-excerpt.log`。
+  Linux完整 **1811/1812／507.10 秒**，唯一工作流转讨论等待失败已由上述确定性回归修正，须新 CI 复验，摘录 `/tmp/stk-ci-43-linux-failure-excerpt.log`。前头终态等待条件已满足；本批本机回归如上，新 CI 仍待推送后核对。
+  Runtime `40247654031`、Docs `40247654048`、Secret `40247654022` 已成功；这些旧头结果不代表本工作树通过。
+
 ## 2026-10-25：报告额外来源选择（本机验收完成）
 
 源码 `b23cfc0` 与原型最终内存门禁修正 `9358ca2` 已提交 main，基线 `0268d68`。所有运行均清空产品模型密钥并取消模型变量；没有模型请求。报告来源选择完整回归通过；随后原生验收工具的最终内存门禁已修正，追加验证见下。

@@ -1,9 +1,28 @@
 # 文档预览技术验证计划
 
-状态：2026-10-25 **已实现默认关闭的原生嵌入候选源码，正在等待本机与跨平台验收，尚未完成选型**。
-macOS 已有 20 轮／161 张自身窗口 OS 图与关闭证据，但最终 guarded 内存门禁失败，候选仍未通过完整验收；
-Windows 尚无实际显示验收。这是 P0 的验证任务，不表示 P4 的 Markdown、HTML 报告、PDF 阅读体验或 LaTeX 已交付。
+状态：2026-10-25 **原生候选仍默认关闭，正式报告视口候选源码 `023aa66` 已接入，尚未完成双平台选型验收**。
+前头 `43e5652` 的 macOS 原型已通过 20 轮／161 张自身窗口 OS 图、关闭与引擎静态析构后 guarded 0 块／0 字节门禁；
+Windows 编译与 CPU 已过，独立原生预检因运行器仅提供 OpenGL 1.1 而失败，尚无实际显示验收。
+这些 P0 原型结果不表示正式 P4 报告、PDF 阅读体验或 LaTeX 已交付。
 产品范围见[项目工作台](project-workbench.md)，当前文件入口见[项目文件](../project-files.md)。
+
+## Windows 测试用软件渲染路径（待 CI 验证）
+
+`43e5652` 的 Windows 运行器仅提供 OpenGL 1.1，尚未到达 WebView2／OS 图像检查。
+本工作树的独立验收 job 将固定 SHA／大小的 pal1000 Mesa 26.2.4 MSVC 归档中两个 x64 DLL
+放到验收 exe 目录，显式请求 llvmpipe；这是该发行者的构建，不是 Mesa 官方二进制。
+只解包指定 DLL，记录归档目录与 DLL 摘要，不运行安装脚本，不替换系统驱动、DXGI 或 D3D。
+本机下载超时，真实包目录与依赖仍待 CI 实际检查，失败即终止。
+
+测试源在 legacy 和真实 4.3 core context 中分别记录 GL vendor／renderer／version 和实际加载的
+`opengl32.dll` 完整路径；显式软件模式必须确为 llvmpipe，拒绝 GL／GLSL／GLES 版本覆盖。
+WGC 自有窗口捕获显式选择 WARP，记录实际 DXGI software adapter 与 feature level，无硬件失败后的自动回退。
+仍须平台支持、准确客户区、独立 OS 帧、20 轮／关闭和最终 guarded 门禁全部通过；软件路径不作硬件性能或浏览器内存结论。
+
+依据：[Mesa LLVMpipe 的 Windows 局部部署](https://docs.mesa3d.org/drivers/llvmpipe.html)、
+[Microsoft WARP 创建](https://learn.microsoft.com/en-us/windows/win32/direct3d11/overviews-direct3d-11-devices-create-warp)、
+[WGC 能力与捕获流程](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture)。
+WARP 可创建 D3D 设备不单独证明当前 Hyper-V 会话可捕获，实际像素检查仍是门禁。
 
 ## 当前约束
 
@@ -52,8 +71,11 @@ Linux 正式预览后端需单独选型，不把 macOS/Windows 方案的通过�
 
 ## 候选源码与有限使用
 
-实现位于 [`desktop/spike/document_preview/`](../../desktop/spike/document_preview/)。
-`STK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE` 默认 `OFF`；只有明确开启时才添加候选及资源测试目标。
+生产资源协议和平台适配位于 [`desktop/engine/lib/stk_document/`](../../desktop/engine/lib/stk_document/)，
+原型夹具和 OS 捕获保留在 [`desktop/spike/document_preview/`](../../desktop/spike/document_preview/)，二者消费同一平台实现。
+`STK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW` 默认 `OFF`，显式开启才选择 macOS／Windows 原生后端；
+`STK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE` 也默认 `OFF`，单独控制原型及像素证据目标。
+纯 CPU 生产资源测试不再依赖开启原型，关闭 Blender 仍可构建。
 macOS 使用同一 GHOST 窗口中的 WKWebView，Windows 使用该窗口承载的 WebView2。
 原型在同窗 Viewer 打开仓库公开的 payload 示例，不启动桌面桥，不读取用户项目，不发起模型请求。
 
@@ -76,7 +98,7 @@ Windows 构建按固定版本和摘要取得 WebView2 SDK，运行时缺少 WebV
 下面以 `build-desktop` 为例；先完成构建，再运行程序或测试，不并行重链正在使用的二进制：
 
 ```sh
-cmake -S desktop -B build-desktop -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON
+cmake -S desktop -B build-desktop -DSTK_DESKTOP_ENABLE_NATIVE_DOCUMENT_PREVIEW=ON -DSTK_DESKTOP_BUILD_DOCUMENT_PREVIEW_SPIKE=ON
 cmake --build build-desktop --config RelWithDebInfo --parallel 4 --target stk-document-preview-spike stk-document-resources-tests
 ctest --test-dir build-desktop -C RelWithDebInfo -R '^(DocumentResources|DocumentEvidence)\.' --output-on-failure
 ```
@@ -134,8 +156,10 @@ env -u STK_TOKEN_PLAN_MODEL STK_TOKEN_PLAN_API_KEY= ctest --test-dir build-deskt
 隐藏编辑器仍接收布局通知；没有 UI／窗口时隐藏，关闭编辑器或父窗口先取消订阅、关闭子视图并失效资源。
 订阅不跟随布局树迁入另一 Screen，宿主需要重新绑定；回调不得保留 Widget／Layout 指针或直接改树。
 普通重绘不触发失效，避免每帧撤焦。所有模态框隐藏子视图，其他相交浮层也暂时隐藏。
-这只是布局同步，仍没有证明同一批原生输入事件的拦截或全局快捷键／IME 路由；候选也仍占整个 main 区域，
-正式报告需要独立且经过裁剪核对的预览视口。
+原型仍占整个 main 区域。正式 ReportsEditor 另使用 `NativeViewport`，在最终布局核对视口、区域和窗口裁剪，
+部分可见则隐藏，不能把缩小子窗口当作原布局的裁剪。
+UI 在弹层和捕获变更前同步通知原生宿主；区域移除及跨 Screen 迁移前撤销会话，项目范围变化不等下一帧处理。
+这仍不能拦截已经派发到 OS 子视图的输入，也不证明全局快捷键、IME 或跨屏 DPI 已验收。
 
 ## 自动原生显示证据
 
