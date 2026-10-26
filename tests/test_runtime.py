@@ -16,7 +16,7 @@ import pytest
 from conftest import finish
 from suan.runtime.client import RuntimeClient, RuntimeErrorResponse
 from suan.runtime.models import TaskSpec
-from suan.runtime.common import atomic_json, instance_lock, read_json, sha256
+from suan.runtime.common import alive, atomic_json, instance_lock, read_json, sha256
 from suan.runtime.supervisor import Supervisor
 
 pytestmark = pytest.mark.server
@@ -165,21 +165,256 @@ def test_memory_limit_and_input_checksum_rejection(runtime, tmp_path):
 
 def test_lost_worker_does_not_hide_live_program_and_can_cancel(runtime):
     import psutil
+    from suan.runtime.worker import terminate_tree
     client, supervisor, server, _ = runtime
     workspace = client.create_workspace('worker loss')['id']
     task = client.submit(TaskSpec(workspace, ['{python}', '-c', "import time; print('ready', flush=True); time.sleep(20)"]))
-    supervisor.tick()
-    deadline = time.monotonic() + 5
-    while not client.logs(task['id'])['bytes']:
-        assert time.monotonic() < deadline
-        time.sleep(.05)
-    wrapper = psutil.Process(int(client.task(task['id'])['backend_id']))
-    wrapper.kill()
-    wrapper.wait(timeout=5)
-    supervisor.tick()
-    assert client.task(task['id'])['state'] == 'unknown'
-    client.cancel(task['id'])
-    assert finish(client, supervisor, task['id'])['state'] == 'cancelled'
+    root, program = server.service.task_dir(task['id']), None
+    try:
+        supervisor.tick()
+        deadline = time.monotonic() + 5
+        while True:
+            program = read_json(root / 'program.json')
+            if client.logs(task['id'])['bytes'] == b'ready\n' and alive(program):
+                break
+            assert time.monotonic() < deadline, 'program readiness and durable identity were not both observed'
+            time.sleep(.01)
+        wrapper = psutil.Process(int(client.task(task['id'])['backend_id']))
+        assert any(child.pid == program['pid'] for child in wrapper.children())
+        wrapper.kill()
+        wrapper.wait(timeout=5)
+        assert alive(program)
+        supervisor.tick()
+        assert client.task(task['id'])['state'] == 'unknown'
+        client.cancel(task['id'])
+        assert finish(client, supervisor, task['id'])['state'] == 'cancelled'
+        assert not alive(program)
+    finally:
+        client.cancel(task['id'])
+        program = program or read_json(root / 'program.json')
+        if alive(program):
+            terminate_tree(psutil.Process(program['pid']), expected_created=program['create_time'])
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX exec authorization pipe')
+@pytest.mark.parametrize('failure', ['worker_killed', 'publication_failed'])
+def test_program_never_executes_without_published_identity(runtime, failure, tmp_path):
+    import psutil
+    from suan.runtime.worker import terminate_tree
+    client, supervisor, server, _ = runtime
+    workspace = client.create_workspace('program identity publication')['id']
+    command = ("from pathlib import Path; import time; Path('executed').write_text('yes'); "
+               "print('ready', flush=True); time.sleep(20)")
+    (tmp_path / 'sitecustomize.py').write_text(
+        "from pathlib import Path; Path('python-environment-executed').write_text('yes')", encoding='utf-8')
+    task = client.submit(TaskSpec(workspace, ['{python}', '-c', command], env={'PYTHONPATH': str(tmp_path)}))
+    root = server.service.task_dir(task['id'])
+    copied_worker = root / 'worker.py'
+    source = copied_worker.read_text(encoding='utf-8')
+    entry = 'if __name__ == "__main__":'
+    assert source.count(entry) == 1
+    # Interpose only in this task's standalone copy. The child PID must match the
+    # parent's live PID/create_time, so no elapsed-time guess selects the crash window.
+    probe = '''
+_original_write_json, _original_run_program = write_json, run_program
+def write_json(path, data):
+    if path.name == 'program.json':
+        _original_write_json(path.parent / 'publication-pending.json', data)
+        deadline = time.monotonic() + 15
+        while not (path.parent / 'release-publication').exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError('test publication handshake timed out')
+            time.sleep(.01)
+        raise OSError('controlled program identity publication failure')
+    return _original_write_json(path, data)
+def run_program(gate, exec_confirmation, argv):
+    _original_write_json(Path.cwd().parent / 'gate-waiting.json',
+                         {'pid': os.getpid()})
+    return _original_run_program(gate, exec_confirmation, argv)
+
+'''
+    copied_worker.write_text(source.replace(entry, probe + entry), encoding='utf-8')
+    program = wrapper_identity = None
+    try:
+        supervisor.tick()
+        wrapper = psutil.Process(int(client.task(task['id'])['backend_id']))
+        wrapper_identity = {'pid': wrapper.pid, 'create_time': wrapper.create_time()}
+        deadline = time.monotonic() + 5
+        while True:
+            program = read_json(root / 'publication-pending.json')
+            gate = read_json(root / 'gate-waiting.json')
+            if program and gate == {'pid': program['pid']} and alive(program):
+                break
+            assert time.monotonic() < deadline, 'parent and gated child did not reach the publication boundary'
+            time.sleep(.01)
+        assert not (root / 'program.json').exists()
+        assert not (root / 'work' / 'executed').exists()
+        assert not (root / 'work' / 'python-environment-executed').exists()
+        assert client.logs(task['id'])['bytes'] == b''
+        if failure == 'worker_killed':
+            wrapper.kill()
+            wrapper.wait(timeout=5)
+        else:
+            (root / 'release-publication').touch()
+        deadline = time.monotonic() + 5
+        while alive(program):
+            assert time.monotonic() < deadline, 'unauthorized program gate remained alive'
+            time.sleep(.01)
+        result = finish(client, supervisor, task['id'])
+        assert result['state'] == 'failed'
+        assert ('without a completion record' if failure == 'worker_killed' else
+                'controlled program identity publication failure') in result['reason']
+        assert not (root / 'program.json').exists()
+        assert not (root / 'work' / 'executed').exists()
+        assert not (root / 'work' / 'python-environment-executed').exists()
+        assert client.logs(task['id'])['bytes'] == b''
+    finally:
+        (root / 'release-publication').touch()
+        client.cancel(task['id'])
+        for identity in (program, wrapper_identity):
+            if alive(identity):
+                terminate_tree(psutil.Process(identity['pid']), expected_created=identity['create_time'])
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX exec authorization pipe')
+def test_authorized_program_exec_failure_keeps_a_failure_diagnostic(runtime, tmp_path):
+    client, supervisor, server, _ = runtime
+    workspace = client.create_workspace('missing executable')['id']
+    task = client.submit(TaskSpec(workspace, [str(tmp_path / 'missing-public-test-program')],
+                                  resources={'memory_mb': 1}))
+    result = finish(client, supervisor, task['id'])
+    assert result['state'] == 'failed' and result['exit_code'] == 127
+    root = server.service.task_dir(task['id'])
+    assert 'Program exec failed: FileNotFoundError:' in (root / 'stderr.log').read_text(encoding='utf-8')
+    assert not alive(read_json(root / 'program.json'))
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX exec confirmation pipe')
+@pytest.mark.parametrize('completion', ['execute', 'cancel', 'signal'])
+def test_program_exec_confirmation_excludes_helper_memory_and_remains_cancellable(runtime, completion):
+    import psutil
+    import signal
+    from suan.runtime.worker import terminate_tree
+    sleep = shutil.which('sleep')
+    if not sleep:
+        pytest.skip('requires a native sleep executable')
+    client, supervisor, server, _ = runtime
+    workspace = client.create_workspace('exec confirmation')['id']
+    task = client.submit(TaskSpec(workspace, [sleep, '.2'], resources={'memory_mb': 16}))
+    root = server.service.task_dir(task['id'])
+    copied_worker = root / 'worker.py'
+    source = copied_worker.read_text(encoding='utf-8')
+    entry = 'if __name__ == "__main__":'
+    assert source.count(entry) == 1
+    # Hold the actual helper after authorization but before exec, with RSS above
+    # the task limit. The native target fits; a monitor started before exec cannot
+    # distinguish this wrapper allocation from the program's own memory.
+    probe = '''
+_original_execvpe = os.execvpe
+def delayed_exec(file, argv, env):
+    allocation = bytearray(32 * 1024 * 1024)
+    for offset in range(0, len(allocation), 4096):
+        allocation[offset] = 1
+    root = Path.cwd().parent
+    write_json(root / 'exec-waiting.json', {'pid': os.getpid()})
+    deadline = time.monotonic() + 15
+    while not (root / 'release-exec').exists():
+        if time.monotonic() >= deadline:
+            raise RuntimeError('test exec handshake timed out')
+        time.sleep(.01)
+    return _original_execvpe(file, argv, env)
+os.execvpe = delayed_exec
+
+'''
+    copied_worker.write_text(source.replace(entry, probe + entry), encoding='utf-8')
+    program = wrapper_identity = None
+    try:
+        supervisor.tick()
+        wrapper = psutil.Process(int(client.task(task['id'])['backend_id']))
+        wrapper_identity = {'pid': wrapper.pid, 'create_time': wrapper.create_time()}
+        deadline = time.monotonic() + 5
+        while True:
+            witness = read_json(root / 'exec-waiting.json')
+            program = read_json(root / 'program.json')
+            if witness and program and alive(program):
+                break
+            assert time.monotonic() < deadline, 'authorized helper did not reach the exec boundary'
+            time.sleep(.01)
+        assert witness['pid'] == program['pid']
+        assert psutil.Process(program['pid']).memory_info().rss > 16 * 1024 * 1024
+        # Keep the known oversized helper across several resource-monitor cycles.
+        # This delay checks an established barrier; it does not select a crash race.
+        time.sleep(.35)
+        assert alive(program) and not (root / 'finished.json').exists()
+        if completion == 'execute':
+            (root / 'release-exec').touch()
+        elif completion == 'cancel':
+            client.cancel(task['id'])
+        else:
+            os.kill(wrapper.pid, signal.SIGTERM)
+        result = finish(client, supervisor, task['id'])
+        expected = {'execute': ('succeeded', ''), 'cancel': ('cancelled', 'Cancelled by user'),
+                    'signal': ('failed', 'Worker interrupted by signal')}
+        assert (result['state'], result['reason']) == expected[completion]
+        assert not alive(program)
+        if completion == 'execute':
+            assert result['exit_code'] == 0
+        else:
+            assert not (root / 'release-exec').exists()
+    finally:
+        client.cancel(task['id'])
+        for identity in (program, wrapper_identity):
+            if alive(identity):
+                terminate_tree(psutil.Process(identity['pid']), expected_created=identity['create_time'])
+        (root / 'release-exec').touch()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX isolated program bootstrap')
+@pytest.mark.parametrize('variable', ['PYTHONHOME', 'PYTHONPATH'])
+def test_native_program_environment_does_not_initialize_the_helper(runtime, tmp_path, variable):
+    sleep = shutil.which('sleep')
+    if not sleep:
+        pytest.skip('requires a native sleep executable')
+    client, supervisor, server, _ = runtime
+    workspace = client.create_workspace('native environment')['id']
+    (tmp_path / 'sitecustomize.py').write_text(
+        "from pathlib import Path; Path('site-executed').write_text('yes')", encoding='utf-8')
+    value = str(tmp_path / 'not-a-python-home') if variable == 'PYTHONHOME' else str(tmp_path)
+    task = client.submit(TaskSpec(workspace, [sleep, '.1'], env={variable: value}))
+    result = finish(client, supervisor, task['id'])
+    assert result['state'] == 'succeeded' and result['exit_code'] == 0
+    assert not (server.service.task_dir(task['id']) / 'work' / 'site-executed').exists()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX isolated program bootstrap')
+def test_python_target_receives_its_environment_only_after_identity_publication(runtime, tmp_path):
+    client, supervisor, server, _ = runtime
+    workspace = client.create_workspace('authorized Python environment')['id']
+    (tmp_path / 'sitecustomize.py').write_text(
+        "import json, os; from pathlib import Path; root = Path.cwd().parent; "
+        "identity = json.loads((root / 'program.json').read_text()); "
+        "assert identity['pid'] == os.getpid(); "
+        "Path('site-executed').write_text('identity published')", encoding='utf-8')
+    task = client.submit(TaskSpec(workspace, ['{python}', '-c', "print('ready', flush=True)"],
+                                  env={'PYTHONPATH': str(tmp_path)}))
+    result = finish(client, supervisor, task['id'])
+    assert result['state'] == 'succeeded'
+    assert client.logs(task['id'])['bytes'] == b'ready\n'
+    assert (server.service.task_dir(task['id']) / 'work' / 'site-executed').read_text() == 'identity published'
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX signal inheritance')
+def test_native_program_restores_sigpipe_default_after_helper(runtime):
+    import signal
+    shell = shutil.which('sh')
+    if not shell:
+        pytest.skip('requires a native shell executable')
+    client, supervisor, server, _ = runtime
+    workspace = client.create_workspace('native signal inheritance')['id']
+    task = client.submit(TaskSpec(workspace, [shell, '-c', 'kill -PIPE $$; echo continued > after-pipe']))
+    result = finish(client, supervisor, task['id'])
+    assert result['state'] == 'failed' and result['exit_code'] == -signal.SIGPIPE
+    assert not (server.service.task_dir(task['id']) / 'work' / 'after-pipe').exists()
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='POSIX scheduler signals')
