@@ -3,6 +3,35 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-26：运行器先发布身份再执行（本机完整回归通过）
+
+源码 `5a6f6fd1f6a1f4b66862a649bb29fdf176bcae02` 已本地提交main，尚未推送；报告源码为 `15edede30c46bc6639eeab910d739bf01fdb762b`。所有测试清空模型key、取消model变量，没有模型请求。
+
+- 旧窗口的确定性复现只修改临时任务副本，在Popen后、program.json发布前以握手暂停：父进程丢失后目标仍活、无持久身份，LocalBackend误报failed，日志 `/tmp/stk-worker-loss-repro.log`，已按PID/创建时间清理。前头Runtime3.11日志没有足够身份证据，不能断言同根。
+- 新Linux任务先以隔离解释器启动惰性门禁，fsync并原子发布目标PID/创建时间后才授权。TaskSpec环境在授权后经匿名管道传递，避免PYTHONHOME/PYTHONPATH/加载器变量提前作用于门禁；实际exec沿用原argv/env并恢复原Popen信号语义。第二管道以CLOEXEC确认进入目标，排除临时Python门禁RSS和启动耗时；失败exec保留stderr和127。取消/信号在环境传输及exec等待期间仍有效；历史任务副本、Windows直接启动路径不改。保留既有文件fsync+rename，不增设共享文件系统目录fsync要求或断电保证。
+- Runtime全文件：3.12 **36 passed/15.17秒**，`/tmp/stk-runtime-launch-gate-full.log`；3.11 **36 passed/15.23秒**、3.14 **36 passed/18.38秒**，对应 `/tmp/stk-runtime-launch-gate-python311.log`、`python314.log`。覆盖发布前杀父/发布失败零执行、已发布程序丢失worker后取消、exec失败、真实native低内存目标、32MiB门禁暂停、取消和SIGTERM、目标环境延迟生效及SIGPIPE。
+- 最终worker后的真实桌面/桥Runtime调用链 **4/4、零失败/错误/跳过、35.65秒**，JUnit `/tmp/stk-runtime-launch-gate-native.xml`，包括日志订阅、Jobs上传/提交/下载与关闭存活、逐行仿真及MuFerro工作流。完整原生1924/1924是在报告源码上、此次Runtime修正前完成；相关调用链在修正后补验，不声称重新跑了全部原生。
+- `uv build --offline`最终wheel/sdist成功，`/tmp/stk-report-runtime-final-package.log`；安装到全新隔离目录，`python -I`确认报告与worker模块来自安装目录后运行 **82 passed/18.54秒**，`/tmp/stk-report-runtime-final-installed-tests.log`，不回落源码模块。最终完整Python **3562 passed、24 skipped、2 deselected、零失败、1项既有Starlette提示／705.26秒**，日志 `/tmp/stk-report-generation-runtime-final-full-python.log`，退出0。首轮两处发布清单失败已由下节记录，保留失败历史。
+- 本次暂存源码gitleaks用 `.gitleaks.toml`、redact扫描 **24861bytes、零发现**，空白检查通过。推送前已fetch确认origin/main无新提交，前头Desktop `40264284403`全部终态，等待门禁满足；本批新CI待推送后核对。
+- 新上下文恢复已完整交付AOCI **22块、1085条、约152153tokens**，Host交付确认和严格Challenge **9/10**通过；读取时治理dirty/stale，模型认知可用不等于当前完整系统认知可靠。最终稳定源码的收尾结果由本提交认知资产与Verify/Check/Guide事实承载，不以此替代源码和平台验收。
+
+当前仍须完成独立桌面AI报告表单、LaTeX、视频及双平台原生显示/输入验收；第4–8项继续，PET新专项后置。
+
+## 2026-10-26：报告模式与生成报告后端（本机验收，平台待复验）
+
+源码 `15edede30c46bc6639eeab910d739bf01fdb762b` 已本地提交main，尚未推送。本轮不修改端点、密钥或网络设置；测试清空 `STK_TOKEN_PLAN_API_KEY` 并取消模型变量，生成回复均由受控适配器/本地测试日志提供，没有收费模型请求。完整桌面生成表单仍未交付。
+
+- 构建 `/tmp/stk-report-generation-native-build.log` 退出0；报告/模式/项目范围 **149/149、零失败/错误/跳过、29.81秒**，JUnit `/tmp/stk-report-generation-native-focused.xml`，相关必跑69匹配通过。新增17项/2读取与valid-wire篡改回归、三模式14项实际执行。
+- 完整原生 **1924/1924、零失败/错误/跳过、469.57秒**，JUnit `/tmp/stk-report-generation-native-full.xml`。实际执行当前 `.github/workflows/desktop.yml` 的完整Linux必跑脚本，**405次核对、1454项匹配全部通过**；日志及JSON `/tmp/stk-report-generation-native-required.log`、`-summary.json`。新增generation参数化类加入三平台必跑规则。
+- 模式点击固定起点：默认分析布局、无桥、**1000×900逻辑像素**，英文/中文×1×/2×。真实鼠标依次准备→报告→分析，每种菜单+菜单项 **2次**，每场6次；报告位于工作区a3，a1Files/a2Viewer/a4Table保留。布局往返恢复，Viewer无新求值、脚本无会话，隐藏Python/报告草稿及相机保留；`WorkModeLayoutClicks`与`WorkModeLayouts`全部通过。CPU事件证据不扩展为Mac/Windows原生浏览器显示。
+- Python普通报告/请求/门面/网关兼容 **192 passed/21.17秒**；新后端 **46 passed/3.41秒**，`/tmp/stk-report-generation-tests.log`；strict bridge与真实ScriptSessions worker **4 passed/2.37秒**，覆盖分步准备/只读/单次明确发送/编辑/保存/预览/ZIP/重开与旧handle拒绝。三种来源绑定反例已真实证明修前3失败、修后拒绝；保留 `/tmp/stk-report-generation-selection-regression.log`。所有来源状态为冻结观察，不将运行状态当科学结果。
+- Python3.11/3.14相关各 **196 passed/7.80和8.78秒**，日志 `/tmp/stk-report-generation-python311.log`、`python314.log`。完整Python首轮 **3549 passed、2 failed、24 skipped、2 deselected、725.45秒**，`/tmp/stk-report-generation-full-python.log`；失败为脚本方法集合和支持prompt集合未同步，已补两条报告方法与新purpose，相关 **91 passed/11.05秒**，`/tmp/stk-report-generation-python-inventory-fixed.log`。运行器稳定后的最终3562项完整通过见上，不将首轮写作全绿。
+- `uv build --offline`构建wheel/sdist成功，`/tmp/stk-report-generation-package.log`；wheel安装到隔离目录，`python -I`确认两个新模块和Schema来自安装目录，再执行新后端 **46 passed/3.65秒**，无源码包回退。最初venv无build/pip模块，使用已安装uv与离线缓存完成，未修改产品环境依赖。运行器修复后的最终重建及82项读回见上。
+- Windows前头job日志 `/tmp/stk-ci-40264284403-windows-job.log:2047/2060` 确认多值discovery标签破坏带空格CMake命令；两处改为单标签，未删测试。Mac日志 `/tmp/stk-ci-40264284403-macos-job.log:7235/7242/7249` 三格式止于 `Create fixture project`。源码存在仅等Client后台Ready而未等主线程ProjectState回调的漏洞，已增加真实项目ready/非busy等待及安全失败诊断；这与日志相容，仍须新MacCI确定效果。原型WKWebView测试成功不等于正式三格式通过。
+- 前推送头 `b32fd0c7` Desktop `40264284403` 已全部终态：Linux主回归、Linux包和干净Ubuntu包冒烟成功；Mac编译/CPU/Metal/app smoke成功、正式native步骤失败；Windows编译失败，独立native job skipped。Runtime `40264284376` 的3.11 job `121383139825` 唯一丢失worker用例失败，其余7job成功；Docs `40264284300`、Secret `40264284339`成功。Runtime限定摘录 `/tmp/stk-runtime-b32-python311-failure.log`；本机确定复现子程序已活但program.json未发布、后端误报failed，`/tmp/stk-worker-loss-repro.log`，已清理真实子进程。生产握手修正与完整回归见上，不能由复现宣称远端必然同根。
+- Linux自身窗口程序运行退出1，明确 `Native window evidence is unsupported on this platform`，0轮/0图，`/tmp/stk-report-generation-linux-unsupported.log`及同名目录；这是平台边界预检，不证明MacReady修正或实际PDF显示。原生候选继续默认关闭，IME/跨屏DPI/浏览器内存、完整AI表单、LaTeX与视频继续。
+- 暂存报告源码密钥扫描 **203977 bytes、零发现**；i18n **2475/2475、零问题**和空白检查通过。运行器最终结果见上；记录与认知收尾后推送，新CI另核。P4和第4–8项保持未完成，PET新专项后置。
+
 ## 2026-10-25：正式报告文档视口（本机完整回归通过，平台待验）
 
 - 源码 `023aa66` 已本地提交 main；记录与认知对齐收尾后推送。`stk_document` 生产资源／平台库、正式报告独立视口、同步项目范围与区域移除清理已写入；
