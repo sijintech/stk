@@ -3,6 +3,19 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-27：独立桌面报告生成表单（本机验收完成，平台待复验）
+
+交付头 `035f7bd960d0a5b72bc83db7608342e15951ea68` 已推送main，包含报告源码 `15edede3`、运行器 `5a6f6fd1` 和记录/认知资产；记录暂存gitleaks扫描141729bytes、零发现。新[Runtime CI](https://github.com/sijintech/stk/actions/runs/40274892305)已结束：三个LinuxPython版本、desktop、web、control均成功；Windows3.11/3.12各3057通过、100跳过、327排除、2个setup/teardown错误（537.95/558.16秒）。日志明确为 `test_invalid_or_oversized_generated_body_is_rejected_atomically` 的默认案例名称包含整段超长正文，写入 `PYTEST_CURRENT_TEST` 超过Windows环境变量32767字符限制；没有运行到该案例断言，不能写作报告后端验证失败或通过。
+修正保留原始大正文与五类拒绝断言，只显式使用简短案例ID；本机3.11/3.12/3.14报告全文件各46项通过（3.68/3.70/3.68秒），日志 `/tmp/stk-report-generation-testids-python311.log`、`python312.log`、`python314.log`，真实Windows仍待下一头CI。新[Desktop CI](https://github.com/sijintech/stk/actions/runs/40274892272)已结束：Linux主回归、Linux包、干净机冒烟及Windows主回归成功；Mac正式报告3项OS像素超时、独立原型20轮161图及最终零分配通过；Windows独立原生4项均在真实llvmpipe4.6预检后0xC0000005退出、零图。Docs `40274892334`、Secret `40274892259`成功。前头Desktop已终态，下一批仍须自己的CI，不能把本机测试作平台通过。
+
+源码 `64205ba809aacef568d1d85637ee777c9ac8aa50` 已提交main，接入独立桌面AI生成表单、每标签局部控制器及workspace v3，普通v1/v2可读。准备、发送、编辑和保存分别明确操作；复用来源选择器，四类来源分页与完整复核、可选真实快照附件，原UUID回查不重发。三处控制器状态缺陷与跨帧/同帧字段提交票据失效已修，按钮继续核原来源及token。
+统一构建退出0；专项 **26/26、零失败/错误/跳过、14.96秒**，`/tmp/stk-report-generation-desktop-tickets.xml`，覆盖14项真实stdio桥、丢回执/取消/换项目/重启，以及中英×1440/560宽度的完整UI、8类恶意workspace状态原子拒绝和恢复零隐式读取/发送、无中间frame的连续Tab与问题重入。首轮14中一例在桥自动重开时重复open，修测试等待；UI首轮18/26后修正用Enter事件输入换行，22/26再暴露真实跨帧票据问题，修正后26/26，不隐藏失败。新增CMake使用NO_PRETTY_VALUES与稳定参数名，三平台必跑规则纳入控制器和UI两类。
+
+固定默认Report模式未最大化、a3报告活动、旁有既有Viewer且隐藏Python/AI草稿；中英各1440×1000和560×1000，实际四场景均 **39鼠标点击、14键盘动作、6文本事件、0滚轮、1指针移动**。14键含一次Ctrl+Space最大化，最大化后的流程仍39点击/13键；四来源、PNG、完整复核、选择上下文与端点/模型、准备/单次发送、编辑和保存均计数。结果是实际读回report/2，四类冻结来源和已删除工作副本的冻结PNG、精确编辑正文；一发一保存，无自动asset/preview读取，Viewer payload/相机与隐藏稿内容保留。证据 `/tmp/stk-report-generation-ui-clicks.xml`、`.log`；WM/CPU事件与UI文本路径不等同真实OS/GPU/IME验收。既有AI页面没有独立has_unsaved_changes覆盖，本轮只证明其内容保留，不声称修复该缺口。
+
+Mac验收harness按实际客户区真实拖动分隔条扩大上排并保留Viewer，关闭popup后移开指针等待Tooltip遮挡解除；PDF改两页独立内嵌960×96 RGB图而保持原强像素判据。555033字节PDF由pypdf6.21.2 strict解析，两页、各276480字节图片、精确六色及第二页反序通过，`/tmp/stk-native-pdf-verify.log`；不代替Mac实际显示。Windows仅补WGL生命周期flush阶段与有限异常地址栈，证据只在显式测试目录、无内存dump；本机无Windows编译，真实崩溃位置与修复仍待下轮CI。
+最终复核另发现保存成功后等待项目刷新没有遵守90秒跟踪上限，已补齐截止处理：停止唤醒并保留原UUID和编辑正文，后续明确查询仍能确认同一份报告。新增真实桥回归1/1通过（2.47秒），最终统一构建退出0。完整原生 **1951/1951、零失败/错误/跳过、465.52秒**，日志 `/tmp/stk-report-generation-desktop-native-final.log`、JUnit同名`.xml`；包含 **15项控制器＋12项中英宽窄UI，共27项报告生成用例**，全部实际运行通过。当前Linux必跑脚本405次核对、1481项匹配通过，`/tmp/stk-report-generation-ui-required-final.log`。上一轮1950/1950是在这项边界修正前完成，不混作最终结果。中英2522键、零问题，diffcheck通过；源码暂存gitleaks按 `.gitleaks.toml`、redact扫描258612bytes、零发现，`/tmp/stk-report-generation-ui-staged-gitleaks-final.log`。最终wheel/sdist已离线重建（`/tmp/stk-report-generation-ui-package-final.log`）；wheel中452份Python文件与当前源码逐字节一致，sdist中的运行验收、报告指南、报告测试、生成后端及worker五文件逐字节一致，证据 `/tmp/stk-report-generation-ui-package-verify.log`。本批平台CI仍待新头复验；最终记录与认知资产随本批收尾，具体对齐以托管资产及Verify/Check/Guide事实为准。P4的LaTeX、视频、原生平台验收及第4–8项继续，PET新专项后置。
+
 ## 2026-10-26：运行器先发布身份再执行（本机完整回归通过）
 
 源码 `5a6f6fd1f6a1f4b66862a649bb29fdf176bcae02` 已本地提交main，尚未推送；报告源码为 `15edede30c46bc6639eeab910d739bf01fdb762b`。所有测试清空模型key、取消model变量，没有模型请求。
