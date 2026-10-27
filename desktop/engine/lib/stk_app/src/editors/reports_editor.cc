@@ -12,6 +12,7 @@
 #include "path_picker.hh"
 #include "project_navigation.hh"
 #include "reports_create_view.hh"
+#include "reports_generation_view.hh"
 
 #include <algorithm>
 #include <cmath>
@@ -24,7 +25,7 @@ using io::Json;
 // any conversion to ordered RPC JSON, which would otherwise copy the complete draft.
 bool reading_state_shape(const nlohmann::json &state, int version)
 {
-  if (!state.is_object() || state.size() != size_t(version == 2 ? 7 : 6) ||
+  if (!state.is_object() || state.size() != size_t(version == 3 ? 8 : version == 2 ? 7 : 6) ||
       !state.contains("version") || !state.at("version").is_number_integer() || state.at("version") != version ||
       !state.contains("text_page") || !state.at("text_page").is_number_integer()) { return false; }
   const auto &page = state.at("text_page");
@@ -48,7 +49,10 @@ class ReportsEditor final : public Editor {
     document_.reset();
     release_image();
   }
-  bool has_unsaved_changes() const override { return create_.dirty() || (reports_ && reports_->exporting()); }
+  bool has_unsaved_changes() const override
+  {
+    return create_.dirty() || generate_.dirty() || (reports_ && reports_->exporting());
+  }
   void on_area_removed() override
   {
     // An in-flight prepared response must not attach to a different owner/window later.
@@ -99,15 +103,21 @@ class ReportsEditor final : public Editor {
     if (!reports.error().empty()) { layout.paragraph(reports.error()); }
     if (!reports.notice().empty()) { layout.paragraph(ctx.tr(reports.notice())); }
     if (!project_id_.empty() && project_id_ != reports.project_id()) { layout.paragraph(ctx.tr("reports.other_project")); }
+    generate_.draw(layout, ctx, [this, weak = lifetime()] {
+      return !weak.expired() && reports_ && !reports_->busy();
+    });
+    const auto adopt_created = [this, &reports](const auto &created) {
+      if (created.project_id != reports.project_id()) { return; }
+      ++generation_; release_image(); text_offsets_.clear(); destination_.clear();
+      project_id_ = created.project_id; report_id_ = created.report_id; source_sha_ = created.source_sha256;
+      asset_path_.clear(); text_page_ = 0; pending_load_ = restore_asset_ = restored_ = true;
+      reports.clear(); // Open only verified metadata after the explicit create; no asset read.
+    };
+    if (const auto created = generate_.take_created()) { adopt_created(*created); }
     create_.draw(layout, ctx, [this, weak = lifetime()] {
       return !weak.expired() && reports_ && !reports_->busy();
     });
-    if (const auto created = create_.take_created(); created && created->project_id == reports.project_id()) {
-      ++generation_; release_image(); text_offsets_.clear(); destination_.clear();
-      project_id_ = created->project_id; report_id_ = created->report_id; source_sha_ = created->source_sha256;
-      asset_path_.clear(); text_page_ = 0; pending_load_ = restore_asset_ = restored_ = true;
-      reports.clear(); // Open only verified metadata after the explicit create; no asset read.
-    }
+    if (const auto created = create_.take_created()) { adopt_created(*created); }
     const auto current = guard();
     draw_list(layout, ctx, current);
     if (!reports.selected().is_object()) { return; }
@@ -163,22 +173,32 @@ class ReportsEditor final : public Editor {
   {
     auto state = save_state();
     const auto draft = create_.save_workspace_state();
-    if (!draft.empty()) { state["version"] = 2; state["create_draft"] = draft; }
+    const auto generated = generate_.save_workspace_state();
+    if (!generated.empty()) {
+      state["version"] = 3; state["create_draft"] = draft; state["generation_draft"] = generated;
+    }
+    else if (!draft.empty()) { state["version"] = 2; state["create_draft"] = draft; }
     return state;
   }
   bool load_workspace_state(const nlohmann::json &state) override
   {
-    if (state.is_object() && state.contains("version") && state.at("version").is_number_integer() && state.at("version") == 2) {
-      if (!reading_state_shape(state, 2) || !state.contains("create_draft") ||
-          !ReportsCreateView::valid_workspace_state(state.at("create_draft"))) { return false; }
+    if (state.is_object() && state.contains("version") && state.at("version").is_number_integer() &&
+        (state.at("version") == 2 || state.at("version") == 3)) {
+      const bool generated = state.at("version") == 3;
+      if (!reading_state_shape(state, generated ? 3 : 2) || !state.contains("create_draft") ||
+          !ReportsCreateView::valid_workspace_state(state.at("create_draft")) ||
+          (generated && (!state.contains("generation_draft") ||
+              !ReportsGenerationView::valid_workspace_state(state.at("generation_draft"))))) { return false; }
       nlohmann::json reading = {{"version", 1}};
       for (const char *key : {"project_id", "report_id", "source_sha256", "asset_path", "text_page"}) { reading[key] = state.at(key); }
       // Validate both payloads before mutating this tab. Reader validation is atomic.
       if (!load_state(reading)) { return false; }
-      return create_.load_workspace_state(state.at("create_draft"));
+      return create_.load_workspace_state(state.at("create_draft")) &&
+          generate_.load_workspace_state(generated ? state.at("generation_draft") : nlohmann::json::object());
     }
     if (!load_state(state)) { return false; }
-    return create_.load_workspace_state(nlohmann::json::object());
+    return create_.load_workspace_state(nlohmann::json::object()) &&
+        generate_.load_workspace_state(nlohmann::json::object());
   }
   bool shows_navigation_target(const nlohmann::json &target) const override
   {
@@ -456,6 +476,7 @@ class ReportsEditor final : public Editor {
   }
 
   ReportsCreateView create_;
+  ReportsGenerationView generate_;
   std::unique_ptr<ProjectReports> reports_;
   std::unique_ptr<ReportDocumentHost> document_;
   bool document_mode_ = false;

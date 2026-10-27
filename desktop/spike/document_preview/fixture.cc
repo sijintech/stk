@@ -176,16 +176,25 @@ constexpr uint8_t kCheckerboard[] = {
     0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 };
 
-std::string pdf_stripe(int page)
+std::string pdf_stripe_image(int page)
 {
-  std::string result;
-  for (size_t i = 0; i < kEvidenceColors.size(); ++i) {
-    const auto &color = kEvidenceColors[page == 1 ? i : kEvidenceColors.size() - 1 - i];
-    result += "q " + std::to_string(double(color[0]) / 255.0) + " " +
-        std::to_string(double(color[1]) / 255.0) + " " + std::to_string(double(color[2]) / 255.0) +
-        " rg " + std::to_string(48 + i * 40) + " 650 40 24 re f Q\n";
+  // One page-owned raster avoids separately antialiased rectangle edges creating
+  // artificial gaps between adjacent colors. The OS screenshot still has to pass
+  // the unchanged contiguous-color criterion after the browser renders this PDF.
+  constexpr int width = 960, height = 96;
+  std::string pixels;
+  pixels.reserve(width * height * 3);
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      const size_t index = size_t(x) * kEvidenceColors.size() / width;
+      const auto &color = kEvidenceColors[page == 1 ? index : kEvidenceColors.size() - 1 - index];
+      for (const auto channel : color) { pixels.push_back(char(channel)); }
+    }
   }
-  return result;
+  return "<< /Type /XObject /Subtype /Image /Width " + std::to_string(width) +
+      " /Height " + std::to_string(height) +
+      " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Interpolate false /Length " +
+      std::to_string(pixels.size()) + " >>\nstream\n" + pixels + "\nendstream";
 }
 
 std::string pdf_fixture()
@@ -193,14 +202,16 @@ std::string pdf_fixture()
   // Standard Type1 Helvetica and uncompressed English text avoid a font/renderer dependency.
   // Every xref offset and stream length is computed from the actual bytes emitted below.
   const std::string first =
-      "q 0.90 0.95 1 rg 0 0 612 792 re f Q\n" + pdf_stripe(1) +
+      "q 0.90 0.95 1 rg 0 0 612 792 re f Q\n"
+      "q 240 0 0 24 48 650 cm /Marker Do Q\n"
       "BT /F1 24 Tf 0.06 0.22 0.38 rg 48 714 Td (Synthetic PDF - page 1 of 2) Tj\n"
       "/F1 14 Tf 0 -110 Td (Offline document preview acceptance fixture.) Tj\n"
       "0 -30 Td (Select, copy, search, zoom and scroll to the next page.) Tj\n"
       "0 -30 Td (These are synthetic words, not scientific results.) Tj\n"
       "0 -30 Td (No scripts, embedded files, links or external fonts.) Tj ET\n";
   const std::string second =
-      "q 1 0.94 0.86 rg 0 0 612 792 re f Q\n" + pdf_stripe(2) +
+      "q 1 0.94 0.86 rg 0 0 612 792 re f Q\n"
+      "q 240 0 0 24 48 650 cm /Marker Do Q\n"
       "BT /F1 24 Tf 0.47 0.22 0.04 rg 48 714 Td (Synthetic PDF - page 2 of 2) Tj\n"
       "/F1 14 Tf 0 -110 Td (The second page has a pale orange background.) Tj\n"
       "0 -30 Td (Search marker: STK-PDF-PAGE-TWO.) Tj\n"
@@ -208,29 +219,33 @@ std::string pdf_fixture()
       "0 -30 Td (Native PDF support remains subject to platform acceptance.) Tj ET\n";
   const std::string page =
       "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-      "/Resources << /Font << /F1 5 0 R >> >> /Contents ";
-  const std::array<std::string, 7> objects = {
+      "/Resources << /Font << /F1 5 0 R >> /XObject << /Marker ";
+  const std::array<std::string, 9> objects = {
       "<< /Type /Catalog /Pages 2 0 R >>",
       "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
-      page + "6 0 R >>",
-      page + "7 0 R >>",
+      page + "8 0 R >> >> /Contents 6 0 R >>",
+      page + "9 0 R >> >> /Contents 7 0 R >>",
       "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
       "<< /Length " + std::to_string(first.size()) + " >>\nstream\n" + first + "endstream",
       "<< /Length " + std::to_string(second.size()) + " >>\nstream\n" + second + "endstream",
+      pdf_stripe_image(1),
+      pdf_stripe_image(2),
   };
   std::string pdf = "%PDF-1.4\n% STK synthetic acceptance fixture\n";
-  std::array<size_t, 7> offsets{};
+  std::array<size_t, 9> offsets{};
   for (size_t i = 0; i < objects.size(); ++i) {
     offsets[i] = pdf.size();
     pdf += std::to_string(i + 1) + " 0 obj\n" + objects[i] + "\nendobj\n";
   }
   const size_t xref = pdf.size();
-  pdf += "xref\n0 8\n0000000000 65535 f \n";
+  const auto object_count = std::to_string(objects.size() + 1);
+  pdf += "xref\n0 " + object_count + "\n0000000000 65535 f \n";
   for (const size_t offset : offsets) {
     const auto digits = std::to_string(offset);
     pdf += std::string(10 - digits.size(), '0') + digits + " 00000 n \n";
   }
-  pdf += "trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n" + std::to_string(xref) + "\n%%EOF\n";
+  pdf += "trailer\n<< /Size " + object_count + " /Root 1 0 R >>\nstartxref\n" +
+      std::to_string(xref) + "\n%%EOF\n";
   return pdf;
 }
 

@@ -49,6 +49,7 @@ add_library(stk_app STATIC
   src/table_workbench_state.cc
   src/project_context_selection.cc
   src/project_discussion.cc
+  src/project_report_generation.cc
   src/project_agent.cc
   src/module_settings.cc
   src/project_review.cc

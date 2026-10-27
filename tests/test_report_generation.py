@@ -528,7 +528,8 @@ def test_edited_flag_is_derived_from_exact_completed_response(model, workers, bo
     assert report["manifest"]["assets"][0]["sha256"] == hashlib.sha256(body.encode()).hexdigest()
 
 
-@pytest.mark.parametrize("body", ["界" * 21846, "x\x00y", "\x85", " ", "\ud800"])
+@pytest.mark.parametrize("body", ["界" * 21846, "x\x00y", "\x85", " ", "\ud800"],
+                         ids=["utf8_over_limit", "nul", "c1_control", "blank", "unpaired_surrogate"])
 def test_invalid_or_oversized_generated_body_is_rejected_atomically(model, workers, body):
     store, _ = model
     done, _ = complete(store, prepare(store, capture(model)), workers)

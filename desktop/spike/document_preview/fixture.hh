@@ -9,7 +9,7 @@ namespace stk::document_preview {
  * This is neither a Markdown renderer nor a product report/PDF reader.
  */
 std::shared_ptr<ResourceSession> make_fixture(std::string &error);
-/** Complete two-page synthetic PDF bytes; distinct vector stripes identify both pages.
+/** Complete two-page synthetic PDF bytes; page-embedded RGB stripes identify both pages.
  * Shared by the standalone spike and the frozen production ReportsEditor acceptance.
  */
 std::string make_pdf_fixture();

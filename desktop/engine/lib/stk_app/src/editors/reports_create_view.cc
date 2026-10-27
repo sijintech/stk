@@ -190,7 +190,7 @@ bool workspace_budget(const nlohmann::json &state)
   }
   return true;
 }
-bool valid_draft(const Json &state)
+bool valid_draft(const Json &state, bool inputs = false)
 {
   try {
     check_analysis_json_bounds(state, 512 * 1024);
@@ -217,8 +217,9 @@ bool valid_draft(const Json &state)
     }
     require(entry.empty() || records.contains(entry), "Report entry is not selected");
     const Json sources = legacy ? Json::array() : state.at("sources");
-    require(source_selection(sources) && (sources.empty() || !snapshot.empty()), "Invalid report draft sources");
+    require(source_selection(sources) && (sources.empty() || (inputs ? !project.empty() : !snapshot.empty())), "Invalid report draft sources");
     const auto &pending = state.at("pending");
+    if (inputs) { require(pending.is_null() && entry.empty() && io::get_string(state, "name").empty() && assets.size() <= 63, "Invalid generation input draft"); }
     if (pending.is_null()) { return true; }
     require(valid_title(io::get_string(state, "name")) && pending.is_object() && pending.size() == 4 && canonical_uuid(io::get_string(pending, "report_id")) &&
         io::get_int(pending, "expected_revision", -1) >= 0 && core::is_sha256_hex(io::get_string(pending, "source_sha256")),
@@ -257,6 +258,10 @@ bool valid_draft(const Json &state)
 
 class ReportsCreateView::Impl {
  public:
+  explicit Impl(Mode m) : mode(m) {}
+  Mode mode;
+  bool inputs() const { return mode == Mode::GenerationInputs; }
+  size_t asset_count_limit() const { return inputs() ? 63 : 64; }
   ~Impl() { *alive = false; if (future) { future->cancel(); } }
   enum class Operation { None, Read, Create, Check };
   struct Snapshot { std::string id, sha, label; };
@@ -423,7 +428,7 @@ class ReportsCreateView::Impl {
   }
   void load_snapshots(int64_t requested_offset = 0)
   {
-    if (dirty() || requested_offset < 0) { return; }
+    if ((!inputs() && dirty()) || !io::get_string(draft, "snapshot_id").empty() || requested_offset < 0) { return; }
     call("project.snapshots.list_summaries", {{"expected_revision", revision}, {"offset", requested_offset}, {"limit", 64}},
         Operation::Read, [this, requested_offset](const Json &result) {
       check_analysis_json_bounds(result, 64 * 1024);
@@ -492,7 +497,8 @@ class ReportsCreateView::Impl {
   }
   bool eligible(const Json &entry) const
   {
-    return !io::get_string(entry, "mime").empty() && io::get_int(entry, "size", -1) <= asset_limit;
+    const auto type = io::get_string(entry, "mime");
+    return !type.empty() && (!inputs() || type.starts_with("image/")) && io::get_int(entry, "size", -1) <= asset_limit;
   }
   Json proposed_manifest() const
   {
@@ -570,159 +576,39 @@ class ReportsCreateView::Impl {
     });
   }
   void draw(ui::Layout &layout, EditorContext &ctx, std::function<bool()> reader_available);
+  void draw_sources(ui::Layout &target, EditorContext &ctx, bool blocked);
+  std::optional<ReviewedInput> reviewed_input() const
+  {
+    if (!inputs() || busy() || !store || io::get_string(draft, "project_id") != project_id ||
+        draft.at("sources").empty() || sources_revision != revision) { return {}; }
+    try {
+      validate_sources(reviewed_sources, draft.at("sources"), project_id, revision);
+      ReviewedInput result{project_id, revision, reviewed_sources, Json::array(), nullptr, nullptr};
+      if (!io::get_string(draft, "snapshot_id").empty()) {
+        require(reviewed_revision == revision, "Review the selected snapshot");
+        result.snapshot_id = draft.at("snapshot_id"); result.snapshot_sha256 = draft.at("snapshot_sha256");
+      }
+      require(draft.at("assets").size() <= 63, "Too many report attachments");
+      int64_t total = 0; std::set<std::string> paths;
+      for (const auto &selected : draft.at("assets")) {
+        const auto *original = file(io::get_string(selected, "record_id"));
+        const auto target = io::get_string(selected, "path");
+        require(original && eligible(*original) && path(target) && paths.insert(target).second, "Invalid report attachment");
+        Json asset = selected; asset["size"] = original->at("size"); asset["sha256"] = original->at("sha256"); asset["mime"] = original->at("mime");
+        result.assets.push_back(std::move(asset)); total += io::get_int(*original, "size", 0);
+      }
+      require(total <= total_limit - 65536, "Report attachments exceed the budget");
+      return result;
+    } catch (...) { return {}; }
+  }
 };
 
-void ReportsCreateView::Impl::draw(ui::Layout &layout, EditorContext &ctx, std::function<bool()> available)
+void ReportsCreateView::Impl::draw_sources(ui::Layout &target, EditorContext &ctx, bool blocked)
 {
-  reader_available = std::move(available);
-  sync(ctx.store);
-  auto *panel = layout.panel("reports_create_panel", ctx.tr("reports.create.panel"), false);
-  if (!panel) { return; }
+  auto *panel = &target;
   auto *shell = &ctx.area.shell();
   const auto current = guard();
-  const auto same_form = guard(false);
-  const bool blocked = busy() || !reader_available() || store->project().busy();
-  const bool other_project = dirty() && io::get_string(draft, "project_id") != project_id;
-  panel->paragraph(ctx.tr("reports.create.intro"));
-  if (!error.empty()) { panel->paragraph(error); }
-  if (busy()) { panel->label(ctx.tr("project.busy")); }
-  if (dirty()) {
-    if (other_project) { panel->paragraph(ctx.tr("reports.create.other_project")); }
-    if (pending()) {
-      panel->paragraph(ctx.tr("reports.create.pending"));
-      panel->label(io::get_string(draft.at("pending"), "report_id"));
-      panel->button("reports_create_check", ctx.tr("reports.create.check"), [this, current, shell] {
-        if (current() && !shell->text_input_active()) { check_pending(); }
-      }).disable(blocked || other_project || !supports("project.reports.get") || shell->text_input_active());
-      panel->checkbox("reports_create_abandon", ctx.tr("reports.create.abandon"),
-          {[this, same_form] { return same_form() && abandon_pending; },
-           [this, current](bool value) { if (current() && !busy()) { abandon_pending = value; changed(); } }}).disable(blocked);
-    }
-    panel->button("reports_create_discard", ctx.tr("reports.create.discard"), [this, current, shell] {
-      if (!current() || busy() || shell->text_input_active() || (pending() && !abandon_pending)) { return; }
-      draft = blank(); files = Json::array(); selected_file.clear(); reviewed_revision = -1;
-      clear_source_metadata(); selected_source = -1; error.clear(); abandon_pending = false; form_changed();
-    }).disable(blocked || (pending() && !abandon_pending) || shell->text_input_active());
-  }
-  if (pending() || other_project) { return; }
-  if (!supports("project.reports.create") || !supports("project.snapshots.list_summaries") ||
-      !supports("project.snapshots.get")) {
-    panel->paragraph(ctx.tr("reports.create.unsupported")); return;
-  }
-  const auto snapshot_id = io::get_string(draft, "snapshot_id");
-  if (snapshot_id.empty()) {
-    panel->button("reports_create_snapshots", ctx.tr("reports.create.load_snapshots"), [this, current, shell] {
-      if (current() && !shell->text_input_active()) { load_snapshots(); }
-    }).disable(blocked || shell->text_input_active());
-    if (!list_loaded) { return; }
-    panel->label(std::string(ctx.tr("reports.create.snapshot_columns")));
-    panel->label(std::to_string(snapshots.empty() ? 0 : offset + 1) + "–" +
-        std::to_string(offset + int64_t(snapshots.size())) + " / " + std::to_string(total));
-    if (snapshots.empty()) { panel->paragraph(ctx.tr("reports.create.no_snapshots")); }
-    ui::ListSpec list; list.count = int(snapshots.size()); list.rows = std::min(4.0f, float(snapshots.size()));
-    const auto summaries = snapshots; // At most 64 small summaries; no full manifests or file paths.
-    list.text = [summaries](int i) { return summaries.at(size_t(i)).label; };
-    list.selected = {[] { return -1; }, [this, current, summaries, shell](int i) {
-      if (!current() || shell->text_input_active() || i < 0 || size_t(i) >= summaries.size()) { return; }
-      review(summaries[size_t(i)].id, summaries[size_t(i)].sha);
-    }};
-    if (!snapshots.empty()) { panel->virtual_list("reports_create_snapshot_list", std::move(list)).disable(blocked); }
-    if (offset || total > int64_t(snapshots.size())) {
-      auto &pages = panel->row();
-      pages.button("reports_create_snapshots_previous", ctx.tr("reports.previous"), [this, current] {
-        if (current()) { load_snapshots(std::max(int64_t(0), offset - 64)); }
-      }).disable(blocked || !offset);
-      pages.button("reports_create_snapshots_next", ctx.tr("reports.next"), [this, current] {
-        if (current()) { load_snapshots(offset + 64); }
-      }).disable(blocked || int64_t(snapshots.size()) >= total - offset);
-    }
-    return;
-  }
-  panel->label(std::string(ctx.tr("reports.snapshot")) + snapshot_id);
-  if (reviewed_revision != revision) {
-    panel->paragraph(ctx.tr("reports.create.review_needed"));
-    panel->button("reports_create_review", ctx.tr("reports.create.review"), [this, current, shell, snapshot_id] {
-      if (current() && !shell->text_input_active()) { review(snapshot_id, io::get_string(draft, "snapshot_sha256")); }
-    }).disable(blocked || shell->text_input_active());
-  }
-  // A text commit invalidates action callbacks, but not an untouched sibling field.
-  // This permits Tab to commit a title then focus the path before the next redraw.
-  const auto title_token = title_generation;
-  panel->prop(ctx.tr("reports.create.title")).text_field("reports_create_title",
-      {[this, same_form, title_token] { return same_form() && title_token == title_generation ? io::get_string(draft, "name") : std::string(); },
-       [this, same_form, title_token](const std::string &value) {
-         if (!same_form() || title_token != title_generation || pending() || busy() || value.size() > 1024 ||
-             !core::utf8::is_valid(value) || value.find('\0') != std::string::npos) { return; }
-         draft["name"] = value; ++title_generation; changed();
-       }}, {.max_length = 256}).disable(blocked);
-  if (reviewed_revision == revision) {
-    panel->paragraph(ctx.tr("reports.create.choose_assets"));
-    ui::ListSpec list; list.count = int(files.size()); list.rows = std::min(5.0f, float(files.size()));
-    std::vector<std::string> names, ids; int selected = -1;
-    for (const auto &item : files) {
-      const auto id = io::get_string(item, "record_id"); ids.push_back(id);
-      names.push_back((asset(id) ? "☑ " : "☐ ") + shortened(io::get_string(item, "name")) +
-          " · " + std::to_string(io::get_int(item, "size", 0)) + " B" + (eligible(item) ? "" : " ⚠"));
-      if (id == selected_file) { selected = int(ids.size()) - 1; }
-    }
-    list.text = [names](int i) { return names.at(size_t(i)); };
-    list.selected = {[selected] { return selected; }, [this, current, ids, shell](int i) {
-      if (!current() || busy() || shell->text_input_active() || i < 0 || size_t(i) >= ids.size()) { return; }
-      selected_file = ids[size_t(i)]; form_changed();
-    }};
-    panel->virtual_list("reports_create_files", std::move(list)).disable(blocked);
-    const auto *selected_item = file(selected_file);
-    if (selected_item) {
-      const auto id = selected_file; const bool included = asset(id) != nullptr;
-      panel->label(shortened(io::get_string(*selected_item, "name"), 512));
-      panel->label(io::get_string(*selected_item, "mime"));
-      panel->checkbox("reports_create_include", ctx.tr("reports.create.include"),
-          {[included] { return included; }, [this, current, id, shell](bool value) {
-            if (!current() || busy() || shell->text_input_active()) { return; }
-            const auto *original = file(id); if (!original || !eligible(*original)) { return; }
-            if (value && !asset(id) && draft.at("assets").size() < 64) {
-              draft["assets"].push_back({{"record_id", id}, {"path", io::get_string(*original, "name")}});
-            }
-            else if (!value && asset(id)) {
-              auto &entries = draft["assets"];
-              for (size_t i = 0; i < entries.size(); ++i) { if (io::get_string(entries[i], "record_id") == id) { entries.erase(i); break; } }
-              if (io::get_string(draft, "entry_record_id") == id) { draft["entry_record_id"] = ""; }
-            }
-            form_changed();
-          }}).disable(blocked || !eligible(*selected_item) || (!included && draft.at("assets").size() >= 64));
-      if (included) {
-        const auto path_token = path_generation;
-        panel->prop(ctx.tr("reports.create.path")).text_field("reports_create_path",
-            {[this, same_form, id, path_token] {
-              if (!same_form() || selected_file != id || path_token != path_generation) { return std::string(); }
-              const auto *entry = asset(id); return entry ? io::get_string(*entry, "path") : std::string();
-            }, [this, same_form, id, path_token](const std::string &value) {
-              if (!same_form() || selected_file != id || path_token != path_generation || pending() || busy() ||
-                  value.size() > 1024 || !core::utf8::is_valid(value) || value.find('\0') != std::string::npos) { return; }
-              auto *entry = asset(id); if (!entry) { return; }
-              (*entry)["path"] = value; ++path_generation; changed();
-            }}, {.max_length = 1024}).disable(blocked);
-        panel->button("reports_create_entry", ctx.tr("reports.create.use_entry"), [this, current, id, shell] {
-          if (current() && !busy() && !shell->text_input_active() && asset(id)) { draft["entry_record_id"] = id; form_changed(); }
-        }).disable(blocked || io::get_string(draft, "entry_record_id") == id || shell->text_input_active());
-      }
-    }
-  }
-  // Review every selected virtual path, including files outside the current list viewport.
-  if (!draft.at("assets").empty()) {
-    panel->label(std::string(ctx.tr("reports.create.selected")) + std::to_string(draft.at("assets").size()) + " / 64");
-    std::vector<std::string> rows;
-    for (const auto &item : draft.at("assets")) {
-      const auto *original = file(io::get_string(item, "record_id"));
-      rows.push_back((item.at("record_id") == draft.at("entry_record_id") ? "▶ " : "") +
-          shortened(io::get_string(item, "path"), 512) + " ← " +
-          shortened(original ? io::get_string(*original, "name") : io::get_string(item, "record_id")));
-    }
-    ui::ListSpec review; review.count = int(rows.size()); review.rows = std::min(3.0f, float(rows.size()));
-    review.text = [rows](int i) { return rows.at(size_t(i)); };
-    panel->virtual_list("reports_create_asset_review", std::move(review));
-  }
-  if (auto *sources_panel = panel->panel("reports_create_sources_panel", ctx.tr("reports.create.sources.panel"), false)) {
+  if (auto *sources_panel = panel->panel("reports_create_sources_panel", ctx.tr("reports.create.sources.panel"), inputs())) {
     auto &box = *sources_panel;
     box.paragraph(ctx.tr("reports.create.sources.intro"));
     const bool supported = supports("project.reports.review_sources");
@@ -770,7 +656,7 @@ void ReportsCreateView::Impl::draw(ui::Layout &layout, EditorContext &ctx, std::
         if (!current() || busy() || shell->text_input_active() || draft.at("sources").size() >= 16) { return; }
         auto &entries = draft["sources"];
         if (std::any_of(entries.begin(), entries.end(), [&chosen](const Json &value) { return io::get_string(value, "kind") == io::get_string(chosen, "kind") && io::get_string(value, "id") == io::get_string(chosen, "id"); })) { return; }
-        entries.push_back(chosen); selected_source = int(entries.size()) - 1; clear_source_review(); form_changed();
+        draft["project_id"] = project_id; entries.push_back(chosen); selected_source = int(entries.size()) - 1; clear_source_review(); form_changed();
       }).disable(blocked || included || selected.size() >= 16 || shell->text_input_active());
     }
     box.label(std::string(ctx.tr("reports.create.sources.selected")) + std::to_string(draft.at("sources").size()) + " / 16");
@@ -816,6 +702,173 @@ void ReportsCreateView::Impl::draw(ui::Layout &layout, EditorContext &ctx, std::
       }
     }
   }
+}
+
+void ReportsCreateView::Impl::draw(ui::Layout &layout, EditorContext &ctx, std::function<bool()> available)
+{
+  reader_available = std::move(available);
+  sync(ctx.store);
+  auto *panel = layout.panel(inputs() ? "reports_generation_input_panel" : "reports_create_panel",
+      ctx.tr(inputs() ? "reports.generation.inputs" : "reports.create.panel"), inputs());
+  if (!panel) { return; }
+  auto *shell = &ctx.area.shell();
+  const auto current = guard();
+  const auto same_form = guard(false);
+  const bool blocked = busy() || !reader_available() || store->project().busy();
+  const bool other_project = dirty() && io::get_string(draft, "project_id") != project_id;
+  panel->paragraph(ctx.tr(inputs() ? "reports.generation.inputs_intro" : "reports.create.intro"));
+  if (!error.empty()) { panel->paragraph(error); }
+  if (busy()) { panel->label(ctx.tr("project.busy")); }
+  if (dirty()) {
+    if (other_project) { panel->paragraph(ctx.tr("reports.create.other_project")); }
+    if (pending()) {
+      panel->paragraph(ctx.tr("reports.create.pending"));
+      panel->label(io::get_string(draft.at("pending"), "report_id"));
+      panel->button("reports_create_check", ctx.tr("reports.create.check"), [this, current, shell] {
+        if (current() && !shell->text_input_active()) { check_pending(); }
+      }).disable(blocked || other_project || !supports("project.reports.get") || shell->text_input_active());
+      panel->checkbox("reports_create_abandon", ctx.tr("reports.create.abandon"),
+          {[this, same_form] { return same_form() && abandon_pending; },
+           [this, current](bool value) { if (current() && !busy()) { abandon_pending = value; changed(); } }}).disable(blocked);
+    }
+    panel->button("reports_create_discard", ctx.tr("reports.create.discard"), [this, current, shell] {
+      if (!current() || busy() || shell->text_input_active() || (pending() && !abandon_pending)) { return; }
+      draft = blank(); files = Json::array(); selected_file.clear(); reviewed_revision = -1;
+      clear_source_metadata(); selected_source = -1; error.clear(); abandon_pending = false; form_changed();
+    }).disable(blocked || (pending() && !abandon_pending) || shell->text_input_active());
+  }
+  if (pending() || other_project) { return; }
+  if (!supports("project.reports.create") || !supports("project.snapshots.list_summaries") ||
+      !supports("project.snapshots.get")) {
+    panel->paragraph(ctx.tr("reports.create.unsupported")); return;
+  }
+  if (inputs()) {
+    draw_sources(*panel, ctx, blocked);
+    panel = panel->panel("reports_generation_attachments_panel", ctx.tr("reports.generation.attachments"), false);
+    if (!panel) { return; }
+  }
+  const auto snapshot_id = io::get_string(draft, "snapshot_id");
+  if (snapshot_id.empty()) {
+    panel->button("reports_create_snapshots", ctx.tr("reports.create.load_snapshots"), [this, current, shell] {
+      if (current() && !shell->text_input_active()) { load_snapshots(); }
+    }).disable(blocked || shell->text_input_active());
+    if (!list_loaded) { return; }
+    panel->label(std::string(ctx.tr("reports.create.snapshot_columns")));
+    panel->label(std::to_string(snapshots.empty() ? 0 : offset + 1) + "–" +
+        std::to_string(offset + int64_t(snapshots.size())) + " / " + std::to_string(total));
+    if (snapshots.empty()) { panel->paragraph(ctx.tr("reports.create.no_snapshots")); }
+    ui::ListSpec list; list.count = int(snapshots.size()); list.rows = std::min(4.0f, float(snapshots.size()));
+    const auto summaries = snapshots; // At most 64 small summaries; no full manifests or file paths.
+    list.text = [summaries](int i) { return summaries.at(size_t(i)).label; };
+    list.selected = {[] { return -1; }, [this, current, summaries, shell](int i) {
+      if (!current() || shell->text_input_active() || i < 0 || size_t(i) >= summaries.size()) { return; }
+      review(summaries[size_t(i)].id, summaries[size_t(i)].sha);
+    }};
+    if (!snapshots.empty()) { panel->virtual_list("reports_create_snapshot_list", std::move(list)).disable(blocked); }
+    if (offset || total > int64_t(snapshots.size())) {
+      auto &pages = panel->row();
+      pages.button("reports_create_snapshots_previous", ctx.tr("reports.previous"), [this, current] {
+        if (current()) { load_snapshots(std::max(int64_t(0), offset - 64)); }
+      }).disable(blocked || !offset);
+      pages.button("reports_create_snapshots_next", ctx.tr("reports.next"), [this, current] {
+        if (current()) { load_snapshots(offset + 64); }
+      }).disable(blocked || int64_t(snapshots.size()) >= total - offset);
+    }
+    return;
+  }
+  panel->label(std::string(ctx.tr("reports.snapshot")) + snapshot_id);
+  if (inputs()) {
+    panel->button("reports_generation_clear_attachments", ctx.tr("reports.generation.clear_attachments"), [this, current, shell] {
+      if (!current() || busy() || shell->text_input_active()) { return; }
+      draft["snapshot_id"] = draft["snapshot_sha256"] = ""; draft["assets"] = Json::array();
+      files = Json::array(); selected_file.clear(); reviewed_revision = -1; list_loaded = false; form_changed();
+    }).disable(blocked || shell->text_input_active());
+  }
+  if (reviewed_revision != revision) {
+    panel->paragraph(ctx.tr("reports.create.review_needed"));
+    panel->button("reports_create_review", ctx.tr("reports.create.review"), [this, current, shell, snapshot_id] {
+      if (current() && !shell->text_input_active()) { review(snapshot_id, io::get_string(draft, "snapshot_sha256")); }
+    }).disable(blocked || shell->text_input_active());
+  }
+  // A text commit invalidates action callbacks, but not an untouched sibling field.
+  // This permits Tab to commit a title then focus the path before the next redraw.
+  const auto title_token = title_generation;
+  if (!inputs()) { panel->prop(ctx.tr("reports.create.title")).text_field("reports_create_title",
+      {[this, same_form, title_token] { return same_form() && title_token == title_generation ? io::get_string(draft, "name") : std::string(); },
+       [this, same_form, title_token](const std::string &value) {
+         if (!same_form() || title_token != title_generation || pending() || busy() || value.size() > 1024 ||
+             !core::utf8::is_valid(value) || value.find('\0') != std::string::npos) { return; }
+         draft["name"] = value; ++title_generation; changed();
+       }}, {.max_length = 256}).disable(blocked); }
+  if (reviewed_revision == revision) {
+    panel->paragraph(ctx.tr("reports.create.choose_assets"));
+    ui::ListSpec list; list.count = int(files.size()); list.rows = std::min(5.0f, float(files.size()));
+    std::vector<std::string> names, ids; int selected = -1;
+    for (const auto &item : files) {
+      const auto id = io::get_string(item, "record_id"); ids.push_back(id);
+      names.push_back((asset(id) ? "☑ " : "☐ ") + shortened(io::get_string(item, "name")) +
+          " · " + std::to_string(io::get_int(item, "size", 0)) + " B" + (eligible(item) ? "" : " ⚠"));
+      if (id == selected_file) { selected = int(ids.size()) - 1; }
+    }
+    list.text = [names](int i) { return names.at(size_t(i)); };
+    list.selected = {[selected] { return selected; }, [this, current, ids, shell](int i) {
+      if (!current() || busy() || shell->text_input_active() || i < 0 || size_t(i) >= ids.size()) { return; }
+      selected_file = ids[size_t(i)]; form_changed();
+    }};
+    panel->virtual_list("reports_create_files", std::move(list)).disable(blocked);
+    const auto *selected_item = file(selected_file);
+    if (selected_item) {
+      const auto id = selected_file; const bool included = asset(id) != nullptr;
+      panel->label(shortened(io::get_string(*selected_item, "name"), 512));
+      panel->label(io::get_string(*selected_item, "mime"));
+      panel->checkbox("reports_create_include", ctx.tr("reports.create.include"),
+          {[included] { return included; }, [this, current, id, shell](bool value) {
+            if (!current() || busy() || shell->text_input_active()) { return; }
+            const auto *original = file(id); if (!original || !eligible(*original)) { return; }
+            if (value && !asset(id) && draft.at("assets").size() < asset_count_limit()) {
+              draft["assets"].push_back({{"record_id", id}, {"path", io::get_string(*original, "name")}});
+            }
+            else if (!value && asset(id)) {
+              auto &entries = draft["assets"];
+              for (size_t i = 0; i < entries.size(); ++i) { if (io::get_string(entries[i], "record_id") == id) { entries.erase(i); break; } }
+              if (io::get_string(draft, "entry_record_id") == id) { draft["entry_record_id"] = ""; }
+            }
+            form_changed();
+          }}).disable(blocked || !eligible(*selected_item) || (!included && draft.at("assets").size() >= asset_count_limit()));
+      if (included) {
+        const auto path_token = path_generation;
+        panel->prop(ctx.tr("reports.create.path")).text_field("reports_create_path",
+            {[this, same_form, id, path_token] {
+              if (!same_form() || selected_file != id || path_token != path_generation) { return std::string(); }
+              const auto *entry = asset(id); return entry ? io::get_string(*entry, "path") : std::string();
+            }, [this, same_form, id, path_token](const std::string &value) {
+              if (!same_form() || selected_file != id || path_token != path_generation || pending() || busy() ||
+                  value.size() > 1024 || !core::utf8::is_valid(value) || value.find('\0') != std::string::npos) { return; }
+              auto *entry = asset(id); if (!entry) { return; }
+              (*entry)["path"] = value; ++path_generation; changed();
+            }}, {.max_length = 1024}).disable(blocked);
+        if (!inputs()) { panel->button("reports_create_entry", ctx.tr("reports.create.use_entry"), [this, current, id, shell] {
+          if (current() && !busy() && !shell->text_input_active() && asset(id)) { draft["entry_record_id"] = id; form_changed(); }
+        }).disable(blocked || io::get_string(draft, "entry_record_id") == id || shell->text_input_active()); }
+      }
+    }
+  }
+  // Review every selected virtual path, including files outside the current list viewport.
+  if (!draft.at("assets").empty()) {
+    panel->label(std::string(ctx.tr("reports.create.selected")) + std::to_string(draft.at("assets").size()) + " / " + std::to_string(asset_count_limit()));
+    std::vector<std::string> rows;
+    for (const auto &item : draft.at("assets")) {
+      const auto *original = file(io::get_string(item, "record_id"));
+      rows.push_back((item.at("record_id") == draft.at("entry_record_id") ? "▶ " : "") +
+          shortened(io::get_string(item, "path"), 512) + " ← " +
+          shortened(original ? io::get_string(*original, "name") : io::get_string(item, "record_id")));
+    }
+    ui::ListSpec review; review.count = int(rows.size()); review.rows = std::min(3.0f, float(rows.size()));
+    review.text = [rows](int i) { return rows.at(size_t(i)); };
+    panel->virtual_list("reports_create_asset_review", std::move(review));
+  }
+  if (!inputs()) { draw_sources(*panel, ctx, blocked); }
+  if (inputs()) { panel->paragraph(ctx.tr("reports.generation.attachments_limits")); return; }
   panel->paragraph(ctx.tr("reports.create.limits"));
   panel->paragraph(ctx.tr("reports.create.finish_text"));
   if (validation_action != action) {
@@ -828,9 +881,13 @@ void ReportsCreateView::Impl::draw(ui::Layout &layout, EditorContext &ctx, std::
   }).disable(blocked || !validation.empty() || shell->text_input_active());
 }
 
-ReportsCreateView::ReportsCreateView() : impl_(std::make_unique<Impl>()) {}
+ReportsCreateView::ReportsCreateView(Mode mode) : impl_(std::make_unique<Impl>(mode)) {}
+std::optional<ReportsCreateView::ReviewedInput> ReportsCreateView::reviewed_input() const { return impl_->reviewed_input(); }
+bool ReportsCreateView::valid_input_workspace_state(const nlohmann::json &state)
+{ return workspace_budget(state) && valid_draft(Json(state), true); }
 ReportsCreateView::~ReportsCreateView() = default;
 bool ReportsCreateView::dirty() const { return impl_->dirty(); }
+uint64_t ReportsCreateView::version() const { return impl_->action; }
 void ReportsCreateView::draw(ui::Layout &layout, EditorContext &ctx, std::function<bool()> available) { impl_->draw(layout, ctx, std::move(available)); }
 std::optional<ReportsCreateView::Created> ReportsCreateView::take_created()
 {
@@ -846,7 +903,7 @@ bool ReportsCreateView::valid_workspace_state(const nlohmann::json &state)
 }
 bool ReportsCreateView::load_workspace_state(const nlohmann::json &state)
 {
-  if (!valid_workspace_state(state)) { return false; }
+  if (!(impl_->inputs() ? valid_input_workspace_state(state) : valid_workspace_state(state))) { return false; }
   ++impl_->epoch; impl_->cancel(); impl_->draft = state.empty() ? blank() : Json(state);
   if (io::get_int(impl_->draft, "version", -1) == 1) { impl_->draft["version"] = 2; impl_->draft["sources"] = Json::array(); }
   impl_->clear_source_metadata(); impl_->selected_source = -1;

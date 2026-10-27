@@ -4,7 +4,7 @@
 #include <array>
 #include <cstdint>
 namespace stk::document_preview {
-// These six colors are only emitted by the HTML fixture, never by the STK GPU host.
+// These six colors are emitted by the HTML/PDF fixtures, never by the STK GPU host.
 inline constexpr std::array<std::array<uint8_t, 3>, 6> kEvidenceColors = {{
     {26, 78, 210}, {230, 118, 24}, {30, 174, 74},
     {154, 42, 190}, {24, 186, 202}, {218, 38, 58}}};

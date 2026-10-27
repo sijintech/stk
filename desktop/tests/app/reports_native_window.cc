@@ -100,6 +100,50 @@ class Exercise {
     wm::Event e; e.type = wm::EventType::KeyDown; e.key = value; e.modifiers = modifiers; event(e);
     e.type = wm::EventType::KeyUp; event(e); frame();
   }
+  void move_pointer(ui::Vec2 point)
+  {
+    wm::Event e; e.type = wm::EventType::MouseMove;
+    e.x = int(point.x); e.y = window_.height() - 1 - int(point.y);
+    event(e); ++pointer_moves; frame();
+  }
+  void enlarge_report_row(app::EditorArea &area)
+  {
+    // Window servers may clamp the requested 1440x1000 window (macOS CI is
+    // 1024x653). Resize the real upper row, retaining the adjacent Viewer and
+    // every live editor; do not replace the layout or assume requested pixels.
+    frame();
+    auto *row = area.node() ? area.node()->parent : nullptr;
+    auto *work = row ? row->parent : nullptr;
+    require(work && work->dir == wm::SplitDir::Vertical && work->children.size() == 2 &&
+        work->children[0].get() == row, "Expected default report/Viewer row above table");
+    const auto found = std::find_if(screen_.splitters().begin(), screen_.splitters().end(),
+        [work](const wm::Splitter &splitter) { return splitter.node == work && splitter.index == 0; });
+    require(found != screen_.splitters().end(), "Report row splitter must exist");
+    const auto bar = found->rect;
+    const auto before = area.rect();
+    const int x = (before.xmin + before.xmax) / 2;
+    const int from_y = (bar.ymin + bar.ymax) / 2;
+    const int to_y = work->rect.ymin + int(std::ceil(std::max(
+        4.0f * screen_.ui()->style().unit, float(work->rect.height()) * 0.12f)));
+    require(to_y < from_y, "Actual client is too small to enlarge the report row");
+    wm::Event e; e.x = x; e.y = from_y; e.type = wm::EventType::MouseMove; event(e);
+    e.type = wm::EventType::MouseDown; e.button = wm::MouseButton::Left; event(e); frame();
+    require(screen_.capture() == wm::Screen::Capture::Splitter, "Mouse must capture the row splitter");
+    e.type = wm::EventType::MouseMove; e.y = to_y; event(e); frame();
+    e.type = wm::EventType::MouseUp; event(e); frame();
+    ++layout_drags;
+    require(screen_.capture() == wm::Screen::Capture::None && area.rect().height() > before.height(),
+        "Actual row drag must enlarge the report area and release capture");
+    const auto after = area.rect();
+    result_["layout_preparation"] = {{"action", "one mouse drag of default upper-row/table splitter"},
+        {"client_size", {window_.width(), window_.height()}},
+        {"report_area_before_bottom_left", {before.xmin, before.ymin, before.width(), before.height()}},
+        {"report_area_after_bottom_left", {after.xmin, after.ymin, after.width(), after.height()}},
+        {"drag_from_bottom_left", {x, from_y}}, {"drag_to_bottom_left", {x, to_y}}};
+    move_pointer({float(after.xmin + after.width() / 2),
+        float(window_.height() - 1 - (after.ymin + after.height() / 2))});
+    save();
+  }
   void text(const std::string &value)
   {
     // Same UTF-8 commit path that GHOST key events use; no widget binding/setter invocation.
@@ -228,9 +272,10 @@ class Exercise {
   {
     check_native_scroll();
     result_["actual_mouse_clicks"] = clicks; result_["wheel_steps"] = wheels;
+    result_["layout_mouse_drags"] = layout_drags; result_["pointer_moves"] = pointer_moves;
     write(directory_ / "result.json", result_.dump(2));
   }
-  int clicks = 0, wheels = 0;
+  int clicks = 0, wheels = 0, layout_drags = 0, pointer_moves = 0;
  private:
   void check_native_scroll() const
   {
@@ -257,12 +302,18 @@ void run(const Options &options, Json &result, const fs::path &directory)
 {
   const auto environment = document_preview::native_evidence_environment_error();
   require(environment.empty(), environment);
+  std::fputs("STK_NATIVE_STAGE name=reports.after-environment-probe\n", stdout); std::fflush(stdout);
   gfx::Backend backend; std::string error;
   require(gfx::resolve_backend(options.backend, backend, error), error);
+  std::fputs("STK_NATIVE_STAGE name=reports.app-shell.before\n", stdout); std::fflush(stdout);
   app::AppShell shell({.language = "en", .interactive = false});
+  std::fputs("STK_NATIVE_STAGE name=reports.app-shell.after\n", stdout); std::fflush(stdout);
   wm::WmOptions wm_options; wm_options.gpu.backend = backend;
   wm_options.window = {"STK public frozen report native acceptance", 1440, 1000, false};
-  auto manager = wm::WindowManager::create(wm_options, error); require(bool(manager), error);
+  std::fputs("STK_NATIVE_STAGE name=reports.window-manager.before\n", stdout); std::fflush(stdout);
+  auto manager = wm::WindowManager::create(wm_options, error);
+  std::fputs("STK_NATIVE_STAGE name=reports.window-manager.after\n", stdout); std::fflush(stdout);
+  require(bool(manager), error);
   auto *window = manager->main_window(); auto &screen = window->screen();
   result["system_backend"] = manager->system_backend();
   result["gpu_backend"] = manager->gpu().backend_name();
@@ -278,6 +329,7 @@ void run(const Options &options, Json &result, const fs::path &directory)
   } redraw_timer{*manager, manager->add_timer(50, 50, [window] { window->request_redraw(); })};
   require(redraw_timer.id != 0, "Cannot install bounded-wait redraw timer");
   Exercise ui(*manager, *window, result, directory);
+  ui.enlarge_report_row(*area);
   const auto scratch = directory / "public-fixture"; fs::create_directory(scratch);
   const auto trace = scratch / "calls.jsonl";
   const auto wrapper = scratch / "observe.py";
@@ -407,19 +459,22 @@ raise SystemExit(main())
   require(!fs::exists(trace), "Selecting a report must not prepare/read any content");
   result["project_id"] = project.project()->id; result["report_id"] = kReport;
   result["source_sha256"] = report.at("source_sha256"); result["source_kind"] = options.source;
-  result["body_text_pixel_criterion"] = pdf ? "not applied: PDF page identities use independent vector stripes" :
+  result["body_text_pixel_criterion"] = pdf ? "not applied: PDF page identities use independent page-embedded RGB stripes" :
       "Three aligned 20-column U+2588/space rows, independently required beside the frozen PNG";
   result["required_images"] = pdf ? 160 : 140;
-  result["starting_layout"] = "1440x1000 logical window; default a3 Reports/Python; Viewer stays beside report; Reports selected by one mouse click";
+  result["starting_layout"] = "Actual client size recorded; default a3 Reports/Python with one recorded upper-row splitter drag; Viewer stays beside report; Reports selected by one mouse click";
   auto ready = [&] {
     const auto *v = ui.widget("reports_document_viewport"), *f = ui.widget("reports_document_focus");
-    return v && v->type == ui::WidgetType::NativeViewport && ui.visible(v) && f && f->enabled;
+    return v && v->type == ui::WidgetType::NativeViewport && ui.visible(v) && f && f->enabled &&
+        !screen.ui()->native_view_interaction_blocked();
   };
   ui.click("reports_preview", *area); ui.wait(ready, "Production native report ready");
   result["initial_reading_clicks"] = ui.clicks;
   for (int cycle = 1; cycle <= 20; ++cycle) {
     ui.wait(ready, "Native report visible");
     const auto bounds = ui.widget("reports_document_viewport")->rect;
+    require(bounds.h >= 10.0f * screen.ui()->style().unit,
+        "Actual native viewport is too short for the complete three-line body fixture");
     ui.capture(cycle, "visible-page1", 1, bounds, !pdf);
     if (pdf) { ui.capture(cycle, "scrolled-page2", 2, bounds, false, true); }
     const int retained_page = pdf ? 2 : 1;
@@ -429,7 +484,13 @@ raise SystemExit(main())
     ui.click(area->area_menu_key(), *area);
     require(screen.ui()->popup_open(), "Area menu opens through actual mouse routing");
     ui.capture(cycle, "popup", 0, bounds, !pdf);
-    ui.key(wm::Key::Esc); ui.wait(ready, "Report returns after popup"); ui.capture(cycle, "after-popup", retained_page, bounds, !pdf);
+    ui.key(wm::Key::Esc);
+    // Leaving the pointer over the menu button creates its tooltip on the next
+    // frame. All tooltips deliberately hide the production child, even outside
+    // this viewport; move to its passive interior before awaiting visible pixels.
+    ui.move_pointer({bounds.cx(), bounds.cy()});
+    ui.wait([&] { return ready() && !screen.ui()->popup_open(); }, "Report returns after popup and tooltip");
+    ui.capture(cycle, "after-popup", retained_page, bounds, !pdf);
     ui.click("reports_document_close", *area); ui.capture(cycle, "closed", 0, bounds, !pdf);
     ui.wait([&] { const auto *w = ui.widget("reports_preview"); return w && w->enabled; }, "Explicit reopen action");
     ui.click("reports_preview", *area); ui.wait(ready, "Explicit prepare creates next native preview");

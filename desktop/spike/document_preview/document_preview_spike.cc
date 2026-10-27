@@ -451,7 +451,9 @@ void final_memory_gate() noexcept
 int run(const Options &options, Evidence *evidence)
 {
   std::vector<std::weak_ptr<Host>> hosts;
+  std::fputs("STK_NATIVE_STAGE name=spike.app-shell.before\n", stdout); std::fflush(stdout);
   app::AppShell shell({.language = "en", .interactive = true});
+  std::fputs("STK_NATIVE_STAGE name=spike.app-shell.after\n", stdout); std::fflush(stdout);
   shell.registry().add({kEditor, "Document preview (spike)", [&](const app::EditorType &type) {
     auto host = std::make_shared<Host>();
     hosts.push_back(host);
@@ -461,7 +463,9 @@ int run(const Options &options, Evidence *evidence)
   wm_options.gpu.backend = options.backend;
   wm_options.window = {"STK document preview experiment", 1440, 1000, false};
   std::string error;
+  std::fputs("STK_NATIVE_STAGE name=spike.window-manager.before\n", stdout); std::fflush(stdout);
   auto manager = wm::WindowManager::create(wm_options, error);
+  std::fputs("STK_NATIVE_STAGE name=spike.window-manager.after\n", stdout); std::fflush(stdout);
   if (!manager) { throw std::runtime_error(error); }
   auto *window = manager->main_window();
   shell.install(window->screen(), window);
@@ -664,10 +668,13 @@ int main(int argc, char **argv)
     if (gate.evidence) {
       const auto environment_error = native_evidence_environment_error();
       if (!environment_error.empty()) { throw std::runtime_error(environment_error); }
+      std::fputs("STK_NATIVE_STAGE name=spike.after-environment-probe\n", stdout); std::fflush(stdout);
     }
     int result;
     {
+      std::fputs("STK_NATIVE_STAGE name=spike.runtime.before\n", stdout); std::fflush(stdout);
       gfx::Runtime runtime;
+      std::fputs("STK_NATIVE_STAGE name=spike.runtime.after\n", stdout); std::fflush(stdout);
       if (std::atexit(final_memory_gate) != 0) {
         throw std::runtime_error("Cannot register final guarded STK memory validation");
       }

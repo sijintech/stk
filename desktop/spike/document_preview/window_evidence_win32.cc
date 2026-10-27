@@ -14,6 +14,10 @@
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include "window_evidence.hh"
 #include "stk/io/json.hh"
+#include <atomic>
+#include <cstdint>
+#include <cwchar>
+#include <iterator>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -23,6 +27,171 @@ namespace {
 using namespace winrt::Windows::Graphics::Capture;
 using namespace winrt::Windows::Graphics::DirectX;
 using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
+
+// This file belongs only to the opt-in acceptance executables. Keep the diagnostic handle
+// for their whole process lifetime, including engine static destruction; Windows closes it
+// on exit. Never serialize stack memory, registers containing data, or an environment dump.
+HANDLE crash_file = INVALID_HANDLE_VALUE;
+std::atomic<const char *> last_stage{"diagnostics.not-installed"};
+static_assert(std::atomic<const char *>::is_always_lock_free);
+std::atomic<unsigned> stage_count{0};
+volatile LONG handling_crash = 0;
+
+void write_crash_line(const char *line, DWORD length) noexcept
+{
+  if (crash_file != INVALID_HANDLE_VALUE) {
+    DWORD written = 0;
+    WriteFile(crash_file, line, length, &written, nullptr);
+    FlushFileBuffers(crash_file);
+  }
+  // Avoid stdio stream locks in this write path. Ordinary lifecycle logging explicitly
+  // flushes stdout; fault logging writes directly to the already inherited stderr handle.
+  const auto error = GetStdHandle(STD_ERROR_HANDLE);
+  if (error && error != INVALID_HANDLE_VALUE) {
+    DWORD written = 0;
+    WriteFile(error, line, length, &written, nullptr);
+  }
+}
+
+void record_fault_frame(unsigned index, uintptr_t address) noexcept
+{
+  MEMORY_BASIC_INFORMATION memory{};
+  const auto base = VirtualQuery(reinterpret_cast<const void *>(address), &memory, sizeof(memory)) ?
+      reinterpret_cast<uintptr_t>(memory.AllocationBase) : uintptr_t(0);
+  wchar_t module_path[1024]{};
+  char module_name[128] = "unknown";
+  const auto count = base ? GetModuleFileNameW(reinterpret_cast<HMODULE>(base), module_path,
+                                               DWORD(std::size(module_path))) : 0;
+  if (count && count < std::size(module_path)) {
+    DWORD start = 0;
+    for (DWORD i = 0; i < count; ++i) {
+      if (module_path[i] == L'\\' || module_path[i] == L'/') { start = i + 1; }
+    }
+    size_t out = 0;
+    for (DWORD i = start; i < count && out + 1 < sizeof(module_name); ++i) {
+      const auto c = module_path[i];
+      module_name[out++] = c >= 33 && c <= 126 && c != '=' ? char(c) : '?';
+    }
+    module_name[out] = '\0';
+  }
+  char line[384]{};
+  const int length = std::snprintf(line, sizeof(line),
+      "STK_NATIVE_CRASH_FRAME index=%u address=0x%llx module=%s allocation_base=0x%llx offset=0x%llx\n",
+      index, static_cast<unsigned long long>(address), module_name, static_cast<unsigned long long>(base),
+      static_cast<unsigned long long>(base ? address - base : 0));
+  if (length > 0 && size_t(length) < sizeof(line)) { write_crash_line(line, DWORD(length)); }
+}
+
+void record_fault_stack(const CONTEXT *source) noexcept
+{
+#if defined(_M_X64)
+  // Unwind a COPY of the fault context, not the exception-handler call stack. No symbols,
+  // DLL loading, callbacks of our own or heap allocations are needed. A damaged stack or
+  // driver unwind table must not prevent the already flushed exception record surviving.
+  __try {
+    CONTEXT context = *source;
+    for (unsigned index = 0; index < 32 && context.Rip; ++index) {
+      record_fault_frame(index, uintptr_t(context.Rip));
+      const auto previous_ip = context.Rip;
+      const auto previous_sp = context.Rsp;
+      DWORD64 image_base = 0;
+      const auto entry = RtlLookupFunctionEntry(context.Rip, &image_base, nullptr);
+      if (entry) {
+        PVOID handler_data = nullptr;
+        DWORD64 frame = 0;
+        RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip, entry, &context,
+                        &handler_data, &frame, nullptr);
+      }
+      else {
+        DWORD64 return_address = 0;
+        SIZE_T bytes = 0;
+        if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void *>(context.Rsp),
+                               &return_address, sizeof(return_address), &bytes) ||
+            bytes != sizeof(return_address)) { break; }
+        context.Rip = return_address;
+        context.Rsp += sizeof(return_address);
+      }
+      if (context.Rsp <= previous_sp || context.Rsp - previous_sp > 1024 * 1024 ||
+          context.Rip == previous_ip) { break; }
+    }
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    constexpr char line[] = "STK_NATIVE_CRASH_STACK stopped=invalid-unwind\n";
+    write_crash_line(line, DWORD(sizeof(line) - 1));
+  }
+#else
+  (void)source;
+  constexpr char line[] = "STK_NATIVE_CRASH_STACK unavailable=non-x64\n";
+  write_crash_line(line, DWORD(sizeof(line) - 1));
+#endif
+}
+
+LONG WINAPI record_unhandled_exception(EXCEPTION_POINTERS *exception) noexcept
+{
+  if (InterlockedCompareExchange(&handling_crash, 1, 0) != 0) { return EXCEPTION_CONTINUE_SEARCH; }
+  const auto *record = exception ? exception->ExceptionRecord : nullptr;
+  char line[384]{};
+  const int length = std::snprintf(line, sizeof(line),
+      "STK_NATIVE_CRASH code=0x%08lx address=0x%llx thread=%lu last_stage=%s\n",
+      record ? record->ExceptionCode : 0ul,
+      static_cast<unsigned long long>(record ? reinterpret_cast<uintptr_t>(record->ExceptionAddress) : 0),
+      GetCurrentThreadId(), last_stage.load(std::memory_order_relaxed));
+  if (length > 0 && size_t(length) < sizeof(line)) { write_crash_line(line, DWORD(length)); }
+  if (exception && exception->ContextRecord) { record_fault_stack(exception->ContextRecord); }
+  // Preserve the original failure and normal Windows termination. Never resume execution,
+  // convert a crash to a passing exit, or emit any successful native-evidence marker.
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void stage(const char *name, long result = 0, DWORD error = 0) noexcept
+{
+  last_stage.store(name, std::memory_order_relaxed); // All callers use fixed string literals.
+  if (stage_count.fetch_add(1, std::memory_order_relaxed) >= 128) { return; }
+  std::printf("STK_NATIVE_STAGE name=%s thread=%lu result=%ld win32_error=%lu\n",
+              name, GetCurrentThreadId(), result, error);
+  std::fflush(stdout);
+}
+
+std::string install_crash_diagnostics()
+{
+  static bool installed = false; // Only the acceptance UI thread calls this entry point.
+  if (installed) { return {}; }
+  wchar_t root[32768]{};
+  const auto count = GetEnvironmentVariableW(L"STK_NATIVE_TEST_DIR", root, DWORD(std::size(root)));
+  if (count >= std::size(root)) { return "Native diagnostic evidence directory exceeds path budget"; }
+  if (count) {
+    // The explicit CI evidence directory is a local absolute path. Do not open a network
+    // share or follow a redirected evidence child. The fixed basename cannot escape it.
+    if (count < 3 || root[1] != L':' || (root[2] != L'\\' && root[2] != L'/')) {
+      return "Native diagnostic evidence directory must be an absolute local drive path";
+    }
+    const auto folder = std::wstring(root, count) + L"\\evidence";
+    const auto attributes = GetFileAttributesW(folder.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+      return "Native diagnostic evidence child directory is missing or redirected";
+    }
+    wchar_t basename[96]{};
+    std::swprintf(basename, std::size(basename), L"\\native-crash-%lu-%llu.txt", GetCurrentProcessId(),
+                  static_cast<unsigned long long>(GetTickCount64()));
+    const auto path = folder + basename;
+    if (path.size() >= 32768) { return "Native diagnostic evidence file exceeds path budget"; }
+    crash_file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW,
+                             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+    if (crash_file == INVALID_HANDLE_VALUE) { return "Cannot create exclusive native crash evidence file"; }
+    constexpr char header[] = "STK_NATIVE_CRASH_FORMAT version=1 stack=addresses-only limit=32\n";
+    DWORD written = 0;
+    if (!WriteFile(crash_file, header, DWORD(sizeof(header) - 1), &written, nullptr) ||
+        written != sizeof(header) - 1 || !FlushFileBuffers(crash_file)) {
+      CloseHandle(crash_file); crash_file = INVALID_HANDLE_VALUE;
+      return "Cannot flush native crash evidence header";
+    }
+  }
+  SetUnhandledExceptionFilter(record_unhandled_exception);
+  installed = true;
+  stage(count ? "diagnostics.installed.file-and-stderr" : "diagnostics.installed.stderr-only");
+  return {};
+}
 
 class Capture final : public WindowEvidenceCapture {
  public:
@@ -190,6 +359,8 @@ class Capture final : public WindowEvidenceCapture {
 }
 std::string native_evidence_environment_error()
 {
+  if (const auto error = install_crash_diagnostics(); !error.empty()) { return error; }
+  stage("probe.begin");
   wchar_t software_option[4]{};
   const auto software_count = GetEnvironmentVariableW(
       L"STK_NATIVE_EVIDENCE_REQUIRE_LLVMPIPE", software_option, 4);
@@ -258,6 +429,7 @@ std::string native_evidence_environment_error()
   if (!set_process_context || !get_thread_context || !get_context_awareness) {
     return "Native evidence requires User32 DPI awareness context APIs; one or more are unavailable";
   }
+  stage("probe.dpi.before");
   if (!set_process_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE) &&
       get_context_awareness(get_thread_context()) != DPI_AWARENESS_PER_MONITOR_AWARE) {
     return "Cannot establish GHOST-compatible per-monitor DPI awareness before the GL probe";
@@ -265,6 +437,7 @@ std::string native_evidence_environment_error()
   if (get_context_awareness(get_thread_context()) != DPI_AWARENESS_PER_MONITOR_AWARE) {
     return "The native evidence UI thread has an incompatible DPI context";
   }
+  stage("probe.dpi.after");
   // GHOST displays a modal dialog on GL startup failure. Probe our own hidden window first
   // so a runner with only Microsoft's GL 1.1 fails with a durable, non-interactive diagnosis.
   // This DC belongs solely to this temporary STK window: no screen DC or pixels are read.
@@ -277,12 +450,38 @@ std::string native_evidence_environment_error()
     HGLRC legacy = nullptr, modern = nullptr;
     ~Probe()
     {
-      if (legacy || modern) { wglMakeCurrent(nullptr, nullptr); }
-      if (modern) { wglDeleteContext(modern); }
-      if (legacy) { wglDeleteContext(legacy); }
-      if (dc) { ReleaseDC(window, dc); }
-      if (window) { DestroyWindow(window); }
-      if (atom) { UnregisterClassW(name, instance); }
+      stage("probe.teardown.begin");
+      if (legacy || modern) {
+        stage("probe.unbind.before");
+        const auto ok = wglMakeCurrent(nullptr, nullptr);
+        stage("probe.unbind.after", ok, ok ? 0 : GetLastError());
+      }
+      if (modern) {
+        stage("probe.delete-core.before");
+        const auto ok = wglDeleteContext(modern);
+        stage("probe.delete-core.after", ok, ok ? 0 : GetLastError());
+      }
+      if (legacy) {
+        stage("probe.delete-legacy.before");
+        const auto ok = wglDeleteContext(legacy);
+        stage("probe.delete-legacy.after", ok, ok ? 0 : GetLastError());
+      }
+      if (dc) {
+        stage("probe.release-dc.before");
+        const auto ok = ReleaseDC(window, dc);
+        stage("probe.release-dc.after", ok); // ReleaseDC does not define GetLastError.
+      }
+      if (window) {
+        stage("probe.destroy-window.before");
+        const auto ok = DestroyWindow(window);
+        stage("probe.destroy-window.after", ok, ok ? 0 : GetLastError());
+      }
+      if (atom) {
+        stage("probe.unregister-class.before");
+        const auto ok = UnregisterClassW(name, instance);
+        stage("probe.unregister-class.after", ok, ok ? 0 : GetLastError());
+      }
+      stage("probe.teardown.end");
     }
   } p;
   WNDCLASSW cls{};
@@ -290,25 +489,42 @@ std::string native_evidence_environment_error()
   cls.lpfnWndProc = DefWindowProcW;
   cls.hInstance = p.instance;
   cls.lpszClassName = p.name;
+  stage("probe.register-class.before");
   p.atom = RegisterClassW(&cls);
+  stage("probe.register-class.after", p.atom, p.atom ? 0 : GetLastError());
   if (!p.atom) { return "Cannot register the isolated STK OpenGL capability probe"; }
+  stage("probe.create-window.before");
   p.window = CreateWindowW(p.name, L"STK native evidence capability probe", WS_OVERLAPPEDWINDOW,
                             0, 0, 64, 64, nullptr, nullptr, p.instance, nullptr);
+  stage("probe.create-window.after", p.window != nullptr, p.window ? 0 : GetLastError());
+  stage("probe.get-dc.before");
   if (!p.window || !(p.dc = GetDC(p.window))) { return "No interactive Win32 window/DC for the STK probe"; }
+  stage("probe.get-dc.after", 1);
   PIXELFORMATDESCRIPTOR format{};
   format.nSize = sizeof(format); format.nVersion = 1;
   format.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
   format.iPixelType = PFD_TYPE_RGBA; format.cColorBits = 32;
   format.cDepthBits = 24; format.cStencilBits = 8;
+  stage("probe.pixel-format.before");
   const int index = ChoosePixelFormat(p.dc, &format);
-  if (!index || !SetPixelFormat(p.dc, index, &format) ||
-      !(p.legacy = wglCreateContext(p.dc)) || !wglMakeCurrent(p.dc, p.legacy)) {
+  if (!index || !SetPixelFormat(p.dc, index, &format)) {
     return "Windows runner cannot create an OpenGL context; native preview is unverified";
   }
+  stage("probe.pixel-format.after", index);
+  stage("probe.create-legacy.before");
+  p.legacy = wglCreateContext(p.dc);
+  stage("probe.create-legacy.after", p.legacy != nullptr, p.legacy ? 0 : GetLastError());
+  if (!p.legacy) { return "Windows runner cannot create an OpenGL context; native preview is unverified"; }
+  stage("probe.bind-legacy.before");
+  if (!wglMakeCurrent(p.dc, p.legacy)) {
+    return "Windows runner cannot create an OpenGL context; native preview is unverified";
+  }
+  stage("probe.bind-legacy.after", 1);
   if (!record_gl("legacy")) { return "The actual OpenGL renderer is not the explicitly required llvmpipe"; }
-  const auto version_text = glGetString(GL_VERSION);
-  const std::string legacy_version = version_text ? reinterpret_cast<const char *>(version_text) : "unknown";
+  const auto legacy_version = gl_text(GL_VERSION);
+  stage("probe.lookup-core.before");
   const auto address = wglGetProcAddress("wglCreateContextAttribsARB");
+  stage("probe.lookup-core.after");
   const auto value = reinterpret_cast<uintptr_t>(address);
   if (!address || value <= 3 || value == UINTPTR_MAX) {
     return "Native STK window needs OpenGL 4.3 core; runner exposes " + legacy_version +
@@ -318,18 +534,28 @@ std::string native_evidence_environment_error()
   // WGL_CONTEXT_MAJOR_VERSION_ARB, MINOR_VERSION_ARB, PROFILE_MASK_ARB, CORE_PROFILE_BIT_ARB.
   const int attributes[] = {0x2091, 4, 0x2092, 3, 0x9126, 1, 0};
   const auto create = reinterpret_cast<CreateContext>(address);
+  stage("probe.create-core.before");
   p.modern = create(p.dc, nullptr, attributes);
-  if (!p.modern || !wglMakeCurrent(p.dc, p.modern)) {
+  stage("probe.create-core.after", p.modern != nullptr, p.modern ? 0 : GetLastError());
+  if (!p.modern) {
     return "Native STK window needs OpenGL 4.3 core; creation failed on runner GL " + legacy_version;
   }
+  stage("probe.bind-core.before");
+  if (!wglMakeCurrent(p.dc, p.modern)) {
+    return "Native STK window needs OpenGL 4.3 core; creation failed on runner GL " + legacy_version;
+  }
+  stage("probe.bind-core.after", 1);
   if (!record_gl("core")) { return "The actual OpenGL core renderer is not the explicitly required llvmpipe"; }
+  stage("probe.verify-core.before");
   int major = 0, minor = 0;
-  const auto modern_text = glGetString(GL_VERSION);
-  if (!modern_text || std::sscanf(reinterpret_cast<const char *>(modern_text), "%d.%d", &major, &minor) != 2 ||
+  const auto modern_text = gl_text(GL_VERSION);
+  if (std::sscanf(modern_text.c_str(), "%d.%d", &major, &minor) != 2 ||
       major < 4 || (major == 4 && minor < 3)) {
     return "The runner did not supply the requested OpenGL 4.3 context";
   }
-  std::printf("Native evidence capability probe: OpenGL %s; actual window/capture still pending\n", reinterpret_cast<const char *>(modern_text));
+  stage("probe.verify-core.after", 1);
+  // Driver strings were already emitted as escaped JSON; keep this stage line fixed.
+  stage("probe.return-success.pending-teardown");
   return {};
 }
 std::unique_ptr<WindowEvidenceCapture> capture_window_evidence(wm::NativeWindowHandle parent)
