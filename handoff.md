@@ -6,13 +6,15 @@
 
 ## 当前工作树和下一步
 
+- **最新交付与在研修复**：S3记录/认知头`70449dc15ed0635014f8bc66924bc7af123f0a8a`已推送；后续Hub上传幂等修复`e5cea387f048f937eb643a69bba11d81363d83d3`已本地提交，尚未推送。它只分开预算请求与原请求身份，不改变传输协议或旧journal；3.12相关49/49、3.11/3.14各23/23零跳过，修前10个确定性失败和1个真实Hub失败保留。旧错误journal缺少原请求，仍按transfer ID查询/恢复，不猜写。
+- **当前CI门禁**：70449dc的Desktop`40973399539`和Runtime`40973399517`正在运行，前者四平台/包job均已进入构建；Runtime的control、web、desktop三个job已成功，其余仍运行。Secret`40973399529`成功；这是当次核对快照。该Desktop结束前不推送e5cea387或后续代码，不把在跑状态记为通过。
 - **交付源码**：主线代码头`c236816a6a67520b816754aa091b06b90f81c051`。本批六提交：平台修复`d64023ce`、S3后端`fca7fcf0`、registry预算`99bea12b`、Windows诊断`62984f28`、桌面训练页`384c16bb`、英文标题/18编辑器补修`c236816a`；状态记录和AOCI收尾同批交付。先核真实Git及新交付头CI，不把本机通过当平台通过。前头9da Desktop已终态，推送等待门已满足。
 - **S3b本机已验收**：冻结数据/options/精确split/base+active baseline、实际迁移初始化与同留出集比较、持久任务/逐epoch曲线、明确准备/启动/取消/恢复、活动版本generation CAS与回退、独立材料模型页和实际GPU曲线。准备/读/重开/恢复不训练，旧模型无weights摘要明确legacy未验证；capsule不改合作格式。[训练契约](docs/specs/materials-training-1.md)、[桌面指南](docs/desktop.md)。
 - **本机证据**：最终原生2021/2021、零失败/错误/跳过、481.20秒；现行Linux必跑413次/1545项匹配。首次完整5个旧布局/数量失败已保留，短英文标题及18编辑器检查修正后39项及最终全量通过，golden未改。新30项含22CPU与8实际GPU、中英宽窄16PNG；固定预填起点校验→冻结→开始3点击，评估另1点击，Viewer/隐藏稿不变。完整Python3911通过/31跳过/2排除，最后读锁/预算另83项通过；15个原跳过的离屏用例在私有Xvfb下全部通过。三版本/同capsule及安装包证据见运行验收，不能把无Torch环境的skip作训练通过。
 - **发行和运行句柄**：证据根`/home/mnemora/.local/state/stk-validation/s3-training-20261029/`。所有旧native build、首轮/最终full及定向进程均已终态，不重启旧句柄；只运行一个新编译且退出成功后才测试。最终包以`package-check/final-summary.json`的真实产物、业务字节比对和安装测试为准，业务候选五文件198/198实际安装通过，470份py/schema字节一致；旧bootstrap196项属于预算补修前preimage，最终文档版通过全成员比对绑定到已测198项候选。
 - **平台仍有缺口**：[Desktop40957894690](https://github.com/sijintech/stk/actions/runs/40957894690)已结束：Linux主回归旧补丁上限3失败、Mac ARC编译失败，Linux包/干净机及Windows主回归成功，Windows独立native123763562850六格式均0轮/0图，本头无RIP0异常记录，失败为WGC几何门及鼠标消息。补丁上限4、ARC strong、FileRenameInfoEx与精确Win诊断已提交，门禁未放宽；Runtime40957894618六成功/两Windows旧generation replace失败。Windows候选本机三版本各95通过/7 Windows-only跳过，实际分支待新CI。P4文档/视频默认关闭，尚非双平台交付。
 - **后续完整路线**：保持P4平台复验，接第5项跨平台连接/S4独立Flower，随后知识库、复现、完整发行及toolkits按职责整合；PET新专项后置。三项所有者待决保持下节原范围，S2c权限未扩大。现有LaTeX/MP4及旧1991原生/456安装包证据只代表前批，不能冒充本次2021/最终包结果。
-- **认知与操作**：本Run正式Overview在11/23块后snapshot unavailable，已停链，无Attestation；按绑定源码推进，不声称完整认知可靠。本批增量认知对齐以收尾Verify/Check/Guide机器证据为准。上下文压缩后按AGENTS/rules完整重载，handoff不替代当前认知。测试key空/model unset，保护Viewer、隐藏稿和明确运行/保存/发送。
+- **认知与操作**：此前正式Overview在11/23块后snapshot unavailable，失败链保留；新一轮完整1102条/23块已确认交付，Challenge10/10通过，随后32条语义更新使S3资产1105条对齐，Verify/Check/Guide均通过。索引更新后不沿用旧收据声称新完整认知可靠；Hub修复收尾另以实际机器证据为准。上下文压缩后按AGENTS/rules完整重载，handoff不替代认知。测试key空/model unset，保护Viewer、隐藏稿和明确动作。
 
 核对命令：
 

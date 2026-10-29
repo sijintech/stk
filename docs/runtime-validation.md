@@ -3,6 +3,24 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-29：S3交付闭环与Hub上传幂等修复
+
+S3记录/认知交付`70449dc15ed0635014f8bc66924bc7af123f0a8a`已推送。32条语义按13/12/7三批Apply，最终1105条，Verify/Check退出0、Guide complete=true/next_action=none，无未决事务、Recovery或第三方冲突。暂存141405字节gitleaks零发现。完整交付证明在S3证据根`delivery-closure-summary.json`；此前失败的Overview链保留，新链完整1102条/23块、约156129 tokens、Challenge10/10通过，随后索引身份已变，资产对齐与模型完整认知可靠性分开。
+
+后续修复源码`e5cea387f048f937eb643a69bba11d81363d83d3`只把Hub导入预算检查临时变量改为import_request，避免覆盖upload.start原始幂等请求。证据根`/home/mnemora/.local/state/stk-validation/s4-foundation-20261029/hub-idempotency/`，源摘要与结果见`summary.json`。
+
+| 验证 | 实际结果 |
+|---|---|
+| 修前独立复现 | 16组合中Hub8个均误冲突，Runtime8个正常 |
+| 修前扩展回归 | 23项10失败/13通过，0错误/跳过；真实Hub新增key链另1项失败，原XML/log保留 |
+| 修后Python3.12 | 四个传输/Hub/Runtime相关文件49/49，0失败/错误/跳过，35.712秒 |
+| 修后Python3.11/3.14 | 确定性各23/23，0失败/错误/跳过，0.210/0.214秒 |
+| 源与扫描 | 三文件SHA与已测summary一致，diff检查通过，暂存12404字节gitleaks零发现 |
+
+覆盖文件/目录与remote原写法、六状态及重启相同ID不再launch、四并发一次launch、变参冲突、导入预算先拒绝；真实Hub使用2MiB+321字节，分块失败后原offset续传，经审阅、桥重启和批准仅生成一次import，下载SHA一致。旧错误journal已丢原始remote意图，不能由规范化路径猜回；同key保留conflict，已有transfer ID仍可查询/恢复。不修改原协议，不扩展权限。本机Linux执行，不把多Python版本当Mac/Windows实测；S3发行包证明绑定70449dc业务，未声明该包包含后续传输补修。
+
+当前[Desktop40973399539](https://github.com/sijintech/stk/actions/runs/40973399539)的Linux主回归、Linux包、Mac和Windows四job均已进入构建但未结束；[Runtime40973399517](https://github.com/sijintech/stk/actions/runs/40973399517)的control/web/desktop成功，其余五job仍运行。Secret40973399529成功；这是修复本地提交时的查询快照，完整摘要为`desktop-ci-at-local-fix.json`、`runtime-ci-at-local-fix.json`。Desktop终态前不推送后续代码；无新Mac/Win原生通过声明。四份状态记录与AOCI按本批最终稳定源另行收尾，P4及第5–8项继续，PET新专项后置；测试key空/model unset，无收费模型请求。
+
 ## 2026-10-29：S3b本机验收完成与平台补修待复验
 
 本轮基线main `9da98ea1aabf129e3f4b8740a1d80698fdde568d`；平台修复`d64023ce`、S3后端`fca7fcf0`、registry预算`99bea12b`、Windows诊断`62984f28`、桌面页`384c16bb`和最终布局补修`c236816a6a67520b816754aa091b06b90f81c051`构成本批源码；状态记录与认知资产同批收尾，新交付头CI待核。S3证据根为 `/home/mnemora/.local/state/stk-validation/s3-training-20261029/`。
