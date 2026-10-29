@@ -2,6 +2,29 @@
 
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-29：冻结 LaTeX 工作流与桌面编译证据
+
+源码 `51a01af143496eeaf58b39b4a6547af45e55176d` 增加 `latex-compile/1` 的明确准备/启动、冻结文件与编译器、取消/超时、持久日志与只读诊断；
+补修 `3d4998d613597d93c6da4b7688775a7e854df57a` 使项目关闭/打开/刷新意图在旧句柄仍存在时也拒绝晚到源码跳转。两者均直接在 main，
+记录与托管认知资产随本批收尾；新头 CI 待核。普通 Viewer 图与报告读取不会启动编译，也不自动创建报告或预览。
+
+本轮先完成源码主链的完整 Python **3644 passed、24 skipped、2 deselected、零失败、803.73秒**，
+完整原生 **1956/1956、零失败/错误/跳过、474.70秒**；Linux 现行必跑规则405次调用、1487项匹配通过。
+最后再修中断遗留 `.new` 阻塞回执、Mac PDF 缩放色条判据及关闭项目前ACK的定位窗口：
+三 Python 版本的新专项各 **79/79**，末次统一构建后原生定向 **29/29**（19像素、5编译、5文件/布局）通过。
+全量结果属于最后这些小修之前的已冻结主链，不能冒称最终1963项已跑全量。
+
+中英固定1440×2200、1×、a3最大化/侧栏560的失败运行详情起点，各6次实际鼠标点击完成日志与源码检查，
+另1次点击拒绝已修改源的旧定位；Viewer状态完全不变，未发送模型请求或自动保存/预览。
+真实 TeX Live 2026 验证两页 PDF、`section.tex:2` 失败日志、明确保存报告、删除工作文件后重开及ZIP逐字节一致。
+隔离 wheel 的79项与相同真实TeX链也通过，456份Python/12份Schema及279项sdist内容逐字节核对；
+最终状态文档版由发行机器比对记录，详见[运行验收](runtime-validation.md)与[LaTeX指南](latex-workflows.md)。
+
+前头3ac89623 Desktop已全部结束：Linux三项和Windows主回归成功；Mac正式Markdown/HTML及独立原型通过，
+PDF首页已显示但被1–2px混色边界判据拒绝，已保存原图并补严格CPU重放/正反例；新平台20轮仍待验。
+Windows四项在WGL清理后其他线程RIP0崩溃，现有栈记录循环漏掉RIP0，已仅修诊断，未断言驱动根因。
+Runtime8/8、Docs、Secret成功。前头Desktop推送等待门已满足。本批尚不代表P4或整份计划完成，视频和第4–8项继续，PET新专项后置。
+
 ## 2026-10-27：独立桌面报告生成表单（本机验收完成，平台待复验）
 
 交付头 `035f7bd960d0a5b72bc83db7608342e15951ea68` 已推送main，包含报告源码 `15edede3`、运行器 `5a6f6fd1` 和记录/认知资产；记录暂存gitleaks扫描141729bytes、零发现。新[Runtime CI](https://github.com/sijintech/stk/actions/runs/40274892305)已结束：三个LinuxPython版本、desktop、web、control均成功；Windows3.11/3.12各3057通过、100跳过、327排除、2个setup/teardown错误（537.95/558.16秒）。日志明确为 `test_invalid_or_oversized_generated_body_is_rejected_atomically` 的默认案例名称包含整段超长正文，写入 `PYTEST_CURRENT_TEST` 超过Windows环境变量32767字符限制；没有运行到该案例断言，不能写作报告后端验证失败或通过。

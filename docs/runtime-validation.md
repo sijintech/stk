@@ -3,6 +3,71 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-29：LaTeX 工作流、编译证据与原生判据修复
+
+本批源码 `51a01af143496eeaf58b39b4a6547af45e55176d`，项目来源失效补修 `3d4998d613597d93c6da4b7688775a7e854df57a`；均直接 main，最终交付还包含四份状态记录与AOCI托管资产。
+`latex-compile/1` 使用已注册的本机工作流步骤，冻结明确选择的编译器与输入Snapshot；只有启动才探测版本和编译。
+静态/动态上游、取消/超时、父进程丢失、旧尝试防重放、回执/日志/诊断篡改、历史上游绑定、源码SHA及晚到响应均有定向反例。
+编译成功后的PDF/日志正常登记Files并捕获Snapshot，失败证据也可读；不自动保存报告或预览，不注册Viewer自动求值节点。
+
+持久证据根目录：`/home/mnemora/.local/state/stk-validation/latex-20261029/`。中断前的 `/tmp/stk-latex-*` 已清理；下表为重新生成并绑定源码摘要的证据。
+
+| 阶段 | 实际结果 | 证据 |
+|---|---|---|
+| 冻结主链完整Python | 3644 passed、24 skipped、2 deselected、零失败，803.73秒；1项既有Starlette弃用提示 | `python-full.log`、`source-sha256.json` |
+| 冻结主链完整原生 | 1956/1956，零失败/错误/跳过，474.70秒 | `native-full.xml`、`native-full.log`、`native-full-summary.json` |
+| 当时现行Linux必跑核对 | 405次调用，1487项匹配，无未跑/跳过 | `required.sh`、`required.log` |
+| 最后回执发布修复 | 3.12新专项79/79，37.91秒；3.11为79/79、32.91秒；3.14为79/79、26.11秒 | `python-final-focused.log`、`python311-final.log`、`python314-final.log` |
+| 最后原生判据与来源门禁 | 统一构建退出0；最终29/29、零失败/错误/跳过、3.15秒，含19个像素、5个编译、5个文件/布局用例 | `native-scope-build.log`、`native-final-scope.xml`、`native-final-scope.log` |
+| 隔离wheel专项 | 79/79，零失败/错误/跳过，47.50秒；全部suan导入仅来自隔离site-packages | `package-check/bootstrap-summary.json` |
+
+全量结果的源码绑定在最后三项小修之前：唯一临时文件发布、缩放色条识别、项目scope意图失效。
+这些修改完成后已定向复验；当前目录虽发现1963项，不把29项定向结果写成最终全量通过。
+首轮原生新增测试JSON括号错误已修；隔离发行环境首轮漏装NumPy导致21项报错，离线补齐科学依赖NumPy2.5.3后79项通过，
+保留初轮证据，未改变共享Python或产品配置。测试均清空 `STK_TOKEN_PLAN_API_KEY` 并unset `STK_TOKEN_PLAN_MODEL`，没有收费模型请求。
+
+### 实际UI事件与冻结来源
+
+固定1440×2200逻辑像素、1×、a3工作流区最大化、侧栏560、已有失败运行详情起点；中英各6次实际ScreenDriver点击：
+选行→查看编译→选诊断→源码定位→读取输出→下一页。通过夹具改变原文件后另1点击拒绝过期源码；无键盘事件，
+Viewer完整工作空间不变，未创建报告/准备预览/重放执行。覆盖8192字节处中文跨页、旧读取清理、切运行/工作流后拒绝旧定位，
+以及服务器仍持有关闭ACK时拒绝旧源码回调。CPU事件路由与像素重放不替代OS/GPU/IME或跨屏DPI验证。
+
+### 真实TeX与发行包
+
+只在持久验证目录下隔离安装TeX Live2026/pdfTeX1.40.29（约148MiB），不改系统PATH或产品设置。
+`source-real-tex-v2/verification-summary.json` 记录strict NDJSON真实桥两个进程均exit0：主源+section先freeze、删除live源后明确启动，
+实际生成2页PDF（25675字节）；独立pypdf6.21.4解码两页正文。错误文档实际exit1，定位 `section.tex:2`（column=null），
+源码SHA回查通过。明确以workflow_run为来源保存Report、删除四个live产物、关闭重开后，PDF和三日志/ZIP仍逐字节一致。
+
+隔离wheel以同样真实链通过，证据 `installed-real-tex-bootstrap-v2/verification-summary.json`；
+该次PDF SHA-256 `5d0551d6999538d032873ccdf0c966dac97f8cb0446dad6bc3b3b017b95ded8c`。
+发行首批456份Python、12份Schema与279项sdist声明内容逐字节匹配。
+状态文档定稿后的最终发行字节结果保存在 `package-check/final-package-verification.json`，
+bootstrap/final全wheel成员与sdist变动对照在 `package-check/final-stage-comparison.json`；
+两个纯desktop补修不在Python发行包内，最终对照需证明Python/Schema/测试/规范/新指南均未漂移。
+
+### 前推送头CI与剩余边界
+
+前头3ac89623的[Desktop40472799346](https://github.com/sijintech/stk/actions/runs/40472799346)六job全部结束：
+Linux主回归/包/干净机冒烟与Windows主回归成功；Mac与Windows独立native失败。
+[Runtime40472799376](https://github.com/sijintech/stk/actions/runs/40472799376)8/8、Docs40472799342和Secret40472799351成功。
+前头Desktop等待门已满足；本批新头CI仍待核。
+
+Mac正式Markdown/HTML各20轮140张OS图，独立原型20轮161图及最终guarded内存0块/0字节通过。
+PDF首轮截图与result.json已恢复并核SHA：client1024×653，viewport[631,200,385,256]，首页实际显示；
+13行的6色实段宽20/18/18/18/17/19、1/1/1/2/2px混色边界使旧连续判据拒绝。
+已保留不改字节的公开合成PNG为CPU回放，修正仅接受相邻预期色之间最多2px、通道残差≤2且比例单调的过渡；
+6色顺序、8行、几何范围、页身份、视口外拒绝及20轮门禁保留。19个CPU正反例通过不能替代新Mac原生20轮。
+Windows四项均完成WGL清理后在其他线程RIP0崩溃；旧栈循环在RIP0漏掉所有帧，现仅修有界栈诊断，未证明驱动或窗口调用根因。
+证据ZIP与已核截图在 `native-ci/`，公开夹具说明见 `desktop/spike/document_preview/fixtures/README.md`。
+
+尚无XeLaTeX/MiKTeX、Windows Job实际新CI、完整双平台PDF/输入/跨屏DPI/浏览器内存证明；
+编译当前为一次引擎执行，尚无BibTeX/Biber或多遍引用收敛自动链。原生候选默认关闭，Linux Unsupported。
+视频仍仅技术调查，P4与第4–8项继续，PET新专项后置，不把本批标作整份计划完成。
+暂存扫描沿用 `.gitleaks.toml`，feature244987字节零发现，scope小修另行扫描零发现；最后记录/托管资产提交前仍须扫描。
+AOCI最终判据由同证据目录的 `aoci-check.json` 与 `aoci-guide.json` 记录；索引对齐不等于本Run完整认知或平台实测通过。
+
 ## 2026-10-27：独立桌面报告生成表单（本机验收完成，平台待复验）
 
 交付头 `035f7bd960d0a5b72bc83db7608342e15951ea68` 已推送main，包含报告源码 `15edede3`、运行器 `5a6f6fd1` 和记录/认知资产；记录暂存gitleaks扫描141729bytes、零发现。新[Runtime CI](https://github.com/sijintech/stk/actions/runs/40274892305)已结束：三个LinuxPython版本、desktop、web、control均成功；Windows3.11/3.12各3057通过、100跳过、327排除、2个setup/teardown错误（537.95/558.16秒）。日志明确为 `test_invalid_or_oversized_generated_body_is_rejected_atomically` 的默认案例名称包含整段超长正文，写入 `PYTEST_CURRENT_TEST` 超过Windows环境变量32767字符限制；没有运行到该案例断言，不能写作报告后端验证失败或通过。

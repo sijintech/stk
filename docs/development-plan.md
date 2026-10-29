@@ -1,6 +1,6 @@
 # STK 开发计划
 
-更新：2026-10-27。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
+更新：2026-10-29。本文是后续开发的主计划；产品约定见[项目工作台设计](design/project-workbench.md)，
 存储与求值方案见[项目数据模型](design/project-model.md)。设计目标不代表当前版本已经实现。
 当前模块职责、归档清单与新增代码放置原则见[仓库结构说明](repository-structure.md)。
 
@@ -9,6 +9,8 @@
 所有者要求完成本计划的主要内容，先完成通用功能，PET 等具体场景推迟开发。
 以下顺序覆盖后续工作；旧段落中的“下一步”若与这里冲突，以此处为准。每项以实际验收为完成依据，
 不能用当前编辑器补丁、工具配置或单个平台通过代替整份计划完成。
+
+当前交付：LaTeX主链源码 `51a01af143496eeaf58b39b4a6547af45e55176d` 与来源意图门禁补修 `3d4998d613597d93c6da4b7688775a7e854df57a` 已在main；[LaTeX指南](latex-workflows.md)覆盖冻结输入、明确编译、失败日志和源码定位。完整主链Python3644/原生1956通过，最后小修后3版本专项各79、原生定向29通过，真实TeX两页PDF及隔离wheel保存/重开/导出链通过；这些范围见运行验收，不冒称最终全量或平台通过。前头3ac89623 Runtime8/8、Docs/Secret成功，Desktop已结束：Linux三job/Windows主回归成功，Mac仅PDF色条判据失败（首页已显示），Windows独立native崩溃；有界AA和RIP0诊断补修须新平台CI。P4仍有视频与完整双平台验收，第4–8项继续，PET新专项后置。
 
 `035f7bd9` CI已结束：Runtime三个Linux版本及web/desktop/control成功，两个Windows客户端因超长pytest案例ID报错，短ID修正后三版本报告各46项通过；Desktop Linux三job/Windows主回归成功，Mac正式报告三像素失败、独立原型通过，Windows独立native四项访问冲突且零图；Docs/Secret成功。独立AI报告表单源码 `64205ba809aacef568d1d85637ee777c9ac8aa50` 已提交main，workspace v3与保存后90秒等待边界已统一构建，最终完整原生1951/1951、零失败/错误/跳过、465.52秒；含15控制器＋12中英宽窄UI共27项报告用例，Linux必跑405次核对、1481项匹配。四组各39点击/14键（含最大化1键）/6文本事件，源码暂存密钥扫描258612bytes、零发现。最终记录与认知资产随本批收尾，新平台CI仍待复验。
 
