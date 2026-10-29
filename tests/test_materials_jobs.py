@@ -382,3 +382,19 @@ def test_registry_readers_share_the_publication_lease(data, local, monkeypatch):
         with pytest.raises(service.MaterialsBusy):
             another.activate('capacity_fade', 'v1')
     assert another.activate('capacity_fade', 'v1')['active'] == 'v1'
+
+
+@pytest.mark.parametrize('budget', ['bytes', 'versions'])
+def test_registry_publication_never_exceeds_its_own_read_budget(local, budget):
+    original = {'kinds': {}}
+    local._save(original)
+    before = (local.root / 'registry.json').read_bytes()
+    if budget == 'bytes':
+        oversized = {'kinds': {}, 'padding': 'x' * service.MAX_REGISTRY_BYTES}
+    else:
+        oversized = {'kinds': {'capacity_fade': {'active': None,
+            'versions': [{'version': f'v{i}'} for i in range(1, 10002)]}}}
+    with pytest.raises(service.MaterialsUnavailable, match='budget'):
+        local._save(oversized)
+    assert (local.root / 'registry.json').read_bytes() == before
+    assert local._registry() == original

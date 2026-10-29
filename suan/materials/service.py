@@ -21,6 +21,7 @@ from . import curves, datasets, inputs, jobs as storage, training
 
 GATES = {"pe_loop": 0.25, "capacity_fade": 0.1}
 MAX_PREDICT_ROWS = 100
+MAX_REGISTRY_BYTES = 16 * 1024 * 1024
 
 
 class MaterialsError(ValueError):
@@ -122,9 +123,9 @@ class MaterialsService:
         try:
             if not path.exists() and not path.is_symlink():
                 return {"kinds": {}}
-            if storage.ordinary(path).st_size > 16 * 1024 * 1024:
+            if storage.ordinary(path).st_size > MAX_REGISTRY_BYTES:
                 raise ValueError("oversized registry")
-            registry = json.loads(_bytes(path, 16 * 1024 * 1024))
+            registry = json.loads(_bytes(path, MAX_REGISTRY_BYTES))
         except (OSError, ValueError) as exc:
             raise MaterialsUnavailable(f"The model registry cannot be read: {type(exc).__name__}") from None
         if not isinstance(registry, dict) or not isinstance(registry.get("kinds"), dict):
@@ -146,6 +147,9 @@ class MaterialsService:
         temporary = self.root / ("registry-" + uuid.uuid4().hex + ".tmp")
         try:
             data = json.dumps(registry, ensure_ascii=False, indent=1, allow_nan=False).encode("utf-8") + b"\n"
+            if len(data) > MAX_REGISTRY_BYTES or any(len(entry["versions"]) > 10000
+                                                     for entry in registry["kinds"].values()):
+                raise MaterialsUnavailable("The model registry exceeds its metadata budget")
             with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as target:
                 target.write(data)
                 target.flush()
