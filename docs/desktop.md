@@ -234,6 +234,22 @@ vLLM 档（GPU 服务器上的不量化模型）目前只评估能否放下，�
 问答用途是单条问题与选定上下文的文字请求，不自动附带其他问答、文件或未保存输入；没有 Markdown 渲染或默认 AI 主页切换。各增量的本机与跨平台验证见[验收记录](runtime-validation.md)。
 双平台真实模型和输入设备验收见[工作台清单](workbench-acceptance.md#ai-助手)。
 
+## 材料模型：本机训练与比较
+
+从区域的编辑器类型菜单选择 **材料模型**。在 **训练输入** 填写曲线数据集目录，选择训练轮次及可选初始化模型；
+高级参数可设置网络、划分、种子和早停。数据集仍是现有 `dataset.json` 加 `samples.jsonl`，支持P–E回线与容量衰减。
+可先在Python页用 `stk.materials.synthetic("/绝对路径/新目录", "capacity_fade", 300, seed=2)` 生成明确标注的测试数据。
+
+依次点击 **校验数据集 → 冻结训练输入 → 开始训练**。校验显示本地数据卡；冻结后转到训练任务，数据、划分及模型来源固定，
+开始前修改原目录不会改变已准备任务。开始训练需要可选PyTorch CPU依赖；校验、准备和读取历史不需要Torch。
+主区显示逐轮训练/验证损失，切换到评估页可比较最多三个冻结测试样本的观测、候选、初始化模型与活动基线曲线。
+缺失观测留断点，不以插值补造。任务页可查看历史、取消或明确恢复状态；重开不自动训练。
+
+选择初始化版本时，候选沿用它的权重和标准化；高级网络形状须与之兼容。准入还比较冻结时的活动模型，
+候选未达绝对门槛或比活动基线差时保留指标、拒绝替换。**模型版本** 页可明确切换活动版本；训练期间的人工切换不会被后台覆盖。
+训练记录和模型属于本机后台服务；工作空间保存本地表单稿，不迁移这些任务/权重。合成链路通过不代表真实材料性质有效。
+接口、任务状态和解释边界见[训练契约](specs/materials-training-1.md)，实际平台验证见[运行验收](runtime-validation.md)。
+
 ## 安装
 
 桌面程序与 Python 部分分开安装：程序包里**没有** Python（D1 不内置解释器），桥、本地求值和本机 Runtime
@@ -622,6 +638,19 @@ Saving, reading and renaming never evaluate nodes. See [analysis graphs](analysi
 [saved analysis documents](project-analyses.md). The saved-analysis Runs tab explicitly binds input snapshots,
 prepares and starts a local attempt, and reads verified archived results for import into an empty Viewer;
 see [analysis runs](project-analysis-runs.md). Connection editing and hierarchical workflows remain planned.
+
+### Materials: local training and comparison
+
+Choose **Materials models** from an area's editor-type menu. In **Training inputs**, enter a curve-dataset directory,
+choose training settings and an optional initialization version. Validate the data card, freeze the inputs, then
+explicitly start training. Preparation freezes exact bytes, split IDs and model roles; only training needs optional
+CPU PyTorch. History, cancellation and explicit state recovery use durable local receipts and never restart a trainer.
+
+The main area shows recorded losses and up to three held-out observed/candidate/base/active-baseline curve examples,
+with gaps for missing observations. Admission requires the absolute gate and no regression against the frozen active
+baseline; a manual version switch during training is preserved. The Models section supports explicit rollback.
+Workspaces preserve local form drafts, not service-local tasks or model weights. Synthetic data validate the software
+chain only. See the [training contract](specs/materials-training-1.md) and [validation record](runtime-validation.md).
 
 ### Install
 

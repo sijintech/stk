@@ -10,7 +10,8 @@ if(NOT TARGET stk_app OR NOT TARGET GTest::gtest_main)
 endif()
 include(GoogleTest)
 
-file(GLOB _stk_app_test_parts "${CMAKE_CURRENT_SOURCE_DIR}/*.cmake")
+# Include independently owned parts such as materials.cmake; notice new parts in existing builds too.
+file(GLOB _stk_app_test_parts CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cmake")
 list(SORT _stk_app_test_parts)
 foreach(_part ${_stk_app_test_parts})
   include(${_part})

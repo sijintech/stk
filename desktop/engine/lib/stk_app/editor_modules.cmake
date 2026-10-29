@@ -77,3 +77,7 @@ stk_editor_module(reports
   src/editors/reports_create_view.cc
   src/editors/reports_generation_view.cc
 )
+
+stk_editor_module(materials
+  src/editors/materials_editor.cc
+)

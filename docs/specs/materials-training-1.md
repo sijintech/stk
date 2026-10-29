@@ -114,6 +114,8 @@ SHA-256, capsule/split provenance and both frozen model roles. Weights are check
 before `torch.load(..., weights_only=True)`. Legacy model/1 folders without a
 weights digest remain readable and are reported as `legacy_unverified`; no digest
 is invented for them. Model numbers include orphan folders and are not reused.
+The registry is bounded to 16 MiB and 10000 versions per kind; publication refuses
+to replace a readable registry with a generation beyond its own read limits.
 
 Publication records an intent before moving a model and replacing the registry.
 Recovery recognizes only an exact already-published version receipt and verifies

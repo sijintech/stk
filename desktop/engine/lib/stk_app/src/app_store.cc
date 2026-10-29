@@ -7,6 +7,7 @@
 #include "stk/app/script_state.hh"
 #include "stk/app/model_settings.hh"
 #include "stk/app/module_settings.hh"
+#include "stk/app/materials_state.hh"
 #include "stk/app/project_archive.hh"
 #include "stk/app/project_data_labels.hh"
 #include "stk/app/project_attention.hh"
@@ -66,6 +67,7 @@ AppStore::~AppStore()
   data_labels_.reset();
   models_.reset();
   modules_.reset();
+  materials_.reset();
   skills_.reset();
   scripts_.reset();
   project_.reset();
@@ -105,6 +107,12 @@ ModuleSettings &AppStore::modules()
   return *modules_;
 }
 
+MaterialsState &AppStore::materials()
+{
+  if (!materials_) { materials_ = std::make_unique<MaterialsState>(*this); }
+  return *materials_;
+}
+
 ProjectArchive &AppStore::archive()
 {
   if (!archive_) {
@@ -139,7 +147,7 @@ ScriptState &AppStore::scripts()
 
 void AppStore::set_bridge(bridge::Client *client)
 {
-  if (bridge_client_ != client) { invalidate_project_scope(); }
+  if (bridge_client_ != client) { ++bridge_epoch_; invalidate_project_scope(); }
   bridge_client_ = client;
   if (scripts_) {
     scripts_->sync();

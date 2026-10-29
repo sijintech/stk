@@ -36,6 +36,7 @@ class ProjectArchive;
 class ProjectDataLabels;
 class ModelSettings;
 class ModuleSettings;
+class MaterialsState;
 
 /**
  * A request to show a result in the Viewer (raised by the Jobs editor, "Open in viewer"; consumed
@@ -132,6 +133,8 @@ class AppStore {
     return bridge_client_;
   }
   void set_bridge(bridge::Client *client);
+  /** Includes detach/reattach to the same client before the next frame. */
+  uint64_t bridge_epoch() const { return bridge_epoch_; }
 
   /** Synchronous invalidation, before changing project/bridge identity or awaiting refresh.
    * Callbacks close transient resources only; they must not start reads, mutate the project
@@ -158,6 +161,8 @@ class AppStore {
   ModelSettings &models();
   /** Optional software modules: engines and modeling tools (module_settings.hh). */
   ModuleSettings &modules();
+  /** Explicit local material training and read-only durable task observation. */
+  MaterialsState &materials();
 
   /** Queues a request for the Viewer (replaces an unconsumed one) and calls #changed. */
   void request_open_result(OpenResultRequest request);
@@ -202,6 +207,7 @@ class AppStore {
   std::string bridge_error_;
   std::string connection_;
   bridge::Client *bridge_client_ = nullptr;
+  uint64_t bridge_epoch_ = 0;
   std::optional<OpenResultRequest> pending_open_;
   std::unique_ptr<ViewerState> viewer_;
   std::unique_ptr<JobsState> jobs_;
@@ -213,6 +219,7 @@ class AppStore {
   std::unique_ptr<ProjectDataLabels> data_labels_;
   std::unique_ptr<ModelSettings> models_;
   std::unique_ptr<ModuleSettings> modules_;
+  std::unique_ptr<MaterialsState> materials_;
   ui::LogBuffer app_log_{20000};
   ui::LogBuffer bridge_log_{20000};
   uint64_t version_ = 0;
