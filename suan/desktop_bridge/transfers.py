@@ -213,10 +213,10 @@ class TransferManager:
             if len(items) > IMPORT_MAX_FILES:
                 raise BridgeError("invalid_params", f"An upload through a hub is limited to {IMPORT_MAX_FILES} "
                                   "files; upload the folder in parts")
-            request = {"id": "0" * 32, "node_id": "0" * 32, "kind": "workspace.import", "payload": {
+            import_request = {"id": "0" * 32, "node_id": "0" * 32, "kind": "workspace.import", "payload": {
                 "workspace_id": workspace_id, "files": [{"path": i["remote"], "sha256": "0" * 64, "size": i["size"]}
                                                         for i in items]}}
-            if encoded_size(request) > IMPORT_REQUEST_BYTES:
+            if encoded_size(import_request) > IMPORT_REQUEST_BYTES:
                 raise BridgeError("invalid_params", f"The file list of this upload exceeds the hub's "
                                   f"{IMPORT_REQUEST_BYTES}-byte import request limit; upload the folder in parts")
         record = self._new("upload", key, request, connection=connection, node=node, workspace_id=workspace_id,

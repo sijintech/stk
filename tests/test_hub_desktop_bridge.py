@@ -190,10 +190,16 @@ def test_upload_through_the_hub_resumes_waits_for_review_and_imports(live, inpro
     hub_id, target = pair(harness, live)
     workspace = harness.call("workspace.create", {**target, "name": "上传", "idempotency_key": "u"})["workspace"]["id"]
     mark = harness.mark()
-    transfer = harness.call("upload.start", {**target, "workspace_id": workspace, "source": str(folder),
-                                             "remote": "run"})["transfer"]
+    upload = {**target, "workspace_id": workspace, "source": str(folder), "remote": "run",
+              "idempotency_key": "hub-upload-once"}
+    transfer = harness.call("upload.start", upload)["transfer"]
+    assert harness.call("upload.start", upload)["transfer"]["id"] == transfer["id"]
+    conflict = harness.error("upload.start", {**upload, "remote": "other"})
+    assert conflict["code"] == "conflict" and conflict["data"]["transfer_id"] == transfer["id"]
     failed = harness.wait_transfer(transfer["id"], start=mark)
     assert failed["state"] == "failed" and failed["error"]["code"] == "unavailable", failed
+    repeated = harness.call("upload.start", upload)["transfer"]
+    assert repeated["id"] == transfer["id"] and repeated["state"] == "failed"
     held = offsets[-1]
     mark = harness.mark()
     harness.call("transfer.resume", {"id": transfer["id"]})
@@ -209,11 +215,15 @@ def test_upload_through_the_hub_resumes_waits_for_review_and_imports(live, inpro
     restarted = inproc()
     hello = restarted.call("hello", {"protocol": 1})
     assert hello["resumed_transfers"] == [transfer["id"]]
+    repeated = restarted.call("upload.start", upload)["transfer"]
+    assert repeated["id"] == transfer["id"] and repeated["action"]["id"] == action_id
     request = restarted.call("hub.action", {"connection": hub_id, "action_id": action_id})["action"]["request"]
     assert sorted(f["path"] for f in request["payload"]["files"]) == ["run/config.json", "run/sub/场.bin"]
     restarted.call("hub.review", {"connection": hub_id, "action_id": action_id, "approved": True})
     done = restarted.wait_transfer(transfer["id"])
     assert done["state"] == "completed" and done["action"]["state"] == "succeeded"
+    repeated = restarted.call("upload.start", upload)["transfer"]
+    assert repeated["id"] == transfer["id"] and repeated["state"] == "completed"
     assert len(live.actions("workspace.import")) == 1
     files = {f["path"]: f["sha256"] for f in restarted.call("workspace.files", {**target, "workspace_id": workspace})[
         "files"]}
