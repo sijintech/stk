@@ -1041,14 +1041,34 @@ class Materials:
     def validate(self, directory):
         return self._call("materials.datasets.validate", {"directory": str(directory)})["card"]
 
-    def train(self, directory, *, job_id=None, options=None, wait=True, poll=0.5, timeout=3600):
-        """Train in the background (PyTorch CPU); with ``wait``, return the job once it has ended."""
-        import time
+    def prepare(self, directory, *, job_id=None, options=None, base_version=None):
+        """Freeze the dataset, options and comparison models without loading Torch or starting training."""
         from uuid import uuid4
         params = {"directory": str(directory), "job_id": job_id or uuid4().hex}
-        if options:
+        if options is not None:
             params["options"] = options
+        if base_version is not None:
+            params["base_version"] = base_version
+        return self._call("materials.prepare", params)["job"]
+
+    def start(self, job_id, *, wait=True, poll=0.5, timeout=3600):
+        """Explicitly start a prepared task; optionally wait for its terminal state."""
+        job = self._call("materials.start", {"job_id": job_id})["job"]
+        return self._wait(job, wait=wait, poll=poll, timeout=timeout)
+
+    def train(self, directory, *, job_id=None, options=None, base_version=None, wait=True, poll=0.5, timeout=3600):
+        """Explicitly prepare/start a new CPU task; optionally poll while its state is running."""
+        from uuid import uuid4
+        params = {"directory": str(directory), "job_id": job_id or uuid4().hex}
+        if options is not None:
+            params["options"] = options
+        if base_version is not None:
+            params["base_version"] = base_version
         job = self._call("materials.train", params)["job"]
+        return self._wait(job, wait=wait, poll=poll, timeout=timeout)
+
+    def _wait(self, job, *, wait, poll, timeout):
+        import time
         deadline = time.monotonic() + timeout
         while wait and job["state"] == "running" and time.monotonic() < deadline:
             time.sleep(poll)
@@ -1057,6 +1077,16 @@ class Materials:
 
     def job(self, job_id):
         return self._call("materials.jobs.get", {"job_id": job_id})["job"]
+
+    def jobs(self, *, offset=0, limit=50):
+        return self._call("materials.jobs.list", {"offset": offset, "limit": limit})
+
+    def curves(self, job_id, *, after=0, limit=200):
+        return self._call("materials.jobs.curves", {"job_id": job_id, "after": after, "limit": limit})
+
+    def recover(self, job_id):
+        """Record a stopped trainer's state; never resume training or activate a model."""
+        return self._call("materials.jobs.recover", {"job_id": job_id})["job"]
 
     def cancel(self, job_id):
         return self._call("materials.jobs.cancel", {"job_id": job_id})["job"]

@@ -8902,8 +8902,8 @@
           "additionalProperties": false
         }
       },
-      "materials.train": {
-        "description": "Train a curve model on a dataset on this computer in the background (PyTorch CPU; unsupported without it). The same job_id again returns the job. A model passing its gate is registered and becomes active.",
+      "materials.prepare": {
+        "description": "Freeze dataset, options, test split and selected base/active baseline into a new persistent task. Does not load Torch or train; identical retries preserve the original input bytes.",
         "params": {
           "type": "object",
           "properties": {
@@ -8917,44 +8917,82 @@
               "pattern": "^[A-Za-z0-9_-]{1,64}$"
             },
             "options": {
-              "type": "object",
-              "properties": {
-                "hidden": {
-                  "type": "array",
-                  "minItems": 1,
-                  "maxItems": 4,
-                  "items": {
-                    "type": "integer",
-                    "minimum": 4,
-                    "maximum": 1024
-                  }
-                },
-                "epochs": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 5000
-                },
-                "batch_size": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 4096
-                },
-                "learning_rate": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 1
-                },
-                "patience": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 5000
-                },
-                "seed": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              },
-              "additionalProperties": false
+              "$ref": "#/$defs/materialsTrainingOptions"
+            },
+            "base_version": {
+              "type": "string",
+              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 16
+            }
+          },
+          "required": [
+            "directory",
+            "job_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/materialsJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.start": {
+        "description": "Explicitly start a prepared local training task. Non-prepared tasks are returned without replay.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          "required": [
+            "job_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/materialsJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.train": {
+        "description": "Explicitly prepare and start a local CPU training task. Reusing a job_id returns its original task without replay. Admission requires the absolute gate and no regression against the frozen active baseline on the same held-out test IDs.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "job_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "options": {
+              "$ref": "#/$defs/materialsTrainingOptions"
+            },
+            "base_version": {
+              "type": "string",
+              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 16
             }
           },
           "required": [
@@ -8978,6 +9016,180 @@
       },
       "materials.jobs.get": {
         "description": "A training job of this service.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            }
+          },
+          "required": [
+            "job_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/materialsJob"
+            }
+          },
+          "required": [
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.jobs.list": {
+        "description": "Read a bounded newest-first page of persistent training tasks without starting or recovering them.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "jobs": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/materialsJob"
+              }
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "jobs",
+            "offset",
+            "total",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.jobs.curves": {
+        "description": "Read recorded epoch losses after an exclusive epoch cursor; reading never loads Torch or resumes training.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "after": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5000
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          },
+          "required": [
+            "job_id"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "curves": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5000
+                  },
+                  "train_loss": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "validation_loss": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "epoch",
+                  "train_loss",
+                  "validation_loss"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "next_after": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 5000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recorded_epochs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5000
+            }
+          },
+          "required": [
+            "id",
+            "curves",
+            "next_after",
+            "recorded_epochs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "materials.jobs.recover": {
+        "description": "Explicitly record the state of a stopped trainer, or recognize an already proven publication. Never starts training or activates a model.",
         "params": {
           "type": "object",
           "properties": {
@@ -9065,7 +9277,7 @@
                   "versions": {
                     "type": "array",
                     "items": {
-                      "type": "object"
+                      "$ref": "#/$defs/materialsModelVersion"
                     }
                   }
                 },
@@ -9129,7 +9341,7 @@
                 "versions": {
                   "type": "array",
                   "items": {
-                    "type": "object"
+                    "$ref": "#/$defs/materialsModelVersion"
                   }
                 }
               },
@@ -19472,9 +19684,414 @@
       ],
       "additionalProperties": false
     },
+    "materialsTrainingOptions": {
+      "type": "object",
+      "properties": {
+        "hidden": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 1024
+          }
+        },
+        "epochs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "learning_rate": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "patience": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "split": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "description": "Train/validation/test fractions: all positive, sum within 1e-9 of one, and each realized partition nonempty. The service checks the sum and realized sample counts."
+        }
+      },
+      "additionalProperties": false
+    },
+    "materialsEvaluationMetrics": {
+      "type": "object",
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "rmse": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "normalized_rmse": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "samples",
+        "rmse",
+        "normalized_rmse"
+      ],
+      "additionalProperties": {
+        "type": [
+          "number",
+          "null"
+        ]
+      }
+    },
+    "materialsComparison": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "stk.materials-training-comparison/1"
+        },
+        "test_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "test_samples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "candidate": {
+          "$ref": "#/$defs/materialsEvaluationMetrics"
+        },
+        "base": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/materialsEvaluationMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/materialsEvaluationMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "format",
+        "test_sha256",
+        "test_samples",
+        "candidate",
+        "base",
+        "baseline"
+      ],
+      "additionalProperties": false
+    },
+    "materialsEvaluationPreview": {
+      "type": "object",
+      "properties": {
+        "grid": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "const": "E/E_max"
+                },
+                "points": {
+                  "const": 64
+                },
+                "branches": {
+                  "const": [
+                    "up",
+                    "down"
+                  ]
+                },
+                "from": {
+                  "const": -1.0
+                },
+                "to": {
+                  "const": 1.0
+                }
+              },
+              "required": [
+                "x",
+                "points",
+                "branches",
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "const": "cycle"
+                },
+                "points": {
+                  "const": 64
+                },
+                "from": {
+                  "const": 0.0
+                },
+                "to": {
+                  "const": 2000.0
+                }
+              },
+              "required": [
+                "x",
+                "points",
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "samples": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "inputs": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 64,
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "observed": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "minItems": 64,
+                    "maxItems": 64,
+                    "items": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "array",
+                    "minItems": 128,
+                    "maxItems": 128,
+                    "items": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "candidate": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "minItems": 64,
+                    "maxItems": 64,
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  {
+                    "type": "array",
+                    "minItems": 128,
+                    "maxItems": 128,
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                ]
+              },
+              "base": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "minItems": 64,
+                        "maxItems": 64,
+                        "items": {
+                          "type": "number"
+                        }
+                      },
+                      {
+                        "type": "array",
+                        "minItems": 128,
+                        "maxItems": 128,
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "baseline": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "minItems": 64,
+                        "maxItems": 64,
+                        "items": {
+                          "type": "number"
+                        }
+                      },
+                      {
+                        "type": "array",
+                        "minItems": 128,
+                        "maxItems": 128,
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "inputs",
+              "observed",
+              "candidate",
+              "base",
+              "baseline"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "grid",
+        "samples"
+      ],
+      "additionalProperties": false
+    },
+    "materialsModelVersion": {
+      "type": "object",
+      "description": "Registered version metadata. New provenance fields are optional so earlier registry records remain readable.",
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^v[1-9][0-9]*$",
+          "maxLength": 16
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "dataset": {
+          "type": "object"
+        },
+        "metrics": {
+          "type": "object"
+        },
+        "gate": {
+          "type": "number"
+        },
+        "job_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "model_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "weights_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "comparison": {
+          "$ref": "#/$defs/materialsComparison"
+        },
+        "base_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 16
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseline_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 16
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
     "materialsJob": {
       "type": "object",
-      "description": "A training job of this service (kept in memory): state, progress, the registered version or why not.",
+      "description": "A persistent local training task with its frozen input identity, progress and admission result. Earlier job records remain readable; internal request/admission/owner/CAS fields are not public.",
       "properties": {
         "id": {
           "type": "string",
@@ -19488,11 +20105,14 @@
         },
         "state": {
           "enum": [
+            "prepared",
             "running",
             "done",
             "rejected",
             "cancelled",
-            "failed"
+            "failed",
+            "interrupted",
+            "uncertain"
           ]
         },
         "dataset": {
@@ -19550,7 +20170,10 @@
           "type": "number"
         },
         "started_at": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "maxLength": 64
         },
         "finished_at": {
@@ -19559,6 +20182,99 @@
             "null"
           ],
           "maxLength": 64
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "input_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "options": {
+          "$ref": "#/$defs/materialsTrainingOptions"
+        },
+        "split_counts": {
+          "type": "object",
+          "properties": {
+            "train": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "validation": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "test": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            }
+          },
+          "required": [
+            "train",
+            "validation",
+            "test"
+          ],
+          "additionalProperties": false
+        },
+        "card": {
+          "$ref": "#/$defs/materialsDataCard"
+        },
+        "base_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 16
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseline_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^v[1-9][0-9]*$",
+              "maxLength": 16
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparison": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/materialsComparison"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evaluation_preview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/materialsEvaluationPreview"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1000
+        },
+        "cancel_requested": {
+          "type": "boolean"
         }
       },
       "required": [

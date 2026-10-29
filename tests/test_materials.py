@@ -106,7 +106,10 @@ def test_training_registers_a_model_that_passes_its_gate_and_versions_can_be_rol
     # A tiny network trained for one epoch does not pass the gate: nothing is registered.
     rejected = finished(materials.train(tmp_path / "fade", "tiny", options={"epochs": 1, "hidden": [4]})["id"])
     assert rejected["state"] == "rejected" and rejected["version"] is None
-    second = finished(materials.train(tmp_path / "fade", "second", options={"epochs": 400, "seed": 1})["id"])
+    # Equal deterministic quality may register another version. A different
+    # seed is not guaranteed to beat the active model on the frozen test rows.
+    second = finished(materials.train(tmp_path / "fade", "second", options={"epochs": 400, "seed": 0})["id"])
+    assert second["comparison"]["candidate"]["normalized_rmse"] <= second["comparison"]["baseline"]["normalized_rmse"]
     listed = materials.models("capacity_fade")["kinds"]["capacity_fade"]
     assert second["version"] == "v2" and listed["active"] == "v2" and [v["version"] for v in listed["versions"]] == ["v1", "v2"]
     assert all(item["dataset"]["synthetic"] for item in listed["versions"])

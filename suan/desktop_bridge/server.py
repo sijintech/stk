@@ -367,8 +367,13 @@ class Bridge:
             "modules.remove": lambda p, c: self.modules_call("remove", p),
             "materials.datasets.synthetic": lambda p, c: self.materials_call("synthetic", p),
             "materials.datasets.validate": lambda p, c: self.materials_call("validate", p),
+            "materials.prepare": lambda p, c: self.materials_call("prepare", p),
+            "materials.start": lambda p, c: self.materials_call("start", p),
             "materials.train": lambda p, c: self.materials_call("train", p),
             "materials.jobs.get": lambda p, c: self.materials_call("job", p),
+            "materials.jobs.list": lambda p, c: self.materials_call("jobs", p),
+            "materials.jobs.curves": lambda p, c: self.materials_call("curves", p),
+            "materials.jobs.recover": lambda p, c: self.materials_call("recover", p),
             "materials.jobs.cancel": lambda p, c: self.materials_call("cancel", p),
             "materials.models.list": lambda p, c: self.materials_call("models", p),
             "materials.models.activate": lambda p, c: self.materials_call("activate", p),
@@ -616,10 +621,20 @@ class Bridge:
                                                          seed=params.get("seed", 0), name=params.get("name"))}
             if action == "validate":
                 return {"card": datasets.validate(_absolute(params["directory"]))}
-            if action == "train":
-                return {"job": materials.train(_absolute(params["directory"]), params["job_id"], options=params.get("options"))}
+            if action in {"prepare", "train"}:
+                operation = materials.prepare if action == "prepare" else materials.train
+                return {"job": operation(_absolute(params["directory"]), params["job_id"],
+                                         options=params.get("options"), base_version=params.get("base_version"))}
+            if action == "start":
+                return {"job": materials.start(params["job_id"])}
             if action == "job":
                 return {"job": materials.job(params["job_id"])}
+            if action == "jobs":
+                return materials.jobs(offset=params.get("offset", 0), limit=params.get("limit", 50))
+            if action == "curves":
+                return materials.job_curves(params["job_id"], after=params.get("after", 0), limit=params.get("limit", 200))
+            if action == "recover":
+                return {"job": materials.recover(params["job_id"])}
             if action == "cancel":
                 return {"job": materials.cancel(params["job_id"])}
             if action == "models":
@@ -737,7 +752,8 @@ class Bridge:
                  "project.agent.start", "project.agent.cancel", "project.agent.recover", "project.agent.get",
                  "project.agent.list", "project.agent.objects", "project.agent.verify", "project.agent.export",
                  "modules.list", "modules.detect",
-                 "materials.datasets.synthetic", "materials.datasets.validate", "materials.train", "materials.jobs.get",
+                 "materials.datasets.synthetic", "materials.datasets.validate", "materials.prepare", "materials.start",
+                 "materials.train", "materials.jobs.get", "materials.jobs.list", "materials.jobs.curves", "materials.jobs.recover",
                  "materials.jobs.cancel", "materials.models.list", "materials.models.activate", "materials.predict",
                  "connections.list", "connections.check", "connections.ssh",
                  "hub.devices", "hub.templates", "hub.actions", "hub.action",
