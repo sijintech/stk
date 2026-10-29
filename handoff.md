@@ -6,13 +6,14 @@
 
 ## 当前工作树和下一步
 
-- **当前交付源码**：LaTeX主链 `51a01af143496eeaf58b39b4a6547af45e55176d`，项目scope意图门禁补修 `3d4998d613597d93c6da4b7688775a7e854df57a`，直接main；记录与AOCI资产随本批收尾，新头CI待核。完整主链Python3644通过/24跳过/2排除，原生1956/1956零跳过；最后小修后3个Python版本各79通过、原生定向29/29，别写成最终1963项已跑全量。本批本机测试进程已结束，不重复启动旧套件。
-- **LaTeX已完成本机主链**：[指南](docs/latex-workflows.md)。明确冻结/启动、静态及动态快照输入、固定编译器/参数、取消/超时/父进程丢失、持久失败日志与严格只读回执、源码SHA与一基行列VSCode定位；刷新/恢复/查看不执行，不自动创建Report或预览。编译仅一次引擎执行，多遍引用/BibTeX/Biber不在此批证明范围。
-- **真实工具链与发行证据**：TeX Live2026两页PDF、section.tex:2失败、明确保存报告后删live文件重开/ZIP逐字节一致；隔离wheel79项与真实TeX同等链通过。原始 `/tmp` 证据已清理，本批持久根为 `/home/mnemora/.local/state/stk-validation/latex-20261029`，完整范围和最终发行字节对照见[运行验收](docs/runtime-validation.md)。中英固定1440×2200/1×/a3最大化侧栏560，各6点击检查、另1点击拒绝漂移源，Viewer保持；CPU路由不代替OS/IME。
-- **前头3ac89623 CI全部结束**：Desktop40472799346的Linux三job和Windows主回归成功，Mac正式MD/HTML各20轮140图、独立原型20轮161图/最终零泄漏通过；PDF首页实际显示但1–2px缩放混色触发旧判据，现有19个严格像素CPU反例/实际PNG重放，须新Mac原生20轮。Windows独立native四项WGL清理后其他线程RIP0崩溃，现只修漏栈诊断，真正调用者待新CI。Runtime40472799376 8/8、Docs及Secret成功。上次代码头Desktop推送等待门已满足，失败仍需闭环。
-- **剩余路线不缩小**：第1项已交付、第2项主要交付；当前P4仍有视频、完整原生双平台文档/IME/DPI/内存与编译兼容验证。之后继续通用训练、连接/联邦、知识库、复现、完整发行与toolkits按职责整合。PET新专项后置，保护现有PET成果。原生文档候选默认关闭，Linux Unsupported；AI报告表单已交付源码与本机回归，不代替整份P4完成。
-- **S3可直接推进的入口**：先补冻结训练/评估数据与持久任务/曲线，再做迁移/基模型比较；当前已有准入与回退，勿重复造。训练目录和Viewer都使用stk.dataset/1但结构不同，新训练冻结契约须独立版本化，不擅改合作方格式。待所有者决定的三项仍在下节，不因优先级调整默认获准。
-- **认知与操作**：按[AI工具指南](docs/ai-development.md)做局部导航，不加载整仓扫描报告或第二份全仓记忆。本Run此前完整刷新3/23块后snapshot变化停链，继续source-bound；最终索引/基线Check和Guide在上述持久证据目录，不能用索引对齐声称当前完整认知可靠。交付前暂存密钥扫描、最终稳定后一次维护；关闭项目/切来源立即撤销旧资源与定位，保护Viewer/隐藏草稿。
+- **本批源码**：平台/LaTeX修复 `852860ae53327ae11fec9cb1a459d64f247bc1cd`，冻结MP4 `8627d98184af62548a4b23b0d1e41e4f2856f6f3`，直接main；四份记录与AOCI随本批收尾，新交付头CI待核。原生完整1991/1991零跳过、471.76秒，Linux必跑405次/1515项匹配；最后路径断言补修后统一构建与编译专项5/5通过。完整Python3708通过/24跳过/2排除早于最后目录补修；随后三版本专项各86通过/6项仅Windows跳过，不混作最终全量。
+- **报告与视频**：[指南](docs/project-reports.md)。文件MP4入口及Markdown/HTML内视频、独立播放器、renderer/2与source_path、精确媒体CSP、单Range及隐藏暂停/重显不续播已实现；附件仅元数据进入模型请求。四个中英宽窄/缩放CPU布局各5点击且保Viewer/隐藏草稿；真实Mac/Windows播放仍待新CI。原生候选与测试探针默认关闭，Linux Unsupported不作播放通过。两个视频格式各需20轮/161张OS证据/21session；21次显式asset RPC之外prepare内部也校验原始MP4，不冒称总读取只有21次。
+- **LaTeX与平台修复**：[LaTeX指南](docs/latex-workflows.md)。已有明确冻结/启动、日志、源码SHA与一基行列定位、取消/恢复及真实TeX两页PDF/重开/ZIP证据。新修Windows fd/path时间戳比较、原子回执共享删除句柄、UTF8夹具和junction目录拒绝；新Windows分支待CI。Mac PDF首轮真实首页已显示，失败为滚轮事件窗口关联，现按公开局部事件语义修正。Windows PE定位到epoxy包装层间接空调用，现生产WGL切换使用系统入口并通知epoxy，vendor1095/1095及补丁fuzz0精确重放通过；TLS零槽是机制推断，实机修复效果未证明。
+- **前头f331 CI全部结束**：Desktop40943343333的Linux主回归/包/干净机成功；Windows CPU两项编译定位失败、Mac PDF事件失败、Windows独立native四项0轮0图崩溃。Runtime40943343293六项成功、两个Windows客户端失败，Docs/Secret成功。前代码头Desktop推送等待门已满足，失败仍须新头复验；不能把本机或CPU图像回放当平台通过。
+- **发行与证据**：持久根 `/home/mnemora/.local/state/stk-validation/p4-video-20261029/`。bootstrap隔离wheel十文件456通过/6项Windows跳过；导入realpath仅安装site-packages、468份Python/Schema与wheel一致。首次collection缺静态preset已修验证工具路径并保留原失败。最终文档版包仅允许状态记录与报告指南两处措辞变化，与bootstrap业务成员的逐字节比较由 `package-check/final-stage-comparison.json` 记录；不把bootstrap包SHA冒充最终包。上述本机测试进程均已结束，不重复启动旧套件。
+- **路线仍完整保留**：第1项已交付，第2项主要交付；P4完整双平台文档/视频、IME/跨屏DPI/浏览器内存及编译兼容仍在。之后继续S3通用训练、连接/联邦、知识库、复现、完整发行及toolkits按职责整合，PET新专项后置，三项待所有者决定仍见下节。
+- **S3下一入口**：先补独立版本化的冻结训练/评估输入、持久任务与曲线，再迁移/基模型同一留出集比较；当前已有准入与回退，勿重复造。训练目录与Viewer的stk.dataset/1结构不同，不擅改合作方格式。
+- **认知与操作**：按[工具指南](docs/ai-development.md)局部导航，不加载整仓扫描报告或第二份全仓记忆。索引对齐与当前模型完整认知可靠性分开；上下文压缩后按实时合同完整重载。维护只在受管内容最终稳定后进行。关闭项目/切来源立即撤销资源及定位，保护Viewer、隐藏草稿和明确运行/保存/发送。
 
 核对命令：
 
@@ -59,7 +60,7 @@ gh run list --branch main --limit 6
 - 项目采用“目录 + SQLite + 普通资源文件”。稳定 ID 用于持久关联，打开句柄只表示当前会话；
   大数据与图像等不必逐单元格写入 SQLite。表达式/依赖由应用服务求值，SQLite 本身不会执行所有计算。
 - STK 内使用 Python 控制公开操作和布局；UI、Python、AI 复用共享服务和校验。2026-10-14 明确应用内基础代码编辑与运行，VSCode 保留为可选外部 IDE。
-- Markdown/HTML/PDF 原生候选默认关闭、双平台待验；AI 报告后端和三模式布局已本机实现，独立生成表单的平台验证、LaTeX 与视频继续推进。
+- Markdown/HTML/PDF 原生候选默认关闭、双平台待验；AI 报告后端和三模式布局已本机实现，LaTeX主链与MP4已实现，完整平台和编译兼容验证继续推进。
 - 需要直接连接与 SSH；已有 Linux Runtime 连接/SSH 隧道和本机 stdio 桥，**通用 Mac↔Windows STK 点对点端点尚未实现**。
 - `toolkits/` 最终按功能迁入 `suan/`，保留必要兼容；不是整目录改名。当前还有真实调用，不能提前删除。
 

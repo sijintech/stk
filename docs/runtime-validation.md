@@ -3,6 +3,34 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-29：冻结 MP4 与平台修正（本机验收完成，平台待复验）
+
+基线main为 `f331dbe7b015220a821b8a5f83bbf852a4d19db5`；平台/LaTeX修复 `852860ae53327ae11fec9cb1a459d64f247bc1cd`、MP4源码 `8627d98184af62548a4b23b0d1e41e4f2856f6f3` 已本地提交，四份记录与AOCI随本批收尾，新交付头CI待核。证据根目录为 `/home/mnemora/.local/state/stk-validation/p4-video-20261029/`。
+
+| 验证范围 | 实际结果 | 证据 |
+|---|---|---|
+| MP4与报告六文件 | Python3.12/3.11/3.14各348通过，无失败/错误/跳过 | `python-final-focused.xml`；`python-report/matrix-{311,314}/junit.xml` |
+| 最新完整Python | 3708通过、24跳过、2排除、1项既有Starlette提示，741.88秒；早于最后目录junction补修 | `python-final-full.xml`、`.log` |
+| 最后LaTeX目录与读取专项 | 三版本各86通过、6项仅Windows真实junction跳过；Windows上无法创建junction将失败而非跳过 | `latex-junction-{312,311,314}/junit.xml` |
+| 原生统一构建 | 探针开关ON的Linux构建已退出0；平台实际SDK仍须新CI | `native-build-probes.log` |
+| 原生完整回归 | 1991/1991，零失败/错误/跳过，471.76秒；早于最后路径断言及Windows-only补修 | `native-full.xml`、`.log` |
+| Linux必跑与最后定向 | 现行规则405次调用/1515项匹配；增量all构建退出0，最后编译5/5及必跑通过、2.94秒 | `required.log`、`native-final-build.log`、`native-final-compilation.xml` |
+| 隔离wheel十文件 | 456通过、6项仅Windows junction跳过，零失败/错误，62.54秒；所有suan导入realpath来自安装site-packages | `package-check/bootstrap-summary.json`、`package-check/installed-test-work/installed-product-tests.xml` |
+
+前头[Desktop40943343333](https://github.com/sijintech/stk/actions/runs/40943343333)六job已全部结束：Linux主回归、包及干净机冒烟成功；Windows CPU仅两项编译定位失败，Mac与Windows独立native失败。[Runtime40943343293](https://github.com/sijintech/stk/actions/runs/40943343293)六job成功、两个Windows客户端失败；Docs40943343346、Secret40943343327成功。前代码头Desktop等待门已满足，失败并未因此闭环。
+
+Windows Runtime的实际日志显示fd/path两种API的ctime语义不同、读句柄阻止原子replace，以及测试以cp1252读取UTF8回执。修正保留同API前后稳定校验、字节/SHA绑定与竞态反例；仅原子记录使用共享删除且不可继承的句柄。另拒绝编译目录各组件的symlink/reparse point并保留新尝试不可重放。CPU两项还比较了不同斜杠写法，测试改为本机路径的词法规范比较，不放宽源码身份。证据 `previous-ci-runtime/`、`previous-ci-desktop/windows/cpu/`；新Windows实际验证尚未完成。
+
+Mac实际Markdown/HTML各20轮140图及独立原型20轮161图成功，PDF首轮首页marker已两次通过，首次滚动前的窗口关联断言失败。实际PNG已查看；按WebKit公开的windowless-local wheel方式修正，仅直投已核自身WKWebView后代，并前后重核整视口、命中与方向，PDF20轮160图门禁未改。证据 `previous-ci-desktop/macos/analysis/diagnosis.json`。关闭页面JS仍允许宿主只读probe的公开契约及固定版本官方回归见同目录 `webkit-host-probe.json`，不以公开源码标签冒充运行系统二进制版本。
+
+Windows原生前头四项均0轮0图崩溃。实际PE导入与反汇编定位epoxy包装层对unwrapped函数的间接空调用，EXE调用结构与GPUSecondaryContext::activate一致；新线程TLS零槽是符合libepoxy1.5.10源码的机制推断，并非运行内存实测。候选修复在生产GHOST七处WGL切换调用系统入口，再以公开API通知epoxy；真实调用失败也通知并恢复LastError，missing module/export不通知。预检三处同样通知，不关闭后台编译或降低GL能力。vendor1095/1095、补丁fuzz0隔离重放逐字节一致、manifest摘要及独立review通过，仍需新Windows编译和OS20轮；不扩称任意未激活线程的创建/析构均安全。证据 `previous-ci-desktop/windows/diagnosis-final.json`、`patch-format-replay-result.json`。
+
+发行bootstrap在独立环境离线构建并安装：456份suan Python与12份Schema、279项sdist声明内容逐字节核验；源码750项构建pre/post一致。十文件462项中456通过、6项仅Windows跳过，安装后468份Python/Schema再次与wheel一致，192个提取测试与sdist字节一致。首次collection因验证目录缺静态preset而失败，日志独立保留；修验证工具使ROOT/suan指向安装site-packages，未提取sdist产品源码或修改测试，实际导入realpath均审计为安装包。最终文档版重建与bootstrap逐成员对照记录在 `package-check/final-stage-comparison.json`，只允许四份状态文档及报告指南两处状态/附件措辞差异，业务Python/Schema/测试不得漂移；不以bootstrap的包SHA代替final。修复源码暂存扫描37921字节、视频源码318957字节，gitleaks按.gitleaks.toml/redact均零发现；记录与认知资产提交前另扫。测试始终key空/modelunset，无收费模型请求。
+
+视频使用41558字节、6秒、红转蓝的公开合成MP4（H.264/AAC）；来源、生成命令和SHA见 `desktop/spike/document_preview/fixtures/README.md`。独立播放器与HTML内视频使用各自会话下的精确MP4 CSP，资源字节全验后才发布；GET单Range、HEAD、206/416及关闭优先410有CPU反例。隐藏暂停、重显不续播和明确播放须两平台新OS证据。默认关闭的只读探针仅返回17个定型测量字段，不采页面文字或路径。
+
+四个CPU鼠标布局为1440×1000/1×中英、900×1000/1×英文与1800×2000/2×中文，固定a4报告区最大化起点：选报告→预览→原文→预览→关闭，共5点击，保留Viewer与隐藏Python/创建草稿。初轮新UI四项仅资产读取计数断言失败，已纠正为准备时核入口加一次明确资产读取，不减少真实校验。原生OS测试每视频格式要求20轮/161张实际窗口图、21个独立session，包含自然播放红转蓝、seek、隐藏暂停、重显不续播与关闭410；当前未获本批平台通过证据。Linux仍Unsupported；P4完整平台/IME/DPI/浏览器内存、S3–S7与toolkits整合继续，PET新专项后置。
+
 ## 2026-10-29：LaTeX 工作流、编译证据与原生判据修复
 
 本批源码 `51a01af143496eeaf58b39b4a6547af45e55176d`，项目来源失效补修 `3d4998d613597d93c6da4b7688775a7e854df57a`；均直接 main，最终交付还包含四份状态记录与AOCI托管资产。
