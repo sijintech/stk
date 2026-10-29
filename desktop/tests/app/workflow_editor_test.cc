@@ -179,6 +179,9 @@ latex._run_command = command
 def run(self, identity, method, params):
     with lock, (control / 'calls.jsonl').open('a', encoding='utf-8') as stream:
         stream.write(json.dumps({'method': method}, ensure_ascii=True) + '\n')
+    if method == 'project.close':
+        while (control / 'hold-project-close').exists():
+            time.sleep(.01)
     return original_run(self, identity, method, params)
 
 Bridge._run = run
@@ -577,6 +580,34 @@ TEST_F(WorkflowEditorPython, CompilationSourceReplyCannotOpenAfterRunOrWorkflowS
   EXPECT_TRUE(workflows.compilation().is_null());
   ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && io::get_string(workflows.selected(), "id") == broken_id; }));
   EXPECT_EQ(opened, 0);
+}
+
+TEST_F(WorkflowEditorPython, CompilationSourceReplyCannotOpenAfterProjectCloseIntentBeforeAcknowledgement)
+{
+  const std::string run_id = "3ac95e14-1f24-4d84-8012-0c639dab671f", row = "21a97c6c-2aff-46d0-900b-c5d4483e03d1";
+  ASSERT_NO_FATAL_FAILURE(prepare_compilation(run_id, row));
+  ProjectWorkflows workflows(store());
+  ASSERT_TRUE(workflows.load(workflow_id));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy() && !workflows.validation().is_null(); }));
+  ASSERT_TRUE(workflows.load_run(run_id));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.busy(); }));
+  ASSERT_TRUE(workflows.load_compilation("compile", row, 1));
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.compilation_busy(); }));
+  const auto held = directory.path() / "hold-project-close";
+  struct Release {
+    fs::path path;
+    ~Release() { std::error_code error; fs::remove(path, error); }
+  } release{held};
+  { std::ofstream file(held); file << "hold only this fixture's close acknowledgement"; }
+  int opened = 0;
+  ASSERT_TRUE(workflows.read_compilation_source(0, [&](const Json &) { ++opened; }));
+  ASSERT_TRUE(project().close());
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !workflows.compilation_busy(); }));
+  EXPECT_TRUE(project().busy()); ASSERT_TRUE(project().project());  // old handle deliberately still present
+  EXPECT_EQ(opened, 0);
+  EXPECT_TRUE(workflows.compilation().is_null());
+  fs::remove(held);
+  ASSERT_NO_FATAL_FAILURE(frames_until([&] { return !project().project(); }));
 }
 
 TEST_F(WorkflowEditorPython, ExposesAndSavesAnOutputInTwoClicksEnglish)

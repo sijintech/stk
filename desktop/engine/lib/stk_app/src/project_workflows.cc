@@ -407,6 +407,7 @@ bool ProjectWorkflows::compilation_call(const std::string &method, Json params,
   sync();
   if (!compilations_supported() || compilation_busy_ || compilation_key_.is_null() || project_.busy()) { return false; }
   const auto epoch = epoch_, generation = compilation_generation_;
+  const auto project_scope = store_.project_scope_epoch();
   const auto key = compilation_key_;
   const std::weak_ptr<bool> weak = alive_;
   params.update(key); params["handle"] = handle_;
@@ -414,12 +415,15 @@ bool ProjectWorkflows::compilation_call(const std::string &method, Json params,
   options.retry = bridge::CallOptions::Retry::Never;
   compilation_busy_ = true; compilation_error_.clear();
   compilation_future_ = client_->call(method, params, options);
-  compilation_future_->then([this, weak, epoch, generation, key, done = std::move(done)](bridge::Result<Json> result) {
+  compilation_future_->then([this, weak, epoch, generation, project_scope, key, done = std::move(done)](bridge::Result<Json> result) {
     const auto alive = weak.lock();
     if (!alive || !*alive) { return; }
     sync();
     if (epoch != epoch_ || generation != compilation_generation_ || compilation_key_ != key ||
         io::get_string(run_, "id") != io::get_string(key, "run_id")) { return; }
+    // Close/open/refresh intent invalidates source resources synchronously,
+    // before the old project handle is necessarily replaced by its reply.
+    if (project_scope != store_.project_scope_epoch()) { clear_compilation(); changed(); return; }
     compilation_busy_ = false; compilation_future_.reset();
     if (!result) { compilation_error_ = result.error().describe(); }
     else {
