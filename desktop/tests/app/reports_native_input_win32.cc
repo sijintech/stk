@@ -4,6 +4,7 @@
 #  define NOMINMAX
 #endif
 #include <windows.h>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -129,9 +130,32 @@ bool send(const Target &target, UINT message, WPARAM wparam, LPARAM lparam, std:
 {
   if (!attached(target)) { error = "Native input child changed before message delivery"; return false; }
   DWORD_PTR ignored = 0;
-  if (!SendMessageTimeoutW(target.child, message, wparam, lparam,
-                          SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT, 2000, &ignored)) {
-    error = "SendMessageTimeout native input failed or timed out (message=" + std::to_string(message) + ")";
+  const auto began = std::chrono::steady_clock::now();
+  // This API may return zero without setting LastError. Reset it immediately before the
+  // unchanged bounded send, then capture it before any identity/geometry diagnostic API.
+  SetLastError(ERROR_SUCCESS);
+  const auto sent = SendMessageTimeoutW(target.child, message, wparam, lparam,
+                                       SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT, 2000, &ignored);
+  const DWORD send_error = GetLastError();
+  if (!sent) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - began).count();
+    DWORD observed_pid = 0;
+    const DWORD observed_thread = GetWindowThreadProcessId(target.child, &observed_pid);
+    const bool still_attached = attached(target);
+    error = "SendMessageTimeout native input failed or timed out (message=" + std::to_string(message) +
+        "); win32_error=" + std::to_string(send_error) + "; elapsed_ms=" + std::to_string(elapsed) +
+        "; sender_pid=" + std::to_string(GetCurrentProcessId()) +
+        "; sender_thread=" + std::to_string(GetCurrentThreadId()) +
+        "; expected_parent_thread=" + std::to_string(target.parent_thread) +
+        "; expected_child_pid=" + std::to_string(target.child_pid) +
+        "; expected_child_thread=" + std::to_string(target.child_thread) +
+        "; observed_child_pid=" + std::to_string(observed_pid) +
+        "; observed_child_thread=" + std::to_string(observed_thread) +
+        "; parent_hwnd=" + std::to_string(reinterpret_cast<uintptr_t>(target.parent)) +
+        "; container_hwnd=" + std::to_string(reinterpret_cast<uintptr_t>(target.container)) +
+        "; child_hwnd=" + std::to_string(reinterpret_cast<uintptr_t>(target.child)) +
+        "; attached_after=" + (still_attached ? "true" : "false");
     return false;
   }
   if (!attached(target)) { error = "Native input child changed during message delivery"; return false; }

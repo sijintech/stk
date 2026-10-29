@@ -236,7 +236,36 @@ class Capture final : public WindowEvidenceCapture {
           int64_t(size.Width) * size.Height > 16 * 1024 * 1024 ||
           client_.left < outer_.left || client_.top < outer_.top ||
           client_.right > outer_.right || client_.bottom > outer_.bottom) {
-        throw std::runtime_error("Captured window geometry does not match the bounded STK client area");
+        // Failure-only observations: keep every exact geometry gate above. DWM bounds and
+        // GetWindowRect have different documented DPI/border semantics; do not guess which
+        // one explains a rejected OS capture without recording the actual coordinates.
+        RECT window_rect{};
+        SetLastError(ERROR_SUCCESS);
+        const bool got_window_rect = GetWindowRect(window_, &window_rect) != FALSE;
+        const DWORD window_rect_error = got_window_rect ? ERROR_SUCCESS : GetLastError();
+        using GetWindowDpi = UINT (WINAPI *)(HWND);
+        const auto user32 = GetModuleHandleW(L"user32.dll"); // Borrowed, already loaded.
+        const auto get_window_dpi = user32 ? reinterpret_cast<GetWindowDpi>(
+            GetProcAddress(user32, "GetDpiForWindow")) : nullptr;
+        const io::Json details = {
+            {"item_size", {size.Width, size.Height}},
+            {"dwm_outer", {outer_.left, outer_.top, outer_.right, outer_.bottom}},
+            {"client_screen", {client_.left, client_.top, client_.right, client_.bottom}},
+            {"get_window_rect_ok", got_window_rect}, {"get_window_rect_error", window_rect_error},
+            {"window_rect", {window_rect.left, window_rect.top, window_rect.right, window_rect.bottom}},
+            {"window_dpi_api_available", get_window_dpi != nullptr},
+            {"window_dpi", get_window_dpi ? get_window_dpi(window_) : 0u},
+            {"failed_predicates", {
+                {"item_width_differs_from_dwm", size.Width != outer_.right - outer_.left},
+                {"item_height_differs_from_dwm", size.Height != outer_.bottom - outer_.top},
+                {"item_width_nonpositive", size.Width <= 0}, {"item_height_nonpositive", size.Height <= 0},
+                {"item_width_over_8192", size.Width > 8192}, {"item_height_over_8192", size.Height > 8192},
+                {"item_pixels_over_16_mib", int64_t(size.Width) * size.Height > 16 * 1024 * 1024},
+                {"client_left_before_dwm", client_.left < outer_.left},
+                {"client_top_before_dwm", client_.top < outer_.top},
+                {"client_right_after_dwm", client_.right > outer_.right},
+                {"client_bottom_after_dwm", client_.bottom > outer_.bottom}}}};
+        throw std::runtime_error("Captured window geometry does not match the bounded STK client area; " + details.dump());
       }
       // Capture has its own D3D device; the STK rendering backend remains OpenGL.
       // Microsoft supports WARP through this same API. WGC support and actual pixels still
