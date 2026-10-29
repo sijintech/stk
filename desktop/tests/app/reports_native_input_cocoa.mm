@@ -86,7 +86,7 @@ bool attached(const Target &target)
          std::abs(actual.size.height - target.pixels.size.height) <= 0.5;
 }
 
-bool key_spec(wm::Key key, unsigned short &code, NSString *&characters, NSEventModifierFlags &flags)
+bool key_spec(wm::Key key, unsigned short &code, NSString *__strong &characters, NSEventModifierFlags &flags)
 {
   flags = 0;
   unichar character = 0;

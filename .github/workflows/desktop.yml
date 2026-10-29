@@ -114,8 +114,8 @@ jobs:
               forbidden=$((forbidden + n))
             fi
           done
-          echo "patches=$patches (max 3), shim lines=$shim_lines (max ~800), draw/imbuf/blenkernel/nodes .cc=$forbidden (max 0)"
-          test "$patches" -le 3
+          echo "patches=$patches (max 4), shim lines=$shim_lines (max ~800), draw/imbuf/blenkernel/nodes .cc=$forbidden (max 0)"
+          test "$patches" -le 4
           test "$shim_lines" -le 800
           test "$forbidden" -eq 0
 

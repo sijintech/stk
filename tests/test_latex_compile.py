@@ -475,6 +475,174 @@ def test_atomic_record_reader_is_not_inherited_by_child_processes(tmp_path):
         assert stream.read() == b"{}"
 
 
+@pytest.fixture
+def windows_atomic_api(monkeypatch):
+    """Exercise the Windows ABI and publication contract over real local descriptors.
+
+    The rename operation uses this host's filesystem; this is not a Windows OS pass.
+    """
+    if os.name == "nt":
+        pytest.skip("POSIX-backed ABI simulation; real Windows generation tests run without mocks")
+    import ctypes
+    import struct
+    from types import SimpleNamespace
+    native = SimpleNamespace(**{**vars(os), "name": "nt"})
+    state = SimpleNamespace(error=0, calls=[], handles=[], closed=[], before_open=None,
+                            fail_conversion=False)
+
+    def create(path, access, sharing, security, disposition, attributes, template):
+        assert (access, sharing, security, disposition, attributes, template) == (
+            0x80010000, 0x5, None, 3, 0x00200000, None)
+        if state.before_open:
+            state.before_open(Path(path))
+        handle = os.open(path, os.O_RDONLY)
+        state.handles.append(handle)
+        return handle
+
+    def close(handle):
+        state.closed.append(handle)
+        os.close(handle)
+        return True
+
+    def convert(handle, flags):
+        if state.fail_conversion:
+            raise OSError("controlled CRT ownership transfer failure")
+        return handle
+
+    def replace(handle, information_class, buffer, size):
+        # FILE_RENAME_INFO has DWORD flags, pointer-aligned HANDLE, DWORD byte
+        # count, then UTF-16 code units. Decode independently of the product struct.
+        data = ctypes.string_at(buffer, size)
+        root_offset = ctypes.sizeof(ctypes.c_void_p)
+        name_offset = root_offset * 2 + 4
+        flags = struct.unpack_from("<I", data)[0]
+        root = int.from_bytes(data[root_offset:root_offset * 2], "little")
+        length = struct.unpack_from("<I", data, root_offset * 2)[0]
+        assert (information_class, flags, root) == (22, 3, 0)
+        assert length % 2 == 0 and size >= name_offset + length + 2
+        assert data[name_offset + length:name_offset + length + 2] == b"\0\0"
+        target = Path(data[name_offset:name_offset + length].decode("utf-16-le"))
+        assert target.is_absolute()
+        source = Path(state.source)
+        state.calls.append((source, target))
+        if state.error:
+            return False
+        os.replace(source, target)
+        return True
+
+    def winerror(code):
+        error = OSError(code, "controlled Windows publication error")
+        error.winerror = code
+        return error
+
+    def tracked_create(path, *args):
+        state.source = path
+        return create(path, *args)
+
+    kernel = SimpleNamespace(CreateFileW=tracked_create, CloseHandle=close,
+                             SetFileInformationByHandle=replace)
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel, raising=False)
+    monkeypatch.setattr(ctypes, "WinError", winerror, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: state.error, raising=False)
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(open_osfhandle=convert))
+    monkeypatch.setattr(latex, "os", native)
+    state.native = native
+    yield state
+    for handle in state.handles:
+        with pytest.raises(OSError):
+            os.fstat(handle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Actual Windows FileRenameInfoEx generation semantics")
+def test_actual_windows_publication_preserves_multiple_old_readers_and_utf16_name(tmp_path):
+    from contextlib import ExitStack
+    from suan.project.snapshots import _reader
+    path = tmp_path / "记录-😀.json"
+    old, new = b'{"generation":"old"}', b'{"generation":"new and complete"}'
+    path.write_bytes(old)
+    with ExitStack() as stack:
+        readers = [stack.enter_context(_reader(path, share_delete=True)) for _ in range(3)]
+        latex._write_bytes(path, new)
+        assert path.read_bytes() == new
+        assert [stream.read() for stream in readers] == [old] * 3
+    assert list(tmp_path.glob("*.new")) == []
+
+
+def test_windows_publication_preserves_multiple_old_readers_and_utf16_name(tmp_path, windows_atomic_api):
+    from contextlib import ExitStack
+    from suan.project.snapshots import _reader
+    path = tmp_path / "记录-😀.json"
+    old, new = b'{"generation":"old"}', b'{"generation":"new and complete"}'
+    path.write_bytes(old)
+    with ExitStack() as stack:
+        readers = [stack.enter_context(_reader(path, share_delete=True)) for _ in range(3)]
+        latex._write_bytes(path, new)
+        assert path.read_bytes() == new
+        assert [stream.read() for stream in readers] == [old] * 3
+    assert len(windows_atomic_api.calls) == 1
+    assert windows_atomic_api.calls[0][1] == path
+    assert list(tmp_path.glob("*.new")) == []
+
+
+@pytest.mark.parametrize("error", [5, 32])
+def test_windows_publication_errors_preserve_target_and_only_clean_own_temporary(
+        tmp_path, windows_atomic_api, error):
+    path = tmp_path / "record.json"
+    path.write_bytes(b"old complete generation")
+    unrelated = tmp_path / "record.json.unknown.new"
+    unrelated.write_bytes(b"interrupted other writer")
+    windows_atomic_api.error = error
+    def no_fallback(*args):
+        raise AssertionError("An access or sharing error must not use another publication path")
+    windows_atomic_api.native.replace = no_fallback
+    with pytest.raises(OSError) as caught:
+        latex._write_bytes(path, b"new complete generation")
+    assert caught.value.winerror == error
+    assert path.read_bytes() == b"old complete generation"
+    assert list(tmp_path.glob("*.new")) == [unrelated]
+    assert unrelated.read_bytes() == b"interrupted other writer"
+
+
+@pytest.mark.parametrize("unsupported", [1, 50, 87])
+def test_windows_older_filesystem_fallback_is_still_atomic_and_propagates_failure(
+        tmp_path, windows_atomic_api, unsupported):
+    path = tmp_path / "record.json"
+    path.write_bytes(b"old complete generation")
+    windows_atomic_api.error = unsupported
+    calls = []
+    def denied(source, destination):
+        calls.append((source, destination))
+        raise PermissionError("controlled ordinary atomic replace denial")
+    windows_atomic_api.native.replace = denied
+    with pytest.raises(PermissionError, match="ordinary atomic replace denial"):
+        latex._write_bytes(path, b"new complete generation")
+    assert len(calls) == 1
+    assert path.read_bytes() == b"old complete generation"
+    assert list(tmp_path.glob("*.new")) == []
+
+
+@pytest.mark.parametrize("change", ["identity", "bytes", "crt"])
+def test_windows_publication_rejects_replaced_or_changed_temporary_and_closes_handles(
+        tmp_path, windows_atomic_api, change):
+    path = tmp_path / "record.json"
+    path.write_bytes(b"old generation")
+    def change_source(source):
+        if change == "identity":
+            other = tmp_path / "replacement"
+            other.write_bytes(b"new generation")
+            os.replace(other, source)
+        elif change == "bytes":
+            source.write_bytes(b"bad generation")  # Same byte count, distinct contents.
+    windows_atomic_api.before_open = change_source
+    windows_atomic_api.fail_conversion = change == "crt"
+    with pytest.raises((latex.LatexError, OSError), match="temporary file changed|CRT ownership"):
+        latex._write_bytes(path, b"new generation")
+    assert windows_atomic_api.calls == []
+    assert len(windows_atomic_api.closed) == (1 if change == "crt" else 0)
+    assert path.read_bytes() == b"old generation"
+    assert list(tmp_path.glob("*.new")) == []
+
+
 @pytest.mark.parametrize("boundary", ["before_authorization", "interrupted_publication", "running_with_descendant"])
 def test_lost_owner_stops_gate_and_process_tree_without_replay(project, compiler_fixture, tmp_path, boundary):
     """Kill the actual executor, rather than merely calling its cancellation handler."""

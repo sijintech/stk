@@ -88,6 +88,73 @@ def _regular(path, maximum, *, atomic_record=False):
     return raw
 
 
+def _replace_windows(source, destination, raw, identity):
+    """Publish one pinned generation while existing readers retain the replaced file."""
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+    from suan.project.snapshots import _signature
+
+    # MoveFileExW (used by os.replace) does not request POSIX replacement semantics.
+    # FileRenameInfoEx with REPLACE_IF_EXISTS | POSIX_SEMANTICS explicitly preserves
+    # existing handles to the old generation while new opens resolve the new one.
+    class RenameInfo(ctypes.Structure):
+        _fields_ = (("flags", ctypes.c_uint32), ("root", ctypes.c_void_p),
+                    ("name_length", ctypes.c_uint32), ("name", ctypes.c_uint16 * 1))
+
+    target = os.fspath(destination.absolute())
+    if "\0" in target or "\0" in os.fspath(source):
+        raise ValueError("NUL in compilation publication path")
+    encoded = target.encode("utf-16-le")
+    size = max(ctypes.sizeof(RenameInfo), RenameInfo.name.offset + len(encoded) + 2)
+    buffer = ctypes.create_string_buffer(size)
+    rename = RenameInfo.from_buffer(buffer)
+    rename.flags, rename.name_length = 0x1 | 0x2, len(encoded)
+    ctypes.memmove(ctypes.addressof(buffer) + RenameInfo.name.offset, encoded, len(encoded))
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create, close, replace = kernel.CreateFileW, kernel.CloseHandle, kernel.SetFileInformationByHandle
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    close.argtypes, close.restype = (wintypes.HANDLE,), wintypes.BOOL
+    replace.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+    replace.restype = wintypes.BOOL
+    # GENERIC_READ | DELETE; share read/delete, denying in-place writes while pinned.
+    # No inheritable handle, and OPEN_REPARSE_POINT never follows a replaced final link.
+    handle = create(os.fspath(source), 0x80010000, 0x1 | 0x4, None, 3, 0x00200000, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                                 | getattr(os, "O_NOINHERIT", 0))
+    except BaseException:
+        close(handle)
+        raise
+    unsupported = False
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or (before.st_dev, before.st_ino) != identity or
+                before.st_size != len(raw) or getattr(before, "st_file_attributes", 0) &
+                getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+            raise LatexError("Compilation publication temporary file changed")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            actual = stream.read(len(raw) + 1)
+        if actual != raw or _signature(before) != _signature(os.fstat(fd)):
+            raise LatexError("Compilation publication temporary file changed")
+        if not replace(handle, 22, buffer, size):  # FileRenameInfoEx.
+            error = ctypes.get_last_error()
+            if error not in (1, 50, 87):  # Unsupported information class / filesystem.
+                raise ctypes.WinError(error)
+            unsupported = True
+    finally:
+        os.close(fd)  # open_osfhandle transferred ownership of the native handle.
+    if unsupported:
+        # Older filesystems may still support atomic ordinary replacement. This never
+        # unlinks/copies or suppresses an error if an open old generation blocks it.
+        os.replace(source, destination)
+
+
 def _write_bytes(path, raw):
     from suan.project.snapshots import _sync_directory
     temporary = None
@@ -99,7 +166,11 @@ def _write_bytes(path, raw):
             stream.write(raw)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+            info = os.fstat(stream.fileno())
+        if os.name == "nt":
+            _replace_windows(temporary, path, raw, (info.st_dev, info.st_ino))
+        else:
+            os.replace(temporary, path)
         _sync_directory(path.parent)
     finally:
         if temporary is not None:
