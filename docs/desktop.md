@@ -641,7 +641,7 @@ see [analysis runs](project-analysis-runs.md). Connection editing and hierarchic
 
 ### Materials: local training and comparison
 
-Choose **Materials models** from an area's editor-type menu. In **Training inputs**, enter a curve-dataset directory,
+Choose **Materials** from an area's editor-type menu. In **Training inputs**, enter a curve-dataset directory,
 choose training settings and an optional initialization version. Validate the data card, freeze the inputs, then
 explicitly start training. Preparation freezes exact bytes, split IDs and model roles; only training needs optional
 CPU PyTorch. History, cancellation and explicit state recovery use durable local receipts and never restart a trainer.

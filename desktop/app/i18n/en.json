@@ -1,7 +1,7 @@
 {
   "materials.discard_draft": "Discard parameter draft",
   "materials.plot_hint": "Curves use the same frozen test partition; missing observations stay empty.",
-  "editor.materials.title": "Materials models",
+  "editor.materials.title": "Materials",
   "materials.intro": "Train and compare curves on this computer. No data is sent to an external model.",
   "materials.unsupported": "This bridge does not support persistent materials training. Update the bridge to use this editor.",
   "materials.refresh": "Refresh records",
