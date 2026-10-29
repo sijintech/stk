@@ -6,14 +6,13 @@
 
 ## 当前工作树和下一步
 
-- **本批源码**：平台/LaTeX修复 `852860ae53327ae11fec9cb1a459d64f247bc1cd`，冻结MP4 `8627d98184af62548a4b23b0d1e41e4f2856f6f3`，直接main；四份记录与AOCI随本批收尾，新交付头CI待核。原生完整1991/1991零跳过、471.76秒，Linux必跑405次/1515项匹配；最后路径断言补修后统一构建与编译专项5/5通过。完整Python3708通过/24跳过/2排除早于最后目录补修；随后三版本专项各86通过/6项仅Windows跳过，不混作最终全量。
-- **报告与视频**：[指南](docs/project-reports.md)。文件MP4入口及Markdown/HTML内视频、独立播放器、renderer/2与source_path、精确媒体CSP、单Range及隐藏暂停/重显不续播已实现；附件仅元数据进入模型请求。四个中英宽窄/缩放CPU布局各5点击且保Viewer/隐藏草稿；真实Mac/Windows播放仍待新CI。原生候选与测试探针默认关闭，Linux Unsupported不作播放通过。两个视频格式各需20轮/161张OS证据/21session；21次显式asset RPC之外prepare内部也校验原始MP4，不冒称总读取只有21次。
-- **LaTeX与平台修复**：[LaTeX指南](docs/latex-workflows.md)。已有明确冻结/启动、日志、源码SHA与一基行列定位、取消/恢复及真实TeX两页PDF/重开/ZIP证据。新修Windows fd/path时间戳比较、原子回执共享删除句柄、UTF8夹具和junction目录拒绝；新Windows分支待CI。Mac PDF首轮真实首页已显示，失败为滚轮事件窗口关联，现按公开局部事件语义修正。Windows PE定位到epoxy包装层间接空调用，现生产WGL切换使用系统入口并通知epoxy，vendor1095/1095及补丁fuzz0精确重放通过；TLS零槽是机制推断，实机修复效果未证明。
-- **前头f331 CI全部结束**：Desktop40943343333的Linux主回归/包/干净机成功；Windows CPU两项编译定位失败、Mac PDF事件失败、Windows独立native四项0轮0图崩溃。Runtime40943343293六项成功、两个Windows客户端失败，Docs/Secret成功。前代码头Desktop推送等待门已满足，失败仍须新头复验；不能把本机或CPU图像回放当平台通过。
-- **发行与证据**：持久根 `/home/mnemora/.local/state/stk-validation/p4-video-20261029/`。bootstrap隔离wheel十文件456通过/6项Windows跳过；导入realpath仅安装site-packages、468份Python/Schema与wheel一致。首次collection缺静态preset已修验证工具路径并保留原失败。最终文档版包仅允许状态记录与报告指南两处措辞变化，与bootstrap业务成员的逐字节比较由 `package-check/final-stage-comparison.json` 记录；不把bootstrap包SHA冒充最终包。上述本机测试进程均已结束，不重复启动旧套件。
-- **路线仍完整保留**：第1项已交付，第2项主要交付；P4完整双平台文档/视频、IME/跨屏DPI/浏览器内存及编译兼容仍在。之后继续S3通用训练、连接/联邦、知识库、复现、完整发行及toolkits按职责整合，PET新专项后置，三项待所有者决定仍见下节。
-- **S3下一入口**：先补独立版本化的冻结训练/评估输入、持久任务与曲线，再迁移/基模型同一留出集比较；当前已有准入与回退，勿重复造。训练目录与Viewer的stk.dataset/1结构不同，不擅改合作方格式。
-- **认知与操作**：按[工具指南](docs/ai-development.md)局部导航，不加载整仓扫描报告或第二份全仓记忆。索引对齐与当前模型完整认知可靠性分开；上下文压缩后按实时合同完整重载。维护只在受管内容最终稳定后进行。关闭项目/切来源立即撤销资源及定位，保护Viewer、隐藏草稿和明确运行/保存/发送。
+- **交付源码**：主线代码头`c236816a6a67520b816754aa091b06b90f81c051`。本批六提交：平台修复`d64023ce`、S3后端`fca7fcf0`、registry预算`99bea12b`、Windows诊断`62984f28`、桌面训练页`384c16bb`、英文标题/18编辑器补修`c236816a`；状态记录和AOCI收尾同批交付。先核真实Git及新交付头CI，不把本机通过当平台通过。前头9da Desktop已终态，推送等待门已满足。
+- **S3b本机已验收**：冻结数据/options/精确split/base+active baseline、实际迁移初始化与同留出集比较、持久任务/逐epoch曲线、明确准备/启动/取消/恢复、活动版本generation CAS与回退、独立材料模型页和实际GPU曲线。准备/读/重开/恢复不训练，旧模型无weights摘要明确legacy未验证；capsule不改合作格式。[训练契约](docs/specs/materials-training-1.md)、[桌面指南](docs/desktop.md)。
+- **本机证据**：最终原生2021/2021、零失败/错误/跳过、481.20秒；现行Linux必跑413次/1545项匹配。首次完整5个旧布局/数量失败已保留，短英文标题及18编辑器检查修正后39项及最终全量通过，golden未改。新30项含22CPU与8实际GPU、中英宽窄16PNG；固定预填起点校验→冻结→开始3点击，评估另1点击，Viewer/隐藏稿不变。完整Python3911通过/31跳过/2排除，最后读锁/预算另83项通过；15个原跳过的离屏用例在私有Xvfb下全部通过。三版本/同capsule及安装包证据见运行验收，不能把无Torch环境的skip作训练通过。
+- **发行和运行句柄**：证据根`/home/mnemora/.local/state/stk-validation/s3-training-20261029/`。所有旧native build、首轮/最终full及定向进程均已终态，不重启旧句柄；只运行一个新编译且退出成功后才测试。最终包以`package-check/final-summary.json`的真实产物、业务字节比对和安装测试为准，业务候选五文件198/198实际安装通过，470份py/schema字节一致；旧bootstrap196项属于预算补修前preimage，最终文档版通过全成员比对绑定到已测198项候选。
+- **平台仍有缺口**：[Desktop40957894690](https://github.com/sijintech/stk/actions/runs/40957894690)已结束：Linux主回归旧补丁上限3失败、Mac ARC编译失败，Linux包/干净机及Windows主回归成功，Windows独立native123763562850六格式均0轮/0图，本头无RIP0异常记录，失败为WGC几何门及鼠标消息。补丁上限4、ARC strong、FileRenameInfoEx与精确Win诊断已提交，门禁未放宽；Runtime40957894618六成功/两Windows旧generation replace失败。Windows候选本机三版本各95通过/7 Windows-only跳过，实际分支待新CI。P4文档/视频默认关闭，尚非双平台交付。
+- **后续完整路线**：保持P4平台复验，接第5项跨平台连接/S4独立Flower，随后知识库、复现、完整发行及toolkits按职责整合；PET新专项后置。三项所有者待决保持下节原范围，S2c权限未扩大。现有LaTeX/MP4及旧1991原生/456安装包证据只代表前批，不能冒充本次2021/最终包结果。
+- **认知与操作**：本Run正式Overview在11/23块后snapshot unavailable，已停链，无Attestation；按绑定源码推进，不声称完整认知可靠。本批增量认知对齐以收尾Verify/Check/Guide机器证据为准。上下文压缩后按AGENTS/rules完整重载，handoff不替代当前认知。测试key空/model unset，保护Viewer、隐藏稿和明确运行/保存/发送。
 
 核对命令：
 
@@ -33,7 +32,7 @@ gh run list --branch main --limit 6
 | 桌面与项目基线 | 原生桌面（GHOST/OpenGL/Vulkan/Metal）、项目格式 **14**（旧 13 可读、升级先备份；SQLite + 文件）、表格/参数扫描、保存分析、项目工作流（按行运行 MuFerro 与 LAMMPS）、归档、技能目录、工作台 | [开发计划](docs/development-plan.md)“当前基线”；`suan/project/`、`desktop/engine/lib/stk_app/` |
 | S1 模型接入 | 全部交付：端点与密钥、数据标注与网络设置、本机一键部署（llama.cpp）、能力分档与自动切换 | [model-gateway.md](docs/design/model-gateway.md)；`suan/models/` |
 | S2 智能体 | S2a、S2b 交付（格式 13 会话/事件/对象、8 个工具、签名批准、桌面“智能体（多步）”）；**真实模型的 GUI 人工验收未做** | [agent-harness.md](docs/design/agent-harness.md)；`suan/agent/` |
-| S3 材料模型 | S3a 交付（P–E 回线、容量衰减；合成数据；PyTorch CPU 可选） | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
+| S3 材料模型 | S3a与S3b通用本机主链交付：冻结输入、迁移/同留出集比较、持久任务、桌面曲线与回退；跨平台新CI待验，合成/PyTorch CPU边界保留 | [materials-models-s3.md](docs/design/materials-models-s3.md)；`suan/materials/` |
 | 多尺度引擎 | E0a、E0b、E1a、**E1b 写出器与 PET 本机建模、E1c 分析模板已交付**；PET 参数已按所有者新授权选择 | [方案](docs/design/multiscale-engines.md)、[写出器](docs/lammps-data.md)、[分析](docs/lammps-analysis.md) |
 | PET 数据闭环节点 1 | MuFerro/LAMMPS 桌面导入、按冻结引擎处理运行及批次、离线热力学摘要；字典草案和全合成离线数据演练 | [桌面指南](docs/lammps-desktop.md)、[字典](docs/design/pet-data-dictionary.md)、[示例](examples/pet_data/README.md)、[厂内清单](docs/design/inplant-execution-baseline.md) |
 | PET 专项研究 / E1d（已交付） | 冻结建模→压密→逐温降温→模量/O₂ 或 PET 链 COM MSD→保存分析；明确启动、取消、恢复、成功阶段复用；full/real 原子/真实键/盒子与实际轨迹帧。11 段真实软件验收通过，物性未验证收敛 | [全流程例](examples/pet_study/README.md)、[结构契约](docs/specs/lammps-structure-1.md)、[参数/限制](docs/pet-model.md) |

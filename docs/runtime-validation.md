@@ -3,6 +3,45 @@
 日期：2026-09-09。状态：工程预发布，尚未完成真实集群和独立桌面安装器验收。
 各历史批次的待办及 CI 状态保留当时快照；当前状态以最新首节和 `handoff.md` 为准。
 
+## 2026-10-29：S3b本机验收完成与平台补修待复验
+
+本轮基线main `9da98ea1aabf129e3f4b8740a1d80698fdde568d`；平台修复`d64023ce`、S3后端`fca7fcf0`、registry预算`99bea12b`、Windows诊断`62984f28`、桌面页`384c16bb`和最终布局补修`c236816a6a67520b816754aa091b06b90f81c051`构成本批源码；状态记录与认知资产同批收尾，新交付头CI待核。S3证据根为 `/home/mnemora/.local/state/stk-validation/s3-training-20261029/`。
+
+| 验证范围 | 实际结果 | 证据 |
+|---|---|---|
+| 冻结输入与真实CPU训练 | 95+20=115通过，无跳过；Torch2.14.1，权重初始化/normalization、同留出集与最多3个真实test曲线独立核对 | `inputs-training-preview.xml` |
+| 后端/API联合 | 198通过、零失败/错误/跳过、29.76秒；含旧接口、Schema、agent工具权限 | `materials-integrated-final.xml` |
+| 最后登记读保护 | 服务35、旧接口11、API35，共81通过、26.82秒；登记公开读与发布共用跨进程锁 | `materials-registry-final.xml` |
+| 最后registry预算保护 | 服务37、旧接口11、API35，共83通过、28.20秒；拒绝发布超过自身16MiB/10000版本读取预算的registry，原文件不变 | `materials-final-budget.xml` |
+| 完整Python | 3911通过、31跳过、2排除、零失败、1项既有Starlette提示，748.98秒；早于最后登记读保护小修，后者由上述81项覆盖 | `python-full.log`、`python-full.xml` |
+| 3.11.16/3.14.4材料相关矩阵 | 各199项收集，182通过/17项因未装Torch跳过，8.97/9.23秒；其余冻结与持久任务实际执行 | `materials-py311.xml`、`materials-py314.xml` |
+| 同一capsule跨版本 | 3.12真实CPU生成base/baseline并冻结，3.11/3.14对同实体verify/load，摘要、精确ID划分和7文件前后字节全同；两probe均未加载Torch | `capsule-cross-version/` |
+| bootstrap隔离wheel | 五材料文件196/196、零跳过，35.96秒；独立Python3.12.14/Torch2.14.1+cpu，全部suan origin位于安装site-packages，470份py/schema逐字节一致 | `package-check/bootstrap-summary.json` |
+| 预算补修后业务候选安装 | 五文件198/198（95+20+37+11+35）、零失败/错误/跳过，35.70秒；真实卸旧wheel再装候选，独立-I进程、清PYTHONPATH、所有suan origin在安装路径 | `package-check/business-candidate-summary.json` |
+| 新桌面定向 | 30/30，零失败/跳过，25.78秒；22状态/真实事件+8 OpenGL/Vulkan中英宽窄GPU案例，16实际PNG，绘制/图例/裁剪已目视 | `materials-native-focused.xml`、`renderer-proof/` |
+| 首次完整原生 | 2016/2021通过、5失败、零跳过，480.74秒；为17→18编辑器数量旧断言及新英文标题撑宽旧布局 | `native-full.xml`、`.log` |
+| 布局补修定向 | 39/39，零失败/跳过，18.43秒；保原golden，入口缩为Materials，登记校验扩为18 | `materials-layout-final.xml` |
+| 最终完整原生 | 最终统一构建退出0；2021/2021，零失败/错误/跳过，481.20秒 | `native-final-full.xml`、`.log`、`native-final-full-summary.json` |
+| 最终Linux必跑 | 从当前desktop.yml真实步骤提取，413次核验/1545匹配、无BAD/缺项/跳过 | `required-current.sh`、`.log` |
+| 最后预算跨版本 | Python3.11.16/3.14.4的jobs文件各37通过、无跳过，3.56/3.67秒 | `materials-jobs-budget-py311.xml`、`-py314.xml` |
+| 原15个离屏skip补验 | 私有Xvfb+已有软件GL下15通过/0跳过/22排除，27.85秒，golden未改；不改写原full31skip | `render-diagnostics/xvfb-render-15.xml`、`render-environment-summary.json` |
+
+完整Python的31跳过分为：7项仅Windows真实junction/原子generation门禁、15项离屏渲染probe子进程SIG11、2项性能基准、2项缺PySide6、2项可选MCP、3项未指定真实MuFerro前缀。15个离屏用例已在私有Xvfb补验全过，原full跳过计数不改写。隔离包比较绑定757份发行源构建pre/post一致、458份Python/12份Schema及284项声明文件；bootstrap包wheel SHA `396beef6d7380ffbad483e0f5979a627d383724bc769beb12f4cad39f960bc56`、sdist SHA `f20e59aa856f14bf82062c5acebc166542e53d66b045deaae5f40c1e4be4cec4`，不是后续文档最终包。初次外部verifier误要求未声明design指南，原失败保留；只修验证器后同一包通过，未改发行声明。
+
+后续业务候选已实际验证预算补修：761份源（包含冻结五docs）构建前后及安装测试结束一致；470份安装py/schema、196份sdist测试文件与对应产物逐字节一致。候选wheel SHA `4a7fc5c7de8486700f0f73e1cc4bd86ab2be836d6692d976b0bbb641c6fab935`、sdist SHA `07c6b86ef4bbb6a1f7fec5d83c292b4d7793a2d50a2242d1a308df78035278fe`，明确不是最终文档版SHA。最终文档版的产物身份及全成员比较由`package-check/final-summary.json`记录；业务Python/Schema/测试须与这份已测试198项候选完全相同，仅批准的交付文档可变，不重复声明未运行的安装测试。
+
+持久任务/逐epoch曲线、冻结输入删除live后重放、同ID不重训、跨服务取消/互斥、active generation CAS、基准变差拒绝、发布前后崩溃、孤儿版本不复用、已发布缺证据持久uncertain及明确回退后恢复不重激活均有专项反例。只在明确start后加载Torch训练；prepare、读、重开和recover不训练。行级划分不证明材料/批次独立性，旧base可能见过重叠样本，合成曲线不作物性结论。合作格式/MuPRO扫描及原三项所有者待决均未改变。
+
+新头[Runtime40957894618](https://github.com/sijintech/stk/actions/runs/40957894618)已结束，6成功/两Windows失败，各3219通过/100跳过/327排除、仅原子generation测试失败。实际栈为`test_atomic_receipt_replacement_yields_one_complete_generation`打开旧回执后`os.replace`报WinError5；共享DELETE reader本已存在，不能重复以加共享flag解释。候选writer改用`SetFileInformationByHandle(FileRenameInfoEx)`与replace/posix flags，窄unsupported回退仍只准原子replace；不unlink/copy降级。最终相关组三版本各95通过/7项仅Windows真实门禁跳过，原失败反例保留，新增实际Windows三旧handle/UTF16测试；POSIX-backed ABI模拟不作实际Windows证据。证据在P4根`current-ci/windows-atomic-final-local-validation.json`与`runtime-failures-diagnosis.json`；真实Windows候选尚未运行。
+
+新头[Desktop40957894690](https://github.com/sijintech/stk/actions/runs/40957894690)已终态失败：Linux主回归在Phase0旧补丁数上限3失败，vendor1095/1095已过；同步4后本机同一步vendor1095/1095、patches4/4、shims620/800、forbidden0/0通过（`phase0-patch-budget.log`）。Linux包/干净机及Windows主回归成功；Mac Build的NSString引用ownership错误已显式strong，本机仅源码/静态核验。Windows独立native123763562850六项均0轮/0图：原型与MD/HTML/PDF被WGC几何条件拒绝，两个video到首轮paused=true/time0后鼠标SendMessageTimeout失败。本头无RIP0异常栈，不能推断所有线程安全已验证；两处精确geometry/error/线程诊断已提交`62984f28`，未改任何几何/crop/2秒timeout门。前头Desktop推送等待门已满足，本批仍待最终验证与新CI，不把未开始的OS门禁或LinuxUnsupported算通过。
+
+桌面实际事件为英文1440×1100/1×、中文1000×1100/1×、英文2160×1650/1.5×、中文2000×2200/2×。各以a4材料页最大化、侧栏560逻辑单位、数据目录和job ID已填、高级参数折叠，既有Viewer与隐藏Python稿为固定起点：校验→冻结→开始3点击，另1点击切到留出曲线；冻结后删除live目录仍完成，重开只读且旧start/activate/晚到get/list不能跨来源生效。OpenGL/Vulkan的8个GPU案例各导出loss与四角色evaluation图，像素校验排除legend色块、逐角色检查跨度和零越界；root实际查看了英文宽evaluation及中文窄loss。GPU输入是经真实服务冻结与登记的受控训练输出，证明生产draw_gpu呈现，不证明Torch精度或材料性质；真实Torch证据由独立20项训练与服务测试承担。
+
+六个源码提交前分别扫描暂存14229/214740/3012/6156/169628/2238字节，均按`.gitleaks.toml`零发现，`*-staged-gitleaks.log`保留实际记录。状态文档和认知资产的扫描另记；本批AOCI对齐以最终Verify/Check/Guide机器结果为准，对齐不等于当前模型完整认知可靠。测试key为空、model unset，没有收费请求。
+
+上下文恢复时AOCI正式链在11/23块后返回snapshot unavailable，已停止且没有旁路补答或重读；当前按真实源码推进，不声称完整认知可靠。本批在源码和状态记录稳定后统一维护，以收尾Verify/Check/Guide证明资产对齐；资产对齐与完整认知可靠性分开。完整目标仍包含P4平台及第5–8项，PET新专项后置。
+
 ## 2026-10-29：冻结 MP4 与平台修正（本机验收完成，平台待复验）
 
 基线main为 `f331dbe7b015220a821b8a5f83bbf852a4d19db5`；平台/LaTeX修复 `852860ae53327ae11fec9cb1a459d64f247bc1cd`、MP4源码 `8627d98184af62548a4b23b0d1e41e4f2856f6f3` 已本地提交，四份记录与AOCI随本批收尾，新交付头CI待核。证据根目录为 `/home/mnemora/.local/state/stk-validation/p4-video-20261029/`。
